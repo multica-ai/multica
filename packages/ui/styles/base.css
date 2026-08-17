@@ -2,6 +2,34 @@
  * Multica shared base styles — imported by all apps
  * ============================================================================= */
 
+/* The chat launcher overlays the dashboard's bottom-right corner on every
+ * workspace page, so anything that runs to that corner has to stop short of
+ * it. Named rather than spelled out at each site: the intent is legible, every
+ * site that yields to the launcher is findable by these classes, and the
+ * distance stays derived from the launcher's own geometry.
+ *
+ * Which one to reach for depends on how the site approaches the corner:
+ *  - a full-width bar arrives from the left     -> pe-chat-launcher
+ *  - scrollable content ends there              -> pb-chat-launcher
+ *  - a centred overlay grows into it            -> above-chat-launcher
+ *
+ * A centred toolbar (`left-1/2 -translate-x-1/2`) cannot use the padding
+ * variants: inline padding widens it symmetrically, so it reaches just as far
+ * right as before. It has to clear the launcher vertically instead. On a wide
+ * viewport a centred toolbar never gets near the corner, so its clearance is
+ * usually applied under a `max-md:` variant. */
+@utility pe-chat-launcher {
+  padding-inline-end: var(--chat-launcher-clearance);
+}
+
+@utility pb-chat-launcher {
+  padding-bottom: var(--chat-launcher-clearance);
+}
+
+@utility above-chat-launcher {
+  bottom: calc(var(--chat-launcher-clearance) + var(--chat-launcher-inset));
+}
+
 /* Shiki dual themes: CSS-only light/dark switching via CSS variables */
 /* @see https://shiki.style/guide/dual-themes */
 .shiki,
@@ -218,6 +246,36 @@
   color: var(--sidebar-accent-foreground);
 }
 
+/* Sidebar resizing follows the same cursor contract as
+ * react-resizable-panels: the resize cursor survives leaving the narrow rail
+ * and wins over descendants with their own cursor declarations. Live width is
+ * written directly to the two layout shells, so their toggle transitions must
+ * stay disabled until the gesture finishes. */
+html[data-sidebar-resizing="true"],
+html[data-sidebar-resizing="true"] * {
+  cursor: ew-resize !important;
+  user-select: none !important;
+}
+
+/* Row drag-and-drop shares the same cursor contract: while a dnd-kit drag
+ * is active the grabbing cursor must survive the pointer leaving the drag
+ * handle and win over descendants' own cursor declarations (including the
+ * preflight `cursor: pointer` on buttons the pointer crosses mid-drag). */
+html[data-dnd-dragging="true"],
+html[data-dnd-dragging="true"] * {
+  cursor: grabbing !important;
+  user-select: none !important;
+}
+
+[data-sidebar-resizing="true"] [data-slot="sidebar-gap"],
+[data-sidebar-resizing="true"] [data-slot="sidebar-container"] {
+  transition: none !important;
+}
+
+[data-sidebar-resizing="true"] [data-sidebar="rail"]::after {
+  background-color: var(--sidebar-border);
+}
+
 /* Right detail sidebars use react-resizable-panels, which sizes panels by
  * updating the outer panel's flex-grow. Animate that property for button
  * toggles only; mount-time layout restoration and resize sync should snap
@@ -233,6 +291,17 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .animate-entrance-spin,
+  .animate-onboarding-enter,
+  .animate-welcome-emoji-pop,
+  .animate-completion-badge,
+  .animate-completion-check,
+  .animate-chat-impulse,
+  .animate-chat-text-shimmer,
+  .animate-nav-progress-sweep {
+    animation: none;
+  }
+
   [data-right-sidebar-panel] {
     transition: none;
   }
@@ -266,6 +335,24 @@
      * Native CSS text-autospace (Chrome 119+, Electron recent versions).
      * Progressive enhancement: browsers that don't support it simply ignore the rule. */
     text-autospace: ideograph-alpha ideograph-numeric;
+    /* `style` keyword = allow style synthesis, forbid weight synthesis.
+     *
+     * Weight OFF: every face we load has real weights — Inter, Source Serif 4
+     * and Geist Mono are all variable (100-900) on both platforms, and landing's
+     * 400-only Instrument Serif is never set to another weight. Synthesis can
+     * only make those worse, and on the CJK tail of `--font-sans` it is actively
+     * harmful: `font-bold` against PingFang SC (which stops at Semibold) makes
+     * Chromium smear a fake 700, and the added stroke weight closes up the
+     * counters of dense Han glyphs. Forbidding it picks real Semibold instead.
+     *
+     * Style ON, deliberately: `auto` only synthesizes when no real italic face
+     * matches, so now that Inter Italic is loaded on both platforms the real face
+     * already wins for all Latin UI text and markdown <em>. What is left
+     * synthesizing is exactly the two stacks that ship no italic at all — the CJK
+     * fallbacks and Geist Mono — and there `font-style: italic` has no other
+     * visual carrier. Forbidding it would silently flatten every Chinese <em>,
+     * every editor italic mark, and every hljs comment to upright. */
+    font-synthesis: style;
   }
 
   @media (max-width: 767px), (pointer: coarse) {
@@ -277,4 +364,18 @@
       font-size: 16px !important;
     }
   }
+}
+
+/* In-page find (Cmd/Ctrl+F on the issue detail page). Matches are painted with
+ * the CSS Custom Highlight API — ranges only, no DOM mutation — so the tint
+ * layers cleanly over React-rendered markdown and the contenteditable
+ * title/description editors. `multica-find-active` is registered with a higher
+ * priority so the current match paints on top of the dimmer all-matches tint. */
+::highlight(multica-find) {
+  background-color: var(--find-match);
+  color: var(--find-match-foreground);
+}
+::highlight(multica-find-active) {
+  background-color: var(--find-match-active);
+  color: var(--find-match-foreground);
 }

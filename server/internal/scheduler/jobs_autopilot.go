@@ -30,6 +30,13 @@ const ScopeKindAutopilotTrigger = "autopilot_trigger"
 // service.DefaultAutopilotTriggerTimezone.
 const DefaultAutopilotScheduleTimezone = "UTC"
 
+// maxAutopilotScheduleLateness is the acceptance window for dispatching a
+// cron occurrence after its configured plan_time. Normal scheduler jitter is
+// tens of seconds; anything beyond this is a stale catch-up and should wait
+// for the next configured slot instead of firing at an arbitrary activation
+// time.
+const maxAutopilotScheduleLateness = 5 * time.Minute
+
 // AutopilotScheduleDispatcher is the narrow contract this job needs
 // from service.AutopilotService. Defined here so unit tests in this
 // package (and the cmd/server integration tests) can stub it without
@@ -211,10 +218,11 @@ func autopilotScopes(
 }
 
 // autopilotPlansForScope returns the PlansForScope hook that computes
-// every cron occurrence in (lastPlan, dbNow] and keeps only the most
-// recent one. This matches the legacy goroutine's "collapse missed
-// fires" semantics; a future per-trigger catch_up_mode column can flip
-// the policy without touching scheduler internals.
+// every cron occurrence in (lastPlan, dbNow], keeps only the most recent
+// one, and rejects it if it is outside the dispatch-lateness window.
+// The latest-only collapse prevents a long outage from replaying every
+// missed slot; the lateness guard prevents a paused / newly eligible
+// trigger from firing hours after its configured time.
 //
 // Retry-eligible state is handled specially: when the most recent
 // stored plan_time is a FAILED row with attempts remaining and
@@ -300,8 +308,16 @@ func autopilotPlansForScope(cache *autopilotScheduleCache) func(
 			return nil, nil
 		}
 		// CatchUpLatestOnly: collapse missed fires to the most recent.
-		return occs[len(occs)-1:], nil
+		latestDue := occs[len(occs)-1]
+		if isAutopilotSchedulePlanStale(now, latestDue) {
+			return nil, nil
+		}
+		return []time.Time{latestDue}, nil
 	}
+}
+
+func isAutopilotSchedulePlanStale(now, planTime time.Time) bool {
+	return now.Sub(planTime) > maxAutopilotScheduleLateness
 }
 
 // autopilotHandler dispatches one (trigger, planTime) attempt and

@@ -1,6 +1,6 @@
 /**
- * Notification preferences subscreen. 5 inbox groups + system_notifications
- * toggle, each backed by an optimistic PUT /api/notification-preferences.
+ * Notification preferences subscreen. 6 inbox groups + system_notifications
+ * toggle, each backed by an optimistic PATCH /api/notification-preferences.
  *
  * Copy mirrors packages/views/settings/components/notifications-tab.tsx but
  * hardcoded English (mobile has no i18n infra yet). The group labels MUST
@@ -39,6 +39,11 @@ const INBOX_GROUPS: Array<{
     key: "comments",
     label: "Comments",
     description: "New comments on issues you're subscribed to.",
+  },
+  {
+    key: "mentions",
+    label: "Mentions",
+    description: "When someone @mentions you, including @all and @squad.",
   },
   {
     key: "updates",

@@ -74,16 +74,11 @@ func resolveToken(cmd *cobra.Command) string {
 	if v := strings.TrimSpace(os.Getenv("MULTICA_TOKEN")); v != "" {
 		return v
 	}
-	if inAgentExecutionContext() {
-		return ""
-	}
-	// A daemon-managed agent process may lose MULTICA_AGENT_ID /
-	// MULTICA_TASK_ID in child subprocesses (the runtime may not forward
-	// them), but MULTICA_DAEMON_PORT persists. When we detect the daemon
-	// signal we fail closed — never silently fall back to the user-global
-	// config token, because that fallback is how agent operations land as
-	// the wrong actor.
-	if os.Getenv("MULTICA_DAEMON_PORT") != "" {
+	// Inside a daemon-managed task, never fall back to the user-global config
+	// token: that silent fallback is how agent writes land as the wrong actor.
+	// inDaemonManagedExecutionContext already covers the MULTICA_DAEMON_PORT
+	// signal for subprocesses that lost MULTICA_AGENT_ID / MULTICA_TASK_ID.
+	if inDaemonManagedExecutionContext() {
 		return ""
 	}
 	profile := resolveProfile(cmd)
@@ -127,6 +122,9 @@ func openBrowser(url string) error {
 }
 
 func runAuthLogin(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("login"); err != nil {
+		return err
+	}
 	if cmd.Flags().Changed("token") {
 		tokenFlag, _ := cmd.Flags().GetString("token")
 		// `--token mul_xxx` (space form) is what users actually type — that's
@@ -238,7 +236,7 @@ func detectOutboundIP(serverURL string) net.IP {
 }
 
 func runAuthLoginBrowser(cmd *cobra.Command) error {
-	serverURL := resolveServerURL(cmd)
+	serverURL := resolveHumanServerURL(cmd)
 	appURL := resolveAppURL(cmd)
 
 	flagHost := callbackHostFlagValue(cmd)
@@ -435,7 +433,7 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 		return err
 	}
 
-	serverURL := resolveServerURL(cmd)
+	serverURL := resolveLoginTokenServerURL(cmd)
 	client := cli.NewAPIClient(serverURL, "", token)
 
 	ctx, cancel := cli.APIContext(context.Background())
@@ -454,6 +452,9 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 	cfg.WorkspaceID = ""
 	cfg.Token = token
 	cfg.ServerURL = serverURL
+	if cfg.AppURL == "" && serverURL == defaultCloudServerURL {
+		cfg.AppURL = defaultCloudAppURL
+	}
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {
 		return fmt.Errorf("failed to save config: %w", err)
 	}
@@ -463,7 +464,14 @@ func runAuthLoginToken(cmd *cobra.Command, providedToken string) error {
 }
 
 func runAuthStatus(cmd *cobra.Command, _ []string) error {
+	if err := requireTaskLocalConfigRoot(); err != nil {
+		return err
+	}
+	taskContext := inDaemonManagedExecutionContext()
 	token := resolveToken(cmd)
+	if taskContext && !strings.HasPrefix(token, "mat_") {
+		return fmt.Errorf("agent execution context requires MULTICA_TOKEN to be a task-scoped mat_ token")
+	}
 	serverURL := resolveServerURL(cmd)
 
 	if token == "" {
@@ -485,11 +493,15 @@ func runAuthStatus(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
+	if taskContext {
+		fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\n", serverURL, me.Name, me.Email)
+		return nil
+	}
+
 	prefix := token
 	if len(prefix) > 12 {
 		prefix = prefix[:12] + "..."
 	}
-
 	fmt.Fprintf(os.Stderr, "Server:  %s\nUser:    %s (%s)\nToken:   %s\n", serverURL, me.Name, me.Email, prefix)
 	return nil
 }
@@ -534,6 +546,9 @@ const callbackSuccessHTML = `<!DOCTYPE html>
 </html>`
 
 func runAuthLogout(cmd *cobra.Command, _ []string) error {
+	if err := requireHumanLocalCommand("logout"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
 	if cfg.Token == "" {

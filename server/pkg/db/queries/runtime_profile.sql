@@ -24,6 +24,22 @@ WHERE id = $1;
 SELECT * FROM runtime_profile
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockRuntimeProfileForRegistration :one
+-- Serializes daemon registration with profile deletion. Registration holds a
+-- KEY SHARE lock until its runtime row is committed; profile deletion takes an
+-- UPDATE lock, then locks the profile's runtime rows. Whichever starts first
+-- wins, so deletion cannot miss a runtime inserted from a stale profile read.
+SELECT * FROM runtime_profile
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE;
+
+-- name: LockRuntimeProfileForDelete :one
+-- See LockRuntimeProfileForRegistration. The stronger lock prevents a daemon
+-- from registering another instance between the delete plan and commit.
+SELECT * FROM runtime_profile
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: ListRuntimeProfiles :many
 SELECT * FROM runtime_profile
 WHERE workspace_id = $1
@@ -62,7 +78,7 @@ WHERE id = $1 AND workspace_id = $2;
 -- instances itself. Returns the deleted rows so the caller can broadcast /
 -- audit. Runs inside the same transaction as DeleteRuntimeProfile.
 DELETE FROM agent_runtime
-WHERE profile_id = $1
+WHERE profile_id = $1 AND workspace_id = $2
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: CountAgentsByProfile :one
@@ -71,7 +87,7 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 -- agents still depend on it, mirroring the runtime-delete guard.
 SELECT count(*) FROM agent a
 JOIN agent_runtime ar ON ar.id = a.runtime_id
-WHERE ar.profile_id = $1 AND a.archived_at IS NULL;
+WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL;
 
 -- name: ListAgentRuntimeIDsByProfile :many
 -- Enumerates the runtime instance rows registered against a profile. The
@@ -80,4 +96,6 @@ WHERE ar.profile_id = $1 AND a.archived_at IS NULL;
 -- removing each runtime row — agent.runtime_id is ON DELETE RESTRICT, so a
 -- bare delete would 500 whenever an archived agent still references the row.
 SELECT id FROM agent_runtime
-WHERE profile_id = $1;
+WHERE profile_id = $1 AND workspace_id = $2
+ORDER BY id
+FOR UPDATE;

@@ -110,7 +110,7 @@ func TestCreateAutopilot_SquadPrivateLeader_OwnerAllowed(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID, _, _ := privateAgentTestFixture(t)
+	agentID, ownerID, _ := privateAgentTestFixture(t)
 
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
@@ -124,9 +124,10 @@ func TestCreateAutopilot_SquadPrivateLeader_OwnerAllowed(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
 	})
 
-	// testUserID is workspace owner — should succeed.
+	// The AGENT OWNER creates the autopilot — allowed under MUL-3963 (workspace
+	// owner/admin no longer bypasses a private leader's invocation gate).
 	w := httptest.NewRecorder()
-	r := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+	r := newRequestAs(ownerID, "POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":          "owner creates private-leader squad ap",
 		"assignee_type":  "squad",
 		"assignee_id":    squadID,
@@ -154,7 +155,7 @@ func TestTriggerAutopilot_SquadPrivateLeader_OwnerCanDispatch(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	agentID, _, _ := privateAgentTestFixture(t)
+	agentID, ownerID, _ := privateAgentTestFixture(t)
 
 	var squadID string
 	if err := testPool.QueryRow(ctx, `
@@ -168,9 +169,10 @@ func TestTriggerAutopilot_SquadPrivateLeader_OwnerCanDispatch(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
 	})
 
-	// Create autopilot as owner.
+	// Create autopilot as the AGENT OWNER (MUL-3963: only owner/allow-listed
+	// may invoke the private leader; workspace admin no longer bypasses).
 	w := httptest.NewRecorder()
-	r := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+	r := newRequestAs(ownerID, "POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":          "dispatch test private leader squad",
 		"assignee_type":  "squad",
 		"assignee_id":    squadID,
@@ -191,9 +193,12 @@ func TestTriggerAutopilot_SquadPrivateLeader_OwnerCanDispatch(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
 	})
 
-	// Trigger — should succeed since owner created it.
+	// Trigger AS THE OWNER — manual "run now" admits on the current clicker's
+	// invoke permission (MUL-4525), so the owner (who can invoke the private
+	// leader) must be the one clicking. A non-owner clicker is covered by
+	// TestTriggerAutopilot_SquadPrivateLeader_NonOwnerClicker_Blocked below.
 	w = httptest.NewRecorder()
-	r = newRequest("POST", "/api/autopilots/"+ap.ID+"/trigger?workspace_id="+testWorkspaceID, nil)
+	r = newRequestAs(ownerID, "POST", "/api/autopilots/"+ap.ID+"/trigger?workspace_id="+testWorkspaceID, nil)
 	r = withURLParam(r, "id", ap.ID)
 	testHandler.TriggerAutopilot(w, r)
 	if w.Code != http.StatusOK {
@@ -205,6 +210,82 @@ func TestTriggerAutopilot_SquadPrivateLeader_OwnerCanDispatch(t *testing.T) {
 	}
 	if run.Status != "issue_created" {
 		t.Fatalf("run status = %q, want issue_created", run.Status)
+	}
+}
+
+// TestTriggerAutopilot_SquadPrivateLeader_NonOwnerClicker_Blocked pins the
+// MUL-4525 fork fix: manual "run now" admits on the CURRENT clicker, not the
+// autopilot creator. Even for an autopilot the OWNER created (so the creator
+// could invoke), a different member clicking Run now who cannot invoke the
+// private leader is blocked — surfaced as a 200 + status=skipped run carrying a
+// stable, enumeration-safe reason_code (not a silent success). This is the exact
+// case where the old creator-based admission and clicker-based attribution
+// forked.
+func TestTriggerAutopilot_SquadPrivateLeader_NonOwnerClicker_Blocked(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	agentID, ownerID, _ := privateAgentTestFixture(t)
+
+	var squadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
+		VALUES ($1, 'AP Private Leader Clicker Fork', '', $2, $3)
+		RETURNING id
+	`, testWorkspaceID, agentID, testUserID).Scan(&squadID); err != nil {
+		t.Fatalf("create squad: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+
+	// Owner creates a legitimate autopilot (creator CAN invoke the leader).
+	w := httptest.NewRecorder()
+	r := newRequestAs(ownerID, "POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
+		"title":          "clicker fork private leader squad",
+		"assignee_type":  "squad",
+		"assignee_id":    squadID,
+		"execution_mode": "create_issue",
+	})
+	testHandler.CreateAutopilot(w, r)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var ap AutopilotResponse
+	if err := json.NewDecoder(w.Body).Decode(&ap); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM autopilot_run WHERE autopilot_id = $1`, ap.ID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE workspace_id = $1 AND title LIKE 'clicker fork private leader squad%'`, testWorkspaceID)
+		testPool.Exec(context.Background(), `DELETE FROM autopilot WHERE id = $1`, ap.ID)
+	})
+
+	// The workspace owner (testUserID) — NOT the private agent's owner — clicks
+	// Run now. requireAutopilotWrite passes (workspace owner can manage), but the
+	// invoke gate keys on the clicker and denies them.
+	w = httptest.NewRecorder()
+	r = newRequest("POST", "/api/autopilots/"+ap.ID+"/trigger?workspace_id="+testWorkspaceID, nil)
+	r = withURLParam(r, "id", ap.ID)
+	testHandler.TriggerAutopilot(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("TriggerAutopilot: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var run AutopilotRunResponse
+	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
+		t.Fatalf("decode run: %v", err)
+	}
+	if run.Status != "skipped" {
+		t.Fatalf("run status = %q, want skipped (non-owner clicker blocked)", run.Status)
+	}
+	if run.ReasonCode == nil || *run.ReasonCode != string(ReasonInvocationNotAllowed) {
+		got := "<nil>"
+		if run.ReasonCode != nil {
+			got = *run.ReasonCode
+		}
+		t.Fatalf("reason_code = %s, want %s", got, ReasonInvocationNotAllowed)
 	}
 }
 

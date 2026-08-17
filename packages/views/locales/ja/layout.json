@@ -1,23 +1,39 @@
 {
   "nav": {
     "inbox": "インボックス",
-    "my_issues": "マイイシュー",
-    "issues": "イシュー",
+    "chat": "チャット",
+    "my_issues": "マイタスク",
+    "issues": "タスク",
     "projects": "プロジェクト",
     "autopilots": "オートパイロット",
     "agents": "エージェント",
     "squads": "スクワッド",
-    "usage": "使用量",
+    "usage": "分析",
     "runtimes": "ランタイム",
     "skills": "スキル",
     "settings": "設定"
+  },
+  "tab": {
+    "issue": "タスク",
+    "project": "プロジェクト",
+    "autopilot": "オートパイロット",
+    "agent": "エージェント",
+    "member": "メンバー",
+    "squad": "スクワッド",
+    "skill": "スキル",
+    "machine": "マシン",
+    "runtime": "ランタイム",
+    "attachment": "添付ファイル",
+    "create_agent": "エージェントを作成",
+    "unknown": "不明なページ"
   },
   "help": {
     "trigger": "ヘルプ",
     "docs": "ドキュメント",
     "changelog": "変更ログ",
     "discord": "Discord",
-    "feedback": "フィードバック"
+    "feedback": "フィードバック",
+    "server_version": "サーバーバージョン {{version}}"
   },
   "workspace_loader": {
     "loading_workspace": "ワークスペースを読み込み中…",
@@ -32,7 +48,7 @@
     "invitation_join": "参加",
     "invitation_decline": "辞退",
     "log_out": "ログアウト",
-    "new_issue": "新規イシュー",
+    "new_issue": "新規タスク",
     "new_issue_shortcut": "C",
     "pinned_label": "ピン留め済み",
     "workspace_group": "ワークスペース",
@@ -40,7 +56,6 @@
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Discord に参加",
-      "description": "チームや他のユーザーと交流しましょう。",
       "dismiss": "閉じる"
     }
   }

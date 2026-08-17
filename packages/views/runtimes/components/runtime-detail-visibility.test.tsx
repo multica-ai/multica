@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import type { ComponentProps, ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import type { AgentRuntime, RuntimeProfile } from "@multica/core/types";
@@ -28,7 +29,7 @@ vi.mock("@multica/core/api", () => ({
   api: {
     updateRuntime: (...args: unknown[]) => mockUpdateRuntime(...args),
     deleteRuntime: vi.fn(),
-    archiveAgentsAndDeleteRuntime: vi.fn(),
+    unbindAgentsAndDeleteRuntime: vi.fn(),
     deleteRuntimeProfile: (...args: unknown[]) =>
       mockDeleteRuntimeProfile(...args),
   },
@@ -75,6 +76,8 @@ vi.mock("@multica/core/auth", () => ({
 
 vi.mock("@multica/core/runtimes", () => ({
   deriveRuntimeHealth: () => "online",
+  runtimeDisplayName: (rt: { name: string; custom_name?: string | null }) =>
+    rt.custom_name?.trim() || rt.name,
   runtimeProfileListOptions: (wsId: string) => ({
     queryKey: ["runtime-profiles", wsId],
   }),
@@ -109,17 +112,16 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
     isPending: false,
   }),
   useDeleteRuntime: () => ({ mutate: vi.fn(), isPending: false, mutateAsync: vi.fn() }),
-  useArchiveAgentsAndDeleteRuntime: () => ({
+  useUnbindAgentsAndDeleteRuntime: () => ({
     mutate: vi.fn(),
     isPending: false,
     mutateAsync: vi.fn(),
   }),
 }));
 
-// Stubbing ProviderLogo / UsageSection / UpdateSection avoids dragging in
-// chart libs and additional query keys we don't care about here.
+// Stubbing ProviderLogo / UsageSection avoids dragging in chart libs and
+// additional query keys we don't care about here.
 vi.mock("./provider-logo", () => ({ ProviderLogo: () => null }));
-vi.mock("./update-section", () => ({ UpdateSection: () => null }));
 vi.mock("./usage-section", () => ({ UsageSection: () => null }));
 vi.mock("./shared", () => ({ HealthBadge: () => null }));
 vi.mock("../../agents/presence", () => ({
@@ -128,7 +130,7 @@ vi.mock("../../agents/presence", () => ({
 }));
 vi.mock("../../common/actor-avatar", () => ({ ActorAvatar: () => null }));
 vi.mock("../../navigation", () => ({
-  AppLink: () => null,
+  AppLink: ({ children }: { children: ReactNode }) => <>{children}</>,
   useNavigation: () => ({ push: vi.fn(), replace: vi.fn() }),
 }));
 
@@ -173,12 +175,18 @@ function makeProfile(overrides: Partial<RuntimeProfile> = {}): RuntimeProfile {
   };
 }
 
-function renderDetail(runtime: AgentRuntime) {
+function renderDetail(
+  runtime: AgentRuntime,
+  props: Pick<
+    ComponentProps<typeof RuntimeDetail>,
+    "machineHref" | "machineLabel"
+  > = {},
+) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={qc}>
-        <RuntimeDetail runtime={runtime} />
+        <RuntimeDetail runtime={runtime} {...props} />
       </QueryClientProvider>
     </I18nProvider>,
   );
@@ -199,6 +207,51 @@ describe("RuntimeDetail visibility section", () => {
     expect(screen.getByText("Public")).toBeInTheDocument();
   });
 
+  it("keeps daemon CLI version details without rendering update controls", () => {
+    renderDetail(
+      makeRuntime({
+        metadata: { cli_version: "0.3.17" },
+        runtime_mode: "local",
+      }),
+    );
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "Technical details" }),
+    );
+
+    expect(screen.getByText("0.3.17")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Update" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("uses the provider name when the runtime alias is the machine name", () => {
+    renderDetail(
+      makeRuntime({
+        name: "Pi (Studio Mac)",
+        custom_name: "Studio Mac",
+        provider: "pi",
+      }),
+      { machineHref: "/runtimes/local:daemon-1", machineLabel: "Studio Mac" },
+    );
+
+    expect(screen.getAllByText("Pi")).toHaveLength(2);
+    expect(screen.getByRole("banner")).toHaveTextContent("Studio Mac");
+  });
+
+  it("preserves a runtime-specific alias that differs from the machine name", () => {
+    renderDetail(
+      makeRuntime({
+        name: "Pi (Studio Mac)",
+        custom_name: "Research Pi",
+        provider: "pi",
+      }),
+      { machineHref: "/runtimes/local:daemon-1", machineLabel: "Studio Mac" },
+    );
+
+    expect(screen.getAllByText("Research Pi")).toHaveLength(2);
+  });
+
   it("flips visibility to public when the owner clicks the Public choice", async () => {
     renderDetail(makeRuntime({ owner_id: "user-me", visibility: "private" }));
     fireEvent.click(screen.getByText("Public"));
@@ -212,6 +265,21 @@ describe("RuntimeDetail visibility section", () => {
     expect(screen.getByText("Public")).toBeInTheDocument();
     // The editor's "Private" choice button must not render in read-only mode.
     expect(screen.queryByText("Private")).not.toBeInTheDocument();
+  });
+
+  // MUL-6126: a workspace admin may rename or delete someone else's runtime,
+  // but not share it — sharing is the owner's consent to lend their machine,
+  // and the PATCH refuses an admin regardless of what this UI renders.
+  it("keeps visibility read-only for a workspace admin who does not own the runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "private" }),
+    );
+    expect(screen.getByText("Private")).toBeInTheDocument();
+    expect(screen.queryByText("Public")).not.toBeInTheDocument();
   });
 
   // MUL-3352: an owner viewing an online local (self-healing) runtime
@@ -260,9 +328,18 @@ describe("RuntimeDetail visibility section", () => {
     );
 
     fireEvent.click(screen.getByRole("button", { name: /Delete runtime/i }));
-    expect(screen.getByText("Delete custom runtime?")).toBeInTheDocument();
+    expect(
+      screen.getByText("Delete custom runtime from workspace?"),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("alertdialog", {
+        name: "Delete custom runtime from workspace?",
+      }),
+    ).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole("button", { name: "Delete" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Delete from workspace" }),
+    );
     await waitFor(() =>
       expect(mockDeleteRuntimeProfile).toHaveBeenCalledWith(profile.id),
     );

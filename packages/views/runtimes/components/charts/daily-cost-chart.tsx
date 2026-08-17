@@ -50,7 +50,7 @@ export function DailyCostChart({ data }: { data: DailyCostStackData[] }) {
           axisLine={false}
           tickMargin={8}
           tickFormatter={(v: number) => `$${v}`}
-          width={50}
+          width="auto"
         />
         <ChartTooltip
           content={

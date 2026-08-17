@@ -12,6 +12,7 @@ const mockGetConnectURL = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 const mockNavPush = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
+const mockToastSuccess = vi.hoisted(() => vi.fn());
 
 const workspaceRef = vi.hoisted(() => ({
   current: {
@@ -95,7 +96,9 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("../../navigation", () => ({
+// Mocked at the context module rather than the barrel so <AppLink> stays the
+// real component and its click contract is what the test exercises.
+vi.mock("../../navigation/context", () => ({
   useNavigation: () => ({
     push: mockNavPush,
     replace: vi.fn(),
@@ -107,7 +110,7 @@ vi.mock("../../navigation", () => ({
 }));
 
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: mockToastSuccess, error: vi.fn() },
 }));
 
 import { GitHubTab } from "./github-tab";
@@ -186,6 +189,9 @@ describe("GitHubTab", () => {
     await waitFor(() => {
       expect(mockUpdateWorkspace).toHaveBeenCalledWith("workspace-1", {
         settings: { co_authored_by_enabled: true, github_enabled: false },
+      });
+      expect(mockToastSuccess).toHaveBeenCalledWith("Changes saved", {
+        id: "settings-auto-save",
       });
     });
   });

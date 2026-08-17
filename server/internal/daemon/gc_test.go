@@ -26,13 +26,14 @@ func newGCTestDaemon(t *testing.T, handler http.Handler) *Daemon {
 
 	root := t.TempDir()
 	cfg := Config{
-		WorkspacesRoot:     root,
-		GCEnabled:          true,
-		GCInterval:         1 * time.Hour,
-		GCTTL:              5 * 24 * time.Hour,
-		GCOrphanTTL:        30 * 24 * time.Hour,
-		GCArtifactTTL:      12 * time.Hour,
-		GCArtifactPatterns: []string{"node_modules", ".next", ".turbo"},
+		WorkspacesRoot:           root,
+		GCEnabled:                true,
+		GCInterval:               1 * time.Hour,
+		GCTTL:                    5 * 24 * time.Hour,
+		GCOrphanTTL:              30 * 24 * time.Hour,
+		GCArtifactTTL:            12 * time.Hour,
+		GCArtifactPatterns:       []string{"node_modules", ".next", ".turbo"},
+		GCRepoMaintenanceEnabled: true,
 	}
 	d := New(cfg, slog.Default())
 	d.client = NewClient(srv.URL)
@@ -304,6 +305,208 @@ func TestGcWorkspace_CleansEmptyWorkspaceDir(t *testing.T) {
 	}
 }
 
+func TestGCWorkspace_BatchesAndDeduplicatesIssueChecks(t *testing.T) {
+	doneID := "77777777-7777-7777-7777-777777777771"
+	openID := "77777777-7777-7777-7777-777777777772"
+	var batchRequests, legacyRequests int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-batch/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		batchRequests++
+		if r.Method != http.MethodPost {
+			t.Fatalf("batch method = %s, want POST", r.Method)
+		}
+		var body struct {
+			IssueIDs []string `json:"issue_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode batch request: %v", err)
+		}
+		if got, want := strings.Join(body.IssueIDs, ","), doneID+","+openID; got != want {
+			t.Fatalf("batch issue_ids = %q, want %q", got, want)
+		}
+		json.NewEncoder(w).Encode(map[string]any{"issues": []map[string]any{
+			{"id": doneID, "found": true, "status": "done", "updated_at": time.Now().Add(-10 * 24 * time.Hour)},
+			{"id": openID, "found": true, "status": "in_progress", "updated_at": time.Now()},
+		}})
+	})
+	mux.HandleFunc("/api/daemon/issues/", func(w http.ResponseWriter, r *http.Request) {
+		legacyRequests++
+		http.Error(w, "legacy endpoint must not be called", http.StatusInternalServerError)
+	})
+
+	d := newGCTestDaemon(t, mux)
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-batch")
+	doneA := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-batch", "done-a", &execenv.GCMeta{
+		IssueID: doneID, WorkspaceID: "ws-batch", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	doneB := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-batch", "done-b", &execenv.GCMeta{
+		IssueID: doneID, WorkspaceID: "ws-batch", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	open := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-batch", "open", &execenv.GCMeta{
+		IssueID: openID, WorkspaceID: "ws-batch", CompletedAt: time.Now(),
+	})
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if batchRequests != 1 || legacyRequests != 0 {
+		t.Fatalf("requests: batch=%d legacy=%d, want batch=1 legacy=0", batchRequests, legacyRequests)
+	}
+	for _, dir := range []string{doneA, doneB} {
+		if _, err := os.Stat(dir); !os.IsNotExist(err) {
+			t.Fatalf("done task dir %s was not removed", dir)
+		}
+	}
+	if _, err := os.Stat(open); err != nil {
+		t.Fatalf("open task dir should remain: %v", err)
+	}
+	if stats.cleaned != 2 || stats.skipped != 1 {
+		t.Fatalf("stats = cleaned:%d skipped:%d, want 2/1", stats.cleaned, stats.skipped)
+	}
+}
+
+func TestGCWorkspace_OldServerFallbackIsCached(t *testing.T) {
+	issueA := "77777777-7777-7777-7777-777777777773"
+	issueB := "77777777-7777-7777-7777-777777777774"
+	var batchRequests, legacyRequests int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/", func(w http.ResponseWriter, r *http.Request) {
+		batchRequests++
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("/api/daemon/issues/", func(w http.ResponseWriter, r *http.Request) {
+		legacyRequests++
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "done", "updated_at": time.Now().Add(-10 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	for i, tc := range []struct {
+		workspace string
+		issueID   string
+	}{{"ws-legacy-a", issueA}, {"ws-legacy-b", issueB}} {
+		wsDir := filepath.Join(d.cfg.WorkspacesRoot, tc.workspace)
+		taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, tc.workspace, fmt.Sprintf("task-%d", i), &execenv.GCMeta{
+			IssueID: tc.issueID, WorkspaceID: tc.workspace, CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+		})
+		d.gcWorkspace(context.Background(), wsDir, &gcStats{byPattern: map[string]int{}})
+		if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+			t.Fatalf("legacy fallback did not clean %s", taskDir)
+		}
+	}
+
+	if batchRequests != 1 {
+		t.Fatalf("batch requests = %d, want 1 capability probe", batchRequests)
+	}
+	if legacyRequests != 2 {
+		t.Fatalf("legacy requests = %d, want 2", legacyRequests)
+	}
+}
+
+func TestGCWorkspace_BatchFailureDoesNotFanOutOrClean(t *testing.T) {
+	issueID := "77777777-7777-7777-7777-777777777775"
+	var batchRequests, legacyRequests int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-fail/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		batchRequests++
+		http.Error(w, "temporary failure", http.StatusInternalServerError)
+	})
+	mux.HandleFunc("/api/daemon/issues/", func(w http.ResponseWriter, r *http.Request) {
+		legacyRequests++
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "done", "updated_at": time.Now().Add(-10 * 24 * time.Hour),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-fail")
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-fail", "task", &execenv.GCMeta{
+		IssueID: issueID, WorkspaceID: "ws-fail", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if batchRequests != 1 || legacyRequests != 0 {
+		t.Fatalf("requests: batch=%d legacy=%d, want batch=1 legacy=0", batchRequests, legacyRequests)
+	}
+	if _, err := os.Stat(taskDir); err != nil {
+		t.Fatalf("task dir must remain on batch failure: %v", err)
+	}
+	if stats.cleaned != 0 || stats.orphaned != 0 || stats.skipped != 1 {
+		t.Fatalf("unexpected stats after failure: %+v", stats)
+	}
+}
+
+func TestGCWorkspace_ReclaimsLegacyCodexSandboxWithoutConfiguredPatterns(t *testing.T) {
+	issueID := "77777777-7777-7777-7777-777777777776"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-legacy-codex/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []map[string]any{
+			{"id": issueID, "found": true, "status": "in_progress", "updated_at": time.Now()},
+		}})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCArtifactPatterns = nil
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-legacy-codex")
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-legacy-codex", "v0.4.0-task", nil)
+	// Raw v0.4.0 metadata shape: no migration or newly introduced marker is
+	// needed for an already-existing task to become eligible after upgrade.
+	legacyMeta := fmt.Sprintf(
+		`{"kind":"issue","issue_id":%q,"workspace_id":"ws-legacy-codex","completed_at":%q,"local_directory":true}`,
+		issueID,
+		time.Now().Add(-24*time.Hour).UTC().Format(time.RFC3339Nano),
+	)
+	if err := os.WriteFile(filepath.Join(taskDir, ".gc_meta.json"), []byte(legacyMeta), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// A tiny representative file keeps the regression fast; the reported
+	// Windows executable is about 325 MiB but has identical GC semantics.
+	writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 325)
+	for _, rel := range []string{
+		"codex-home/auth.json",
+		"codex-home/config.toml",
+		"codex-home/sessions/session.jsonl",
+		"output/result.txt",
+		"logs/task.log",
+		"workdir/repo/.sandbox-bin/user-owned",
+	} {
+		writeFile(t, filepath.Join(taskDir, filepath.FromSlash(rel)), 10)
+	}
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if _, err := os.Stat(filepath.Join(taskDir, "codex-home/.sandbox-bin")); !os.IsNotExist(err) {
+		t.Fatalf("managed Codex sandbox should be removed, stat err=%v", err)
+	}
+	for _, rel := range []string{
+		"codex-home/auth.json",
+		"codex-home/config.toml",
+		"codex-home/sessions/session.jsonl",
+		"output/result.txt",
+		"logs/task.log",
+		"workdir/repo/.sandbox-bin/user-owned",
+		".gc_meta.json",
+	} {
+		if _, err := os.Stat(filepath.Join(taskDir, filepath.FromSlash(rel))); err != nil {
+			t.Errorf("expected %s to be preserved: %v", rel, err)
+		}
+	}
+	managedPattern := managedArtifactPatternPrefix + "codex-home/.sandbox-bin"
+	if stats.artifactDirs != 1 || stats.artifactRemoved != 1 || stats.bytesReclaimed != 325 || stats.skipped != 1 {
+		t.Fatalf("unexpected managed cleanup stats: %+v", stats)
+	}
+	if stats.byPattern[managedPattern] != 1 {
+		t.Fatalf("managed pattern stats = %+v, want %q=1", stats.byPattern, managedPattern)
+	}
+}
+
 func TestShouldCleanTaskDir_OpenIssueArtifactCleanup(t *testing.T) {
 	t.Parallel()
 	issueID := "88888888-8888-8888-8888-888888888888"
@@ -355,6 +558,44 @@ func TestShouldCleanTaskDir_OpenIssueRecentTaskSkipped(t *testing.T) {
 	}
 }
 
+func TestShouldCleanTaskDir_LegacyMetaUsesManagedOnlyFallback(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-88888888888c"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "in_progress", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCOrphanTTL = 72 * time.Hour
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "legacy-meta", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
+	})
+	old := time.Now().Add(-73 * time.Hour)
+	if err := os.Chtimes(filepath.Join(taskDir, ".gc_meta.json"), old, old); err != nil {
+		t.Fatal(err)
+	}
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionCleanManagedArtifacts {
+		t.Fatalf("expected managed-only fallback for stale legacy meta, got %d", action)
+	}
+
+	recentDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "recent-legacy-meta", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
+	})
+	// Nested activity may leave taskDir's own mtime stale. A recently rewritten
+	// metadata file is the authoritative fallback and must defer cleanup.
+	if err := os.Chtimes(recentDir, old, old); err != nil {
+		t.Fatal(err)
+	}
+	if action := d.shouldCleanTaskDir(context.Background(), recentDir); action != gcActionSkip {
+		t.Fatalf("expected recent legacy meta to remain untouched, got %d", action)
+	}
+}
+
 func TestShouldCleanTaskDir_ActiveEnvRootSkipsArtifactCleanup(t *testing.T) {
 	t.Parallel()
 	issueID := "88888888-8888-8888-8888-88888888888a"
@@ -391,9 +632,10 @@ func TestShouldCleanTaskDir_ActiveEnvRootSkipsFullCleanup(t *testing.T) {
 	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		// Done long enough ago to satisfy GCTTL — this would normally return
-		// gcActionClean. But the env root is in use (e.g. follow-up comment
-		// dispatched a task that reuses the prior workdir), and CreateComment
-		// does not bump issue.updated_at. Active-root guard must override.
+		// gcActionClean. But the env root is in use (e.g. a re-dispatched task
+		// reuses the prior workdir of an already-done issue whose updated_at is
+		// still stale, since a task re-claim doesn't advance it). Active-root
+		// guard must override.
 		json.NewEncoder(w).Encode(map[string]any{
 			"status":     "done",
 			"updated_at": time.Now().Add(-30 * 24 * time.Hour),
@@ -479,6 +721,27 @@ func TestShouldCleanTaskDir_ArtifactTTLDisabled(t *testing.T) {
 
 	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
 		t.Fatalf("expected gcActionSkip when artifact GC disabled, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_ArtifactTTLDisabledSkipsLocalOrphanManagedCleanup(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-88888888888d"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		http.NotFound(w, r)
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCArtifactTTL = 0
+	d.cfg.GCOrphanTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "disabled-local-orphan", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1", LocalDirectory: true,
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected artifact TTL zero to disable managed local orphan cleanup, got %d", action)
 	}
 }
 
@@ -605,6 +868,82 @@ func TestCleanTaskArtifacts_DoesNotFollowSymlinks(t *testing.T) {
 	}
 }
 
+func TestCleanTaskArtifacts_ManagedPathIsExactAndDeduplicated(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+
+	t.Run("managed only", func(t *testing.T) {
+		taskDir := t.TempDir()
+		writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
+		writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/keep"), 400)
+		writeFile(t, filepath.Join(taskDir, "codex-home/auth.json"), 10)
+
+		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, nil)
+		if removed != 1 || bytes != 300 {
+			t.Fatalf("removed=%d bytes=%d, want 1/300", removed, bytes)
+		}
+		if perPattern[managedArtifactPatternPrefix+"codex-home/.sandbox-bin"] != 1 {
+			t.Fatalf("unexpected per-pattern stats: %+v", perPattern)
+		}
+		for _, rel := range []string{"workdir/repo/.sandbox-bin/keep", "codex-home/auth.json"} {
+			if _, err := os.Stat(filepath.Join(taskDir, filepath.FromSlash(rel))); err != nil {
+				t.Errorf("expected %s to be preserved: %v", rel, err)
+			}
+		}
+	})
+
+	t.Run("explicit broad basename", func(t *testing.T) {
+		taskDir := t.TempDir()
+		writeFile(t, filepath.Join(taskDir, "codex-home/.sandbox-bin/codex.exe"), 300)
+		writeFile(t, filepath.Join(taskDir, "workdir/repo/.sandbox-bin/cache"), 400)
+
+		removed, bytes, perPattern := d.cleanTaskArtifacts(taskDir, []string{".sandbox-bin"})
+		if removed != 2 || bytes != 700 {
+			t.Fatalf("removed=%d bytes=%d, want 2/700 without double counting", removed, bytes)
+		}
+		if perPattern[managedArtifactPatternPrefix+"codex-home/.sandbox-bin"] != 1 || perPattern[".sandbox-bin"] != 1 {
+			t.Fatalf("unexpected per-pattern stats: %+v", perPattern)
+		}
+	})
+}
+
+func TestCleanTaskArtifacts_ManagedPathDoesNotFollowSymlinks(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+
+	for _, tc := range []struct {
+		name     string
+		linkPath string
+	}{
+		{name: "leaf", linkPath: "codex-home/.sandbox-bin"},
+		{name: "parent", linkPath: "codex-home"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			taskDir := t.TempDir()
+			outside := t.TempDir()
+			keepFile := filepath.Join(outside, "keep")
+			writeFile(t, keepFile, 10)
+			linkPath := filepath.Join(taskDir, filepath.FromSlash(tc.linkPath))
+			if err := os.MkdirAll(filepath.Dir(linkPath), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(outside, linkPath); err != nil {
+				t.Skipf("symlink not supported: %v", err)
+			}
+
+			removed, _, _ := d.cleanTaskArtifacts(taskDir, nil)
+			if removed != 0 {
+				t.Fatalf("removed=%d, want 0 for symlinked managed path", removed)
+			}
+			if _, err := os.Stat(keepFile); err != nil {
+				t.Fatalf("symlink target was touched: %v", err)
+			}
+		})
+	}
+}
+
 func TestActiveEnvRootRefcount(t *testing.T) {
 	t.Parallel()
 
@@ -627,6 +966,34 @@ func TestActiveEnvRootRefcount(t *testing.T) {
 	if d.isActiveEnvRoot(root) {
 		t.Fatal("expected inactive after both unmarks")
 	}
+}
+
+func TestReserveEnvRootForGCIsExclusive(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	root := "/tmp/fake/gc-reservation"
+
+	d.markActiveEnvRoot(root)
+	if _, ok := d.reserveEnvRootForGC(root); ok {
+		t.Fatal("GC reservation must fail while a task is active")
+	}
+	d.unmarkActiveEnvRoot(root)
+
+	release, ok := d.reserveEnvRootForGC(root)
+	if !ok {
+		t.Fatal("expected GC reservation for inactive env root")
+	}
+	if _, ok := d.reserveEnvRootForGC(root); ok {
+		t.Fatal("second GC reservation must fail while the first is held")
+	}
+	release()
+
+	release, ok = d.reserveEnvRootForGC(root)
+	if !ok {
+		t.Fatal("expected GC reservation after release")
+	}
+	release()
 }
 
 func TestIsBareRepo(t *testing.T) {
@@ -684,6 +1051,28 @@ func TestPruneWorktree_RemovesOnlyStaleAgentBranches(t *testing.T) {
 	}
 	if !gitRefExists(t, barePath, "refs/heads/"+keepBranch) {
 		t.Fatalf("expected non-agent branch %q to be preserved", keepBranch)
+	}
+}
+
+func TestMaintainRepoCacheRunsLightCleanupWhileTaskActive(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+	const staleBranch = "agent/stale/87654321"
+	runGitForGC(t, "", "-C", barePath, "branch", staleBranch, "HEAD")
+
+	d.activeTasks.Add(1)
+	defer d.activeTasks.Add(-1)
+	d.maintainRepoCache(context.Background(), barePath, &gcStats{})
+
+	if gitRefExists(t, barePath, "refs/heads/"+staleBranch) {
+		t.Fatalf("expected stale branch %q to be deleted while a task is active", staleBranch)
+	}
+	if _, err := os.Stat(filepath.Join(barePath, repoMaintenanceMarker)); err != nil {
+		t.Fatalf("heavy maintenance should remain pending while a task is active: %v", err)
 	}
 }
 
@@ -745,6 +1134,29 @@ func TestPruneWorktree_SkipsMaintenanceWhenNothingDeleted(t *testing.T) {
 	}
 }
 
+func TestPruneWorktree_RetriesPendingMaintenanceWithoutAnotherBranchDeletion(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	barePath := filepath.Join(t.TempDir(), "cache.git")
+	runGitForGC(t, "", "clone", "--bare", sourceRepo, barePath)
+
+	sentinelPath := writeOldLooseBlob(t, barePath, "pending-maintenance", 60*24*time.Hour)
+	markerPath := filepath.Join(barePath, repoMaintenanceMarker)
+	if err := os.WriteFile(markerPath, []byte("pending\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	d.pruneWorktree(barePath)
+	if _, err := os.Stat(sentinelPath); !os.IsNotExist(err) {
+		t.Fatalf("expected pending maintenance to prune sentinel, stat err=%v", err)
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("expected completed maintenance to clear pending marker, stat err=%v", err)
+	}
+}
+
 // writeOldLooseBlob writes a dangling loose-object blob to the bare repo and
 // backdates its mtime so `git gc --prune=30.days` will consider it prunable.
 // Returns the absolute path to the loose object on disk.
@@ -771,7 +1183,7 @@ func writeOldLooseBlob(t *testing.T, barePath, content string, age time.Duration
 	return loose
 }
 
-func TestPruneWorktree_SerializesWithCreateWorktree(t *testing.T) {
+func TestPruneWorktree_LegacyCacheFallbackSerializesWithCreateWorktree(t *testing.T) {
 	t.Parallel()
 
 	d := newGCTestDaemon(t, http.NewServeMux())
@@ -843,6 +1255,131 @@ func TestPruneWorktree_SerializesWithCreateWorktree(t *testing.T) {
 	}
 }
 
+func TestCleanupNewRepoMaintenanceLocksPreservesPreexistingFiles(t *testing.T) {
+	t.Parallel()
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	barePath := t.TempDir()
+	preexisting := filepath.Join(barePath, "logs", "refs", "heads", "main.lock")
+	if err := os.MkdirAll(filepath.Dir(preexisting), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(preexisting, []byte("existing"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshotRepoMaintenanceLocks(barePath)
+
+	created := []string{
+		filepath.Join(barePath, "refs", "remotes", "origin", "main.lock"),
+		filepath.Join(barePath, "objects", "pack", "multi-pack-index.lock"),
+		filepath.Join(barePath, "packed-refs.lock"),
+		filepath.Join(barePath, "gc.pid"),
+	}
+	for _, path := range created {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte("new"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	outsideWhitelist := filepath.Join(barePath, "hooks", "user.lock")
+	if err := os.MkdirAll(filepath.Dir(outsideWhitelist), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(outsideWhitelist, []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d.cleanupNewRepoMaintenanceLocks(barePath, before)
+	for _, path := range created {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("new maintenance lock %s survived, stat error = %v", path, err)
+		}
+	}
+	for _, path := range []string{preexisting, outsideWhitelist} {
+		if _, err := os.Stat(path); err != nil {
+			t.Errorf("unowned lock %s was removed: %v", path, err)
+		}
+	}
+}
+
+func TestPruneWorktreePreemptionCleansLocksBeforeTaskStarts(t *testing.T) {
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skipf("requires a POSIX shell: %v", err)
+	}
+	realGit, err := exec.LookPath("git")
+	if err != nil {
+		t.Skipf("git not found: %v", err)
+	}
+
+	d := newGCTestDaemon(t, http.NewServeMux())
+	sourceRepo := createGCGitRepo(t)
+	cache := repocache.New(filepath.Join(d.cfg.WorkspacesRoot, ".repos"), slog.Default())
+	if err := cache.Sync("ws1", []repocache.RepoInfo{{URL: sourceRepo}}); err != nil {
+		t.Fatalf("cache sync failed: %v", err)
+	}
+	d.repoCache = cache
+	barePath := cache.Lookup("ws1", sourceRepo)
+	runGitForGC(t, "", "-C", barePath, "branch", "agent/stale/87654321", "HEAD")
+
+	lockPath := filepath.Join(barePath, "refs", "remotes", "origin", "main.lock")
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	startedPath := filepath.Join(t.TempDir(), "maintenance-started")
+	binDir := t.TempDir()
+	fakeGit := filepath.Join(binDir, "git")
+	script := `#!/bin/sh
+if [ "$3" = "reflog" ] && [ "$4" = "expire" ]; then
+  : > "$2/refs/remotes/origin/main.lock"
+  : > "$MULTICA_TEST_MAINTENANCE_STARTED"
+  trap 'exit 143' TERM INT
+  while :; do sleep 1; done
+fi
+exec "$MULTICA_TEST_REAL_GIT" "$@"
+`
+	if err := os.WriteFile(fakeGit, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MULTICA_TEST_REAL_GIT", realGit)
+	t.Setenv("MULTICA_TEST_MAINTENANCE_STARTED", startedPath)
+	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	pruneDone := make(chan struct{})
+	go func() {
+		d.pruneWorktree(barePath)
+		close(pruneDone)
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		if _, err := os.Stat(startedPath); err == nil {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("timed out waiting for heavy maintenance to start")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	// Match production task dispatch order: mark the task active, then cancel
+	// maintenance and wait for its cleanup barrier before agent code starts.
+	d.activeTasks.Add(1)
+	defer d.activeTasks.Add(-1)
+	cache.CancelMaintenance()
+	select {
+	case <-pruneDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("pruneWorktree did not finish after preemption")
+	}
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Fatalf("maintenance lock survived real task preemption, stat error = %v", err)
+	}
+	if err := cache.Fetch(barePath); err != nil {
+		t.Fatalf("fetch did not recover after preempted maintenance cleanup: %v", err)
+	}
+}
+
 type blockingRepoCache struct {
 	inner   *repocache.Cache
 	entered chan struct{}
@@ -851,6 +1388,10 @@ type blockingRepoCache struct {
 
 func (c *blockingRepoCache) Lookup(workspaceID, url string) string {
 	return c.inner.Lookup(workspaceID, url)
+}
+
+func (c *blockingRepoCache) BarePath(workspaceID, url string) string {
+	return c.inner.BarePath(workspaceID, url)
 }
 
 func (c *blockingRepoCache) Sync(workspaceID string, repos []repocache.RepoInfo) error {
@@ -1225,6 +1766,13 @@ func TestShouldCleanTaskDir_ChatHardDeletedFreshMtime(t *testing.T) {
 // criterion #2: an active chat session whose workdir is older than
 // GCOrphanTTL must NOT be reclaimed. The only path to clean an active
 // session's workdir is for the user to archive or hard-delete the session.
+//
+// #6782 narrowed this from "the GC does nothing" to "the GC never removes the
+// directory": a session idle past GCArtifactTTL now gives back the regenerable
+// codex-home/.sandbox-bin cache, which the next message re-provisions. The
+// acceptance criterion is unchanged — the session's own data survives — so
+// this asserts the surviving contents rather than the bare action value.
+// TestManagedArtifact_IdleActiveChatReclaimsSandboxBin covers the carve-out.
 func TestShouldCleanTaskDir_ChatActiveResistsOldMtime(t *testing.T) {
 	t.Parallel()
 	chatID := "ffffffff-ffff-ffff-ffff-ffffffffff01"
@@ -1247,12 +1795,22 @@ func TestShouldCleanTaskDir_ChatActiveResistsOldMtime(t *testing.T) {
 		CompletedAt:   time.Now().Add(-200 * 24 * time.Hour),
 	}
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws", "active-chat", meta)
+	writeFile(t, filepath.Join(taskDir, "logs/run.log"), 32)
+	writeFile(t, filepath.Join(taskDir, "output/result.md"), 32)
 	if err := os.Chtimes(taskDir, time.Now().Add(-200*24*time.Hour), time.Now().Add(-200*24*time.Hour)); err != nil {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	if got := d.shouldCleanTaskDir(context.Background(), taskDir); got != gcActionSkip {
-		t.Fatalf("active chat session must not be reclaimed even with stale mtime, got %d", got)
+	action := d.shouldCleanTaskDir(context.Background(), taskDir)
+	if action == gcActionClean || action == gcActionOrphan {
+		t.Fatalf("active chat session's directory must never be removed, got action %d", action)
+	}
+	d.applyGCAction(taskDir, action, &gcStats{byPattern: map[string]int{}})
+
+	for _, rel := range []string{".", "logs/run.log", "output/result.md", ".gc_meta.json"} {
+		if _, err := os.Stat(filepath.Join(taskDir, rel)); err != nil {
+			t.Fatalf("active chat session must keep %s: %v", rel, err)
+		}
 	}
 }
 
@@ -1363,10 +1921,10 @@ func TestShouldCleanTaskDir_LocalDirectoryNeverClean(t *testing.T) {
 	}
 }
 
-// TestShouldCleanTaskDir_LocalDirectoryNeverOrphan confirms that even when
-// the parent issue 404s (would normally fall through to mtime-based orphan
-// cleanup) a local_directory task's envRoot is preserved.
-func TestShouldCleanTaskDir_LocalDirectoryNeverOrphan(t *testing.T) {
+// TestShouldCleanTaskDir_LocalDirectoryOrphanUsesManagedOnly confirms that
+// when the parent issue 404s, a local_directory task preserves its envRoot and
+// becomes eligible only for exact daemon-managed artifact cleanup.
+func TestShouldCleanTaskDir_LocalDirectoryOrphanUsesManagedOnly(t *testing.T) {
 	t.Parallel()
 	issueID := "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaa2"
 
@@ -1385,8 +1943,8 @@ func TestShouldCleanTaskDir_LocalDirectoryNeverOrphan(t *testing.T) {
 	})
 
 	got := d.shouldCleanTaskDir(context.Background(), taskDir)
-	if got == gcActionOrphan || got == gcActionClean {
-		t.Fatalf("expected local_directory orphan to be skipped, got %d", got)
+	if got != gcActionCleanManagedArtifacts {
+		t.Fatalf("expected local_directory orphan to use managed-only cleanup, got %d", got)
 	}
 }
 

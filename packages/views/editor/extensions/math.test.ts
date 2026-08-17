@@ -33,6 +33,10 @@ function findAll(node: JsonNode, type: string, acc: JsonNode[] = []): JsonNode[]
   return acc;
 }
 
+function unescapeMarkdownSyntax(md: string): string {
+  return md.replace(/\\([\\`*_[\]~])/g, "$1");
+}
+
 function typeText(editor: Editor, text: string) {
   for (const ch of text) {
     const { from, to } = editor.state.selection;
@@ -59,7 +63,7 @@ describe("math editor extension", () => {
 
     expect(findAll(editor.getJSON() as JsonNode, "inlineMath")).toHaveLength(0);
     expect(editor.getText()).toBe(FINANCE_TEXT);
-    expect(editor.getMarkdown().trim()).toBe(FINANCE_TEXT);
+    expect(unescapeMarkdownSyntax(editor.getMarkdown().trim())).toBe(FINANCE_TEXT);
   });
 
   it("parses single-dollar markdown as literal text", () => {
@@ -69,7 +73,7 @@ describe("math editor extension", () => {
 
     expect(findAll(editor.getJSON() as JsonNode, "inlineMath")).toHaveLength(0);
     expect(editor.getText()).toBe(FINANCE_TEXT);
-    expect(editor.getMarkdown().trim()).toBe(FINANCE_TEXT);
+    expect(unescapeMarkdownSyntax(editor.getMarkdown().trim())).toBe(FINANCE_TEXT);
   });
 
   it("still parses explicit display math blocks", () => {

@@ -2,12 +2,15 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -87,8 +90,50 @@ func (h *Handler) PinTaskSession(w http.ResponseWriter, r *http.Request) {
 	if req.WorkDir != "" {
 		params.WorkDir = pgtype.Text{String: req.WorkDir, Valid: true}
 	}
-	if err := h.Queries.UpdateAgentTaskSession(r.Context(), params); err != nil {
+	// The pin can arrive after the user has already cancelled the run — it is
+	// asynchronous, and for Codex it waits for the rollout to reach the store.
+	// The cancel transaction then found no session to publish, so the chat's
+	// resume pointer is still on the previous turn and would shadow the session
+	// this pin is about to record (the claim handler reads the pointer before
+	// the GetLastChatTaskSession fallback). Advancing it here closes that half
+	// of GH #6340.
+	//
+	// Both writes commit together. Landing the session on the task row first and
+	// the pointer second leaves the same window the cancel path had: the row
+	// already names the new session while the pointer still names the previous
+	// turn, and a follow-up claimed in between resumes the older one. The lock
+	// comes first for the same reason it does in CancelTaskWithResult —
+	// chat_session -> agent_task_queue is the global order, and ErrNoRows simply
+	// means there is no session to lock or advance.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		slog.Warn("pin-session failed to start tx", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "pin session failed")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+
+	if _, err := qtx.LockChatSessionForTask(r.Context(), params.ID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		slog.Warn("pin-session failed to lock chat session", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "pin session failed")
+		return
+	}
+	if err := qtx.UpdateAgentTaskSession(r.Context(), params); err != nil {
 		slog.Warn("pin-session failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "pin session failed")
+		return
+	}
+	// The statement re-reads the row, ignores anything that is not a cancelled
+	// chat task, and refuses to move the pointer when a newer turn already owns
+	// a session — so a straggler pin cannot drag the conversation backwards.
+	if err := qtx.AdvanceCancelledChatSessionPointer(r.Context(), params.ID); err != nil {
+		slog.Warn("advance cancelled chat session pointer failed", "task_id", taskID, "error", err)
+		writeError(w, http.StatusInternalServerError, "pin session failed")
+		return
+	}
+	if err := tx.Commit(r.Context()); err != nil {
+		slog.Warn("pin-session commit failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusInternalServerError, "pin session failed")
 		return
 	}
@@ -143,11 +188,37 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		sourceTaskID = parsed
 	}
 
-	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{})
+	// A manual rerun is a direct human action: attribute the new run to the
+	// rerunning member (MUL-4302 §5). Resolve the actor the same way assign/promote
+	// does; an agent A2A actor is not a human and threads an invalid actor.
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := uuidToString(issue.WorkspaceID)
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	actorUserID := memberActorUserID(actorType, actorID)
+
+	// Re-validate the operator's invoke permission on the resolved target agent
+	// before cancelling / creating anything (MUL-4525). Issue visibility does not
+	// grant the right to trigger a private agent — a task_id rerun must gate the
+	// historical agent, not the (possibly reassigned) current assignee.
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
+	canInvoke := func(agent db.Agent) bool {
+		return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
+	}
+
+	task, err := h.TaskService.RerunIssue(r.Context(), issue.ID, sourceTaskID, pgtype.UUID{}, actorUserID, canInvoke)
+	if errors.Is(err, service.ErrRerunInvokeNotAllowed) {
+		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
+		return
+	}
 	if err != nil {
 		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	writeJSON(w, http.StatusAccepted, taskToResponse(*task, uuidToString(issue.WorkspaceID)))
+	resp := taskToResponse(*task, uuidToString(issue.WorkspaceID))
+	h.hydrateTaskAttributions(r.Context(), []*TaskAttribution{resp.Attribution})
+	writeJSON(w, http.StatusAccepted, resp)
 }

@@ -1,6 +1,7 @@
 package logger
 
 import (
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
@@ -47,6 +48,34 @@ func NewLogger(component string) *slog.Logger {
 		NoColor:    !isTerminal(os.Stderr),
 	})
 	return slog.New(handler).With("component", component)
+}
+
+// StderrIsTerminal reports whether this process's stderr is attached to a
+// terminal. The daemon uses it to distinguish a user running
+// `daemon start --foreground` in a shell (log live to the terminal) from a
+// detached/background child whose stderr is redirected to a file (rotate into
+// daemon.log instead).
+func StderrIsTerminal() bool {
+	return isTerminal(os.Stderr)
+}
+
+// NewWriterLoggerDefault builds a named slog logger that writes structured,
+// color-free output to w, and installs the same handler as the global slog
+// default so bare slog.Info/Warn/... calls (e.g. from LoadConfig) land in the
+// same sink. Intended for standalone processes that log to a file or rotating
+// writer instead of a terminal (the daemon), where ANSI color is never wanted
+// and every log line — injected-logger and package-global alike — must end up
+// in the one managed file. Reads LOG_LEVEL like NewLogger/Init.
+func NewWriterLoggerDefault(component string, w io.Writer) *slog.Logger {
+	level := parseLevel(os.Getenv("LOG_LEVEL"))
+	handler := tint.NewHandler(w, &tint.Options{
+		Level:      level,
+		TimeFormat: "15:04:05.000",
+		NoColor:    true,
+	})
+	base := slog.New(handler)
+	slog.SetDefault(base)
+	return base.With("component", component)
 }
 
 // RequestAttrs extracts request_id, user_id, and X-Client-* metadata from

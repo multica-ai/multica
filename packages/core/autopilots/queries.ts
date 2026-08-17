@@ -14,6 +14,8 @@ export const autopilotKeys = {
     [...autopilotKeys.all(wsId), "deliveries", id] as const,
   delivery: (wsId: string, autopilotId: string, deliveryId: string) =>
     [...autopilotKeys.all(wsId), "deliveries", autopilotId, deliveryId] as const,
+  cronPreview: (wsId: string, expr: string, tz: string) =>
+    [...autopilotKeys.all(wsId), "cron-preview", expr, tz] as const,
 };
 
 export function autopilotListOptions(wsId: string) {
@@ -85,5 +87,24 @@ export function autopilotDeliveryOptions(
     queryKey: autopilotKeys.delivery(wsId, autopilotId, deliveryId),
     queryFn: () => api.getAutopilotDelivery(autopilotId, deliveryId),
     enabled: options?.enabled ?? true,
+  });
+}
+
+// cronPreviewOptions backs the schedule editor's next-run preview. The server
+// owns cron/timezone evaluation, so the editor never approximates it locally.
+export function cronPreviewOptions(
+  wsId: string,
+  expr: string,
+  tz: string,
+  options?: { enabled?: boolean },
+) {
+  return queryOptions({
+    queryKey: autopilotKeys.cronPreview(wsId, expr, tz),
+    queryFn: () => api.cronPreview({ expr, tz }),
+    enabled: options?.enabled ?? true,
+    staleTime: 30_000,
+    // A 400 (invalid expression/timezone) is a stable answer for this input,
+    // not a transient failure — retrying would only delay the inline error.
+    retry: false,
   });
 }

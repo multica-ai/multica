@@ -25,6 +25,7 @@ catalog:
   # UI & Styling
   tailwindcss: "^4"
   "@tailwindcss/postcss": "^4"
+  postcss: "^8"
   "@tailwindcss/vite": "^4"
   tailwind-merge: "^3.4.0"
   class-variance-authority: "^0.7.1"

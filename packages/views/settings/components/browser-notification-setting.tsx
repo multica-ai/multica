@@ -8,9 +8,9 @@ import {
   type WebNotificationPermission,
 } from "@multica/core/platform";
 import { Button } from "@multica/ui/components/ui/button";
-import { Card, CardContent } from "@multica/ui/components/ui/card";
 import { isDesktopShell } from "../../platform";
 import { useT } from "../../i18n";
+import { SettingsCard, SettingsRow } from "./settings-layout";
 
 /**
  * Web-only control for the browser permission that native notification banners
@@ -48,27 +48,22 @@ export function BrowserNotificationSetting() {
         : t(($) => $.notifications.browser.hint);
 
   return (
-    <Card>
-      <CardContent>
-        <div className="flex items-center justify-between gap-4">
-          <div className="space-y-0.5 pr-4">
-            <p className="text-sm font-medium">
-              {t(($) => $.notifications.browser.label)}
-            </p>
-            <p className="text-xs text-muted-foreground">{statusHint}</p>
-          </div>
+    <SettingsCard>
+      <SettingsRow
+        label={t(($) => $.notifications.browser.label)}
+        description={statusHint}
+      >
           {permission === "default" && (
             <Button size="sm" variant="outline" onClick={handleEnable}>
               {t(($) => $.notifications.browser.enable)}
             </Button>
           )}
           {permission === "granted" && (
-            <span className="shrink-0 text-xs font-medium text-muted-foreground">
+            <span className="shrink-0 text-caption font-medium text-muted-foreground">
               {t(($) => $.notifications.browser.enabled_badge)}
             </span>
           )}
-        </div>
-      </CardContent>
-    </Card>
+      </SettingsRow>
+    </SettingsCard>
   );
 }

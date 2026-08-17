@@ -11,6 +11,9 @@ const webRepoUrl = "https://github.com/multica-ai/web";
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({ data: [] }),
+  // The modal now reads the runtime list to gate worktree mode, and
+  // runtimeListOptions builds its descriptor with queryOptions.
+  queryOptions: (options: unknown) => options,
 }));
 
 vi.mock("@multica/core/projects/mutations", () => ({
@@ -87,6 +90,17 @@ vi.mock("../issues/components/priority-icon", () => ({
 
 vi.mock("../common/actor-avatar", () => ({
   ActorAvatar: () => <span data-testid="actor-avatar" />,
+}));
+
+// Stub the date pickers so this test doesn't pull the real Calendar (and its
+// buttonVariants import) into the modal's module graph; the pickers have their
+// own test. The stubs render the placeholder label so the pills are assertable.
+vi.mock("../projects/components/project-start-date-picker", () => ({
+  ProjectStartDatePicker: () => <button type="button">Start date</button>,
+}));
+
+vi.mock("../projects/components/project-due-date-picker", () => ({
+  ProjectDueDatePicker: () => <button type="button">Due date</button>,
 }));
 
 vi.mock("@multica/ui/components/ui/dialog", () => ({
@@ -166,8 +180,25 @@ describe("CreateProjectModal", () => {
   it("exposes full repository URLs in the repository picker", () => {
     render(<CreateProjectModal onClose={vi.fn()} />);
 
-    expect(screen.getByTitle(longRepoUrl)).toHaveTextContent(longRepoUrl);
+    // The Tooltip is the single reveal mechanism. A native `title` carrying the
+    // same URL would stack a browser tooltip on top of it (MUL-4836).
     expect(screen.getByRole("tooltip", { name: longRepoUrl })).toBeInTheDocument();
+    expect(screen.queryByTitle(longRepoUrl)).toBeNull();
+  });
+
+  it("reveals the start/due date pickers from the ⋯ overflow menu", async () => {
+    const user = userEvent.setup();
+    renderWithI18n(<CreateProjectModal onClose={vi.fn()} />);
+
+    // Dates are collapsed behind the overflow by default (progressive disclosure).
+    expect(screen.queryByRole("button", { name: "Start date" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Due date" })).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set start date/ }));
+    expect(screen.getByRole("button", { name: "Start date" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Set due date/ }));
+    expect(screen.getByRole("button", { name: "Due date" })).toBeInTheDocument();
   });
 
   it("filters workspace repositories by search text", async () => {

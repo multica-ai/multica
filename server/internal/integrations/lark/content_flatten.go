@@ -21,12 +21,13 @@ import (
 // knows which one applies — so flattening stays mention-agnostic.
 //
 // Non-text media types render as a stable bracketed placeholder so the
-// agent sees that *something* was attached without us downloading the
-// binary. Attachment ingestion is explicitly out of scope (tracked as a
-// separate attachment-pipeline issue), and merge_forward is intercepted
-// by the enricher before it reaches here (expanding it needs an HTTP
-// round-trip); the inline placeholder is only a fallback for a forward
-// nested inside another forward.
+// agent sees that *something* was attached without this fast path
+// downloading the binary; the detached media resolver separately fetches
+// the resource and binds it as a chat attachment, with the placeholder
+// as the durable fallback. merge_forward is intercepted by the enricher
+// before it reaches here (expanding it needs an HTTP round-trip); the
+// inline placeholder is only a fallback for a forward nested inside
+// another forward.
 func flattenContent(msgType, rawContent string) string {
 	switch msgType {
 	case "text":
@@ -39,7 +40,7 @@ func flattenContent(msgType, rawContent string) string {
 		return "[File]"
 	case "audio":
 		return "[Audio]"
-	case "media":
+	case "media", "video":
 		return "[Video]"
 	case "sticker":
 		return "[Sticker]"
@@ -80,6 +81,11 @@ type larkPostSpan struct {
 	Href     string `json:"href"`
 	UserID   string `json:"user_id"`
 	UserName string `json:"user_name"`
+	ImageKey string `json:"image_key"`
+	FileKey  string `json:"file_key"`
+	FileName string `json:"file_name"`
+	Name     string `json:"name"`
+	MimeType string `json:"mime_type"`
 }
 
 // flattenPostContent flattens a received `post` body.content into plain

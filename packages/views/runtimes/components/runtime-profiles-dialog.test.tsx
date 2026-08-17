@@ -78,12 +78,32 @@ function profile(overrides: Partial<RuntimeProfile> = {}): RuntimeProfile {
   };
 }
 
-function renderDialog() {
-  return render(
+function renderDialog({
+  intent,
+  machineName,
+  initialProfile,
+  onClose = vi.fn(),
+  onProfileCreated,
+}: {
+  intent?: "create" | "edit" | "manage";
+  machineName?: string;
+  initialProfile?: RuntimeProfile;
+  onClose?: () => void;
+  onProfileCreated?: (profile: RuntimeProfile) => void;
+} = {}) {
+  const view = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
-      <RuntimeProfilesDialog wsId="ws-1" onClose={vi.fn()} />
+      <RuntimeProfilesDialog
+        wsId="ws-1"
+        intent={intent}
+        machineName={machineName}
+        initialProfile={initialProfile}
+        onClose={onClose}
+        onProfileCreated={onProfileCreated}
+      />
     </I18nProvider>,
   );
+  return { ...view, onClose };
 }
 
 describe("RuntimeProfilesDialog", () => {
@@ -117,7 +137,7 @@ describe("RuntimeProfilesDialog", () => {
     expect(screen.queryByText("claude")).not.toBeInTheDocument();
     expect(
       screen.getAllByRole("button", { name: "New custom runtime" }),
-    ).toHaveLength(2);
+    ).toHaveLength(1);
   });
 
   it("renders custom profiles before the collapsed built-in reference section", () => {
@@ -176,7 +196,7 @@ describe("RuntimeProfilesDialog", () => {
     });
     expect(newRuntimeButtons[0]).toBeDefined();
     fireEvent.click(newRuntimeButtons[0]!);
-    fireEvent.click(screen.getByRole("radio", { name: /codex/i }));
+    fireEvent.click(screen.getByRole("button", { name: /codex/i }));
     fireEvent.change(screen.getByLabelText("Display name"), {
       target: { value: "Composer Agent" },
     });
@@ -199,5 +219,63 @@ describe("RuntimeProfilesDialog", () => {
         fixed_args: ["--model", "composer-2.5"],
       }),
     );
+  });
+
+  it("opens the focused create flow from a machine and closes after creation", async () => {
+    const onClose = vi.fn();
+    const onProfileCreated = vi.fn();
+    renderDialog({
+      intent: "create",
+      machineName: "Studio Mac",
+      onClose,
+      onProfileCreated,
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "New custom runtime" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/from Studio Mac/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View setup guide" })).toHaveAttribute(
+      "href",
+      "https://multica.ai/docs/daemon-runtimes#custom-runtime-profiles",
+    );
+    expect(screen.getByText("Step 1 of 2")).toBeInTheDocument();
+    expect(
+      screen.queryByText("Create your first custom runtime"),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Back" })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /codex/i }));
+    expect(screen.getByText("Step 2 of 2")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Display name"), {
+      target: { value: "Composer Agent" },
+    });
+    fireEvent.change(screen.getByLabelText("Command"), {
+      target: { value: "agent --model composer-2.5" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Create runtime" }));
+
+    await waitFor(() => {
+      expect(onProfileCreated).toHaveBeenCalledWith(
+        expect.objectContaining({ id: "prof-1" }),
+      );
+      expect(onClose).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("opens a custom runtime directly in edit mode", () => {
+    renderDialog({
+      intent: "edit",
+      initialProfile: profile(),
+    });
+
+    expect(
+      screen.getByRole("heading", { name: "Edit custom runtime" }),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Display name")).toHaveValue("Team Codex");
+    expect(screen.getByLabelText("Command")).toHaveValue("codex");
+    expect(
+      screen.queryByText("Create your first custom runtime"),
+    ).not.toBeInTheDocument();
   });
 });

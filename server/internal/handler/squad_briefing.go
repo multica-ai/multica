@@ -9,15 +9,18 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// squadOperatingProtocol is the hard-coded system-level briefing prepended to
-// every squad-leader claim. It explains the leader's coordinator role, the
-// @mention dispatch mechanism, and the stop-after-dispatch contract.
+// squadOperatingProtocolHeader is the hard-coded system-level briefing
+// prepended to every squad-leader claim. It explains the leader's coordinator
+// role, the @mention dispatch mechanism, and the stop-after-dispatch contract.
+// Responsibility 6 (parent issue status) is appended separately by
+// squadOperatingProtocolFor — it is the only part that varies by whether this
+// squad actually owns the issue.
 //
 // Keep this text English-only (matches existing agent-harness conventions)
 // and keep the mention syntax exactly aligned with util.MentionRe — the
 // "Squad Roster" block below renders concrete examples that round-trip
 // through util.ParseMentions, and the protocol text refers to that format.
-const squadOperatingProtocol = `## Squad Operating Protocol
+const squadOperatingProtocolHeader = `## Squad Operating Protocol
 
 **If you are reading this section, you have been activated as a squad LEADER
 for this task — regardless of how the work reached you (direct assignment,
@@ -65,9 +68,43 @@ Your responsibilities, in order:
    activity and decide whether to delegate the next step, escalate to
    the human reporter, or close the loop. If no action is needed
    (e.g. a member posted a progress update that requires no response),
-   record ` + "`" + `no_action` + "`" + ` and exit silently.
+   record ` + "`" + `no_action` + "`" + ` and exit silently.`
 
-Hard rules:
+// squadParentStatusOwned is responsibility 6 for the case where the issue this
+// leader was woken on is assigned to THIS squad. Only then does the leader own
+// the parent's status arc.
+//
+// The "even when no comment asked you to" clause is load-bearing: the comment
+// workflow's default rule is "do not change status unless the comment asks",
+// and a member's delivery comment never asks. Without an explicit standing
+// grant here, the @mention-dispatch squad shape (no child issues, so no
+// child-done system comment carrying an explicit ask) would leave the parent
+// stuck in in_progress forever. The comment workflow defers to this section by
+// name — keep the heading text in sync with writeWorkflowComment.
+const squadParentStatusOwned = `6. **Own the parent issue status.** This issue is assigned to your squad,
+   so its status is yours to manage (unless Agent Identity forbids status
+   changes). On the first assignment turn, move the parent to
+   ` + "`" + `in_progress` + "`" + ` and keep it there while members work — a successful
+   dispatch is not completion. On later turns, do not flip status for
+   routine progress updates. When you confirm the overall goal is met, run
+   ` + "`" + `multica issue status <issue-id> in_review` + "`" + ` — this responsibility is
+   itself the standing instruction that authorizes that change, so do it even
+   when no comment asked you to. Leave ` + "`" + `done` + "`" + ` to a human reviewer or
+   existing integrations (for example a PR with close intent that merges).`
+
+// squadParentStatusNotOwned is responsibility 6 for every other leader path:
+// an @squad mention on an issue owned by someone else (MUL-3724), and
+// quick-create, where no issue exists yet on this turn. Granting status
+// ownership there would let a squad that was merely pulled in to answer a
+// question push another assignee's in-flight issue to in_review.
+const squadParentStatusNotOwned = `6. **Do NOT change this issue's status.** This issue is not assigned to your
+   squad — you were pulled in by an @mention (or this is a quick-create turn,
+   where the issue does not exist yet). Its status belongs to its own
+   assignee. Answer, delegate, or escalate as usual, but never run
+   ` + "`" + `multica issue status` + "`" + ` on it, no matter how complete the work looks
+   to you.`
+
+const squadOperatingProtocolHardRules = `Hard rules:
 - EVERY delegation MUST use the full mention markdown syntax
   ` + "`" + `[@Name](mention://<type>/<UUID>)` + "`" + ` exactly as shown in the Squad
   Roster. A plain "@name" or bare name does NOT trigger the agent —
@@ -96,6 +133,16 @@ Hard rules:
   @mention on this issue, or create a ` + "`" + `todo` + "`" + ` child issue assigned to
   them. Never both for the same work.`
 
+// squadOperatingProtocolFor assembles the protocol, selecting the parent-status
+// responsibility that matches this leader's actual authority over the issue.
+func squadOperatingProtocolFor(ownsIssueStatus bool) string {
+	status := squadParentStatusNotOwned
+	if ownsIssueStatus {
+		status = squadParentStatusOwned
+	}
+	return squadOperatingProtocolHeader + "\n" + status + "\n\n" + squadOperatingProtocolHardRules
+}
+
 // buildSquadLeaderBriefing composes the full system briefing appended to a
 // squad leader's Instructions when it claims a task on a squad-assigned
 // issue. The returned string contains three sections:
@@ -106,12 +153,17 @@ Hard rules:
 //  3. Squad Instructions (user-defined `squad.instructions`, omitted when
 //     empty so we don't leave a dangling heading).
 //
+// ownsIssueStatus must be true only when the issue this task is bound to is
+// assigned to this very squad. The briefing is injected on every leader path,
+// including ones where the squad is a guest on someone else's issue, so this
+// flag is what keeps status authority from leaking along with the roster.
+//
 // Archived agent members are skipped — there's no point asking the leader
 // to delegate to a retired agent. Members whose underlying record can't be
 // loaded (deleted user/agent races, FK weirdness) are also skipped silently.
-func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad) string {
+func buildSquadLeaderBriefing(ctx context.Context, q *db.Queries, squad db.Squad, ownsIssueStatus bool) string {
 	var sb strings.Builder
-	sb.WriteString(squadOperatingProtocol)
+	sb.WriteString(squadOperatingProtocolFor(ownsIssueStatus))
 	sb.WriteString("\n\n")
 	sb.WriteString(buildSquadRoster(ctx, q, squad))
 

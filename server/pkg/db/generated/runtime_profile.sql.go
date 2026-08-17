@@ -14,14 +14,19 @@ import (
 const countAgentsByProfile = `-- name: CountAgentsByProfile :one
 SELECT count(*) FROM agent a
 JOIN agent_runtime ar ON ar.id = a.runtime_id
-WHERE ar.profile_id = $1 AND a.archived_at IS NULL
+WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
 `
+
+type CountAgentsByProfileParams struct {
+	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
 
 // Counts active (non-archived) agents bound to any runtime instance of this
 // profile. The profile-delete path uses this to refuse deletion (409) while
 // agents still depend on it, mirroring the runtime-delete guard.
-func (q *Queries) CountAgentsByProfile(ctx context.Context, profileID pgtype.UUID) (int64, error) {
-	row := q.db.QueryRow(ctx, countAgentsByProfile, profileID)
+func (q *Queries) CountAgentsByProfile(ctx context.Context, arg CountAgentsByProfileParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgentsByProfile, arg.ProfileID, arg.WorkspaceID)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -90,9 +95,14 @@ func (q *Queries) CreateRuntimeProfile(ctx context.Context, arg CreateRuntimePro
 
 const deleteAgentRuntimesByProfile = `-- name: DeleteAgentRuntimesByProfile :many
 DELETE FROM agent_runtime
-WHERE profile_id = $1
+WHERE profile_id = $1 AND workspace_id = $2
 RETURNING id, workspace_id, owner_id, daemon_id, provider
 `
+
+type DeleteAgentRuntimesByProfileParams struct {
+	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
 
 type DeleteAgentRuntimesByProfileRow struct {
 	ID          pgtype.UUID `json:"id"`
@@ -106,8 +116,8 @@ type DeleteAgentRuntimesByProfileRow struct {
 // the profile-delete path must remove the profile's registered runtime
 // instances itself. Returns the deleted rows so the caller can broadcast /
 // audit. Runs inside the same transaction as DeleteRuntimeProfile.
-func (q *Queries) DeleteAgentRuntimesByProfile(ctx context.Context, profileID pgtype.UUID) ([]DeleteAgentRuntimesByProfileRow, error) {
-	rows, err := q.db.Query(ctx, deleteAgentRuntimesByProfile, profileID)
+func (q *Queries) DeleteAgentRuntimesByProfile(ctx context.Context, arg DeleteAgentRuntimesByProfileParams) ([]DeleteAgentRuntimesByProfileRow, error) {
+	rows, err := q.db.Query(ctx, deleteAgentRuntimesByProfile, arg.ProfileID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -204,16 +214,23 @@ func (q *Queries) GetRuntimeProfileForWorkspace(ctx context.Context, arg GetRunt
 
 const listAgentRuntimeIDsByProfile = `-- name: ListAgentRuntimeIDsByProfile :many
 SELECT id FROM agent_runtime
-WHERE profile_id = $1
+WHERE profile_id = $1 AND workspace_id = $2
+ORDER BY id
+FOR UPDATE
 `
+
+type ListAgentRuntimeIDsByProfileParams struct {
+	ProfileID   pgtype.UUID `json:"profile_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
 
 // Enumerates the runtime instance rows registered against a profile. The
 // profile-delete cascade walks these so it can run the same archived-agent /
 // archived-squad / autopilot teardown the runtime-delete path uses before
 // removing each runtime row — agent.runtime_id is ON DELETE RESTRICT, so a
 // bare delete would 500 whenever an archived agent still references the row.
-func (q *Queries) ListAgentRuntimeIDsByProfile(ctx context.Context, profileID pgtype.UUID) ([]pgtype.UUID, error) {
-	rows, err := q.db.Query(ctx, listAgentRuntimeIDsByProfile, profileID)
+func (q *Queries) ListAgentRuntimeIDsByProfile(ctx context.Context, arg ListAgentRuntimeIDsByProfileParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, listAgentRuntimeIDsByProfile, arg.ProfileID, arg.WorkspaceID)
 	if err != nil {
 		return nil, err
 	}
@@ -310,6 +327,74 @@ func (q *Queries) ListRuntimeProfiles(ctx context.Context, workspaceID pgtype.UU
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockRuntimeProfileForDelete = `-- name: LockRuntimeProfileForDelete :one
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockRuntimeProfileForDeleteParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// See LockRuntimeProfileForRegistration. The stronger lock prevents a daemon
+// from registering another instance between the delete plan and commit.
+func (q *Queries) LockRuntimeProfileForDelete(ctx context.Context, arg LockRuntimeProfileForDeleteParams) (RuntimeProfile, error) {
+	row := q.db.QueryRow(ctx, lockRuntimeProfileForDelete, arg.ID, arg.WorkspaceID)
+	var i RuntimeProfile
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DisplayName,
+		&i.ProtocolFamily,
+		&i.CommandName,
+		&i.Description,
+		&i.FixedArgs,
+		&i.Visibility,
+		&i.CreatedBy,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockRuntimeProfileForRegistration = `-- name: LockRuntimeProfileForRegistration :one
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE
+`
+
+type LockRuntimeProfileForRegistrationParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Serializes daemon registration with profile deletion. Registration holds a
+// KEY SHARE lock until its runtime row is committed; profile deletion takes an
+// UPDATE lock, then locks the profile's runtime rows. Whichever starts first
+// wins, so deletion cannot miss a runtime inserted from a stale profile read.
+func (q *Queries) LockRuntimeProfileForRegistration(ctx context.Context, arg LockRuntimeProfileForRegistrationParams) (RuntimeProfile, error) {
+	row := q.db.QueryRow(ctx, lockRuntimeProfileForRegistration, arg.ID, arg.WorkspaceID)
+	var i RuntimeProfile
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DisplayName,
+		&i.ProtocolFamily,
+		&i.CommandName,
+		&i.Description,
+		&i.FixedArgs,
+		&i.Visibility,
+		&i.CreatedBy,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateRuntimeProfile = `-- name: UpdateRuntimeProfile :one

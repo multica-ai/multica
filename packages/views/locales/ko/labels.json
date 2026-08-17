@@ -1,3 +1,10 @@
 {
-  "remove_label": "{{name}} 라벨 제거"
+  "remove_label": "{{name}} 라벨 제거",
+  "resource_picker": {
+    "empty": "레이블 없음",
+    "add": "레이블 추가",
+    "search": "레이블 검색...",
+    "no_labels": "먼저 설정에서 레이블을 만드세요",
+    "no_results": "일치하는 레이블이 없습니다"
+  }
 }

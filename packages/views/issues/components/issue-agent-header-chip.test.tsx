@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 
-import { cleanup, screen } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { api } from "@multica/core/api";
+import { chatKeys } from "@multica/core/chat/queries";
 import type { AgentTask } from "@multica/core/types";
+import type { TaskMessagePayload } from "@multica/core/types/events";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
@@ -11,6 +15,12 @@ const mockState = vi.hoisted(() => ({
   // Captures the props the chip passes to PopoverTrigger so a test can assert
   // the card is wired to open on hover, not only on click.
   triggerProps: undefined as Record<string, unknown> | undefined,
+}));
+
+vi.mock("@multica/core/api", () => ({
+  api: {
+    listTaskMessages: vi.fn(),
+  },
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
@@ -29,9 +39,18 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   }),
 }));
 
-vi.mock("@multica/core/chat/queries", () => ({
-  taskMessagesOptions: mockState.taskMessagesOptions,
-}));
+vi.mock("@multica/core/chat/queries", async () => {
+  const actual = await vi.importActual<typeof import("@multica/core/chat/queries")>(
+    "@multica/core/chat/queries",
+  );
+  return {
+    ...actual,
+    taskMessagesOptions: (...args: Parameters<typeof actual.taskMessagesOptions>) => {
+      mockState.taskMessagesOptions(...args);
+      return actual.taskMessagesOptions(...args);
+    },
+  };
+});
 
 vi.mock("@multica/ui/components/ui/popover", async () => {
   const React = await vi.importActual<typeof import("react")>("react");
@@ -57,9 +76,42 @@ vi.mock("@multica/ui/components/ui/popover", async () => {
 });
 
 vi.mock("./execution-log-section", () => ({
-  ActiveTaskRow: ({ task }: { task: AgentTask }) => (
-    <div data-testid="active-task-row">{task.id}</div>
+  ActiveTaskRow: ({
+    task,
+    onTranscriptOpenChange,
+  }: {
+    task: AgentTask;
+    transcriptOpen?: boolean;
+    onTranscriptOpenChange?: (open: boolean) => void;
+  }) => (
+    <div data-testid="active-task-row">
+      <span>{task.id}</span>
+      <button
+        type="button"
+        aria-label={`open transcript ${task.id}`}
+        onClick={() => onTranscriptOpenChange?.(true)}
+      >
+        Open transcript
+      </button>
+    </div>
   ),
+}));
+
+vi.mock("../../common/task-transcript/agent-transcript-dialog", () => ({
+  AgentTranscriptDialog: ({
+    open,
+    items,
+  }: {
+    open: boolean;
+    items: Array<{ seq: number }>;
+  }) =>
+    open ? (
+      <div role="dialog">
+        {items.map((item) => (
+          <div key={item.seq} data-testid="event" data-seq={item.seq} />
+        ))}
+      </div>
+    ) : null,
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -75,16 +127,43 @@ vi.mock("@tanstack/react-query", async () => {
       if (opts.queryKey?.[0] === "issues" && opts.queryKey?.[1] === "tasks") {
         return { data: mockState.tasks };
       }
-      return { data: undefined };
+      return actual.useQuery(opts as Parameters<typeof actual.useQuery>[0]);
     },
   };
 });
 
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 
+const listTaskMessages = vi.mocked(api.listTaskMessages);
+
+const LIVE_TASK_ID = "4a2e8d1c-7f9b-4e2a-9c1d-123456789abc";
+
+const msg = (seq: number): TaskMessagePayload => ({
+  task_id: LIVE_TASK_ID,
+  issue_id: "issue-1",
+  seq,
+  type: "tool_use",
+  tool: `Tool ${seq}`,
+  input: { i: String(seq) },
+});
+
+function newClient() {
+  return new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+}
+
+function renderChip(qc: QueryClient, issueId = "issue-1") {
+  return renderWithI18n(
+    <QueryClientProvider client={qc}>
+      <IssueAgentHeaderChip issueId={issueId} />
+    </QueryClientProvider>,
+  );
+}
+
 function makeTask(overrides: Partial<AgentTask>): AgentTask {
   return {
-    id: "task-1",
+    id: LIVE_TASK_ID,
     agent_id: "agent-1",
     runtime_id: "runtime-1",
     issue_id: "issue-1",
@@ -105,6 +184,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mockState.tasks = [];
   mockState.triggerProps = undefined;
+  listTaskMessages.mockReset();
+  listTaskMessages.mockResolvedValue([]);
 });
 
 describe("IssueAgentHeaderChip", () => {
@@ -132,6 +213,69 @@ describe("IssueAgentHeaderChip", () => {
       "task-running",
     );
     expect(mockState.taskMessagesOptions).not.toHaveBeenCalled();
+  });
+
+  it("keeps the live transcript open after the clicked task row disappears from the active list", async () => {
+    const qc = newClient();
+    mockState.tasks = [makeTask({ id: LIVE_TASK_ID })];
+    qc.setQueryData(chatKeys.taskMessages(LIVE_TASK_ID), [msg(1)]);
+    listTaskMessages.mockResolvedValue([msg(1)]);
+
+    const { rerender } = renderChip(qc);
+
+    fireEvent.click(screen.getByRole("button", { name: `open transcript ${LIVE_TASK_ID}` }));
+
+    await waitFor(() => {
+      expect(screen.getByRole("dialog")).toBeInTheDocument();
+    });
+    await waitFor(() => {
+      expect(screen.getAllByTestId("event")).toHaveLength(1);
+    });
+    expect(screen.getByTestId("active-task-row")).toHaveTextContent(LIVE_TASK_ID);
+    expect(listTaskMessages).toHaveBeenCalledWith(LIVE_TASK_ID);
+
+    mockState.tasks = [];
+    rerender(
+      <QueryClientProvider client={qc}>
+        <IssueAgentHeaderChip issueId="issue-2" />
+      </QueryClientProvider>,
+    );
+
+    expect(screen.queryByTestId("active-task-row")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getAllByTestId("event")).toHaveLength(1);
+  });
+
+  it("refreshes the transcript when the opened task completes", async () => {
+    const qc = newClient();
+    mockState.tasks = [makeTask({ id: LIVE_TASK_ID, status: "running" })];
+    qc.setQueryData(chatKeys.taskMessages(LIVE_TASK_ID), [msg(1)]);
+    listTaskMessages.mockResolvedValue([msg(1)]);
+
+    const { rerender } = renderChip(qc);
+
+    fireEvent.click(screen.getByRole("button", { name: `open transcript ${LIVE_TASK_ID}` }));
+
+    await waitFor(() => {
+      expect(listTaskMessages).toHaveBeenCalledTimes(1);
+    });
+
+    mockState.tasks = [
+      makeTask({
+        id: LIVE_TASK_ID,
+        status: "completed",
+        completed_at: "2026-06-08T08:05:00Z",
+      }),
+    ];
+    rerender(
+      <QueryClientProvider client={qc}>
+        <IssueAgentHeaderChip issueId="issue-2" />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(listTaskMessages).toHaveBeenCalledTimes(2);
+    });
   });
 
   it("opens the activity card on hover, not only on click", () => {

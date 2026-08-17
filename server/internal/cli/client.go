@@ -161,7 +161,23 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 	}
 }
 
+// clientCapabilities is the X-Client-Capabilities value every CLI request
+// advertises. It is a protocol detail, not a user-visible flag: the CLI always
+// knows how to handle these response shapes, so there is nothing for a caller
+// to opt into.
+//
+// stable_attachment_urls asks bulk responses to return the stable
+// /api/attachments/{id}/download path instead of a ~800-char CloudFront
+// signature that is re-minted on every request (MUL-5372 / GitHub #5999). The
+// CLI never hands an attachment URL to a native loader — `multica attachment
+// download <id>` fetches a fresh signature from the single-attachment endpoint,
+// which keeps signing regardless of this capability — so the signature in list
+// payloads was pure cost: raw bytes, a per-attachment RSA sign, and bytes that
+// differ on every read and therefore defeat agent prompt caching.
+const clientCapabilities = "stable_attachment_urls"
+
 func (c *APIClient) setHeaders(req *http.Request) {
+	req.Header.Set("X-Client-Capabilities", clientCapabilities)
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
@@ -406,6 +422,9 @@ type AttachmentResponse struct {
 	ID          string `json:"id"`
 	URL         string `json:"url"`
 	DownloadURL string `json:"download_url"`
+	// MarkdownURL is the durable, persistable URL to embed in markdown bodies
+	// (chat replies, comments). Unlike DownloadURL it never carries a TTL.
+	MarkdownURL string `json:"markdown_url"`
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	SizeBytes   int64  `json:"size_bytes"`
@@ -464,6 +483,69 @@ func (c *APIClient) UploadFile(ctx context.Context, fileData []byte, filename st
 		return "", fmt.Errorf("upload response missing attachment id")
 	}
 	return id, nil
+}
+
+// UploadChatAttachment uploads a file via multipart form to /api/upload-file
+// tagged with a chat task (task_id). The server binds the row to the assistant
+// reply that task produces on completion. Returns the full AttachmentResponse
+// (id + markdown_url) so the agent can embed the image inline in its reply.
+func (c *APIClient) UploadChatAttachment(ctx context.Context, fileData []byte, filename, taskID string) (AttachmentResponse, error) {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+
+	part, err := writer.CreateFormFile("file", filepath.Base(filename))
+	if err != nil {
+		return AttachmentResponse{}, fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := part.Write(fileData); err != nil {
+		return AttachmentResponse{}, fmt.Errorf("write file data: %w", err)
+	}
+	if taskID != "" {
+		if err := writer.WriteField("task_id", taskID); err != nil {
+			return AttachmentResponse{}, fmt.Errorf("write task_id field: %w", err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return AttachmentResponse{}, fmt.Errorf("close multipart writer: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+"/api/upload-file", &body)
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+
+	// Honor a longer context deadline for large images, same as UploadFileWithURL.
+	httpClient := c.HTTPClient
+	if deadline, ok := ctx.Deadline(); ok {
+		remaining := time.Until(deadline)
+		if remaining > httpClient.Timeout {
+			clientCopy := *httpClient
+			clientCopy.Timeout = remaining
+			httpClient = &clientCopy
+		}
+	}
+
+	resp, err := httpClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return AttachmentResponse{}, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return AttachmentResponse{}, newHTTPError(http.MethodPost, "/api/upload-file", resp)
+	}
+
+	var result AttachmentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return AttachmentResponse{}, fmt.Errorf("decode upload response: %w", err)
+	}
+	if result.ID == "" {
+		return AttachmentResponse{}, fmt.Errorf("upload response missing attachment id")
+	}
+	return result, nil
 }
 
 // UploadFileWithURL uploads a file via multipart form to /api/upload-file
@@ -580,6 +662,44 @@ func (c *APIClient) ImportSkillFile(ctx context.Context, fileData []byte, filena
 
 	if resp.StatusCode >= 400 {
 		return newHTTPError(http.MethodPost, "/api/skills/import", resp)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// UploadPrivatePlugin installs workspace-private Plugin archive bytes. The
+// filename is transport metadata only; the Server derives source identity from
+// validated manifest content and digests.
+func (c *APIClient) UploadPrivatePlugin(ctx context.Context, path string, archive []byte, filename string, out any) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("artifact", filepath.Base(filename))
+	if err != nil {
+		return fmt.Errorf("create Plugin artifact form file: %w", err)
+	}
+	if _, err := part.Write(archive); err != nil {
+		return fmt.Errorf("write Plugin artifact: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close Plugin artifact upload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, path, resp)
 	}
 	if out == nil {
 		return nil

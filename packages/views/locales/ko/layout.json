@@ -1,23 +1,39 @@
 {
   "nav": {
     "inbox": "인박스",
-    "my_issues": "내 이슈",
-    "issues": "이슈",
+    "chat": "채팅",
+    "my_issues": "내 태스크",
+    "issues": "태스크",
     "projects": "프로젝트",
     "autopilots": "오토파일럿",
     "agents": "에이전트",
     "squads": "스쿼드",
-    "usage": "사용량",
+    "usage": "분석",
     "runtimes": "런타임",
     "skills": "스킬",
     "settings": "설정"
+  },
+  "tab": {
+    "issue": "태스크",
+    "project": "프로젝트",
+    "autopilot": "오토파일럿",
+    "agent": "에이전트",
+    "member": "멤버",
+    "squad": "스쿼드",
+    "skill": "스킬",
+    "machine": "머신",
+    "runtime": "런타임",
+    "attachment": "첨부파일",
+    "create_agent": "에이전트 만들기",
+    "unknown": "알 수 없는 페이지"
   },
   "help": {
     "trigger": "도움말",
     "docs": "문서",
     "changelog": "변경 로그",
     "discord": "Discord",
-    "feedback": "피드백"
+    "feedback": "피드백",
+    "server_version": "서버 버전 {{version}}"
   },
   "workspace_loader": {
     "loading_workspace": "워크스페이스 로딩 중...",
@@ -32,7 +48,7 @@
     "invitation_join": "참가",
     "invitation_decline": "거절",
     "log_out": "로그아웃",
-    "new_issue": "새 이슈",
+    "new_issue": "새 태스크",
     "new_issue_shortcut": "C",
     "pinned_label": "고정됨",
     "workspace_group": "워크스페이스",
@@ -40,7 +56,6 @@
     "unread_overflow": "99+",
     "discord_card": {
       "title": "Discord 참여하기",
-      "description": "팀과 다른 사용자들과 교류해 보세요.",
       "dismiss": "닫기"
     }
   }

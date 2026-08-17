@@ -1,14 +1,103 @@
 import type { AgentTask } from "./agent";
 
+/** A user's pinned "quick agent" for the Chat list top bar. */
+export interface ChatPinnedAgent {
+  agent_id: string;
+  position: number;
+}
+
+/**
+ * Kind of a chat message. Additive (MUL-4351): the server always sends a
+ * concrete value, but treat a missing/unknown value as "message" so an older
+ * server or a future kind never breaks rendering.
+ * - "message"     — an ordinary user/assistant message.
+ * - "no_response" — a completed direct-chat turn that produced no text reply.
+ * - "onboarding_kickoff" — a product-authored opening input that is sent to
+ *   Mika but never rendered as a member message.
+ * - "onboarding_opening" — Mika's reply to the kickoff; chat renders the
+ *   onboarding starter cards under it instead of quick-action chips.
+ */
+export type ChatMessageKind =
+  | "message"
+  | "no_response"
+  | "onboarding_kickoff"
+  | "onboarding_opening";
+
+/**
+ * A concise follow-up offered by an assistant reply. `label` is rendered in
+ * the UI while `prompt` is the full text sent back to the agent. At most one
+ * action should be primary; clients still render safely if an older or future
+ * server sends more than one.
+ */
+export interface ChatQuickAction {
+  label: string;
+  prompt: string;
+  primary?: boolean;
+}
+
+/**
+ * Client-only marker (never persisted, never fetched) that the identified
+ * turn's quick-actions supplement is still in flight — drives the pill
+ * skeleton between chat:done and chat:quick_actions.
+ */
+export interface ChatQuickActionsPendingState {
+  message_id: string;
+  task_id: string;
+  /**
+   * Absolute epoch-ms deadline after which a client gives up waiting for the
+   * chat:quick_actions supplement and clears this marker. Stored on the marker
+   * (not as a component timer) so switching chat surfaces — which unmounts and
+   * remounts the timeout hook — resumes the SAME deadline instead of re-arming
+   * a fresh window each time (MUL-5149 review).
+   */
+  expires_at: number;
+}
+
+/**
+ * Client-only signal (never persisted, never fetched) that an explicit refresh's
+ * background regeneration FAILED — the daemon suggestion pass never completed, so
+ * the turn's pills are unchanged. Set by the realtime layer off a failed
+ * chat:quick_actions and consumed once by a view to toast "couldn't refresh"
+ * before clearing itself. `at` is a per-event nonce so a second failure re-fires
+ * even when the message_id repeats (MUL-5149 review).
+ */
+export interface ChatQuickActionsFailureState {
+  message_id: string;
+  at: number;
+}
+
+/** Preview of a session's most recent message, for the IM-style list. */
+export interface ChatLastMessage {
+  content: string;
+  role: "user" | "assistant";
+  created_at: string;
+  /** Present when the last message is a failed assistant reply. */
+  failure_reason?: string | null;
+  /** "message" (default) or "no_response". Optional for older servers. */
+  message_kind?: ChatMessageKind;
+}
+
 export interface ChatSession {
   id: string;
   workspace_id: string;
   agent_id: string;
   creator_id: string;
+  /** Durable project context for every turn in this session. Null when the
+   *  conversation uses workspace context only; optional for older servers. */
+  project_id?: string | null;
   title: string;
   status: "active" | "archived";
-  /** True when the session has any unread assistant replies. List-only. */
+  /** True when the session has any unread assistant replies. List-only.
+   *  Convenience for `unread_count > 0`. */
   has_unread: boolean;
+  /** Number of unread assistant messages (after the read cursor). List-only;
+   *  optional so older clients / non-list payloads stay valid. */
+  unread_count?: number;
+  /** Latest message in the session, or null when empty. List-only. */
+  last_message?: ChatLastMessage | null;
+  /** True when the user has pinned this chat to the top of the list.
+   *  Optional so older clients / non-list payloads stay valid. */
+  pinned?: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -21,6 +110,15 @@ export interface PendingChatTaskItem {
 
 export interface PendingChatTasksResponse {
   tasks: PendingChatTaskItem[];
+}
+
+/**
+ * Boolean fast-path payload for the FAB "running" indicator — returned by
+ * GET /api/chat/pending-tasks/has-any. The FAB only needs to know whether any
+ * in-flight chat task exists, so it avoids fetching the full task list.
+ */
+export interface HasPendingChatTasksResponse {
+  has_pending: boolean;
 }
 
 export interface ChatMessage {
@@ -55,6 +153,14 @@ export interface ChatMessage {
    * and on legacy assistant messages predating migration 063.
    */
   elapsed_ms?: number | null;
+  /**
+   * "message" (default) or "no_response" — a completed direct-chat turn that
+   * produced no text reply (MUL-4351). Optional/additive: absent on older
+   * servers and on user messages; treat a missing value as "message".
+   */
+  message_kind?: ChatMessageKind;
+  /** Up to three server-validated follow-ups generated with this reply. */
+  quick_actions?: ChatQuickAction[];
 }
 
 export interface ChatMessagesCursor {
@@ -72,6 +178,13 @@ export interface ChatMessagesPage {
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
+  /** True when the server supports queued follow-up sends. */
+  supports_queue?: boolean;
+  /**
+   * True only when this task was accepted behind another in-flight task in
+   * the same chat session. Optional for compatibility with older servers.
+   */
+  queued?: boolean;
   /**
    * Server-authoritative task creation time. Optimistic StatusPill seed
    * uses this as its anchor so the timer starts from the real `0s` —
@@ -86,6 +199,18 @@ export interface SendChatMessageResponse {
    * compat with servers that predate the field.
    */
   attachment_ids?: string[];
+}
+
+export interface StartMikaOnboardingResponse {
+  /** True only for the request that wrote the opening. */
+  started: boolean;
+  /**
+   * The opening message, already persisted and final. No agent runs to
+   * produce it, so there is no task to await — a `started` response means the
+   * member's first message from Mika is in the transcript right now.
+   */
+  message_id?: string;
+  created_at?: string;
 }
 
 export interface CancelledChatMessage {
@@ -105,6 +230,32 @@ export interface CancelTaskResponse extends AgentTask {
 }
 
 /**
+ * One durable draft restore from GET /api/chat/sessions/{id}/draft-restores
+ * (#5219): a deferred cancellation settled as empty-transcript after the
+ * cancel HTTP response had returned, so the deleted prompt is held
+ * server-side until the creator's client applies it to the composer and
+ * consumes it (DELETE, idempotent). The chat:cancel_finalized event is only
+ * an invalidation hint for this fetch.
+ */
+export interface ChatDraftRestore {
+  /** The deleted user chat message id — stable dedup and consume key. */
+  id: string;
+  chat_session_id: string;
+  task_id?: string;
+  content: string;
+  /**
+   * Attachments detached from the deleted message so a restored draft can
+   * re-bind them on re-send.
+   */
+  attachments?: import("./attachment").Attachment[];
+  created_at?: string;
+}
+
+export interface ChatDraftRestoresResponse {
+  restores: ChatDraftRestore[];
+}
+
+/**
  * Response from GET /api/chat/sessions/{id}/pending-task.
  * All fields are absent when the session has no in-flight task.
  *
@@ -113,8 +264,29 @@ export interface CancelTaskResponse extends AgentTask {
  * task_id/status only, then this query catches up with the real created_at
  * so the timer survives refresh / reopen without "resetting to 0s".
  */
+export interface ChatQueuedTask {
+  task_id: string;
+  status: string;
+  created_at: string;
+  message_id?: string;
+  content?: string;
+}
+
+export interface PrioritizeQueuedChatTaskResponse {
+  task_id: string;
+  /** Server-authoritative task to stop after the selected task is prioritized. */
+  active_task_id?: string;
+}
+
 export interface ChatPendingTask {
   task_id?: string;
   status?: string;
   created_at?: string;
+  /** Explicit capability gate; absent on servers predating follow-up queues. */
+  supports_queue?: boolean;
+  /**
+   * Ordered follow-ups behind the root task. The root may itself still have
+   * database status `queued` before claim, but is never duplicated here.
+   */
+  queued_tasks?: ChatQueuedTask[];
 }

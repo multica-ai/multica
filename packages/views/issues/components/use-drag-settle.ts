@@ -1,4 +1,36 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type Dispatch,
+  type SetStateAction,
+} from "react";
+
+/**
+ * Content equality for the column map (`columnId -> ordered issue ids`). Two
+ * maps are equal when they have the same column keys and each column's id list
+ * matches element-for-element. Used to skip no-op `setColumns` writes.
+ */
+function columnsEqual(
+  a: Record<string, string[]>,
+  b: Record<string, string[]>,
+): boolean {
+  if (a === b) return true;
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    const av = a[key];
+    const bv = b[key];
+    if (av === bv) continue;
+    if (!av || !bv || av.length !== bv.length) return false;
+    for (let i = 0; i < av.length; i++) {
+      if (av[i] !== bv[i]) return false;
+    }
+  }
+  return true;
+}
 
 /**
  * Shared drag/settle state machine for the issue boards (board-view, list-view).
@@ -30,11 +62,33 @@ export function useDragSettle(
   const recentlyMovedRef = useRef(false);
   const [settleVersion, setSettleVersion] = useState(0);
 
-  const [columns, setColumns] = useState<Record<string, string[]>>(
+  const [columns, setColumnsState] = useState<Record<string, string[]>>(
     initialColumns,
   );
   const columnsRef = useRef(columns);
   columnsRef.current = columns;
+
+  // Equality-guarded column setter. When a resync (or a no-op drag) produces a
+  // column map whose contents match the current one, return the SAME reference
+  // so React bails out of the re-render. Second line of defense against the
+  // cold-load update loop (MUL-4985): even if some input to `buildColumns`
+  // regains a per-render-unstable identity, a content-equal rebuild no longer
+  // forces a new state object and cannot spin the resync effect. It never
+  // changes the resulting value — only skips redundant writes — so drag/settle
+  // semantics are unchanged.
+  const setColumns = useCallback<
+    Dispatch<SetStateAction<Record<string, string[]>>>
+  >((update) => {
+    setColumnsState((prev) => {
+      const next =
+        typeof update === "function"
+          ? (update as (p: Record<string, string[]>) => Record<string, string[]>)(
+              prev,
+            )
+          : update;
+      return columnsEqual(prev, next) ? prev : next;
+    });
+  }, []);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {

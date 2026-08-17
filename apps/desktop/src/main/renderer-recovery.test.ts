@@ -208,7 +208,7 @@ describe("freeze/crash breadcrumb state machine", () => {
     expect(clearBreadcrumb).not.toHaveBeenCalled();
   });
 
-  it("recovering after a written breadcrumb clears it (no double-count, no false recovered:false)", async () => {
+  it("recovering after a written breadcrumb clears it, so the in-thread watchdog is the only reporter", async () => {
     vi.useFakeTimers();
     const fixture = makeWindow();
     const { persistBreadcrumb, clearBreadcrumb } = install(fixture);

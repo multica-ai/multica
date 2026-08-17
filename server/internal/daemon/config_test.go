@@ -1,6 +1,9 @@
 package daemon
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +17,80 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 )
 
+func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires elevated privileges on Windows")
+	}
+
+	for _, shimName := range []string{"volta-shim", "vp"} {
+		t.Run(shimName, func(t *testing.T) {
+			managerDir := t.TempDir()
+			manager := filepath.Join(managerDir, shimName)
+			if err := os.WriteFile(manager, []byte("#!/bin/sh\nprintf '%s\\n' \"${0##*/}\"\n"), 0o755); err != nil {
+				t.Fatalf("write dispatcher: %v", err)
+			}
+
+			binDir := t.TempDir()
+			entrypoint := filepath.Join(binDir, "claude")
+			if err := os.Symlink(manager, entrypoint); err != nil {
+				t.Fatalf("symlink dispatcher: %v", err)
+			}
+			t.Setenv("PATH", binDir)
+
+			got, err := resolveAgentExecutablePath("claude")
+			if err != nil {
+				t.Fatalf("resolveAgentExecutablePath: %v", err)
+			}
+			realBinDir, err := filepath.EvalSymlinks(binDir)
+			if err != nil {
+				t.Fatalf("resolve bin directory: %v", err)
+			}
+			want := filepath.Join(realBinDir, "claude")
+			if got != want {
+				t.Fatalf("resolved path = %q, want command-preserving entrypoint %q", got, want)
+			}
+			output, err := exec.Command(got, "--version").CombinedOutput()
+			if err != nil {
+				t.Fatalf("run resolved entrypoint: %v: %s", err, output)
+			}
+			if got := strings.TrimSpace(string(output)); got != "claude" {
+				t.Fatalf("dispatcher observed command name %q, want claude", got)
+			}
+		})
+	}
+}
+
+func TestResolveAgentExecutablePath_CanonicalizesOrdinaryVersionTarget(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("creating symlinks requires elevated privileges on Windows")
+	}
+
+	versionDir := t.TempDir()
+	target := filepath.Join(versionDir, "claude-2.1.216")
+	if err := os.WriteFile(target, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write versioned executable: %v", err)
+	}
+
+	binDir := t.TempDir()
+	entrypoint := filepath.Join(binDir, "claude")
+	if err := os.Symlink(target, entrypoint); err != nil {
+		t.Fatalf("symlink versioned executable: %v", err)
+	}
+	t.Setenv("PATH", binDir)
+
+	got, err := resolveAgentExecutablePath("claude")
+	if err != nil {
+		t.Fatalf("resolveAgentExecutablePath: %v", err)
+	}
+	want, err := filepath.EvalSymlinks(entrypoint)
+	if err != nil {
+		t.Fatalf("resolve versioned executable: %v", err)
+	}
+	if got != want {
+		t.Fatalf("resolved path = %q, want pinned version target %q", got, want)
+	}
+}
+
 func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	t.Setenv("MULTICA_GC_ARTIFACT_PATTERNS", "")
 	defaults := []string{"node_modules", ".next", ".turbo"}
@@ -25,6 +102,24 @@ func TestPatternsFromEnv_DefaultsWhenUnset(t *testing.T) {
 	got[0] = "mutated"
 	if defaults[0] == "mutated" {
 		t.Fatal("patternsFromEnv must not return a slice aliased with defaults")
+	}
+}
+
+func TestDefaultGCIntervalIsTwoHours(t *testing.T) {
+	if DefaultGCInterval != 2*time.Hour {
+		t.Fatalf("DefaultGCInterval = %s, want 2h", DefaultGCInterval)
+	}
+}
+
+func TestRepoMaintenanceKillSwitchDefaultsOnAndCanDisable(t *testing.T) {
+	t.Setenv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", "")
+	if !boolFromEnv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", true) {
+		t.Fatal("repo maintenance kill switch should default to enabled")
+	}
+
+	t.Setenv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", "false")
+	if boolFromEnv("MULTICA_GC_REPO_MAINTENANCE_ENABLED", true) {
+		t.Fatal("repo maintenance kill switch should accept false")
 	}
 }
 
@@ -243,6 +338,162 @@ func stageFakeAgent(t *testing.T) string {
 	return binDir
 }
 
+func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture is unavailable on Windows")
+	}
+	binDir := stageFakeAgent(t)
+	qwen := filepath.Join(binDir, "qwen")
+	if err := os.WriteFile(qwen, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake qwen: %v", err)
+	}
+	// Avoid consulting an inherited interactive shell for all deliberately
+	// absent providers; this test is about ordinary PATH discovery.
+	t.Setenv("SHELL", "/usr/bin/fish")
+	t.Setenv("MULTICA_QWEN_MODEL", "qwen3.8-max-preview")
+	t.Setenv("MULTICA_QWEN_ARGS", "--verbose --foo=bar")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	entry, ok := cfg.Agents["qwen"]
+	if !ok {
+		t.Fatalf("qwen was not discovered: %v", cfg.Agents)
+	}
+	wantPath, err := filepath.EvalSymlinks(qwen)
+	if err != nil {
+		t.Fatalf("eval symlinks for qwen: %v", err)
+	}
+	if entry.Path != wantPath || entry.Command != "qwen" || entry.Model != "qwen3.8-max-preview" {
+		t.Fatalf("qwen entry = %+v, want path=%q command=qwen model=qwen3.8-max-preview", entry, wantPath)
+	}
+	if got, want := strings.Join(cfg.QwenArgs, " "), "--verbose --foo=bar"; got != want {
+		t.Fatalf("QwenArgs = %q, want %q", got, want)
+	}
+}
+
+func TestLoadConfig_SkipsMulticaHooksShadowingAgentBinaries(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hooksDir := filepath.Join(home, ".multica", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	realBinDir := t.TempDir()
+
+	for _, name := range []string{"claude", "codex", "hermes"} {
+		hookPath := filepath.Join(hooksDir, name)
+		hookBody := "#!/bin/sh\nexec " + name + " \"$@\"\n"
+		if err := os.WriteFile(hookPath, []byte(hookBody), 0o755); err != nil {
+			t.Fatalf("write hook wrapper %s: %v", name, err)
+		}
+		realPath := filepath.Join(realBinDir, name)
+		if err := os.WriteFile(realPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write real binary %s: %v", name, err)
+		}
+	}
+
+	t.Setenv("PATH", hooksDir+string(os.PathListSeparator)+realBinDir)
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+
+	for provider, binary := range map[string]string{
+		"claude": "claude",
+		"codex":  "codex",
+		"hermes": "hermes",
+	} {
+		got, ok := cfg.Agents[provider]
+		if !ok {
+			t.Fatalf("expected %s agent in config, got %#v", provider, cfg.Agents)
+		}
+		want := canonicalExecutablePath(filepath.Join(realBinDir, binary))
+		if got.Path != want {
+			t.Errorf("%s path = %q, want unshadowed real binary %q", provider, got.Path, want)
+		}
+		if strings.HasPrefix(got.Path, hooksDir) {
+			t.Errorf("%s path still points into hooks dir: %q", provider, got.Path)
+		}
+	}
+}
+
+func TestLoadConfig_SkipsMulticaHooksFromLoginShellFallback(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell not available on Windows")
+	}
+	sh := "/bin/sh"
+	if _, err := os.Stat(sh); err != nil {
+		t.Skipf("no /bin/sh available: %v", err)
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	hooksDir := filepath.Join(home, ".multica", "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		t.Fatalf("create hooks dir: %v", err)
+	}
+	realBinDir := t.TempDir()
+	hookPath := filepath.Join(hooksDir, "codex")
+	if err := os.WriteFile(hookPath, []byte("#!/bin/sh\nexec codex \"$@\"\n"), 0o755); err != nil {
+		t.Fatalf("write hook wrapper: %v", err)
+	}
+	realPath := filepath.Join(realBinDir, "codex")
+	if err := os.WriteFile(realPath, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write real codex: %v", err)
+	}
+
+	t.Setenv("PATH", "/usr/bin:/bin")
+	if _, err := exec.LookPath("codex"); err == nil {
+		t.Skip("PATH leak - codex already visible to daemon without shell fallback")
+	}
+	rc := filepath.Join(t.TempDir(), "sh.rc")
+	rcBody := "export PATH=\"" + hooksDir + string(os.PathListSeparator) + realBinDir + ":$PATH\"\n"
+	if err := os.WriteFile(rc, []byte(rcBody), 0o644); err != nil {
+		t.Fatalf("write shell rc: %v", err)
+	}
+	t.Setenv("SHELL", sh)
+	t.Setenv("ENV", rc)
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+	oldBundlePaths := codexDesktopAppBundlePaths
+	codexDesktopAppBundlePaths = func() []string { return nil }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex from login-shell fallback, got %#v", cfg.Agents)
+	}
+	want := canonicalExecutablePath(realPath)
+	if got.Path != want {
+		t.Fatalf("codex path = %q, want unshadowed real binary %q", got.Path, want)
+	}
+	if strings.HasPrefix(got.Path, hooksDir) {
+		t.Fatalf("codex path still points into hooks dir: %q", got.Path)
+	}
+}
+
 // TestLoadConfig_AutoUpdateDefault_SelfHostOff is the regression guard for
 // MUL-2381: a daemon pointed at any non-cloud server URL must default
 // AutoUpdateEnabled to false, because self-host operators frequently run a
@@ -258,6 +509,194 @@ func TestLoadConfig_AutoUpdateDefault_SelfHostOff(t *testing.T) {
 	}
 	if cfg.AutoUpdateEnabled {
 		t.Fatalf("AutoUpdateEnabled = true for self-host (localhost) server, want false")
+	}
+}
+
+func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with default: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != DefaultCodexHandshakeTimeout {
+		t.Fatalf("CodexHandshakeTimeout = %s, want default %s", cfg.CodexHandshakeTimeout, DefaultCodexHandshakeTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "47s")
+
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != 47*time.Second {
+		t.Fatalf("CodexHandshakeTimeout = %s, want 47s from env", cfg.CodexHandshakeTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != DefaultCodexHandshakeTimeout {
+		t.Fatalf("CodexHandshakeTimeout = %s, want default %s for zero env", cfg.CodexHandshakeTimeout, DefaultCodexHandshakeTimeout)
+	}
+
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:             "http://localhost:8080",
+		WorkspacesRoot:        t.TempDir(),
+		CodexHandshakeTimeout: 12 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with override: %v", err)
+	}
+	if cfg.CodexHandshakeTimeout != 12*time.Second {
+		t.Fatalf("CodexHandshakeTimeout = %s, want 12s from override", cfg.CodexHandshakeTimeout)
+	}
+}
+
+// TestLoadConfig_CodexFirstTurnNoProgressTimeout pins the env-only
+// MULTICA_CODEX_FIRST_TURN_TIMEOUT resolution (GH #3262 / #5959): unset and an
+// explicit "0" both mean "keep the backend default" (0 = unset), while a positive
+// value is honored verbatim. There is deliberately no Overrides/CLI parity — this
+// knob is environment-only.
+func TestLoadConfig_CodexFirstTurnNoProgressTimeout(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with unset: %v", err)
+	}
+	if cfg.CodexFirstTurnNoProgressTimeout != 0 {
+		t.Fatalf("CodexFirstTurnNoProgressTimeout = %s, want 0 when unset", cfg.CodexFirstTurnNoProgressTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "30m")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.CodexFirstTurnNoProgressTimeout != 30*time.Minute {
+		t.Fatalf("CodexFirstTurnNoProgressTimeout = %s, want 30m from env", cfg.CodexFirstTurnNoProgressTimeout)
+	}
+
+	t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.CodexFirstTurnNoProgressTimeout != 0 {
+		t.Fatalf("CodexFirstTurnNoProgressTimeout = %s, want 0 for explicit zero", cfg.CodexFirstTurnNoProgressTimeout)
+	}
+}
+
+// TestLoadConfig_CodexFirstTurnTimeoutEqualToSemanticWarns pins the equality
+// edge (multica-eve review on #6753): because the semantic-inactivity timer is
+// armed before the first-turn timer, equal durations still let the semantic
+// deadline win and drop the #3291 startup retry. LoadConfig must warn when the
+// first-turn timeout is >= the semantic timeout, and stay quiet only when the
+// semantic timeout is strictly greater.
+func TestLoadConfig_CodexFirstTurnTimeoutEqualToSemanticWarns(t *testing.T) {
+	stageFakeAgent(t)
+
+	const warnNeedle = "MULTICA_CODEX_FIRST_TURN_TIMEOUT is greater than or equal to the semantic-inactivity timeout"
+
+	loadWithLoggedWarnings := func(t *testing.T, semantic, firstTurn string) string {
+		t.Helper()
+		var buf bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelWarn})))
+		t.Cleanup(func() { slog.SetDefault(prev) })
+
+		t.Setenv("MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT", semantic)
+		t.Setenv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", firstTurn)
+		if _, err := LoadConfig(Overrides{
+			ServerURL:      "http://localhost:8080",
+			WorkspacesRoot: t.TempDir(),
+		}); err != nil {
+			t.Fatalf("LoadConfig: %v", err)
+		}
+		return buf.String()
+	}
+
+	// Equal durations: the semantic timer is armed first, so the retry can still
+	// be lost. The warning MUST fire — this is the edge the earlier `>`-only
+	// check missed.
+	if logs := loadWithLoggedWarnings(t, "15m", "15m"); !strings.Contains(logs, warnNeedle) {
+		t.Fatalf("equal durations must warn; logs = %q", logs)
+	}
+
+	// First-turn strictly above semantic: also warns (the original truncation case).
+	if logs := loadWithLoggedWarnings(t, "10m", "30m"); !strings.Contains(logs, warnNeedle) {
+		t.Fatalf("first-turn above semantic must warn; logs = %q", logs)
+	}
+
+	// Semantic strictly above first-turn: the recommended safe configuration —
+	// no warning.
+	if logs := loadWithLoggedWarnings(t, "30m", "10m"); strings.Contains(logs, warnNeedle) {
+		t.Fatalf("semantic strictly above first-turn must not warn; logs = %q", logs)
+	}
+}
+
+func TestLoadConfig_OpenCodeIdleWatchdog(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with default: %v", err)
+	}
+	if cfg.OpenCodeIdleWatchdog != DefaultOpenCodeIdleWatchdog {
+		t.Fatalf("OpenCodeIdleWatchdog = %s, want default %s", cfg.OpenCodeIdleWatchdog, DefaultOpenCodeIdleWatchdog)
+	}
+
+	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "7m")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.OpenCodeIdleWatchdog != 7*time.Minute {
+		t.Fatalf("OpenCodeIdleWatchdog = %s, want 7m from env", cfg.OpenCodeIdleWatchdog)
+	}
+
+	// Zero disables the OpenCode-specific override while leaving the generic
+	// AgentIdleWatchdog as the fallback for OpenCode runs.
+	t.Setenv("MULTICA_OPENCODE_IDLE_WATCHDOG", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.OpenCodeIdleWatchdog != 0 {
+		t.Fatalf("OpenCodeIdleWatchdog = %s, want zero from env", cfg.OpenCodeIdleWatchdog)
 	}
 }
 
@@ -333,6 +772,84 @@ func TestLoadConfig_AutoUpdate_NoFlagWinsOverCloudDefault(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_AutoReload_DefaultsOnEvenForSelfHost is the review's first
+// product decision, encoded: "don't pull new versions from GitHub" and "follow
+// the binary I replaced myself" are separate concerns. Self-host defaults
+// auto-update OFF (MUL-2381) because upgrading a fork from an upstream release
+// would clobber it — an argument that says nothing about a binary the operator
+// installed by hand.
+func TestLoadConfig_AutoReload_DefaultsOnEvenForSelfHost(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
+	t.Setenv("MULTICA_DAEMON_AUTO_RELOAD", "")
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if cfg.AutoUpdateEnabled {
+		t.Fatalf("AutoUpdateEnabled = true for self-host, want false (MUL-2381)")
+	}
+	if !cfg.AutoReloadEnabled {
+		t.Fatalf("AutoReloadEnabled = false for self-host; the on-disk watcher must not ride on the auto-update default")
+	}
+}
+
+// TestLoadConfig_AutoReload_NotGatedOnAutoUpdateEnv is the same decoupling at
+// the env layer: turning GitHub polling off must not silently stop the daemon
+// from following a hand-installed binary.
+func TestLoadConfig_AutoReload_NotGatedOnAutoUpdateEnv(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "false")
+	t.Setenv("MULTICA_DAEMON_AUTO_RELOAD", "")
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "https://api.multica.ai",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if !cfg.AutoReloadEnabled {
+		t.Fatalf("MULTICA_DAEMON_AUTO_UPDATE=false disabled auto-reload; the two switches are independent")
+	}
+}
+
+// TestLoadConfig_AutoReload_OffSwitches pins the escape hatch across both layers
+// it can be turned off from. The config-file layer resolves to
+// overrides.DisableAutoReload in cmd_daemon.go, so it is covered by the same
+// assertion as the flag.
+func TestLoadConfig_AutoReload_OffSwitches(t *testing.T) {
+	cases := []struct {
+		name      string
+		env       string
+		overrides Overrides
+	}{
+		{name: "env false", env: "false"},
+		{name: "env 0", env: "0"},
+		{name: "env off", env: "off"},
+		{name: "flag or config file", env: "", overrides: Overrides{DisableAutoReload: true}},
+		{name: "flag beats a truthy env", env: "true", overrides: Overrides{DisableAutoReload: true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			stageFakeAgent(t)
+			t.Setenv("MULTICA_DAEMON_AUTO_RELOAD", tc.env)
+			overrides := tc.overrides
+			overrides.ServerURL = "https://api.multica.ai"
+			overrides.WorkspacesRoot = t.TempDir()
+			cfg, err := LoadConfig(overrides)
+			if err != nil {
+				t.Fatalf("LoadConfig: %v", err)
+			}
+			if cfg.AutoReloadEnabled {
+				t.Fatalf("AutoReloadEnabled = true, want false")
+			}
+		})
+	}
+}
+
 // TestResolveAgentsViaLoginShell_StripsAliasShadowing locks down the fix for
 // #2512: when the user's rc file declares an alias with the same name as the
 // agent CLI, the resolver must still return the real binary on PATH, not the
@@ -378,7 +895,11 @@ func TestResolveAgentsViaLoginShell_StripsAliasShadowing(t *testing.T) {
 	// scenario the test couldn't actually set up.
 	t.Setenv("SHELL", sh)
 	t.Setenv("ENV", rc)
-	probe, err := exec.Command(sh, "-ilc", "alias fakeclaude 2>/dev/null").Output()
+	probeCtx, probeCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer probeCancel()
+	probeCmd := exec.CommandContext(probeCtx, sh, "-ilc", "alias fakeclaude 2>/dev/null")
+	probeCmd.Stdin = strings.NewReader("")
+	probe, err := probeCmd.Output()
 	if err != nil || !strings.Contains(string(probe), "fakeclaude") {
 		t.Skipf("test host's /bin/sh did not load alias from $ENV; cannot simulate shadowing (probe=%q err=%v)", string(probe), err)
 	}
@@ -542,6 +1063,80 @@ func TestLoadConfig_UsesCodexDesktopAppBundleFallback(t *testing.T) {
 	}
 }
 
+// Regression for #5205: after OpenAI moved the Desktop app to ChatGPT.app,
+// Multica must resolve the bundled CLI under ChatGPT.app (and prefer it over
+// the legacy Codex.app path when both exist).
+func TestLoadConfig_UsesChatGPTAppBundleCodexPath(t *testing.T) {
+	pathDir := t.TempDir()
+	fakeChatGPT := filepath.Join(pathDir, "ChatGPT.app", "Contents", "Resources", "codex")
+	fakeLegacy := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
+	for _, p := range []string{fakeChatGPT, fakeLegacy} {
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatalf("mkdir: %v", err)
+		}
+		if err := os.WriteFile(p, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+			t.Fatalf("write fake CLI: %v", err)
+		}
+	}
+
+	oldBundlePaths := codexDesktopAppBundlePaths
+	// Prefer ChatGPT first, matching production ordering.
+	codexDesktopAppBundlePaths = func() []string { return []string{fakeChatGPT, fakeLegacy} }
+	t.Cleanup(func() { codexDesktopAppBundlePaths = oldBundlePaths })
+
+	t.Setenv("PATH", t.TempDir())
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
+	pinNonCodexAgentsToMissingPaths(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	got, ok := cfg.Agents["codex"]
+	if !ok {
+		t.Fatalf("expected codex agent from ChatGPT.app bundle, got %#v", cfg.Agents)
+	}
+	if got.Path != fakeChatGPT {
+		t.Fatalf("codex path = %q, want ChatGPT.app path %q", got.Path, fakeChatGPT)
+	}
+}
+
+func TestCodexDesktopAppBundlePaths_IncludesChatGPTAndLegacy(t *testing.T) {
+	paths := codexDesktopAppBundlePaths()
+	var hasChatGPT, hasLegacy bool
+	for _, p := range paths {
+		if strings.Contains(p, "ChatGPT.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
+			hasChatGPT = true
+		}
+		if strings.Contains(p, "Codex.app") && strings.HasSuffix(filepath.ToSlash(p), "Contents/Resources/codex") {
+			hasLegacy = true
+		}
+	}
+	if !hasChatGPT {
+		t.Fatalf("codexDesktopAppBundlePaths missing ChatGPT.app entry: %#v", paths)
+	}
+	if !hasLegacy {
+		t.Fatalf("codexDesktopAppBundlePaths missing legacy Codex.app entry: %#v", paths)
+	}
+	// New path must be preferred (listed before legacy).
+	chatgptIdx, legacyIdx := -1, -1
+	for i, p := range paths {
+		if chatgptIdx < 0 && strings.Contains(p, "ChatGPT.app") {
+			chatgptIdx = i
+		}
+		if legacyIdx < 0 && strings.Contains(p, "Codex.app") {
+			legacyIdx = i
+		}
+	}
+	if chatgptIdx < 0 || legacyIdx < 0 || chatgptIdx > legacyIdx {
+		t.Fatalf("expected ChatGPT.app before Codex.app, got indices chat=%d legacy=%d paths=%#v", chatgptIdx, legacyIdx, paths)
+	}
+}
+
 func TestLoadConfig_CodexDesktopFallbackDoesNotOverrideExplicitPath(t *testing.T) {
 	pathDir := t.TempDir()
 	fakeCodex := filepath.Join(pathDir, "Codex.app", "Contents", "Resources", "codex")
@@ -591,7 +1186,10 @@ func pinNonCodexAgentsToMissingPaths(t *testing.T) {
 		"MULTICA_CURSOR_PATH",
 		"MULTICA_COPILOT_PATH",
 		"MULTICA_KIMI_PATH",
+		"MULTICA_REASONIX_PATH",
+		"MULTICA_DSH_PATH",
 		"MULTICA_KIRO_PATH",
+		"MULTICA_GROK_PATH",
 	} {
 		t.Setenv(name, filepath.Join(missingDir, strings.ToLower(name)))
 	}

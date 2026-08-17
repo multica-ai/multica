@@ -7,13 +7,22 @@
 // config for CLIs that do not receive it through ExecOptions.
 const MCP_SUPPORTED_PROVIDERS = new Set([
   "claude",
+  "codebuddy",
   "codex",
   "cursor",
+  "grok",
   "hermes",
   "kimi",
+  "reasonix",
+  "dsh",
   "kiro",
   "opencode",
   "openclaw",
+  "qoder",
+  "qoderclicn",
+  "qwen",
+  "qwenpaw",
+  "traecli",
 ]);
 
 export function providerSupportsMcpConfig(provider: string | undefined | null): boolean {

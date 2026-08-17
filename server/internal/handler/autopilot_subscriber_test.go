@@ -597,22 +597,30 @@ func TestAutopilotDispatchSkipsInboxWhenNoSubscribers(t *testing.T) {
 	}
 }
 
-// TestDeleteAutopilotRemovesSubscribers guards the app-layer cleanup that
-// replaced the dropped autopilot_subscriber → autopilot ON DELETE CASCADE:
-// deleting an autopilot must also delete its subscriber template rows in the
-// same transaction, leaving no orphans behind.
-func TestDeleteAutopilotRemovesSubscribers(t *testing.T) {
+// TestDeleteAutopilotArchivesAndPreservesHistory guards the delete endpoint's
+// product contract: user-facing delete archives the autopilot, hiding it from
+// the default list and stopping future triggers, but preserves historical
+// runs/tasks and subscriber configuration.
+func TestDeleteAutopilotArchivesAndPreservesHistory(t *testing.T) {
 	ctx := context.Background()
 	var autopilotID string
+	var taskID string
 	defer func() {
+		if taskID != "" {
+			testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+		}
 		if autopilotID != "" {
 			testPool.Exec(ctx, `DELETE FROM autopilot_subscriber WHERE autopilot_id = $1`, autopilotID)
 			testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 		}
 	}()
 
-	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
+	var agentID, runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id, runtime_id FROM agent
+		WHERE workspace_id = $1 AND runtime_id IS NOT NULL
+		LIMIT 1
+	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
 		t.Fatalf("load test agent: %v", err)
 	}
 
@@ -643,6 +651,24 @@ func TestDeleteAutopilotRemovesSubscribers(t *testing.T) {
 		t.Fatalf("subscriber rows before delete = %d, want 1", before)
 	}
 
+	var runID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO autopilot_run (autopilot_id, source, status)
+		VALUES ($1, 'manual', 'completed')
+		RETURNING id
+	`, autopilotID).Scan(&runID); err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, status, priority, autopilot_run_id
+		)
+		VALUES ($1, $2, 'completed', 0, $3)
+		RETURNING id
+	`, agentID, runtimeID, runID).Scan(&taskID); err != nil {
+		t.Fatalf("create linked task: %v", err)
+	}
+
 	w = httptest.NewRecorder()
 	req = newRequest("DELETE", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, nil)
 	req = withURLParam(req, "id", autopilotID)
@@ -651,19 +677,35 @@ func TestDeleteAutopilotRemovesSubscribers(t *testing.T) {
 		t.Fatalf("DeleteAutopilot: expected 204, got %d: %s", w.Code, w.Body.String())
 	}
 
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM autopilot WHERE id = $1`, autopilotID).Scan(&status); err != nil {
+		t.Fatalf("load autopilot after delete: %v", err)
+	}
+	if status != "archived" {
+		t.Fatalf("autopilot status after delete = %q, want archived", status)
+	}
+
 	var after int
 	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM autopilot_subscriber WHERE autopilot_id = $1`, autopilotID).Scan(&after); err != nil {
 		t.Fatalf("count subscribers after delete: %v", err)
 	}
-	if after != 0 {
-		t.Fatalf("subscriber rows after delete = %d, want 0 (app-layer cleanup)", after)
+	if after != 1 {
+		t.Fatalf("subscriber rows after delete = %d, want 1 (archival preserves config)", after)
 	}
 
-	var autopilotRows int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM autopilot WHERE id = $1`, autopilotID).Scan(&autopilotRows); err != nil {
-		t.Fatalf("count autopilot after delete: %v", err)
+	var runRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM autopilot_run WHERE id = $1 AND autopilot_id = $2`, runID, autopilotID).Scan(&runRows); err != nil {
+		t.Fatalf("count run after delete: %v", err)
 	}
-	if autopilotRows != 0 {
-		t.Fatalf("autopilot rows after delete = %d, want 0", autopilotRows)
+	if runRows != 1 {
+		t.Fatalf("autopilot_run rows after delete = %d, want 1 (archival preserves history)", runRows)
+	}
+
+	var taskRunID string
+	if err := testPool.QueryRow(ctx, `SELECT autopilot_run_id::text FROM agent_task_queue WHERE id = $1`, taskID).Scan(&taskRunID); err != nil {
+		t.Fatalf("load linked task after delete: %v", err)
+	}
+	if taskRunID != runID {
+		t.Fatalf("task autopilot_run_id after delete = %q, want %q", taskRunID, runID)
 	}
 }

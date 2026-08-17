@@ -5,8 +5,10 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -78,6 +80,30 @@ func cleanupSweeperFixture(t *testing.T, issueID, agentID string) {
 	testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID)
 }
 
+// ageOutAgentRuntime marks the agent's runtime as stale — old last_seen_at —
+// so the runtime-liveness gate on the running-task sweep predicate
+// (agent_runtime.last_seen_at within staleThresholdSeconds) does NOT protect
+// the test task from being killed by the wall clock. Register a cleanup that
+// restores last_seen_at so subsequent tests re-using this runtime see it as
+// fresh. Callers pass a `staleAgo` well beyond staleThresholdSeconds so tests
+// are insensitive to that constant's precise value.
+func ageOutAgentRuntime(t *testing.T, agentID string, staleAgo time.Duration) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime SET last_seen_at = now() - make_interval(secs => $1)
+		WHERE id = (SELECT runtime_id FROM agent WHERE id = $2)
+	`, staleAgo.Seconds(), agentID); err != nil {
+		t.Fatalf("failed to age out agent runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `
+			UPDATE agent_runtime SET last_seen_at = now()
+			WHERE id = (SELECT runtime_id FROM agent WHERE id = $1)
+		`, agentID)
+	})
+}
+
 func TestRefreshAgentStatusFromTasks(t *testing.T) {
 	if testPool == nil {
 		t.Skip("no database connection")
@@ -88,6 +114,7 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
 
 	queries := db.New(testPool)
+	taskService := service.NewTaskService(queries, testPool, nil, events.New())
 
 	if _, err := testPool.Exec(ctx, `UPDATE agent SET status = 'idle' WHERE id = $1`, agentID); err != nil {
 		t.Fatalf("failed to seed idle agent status: %v", err)
@@ -99,6 +126,28 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 	}
 	if agent.Status != "working" {
 		t.Fatalf("expected dispatched task to refresh agent status to working, got %q", agent.Status)
+	}
+
+	if _, err := taskService.MarkTaskWaitingLocalDirectory(ctx, parseUUID(taskID), "test path busy"); err != nil {
+		t.Fatalf("MarkTaskWaitingLocalDirectory failed: %v", err)
+	}
+	agent, err = queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("GetAgent after local-directory wait failed: %v", err)
+	}
+	if agent.Status != "idle" {
+		t.Fatalf("expected waiter-only agent status idle, got %q", agent.Status)
+	}
+
+	if _, err := taskService.StartTask(ctx, parseUUID(taskID)); err != nil {
+		t.Fatalf("StartTask from local-directory wait failed: %v", err)
+	}
+	agent, err = queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("GetAgent after StartTask failed: %v", err)
+	}
+	if agent.Status != "working" {
+		t.Fatalf("expected running task to restore agent status working, got %q", agent.Status)
 	}
 
 	if _, err := testPool.Exec(ctx, `
@@ -121,6 +170,56 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 	}
 }
 
+func TestStartTaskSkipsUnchangedAgentStatusWriteAndBroadcast(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "dispatched")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	var updatedAtBefore time.Time
+	if err := testPool.QueryRow(ctx, `
+		UPDATE agent
+		SET status = 'working', updated_at = now() - interval '1 hour'
+		WHERE id = $1
+		RETURNING updated_at
+	`, agentID).Scan(&updatedAtBefore); err != nil {
+		t.Fatalf("seed working agent status: %v", err)
+	}
+
+	bus := events.New()
+	statusEvents := 0
+	bus.Subscribe("agent:status", func(events.Event) {
+		statusEvents++
+	})
+	taskService := service.NewTaskService(db.New(testPool), testPool, nil, bus)
+
+	if _, err := taskService.StartTask(ctx, parseUUID(taskID)); err != nil {
+		t.Fatalf("StartTask from dispatched failed: %v", err)
+	}
+
+	var (
+		status         string
+		updatedAtAfter time.Time
+	)
+	if err := testPool.QueryRow(ctx, `
+		SELECT status, updated_at FROM agent WHERE id = $1
+	`, agentID).Scan(&status, &updatedAtAfter); err != nil {
+		t.Fatalf("load agent after StartTask: %v", err)
+	}
+	if status != "working" {
+		t.Fatalf("agent status after StartTask = %q, want working", status)
+	}
+	if !updatedAtAfter.Equal(updatedAtBefore) {
+		t.Fatalf("unchanged status rewrote updated_at: before=%s after=%s", updatedAtBefore, updatedAtAfter)
+	}
+	if statusEvents != 0 {
+		t.Fatalf("unchanged status broadcasts = %d, want 0", statusEvents)
+	}
+}
+
 // TestSweepStaleTasksBroadcastsWithWorkspaceID verifies that when the task sweeper
 // fails a stale running task, the task:failed event is broadcast with the correct
 // WorkspaceID so it reaches frontend WebSocket clients (events without WorkspaceID
@@ -132,6 +231,10 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 
 	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
 	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	// The running-task sweep now requires the task's runtime to be NOT
+	// heartbeating (MUL-4107). Age the runtime out so this test still
+	// exercises the sweeper wall clock rather than being silently skipped.
+	ageOutAgentRuntime(t, agentID, 10*time.Minute)
 
 	queries := db.New(testPool)
 	bus := events.New()
@@ -149,6 +252,7 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0, // 1 second — our task is 3 hours old
+		RuntimeStaleSecs:    staleThresholdSeconds,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks query failed: %v", err)
@@ -185,6 +289,15 @@ func TestSweepStaleTasksBroadcastsWithWorkspaceID(t *testing.T) {
 			if e.WorkspaceID != testWorkspaceID {
 				t.Fatalf("expected WorkspaceID %s, got %s", testWorkspaceID, e.WorkspaceID)
 			}
+			if e.TaskID != taskID {
+				t.Fatalf("expected envelope TaskID %s, got %s", taskID, e.TaskID)
+			}
+			if payload["error"] != "task timed out" {
+				t.Fatalf("expected deliverable error %q, got %v", "task timed out", payload["error"])
+			}
+			if payload["failure_reason"] != "timeout" || payload["retry_pending"] != false {
+				t.Fatalf("unexpected failure metadata: reason=%v retry_pending=%v", payload["failure_reason"], payload["retry_pending"])
+			}
 			foundEvent = true
 			break
 		}
@@ -213,6 +326,8 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 
 	issueID, agentID, _ := setupSweeperTestFixture(t, "running")
 	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	// Runtime must be stale for the running-task wall clock to fire (MUL-4107).
+	ageOutAgentRuntime(t, agentID, 10*time.Minute)
 
 	queries := db.New(testPool)
 	bus := events.New()
@@ -230,6 +345,7 @@ func TestSweepStaleTasksReconcileAgentStatus(t *testing.T) {
 	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
+		RuntimeStaleSecs:    staleThresholdSeconds,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks failed: %v", err)
@@ -291,6 +407,9 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 1.0,
 		RunningTimeoutSecs:  9000.0,
+		// RuntimeStaleSecs only affects the running branch — irrelevant for
+		// this dispatched-timeout test, but wired for API consistency.
+		RuntimeStaleSecs: staleThresholdSeconds,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks failed: %v", err)
@@ -340,6 +459,98 @@ func TestSweepDispatchedStaleTask(t *testing.T) {
 	}
 	if agentStatus != "idle" {
 		t.Fatalf("expected agent status 'idle' after sweep, got '%s'", agentStatus)
+	}
+}
+
+// TestSweepRunningTaskSkippedWhenRuntimeFresh is the MUL-4107 regression test:
+// a running task whose wall-clock deadline has already passed MUST NOT be
+// killed by the sweeper as long as its owning runtime is 'online' and its
+// last_seen_at is within the runtime stale window. This preserves healthy
+// multi-hour research / training runs — the primary motivation for the
+// liveness-keyed sweep predicate.
+func TestSweepRunningTaskSkippedWhenRuntimeFresh(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	// Runtime heartbeat is fresh (integration fixture inserts last_seen_at=now()).
+	// Task started_at is 3h ago; RunningTimeoutSecs=1s would kill on wall clock
+	// alone — but the runtime is proving liveness, so the sweeper must skip it.
+	queries := db.New(testPool)
+	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+		DispatchTimeoutSecs: 300.0,
+		RunningTimeoutSecs:  1.0,
+		RuntimeStaleSecs:    staleThresholdSeconds,
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks failed: %v", err)
+	}
+
+	for _, ft := range failedTasks {
+		if ft.ID.Bytes == parseUUIDBytes(taskID) {
+			t.Fatalf("healthy long-running task on live daemon must NOT be swept — that was the MUL-4107 bug")
+		}
+	}
+
+	var status string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT status FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&status); err != nil {
+		t.Fatalf("failed to query task status: %v", err)
+	}
+	if status != "running" {
+		t.Fatalf("expected task to stay 'running', got %q", status)
+	}
+}
+
+// TestSweepRunningTaskKilledWhenRuntimeStale is the companion coverage: with
+// the same wall-clock deadline elapsed, a running task IS killed when its
+// runtime's DB heartbeat is stale (simulates the "runtime lingers online
+// with a stale heartbeat past the wall clock" pathological case that the
+// wall-clock branch is the defensive backstop for). Note that in production
+// the daemon-dead case is normally reclaimed sooner by sweepStaleRuntimes;
+// this test asserts the residual backstop still fires when it needs to.
+func TestSweepRunningTaskKilledWhenRuntimeStale(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	issueID, agentID, taskID := setupSweeperTestFixture(t, "running")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+	ageOutAgentRuntime(t, agentID, 10*time.Minute)
+
+	queries := db.New(testPool)
+	failedTasks, err := queries.FailStaleTasks(context.Background(), db.FailStaleTasksParams{
+		DispatchTimeoutSecs: 300.0,
+		RunningTimeoutSecs:  1.0,
+		RuntimeStaleSecs:    staleThresholdSeconds,
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks failed: %v", err)
+	}
+
+	found := false
+	for _, ft := range failedTasks {
+		if ft.ID.Bytes == parseUUIDBytes(taskID) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected wall clock to fire when runtime heartbeat is stale, but task %s was not swept", taskID)
+	}
+
+	var status string
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT status FROM agent_task_queue WHERE id = $1`, taskID,
+	).Scan(&status); err != nil {
+		t.Fatalf("failed to query task status: %v", err)
+	}
+	if status != "failed" {
+		t.Fatalf("expected task status 'failed', got %q", status)
 	}
 }
 
@@ -399,10 +610,14 @@ func TestSweepResetsInProgressIssueToTodo(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 
+	// Runtime must be stale for the running-task wall clock to fire (MUL-4107).
+	ageOutAgentRuntime(t, agentID, 10*time.Minute)
+
 	// Fail the stale task (running timeout of 1 second — our task is 3 hours old).
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
+		RuntimeStaleSecs:    staleThresholdSeconds,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks failed: %v", err)
@@ -484,9 +699,13 @@ func TestSweepDoesNotResetIssueAlreadyInReview(t *testing.T) {
 	queries := db.New(testPool)
 	bus := events.New()
 
+	// Runtime must be stale for the running-task wall clock to fire (MUL-4107).
+	ageOutAgentRuntime(t, agentID, 10*time.Minute)
+
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
 		DispatchTimeoutSecs: 300.0,
 		RunningTimeoutSecs:  1.0,
+		RuntimeStaleSecs:    staleThresholdSeconds,
 	})
 	if err != nil {
 		t.Fatalf("FailStaleTasks failed: %v", err)

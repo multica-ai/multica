@@ -1,4 +1,5 @@
 import type { Issue, IssueMetadata, IssueReaction } from "./issue";
+import type { IssueProperty, IssuePropertyValues } from "./property";
 import type { Agent } from "./agent";
 import type { InboxItem } from "./inbox";
 import type { Comment, Reaction } from "./comment";
@@ -11,6 +12,7 @@ import type { Label } from "./label";
 export type WSEventType =
   | "issue:created"
   | "issue:updated"
+  | "issue_attachments:changed"
   | "issue:deleted"
   | "comment:created"
   | "comment:updated"
@@ -32,7 +34,9 @@ export type WSEventType =
   | "task:cancelled"
   | "inbox:new"
   | "inbox:read"
+  | "inbox:unread"
   | "inbox:archived"
+  | "inbox:unarchived"
   | "inbox:batch-read"
   | "inbox:batch-archived"
   | "workspace:updated"
@@ -54,6 +58,8 @@ export type WSEventType =
   | "issue_reaction:removed"
   | "chat:message"
   | "chat:done"
+  | "chat:quick_actions"
+  | "chat:cancel_finalized"
   | "chat:session_read"
   | "chat:session_deleted"
   | "chat:session_updated"
@@ -68,6 +74,9 @@ export type WSEventType =
   | "label:deleted"
   | "issue_labels:changed"
   | "issue_metadata:changed"
+  | "issue_properties:changed"
+  | "property:created"
+  | "property:updated"
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
@@ -117,9 +126,22 @@ export interface IssueLabelsChangedPayload {
   labels: Label[];
 }
 
+export interface IssueAttachmentsChangedPayload {
+  issue_id: string;
+}
+
 export interface IssueMetadataChangedPayload {
   issue_id: string;
   metadata: IssueMetadata;
+}
+
+export interface IssuePropertiesChangedPayload {
+  issue_id: string;
+  properties: IssuePropertyValues;
+}
+
+export interface PropertyChangedPayload {
+  property: IssueProperty;
 }
 
 export interface AgentStatusPayload {
@@ -147,8 +169,20 @@ export interface InboxReadPayload {
   recipient_id: string;
 }
 
+/** Emitted when a recipient flips a notification back to unread. */
+export interface InboxUnreadPayload {
+  item_id: string;
+  recipient_id: string;
+}
+
 export interface InboxArchivedPayload {
   item_id: string;
+  recipient_id: string;
+}
+
+export interface InboxUnarchivedPayload {
+  item_id: string;
+  issue_id: string | null;
   recipient_id: string;
 }
 
@@ -290,6 +324,8 @@ export interface TaskFailedPayload {
   issue_id: string;
   chat_session_id?: string;
   status: string;
+  failure_reason?: string;
+  retry_pending?: boolean;
 }
 
 export interface TaskCancelledPayload {
@@ -347,6 +383,72 @@ export interface ChatDonePayload {
   content?: string;
   elapsed_ms?: number;
   created_at?: string;
+  /**
+   * "message" (default) or "no_response" — a completed direct-chat turn with
+   * no text reply (MUL-4351). Optional/additive: older servers omit it, so the
+   * consumer defaults to "message". Because direct-chat completion now always
+   * persists exactly one assistant row, message_id/content/created_at are
+   * populated alongside this even for a no_response turn.
+   */
+  message_kind?: import("./chat").ChatMessageKind;
+  /** Server-validated follow-ups attached to the persisted assistant reply. */
+  quick_actions?: import("./chat").ChatQuickAction[];
+  /**
+   * The daemon will follow up with a chat:quick_actions supplement for this
+   * turn — render a placeholder. Never true alongside populated
+   * quick_actions; absent on older servers/daemons.
+   */
+  quick_actions_pending?: boolean;
+}
+
+/**
+ * chat:quick_actions — supplements a finished turn with the follow-up
+ * suggestions from the daemon's background pass. An empty list is terminal:
+ * "no suggestions this turn", resolve any placeholder.
+ */
+export interface ChatQuickActionsPayload {
+  chat_session_id: string;
+  task_id: string;
+  message_id: string;
+  quick_actions?: import("./chat").ChatQuickAction[];
+  /**
+   * The regeneration behind an explicit refresh failed: the actions carried
+   * here are the turn's UNCHANGED prior pills, sent only to resolve the pending
+   * spinner. Clients surface a "couldn't refresh" notice rather than treating
+   * them as freshly generated. Absent/false on the normal success path and on
+   * older servers.
+   */
+  failed?: boolean;
+}
+
+/**
+ * Deferred outcome of a cancelled chat task (#5219). The cancel HTTP response
+ * cannot carry it — the empty/non-empty judgment settles only after the
+ * daemon's transcript flush — so the server broadcasts it here instead:
+ * outcome "stopped" describes a freshly-persisted "Stopped." assistant row
+ * (ChatDonePayload-shaped fields), outcome "restored" is a content-free
+ * invalidation hint — the deleted prompt itself is durable server-side and
+ * the initiator's client fetches it from the creator-authorized
+ * draft-restores endpoint. All fields beyond the discriminator are optional —
+ * treat defensively and fall back to a refetch.
+ */
+export interface ChatCancelFinalizedPayload {
+  outcome: "stopped" | "restored";
+  chat_session_id: string;
+  task_id: string;
+  /**
+   * The user who triggered the cancelled task. Only this user's client needs
+   * to refetch draft restores; treat a missing value as "not me" (fail
+   * closed — the durable restore is still picked up on the next session
+   * open).
+   */
+  initiator_user_id?: string;
+  message_id?: string;
+  /** "Stopped." assistant row fields — set only for outcome "stopped". */
+  content?: string;
+  message_kind?: import("./chat").ChatMessageKind;
+  created_at?: string;
+  elapsed_ms?: number;
 }
 
 export interface ChatSessionReadPayload {
@@ -406,7 +508,11 @@ export interface WSEventPayloadMap {
   "issue:created": IssueCreatedPayload;
   "issue:updated": IssueUpdatedPayload;
   "issue:deleted": IssueDeletedPayload;
+  "issue_attachments:changed": IssueAttachmentsChangedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
+  "issue_properties:changed": IssuePropertiesChangedPayload;
+  "property:created": PropertyChangedPayload;
+  "property:updated": PropertyChangedPayload;
   "issue_reaction:added": IssueReactionAddedPayload;
   "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;
@@ -431,7 +537,9 @@ export interface WSEventPayloadMap {
   "task:progress": unknown;
   "inbox:new": InboxNewPayload;
   "inbox:read": InboxReadPayload;
+  "inbox:unread": InboxUnreadPayload;
   "inbox:archived": InboxArchivedPayload;
+  "inbox:unarchived": InboxUnarchivedPayload;
   "inbox:batch-read": InboxBatchReadPayload;
   "inbox:batch-archived": InboxBatchArchivedPayload;
   "workspace:updated": WorkspaceUpdatedPayload;
@@ -444,6 +552,8 @@ export interface WSEventPayloadMap {
   "activity:created": ActivityCreatedPayload;
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
+  "chat:quick_actions": ChatQuickActionsPayload;
+  "chat:cancel_finalized": ChatCancelFinalizedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;
   "chat:session_updated": unknown;

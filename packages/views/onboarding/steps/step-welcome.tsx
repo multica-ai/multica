@@ -4,7 +4,6 @@ import { useState } from "react";
 import { ArrowRight, Download, Loader2 } from "lucide-react";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
-import { captureDownloadIntent } from "@multica/core/analytics";
 import { cn } from "@multica/ui/lib/utils";
 import { DragStrip } from "@multica/views/platform";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
@@ -80,7 +79,7 @@ export function StepWelcome({
           <div className="flex w-full max-w-[540px] flex-col gap-8">
             <div className="flex items-center gap-2.5">
               <MulticaIcon className="size-5 text-foreground" noSpin />
-              <span className="font-serif text-xl font-medium tracking-tight">
+              <span className="font-serif text-title-lg font-medium tracking-tight">
                 {t(($) => $.welcome.wordmark)}
               </span>
             </div>
@@ -93,10 +92,10 @@ export function StepWelcome({
             </h1>
 
             <div className="flex flex-col gap-4">
-              <p className="text-lg leading-relaxed text-foreground/85">
+              <p className="text-title leading-relaxed text-foreground">
                 {t(($) => $.welcome.lede)}
               </p>
-              <p className="text-sm leading-relaxed text-muted-foreground">
+              <p className="text-body leading-relaxed text-muted-foreground">
                 {isWeb
                   ? t(($) => $.welcome.lede_web)
                   : t(($) => $.welcome.lede_desktop)}
@@ -117,7 +116,6 @@ export function StepWelcome({
                     href="/download"
                     target="_blank"
                     rel="noopener noreferrer"
-                    onClick={() => captureDownloadIntent("welcome")}
                     className={buttonVariants({ size: "lg" })}
                   >
                     <Download className="h-4 w-4" />
@@ -176,7 +174,7 @@ export function StepWelcome({
       <div className="hidden border-l bg-muted/40 lg:flex lg:flex-1 lg:flex-col lg:overflow-hidden">
         <DragStrip />
         <div className="flex flex-1 flex-col items-center justify-center gap-7 px-8 py-8">
-          <p className="max-w-[440px] text-balance text-center font-serif text-[15px] italic leading-snug text-muted-foreground">
+          <p className="max-w-[440px] text-balance text-center font-serif text-body-lg italic leading-snug text-muted-foreground">
             {t(($) => $.welcome.illustration_caption)}
           </p>
           <WelcomeIllustration />
@@ -320,16 +318,16 @@ function MockActivityCard({
       <div className="flex items-center justify-between gap-3">
         <div className="flex min-w-0 items-center gap-2">
           <MockAvatar actor={actor} />
-          <span className="truncate text-sm font-medium text-foreground">
+          <span className="truncate text-body font-medium text-foreground">
             {actor.name}
           </span>
         </div>
-        <span className="shrink-0 font-mono text-[11px] text-muted-foreground">
+        <span className="shrink-0 font-mono text-micro text-muted-foreground">
           {issueId}
         </span>
       </div>
 
-      <p className="mt-2.5 text-sm leading-snug text-foreground/85">
+      <p className="mt-2.5 text-body leading-snug text-foreground">
         {content}
       </p>
 
@@ -343,7 +341,7 @@ function MockAvatar({ actor }: { actor: ActivityActor }) {
     return (
       <div
         aria-hidden
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground text-[11px] font-semibold text-background"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-foreground text-micro font-semibold text-background"
       >
         {actor.initial}
       </div>
@@ -368,7 +366,7 @@ function StatusFooter({
 }) {
   const cfg = STATUS_CONFIG[status];
   return (
-    <div className="mt-3 flex items-center gap-2 text-xs">
+    <div className="mt-3 flex items-center gap-2 text-caption">
       <span
         className={cn("flex items-center gap-1.5 font-medium", cfg.iconColor)}
       >

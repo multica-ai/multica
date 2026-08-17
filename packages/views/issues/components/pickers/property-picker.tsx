@@ -17,6 +17,23 @@ import { useT } from "../../../i18n";
 
 const HIGHLIGHT_CLASS = "bg-accent";
 const ITEM_SELECTOR = "button[data-picker-item]:not(:disabled)";
+/**
+ * Marks the fixed empty-value row ("No project", "Unassigned", …). The row is
+ * pinned first for the eye, but it is not a search result — typing a query and
+ * pressing Enter must commit the first real match, never clear the field.
+ */
+const EMPTY_ITEM_ATTR = "data-picker-empty";
+
+const isEmptyItem = (el: HTMLButtonElement | undefined) =>
+  el?.hasAttribute(EMPTY_ITEM_ATTR) === true;
+
+/**
+ * Default class of the picker popover trigger. Shared with the deferred
+ * (pre-mount) lookalike trigger in `DeferredPopup` call sites so the swap on
+ * first interaction is pixel-identical.
+ */
+export const PICKER_TRIGGER_CLASS =
+  "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden";
 
 // ---------------------------------------------------------------------------
 // PropertyPicker — generic Popover shell with optional search
@@ -85,6 +102,21 @@ export function PropertyPicker({
     );
   }, []);
 
+  // Typing re-highlights the first *real* match. The index can't be computed
+  // in the input's onChange handler — the filtered list hasn't rendered yet —
+  // so the keystroke raises a flag and this effect resolves it against the
+  // fresh DOM. Guarding on the flag keeps arrow keys free to walk back onto
+  // the empty row: only a keystroke moves the highlight off it.
+  const pendingSearchHighlight = useRef(false);
+  useEffect(() => {
+    if (!pendingSearchHighlight.current) return;
+    pendingSearchHighlight.current = false;
+    const items = getItems();
+    // -1 when the query matches nothing (only the empty row is left), which
+    // leaves Enter inert instead of clearing the field.
+    setHighlightedIndex(items.findIndex((item) => !isEmptyItem(item)));
+  }, [children, getItems]);
+
   // Apply/remove highlight class via DOM when index changes
   useEffect(() => {
     const items = getItems();
@@ -96,17 +128,20 @@ export function PropertyPicker({
     }
   }, [highlightedIndex, getItems, children]); // re-run when children change (filtered list updates)
 
-  const handleOpenChange = useCallback(
-    (v: boolean) => {
-      onOpenChange(v);
-      if (!v) {
-        setQuery("");
-        setHighlightedIndex(-1);
-        onSearchChange?.("");
-      }
-    },
-    [onOpenChange, onSearchChange],
-  );
+  // Reset the search state on the open -> closed transition rather than inside
+  // an open-change handler. Every picker closes itself after a selection by
+  // calling its own `setOpen(false)`, which flips this `open` prop directly and
+  // never routes through the popover's `onOpenChange` — so a handler-only reset
+  // left the stale query (and the filtered list) in place on the next open.
+  const wasOpen = useRef(open);
+  useEffect(() => {
+    if (wasOpen.current && !open) {
+      setQuery("");
+      setHighlightedIndex(-1);
+      onSearchChange?.("");
+    }
+    wasOpen.current = open;
+  }, [open, onSearchChange]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -134,8 +169,10 @@ export function PropertyPicker({
         e.preventDefault();
         if (highlightedIndex >= 0 && highlightedIndex < items.length) {
           items[highlightedIndex]?.click();
-        } else if (items.length === 1) {
-          // Auto-select when only one result
+        } else if (items.length === 1 && !isEmptyItem(items[0])) {
+          // Auto-select when only one result. The empty row is excluded: a
+          // query with no matches leaves it as the sole item, and Enter there
+          // would clear the field the user was trying to search in.
           items[0]?.click();
         }
       }
@@ -145,7 +182,7 @@ export function PropertyPicker({
 
   const popoverTrigger = (
     <PopoverTrigger
-      className={triggerRender ? undefined : "flex items-center gap-1.5 cursor-pointer rounded px-1 -mx-1 hover:bg-accent/30 transition-colors overflow-hidden"}
+      className={triggerRender ? undefined : PICKER_TRIGGER_CLASS}
       render={triggerRender}
     >
       {trigger}
@@ -153,7 +190,7 @@ export function PropertyPicker({
   );
 
   return (
-    <Popover open={open} onOpenChange={handleOpenChange}>
+    <Popover open={open} onOpenChange={onOpenChange}>
       {tooltip ? (
         <Tooltip open={tooltipOpen} onOpenChange={setTooltipHover}>
           <TooltipTrigger render={popoverTrigger} />
@@ -170,13 +207,13 @@ export function PropertyPicker({
               value={query}
               onChange={(e) => {
                 setQuery(e.target.value);
-                setHighlightedIndex(0);
+                pendingSearchHighlight.current = true;
                 onSearchChange?.(e.target.value);
               }}
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               aria-label={filterAria}
-              className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+              className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
             />
           </div>
         )}
@@ -198,12 +235,23 @@ export function PickerItem({
   onClick,
   hoverClassName,
   tooltip,
+  emptyValue = false,
   children,
 }: {
   selected: boolean;
   disabled?: boolean;
   onClick: () => void;
   hoverClassName?: string;
+  /**
+   * Marks this row as the field's fixed empty value ("No project",
+   * "Unassigned", "No stage"). Such a row is pinned first for the eye but
+   * excluded from search-result keyboard defaults, so typing a query and
+   * pressing Enter commits the first real match instead of clearing the
+   * field. Arrow keys can still reach it. Set this on rows that write
+   * null/undefined — not on a real enum member that happens to read as
+   * "none" (issue priority), which is a value like any other.
+   */
+  emptyValue?: boolean;
   /** Design-system tooltip for the row — useful when truncated content needs
    *  the full string, or when the row carries metadata that doesn't fit on
    *  a single line. Wrapped in a real Tooltip component (200ms delay,
@@ -215,9 +263,10 @@ export function PickerItem({
     <button
       type="button"
       data-picker-item
+      {...(emptyValue ? { [EMPTY_ITEM_ATTR]: "" } : {})}
       disabled={disabled}
       onClick={onClick}
-      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-sm ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
+      className={`flex w-full items-center gap-3 rounded-md px-2 py-1.5 text-left text-body ${disabled ? "opacity-50 cursor-not-allowed" : hoverClassName ?? "hover:bg-accent"} transition-colors`}
     >
       {/* min-w-0 lets long children (like truncated label names) shrink
           inside the flex row instead of pushing the selected checkmark off
@@ -257,7 +306,7 @@ export function PickerSection({
 }) {
   return (
     <div>
-      <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+      <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
         {label}
       </div>
       {children}
@@ -272,7 +321,7 @@ export function PickerSection({
 export function PickerEmpty() {
   const { t } = useT("issues");
   return (
-    <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+    <div className="px-2 py-3 text-center text-body text-muted-foreground">
       {t(($) => $.pickers.no_results)}
     </div>
   );

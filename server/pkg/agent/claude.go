@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,10 +8,27 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"syscall"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
+
+// claudeTerminateGraceNanos optionally overrides, in nanoseconds, how long a
+// cancelled claude process group is given to exit after SIGTERM before it is
+// SIGKILLed. Set via atomic store in tests; zero keeps the default.
+var claudeTerminateGraceNanos atomic.Int64
+
+func claudeTerminateGrace() time.Duration {
+	if n := claudeTerminateGraceNanos.Load(); n > 0 {
+		return time.Duration(n)
+	}
+	return 5 * time.Second
+}
 
 // claudeBackend implements Backend by spawning the Claude Code CLI
 // with --output-format stream-json.
@@ -39,14 +55,14 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	// instead of inheriting from the outer Claude Code session.
 	var mcpConfigPath string
 	var mcpFileCleanup func() // non-nil while this function owns the temp file
-	if len(opts.McpConfig) > 0 {
+	if hasManagedMcpConfig(opts.McpConfig) {
 		path, err := writeMcpConfigToTemp(opts.McpConfig)
 		if err != nil {
 			cancel()
 			return nil, err
 		}
 		mcpConfigPath = path
-		mcpFileCleanup = func() { os.Remove(mcpConfigPath) }
+		mcpFileCleanup = func() { cleanupMcpConfigTemp(mcpConfigPath) }
 		args = append(args, "--mcp-config", mcpConfigPath)
 	}
 	// Clean up the temp file if we return before the goroutine takes ownership.
@@ -56,14 +72,33 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
+	// Run claude in its own process group so cancellation can reach the whole
+	// tree — the claude CLI plus the MCP servers and tool subprocesses it
+	// spawns — not just the direct child. The default CommandContext behaviour
+	// SIGKILLs only the leader, which orphans those descendants; on a resumed
+	// stream-json session with no wall-clock timeout they then keep running and
+	// burning model budget long after the task was cancelled, and under
+	// --max-concurrent-tasks 1 starve every queued task (#5918). This mirrors
+	// the fix already made for codex (#4520) and opencode (#4533).
+	configureProcessGroup(cmd)
+	// Take over context cancellation: the default would SIGKILL only the leader
+	// the instant runCtx is done. We instead drive a graceful group-wide
+	// SIGTERM→SIGKILL from the cancellation goroutine below and close stdout
+	// only after the tree has been signalled. Returning nil keeps os/exec from
+	// racing us with its own kill; WaitDelay remains the hard backstop.
+	cmd.Cancel = func() error { return nil }
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
 	cmd.Env = buildEnv(b.cfg.Env)
+	if err := claudeRootSudoPreflight(args, cmd.Env); err != nil {
+		cancel()
+		return nil, err
+	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -99,6 +134,10 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
+	// procDone closes once cmd.Wait() returns, letting the cancellation handler
+	// skip a process that already exited and avoid signalling a dead/reused pid.
+	procDone := make(chan struct{})
+
 	// writeClaudeInput runs in its own goroutine so it cannot deadlock
 	// against the stdout reader. With --verbose --output-format stream-json
 	// the CLI emits a startup banner before reading its first stdin frame;
@@ -127,26 +166,57 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		defer close(msgCh)
 		defer close(resCh)
 		if mcpConfigPath != "" {
-			defer os.Remove(mcpConfigPath)
+			defer cleanupMcpConfigTemp(mcpConfigPath)
 		}
 
 		startTime := time.Now()
-		var output strings.Builder
+		var lastAssistantText string
+		var finalResultText string
+		sawResult := false
+		resultIsError := false
+		terminalReasonError := ""
 		var sessionID string
-		finalStatus := "completed"
-		var finalError string
 		sawAsyncLaunch := false
 		usage := make(map[string]TokenUsage)
+		eventCount := 0
+		invalidEventCount := 0
+		assistantEventCount := 0
+		toolUseCount := 0
+		unreadableAssistantCount := 0
 
-		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
+		// On cancellation / timeout, terminate claude (and every MCP server and
+		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
+		// to nudge a clean exit, then SIGTERM the whole process group, give it a
+		// grace period, and SIGKILL the group if any member is still alive.
+		// SIGKILL is uncatchable, so once delivered no group member can write
+		// again — only then is it safe to close the stdout read end as a
+		// last-resort unblock for a scanner a wedged descendant still keeps
+		// open. WaitDelay is the final backstop (#5918).
 		go func() {
-			<-runCtx.Done()
+			select {
+			case <-procDone:
+				return // finished on its own; nothing to terminate
+			case <-runCtx.Done():
+			}
 			closeStdin()
+			if cmd.Process != nil {
+				signalProcessGroup(cmd, syscall.SIGTERM)
+				// Escalate to a group SIGKILL unless the WHOLE process group has
+				// exited within the grace window. This must key off the process
+				// group, not procDone: procDone only means cmd.Wait() returned
+				// for the leader, so a SIGTERM-ignoring descendant that does not
+				// hold claude's stdout would let the leader exit, close procDone,
+				// and skip the SIGKILL — leaking exactly the orphan this fix
+				// targets. waitProcessGroupGone returns as soon as the group is
+				// empty, so the graceful case adds no latency.
+				if !waitProcessGroupGone(cmd, claudeTerminateGrace()) {
+					signalProcessGroup(cmd, syscall.SIGKILL)
+				}
+			}
 			_ = stdout.Close()
 		}()
 
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -156,12 +226,20 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 			var msg claudeSDKMessage
 			if err := json.Unmarshal([]byte(line), &msg); err != nil {
+				invalidEventCount++
 				continue
 			}
+			eventCount++
 
 			switch msg.Type {
 			case "assistant":
-				b.handleAssistant(msg, msgCh, &output, usage)
+				assistantEventCount++
+				turn := b.handleAssistant(msg, msgCh, usage)
+				toolUseCount += turn.toolUses
+				if !turn.understood {
+					unreadableAssistantCount++
+				}
+				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
 				if b.handleUser(msg, msgCh) {
 					sawAsyncLaunch = true
@@ -172,17 +250,13 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				}
 				trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 			case "result":
+				sawResult = true
+				finalResultText = msg.ResultText
+				resultIsError = msg.IsError
+				terminalReasonError = claudeTerminalReasonFailure(msg.TerminalReason, msg.ResultText)
 				sessionID = msg.SessionID
-				if msg.ResultText != "" {
-					output.Reset()
-					output.WriteString(msg.ResultText)
-				}
 				if resultUsage := claudeResultUsage(msg, opts.Model); len(resultUsage) > 0 {
 					usage = resultUsage
-				}
-				if msg.IsError {
-					finalStatus = "failed"
-					finalError = msg.ResultText
 				}
 				closeStdin()
 			case "log":
@@ -197,76 +271,111 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				b.handleControlRequest(msg, stdin)
 			}
 		}
+		scanErr := scanner.Err()
+		if scanErr != nil {
+			// Scanner stopped consuming stdout. Close the pipe before Wait so a
+			// child still writing a malformed/oversized event cannot deadlock on
+			// the full OS pipe; the scanner error remains the primary failure.
+			_ = stdout.Close()
+		}
 
 		closeStdin()
 
-		// Wait for process exit
+		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
+		close(procDone)
 		duration := time.Since(startTime)
 		// writeDone is buffered (cap 1) and the writer always sends — by the
 		// time cmd has exited, the prompt write has either succeeded, hit a
 		// broken pipe, or been unblocked by the kill that ended cmd.
 		writeErr := <-writeDone
 
-		switch {
-		case runCtx.Err() == context.DeadlineExceeded:
-			finalStatus = "timeout"
-			finalError = fmt.Sprintf("claude timed out after %s", timeout)
-		case runCtx.Err() == context.Canceled:
-			finalStatus = "aborted"
-			finalError = "execution cancelled"
-		case writeErr != nil && finalStatus == "completed" && sessionID == "":
-			// No result event landed and the prompt write failed — claude
-			// died before reading the prompt. Surface the write error; the
-			// stderr tail attached below carries the real reason.
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("write claude input: %v", writeErr)
-		case exitErr != nil && finalStatus == "completed":
-			finalStatus = "failed"
-			finalError = fmt.Sprintf("claude exited with error: %v", exitErr)
+		completionGuardError := ""
+		if sawAsyncLaunch {
+			completionGuardError = "claude launched an async background task; Multica-managed runs require foreground execution"
 		}
-		if finalStatus == "completed" && sawAsyncLaunch {
-			finalStatus = "failed"
-			finalError = "claude launched an async background task; Multica-managed runs require foreground execution"
-		}
+		finalStatus, finalOutput, finalError := finalizeStreamResult(
+			"claude",
+			timeout,
+			runCtx.Err(),
+			writeErr,
+			exitErr,
+			sessionID,
+			streamTerminalState{
+				lastAssistantText:   lastAssistantText,
+				finalResultText:     finalResultText,
+				sawResult:           sawResult,
+				resultIsError:       resultIsError,
+				scanErr:             scanErr,
+				terminalReasonError: terminalReasonError,
+			},
+			completionGuardError,
+		)
 
 		// cmd.Wait() has returned — os/exec's stderr copy goroutine has
 		// observed every byte claude wrote to stderr before exiting, so
 		// stderrBuf.Tail() is safe to sample now. Attach the tail to any
 		// non-empty failure message; callers upstream surface this as the
 		// task's error field, which is the only place users see it.
+		stderrTail := stderrBuf.Tail()
 		if finalError != "" {
-			finalError = withAgentStderr(finalError, "claude", stderrBuf.Tail())
+			finalError = withAgentStderr(finalError, "claude", stderrTail)
 		}
+		logStreamProtocolObservation(b.cfg.Logger, streamProtocolObservation{
+			provider:                   "claude",
+			cliVersion:                 b.cfg.CLIVersion,
+			model:                      opts.Model,
+			exitCode:                   streamProcessExitCode(exitErr),
+			eventCount:                 eventCount,
+			invalidEventCount:          invalidEventCount,
+			assistantEventCount:        assistantEventCount,
+			toolUseCount:               toolUseCount,
+			sawResult:                  sawResult,
+			resultIsError:              resultIsError,
+			resultBytes:                len(finalResultText),
+			lastAssistantBytes:         len(lastAssistantText),
+			scannerError:               scanErr != nil,
+			unreadableAssistantCount:   unreadableAssistantCount,
+			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
+		})
 
 		b.cfg.Logger.Info("claude finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
 
-		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed")
-		if reportedSessionID != sessionID {
-			b.cfg.Logger.Info("claude resume did not land; clearing fresh session id for daemon fallback",
+		// The account-binding 400 arrives in the result event (finalError);
+		// "no conversation found" is printed to stderr. Check both.
+		resumeRejected := resumeWasRejected(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		reportedSessionID := resolveSessionID(opts.ResumeSessionID, sessionID, finalStatus == "failed", finalError, stderrTail)
+		if resumeRejected {
+			b.cfg.Logger.Info("claude resume was rejected; dropping session id and signalling fresh-session retry",
 				"requested_resume", opts.ResumeSessionID,
 				"emitted_session", sessionID,
 			)
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     output.String(),
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  reportedSessionID,
-			Usage:      usage,
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      reportedSessionID,
+			Usage:          usage,
+			ResumeRejected: resumeRejected,
 		}
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, output *strings.Builder, usage map[string]TokenUsage) {
+func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
 	var content claudeMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return
+		// Unreadable body: understood stays false so the caller drops any
+		// fallback rather than let an older turn stand in for this one.
+		return assistantTurn{}
 	}
+	turn := assistantTurn{understood: true}
+	var assistantText strings.Builder
+	toolUseCount := 0
 
 	// Accumulate token usage per model.
 	if content.Usage != nil && content.Model != "" {
@@ -282,7 +391,7 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 		switch block.Type {
 		case "text":
 			if block.Text != "" {
-				output.WriteString(block.Text)
+				assistantText.WriteString(block.Text)
 				trySend(ch, Message{Type: MessageText, Content: block.Text})
 			}
 		case "thinking":
@@ -290,6 +399,7 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 				trySend(ch, Message{Type: MessageThinking, Content: block.Text})
 			}
 		case "tool_use":
+			toolUseCount++
 			var input map[string]any
 			if block.Input != nil {
 				_ = json.Unmarshal(block.Input, &input)
@@ -300,8 +410,17 @@ func (b *claudeBackend) handleAssistant(msg claudeSDKMessage, ch chan<- Message,
 				CallID: block.ID,
 				Input:  input,
 			})
+		default:
+			// A block type we do not render may be carrying the model's answer
+			// in a shape we cannot read, so we must not claim this turn was
+			// silent. Recognising a new no-text block is a deliberate one-line
+			// addition here, not an accident of falling through.
+			turn.understood = false
 		}
 	}
+	turn.text = assistantText.String()
+	turn.toolUses = toolUseCount
+	return turn
 }
 
 func (b *claudeBackend) handleUser(msg claudeSDKMessage, ch chan<- Message) bool {
@@ -428,12 +547,16 @@ type claudeSDKMessage struct {
 	Model     string          `json:"model,omitempty"`
 
 	// result fields
-	ResultText string                            `json:"result,omitempty"`
-	IsError    bool                              `json:"is_error,omitempty"`
-	DurationMs float64                           `json:"duration_ms,omitempty"`
-	NumTurns   int                               `json:"num_turns,omitempty"`
-	Usage      *claudeUsage                      `json:"usage,omitempty"`
-	ModelUsage map[string]claudeResultModelUsage `json:"modelUsage,omitempty"`
+	ResultText string `json:"result,omitempty"`
+	IsError    bool   `json:"is_error,omitempty"`
+	// TerminalReason is Claude Code's structured statement of why the turn
+	// ended. Read separately from IsError because the CLI computes the two
+	// independently — see claudeTerminalReasonFailure.
+	TerminalReason string                            `json:"terminal_reason,omitempty"`
+	DurationMs     float64                           `json:"duration_ms,omitempty"`
+	NumTurns       int                               `json:"num_turns,omitempty"`
+	Usage          *claudeUsage                      `json:"usage,omitempty"`
+	ModelUsage     map[string]claudeResultModelUsage `json:"modelUsage,omitempty"`
 
 	// log fields
 	Log *claudeLogEntry `json:"log,omitempty"`
@@ -467,6 +590,38 @@ type claudeResultModelUsage struct {
 	OutputTokens             int64 `json:"outputTokens"`
 	CacheReadInputTokens     int64 `json:"cacheReadInputTokens"`
 	CacheCreationInputTokens int64 `json:"cacheCreationInputTokens"`
+}
+
+// claudeTerminalReasonFailure turns Claude Code's structured terminal_reason
+// into an error string when the reason means the turn did not actually produce
+// an answer, and returns "" when it says nothing of the sort.
+//
+// Only prompt_too_long is recognised, and deliberately so. Every other terminal
+// reason the CLI can report either already arrives with is_error set (api_error,
+// model_error, error_max_turns …) or is a legitimate completion, so widening
+// this would second-guess a contract that works — while prompt_too_long is the
+// one case observed reaching the platform as a clean success (GH #6402). The
+// CLI computes is_error from whether the last message it rendered was an API
+// error and terminal_reason from why the turn stopped; when compaction fails
+// and the run ends on a message that is not itself flagged, the two disagree
+// and only terminal_reason is telling the truth.
+//
+// The returned text quotes the enum token so taskfailure.Classify lands it in
+// agent_error.context_overflow without depending on the CLI's prose, which
+// varies by release and is empty in some shapes. That reason is on the resume
+// blacklist (GetLastTaskSession / GetLastChatTaskSession), so the saturated
+// session is retired and the next task on the issue starts fresh — the
+// automated form of the transcript-archiving workaround #6402 reported.
+func claudeTerminalReasonFailure(terminalReason, resultText string) string {
+	if strings.TrimSpace(terminalReason) != taskfailure.TerminalReasonPromptTooLong {
+		return ""
+	}
+	msg := "claude ended the turn with terminal_reason=" + taskfailure.TerminalReasonPromptTooLong +
+		": the session's context window is exhausted and compaction could not recover it"
+	if detail := strings.TrimSpace(resultText); detail != "" {
+		msg += " (" + detail + ")"
+	}
+	return msg
 }
 
 func claudeResultUsage(msg claudeSDKMessage, fallbackModel string) map[string]TokenUsage {
@@ -536,8 +691,8 @@ func trySend(ch chan<- Message, msg Message) {
 	select {
 	case ch <- msg:
 	default:
-		// Channel full — drop message. Final output is accumulated separately
-		// in Result.Output, so only streaming consumers are affected.
+		// Channel full — drop message. Result.Output is finalized independently,
+		// so only live transcript consumers are affected.
 	}
 }
 
@@ -565,7 +720,6 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		// AskUserQuestion is Claude Code's built-in interactive question tool.
 		// The daemon runs Claude in non-interactive stream-json mode and has
@@ -574,6 +728,12 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 		// never sees the question (see GitHub #2588). User-facing
 		// clarification belongs in an issue comment instead.
 		"--disallowedTools", "AskUserQuestion",
+	}
+	if hasManagedMcpConfig(opts.McpConfig) {
+		// A saved agent-level config is authoritative, including an explicitly
+		// empty object. With no managed config, omit strict mode so Claude can
+		// inherit the user's local runtime MCP servers.
+		args = append(args, "--strict-mcp-config")
 	}
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
@@ -588,14 +748,29 @@ func buildClaudeArgs(opts ExecOptions, logger *slog.Logger) []string {
 	if opts.MaxTurns > 0 {
 		args = append(args, "--max-turns", fmt.Sprintf("%d", opts.MaxTurns))
 	}
-	if opts.SystemPrompt != "" {
-		args = append(args, "--append-system-prompt", opts.SystemPrompt)
-	}
+	// SystemPrompt is intentionally not forwarded as --append-system-prompt:
+	// Claude Code loads the per-task CLAUDE.md the daemon writes into the
+	// workdir, so inlining the same runtime brief would duplicate it on every
+	// turn. Verified against Claude Code 2.1.220 (MUL-5392).
 	if opts.ResumeSessionID != "" {
 		args = append(args, "--resume", opts.ResumeSessionID)
 	}
-	args = append(args, filterCustomArgs(opts.ExtraArgs, claudeBlockedArgs, logger)...)
-	args = append(args, filterCustomArgs(opts.CustomArgs, claudeBlockedArgs, logger)...)
+	blockedArgs := claudeBlockedArgs
+	if opts.ClaudeSettingsPath != "" {
+		// The daemon-owned --settings file is the enforcement layer for disabled
+		// inherited skills. Drop competing per-agent/default flags only while that
+		// policy is active, then append the managed file last.
+		blockedArgs = make(map[string]blockedArgMode, len(claudeBlockedArgs)+1)
+		for key, mode := range claudeBlockedArgs {
+			blockedArgs[key] = mode
+		}
+		blockedArgs["--settings"] = blockedWithValue
+	}
+	args = append(args, filterCustomArgs(opts.ExtraArgs, blockedArgs, logger)...)
+	args = append(args, filterCustomArgs(opts.CustomArgs, blockedArgs, logger)...)
+	if opts.ClaudeSettingsPath != "" {
+		args = append(args, "--settings", opts.ClaudeSettingsPath)
+	}
 	return args
 }
 
@@ -630,15 +805,73 @@ func buildClaudeInput(prompt string) ([]byte, error) {
 	return append(data, '\n'), nil
 }
 
-// resolveSessionID decides which session id to report on the Result. When the
-// caller requested --resume but claude emitted a fresh, different session id
-// AND the run failed, the resume did not land (claude prints
-// "No conversation found with session ID: ..." to stderr, generates a fresh
-// session, and exits). Returning "" in that case keeps the daemon's
-// retry-with-fresh-session fallback able to trigger, instead of silently
-// persisting a brand-new id as if resume had succeeded.
-func resolveSessionID(requestedResume, emitted string, failed bool) string {
-	if failed && requestedResume != "" && emitted != "" && emitted != requestedResume {
+// resumeRejectedPhrases are the provider messages that positively identify a
+// refused resume, as opposed to a failure that merely happened to occur during
+// a resumed run. Shared by the stream-json backends (claude, codebuddy, qwen);
+// the ACP backends match structured error codes via isACPSessionNotFound
+// instead.
+//
+// Matching must stay tight: a false positive makes the daemon throw away a
+// recoverable session pointer and re-run the task, so anything ambiguous
+// belongs out of this list.
+var resumeRejectedPhrases = []string{
+	// Verified: claude prints this when the transcript named by --resume is
+	// absent. Covered by TestResolveSessionID's existing stderr fixture.
+	"no conversation found",
+	// Verified: qwen-code 0.20.0, captured in
+	// testdata/qwen-code-0.20.0-resume-not-found.stderr.txt — "No saved
+	// session found with ID <id>. Run `qwen --resume` without an ID to
+	// choose from existing sessions."
+	"no saved session found",
+	// Reported verbatim in multica-ai/multica#5704 against Claude Code
+	// 2.1.207 (zh-CN): "400 此 session 已绑定另外的ai账号，请执行 /new 开启新
+	// session". This is the account-switch guardrail this signal exists for.
+	"已绑定另外",
+	// INFERRED, not yet observed: the en-US wording of the same guardrail has
+	// not been captured. These are guesses derived from the zh-CN text and
+	// should be corrected once a real English sample is available. A miss
+	// here degrades to a terminal failure carrying the provider's raw error,
+	// which is diagnosable — it does not silently mis-route the run.
+	"bound to another account",
+	"bound to a different account",
+}
+
+// resumeWasRejected reports whether a failed run's --resume was itself
+// refused. It is the positive-evidence predicate behind Result.ResumeRejected:
+// only a rejected resume can be cured by starting a fresh session.
+//
+// texts should include every place the provider may have written the reason —
+// the final error string and the stderr tail — because the account-binding 400
+// arrives in the stream-json result event while "no conversation found" is
+// printed to stderr.
+func resumeWasRejected(requestedResume, emitted string, failed bool, texts ...string) bool {
+	if !failed || requestedResume == "" {
+		return false
+	}
+	for _, text := range texts {
+		lower := strings.ToLower(text)
+		for _, phrase := range resumeRejectedPhrases {
+			if strings.Contains(lower, phrase) {
+				return true
+			}
+		}
+	}
+	// Claude answered with a different session than the one we asked to
+	// continue: the requested transcript did not load.
+	return emitted != "" && emitted != requestedResume
+}
+
+// resolveSessionID decides which session id to report on the Result. A session
+// known to be dead must not be persisted as the resume pointer, so a rejected
+// resume reports "" regardless of what claude echoed back.
+//
+// This is deliberately no longer the signal the daemon reads to decide *why*
+// a run failed — Result.ResumeRejected carries that. An empty SessionID is
+// also produced by any failure before the first stream message (a 401, a
+// missing binary), which is why inferring "the resume was rejected" from it
+// was wrong in both directions.
+func resolveSessionID(requestedResume, emitted string, failed bool, texts ...string) string {
+	if resumeWasRejected(requestedResume, emitted, failed, texts...) {
 		return ""
 	}
 	return emitted
@@ -648,11 +881,52 @@ func buildEnv(extra map[string]string) []string {
 	return mergeEnv(os.Environ(), extra)
 }
 
+func claudeRootSudoPreflight(args, env []string) error {
+	if !argsRequestBypassPermissions(args) || os.Geteuid() != 0 || envHasSandbox(env) {
+		return nil
+	}
+	return fmt.Errorf("Claude Code refuses bypassPermissions under root/sudo privileges. Run the Multica daemon as a non-root user, or set IS_SANDBOX=1 if running in a genuine container/sandbox")
+}
+
+func argsRequestBypassPermissions(args []string) bool {
+	for i, arg := range args {
+		if arg == "--dangerously-skip-permissions" {
+			return true
+		}
+		if arg == "--permission-mode" && i+1 < len(args) && args[i+1] == "bypassPermissions" {
+			return true
+		}
+	}
+	return false
+}
+
+func envHasSandbox(env []string) bool {
+	for i := len(env) - 1; i >= 0; i-- {
+		key, value, ok := strings.Cut(env[i], "=")
+		if key != "IS_SANDBOX" {
+			continue
+		}
+		if !ok {
+			return false
+		}
+		switch strings.ToLower(value) {
+		case "1", "true", "yes", "on":
+			return true
+		default:
+			return false
+		}
+	}
+	return false
+}
+
 func mergeEnv(base []string, extra map[string]string) []string {
 	env := make([]string, 0, len(base)+len(extra))
 	for _, entry := range base {
 		key, _, _ := strings.Cut(entry, "=")
-		if isFilteredChildEnvKey(key) {
+		// MULTICA_* in the daemon's own environment is not task context. Drop
+		// the inherited namespace for every backend and append only the values
+		// daemon.go explicitly assembled for this task below.
+		if isFilteredChildEnvKey(key) || strings.HasPrefix(strings.ToUpper(key), "MULTICA_") {
 			continue
 		}
 		env = append(env, entry)
@@ -699,8 +973,9 @@ func isFilteredChildEnvKey(key string) bool {
 type blockedArgMode int
 
 const (
-	blockedWithValue  blockedArgMode = iota // flag takes a value (next arg or =value)
-	blockedStandalone                       // flag is boolean, no value
+	blockedWithValue     blockedArgMode = iota // flag takes a value (next arg or =value)
+	blockedStandalone                          // flag is boolean, no value
+	blockedOptionalValue                       // flag may take the next non-flag arg or =value
 )
 
 // filterCustomArgs removes protocol-critical flags from user-configured custom
@@ -720,12 +995,8 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 		return args
 	}
 	filtered := make([]string, 0, len(args))
-	skip := false
-	for _, raw := range args {
-		if skip {
-			skip = false
-			continue
-		}
+	for i := 0; i < len(args); i++ {
+		raw := args[i]
 		arg := unshellQuoteArg(raw)
 		flag := arg
 		hasInlineValue := false
@@ -738,7 +1009,13 @@ func filterCustomArgs(args []string, blocked map[string]blockedArgMode, logger *
 			logger.Warn("custom_args: blocked protocol-critical flag, skipping", "flag", flag)
 			if mode == blockedWithValue && !hasInlineValue {
 				// The next arg is the value for this flag — skip it too.
-				skip = true
+				i++
+			} else if mode == blockedOptionalValue && !hasInlineValue && i+1 < len(args) &&
+				!strings.HasPrefix(unshellQuoteArg(args[i+1]), "-") {
+				// Optional values are consumed only when the next token is not
+				// another flag, so a boolean form cannot swallow an unrelated
+				// option.
+				i++
 			}
 			continue
 		}
@@ -785,23 +1062,36 @@ func stripSurroundingQuotes(s string) (string, bool) {
 	return s, false
 }
 
-// writeMcpConfigToTemp writes raw MCP config JSON to a temporary file and returns
-// its path. The caller is responsible for removing the file when done.
+// writeMcpConfigToTemp writes MCP config JSON to a temporary file and returns
+// its path. The caller is responsible for removing it via cleanupMcpConfigTemp.
 func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
-	f, err := os.CreateTemp("", "multica-mcp-*.json")
+	dir, err := os.MkdirTemp("", "multica-mcp-*")
 	if err != nil {
-		return "", fmt.Errorf("create mcp config temp file: %w", err)
+		return "", fmt.Errorf("create mcp config temp dir: %w", err)
 	}
-	if _, err := f.Write(raw); err != nil {
-		f.Close()
-		os.Remove(f.Name())
+	data, err := hardenBrowserMcpConfig(raw, dir)
+	if err != nil {
+		cleanupMcpConfigTemp(filepath.Join(dir, "mcp-config.json"))
+		return "", err
+	}
+	path := filepath.Join(dir, "mcp-config.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		cleanupMcpConfigTemp(path)
 		return "", fmt.Errorf("write mcp config temp file: %w", err)
 	}
-	if err := f.Close(); err != nil {
-		os.Remove(f.Name())
-		return "", fmt.Errorf("close mcp config temp file: %w", err)
+	return path, nil
+}
+
+func cleanupMcpConfigTemp(path string) {
+	if path == "" {
+		return
 	}
-	return f.Name(), nil
+	dir := filepath.Dir(path)
+	if strings.HasPrefix(filepath.Base(dir), "multica-mcp-") {
+		_ = os.RemoveAll(dir)
+		return
+	}
+	_ = os.Remove(path)
 }
 
 // detectVersionTimeout bounds a single `<cli> --version` probe. Version
@@ -816,11 +1106,11 @@ func writeMcpConfigToTemp(raw json.RawMessage) (string, error) {
 // tests can shrink it without waiting out the real bound.
 var detectVersionTimeout = 10 * time.Second
 
-func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
+func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, execPath, "--version")
+	cmd := runtimeCmd.exec(ctx, "--version")
 	hideAgentWindow(cmd)
 	// exec.CommandContext only kills the direct child on timeout. A broken CLI
 	// (node/bun shim) can leave grandchildren that inherited and still hold our
@@ -830,7 +1120,11 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 	cmd.WaitDelay = 2 * time.Second
 	data, err := cmd.Output()
 	if err != nil {
-		return "", fmt.Errorf("detect version for %s: %w", execPath, err)
+		// One provider-agnostic boundary for probes: DetectVersion routes every
+		// provider through here, so an ENOEXEC diagnosis added at this point
+		// reaches the reason the daemon reports for a skipped runtime
+		// (MUL-6164).
+		return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
 	}
 	return extractVersionLine(string(data)), nil
 }

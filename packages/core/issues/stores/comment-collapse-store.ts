@@ -11,6 +11,10 @@ interface CommentCollapseStore {
   collapsedByIssue: Record<string, string[]>;
   isCollapsed: (issueId: string, commentId: string) => boolean;
   toggle: (issueId: string, commentId: string) => void;
+  /** Replace the issue's collapsed set with `commentIds` (fold-all). */
+  collapseAll: (issueId: string, commentIds: readonly string[]) => void;
+  /** Clear the issue's collapsed set (unfold-all). */
+  expandAll: (issueId: string) => void;
 }
 
 export const useCommentCollapseStore = create<CommentCollapseStore>()(
@@ -34,6 +38,21 @@ export const useCommentCollapseStore = create<CommentCollapseStore>()(
             return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: next } };
           }
           return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: [...current, commentId] } };
+        }),
+      collapseAll: (issueId, commentIds) =>
+        set((s) => {
+          if (commentIds.length === 0) {
+            if (!(issueId in s.collapsedByIssue)) return s;
+            const { [issueId]: _, ...rest } = s.collapsedByIssue;
+            return { collapsedByIssue: rest };
+          }
+          return { collapsedByIssue: { ...s.collapsedByIssue, [issueId]: [...new Set(commentIds)] } };
+        }),
+      expandAll: (issueId) =>
+        set((s) => {
+          if (!(issueId in s.collapsedByIssue)) return s;
+          const { [issueId]: _, ...rest } = s.collapsedByIssue;
+          return { collapsedByIssue: rest };
         }),
     }),
     {

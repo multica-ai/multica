@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"compress/gzip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -19,6 +20,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/selfexec"
 )
 
 // ChecksumManifestName is the asset name GoReleaser publishes for the
@@ -291,7 +294,7 @@ func MatchKnownBrewPrefix(path string) string {
 
 // IsBrewInstall checks whether the running multica binary was installed via Homebrew.
 func IsBrewInstall() bool {
-	exePath, err := os.Executable()
+	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return false
 	}
@@ -309,8 +312,14 @@ func IsBrewInstall() bool {
 }
 
 // GetBrewPrefix returns the Homebrew prefix by running `brew --prefix`, or empty string.
+// Bounded: a wedged brew (broken shellenv, unreachable network home) must not
+// park the caller — the daemon's reload loop reaches here periodically.
 func GetBrewPrefix() string {
-	out, err := exec.Command("brew", "--prefix").Output()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "brew", "--prefix")
+	cmd.WaitDelay = 2 * time.Second
+	out, err := cmd.Output()
 	if err != nil {
 		return ""
 	}
@@ -361,7 +370,7 @@ func UpdateViaDownload(targetVersion string) (string, error) {
 // UpdateViaDownloadWithTimeout downloads the latest release binary with a caller-selected timeout.
 func UpdateViaDownloadWithTimeout(targetVersion string, downloadTimeout time.Duration) (string, error) {
 	// Determine current binary path.
-	exePath, err := os.Executable()
+	exePath, err := selfexec.Resolve()
 	if err != nil {
 		return "", fmt.Errorf("resolve executable path: %w", err)
 	}

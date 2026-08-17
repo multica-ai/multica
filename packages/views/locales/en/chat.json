@@ -1,4 +1,9 @@
 {
+  "page": {
+    "title": "Chat",
+    "select_prompt": "Pick a conversation, or start a new one with +",
+    "agent_link_no_access": "You don't have access to chat with this agent."
+  },
   "fab": {
     "running": "Multica is working...",
     "unread_one": "{{count}} unread chat",
@@ -8,18 +13,61 @@
   "input": {
     "placeholder_no_agent": "Create an agent to start chatting",
     "placeholder_archived": "This session is archived",
+    "placeholder_archived_agent": "This agent has been archived",
+    "placeholder_runtime_required": "Bind a runtime to continue",
     "placeholder_named": "Message {{name}}…",
     "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
+    "queue_send_tooltip": "Queue message",
     "stop_tooltip": "Stop",
     "send_failed_toast": "Failed to send message",
-    "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment."
+    "send_blocked_toast": "Message not sent — you no longer have permission to use this agent",
+    "runtime_required_toast": "Message not sent — bind a runtime to this agent first",
+    "attachment_bind_failed_toast": "Message sent, but files were not attached. Please try again in a moment.",
+    "add_tooltip": "Add",
+    "upload_file": "Image or files",
+    "project_context": "Project context",
+    "change_project_context": "Change project context",
+    "remove_project_context": "Remove project context",
+    "no_projects": "No projects yet",
+    "project_context_unsupported": "Project description won't apply — this agent's daemon needs an upgrade"
+  },
+  "queue": {
+    "title_one": "{{count}} queued message",
+    "title_other": "{{count}} queued messages",
+    "clear": "Clear all",
+    "steer": "Steer",
+    "steer_unavailable": "Steer is available after the current reply starts",
+    "steer_unavailable_toast": "Steer is unavailable. Refreshing the queue.",
+    "edit": "Edit queued message",
+    "remove": "Remove queued message",
+    "more": "More queue actions",
+    "fallback": "Queued message",
+    "action_failed_toast": "Couldn't update the queued message"
   },
   "message_list": {
     "show_details": "Show details",
     "replied_in": "Replied in {{elapsed}}",
     "failed_after": "Failed after {{elapsed}}",
-    "task_failed_fallback": "Task failed",
+    "finished_in": "Finished in {{elapsed}}",
+    "no_response": "The agent finished this turn without a text reply.",
+    "failure": {
+      "agent_error": "The agent ran into an error and couldn't finish replying. Please try again.",
+      "timeout": "The agent took too long and stopped before finishing. Try again, or break your request into smaller steps.",
+      "codex_semantic_inactivity": "The agent went idle and stopped before finishing. Please try again.",
+      "runtime_offline": "The agent is offline right now, so it couldn't reply. Please try again once it's back online.",
+      "runtime_recovery": "The agent restarted before it could finish. Please try again.",
+      "manual": "This reply was cancelled.",
+      "skill_bundle_unavailable": "The agent's skills couldn't be downloaded, so it never got started. This is usually a connection problem — please try again.",
+      "provider_network": "The connection to the model provider dropped before the reply finished. Check your network and try again.",
+      "provider_auth_or_access": "The agent's model account isn't signed in any more. Sign in again, then retry.",
+      "provider_quota_limit": "The agent's model account has run out of credit. Top it up or switch accounts, then retry.",
+      "provider_capacity_or_rate_limit": "The model provider is busy or rate-limiting this account. Please try again in a moment.",
+      "context_overflow": "This conversation got too long for the model. Start a new session, or break your request into smaller steps.",
+      "runtime_missing_executable": "The agent's CLI couldn't be run on this machine. Check that it's installed correctly and on PATH, then retry.",
+      "runtime_version_unsupported": "The agent's CLI is too old for this runtime. Upgrade it, then retry.",
+      "fallback": "Something went wrong and the agent couldn't finish replying. Please try again."
+    },
     "tools_one": "{{count}} tool",
     "tools_other": "{{count}} tools",
     "tool_result_named": "{{tool}} result: ",
@@ -29,7 +77,10 @@
     "copy_action": "Copy",
     "copied_toast": "Copied",
     "copy_failed_toast": "Copy failed",
-    "loading_older": "Loading older messages…"
+    "loading_older": "Loading older messages…",
+    "quick_actions_heading": "Follow-up questions",
+    "quick_actions_regenerate": "Regenerate suggestions",
+    "quick_actions_regenerate_failed": "Couldn't refresh suggestions. Please try again."
   },
   "session_history": {
     "untitled": "Untitled",
@@ -63,7 +114,8 @@
       "cancel": "Cancel",
       "confirm": "Delete",
       "confirming": "Deleting..."
-    }
+    },
+    "row_actions_aria": "Chat actions"
   },
   "window": {
     "new_chat_tooltip": "New chat",
@@ -80,7 +132,9 @@
     "others": "Others",
     "no_agents": "No agents",
     "history_group": "Chat history",
-    "agent_filter_placeholder": "Search agents..."
+    "agent_filter_placeholder": "Search agents...",
+    "agent_needs_runtime": "Needs runtime",
+    "agent_needs_runtime_hint": "Bind a runtime before starting a chat with this agent"
   },
   "empty_state": {
     "first_time_title": "Chat with your agents",
@@ -90,14 +144,41 @@
     "first_time_actions": "Ask for a summary, plan your day, or hand off a quick task.",
     "returning_title_named": "Hi, I'm {{name}}",
     "returning_title_default": "Welcome to Multica",
-    "returning_subtitle": "Try asking"
+    "returning_subtitle": "Try asking",
+    "chat_with_named": "Chat with {{name}}"
   },
   "starter_prompts": {
     "list_open": "List my open tasks by priority",
     "summarize_today": "Summarize what I did today",
     "plan_next": "Plan what to work on next"
   },
+  "onboarding_cards": {
+    "aria_label": "Ways to start",
+    "cta": "Start",
+    "board": {
+      "title": "Get a board up in minutes",
+      "desc": "Tell me the goal — I'll create the project, split the issues, and set priorities.",
+      "prompt": "Turn our current goals into a project board"
+    },
+    "delegate": {
+      "title": "Hand me one thing first",
+      "desc": "A quick piece of research, say — results come back as an issue and a report.",
+      "prompt": "Take one thing off my plate: run a quick piece of research and send the results back as a report"
+    },
+    "digest": {
+      "title": "Let the daily digest write itself",
+      "desc": "A morning summary of workspace progress, straight to your inbox.",
+      "prompt": "Set up a daily automation that posts a morning summary of workspace progress"
+    },
+    "digest_badge": "Daily 9:00"
+  },
   "no_agent_banner": "You need an agent to start chatting.",
+  "archived_agent_banner": "{{name}} has been archived — this conversation is read-only.",
+  "runtime_required_banner": {
+    "fallback_name": "The agent",
+    "message": "{{name}} needs a runtime before it can reply.",
+    "action": "Bind runtime"
+  },
   "offline_banner": {
     "fallback_name": "the agent",
     "unstable": "{{name}}'s connection is unstable — replies may be delayed.",
@@ -107,6 +188,7 @@
     "stages": {
       "offline": "Offline",
       "reconnecting": "Reconnecting",
+      "retrying": "Retrying",
       "queued": "Queued",
       "waiting_local_directory": "Waiting for local directory",
       "starting_up": "Starting up",
@@ -121,5 +203,31 @@
       "searching_web": "Searching the web",
       "fallback": "Working"
     }
+  },
+  "list": {
+    "typing": "Typing…",
+    "failed": "Failed to send",
+    "you_prefix": "You: ",
+    "no_messages": "No messages yet",
+    "no_response_preview": "No text reply",
+    "quick_agents": "Frequent agents",
+    "add": "Add",
+    "add_agent": "Add a frequent agent",
+    "unpin_agent": "Remove from frequent",
+    "waiting": "Waiting for reply",
+    "pin": "Pin",
+    "unpin": "Unpin",
+    "pinned": "Pinned",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "archived_title": "Archived",
+    "row_actions_aria": "Chat actions"
+  },
+  "header": {
+    "view_profile": "View agent profile",
+    "rename": "Rename chat",
+    "archive": "Archive chat",
+    "unarchive": "Unarchive chat",
+    "delete": "Delete chat"
   }
 }

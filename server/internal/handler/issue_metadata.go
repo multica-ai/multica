@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -75,16 +76,11 @@ func validateIssueMetadataValue(raw json.RawMessage) error {
 // parseIssueMetadata decodes the JSONB bytes from db.Issue.Metadata into a
 // Go map suitable for response serialization. Empty or unparseable blobs
 // degrade to an empty map — the DB CHECK guarantees object shape, so this
-// path is only hit on rows somehow predating the migration.
+// path is only hit on rows somehow predating the migration. Shared with the
+// service-layer broadcast rendering (service.IssueToMap) so both ways of
+// describing an issue agree on what an unset bag looks like on the wire.
 func parseIssueMetadata(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return map[string]any{}
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
-		return map[string]any{}
-	}
-	return out
+	return util.JSONObjectOrEmpty(raw)
 }
 
 // parseMetadataFilterParam reads the `metadata` query parameter (a JSON

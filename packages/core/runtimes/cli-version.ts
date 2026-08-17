@@ -11,6 +11,7 @@
  * "your daemon needs an upgrade" before they hit submit.
  */
 export const MIN_QUICK_CREATE_CLI_VERSION = "0.2.21";
+export const MIN_QUICK_CREATE_FIELDS_CLI_VERSION = "0.4.3";
 
 export type CliVersionState = "ok" | "too_old" | "missing";
 
@@ -52,19 +53,33 @@ function lessThan(a: [number, number, number], b: [number, number, number]) {
  * itself is the shared signal, so frontend and server agree by construction.
  */
 export function checkQuickCreateCliVersion(detected: string | undefined | null): CliVersionCheck {
+  return checkCliVersion(detected, MIN_QUICK_CREATE_CLI_VERSION);
+}
+
+/** Capability gate for explicit quick-create priority and due-date fields. */
+export function checkQuickCreateFieldsCliVersion(
+  detected: string | undefined | null,
+): CliVersionCheck {
+  return checkCliVersion(detected, MIN_QUICK_CREATE_FIELDS_CLI_VERSION);
+}
+
+function checkCliVersion(
+  detected: string | undefined | null,
+  minimum: string,
+): CliVersionCheck {
   const current = (detected ?? "").trim();
   if (DEV_DESCRIBE_RE.test(current)) {
-    return { state: "ok", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+    return { state: "ok", current, min: minimum };
   }
   const parsed = current ? parseSemver(current) : null;
   if (!parsed) {
-    return { state: "missing", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+    return { state: "missing", current, min: minimum };
   }
-  const min = parseSemver(MIN_QUICK_CREATE_CLI_VERSION)!;
+  const min = parseSemver(minimum)!;
   if (lessThan(parsed, min)) {
-    return { state: "too_old", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+    return { state: "too_old", current, min: minimum };
   }
-  return { state: "ok", current, min: MIN_QUICK_CREATE_CLI_VERSION };
+  return { state: "ok", current, min: minimum };
 }
 
 /** Pull `cli_version` off a runtime row's loosely-typed metadata bag. */
@@ -95,10 +110,125 @@ export const MIN_HANDOFF_CLI_VERSION = "0.3.28";
  * round-trip, exactly like the quick-create version gate.
  */
 export function handoffSupported(detected: string | undefined | null): boolean {
+  return meetsMinCliVersion(detected, MIN_HANDOFF_CLI_VERSION);
+}
+
+/**
+ * First release whose daemon renders the chat session's project context
+ * (description + resources) into the run brief (PR #5765, ships in v0.4.10).
+ * Older daemons still receive and honor the project's repos — the server
+ * pre-extracts those into the generic `repos` claim field — but silently skip
+ * the Project Context section, so the durable description never reaches the
+ * agent. SOFT gate: selecting a project always works; the UI only warns.
+ *
+ * Frontend-only constant: unlike handoff there is no server preview endpoint
+ * computing this, so there is no server twin to keep in lockstep with.
+ */
+export const MIN_CHAT_PROJECT_CONTEXT_CLI_VERSION = "0.4.10";
+
+/**
+ * Whether a daemon-reported CLI version is new enough to inject a chat
+ * session's project description into the run brief. Same degrade rules as
+ * `handoffSupported`: missing / unparsable / below-minimum are `false`,
+ * dev-built daemons (git-describe shape) always pass.
+ */
+export function chatProjectContextSupported(detected: string | undefined | null): boolean {
+  return meetsMinCliVersion(detected, MIN_CHAT_PROJECT_CONTEXT_CLI_VERSION);
+}
+
+function meetsMinCliVersion(detected: string | undefined | null, minimum: string): boolean {
   const current = (detected ?? "").trim();
   if (!current) return false;
   if (DEV_DESCRIBE_RE.test(current)) return true;
   const parsed = parseSemver(current);
   if (!parsed) return false;
-  return !lessThan(parsed, parseSemver(MIN_HANDOFF_CLI_VERSION)!);
+  return !lessThan(parsed, parseSemver(minimum)!);
+}
+
+/**
+ * Minimum daemon CLI version that implements worktree mode for
+ * `local_directory` resources (`execution_mode: "worktree"`).
+ *
+ * Server twin: `MinLocalWorktreeCLIVersion` in `server/pkg/agent/version.go`.
+ * Keep the two in lockstep — the server refuses to SAVE a worktree resource
+ * below this floor, and this constant only exists so the UI can say so before
+ * the user submits rather than surfacing a bare 422.
+ *
+ * HARD gate, unlike `handoffSupported`: a daemon below the floor does not know
+ * the field exists, so it would run the task in place — editing the working
+ * copy the user asked to isolate. Degrading to "just try it" is not an option.
+ */
+export const MIN_LOCAL_WORKTREE_CLI_VERSION = "0.4.24";
+
+/**
+ * Whether a daemon-reported CLI version can run worktree mode. Missing /
+ * unparsable / below-minimum are `false`; dev-built daemons (git-describe
+ * shape) pass, matching every other gate in this file.
+ */
+export function localWorktreeSupported(detected: string | undefined | null): boolean {
+  return meetsMinCliVersion(detected, MIN_LOCAL_WORKTREE_CLI_VERSION);
+}
+
+/**
+ * Capability a daemon advertises when it implements worktree mode for
+ * local_directory resources. Mirrors `DaemonCapabilityLocalWorktreeV1` in
+ * `server/pkg/protocol/messages.go`.
+ */
+export const LOCAL_WORKTREE_CAPABILITY = "local-worktree-v1";
+
+/**
+ * Whether a runtime advertised worktree support at registration.
+ *
+ * This replaces a version comparison on purpose. A daemon without the
+ * implementation does not merely lose concurrency — it ignores `execution_mode`
+ * and edits the user's working copy, which is what the mode exists to prevent.
+ * Version strings could not answer that: a dev build reports a git-describe
+ * string that `meetsMinCliVersion` deliberately exempts, so a daemon with no
+ * worktree code at all passed the check (MUL-5707).
+ *
+ * Absent metadata (an older daemon that never sent the header) is `false` —
+ * this must fail closed, and the server enforces the same thing at claim time.
+ */
+export function runtimeSupportsLocalWorktree(metadata: unknown): boolean {
+  if (!metadata || typeof metadata !== "object") return false;
+  const caps = (metadata as { capabilities?: unknown }).capabilities;
+  return Array.isArray(caps) && caps.includes(LOCAL_WORKTREE_CAPABILITY);
+}
+
+/** Minimal runtime shape this module needs; keeps callers from importing types. */
+type RuntimeCapabilityRow = {
+  daemon_id?: string | null;
+  last_seen_at?: string | null;
+  metadata?: unknown;
+};
+
+/**
+ * Whether the machine behind `daemonId` currently runs a daemon that supports
+ * worktree mode, judged by its MOST RECENTLY SEEN runtime row.
+ *
+ * Deliberately not "any row advertised it". Deregistering a runtime only marks
+ * the row offline — its metadata survives — so a machine that once ran a
+ * capable daemon and then downgraded still has an old capable row beside the
+ * fresh incapable one, and an any-match would answer yes forever. The server's
+ * `daemonAdvertisesWorktree` uses the same newest-wins rule; the two must agree
+ * or the UI offers a mode the API will refuse.
+ */
+export function daemonSupportsLocalWorktree(
+  runtimes: RuntimeCapabilityRow[],
+  daemonId: string | null | undefined,
+): boolean {
+  if (!daemonId) return false;
+  let newest: RuntimeCapabilityRow | undefined;
+  for (const rt of runtimes) {
+    if (rt.daemon_id !== daemonId) continue;
+    if (!newest) {
+      newest = rt;
+      continue;
+    }
+    // A row that never reported sorts oldest, so a live row always wins.
+    const candidateSeen = rt.last_seen_at ?? "";
+    const currentSeen = newest.last_seen_at ?? "";
+    if (candidateSeen > currentSeen) newest = rt;
+  }
+  return newest ? runtimeSupportsLocalWorktree(newest.metadata) : false;
 }

@@ -5,10 +5,16 @@ import {
   ArrowUp,
   ChevronDown,
   Filter,
+  Search,
   X,
 } from "lucide-react";
-import type { AgentAvailability } from "@multica/core/agents";
+import {
+  ALL_ACCESS_SCOPES,
+  effectiveAccessScope,
+  type AgentAvailability,
+} from "@multica/core/agents";
 import type { MemberWithUser } from "@multica/core/types";
+import { runtimeDisplayLabel } from "@multica/core/runtimes";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import {
   AGENT_SCOPES,
@@ -19,6 +25,7 @@ import {
   type AgentSortField,
 } from "@multica/core/agents/stores";
 import { Button } from "@multica/ui/components/ui/button";
+import { Input } from "@multica/ui/components/ui/input";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -46,10 +53,13 @@ import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { availabilityConfig } from "../presence";
 import { useT } from "../../i18n";
 import type { AgentListRow } from "./agents-page";
+import { PAGE_GUTTER } from "../../layout/page-header";
+import { cn } from "@multica/ui/lib/utils";
 
 const COLUMN_KEYS: AgentColumnKey[] = [
   "status",
   "owner",
+  "access",
   "runtime",
   "lastActive",
   "runs",
@@ -78,13 +88,18 @@ export function countActiveFilterDimensions(
   if (filters.runtimes.length > 0) count++;
   if (filters.owners.length > 0) count++;
   if (filters.models.length > 0) count++;
+  if (filters.access.length > 0) count++;
   return count;
 }
+
+const ACCESS_SCOPES = ALL_ACCESS_SCOPES;
 
 export function AgentListToolbar({
   scope,
   onScopeChange,
   scopeCounts,
+  search,
+  onSearchChange,
   filters,
   onToggleFilter,
   onClearFilters,
@@ -102,6 +117,8 @@ export function AgentListToolbar({
   onScopeChange: (scope: AgentsScope) => void;
   /** Per-scope totals from the FULL set — scope counts ignore filters. */
   scopeCounts: Record<AgentsScope, number>;
+  search: string;
+  onSearchChange: (value: string) => void;
   filters: AgentListFilters;
   onToggleFilter: (key: keyof AgentListFilters, value: string) => void;
   onClearFilters: () => void;
@@ -122,11 +139,13 @@ export function AgentListToolbar({
 
   const activeCount = countActiveFilterDimensions(filters);
   const hasActiveFilters = activeCount > 0;
+  const hasSearch = search.trim().length > 0;
 
   // Option lists with counts, derived from the scope's unfiltered rows so
   // toggling one dimension doesn't make the others' options vanish.
   const availabilityCounts = new Map<string, number>();
   const runtimeOptions = new Map<string, { name: string; count: number }>();
+  const accessCounts = new Map<string, number>();
   for (const row of allRows) {
     if (row.presence) {
       availabilityCounts.set(
@@ -138,8 +157,10 @@ export function AgentListToolbar({
     if (rt) {
       const entry = runtimeOptions.get(rt.id);
       if (entry) entry.count += 1;
-      else runtimeOptions.set(rt.id, { name: rt.name, count: 1 });
+      else runtimeOptions.set(rt.id, { name: runtimeDisplayLabel(rt), count: 1 });
     }
+    const a = effectiveAccessScope(row.agent.permission_mode, row.agent.invocation_targets);
+    accessCounts.set(a, (accessCounts.get(a) ?? 0) + 1);
   }
 
   // Owner options: members who own at least one agent in the current scope.
@@ -169,6 +190,7 @@ export function AgentListToolbar({
   const COLUMN_LABELS: Record<AgentColumnKey, string> = {
     status: t(($) => $.columns.status),
     owner: t(($) => $.columns.owner),
+    access: t(($) => $.columns.access),
     runtime: t(($) => $.columns.runtime),
     lastActive: t(($) => $.columns.last_active),
     runs: t(($) => $.columns.runs),
@@ -178,17 +200,28 @@ export function AgentListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-xs text-muted-foreground">{n}</span>
+    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
   );
 
   return (
-    <div className="h-12 shrink-0 overflow-x-auto px-5 [-webkit-overflow-scrolling:touch]">
+    <div className={cn("h-12 shrink-0 overflow-x-auto [-webkit-overflow-scrolling:touch]", PAGE_GUTTER)}>
       <div className="flex h-full w-max min-w-full items-center justify-between gap-2">
-        {/* Left: scope buttons + result count. Scope mixes the ownership lens
-          (mine/all) with the archived lifecycle stage; no search box (scope
-          partitions the small set). Button styling and the <md dropdown
-          collapse follow the issues header's scope buttons. */}
+        {/* Left: local search + scope buttons + result count. Scope mixes the
+          ownership lens (mine/all) with the archived lifecycle stage. Button
+          styling and the <md dropdown collapse follow the issues header's
+          scope buttons. */}
       <div className="flex min-w-0 items-center gap-2">
+        <div className="relative hidden shrink-0 md:block">
+          <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            aria-label={t(($) => $.page.search_placeholder)}
+            placeholder={t(($) => $.page.search_placeholder)}
+            className="h-8 w-56 pl-8 text-body"
+          />
+        </div>
+
         <div className="hidden shrink-0 items-center gap-1 md:flex">
           {AGENT_SCOPES.map((s) => (
             <Button
@@ -203,7 +236,7 @@ export function AgentListToolbar({
               onClick={() => onScopeChange(s)}
             >
               {SCOPE_LABELS[s]}
-              <span className="tabular-nums text-xs text-muted-foreground/70">
+              <span className="tabular-nums text-caption text-muted-foreground">
                 {scopeCounts[s]}
               </span>
             </Button>
@@ -231,7 +264,7 @@ export function AgentListToolbar({
               {AGENT_SCOPES.map((s) => (
                 <DropdownMenuRadioItem key={s} value={s}>
                   {SCOPE_LABELS[s]}
-                  <span className="ml-2 tabular-nums text-xs text-muted-foreground/70">
+                  <span className="ml-2 tabular-nums text-caption text-muted-foreground">
                     {scopeCounts[s]}
                   </span>
                 </DropdownMenuRadioItem>
@@ -240,10 +273,10 @@ export function AgentListToolbar({
           </DropdownMenuContent>
         </DropdownMenu>
 
-        {hasActiveFilters && (
+        {(hasActiveFilters || hasSearch) && (
           <span
             title={t(($) => $.toolbar.result_count_title)}
-            className="hidden shrink-0 text-xs tabular-nums text-muted-foreground md:inline"
+            className="hidden shrink-0 text-caption tabular-nums text-muted-foreground md:inline"
           >
             {visibleCount} / {allRows.length}
           </span>
@@ -308,7 +341,7 @@ export function AgentListToolbar({
                   {t(($) => $.toolbar.section_availability)}
                 </span>
                 {filters.availability.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.availability.length}
                   </span>
                 )}
@@ -339,6 +372,43 @@ export function AgentListToolbar({
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 
+            {/* Access — effective access scope (workspace / specific-people / owner-only).
+                Mirrors Availability's keyboard/ARIA pattern. */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger>
+                <span className="flex-1">
+                  {t(($) => $.toolbar.section_access)}
+                </span>
+                {filters.access.length > 0 && (
+                  <span className="text-caption font-medium text-primary">
+                    {filters.access.length}
+                  </span>
+                )}
+              </DropdownMenuSubTrigger>
+              <DropdownMenuSubContent className="w-auto min-w-44">
+                {ACCESS_SCOPES.map((value) => (
+                  <DropdownMenuCheckboxItem
+                    key={value}
+                    checked={filters.access.includes(value)}
+                    onCheckedChange={() => onToggleFilter("access", value)}
+                    className={FILTER_ITEM_CLASS}
+                  >
+                    <HoverCheck checked={filters.access.includes(value)} />
+                    <span className="min-w-0 truncate">
+                      {t(($) =>
+                        value === "workspace"
+                          ? $.access.scope_labels.workspace
+                          : value === "specific-people"
+                            ? $.access.scope_labels.specific_people
+                            : $.access.scope_labels.owner_only,
+                      )}
+                    </span>
+                    {countBadge(accessCounts.get(value) ?? 0)}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+
             {/* Runtime */}
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
@@ -346,7 +416,7 @@ export function AgentListToolbar({
                   {t(($) => $.toolbar.section_runtime)}
                 </span>
                 {filters.runtimes.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.runtimes.length}
                   </span>
                 )}
@@ -376,7 +446,7 @@ export function AgentListToolbar({
                   {t(($) => $.toolbar.section_owner)}
                 </span>
                 {filters.owners.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.owners.length}
                   </span>
                 )}
@@ -396,7 +466,7 @@ export function AgentListToolbar({
                         name={m?.name ?? userId.slice(0, 8)}
                         initials={(m?.name ?? "?").slice(0, 2).toUpperCase()}
                         avatarUrl={resolvePublicFileUrl(m?.avatar_url ?? null)}
-                        size={16}
+                        size="sm"
                       />
                       <span className="min-w-0 truncate">
                         {m?.name ?? userId.slice(0, 8)}
@@ -416,7 +486,7 @@ export function AgentListToolbar({
                     {t(($) => $.toolbar.section_model)}
                   </span>
                   {filters.models.length > 0 && (
-                    <span className="text-xs font-medium text-primary">
+                    <span className="text-caption font-medium text-primary">
                       {filters.models.length}
                     </span>
                   )}
@@ -469,7 +539,7 @@ export function AgentListToolbar({
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
             <div className="border-b px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.sort_by)}
               </span>
               <div className="mt-2 flex items-center gap-1.5">
@@ -479,7 +549,7 @@ export function AgentListToolbar({
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1 justify-between text-xs"
+                        className="flex-1 justify-between text-caption"
                       >
                         {sortLabel}
                         <ChevronDown className="size-3 text-muted-foreground" />
@@ -525,7 +595,7 @@ export function AgentListToolbar({
             </div>
 
             <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.section_columns)}
               </span>
               <div className="mt-2 space-y-2">
@@ -534,7 +604,7 @@ export function AgentListToolbar({
                     key={key}
                     className="flex cursor-pointer items-center justify-between"
                   >
-                    <span className="text-sm">{COLUMN_LABELS[key]}</span>
+                    <span className="text-body">{COLUMN_LABELS[key]}</span>
                     <Switch
                       size="sm"
                       checked={!hiddenColumns.includes(key)}

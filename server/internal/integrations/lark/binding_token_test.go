@@ -5,14 +5,18 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // These tests cover the pure-Go halves of BindingTokenService — token
 // generation entropy/encoding, deterministic hashing — without
 // touching the database. DB-backed mint/redeem invariants (single use,
-// expiry) are covered by the DB CHECK on lark_binding_token plus the
+// expiry) are covered by the DB CHECK on channel_binding_token plus the
 // ConsumeLarkBindingToken query, which require an integration test
 // against a real Postgres and are added in a follow-up.
 
@@ -97,5 +101,49 @@ func TestHashTokenDeterministic(t *testing.T) {
 	}
 	if len(a) != 64 {
 		t.Fatalf("expected sha256 hex (64 chars), got %d chars", len(a))
+	}
+}
+
+// TestBindingTokenMintClampsAppClockSkew protects the production binding-card
+// path. Application and database clocks can differ slightly; computing the
+// full 15-minute TTL from an app clock that is ahead of Postgres used to trip
+// channel_binding_token_ttl_cap, so unbound Feishu users received no card.
+func TestBindingTokenMintClampsAppClockSkew(t *testing.T) {
+	pool := channelScopeTestDB(t)
+	ctx := context.Background()
+	installationID := util.MustParseUUID("5c09e000-0000-4000-8000-000000000101")
+	workspaceID := util.MustParseUUID("5c09e000-0000-4000-8000-000000000102")
+
+	clean := func() {
+		_, _ = pool.Exec(context.Background(),
+			`DELETE FROM channel_binding_token WHERE installation_id = $1`, installationID)
+	}
+	clean()
+	t.Cleanup(clean)
+
+	service := NewBindingTokenServiceWithClock(db.New(pool), nil, func() time.Time {
+		return time.Now().Add(time.Hour)
+	})
+	token, err := service.Mint(ctx, workspaceID, installationID, OpenID("ou_clock_skew"))
+	if err != nil {
+		t.Fatalf("Mint with app clock ahead of database: %v", err)
+	}
+
+	var storedExpiresAt, createdAt time.Time
+	if err := pool.QueryRow(ctx, `
+		SELECT expires_at, created_at
+		FROM channel_binding_token
+		WHERE installation_id = $1
+	`, installationID).Scan(&storedExpiresAt, &createdAt); err != nil {
+		t.Fatalf("read minted token: %v", err)
+	}
+	if storedExpiresAt.After(createdAt.Add(BindingTokenTTL)) {
+		t.Fatalf("stored TTL exceeds cap: created=%s expires=%s", createdAt, storedExpiresAt)
+	}
+	if storedExpiresAt.Before(createdAt.Add(BindingTokenTTL - time.Second)) {
+		t.Fatalf("stored TTL was shortened unexpectedly: created=%s expires=%s", createdAt, storedExpiresAt)
+	}
+	if !token.ExpiresAt.Equal(storedExpiresAt) {
+		t.Fatalf("returned expiry %s does not match stored expiry %s", token.ExpiresAt, storedExpiresAt)
 	}
 }

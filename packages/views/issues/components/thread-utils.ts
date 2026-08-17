@@ -60,3 +60,42 @@ export function deriveThreadResolution(
   }
   return chosen ? { kind: "reply", resolutionId: chosen.id } : { kind: "none" };
 }
+
+/**
+ * IDs of every thread root (top-level comment) in a timeline — the units the
+ * per-comment collapse store folds. Same root/reply split as issue-detail's
+ * `timelineView` grouping: a comment is a root iff it has no `parent_id`.
+ */
+export function rootCommentIds(entries: readonly TimelineEntry[]): string[] {
+  return entries
+    .filter((e) => e.type === "comment" && !e.parent_id)
+    .map((e) => e.id);
+}
+
+/**
+ * IDs of thread roots that carry a resolution (on the root itself or on a
+ * reply) — the threads that render folded behind a bar until expanded via
+ * `useResolvedExpandStore`. Unresolved roots are excluded on purpose: seeding
+ * them into the expand set would keep them expanded through a later resolve.
+ */
+export function resolvedThreadRootIds(entries: readonly TimelineEntry[]): string[] {
+  const roots: TimelineEntry[] = [];
+  const repliesByParent = new Map<string, TimelineEntry[]>();
+  for (const e of entries) {
+    if (e.type !== "comment") continue;
+    if (!e.parent_id) {
+      roots.push(e);
+    } else {
+      const list = repliesByParent.get(e.parent_id) ?? [];
+      list.push(e);
+      repliesByParent.set(e.parent_id, list);
+    }
+  }
+  return roots
+    .filter(
+      (root) =>
+        deriveThreadResolution(root, collectThreadReplies(root.id, repliesByParent)).kind !==
+        "none",
+    )
+    .map((root) => root.id);
+}

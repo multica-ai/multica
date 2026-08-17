@@ -91,6 +91,7 @@ type ConnectedAccount struct {
 	ID           string         `json:"id"`
 	UserID       string         `json:"user_id"`
 	AuthConfigID string         `json:"auth_config_id"`
+	AuthConfig   AuthConfigRef  `json:"auth_config"`
 	Toolkit      Toolkit        `json:"toolkit"`
 	Status       string         `json:"status"`
 	StatusReason string         `json:"status_reason,omitempty"`
@@ -98,6 +99,15 @@ type ConnectedAccount struct {
 	UpdatedAt    string         `json:"updated_at,omitempty"`
 	LastUsedAt   string         `json:"last_used_at,omitempty"`
 	Extra        map[string]any `json:"-"`
+}
+
+// AuthConfigRef is the nested auth_config object Composio returns on connected
+// accounts. Some responses also include the older top-level auth_config_id.
+type AuthConfigRef struct {
+	ID                string `json:"id"`
+	AuthScheme        string `json:"auth_scheme,omitempty"`
+	IsComposioManaged bool   `json:"is_composio_managed,omitempty"`
+	IsDisabled        bool   `json:"is_disabled,omitempty"`
 }
 
 // ListConnectedAccountsResponse is the typed paginated response.

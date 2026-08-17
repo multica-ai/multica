@@ -1,9 +1,10 @@
 "use client";
 
 import { useState } from "react";
-import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Users, Clock, X, Mail } from "lucide-react";
+import { Crown, Shield, User, Plus, MoreHorizontal, UserMinus, Clock, X, Mail, Link, Copy, Trash2 } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
-import type { MemberWithUser, MemberRole, Invitation } from "@multica/core/types";
+import { useOptionalNavigation } from "../../navigation";
+import type { MemberWithUser, MemberRole, Invitation, ShareLink } from "@multica/core/types";
 import { Input } from "@multica/ui/components/ui/input";
 import { Button } from "@multica/ui/components/ui/button";
 import { Card, CardContent } from "@multica/ui/components/ui/card";
@@ -40,15 +41,30 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace } from "@multica/core/paths";
-import { memberListOptions, invitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { memberListOptions, invitationListOptions, shareLinkListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
 import { useT } from "../../i18n";
+import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 
 const ROLE_ICONS: Record<MemberRole, typeof Crown> = {
   owner: Crown,
   admin: Shield,
   member: User,
 };
+
+// Builds the shareable URL for a share-link invite. Prefers the navigation
+// adapter's getShareableUrl (works on desktop where window.location.origin is
+// not the public web origin), falling back to the browser origin on web.
+function buildShareLinkUrl(
+  navigation: ReturnType<typeof useOptionalNavigation>,
+  code: string,
+): string {
+  const joinPath = `/join?code=${code}`;
+  if (navigation?.getShareableUrl) {
+    return navigation.getShareableUrl(joinPath);
+  }
+  return `${typeof window !== "undefined" ? window.location.origin : ""}${joinPath}`;
+}
 
 function useRoleLabels() {
   const { t } = useT("settings");
@@ -103,10 +119,10 @@ function MemberRow({
 
   return (
     <div className="flex items-center gap-3 px-4 py-3">
-      <ActorAvatar actorType="member" actorId={member.user_id} size={32} />
+      <ActorAvatar actorType="member" actorId={member.user_id} size="lg" />
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{member.name}</div>
-        <div className="text-xs text-muted-foreground truncate">{member.email}</div>
+        <div className="text-body font-medium truncate">{member.name}</div>
+        <div className="text-caption text-muted-foreground truncate">{member.email}</div>
       </div>
       {showMenu && (
         <DropdownMenu>
@@ -147,14 +163,14 @@ function MemberRow({
                           <Icon className="h-3.5 w-3.5" />
                           <div className="flex flex-col">
                             <span>{config.label}</span>
-                            <span className="text-xs text-muted-foreground font-normal">
+                            <span className="text-caption text-muted-foreground font-normal">
                               {wouldDemoteLastOwner
                                 ? t(($) => $.members.cannot_demote_last_owner)
                                 : config.description}
                             </span>
                           </div>
                           {member.role === role && (
-                            <span className="ml-auto text-xs text-muted-foreground">{"✓"}</span>
+                            <span className="ml-auto text-caption text-muted-foreground">{"✓"}</span>
                           )}
                         </DropdownMenuItem>
                       );
@@ -202,8 +218,8 @@ function InvitationRow({
         <Mail className="h-4 w-4 text-muted-foreground" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm font-medium truncate">{invitation.invitee_email}</div>
-        <div className="flex items-center gap-1 text-xs text-muted-foreground">
+        <div className="text-body font-medium truncate">{invitation.invitee_email}</div>
+        <div className="flex items-center gap-1 text-caption text-muted-foreground">
           <Clock className="h-3 w-3" />
           <span>{t(($) => $.members.pending_status)}</span>
         </div>
@@ -226,6 +242,59 @@ function InvitationRow({
   );
 }
 
+function ShareLinkRow({
+  link,
+  onRevoke,
+  busy,
+  onCopy,
+}: {
+  link: ShareLink;
+  onRevoke: () => void;
+  busy: boolean;
+  onCopy: () => void;
+}) {
+  const { t } = useT("settings");
+  const roleConfig = useRoleLabels();
+  const rc = roleConfig[link.role];
+  const navigation = useOptionalNavigation();
+  const joinUrl = buildShareLinkUrl(navigation, link.code);
+
+  return (
+    <div className="flex items-center gap-3 px-4 py-3">
+      <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted">
+        <Link className="h-4 w-4 text-muted-foreground" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-body font-medium truncate">{joinUrl}</div>
+        <div className="flex items-center gap-1 text-caption text-muted-foreground">
+          <span>{t(($) => $.members.share_link_uses, { used: link.use_count, max: link.max_uses ?? "∞" })}</span>
+          {link.expires_at && <span>· {t(($) => $.members.share_link_expires, { date: new Date(link.expires_at).toLocaleDateString() })}</span>}
+        </div>
+      </div>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        onClick={onCopy}
+        title={t(($) => $.members.share_link_copy_tooltip)}
+      >
+        <Copy className="h-4 w-4 text-muted-foreground" />
+      </Button>
+      <Button
+        variant="ghost"
+        size="icon-sm"
+        disabled={busy}
+        onClick={onRevoke}
+        title={t(($) => $.members.share_link_revoke_tooltip)}
+      >
+        <Trash2 className="h-4 w-4 text-muted-foreground" />
+      </Button>
+      <Badge variant="outline">
+        {rc.label}
+      </Badge>
+    </div>
+  );
+}
+
 export function MembersTab() {
   const { t } = useT("settings");
   const roleConfig = useRoleLabels();
@@ -233,6 +302,7 @@ export function MembersTab() {
   const workspace = useCurrentWorkspace();
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
+  const navigation = useOptionalNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
 
@@ -241,6 +311,10 @@ export function MembersTab() {
   const [inviteLoading, setInviteLoading] = useState(false);
   const [memberActionId, setMemberActionId] = useState<string | null>(null);
   const [invitationActionId, setInvitationActionId] = useState<string | null>(null);
+  const [shareLinkActionId, setShareLinkActionId] = useState<string | null>(null);
+  const [shareLinkLoading, setShareLinkLoading] = useState(false);
+  const [shareLinkRole, setShareLinkRole] = useState<MemberRole>("member");
+  const [shareLinkExpiry, setShareLinkExpiry] = useState<string>("168"); // default 7 days
   const [confirmAction, setConfirmAction] = useState<{
     title: string;
     description: string;
@@ -252,6 +326,9 @@ export function MembersTab() {
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const isOwner = currentMember?.role === "owner";
   const ownerCount = members.filter((m) => m.role === "owner").length;
+  // Only owners/admins may list share links; skip the request for plain
+  // members (the server would 403) once the current member's role is known.
+  const { data: shareLinks = [] } = useQuery(shareLinkListOptions(wsId, canManageWorkspace));
 
   const handleInviteMember = async () => {
     if (!workspace) return;
@@ -328,26 +405,78 @@ export function MembersTab() {
     });
   };
 
+  const handleCreateShareLink = async () => {
+    if (!workspace) return;
+    setShareLinkLoading(true);
+    try {
+      await api.createShareLink(workspace.id, { role: shareLinkRole, expires_in: parseInt(shareLinkExpiry) || undefined });
+      qc.invalidateQueries({ queryKey: workspaceKeys.shareLinks(wsId) });
+      toast.success(t(($) => $.members.toast_share_link_created));
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_share_link_failed));
+    } finally {
+      setShareLinkLoading(false);
+    }
+  };
+
+  const handleRevokeShareLink = (link: ShareLink) => {
+    if (!workspace) return;
+    setShareLinkActionId(link.id);
+    api.revokeShareLink(workspace.id, link.id)
+      .then(() => {
+        qc.invalidateQueries({ queryKey: workspaceKeys.shareLinks(wsId) });
+        toast.success(t(($) => $.members.toast_share_link_revoked));
+      })
+      .catch((e) => {
+        toast.error(e instanceof Error ? e.message : t(($) => $.members.toast_share_link_revoke_failed));
+      })
+      .finally(() => setShareLinkActionId(null));
+  };
+
+  const handleCopyShareLink = (link: ShareLink) => {
+    const joinUrl = buildShareLinkUrl(navigation, link.code);
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(joinUrl).then(
+        () => toast.success(t(($) => $.members.toast_share_link_copied)),
+        () => toast.error(t(($) => $.members.toast_share_link_copy_failed)),
+      );
+    } else {
+      const textArea = document.createElement("textarea");
+      textArea.value = joinUrl;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      document.body.appendChild(textArea);
+      textArea.select();
+      try {
+        document.execCommand("copy");
+        toast.success(t(($) => $.members.toast_share_link_copied));
+      } catch {
+        toast.error(t(($) => $.members.toast_share_link_copy_failed));
+      }
+      document.body.removeChild(textArea);
+    }
+  };
+
   if (!workspace) return null;
 
   return (
-    <div className="space-y-8">
-      <section className="space-y-4">
-        <div className="flex items-center gap-2">
-          <Users className="h-4 w-4 text-muted-foreground" />
-          <h2 className="text-sm font-semibold">{t(($) => $.members.section_title, { count: members.length })}</h2>
-        </div>
+    <SettingsTab title={t(($) => $.page.tabs.members)}>
+      <SettingsSection title={t(($) => $.members.section_title, { count: members.length })}>
 
         {canManageWorkspace && (
           <Card>
             <CardContent className="space-y-3">
               <div className="flex items-center gap-2">
                 <Plus className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium">{t(($) => $.members.invite_title)}</h3>
+                <h3 className="text-body font-medium">{t(($) => $.members.invite_title)}</h3>
               </div>
               <div className="grid gap-3 sm:grid-cols-[1fr_120px_auto]">
                 <Input
                   type="email"
+                  name="invite-email"
+                  autoComplete="email"
+                  spellCheck={false}
+                  aria-label={t(($) => $.members.invite_email_placeholder)}
                   value={inviteEmail}
                   onChange={(e) => setInviteEmail(e.target.value)}
                   placeholder={t(($) => $.members.invite_email_placeholder)}
@@ -355,7 +484,14 @@ export function MembersTab() {
                     if (e.key === "Enter" && inviteEmail.trim()) handleInviteMember();
                   }}
                 />
-                <Select value={inviteRole} onValueChange={(value) => setInviteRole(value as MemberRole)}>
+                <Select
+                  items={(["member", "admin"] as const).map((value) => ({
+                    value,
+                    label: roleConfig[value].label,
+                  }))}
+                  value={inviteRole}
+                  onValueChange={(value) => setInviteRole(value as MemberRole)}
+                >
                   <SelectTrigger size="sm">
                     <SelectValue>{() => roleConfig[inviteRole].label}</SelectValue>
                   </SelectTrigger>
@@ -376,9 +512,9 @@ export function MembersTab() {
         )}
 
         {members.length > 0 ? (
-          <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
-            {members.map((m, i) => (
-              <div key={m.id} className={i > 0 ? "border-t border-border/50" : ""}>
+          <SettingsCard>
+            {members.map((m) => (
+              <div key={m.id}>
                 <MemberRow
                   member={m}
                   canManage={canManageWorkspace}
@@ -391,21 +527,17 @@ export function MembersTab() {
                 />
               </div>
             ))}
-          </div>
+          </SettingsCard>
         ) : (
-          <p className="text-sm text-muted-foreground">{t(($) => $.members.no_members)}</p>
+          <p className="text-body text-muted-foreground">{t(($) => $.members.no_members)}</p>
         )}
-      </section>
+      </SettingsSection>
 
       {invitations.length > 0 && (
-        <section className="space-y-4">
-          <div className="flex items-center gap-2">
-            <Clock className="h-4 w-4 text-muted-foreground" />
-            <h2 className="text-sm font-semibold">{t(($) => $.members.pending_title, { count: invitations.length })}</h2>
-          </div>
-          <div className="overflow-hidden rounded-xl ring-1 ring-foreground/10">
-            {invitations.map((inv, i) => (
-              <div key={inv.id} className={i > 0 ? "border-t border-border/50" : ""}>
+        <SettingsSection title={t(($) => $.members.pending_title, { count: invitations.length })}>
+          <SettingsCard>
+            {invitations.map((inv) => (
+              <div key={inv.id}>
                 <InvitationRow
                   invitation={inv}
                   canManage={canManageWorkspace}
@@ -414,8 +546,90 @@ export function MembersTab() {
                 />
               </div>
             ))}
-          </div>
-        </section>
+          </SettingsCard>
+        </SettingsSection>
+      )}
+
+      {canManageWorkspace && (
+        <SettingsSection title={t(($) => $.members.share_links_title, { count: shareLinks.length })}>
+          <Card>
+            <CardContent className="space-y-3">
+              <div className="flex items-center gap-2">
+                <Link className="h-4 w-4 text-muted-foreground" />
+                <h3 className="text-body font-medium">{t(($) => $.members.share_links_create_title)}</h3>
+              </div>
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                <div className="flex min-w-0 flex-1 basis-40 items-center gap-2">
+                  <span className="text-body text-muted-foreground shrink-0">{t(($) => $.members.role_field)}</span>
+                  <Select
+                    items={(["member", "admin"] as const).map((value) => ({
+                      value,
+                      label: roleConfig[value].label,
+                    }))}
+                    value={shareLinkRole}
+                    onValueChange={(value) => setShareLinkRole(value as MemberRole)}
+                  >
+                    <SelectTrigger size="sm">
+                      <SelectValue>{() => roleConfig[shareLinkRole].label}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="min-w-0">
+                      <SelectItem value="member">{roleConfig.member.label}</SelectItem>
+                      <SelectItem value="admin">{roleConfig.admin.label}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex min-w-0 flex-1 basis-40 items-center gap-2">
+                  <span className="text-body text-muted-foreground shrink-0">{t(($) => $.members.expiry_field)}</span>
+                  <Select
+                    items={[
+                      { value: "24", label: t(($) => $.members.expiry_24h) },
+                      { value: "168", label: t(($) => $.members.expiry_7d) },
+                      { value: "720", label: t(($) => $.members.expiry_30d) },
+                      { value: "0", label: t(($) => $.members.expiry_never) },
+                    ]}
+                    value={shareLinkExpiry}
+                    onValueChange={(v) => v && setShareLinkExpiry(v)}
+                  >
+                    <SelectTrigger size="sm">
+                      <SelectValue>{() => {
+                        const opts: Record<string, string> = {
+                          "24": t(($) => $.members.expiry_24h),
+                          "168": t(($) => $.members.expiry_7d),
+                          "720": t(($) => $.members.expiry_30d),
+                          "0": t(($) => $.members.expiry_never),
+                        };
+                        return opts[shareLinkExpiry] || shareLinkExpiry;
+                      }}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent className="min-w-0">
+                      <SelectItem value="24">{t(($) => $.members.expiry_24h)}</SelectItem>
+                      <SelectItem value="168">{t(($) => $.members.expiry_7d)}</SelectItem>
+                      <SelectItem value="720">{t(($) => $.members.expiry_30d)}</SelectItem>
+                      <SelectItem value="0">{t(($) => $.members.expiry_never)}</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Button onClick={handleCreateShareLink} disabled={shareLinkLoading} className="shrink-0">
+                  {shareLinkLoading ? t(($) => $.members.share_links_creating) : t(($) => $.members.share_links_create_button)}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+          {shareLinks.length > 0 && (
+            <SettingsCard>
+              {shareLinks.map((link) => (
+                <div key={link.id}>
+                  <ShareLinkRow
+                    link={link}
+                    onRevoke={() => handleRevokeShareLink(link)}
+                    busy={shareLinkActionId === link.id}
+                    onCopy={() => handleCopyShareLink(link)}
+                  />
+                </div>
+              ))}
+            </SettingsCard>
+          )}
+        </SettingsSection>
       )}
 
       <AlertDialog open={!!confirmAction} onOpenChange={(v) => { if (!v) setConfirmAction(null); }}>
@@ -438,6 +652,6 @@ export function MembersTab() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </SettingsTab>
   );
 }

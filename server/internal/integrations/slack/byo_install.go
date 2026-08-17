@@ -123,6 +123,7 @@ func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (
 		wsID:        p.WorkspaceID,
 		agentID:     p.AgentID,
 		installerID: p.InitiatorID,
+		appIDKey:    appID,
 		configJSON:  cfgJSON,
 	})
 }

@@ -1,6 +1,9 @@
 package redact
 
 import (
+	"encoding/json"
+	"os"
+	"os/user"
 	"strings"
 	"testing"
 )
@@ -47,6 +50,41 @@ func TestRedactGitHubToken(t *testing.T) {
 	}
 }
 
+// asm joins fragments into a credential-shaped test fixture. The token is kept
+// split across fragments so the full value never appears as a contiguous
+// literal in source — otherwise secret scanners (including GitHub push
+// protection) flag these redaction-test fixtures as real credentials. The
+// runtime string is identical, so the patterns are exercised exactly the same.
+func asm(parts ...string) string { return strings.Join(parts, "") }
+
+// TestRedactGitHubFineGrainedToken guards the github_pat_ prefix used by
+// GitHub fine-grained personal access tokens. The classic-token pattern only
+// covers ghp_/gho_/ghu_/ghs_/ghr_, so before the dedicated pattern was added a
+// fine-grained PAT reached the DB / WS broadcast unredacted.
+func TestRedactGitHubFineGrainedToken(t *testing.T) {
+	t.Parallel()
+	input := "cloning with token " + asm("github_", "pat_", "11ABCDE0Q0abcdefghijkl_MNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyzABCD")
+	got := Text(input)
+	if strings.Contains(got, asm("github_", "pat_", "11ABCDE0Q0")) {
+		t.Fatalf("fine-grained GitHub PAT not redacted: %s", got)
+	}
+	if !strings.Contains(got, "[REDACTED GITHUB TOKEN]") {
+		t.Fatalf("expected [REDACTED GITHUB TOKEN] placeholder, got: %s", got)
+	}
+}
+
+func TestRedactGoogleAPIKeyEndingWithDash(t *testing.T) {
+	t.Parallel()
+	input := `the config file still had "` + asm("AIza", "SyB1cD3fGhIjKlMnOpQrStUvWxYz012345-") + `" in it`
+	got := Text(input)
+	if strings.Contains(got, asm("AIza", "SyB1cD3f")) {
+		t.Fatalf("Google API key ending with dash not redacted: %s", got)
+	}
+	if !strings.Contains(got, `"[REDACTED GOOGLE API KEY]" in it`) {
+		t.Fatalf("expected delimiter to be preserved, got: %s", got)
+	}
+}
+
 func TestRedactOpenAIKey(t *testing.T) {
 	t.Parallel()
 	input := "OPENAI_API_KEY=sk-proj-abc123def456ghi789jkl012mno345"
@@ -65,12 +103,77 @@ func TestRedactSlackToken(t *testing.T) {
 	}
 }
 
+// TestRedactSlackAppAndConfigTokens guards the xapp- (app-level) and xoxe-
+// (config/refresh) prefixes that the original xox[bporas]- rule did not cover.
+func TestRedactSlackAppAndConfigTokens(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct{ name, in, leak string }{
+		{"app-level xapp-", "connecting with " + asm("xa", "pp-1-A0000000000-1111111111-abcdefdeadbeefcafe") + " now", asm("xa", "pp-1-A0000000000")},
+		{"config xoxe-", "refresh with " + asm("xo", "xe-1-My0abcdefghijklmnopqrstuvwx") + " now", asm("xo", "xe-1-My0abcdef")},
+	} {
+		got := Text(tc.in)
+		if strings.Contains(got, tc.leak) {
+			t.Fatalf("%s not redacted: %s", tc.name, got)
+		}
+		if !strings.Contains(got, "[REDACTED SLACK TOKEN]") {
+			t.Fatalf("%s: expected [REDACTED SLACK TOKEN], got: %s", tc.name, got)
+		}
+	}
+}
+
+// TestRedactGoogleAPIKey guards the AIza-prefixed Google API key format, which
+// no prior pattern covered.
+func TestRedactGoogleAPIKey(t *testing.T) {
+	t.Parallel()
+	input := "calling gemini with " + asm("AIza", "SyD1234567890abcdefghijklmnopqrstuv") + " now"
+	got := Text(input)
+	if strings.Contains(got, asm("AIza", "SyD1234567890")) {
+		t.Fatalf("Google API key not redacted: %s", got)
+	}
+	if !strings.Contains(got, "[REDACTED GOOGLE API KEY]") {
+		t.Fatalf("expected [REDACTED GOOGLE API KEY], got: %s", got)
+	}
+}
+
+// TestRedactStripeLiveKey guards Stripe secret/restricted live keys, which use
+// an underscore (sk_live_) and so are missed by the hyphen-form sk- rule.
+// Publishable keys (pk_live_) are intentionally NOT redacted — they are public.
+func TestRedactStripeLiveKey(t *testing.T) {
+	t.Parallel()
+	if got := Text("STRIPE_SECRET_KEY=" + asm("sk_", "live_", "51Abcdef0000000000000000")); strings.Contains(got, asm("sk_", "live_51Abcdef")) {
+		t.Fatalf("Stripe live key not redacted: %s", got)
+	}
+	if got := Text("restricted " + asm("rk_", "live_", "51Abcdef0000000000000000")); !strings.Contains(got, "[REDACTED STRIPE KEY]") {
+		t.Fatalf("Stripe restricted key not redacted: %s", got)
+	}
+	// Publishable keys are public and must survive untouched.
+	if got := Text(asm("pk_", "live_", "51Abcdef0000000000000000")); !strings.Contains(got, asm("pk_", "live_51Abcdef")) {
+		t.Fatalf("publishable key should NOT be redacted: %s", got)
+	}
+}
+
 func TestRedactBearerToken(t *testing.T) {
 	t.Parallel()
 	input := "Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.abc123"
 	got := Text(input)
 	if strings.Contains(got, "eyJhbGci") {
 		t.Fatalf("Bearer token not redacted: %s", got)
+	}
+}
+
+// TestRedactBearerMCPToken is a regression guard for the Composio MCP session
+// headers (MUL-3720): the SDK attaches the project key as `Bearer mcp_...` on
+// some MCP transports, so the generic Bearer pattern must mask it before it can
+// reach a log line or WS broadcast.
+func TestRedactBearerMCPToken(t *testing.T) {
+	t.Parallel()
+	input := "connecting with Authorization: Bearer mcp_AbCdEf0123456789-_token"
+	got := Text(input)
+	if strings.Contains(got, "mcp_AbCdEf0123456789") {
+		t.Fatalf("Bearer mcp_ token not redacted: %s", got)
+	}
+	if !strings.Contains(got, "Bearer [REDACTED]") {
+		t.Fatalf("expected Bearer [REDACTED] placeholder, got: %s", got)
 	}
 }
 
@@ -201,6 +304,156 @@ func TestInputMapNil(t *testing.T) {
 	if got := InputMap(nil); got != nil {
 		t.Fatalf("expected nil, got: %v", got)
 	}
+}
+
+// A Codex file edit arrives as changes[]{path, diff, content}. Before the
+// nested walk these strings bypassed redaction entirely and reached the DB.
+func TestInputMapRedactsNestedSliceOfMaps(t *testing.T) {
+	t.Parallel()
+	m := map[string]any{
+		"changes": []any{
+			map[string]any{
+				"path": "cfg.go",
+				"diff": "+api_key: sk-proj-abc123def456ghi789jkl012mno345",
+			},
+			map[string]any{
+				"path":    ".env",
+				"content": "GITHUB_TOKEN=ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn",
+			},
+		},
+	}
+	got := InputMap(m)
+
+	changes, ok := got["changes"].([]any)
+	if !ok || len(changes) != 2 {
+		t.Fatalf("changes not preserved as a 2-element slice: %#v", got["changes"])
+	}
+	first, _ := changes[0].(map[string]any)
+	if diff, _ := first["diff"].(string); strings.Contains(diff, "sk-proj") {
+		t.Fatalf("API key nested in changes[0].diff not redacted: %s", diff)
+	}
+	if first["path"] != "cfg.go" {
+		t.Fatalf("clean nested string altered: %v", first["path"])
+	}
+	second, _ := changes[1].(map[string]any)
+	if content, _ := second["content"].(string); strings.Contains(content, "ghp_ABCDEFGH") {
+		t.Fatalf("token nested in changes[1].content not redacted: %s", content)
+	}
+}
+
+func TestInputMapRedactsDeeplyNestedMaps(t *testing.T) {
+	t.Parallel()
+	m := map[string]any{
+		"a": map[string]any{
+			"b": map[string]any{
+				"c": []any{"leak sk-proj-abc123def456ghi789jkl012mno345"},
+			},
+		},
+	}
+	got := InputMap(m)
+	a, _ := got["a"].(map[string]any)
+	b, _ := a["b"].(map[string]any)
+	c, _ := b["c"].([]any)
+	if len(c) != 1 {
+		t.Fatalf("nested slice not preserved: %#v", b["c"])
+	}
+	if s, _ := c[0].(string); strings.Contains(s, "sk-proj") {
+		t.Fatalf("API key at depth 4 not redacted: %s", s)
+	}
+}
+
+func TestInputMapRedactsNestedHomePath(t *testing.T) {
+	t.Parallel()
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		t.Skip("no home directory resolved in this environment")
+	}
+	u, err := user.Current()
+	if err != nil || u.Username == "" {
+		t.Skip("no current user resolved in this environment")
+	}
+	m := map[string]any{
+		"changes": []any{
+			map[string]any{"path": home + "/secret/app.go"},
+		},
+	}
+	got := InputMap(m)
+	changes, _ := got["changes"].([]any)
+	first, _ := changes[0].(map[string]any)
+	path, _ := first["path"].(string)
+	if strings.Contains(path, u.Username) {
+		t.Fatalf("username leaked from nested path: %s", path)
+	}
+}
+
+func TestInputMapRedactsStringSliceAndStringMap(t *testing.T) {
+	t.Parallel()
+	m := map[string]any{
+		"argv": []string{"curl", "-H", "Authorization: Bearer abc123def456"},
+		"env":  map[string]string{"TOKEN": "ghp_ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmn"},
+	}
+	got := InputMap(m)
+
+	argv, ok := got["argv"].([]string)
+	if !ok || len(argv) != 3 {
+		t.Fatalf("argv not preserved as []string: %#v", got["argv"])
+	}
+	if strings.Contains(argv[2], "abc123def456") {
+		t.Fatalf("bearer token in []string not redacted: %s", argv[2])
+	}
+	env, ok := got["env"].(map[string]string)
+	if !ok {
+		t.Fatalf("env not preserved as map[string]string: %#v", got["env"])
+	}
+	if strings.Contains(env["TOKEN"], "ghp_ABCDEFGH") {
+		t.Fatalf("token in map[string]string not redacted: %s", env["TOKEN"])
+	}
+}
+
+// The caller keeps using the map it passed in, so redaction must not write
+// through the shared nested references.
+func TestInputMapDoesNotMutateInput(t *testing.T) {
+	t.Parallel()
+	secret := "sk-proj-abc123def456ghi789jkl012mno345"
+	inner := map[string]any{"diff": secret}
+	m := map[string]any{"changes": []any{inner}}
+
+	_ = InputMap(m)
+
+	if inner["diff"] != secret {
+		t.Fatalf("input map was mutated in place: %v", inner["diff"])
+	}
+}
+
+// Depth is attacker-influenced, so the walk must bottom out instead of
+// exhausting the stack — and must not hand back a raw string when it does.
+func TestInputMapBoundsRecursionDepth(t *testing.T) {
+	t.Parallel()
+	leaf := map[string]any{"leak": "sk-proj-abc123def456ghi789jkl012mno345"}
+	cur := leaf
+	for i := 0; i < 5000; i++ {
+		cur = map[string]any{"next": cur}
+	}
+
+	got := InputMap(cur) // must not stack overflow
+
+	blob, err := json.Marshal(got)
+	if err != nil {
+		t.Fatalf("marshal redacted map: %v", err)
+	}
+	if strings.Contains(string(blob), "sk-proj") {
+		t.Fatalf("secret past the depth limit was returned unredacted")
+	}
+	if !strings.Contains(string(blob), depthLimitPlaceholder) {
+		t.Fatalf("expected depth-limit placeholder in output: %s", truncateForLog(string(blob)))
+	}
+}
+
+func truncateForLog(s string) string {
+	if len(s) <= 200 {
+		return s
+	}
+	return s[:200] + "…"
 }
 
 func TestRedactMultipleSecrets(t *testing.T) {

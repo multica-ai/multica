@@ -25,6 +25,7 @@ function mk(id: string, status: Issue["status"], position: number): Issue {
     start_date: null,
     due_date: null,
     metadata: {},
+  properties: {},
     labels: [],
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
@@ -93,6 +94,24 @@ describe("patchIssueInBuckets — cross-status move", () => {
     });
     expect(next.byStatus.todo?.total).toBe(0);
     expect(next.byStatus.in_progress?.total).toBe(2);
+  });
+
+  // MUL-4261: `cancelled` is now a first-class paginated bucket, so cancelling
+  // an issue rebuckets it into `cancelled` (instead of dropping it) and the
+  // rebucketed card stays locatable for later patches.
+  it("rebuckets a cancelled issue and keeps it locatable", () => {
+    const c0 = cache({
+      todo: { issues: [mk("a", "todo", 1)], total: 1 },
+      cancelled: { issues: [], total: 0 },
+    });
+    const cancelled = patchIssueInBuckets(c0, "a", { status: "cancelled" });
+    expect(ids(cancelled, "todo")).toEqual([]);
+    expect(ids(cancelled, "cancelled")).toEqual(["a"]);
+    expect(cancelled.byStatus.cancelled?.total).toBe(1);
+
+    // A follow-up edit still finds the card in the cancelled bucket.
+    const renamed = patchIssueInBuckets(cancelled, "a", { title: "renamed" });
+    expect(renamed.byStatus.cancelled?.issues[0]?.title).toBe("renamed");
   });
 });
 

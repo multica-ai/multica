@@ -16,6 +16,18 @@
     color-scheme: light;
 }
 .landing-light {
+    --app-shell: oklch(0.964435 0.001327 286.375);
+    --page-canvas: oklch(0.988087 0 0);
+    --surface: oklch(1 0 0);
+    --surface-foreground: oklch(0.141 0.005 285.823);
+    --surface-raised: oklch(1 0 0);
+    --surface-hover: oklch(0.967 0.001 286.375);
+    --surface-selected: oklch(0.95 0.002 286.375);
+    --surface-selected-foreground: oklch(0.141 0.005 285.823);
+    --surface-border: oklch(0.92 0.004 286.32);
+    --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+    --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+    --menu-shadow: 0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05);
     --background: oklch(1 0 0);
     --foreground: oklch(0.141 0.005 285.823);
     --card: oklch(1 0 0);
@@ -27,7 +39,12 @@
     --secondary: oklch(0.967 0.001 286.375);
     --secondary-foreground: oklch(0.21 0.006 285.885);
     --muted: oklch(0.967 0.001 286.375);
-    --muted-foreground: oklch(0.552 0.016 285.938);
+    /* Kept in lockstep with the light value in tokens.css — see the AA
+       reasoning there before changing this number. */
+    --muted-foreground: oklch(0.505 0.016 285.938);
+    /* Same lockstep rule. Without this line the landing chevrons would inherit
+       the .dark value of --faint-foreground while sitting on a white surface. */
+    --faint-foreground: oklch(0.606 0.016 285.938);
     --accent: oklch(0.967 0.001 286.375);
     --accent-foreground: oklch(0.21 0.006 285.885);
     --destructive: oklch(0.577 0.245 27.325);
@@ -42,4 +59,81 @@
     --scrollbar-thumb: oklch(0 0 0 / 10%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
     --scrollbar-track: transparent;
+}
+
+/* -----------------------------------------------------------------------------
+ * Landing editorial serif
+ *
+ * The landing tree swaps the app's `--font-serif` (Source Serif 4, set on <html>
+ * by app/layout.tsx) for Instrument Serif, loaded by app/(landing)/layout.tsx as
+ * `--font-instrument-serif`. The stack is composed here in static CSS rather
+ * than in next/font's `fallback` for the same reasons `--font-sans` is composed
+ * in app/globals.css: it has to be overridable per `<html lang>`, and it stays
+ * CSP-safe (no inline <style>). Keep the CJK ordering here in sync with the
+ * `--font-sans` chain in app/globals.css.
+ *
+ * Instrument Serif ships Latin only, so CJK headlines used to fall out of the
+ * stack entirely and land on the browser's default face — a sans, next to Latin
+ * set in a high-contrast display serif. The tail hands Han and Hangul to a
+ * platform Songti/Mincho/Myeongjo instead of shipping a multi-megabyte CJK
+ * webfont (an earlier `Noto_Serif_SC` next/font entry was never referenced by
+ * any rule and requested `subsets: ["latin"]`, so it downloaded no CJK glyphs).
+ *
+ * Default (en / zh / ko): Latin renders with Instrument Serif; Han falls through
+ * to the Chinese serifs, then Hangul to the Korean ones. Chinese MUST stay
+ * before Korean so zh users never get Korean Hanja glyph shapes (Hangul is a
+ * separate Unicode block, so ko users still get Korean fonts for Hangul). */
+.landing-light {
+    --font-serif: var(--font-instrument-serif), "Songti SC", "SimSun",
+        "Noto Serif CJK SC", "Nanum Myeongjo", "AppleMyungjo", "Batang",
+        "Noto Serif CJK KR", ui-serif, serif;
+}
+
+/* Japanese: Kanji are Han ideographs sharing the same Unicode block as Chinese,
+   and CSS font-fallback order is NOT affected by `<html lang>` — so the
+   Chinese-first default above would hand Japanese users Chinese glyph shapes for
+   shared ideographs. Promote a Mincho-first chain only for Japanese. Instrument
+   Serif still leads for Latin; zh/ko remain as a deep fallback. */
+html[lang|="ja"] .landing-light {
+    --font-serif: var(--font-instrument-serif), "Hiragino Mincho ProN",
+        "Yu Mincho", "MS Mincho", "Noto Serif CJK JP", "Songti SC", "SimSun",
+        "Noto Serif CJK SC", "Nanum Myeongjo", "AppleMyungjo", "Batang",
+        "Noto Serif CJK KR", ui-serif, serif;
+}
+
+/* Single hook for every landing surface set in the editorial serif. Declared
+   outside Tailwind's layers so the per-locale resets below outrank the inline
+   `tracking-*` / `leading-*` utilities they have to correct. */
+.landing-serif {
+    font-family: var(--font-serif);
+}
+
+/* The landing display sizes are tuned for Latin: negative tracking and sub-1
+   leading, down to `tracking-[-0.038em] leading-[0.93]` at 6.4rem on the hero.
+   Both are wrong for CJK — Han and Hangul already fill their em box, so negative
+   tracking jams the glyphs together and a 0.93 line-height collides the two
+   lines of a `<br />`-split headline. Reset them for CJK locales only; Latin
+   locales keep the original treatment untouched.
+
+   `[lang|="zh"]` is the BCP-47 language-range selector: it matches exactly `zh`
+   or `zh-<region>` (app/layout.tsx emits `zh-CN`, `ja-JP`, `ko-KR`), never an
+   unrelated subtag such as `zha`. Scoped to headings so the footer wordmark — a
+   Latin-only <span> rendering "multica" at up to 16rem — keeps its tuned
+   tracking on every locale. */
+html[lang|="zh"] :is(h1, h2).landing-serif,
+html[lang|="ja"] :is(h1, h2).landing-serif,
+html[lang|="ko"] :is(h1, h2).landing-serif {
+    letter-spacing: 0;
+    line-height: 1.25;
+}
+
+/* Korean only: Hangul is written with spaces between words, but the default
+   line-break rules treat every syllable as a break opportunity, so a wrapped
+   headline splits mid-word (모릅니 / 다). `keep-all` restores word-boundary
+   breaking; `break-word` is the escape hatch so a word wider than the column
+   still breaks instead of overflowing at narrow viewports. Chinese and Japanese
+   are written without spaces and break per character correctly by default. */
+html[lang|="ko"] :is(h1, h2).landing-serif {
+    word-break: keep-all;
+    overflow-wrap: break-word;
 }

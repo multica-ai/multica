@@ -96,11 +96,11 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="flex max-h-[88vh] flex-col gap-0 p-0 sm:max-w-3xl">
         <DialogHeader className="border-b px-6 py-5">
-          <DialogTitle className="flex items-center gap-2 text-base">
+          <DialogTitle className="flex items-center gap-2 text-title-sm">
             <Cloud className="h-4 w-4 text-muted-foreground" />
             {t(($) => $.cloud_runtime.title)}
           </DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription className="text-caption">
             {t(($) => $.cloud_runtime.description)}
           </DialogDescription>
         </DialogHeader>
@@ -109,10 +109,10 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
           <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(280px,0.82fr)]">
             <form id={formId} onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <h3 className="text-sm font-medium">
+                <h3 className="text-body font-medium">
                   {t(($) => $.cloud_runtime.create_title)}
                 </h3>
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 text-caption text-muted-foreground">
                   {t(($) => $.cloud_runtime.create_hint)}
                 </p>
               </div>
@@ -146,7 +146,7 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
 
             <section className="min-h-0 rounded-md border bg-muted/20">
               <div className="flex items-center justify-between border-b bg-background px-3 py-2.5">
-                <h3 className="text-sm font-medium">
+                <h3 className="text-body font-medium">
                   {t(($) => $.cloud_runtime.nodes_title)}
                 </h3>
                 <Button
@@ -173,10 +173,10 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
                 </div>
               ) : nodesQuery.isError ? (
                 <div className="flex h-40 flex-col items-center justify-center px-5 text-center">
-                  <p className="text-sm font-medium">
+                  <p className="text-body font-medium">
                     {t(($) => $.cloud_runtime.nodes_failed)}
                   </p>
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-1 text-caption text-muted-foreground">
                     {nodesQuery.error instanceof Error
                       ? nodesQuery.error.message
                       : t(($) => $.cloud_runtime.nodes_failed_hint)}
@@ -184,8 +184,8 @@ export function CloudRuntimeDialog({ onClose }: { onClose: () => void }) {
                 </div>
               ) : sortedNodes.length === 0 ? (
                 <div className="flex h-40 flex-col items-center justify-center px-5 text-center">
-                  <Cloud className="h-7 w-7 text-muted-foreground/50" />
-                  <p className="mt-3 text-sm font-medium">
+                  <Cloud className="h-7 w-7 text-faint-foreground" />
+                  <p className="mt-3 text-body font-medium">
                     {t(($) => $.cloud_runtime.nodes_empty)}
                   </p>
                 </div>
@@ -251,11 +251,15 @@ function LabeledInput({
   if (options) {
     return (
       <div className="space-y-1.5">
-        <Label htmlFor={id} className="text-xs text-muted-foreground">
+        <Label htmlFor={id} className="text-caption text-muted-foreground">
           {label}
         </Label>
-        <Select value={value} onValueChange={(next) => onChange(next ?? value)}>
-          <SelectTrigger id={id} className="h-9 w-full rounded-md text-sm">
+        <Select
+          items={options.map((option) => ({ value: option, label: option }))}
+          value={value}
+          onValueChange={(next) => onChange(next ?? value)}
+        >
+          <SelectTrigger id={id} className="h-9 w-full rounded-md text-body">
             <SelectValue>
               {() => <span className="truncate">{value}</span>}
             </SelectValue>
@@ -274,7 +278,7 @@ function LabeledInput({
 
   return (
     <div className="space-y-1.5">
-      <Label htmlFor={id} className="text-xs text-muted-foreground">
+      <Label htmlFor={id} className="text-caption text-muted-foreground">
         {label}
       </Label>
       <Input
@@ -285,7 +289,7 @@ function LabeledInput({
         required={required}
         type={type}
         inputMode={inputMode}
-        className="h-9 text-sm"
+        className="h-9 text-body"
       />
     </div>
   );
@@ -304,16 +308,16 @@ function CloudRuntimeNodeRow({ node, wsId }: { node: CloudRuntimeNode; wsId: str
       <div className="flex min-w-0 items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex min-w-0 items-center gap-2">
-            <span className="truncate text-sm font-medium">{title}</span>
+            <span className="truncate text-body font-medium">{title}</span>
             <CloudRuntimeStatusBadge status={node.status} />
           </div>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-caption text-muted-foreground">
             <span>{node.instance_type}</span>
-            <span className="text-muted-foreground/40">/</span>
+            <span className="text-faint-foreground">/</span>
             <span>{node.region}</span>
             {created && (
               <>
-                <span className="text-muted-foreground/40">/</span>
+                <span className="text-faint-foreground">/</span>
                 <span>{created}</span>
               </>
             )}
@@ -347,7 +351,7 @@ function CloudRuntimeNodeRow({ node, wsId }: { node: CloudRuntimeNode; wsId: str
         </Button>
       </div>
       {node.instance_id && (
-        <div className="mt-2 truncate font-mono text-[11px] text-muted-foreground/80">
+        <div className="mt-2 truncate font-mono text-micro text-muted-foreground">
           {node.instance_id}
         </div>
       )}
@@ -371,7 +375,7 @@ function CloudRuntimeStatusBadge({ status }: { status: string }) {
     <Badge
       variant="secondary"
       className={cn(
-        "h-5 rounded-md px-1.5 font-mono text-[10px]",
+        "h-5 rounded-md px-1.5 font-mono text-micro",
         active.has(normalized) && "bg-success/10 text-success",
         pending.has(normalized) && "bg-warning/10 text-warning",
         failed.has(normalized) && "bg-destructive/10 text-destructive",

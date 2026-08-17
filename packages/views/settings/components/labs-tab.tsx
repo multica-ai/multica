@@ -9,6 +9,7 @@ import {
   EmptyTitle,
 } from "@multica/ui/components/ui/empty";
 import { useT } from "../../i18n";
+import { SettingsCard, SettingsTab } from "./settings-layout";
 
 // The Co-authored-by trailer toggle moved into the dedicated GitHub Settings
 // tab (see github-tab.tsx). Labs is kept as a container for future
@@ -16,18 +17,20 @@ import { useT } from "../../i18n";
 export function LabsTab() {
   const { t } = useT("settings");
   return (
-    <div className="space-y-4">
-      <Empty>
-        <EmptyHeader>
-          <EmptyMedia variant="icon">
-            <FlaskConical className="h-4 w-4" />
-          </EmptyMedia>
-          <EmptyTitle>{t(($) => $.labs.section_placeholder_title)}</EmptyTitle>
-          <EmptyDescription>
-            {t(($) => $.labs.section_placeholder_description)}
-          </EmptyDescription>
-        </EmptyHeader>
-      </Empty>
-    </div>
+    <SettingsTab title={t(($) => $.page.tabs.labs)}>
+      <SettingsCard>
+        <Empty>
+          <EmptyHeader>
+            <EmptyMedia variant="icon">
+              <FlaskConical className="h-4 w-4" />
+            </EmptyMedia>
+            <EmptyTitle>{t(($) => $.labs.section_placeholder_title)}</EmptyTitle>
+            <EmptyDescription>
+              {t(($) => $.labs.section_placeholder_description)}
+            </EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </SettingsCard>
+    </SettingsTab>
   );
 }

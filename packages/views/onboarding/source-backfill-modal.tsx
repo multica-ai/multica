@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Briefcase,
   CalendarDays,
@@ -11,14 +12,16 @@ import {
   Users,
 } from "lucide-react";
 import { toast } from "sonner";
-import { captureEvent } from "@multica/core/analytics";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  agentCompletedIssueCountOptions,
   needsSourceBackfill,
   saveQuestionnaire,
+  SOURCE_BACKFILL_MIN_AGENT_DONE_ISSUES,
   type QuestionnaireAnswers,
   type Source,
 } from "@multica/core/onboarding";
+import { useCurrentWorkspace } from "@multica/core/paths";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   Dialog,
@@ -35,8 +38,8 @@ import {
 import {
   IconOptionCard,
   IconOtherOptionCard,
+  type QuestionOption,
 } from "./components/icon-option-card";
-import type { QuestionOption } from "./steps/step-question";
 import { mergedQuestionnairePatch } from "./source-backfill-merge";
 import { useSourceBackfillDismissCount } from "./source-backfill-dismiss";
 import { useT } from "../i18n";
@@ -51,18 +54,27 @@ const EMPTY_BACKFILL: Pick<
 };
 
 /**
- * Source-attribution backfill prompt for already-onboarded users whose
- * questionnaire never recorded a source. Rendered as a Dialog overlay
- * on top of the workspace shell — the user keeps their workspace
- * context visible behind a dimmed backdrop.
+ * Source-attribution prompt for onboarded users whose questionnaire
+ * never recorded a source. The question is not asked during
+ * onboarding at all — this prompt is its only collection point.
+ * Rendered as a Dialog overlay on top of the workspace shell — the
+ * user keeps their workspace context visible behind a dimmed backdrop.
  *
  * Self-mounted: the caller drops `<SourceBackfillModal />` once inside
- * the dashboard layout. The component reads the predicate
- * `needsSourceBackfill(user, dismissCount)` and opens the dialog when
- * it flips to true. Once the dialog opens we capture the open decision
- * in a ref so subsequent re-renders that flip the predicate to false
- * (e.g. after submit, before refreshMe round-trips) don't tear the
- * dialog away mid-animation.
+ * the dashboard layout. Two gates decide whether the dialog opens:
+ *
+ *   1. User-level: `needsSourceBackfill(user, dismissCount)` — no
+ *      source recorded, never declined, dismiss cap not reached.
+ *   2. Workspace-level: agents (or squads) have completed at least
+ *      SOURCE_BACKFILL_MIN_AGENT_DONE_ISSUES issues here. Attribution
+ *      is a zero-payoff ask for the user, so it waits until Multica
+ *      has visibly delivered value. The count query only runs while
+ *      gate 1 passes, so settled users never pay for it.
+ *
+ * Once the dialog opens we capture the open decision in a ref so
+ * subsequent re-renders that flip the predicate to false (e.g. after
+ * submit, before refreshMe round-trips) don't tear the dialog away
+ * mid-animation.
  *
  * Three exit shapes:
  *   - Submit         → PATCH merged questionnaire, terminal.
@@ -82,9 +94,22 @@ export function SourceBackfillModal() {
   const [dismissCount, bumpDismissCount] =
     useSourceBackfillDismissCount(userId);
 
-  // Decide once per (user, dismissCount delta) whether the prompt
-  // should open. After it opens we stop reconsulting the predicate so
-  // a midflight refreshMe (which sets source) doesn't unmount the
+  // Gate 1 first: it's pure and free. Gate 2 costs a (tiny) issues
+  // query, so it's `enabled` only while gate 1 says this user still
+  // owes an answer and we know which workspace to count in.
+  const userEligible = needsSourceBackfill(user, dismissCount);
+  const wsId = useCurrentWorkspace()?.id ?? null;
+  const { data: agentDoneCount } = useQuery({
+    ...agentCompletedIssueCountOptions(wsId ?? ""),
+    enabled: userEligible && wsId !== null,
+  });
+  const shouldPrompt =
+    userEligible &&
+    (agentDoneCount ?? 0) >= SOURCE_BACKFILL_MIN_AGENT_DONE_ISSUES;
+
+  // Decide once per (user, gate delta) whether the prompt should
+  // open. After it opens we stop reconsulting the predicate so a
+  // midflight refreshMe (which sets source) doesn't unmount the
   // dialog while the submit animation is still running. `openedRef`
   // is reset when the user identity changes.
   //
@@ -103,7 +128,7 @@ export function SourceBackfillModal() {
       return;
     }
     if (openedForUserRef.current === user.id) return;
-    if (!needsSourceBackfill(user, dismissCount)) return;
+    if (!shouldPrompt) return;
     // Soft entrance: let the user see the workspace for a beat before
     // the modal floats in, so it doesn't feel like a hard block. Common
     // delight pattern — ~700ms is short enough that nobody starts an
@@ -124,7 +149,7 @@ export function SourceBackfillModal() {
       setOpen(true);
     }, 700);
     return () => window.clearTimeout(timer);
-  }, [user, dismissCount]);
+  }, [user, shouldPrompt]);
 
   return (
     <Dialog
@@ -133,13 +158,11 @@ export function SourceBackfillModal() {
         if (next || !open) return;
         // Base UI fires onOpenChange(false) for X, ESC, and outside
         // click — all three count as "dismiss without committing".
-        captureEvent("source_backfill_dismissed", { trigger: "close" });
         bumpDismissCount();
         setOpen(false);
       }}
     >
       <SourceBackfillDialogBody
-        open={open}
         onComplete={() => setOpen(false)}
       />
     </Dialog>
@@ -155,27 +178,14 @@ SourceBackfillModal.displayName = "SourceBackfillModal";
  * starts fresh.
  */
 function SourceBackfillDialogBody({
-  open,
   onComplete,
 }: {
-  open: boolean;
   onComplete: () => void;
 }) {
   const { t } = useT("onboarding");
 
   const [answers, setAnswers] = useState(EMPTY_BACKFILL);
   const [busy, setBusy] = useState(false);
-  const shownEmittedRef = useRef(false);
-
-  // Fire the funnel-open event exactly once per open transition.
-  // `open` flips back when the parent closes us, and a fresh subsequent
-  // open mounts a brand-new body, so the ref starts fresh too.
-  useEffect(() => {
-    if (!open) return;
-    if (shownEmittedRef.current) return;
-    shownEmittedRef.current = true;
-    captureEvent("source_backfill_shown");
-  }, [open]);
 
   const options = useMemo<QuestionOption[]>(
     () => [
@@ -260,10 +270,6 @@ function SourceBackfillDialogBody({
           source_skipped: false,
         }),
       );
-      captureEvent("source_backfill_submitted", {
-        source: answers.source,
-        ...(answers.source_other ? { source_other: answers.source_other } : {}),
-      });
       onComplete();
     } catch (err) {
       setBusy(false);
@@ -284,7 +290,6 @@ function SourceBackfillDialogBody({
           source_skipped: true,
         }),
       );
-      captureEvent("source_backfill_skipped");
       onComplete();
     } catch (err) {
       setBusy(false);
@@ -295,13 +300,13 @@ function SourceBackfillDialogBody({
   return (
     <DialogContent className="sm:max-w-2xl p-0 gap-0 overflow-hidden">
       <div className="px-6 pt-6 pb-2">
-        <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+        <div className="text-micro font-medium uppercase tracking-[0.08em] text-muted-foreground">
           {t(($) => $.source_backfill.eyebrow)}
         </div>
-        <h2 className="mt-1 text-balance font-serif text-2xl font-medium leading-tight tracking-tight text-foreground">
+        <h2 className="mt-1 text-balance font-serif text-display-sm font-medium leading-tight tracking-tight text-foreground">
           {t(($) => $.questions.source.question)}
         </h2>
-        <p className="mt-2 text-sm text-muted-foreground">
+        <p className="mt-2 text-body text-muted-foreground">
           {t(($) => $.source_backfill.lede)}
         </p>
       </div>
@@ -341,7 +346,7 @@ function SourceBackfillDialogBody({
       <div className="mt-4 flex flex-wrap items-center justify-end gap-x-4 gap-y-2 border-t bg-muted/40 px-6 py-3">
         <span
           aria-live="polite"
-          className="mr-auto text-xs text-muted-foreground"
+          className="mr-auto text-caption text-muted-foreground"
         >
           {canSubmit
             ? t(($) => $.source_backfill.hint_ready)

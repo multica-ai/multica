@@ -11,7 +11,7 @@
  * ok-plan-linked-taco.md.
  */
 import { Alert, Pressable, View } from "react-native";
-import type { AgentTask, TaskFailureReason } from "@multica/core/types";
+import type { AgentTask } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { useCancelTask } from "@/data/mutations/issues";
@@ -65,7 +65,7 @@ function StatusBadge({ task }: { task: AgentTask }) {
   const label = STATUS_LABEL[task.status] ?? task.status;
   const cls = STATUS_CLASS[task.status] ?? "text-muted-foreground";
   // For failed tasks, surface the failure_reason inline so users don't have
-  // to drill in. Reasons are coarse enums; missing/empty stays as just "Failed".
+  // to drill in. Missing / empty / unrecognised stays as just "Failed".
   if (task.status === "failed" && task.failure_reason) {
     const reasonLabel = FAILURE_REASON_LABEL[task.failure_reason];
     if (reasonLabel) {
@@ -150,11 +150,42 @@ const STATUS_CLASS: Record<AgentTask["status"], string> = {
   cancelled: "text-muted-foreground",
 };
 
-const FAILURE_REASON_LABEL: Record<TaskFailureReason, string> = {
-  agent_error: "Agent error",
-  timeout: "Timeout",
-  codex_semantic_inactivity: "Codex inactivity",
+// Short badge copy — deliberately terser than lib/failure-reason-label.ts,
+// which backs a full-width chat bubble; this one shares a single line with the
+// status word and a timestamp.
+//
+// Keyed by the raw wire value, not a closed enum: `failure_reason` is an open
+// string that grows as classifier rules land. It held only the six
+// pre-MUL-1949 coarse values until MUL-5370, so every refined `agent_error.*`
+// the backend has written since fell through and the badge read just "Failed".
+// An unrecognised reason still does — a compact badge is the one place where
+// web's raw-wire-value fallback would overflow the row.
+const FAILURE_REASON_LABEL: Record<string, string> = {
+  queued_expired: "Queue expired",
   runtime_offline: "Runtime offline",
   runtime_recovery: "Runtime recovery",
+  timeout: "Timeout",
+  iteration_limit: "Iteration limit",
+  agent_blocked: "Needs input",
+  api_invalid_request: "Request rejected",
+  skill_bundle_unavailable: "Skill download failed",
+
+  "agent_error.provider_auth_or_access": "Auth failed",
+  "agent_error.provider_quota_limit": "Quota exhausted",
+  "agent_error.provider_capacity_or_rate_limit": "Rate limited",
+  "agent_error.provider_server_error": "Provider error",
+  "agent_error.provider_network": "Network error",
+  "agent_error.process_failure": "Process crashed",
+  "agent_error.empty_or_unparseable_output": "No usable output",
+  "agent_error.agent_timeout": "Agent timeout",
+  "agent_error.context_overflow": "Context overflow",
+  "agent_error.missing_config": "Config missing",
+  "agent_error.model_not_found_or_unavailable": "Model unavailable",
+  "agent_error.runtime_version_unsupported": "CLI unsupported",
+  "agent_error.runtime_missing_executable": "CLI not installed",
+  "agent_error.unknown": "Agent error",
+
+  agent_error: "Agent error",
+  codex_semantic_inactivity: "Codex inactivity",
   manual: "Manual",
 };

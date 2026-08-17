@@ -2,6 +2,10 @@ import { contextBridge, ipcRenderer } from "electron";
 import { electronAPI } from "@electron-toolkit/preload";
 import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import type {
+  ManualUpdateCheckResult,
+  UpdaterPreferences,
+} from "../shared/updater-types";
 import {
   RENDERER_ROUTE_CONTEXT_CHANNEL,
   type RendererRouteContextInput,
@@ -11,6 +15,19 @@ import {
   NAVIGATION_GESTURE_CHANNEL,
   type NavigationGesture,
 } from "../shared/navigation-gestures";
+import {
+  readDesktopWindowContext,
+  type IssueWindowRequest,
+} from "../shared/issue-window";
+import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
+import type {
+  DaemonStatus,
+  LocalRuntimeProbe,
+} from "../shared/daemon-types";
+import {
+  MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
+  type MainRendererMessageChannel,
+} from "../shared/main-renderer-messages";
 
 // Synchronously fetch app metadata from main at preload time so the renderer
 // can pass it into CoreProvider during the initial render — the alternative
@@ -49,6 +66,7 @@ function fetchRuntimeConfig(): RuntimeConfigResult {
 
 const appInfo = fetchAppInfo();
 const runtimeConfig = fetchRuntimeConfig();
+const windowContext = readDesktopWindowContext(process.argv);
 
 // Read the OS-preferred locale that main injected via additionalArguments.
 // Zero IPC, zero blocking — process.argv is populated before preload runs.
@@ -58,6 +76,26 @@ function fetchSystemLocale(): string {
 }
 
 const systemLocale = fetchSystemLocale();
+
+function subscribeToMainRendererChannel<T>(
+  channel: MainRendererMessageChannel,
+  callback: (payload: T) => void,
+): () => void {
+  const handler = (_event: Electron.IpcRendererEvent, payload: T) =>
+    callback(payload);
+  ipcRenderer.on(channel, handler);
+  ipcRenderer.send(MAIN_RENDERER_CHANNEL_STATE_CHANNEL, {
+    channel,
+    ready: true,
+  });
+  return () => {
+    ipcRenderer.removeListener(channel, handler);
+    ipcRenderer.send(MAIN_RENDERER_CHANNEL_STATE_CHANNEL, {
+      channel,
+      ready: false,
+    });
+  };
+}
 
 const desktopAPI = {
   /** App version + normalized OS. Read once at preload time so the renderer
@@ -79,9 +117,13 @@ const desktopAPI = {
   },
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig,
-  /** Read + clear any freeze/crash breadcrumb left by a previous session, so
-   *  the renderer can flush it to telemetry on boot. Returns null when there's
-   *  nothing pending (the normal case). */
+  /** Identifies whether this renderer owns the main tabbed window or a
+   *  dedicated issue window, parsed from validated launch arguments. */
+  windowContext,
+  /** Read any freeze/crash breadcrumb left by a previous session, so the
+   *  renderer can flush it to telemetry on boot. Returns null when there's
+   *  nothing pending (the normal case). Reading does not consume it — call
+   *  `ackFreeze` once the event is on the wire. */
   getLastFreeze: (): FreezeBreadcrumb | null => {
     try {
       return ipcRenderer.sendSync("freeze:get-last") as FreezeBreadcrumb | null;
@@ -89,24 +131,19 @@ const desktopAPI = {
       return null;
     }
   },
+  /** Retire the breadcrumb with this exact timestamp after its event has been
+   *  handed to analytics. Anything left unacknowledged is retried next boot. */
+  ackFreeze: (ts: number) => ipcRenderer.send("freeze:ack", ts),
+  /** Report only the resolved user id (never a token) so main can close
+   *  dedicated issue windows that belong to an old account. */
+  reportAuthSession: (userId: string | null) =>
+    ipcRenderer.send(AUTH_SESSION_STATE_CHANNEL, userId),
   /** Listen for auth token delivered via deep link */
-  onAuthToken: (callback: (token: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, token: string) =>
-      callback(token);
-    ipcRenderer.on("auth:token", handler);
-    return () => {
-      ipcRenderer.removeListener("auth:token", handler);
-    };
-  },
+  onAuthToken: (callback: (token: string) => void) =>
+    subscribeToMainRendererChannel("auth:token", callback),
   /** Listen for invitation IDs delivered via deep link */
-  onInviteOpen: (callback: (invitationId: string) => void) => {
-    const handler = (_event: Electron.IpcRendererEvent, invitationId: string) =>
-      callback(invitationId);
-    ipcRenderer.on("invite:open", handler);
-    return () => {
-      ipcRenderer.removeListener("invite:open", handler);
-    };
-  },
+  onInviteOpen: (callback: (invitationId: string) => void) =>
+    subscribeToMainRendererChannel("invite:open", callback),
   /** Open a URL in the default browser */
   openExternal: (url: string) => ipcRenderer.invoke("shell:openExternal", url),
   /** Download a file by URL through Electron's native download system.
@@ -151,16 +188,7 @@ const desktopAPI = {
       itemId: string;
       issueKey: string;
     }) => void,
-  ) => {
-    const handler = (
-      _event: Electron.IpcRendererEvent,
-      payload: { slug: string; itemId: string; issueKey: string },
-    ) => callback(payload);
-    ipcRenderer.on("inbox:open", handler);
-    return () => {
-      ipcRenderer.removeListener("inbox:open", handler);
-    };
-  },
+  ) => subscribeToMainRendererChannel("inbox:open", callback),
   /** Listen for native macOS back/forward swipe gestures. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, gesture: unknown) => {
@@ -190,28 +218,17 @@ const desktopAPI = {
       ipcRenderer.removeListener("tab:close-active", handler);
     };
   },
+  /** Listen for Cmd/Ctrl+, requests to open Settings. Only the main window
+   *  subscribes — main delivers the chord there even when it was pressed in
+   *  an issue window, because Settings is a tab. Returns an unsubscribe fn. */
+  onOpenSettings: (callback: () => void) =>
+    subscribeToMainRendererChannel("settings:open", () => callback()),
   /** Ask the main process to close the window (used after closing the last tab). */
   closeWindow: () => ipcRenderer.send("window:close"),
+  /** Open a validated issue-detail route in a dedicated native window. */
+  openIssueWindow: (request: IssueWindowRequest) =>
+    ipcRenderer.invoke("window:open-issue", request),
 };
-
-interface DaemonStatus {
-  state:
-    | "running"
-    | "stopped"
-    | "starting"
-    | "stopping"
-    | "installing_cli"
-    | "cli_not_found"
-    | "auth_expired";
-  pid?: number;
-  uptime?: string;
-  daemonId?: string;
-  deviceName?: string;
-  agents?: string[];
-  workspaceCount?: number;
-  profile?: string;
-  serverUrl?: string;
-}
 
 type DaemonReauthResult =
   | { ok: true }
@@ -227,6 +244,8 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:restart"),
   getStatus: (): Promise<DaemonStatus> =>
     ipcRenderer.invoke("daemon:get-status"),
+  probeRuntimes: (): Promise<LocalRuntimeProbe> =>
+    ipcRenderer.invoke("daemon:probe-runtimes"),
   getHostName: (): Promise<string> =>
     ipcRenderer.invoke("daemon:get-host-name"),
   onStatusChange: (callback: (status: DaemonStatus) => void) => {
@@ -287,10 +306,12 @@ const updaterAPI = {
   },
   downloadUpdate: () => ipcRenderer.invoke("updater:download"),
   installUpdate: () => ipcRenderer.invoke("updater:install"),
-  checkForUpdates: (): Promise<
-    | { ok: true; currentVersion: string; latestVersion: string; available: boolean }
-    | { ok: false; error: string }
-  > => ipcRenderer.invoke("updater:check"),
+  getPreferences: (): Promise<UpdaterPreferences> =>
+    ipcRenderer.invoke("updater:get-preferences"),
+  setAutomaticUpdates: (enabled: boolean): Promise<UpdaterPreferences> =>
+    ipcRenderer.invoke("updater:set-automatic-updates", enabled),
+  checkForUpdates: (): Promise<ManualUpdateCheckResult> =>
+    ipcRenderer.invoke("updater:check"),
 };
 
 if (process.contextIsolated) {

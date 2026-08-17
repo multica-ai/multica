@@ -26,14 +26,31 @@ function workspaceScoped(slug: string) {
     autopilots: () => `${ws}/autopilots`,
     autopilotDetail: (id: string) => `${ws}/autopilots/${encode(id)}`,
     agents: () => `${ws}/agents`,
+    newAgent: () => `${ws}/agents/new`,
+    // The two creation methods behind the chooser. Each is a real route so a
+    // half-filled form survives a refresh and can be linked to directly.
+    newAgentManual: () => `${ws}/agents/new/manual`,
+    newAgentAi: () => `${ws}/agents/new/ai`,
+    // One creation conversation. It is a durable object, not a step of the
+    // route above: it survives leaving the studio and is resumed later, so it
+    // owns an address instead of being a query param on the "start one" screen.
+    newAgentAiSession: (sessionId: string) =>
+      `${ws}/agents/new/ai/${encode(sessionId)}`,
     agentDetail: (id: string) => `${ws}/agents/${encode(id)}`,
     memberDetail: (id: string) => `${ws}/members/${encode(id)}`,
     squads: () => `${ws}/squads`,
     squadDetail: (id: string) => `${ws}/squads/${encode(id)}`,
     inbox: () => `${ws}/inbox`,
+    chat: () => `${ws}/chat`,
+    chatWithAgent: (agentId: string) =>
+      `${ws}/chat?agent=${encode(agentId)}`,
+    chatSession: (sessionId: string) =>
+      `${ws}/chat?session=${encode(sessionId)}`,
     myIssues: () => `${ws}/my-issues`,
     runtimes: () => `${ws}/runtimes`,
     runtimeDetail: (id: string) => `${ws}/runtimes/${encode(id)}`,
+    runtimeSettings: (machineId: string, runtimeId: string) =>
+      `${ws}/runtimes/${encode(machineId)}/runtime/${encode(runtimeId)}`,
     skills: () => `${ws}/skills`,
     skillDetail: (id: string) => `${ws}/skills/${encode(id)}`,
     settings: () => `${ws}/settings`,

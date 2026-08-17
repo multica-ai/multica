@@ -119,11 +119,14 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 		"supported": true,
 		"skills": []map[string]any{
 			{
-				"key":         "review-helper",
-				"name":        "Review Helper",
+				"key":         "paper-desktop:review-helper",
+				"name":        "paper-desktop:review-helper",
 				"description": "Review PRs",
-				"source_path": "~/.claude/skills/review-helper",
+				"source_path": "~/.claude/plugins/cache/paper/skills/review-helper",
 				"provider":    "claude",
+				"root":        "plugin",
+				"plugin":      "paper-desktop@paper",
+				"can_disable": true,
 				"file_count":  2,
 			},
 		},
@@ -137,7 +140,7 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 		t.Fatalf("unmarshal report body: %v", err)
 	}
 
-	if err := store.Complete(ctx, req.ID, parsed.Skills, true); err != nil {
+	if err := store.Complete(ctx, req.ID, parsed.Skills, true, nil, false); err != nil {
 		t.Fatalf("complete: %v", err)
 	}
 	got, err := store.Get(ctx, req.ID)
@@ -150,11 +153,17 @@ func TestInMemoryLocalSkillListStore_PreservesSummaries(t *testing.T) {
 	if len(got.Skills) != 1 {
 		t.Fatalf("expected 1 skill, got %d", len(got.Skills))
 	}
-	if got.Skills[0].SourcePath != "~/.claude/skills/review-helper" {
+	if got.Skills[0].SourcePath != "~/.claude/plugins/cache/paper/skills/review-helper" {
 		t.Fatalf("source_path = %q", got.Skills[0].SourcePath)
+	}
+	if got.Skills[0].Root != "plugin" || got.Skills[0].Plugin != "paper-desktop@paper" {
+		t.Fatalf("plugin origin = %#v", got.Skills[0])
 	}
 	if got.Skills[0].FileCount != 2 {
 		t.Fatalf("file_count = %d", got.Skills[0].FileCount)
+	}
+	if !got.Skills[0].CanDisable {
+		t.Fatal("can_disable capability was not preserved")
 	}
 }
 
@@ -214,7 +223,79 @@ func TestInMemoryLocalSkillImportStore_TimesOutRunningRequests(t *testing.T) {
 	}
 }
 
-func TestInitiateListLocalSkills_RequiresRuntimeOwner(t *testing.T) {
+// Capability discovery (list + poll) is readable by any workspace member so
+// the Agent capabilities surfaces work for agents bound to someone else's
+// runtime. Import stays owner-only (tests below).
+func TestListLocalSkills_AllowsNonOwnerWorkspaceMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+	memberUserID := createRuntimeLocalSkillTestMember(t, "member")
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(memberUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills", nil),
+		"runtimeId", runtimeID,
+	)
+
+	testHandler.InitiateListLocalSkills(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var initResp RuntimeLocalSkillListRequest
+	if err := json.NewDecoder(w.Body).Decode(&initResp); err != nil {
+		t.Fatalf("decode initiate response: %v", err)
+	}
+
+	w = httptest.NewRecorder()
+	pollReq := withURLParams(
+		newRequestAsUser(memberUserID, http.MethodGet, "/api/runtimes/"+runtimeID+"/local-skills/"+initResp.ID, nil),
+		"runtimeId", runtimeID,
+		"requestId", initResp.ID,
+	)
+
+	testHandler.GetLocalSkillListRequest(w, pollReq)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListLocalSkills_RejectsNonMember(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	runtimeID := createRuntimeLocalSkillTestRuntime(t, testUserID)
+
+	var outsiderID string
+	email := fmt.Sprintf("runtime-local-skills-outsider-%d@multica.ai", time.Now().UnixNano())
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO "user" (name, email)
+		VALUES ('Runtime Local Skills Outsider', $1)
+		RETURNING id
+	`, email).Scan(&outsiderID); err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, outsiderID)
+	})
+
+	w := httptest.NewRecorder()
+	req := withURLParams(
+		newRequestAsUser(outsiderID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills", nil),
+		"runtimeId", runtimeID,
+	)
+
+	testHandler.InitiateListLocalSkills(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestInitiateImportLocalSkill_RequiresRuntimeOwner(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -224,11 +305,13 @@ func TestInitiateListLocalSkills_RequiresRuntimeOwner(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := withURLParams(
-		newRequestAsUser(adminUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills", nil),
+		newRequestAsUser(adminUserID, http.MethodPost, "/api/runtimes/"+runtimeID+"/local-skills/import", map[string]any{
+			"skill_key": "review-helper",
+		}),
 		"runtimeId", runtimeID,
 	)
 
-	testHandler.InitiateListLocalSkills(w, req)
+	testHandler.InitiateImportLocalSkill(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d: %s", w.Code, w.Body.String())
 	}
@@ -371,6 +454,12 @@ func TestRuntimeLocalSkillImportFlow_EndToEnd(t *testing.T) {
 	}
 	if completed.Skill.Description != "Imported description" {
 		t.Fatalf("imported description = %q", completed.Skill.Description)
+	}
+	if len(completed.Skill.Files) != 1 {
+		t.Fatalf("expected poll response to include 1 imported file, got %d", len(completed.Skill.Files))
+	}
+	if completed.Skill.Files[0].Path != "templates/check.md" || completed.Skill.Files[0].Content != "body" {
+		t.Fatalf("unexpected imported file in poll response: %+v", completed.Skill.Files[0])
 	}
 	if got := countSkillFiles(t, completed.Skill.ID); got != 1 {
 		t.Fatalf("expected 1 imported file, got %d", got)

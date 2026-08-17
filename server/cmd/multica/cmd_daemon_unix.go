@@ -30,10 +30,23 @@ func notifyShutdownContext(parent context.Context) (context.Context, context.Can
 	return signal.NotifyContext(parent, syscall.SIGINT, syscall.SIGTERM)
 }
 
+// repointStdioToErrLog is a no-op on Unix. The rotating daemon.log writer
+// renames the active file on rotation, and on POSIX an open file descriptor —
+// including one an older self-update launcher inherited onto this process's
+// stdout/stderr — never blocks a rename or unlink, so the rotator works without
+// re-pointing our standard handles. Only Windows needs to release the inherited
+// handle (see the windows build for the rationale).
+func repointStdioToErrLog(_ string) {}
+
 func tailLogFile(logPath string, lines int, follow bool) error {
 	args := []string{"-n", strconv.Itoa(lines)}
 	if follow {
-		args = append(args, "-f")
+		// -F (follow by name), not -f (follow by descriptor): after the rotator
+		// renames daemon.log out from under us and opens a fresh one, -F reopens
+		// the new file by path, whereas -f would stay glued to the rotated-away
+		// inode and silently stop showing new output. Both GNU and BSD/macOS
+		// tail support -F.
+		args = append(args, "-F")
 	}
 	args = append(args, logPath)
 

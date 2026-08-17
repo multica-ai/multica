@@ -9,6 +9,7 @@ import (
 	"net/netip"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -65,6 +66,16 @@ type AttachmentResponse struct {
 	Filename      string  `json:"filename"`
 	URL           string  `json:"url"`
 	DownloadURL   string  `json:"download_url"`
+	// AttachmentDownloadURL is a credential-free URL that forces a
+	// Content-Disposition: attachment across every storage mode, for the
+	// download BUTTON — unlike DownloadURL, which is load-intent and keeps
+	// serving media inline so the preview path (resolvePreviewMediaUrl) can
+	// render it. Like DownloadURL it can be short-lived (a 60s proxy capability,
+	// a presigned URL) and therefore MUST NOT be persisted, and it is emitted
+	// ONLY by the single-attachment endpoint (GetAttachmentByID), never in list
+	// responses. Empty when the server cannot mint one for the object's storage
+	// mode; clients fall back to DownloadURL. (MUL follow-up to #6092 / #6713.)
+	AttachmentDownloadURL string `json:"attachment_download_url,omitempty"`
 	// MarkdownURL is the durable, absolute-when-possible URL the client
 	// SHOULD persist into markdown bodies (issue descriptions, comments,
 	// chat messages). It is computed per deployment policy by
@@ -96,7 +107,56 @@ type AttachmentResponse struct {
 	CreatedAt   string `json:"created_at"`
 }
 
-func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
+// attachmentURLMode selects how DownloadURL is rendered on a response.
+//
+// MUL-5372 / GitHub #5999. A CloudFront-signed DownloadURL is ~800 chars, of
+// which ~630 are a Policy+Signature pair that is re-minted on every request
+// (the policy embeds now+TTL at second granularity). Emitting it for every
+// attachment of every list response is expensive three times over: raw payload,
+// a fresh RSA sign per attachment per request, and — because the bytes differ on
+// each read — it defeats any cache keyed on response content. Agents pay all
+// three and use none of it: they fetch files through the single-attachment
+// endpoint, which needs only the id.
+//
+// The mode is a caller capability declaration, never a server-side default
+// flip, so a client that does not know about it is served byte-identically to
+// before. See attachmentURLModeFromRequest.
+type attachmentURLMode int
+
+const (
+	// attachmentURLModeSigned pre-binds authorization into DownloadURL so the
+	// caller can hand it straight to a native resource load (browser <img>,
+	// Linking.openURL) that cannot attach an Authorization header. This is the
+	// default for every caller that does not opt out.
+	attachmentURLModeSigned attachmentURLMode = iota
+	// attachmentURLModeStable renders DownloadURL as the stable
+	// /api/attachments/{id}/download path. That endpoint re-signs and 302s on
+	// every hit, so the value stays correct forever and costs ~95 chars instead
+	// of ~800. Callers that pick this mode must be able to follow an
+	// authenticated redirect, or fetch a fresh signature from the
+	// single-attachment endpoint before handing a URL to a native loader.
+	attachmentURLModeStable
+)
+
+// ClientCapabilityStableAttachmentURLs is the X-Client-Capabilities token a
+// caller advertises to receive stable attachment paths instead of pre-signed
+// URLs in bulk responses. Reusing the existing capability header (rather than a
+// query parameter) keeps the declaration client-wide: it is a property of what
+// the caller can process, not of the resource being requested.
+const ClientCapabilityStableAttachmentURLs = "stable_attachment_urls"
+
+// attachmentURLModeFromRequest resolves the mode a request asked for. Absent or
+// unrecognized declarations resolve to attachmentURLModeSigned, which is what
+// makes this change safe to ship ahead of any client: the server default never
+// moves, callers migrate on their own release cadence.
+func attachmentURLModeFromRequest(r *http.Request) attachmentURLMode {
+	if r != nil && requestHasClientCapability(r, ClientCapabilityStableAttachmentURLs) {
+		return attachmentURLModeStable
+	}
+	return attachmentURLModeSigned
+}
+
+func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) AttachmentResponse {
 	id := uuidToString(a.ID)
 	resp := AttachmentResponse{
 		ID:           id,
@@ -111,7 +171,10 @@ func (h *Handler) attachmentToResponse(a db.Attachment) AttachmentResponse {
 		SizeBytes:    a.SizeBytes,
 		CreatedAt:    a.CreatedAt.Time.Format("2006-01-02T15:04:05Z07:00"),
 	}
-	if h.CFSigner != nil {
+	// Only CloudFront mode overrides the stable path here; the presign and proxy
+	// modes already leave DownloadURL as the stable path and resolve it at
+	// download time, so stable mode is a no-op for them.
+	if h.CFSigner != nil && mode != attachmentURLModeStable {
 		resp.DownloadURL = h.CFSigner.SignedURL(a.Url, time.Now().Add(h.attachmentDownloadURLTTL()))
 	}
 	if a.IssueID.Valid {
@@ -276,10 +339,11 @@ func (h *Handler) groupAttachments(r *http.Request, commentIDs []pgtype.UUID) ma
 		slog.Error("failed to load attachments for comments", "error", err)
 		return nil
 	}
+	mode := attachmentURLModeFromRequest(r)
 	grouped := make(map[string][]AttachmentResponse, len(commentIDs))
 	for _, a := range attachments {
 		cid := uuidToString(a.CommentID)
-		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a))
+		grouped[cid] = append(grouped[cid], h.attachmentToResponse(a, mode))
 	}
 	return grouped
 }
@@ -303,7 +367,7 @@ func (h *Handler) groupChatMessageAttachments(ctx context.Context, workspaceID s
 	grouped := make(map[string][]AttachmentResponse, len(messageIDs))
 	for _, a := range attachments {
 		mid := uuidToString(a.ChatMessageID)
-		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a))
+		grouped[mid] = append(grouped[mid], h.attachmentToResponse(a, attachmentURLModeSigned))
 	}
 	return grouped
 }
@@ -426,14 +490,70 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			params.CommentID = comment.ID
 		}
 		if chatSessionID := r.FormValue("chat_session_id"); chatSessionID != "" {
-			// Re-use the existing private-agent gate so the user can still
-			// reach this session — covers role downgrade and agent
-			// visibility flips. The gate writes 4xx on failure.
-			session, ok := h.gateChatSessionForUser(w, r, userID, workspaceID, chatSessionID)
+			// Require the member-visible Chat projection as well as private-agent
+			// access. A cached command-only session id must not accept uploads that
+			// could later be attached by an old client and resurrect the session.
+			session, ok := h.gatePublicChatSessionForUser(w, r, userID, workspaceID, chatSessionID)
 			if !ok {
 				return
 			}
 			params.ChatSessionID = session.ID
+		}
+		// task_id upload: an agent producing an image/file for its chat reply.
+		// The row is tagged with the producing task and its chat session so
+		// CompleteTask can bind it to the assistant message it synthesizes.
+		// Gate: the request must come from a task-scoped token, the form task_id
+		// must equal that token's task, the caller must be that task's agent,
+		// and it must be a chat task (has a chat_session_id).
+		if taskID := r.FormValue("task_id"); taskID != "" {
+			// Authoritative task-token boundary (load-bearing, mirrors
+			// chat_history.go:chatHistorySession). X-Task-ID is only trustworthy
+			// when the auth middleware set it from a task-scoped `mat_` token —
+			// that path is also the ONLY one that stamps X-Actor-Source=task_token
+			// and strips a client-forged X-Task-ID. A normal JWT / `mul_` PAT
+			// leaves X-Actor-Source empty and does NOT strip a forged X-Task-ID,
+			// and resolveActor's fallback will accept a real X-Agent-ID +
+			// X-Task-ID pair. So without this gate a member who learns a task ID
+			// could forge both headers and inject an attachment onto another chat
+			// task's assistant reply — a cross-session/privacy leak.
+			if r.Header.Get("X-Actor-Source") != "task_token" {
+				writeError(w, http.StatusForbidden, "task_id upload is only available from within an agent task")
+				return
+			}
+			taskUUID, ok := parseUUIDOrBadRequest(w, taskID, "task_id")
+			if !ok {
+				return
+			}
+			// Pin to the run's own task: the middleware-injected X-Task-ID is the
+			// single source of truth for which task this token may act on, so a
+			// run authorized for task A cannot tag an attachment onto task B —
+			// even another chat task of the same agent, whose session may belong
+			// to a different user.
+			boundTaskID := strings.TrimSpace(r.Header.Get("X-Task-ID"))
+			if boundTaskID == "" || !strings.EqualFold(boundTaskID, strings.TrimSpace(taskID)) {
+				writeError(w, http.StatusForbidden, "task_id must match the request's task token")
+				return
+			}
+			task, err := h.Queries.GetAgentTaskInWorkspace(r.Context(), db.GetAgentTaskInWorkspaceParams{
+				ID:          taskUUID,
+				WorkspaceID: parseUUID(workspaceID),
+			})
+			if err != nil {
+				writeError(w, http.StatusForbidden, "invalid task_id")
+				return
+			}
+			if uploaderType != "agent" || uuidToString(task.AgentID) != uploaderID {
+				writeError(w, http.StatusForbidden, "task_id upload requires the task's own agent")
+				return
+			}
+			if !task.ChatSessionID.Valid {
+				writeError(w, http.StatusBadRequest, "task_id upload requires a chat task")
+				return
+			}
+			params.TaskID = task.ID
+			// Bind the session too so reads (groupChatMessageAttachments) and
+			// GC classify the row consistently before it gains a message id.
+			params.ChatSessionID = task.ChatSessionID
 		}
 
 		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
@@ -450,7 +570,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
 		} else {
-			writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+			writeJSON(w, http.StatusOK, h.attachmentToResponse(att, attachmentURLModeFromRequest(r)))
 			return
 		}
 
@@ -497,9 +617,10 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mode := attachmentURLModeFromRequest(r)
 	resp := make([]AttachmentResponse, len(attachments))
 	for i, a := range attachments {
-		resp[i] = h.attachmentToResponse(a)
+		resp[i] = h.attachmentToResponse(a, mode)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -514,7 +635,77 @@ func (h *Handler) GetAttachmentByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, h.attachmentToResponse(att))
+	// Always signed, regardless of what the caller advertised: this endpoint is
+	// the single source of fresh, natively-loadable URLs. Stable-mode callers
+	// (CLI `attachment download`, the web inline-media re-sign hook) exchange a
+	// stable path for a signature HERE, so honoring the capability would break
+	// the very flow that makes stable mode safe elsewhere.
+	resp := h.attachmentToResponse(att, attachmentURLModeSigned)
+	// Token-mode clients use this authenticated endpoint to replace the
+	// auth-gated API path with a URL that native media elements can load.
+	// Assert the same storage.DownloadPresigner that resolveAttachmentDownloadMode
+	// keys its presign decision on, so the mode resolution and the presign call
+	// can never disagree. An empty content disposition inherits the object's
+	// stored Content-Disposition (inline for media, attachment otherwise), which
+	// keeps images renderable inline while preserving the original download
+	// filename.
+	switch mode := h.resolveAttachmentDownloadMode(att.Url); mode {
+	case attachmentDownloadModeCloudFront:
+		// CloudFront mode: attachmentToResponse already set DownloadURL to an
+		// inline-intent signed URL. The download button needs the forced-
+		// attachment sibling. response-content-disposition is folded into the
+		// signed Resource (SignedURLWithContentDisposition), so a client cannot
+		// strip or alter it without invalidating the signature. Keying on the
+		// resolved mode (not h.CFSigner != nil) lets an explicit proxy/presign
+		// override take effect even when a signer is configured; the nil guard
+		// keeps an explicit cloudfront mode without a configured signer from
+		// panicking — the field is left empty and the client falls back to
+		// download_url, the same graceful degrade attachmentToResponse uses.
+		if h.CFSigner != nil {
+			resp.AttachmentDownloadURL = h.CFSigner.SignedURLWithContentDisposition(
+				att.Url,
+				storage.AttachmentContentDisposition(att.Filename),
+				time.Now().Add(h.attachmentDownloadURLTTL()),
+			)
+		}
+	case attachmentDownloadModePresign:
+		if presigner, ok := h.Storage.(storage.DownloadPresigner); ok {
+			key := h.Storage.KeyFromURL(att.Url)
+			signedURL, err := presigner.PresignGetWithContentDisposition(r.Context(), key, h.attachmentDownloadURLTTL(), "")
+			if err != nil {
+				slog.Warn("failed to presign inline attachment URL", "id", uuidToString(att.ID), "key", key, "error", err)
+			} else {
+				resp.DownloadURL = signedURL
+			}
+			// Download-intent sibling: the same presigned object, but with a
+			// forced attachment disposition so the download button saves the
+			// file instead of previewing it. Independent of DownloadURL's inline
+			// signature above; either may be present without the other.
+			if dlURL, err := presigner.PresignGetWithContentDisposition(r.Context(), key, h.attachmentDownloadURLTTL(), storage.AttachmentContentDisposition(att.Filename)); err != nil {
+				slog.Warn("failed to presign attachment download URL", "id", uuidToString(att.ID), "key", key, "error", err)
+			} else {
+				resp.AttachmentDownloadURL = dlURL
+			}
+		}
+	case attachmentDownloadModeProxy:
+		// Proxy mode has no signed storage URL to offer, so this response
+		// would otherwise hand back the auth-gated API path — which a
+		// native download on a token-mode client cannot authenticate,
+		// leaving the user with no file (MUL-5292). Mint a
+		// single-attachment, 60-second capability instead, so the same
+		// "replace the auth-gated path with something a native loader can
+		// fetch" contract holds in all three modes.
+		//
+		// Only here, never in attachmentToResponse: list responses are held
+		// far longer than the TTL, so a capability embedded in one would be
+		// expired by the time anything used it.
+		resp.DownloadURL = attachmentCapabilityPath(resp.ID, time.Now())
+		// Download-intent sibling capability (dl=1): the redemption route turns
+		// it into a Content-Disposition: attachment, for the download button.
+		resp.AttachmentDownloadURL = attachmentDownloadCapabilityPath(resp.ID, time.Now())
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }
 
 func (h *Handler) loadAttachmentForRequest(w http.ResponseWriter, r *http.Request) (db.Attachment, bool) {
@@ -664,7 +855,7 @@ func (h *Handler) DownloadAttachment(w http.ResponseWriter, r *http.Request) {
 		h.setAttachmentPreviewSecurityHeaders(w)
 		http.Redirect(w, r, signedURL, http.StatusFound)
 	case attachmentDownloadModeProxy:
-		h.proxyAttachmentDownload(w, r, att, key)
+		h.proxyAttachmentDownload(w, r, att, key, false)
 	default:
 		writeError(w, http.StatusInternalServerError, "invalid attachment download mode")
 	}
@@ -722,7 +913,41 @@ func shouldProxyAttachmentURL(rawURL string) bool {
 	return false
 }
 
-func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string) {
+// ServeLocalUpload serves a local-disk object from the public /uploads/*
+// route. It carries the same preview security headers as the authenticated
+// download endpoint so self-hosted deployments — same-origin or split
+// frontend/backend origins — can inline-render images and iframe-preview
+// documents (PDF/HTML) fetched straight from the static route. Without these
+// headers the global "frame-ancestors 'none'" policy blocks those previews.
+// See MUL-3821 / #4477.
+func (h *Handler) ServeLocalUpload(w http.ResponseWriter, r *http.Request) {
+	local, ok := h.Storage.(*storage.LocalStorage)
+	if !ok {
+		http.NotFound(w, r)
+		return
+	}
+	h.setAttachmentPreviewSecurityHeaders(w)
+	key := strings.TrimPrefix(r.URL.Path, "/uploads/")
+	local.ServeFile(w, r, key)
+}
+
+// proxyAttachmentDownload streams an attachment through the API instead of
+// redirecting to a signed storage URL (used for local-disk / private-host
+// backends, see resolveAttachmentDownloadMode).
+//
+// It supports HTTP Range requests so a download interrupted mid-stream can be
+// resumed with `Range: bytes=<resume>-` instead of restarting from byte 0
+// (RAS-29). Two paths:
+//
+//   - Seekable backend (local disk returns *os.File): delegate to
+//     http.ServeContent, which implements Range / If-Range / 206 /
+//     Content-Range / 416 correctly out of the box.
+//   - Non-seekable backend (S3/MinIO streaming body): advertise
+//     Accept-Ranges and implement single-range requests by hand
+//     (serveProxyRange). Multi-range is not implemented on this path; per
+//     RFC 7233 it is ignored and the full body is served (200), matching the
+//     seekable path's successful outcome rather than failing with 416.
+func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request, att db.Attachment, key string, forceAttachment bool) {
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
 		slog.Error("failed to open attachment for download", "id", uuidToString(att.ID), "key", key, "error", err)
@@ -736,16 +961,225 @@ func (h *Handler) proxyAttachmentDownload(w http.ResponseWriter, r *http.Request
 	} else {
 		w.Header().Set("Content-Type", "application/octet-stream")
 	}
-	if att.SizeBytes >= 0 {
-		w.Header().Set("Content-Length", fmt.Sprintf("%d", att.SizeBytes))
+	disposition := storage.ContentDisposition(att.ContentType, att.Filename)
+	if forceAttachment {
+		// Download-intent capability (dl=1): override the media-aware inline
+		// disposition so the browser saves the file instead of previewing it.
+		disposition = storage.AttachmentContentDisposition(att.Filename)
 	}
-	w.Header().Set("Content-Disposition", storage.ContentDisposition(att.ContentType, att.Filename))
+	w.Header().Set("Content-Disposition", disposition)
+	// no-store predates Range support; keep it. Range/206 semantics are
+	// independent of caching — clients resume via Content-Range, not the cache.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	h.setAttachmentPreviewSecurityHeaders(w)
-	if _, err := io.Copy(w, reader); err != nil {
-		slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
+
+	// Seekable backends get full standard-library Range handling. A zero
+	// modTime disables Last-Modified / If-Modified-Since (we keep no-store);
+	// ServeContent still honors Range and sets Accept-Ranges / Content-Length /
+	// Content-Range / status itself, and respects the headers we set above.
+	if seeker, ok := reader.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, att.Filename, time.Time{}, seeker)
+		return
 	}
+
+	// Non-seekable backend: single-range fallback.
+	h.serveProxyRange(w, r, att, reader)
+}
+
+// serveProxyRange streams a (possibly partial) attachment body from a
+// forward-only reader. It always advertises Accept-Ranges: bytes and, when the
+// request carries a satisfiable single-range `Range` header, replies 206 +
+// Content-Range with just that byte interval. Without a Range header (or when
+// the size is unknown) it streams the whole body as a 200, preserving the
+// pre-RAS-29 behavior. An unsatisfiable range yields 416 + `Content-Range:
+// bytes */<total>` per RFC 7233.
+func (h *Handler) serveProxyRange(w http.ResponseWriter, r *http.Request, att db.Attachment, reader io.Reader) {
+	total := att.SizeBytes
+	w.Header().Set("Accept-Ranges", "bytes")
+
+	rangeHeader := strings.TrimSpace(r.Header.Get("Range"))
+
+	// Decide how to respond. We serve the full body (200) when there is no Range,
+	// when the total size is unknown (total < 0), or when parseSingleByteRange
+	// classifies the Range as unsupported — multi-range, or a well-formed range
+	// against an empty object (see rangeUnsupported). A well-formed, in-bounds
+	// single range yields 206; a well-formed but out-of-bounds range on a
+	// non-empty object is the only case that yields 416.
+	serveFull := rangeHeader == "" || total < 0
+	var start, length int64
+	if !serveFull {
+		var outcome rangeParseOutcome
+		start, length, outcome = parseSingleByteRange(rangeHeader, total)
+		switch outcome {
+		case rangeUnsupported:
+			// Unsupported Range form (multi-range). RFC 7233 requires an
+			// unsupported Range to be *ignored* and the full representation served
+			// (200), not rejected with 416. This also keeps the non-seekable path
+			// from diverging from the seekable http.ServeContent path, which
+			// answers multi-range with a successful 206 multipart: both backends
+			// now return complete, correctly-labeled data instead of one silently
+			// turning a resumable download into a hard 416 failure.
+			serveFull = true
+		case rangeUnsatisfiable:
+			// Well-formed bytes range that does not overlap the content. RFC 7233
+			// §4.4 requires the total in the Content-Range of a 416 response.
+			w.Header().Set("Content-Range", fmt.Sprintf("bytes */%d", total))
+			writeError(w, http.StatusRequestedRangeNotSatisfiable, "requested range not satisfiable")
+			return
+		}
+	}
+
+	if serveFull {
+		if total >= 0 {
+			w.Header().Set("Content-Length", strconv.FormatInt(total, 10))
+		}
+		if _, err := io.Copy(w, reader); err != nil {
+			slog.Error("failed to stream attachment download", "id", uuidToString(att.ID), "error", err)
+		}
+		return
+	}
+
+	// Satisfiable single range → 206. Forward-only reader: discard the bytes
+	// before `start` before copying the requested interval. Wasteful for large
+	// offsets but correct; seekable backends never reach here (they take the
+	// ServeContent path above).
+	if start > 0 {
+		if _, err := io.CopyN(io.Discard, reader, start); err != nil {
+			// The skip failed BEFORE any response header was written. We must send
+			// an explicit error status here: a bare `return` would let net/http
+			// emit its default 200 OK + empty body, which a resuming client reads
+			// as "Range ignored, here is the whole file" — silently turning a
+			// transient storage read error into a corrupt/empty download and
+			// defeating the very resume feature this path implements. (A copy
+			// failure AFTER WriteHeader below can only be logged: the 206 status
+			// is already on the wire and cannot be revised.)
+			slog.Error("failed to skip to range start for attachment", "id", uuidToString(att.ID), "error", err)
+			writeError(w, http.StatusBadGateway, "failed to read attachment range")
+			return
+		}
+	}
+	w.Header().Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, start+length-1, total))
+	w.Header().Set("Content-Length", strconv.FormatInt(length, 10))
+	w.WriteHeader(http.StatusPartialContent)
+	if _, err := io.CopyN(w, reader, length); err != nil {
+		slog.Error("failed to stream attachment range", "id", uuidToString(att.ID), "error", err)
+	}
+}
+
+// rangeParseOutcome classifies how serveProxyRange must respond to a `Range`
+// header on the forward-only (non-seekable) proxy path. It exists so the three
+// distinct HTTP outcomes required by RFC 7233 are not collapsed into a single
+// bool — collapsing them is exactly what caused a multi-range request to fail
+// with 416 on this path while succeeding (206 multipart) on the seekable path.
+type rangeParseOutcome int
+
+const (
+	// rangeSatisfiable: a single byte range we can serve as 206 + Content-Range.
+	rangeSatisfiable rangeParseOutcome = iota
+	// rangeUnsatisfiable: a well-formed request that cannot be served as a range
+	// we support — a bytes range that does not overlap the content (start at/after
+	// EOF, reversed), or a malformed / unknown-unit Range. stdlib http.ServeContent
+	// answers all of these with 416, so replying 416 here keeps the two backends
+	// aligned; the caller adds `Content-Range: bytes */<total>` (RFC 7233 §4.4).
+	rangeUnsatisfiable
+	// rangeUnsupported: a well-formed Range this path answers by ignoring the
+	// Range and serving the full body (200), per RFC 7233. Two cases:
+	//   - multi-range (`bytes=a-b,c-d`): the seekable path serves it as a 206
+	//     multipart, so a full 200 here keeps both paths returning complete data
+	//     instead of one hard-failing with 416.
+	//   - a well-formed byte range against an EMPTY object (size == 0): there are
+	//     no bytes to satisfy any range, and stdlib http.ServeContent ignores the
+	//     Range and returns an empty 200 rather than 416. Classifying it here as
+	//     unsupported (→ empty 200) keeps the non-seekable path aligned with the
+	//     seekable one; answering 416 would make the same request against a
+	//     0-byte attachment succeed on a seekable backend but fail on an
+	//     S3/MinIO stream. Genuinely malformed / unknown-unit ranges against an
+	//     empty object stay rangeUnsatisfiable (416), matching ServeContent.
+	rangeUnsupported
+)
+
+// parseSingleByteRange parses a single-range HTTP `Range` header value against
+// a known content size and returns the absolute start offset, byte length, and
+// an outcome telling the caller which status to send (see rangeParseOutcome).
+// start/length are only meaningful when the outcome is rangeSatisfiable.
+//
+// Supported forms (RFC 7233): `bytes=start-end`, `bytes=start-` (to EOF), and
+// `bytes=-suffix` (final suffix bytes). An out-of-range end is clamped to the
+// last byte; a start at or past EOF on a non-empty object is unsatisfiable (416).
+// Multi-range, and any well-formed range against an empty object (size == 0),
+// are valid-but-unsupported forms and yield rangeUnsupported (ignored → full
+// body), matching how the seekable http.ServeContent path handles them.
+func parseSingleByteRange(header string, size int64) (start, length int64, outcome rangeParseOutcome) {
+	const prefix = "bytes="
+	if !strings.HasPrefix(header, prefix) {
+		// Unknown / missing unit (e.g. "items=0-10", "0-100"). stdlib
+		// http.ServeContent rejects these with 416; mirror that here.
+		return 0, 0, rangeUnsatisfiable
+	}
+	spec := strings.TrimSpace(header[len(prefix):])
+	if spec == "" {
+		return 0, 0, rangeUnsatisfiable
+	}
+	// Multi-range is a valid HTTP form we do not implement on this forward-only
+	// path; ignore it and serve the full body rather than failing with 416.
+	if strings.Contains(spec, ",") {
+		return 0, 0, rangeUnsupported
+	}
+	dash := strings.IndexByte(spec, '-')
+	if dash < 0 {
+		return 0, 0, rangeUnsatisfiable
+	}
+	startStr := strings.TrimSpace(spec[:dash])
+	endStr := strings.TrimSpace(spec[dash+1:])
+
+	if startStr == "" {
+		// Suffix form: bytes=-N → final N bytes.
+		if endStr == "" {
+			return 0, 0, rangeUnsatisfiable
+		}
+		n, err := strconv.ParseInt(endStr, 10, 64)
+		if err != nil || n <= 0 {
+			return 0, 0, rangeUnsatisfiable
+		}
+		if size == 0 {
+			// Well-formed suffix against an empty object: no bytes to satisfy it.
+			// Ignore the Range and serve an empty 200 (rangeUnsupported) to match
+			// the seekable path, instead of a divergent 416.
+			return 0, 0, rangeUnsupported
+		}
+		if n > size {
+			n = size
+		}
+		return size - n, n, rangeSatisfiable
+	}
+
+	s, err := strconv.ParseInt(startStr, 10, 64)
+	if err != nil || s < 0 {
+		return 0, 0, rangeUnsatisfiable
+	}
+	if s >= size {
+		// The start is at or beyond EOF, so no bytes overlap. For an empty object
+		// (size == 0) every start is at EOF; stdlib http.ServeContent ignores the
+		// Range and serves an empty 200 there (it never validates the end once the
+		// start is out of range), so classify as rangeUnsupported (→ empty 200) to
+		// stay aligned. For a non-empty object a start past EOF is a genuine 416.
+		if size == 0 {
+			return 0, 0, rangeUnsupported
+		}
+		return 0, 0, rangeUnsatisfiable
+	}
+	if endStr == "" {
+		return s, size - s, rangeSatisfiable
+	}
+	e, err := strconv.ParseInt(endStr, 10, 64)
+	if err != nil || e < s {
+		return 0, 0, rangeUnsatisfiable
+	}
+	if e >= size {
+		e = size - 1
+	}
+	return s, e - s + 1, rangeSatisfiable
 }
 
 func (h *Handler) setAttachmentPreviewSecurityHeaders(w http.ResponseWriter) {

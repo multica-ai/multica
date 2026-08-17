@@ -10,6 +10,8 @@
  *      (CloudFront, no auth on the client side) or a new authenticated proxy.
  */
 
+import { isImageAttachment } from "@multica/core/attachments/image-sequence";
+
 export type PreviewKind =
   | "image"
   | "pdf"
@@ -43,6 +45,9 @@ const EXT_LANGUAGE_MAP: Record<string, string> = {
   toml: "ini",
   ini: "ini",
   conf: "ini",
+  dockerfile: "dockerfile",
+  makefile: "makefile",
+  gitignore: "plaintext",
   // Shell
   sh: "bash",
   bash: "bash",
@@ -79,6 +84,8 @@ const EXT_LANGUAGE_MAP: Record<string, string> = {
 const BASENAME_LANGUAGE_MAP: Record<string, string> = {
   dockerfile: "dockerfile",
   makefile: "makefile",
+  ".env": "plaintext",
+  ".gitignore": "plaintext",
 };
 
 // IMPORTANT — KEEP IN SYNC with isTextPreviewable() in
@@ -92,6 +99,7 @@ const TEXT_EXTENSIONS = new Set<string>([
   "md", "markdown", "txt", "log", "csv", "tsv",
   "html", "htm", "json", "xml",
   "yml", "yaml", "toml", "ini", "conf",
+  "dockerfile", "makefile", "gitignore",
   "sh", "bash", "zsh",
   "py", "rb", "go", "rs",
   "ts", "tsx", "js", "jsx", "mjs", "cjs",
@@ -113,7 +121,12 @@ const TEXT_CONTENT_TYPES = new Set<string>([
   "application/x-httpd-php",
 ]);
 
-const TEXT_BASENAMES = new Set<string>(["dockerfile", "makefile"]);
+const TEXT_BASENAMES = new Set<string>([
+  "dockerfile",
+  "makefile",
+  ".env",
+  ".gitignore",
+]);
 
 // Extension fallbacks for media kinds — used when contentType is empty
 // (URL-only preview source, no server-side metadata available).
@@ -123,9 +136,9 @@ const VIDEO_EXTS = new Set<string>([
 const AUDIO_EXTS = new Set<string>([
   "mp3", "wav", "m4a", "ogg", "oga", "flac", "aac", "opus",
 ]);
-const IMAGE_EXTS = new Set<string>([
-  "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg",
-]);
+// Image detection lives in @multica/core/attachments/image-sequence — the
+// gallery sequence builder needs the same answer and is shared with mobile,
+// which cannot import from packages/views.
 
 function extOf(filename: string): string {
   const base = filename.toLowerCase().split(/[\\/]/).pop() ?? "";
@@ -171,7 +184,7 @@ export function getPreviewKind(
   // Image — must come BEFORE the html/text branches because svg is
   // text-like (XML), and image/* content-types include text/svg variants
   // that isTextLike would otherwise catch.
-  if (ct.startsWith("image/") || (ext && IMAGE_EXTS.has(ext))) return "image";
+  if (isImageAttachment(contentType, filename)) return "image";
 
   // Markdown — covers both the well-typed case and the common
   // server-side sniffer fallback (text/plain for .md).

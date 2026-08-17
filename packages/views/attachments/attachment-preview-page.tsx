@@ -50,12 +50,12 @@ export function AttachmentPreviewPage({
   return (
     <div className="flex h-full w-full flex-col bg-background">
       {isLoading ? (
-        <div className="flex flex-1 items-center justify-center text-sm text-muted-foreground">
+        <div className="flex flex-1 items-center justify-center text-body text-muted-foreground">
           {t(($) => $.attachment.preview_loading)}
         </div>
       ) : isError ? (
         <div
-          className="flex flex-1 items-center justify-center px-4 text-sm text-muted-foreground"
+          className="flex flex-1 items-center justify-center px-4 text-body text-muted-foreground"
           data-testid="attachment-preview-page-error"
         >
           {t(($) => $.attachment.preview_failed)}

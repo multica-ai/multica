@@ -20,10 +20,15 @@
  *   - chatKeys.pendingTask(sessionId)→ ChatPendingTask (empty `{}` = no in-flight)
  */
 import type { QueryClient } from "@tanstack/react-query";
+import {
+  enqueuePendingChatTask,
+  removePendingChatTask,
+} from "@multica/core/chat/pending";
 import type {
   ChatDonePayload,
   ChatMessage,
   ChatPendingTask,
+  ChatQuickActionsPayload,
   ChatSession,
   ChatSessionDeletedPayload,
   TaskMessagePayload,
@@ -100,20 +105,39 @@ export function flipSessionUnread(
  * Older servers (pre-#2123 in web's commit history) sent only chat_session_id
  * + task_id. Detect that and fall back to invalidate; we'll refetch the
  * messages list and accept a one-frame window with no bubble.
+ *
+ * The inline patch never carries attachments: `ChatDonePayload` has no
+ * attachments field by contract, yet an assistant reply may have images/files
+ * bound to it server-side. So after the inline patch we ALWAYS invalidate the
+ * messages list to refetch the authoritative rows (which include
+ * `attachments`). Mirrors web's `use-realtime-sync.ts`, which invalidates
+ * unconditionally after its inline patch. The patch is kept purely for the
+ * instant, flicker-free bubble; the refetch is what makes attachments appear.
  */
 export function applyChatDoneToCache(
   qc: QueryClient,
   payload: ChatDonePayload,
 ) {
-  if (payload.message_id && payload.content != null && payload.created_at) {
+  if (
+    payload.message_id &&
+    (payload.content != null || (payload.quick_actions?.length ?? 0) > 0) &&
+    payload.created_at
+  ) {
     const assistantMsg: ChatMessage = {
       id: payload.message_id,
       chat_session_id: payload.chat_session_id,
       role: "assistant",
-      content: payload.content,
+      content: payload.content ?? "",
       task_id: payload.task_id,
       created_at: payload.created_at,
       elapsed_ms: payload.elapsed_ms ?? null,
+      // Mirror web's applyChatDoneToCache: carry the kind so a no_response turn
+      // renders its notice inline; missing → "message" for older servers
+      // (MUL-4351).
+      message_kind: payload.message_kind ?? "message",
+      ...(payload.quick_actions !== undefined
+        ? { quick_actions: payload.quick_actions }
+        : {}),
     };
     qc.setQueryData<ChatMessage[]>(
       chatKeys.messages(payload.chat_session_id),
@@ -124,14 +148,61 @@ export function applyChatDoneToCache(
         return [...old, assistantMsg];
       },
     );
-  } else {
-    qc.invalidateQueries({
-      queryKey: chatKeys.messages(payload.chat_session_id),
-    });
   }
-  // Clear in-flight pointer in the same tick so StatusPill unmounts and
-  // the AssistantMessage owns the rendering.
-  qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+  // Refetch the authoritative message list so any attachments bound to the
+  // assistant reply (absent from the event payload) are pulled in.
+  qc.invalidateQueries({
+    queryKey: chatKeys.messages(payload.chat_session_id),
+  });
+  // A queued successor may already exist. Refetch the server-authoritative
+  // head instead of clearing it and briefly presenting the session as idle.
+  invalidatePendingTask(qc, payload.chat_session_id);
+}
+
+/**
+ * Apply a `chat:quick_actions` supplement to the messages cache.
+ *
+ * The daemon generates quick actions in a background pass AFTER the turn
+ * finishes, so they arrive on their own event well after `chat:done` already
+ * invalidated + refetched the messages list (which came back with none). With
+ * `staleTime: Infinity` nothing refetches again, so without this patch an
+ * active mobile session would never render async-generated quick actions until
+ * a manual pull-to-refresh or refocus.
+ *
+ * Patch the identified assistant message's `quick_actions` in place. The
+ * payload's list is already server-validated, so — like web — this only
+ * patches; no invalidate (mobile's cellular "patch over invalidate" rule). An
+ * empty/missing list is terminal ("no suggestions this turn") and a no-op:
+ * the message already renders no chips.
+ *
+ * Mirrors web's `applyChatQuickActionsToCache` in
+ * packages/core/realtime/use-realtime-sync.ts. Mobile has a single flat
+ * messages cache and no pending-placeholder marker, so it patches only that
+ * one cache.
+ */
+export async function applyChatQuickActionsToCache(
+  qc: QueryClient,
+  payload: ChatQuickActionsPayload,
+) {
+  const actions = payload.quick_actions ?? [];
+  if (actions.length === 0) return;
+  // chat:done's invalidate may still have a messages refetch in flight that
+  // read the assistant row BEFORE the daemon persisted these actions. Cancel it
+  // first so its actions-less response can't land after — and overwrite — the
+  // patch below. The messages query is staleTime: Infinity, so such an overwrite
+  // would never self-heal (MUL-5149 stale-refetch race). Cancel before
+  // setQueryData: cancelQueries reverts to the pre-fetch state, so patching
+  // first would be undone by the revert.
+  await qc.cancelQueries({
+    queryKey: chatKeys.messages(payload.chat_session_id),
+  });
+  qc.setQueryData<ChatMessage[]>(
+    chatKeys.messages(payload.chat_session_id),
+    (old) =>
+      old?.map((m) =>
+        m.id === payload.message_id ? { ...m, quick_actions: actions } : m,
+      ),
+  );
 }
 
 // =====================================================
@@ -143,14 +214,9 @@ export function seedPendingTaskFromQueued(
   payload: TaskQueuedPayload,
 ) {
   if (!payload.chat_session_id) return;
-  qc.setQueryData<ChatPendingTask>(
-    chatKeys.pendingTask(payload.chat_session_id),
-    (old) => ({
-      ...(old ?? {}),
-      task_id: payload.task_id,
-      status: "queued",
-    }),
-  );
+  // A follow-up can be queued while another task is active. The event does
+  // not carry enough queue state to replace that active head safely.
+  invalidatePendingTask(qc, payload.chat_session_id);
 }
 
 export function promotePendingTaskToRunning(
@@ -167,13 +233,67 @@ export function promotePendingTaskToRunning(
       return { ...old, status: "running" };
     },
   );
+  invalidatePendingTask(qc, payload.chat_session_id);
+  qc.invalidateQueries({
+    queryKey: chatKeys.messages(payload.chat_session_id),
+  });
 }
 
-export function clearPendingTask(
+export function invalidatePendingTask(
   qc: QueryClient,
   sessionId: string,
 ) {
-  qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+}
+
+export function seedAcceptedPendingTask(
+  qc: QueryClient,
+  payload: {
+    chat_session_id: string;
+    task_id: string;
+    created_at: string;
+    message_id?: string;
+    content?: string;
+    optimistic_task_id?: string;
+    supports_queue?: boolean;
+    queued?: boolean;
+  },
+) {
+  qc.setQueryData<ChatPendingTask>(
+    chatKeys.pendingTask(payload.chat_session_id),
+    (old) => {
+      const task = {
+        task_id: payload.task_id,
+        status: "queued",
+        created_at: payload.created_at,
+        ...(payload.message_id ? { message_id: payload.message_id } : {}),
+        ...(payload.content !== undefined ? { content: payload.content } : {}),
+      };
+      let next: ChatPendingTask;
+      if (
+        payload.queued === true &&
+        payload.optimistic_task_id &&
+        old?.task_id === payload.optimistic_task_id
+      ) {
+        // The server knows an authoritative predecessor exists, but this
+        // client has not loaded it yet. Retain the optimistic root as a
+        // non-network placeholder until the invalidation fills that head;
+        // dropping it here would briefly unlock the composer and remove the
+        // status line while leaving only a queue row.
+        next = enqueuePendingChatTask(old, task, true);
+      } else {
+        const reconciled = payload.optimistic_task_id
+          ? removePendingChatTask(old, payload.optimistic_task_id)
+          : old;
+        next = enqueuePendingChatTask(reconciled, task, payload.queued);
+      }
+      if (payload.supports_queue === true || old?.supports_queue === true) {
+        next.supports_queue = true;
+      }
+      return next;
+    },
+  );
+  invalidatePendingTask(qc, payload.chat_session_id);
 }
 
 // =====================================================

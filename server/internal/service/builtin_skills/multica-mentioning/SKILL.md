@@ -1,6 +1,6 @@
 ---
 name: multica-mentioning
-description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, or broadcast with @all. Documents the verified mention contract: how a mention link is built from a real UUID, the four mention types and exactly what each one enqueues (agent → a run for that agent, squad → a run for the squad leader, member and issue → a rendered link with NO run), comment create/edit preview and suppression, the @all broadcast and how it suppresses the assignee's auto-trigger, and the silent no-op cases (a name where a UUID belongs, a bad/unknown UUID, an already-pending task, an archived agent, a private agent you cannot access). WHETHER to mention — loop avoidance, staying silent on acknowledgements — lives in the runtime brief's Mentions section, not here. This skill is the backend contract only, traced to server/internal/util/mention.go and server/internal/handler/comment.go."
+description: "Use when an issue comment needs to @mention someone — link to a person, trigger another agent, hand work to a squad, or broadcast with @all. Whether to mention at all is covered by the runtime brief, not here."
 user-invocable: false
 allowed-tools: Bash(multica *)
 ---
@@ -31,6 +31,15 @@ accepts only hex characters and dashes, OR the literal string `all`:
 So the link target is a real entity UUID (or `all`), never a display name. The
 label between the brackets is free text — that is where the human-readable name
 goes.
+
+One `mention://` form deliberately sits OUTSIDE this parser:
+`[Label](mention://project/<uuid>)`. `project` is absent from the type group
+above, so the backend never parses it and it can enqueue nothing — it is a
+render-only link every client makes navigable (a chip on web and desktop, an
+ordinary link that opens the project on tap on mobile). That is the whole point:
+a project reference should never be able to start a run. Use it freely to point
+at a project (see the multica-projects-and-resources skill); everything else in
+this document is about the four types (plus `all`) the parser does recognize.
 
 ## Step 1 — look up the UUID with `--output json`
 
@@ -97,35 +106,90 @@ is a no-op; a malformed UUID is rejected at the request boundary.
     [@all](mention://all/all)
 
 It addresses everyone on the issue. It does NOT make any specific agent run.
-And it is special at trigger time: in `commentMentionsOthersButNotAssignee`
-(`server/internal/handler/comment.go`), a comment that carries an `@all`
-mention is treated as a broadcast that SUPPRESSES the issue assignee's
-automatic on-comment trigger. Use `@all` to announce, not to request work from
-the assignee.
+And it is special at trigger time: a comment that carries an `@all` mention is
+treated as a broadcast that SUPPRESSES the issue assignee's automatic
+on-comment trigger (and the other implicit routing fallbacks — thread parent /
+conversation owner). Use `@all` to announce, not to request work from the
+assignee.
+
+`@all` only suppresses those IMPLICIT routes. An EXPLICIT `@agent` / `@squad`
+mention in the same comment still fires normally (MUL-5411): a comment reading
+`[@all](mention://all/all) heads up — [@Preflight](mention://agent/<uuid>)
+please take this` enqueues Preflight and nobody else. Explicit mentions win over
+the broadcast; see `computeCommentAgentTriggers` in
+`server/internal/handler/comment.go`, where the explicit-mention branch is
+evaluated BEFORE the `@all` short-circuit.
 
 ## What does NOT happen (so the result doesn't surprise you)
 
-These are all silent no-ops — no error, no run:
+None of these start a fresh run, and none produce an error response — but they
+are three different things, and the response tells you which. A mention that
+never parsed is a truly silent no-op. One that parsed and was refused comes back
+in `trigger_outcomes` as `status: "blocked"` with a `reason_code`. One whose
+target is already busy comes back `coalesced` or `deferred`: no second run, but
+your comment IS folded into the task that is already running, so it still gets
+read. Read that array after posting — it is the only place any of this shows up.
 
 - **A name where a UUID belongs.** `mention://member/Alice` is dead. The id
   group accepts only hex+dashes or `all`; the non-hex letters in a typical name
   make the whole pattern fail to match, so the parser returns nothing.
 - **A hex-ish but wrong UUID.** A well-formed-looking UUID that no entity owns
   DOES parse, then no-ops at lookup: the workspace-scoped query finds no agent
-  and the loop `continue`s. Same agent-visible result (nothing fires), but the
-  mechanism is the lookup miss, not a parse failure.
-- **An already-pending task.** Even a correct `@agent`/`@squad` is skipped when
-  the target already has a pending task on this issue
-  (`HasPendingTaskForIssueAndAgent` → `continue`). Edit preview is the only
-  exception: `editing_comment_id` ignores pending tasks from the same comment
-  being edited, because save cancels those old tasks before it re-computes
-  triggers. It is still comment-scoped, not an agent-wide bypass.
-- **An archived agent**, or a squad whose leader is archived: skipped
-  (`RuntimeID` invalid or `ArchivedAt` set).
-- **A private agent you cannot access:** skipped — the mention path gates on
-  `canAccessPrivateAgent` directly for both `@agent` and `@squad` (the
-  `canEnqueueSquadLeader` wrapper is the assignment/child-done path, not this
-  one).
+  and the mention is reported blocked with `invocation_not_allowed`. That code
+  is deliberately ambiguous — **a typo'd UUID and a genuine permission denial
+  look identical on purpose**, because the id you typed could name a private
+  agent in another workspace and the reason must not confirm that it exists.
+  **So when you see `invocation_not_allowed`, check the UUID against the live
+  roster BEFORE you touch any visibility or invocation setting** (MUL-5548);
+  `multica squad member list <squad-id> --output json` returns the `member_id`
+  to build the mention from. An id that matches the pattern but is NOT a valid
+  UUID at all (`mention://agent/-`) is rejected by the id parser and blocked
+  with `target_unavailable` instead — a non-UUID names no entity anywhere, so
+  it conceals nothing. Neither case is ever an error response.
+- **An already-pending task.** Even a correct `@agent`/`@squad` starts no second
+  run when the target already has a pending task on this issue
+  (`HasPendingTaskForIssueAndAgent`). This is a fold, not a drop: the comment
+  merges into that task and the outcome is `coalesced` (same reviewed head) or
+  `deferred` (different head) — do NOT re-post it as "the mention didn't work".
+  Edit preview is the only exception: `editing_comment_id` ignores pending tasks
+  from the same comment being edited, because save cancels those old tasks
+  before it re-computes triggers. It is still comment-scoped, not an agent-wide
+  bypass.
+- **An archived agent, or one with no runtime bound** (likewise a squad whose
+  leader is): blocked with `target_unavailable` and `runtime_offline`
+  respectively. Both are checked only AFTER the invoke gate, so a caller who may
+  not invoke the target never learns its state.
+- **A private agent you cannot invoke:** blocked — the mention path gates on
+  `canInvokeAgent` for both `@agent` and `@squad`. That is the *run* gate, not
+  the *see* gate: since MUL-3963 a workspace admin who can open a private agent
+  in the UI still may not trigger it, so being able to view the target says
+  nothing about being able to mention it. (The `canEnqueueSquadLeader` wrapper
+  is the squad assignment/promote path, not this one; the child-done wake is
+  ungated — see the multica-squads skill.)
+
+One nuance for automation (MUL-4857): when an UNATTRIBUTED autopilot run (a
+schedule/webhook dispatch has no human originator, so the A2A gate has no human
+to key on) delegates by `@mention` while working on the issue that autopilot
+created, the invoke gate falls back to the **autopilot creator** as the effective
+invoking user — the same principal that admitted the first dispatch. So a mid-run
+`@agent` / `@squad` delegation fires exactly when the autopilot creator could
+invoke that target (owner / `public_to` match), and stays skipped otherwise. It
+is authorization only — the enqueued run's originator/attribution is unchanged.
+This fallback is bound to verified task lineage: it applies only when the
+delegating run's own task is the one working on that autopilot issue (author ==
+task agent, `task.issue_id` == this issue), so a run doing work elsewhere can
+never borrow another autopilot creator's authority by commenting on its issue.
+The same authority carries the plain assigned-squad-leader wake (a worker's
+result comment on the autopilot issue can still wake the leader), and it survives
+a busy target: if the mentioned agent is already running, the delegation is
+replayed at that run's completion under the same authority, so it is never lost.
+An edit is treated as a fresh action — it re-derives the comment's lineage from
+the editing action. Only the agent author editing its OWN comment re-stamps the
+lineage to the editing task; any other editor — including a workspace owner/admin
+editing an agent's comment — CLEARS it. So editing an old autopilot comment from
+an unrelated issue, or an admin editing an agent's comment (manage rights, not
+invoke rights), fails closed at the deferred completion-reconcile instead of
+reusing the original run's authority.
 
 ## Incorrect → Correct
 

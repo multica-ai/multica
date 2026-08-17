@@ -35,8 +35,9 @@ Multica 코드를 작성하거나, 번역을 변경하거나, 중국어 제품 �
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
 | `apps/web/platform/` | `next/*` | 다른 앱 |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | 다른 앱 |
+| `apps/mobile/` | `@multica/core`의 유형과 순수 함수 | Web/Desktop의 React 페이지, store, 플랫폼 구현 |
 
-두 앱 모두에 동일한 로직이 나타난다면 반드시 공유 패키지로 추출해야 합니다. "사소한" 중복이라는 예외는 없습니다.
+두 앱 모두에 동일한 로직이 나타난다면 반드시 공유 패키지로 추출해야 합니다. "사소한" 중복이라는 예외는 없습니다. Mobile은 독립된 UI, 데이터 계층, 출시 절차를 가지며 유형과 순수 함수만 공유합니다.
 
 ### 파일과 컴포넌트
 
@@ -53,6 +54,8 @@ Multica 코드를 작성하거나, 번역을 변경하거나, 중국어 제품 �
 - 외래 키: `<table>_id`
 - 불리언: `is_<state>` 또는 `<state>_at` (상태 변경에는 타임스탬프 형태 선호)
 - 마이그레이션 파일: `NNN_descriptive_name.up.sql` + `.down.sql` — 항상 양방향을 모두 제공
+- 데이터베이스 foreign key, cascade delete, cascade update를 만들지 않고 관계 검사와 정리는 애플리케이션 계층에서 수행
+- 모든 index는 `CREATE INDEX CONCURRENTLY` 또는 `CREATE UNIQUE INDEX CONCURRENTLY`를 사용하고 각 concurrent index를 단일 문장 migration 파일에 분리
 
 ### Go
 
@@ -67,6 +70,13 @@ Multica 코드를 작성하거나, 번역을 변경하거나, 중국어 제품 �
 - 타입: `PascalCase` (`Issue`, `AgentRuntime`); `IPrefix` 금지, `_t` 접미사 금지.
 - 열거형: string literal union을 선호하고, 런타임 순회가 필요한 경우에만 `enum`을 사용.
 - TanStack Query 키: `<feature>/queries.ts` 안의 팩토리 함수, 예: `issueKeys.detail(id)`.
+
+### API 경계
+
+- 네트워크 응답은 `packages/core/api/schema.ts`의 `parseWithFallback`과 zod schema로 parsing하며 `as T`로 직접 강제 변환하지 않음
+- endpoint를 추가하거나 변경할 때 schema도 업데이트하고 필드 누락 또는 잘못된 형식을 테스트로 포함
+- 하위 UI는 선택 필드에 기본값을 제공하고 서버 enum의 `switch`에는 반드시 `default` 분기를 포함
+- 설치된 Desktop이 더 새로운 backend에 연결될 수 있으므로 프런트엔드와 backend가 항상 같은 버전이라고 가정하지 않음
 
 ### 이슈 키
 

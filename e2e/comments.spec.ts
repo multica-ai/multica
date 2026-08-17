@@ -29,6 +29,12 @@ test.describe("Comments", () => {
     // Wait for issue detail to load
     await expect(page.locator("text=Properties")).toBeVisible();
 
+    // The composer renders as a static shell until clicked (readonly-first);
+    // clicking it mounts and focuses the real ProseMirror editor.
+    const shell = page.getByTestId("comment-composer-shell");
+    await expect(shell).toBeVisible();
+    await shell.click();
+
     // Type a comment
     const commentText = "E2E comment " + Date.now();
     const editor = page
@@ -52,12 +58,12 @@ test.describe("Comments", () => {
 
     await expect(page.locator("text=Properties")).toBeVisible();
 
-    // Submit button should be disabled when input is empty
-    const editor = page
-      .locator('.ProseMirror[data-placeholder="Leave a comment..."], .ProseMirror:has([data-placeholder="Leave a comment..."])')
-      .first();
-    await expect(editor).toBeVisible();
-    const composer = editor.locator("xpath=ancestor::div[contains(@class, 'rounded-lg')][1]");
+    // Submit button should be disabled when input is empty. The composer is a
+    // static shell until clicked (readonly-first) — the disabled state must
+    // hold in shell form too, no activation needed.
+    const shell = page.getByTestId("comment-composer-shell");
+    await expect(shell).toBeVisible();
+    const composer = shell.locator("xpath=ancestor::div[contains(@class, 'rounded-lg')][1]");
     const submitBtn = composer.locator("button:has(svg.lucide-arrow-up)").last();
     await expect(submitBtn).toBeDisabled();
   });

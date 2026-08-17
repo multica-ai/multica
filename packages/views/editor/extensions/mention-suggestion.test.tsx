@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { createRef, type ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
@@ -10,9 +10,16 @@ import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
 import enSettings from "../../locales/en/settings.json";
 import enEditor from "../../locales/en/editor.json";
+import enIssues from "../../locales/en/issues.json";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, auth: enAuth, settings: enSettings, editor: enEditor },
+  en: {
+    common: enCommon,
+    auth: enAuth,
+    settings: enSettings,
+    editor: enEditor,
+    issues: enIssues,
+  },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -49,6 +56,12 @@ vi.mock("@multica/core/auth", () => ({
   useAuthStore: { getState: () => authState },
 }));
 
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: ({ actorId }: { actorId: string }) => (
+    <span data-testid={`actor-${actorId}`} />
+  ),
+}));
+
 import {
   createMentionSuggestion,
   MentionList,
@@ -62,19 +75,44 @@ function fakeQc(data: {
     id: string;
     name: string;
     archived_at: string | null;
+    runtime_id?: string;
+    runtime_bound?: boolean;
     visibility?: "workspace" | "private";
     owner_id?: string | null;
+    permission_mode?: "private" | "public_to";
+    invocation_targets?: Array<{
+      target_type: "workspace" | "member" | "team";
+      target_id: string | null;
+    }>;
   }>;
   squads?: Array<{
     id: string;
     name: string;
     archived_at: string | null;
+    leader_id: string;
   }>;
   issues?: Array<{ id: string; identifier: string; title: string; status: string }>;
 }): QueryClient {
   const map = new Map<string, unknown>();
   map.set(JSON.stringify(workspaceKeys.members("ws-1")), data.members ?? []);
-  map.set(JSON.stringify(workspaceKeys.agents("ws-1")), data.agents ?? []);
+  // MUL-3963: the mention filter runs through canAssignAgentToIssue, which
+  // reads permission_mode + invocation_targets (not the legacy `visibility`).
+  // Fixtures still express intent via `visibility`, so derive the permission
+  // fields from it here (public_to + workspace target for "workspace";
+  // private + no targets otherwise) unless a fixture sets them explicitly.
+  const agentsWithPermissions = (data.agents ?? []).map((a) => ({
+    ...a,
+    runtime_id: a.runtime_id ?? "runtime-1",
+    runtime_bound: a.runtime_bound ?? true,
+    permission_mode:
+      a.permission_mode ?? (a.visibility === "private" ? "private" : "public_to"),
+    invocation_targets:
+      a.invocation_targets ??
+      (a.visibility === "private"
+        ? []
+        : [{ target_type: "workspace" as const, target_id: null }]),
+  }));
+  map.set(JSON.stringify(workspaceKeys.agents("ws-1")), agentsWithPermissions);
   map.set(JSON.stringify(workspaceKeys.squads("ws-1")), data.squads ?? []);
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_STATUSES) {
@@ -101,11 +139,38 @@ function fakeQc(data: {
   } as unknown as QueryClient;
 }
 
+function itemArgs(query: string) {
+  return {
+    query,
+    editor: {} as never,
+    signal: new AbortController().signal,
+  };
+}
+
 describe("createMentionSuggestion", () => {
   beforeEach(() => {
     searchIssuesMock.mockReset();
     searchProjectsMock.mockReset();
     Element.prototype.scrollIntoView = vi.fn();
+  });
+
+  it("keeps the mention query active across spaces for multi-word search", () => {
+    const qc = fakeQc({
+      issues: [
+        {
+          id: "i-login",
+          identifier: "MUL-1",
+          title: "Login redirect bug",
+          status: "todo",
+        },
+      ],
+    });
+    const config = createMentionSuggestion(qc);
+
+    expect(config.allowSpaces).toBe(true);
+    expect(config.items!(itemArgs("login redirect"))).toEqual([
+      expect.objectContaining({ id: "i-login", type: "issue" }),
+    ]);
   });
 
   it("returns members and agents synchronously without waiting for the server search", () => {
@@ -125,13 +190,75 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "a", editor: {} as never });
+    const result = config.items!(itemArgs("a"));
 
     // Must be synchronous: a plain array, not a Promise.
     expect(Array.isArray(result)).toBe(true);
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "member" && i.label === "Alice")).toBe(true);
     expect(items.some((i) => i.type === "agent" && i.label === "Aegis")).toBe(true);
+  });
+
+  it("keeps an unbound agent discoverable but marks it as unselectable", () => {
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        {
+          id: "a1",
+          name: "Aegis",
+          archived_at: null,
+          runtime_id: "",
+          runtime_bound: false,
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc);
+    const items = config.items!(itemArgs("a")) as MentionItem[];
+
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        type: "agent",
+        id: "a1",
+        disabledReason: "agent_runtime_required",
+      }),
+    );
+  });
+
+  it("does not select a runtime-required mention row by click or keyboard", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    render(
+      <I18nWrapper>
+        <MentionList
+          ref={ref}
+          items={[
+            {
+              id: "a1",
+              label: "Aegis",
+              type: "agent",
+              disabledReason: "agent_runtime_required",
+            },
+          ]}
+          query=""
+          command={command}
+        />
+      </I18nWrapper>,
+    );
+
+    const row = screen.getByRole("button", {
+      name: "Aegis: This target has no runtime — bind one to run it",
+    });
+    expect(row).toHaveAttribute("aria-disabled", "true");
+    fireEvent.click(row);
+    expect(
+      ref.current?.onKeyDown({
+        event: new KeyboardEvent("keydown", { key: "Enter" }),
+      }),
+    ).toBe(true);
+    expect(command).not.toHaveBeenCalled();
   });
 
   it("loads server issue matches into the popup when the list cache misses", async () => {
@@ -315,6 +442,86 @@ describe("createMentionSuggestion", () => {
     expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-2");
   });
 
+  // MUL-5495: the command bar (cmdk) navigates on Ctrl+N/J and Ctrl+P/K as well
+  // as the arrows. The mention picker used to accept arrows only, so the same
+  // muscle memory silently did nothing here.
+  it("navigates with Ctrl+N/J and Ctrl+P/K, like the command bar", () => {
+    const command = vi.fn<(item: MentionItem) => void>();
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+      { id: "i-3", label: "MUL-3", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={command} />
+      </I18nWrapper>,
+    );
+
+    const highlightedLabel = () => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
+    };
+    let handled: boolean | undefined;
+    const press = (init: KeyboardEventInit) =>
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", init) });
+      });
+
+    expect(highlightedLabel()).toBe("MUL-1");
+
+    press({ key: "n", ctrlKey: true });
+    expect(handled).toBe(true);
+    expect(highlightedLabel()).toBe("MUL-2");
+
+    press({ key: "j", ctrlKey: true });
+    expect(highlightedLabel()).toBe("MUL-3");
+
+    press({ key: "p", ctrlKey: true });
+    expect(highlightedLabel()).toBe("MUL-2");
+
+    press({ key: "k", ctrlKey: true });
+    expect(highlightedLabel()).toBe("MUL-1");
+
+    // The highlight the aliases moved is the row Enter commits.
+    press({ key: "n", ctrlKey: true });
+    press({ key: "Enter" });
+    expect(command).toHaveBeenCalledTimes(1);
+    expect(command.mock.calls[0]?.[0]?.label).toBe("MUL-2");
+  });
+
+  // Without Ctrl these letters are ordinary query characters; swallowing them
+  // would make "@nick" unsearchable.
+  it("leaves bare n/j/p/k to the query instead of moving the highlight", () => {
+    const ref = createRef<MentionListRef>();
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue" },
+      { id: "i-2", label: "MUL-2", type: "issue" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList ref={ref} items={items} query="" command={vi.fn()} />
+      </I18nWrapper>,
+    );
+
+    const highlightedLabel = () => {
+      const buttons = Array.from(document.querySelectorAll<HTMLButtonElement>("button"));
+      return buttons.find((b) => b.classList.contains("bg-accent"))?.textContent ?? "";
+    };
+
+    for (const key of ["n", "j", "p", "k"]) {
+      let handled: boolean | undefined;
+      act(() => {
+        handled = ref.current?.onKeyDown({ event: new KeyboardEvent("keydown", { key }) });
+      });
+      expect(handled).toBe(false);
+    }
+    expect(highlightedLabel()).toBe("MUL-1");
+  });
+
   it("hides personal agents owned by someone else from a regular member", () => {
     const qc = fakeQc({
       members: [
@@ -351,7 +558,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "a", editor: {} as never });
+    const result = config.items!(itemArgs("a"));
     const items = result as MentionItem[];
 
     expect(items.some((i) => i.type === "agent" && i.label === "Athena")).toBe(true);
@@ -359,10 +566,11 @@ describe("createMentionSuggestion", () => {
     expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
   });
 
-  it("shows everyone's personal agents to a workspace admin", () => {
+  it("hides another owner's personal agent from a workspace admin (MUL-3963)", () => {
     // Role lives in the member fixture, not in authState — promoting Alice
-    // to admin here is enough to flip the gate. Backend gate allows admins
-    // to assign anyone's personal agent, so the @mention list mirrors that.
+    // to admin here exercises the gate. MUL-3963 removed the admin bypass:
+    // a private agent is invocable only by its owner, so the @mention list
+    // must NOT surface Bob's personal agent to admin Alice.
     const qc = fakeQc({
       members: [
         { user_id: "u1", name: "Alice", role: "admin" },
@@ -381,10 +589,10 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "a", editor: {} as never });
+    const result = config.items!(itemArgs("a"));
     const items = result as MentionItem[];
 
-    expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(true);
+    expect(items.some((i) => i.type === "agent" && i.label === "Atlas")).toBe(false);
   });
 
   it("includes cached issues in the synchronous response", () => {
@@ -397,7 +605,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "bug", editor: {} as never });
+    const result = config.items!(itemArgs("bug"));
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "issue" && i.id === "i1")).toBe(true);
@@ -411,7 +619,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+    const result = config.items!(itemArgs("")) as MentionItem[];
 
     expect(result.some((item) => item.group === "current" || item.group === "recent")).toBe(false);
     expect(result.map((item) => `${item.type}:${item.id}`)).toContain("member:u1");
@@ -434,7 +642,7 @@ describe("createMentionSuggestion", () => {
         { id: "p1", label: "Roadmap", type: "project", description: "Q3", group: "recent" },
       ],
     });
-    const result = config.items!({ query: "", editor: {} as never }) as MentionItem[];
+    const result = config.items!(itemArgs("")) as MentionItem[];
 
     expect(result.map((item) => `${item.type}:${item.id}`)).toEqual(["issue:i1", "project:p1"]);
     expect(result.some((item) => item.type === "member" || item.type === "agent")).toBe(false);
@@ -455,7 +663,7 @@ describe("createMentionSuggestion", () => {
         { id: "p1", label: "Roadmap", type: "project", description: "Q3", group: "recent" },
       ],
     });
-    const result = config.items!({ query: "a", editor: {} as never }) as MentionItem[];
+    const result = config.items!(itemArgs("a")) as MentionItem[];
 
     expect(result.map((item) => `${item.type}:${item.id}`).slice(0, 2)).toEqual(["issue:i1", "project:p1"]);
     expect(result.some((item) => item.type === "member" && item.label === "Alice")).toBe(true);
@@ -482,25 +690,133 @@ describe("createMentionSuggestion", () => {
     expect(screen.getByText("Roadmap")).toBeInTheDocument();
   });
 
-  it("includes all non-archived squads in the mention list", () => {
+  it("includes squads with a runnable leader in the mention list", () => {
     const qc = fakeQc({
       members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        {
+          id: "leader-1",
+          name: "Leader",
+          archived_at: null,
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
       squads: [
-        { id: "s1", name: "Jiayuan's Coding Team", archived_at: null },
-        { id: "s2", name: "独立团", archived_at: null },
-        { id: "s3", name: "Archived Squad", archived_at: "2026-01-01T00:00:00Z" },
+        {
+          id: "s1",
+          name: "Jiayuan's Coding Team",
+          archived_at: null,
+          leader_id: "leader-1",
+        },
+        {
+          id: "s2",
+          name: "独立团",
+          archived_at: null,
+          leader_id: "leader-1",
+        },
+        {
+          id: "s3",
+          name: "Archived Squad",
+          archived_at: "2026-01-01T00:00:00Z",
+          leader_id: "leader-1",
+        },
       ],
     });
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never });
+    const result = config.items!(itemArgs(""));
 
     const items = result as MentionItem[];
     expect(items.filter((i) => i.type === "squad")).toHaveLength(2);
     expect(items.some((i) => i.type === "squad" && i.label === "Jiayuan's Coding Team")).toBe(true);
     expect(items.some((i) => i.type === "squad" && i.label === "独立团")).toBe(true);
     expect(items.some((i) => i.type === "squad" && i.label === "Archived Squad")).toBe(false);
+  });
+
+  it("keeps a squad with an unbound leader discoverable but unselectable", () => {
+    const qc = fakeQc({
+      agents: [
+        {
+          id: "leader-1",
+          name: "Leader",
+          archived_at: null,
+          runtime_id: "",
+          runtime_bound: false,
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
+      squads: [
+        {
+          id: "s1",
+          name: "Unrunnable Squad",
+          archived_at: null,
+          leader_id: "leader-1",
+        },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc);
+    const items = config.items!(itemArgs("")) as MentionItem[];
+
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        type: "squad",
+        id: "s1",
+        disabledReason: "agent_runtime_required",
+      }),
+    );
+  });
+
+  it("keeps squads discoverable while the agents cache is not ready", () => {
+    const qc = fakeQc({
+      squads: [
+        {
+          id: "s1",
+          name: "Cold Cache Squad",
+          archived_at: null,
+          leader_id: "leader-not-cached",
+        },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc);
+    const items = config.items!(itemArgs("")) as MentionItem[];
+    const squad = items.find((item) => item.type === "squad" && item.id === "s1");
+
+    expect(squad).toBeDefined();
+    expect(squad?.disabledReason).toBeUndefined();
+  });
+
+  it("keeps a squad with an archived leader discoverable", () => {
+    const qc = fakeQc({
+      agents: [
+        {
+          id: "leader-1",
+          name: "Archived Leader",
+          archived_at: "2026-01-01T00:00:00Z",
+          visibility: "workspace",
+          owner_id: null,
+        },
+      ],
+      squads: [
+        {
+          id: "s1",
+          name: "Archived Leader Squad",
+          archived_at: null,
+          leader_id: "leader-1",
+        },
+      ],
+    });
+
+    const config = createMentionSuggestion(qc);
+    const items = config.items!(itemArgs("")) as MentionItem[];
+    const squad = items.find((item) => item.type === "squad" && item.id === "s1");
+
+    expect(squad).toBeDefined();
+    expect(squad?.disabledReason).toBeUndefined();
   });
 
   it("returns no squads when the squads cache is empty (not yet fetched)", () => {
@@ -511,7 +827,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "", editor: {} as never });
+    const result = config.items!(itemArgs(""));
 
     const items = result as MentionItem[];
     expect(items.filter((i) => i.type === "squad")).toHaveLength(0);
@@ -527,7 +843,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "liyunlong", editor: {} as never });
+    const result = config.items!(itemArgs("liyunlong"));
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
@@ -545,7 +861,7 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "lyl", editor: {} as never });
+    const result = config.items!(itemArgs("lyl"));
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "member" && i.label === "李云龙")).toBe(true);
@@ -562,9 +878,382 @@ describe("createMentionSuggestion", () => {
     searchIssuesMock.mockReturnValue(new Promise(() => {}));
 
     const config = createMentionSuggestion(qc);
-    const result = config.items!({ query: "whs", editor: {} as never });
+    const result = config.items!(itemArgs("whs"));
 
     const items = result as MentionItem[];
     expect(items.some((i) => i.type === "agent" && i.label === "魏和尚")).toBe(true);
+  });
+});
+
+// MUL-5824: the search API already demotes cancelled issues, but the picker
+// merges its local cache AHEAD of the server results and only then truncates to
+// MAX_ITEMS — so a cached cancelled row could both outrank and crowd out live
+// work the backend had deliberately ranked above it.
+describe("MentionList cancelled demotion", () => {
+  beforeEach(() => {
+    searchIssuesMock.mockReset();
+    searchProjectsMock.mockReset();
+    searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
+    searchProjectsMock.mockResolvedValue({ projects: [], total: 0 });
+  });
+
+  // Rendered top-to-bottom order of the issue rows. textContent runs the
+  // identifier straight into the title, so match the identifier off the front.
+  const issueLabels = () =>
+    Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+      .map((b) => (b.textContent ?? "").match(/^MUL-\d+/)?.[0])
+      .filter((label): label is string => !!label);
+
+  it("sorts cancelled issues below live ones regardless of input order", () => {
+    const items: MentionItem[] = [
+      { id: "i-1", label: "MUL-1", type: "issue", status: "cancelled" },
+      { id: "i-2", label: "MUL-2", type: "issue", status: "in_progress" },
+      { id: "i-3", label: "MUL-3", type: "issue", status: "cancelled" },
+      { id: "i-4", label: "MUL-4", type: "issue", status: "backlog" },
+    ];
+
+    render(<I18nWrapper><MentionList items={items} query="" command={vi.fn()} /></I18nWrapper>);
+
+    // Live rows keep their relative order; cancelled rows keep theirs too.
+    expect(issueLabels()).toEqual(["MUL-2", "MUL-4", "MUL-1", "MUL-3"]);
+  });
+
+  it("gives up the slot, not just the position, when the list overflows", () => {
+    // 20 cancelled rows ahead of one live row: with only 20 slots the live row
+    // is invisible unless the demotion runs BEFORE the truncation.
+    const items: MentionItem[] = [
+      ...Array.from({ length: 20 }, (_, n) => ({
+        id: `i-c${n}`,
+        label: `MUL-${100 + n}`,
+        type: "issue" as const,
+        status: "cancelled" as const,
+      })),
+      { id: "i-live", label: "MUL-9", type: "issue", status: "todo" },
+    ];
+
+    render(<I18nWrapper><MentionList items={items} query="" command={vi.fn()} /></I18nWrapper>);
+
+    const labels = issueLabels();
+    expect(labels).toHaveLength(20);
+    expect(labels[0]).toBe("MUL-9");
+    // One cancelled row was dropped to make room, not the live one.
+    expect(labels).not.toContain("MUL-119");
+  });
+
+  it("keeps a cancelled issue you are currently viewing in its Current section", () => {
+    // "Current" is explicit context, not a relevance hit — demoting it past the
+    // truncation would make the issue on screen vanish from its own picker.
+    const items: MentionItem[] = [
+      { id: "i-cur", label: "MUL-7", type: "issue", status: "cancelled", group: "current" },
+      { id: "i-live", label: "MUL-8", type: "issue", status: "in_progress" },
+    ];
+
+    render(
+      <I18nWrapper>
+        <MentionList items={items} query="" command={vi.fn()} includeProjectSearch />
+      </I18nWrapper>,
+    );
+
+    expect(screen.getByText("Current page")).toBeInTheDocument();
+    expect(issueLabels()).toEqual(["MUL-7", "MUL-8"]);
+  });
+
+  it("does not reorder server results, which the API already ranked", async () => {
+    searchIssuesMock.mockResolvedValue({
+      issues: [
+        { id: "i-a", identifier: "MUL-11", title: "Live match", status: "todo" },
+        { id: "i-b", identifier: "MUL-12", title: "Cancelled match", status: "cancelled" },
+      ],
+      total: 2,
+    });
+
+    render(<I18nWrapper><MentionList items={[]} query="match" command={vi.fn()} /></I18nWrapper>);
+
+    await waitFor(() => {
+      expect(screen.getByText("MUL-11")).toBeInTheDocument();
+    });
+    expect(issueLabels()).toEqual(["MUL-11", "MUL-12"]);
+  });
+
+  it("demotes a cached cancelled row below a server-ranked live one", async () => {
+    searchIssuesMock.mockResolvedValue({
+      issues: [{ id: "i-live", identifier: "MUL-21", title: "Live match", status: "in_progress" }],
+      total: 1,
+    });
+
+    // The cached row is merged first; without the demotion it would render on
+    // top of the server's higher-ranked live match.
+    const items: MentionItem[] = [
+      { id: "i-cached", label: "MUL-20", type: "issue", status: "cancelled", description: "Cancelled match" },
+    ];
+
+    render(<I18nWrapper><MentionList items={items} query="match" command={vi.fn()} /></I18nWrapper>);
+
+    await waitFor(() => {
+      expect(screen.getByText("MUL-21")).toBeInTheDocument();
+    });
+    expect(issueLabels()).toEqual(["MUL-21", "MUL-20"]);
+  });
+
+  // Cross-type half of MUL-5824. Context mentions aggregate two independently
+  // ranked responses — issues then projects, both tagged `search` — so per-type
+  // ranking alone left a cancelled project above a live issue, and cancelled
+  // search rows were exempted from the client partition entirely.
+  describe("mixed issue/project results", () => {
+    // Rendered order of every result row: issue rows put their identifier in
+    // the leading font-medium span, project rows their title.
+    const rowLabels = () =>
+      Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+        .map((b) => b.querySelector("span.font-medium")?.textContent ?? "")
+        .filter((label) => label !== "");
+
+    const headings = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>("div.uppercase"),
+      ).map((el) => el.textContent ?? "");
+
+    it("keeps a cancelled project below a live issue in the search results", async () => {
+      searchIssuesMock.mockResolvedValue({
+        issues: [
+          { id: "i-live", identifier: "MUL-31", title: "Live issue", status: "todo" },
+        ],
+        total: 1,
+      });
+      searchProjectsMock.mockResolvedValue({
+        projects: [
+          { id: "p-dead", title: "Dead project", description: null, icon: null, status: "cancelled" },
+        ],
+        total: 1,
+      });
+
+      render(
+        <I18nWrapper>
+          <MentionList items={[]} query="thing" command={vi.fn()} includeProjectSearch />
+        </I18nWrapper>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Dead project")).toBeInTheDocument();
+      });
+      expect(rowLabels()).toEqual(["MUL-31", "Dead project"]);
+      expect(headings()).toEqual(["Search results", "Cancelled"]);
+    });
+
+    it("demotes cancelled search results of both types below every live row", async () => {
+      searchIssuesMock.mockResolvedValue({
+        issues: [
+          { id: "i-dead", identifier: "MUL-41", title: "Dead issue", status: "cancelled" },
+          { id: "i-live", identifier: "MUL-42", title: "Live issue", status: "in_review" },
+        ],
+        total: 2,
+      });
+      searchProjectsMock.mockResolvedValue({
+        projects: [
+          { id: "p-dead", title: "Dead project", description: null, icon: null, status: "cancelled" },
+          { id: "p-live", title: "Live project", description: null, icon: null, status: "planned" },
+        ],
+        total: 2,
+      });
+
+      render(
+        <I18nWrapper>
+          <MentionList items={[]} query="thing" command={vi.fn()} includeProjectSearch />
+        </I18nWrapper>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Live project")).toBeInTheDocument();
+      });
+      // Live rows keep their server order; both cancelled types land last.
+      expect(rowLabels()).toEqual([
+        "MUL-42",
+        "Live project",
+        "MUL-41",
+        "Dead project",
+      ]);
+    });
+
+    it("keeps a cancelled project you are currently viewing in its Current section", async () => {
+      searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
+      searchProjectsMock.mockResolvedValue({ projects: [], total: 0 });
+
+      const items: MentionItem[] = [
+        {
+          id: "p-cur",
+          label: "Current project",
+          type: "project",
+          projectStatus: "cancelled",
+          group: "current",
+        },
+        { id: "i-live", label: "MUL-51", type: "issue", status: "todo" },
+      ];
+
+      render(
+        <I18nWrapper>
+          <MentionList items={items} query="" command={vi.fn()} includeProjectSearch />
+        </I18nWrapper>,
+      );
+
+      expect(rowLabels()).toEqual(["Current project", "MUL-51"]);
+      expect(headings()).toEqual(["Current page", "Issues"]);
+    });
+
+    it("gives up slots to live rows across both types when the list overflows", async () => {
+      // 20 cancelled projects ahead of one live issue: with only 20 slots the
+      // live row is invisible unless the cross-type demotion runs BEFORE the
+      // truncation.
+      searchIssuesMock.mockResolvedValue({ issues: [], total: 0 });
+      searchProjectsMock.mockResolvedValue({ projects: [], total: 0 });
+
+      const items: MentionItem[] = [
+        ...Array.from({ length: 20 }, (_, n) => ({
+          id: `p-c${n}`,
+          label: `Dead project ${n}`,
+          type: "project" as const,
+          projectStatus: "cancelled" as const,
+        })),
+        { id: "i-live", label: "MUL-61", type: "issue", status: "todo" },
+      ];
+
+      render(
+        <I18nWrapper>
+          <MentionList items={items} query="" command={vi.fn()} includeProjectSearch />
+        </I18nWrapper>,
+      );
+
+      const labels = rowLabels();
+      expect(labels).toHaveLength(20);
+      expect(labels[0]).toBe("MUL-61");
+      // One cancelled project was dropped to make room, not the live issue.
+      expect(labels).not.toContain("Dead project 19");
+    });
+  });
+
+  // A direct hit — exact identifier, bare number, or full title — is the record
+  // the user typed out in full. The backend ranks it first and exempts it from
+  // the cancelled demotion; the picker has to agree, and exemption alone is not
+  // enough: slice(0, MAX_ITEMS) runs on the merged list, so a direct hit sitting
+  // behind a full window of cached candidates would still be cut.
+  describe("direct hits", () => {
+    const rowLabels = () =>
+      Array.from(document.querySelectorAll<HTMLButtonElement>("button"))
+        .map((b) => b.querySelector("span.font-medium")?.textContent ?? "")
+        .filter((label) => label !== "");
+
+    const headings = () =>
+      Array.from(
+        document.querySelectorAll<HTMLElement>("div.uppercase"),
+      ).map((el) => el.textContent ?? "");
+
+    it("keeps a cancelled issue matched by exact identifier out of the Cancelled group", async () => {
+      searchIssuesMock.mockResolvedValue({
+        issues: [
+          { id: "i-hit", identifier: "MUL-77", title: "Abandoned plan", status: "cancelled" },
+          { id: "i-other", identifier: "MUL-78", title: "MUL-77 follow-up", status: "todo" },
+        ],
+        total: 2,
+      });
+
+      render(<I18nWrapper><MentionList items={[]} query="MUL-77" command={vi.fn()} /></I18nWrapper>);
+
+      await waitFor(() => {
+        expect(screen.getByText("MUL-77")).toBeInTheDocument();
+      });
+      // The target the user spelled out stays on top; no demotion, no section.
+      expect(rowLabels()).toEqual(["MUL-77", "MUL-78"]);
+      expect(headings()).not.toContain("Cancelled");
+    });
+
+    it("treats a bare number as targeting the issue with that number", async () => {
+      searchIssuesMock.mockResolvedValue({
+        issues: [
+          { id: "i-live", identifier: "MUL-800", title: "Mentions 77 in passing", status: "todo" },
+          { id: "i-hit", identifier: "MUL-77", title: "Abandoned plan", status: "cancelled" },
+        ],
+        total: 2,
+      });
+
+      render(<I18nWrapper><MentionList items={[]} query="77" command={vi.fn()} /></I18nWrapper>);
+
+      await waitFor(() => {
+        expect(screen.getByText("MUL-77")).toBeInTheDocument();
+      });
+      expect(rowLabels()).toEqual(["MUL-77", "MUL-800"]);
+    });
+
+    it("keeps a cancelled project matched by its full title with the live rows", async () => {
+      searchIssuesMock.mockResolvedValue({
+        issues: [{ id: "i-live", identifier: "MUL-81", title: "Search revamp notes", status: "todo" }],
+        total: 1,
+      });
+      searchProjectsMock.mockResolvedValue({
+        projects: [
+          { id: "p-hit", title: "Search revamp", description: null, icon: null, status: "cancelled" },
+        ],
+        total: 1,
+      });
+
+      render(
+        <I18nWrapper>
+          <MentionList items={[]} query="Search revamp" command={vi.fn()} includeProjectSearch />
+        </I18nWrapper>,
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("Search revamp")).toBeInTheDocument();
+      });
+      expect(rowLabels()).toEqual(["Search revamp", "MUL-81"]);
+      expect(headings()).not.toContain("Cancelled");
+    });
+
+    it("keeps a cancelled direct hit visible behind a full window of live candidates", async () => {
+      // 20 non-cancelled cached candidates already fill every slot. Exempting
+      // the direct hit from the demotion would leave it at position 21 and the
+      // truncation would still delete it, so it has to be pinned to the front.
+      searchIssuesMock.mockResolvedValue({
+        issues: [
+          { id: "i-hit", identifier: "MUL-99", title: "Abandoned plan", status: "cancelled" },
+        ],
+        total: 1,
+      });
+
+      const items: MentionItem[] = Array.from({ length: 20 }, (_, n) => ({
+        id: `i-live${n}`,
+        label: `MUL-${200 + n}`,
+        type: "issue" as const,
+        status: "todo" as const,
+      }));
+
+      render(<I18nWrapper><MentionList items={items} query="MUL-99" command={vi.fn()} /></I18nWrapper>);
+
+      await waitFor(() => {
+        expect(screen.getByText("MUL-99")).toBeInTheDocument();
+      });
+
+      const labels = rowLabels();
+      expect(labels).toHaveLength(20);
+      expect(labels[0]).toBe("MUL-99");
+      // A live candidate gave up the last slot, not the record the user typed.
+      expect(labels).not.toContain("MUL-219");
+    });
+
+    it("still demotes a cancelled row that merely contains the query", async () => {
+      // Guard against over-exempting: a partial match is not a direct hit.
+      searchIssuesMock.mockResolvedValue({
+        issues: [
+          { id: "i-dead", identifier: "MUL-91", title: "Abandoned plan", status: "cancelled" },
+          { id: "i-live", identifier: "MUL-92", title: "Active plan", status: "todo" },
+        ],
+        total: 2,
+      });
+
+      render(<I18nWrapper><MentionList items={[]} query="plan" command={vi.fn()} /></I18nWrapper>);
+
+      await waitFor(() => {
+        expect(screen.getByText("MUL-92")).toBeInTheDocument();
+      });
+      expect(rowLabels()).toEqual(["MUL-92", "MUL-91"]);
+      expect(headings()).toContain("Cancelled");
+    });
   });
 });

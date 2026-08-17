@@ -6,6 +6,7 @@ import { useAgentPresenceDetail } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   deriveRuntimeHealth,
+  runtimeDisplayLabel,
   type RuntimeHealth,
 } from "@multica/core/runtimes";
 import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
@@ -48,7 +49,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
 
   if (!agent) {
     return (
-      <div className="text-xs text-muted-foreground">{t(($) => $.profile_card.unavailable)}</div>
+      <div className="text-caption text-muted-foreground">{t(($) => $.profile_card.unavailable)}</div>
     );
   }
 
@@ -74,20 +75,22 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
           availability dot is surfaced here; last-task state lives in the
           agents list and the agent detail page. */}
       <div className="flex items-start gap-3">
+        {/* Base avatar rather than the ActorAvatar wrapper: this card IS a
+            hover-card payload, so it must not nest another hover card or
+            profile link inside itself. */}
         <ActorAvatarBase
           name={agent.name}
           initials={initials}
           avatarUrl={resolvePublicFileUrl(agent.avatar_url)}
           isAgent
-          size={40}
-          className="rounded-md"
+          size="xl"
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <p className="truncate text-sm font-semibold">{agent.name}</p>
+            <p className="truncate text-body font-semibold">{agent.name}</p>
             {!isArchived && <VisibilityBadge value={agent.visibility} compact />}
             {isArchived && (
-              <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+              <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
                 {t(($) => $.row.archived)}
               </span>
             )}
@@ -99,7 +102,7 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
         {!isArchived && (
           <AppLink
             href={p.agentDetail(agent.id)}
-            className="mr-1 mt-0.5 shrink-0 text-xs font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
+            className="mr-1 mt-0.5 shrink-0 text-caption font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
           >
             {t(($) => $.profile_card.detail_link)}
           </AppLink>
@@ -108,16 +111,18 @@ export function AgentProfileCard({ agentId }: AgentProfileCardProps) {
 
       {/* Description */}
       {agent.description && (
-        <p className="line-clamp-2 text-xs text-muted-foreground">
+        <p className="line-clamp-2 text-caption text-muted-foreground">
           {agent.description}
         </p>
       )}
 
-      {/* Meta rows — minimal set: runtime (where it lives), skills (what
-          it knows), owner (who manages it). Model is intentionally
-          omitted — power-user detail lives on the detail page. */}
-      <div className="flex flex-col gap-1.5 text-xs">
+      {/* Meta rows — runtime (where it lives), model (what powers it),
+          skills (what it knows), owner (who manages it). Model + effort
+          are surfaced here so a quick hover answers "which model is this
+          agent running?" without opening the detail page. */}
+      <div className="flex flex-col gap-1.5 text-caption">
         <RuntimeRow agent={agent} runtime={runtime} />
+        <ModelRow model={agent.model} thinkingLevel={agent.thinking_level} />
         {agent.skills.length > 0 && (
           <SkillsRow skills={agent.skills.map((s) => s.name)} />
         )}
@@ -147,7 +152,7 @@ function AgentAvailabilityLine({
   return (
     <div className="mt-0.5 inline-flex items-center gap-1.5">
       <span className={`h-1.5 w-1.5 rounded-full ${av.dotClass}`} />
-      <span className={`text-xs ${av.textClass}`}>{t(($) => $.availability[detail.availability])}</span>
+      <span className={`text-caption ${av.textClass}`}>{t(($) => $.availability[detail.availability])}</span>
     </div>
   );
 }
@@ -173,11 +178,11 @@ function RuntimeRow({
     : runtime
       ? deriveRuntimeHealth(runtime, Date.now())
       : "offline";
-  const label =
-    runtime?.name ??
-    (isCloud
+  const label = runtime
+    ? runtimeDisplayLabel(runtime)
+    : isCloud
       ? t(($) => $.row.fallback_runtime_cloud)
-      : t(($) => $.profile_card.unknown_runtime));
+      : t(($) => $.profile_card.unknown_runtime);
   return (
     <div className="flex items-center gap-1.5">
       <span className="w-12 shrink-0 text-muted-foreground">{t(($) => $.profile_card.runtime_label)}</span>
@@ -185,6 +190,49 @@ function RuntimeRow({
       <span className="min-w-0 truncate" title={label}>
         {label}
       </span>
+    </div>
+  );
+}
+
+// Model row — the runtime-native model id the agent runs (`agent.model`),
+// with the reasoning/effort token appended as a small badge whenever the
+// agent pins one. An empty model means "no override": the runtime CLI's own
+// default decides at run time, so we render a "Runtime default" placeholder
+// rather than a bare dash. The model id is mono so provider-slug ids like
+// `claude-opus-4-8` stay legible. The effort badge is gated on `effort`
+// alone (NOT on `hasModel`): a `Runtime default` agent can still persist a
+// `thinking_level` override that applies at run time against the runtime's
+// default model, and the whole point of this row is to surface that runtime
+// info at a glance — hiding it would misreport the agent's real config.
+function ModelRow({
+  model,
+  thinkingLevel,
+}: {
+  model: string;
+  thinkingLevel?: string;
+}) {
+  const { t } = useT("agents");
+  const hasModel = model.trim().length > 0;
+  const effort = thinkingLevel?.trim();
+  return (
+    <div className="flex items-center gap-1.5">
+      <span className="w-12 shrink-0 text-muted-foreground">
+        {t(($) => $.profile_card.model_label)}
+      </span>
+      {hasModel ? (
+        <span className="min-w-0 truncate font-mono text-micro" title={model}>
+          {model}
+        </span>
+      ) : (
+        <span className="min-w-0 truncate text-muted-foreground">
+          {t(($) => $.profile_card.model_unset)}
+        </span>
+      )}
+      {effort && (
+        <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
+          {effort}
+        </span>
+      )}
     </div>
   );
 }
@@ -201,7 +249,7 @@ function MetaRow({
   return (
     <div className="flex items-center gap-1.5">
       <span className="w-12 shrink-0 text-muted-foreground">{label}</span>
-      <span className={`truncate ${mono ? "font-mono text-[11px]" : ""}`} title={value}>
+      <span className={`truncate ${mono ? "font-mono text-micro" : ""}`} title={value}>
         {value}
       </span>
     </div>
@@ -213,19 +261,26 @@ function SkillsRow({ skills }: { skills: string[] }) {
   const visible = skills.slice(0, 3);
   const overflow = skills.length - visible.length;
   return (
-    <div className="flex items-center gap-1.5">
-      <span className="w-12 shrink-0 text-muted-foreground">{t(($) => $.profile_card.skills_label)}</span>
+    // `items-start` (not center): skill chips wrap to multiple lines, and a
+    // vertically-centred label would drift down next to the middle chip —
+    // making the first chip look like it belongs to the row above. Pin the
+    // label to the first chip row; `pt-0.5` lines its text up with the chip
+    // text (chips carry `py-0.5`). Each chip truncates so one long skill name
+    // can't blow out the card width.
+    <div className="flex items-start gap-1.5">
+      <span className="w-12 shrink-0 pt-0.5 text-muted-foreground">{t(($) => $.profile_card.skills_label)}</span>
       <div className="flex min-w-0 flex-wrap gap-1">
         {visible.map((s) => (
           <span
             key={s}
-            className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+            className="max-w-full truncate rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground"
+            title={s}
           >
             {s}
           </span>
         ))}
         {overflow > 0 && (
-          <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+          <span className="shrink-0 rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
             +{overflow}
           </span>
         )}

@@ -10,6 +10,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/runtimeapps"
 )
 
 // RepoContextForEnv describes a workspace repo available for checkout.
@@ -25,10 +27,10 @@ type RepoContextForEnv struct {
 // fields the meta-skill template needs to render a human-readable summary
 // (URL for github_repo, generic label otherwise).
 type ProjectResourceForEnv struct {
-	ID           string          // server-assigned UUID
-	ResourceType string          // e.g. "github_repo"
-	ResourceRef  json.RawMessage // raw JSONB payload from the API
-	Label        string          // optional user-supplied label
+	ID           string          `json:"id"`              // server-assigned UUID
+	ResourceType string          `json:"resource_type"`   // e.g. "github_repo"
+	ResourceRef  json.RawMessage `json:"resource_ref"`    // raw JSONB payload from the API
+	Label        string          `json:"label,omitempty"` // optional user-supplied label
 }
 
 // PrepareParams holds all inputs needed to set up an execution environment.
@@ -37,14 +39,22 @@ type PrepareParams struct {
 	WorkspaceID    string // workspace UUID — tasks are grouped under this
 	TaskID         string // task UUID — used for directory name
 	AgentName      string // for git branch naming only
-	Provider       string // agent provider (determines runtime config and skill injection paths)
-	CodexVersion   string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin    string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	// Profile is the daemon's profile name (empty = default). It namespaces the
+	// per-issue Codex session store so a second profile-daemon sharing the same
+	// ~/.codex cannot see or GC this daemon's stores (MUL-4424).
+	Profile      string
+	Provider     string // agent provider (determines runtime config and skill injection paths)
+	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
+	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor and OpenClaw consume it here; other
 	// providers wire MCP via ExecOptions.McpConfig in the agent backend.
 	McpConfig json.RawMessage
+	// CursorMcpAuthSource is an explicit opt-in path to a Cursor mcp-auth.json
+	// file, or the Cursor project data directory containing it. Only Cursor's
+	// managed MCP path consumes it.
+	CursorMcpAuthSource string
 	// OpenclawGateway pins the OpenClaw Gateway endpoint inside the per-task
 	// wrapper. Only consulted when Provider == "openclaw" and the agent's
 	// runtime_config selected gateway mode (issue #3260). Zero means "inherit
@@ -58,28 +68,114 @@ type PrepareParams struct {
 	// substituted. Used by the local_directory project_resource flow
 	// (MUL-2663). When set, the envRoot/workdir directory is not created.
 	LocalWorkDir string
-	Task         TaskContextForEnv // context data for writing files
+	// LocalWorktree, when non-nil, is the worktree-mode counterpart of
+	// LocalWorkDir: instead of running in the user's directory, the task gets
+	// its own git worktree of that repo inside envRoot and delivers its work
+	// as a branch. Tasks sharing the directory then run concurrently.
+	// Mutually exclusive with LocalWorkDir — the daemon picks one based on the
+	// resource's execution_mode.
+	LocalWorktree *LocalWorktreeParams
+	// HermesSourceHome is the shared Hermes home the per-task overlay is seeded
+	// from — resolved by the daemon via execenv.ResolveHermesProfile so it honors
+	// the agent's custom_env HERMES_HOME and any -p/--profile or sticky selection.
+	// Only used for the hermes provider; empty falls back to the platform default.
+	HermesSourceHome string
+	// HermesSourceMustExist fails the overlay build closed when HermesSourceHome
+	// is absent — set when an explicit named profile was requested so a typo
+	// doesn't silently seed from an empty home and drop the user's auth/config.
+	HermesSourceMustExist bool
+	// HermesMemoryStore is the agent's persistent Hermes memory store
+	// (HermesMemoryStorePath) the overlay links memories/ to, so memory outlives
+	// the task. Empty keeps memories/ task-local — no agent to key on, or the
+	// Multica profile dir could not be resolved.
+	HermesMemoryStore string
+	// HermesSessionStore is the conversation's persistent Hermes session store
+	// (HermesSessionStorePath) the overlay links state.db to, so the transcript
+	// outlives the task and a follow-up turn can actually resume it. Empty keeps
+	// state.db task-local — no agent or conversation to key on, or the Multica
+	// profile dir could not be resolved.
+	HermesSessionStore string
+	// HermesEnv is the sanitized effective env (agent custom_env minus the daemon
+	// blocklisted keys) used to expand ${VAR} in Hermes external_dirs so it
+	// matches what the Hermes child process actually sees. Only used for hermes.
+	HermesEnv map[string]string
+	// ReasonixEnv is the sanitized agent custom_env, layered over the daemon's
+	// own environment exactly as the child's env is built. The per-task
+	// reasonix.toml restates the permissions from the user config that env
+	// resolves to, so an agent that re-points (or clears) REASONIX_HOME moves the
+	// daemon's read with it. Only used for reasonix.
+	ReasonixEnv map[string]string
+	// CodexCustomArgs are the effective Codex CLI args this task launches with
+	// (daemon defaults + profile-fixed + per-agent custom_args). Only the
+	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
+	// override that never lands in config.toml (MUL-4957).
+	CodexCustomArgs []string
+	Task            TaskContextForEnv // context data for writing files
 }
 
 // TaskContextForEnv is the subset of task context used for writing context files.
 type TaskContextForEnv struct {
-	IssueID                 string
-	TriggerCommentID        string // comment that triggered this task (empty for on_assign)
-	TriggerThreadID         string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
-	NewCommentCount         int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
-	NewCommentsSince        string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
-	PriorSessionResumed     bool   // true when the daemon will resume an existing provider session for this task
-	AgentID                 string // unique ID of the dispatched agent
-	AgentName               string
-	AgentInstructions       string // agent identity/persona instructions, injected into CLAUDE.md
-	AgentSkills             []SkillContextForEnv
-	Repos                   []RepoContextForEnv     // workspace repos available for checkout
-	ProjectID               string                  // issue's project, when present
-	ProjectTitle            string                  // human-readable project title
-	ProjectDescription      string                  // durable project-level context, rendered into the brief's Project Context section
-	ProjectResources        []ProjectResourceForEnv // resources attached to the project
-	ChatSessionID           string                  // non-empty for chat tasks
-	AutopilotRunID          string                  // non-empty for autopilot run_only tasks
+	IssueID          string
+	TriggerCommentID string // comment that triggered this task (empty for on_assign)
+	TriggerThreadID  string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	// CommentReplyTargets is set for a comment run that coalesced comments
+	// spanning MORE THAN ONE root thread (MUL-4348). When it has >=2 entries the
+	// workflow's reply step fans out — one reply per thread — instead of the
+	// single --parent=trigger cookbook, keeping this persistent brief in sync
+	// with the per-turn prompt so a cross-thread run cannot get one source
+	// telling it "one comment" and the other "one per thread". Same-thread
+	// follow-ups collapse to a single group upstream, so this stays empty and
+	// the single-parent path is used (no duplicate replies).
+	CommentReplyTargets []ThreadReplyTarget
+	NewCommentCount     int    // issue-wide comments since this agent's last run (excludes its own and the injected trigger)
+	NewCommentsSince    string // RFC3339 anchor (last run's started_at) the count is measured from; empty on cold start
+	PriorSessionResumed bool   // true when the daemon will resume an existing provider session for this task
+	// PriorSessionResumeUnavailable is true when this task carried a prior
+	// session the daemon expected to resume but could NOT (the reused workdir was
+	// gone, or the Codex rollout was not present in the task CODEX_HOME). The
+	// brief surfaces this so the agent tells the user its previous conversation
+	// context is gone and this run starts fresh — turning a silent context loss
+	// into a user-visible one (MUL-4424). Distinct from an ordinary cold start,
+	// which never had a prior session to lose.
+	PriorSessionResumeUnavailable bool
+	AgentID                       string // unique ID of the dispatched agent
+	AgentName                     string
+	AgentInstructions             string // agent identity/persona instructions, injected into CLAUDE.md
+	AgentSkills                   []SkillContextForEnv
+	DisabledRuntimeSkills         []RuntimeSkillRefForEnv
+	Repos                         []RepoContextForEnv     // workspace repos available for checkout
+	ProjectID                     string                  // active project for this task, when present
+	ProjectTitle                  string                  // human-readable project title
+	ProjectDescription            string                  // durable project-level context, rendered into the brief's Project Context section
+	ProjectResources              []ProjectResourceForEnv // resources attached to the project
+	ChatSessionID                 string                  // non-empty for chat tasks
+	// ChatChannelType is the IM platform behind a chat session ("slack",
+	// "feishu", "wecom"); empty for a web/mobile chat. It names the surface in
+	// the brief's copy; what that surface can DELIVER is the separate field
+	// below (MUL-4899). The orthogonal audience and history policies live in
+	// the per-turn chat prompt (daemon/prompt.go) — the server has no history
+	// reader for any other channel.
+	ChatChannelType string
+	// ChatChannelDeliversFiles is the server's verdict, for THIS turn, on
+	// whether a file the agent produces reaches the reader: the adapter goes
+	// back for the bound attachment and this deployment has the object storage
+	// it goes back to. It arrives on the claim and is used as given. False
+	// covers an old server that never sent it, a deployment with no storage,
+	// and every channel whose adapter does not perform the hop — all three of
+	// which want the same instruction, the one telling the agent to describe
+	// its file in words.
+	//
+	// Carried here but deliberately NOT rendered into the brief. It is a
+	// per-turn value: a server upgrade that starts sending it, or object
+	// storage being turned on or off, flips it under a chat session that
+	// resumes across the change, and the brief is the prompt-cache prefix
+	// (MUL-5377). The agent-facing verdict is emitted by the per-turn chat
+	// prompt (daemon.buildChatPrompt) instead, and
+	// TestBriefByteIdenticalAcrossRunsForEveryKind is what keeps this field out
+	// of the brief.
+	ChatChannelDeliversFiles bool
+
+	AutopilotRunID          string // non-empty for autopilot run_only tasks
 	AutopilotID             string
 	AutopilotTitle          string
 	AutopilotDescription    string
@@ -87,12 +183,16 @@ type TaskContextForEnv struct {
 	AutopilotTriggerPayload string
 	QuickCreatePrompt       string // non-empty for quick-create tasks
 	HandoffNote             string // assignment handoff instruction; rendered into issue_context.md (MUL-3375)
-	IsSquadLeader           bool   // true when the agent is acting as a squad leader (may exit silently on no_action)
+	IsSquadLeader           bool   // true when THIS TASK runs the agent in the squad-leader role (may exit silently on no_action); derived from the claim's is_leader_task / squad_id, never sniffed from instructions text (MUL-5811)
 	// WorkspaceContext is the workspace-level system prompt (workspace.context
 	// in the DB). Rendered into the brief as `## Workspace Context` when
 	// non-empty so every agent in the workspace sees the same shared context,
 	// regardless of issue / chat / autopilot / quick-create.
 	WorkspaceContext string
+	// ConnectedApps lists per-run external app capabilities mounted through
+	// MCP overlays. Rendered briefly so the agent can map app names such as
+	// Notion to the actual MCP server name (`composio`).
+	ConnectedApps []runtimeapps.ConnectedApp
 	// RequestingUserName + RequestingUserProfileDescription describe the
 	// human the agent is acting on behalf of. v1 sources them from the
 	// runtime owner (the user who registered the daemon). Rendered into the
@@ -139,9 +239,26 @@ type Environment struct {
 	// outside RootDir (the local_directory flow). Callers that key behavior
 	// on "may I remove WorkDir as scratch?" must check this — for example
 	// the GC loop never deletes the user's directory.
+	//
+	// Deliberately FALSE in worktree mode: there the workdir is a disposable
+	// git worktree inside RootDir, so the env root is ordinary daemon-owned
+	// scratch that the GC should reclaim on the normal schedule, and the
+	// sidecar rollback that protects a user's directory is unnecessary.
 	LocalDirectory bool
+	// MulticaConfigRoot is the private per-task config directory exported to
+	// child CLI invocations. It prevents implicit discovery of the daemon
+	// owner's ~/.multica profile without changing the provider-facing HOME.
+	MulticaConfigRoot string
+	// LocalWorktree is set when the task runs in worktree mode against a
+	// local_directory resource. The daemon calls Finalize on it after the
+	// agent exits to commit leftovers, drop the worktree, and learn the
+	// branch name to report as the task's result.
+	LocalWorktree *LocalWorktree
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
+	// ClaudeSettingsPath is a task-local --settings JSON file that applies
+	// disabled runtime-skill policy without mutating the user's Claude config.
+	ClaudeSettingsPath string
 	// OpenclawConfigPath is the path to the per-task synthesized OpenClaw
 	// config (set only for openclaw provider). The daemon exports this as
 	// OPENCLAW_CONFIG_PATH on the openclaw subprocess so its native skill
@@ -160,6 +277,36 @@ type Environment struct {
 	// exports this as CURSOR_DATA_DIR so project-level MCP approvals are
 	// isolated from the user's persistent ~/.cursor/projects state.
 	CursorDataDir string
+	// HermesHome is the path to the per-task HERMES_HOME overlay (set only for
+	// the hermes provider, and only when the agent has skills bound — empty
+	// otherwise, leaving the user's real home in place). It mirrors ~/.hermes/
+	// via symlink, derives a config.yaml that references the user's real skills
+	// as an external root, and holds the bound skills in its skills/ subdir. The
+	// daemon exports it as HERMES_HOME so the hermes CLI discovers those skills
+	// natively — Hermes has no workspace-relative discovery, so the previous
+	// .agent_context/skills/ fallback was never read (issue #5242). See
+	// hermes_home.go.
+	HermesHome string
+	// HermesSessionStore is the conversation's session store this task's
+	// state.db is actually linked to, or "" when the session database stayed
+	// task-local (no store to key on, or a host that could not create the
+	// link).
+	HermesSessionStore string
+	// HermesSessionHistoryPresent reports that the mounted store actually holds
+	// a session database — a prior turn's transcript this task can resume.
+	// Mounting alone does not imply it: a conversation's first turn, a store the
+	// GC reclaimed between turns, a switched Hermes profile and an operator's
+	// `rm` all mount cleanly onto nothing. The daemon reads THIS, not the store
+	// path, as the answer to "can a prior session id still resolve here?" — see
+	// gateResumeToReusedWorkdir.
+	HermesSessionHistoryPresent bool
+	// QwenpawWorkspace is the path to the per-task QwenPaw workspace directory
+	// (set only for the qwenpaw provider). It is populated with the bound skills
+	// and their skill.json manifest with enabled: true, so the skills are
+	// immediately effective. The daemon passes --workspace <dir> to
+	// `qwenpaw acp` so the QwenPaw agent discovers the skills natively.
+	// See qwenpaw_workspace.go.
+	QwenpawWorkspace string
 
 	logger *slog.Logger // for cleanup logging
 }
@@ -190,6 +337,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 
 	envRoot := filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))
 
+	// Self-heal the root-level daemon marker on every task start so a marker
+	// removed while the daemon runs is restored before the agent spawns. The
+	// per-workdir marker written below only covers cwds inside the workdir;
+	// the root marker keeps the CLI fail-closed guard active for subprocesses
+	// that lose all MULTICA_* env vars AND escape above the workdir. Non-fatal:
+	// without it the workdir marker still protects the common case.
+	if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
+		logger.Warn("execenv: workspaces root marker not written; fail-closed guard limited to the task workdir", "error", err)
+	}
+
 	// Remove existing env if present (defensive — task IDs are unique).
 	if _, err := os.Stat(envRoot); err == nil {
 		if err := os.RemoveAll(envRoot); err != nil {
@@ -203,9 +360,9 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// envRoot.
 	workDir := filepath.Join(envRoot, "workdir")
 	scratchDirs := []string{filepath.Join(envRoot, "output"), filepath.Join(envRoot, "logs")}
-	if params.LocalWorkDir == "" {
+	if params.LocalWorkDir == "" && params.LocalWorktree == nil {
 		scratchDirs = append(scratchDirs, workDir)
-	} else {
+	} else if params.LocalWorkDir != "" {
 		workDir = params.LocalWorkDir
 	}
 	for _, dir := range scratchDirs {
@@ -213,12 +370,59 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			return nil, fmt.Errorf("execenv: create directory %s: %w", dir, err)
 		}
 	}
+	multicaConfigRoot := filepath.Join(envRoot, "multica-config")
+	if err := os.MkdirAll(multicaConfigRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("execenv: create task-local Multica config directory: %w", err)
+	}
+	if err := os.Chmod(multicaConfigRoot, 0o700); err != nil {
+		return nil, fmt.Errorf("execenv: restrict task-local Multica config directory: %w", err)
+	}
+
+	// Worktree mode: build the task's own checkout of the user's repo inside
+	// envRoot and use it as the workdir. Done before any context file is
+	// written so the sidecars land inside the disposable worktree instead of
+	// the user's directory.
+	var localWorktree *LocalWorktree
+	// Tracks whether Prepare reached its successful return. Everything after
+	// worktree creation can still fail — context files, provider homes, MCP
+	// config — and on those paths the caller never receives an Environment, so
+	// nothing downstream knows a worktree exists to clean up. Without the
+	// rollback below, each such failure would leave a registration in the
+	// user's repo and a branch that no task ever ran in.
+	prepareSucceeded := false
+	if params.LocalWorktree != nil {
+		wtParams := *params.LocalWorktree
+		wtParams.EnvRoot = envRoot
+		wtParams.AgentName = params.AgentName
+		wtParams.TaskID = params.TaskID
+		var err error
+		localWorktree, err = PrepareLocalWorktree(wtParams, logger)
+		if err != nil {
+			return nil, err
+		}
+		defer func() {
+			if prepareSucceeded {
+				return
+			}
+			// Safe to discard unconditionally: no agent has run yet, so the
+			// worktree holds only what Prepare itself put there.
+			localWorktree.Discard(logger)
+		}()
+		workDir = localWorktree.WorkDir
+		// The resource may point at a subdirectory that holds only ignored
+		// files, in which case git doesn't materialise it in the worktree.
+		if err := os.MkdirAll(workDir, 0o755); err != nil {
+			return nil, fmt.Errorf("execenv: create worktree workdir %s: %w", workDir, err)
+		}
+	}
 
 	env := &Environment{
-		RootDir:        envRoot,
-		WorkDir:        workDir,
-		LocalDirectory: params.LocalWorkDir != "",
-		logger:         logger,
+		RootDir:           envRoot,
+		WorkDir:           workDir,
+		LocalDirectory:    params.LocalWorkDir != "",
+		LocalWorktree:     localWorktree,
+		MulticaConfigRoot: multicaConfigRoot,
+		logger:            logger,
 	}
 
 	// Write context files into workdir (skills go to provider-native paths).
@@ -229,20 +433,119 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// and avoids a conditional that would silently disable cleanup if the
 	// local_directory detection logic ever drifts.
 	manifest := &sidecarManifest{}
+
+	// Arm the rollback BEFORE the first write, not after writeContextFiles
+	// returns. writeContextFiles puts the daemon task marker down as its very
+	// first act and can then fail on any later step — .agent_context, skill
+	// files, project resources — so a defer registered after it returns would
+	// miss exactly the failures that strand a marker with nothing else around
+	// it. Rolling back an empty manifest is a no-op, which is what makes it
+	// safe to arm this early.
+	//
+	// The manifest that records these writes is not persisted until the end of
+	// Prepare, and the caller receives no Environment on any failure path, so
+	// none of the teardown defers that normally undo this tree are ever
+	// registered. Without this rollback the files stay on disk with no record
+	// of what to remove (MUL-6132).
+	//
+	// In place only. Worktree mode discards the whole worktree on failure just
+	// above, and a cloud envRoot is wiped wholesale by the GC — only the
+	// local_directory flow writes into a directory that outlives the task and
+	// belongs to the user, where a leftover marker disables every multica
+	// command in that directory tree until someone removes it by hand.
+	if params.LocalWorkDir != "" {
+		defer func() {
+			if prepareSucceeded {
+				return
+			}
+			if err := rollBackPreparedSidecars(*manifest); err != nil && logger != nil {
+				logger.Warn("execenv: roll back sidecars after failed prepare", "work_dir", workDir, "error", err)
+			}
+		}()
+	}
+
 	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 
+	// Persist managed-env provenance for non-local issue envs at Prepare time
+	// (not on completion, where .gc_meta.json is written). A same-issue
+	// follow-up can be claimed the instant the prior task completes — before
+	// the prior handler writes .gc_meta.json — so reuse eligibility must be
+	// provable from an artifact that exists the moment the env is created. Only
+	// managed (non-local_directory) issue envs get this marker; that is exactly
+	// the set squad-leader reuse targets (MUL-4886). Non-fatal: a write failure
+	// only costs the next follow-up its session reuse (it falls back to a fresh
+	// session), which must never block dispatching this task.
+	if params.LocalWorkDir == "" && params.Task.IssueID != "" {
+		if err := WriteManagedEnvProvenance(envRoot, ManagedEnvProvenance{
+			WorkspaceID: params.WorkspaceID,
+			IssueID:     params.Task.IssueID,
+			AgentID:     params.Task.AgentID,
+		}); err != nil && logger != nil {
+			logger.Warn("execenv: write managed env provenance failed (non-fatal); a follow-up may start a fresh session", "error", err)
+		}
+	}
+
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
-		codexHome := filepath.Join(envRoot, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
+		codexHome := filepath.Join(envRoot, codexHomeDirName)
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
-		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
+		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
+	}
+
+	if params.Provider == "claude" {
+		settingsPath, err := prepareClaudeSkillSettings(envRoot, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: prepare claude skill settings: %w", err)
+		}
+		env.ClaudeSettingsPath = settingsPath
+	}
+
+	// For Hermes, redirect HERMES_HOME to a per-task compatibility overlay ONLY
+	// when the agent has skills bound. A skill-less Hermes task keeps the user's
+	// real home and its original behavior untouched. The overlay makes the bound
+	// skills visible — Hermes discovers skills only from its home, so the old
+	// .agent_context/skills/ fallback was never read (issue #5242). See
+	// hermes_home.go.
+	//
+	// Note this is a local contract, not an observable product behaviour: the
+	// server appends the platform's built-in skills to every agent's skill set
+	// (service.LoadAgentSkillBundles), so a claimed task's AgentSkills is never
+	// empty and the skill-less branch is effectively unreachable in production.
+	// Emptying an agent's own skill list is NOT a way to opt out of the overlay.
+	if params.Provider == "hermes" && len(params.Task.AgentSkills) > 0 {
+		hermesHome := filepath.Join(envRoot, "hermes-home")
+		sessions, err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
+		if err != nil {
+			return nil, fmt.Errorf("execenv: prepare hermes-home: %w", err)
+		}
+		env.HermesHome = hermesHome
+		if sessions.Mounted {
+			env.HermesSessionStore = params.HermesSessionStore
+			env.HermesSessionHistoryPresent = sessions.HistoryPresent
+		}
+	}
+	if params.Provider == "qwenpaw" {
+		qwenpawWorkspace := filepath.Join(envRoot, "qwenpaw-workspace")
+		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
+			return nil, fmt.Errorf("execenv: prepare qwenpaw workspace: %w", err)
+		}
+		env.QwenpawWorkspace = qwenpawWorkspace
+	}
+
+	// For Reasonix, deny the `ask` tool for this task through a project-scoped
+	// reasonix.toml. Degraded, not fatal: without it the task still runs under
+	// the backend's fail-closed question handling.
+	if params.Provider == "reasonix" {
+		if err := writeReasonixProjectConfig(workDir, params.ReasonixEnv, manifest, logger); err != nil {
+			logger.Warn("execenv: write reasonix project config failed", "error", err)
+		}
 	}
 
 	// For Cursor, materialize managed MCP into project-local config and use
@@ -251,7 +554,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// this per-task data dir can load, so user-global MCP servers do not leak
 	// into managed-MCP runs.
 	if params.Provider == "cursor" {
-		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, manifest)
+		cursorDataDir, err := prepareCursorMcpConfig(envRoot, workDir, params.McpConfig, params.CursorMcpAuthSource, manifest)
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare cursor mcp config: %w", err)
 		}
@@ -259,6 +562,16 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	}
 
 	if err := writeSidecarManifest(envRoot, manifest); err != nil {
+		// In place the manifest is the ONLY record of what we wrote into the
+		// user's own directory, so losing it strands the sidecar tree there
+		// permanently — no crash required, a disk or permission hiccup is
+		// enough (MUL-6132). Fail so the rollback registered above removes the
+		// tree now, while we still hold the in-memory manifest. Elsewhere the
+		// manifest is a convenience the GC can do without, so a warning stays
+		// the right response.
+		if params.LocalWorkDir != "" {
+			return nil, fmt.Errorf("execenv: write sidecar manifest: %w", err)
+		}
 		logger.Warn("execenv: write sidecar manifest failed (non-fatal)", "error", err)
 	}
 
@@ -273,6 +586,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			OpenclawBin: params.OpenclawBin,
 			McpConfig:   params.McpConfig,
 			Gateway:     params.OpenclawGateway,
+			Logger:      logger,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("execenv: prepare openclaw config: %w", err)
@@ -282,6 +596,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	}
 
 	logger.Info("execenv: prepared env", "root", envRoot, "repos_available", len(params.Task.Repos))
+	prepareSucceeded = true
 	return env, nil
 }
 
@@ -289,25 +604,59 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 // the per-provider knobs (CodexVersion, OpenclawBin) so callers can pass
 // the same resolved binary path on both first-run and reuse paths.
 type ReuseParams struct {
-	WorkDir      string
-	Provider     string
-	CodexVersion string // only used when Provider == "codex"
-	OpenclawBin  string // only used when Provider == "openclaw"; empty = PATH lookup
+	// WorkspacesRoot is the daemon-owned root under which all task envs live.
+	// Passed on reuse so the root-level fail-closed marker is self-healed here
+	// too — a marker removed while the daemon runs is restored before a reused
+	// task spawns, not only on the fresh-Prepare path.
+	WorkspacesRoot string
+	WorkDir        string
+	Provider       string
+	CodexVersion   string // only used when Provider == "codex"
+	// ResumeSessionID is the prior Codex thread/session ID this reused task
+	// intends to resume, when any. Only consulted when Provider == "codex" and
+	// only used while migrating a legacy per-task home whose sessions/ still
+	// symlinks the shared ~/.codex/sessions — the single rollout for this ID is
+	// exposed into the new task-local sessions dir so thread/resume still finds
+	// it. Empty means a fresh thread. See prepareCodexSessionsDir (MUL-4424).
+	ResumeSessionID string
+	OpenclawBin     string // only used when Provider == "openclaw"; empty = PATH lookup
 	// McpConfig is the agent's saved `mcp_config` JSON. Reused on reuse so a
 	// freshly-saved managed set re-materialises into the wrapper before the
 	// task starts — without this a stale wrapper from a prior run would keep
 	// the old MCP set in play.
 	McpConfig json.RawMessage
+	// CursorMcpAuthSource mirrors PrepareParams.CursorMcpAuthSource on reuse.
+	CursorMcpAuthSource string
 	// OpenclawGateway is the per-task Gateway pin re-applied on reuse so the
 	// agent picks up any runtime_config changes saved since the prior run.
 	OpenclawGateway OpenclawGatewayPin
+	// Profile is the daemon's profile name (empty = default), mirroring
+	// PrepareParams.Profile so a reused task keys its per-issue Codex session
+	// store into the same profile namespace (MUL-4424).
+	Profile string
 	// LocalDirectory is true when the reused WorkDir is a user-supplied
 	// directory (the local_directory flow). The flag is propagated into
 	// the returned Environment so downstream callers (notably the GC
 	// loop) keep the "never delete the user's directory" invariant on
 	// reuse paths.
 	LocalDirectory bool
-	Task           TaskContextForEnv // refreshed context files / skills
+	// HermesSourceHome, HermesEnv, HermesMemoryStore and HermesSessionStore
+	// mirror PrepareParams on reuse so the Hermes overlay re-derives against the
+	// agent's current source home / profile, external_dirs vars, memory store and
+	// conversation session store.
+	HermesSourceHome      string
+	HermesSourceMustExist bool
+	HermesEnv             map[string]string
+	HermesMemoryStore     string
+	HermesSessionStore    string
+	// ReasonixEnv mirrors PrepareParams.ReasonixEnv on reuse so the rewritten
+	// reasonix.toml keeps restating the owner's current permissions.
+	ReasonixEnv map[string]string
+	// CodexCustomArgs mirrors PrepareParams.CodexCustomArgs on reuse so the
+	// Windows sandbox decision honors a `-c windows.sandbox=...` override here
+	// too (MUL-4957).
+	CodexCustomArgs []string
+	Task            TaskContextForEnv // refreshed context files / skills
 }
 
 // Reuse wraps an existing workdir into an Environment and refreshes context files.
@@ -315,6 +664,17 @@ type ReuseParams struct {
 func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if _, err := os.Stat(params.WorkDir); err != nil {
 		return nil
+	}
+
+	// Self-heal the root-level daemon marker on the reuse path too, so a marker
+	// removed while the daemon runs is restored before a reused task spawns —
+	// otherwise reuse could run without the fail-closed guard until the next
+	// fresh Prepare. Non-fatal: the per-workdir marker still protects the common
+	// case, and an empty WorkspacesRoot (legacy callers) simply skips this.
+	if params.WorkspacesRoot != "" {
+		if err := EnsureWorkspacesRootMarker(params.WorkspacesRoot); err != nil && logger != nil {
+			logger.Warn("execenv: workspaces root marker not written on reuse; fail-closed guard limited to the task workdir", "error", err)
+		}
 	}
 
 	rootDir := filepath.Dir(params.WorkDir)
@@ -335,6 +695,17 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 		WorkDir:        params.WorkDir,
 		LocalDirectory: params.LocalDirectory,
 		logger:         logger,
+	}
+	if env.RootDir != "" {
+		env.MulticaConfigRoot = filepath.Join(env.RootDir, "multica-config")
+		if err := os.MkdirAll(env.MulticaConfigRoot, 0o700); err != nil {
+			logger.Warn("execenv: restore task-local Multica config directory failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		if err := os.Chmod(env.MulticaConfigRoot, 0o700); err != nil {
+			logger.Warn("execenv: restrict task-local Multica config directory failed; forcing fresh prepare", "error", err)
+			return nil
+		}
 	}
 
 	// Roll back the previous dispatch's sidecar writes before refreshing.
@@ -390,13 +761,77 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// lives alongside the workdir. Re-run prepareCodexHomeWithOpts to ensure
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
-		codexHome := filepath.Join(env.RootDir, "codex-home")
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion}, logger); err != nil {
+		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
-			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, logger); err != nil {
+			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
+			}
+		}
+	}
+
+	if params.Provider == "claude" && env.RootDir != "" {
+		settingsPath, err := prepareClaudeSkillSettings(env.RootDir, params.Task.DisabledRuntimeSkills, params.Task.AgentSkills)
+		if err != nil {
+			logger.Warn("execenv: refresh claude skill settings failed", "error", err)
+		} else {
+			env.ClaudeSettingsPath = settingsPath
+		}
+	}
+
+	// Re-deny Reasonix's `ask` tool on reuse: CleanupSidecars above removed the
+	// prior run's reasonix.toml, so without this the next turn would run with
+	// the tool available again.
+	if params.Provider == "reasonix" {
+		if err := writeReasonixProjectConfig(params.WorkDir, params.ReasonixEnv, manifest, logger); err != nil {
+			logger.Warn("execenv: refresh reasonix project config failed", "error", err)
+		}
+	}
+
+	// Refresh (or tear down) the per-task QwenPaw workspace on reuse.
+	// Rebuild the workspace so an added/removed/edited skill is reflected.
+	if params.Provider == "qwenpaw" && env.RootDir != "" {
+		qwenpawWorkspace := filepath.Join(env.RootDir, "qwenpaw-workspace")
+		if err := prepareQwenpawWorkspace(qwenpawWorkspace, params.Task.AgentSkills, logger); err != nil {
+			logger.Warn("execenv: refresh qwenpaw workspace failed; forcing fresh prepare", "error", err)
+			return nil
+		}
+		env.QwenpawWorkspace = qwenpawWorkspace
+	}
+
+	// Refresh (or tear down) the per-task HERMES_HOME on reuse. With skills
+	// bound, rebuild the overlay so an added/removed/edited skill and the
+	// mirrored home/config track the user's current ~/.hermes/ before the next
+	// hermes process starts. With no skills bound, drop the redirect entirely so
+	// the task reverts to the user's real home — matching a fresh Prepare for a
+	// skill-less agent.
+	if params.Provider == "hermes" && env.RootDir != "" {
+		hermesHome := filepath.Join(env.RootDir, "hermes-home")
+		if len(params.Task.AgentSkills) > 0 {
+			sessions, err := prepareHermesHome(hermesHome, params.HermesSourceHome, params.HermesSourceMustExist, params.Task.AgentSkills, params.HermesEnv, params.HermesMemoryStore, params.HermesSessionStore, logger)
+			if err != nil {
+				// Fail closed: a half-built overlay must not run. Returning nil
+				// makes the daemon fall back to a fresh Prepare, whose error
+				// then blocks dispatch rather than silently dropping the bound
+				// skill.
+				logger.Warn("execenv: refresh hermes-home failed; forcing fresh prepare", "error", err)
+				return nil
+			}
+			env.HermesHome = hermesHome
+			env.HermesSessionStore = ""
+			env.HermesSessionHistoryPresent = false
+			if sessions.Mounted {
+				env.HermesSessionStore = params.HermesSessionStore
+				env.HermesSessionHistoryPresent = sessions.HistoryPresent
+			}
+		} else {
+			env.HermesHome = ""
+			env.HermesSessionStore = ""
+			env.HermesSessionHistoryPresent = false
+			if err := os.RemoveAll(hermesHome); err != nil {
+				logger.Warn("execenv: remove stale hermes-home failed", "error", err)
 			}
 		}
 	}
@@ -405,7 +840,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// mcp_config must replace the prior run's .cursor/mcp.json and isolated
 	// approvals before the next cursor-agent process starts.
 	if params.Provider == "cursor" && env.RootDir != "" {
-		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, manifest)
+		cursorDataDir, err := prepareCursorMcpConfig(env.RootDir, params.WorkDir, params.McpConfig, params.CursorMcpAuthSource, manifest)
 		if err != nil {
 			logger.Warn("execenv: refresh cursor mcp config failed", "error", err)
 			return nil
@@ -430,6 +865,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 			OpenclawBin: params.OpenclawBin,
 			McpConfig:   params.McpConfig,
 			Gateway:     params.OpenclawGateway,
+			Logger:      logger,
 		})
 		if err != nil {
 			logger.Warn("execenv: refresh openclaw config failed", "error", err)
@@ -463,7 +899,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 // user's real ~/.codex/. Other runtimes leave HOME untouched and discover
 // user-level skills natively (see context.go for the workdir-local paths
 // they use for workspace skills).
-func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, logger *slog.Logger) error {
+func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, disabledRuntimeSkills []RuntimeSkillRefForEnv, logger *slog.Logger) error {
 	skillsDir := filepath.Join(codexHome, "skills")
 	if err := os.RemoveAll(skillsDir); err != nil {
 		return fmt.Errorf("clear codex skills dir: %w", err)
@@ -471,14 +907,12 @@ func hydrateCodexSkills(codexHome string, workspaceSkills []SkillContextForEnv, 
 	if err := seedUserCodexSkills(codexHome, workspaceSkills, logger); err != nil {
 		logger.Warn("execenv: seed user codex skills failed", "error", err)
 	}
-	if len(workspaceSkills) == 0 {
-		return nil
+	if len(workspaceSkills) > 0 {
+		if err := writeSkillFiles(skillsDir, workspaceSkills, nil); err != nil {
+			return err
+		}
 	}
-	// Codex skills live under env.RootDir/codex-home, which the GC loop
-	// (cloud) or env teardown (local_directory) wipes wholesale — they
-	// don't sit inside the user's workdir and don't need sidecar manifest
-	// tracking.
-	return writeSkillFiles(skillsDir, workspaceSkills, nil)
+	return ensureCodexDisabledSkillsConfig(filepath.Join(codexHome, "config.toml"), codexHome, disabledRuntimeSkills, workspaceSkills)
 }
 
 // GCMetaKind identifies which kind of parent record a task workdir belongs to.
@@ -558,6 +992,65 @@ func ReadGCMeta(envRoot string) (*GCMeta, error) {
 		meta.Kind = GCKindIssue
 	}
 	return &meta, nil
+}
+
+const managedEnvProvenanceFile = ".managed_env.json"
+
+// ManagedEnvProvenanceManagedBy discriminates a managed-env provenance file
+// the daemon wrote from any lookalike JSON that happens to share the path.
+const ManagedEnvProvenanceManagedBy = "multica-daemon-managed-env"
+
+// ManagedEnvProvenance is persisted to .managed_env.json inside the env root at
+// Prepare time (NOT on completion, unlike .gc_meta.json). It records that this
+// env root is a daemon-managed, non-local_directory issue env owned by a
+// specific workspace/issue/agent.
+//
+// Its whole reason to exist is timing. A squad-leader follow-up on the same
+// issue can be claimed the instant the prior task completes — the server's
+// task-complete handler reconciles the follow-up and wakes the runtime before
+// the prior task's daemon handler writes .gc_meta.json. Keying reuse
+// eligibility off .gc_meta.json therefore raced: the successor read a
+// not-yet-written file and started a fresh session (MUL-4886). This marker is
+// on disk from the moment the env is created, so the successor can prove reuse
+// safety inside that window. It is written ONLY for non-local managed issue
+// envs, so its presence is itself the "safe to reuse, not a user
+// local_directory" assertion; see shouldReusePriorWorkdir.
+type ManagedEnvProvenance struct {
+	ManagedBy   string `json:"managed_by"`
+	WorkspaceID string `json:"workspace_id"`
+	IssueID     string `json:"issue_id"`
+	AgentID     string `json:"agent_id"`
+}
+
+// WriteManagedEnvProvenance persists the reuse-eligibility marker at the env
+// root. Callers must only invoke it for non-local_directory issue envs, since
+// the file's presence is the non-local assertion. ManagedBy is stamped here so
+// callers cannot forget the discriminator.
+func WriteManagedEnvProvenance(envRoot string, p ManagedEnvProvenance) error {
+	if envRoot == "" {
+		return nil
+	}
+	p.ManagedBy = ManagedEnvProvenanceManagedBy
+	data, err := json.Marshal(p)
+	if err != nil {
+		return fmt.Errorf("marshal managed env provenance: %w", err)
+	}
+	return os.WriteFile(filepath.Join(envRoot, managedEnvProvenanceFile), data, 0o644)
+}
+
+// ReadManagedEnvProvenance reads the Prepare-time reuse-eligibility marker from
+// an env root. A missing or malformed file returns an error; callers fail
+// closed (no reuse) on any error.
+func ReadManagedEnvProvenance(envRoot string) (*ManagedEnvProvenance, error) {
+	data, err := os.ReadFile(filepath.Join(envRoot, managedEnvProvenanceFile))
+	if err != nil {
+		return nil, err
+	}
+	var p ManagedEnvProvenance
+	if err := json.Unmarshal(data, &p); err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
 
 // Cleanup tears down the execution environment.

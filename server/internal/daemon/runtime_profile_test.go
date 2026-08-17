@@ -153,6 +153,54 @@ func newProfileRegisterFixture(t *testing.T, profiles []RuntimeProfile, profiles
 // profile_id, and that its resolved command path is recorded for runTask.
 // Uses a custom-only host (no built-in agents) to also prove that path still
 // registers.
+func TestRegisterRuntimes_IncludesBuiltInQwen(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	fx := newProfileRegisterFixture(t, nil, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"qwen": {Path: "/usr/bin/true", Command: "qwen", Model: "qwen3.8-max-preview"},
+	}
+
+	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if len(fx.sentRuntimes) != 1 {
+		t.Fatalf("sent runtimes = %d, want 1: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+	}
+	sent := fx.sentRuntimes[0]
+	if sent["type"] != "qwen" || sent["name"] != "Qwen Code" || sent["version"] != "9.9.9" || sent["status"] != "online" {
+		t.Fatalf("registered Qwen runtime = %+v", sent)
+	}
+	if len(resp.Runtimes) != 1 || resp.Runtimes[0].Provider != "qwen" {
+		t.Fatalf("register response = %+v", resp)
+	}
+}
+
+func TestRegisterRuntimes_IncludesBuiltInQoderCN(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	fx := newProfileRegisterFixture(t, nil, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"qoderclicn": {Path: "/usr/bin/true", Command: "qoderclicn"},
+	}
+
+	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("registerRuntimesForWorkspace: %v", err)
+	}
+	if len(fx.sentRuntimes) != 1 {
+		t.Fatalf("sent runtimes = %d, want 1: %+v", len(fx.sentRuntimes), fx.sentRuntimes)
+	}
+	sent := fx.sentRuntimes[0]
+	if sent["type"] != "qoderclicn" || sent["name"] != "Qoder CN" || sent["version"] != "9.9.9" || sent["status"] != "online" {
+		t.Fatalf("registered Qoder CN runtime = %+v", sent)
+	}
+	if len(resp.Runtimes) != 1 || resp.Runtimes[0].Provider != "qoderclicn" {
+		t.Fatalf("register response = %+v", resp)
+	}
+}
+
 func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	t.Cleanup(stubAgentVersion(t))
 	stubLookPath(t, map[string]string{"company-codex": "/opt/bin/company-codex"})
@@ -172,7 +220,7 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	// Custom-only host: no built-in agents configured.
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -196,6 +244,9 @@ func TestRegisterRuntimes_AppendsProfileRuntime(t *testing.T) {
 	got := d.profileLaunchSpecs["prof-1"]
 	if got.path != "/opt/bin/company-codex" {
 		t.Errorf("profileLaunchSpecs[prof-1].path = %q, want /opt/bin/company-codex", got.path)
+	}
+	if got.version != "9.9.9" {
+		t.Errorf("profileLaunchSpecs[prof-1].version = %q, want 9.9.9", got.version)
 	}
 	if strings.Join(got.fixedArgs, " ") != "--model composer-2.5" {
 		t.Errorf("profileLaunchSpecs[prof-1].fixedArgs = %v, want [--model composer-2.5]", got.fixedArgs)
@@ -226,7 +277,7 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	_, sig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -263,7 +314,7 @@ func TestRegisterRuntimes_SkipsUnsupportedProfileFamily(t *testing.T) {
 	d := fx.daemon
 	d.cfg.Agents = map[string]AgentEntry{}
 
-	_, sig, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	_, sig, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
@@ -303,7 +354,7 @@ func TestRegisterRuntimes_ProfilesFetchErrorIsBestEffort(t *testing.T) {
 	// Built-in agent present so registration has something to register.
 	d.cfg.Agents = map[string]AgentEntry{"claude": {Path: "/usr/bin/true"}}
 
-	resp, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1")
+	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
 	if err != nil {
 		t.Fatalf("registration should succeed despite profiles 404: %v", err)
 	}
@@ -338,7 +389,7 @@ func TestRegisterRuntimes_PrefersCommandPathOverride(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{}
 	d.cfg.ProfileCommandOverrides = map[string]string{"prof-1": "/opt/custom/company-codex"}
 
-	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+	if _, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
@@ -372,7 +423,7 @@ func TestRegisterRuntimes_OverrideNotExecutableFallsBackToPath(t *testing.T) {
 	d.cfg.Agents = map[string]AgentEntry{}
 	d.cfg.ProfileCommandOverrides = map[string]string{"prof-1": "/opt/stale/company-codex"}
 
-	if _, _, err := d.registerRuntimesForWorkspace(context.Background(), "ws-1"); err != nil {
+	if _, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1"); err != nil {
 		t.Fatalf("registerRuntimesForWorkspace: %v", err)
 	}
 
@@ -395,13 +446,13 @@ func stubProfilePathExecutable(t *testing.T, executable map[string]bool) {
 func TestCustomCommandPathForRuntime(t *testing.T) {
 	d := freshDaemon("")
 	d.profileLaunchSpecs = map[string]profileLaunchSpec{
-		"prof-1": {path: "/opt/bin/company-codex", fixedArgs: []string{"--model", "composer-2.5"}},
+		"prof-1": {path: "/opt/bin/company-codex", version: "9.8.7", fixedArgs: []string{"--model", "composer-2.5"}},
 	}
 	// rt-custom is a custom-profile runtime; rt-builtin is a normal one.
 	d.runtimeIndex["rt-custom"] = Runtime{ID: "rt-custom", Provider: "codex", ProfileID: "prof-1"}
 	d.runtimeIndex["rt-builtin"] = Runtime{ID: "rt-builtin", Provider: "claude"}
 
-	if spec, ok := d.customProfileLaunchForRuntime("rt-custom"); !ok || spec.path != "/opt/bin/company-codex" || strings.Join(spec.fixedArgs, " ") != "--model composer-2.5" {
+	if spec, ok := d.customProfileLaunchForRuntime("rt-custom"); !ok || spec.path != "/opt/bin/company-codex" || spec.version != "9.8.7" || strings.Join(spec.fixedArgs, " ") != "--model composer-2.5" {
 		t.Errorf("custom runtime: got (%+v, %v), want profile launch spec", spec, ok)
 	}
 	if spec, ok := d.customProfileLaunchForRuntime("rt-builtin"); ok || spec.path != "" {

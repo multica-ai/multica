@@ -6,6 +6,8 @@ import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import type { Agent, MemberWithUser, RuntimeDevice } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
+import { configStore } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { NavigationProvider, type NavigationAdapter } from "../../navigation";
 import enCommon from "../../locales/en/common.json";
 import enAgents from "../../locales/en/agents.json";
@@ -94,12 +96,12 @@ function makeRuntime(overrides: Partial<RuntimeDevice>): RuntimeDevice {
   };
 }
 
-function makeTemplate(runtimeId: string): Agent {
+function makeDuplicateSource(runtimeId: string): Agent {
   return {
-    id: "agent-template",
+    id: "agent-source",
     workspace_id: "ws-1",
     runtime_id: runtimeId,
-    name: "Template Agent",
+    name: "Source Agent",
     description: "",
     instructions: "",
     avatar_url: null,
@@ -107,6 +109,8 @@ function makeTemplate(runtimeId: string): Agent {
     runtime_config: {},
     custom_args: [],
     visibility: "private",
+    permission_mode: "private",
+    invocation_targets: [],
     status: "idle",
     max_concurrent_tasks: 1,
     model: "",
@@ -227,8 +231,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     expect(screen.getByText("My Runtime", { selector: "span.truncate" })).toBeInTheDocument();
   });
 
-  it("in duplicate mode, does not pre-fill the template's runtime when it's now locked", async () => {
-    // Template runtime is owned by someone else and now private — the
+  it("in duplicate mode, does not pre-fill the source agent's runtime when it's now locked", async () => {
+    // The source runtime is owned by someone else and now private — the
     // duplicate flow used to seed with it anyway, leaving the user with
     // a Create button that 403s server-side. Now we fall back to the
     // first usable runtime instead.
@@ -244,8 +248,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       owner_id: ME,
       visibility: "private",
     });
-    const template = makeTemplate("rt-others-private");
-    const { onCreate } = renderDialog([othersPrivate, mine], template);
+    const duplicateSource = makeDuplicateSource("rt-others-private");
+    const { onCreate } = renderDialog([othersPrivate, mine], duplicateSource);
 
     expect(
       screen.getByText("My Runtime", { selector: "span.truncate" }),
@@ -261,8 +265,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     expect(onCreate.mock.calls[0]?.[0].runtime_id).toBe("rt-mine");
   });
 
-  it("disables Create when the selected runtime is locked (template + no usable fallback)", () => {
-    // Edge case: template points at a locked runtime AND the workspace
+  it("disables Create when the selected runtime is locked (duplicate source + no usable fallback)", () => {
+    // Edge case: the source agent points at a locked runtime AND the workspace
     // has no usable alternatives in scope. The defense-in-depth gate on
     // the Create button must keep the user from submitting a 403.
     const onlyOthersPrivate = makeRuntime({
@@ -274,8 +278,8 @@ describe("CreateAgentDialog runtime visibility gate", () => {
     // Flip the picker to "All" so the locked runtime is at least
     // visible — that's the scope where the selected-but-locked state
     // can persist after the initial seed search returns nothing.
-    const template = makeTemplate("rt-only-others-private");
-    renderDialog([onlyOthersPrivate], template);
+    const duplicateSource = makeDuplicateSource("rt-only-others-private");
+    renderDialog([onlyOthersPrivate], duplicateSource);
 
     // The Create button is rendered by lucide-free CTA text "Create".
     const createBtn = screen
@@ -283,5 +287,125 @@ describe("CreateAgentDialog runtime visibility gate", () => {
       .find((b) => b.textContent === "Create");
     expect(createBtn).toBeDefined();
     expect((createBtn as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("CreateAgentDialog access picker (MUL-4010, feature-flag gated)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // The dialog's default (workspace) still needs to be usable by ME:
+    // reset flags before every test so a stray "on" state in one test
+    // can't bleed into the next.
+    configStore.getState().setFeatureFlags({});
+  });
+
+  afterEach(() => {
+    cleanup();
+    document.body.innerHTML = "";
+    configStore.getState().setFeatureFlags({});
+  });
+
+  it("keeps the legacy Workspace/Personal toggle when the flag is OFF", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: false });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+
+    // Legacy copy is rendered — matches VISIBILITY_DESCRIPTION.
+    expect(screen.getByText(/All members can assign/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Legacy Agent" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload).toBeDefined();
+    // Legacy path submits visibility, NOT permission_mode/invocation_targets.
+    expect(payload.visibility).toBe("workspace");
+    expect(payload.permission_mode).toBeUndefined();
+    expect(payload.invocation_targets).toBeUndefined();
+  });
+
+  it("submits permission_mode=public_to + workspace target when the flag is ON (default)", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+
+    // New copy replaces the old one.
+    expect(screen.getByText("Only you can run this agent")).toBeInTheDocument();
+    expect(screen.getByText("Entire workspace")).toBeInTheDocument();
+    expect(screen.getByText("Specific people")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Access Agent" },
+    });
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload).toBeDefined();
+    // MUL-3963 payload shape.
+    expect(payload.visibility).toBeUndefined();
+    expect(payload.permission_mode).toBe("public_to");
+    expect(payload.invocation_targets).toEqual([
+      { target_type: "workspace" },
+    ]);
+  });
+
+  it("submits permission_mode=private with empty targets when Private is chosen", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Private Agent" },
+    });
+    // Click the Private card. The Private description doubles as a stable
+    // click target inside the button.
+    fireEvent.click(screen.getByText("Only you can run this agent"));
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload).toBeDefined();
+    expect(payload.permission_mode).toBe("private");
+    expect(payload.invocation_targets).toEqual([]);
+  });
+
+  it("does not create when specific-people scope has no member", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Empty Public Agent" },
+    });
+    fireEvent.click(screen.getByRole("radio", { name: /^Specific people/i }));
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    expect(onCreate).not.toHaveBeenCalled();
+  });
+
+  it("includes ticked members in the invocation_targets payload", async () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    const mine = makeRuntime({ id: "rt-mine", name: "My Runtime", owner_id: ME });
+    const { onCreate } = renderDialog([mine]);
+
+    fireEvent.change(screen.getByPlaceholderText("e.g. Deep Research Agent"), {
+      target: { value: "Shared Agent" },
+    });
+    fireEvent.click(screen.getByRole("radio", { name: /^Specific people/i }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /^Other/ }));
+    fireEvent.click(screen.getByText("Create"));
+    await new Promise((r) => setTimeout(r, 0));
+
+    const payload = onCreate.mock.calls[0]?.[0];
+    expect(payload).toBeDefined();
+    expect(payload.permission_mode).toBe("public_to");
+    expect(payload.invocation_targets).toEqual([
+      { target_type: "member", target_id: OTHER },
+    ]);
   });
 });

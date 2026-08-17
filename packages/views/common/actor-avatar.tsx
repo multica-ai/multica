@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { ActorAvatar as ActorAvatarBase } from "@multica/ui/components/common/actor-avatar";
+import { AVATAR_SIZE_PX, type AvatarSize } from "@multica/ui/lib/avatar-size";
 import {
   HoverCard,
   HoverCardTrigger,
@@ -15,7 +16,11 @@ import { AgentLivePeekCard } from "../agents/components/agent-live-peek-card";
 import { MemberProfileCard } from "../members/member-profile-card";
 import { SquadProfileCard } from "../squads/components/squad-profile-card";
 import { availabilityConfig } from "../agents/presence";
-import { useNavigation } from "../navigation";
+import {
+  resolveClickIntent,
+  useIntentNavigate,
+  type LinkClickIntent,
+} from "../navigation";
 
 /**
  * Selects which agent hover-card payload to render when `enableHoverCard` is
@@ -34,7 +39,7 @@ export type AgentHoverCardVariant = "profile" | "live";
 interface ActorAvatarProps {
   actorType: string;
   actorId: string;
-  size?: number;
+  size?: AvatarSize;
   className?: string;
   /**
    * Wrap the avatar in a hover-card preview on dwell. Use for "who is this?"
@@ -93,10 +98,10 @@ export function ActorAvatar({
     />
   );
 
-  // Optional presence dot overlay. Only meaningful for agents — members have
-  // no presence backbone. Wrapping unconditionally with relative inline-flex
-  // would create extra DOM for every avatar; we only wrap when a dot is asked
-  // for.
+  // Optional presence overlay. Only meaningful for agents — members have no
+  // presence backbone. Wrapping unconditionally with relative inline-flex
+  // would create extra DOM for every avatar; we only wrap when the dot is
+  // asked for.
   const wrapDot = showStatusDot && actorType === "agent";
   const dotted = wrapDot ? (
     <span className="relative inline-flex">
@@ -143,6 +148,12 @@ export function ActorAvatar({
   return content;
 }
 
+/**
+ * Not an `<a>` on purpose: the avatar is often composed inside menu items,
+ * options and buttons, where it yields the click to the surrounding control.
+ * The cost is no native context menu, so modifier and middle clicks are
+ * implemented here with the same intent semantics as AppLink.
+ */
 function ActorAvatarProfileLink({
   href,
   children,
@@ -150,25 +161,26 @@ function ActorAvatarProfileLink({
   href: string;
   children: React.ReactNode;
 }) {
-  const { push, openInNewTab } = useNavigation();
+  // Web note: the trigger is a `<span role="link">`, not an anchor, so there
+  // is no native modifier-click behaviour to fall back to — useIntentNavigate
+  // opens the browser tab itself rather than letting the click navigate in
+  // place.
+  const intentNavigate = useIntentNavigate();
+
+  const insideControl = (event: React.SyntheticEvent) =>
+    !!event.currentTarget.parentElement?.closest(PROFILE_LINK_CONTROL_SELECTOR);
+
+  const open = (intent: LinkClickIntent) => intentNavigate(href, intent);
 
   const navigate = (event: React.MouseEvent | React.KeyboardEvent) => {
-    const controlAncestor = event.currentTarget.parentElement?.closest(
-      PROFILE_LINK_CONTROL_SELECTOR,
-    );
-    if (controlAncestor) return;
-
+    if (insideControl(event)) return;
     event.preventDefault();
     event.stopPropagation();
-    if (
-      "metaKey" in event &&
-      (event.metaKey || event.ctrlKey || event.shiftKey) &&
-      openInNewTab
-    ) {
-      openInNewTab(href);
-      return;
-    }
-    push(href);
+    open(
+      "metaKey" in event && "button" in event
+        ? resolveClickIntent(event as React.MouseEvent)
+        : "push",
+    );
   };
 
   return (
@@ -177,6 +189,13 @@ function ActorAvatarProfileLink({
       tabIndex={-1}
       className="inline-flex cursor-pointer rounded-full"
       onClick={navigate}
+      onAuxClick={(event) => {
+        if (event.defaultPrevented || event.button !== 1) return;
+        if (insideControl(event)) return;
+        event.preventDefault();
+        event.stopPropagation();
+        open("background-tab");
+      }}
       onKeyDown={(event) => {
         if (event.key === "Enter" || event.key === " ") {
           navigate(event);
@@ -195,18 +214,18 @@ function ActorAvatarProfileLink({
 // smaller avatars use a 6 px dot so the indicator doesn't overwhelm them.
 // Exported for surfaces that render the base avatar directly (e.g. comment
 // trigger chips) but still want the standard presence dot.
-export function AgentStatusDot({ agentId, size }: { agentId: string; size?: number }) {
+export function AgentStatusDot({ agentId, size }: { agentId: string; size?: AvatarSize }) {
   const ws = useCurrentWorkspace();
   const detail = useAgentPresenceDetail(ws?.id, agentId);
   if (detail === "loading") return null;
 
   const { dotClass, label } = availabilityConfig[detail.availability];
-  const dotSize = (size ?? 24) >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
+  const px = size ? AVATAR_SIZE_PX[size] : 24;
+  const dotSize = px >= 24 ? "h-1.5 w-1.5" : "h-1 w-1";
 
   return (
     <span
       aria-label={`Status: ${label}`}
-      title={label}
       className={`absolute bottom-0 right-0 rounded-full ring-1 ring-background ${dotClass} ${dotSize}`}
     />
   );
@@ -271,6 +290,18 @@ function SquadAvatarHoverCard({
 // Common chrome shared between agent and member hover cards. Keeps focus
 // behaviour and width consistent so the two surfaces feel structurally
 // parallel — content varies, frame doesn't.
+//
+// Do NOT defer-mount the HoverCard on pointerenter to save per-avatar mount
+// cost (MUL-4827). Base UI drives hover through native mouseenter/mouseleave
+// listeners on the trigger element, and installs its close path *inside* the
+// mouseleave handler — so a trigger that never received a real mouseenter can
+// neither cancel a pending open nor ever hover-close. Warming on pointerenter
+// swaps the node mid-gesture and loses exactly those events, which made
+// brushed-past avatars pop open ~600ms later and stick. This is the same
+// invariant DeferredPopup documents: deferral is only sound for events that
+// END a gesture (click/Enter), and hover starts one. Mounting the root eagerly
+// costs ~0.15ms of JS per avatar and adds zero DOM while closed (the popup
+// subtree, and its queries, stay unmounted until open).
 function ActorAvatarHoverCardShell({
   content,
   children,
@@ -288,16 +319,17 @@ function ActorAvatarHoverCardShell({
     setStandalone(!ancestor);
   }, []);
 
+  const tabIndex = standalone ? 0 : -1;
+  const className = standalone
+    ? "inline-flex cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    : "inline-flex cursor-pointer";
+
   return (
     <HoverCard>
       <HoverCardTrigger
         render={<span ref={triggerRef} />}
-        tabIndex={standalone ? 0 : -1}
-        className={
-          standalone
-            ? "inline-flex cursor-pointer rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            : "inline-flex cursor-pointer"
-        }
+        tabIndex={tabIndex}
+        className={className}
       >
         {children}
       </HoverCardTrigger>

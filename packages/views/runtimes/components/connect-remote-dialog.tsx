@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { Check, ChevronRight, Copy, Terminal } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -19,6 +20,10 @@ import {
 import { Button } from "@multica/ui/components/ui/button";
 import { CODE_LIGATURE_CLASS } from "@multica/ui/lib/code-style";
 import { copyText } from "@multica/ui/lib/clipboard";
+import {
+  UI_EASE_OUT,
+  UI_MOTION_DURATION,
+} from "@multica/ui/lib/motion";
 import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
@@ -62,6 +67,7 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   const slug = useWorkspaceSlug();
   const qc = useQueryClient();
   const navigation = useNavigation();
+  const shouldReduceMotion = useReducedMotion() ?? false;
   const newRuntimeIdRef = useRef<string | null>(null);
 
   // `multica setup` is one blocking command that handles config + login
@@ -100,15 +106,51 @@ export function ConnectRemoteDialog({ onClose }: { onClose: () => void }) {
   return (
     <Dialog open onOpenChange={(v) => !v && onClose()}>
       <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-lg">
-        {step === "instructions" && <InstructionsStep onClose={onClose} />}
-        {step === "success" && (
-          <SuccessStep
-            onGoToAgents={handleGoToAgents}
-            onGoToRuntime={
-              newRuntimeIdRef.current ? handleGoToRuntime : undefined
-            }
-          />
-        )}
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            key={step}
+            className="flex min-h-0 flex-1 flex-col"
+            initial={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(8px)",
+            }}
+            animate={{
+              opacity: 1,
+              transform: "translateY(0)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.standard,
+                ease: UI_EASE_OUT,
+              },
+            }}
+            exit={{
+              opacity: 0,
+              transform: shouldReduceMotion
+                ? "translateY(0)"
+                : "translateY(-8px)",
+              transition: {
+                duration: shouldReduceMotion
+                  ? UI_MOTION_DURATION.fast
+                  : UI_MOTION_DURATION.micro,
+                ease: UI_EASE_OUT,
+              },
+            }}
+          >
+            {step === "instructions" ? (
+              <InstructionsStep onClose={onClose} />
+            ) : (
+              <SuccessStep
+                onGoToAgents={handleGoToAgents}
+                onGoToRuntime={
+                  newRuntimeIdRef.current ? handleGoToRuntime : undefined
+                }
+              />
+            )}
+          </motion.div>
+        </AnimatePresence>
       </DialogContent>
     </Dialog>
   );
@@ -162,10 +204,10 @@ function CommandStep({
 }) {
   return (
     <div>
-      <p className="mb-1.5 text-xs font-medium text-foreground">
+      <p className="mb-1.5 text-caption font-medium text-foreground">
         {n}. {label}
       </p>
-      <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 font-mono text-sm">
+      <div className="flex items-start gap-2 rounded-lg bg-muted px-3 py-2.5 font-mono text-body">
         <Terminal
           className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground"
           aria-hidden
@@ -196,10 +238,10 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
-        <DialogTitle className="text-base text-balance">
+        <DialogTitle className="text-title-sm text-balance">
           {t(($) => $.connect.title)}
         </DialogTitle>
-        <DialogDescription className="text-xs text-balance">
+        <DialogDescription className="text-caption text-balance">
           {t(($) => $.connect.description)}
         </DialogDescription>
       </DialogHeader>
@@ -220,7 +262,7 @@ function InstructionsStep({ onClose }: { onClose: () => void }) {
               cmd={setupCmd}
               copyAria={t(($) => $.connect.copy_aria)}
             />
-            <p className="mt-1.5 text-[11px] leading-[1.55] text-muted-foreground">
+            <p className="mt-1.5 text-micro leading-[1.55] text-muted-foreground">
               {t(($) => $.connect.step2_hint)}
             </p>
           </div>
@@ -244,14 +286,14 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
   const { t } = useT("runtimes");
   return (
     <details className="group rounded-lg border border-dashed">
-      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-xs font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <summary className="flex cursor-pointer list-none items-center gap-1.5 px-3 py-2 text-caption font-medium text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         <ChevronRight
           className="h-3 w-3 transition-transform group-open:rotate-90"
           aria-hidden
         />
         {t(($) => $.connect.troubleshooting)}
       </summary>
-      <div className="space-y-2 border-t px-3 pt-2.5 pb-3 text-[11px] leading-[1.55] text-muted-foreground">
+      <div className="space-y-2 border-t px-3 pt-2.5 pb-3 text-micro leading-[1.55] text-muted-foreground">
         <p>{t(($) => $.connect.trouble_intro)}</p>
         <CommandStep
           n={2}
@@ -270,10 +312,9 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
           <li className="flex items-center gap-1.5">
             <span>{t(($) => $.connect.trouble_check_status)}</span>
             {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
             <code
               className={cn(
-                "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",
+                "rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground",
                 CODE_LIGATURE_CLASS,
               )}
             >
@@ -283,10 +324,9 @@ function TroubleshootingDetails({ tokenCmd }: { tokenCmd: string }) {
           <li className="flex items-center gap-1.5">
             <span>{t(($) => $.connect.trouble_view_logs)}</span>
             {/* CLI command — literal shell string, not i18n content. */}
-            {/* eslint-disable-next-line i18next/no-literal-string */}
             <code
               className={cn(
-                "rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-foreground",
+                "rounded bg-muted px-1.5 py-0.5 font-mono text-micro text-foreground",
                 CODE_LIGATURE_CLASS,
               )}
             >
@@ -307,7 +347,7 @@ function LiveListening() {
   const { t } = useT("runtimes");
   return (
     <div
-      className="flex items-center gap-2.5 rounded-lg border bg-muted/40 px-3 py-2.5 text-xs"
+      className="flex items-center gap-2.5 rounded-lg border bg-muted/40 px-3 py-2.5 text-caption"
       role="status"
       aria-live="polite"
     >
@@ -340,10 +380,10 @@ function SuccessStep({
   return (
     <>
       <DialogHeader className="px-6 pt-6 pb-2">
-        <DialogTitle className="text-base text-balance">
+        <DialogTitle className="text-title-sm text-balance">
           {t(($) => $.connect.success_title)}
         </DialogTitle>
-        <DialogDescription className="text-xs text-balance">
+        <DialogDescription className="text-caption text-balance">
           {t(($) => $.connect.success_description)}
         </DialogDescription>
       </DialogHeader>

@@ -55,11 +55,21 @@ type UpdateAgentEnvRequest struct {
 //
 //  1. The actor MUST resolve to a member (human). Any request authored
 //     by an agent token — even one whose backing member is a workspace
-//     owner — is rejected. This is the key fix for the
-//     impersonation/lateral-movement risk that motivated MUL-2600: an
-//     agent running in the workspace cannot use its host's owner
-//     credentials to reveal another agent's secrets.
-//  2. The member must be a workspace owner or admin.
+//     owner, or the very human who owns the target agent — is rejected.
+//     This is the key fix for the impersonation/lateral-movement risk
+//     that motivated MUL-2600: an agent running in the workspace cannot
+//     use its host's owner credentials to reveal another agent's
+//     secrets.
+//  2. The member must be a workspace owner/admin, or the agent's own
+//     human owner (MUL-5438).
+//
+// Rule 2 used to be workspace-role-only, which made env the single
+// endpoint in the agent permission model that ignored agent ownership:
+// canManageAgent already lets the owner update/archive/restore, and
+// canViewAgentSecrets already lets the owner read mcp_config. The
+// asymmetry was worst on create — POST /api/agents accepts custom_env
+// from any member — so a member could write secrets into their own
+// agent and then never read or rotate them.
 //
 // Returns the loaded agent and the authenticated member on success.
 // All non-2xx branches write their own response and return ok=false.
@@ -83,12 +93,36 @@ func (h *Handler) authorizeAgentEnv(w http.ResponseWriter, r *http.Request) (db.
 		return db.Agent{}, db.Member{}, false
 	}
 
-	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "agent not found", "owner", "admin")
+	member, ok := h.requireWorkspaceRole(w, r, workspaceID, "agent not found", "owner", "admin", "member")
 	if !ok {
+		return db.Agent{}, db.Member{}, false
+	}
+	if !canManageAgentEnv(agent, member) {
+		writeError(w, http.StatusForbidden, "only the agent owner or a workspace owner/admin can manage this agent's env")
 		return db.Agent{}, db.Member{}, false
 	}
 
 	return agent, member, true
+}
+
+// canManageAgentEnv is the pure half of the env authorization rule:
+// a workspace owner/admin, or the human who owns the agent. Mirrors
+// canManageAgent (update/archive) so a member who can manage an agent
+// can also rotate its secrets.
+//
+// The owner comparison deliberately runs against member.UserID rather
+// than requestUserID(r). agent.owner_id is nullable (migration 001) and
+// uuidToString renders a NULL UUID as "", so comparing against a raw
+// header — which can also be empty — would make every NULL-owner agent
+// readable by anyone. member.UserID only exists after the membership
+// lookup succeeded, and the empty-owner guard below closes the case
+// from the other side as well.
+func canManageAgentEnv(agent db.Agent, member db.Member) bool {
+	if roleAllowed(member.Role, "owner", "admin") {
+		return true
+	}
+	ownerID := uuidToString(agent.OwnerID)
+	return ownerID != "" && ownerID == uuidToString(member.UserID)
 }
 
 // GetAgentEnv returns the plaintext custom_env map for a single agent
@@ -230,7 +264,7 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 	// "N variables configured" indicator. Payload is the redacted
 	// AgentResponse — no env values are sent. Skills are reloaded so the
 	// broadcast doesn't tell subscribers the agent has no skills (#3459).
-	resp := agentToResponse(updated)
+	resp := h.agentToResponse(updated)
 	if err := h.attachAgentSkills(r.Context(), &resp, updated.ID); err != nil {
 		slog.Warn("load agent skills after env update failed",
 			append(logger.RequestAttrs(r), "error", err, "agent_id", uuidToString(updated.ID))...)

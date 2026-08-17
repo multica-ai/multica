@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import type { InboxItem } from "@multica/core/types";
 import {
   getInboxDisplayTitle,
-  getQuickCreateFailureDetail,
+  getQuickCreateOutcomeDetail,
+  isQuickCreateOutcome,
   stripQuickCreatePrefix,
 } from "./inbox-display";
 
@@ -73,8 +74,31 @@ describe("inbox display helpers", () => {
       details: { error: "CLI failed\nwith exit status 1" },
     });
 
-    expect(getQuickCreateFailureDetail(failedItem)).toBe(
+    expect(getQuickCreateOutcomeDetail(failedItem)).toBe(
       "CLI failed with exit status 1",
+    );
+  });
+
+  it("treats both non-success quick-create outcomes as recoverable rows", () => {
+    // Drives the original-prompt box and the "Edit as advanced form" recovery
+    // affordance in inbox-page.tsx — the unconfirmed row must keep both.
+    expect(isQuickCreateOutcome("quick_create_failed")).toBe(true);
+    expect(isQuickCreateOutcome("quick_create_unconfirmed")).toBe(true);
+    expect(isQuickCreateOutcome("quick_create_done")).toBe(false);
+    expect(isQuickCreateOutcome("new_comment")).toBe(false);
+  });
+
+  it("uses the original prompt as the unconfirmed quick-create row title", () => {
+    const unconfirmedItem = item({
+      type: "quick_create_unconfirmed",
+      title: "Quick create needs a check",
+      body: "Couldn't confirm whether the issue was created.",
+      issue_id: null,
+      details: { original_prompt: "File a bug about\nthe flaky test" },
+    });
+
+    expect(getInboxDisplayTitle(unconfirmedItem)).toBe(
+      "File a bug about the flaky test",
     );
   });
 });

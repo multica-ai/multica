@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -21,11 +22,21 @@ const maxPreviewTriggerIssues = 500
 // boundary (validateAssigneePair on assign) and inside enqueueSquadLeaderTask
 // (canEnqueueSquadLeader), so a write must NOT re-run or sink it — it passes
 // allow-all. The self-loop check needs the request's X-Task-ID header.
-func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType string, issue db.Issue) service.IssueTriggerProbe {
+func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType, actorID string, issue db.Issue) service.IssueTriggerProbe {
 	return service.IssueTriggerProbe{
 		CanAccessAgent: nil, // allow-all; gate lives at the write boundary
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)
+		},
+		SuppressActiveSelfAssignment: func(agentID pgtype.UUID) bool {
+			suppress := h.shouldSuppressActiveSelfAssignment(r.Context(), actorType, actorID, issue.ID, agentID)
+			if suppress {
+				slog.Info("suppressing duplicate self-assignment enqueue",
+					"issue_id", uuidToString(issue.ID),
+					"agent_id", uuidToString(agentID),
+				)
+			}
+			return suppress
 		},
 	}
 }
@@ -35,18 +46,35 @@ func (h *Handler) issueTriggerWriteProbe(r *http.Request, actorType string, issu
 // readiness to a member who cannot see it — matching validateAssigneePair /
 // canEnqueueSquadLeader) and the same self-loop guard.
 func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, workspaceID string, issue db.Issue) service.IssueTriggerProbe {
+	originatorUserID := h.invokeOriginatorFromRequest(r, actorType, actorID)
 	return service.IssueTriggerProbe{
 		CanAccessAgent: func(agent db.Agent) bool {
-			at := actorType
-			if at == "system" {
-				at = "agent"
-			}
-			return h.canAccessPrivateAgent(r.Context(), agent, at, actorID, workspaceID)
+			return h.canInvokeAgent(r.Context(), agent, actorType, actorID, originatorUserID, workspaceID)
 		},
 		IsSelfLoop: func() bool {
 			return h.isAgentRunningOnIssue(r, actorType, issue)
 		},
+		SuppressActiveSelfAssignment: func(agentID pgtype.UUID) bool {
+			return h.shouldSuppressActiveSelfAssignment(r.Context(), actorType, actorID, issue.ID, agentID)
+		},
 	}
+}
+
+// shouldSuppressActiveSelfAssignment prevents a trusted task-scoped agent
+// actor from creating another run for the target pair merely to claim issue
+// ownership. It intentionally checks the TARGET pair, not whether the actor is
+// busy anywhere: cross-issue self handoffs are a supported workflow and must
+// still enqueue when the target has no active run. Query errors fail closed
+// against the external enqueue side effect while leaving the ownership write
+// itself intact. The API still returns success for that ownership write; only
+// the server log exposes the failed advisory lookup, because enqueue is the
+// optional side effect and suppressing it is safer than risking duplicate work.
+func (h *Handler) shouldSuppressActiveSelfAssignment(ctx context.Context, actorType, actorID string, issueID, targetAgentID pgtype.UUID) bool {
+	if actorType != "agent" || actorID == "" || actorID != uuidToString(targetAgentID) {
+		return false
+	}
+	active, err := h.hasActiveTaskForIssueAndAgent(ctx, issueID, targetAgentID)
+	return active || err != nil
 }
 
 // dispatchIssueRun executes the enqueue side effect for a decision produced by
@@ -56,10 +84,28 @@ func (h *Handler) issueTriggerPreviewProbe(r *http.Request, actorType, actorID, 
 func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
 	switch trigger.AssigneeType {
 	case "agent":
-		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote)
+		// The member who performed this assign/promote is the accountable human
+		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
+		// member actor is threaded; otherwise attribution falls back to the chain.
+		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
 	case "squad":
 		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
 	}
+}
+
+// memberActorUserID returns the acting member's user id as a pgtype.UUID when the
+// actor is a member, and an invalid UUID otherwise (an agent actor id is not a
+// human and must never become an accountable human). Used to thread the
+// assign/promote actor into the attribution resolver (MUL-4302 §4).
+func memberActorUserID(actorType, actorID string) pgtype.UUID {
+	if actorType != "member" {
+		return pgtype.UUID{}
+	}
+	uid, err := util.ParseUUID(actorID)
+	if err != nil {
+		return pgtype.UUID{}
+	}
+	return uid
 }
 
 // IssueTriggerPreviewRequest asks "if I apply this assignee and/or status to

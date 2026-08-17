@@ -14,15 +14,22 @@ import type { OnboardingStep } from "./types";
  * for the same reason — users shouldn't think of reading the intro
  * as progress toward completing setup.
  *
- * Note: "teammate" (the old "Create your first agent" step) is no longer
- * part of the in-flow sequence. Helper agent creation now happens after
- * onboarding exits, via the workspace OnboardingHelperModal — see
- * `packages/views/workspace/onboarding-helper-modal.tsx`.
+ * Two questions are intentionally NOT steps anymore:
+ *
+ *   - "source" (How did you hear about Multica?) is pure attribution
+ *     data with zero user-facing payoff, so it no longer taxes the
+ *     critical path. It is collected post-onboarding by the workspace
+ *     source-backfill prompt, and only after agents have completed
+ *     work for the user — see `needs-backfill.ts`.
+ *   - "role" / "use_case" merged into the single "about_you" step so
+ *     related personalization inputs stay together.
+ *
+ * Runtime is the final form step. A connected path provisions Mika and opens
+ * the interactive onboarding chat as part of the runtime step's submit action;
+ * that chat is the product experience itself, not another progress-screen step.
  */
 export const ONBOARDING_STEP_ORDER: readonly OnboardingStep[] = [
-  "source",
-  "role",
-  "use_case",
+  "about_you",
   "workspace",
   "runtime",
 ] as const;

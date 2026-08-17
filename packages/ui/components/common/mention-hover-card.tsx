@@ -36,8 +36,8 @@ function MentionHoverCard({
               <Users className="h-4 w-4 text-primary" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm font-medium">All members</p>
-              <p className="text-xs text-muted-foreground">Notifies all workspace members</p>
+              <p className="text-body font-medium">All members</p>
+              <p className="text-caption text-muted-foreground">Notifies all workspace members</p>
             </div>
           </div>
         </HoverCardContent>
@@ -57,12 +57,12 @@ function MentionHoverCard({
             initials={initials}
             avatarUrl={avatarUrl}
             isAgent={type === "agent"}
-            size={32}
+            size="lg"
           />
           <div className="min-w-0">
-            <p className="text-sm font-medium truncate">{name}</p>
+            <p className="text-body font-medium truncate">{name}</p>
             {role && (
-              <p className="text-xs text-muted-foreground truncate">{role}</p>
+              <p className="text-caption text-muted-foreground truncate">{role}</p>
             )}
           </div>
         </div>

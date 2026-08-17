@@ -1,36 +1,67 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ArrowLeftRight, Check, ChevronRight, Maximize2, Minimize2, X as XIcon } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+  ArrowLeftRight,
+  CalendarDays,
+  Check,
+  ChevronRight,
+  FolderKanban,
+  Maximize2,
+  Minimize2,
+  MoreHorizontal,
+  Settings2,
+  X as XIcon,
+} from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { DialogTitle } from "@multica/ui/components/ui/dialog";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@multica/ui/components/ui/dropdown-menu";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { cn } from "@multica/ui/lib/utils";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useCurrentWorkspace } from "@multica/core/paths";
+import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
+import { AppLink, resolveClickIntent } from "../navigation";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { projectListOptions } from "@multica/core/projects/queries";
 import {
   useQuickCreateStore,
   type QuickCreateActorType,
 } from "@multica/core/issues/stores/quick-create-store";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
+import {
+  useIssueCreateSettingsStore,
+  type QuickCreateField,
+} from "@multica/core/issues/stores/issue-create-settings-store";
+import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import {
   runtimeListOptions,
   checkQuickCreateCliVersion,
+  checkQuickCreateFieldsCliVersion,
   readRuntimeCliVersion,
-  MIN_QUICK_CREATE_CLI_VERSION,
 } from "@multica/core/runtimes";
-import { useFileUpload } from "@multica/core/hooks/use-file-upload";
-import { formatShortcut, modKey, enterKey } from "@multica/core/platform";
-import { contentReferencesAttachment, type Agent, type Attachment, type Squad } from "@multica/core/types";
+import { useShortcut } from "@multica/core/shortcuts";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
+import {
+  contentReferencesAttachment,
+  type Agent,
+  type IssuePriority,
+  type Squad,
+} from "@multica/core/types";
 import { ActorAvatar } from "../common/actor-avatar";
-import { PillButton } from "../common/pill-button";
+import { ClearablePillButton, PillButton } from "../common/pill-button";
 import { ProjectPicker } from "../projects/components/project-picker";
+import { DueDatePicker, PriorityIcon, PriorityPicker } from "../issues/components";
 import { canAssignAgent } from "../issues/components/pickers/assignee-picker";
+import { isAgentRuntimeBound } from "@multica/core/agents";
 import {
   PropertyPicker,
   PickerItem,
@@ -44,7 +75,10 @@ import {
   type ContentEditorRef,
   useFileDropZone,
   FileDropOverlay,
+  useUploadGate,
+  useComposerSubmit,
 } from "../editor";
+import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
 import { useT } from "../i18n";
 import { matchesPinyin } from "../editor/extensions/pinyin-match";
@@ -82,7 +116,10 @@ export function AgentCreatePanel({
   setIsExpanded: (v: boolean) => void;
 }) {
   const { t } = useT("modals");
+  const { t: tProjects } = useT("projects");
+  const sendShortcut = useShortcut("send");
   const workspaceName = useCurrentWorkspace()?.name;
+  const workspacePaths = useWorkspacePaths();
   const wsId = useWorkspaceId();
   const userId = useAuthStore((s) => s.user?.id);
   const { data: members = [] } = useQuery(memberListOptions(wsId));
@@ -107,7 +144,10 @@ export function AgentCreatePanel({
   const visibleAgents = useMemo(
     () =>
       agents.filter(
-        (a) => !a.archived_at && canAssignAgent(a, userId, memberRole),
+        (a) =>
+          !a.archived_at &&
+          isAgentRuntimeBound(a) &&
+          canAssignAgent(a, userId, memberRole),
       ),
     [agents, userId, memberRole],
   );
@@ -126,14 +166,19 @@ export function AgentCreatePanel({
   const lastActorType = useQuickCreateStore((s) => s.lastActorType);
   const lastActorId = useQuickCreateStore((s) => s.lastActorId);
   const setLastActor = useQuickCreateStore((s) => s.setLastActor);
-  const lastProjectId = useQuickCreateStore((s) => s.lastProjectId);
-  const setLastProjectId = useQuickCreateStore((s) => s.setLastProjectId);
-  const promptDraft = useQuickCreateStore((s) => s.prompt);
-  const setPrompt = useQuickCreateStore((s) => s.setPrompt);
-  const clearPrompt = useQuickCreateStore((s) => s.clearPrompt);
+  const visibleFields = useIssueCreateSettingsStore((s) => s.quickCreateFields);
   const keepOpen = useQuickCreateStore((s) => s.keepOpen);
   const setKeepOpen = useQuickCreateStore((s) => s.setKeepOpen);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
+  // The agent draft (prompt + actor) and the shared fields (project, priority,
+  // due date, attachments) live in the unified issue-create draft, so a switch
+  // to/from the manual form preserves them.
+  const draft = useIssueDraftStore((s) => s.draft);
+  const setShared = useIssueDraftStore((s) => s.setShared);
+  const setManual = useIssueDraftStore((s) => s.setManual);
+  const setAgent = useIssueDraftStore((s) => s.setAgent);
+  const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
+  const clearDraft = useIssueDraftStore((s) => s.clearDraft);
 
   // Resolve a candidate actor against the currently-visible agents / squads.
   // Returns null when the candidate doesn't exist in this workspace right
@@ -158,18 +203,29 @@ export function AgentCreatePanel({
 
   const seedActor = useCallback((): ActorSelection | null => {
     // Caller-provided seed wins (e.g. shell pre-seeds with `agent_id` /
-    // `squad_id`), then persisted preference, then first visible agent.
+    // `squad_id`), then the persisted agent draft, the last successful pick,
+    // and finally the first visible agent.
     const dataAgent = data?.agent_id as string | undefined;
     const dataSquad = data?.squad_id as string | undefined;
     return (
       resolveActor("agent", dataAgent) ||
       resolveActor("squad", dataSquad) ||
+      resolveActor(draft.agent.actorType, draft.agent.actorId) ||
       resolveActor(lastActorType, lastActorId) ||
       (visibleAgents[0]
         ? ({ type: "agent", id: visibleAgents[0].id } as const)
         : null)
     );
-  }, [resolveActor, data?.agent_id, data?.squad_id, lastActorType, lastActorId, visibleAgents]);
+  }, [
+    resolveActor,
+    data?.agent_id,
+    data?.squad_id,
+    draft.agent.actorType,
+    draft.agent.actorId,
+    lastActorType,
+    lastActorId,
+    visibleAgents,
+  ]);
 
   const [actor, setActor] = useState<ActorSelection | null>(() => seedActor());
 
@@ -192,14 +248,31 @@ export function AgentCreatePanel({
     return visibleSquads.find((s) => s.id === actor.id);
   }, [actor, visibleSquads]);
 
-  // Project selection — defaults to the last project the user picked in this
-  // workspace. `data?.project_id` lets the modal opener seed a one-shot
-  // override (e.g. a future "+ Issue" button on a project page); it does NOT
-  // replace the persisted default.
+  // Unfinished selections live in the shared issue-create draft. The
+  // last-successful actor remains a separate fallback, so closing a draft
+  // never overwrites the default established by an actual create.
+  //
+  // Project has exactly two seeds, both carrying explicit user intent: the
+  // project page (or manual panel) the modal was opened from, and the user's
+  // own unfinished draft. It is deliberately NOT seeded from the last create
+  // — see quick-create-store (MUL-5862).
   const [projectId, setProjectId] = useState<string | null>(() => {
-    const seed = (data?.project_id as string | undefined) ?? lastProjectId;
+    const seed = (data?.project_id as string | undefined) ?? draft.shared.projectId;
     return seed ?? null;
   });
+  const [priority, setPriority] = useState<IssuePriority>(
+    (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
+  );
+  const [dueDate, setDueDate] = useState<string | null>(
+    (data?.due_date as string | undefined) ?? draft.shared.dueDate,
+  );
+  const [fieldPickerOpen, setFieldPickerOpen] = useState<QuickCreateField | null>(null);
+  // Local state + shared draft always move together, so both the picker rows
+  // and the pill's quick-clear go through here.
+  const commitProject = (next: string | null) => {
+    setProjectId(next);
+    setShared({ projectId: next ?? undefined });
+  };
 
   // Parent-issue context — seeded by `openCreateSubIssue` when the modal is
   // opened from the "Add sub issue" entry on an existing issue. We carry it
@@ -214,15 +287,23 @@ export function AgentCreatePanel({
   // Stale-id sweep. Once the project list query has actually resolved
   // (`isSuccess` — distinct from "data is the empty default during loading"),
   // a `projectId` that isn't in the list means the project was deleted in
-  // another session. Clear BOTH local state and the persisted preference;
-  // dropping only local state would leave the deleted UUID in `lastProjectId`,
-  // and the next open would re-seed it and submit the same dead value.
+  // another session. Clear local state AND the unfinished draft — the draft
+  // is the only persisted copy left, and leaving it would make the next open
+  // re-seed and submit the same dead value.
   useEffect(() => {
     if (!projectsLoaded || projectId === null) return;
     if (projects.some((p) => p.id === projectId)) return;
     setProjectId(null);
-    if (lastProjectId === projectId) setLastProjectId(null);
-  }, [projectsLoaded, projects, projectId, lastProjectId, setLastProjectId]);
+    if (draft.shared.projectId === projectId) {
+      setShared({ projectId: undefined });
+    }
+  }, [projectsLoaded, projects, projectId, draft.shared.projectId, setShared]);
+
+  // Mark the persisted draft's active mode so a later reopen and any reader of
+  // the unified draft know which form is being edited.
+  useEffect(() => {
+    setActiveMode("agent");
+  }, [setActiveMode]);
 
   // Daemon CLI version gate. The agent-create flow needs the runtime's
   // bundled multica CLI to be ≥ MIN_QUICK_CREATE_CLI_VERSION; older
@@ -241,37 +322,40 @@ export function AgentCreatePanel({
         : undefined,
     [runtimes, selectedAgent?.runtime_id],
   );
-  const versionCheck = useMemo(
-    () => checkQuickCreateCliVersion(readRuntimeCliVersion(selectedRuntime?.metadata)),
-    [selectedRuntime?.metadata],
+  const runtimeCliVersion = readRuntimeCliVersion(selectedRuntime?.metadata);
+  const baseVersionCheck = useMemo(
+    () => checkQuickCreateCliVersion(runtimeCliVersion),
+    [runtimeCliVersion],
   );
-  const versionBlocked = versionCheck.state !== "ok";
+  const fieldVersionCheck = useMemo(
+    () => checkQuickCreateFieldsCliVersion(runtimeCliVersion),
+    [runtimeCliVersion],
+  );
+  const usesExplicitFields = priority !== "none" || dueDate !== null;
+  const versionCheck = usesExplicitFields ? fieldVersionCheck : baseVersionCheck;
+  const versionBlocked =
+    baseVersionCheck.state !== "ok" ||
+    (usesExplicitFields && fieldVersionCheck.state !== "ok");
 
-  const initialPrompt = (data?.prompt as string) || promptDraft;
+  const initialPrompt = draft.agent.prompt || (data?.prompt as string) || "";
   // The editor is uncontrolled — we read the latest markdown via the ref at
   // submit/switch time. `hasContent` mirrors emptiness so the Create button
   // can disable correctly without a controlled-input rerender on every keystroke.
   const editorRef = useRef<ContentEditorRef>(null);
   const [hasContent, setHasContent] = useState(initialPrompt.trim().length > 0);
-  const [submitting, setSubmitting] = useState(false);
   const [justSent, setJustSent] = useState(false);
   const [sentCount, setSentCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [pendingAttachments, setPendingAttachments] = useState<Attachment[]>([]);
-
-  // Image paste/drop support: route uploads through the same helper Advanced
-  // uses, so users can paste screenshots straight into the prompt and the
-  // agent receives them as embedded markdown image URLs in the prompt.
-  const { uploadWithToast, uploading } = useFileUpload(api);
-  const handleUploadFile = useCallback(async (file: File) => {
-    const result = await uploadWithToast(file);
-    if (result) {
-      setPendingAttachments((prev) =>
-        prev.some((a) => a.id === result.id) ? prev : [...prev, result],
-      );
-    }
-    return result;
-  }, [uploadWithToast]);
+  const uploadGate = useUploadGate(editorRef);
+  // Coordinator-owned uploads in the shared draft pool (MUL-5181, L2): a file
+  // pasted into the prompt survives dialog close and mode switches, aborts on
+  // logout, and is dropped after a reload. `gate` widens the editor gate with
+  // the pool's placeholders.
+  const {
+    attachments: pendingAttachments,
+    handleUpload: handleUploadFile,
+    gate,
+  } = useIssueCreateUploads("agent", uploadGate, editorRef);
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
   });
@@ -284,121 +368,177 @@ export function AgentCreatePanel({
     return () => cancelAnimationFrame(id);
   }, []);
 
-  const submit = async () => {
-    const md = editorRef.current?.getMarkdown()?.trim() ?? "";
-    if (!md || !actor || submitting || versionBlocked || uploading) return;
-    // Belt-and-suspenders against the multi-file upload race fixed in
-    // useFileUpload (MUL-3339): `uploading` already tracks an in-flight
-    // counter now, but the editor's per-node `uploading` attr is the most
-    // direct truth — if any image node is still mid-upload, blocking submit
-    // here guarantees `getMarkdown()`'s blob-url strip never erases a
-    // pasted/dropped image whose attachment id hasn't reached
-    // `pendingAttachments` yet.
-    if (editorRef.current?.hasActiveUploads()) return;
-    const activeAttachmentIds = pendingAttachments
-      .filter((a) => contentReferencesAttachment(md, a))
-      .map((a) => a.id);
-    setSubmitting(true);
-    setError(null);
-    try {
-      await api.quickCreateIssue({
-        ...(actor.type === "agent"
-          ? { agent_id: actor.id }
-          : { squad_id: actor.id }),
-        prompt: md,
-        project_id: projectId ?? undefined,
-        parent_issue_id: parentIssueId,
-        ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
-      });
-      setLastActor(actor.type, actor.id);
-      setLastProjectId(projectId);
-      clearPrompt();
-      setLastMode("agent");
-      toast.success(t(($) => $.create_issue.agent.toast_sent), {
-        duration: 4000,
-      });
+  // Agent create runs through the shared await-then-render composer contract
+  // (single-flight ref, submit-time upload re-check, lock+spin, await→boolean,
+  // clear only on acceptance). The prompt IS the editor content, so this maps
+  // onto the hook directly.
+  // Stale-submit guard (MUL-5181 P0): the issue draft is a SINGLETON store.
+  // A late success from a dialog the user closed mid-submit must not clear a
+  // newer draft typed after reopening — see ManualCreatePanel for the rule.
+  const mountedRef = useRef(true);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const submittedDraftRef = useRef<IssueCreateDraft | null>(null);
+  // Set by `onAccepted` only on the branch that keeps the panel open and wipes
+  // the editor; read back by `afterAccepted`. The closing branch must not
+  // refocus an editor that is about to unmount with the dialog.
+  const refocusAfterAcceptRef = useRef(false);
+
+  const composer = useComposerSubmit({
+    editorRef,
+    uploadGate: gate,
+    onSubmit: async (md): Promise<boolean> => {
+      // The button already disables on !actor / versionBlocked, but the
+      // ⌘+Enter path bypasses it — re-guard here and keep the draft in place.
+      if (!actor || versionBlocked) return false;
+      // Flush the prompt editor's pending debounce before snapshotting — see
+      // ManualCreatePanel.
+      const pendingPrompt = editorRef.current?.flushPendingUpdate?.();
+      if (pendingPrompt != null) setAgent({ prompt: pendingPrompt });
+      submittedDraftRef.current = useIssueDraftStore.getState().draft;
+      const activeAttachmentIds = pendingAttachments
+        .filter((a) => contentReferencesAttachment(md, a))
+        .map((a) => a.id);
+      setError(null);
+      try {
+        await api.quickCreateIssue({
+          ...(actor.type === "agent"
+            ? { agent_id: actor.id }
+            : { squad_id: actor.id }),
+          prompt: md,
+          project_id: projectId ?? undefined,
+          ...(priority !== "none" ? { priority } : {}),
+          ...(dueDate ? { due_date: dueDate } : {}),
+          parent_issue_id: parentIssueId,
+          ...(activeAttachmentIds.length > 0 ? { attachment_ids: activeAttachmentIds } : {}),
+        });
+        setLastActor(actor.type, actor.id);
+        setLastMode("agent");
+        toast.success(t(($) => $.create_issue.agent.toast_sent), {
+          duration: 4000,
+        });
+        return true;
+      } catch (e) {
+        // Server returns 422 with { code, ... } for the structured rejection
+        // paths the modal cares about. Surface the reason in-modal so the
+        // user can switch to a live agent / upgrade their daemon without
+        // leaving the flow.
+        if (e instanceof ApiError && e.body && typeof e.body === "object") {
+          const body = e.body as {
+            code?: string;
+            reason?: string;
+            current_version?: string;
+            min_version?: string;
+          };
+          if (body.code === "agent_unavailable") {
+            setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
+            return false;
+          }
+          if (body.code === "daemon_version_unsupported") {
+            // Race fallback: the picker pre-check should normally catch this,
+            // but a runtime can silently re-register with an older CLI between
+            // pre-check and submit. Same wording as the inline notice for
+            // consistency.
+            const cur = body.current_version || "unknown";
+            setError(
+              t(($) => $.create_issue.agent.error_daemon_version, {
+                current: cur,
+                min: body.min_version || versionCheck.min,
+              }),
+            );
+            return false;
+          }
+        }
+        setError(
+          e instanceof Error && e.message
+            ? e.message
+            : t(($) => $.create_issue.agent.error_unknown),
+        );
+        return false;
+      }
+    },
+    // Continuous-creation mode puts the caret back so the next prompt can be
+    // typed immediately. Deliberately no `containerRef`: this is a dialog whose
+    // own focus trap already bounds where focus can be, and reclaiming it is the
+    // point of keep-open mode.
+    afterAccepted: () => (refocusAfterAcceptRef.current ? "refocus" : "none"),
+    onAccepted: () => {
+      refocusAfterAcceptRef.current = false;
+      // A successful create ends this whole draft (shared + manual + agent);
+      // last-successful actor/project preferences were saved in onSubmit.
+      // Success may only consume the draft it submitted: flush the editor's
+      // pending debounce first, then clear only an untouched draft — edits
+      // made mid-flight or by a reopened dialog survive.
+      const latePrompt = editorRef.current?.flushPendingUpdate?.();
+      if (latePrompt != null) setAgent({ prompt: latePrompt });
+      const untouched =
+        useIssueDraftStore.getState().draft === submittedDraftRef.current;
+      if (untouched) clearDraft();
+      // An edit made during the request survives; the panel stays open on it.
+      if (!mountedRef.current || !untouched) return;
       if (keepOpen) {
-        // Stay open for continuous creation — clear the editor so the
-        // user can immediately type the next prompt.
+        // Stay open for continuous creation — clear the editor so the user can
+        // immediately type the next prompt.
         editorRef.current?.clearContent();
-        setPendingAttachments([]);
         setHasContent(false);
         setSentCount((c) => c + 1);
         setJustSent(true);
         setTimeout(() => setJustSent(false), 1500);
-        requestAnimationFrame(() => editorRef.current?.focus());
+        refocusAfterAcceptRef.current = true;
       } else {
         onClose();
       }
-    } catch (e) {
-      // Server returns 422 with { code, ... } for the structured rejection
-      // paths the modal cares about. Surface the reason in-modal so the
-      // user can switch to a live agent / upgrade their daemon without
-      // leaving the flow.
-      if (e instanceof ApiError && e.body && typeof e.body === "object") {
-        const body = e.body as {
-          code?: string;
-          reason?: string;
-          current_version?: string;
-          min_version?: string;
-        };
-        if (body.code === "agent_unavailable") {
-          setError(body.reason || t(($) => $.create_issue.agent.error_agent_unavailable_fallback));
-          setSubmitting(false);
-          return;
-        }
-        if (body.code === "daemon_version_unsupported") {
-          // Race fallback: the picker pre-check should normally catch this,
-          // but a runtime can silently re-register with an older CLI between
-          // pre-check and submit. Same wording as the inline notice for
-          // consistency.
-          const cur = body.current_version || "unknown";
-          setError(
-            t(($) => $.create_issue.agent.error_daemon_version, {
-              current: cur,
-              min: body.min_version || MIN_QUICK_CREATE_CLI_VERSION,
-            }),
-          );
-          setSubmitting(false);
-          return;
-        }
-      }
-      setError(
-        e instanceof Error && e.message
-          ? e.message
-          : t(($) => $.create_issue.agent.error_unknown),
-      );
-    } finally {
-      setSubmitting(false);
-    }
+    },
+  });
+  const submit = () => {
+    void composer.submit();
   };
+  const submitting = composer.submitting;
 
-  // Switch to the manual form, carrying what the user typed over as the
-  // description (markdown, including any pasted images) so they don't lose
-  // their work. The picked actor (agent or squad) becomes the default
-  // assignee candidate (still editable). We seed the shared issue-draft
-  // store directly because the manual panel reads its initial values from
-  // there. Persist the mode flip so the next `c` lands in manual.
+  // Switch to the manual form WITHOUT destroying the agent draft. The agent
+  // slot (prompt + actor) is left untouched so a later manual→agent flip
+  // restores it verbatim. Project / priority / due date already live in the
+  // shared slot and carry across for free. Two one-time assist-inits run only
+  // when the manual slot is still empty: seed the description from the prompt
+  // and the assignee from the picked actor. The parent-issue context is not
+  // persisted (a per-invocation intent) so it rides the carry channel.
   const switchToManual = () => {
-    const md = editorRef.current?.getMarkdown() ?? "";
-    useIssueDraftStore.getState().setDraft({
-      description: md,
-      ...(actor
-        ? { assigneeType: actor.type, assigneeId: actor.id }
-        : {}),
-    });
+    // The prompt is copied into the manual description on assist-init; mid-upload
+    // that body has already lost the pending image (see switchToAgent).
+    if (gate.isBlocked()) return;
+    // Commit the shared fields to the draft so the manual panel reads them from
+    // there — local state can hold a value seeded from `data` that was never
+    // written through a picker.
+    setShared({ projectId: projectId ?? undefined, priority, dueDate });
+    if (!draft.manual.description.trim()) {
+      const md = editorRef.current?.getMarkdown() ?? "";
+      if (md) setManual({ description: md });
+    }
+    if (!draft.manual.assigneeId && actor) {
+      setManual({ assigneeType: actor.type, assigneeId: actor.id });
+    }
     setLastMode("manual");
-    // Hand the picked project and the parent-issue context to the manual
-    // panel through the same `data` channel that already carries agent_id /
-    // parent_issue_id. The manual panel reads these on mount; this preserves
-    // the user's selection (and the sub-issue intent seeded by
-    // openCreateSubIssue) across the mode flip without piping a third store
-    // through.
+    setActiveMode("manual");
     const carry: Record<string, unknown> = {};
-    if (projectId) carry.project_id = projectId;
     if (parentIssueId) carry.parent_issue_id = parentIssueId;
     if (parentIssueIdentifier) carry.parent_issue_identifier = parentIssueIdentifier;
     onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
+  };
+
+  // Field visibility lives in Settings → Issue. Persist the prompt draft
+  // before leaving so what the user typed survives the round-trip, then
+  // close — the dialog would otherwise linger over the settings page.
+  const openFieldSettings = (e: React.MouseEvent) => {
+    // Persist the draft either way, but only an in-place navigation closes
+    // the dialog — a modifier click opens Settings in another tab and the
+    // modal stays put.
+    setAgent({ prompt: editorRef.current?.getMarkdown() ?? "" });
+    if (resolveClickIntent(e) !== "push") return;
+    onClose();
   };
 
   return (
@@ -407,9 +547,9 @@ export function AgentCreatePanel({
 
         {/* Header */}
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs">
+          <div className="flex items-center gap-1.5 text-caption">
             <span className="text-muted-foreground">{workspaceName}</span>
-            <ChevronRight className="size-3 text-muted-foreground/50" />
+            <ChevronRight className="size-3 text-faint-foreground" />
             <span className="font-medium">{t(($) => $.create_issue.agent_breadcrumb)}</span>
           </div>
           {/* Native `title` instead of Base UI Tooltip — Tooltip opens on
@@ -451,6 +591,7 @@ export function AgentCreatePanel({
             selectedSquad={selectedSquad}
             onPick={(next) => {
               setActor(next);
+              setAgent({ actorType: next.type, actorId: next.id });
               setError(null);
             }}
             t={t}
@@ -458,7 +599,7 @@ export function AgentCreatePanel({
         </div>
 
         {selectedAgent && versionBlocked && (
-          <div className="mx-5 mb-2 shrink-0 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">
+          <div className="mx-5 mb-2 shrink-0 rounded-md border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-caption text-amber-700 dark:text-amber-300">
             {versionCheck.state === "missing"
               ? t(($) => $.create_issue.agent.version_missing, { min: versionCheck.min })
               : t(($) => $.create_issue.agent.version_below, {
@@ -485,9 +626,10 @@ export function AgentCreatePanel({
             placeholder={t(($) => $.create_issue.agent.prompt_placeholder)}
             onUpdate={(md) => {
               setHasContent(md.trim().length > 0);
-              setPrompt(md);
+              setAgent({ prompt: md });
             }}
             onUploadFile={handleUploadFile}
+            onUploadingChange={uploadGate.onUploadingChange}
             attachments={pendingAttachments}
             onSubmit={submit}
             debounceMs={150}
@@ -495,16 +637,14 @@ export function AgentCreatePanel({
           {isDragOver && <FileDropOverlay />}
         </div>
 
+
         {error && (
-          <div className="px-5 pb-2 text-xs text-destructive">{error}</div>
+          <div className="px-5 pb-2 text-caption text-destructive">{error}</div>
         )}
 
-        {/* Property toolbar — mirrors the manual panel's pill row so the
-            project pill sits in the same place across both modes. Agent mode
-            owns only the project (status / priority / assignee / due-date are
-            inferred from the prompt), so it's a single pill. The pick is
-            persisted per-workspace via useQuickCreateStore.lastProjectId so
-            users targeting one project skip retyping "in project X".
+        {/* Property toolbar — the project is visible by default; priority and
+            due date live behind the overflow until exposed in settings or
+            given a value. Unfinished picks remain workspace-persistent.
             When the modal was opened from "Add sub issue" on an existing
             issue, a read-only chip on the same row tells the user that the
             new issue will be filed as a sub-issue of that parent — the agent
@@ -513,16 +653,104 @@ export function AgentCreatePanel({
             it non-editable: changing the parent is a `Set parent` action on
             the parent itself, not a knob in the quick-create flow. */}
         <div className="flex items-center gap-1.5 px-4 pb-2 shrink-0 flex-wrap">
-          <ProjectPicker
-            projectId={projectId}
-            onUpdate={(u) => setProjectId(u.project_id ?? null)}
-            triggerRender={<PillButton />}
-            align="start"
-          />
+          {(visibleFields.includes("project") ||
+            projectId !== null ||
+            fieldPickerOpen === "project") && (
+            <ProjectPicker
+              projectId={projectId}
+              onUpdate={(u) => commitProject(u.project_id ?? null)}
+              triggerRender={
+                <ClearablePillButton
+                  onClear={projectId !== null ? () => commitProject(null) : undefined}
+                  clearLabel={tProjects(($) => $.picker.clear_aria)}
+                />
+              }
+              align="start"
+              open={fieldPickerOpen === "project" ? true : undefined}
+              onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
+            />
+          )}
+          {(visibleFields.includes("priority") ||
+            priority !== "none" ||
+            fieldPickerOpen === "priority") && (
+            <PriorityPicker
+              priority={priority}
+              onUpdate={(updates) => {
+                if (updates.priority) {
+                  setPriority(updates.priority);
+                  setShared({ priority: updates.priority });
+                }
+              }}
+              triggerRender={<PillButton />}
+              align="start"
+              open={fieldPickerOpen === "priority" ? true : undefined}
+              onOpenChange={(open) => setFieldPickerOpen(open ? "priority" : null)}
+            />
+          )}
+          {(visibleFields.includes("due_date") ||
+            dueDate !== null ||
+            fieldPickerOpen === "due_date") && (
+            <DueDatePicker
+              dueDate={dueDate}
+              onUpdate={(updates) => {
+                const next = updates.due_date ?? null;
+                setDueDate(next);
+                setShared({ dueDate: next });
+              }}
+              triggerRender={<PillButton />}
+              align="start"
+              open={fieldPickerOpen === "due_date" ? true : undefined}
+              onOpenChange={(open) => setFieldPickerOpen(open ? "due_date" : null)}
+            />
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <PillButton
+                  aria-label={t(($) => $.create_issue.agent.more_fields_aria)}
+                  title={t(($) => $.create_issue.agent.more_fields_aria)}
+                >
+                  <MoreHorizontal className="size-3.5" />
+                </PillButton>
+              }
+            />
+            <DropdownMenuContent align="start" className="w-52">
+              {!visibleFields.includes("project") && projectId === null && (
+                <DropdownMenuItem onClick={() => setFieldPickerOpen("project")}>
+                  <FolderKanban className="size-3.5 text-muted-foreground" />
+                  {t(($) => $.create_issue.agent.set_project)}
+                </DropdownMenuItem>
+              )}
+              {!visibleFields.includes("priority") && priority === "none" && (
+                <DropdownMenuItem onClick={() => setFieldPickerOpen("priority")}>
+                  <PriorityIcon priority="none" className="size-3.5" />
+                  {t(($) => $.create_issue.agent.set_priority)}
+                </DropdownMenuItem>
+              )}
+              {!visibleFields.includes("due_date") && dueDate === null && (
+                <DropdownMenuItem onClick={() => setFieldPickerOpen("due_date")}>
+                  <CalendarDays className="size-3.5 text-muted-foreground" />
+                  {t(($) => $.create_issue.agent.set_due_date)}
+                </DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                render={
+                  <AppLink
+                    href={`${workspacePaths.settings()}?tab=issue`}
+                    onClick={openFieldSettings}
+                  />
+                }
+              >
+                <Settings2 className="size-3.5 text-muted-foreground" />
+                {t(($) => $.create_issue.agent.customize_fields)}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
           {parentIssueId && (
             <span
               data-testid="agent-sub-issue-chip"
-              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs text-muted-foreground"
+              className="inline-flex items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-caption text-muted-foreground"
               title={t(($) => $.create_issue.agent.sub_issue_of, {
                 identifier: parentIssueIdentifier ?? "",
               })}
@@ -534,54 +762,88 @@ export function AgentCreatePanel({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-h-7 items-center gap-2">
+        {/* Footer. Two layouts, one flat child list:
+            - Phones get a 2x2 grid — attach / switch on the top row, keep-open
+              toggle / Create on the bottom one. Laid out as a single row the
+              four controls need ~383px of the 398px a 430px phone has left
+              after padding, which reads as jammed and wraps outright below
+              ~410px (MUL-6236).
+            - From `sm` up it is the original single flex row: `mr-auto` on the
+              attach group reproduces what `justify-between` did when the
+              children were two wrapper divs, and `justify-self-end` goes
+              inert on flex items. */}
+        <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+          <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
+            {/* Deliberately NOT disabled while uploading: each file is its
+                own queue entry, so queueing a second one is safe and waiting
+                for the first to land just to attach the next is busywork. */}
             <FileUploadButton
               size="sm"
-              disabled={uploading}
+              multiple
               onSelect={(file) => editorRef.current?.uploadFile(file)}
             />
             {keepOpen && sentCount > 0 && (
-              <span className="text-xs text-emerald-600 dark:text-emerald-400">
+              <span className="text-caption text-emerald-600 dark:text-emerald-400">
                 {t(($) => $.create_issue.agent.sent_count, { count: sentCount })}
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={switchToManual}
-              title={t(($) => $.create_issue.switch_to_manual_tooltip)}
-              className="flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer"
-            >
-              <ArrowLeftRight className="size-3.5" />
-              {t(($) => $.create_issue.switch_to_manual)}
-            </button>
-            <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-              <Switch
-                size="sm"
-                checked={keepOpen}
-                onCheckedChange={setKeepOpen}
-              />
-              {t(($) => $.create_issue.create_another)}
-            </label>
-            <Button
+          <button
+            type="button"
+            onClick={switchToManual}
+            disabled={gate.uploading}
+            aria-disabled={gate.uploading || undefined}
+            aria-busy={gate.uploading || undefined}
+            title={t(($) => $.create_issue.switch_to_manual_tooltip)}
+            className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ArrowLeftRight className="size-3.5" />
+            {t(($) => $.create_issue.switch_to_manual)}
+          </button>
+          <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+            <Switch
               size="sm"
-              onClick={submit}
-              disabled={!hasContent || !actor || submitting || versionBlocked || uploading}
-              title={
-                versionBlocked
-                  ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
-                  : undefined
-              }
-              className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
-            >
-              {submitting ? t(($) => $.create_issue.agent.sending) : uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
-                <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
-              ) : `${t(($) => $.create_issue.agent.submit)} (${formatShortcut(modKey, enterKey)})`}
-            </Button>
-          </div>
+              checked={keepOpen}
+              onCheckedChange={setKeepOpen}
+            />
+            {t(($) => $.create_issue.create_another)}
+          </label>
+          <Button
+            size="sm"
+            onClick={submit}
+            disabled={!hasContent || !actor || submitting || versionBlocked || gate.uploading}
+            aria-disabled={gate.uploading || undefined}
+            // Sending is a busy state too, not just uploading.
+            aria-busy={gate.uploading || submitting || undefined}
+            title={
+              versionBlocked
+                ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
+                : undefined
+            }
+            className={cn(
+              "justify-self-end min-w-28",
+              justSent && "!bg-emerald-600 !text-white",
+            )}
+          >
+            {submitting ? t(($) => $.create_issue.agent.sending) : gate.uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
+              <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
+            ) : (
+              <>
+                {t(($) => $.create_issue.agent.submit)}
+                {sendShortcut ? (
+                  // Touch phones have no ⌘ key and the narrowest footer row
+                  // to spare — drop the hint at the same breakpoint the
+                  // footer reflows at.
+                  <ShortcutKeycaps
+                    shortcut={sendShortcut}
+                    decorative
+                    className="ml-1 max-sm:hidden"
+                    keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+                  />
+                ) : null}
+              </>
+            )}
+          </Button>
         </div>
     </>
   );
@@ -642,14 +904,14 @@ function ActorPicker({
       searchPlaceholder={t(($) => $.create_issue.agent.search_placeholder)}
       onSearchChange={setFilter}
       trigger={
-        <span className="flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground transition-colors">
+        <span className="flex items-center gap-2 text-caption text-muted-foreground hover:text-foreground transition-colors">
           <span>{t(($) => $.create_issue.agent.created_by)}</span>
           {displayActor && displayLabel ? (
             <span className="flex items-center gap-1.5 text-foreground">
               <ActorAvatar
                 actorType={displayActor.type}
                 actorId={displayActor.id}
-                size={16}
+                size="sm"
               />
               {displayLabel}
             </span>
@@ -663,7 +925,7 @@ function ActorPicker({
         query ? (
           <PickerEmpty />
         ) : (
-          <div className="px-2 py-1.5 text-xs text-muted-foreground">
+          <div className="px-2 py-1.5 text-caption text-muted-foreground">
             {t(($) => $.create_issue.agent.no_agents)}
           </div>
         )
@@ -680,7 +942,7 @@ function ActorPicker({
                     setOpen(false);
                   }}
                 >
-                  <ActorAvatar actorType="agent" actorId={a.id} size={18} />
+                  <ActorAvatar actorType="agent" actorId={a.id} size="sm" />
                   <span className="truncate">{a.name}</span>
                 </PickerItem>
               ))}
@@ -697,7 +959,7 @@ function ActorPicker({
                     setOpen(false);
                   }}
                 >
-                  <ActorAvatar actorType="squad" actorId={s.id} size={18} />
+                  <ActorAvatar actorType="squad" actorId={s.id} size="sm" />
                   <span className="truncate">{s.name}</span>
                 </PickerItem>
               ))}

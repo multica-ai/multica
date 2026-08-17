@@ -18,9 +18,9 @@ import (
 // shared storage.
 
 const (
-	updateKeyPrefix          = "mul:update:req:"
-	updatePendingPrefix      = "mul:update:pending:"
-	updateActivePrefix       = "mul:update:active:"
+	updateKeyPrefix          = "mul:" + runtimePendingRedisHashTag + ":update:req:"
+	updatePendingPrefix      = "mul:" + runtimePendingRedisHashTag + ":update:pending:"
+	updateActivePrefix       = "mul:" + runtimePendingRedisHashTag + ":update:active:"
 	updateRedisPopMaxRetries = 5
 )
 
@@ -43,15 +43,16 @@ func NewRedisUpdateStore(rdb *redis.Client) *RedisUpdateStore {
 	return &RedisUpdateStore{rdb: rdb}
 }
 
-func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion string) (*UpdateRequest, error) {
+func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion, initiatorUserID string) (*UpdateRequest, error) {
 	now := time.Now()
 	req := &UpdateRequest{
-		ID:            randomID(),
-		RuntimeID:     runtimeID,
-		Status:        UpdatePending,
-		TargetVersion: targetVersion,
-		CreatedAt:     now,
-		UpdatedAt:     now,
+		ID:              randomID(),
+		RuntimeID:       runtimeID,
+		InitiatorUserID: initiatorUserID,
+		Status:          UpdatePending,
+		TargetVersion:   targetVersion,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 	data, err := s.marshalRequest(req)
 	if err != nil {
@@ -123,12 +124,17 @@ func (s *RedisUpdateStore) persistRequest(ctx context.Context, req *UpdateReques
 }
 
 type redisUpdateEnvelope struct {
-	Public       *UpdateRequest `json:"r"`
-	RunStartedAt *time.Time     `json:"s,omitempty"`
+	Public          *UpdateRequest `json:"r"`
+	RunStartedAt    *time.Time     `json:"s,omitempty"`
+	InitiatorUserID string         `json:"u,omitempty"`
 }
 
 func (s *RedisUpdateStore) marshalRequest(req *UpdateRequest) ([]byte, error) {
-	env := redisUpdateEnvelope{Public: req, RunStartedAt: req.RunStartedAt}
+	env := redisUpdateEnvelope{
+		Public:          req,
+		RunStartedAt:    req.RunStartedAt,
+		InitiatorUserID: req.InitiatorUserID,
+	}
 	data, err := json.Marshal(env)
 	if err != nil {
 		return nil, fmt.Errorf("marshal update request: %w", err)
@@ -145,6 +151,7 @@ func (s *RedisUpdateStore) unmarshalRequest(raw []byte) (*UpdateRequest, error) 
 		return nil, fmt.Errorf("decode update request: missing payload")
 	}
 	env.Public.RunStartedAt = env.RunStartedAt
+	env.Public.InitiatorUserID = env.InitiatorUserID
 	return env.Public, nil
 }
 

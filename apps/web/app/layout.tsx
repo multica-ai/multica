@@ -8,6 +8,11 @@ import { WebProviders } from "@/components/web-providers";
 import type { SupportedLocale } from "@multica/core/i18n";
 import { RESOURCES } from "@multica/views/locales";
 import { getRequestLocale } from "@/lib/request-locale";
+import { SITE_TITLE, TITLE_TEMPLATE } from "@/platform/document-title";
+import {
+  resolveBrowserApiBaseUrl,
+  resolveBrowserWsUrl,
+} from "@/config/runtime-urls";
 import "./globals.css";
 
 // Inter is the Latin UI face. next/font produces a hashed family (`__Inter_xxx`)
@@ -20,8 +25,15 @@ import "./globals.css";
 // stack), and a hashed family name can only be referenced from CSS via a variable.
 // Keeping the CJK chain in CSS also keeps it CSP-safe and in sync with the desktop
 // app, which defines the same chain in apps/desktop/src/renderer/src/globals.css.
+//
+// Italic is loaded explicitly: `style` defaults to `["normal"]`, and without a real
+// italic face the ~20 semantic italic labels (chat empty states, model-picker's
+// "Managed by runtime", dashboard/squad placeholders) plus every markdown <em> and
+// blockquote rendered as browser-synthesized oblique. Keep in sync with desktop's
+// `@fontsource-variable/inter/wght-italic.css` import.
 const inter = Inter({
   subsets: ["latin"],
+  style: ["normal", "italic"],
   variable: "--font-inter",
 });
 // Mono font has no explicit CJK fallback: CJK chars in code blocks are inherently
@@ -63,14 +75,30 @@ export const viewport: Viewport = {
 export const metadata: Metadata = {
   metadataBase: new URL("https://www.multica.ai"),
   title: {
-    default: "Multica — Project Management for Human + Agent Teams",
-    template: "%s | Multica",
+    default: SITE_TITLE,
+    template: TITLE_TEMPLATE,
   },
   description:
     "Open-source platform that turns coding agents into real teammates. Assign tasks, track progress, compound skills.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     shortcut: ["/favicon.svg"],
+    // iOS never reads the manifest's icons for the home screen; it needs its
+    // own opaque, full-bleed square and rounds the corners itself.
+    apple: [{ url: "/icons/apple-touch-icon.png", sizes: "180x180" }],
+  },
+  // Home-screen behaviour: launch without browser chrome, and label the icon
+  // "Multica" rather than the long SEO <title>. `capable` renders the
+  // standardised `mobile-web-app-capable` tag — Next 16 no longer emits the
+  // deprecated apple-prefixed spelling, so iOS standalone rides on the
+  // manifest's `display` instead (honoured since iOS 16.4).
+  appleWebApp: {
+    capable: true,
+    title: "Multica",
+    // `default` keeps the web view below the status bar. Going edge-to-edge
+    // (`black-translucent` + viewport-fit=cover) needs env(safe-area-inset-*)
+    // padding, which no surface in the app has yet.
+    statusBarStyle: "default",
   },
   openGraph: {
     type: "website",
@@ -109,6 +137,8 @@ export default async function RootLayout({
 }) {
   const locale = await getRequestLocale();
   const resources = { [locale]: RESOURCES[locale] };
+  const apiBaseUrl = resolveBrowserApiBaseUrl(process.env);
+  const wsUrl = resolveBrowserWsUrl(process.env);
 
   return (
     <html
@@ -136,7 +166,12 @@ export default async function RootLayout({
           />
         )}
         <ThemeProvider>
-          <WebProviders locale={locale} resources={resources}>
+          <WebProviders
+            locale={locale}
+            resources={resources}
+            apiBaseUrl={apiBaseUrl}
+            wsUrl={wsUrl}
+          >
             {children}
           </WebProviders>
           <Toaster />

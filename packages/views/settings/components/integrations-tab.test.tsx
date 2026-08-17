@@ -1,0 +1,150 @@
+// @vitest-environment jsdom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import "@testing-library/jest-dom/vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { ApiError } from "@multica/core/api";
+import { configStore } from "@multica/core/config";
+import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
+import { I18nProvider } from "@multica/core/i18n/react";
+import enCommon from "../../locales/en/common.json";
+import enSettings from "../../locales/en/settings.json";
+
+const composioErrorRef = vi.hoisted(() => ({
+  current: null as Error | null,
+}));
+const queryCallsRef = vi.hoisted(() => ({
+  current: [] as { queryKey: unknown[]; enabled?: boolean }[],
+}));
+
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: (opts: { queryKey: unknown[]; enabled?: boolean }) => {
+    queryCallsRef.current.push(opts);
+    return {
+      data: undefined,
+      error: opts.enabled === false ? null : composioErrorRef.current,
+      isError: opts.enabled !== false && composioErrorRef.current != null,
+    };
+  },
+  queryOptions: <T,>(opts: T) => opts,
+}));
+
+vi.mock("@multica/core/composio", () => ({
+  composioToolkitsOptions: () => ({ queryKey: ["composio", "toolkits"] }),
+}));
+
+vi.mock("./lark-tab", () => ({
+  LarkTab: () => <div data-testid="lark-tab" />,
+}));
+
+vi.mock("./composio-tab", () => ({
+  ComposioTab: () => <div data-testid="composio-tab" />,
+}));
+
+vi.mock("./slack-tab", () => ({
+  SlackTab: () => <div data-testid="slack-tab" />,
+}));
+
+vi.mock("./dingtalk-tab", () => ({
+  DingTalkTab: () => <div data-testid="dingtalk-tab" />,
+}));
+
+vi.mock("./vcs-tab", () => ({
+  VCSTab: () => <div data-testid="vcs-tab" />,
+}));
+
+vi.mock("./wecom-tab", () => ({
+  WecomTab: () => <div data-testid="wecom-tab" />,
+}));
+
+import { IntegrationsTab } from "./integrations-tab";
+
+afterEach(cleanup);
+
+function renderTab() {
+  return render(
+    <I18nProvider locale="en" resources={{ en: { common: enCommon, settings: enSettings } }}>
+      <IntegrationsTab />
+    </I18nProvider>,
+  );
+}
+
+describe("Settings IntegrationsTab", () => {
+  beforeEach(() => {
+    queryCallsRef.current = [];
+    composioErrorRef.current = null;
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: true });
+    // Reset the self-host-only VCS gate to its default (hidden) so tests stay
+    // isolated; individual tests opt in below.
+    configStore.getState().setAuthConfig({ allowSignup: true, vcsIntegrationAvailable: false });
+  });
+
+  it("hides Composio and disables the toolkits query when the feature flag is off", () => {
+    configStore.getState().setFeatureFlags({ [COMPOSIO_MCP_APPS_FLAG]: false });
+
+    renderTab();
+
+    expect(screen.queryByTestId("composio-tab")).toBeNull();
+    expect(queryCallsRef.current).toHaveLength(1);
+    expect(queryCallsRef.current[0]?.enabled).toBe(false);
+  });
+
+  it("shows Composio when the feature flag is on and the integration is configured", () => {
+    renderTab();
+
+    expect(screen.getByTestId("composio-tab")).toBeInTheDocument();
+    expect(queryCallsRef.current[0]?.enabled).toBe(true);
+  });
+
+  it("shows each channel description below its icon and title", () => {
+    renderTab();
+
+    for (const channel of ["lark", "slack", "dingtalk", "wecom"]) {
+      const icon = screen.getByTestId(`integration-channel-icon-${channel}`);
+      const title = icon.closest("h3");
+      const description = title?.nextElementSibling;
+      expect(title).not.toBeNull();
+      expect(description?.tagName).toBe("P");
+      expect(description).toHaveClass("text-caption", "text-muted-foreground");
+      expect(icon).not.toHaveClass("border");
+      expect(icon).not.toHaveClass("bg-muted/40");
+    }
+  });
+
+  // Reaching for a generic lucide glyph is how Slack and WeCom ended up sharing
+  // one speech bubble, with nothing on the row saying which platform it was
+  // (#6585). Requiring four distinct shapes is the cheap guard against a
+  // regression to that.
+  it("gives every channel its own brand mark", () => {
+    renderTab();
+
+    const shapes = ["lark", "slack", "dingtalk", "wecom"].map(
+      (channel) => screen.getByTestId(`integration-channel-icon-${channel}`).innerHTML,
+    );
+
+    expect(new Set(shapes).size).toBe(shapes.length);
+  });
+
+  it("hides Composio when the feature flag is on but the server reports 503", () => {
+    composioErrorRef.current = new ApiError("unavailable", 503, "Service Unavailable");
+
+    renderTab();
+
+    expect(screen.queryByTestId("composio-tab")).toBeNull();
+  });
+
+  it("hides the Git providers section when the deployment reports it unavailable", () => {
+    // Default (managed cloud / older server): vcsIntegrationAvailable is false.
+    renderTab();
+
+    expect(screen.queryByTestId("vcs-tab")).toBeNull();
+  });
+
+  it("shows the Git providers section on a self-hosted deployment that enables it", () => {
+    configStore.getState().setAuthConfig({ allowSignup: true, vcsIntegrationAvailable: true });
+
+    renderTab();
+
+    expect(screen.getByTestId("vcs-tab")).toBeInTheDocument();
+  });
+});

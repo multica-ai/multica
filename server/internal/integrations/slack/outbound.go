@@ -9,10 +9,12 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -21,6 +23,8 @@ import (
 // outboundQueries is the slice of generated queries the Slack outbound
 // subscriber needs. *db.Queries satisfies it.
 type outboundQueries interface {
+	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
+	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
 	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
 }
@@ -95,6 +99,29 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if content == "" {
 		return nil // nothing to say (empty completion)
 	}
+	// Only bound, non-empty completions reach here, so classify the task origin
+	// before loading credentials or sending. Web/mobile direct-chat tasks can
+	// reuse a session that originated in Slack, but their replies belong only in
+	// Multica. Outbound delivery fails closed when the origin cannot be
+	// established. Sealed channel tasks own an input batch just like direct
+	// tasks, so the discriminator is the immutable channel_ingested provenance
+	// of that batch, not chat_input_task_id presence (which #5645 originally
+	// used).
+	taskID, ok := chatDoneTaskID(e)
+	if !ok {
+		return nil
+	}
+	task, err := o.q.GetAgentTask(ctx, taskID)
+	if err != nil {
+		return fmt.Errorf("load agent task: %w", err)
+	}
+	deliver, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
+	if err != nil {
+		return fmt.Errorf("classify task input origin: %w", err)
+	}
+	if !deliver {
+		return nil
+	}
 	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: string(TypeSlack),
@@ -118,6 +145,23 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return fmt.Errorf("post slack reply: %w", err)
 	}
 	return nil
+}
+
+// chatDoneTaskID extracts the task id from the event envelope or the typed/map
+// payload emitted by TaskService. Outbound delivery fails closed when the task
+// origin cannot be established.
+func chatDoneTaskID(e events.Event) (pgtype.UUID, bool) {
+	raw := e.TaskID
+	if raw == "" {
+		switch p := e.Payload.(type) {
+		case protocol.ChatDonePayload:
+			raw = p.TaskID
+		case map[string]any:
+			raw, _ = p["task_id"].(string)
+		}
+	}
+	id, err := util.ParseUUID(raw)
+	return id, err == nil && id.Valid
 }
 
 // outboundTarget recovers the real send target from the chat binding. The

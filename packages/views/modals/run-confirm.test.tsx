@@ -1,40 +1,36 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  configureShortcutPlatform,
+  createShortcutChord,
+  useShortcutStore,
+} from "@multica/core/shortcuts";
 import { RunConfirmModal } from "./run-confirm";
 
-// --- Controllable preview result ---------------------------------------------
-const previewState = {
-  triggers: [{ issue_id: "issue-1", agent_id: "agent-1", source: "assign", handoff_supported: true }],
-  totalCount: 1,
-  isLoading: false,
-  handoffSupported: true,
-};
-vi.mock("../issues/hooks/use-issue-trigger-preview", () => ({
-  useIssueTriggerPreview: () => previewState,
-}));
-
-// --- Warm agent + runtime caches (prefetched in the real app) ----------------
-// The modal resolves a concrete agent assignee → its runtime → cli_version
-// locally, exactly like the quick-create version gate, so the note box never
-// waits on the preview round-trip. Tests drive the local verdict by swapping
-// the runtime's reported cli_version here.
+// --- Warm agent / squad / runtime caches (prefetched in the real app) --------
+// The modal resolves the target runtime's cli_version locally — an agent's own
+// runtime, or a squad leader's — so nothing in the dialog waits on the network.
+// Tests drive the verdict by swapping the runtime's reported cli_version here.
 const cache = {
   agents: [{ id: "agent-1", runtime_id: "runtime-1" }] as Array<{ id: string; runtime_id: string }>,
   runtimes: [{ id: "runtime-1", metadata: { cli_version: "0.4.0" } }] as Array<{
     id: string;
     metadata: Record<string, unknown>;
   }>,
+  squads: [{ id: "squad-1", leader_id: "agent-1" }] as Array<{ id: string; leader_id: string }>,
 };
 vi.mock("@tanstack/react-query", () => ({
   useQuery: ({ queryKey }: { queryKey: string[] }) => {
     if (queryKey[0] === "runtimes") return { data: cache.runtimes };
     if (queryKey[0] === "workspaces" && queryKey[2] === "agents") return { data: cache.agents };
+    if (queryKey[0] === "workspaces" && queryKey[2] === "squads") return { data: cache.squads };
     return { data: [] };
   },
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "agents"] }),
+  squadListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "squads"] }),
 }));
 // Stub the runtimes barrel: the query-options builder would otherwise drag the
 // network layer in, and the deep cli-version module isn't an exported subpath.
@@ -53,8 +49,8 @@ vi.mock("@multica/core/runtimes", () => ({
   },
 }));
 
-const mockUpdate = vi.fn().mockResolvedValue(undefined);
-const mockBatch = vi.fn().mockResolvedValue(undefined);
+const mockUpdate = vi.fn().mockResolvedValue({ id: "issue-1" });
+const mockBatch = vi.fn().mockResolvedValue({ updated: 2 });
 vi.mock("@multica/core/issues/mutations", () => ({
   useUpdateIssue: () => ({ mutateAsync: mockUpdate }),
   useBatchUpdateIssues: () => ({ mutateAsync: mockBatch }),
@@ -65,38 +61,39 @@ vi.mock("@multica/core/workspace/hooks", () => ({
 }));
 
 vi.mock("../i18n", () => ({
-  useT: () => ({ t: (sel: (x: Record<string, Record<string, string>>) => string) => {
-    // Resolve the accessor against a flat label map so assertions can target text.
-    const labels = {
-      run_confirm: {
-        title_assign: "Assign and start?",
-        title_status: "Start working now?",
-        will_start_named: "start Walt",
-        will_start_named_squad: "start squad Walt",
-        will_start: "start many",
-        will_start_squad: "start squad many",
-        nothing_assign: "no run (backlog)",
-        nothing_status: "no runs",
-        checking: "Checking…",
-        note_label: "Handoff note",
-        note_placeholder: "scope...",
-        note_unsupported: "runtime too old",
-        start: "Start",
-        dont_start: "Don't start yet",
-        apply: "Apply",
-        toast_failed: "failed",
-        create_will_start: "create start",
-        create_parked: "create parked",
-      },
-    };
-    return sel(labels);
-  } }),
+  useT: () => ({
+    t: (
+      sel: (x: Record<string, Record<string, string>>) => string,
+      vars?: Record<string, unknown>,
+    ) => {
+      // Resolve the accessor against a flat label map so assertions can target
+      // text, then interpolate {{name}} / {{count}} the way i18next would — the
+      // headline substitutes the assignee name and the batch count.
+      const labels = {
+        run_confirm: {
+          title_assign: "Confirm assignment?",
+          assign_single: "assign to {{name}}",
+          assign_batch: "assign {{count}} to {{name}}",
+          note_label: "Handoff note",
+          note_placeholder: "scope...",
+          note_unsupported: "runtime too old",
+          confirm_assign: "Confirm assignment",
+          dont_start: "Don't start yet",
+          toast_failed: "failed",
+        },
+      };
+      return sel(labels).replace(/\{\{(\w+)\}\}/g, (_m, k) => String(vars?.[k] ?? ""));
+    },
+  }),
 }));
 
 // Keep the ui primitives as light DOM so the logic is what's under test.
 vi.mock("@multica/ui/components/ui/dialog", () => ({
   Dialog: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DialogContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  // Keeps the real Popup's prop passthrough, which the send chord binds to.
+  DialogContent: ({ children, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
+    <div data-testid="dialog-content" {...props}>{children}</div>
+  ),
   DialogHeader: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DialogTitle: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -113,29 +110,56 @@ vi.mock("@multica/ui/components/ui/textarea", () => ({
 vi.mock("@multica/ui/components/ui/spinner", () => ({
   Spinner: () => <span data-testid="spinner" />,
 }));
-vi.mock("sonner", () => ({ toast: { error: vi.fn() } }));
+// vi.hoisted: vi.mock factories run before module-level consts initialize.
+// Only error is used now — completion is silent (no result toast).
+const mockToast = vi.hoisted(() => ({ error: vi.fn(), success: vi.fn() }));
+vi.mock("sonner", () => ({ toast: mockToast }));
 
 beforeEach(() => {
-  mockUpdate.mockClear();
-  mockBatch.mockClear();
-  previewState.triggers = [{ issue_id: "issue-1", agent_id: "agent-1", source: "assign", handoff_supported: true }];
-  previewState.totalCount = 1;
-  previewState.isLoading = false;
-  previewState.handoffSupported = true;
+  mockUpdate.mockClear().mockResolvedValue({ id: "issue-1" });
+  mockBatch.mockClear().mockResolvedValue({ updated: 2 });
+  mockToast.error.mockClear();
+  mockToast.success.mockClear();
   cache.agents = [{ id: "agent-1", runtime_id: "runtime-1" }];
   cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.4.0" } }];
+  cache.squads = [{ id: "squad-1", leader_id: "agent-1" }];
+  // The real shortcut store drives both the submit chord and the keycap hint,
+  // and jsdom's platform follows the host OS — pin it so the chord is ⌘+Enter
+  // everywhere, not Ctrl+Enter on a Linux CI runner.
+  configureShortcutPlatform("macos");
+  useShortcutStore.setState({ overrides: {} });
 });
 
+afterEach(() => {
+  configureShortcutPlatform(null);
+  useShortcutStore.setState({ overrides: {} });
+});
+
+const confirmButton = () => screen.getByRole("button", { name: "Confirm assignment" });
+const noteBox = () => screen.getByPlaceholderText("scope...");
+
+const single = {
+  issueIds: ["issue-1"],
+  mode: "assign" as const,
+  assigneeType: "agent" as const,
+  assigneeId: "agent-1",
+};
+
 describe("RunConfirmModal", () => {
-  it("single assign + Start sends the assignee change with the handoff note", async () => {
-    render(
-      <RunConfirmModal
-        onClose={vi.fn()}
-        data={{ issueIds: ["issue-1"], mode: "assign", assigneeType: "agent", assigneeId: "agent-1" }}
-      />,
-    );
-    fireEvent.change(screen.getByPlaceholderText("scope..."), { target: { value: "only login" } });
-    fireEvent.click(screen.getByText("Start"));
+  it("is fully operable on the first frame — no preview request, no spinner", () => {
+    // The MUL-5010 core: opening the dialog fires nothing and blocks nothing.
+    const { container } = render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    expect(screen.queryByTestId("spinner")).not.toBeInTheDocument();
+    expect(noteBox()).not.toBeDisabled();
+    expect(confirmButton()).not.toBeDisabled();
+    // Headline reads across elements — the assignee name is bolded in place.
+    expect(container.textContent).toContain("assign to Walt");
+  });
+
+  it("single assign sends the assignee change with the handoff note", async () => {
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.change(noteBox(), { target: { value: "only login" } });
+    fireEvent.click(confirmButton());
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
     expect(mockUpdate).toHaveBeenCalledWith({
       id: "issue-1",
@@ -146,84 +170,156 @@ describe("RunConfirmModal", () => {
     expect(mockBatch).not.toHaveBeenCalled();
   });
 
+  it("completes silently on success — closes with no result toast", async () => {
+    // Final scope: the dialog only confirms the assignment. The assignee and any
+    // run surface through the issue's normal updates, so submit adds no toast.
+    const onClose = vi.fn();
+    render(<RunConfirmModal onClose={onClose} data={single} />);
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+    expect(mockToast.success).not.toHaveBeenCalled();
+    expect(mockToast.error).not.toHaveBeenCalled();
+  });
+
   it("'暂不开始' sends suppress_run and no handoff note", async () => {
-    render(
-      <RunConfirmModal
-        onClose={vi.fn()}
-        data={{ issueIds: ["issue-1"], mode: "assign", assigneeType: "agent", assigneeId: "agent-1" }}
-      />,
-    );
-    fireEvent.change(screen.getByPlaceholderText("scope..."), { target: { value: "ignored" } });
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.change(noteBox(), { target: { value: "ignored" } });
     fireEvent.click(screen.getByText("Don't start yet"));
     await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
     const payload = mockUpdate.mock.calls[0]![0];
     expect(payload.suppress_run).toBe(true);
     expect(payload.handoff_note).toBeUndefined();
+    expect(mockToast.success).not.toHaveBeenCalled();
   });
 
-  it("disables the note box from the local runtime version, before the preview resolves", () => {
-    // Old daemon that can't render handoff notes, and the predicate is still in
-    // flight. The box must already be disabled + warned from the warm runtime
-    // cache — no "checking…" wait, no reliance on the server verdict.
-    previewState.isLoading = true;
-    previewState.totalCount = 0;
+  it("disables the note box when the agent's runtime is too old", () => {
+    cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.2.21" } }];
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    expect(noteBox()).toBeDisabled();
+    expect(screen.getByText("runtime too old")).toBeInTheDocument();
+  });
+
+  it("resolves a squad's verdict through its leader's runtime, locally", () => {
+    // A squad run is executed by its leader, so the leader's runtime decides.
+    // The squad list gives us leader_id, so this needs no server verdict.
     cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.2.21" } }];
     render(
       <RunConfirmModal
         onClose={vi.fn()}
-        data={{ issueIds: ["issue-1"], mode: "assign", assigneeType: "agent", assigneeId: "agent-1" }}
+        data={{ ...single, assigneeType: "squad", assigneeId: "squad-1" }}
       />,
     );
-    expect(screen.getByPlaceholderText("scope...")).toBeDisabled();
+    expect(noteBox()).toBeDisabled();
     expect(screen.getByText("runtime too old")).toBeInTheDocument();
   });
 
-  it("keeps the note box usable while the preview is still loading for a supported agent", () => {
-    // The core of MUL-3706: a concrete agent on a current runtime should never
-    // see a "checking…" gate on the note box — the version is known locally.
-    previewState.isLoading = true;
-    previewState.totalCount = 0;
-    cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.4.0" } }];
-    render(
-      <RunConfirmModal
-        onClose={vi.fn()}
-        data={{ issueIds: ["issue-1"], mode: "assign", assigneeType: "agent", assigneeId: "agent-1" }}
-      />,
-    );
-    expect(screen.getByPlaceholderText("scope...")).not.toBeDisabled();
+  it("leaves the note box enabled when the target runtime can't be resolved", () => {
+    // Unknown assignee → no verdict. The note is a soft gate, so an
+    // unresolvable target must not produce a spurious warning.
+    cache.agents = [];
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    expect(noteBox()).not.toBeDisabled();
     expect(screen.queryByText("runtime too old")).not.toBeInTheDocument();
   });
 
-  it("squad assignee defers to the server handoff verdict (not locally resolvable)", () => {
-    // A squad routes to its leader agent, picked server-side — the target
-    // runtime isn't knowable client-side, so the box must follow the preview's
-    // handoff_supported, exactly as before.
-    previewState.handoffSupported = false;
-    render(
-      <RunConfirmModal
-        onClose={vi.fn()}
-        data={{ issueIds: ["issue-1"], mode: "assign", assigneeType: "squad", assigneeId: "squad-1" }}
-      />,
+  it("batch assign (N ids) applies via batchUpdate", async () => {
+    const { container } = render(
+      <RunConfirmModal onClose={vi.fn()} data={{ ...single, issueIds: ["i1", "i2"] }} />,
     );
-    expect(screen.getByPlaceholderText("scope...")).toBeDisabled();
-    expect(screen.getByText("runtime too old")).toBeInTheDocument();
+    expect(container.textContent).toContain("assign 2 to Walt");
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(mockBatch).toHaveBeenCalledTimes(1));
+    expect(mockBatch).toHaveBeenCalledWith({
+      ids: ["i1", "i2"],
+      updates: { assignee_type: "agent", assignee_id: "agent-1" },
+    });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    expect(mockToast.success).not.toHaveBeenCalled();
   });
 
-  it("batch (N ids) applies via batchUpdate", async () => {
-    previewState.triggers = [
-      { issue_id: "i1", agent_id: "a1", source: "status", handoff_supported: true },
-      { issue_id: "i2", agent_id: "a2", source: "status", handoff_supported: true },
-    ];
-    previewState.totalCount = 2;
-    render(
-      <RunConfirmModal
-        onClose={vi.fn()}
-        data={{ issueIds: ["i1", "i2"], mode: "status", status: "todo" }}
-      />,
-    );
-    fireEvent.click(screen.getByText("Start"));
-    await waitFor(() => expect(mockBatch).toHaveBeenCalledTimes(1));
-    expect(mockBatch).toHaveBeenCalledWith({ ids: ["i1", "i2"], updates: { status: "todo" } });
+  // --- Send chord (MUL-5694) ------------------------------------------------
+  // The note box is where the caret starts, so the dialog has to submit from
+  // the keyboard there, the same way the issue composer creates.
+
+  it("confirms on the send chord typed in the note box", async () => {
+    const onClose = vi.fn();
+    render(<RunConfirmModal onClose={onClose} data={single} />);
+    fireEvent.change(noteBox(), { target: { value: "only login" } });
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    expect(mockUpdate).toHaveBeenCalledWith({
+      id: "issue-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+      handoff_note: "only login",
+    });
+    await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+
+  it("confirms from a focused footer button, which the chord cannot activate", async () => {
+    // Chromium fires no click for ⌘/Ctrl+Enter on a focused button, so without
+    // the dialog handling it there the chord is simply dead. The dialog focuses
+    // its first tabbable child, so this is where an old runtime leaves the user.
+    cache.runtimes = [{ id: "runtime-1", metadata: { cli_version: "0.2.21" } }];
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(screen.getByText("Don't start yet"), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    // The primary action, not the button the caret happened to sit on.
+    const payload = mockUpdate.mock.calls[0]![0];
+    expect(payload.suppress_run).toBeUndefined();
+    expect(payload.handoff_note).toBeUndefined();
+  });
+
+  it("yields to a focused button when send is remapped to plain Enter", () => {
+    // A bare Enter DOES activate a focused button, so confirming here as well
+    // would double-write — and on "Don't start yet" the two would disagree.
+    useShortcutStore.setState({ overrides: { send: createShortcutChord("Enter") } });
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(screen.getByText("Don't start yet"), { key: "Enter" });
+    fireEvent.keyDown(confirmButton(), { key: "Enter" });
     expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("leaves plain Enter alone so the note stays multi-line", () => {
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(noteBox(), { key: "Enter" });
+    expect(mockUpdate).not.toHaveBeenCalled();
+  });
+
+  it("submits once for a held chord, and never for an IME's committing Enter", async () => {
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true, isComposing: true });
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true, repeat: true });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it("follows a remapped send chord instead of hardcoding ⌘+Enter", async () => {
+    useShortcutStore.setState({ overrides: { send: createShortcutChord("Enter") } });
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    fireEvent.keyDown(noteBox(), { key: "Enter", metaKey: true });
+    expect(mockUpdate).not.toHaveBeenCalled();
+    fireEvent.keyDown(noteBox(), { key: "Enter" });
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+  });
+
+  it("shows the chord on the confirm button without renaming it", () => {
+    render(<RunConfirmModal onClose={vi.fn()} data={single} />);
+    // Decorative: discoverable next to the label, absent from the a11y name —
+    // `confirmButton()` resolving by that exact name is the assertion.
+    expect(
+      confirmButton().querySelector('[data-slot="shortcut-keycaps"]'),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the dialog open and surfaces the error when the write fails", async () => {
+    const onClose = vi.fn();
+    mockUpdate.mockRejectedValue(new Error("boom"));
+    render(<RunConfirmModal onClose={onClose} data={single} />);
+    fireEvent.click(confirmButton());
+    await waitFor(() => expect(mockToast.error).toHaveBeenCalledWith("boom"));
+    expect(onClose).not.toHaveBeenCalled();
+    expect(mockToast.success).not.toHaveBeenCalled();
   });
 });

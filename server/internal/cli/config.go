@@ -6,9 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-const defaultCLIConfigPath = ".multica/config.json"
+const (
+	defaultCLIConfigPath = ".multica/config.json"
+
+	// TaskConfigRootEnv points daemon-managed CLI invocations at a private,
+	// per-task Multica config directory. It is deliberately Multica-specific:
+	// phase-one hardening keeps the real HOME/XDG environment available to
+	// provider tooling while preventing implicit Owner-profile discovery.
+	TaskConfigRootEnv = "MULTICA_TASK_CONFIG_ROOT"
+)
 
 // CLIConfig holds persistent CLI settings.
 type CLIConfig struct {
@@ -16,6 +25,117 @@ type CLIConfig struct {
 	AppURL      string `json:"app_url,omitempty"`
 	WorkspaceID string `json:"workspace_id,omitempty"`
 	Token       string `json:"token,omitempty"`
+
+	// DeviceName is the human-readable label shown in the server's Runtimes
+	// UI for the daemon started with this profile. When multiple daemons run
+	// on the same host under different profiles (typical for shared servers
+	// where one Linux user hosts one profile), os.Hostname() collapses them
+	// all onto one indistinguishable "VM-…" row. Setting device_name per
+	// profile — usually to "<host>-<profile>" or the operator's real name —
+	// makes the runtimes list navigable.
+	//
+	// Resolution precedence (highest wins): --device-name flag,
+	// MULTICA_DAEMON_DEVICE_NAME env, this field, os.Hostname().
+	DeviceName string `json:"device_name,omitempty"`
+
+	// RuntimeName is the daemon's own runtime label ("Runtime display name"
+	// in the UI). Same shape as DeviceName but scopes to the runtime row
+	// rather than the host: users who run several distinct daemons per
+	// profile (rare, but supported) can pin different runtime names for
+	// each. Resolution precedence (highest wins): --runtime-name flag,
+	// MULTICA_AGENT_RUNTIME_NAME env, this field, the built-in
+	// DefaultRuntimeName.
+	RuntimeName string `json:"runtime_name,omitempty"`
+
+	// WorkspacesRoot is the base directory where the daemon creates task
+	// workspaces. Persisting it per profile avoids relying on a process-wide
+	// environment variable and preserves profile isolation. Empty means "not
+	// set — use env / built-in default". Resolution precedence (highest wins):
+	// --workspaces-root flag, MULTICA_WORKSPACES_ROOT env, this field, the
+	// profile-aware built-in default.
+	WorkspacesRoot string `json:"workspaces_root,omitempty"`
+
+	// MaxConcurrentTasks caps the number of task executions the daemon
+	// processes in parallel. Persist here to avoid re-passing
+	// --max-concurrent-tasks on every daemon start / auto-restart. 0 means
+	// "not set — use env / built-in default". Resolution precedence
+	// (highest wins): --max-concurrent-tasks flag,
+	// MULTICA_DAEMON_MAX_CONCURRENT_TASKS env, this field, default.
+	MaxConcurrentTasks int `json:"max_concurrent_tasks,omitempty"`
+
+	// PollInterval is how often the daemon polls the server for new tasks
+	// (Go duration string, e.g. "10s", "500ms"). Same persist-once
+	// motivation as MaxConcurrentTasks. Empty ("") means "not set — use
+	// env / built-in default". Only strictly positive durations are
+	// meaningful here: `config set poll_interval` rejects non-positive
+	// values (including "0s") and un-parseable durations at write time,
+	// so a value that reaches this field is always well-formed. Use
+	// `config set poll_interval ""` to clear a previously persisted
+	// value. Resolution precedence (highest wins): --poll-interval flag,
+	// MULTICA_DAEMON_POLL_INTERVAL env, this field, DefaultPollInterval.
+	PollInterval string `json:"poll_interval,omitempty"`
+
+	// HeartbeatInterval is how often the daemon sends heartbeat pings to
+	// the server (Go duration string). Same persist-once motivation as
+	// PollInterval. Empty ("") means "not set — use env / built-in
+	// default"; `config set heartbeat_interval` rejects zero and
+	// negative durations. Resolution precedence: --heartbeat-interval
+	// flag, MULTICA_DAEMON_HEARTBEAT_INTERVAL env, this field,
+	// DefaultHeartbeatInterval.
+	HeartbeatInterval string `json:"heartbeat_interval,omitempty"`
+
+	// AgentTimeout is the absolute wall-clock cap per agent run (Go
+	// duration string). Unlike the other duration knobs, "0s" is a
+	// meaningful, non-default value here: it explicitly disables the cap
+	// so a run is bounded only by the inactivity watchdogs (see
+	// DefaultAgentTimeout). To distinguish "not persisted" from
+	// "persisted as disabled", we use a pointer: nil = not set, non-nil
+	// = use this string (which may be "0s"). `config set agent_timeout`
+	// accepts any non-negative Go duration; "" clears the persisted
+	// value. Resolution precedence: --agent-timeout flag (including
+	// explicit 0), MULTICA_AGENT_TIMEOUT env, this field,
+	// DefaultAgentTimeout.
+	AgentTimeout *string `json:"agent_timeout,omitempty"`
+
+	// CodexSemanticInactivityTimeout is the Codex-specific inactivity
+	// watchdog window (Go duration string). Persist-once semantics match
+	// PollInterval: empty = not set, positive = use this value.
+	// Resolution precedence: --codex-semantic-inactivity-timeout flag,
+	// MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT env, this field,
+	// DefaultCodexSemanticInactivityTimeout.
+	CodexSemanticInactivityTimeout string `json:"codex_semantic_inactivity_timeout,omitempty"`
+
+	// CodexHandshakeTimeout caps the Codex app-server startup RPCs (Go
+	// duration string). Persist-once semantics match PollInterval.
+	// Resolution precedence: --codex-handshake-timeout flag,
+	// MULTICA_CODEX_HANDSHAKE_TIMEOUT env, this field,
+	// DefaultCodexHandshakeTimeout.
+	CodexHandshakeTimeout string `json:"codex_handshake_timeout,omitempty"`
+
+	// DisableAutoUpdate, when true, turns off the daemon's periodic CLI
+	// self-update poll. Only a single direction is persistable — the
+	// --no-auto-update flag is likewise one-way — because the env/default
+	// already resolves to enabled on Multica Cloud. Absent / false means
+	// "let env/default decide". Resolution precedence:
+	// --no-auto-update flag, MULTICA_DAEMON_AUTO_UPDATE=false env, this
+	// field, cloud/self-host default.
+	DisableAutoUpdate bool `json:"disable_auto_update,omitempty"`
+
+	// AutoUpdateCheckInterval is how often the daemon polls GitHub for a
+	// newer CLI release (Go duration string). Persist-once semantics
+	// match PollInterval. Resolution precedence:
+	// --auto-update-interval flag, MULTICA_DAEMON_AUTO_UPDATE_INTERVAL
+	// env, this field, DefaultAutoUpdateCheckInterval.
+	AutoUpdateCheckInterval string `json:"auto_update_check_interval,omitempty"`
+
+	// DisableAutoReload, when true, stops the daemon from restarting into a
+	// multica binary that was replaced on disk out of band. Single-direction
+	// like DisableAutoUpdate, and separate from it on purpose: "don't pull
+	// new versions from GitHub" and "don't follow the binary I installed
+	// myself" are different decisions. Resolution precedence:
+	// --no-auto-reload flag, MULTICA_DAEMON_AUTO_RELOAD=false env, this
+	// field, default (enabled).
+	DisableAutoReload bool `json:"disable_auto_reload,omitempty"`
 
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
@@ -89,28 +209,78 @@ func CLIConfigPath() (string, error) {
 // CLIConfigPathForProfile returns the config file path for the given profile.
 // An empty profile returns the default path (~/.multica/config.json).
 // A named profile returns ~/.multica/profiles/<name>/config.json.
+// When TaskConfigRootEnv is set by the daemon, the same profile layout is
+// rooted directly below that private task directory instead of the user's home.
 func CLIConfigPathForProfile(profile string) (string, error) {
-	home, err := os.UserHomeDir()
+	root, taskLocal, err := multicaConfigRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve CLI config path: %w", err)
 	}
-	if profile == "" {
-		return filepath.Join(home, defaultCLIConfigPath), nil
+	if taskLocal {
+		if err := validateTaskLocalProfile(profile); err != nil {
+			return "", fmt.Errorf("resolve CLI config path: %w", err)
+		}
 	}
-	return filepath.Join(home, ".multica", "profiles", profile, "config.json"), nil
+	if profile == "" {
+		if taskLocal {
+			return filepath.Join(root, "config.json"), nil
+		}
+		return filepath.Join(root, defaultCLIConfigPath), nil
+	}
+	if taskLocal {
+		return filepath.Join(root, "profiles", profile, "config.json"), nil
+	}
+	return filepath.Join(root, ".multica", "profiles", profile, "config.json"), nil
 }
 
 // ProfileDir returns the base directory for a profile's state files (pid, log).
 // An empty profile returns ~/.multica/. A named profile returns ~/.multica/profiles/<name>/.
+// Task invocations resolve the equivalent paths below TaskConfigRootEnv.
 func ProfileDir(profile string) (string, error) {
-	home, err := os.UserHomeDir()
+	root, taskLocal, err := multicaConfigRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve profile dir: %w", err)
 	}
-	if profile == "" {
-		return filepath.Join(home, ".multica"), nil
+	if taskLocal {
+		if err := validateTaskLocalProfile(profile); err != nil {
+			return "", fmt.Errorf("resolve profile dir: %w", err)
+		}
 	}
-	return filepath.Join(home, ".multica", "profiles", profile), nil
+	if profile == "" {
+		if taskLocal {
+			return root, nil
+		}
+		return filepath.Join(root, ".multica"), nil
+	}
+	if taskLocal {
+		return filepath.Join(root, "profiles", profile), nil
+	}
+	return filepath.Join(root, ".multica", "profiles", profile), nil
+}
+
+func multicaConfigRoot() (root string, taskLocal bool, err error) {
+	if rawRoot := strings.TrimSpace(os.Getenv(TaskConfigRootEnv)); rawRoot != "" {
+		root := filepath.Clean(rawRoot)
+		if !filepath.IsAbs(root) {
+			return "", false, fmt.Errorf("%s must be an absolute path", TaskConfigRootEnv)
+		}
+		return root, true, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false, err
+	}
+	return home, false, nil
+}
+
+func validateTaskLocalProfile(profile string) error {
+	if profile == "" {
+		return nil
+	}
+	if profile == "." || profile == ".." || filepath.IsAbs(profile) || strings.ContainsAny(profile, `/\\`) || filepath.Clean(profile) != profile {
+		return fmt.Errorf("invalid task-local Multica profile name %q", profile)
+	}
+	return nil
 }
 
 // LoadCLIConfig reads the CLI config from disk (default profile).
@@ -150,8 +320,30 @@ func SaveCLIConfigForProfile(cfg CLIConfig, profile string) error {
 		return err
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dirMode := os.FileMode(0o755)
+	if strings.TrimSpace(os.Getenv(TaskConfigRootEnv)) != "" {
+		dirMode = 0o700
+	}
+	if err := os.MkdirAll(dir, dirMode); err != nil {
 		return fmt.Errorf("create CLI config directory: %w", err)
+	}
+	if dirMode == 0o700 {
+		root, _, err := multicaConfigRoot()
+		if err != nil {
+			return fmt.Errorf("resolve task-local CLI config root: %w", err)
+		}
+		for current := dir; ; current = filepath.Dir(current) {
+			if err := os.Chmod(current, 0o700); err != nil {
+				return fmt.Errorf("restrict task-local CLI config directory: %w", err)
+			}
+			if current == root {
+				break
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				return fmt.Errorf("task-local CLI config directory %q escapes root %q", dir, root)
+			}
+		}
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

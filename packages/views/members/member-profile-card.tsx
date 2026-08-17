@@ -50,7 +50,7 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
 
   if (!member) {
     return (
-      <div className="text-xs text-muted-foreground">{t(($) => $.card.unavailable)}</div>
+      <div className="text-caption text-muted-foreground">{t(($) => $.card.unavailable)}</div>
     );
   }
 
@@ -82,15 +82,15 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
           name={member.name}
           initials={initials}
           avatarUrl={resolvePublicFileUrl(member.avatar_url)}
-          size={40}
+          size="xl"
           className="rounded-full"
         />
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
-            <p className="truncate text-sm font-semibold">{member.name}</p>
+            <p className="truncate text-body font-semibold">{member.name}</p>
             <RoleBadge role={member.role} />
           </div>
-          <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          <p className="mt-0.5 truncate text-caption text-muted-foreground">
             {member.email}
           </p>
         </div>
@@ -105,7 +105,7 @@ export function MemberProfileCard({ userId }: MemberProfileCardProps) {
 function RoleBadge({ role }: { role: MemberRole }) {
   const { t } = useT("members");
   return (
-    <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+    <span className="rounded-md bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
       {role === "owner"
         ? t(($) => $.role.owner)
         : role === "admin"
@@ -128,7 +128,7 @@ function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
   const overflow = agents.length - visible.length;
 
   return (
-    <div className="flex flex-col gap-1.5 text-xs">
+    <div className="flex flex-col gap-1.5 text-caption">
       <span className="text-muted-foreground">{t(($) => $.card.agents_section, { count: agents.length })}</span>
       <div className="flex flex-col gap-0.5">
         {visible.map((a) => (
@@ -140,9 +140,9 @@ function OwnedAgentsSection({ agents }: { agents: Agent[] }) {
             <ActorAvatar
               actorType="agent"
               actorId={a.id}
-              size={20}
+              size="sm"
               showStatusDot
-              className="mt-0.5 shrink-0 rounded-md"
+              className="mt-0.5 shrink-0"
             />
             <div className="min-w-0 flex-1">
               <div className="truncate font-medium">{a.name}</div>

@@ -10,6 +10,8 @@ import (
 	"os/signal"
 	"syscall"
 	"time"
+
+	"golang.org/x/sys/windows"
 )
 
 const (
@@ -68,12 +70,58 @@ func notifyShutdownContext(parent context.Context) (context.Context, context.Can
 	return signal.NotifyContext(parent, os.Interrupt, sigBreak)
 }
 
+// repointStdioToErrLog releases the daemon.log handle that an older self-update
+// launcher may have inherited onto this process's stdout/stderr, then makes the
+// bounded crash sink the process's standard output/error. Go opens files
+// without FILE_SHARE_DELETE, so while that inherited handle stays open the
+// rotating writer's rename-on-rotate fails — permanently, until the next clean
+// restart. Closing os.Stdout/os.Stderr drops the inherited handle; SetStdHandle
+// then rebinds the standard handles so panics and any raw writes still land in
+// daemon.err.log. Best-effort: on any failure we leave stdio as inherited.
+func repointStdioToErrLog(errLogPath string) {
+	f, err := openBoundedErrLog(errLogPath)
+	if err != nil {
+		return
+	}
+	_ = os.Stdout.Close()
+	_ = os.Stderr.Close()
+	h := windows.Handle(f.Fd())
+	_ = windows.SetStdHandle(windows.STD_OUTPUT_HANDLE, h)
+	_ = windows.SetStdHandle(windows.STD_ERROR_HANDLE, h)
+	os.Stdout = f
+	os.Stderr = f
+}
+
+// openLogForTail opens the log for reading with FILE_SHARE_DELETE (which Go's
+// os.Open omits). Without delete-sharing, a long-lived reader — `daemon logs
+// -f` — would block the rotator's rename and silently freeze rotation on
+// Windows.
+func openLogForTail(path string) (*os.File, error) {
+	p, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return nil, err
+	}
+	h, err := windows.CreateFile(
+		p,
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE|windows.FILE_SHARE_DELETE,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return os.NewFile(uintptr(h), path), nil
+}
+
 func tailLogFile(logPath string, lines int, follow bool) error {
-	f, err := os.Open(logPath)
+	f, err := openLogForTail(logPath)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { f.Close() }()
 
 	fi, err := f.Stat()
 	if err != nil {
@@ -118,12 +166,26 @@ func tailLogFile(logPath string, lines int, follow bool) error {
 		return nil
 	}
 
+	offset, _ := f.Seek(0, io.SeekCurrent)
 	buf := make([]byte, 4096)
 	for {
 		time.Sleep(500 * time.Millisecond)
+		// Detect rotation: the rotator renamed our file away and created a
+		// fresh, smaller one at the same path. Our handle still points at the
+		// rotated-away file (EOF forever), so reopen by path and start over —
+		// mirrors the Unix `tail -F` behaviour and the Desktop tail's
+		// size-shrink reset.
+		if fi, statErr := os.Stat(logPath); statErr == nil && fi.Size() < offset {
+			if nf, reopenErr := openLogForTail(logPath); reopenErr == nil {
+				f.Close()
+				f = nf
+				offset = 0
+			}
+		}
 		n, readErr := f.Read(buf)
 		if n > 0 {
 			os.Stdout.Write(buf[:n])
+			offset += int64(n)
 		}
 		if readErr != nil && readErr != io.EOF {
 			return readErr

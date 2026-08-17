@@ -10,8 +10,6 @@ import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import {
   useBatchUpdateIssues,
-  useLoadMoreByAssigneeGroup,
-  useLoadMoreByStatus,
   useResolveComment,
   useUpdateIssue,
 } from "./mutations";
@@ -19,13 +17,11 @@ import {
   issueKeys,
   type IssueSortParam,
 } from "./queries";
+import { inboxKeys } from "../inbox/queries";
 import type {
-  GroupedIssuesResponse,
+  InboxItem,
   Issue,
   ListIssuesCache,
-  ListIssuesParams,
-  ListGroupedIssuesParams,
-  ListIssuesResponse,
   TimelineEntry,
 } from "../types";
 
@@ -57,8 +53,35 @@ function makeIssue(idx: number, overrides: Partial<Issue> = {}): Issue {
     due_date: null,
     labels: [],
     metadata: {},
+  properties: {},
     created_at: "2025-01-01T00:00:00Z",
     updated_at: "2025-01-01T00:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeInboxItem(
+  id: string,
+  issueId: string,
+  overrides: Partial<InboxItem> = {},
+): InboxItem {
+  return {
+    id,
+    workspace_id: WS_ID,
+    recipient_type: "member",
+    recipient_id: "user-1",
+    actor_type: "member",
+    actor_id: "user-2",
+    type: "status_changed",
+    severity: "info",
+    issue_id: issueId,
+    title: `Inbox ${id}`,
+    body: null,
+    issue_status: "todo",
+    read: false,
+    archived: false,
+    created_at: "2025-01-01T00:00:00Z",
+    details: null,
     ...overrides,
   };
 }
@@ -69,269 +92,22 @@ function createWrapper(qc: QueryClient) {
   };
 }
 
-describe("useLoadMoreByStatus", () => {
-  let qc: QueryClient;
-  let listIssues: ReturnType<typeof vi.fn<(p?: ListIssuesParams) => Promise<ListIssuesResponse>>>;
-
-  beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    listIssues = vi.fn();
-    setApiInstance({ listIssues } as unknown as ApiClient);
-  });
-
-  afterEach(() => {
-    qc.clear();
-    vi.restoreAllMocks();
-  });
-
-  it("targets the sorted cache key and forwards sort to the API", async () => {
-    const sort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    const activeKey = issueKeys.listSorted(WS_ID, sort);
-    const seed: ListIssuesCache = {
-      byStatus: {
-        todo: { issues: [makeIssue(1)], total: 3 },
-      },
-    };
-    qc.setQueryData<ListIssuesCache>(activeKey, seed);
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2), makeIssue(3)],
-      total: 3,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, sort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.hasMore).toBe(true);
-    expect(result.current.total).toBe(3);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith({
-      status: "todo",
-      limit: 50,
-      offset: 1,
-      sort_by: "priority",
-      sort_direction: "desc",
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.todo?.issues).toHaveLength(3);
-    expect(updated?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-      "issue-3",
-    ]);
-  });
-
-  it("ignores a stale cache entry under a different sort", async () => {
-    // Stale entry from a previous sort lingers (kept by gcTime / keepPreviousData).
-    const staleSort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    qc.setQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort), {
-      byStatus: { todo: { issues: [makeIssue(99)], total: 99 } },
-    });
-
-    // The active sort cache has its own bucket — load-more must target THIS one.
-    const activeSort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
-    const activeKey = issueKeys.listSorted(WS_ID, activeSort);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2)],
-      total: 2,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", undefined, activeSort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    // total derives from the active key, not the stale one.
-    expect(result.current.total).toBe(2);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ offset: 1, sort_by: "position" }),
-    );
-
-    const active = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(active?.byStatus.todo?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-    ]);
-
-    // Stale cache is untouched.
-    const stale = qc.getQueryData<ListIssuesCache>(issueKeys.listSorted(WS_ID, staleSort));
-    expect(stale?.byStatus.todo?.issues.map((i) => i.id)).toEqual(["issue-99"]);
-  });
-
-  it("targets the myList scoped cache when myIssues is provided", async () => {
-    const sort: IssueSortParam = { sort_by: "title", sort_direction: "asc" };
-    const myIssues = { scope: "assigned", filter: { assignee_id: "user-1" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, sort);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { in_progress: { issues: [makeIssue(1, { status: "in_progress" })], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({
-      issues: [makeIssue(2, { status: "in_progress" })],
-      total: 2,
-    });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("in_progress", myIssues, sort),
-      { wrapper: createWrapper(qc) },
-    );
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listIssues).toHaveBeenCalledWith({
-      status: "in_progress",
-      limit: 50,
-      offset: 1,
-      sort_by: "title",
-      sort_direction: "asc",
-      assignee_id: "user-1",
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.in_progress?.issues).toHaveLength(2);
-  });
-
-  it("works with no sort (matches the {} key used by sort-less callers)", async () => {
-    const myIssues = { scope: "actor", filter: { assignee_id: "user-2" } };
-    const activeKey = issueKeys.myListSorted(WS_ID, myIssues.scope, myIssues.filter, undefined);
-    qc.setQueryData<ListIssuesCache>(activeKey, {
-      byStatus: { todo: { issues: [makeIssue(1)], total: 2 } },
-    });
-
-    listIssues.mockResolvedValue({ issues: [makeIssue(2)], total: 2 });
-
-    const { result } = renderHook(
-      () => useLoadMoreByStatus("todo", myIssues),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.total).toBe(2);
-    expect(result.current.hasMore).toBe(true);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    const updated = qc.getQueryData<ListIssuesCache>(activeKey);
-    expect(updated?.byStatus.todo?.issues).toHaveLength(2);
-  });
-});
-
-describe("useLoadMoreByAssigneeGroup", () => {
-  let qc: QueryClient;
-  let listGroupedIssues: ReturnType<
-    typeof vi.fn<(p: ListGroupedIssuesParams) => Promise<GroupedIssuesResponse>>
-  >;
-
-  beforeEach(() => {
-    qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-    listGroupedIssues = vi.fn();
-    setApiInstance({ listGroupedIssues } as unknown as ApiClient);
-  });
-
-  afterEach(() => {
-    qc.clear();
-    vi.restoreAllMocks();
-  });
-
-  it("forwards sort to the grouped API and appends into the right group", async () => {
-    const sort: IssueSortParam = { sort_by: "priority", sort_direction: "desc" };
-    const queryKey = ["custom", "assignee-groups", "ws-1"] as const;
-    const seed: GroupedIssuesResponse = {
-      groups: [
-        {
-          id: "assignee:member:user-1",
-          assignee_type: "member",
-          assignee_id: "user-1",
-          issues: [makeIssue(1, { assignee_type: "member", assignee_id: "user-1" })],
-          total: 2,
-        },
-      ],
-    };
-    qc.setQueryData<GroupedIssuesResponse>(queryKey, seed);
-
-    listGroupedIssues.mockResolvedValue({
-      groups: [
-        {
-          id: "assignee:member:user-1",
-          assignee_type: "member",
-          assignee_id: "user-1",
-          issues: [makeIssue(2, { assignee_type: "member", assignee_id: "user-1" })],
-          total: 2,
-        },
-      ],
-    });
-
-    const { result } = renderHook(
-      () =>
-        useLoadMoreByAssigneeGroup(
-          {
-            id: "assignee:member:user-1",
-            assignee_type: "member",
-            assignee_id: "user-1",
-          },
-          queryKey,
-          { statuses: ["todo"] },
-          sort,
-        ),
-      { wrapper: createWrapper(qc) },
-    );
-
-    expect(result.current.hasMore).toBe(true);
-    expect(result.current.total).toBe(2);
-
-    await act(async () => {
-      await result.current.loadMore();
-    });
-
-    expect(listGroupedIssues).toHaveBeenCalledWith({
-      group_by: "assignee",
-      limit: 50,
-      offset: 1,
-      sort_by: "priority",
-      sort_direction: "desc",
-      statuses: ["todo"],
-      group_assignee_type: "member",
-      group_assignee_id: "user-1",
-    });
-
-    const updated = qc.getQueryData<GroupedIssuesResponse>(queryKey);
-    expect(updated?.groups[0]?.issues.map((i) => i.id)).toEqual([
-      "issue-1",
-      "issue-2",
-    ]);
-  });
-});
-
 describe("useUpdateIssue — optimistic move keeps every bucketed board in sync", () => {
   const sort: IssueSortParam = { sort_by: "position", sort_direction: undefined };
   const myScope = "assigned";
   const myFilter = { assignee_id: "user-1" };
+  const projectScope = "project:p1";
+  const projectFilter = { project_id: "p1" };
   const wsKey = issueKeys.listSorted(WS_ID, sort);
+  const inboxKey = inboxKeys.list(WS_ID);
   // My-Issues AND the Project board both ride this myList cache; a move that
   // only patched the workspace cache snaps back on those boards.
   const myKey = issueKeys.myListSorted(WS_ID, myScope, myFilter, sort);
+  const projectKey = issueKeys.myListSorted(WS_ID, projectScope, projectFilter, sort);
 
   let qc: QueryClient;
   let updateIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
+  let moveIssue: ReturnType<typeof vi.fn<(id: string, data: unknown) => Promise<Issue>>>;
 
   function makeBucketed(): ListIssuesCache {
     return {
@@ -350,12 +126,24 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     return (c?.byStatus[status]?.issues ?? []).map((i) => i.id);
   }
 
+  function inboxStatus(issueId: string) {
+    return qc
+      .getQueryData<InboxItem[]>(inboxKey)
+      ?.find((item) => item.issue_id === issueId)?.issue_status;
+  }
+
   beforeEach(() => {
     qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     updateIssue = vi.fn();
-    setApiInstance({ updateIssue } as unknown as ApiClient);
+    moveIssue = vi.fn();
+    setApiInstance({ updateIssue, moveIssue } as unknown as ApiClient);
     qc.setQueryData<ListIssuesCache>(wsKey, makeBucketed());
     qc.setQueryData<ListIssuesCache>(myKey, makeBucketed());
+    qc.setQueryData<ListIssuesCache>(projectKey, makeBucketed());
+    qc.setQueryData<InboxItem[]>(inboxKey, [
+      makeInboxItem("inbox-1", "issue-1"),
+      makeInboxItem("inbox-2", "issue-2"),
+    ]);
   });
 
   afterEach(() => {
@@ -380,7 +168,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     });
 
     // Optimistic state — the regression: myList must move too, not just ws.
-    for (const key of [wsKey, myKey]) {
+    for (const key of [wsKey, myKey, projectKey]) {
       expect(bucketIds(key, "todo")).toEqual([]);
       expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
     }
@@ -390,9 +178,106 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     });
 
     // Authoritative settle keeps the card in place in both caches.
-    for (const key of [wsKey, myKey]) {
+    for (const key of [wsKey, myKey, projectKey]) {
       expect(bucketIds(key, "in_progress")).toEqual(["issue-1"]);
     }
+  });
+
+  it("keeps the authoritative description base while a description update is pending", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(detailKey, makeIssue(1, { description: "base" }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({
+        id: "issue-1",
+        description: "local edit",
+        description_base: "base",
+      });
+    });
+
+    await waitFor(() => {
+      expect(updateIssue).toHaveBeenCalledWith("issue-1", {
+        description: "local edit",
+        description_base: "base",
+      });
+    });
+    const optimistic = qc.getQueryData<Issue & { description_base?: string }>(detailKey);
+    expect(optimistic?.description).toBe("base");
+    expect(optimistic).not.toHaveProperty("description_base");
+
+    await act(async () => {
+      resolve(makeIssue(1, { description: "local edit" }));
+    });
+    expect(qc.getQueryData<Issue>(detailKey)?.description).toBe("local edit");
+  });
+
+  it("uses server move intent while keeping provisional position optimistic-only", async () => {
+    moveIssue.mockResolvedValue(
+      makeIssue(1, { status: "in_progress", position: 15 }),
+    );
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        id: "issue-1",
+        status: "in_progress",
+        position: 12,
+        move_intent: {
+          before_id: "issue-0",
+          after_id: "issue-2",
+        },
+      });
+    });
+
+    expect(moveIssue).toHaveBeenCalledWith("issue-1", {
+      status: "in_progress",
+      before_id: "issue-0",
+      after_id: "issue-2",
+    });
+    expect(updateIssue).not.toHaveBeenCalled();
+    expect(
+      qc
+        .getQueryData<ListIssuesCache>(wsKey)
+        ?.byStatus.in_progress?.issues[0]?.position,
+    ).toBe(15);
+  });
+
+  it("optimistically patches the linked inbox row status and reconciles with the server response", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", status: "in_progress" });
+    });
+
+    expect(inboxStatus("issue-1")).toBe("in_progress");
+    expect(inboxStatus("issue-2")).toBe("todo");
+
+    await act(async () => {
+      resolve(makeIssue(1, { status: "done" }));
+    });
+
+    expect(inboxStatus("issue-1")).toBe("done");
+    expect(inboxStatus("issue-2")).toBe("todo");
   });
 
   it("rolls both caches back when the request fails", async () => {
@@ -408,10 +293,27 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
         .catch(() => {});
     });
 
-    for (const key of [wsKey, myKey]) {
+    for (const key of [wsKey, myKey, projectKey]) {
       expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
       expect(bucketIds(key, "in_progress")).toEqual([]);
     }
+  });
+
+  it("rolls the linked inbox row status back when the request fails", async () => {
+    updateIssue.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({ id: "issue-1", status: "in_progress" })
+        .catch(() => {});
+    });
+
+    expect(inboxStatus("issue-1")).toBe("todo");
+    expect(inboxStatus("issue-2")).toBe("todo");
   });
 
   it("does not invalidate the board list on settle (no refetch flicker)", async () => {
@@ -432,24 +334,57 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
 
-  it("invalidates myAll on settle when project_id changes (drops the issue from the old project's list)", async () => {
-    // A project move makes the issue leave the old project's filtered list. The
-    // surgical patch is filter-blind (it never removes a card that no longer
-    // matches the list filter), so onSettled must refetch myAll to drop it —
-    // unlike a status-only move, which deliberately does not (MUL-3669 / #4548).
-    updateIssue.mockResolvedValue(makeIssue(1, { project_id: "project-9" }));
+  it("surgically removes the issue from the old project's list on a project move (no blanket myAll refetch)", async () => {
+    // A project move makes the issue leave the old project's filtered list.
+    // The membership-aware coordinator removes the card from that loaded list
+    // in onMutate — deterministic, no WS echo or refetch needed — replacing
+    // the old blanket "invalidate myAll on settle" safety net (MUL-3669 /
+    // #4548). Lists whose filter the move cannot affect stay untouched.
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((r) => {
+        resolve = r;
+      }),
+    );
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
     const { result } = renderHook(() => useUpdateIssue(), {
       wrapper: createWrapper(qc),
     });
 
-    await act(async () => {
-      await result.current.mutateAsync({ id: "issue-1", project_id: "project-9" });
+    act(() => {
+      result.current.mutate({ id: "issue-1", project_id: "project-9" });
     });
 
+    // Optimistic: gone from the old project's list immediately; the
+    // workspace board and the assignee-filtered list keep the card.
+    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    expect(bucketIds(wsKey, "todo")).toEqual(["issue-1"]);
+    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
+
+    await act(async () => {
+      resolve(makeIssue(1, { project_id: "project-9" }));
+    });
+
+    expect(bucketIds(projectKey, "todo")).toEqual([]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
-    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
+    expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
+  });
+
+  it("rolls the membership removal back when a project move fails", async () => {
+    updateIssue.mockRejectedValue(new Error("boom"));
+
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current
+        .mutateAsync({ id: "issue-1", project_id: "project-9" })
+        .catch(() => {});
+    });
+
+    expect(bucketIds(projectKey, "todo")).toEqual(["issue-1"]);
   });
 });
 
@@ -618,6 +553,48 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     }
   });
 
+  it("does not optimistically replace description merge bases", async () => {
+    let resolve!: (r: { updated: number }) => void;
+    batchUpdateIssues.mockReturnValue(
+      new Promise<{ updated: number }>((r) => {
+        resolve = r;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(
+      detailKey,
+      makeIssue(1, { description: "base with marker" }),
+    );
+
+    const { result } = renderHook(() => useBatchUpdateIssues(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({
+        ids: ["issue-1"],
+        updates: {
+          description: "local edit",
+          description_base: "base with marker",
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(batchUpdateIssues).toHaveBeenCalledWith(["issue-1"], {
+        description: "local edit",
+        description_base: "base with marker",
+      });
+    });
+    expect(qc.getQueryData<Issue>(detailKey)?.description).toBe(
+      "base with marker",
+    );
+
+    await act(async () => {
+      resolve({ updated: 1 });
+    });
+  });
+
   it("rolls both caches back when the request fails", async () => {
     batchUpdateIssues.mockRejectedValue(new Error("boom"));
 
@@ -653,10 +630,14 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
     expect(invalidatedKeys).not.toContainEqual(issueKeys.list(WS_ID));
   });
 
-  it("invalidates myAll on settle when project_id changes (drops moved issues from the old project's list)", async () => {
-    // Mirrors useUpdateIssue: a batch that moves issues between projects must
-    // refetch myAll so they leave the old project's filtered list, even though a
-    // status-only batch deliberately does not (MUL-3669 / #4548).
+  it("surgically removes moved issues from the old project's list (no blanket myAll refetch)", async () => {
+    // Mirrors useUpdateIssue: a batch project move drops the cards from the
+    // old project's loaded list via the membership-aware coordinator instead
+    // of refetching every filtered list (MUL-3669 / #4548).
+    const projectScope = "project:p1";
+    const projectFilter = { project_id: "p1" };
+    const projectKey = issueKeys.myListSorted(WS_ID, projectScope, projectFilter, sort);
+    qc.setQueryData<ListIssuesCache>(projectKey, makeBucketed());
     batchUpdateIssues.mockResolvedValue({ updated: 1 });
     const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
@@ -671,8 +652,11 @@ describe("useBatchUpdateIssues — optimistic patch covers filtered boards too",
       });
     });
 
+    expect(bucketIds(projectKey, "todo")).toEqual([]);
+    // The assignee-filtered list is untouched by a project move.
+    expect(bucketIds(myKey, "todo")).toEqual(["issue-1"]);
     const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
-    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
+    expect(invalidatedKeys).not.toContainEqual(issueKeys.myAll(WS_ID));
   });
 });
 

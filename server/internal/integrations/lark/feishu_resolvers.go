@@ -17,10 +17,10 @@ import (
 // the channel-agnostic engine.Router runs the inbound pipeline through. Each
 // resolver translates between the engine's normalized channel.InboundMessage /
 // engine types and the Feishu store / services. Platform-specific fields the
-// normalized envelope does not carry (app_id, event_type, the un-enriched
-// command body, create time) are read from the original InboundMessage the
-// feishuChannel stashes in channel.InboundMessage.Raw — the documented adapter
-// boundary (the core never reads Raw).
+// normalized envelope does not carry (app_id, event_type, create time) are read
+// from the original InboundMessage that feishuChannel stashes in
+// channel.InboundMessage.Raw — the documented adapter boundary (the core never
+// reads Raw).
 
 // originFeishuChat is the issue.origin_type label written for issues created
 // via the Feishu /issue command. Kept as "lark_chat" (unchanged from the
@@ -44,7 +44,7 @@ func larkMsgFromRaw(msg channel.InboundMessage) (InboundMessage, error) {
 // shared session service, audit logger, and (optional) outbound replier +
 // typing indicator. Feishu is just another consumer of the channel-agnostic
 // engine.ChatSession — there is no Feishu-specific session implementation.
-func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audit AuditLogger, replier OutcomeReplier, typing *TypingIndicatorManager, media engine.MediaResolver) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &feishuInstallationResolver{store: store},
 		Identity:     &feishuIdentityResolver{store: store},
@@ -58,6 +58,9 @@ func NewFeishuResolverSet(store *ChannelStore, session *engine.ChatSession, audi
 	}
 	if typing != nil {
 		set.Typing = &feishuTypingNotifier{mgr: typing}
+	}
+	if media != nil {
+		set.Media = media
 	}
 	return set
 }
@@ -156,41 +159,84 @@ func (r *feishuDeduper) Release(ctx context.Context, installationID pgtype.UUID,
 // unit-tested with a fake; *engine.ChatSession is the production value.
 type chatSession interface {
 	EnsureSession(ctx context.Context, in engine.EnsureSessionInput) (pgtype.UUID, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error)
+	BindMediaRefs(ctx context.Context, in engine.BindMediaInput) error
 }
 
 type feishuSessionBinder struct{ session chatSession }
 
+// larkBindingConfig is the opaque outbound routing persisted on the chat
+// binding's config when the binding key is a composite (Lark topic): the real
+// chat id lives here so the outbound path can post back.
+type larkBindingConfig struct {
+	ChatID string `json:"chat_id"`
+}
+
+// larkSessionRouting derives the session-isolation key (stored as
+// channel_chat_id) and the outbound config from one inbound Feishu message.
+// A p2p or plain group chat is one continuous session per chat, so the key is
+// the chat id and the key alone routes outbound (no config). A message inside
+// a Lark topic (话题, thread_id present) is isolated by topic — key =
+// "chat:thread" — so two @bot topics in one group are two sessions (the same
+// model as Slack's channel:threadRoot; see engine.EnsureSessionInput). Pure
+// function so the isolation contract is unit-tested without a DB.
+func larkSessionRouting(msg channel.InboundMessage) (bindingKey string, config []byte) {
+	chatID := msg.Source.ChatID
+	if msg.Source.ChatType != channel.ChatTypeGroup || msg.Source.ThreadID == "" {
+		return chatID, nil
+	}
+	cfg, _ := json.Marshal(larkBindingConfig{ChatID: chatID})
+	return chatID + ":" + msg.Source.ThreadID, cfg
+}
+
 func (r *feishuSessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessionParams) (pgtype.UUID, error) {
+	bindingKey, config := larkSessionRouting(p.Message)
 	return r.session.EnsureSession(ctx, engine.EnsureSessionInput{
 		WorkspaceID:    p.Installation.WorkspaceID,
 		AgentID:        p.Installation.AgentID,
 		InstallationID: p.Installation.ID,
 		Sender:         p.Sender,
-		// Feishu's chat id is the session-isolation key (one session per chat),
-		// and channel_chat_id IS the real outbound chat, so no BindingConfig.
-		BindingKey: p.Message.Source.ChatID,
-		ChatType:   p.Message.Source.ChatType,
+		BindingKey:     bindingKey,
+		BindingConfig:  config,
+		ChatType:       p.Message.Source.ChatType,
 	})
 }
 
+func (r *feishuSessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
+	return r.session.MarkPendingFresh(ctx, sessionID)
+}
+
 func (r *feishuSessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
-	// CommandText is the user's OWN typed text: the Feishu enricher inlines
-	// quoted/forwarded context into Body, so /issue parsing must use the
-	// un-enriched command body stashed in Raw, not Body.
-	lm, err := larkMsgFromRaw(p.Message)
-	if err != nil {
-		return engine.AppendResult{}, err
+	commandText := p.Message.CommandText
+	if commandText == "" {
+		commandText = p.Message.Text
 	}
 	return r.session.AppendUserMessage(ctx, engine.AppendInput{
-		SessionID:      p.SessionID,
-		Sender:         p.Sender,
-		InstallationID: p.InstallationID,
-		Body:           p.Message.Text,
-		CommandText:    lm.CommandBody,
-		MessageID:      p.Message.MessageID,
-		ThreadID:       p.Message.Source.ThreadID,
-		ClaimToken:     p.ClaimToken,
+		SessionID:           p.SessionID,
+		Sender:              p.Sender,
+		InstallationID:      p.InstallationID,
+		Body:                p.Message.Text,
+		CommandText:         commandText,
+		MessageID:           p.Message.MessageID,
+		ThreadID:            p.Message.Source.ThreadID,
+		ClaimToken:          p.ClaimToken,
+		MediaPendingSeconds: p.MediaPendingSeconds,
+		ForceFresh:          p.Message.ForceFresh,
+	})
+}
+
+func (r *feishuSessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams) error {
+	return r.session.BindMediaRefs(ctx, engine.BindMediaInput{
+		MessageID:            p.MessageID,
+		SessionID:            p.SessionID,
+		WorkspaceID:          p.WorkspaceID,
+		Sender:               p.Sender,
+		IssueID:              p.IssueID,
+		IssueDescriptionBase: p.IssueDescriptionBase,
+		IssueCommandText:     p.IssueCommandText,
+		Body:                 p.Body,
+		MediaRefs:            p.MediaRefs,
 	})
 }
 
@@ -229,15 +275,17 @@ func (r *feishuOutboundReplier) Reply(ctx context.Context, inst engine.ResolvedI
 // the OutcomeReplier consumes. The Outcome/DropReason string values match 1:1.
 func dispatchResultFromEngine(res engine.Result) DispatchResult {
 	return DispatchResult{
-		Outcome:         Outcome(string(res.Outcome)),
-		DropReason:      DropReason(string(res.DropReason)),
-		InstallationID:  res.InstallationID,
-		ChatSessionID:   res.ChatSessionID,
-		SenderOpenID:    OpenID(res.Sender),
-		IssueID:         res.IssueID,
-		IssueNumber:     res.IssueNumber,
-		IssueIdentifier: res.IssueIdentifier,
-		IssueTitle:      res.IssueTitle,
+		Outcome:            Outcome(string(res.Outcome)),
+		DropReason:         DropReason(string(res.DropReason)),
+		InstallationID:     res.InstallationID,
+		ChatSessionID:      res.ChatSessionID,
+		SenderOpenID:       OpenID(res.Sender),
+		IssueID:            res.IssueID,
+		IssueNumber:        res.IssueNumber,
+		IssueIdentifier:    res.IssueIdentifier,
+		IssueTitle:         res.IssueTitle,
+		IssueDuplicate:     res.IssueDuplicate,
+		IssueUsageHadMedia: res.IssueUsageHadMedia,
 	}
 }
 

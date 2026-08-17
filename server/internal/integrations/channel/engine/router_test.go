@@ -1,9 +1,12 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -34,10 +37,45 @@ func (f *fakeIdentity) ResolveSender(_ context.Context, _ ResolvedInstallation, 
 	return f.id, f.err
 }
 
+type fakeValidatedInbound struct {
+	mu     sync.Mutex
+	inst   ResolvedInstallation
+	insts  []ResolvedInstallation
+	err    error
+	errs   []error
+	callsN int
+}
+
+func (f *fakeValidatedInbound) ResolveValidatedInbound(_ context.Context, inst ResolvedInstallation, _ ResolvedIdentity, _ channel.InboundMessage) (ResolvedInstallation, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.callsN++
+	call := f.callsN - 1
+	resolveErr := f.err
+	if call < len(f.errs) {
+		resolveErr = f.errs[call]
+	}
+	if len(f.insts) >= f.callsN {
+		return f.insts[call], resolveErr
+	}
+	if f.inst.ID.Valid || f.inst.AgentID.Valid {
+		inst = f.inst
+	}
+	return inst, resolveErr
+}
+
+func (f *fakeValidatedInbound) calls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.callsN
+}
+
 type fakeDedup struct {
 	mu         sync.Mutex
 	token      pgtype.UUID
 	claimErr   error
+	respectCtx bool
+	releaseErr error
 	markCalls  int
 	relCalls   int
 	claimCalls int
@@ -52,37 +90,151 @@ func (f *fakeDedup) Claim(_ context.Context, _ pgtype.UUID, _ string) (pgtype.UU
 	}
 	return f.token, nil
 }
-func (f *fakeDedup) Mark(_ context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
+func (f *fakeDedup) Mark(ctx context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.respectCtx && ctx.Err() != nil {
+		return ctx.Err()
+	}
 	f.markCalls++
 	return nil
 }
-func (f *fakeDedup) Release(_ context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
+func (f *fakeDedup) Release(ctx context.Context, _ pgtype.UUID, _ string, _ pgtype.UUID) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if f.respectCtx && ctx.Err() != nil {
+		f.releaseErr = ctx.Err()
+		return ctx.Err()
+	}
 	f.relCalls++
 	return nil
 }
 func (f *fakeDedup) marks() int    { f.mu.Lock(); defer f.mu.Unlock(); return f.markCalls }
 func (f *fakeDedup) releases() int { f.mu.Lock(); defer f.mu.Unlock(); return f.relCalls }
+func (f *fakeDedup) releaseError() error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.releaseErr
+}
 
 type fakeBinder struct {
+	mu           sync.Mutex
 	ensureID     pgtype.UUID
 	ensureErr    error
+	ensureErrs   []error
+	ensureCalls  int
+	ensureParams []EnsureSessionParams
+	ensureHook   func(int)
 	appendResult AppendResult
+	parseIssue   bool
 	appendErr    error
+	appendErrs   []error
+	appendCalls  int
+	appended     []AppendParams
+	appendHook   func(int)
+	appendDelay  time.Duration
+	bindErr      error
 	lastEnsure   EnsureSessionParams
 	lastAppend   AppendParams
+	lastBind     BindMediaParams
+	pendingFresh int
+	pendingErr   error
 }
 
 func (f *fakeBinder) EnsureSession(_ context.Context, p EnsureSessionParams) (pgtype.UUID, error) {
+	f.mu.Lock()
 	f.lastEnsure = p
-	return f.ensureID, f.ensureErr
+	f.ensureCalls++
+	f.ensureParams = append(f.ensureParams, p)
+	err := f.ensureErr
+	if len(f.ensureErrs) > 0 {
+		err = f.ensureErrs[0]
+		f.ensureErrs = f.ensureErrs[1:]
+	}
+	call, hook := f.ensureCalls, f.ensureHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook(call)
+	}
+	return f.ensureID, err
+}
+func (f *fakeBinder) MarkPendingFresh(_ context.Context, _ pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.pendingFresh++
+	return f.pendingErr
 }
 func (f *fakeBinder) AppendMessage(_ context.Context, p AppendParams) (AppendResult, error) {
+	f.mu.Lock()
+	delay := f.appendDelay
 	f.lastAppend = p
-	return f.appendResult, f.appendErr
+	f.appendCalls++
+	res, err := f.appendResult, f.appendErr
+	if len(f.appendErrs) > 0 {
+		err = f.appendErrs[0]
+		f.appendErrs = f.appendErrs[1:]
+	}
+	if f.parseIssue {
+		commandSource := p.Message.CommandText
+		if commandSource == "" {
+			commandSource = p.Message.Text
+		}
+		res.IssueCommand, _ = ParseIssueCommand(commandSource)
+	}
+	if err == nil {
+		f.appended = append(f.appended, p)
+	}
+	call, hook := f.appendCalls, f.appendHook
+	f.mu.Unlock()
+	if hook != nil {
+		hook(call)
+	}
+	if delay > 0 {
+		time.Sleep(delay)
+	}
+	return res, err
+}
+
+func (f *fakeBinder) appends() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.appendCalls
+}
+func (f *fakeBinder) ensures() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.ensureCalls
+}
+func (f *fakeBinder) ensureAttempts() []EnsureSessionParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]EnsureSessionParams(nil), f.ensureParams...)
+}
+func (f *fakeBinder) successfulAppends() []AppendParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]AppendParams(nil), f.appended...)
+}
+func (f *fakeBinder) BindMedia(_ context.Context, p BindMediaParams) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.lastBind = p
+	return f.bindErr
+}
+func (f *fakeBinder) boundMedia() BindMediaParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastBind
+}
+func (f *fakeBinder) appendedParams() AppendParams {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastAppend
+}
+func (f *fakeBinder) pendingFreshCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.pendingFresh
 }
 
 type fakeAuditor struct {
@@ -140,37 +292,139 @@ func (f *fakeTyping) OnSettled(_ context.Context, _ pgtype.UUID) {
 func (f *fakeTyping) calls() int        { f.mu.Lock(); defer f.mu.Unlock(); return f.count }
 func (f *fakeTyping) settledCalls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.settled }
 
-type fakeIssues struct {
-	called bool
-	params service.IssueCreateParams
-	result service.IssueCreateResult
-	err    error
+type fakeMedia struct {
+	mu            sync.Mutex
+	count         int
+	noMedia       bool
+	waitForCancel bool
+	started       chan struct{}
+	release       <-chan struct{}
+	resolve       func(context.Context, channel.InboundMessage) channel.InboundMessage
+	lastMessageID pgtype.UUID
 }
 
-func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, _ service.IssueCreateOpts) (service.IssueCreateResult, error) {
+func (f *fakeMedia) HasMedia(_ channel.InboundMessage) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return !f.noMedia
+}
+
+func (f *fakeMedia) resolvedMessageID() pgtype.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.lastMessageID
+}
+
+func (f *fakeMedia) ResolveMedia(ctx context.Context, _ ResolvedInstallation, _ ResolvedIdentity, _ pgtype.UUID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage {
+	f.mu.Lock()
+	f.count++
+	f.lastMessageID = chatMessageID
+	waitForCancel := f.waitForCancel
+	started := f.started
+	release := f.release
+	resolve := f.resolve
+	f.mu.Unlock()
+	if resolve != nil {
+		return resolve(ctx, msg)
+	}
+	if started != nil {
+		close(started)
+	}
+	if release != nil {
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return msg
+		}
+	}
+	if waitForCancel {
+		<-ctx.Done()
+		return msg
+	}
+	msg.MediaRefs = append(msg.MediaRefs, channel.MediaRef{
+		Type:       channel.MsgTypeImage,
+		StorageKey: "workspaces/ws/lark/image",
+		StorageURL: "https://cdn.example.test/image",
+		Filename:   "image.png",
+		MimeType:   "image/png",
+		SizeBytes:  3,
+	})
+	return msg
+}
+
+func (f *fakeMedia) calls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.count
+}
+
+type fakeIssues struct {
+	called             bool
+	params             service.IssueCreateParams
+	opts               service.IssueCreateOpts
+	result             service.IssueCreateResult
+	err                error
+	attachmentsChanged atomic.Int64
+}
+
+func (f *fakeIssues) Create(_ context.Context, p service.IssueCreateParams, o service.IssueCreateOpts) (service.IssueCreateResult, error) {
 	f.called = true
 	f.params = p
+	f.opts = o
 	return f.result, f.err
 }
 
+func (f *fakeIssues) PublishAttachmentsChanged(context.Context, db.Issue, pgtype.UUID) {
+	f.attachmentsChanged.Add(1)
+}
+
 type fakeTasks struct {
-	mu         sync.Mutex
-	called     bool
-	forceFresh bool
-	initiator  pgtype.UUID
-	err        error
+	mu                  sync.Mutex
+	called              bool
+	callCount           int
+	promotions          int
+	issueTaskPromotions []pgtype.UUID
+	forceFresh          bool
+	initiator           pgtype.UUID
+	err                 error
+}
+
+func (f *fakeTasks) PromoteChannelChatTasksIfMediaReady(_ context.Context, _ pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.promotions++
+	return nil
+}
+
+func (f *fakeTasks) PromoteDeferredChannelIssueTask(_ context.Context, taskID pgtype.UUID) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.issueTaskPromotions = append(f.issueTaskPromotions, taskID)
+	return nil
 }
 
 func (f *fakeTasks) EnqueueChatTask(_ context.Context, _ db.ChatSession, initiator pgtype.UUID, forceFresh bool) (db.AgentTaskQueue, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.called = true
+	f.callCount++
 	f.forceFresh = forceFresh
 	f.initiator = initiator
 	return db.AgentTaskQueue{}, f.err
 }
 func (f *fakeTasks) wasCalled() bool { f.mu.Lock(); defer f.mu.Unlock(); return f.called }
 func (f *fakeTasks) freshArg() bool  { f.mu.Lock(); defer f.mu.Unlock(); return f.forceFresh }
+func (f *fakeTasks) calls() int      { f.mu.Lock(); defer f.mu.Unlock(); return f.callCount }
+func (f *fakeTasks) promotionCalls() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.promotions
+}
+func (f *fakeTasks) initiatorArg() pgtype.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.initiator
+}
 
 type fakeReader struct {
 	session db.ChatSession
@@ -213,45 +467,61 @@ func p2pMessage(t *testing.T) channel.InboundMessage {
 }
 
 type harness struct {
-	router  *Router
-	inst    *fakeInstaller
-	ident   *fakeIdentity
-	dedup   *fakeDedup
-	binder  *fakeBinder
-	audit   *fakeAuditor
-	replier *fakeReplier
-	typing  *fakeTyping
-	issues  *fakeIssues
-	tasks   *fakeTasks
-	reader  *fakeReader
+	router    *Router
+	inst      *fakeInstaller
+	ident     *fakeIdentity
+	validated *fakeValidatedInbound
+	dedup     *fakeDedup
+	binder    *fakeBinder
+	audit     *fakeAuditor
+	replier   *fakeReplier
+	typing    *fakeTyping
+	media     *fakeMedia
+	issues    *fakeIssues
+	tasks     *fakeTasks
+	reader    *fakeReader
 }
 
 func newHarness(t *testing.T) *harness {
 	t.Helper()
 	h := &harness{
-		inst:    &fakeInstaller{inst: activeResolved(t)},
-		ident:   &fakeIdentity{id: ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}},
-		dedup:   &fakeDedup{token: uuidFromString(t, "55555555-5555-5555-5555-555555555555")},
-		binder:  &fakeBinder{ensureID: uuidFromString(t, "66666666-6666-6666-6666-666666666666"), appendResult: AppendResult{DedupMarked: true}},
+		inst:      &fakeInstaller{inst: activeResolved(t)},
+		ident:     &fakeIdentity{id: ResolvedIdentity{UserID: uuidFromString(t, "44444444-4444-4444-4444-444444444444")}},
+		validated: &fakeValidatedInbound{},
+		dedup:     &fakeDedup{token: uuidFromString(t, "55555555-5555-5555-5555-555555555555")},
+		binder: &fakeBinder{
+			ensureID: uuidFromString(t, "66666666-6666-6666-6666-666666666666"),
+			appendResult: AppendResult{
+				MessageID:   uuidFromString(t, "99999999-9999-4999-8999-999999999999"),
+				DedupMarked: true,
+			},
+		},
 		audit:   &fakeAuditor{},
 		replier: &fakeReplier{},
 		typing:  &fakeTyping{},
+		media:   &fakeMedia{},
 		issues:  &fakeIssues{},
 		tasks:   &fakeTasks{},
 		reader:  &fakeReader{ws: db.Workspace{IssuePrefix: "MUL"}},
 	}
 	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{Logger: discardLogger()})
+	h.register(h.validated)
+	return h
+}
+
+func (h *harness) register(validated ValidatedInboundResolver) {
 	h.router.Register(channel.TypeFeishu, ResolverSet{
 		Installation: h.inst,
 		Identity:     h.ident,
+		Validated:    validated,
 		Dedup:        h.dedup,
 		Session:      h.binder,
 		Audit:        h.audit,
 		Replier:      h.replier,
 		Typing:       h.typing,
+		Media:        h.media,
 		OriginType:   "lark_chat",
 	})
-	return h
 }
 
 func TestRouter_NoResolverSet_ReturnsError(t *testing.T) {
@@ -286,6 +556,9 @@ func TestRouter_RevokedInstallation_Drops(t *testing.T) {
 	if r, _ := h.audit.last(); r != DropReasonRevokedInstallation {
 		t.Fatalf("expected revoked_installation, got %q", r)
 	}
+	if h.media.calls() != 0 {
+		t.Fatal("revoked installation must not resolve media")
+	}
 }
 
 func TestRouter_Duplicate_Drops(t *testing.T) {
@@ -296,6 +569,9 @@ func TestRouter_Duplicate_Drops(t *testing.T) {
 	}
 	if r, _ := h.audit.last(); r != DropReasonDuplicate {
 		t.Fatalf("expected duplicate, got %q", r)
+	}
+	if h.media.calls() != 0 {
+		t.Fatal("duplicate message must not resolve media")
 	}
 }
 
@@ -313,6 +589,12 @@ func TestRouter_GroupNotAddressed_Drops(t *testing.T) {
 	if h.dedup.marks() != 1 {
 		t.Fatalf("group-filter drop must finalize Mark (1), got %d", h.dedup.marks())
 	}
+	if h.media.calls() != 0 {
+		t.Fatal("unaddressed group message must not resolve media")
+	}
+	if h.validated.calls() != 0 {
+		t.Fatal("unaddressed group message must not run validated discovery")
+	}
 }
 
 func TestRouter_UnboundSender_NeedsBinding(t *testing.T) {
@@ -326,6 +608,12 @@ func TestRouter_UnboundSender_NeedsBinding(t *testing.T) {
 	}
 	if h.dedup.marks() != 1 {
 		t.Fatalf("unbound drop must finalize Mark, got %d", h.dedup.marks())
+	}
+	if h.media.calls() != 0 {
+		t.Fatal("unbound sender must not resolve media")
+	}
+	if h.validated.calls() != 0 {
+		t.Fatal("unbound sender must not run validated discovery")
 	}
 	if !waitFor(time.Second, func() bool {
 		for _, r := range h.replier.calls() {
@@ -348,6 +636,259 @@ func TestRouter_NonMember_Drops(t *testing.T) {
 	if r, _ := h.audit.last(); r != DropReasonNonWorkspaceMember {
 		t.Fatalf("expected non_workspace_member, got %q", r)
 	}
+	if h.media.calls() != 0 {
+		t.Fatal("non-member sender must not resolve media")
+	}
+	if h.validated.calls() != 0 {
+		t.Fatal("non-member sender must not run validated discovery")
+	}
+}
+
+func TestRouter_ArchivedValidatedRouteRepliesWithoutCreatingSession(t *testing.T) {
+	h := newHarness(t)
+	h.validated.err = ErrTargetAgentArchived
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	msg.AddressedToBot = true
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("archived route must be a product outcome, got %v", err)
+	}
+	if h.validated.calls() != 1 {
+		t.Fatalf("validated discovery calls = %d, want 1", h.validated.calls())
+	}
+	if h.binder.lastEnsure.Installation.ID.Valid {
+		t.Fatal("archived route must not create or reuse a chat session")
+	}
+	if h.dedup.marks() != 1 {
+		t.Fatalf("archived route must finalize dedup, got %d marks", h.dedup.marks())
+	}
+	if !waitFor(time.Second, func() bool {
+		for _, result := range h.replier.calls() {
+			if result.Outcome == OutcomeAgentArchived {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatal("archived route did not emit the standard archived-agent reply")
+	}
+}
+
+func TestRouter_RouteFenceConflictRefreshesAndRetriesSameClaim(t *testing.T) {
+	h := newHarness(t)
+	oldRoute := activeResolved(t)
+	oldRoute.RouteRevision = 1
+	newRoute := oldRoute
+	newRoute.AgentID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	newRoute.RouteRevision = 2
+	h.inst.inst = oldRoute
+	h.validated.insts = []ResolvedInstallation{oldRoute, newRoute}
+	h.binder.appendErrs = []error{ErrRouteChanged, nil}
+
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	msg.AddressedToBot = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("route fence retry: %v", err)
+	}
+	if h.validated.calls() != 2 {
+		t.Fatalf("validated route resolutions = %d, want initial + refresh", h.validated.calls())
+	}
+	if h.binder.appends() != 2 {
+		t.Fatalf("append attempts = %d, want conflict + retry", h.binder.appends())
+	}
+	if h.binder.lastAppend.AgentID != newRoute.AgentID || h.binder.lastAppend.RouteRevision != 2 {
+		t.Fatalf("retry append route = agent %v revision %d, want agent %v revision 2", h.binder.lastAppend.AgentID, h.binder.lastAppend.RouteRevision, newRoute.AgentID)
+	}
+	appended := h.binder.successfulAppends()
+	if len(appended) != 1 || appended[0].AgentID != newRoute.AgentID || appended[0].ClaimToken != h.dedup.token {
+		t.Fatalf("durable appends = %+v, want one append on the new route with the original claim", appended)
+	}
+	if h.dedup.marks() != 0 || h.dedup.releases() != 0 {
+		t.Fatalf("successful in-tx retry finalization = marks %d releases %d, want 0/0", h.dedup.marks(), h.dedup.releases())
+	}
+}
+
+func TestRouter_EnsureSessionConflictRefreshesAndRetriesSameClaim(t *testing.T) {
+	h := newHarness(t)
+	oldRoute := activeResolved(t)
+	oldRoute.RouteRevision = 1
+	newRoute := oldRoute
+	newRoute.AgentID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	newRoute.RouteRevision = 2
+	h.inst.inst = oldRoute
+	h.validated.insts = []ResolvedInstallation{oldRoute, newRoute}
+	h.binder.ensureErrs = []error{ErrRouteChanged, nil}
+
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	msg.AddressedToBot = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("ensure-session route retry: %v", err)
+	}
+
+	ensures := h.binder.ensureAttempts()
+	if len(ensures) != 2 || ensures[0].Installation.AgentID != oldRoute.AgentID || ensures[1].Installation.AgentID != newRoute.AgentID {
+		t.Fatalf("ensure attempts = %+v, want old route then new route", ensures)
+	}
+	appended := h.binder.successfulAppends()
+	if len(appended) != 1 || appended[0].AgentID != newRoute.AgentID || appended[0].ClaimToken != h.dedup.token {
+		t.Fatalf("durable appends = %+v, want one append on the new route with the original claim", appended)
+	}
+	if h.dedup.marks() != 0 || h.dedup.releases() != 0 {
+		t.Fatalf("successful in-tx retry finalization = marks %d releases %d, want 0/0", h.dedup.marks(), h.dedup.releases())
+	}
+}
+
+func TestRouter_RouteConflictRefreshTerminalPaths(t *testing.T) {
+	refreshInfraErr := errors.New("route refresh database unavailable")
+	for _, tc := range []struct {
+		name        string
+		phase       string
+		refreshErr  error
+		wantError   bool
+		wantMarks   int
+		wantRelease int
+	}{
+		{name: "ensure conflict archived target", phase: "ensure", refreshErr: ErrTargetAgentArchived, wantMarks: 1},
+		{name: "ensure conflict refresh infrastructure error", phase: "ensure", refreshErr: refreshInfraErr, wantError: true, wantRelease: 1},
+		{name: "append conflict archived target", phase: "append", refreshErr: ErrTargetAgentArchived, wantMarks: 1},
+		{name: "append conflict refresh infrastructure error", phase: "append", refreshErr: refreshInfraErr, wantError: true, wantRelease: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.dedup.respectCtx = true
+			oldRoute := activeResolved(t)
+			oldRoute.RouteRevision = 1
+			refreshedRoute := oldRoute
+			refreshedRoute.AgentID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+			refreshedRoute.RouteRevision = 2
+			h.inst.inst = oldRoute
+			h.validated.insts = []ResolvedInstallation{oldRoute, refreshedRoute}
+			h.validated.errs = []error{nil, tc.refreshErr}
+			if tc.phase == "ensure" {
+				h.binder.ensureErr = ErrRouteChanged
+			} else {
+				h.binder.appendErr = ErrRouteChanged
+			}
+
+			msg := p2pMessage(t)
+			msg.Source.ChatType = channel.ChatTypeGroup
+			msg.AddressedToBot = true
+			err := h.router.Handle(context.Background(), msg)
+			if (err != nil) != tc.wantError {
+				t.Fatalf("Handle error = %v, wantError %v", err, tc.wantError)
+			}
+			if tc.wantError && !errors.Is(err, tc.refreshErr) {
+				t.Fatalf("Handle error = %v, want wrapped refresh error %v", err, tc.refreshErr)
+			}
+			if h.validated.calls() != 2 {
+				t.Fatalf("validated route resolutions = %d, want initial + refresh", h.validated.calls())
+			}
+			if got := len(h.binder.successfulAppends()); got != 0 {
+				t.Fatalf("old route received %d successful appends, want 0", got)
+			}
+			if h.dedup.marks() != tc.wantMarks || h.dedup.releases() != tc.wantRelease {
+				t.Fatalf("claim finalization = marks %d releases %d, want %d/%d", h.dedup.marks(), h.dedup.releases(), tc.wantMarks, tc.wantRelease)
+			}
+			if errors.Is(tc.refreshErr, ErrTargetAgentArchived) && !waitFor(time.Second, func() bool {
+				for _, result := range h.replier.calls() {
+					if result.Outcome == OutcomeAgentArchived {
+						return true
+					}
+				}
+				return false
+			}) {
+				t.Fatal("archived refresh did not emit the archived-agent outcome")
+			}
+		})
+	}
+}
+
+func TestRouter_RouteConflictWithoutValidatedResolverReleasesClaim(t *testing.T) {
+	h := newHarness(t)
+	h.register(nil)
+	h.binder.ensureErr = ErrRouteChanged
+
+	err := h.router.Handle(context.Background(), p2pMessage(t))
+	if !errors.Is(err, ErrRouteChanged) {
+		t.Fatalf("missing validated resolver error = %v, want route changed", err)
+	}
+	if h.dedup.marks() != 0 || h.dedup.releases() != 1 {
+		t.Fatalf("claim finalization = marks %d releases %d, want 0/1", h.dedup.marks(), h.dedup.releases())
+	}
+	if got := len(h.binder.successfulAppends()); got != 0 {
+		t.Fatalf("old route received %d successful appends, want 0", got)
+	}
+}
+
+func TestRouter_SessionAppendLockFailureReleasesClaimWithoutAppending(t *testing.T) {
+	h := newHarness(t)
+	oldRoute := activeResolved(t)
+	oldRoute.RouteRevision = 1
+	h.inst.inst = oldRoute
+	h.validated.inst = oldRoute
+	h.binder.appendErr = errors.New("append route lock unavailable")
+
+	msg := p2pMessage(t)
+	msg.Source.ChatType = channel.ChatTypeGroup
+	msg.AddressedToBot = true
+	if err := h.router.Handle(context.Background(), msg); err == nil {
+		t.Fatal("append-lock infrastructure error must surface")
+	}
+	if h.dedup.marks() != 0 || h.dedup.releases() != 1 {
+		t.Fatalf("claim finalization = marks %d releases %d, want 0/1", h.dedup.marks(), h.dedup.releases())
+	}
+	if got := len(h.binder.successfulAppends()); got != 0 {
+		t.Fatalf("failed append lock recorded %d successful appends, want 0", got)
+	}
+}
+
+func TestRouter_RepeatedRouteConflictsTerminateOnContextCancellation(t *testing.T) {
+	for _, phase := range []string{"ensure", "append"} {
+		t.Run(phase, func(t *testing.T) {
+			h := newHarness(t)
+			h.dedup.respectCtx = true
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			if phase == "ensure" {
+				h.binder.ensureErr = ErrRouteChanged
+				h.binder.ensureHook = func(call int) {
+					if call == 3 {
+						cancel()
+					}
+				}
+			} else {
+				h.binder.appendErr = ErrRouteChanged
+				h.binder.appendHook = func(call int) {
+					if call == 3 {
+						cancel()
+					}
+				}
+			}
+
+			err := h.router.Handle(ctx, p2pMessage(t))
+			if !errors.Is(err, context.Canceled) {
+				t.Fatalf("repeated %s conflicts error = %v, want context cancellation", phase, err)
+			}
+			if h.dedup.marks() != 0 || h.dedup.releases() != 1 {
+				t.Fatalf("claim finalization = marks %d releases %d, want 0/1", h.dedup.marks(), h.dedup.releases())
+			}
+			if err := h.dedup.releaseError(); err != nil {
+				t.Fatalf("dedup Release inherited cancelled request context: %v", err)
+			}
+			if got := len(h.binder.successfulAppends()); got != 0 {
+				t.Fatalf("old route received %d successful appends, want 0", got)
+			}
+			if phase == "ensure" && h.binder.ensures() != 3 {
+				t.Fatalf("ensure conflicts = %d, want 3 before cancellation", h.binder.ensures())
+			}
+			if phase == "append" && h.binder.appends() != 3 {
+				t.Fatalf("append conflicts = %d, want 3 before cancellation", h.binder.appends())
+			}
+		})
+	}
 }
 
 func TestRouter_EnsureSessionError_Releases(t *testing.T) {
@@ -359,6 +900,25 @@ func TestRouter_EnsureSessionError_Releases(t *testing.T) {
 	}
 	if h.dedup.releases() != 1 {
 		t.Fatalf("ensure-session error must Release the claim (1), got %d", h.dedup.releases())
+	}
+}
+
+func TestRouter_AppendErrorReleasesClaimAndAllowsMediaRetry(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendErr = errors.New("db down")
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err == nil {
+		t.Fatal("append error must surface to the caller")
+	}
+	if h.dedup.releases() != 1 || h.media.calls() != 0 {
+		t.Fatalf("failed attempt: releases=%d media_calls=%d, want release=1 media_calls=0", h.dedup.releases(), h.media.calls())
+	}
+
+	h.binder.appendErr = nil
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.media.calls() == 1 }) {
+		t.Fatalf("retry media calls = %d, want 1 total", h.media.calls())
 	}
 }
 
@@ -375,11 +935,221 @@ func TestRouter_Ingested_InTxMark_FinalizeNone(t *testing.T) {
 	if h.dedup.releases() != 0 {
 		t.Fatalf("a durable ingest must not Release, got %d", h.dedup.releases())
 	}
-	if !h.tasks.wasCalled() {
+	if !waitFor(time.Second, h.tasks.wasCalled) {
 		t.Fatalf("ingest must trigger a chat run (inline, no batcher)")
 	}
 	if !waitFor(time.Second, func() bool { return h.typing.calls() == 1 }) {
 		t.Fatalf("ingest must show the typing indicator")
+	}
+	// Media resolution runs on its own goroutine (r.mediaWg), and the binding
+	// happens only after it returns, so both of these are downstream of work
+	// that Handle does not wait for. Reading them bare raced with that
+	// goroutine and made this test fail intermittently on loaded CI runners
+	// with "resolved media 0 times, want 1". The waits below match what the
+	// sibling media assertions in this file already do.
+	if !waitFor(time.Second, func() bool { return h.media.calls() == 1 }) {
+		t.Fatalf("ingested message resolved media %d times, want 1", h.media.calls())
+	}
+	if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
+		t.Fatalf("resolved media not bound after append: %+v", h.binder.boundMedia().MediaRefs)
+	}
+	if got := h.binder.boundMedia(); got.IssueID.Valid || got.Body != "hello" {
+		t.Fatalf("plain chat media target/body = issue:%v body:%q", got.IssueID, got.Body)
+	}
+}
+
+func TestRouter_NoMediaMessageSkipsMediaPipeline(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, h.tasks.wasCalled) {
+		t.Fatal("no-media message must still trigger a chat run")
+	}
+	if got := h.binder.appendedParams().MediaPendingSeconds; got != 0 {
+		t.Fatalf("no-media message persisted a media budget: %v", got)
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("no-media message ran ResolveMedia %d times, want 0", h.media.calls())
+	}
+	if h.tasks.promotionCalls() != 0 {
+		t.Fatalf("no-media message triggered %d promotions, want 0", h.tasks.promotionCalls())
+	}
+}
+
+func TestRouter_MediaResolverTimeoutAppendsOriginalMessage(t *testing.T) {
+	h := newHarness(t)
+	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{MediaTimeout: 10 * time.Millisecond, Logger: discardLogger()})
+	h.media.waitForCancel = true
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		Replier:      h.replier,
+		Typing:       h.typing,
+		Media:        h.media,
+		OriginType:   "lark_chat",
+	})
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.media.calls() == 1 }) {
+		t.Fatalf("media resolver calls = %d, want 1", h.media.calls())
+	}
+	if refs := h.binder.boundMedia().MediaRefs; len(refs) != 0 {
+		t.Fatalf("timed-out media refs must not attach: %+v", refs)
+	}
+	if !waitFor(time.Second, h.tasks.wasCalled) {
+		t.Fatalf("message should still be ingested and trigger a chat run")
+	}
+	if h.dedup.releases() != 0 {
+		t.Fatalf("media timeout must not release a durably appended message, got %d", h.dedup.releases())
+	}
+}
+
+func TestRouter_MediaBindFailureStillChecksPlaceholderPromotion(t *testing.T) {
+	h := newHarness(t)
+	h.binder.bindErr = errors.New("attachment write failed")
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 1 }) {
+		t.Fatal("binding failure did not check whether the cleared placeholder task could be promoted")
+	}
+	// No inline deletion on bind failure: the attachments may or may not
+	// have landed (ambiguous commit), and the intent ledger — cleared inside
+	// the same transaction — already reflects whichever outcome is durable.
+	// The reconciler settles the objects.
+}
+
+func TestRouter_MediaDeadlineDropsRefsWithoutBinding(t *testing.T) {
+	h := newHarness(t)
+	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{MediaTimeout: 10 * time.Millisecond, Logger: discardLogger()})
+	// A rich post where an early upload succeeded before the deadline killed
+	// the rest of the resolution: the resolver returns the partial refs. The
+	// router must not bind them — and must not delete anything inline: the
+	// intent-ledger rows written before the uploads are the reclaim path.
+	h.media.resolve = func(ctx context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		msg.MediaRefs = append(msg.MediaRefs, channel.MediaRef{
+			Type:       channel.MsgTypeImage,
+			StorageKey: "workspaces/ws/lark/uploaded-before-deadline",
+		})
+		<-ctx.Done()
+		return msg
+	}
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		Replier:      h.replier,
+		Typing:       h.typing,
+		Media:        h.media,
+		OriginType:   "lark_chat",
+	})
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 1 }) {
+		t.Fatal("deadline expiry must still clear the marker and check promotion")
+	}
+	if refs := h.binder.boundMedia().MediaRefs; len(refs) != 0 {
+		t.Fatalf("timed-out refs must not bind: %+v", refs)
+	}
+}
+
+func TestRouter_MediaResolutionDoesNotBlockInboundHandle(t *testing.T) {
+	h := newHarness(t)
+	h.reader.session = db.ChatSession{}
+	started := make(chan struct{})
+	release := make(chan struct{})
+	h.media.started = started
+	h.media.release = release
+	msg := p2pMessage(t)
+
+	handled := make(chan error, 1)
+	go func() {
+		handled <- h.router.Handle(context.Background(), msg)
+	}()
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("media resolver did not start")
+	}
+	select {
+	case err := <-handled:
+		if err != nil {
+			t.Fatalf("Handle: %v", err)
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Handle waited for media resolution on the connector ACK path")
+	}
+	if !h.tasks.wasCalled() {
+		t.Fatal("durable run trigger was not scheduled while media resolution was pending")
+	}
+
+	close(release)
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 1 }) {
+		t.Fatal("media completion did not promote the durable deferred run")
+	}
+}
+
+func TestRouter_MediaQueuePreservesSessionOrderWithoutCancellingRunBoundary(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	secondStarted := make(chan struct{})
+	releaseSecond := make(chan struct{})
+	h.media.resolve = func(ctx context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		if msg.MessageID == "m2" {
+			close(secondStarted)
+			select {
+			case <-releaseSecond:
+			case <-ctx.Done():
+			}
+		}
+		return msg
+	}
+
+	first := p2pMessage(t)
+	first.MessageID = "m1"
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	if got := h.router.batcher.pendingCount(); got != 1 {
+		t.Fatalf("first message did not arm a run, pending=%d", got)
+	}
+
+	second := p2pMessage(t)
+	second.MessageID = "m2"
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatalf("second Handle: %v", err)
+	}
+	select {
+	case <-secondStarted:
+	case <-time.After(time.Second):
+		t.Fatal("second media job did not start")
+	}
+	if got := h.router.batcher.pendingCount(); got != 1 {
+		t.Fatalf("new media must keep one fenced run boundary, pending=%d", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 1 }) {
+		t.Fatal("durable run trigger did not flush while media was pending")
+	}
+
+	close(releaseSecond)
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 2 }) {
+		t.Fatalf("media completion promotions = %d, want 2", h.tasks.promotionCalls())
 	}
 }
 
@@ -410,6 +1180,12 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 	if h.issues.params.OriginType.String != "lark_chat" {
 		t.Fatalf("origin_type must come from the resolver set, got %q", h.issues.params.OriginType.String)
 	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("direct issue create must not also enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.typing.calls() != 0 {
+		t.Fatalf("terminal issue command must not start a chat processing indicator, calls=%d", h.typing.calls())
+	}
 	if !waitFor(time.Second, func() bool {
 		for _, r := range h.replier.calls() {
 			if r.IssueIdentifier == "MUL-42" && r.IssueTitle == "Fix login" {
@@ -419,6 +1195,388 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 		return false
 	}) {
 		t.Fatalf("expected an issue-created reply with the workspace-qualified identifier")
+	}
+}
+
+func TestRouter_IssueCommandWithMediaBindsWithoutChatRun(t *testing.T) {
+	h := newHarness(t)
+	issueTaskID := uuidFromString(t, "99999999-9999-4999-8999-999999999999")
+	h.binder.appendResult = AppendResult{
+		MessageID:   uuidFromString(t, "77777777-7777-4777-8777-777777777777"),
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Inspect image",
+		},
+	}
+	h.issues.result = service.IssueCreateResult{
+		Issue: db.Issue{
+			ID: uuidFromString(t, "88888888-8888-4888-8888-888888888888"), Number: 43, Title: "Inspect image",
+		},
+		AssignedTaskID: issueTaskID,
+	}
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 1 }) {
+		t.Fatal("issue command media did not finish binding")
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("media completion must not enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if got := h.binder.boundMedia(); len(got.MediaRefs) != 1 || got.IssueID != h.issues.result.Issue.ID || got.Body != "hello" {
+		t.Fatalf("bound issue media = %+v", got)
+	}
+}
+
+func TestRouter_IssueCommand_ActiveDuplicateIsTerminalProductOutcome(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendResult = AppendResult{
+		MessageID:   uuidFromString(t, "77777777-7777-4777-8777-777777777777"),
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Existing issue",
+		},
+	}
+	duplicate := db.Issue{
+		ID:     uuidFromString(t, "88888888-8888-4888-8888-888888888888"),
+		Number: 44,
+		Title:  "Existing issue",
+	}
+	h.issues.result = service.IssueCreateResult{DuplicateIssue: &duplicate}
+	h.issues.err = service.ErrActiveDuplicate
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("duplicate issue must be a product outcome, got error: %v", err)
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("duplicate command must not enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.typing.calls() != 0 {
+		t.Fatalf("duplicate command must not start a processing indicator, calls=%d", h.typing.calls())
+	}
+	if !waitFor(time.Second, func() bool {
+		for _, result := range h.replier.calls() {
+			if result.IssueDuplicate && result.IssueID == duplicate.ID && result.IssueIdentifier == "MUL-44" && result.IssueTitle == duplicate.Title {
+				return true
+			}
+		}
+		return false
+	}) {
+		t.Fatalf("duplicate result was not delivered to replier: %+v", h.replier.calls())
+	}
+	if !waitFor(time.Second, func() bool { return h.binder.boundMedia().MessageID.Valid }) {
+		t.Fatalf("duplicate media was not finalized: %+v", h.binder.boundMedia())
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("duplicate media unexpectedly invoked resolver, calls=%d", h.media.calls())
+	}
+	if got := h.binder.boundMedia().MediaRefs; len(got) != 0 {
+		t.Fatalf("duplicate media unexpectedly persisted refs: %+v", got)
+	}
+	if got := h.binder.boundMedia().IssueID; got.Valid {
+		t.Fatalf("duplicate media unexpectedly targeted existing issue %v", got)
+	}
+	if h.issues.attachmentsChanged.Load() != 0 {
+		t.Fatalf("duplicate media published issue attachment changes = %d, want 0", h.issues.attachmentsChanged.Load())
+	}
+	h.tasks.mu.Lock()
+	issuePromotions := len(h.tasks.issueTaskPromotions)
+	h.tasks.mu.Unlock()
+	if issuePromotions != 0 {
+		t.Fatalf("duplicate media promoted a non-existent issue task, calls=%d", issuePromotions)
+	}
+}
+
+func TestRouter_IssueCommand_ActiveDuplicateFinalizesWithoutWaitingForSessionMedia(t *testing.T) {
+	h := newHarness(t)
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
+	var releaseOnce sync.Once
+	t.Cleanup(func() { releaseOnce.Do(func() { close(releaseFirst) }) })
+	h.media.resolve = func(_ context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		if msg.MessageID == "om-first" {
+			close(firstStarted)
+			<-releaseFirst
+		}
+		return msg
+	}
+
+	first := p2pMessage(t)
+	first.MessageID = "om-first"
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first session media job did not start")
+	}
+
+	duplicateMessageID := uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	h.binder.appendResult = AppendResult{
+		MessageID:   duplicateMessageID,
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Existing issue",
+		},
+	}
+	duplicate := db.Issue{
+		ID:     uuidFromString(t, "88888888-8888-4888-8888-888888888888"),
+		Number: 44,
+		Title:  "Existing issue",
+	}
+	h.issues.result = service.IssueCreateResult{DuplicateIssue: &duplicate}
+	h.issues.err = service.ErrActiveDuplicate
+
+	second := p2pMessage(t)
+	second.MessageID = "om-duplicate"
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatalf("duplicate Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.binder.boundMedia().MessageID == duplicateMessageID }) {
+		t.Fatal("duplicate finalization waited behind the session's active media resolver")
+	}
+	if h.media.calls() != 1 {
+		t.Fatalf("duplicate finalization invoked media resolver, calls=%d", h.media.calls())
+	}
+	if got := h.binder.boundMedia(); len(got.MediaRefs) != 0 || got.IssueID.Valid {
+		t.Fatalf("duplicate finalization persisted media or targeted the issue: %+v", got)
+	}
+
+	releaseOnce.Do(func() { close(releaseFirst) })
+	if !waitFor(time.Second, func() bool { return h.tasks.promotionCalls() == 2 }) {
+		t.Fatalf("session media job did not finish after release, promotions=%d", h.tasks.promotionCalls())
+	}
+}
+
+func TestRouter_MediaFinalizationExpiredDeadlineDoesNotLogResolutionFailure(t *testing.T) {
+	h := newHarness(t)
+	var logs bytes.Buffer
+	h.router.logger = slog.New(slog.NewTextHandler(&logs, nil))
+	messageID := uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+
+	h.router.resolveAndBindMedia(
+		ResolverSet{Session: h.binder, Media: h.media},
+		h.inst.inst,
+		h.ident.id,
+		messageID,
+		p2pMessage(t),
+		h.binder.ensureID,
+		db.Issue{},
+		pgtype.Text{},
+		"",
+		pgtype.UUID{},
+		false,
+		time.Now().Add(-time.Second),
+	)
+
+	if got := h.binder.boundMedia(); got.MessageID != messageID || len(got.MediaRefs) != 0 {
+		t.Fatalf("expired finalize-only bind = %+v", got)
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("finalize-only path invoked media resolver, calls=%d", h.media.calls())
+	}
+	if bytes.Contains(logs.Bytes(), []byte("media resolution incomplete")) {
+		t.Fatalf("finalize-only path logged a media resolution failure: %s", logs.String())
+	}
+}
+
+func TestRouter_IssueCommand_InfrastructureFailureRemainsError(t *testing.T) {
+	h := newHarness(t)
+	h.binder.appendResult = AppendResult{
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Unavailable issue",
+		},
+	}
+	issueErr := errors.New("database unavailable")
+	h.issues.err = issueErr
+
+	err := h.router.Handle(context.Background(), p2pMessage(t))
+	if !errors.Is(err, issueErr) {
+		t.Fatalf("infrastructure failure = %v", err)
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("failed issue command must not enqueue a chat task, calls=%d", h.tasks.calls())
+	}
+	if len(h.replier.calls()) != 0 {
+		t.Fatalf("failed issue command must not emit a success outcome: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_BareIssueReturnsUsageWithoutCreatingOrResolvingMedia(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue"
+	msg.CommandText = "/issue"
+	msg.Type = channel.MsgTypeImage
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("bare issue must be a product outcome, got error: %v", err)
+	}
+	if h.issues.called {
+		t.Fatal("bare issue unexpectedly called IssueService.Create")
+	}
+	if h.tasks.calls() != 0 {
+		t.Fatalf("bare issue unexpectedly enqueued a chat task, calls=%d", h.tasks.calls())
+	}
+	if h.media.calls() != 0 {
+		t.Fatalf("bare issue unexpectedly resolved media, calls=%d", h.media.calls())
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("issue usage result was not delivered: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_BareIssueWithoutMediaDoesNotRequestMediaResend(t *testing.T) {
+	h := newHarness(t)
+	h.binder.parseIssue = true
+	h.media.noMedia = true
+	msg := p2pMessage(t)
+	msg.Text = "/issue"
+	msg.CommandText = "/issue"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("bare issue must be a product outcome, got error: %v", err)
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeIssueUsage && !calls[0].IssueUsageHadMedia
+	}) {
+		t.Fatalf("plain issue usage result was not delivered: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_IssueCommand_MediaTargetsCreatedIssue(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		text        string
+		commandText string
+		title       string
+		description string
+	}{
+		{name: "image before command", text: "[Image]\n/issue 解读该架构图", commandText: "/issue 解读该架构图", title: "解读该架构图", description: ""},
+		{name: "command before image", text: "/issue 解读这个架构图\n[Image]", commandText: "/issue 解读这个架构图", title: "解读这个架构图", description: "[Image]"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			issueID := uuidFromString(t, "77777777-7777-7777-7777-777777777777")
+			issueTaskID := uuidFromString(t, "88888888-8888-4888-8888-888888888888")
+			h.binder.parseIssue = true
+			h.binder.appendResult = AppendResult{
+				MessageID:   uuidFromString(t, "99999999-9999-4999-8999-999999999999"),
+				DedupMarked: true,
+			}
+			h.issues.result = service.IssueCreateResult{
+				Issue:          db.Issue{ID: issueID, Number: 42, Title: tc.title},
+				AssignedTaskID: issueTaskID,
+			}
+			msg := p2pMessage(t)
+			msg.Type = channel.MsgTypeImage
+			msg.Text = tc.text
+			// DingTalk omits its adapter-generated image marker from the command
+			// source, regardless of whether the image precedes or follows the text.
+			msg.CommandText = tc.commandText
+
+			if err := h.router.Handle(context.Background(), msg); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			if h.issues.params.Title != tc.title {
+				t.Fatalf("created issue title = %q, want %q", h.issues.params.Title, tc.title)
+			}
+			if h.issues.params.Description.String != tc.description || h.issues.params.Description.Valid != (tc.description != "") {
+				t.Fatalf("created issue description = %#v, want %q", h.issues.params.Description, tc.description)
+			}
+			if !waitFor(time.Second, func() bool { return len(h.binder.boundMedia().MediaRefs) == 1 }) {
+				t.Fatalf("resolved media not bound: %+v", h.binder.boundMedia())
+			}
+			if got := h.binder.boundMedia().IssueID; got != issueID {
+				t.Fatalf("media target issue = %v, want %v", got, issueID)
+			}
+			if got := h.binder.boundMedia().IssueDescriptionBase; !got.Valid || got.String != tc.description {
+				t.Fatalf("media description base = %#v, want valid %q", got, tc.description)
+			}
+			if h.issues.opts.AssignedAgentRunFireAt.IsZero() {
+				t.Fatal("media-backed /issue must defer its assigned-agent task")
+			}
+			if !waitFor(time.Second, func() bool {
+				h.tasks.mu.Lock()
+				defer h.tasks.mu.Unlock()
+				return len(h.tasks.issueTaskPromotions) == 1
+			}) {
+				t.Fatal("deferred issue task was not promoted after media binding")
+			}
+			h.tasks.mu.Lock()
+			gotTaskID := h.tasks.issueTaskPromotions[0]
+			h.tasks.mu.Unlock()
+			if gotTaskID != issueTaskID {
+				t.Fatalf("promoted issue task = %v, want %v", gotTaskID, issueTaskID)
+			}
+			if !waitFor(time.Second, func() bool { return h.issues.attachmentsChanged.Load() == 1 }) {
+				t.Fatalf("attachment change events = %d, want 1", h.issues.attachmentsChanged.Load())
+			}
+		})
+	}
+}
+
+func TestRouter_IssueCommand_WithoutMediaKeepsImmediateAssignedTask(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	h.binder.appendResult = AppendResult{
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Fix broken layout",
+		},
+	}
+	h.issues.result = service.IssueCreateResult{
+		Issue: db.Issue{ID: uuidFromString(t, "77777777-7777-7777-7777-777777777777"), Number: 42, Title: "Fix broken layout"},
+	}
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !h.issues.opts.AssignedAgentRunFireAt.IsZero() {
+		t.Fatalf("text-only /issue unexpectedly deferred its assigned task until %v", h.issues.opts.AssignedAgentRunFireAt)
+	}
+	h.tasks.mu.Lock()
+	promotions := len(h.tasks.issueTaskPromotions)
+	h.tasks.mu.Unlock()
+	if promotions != 0 {
+		t.Fatalf("text-only /issue task promotions = %d, want 0", promotions)
+	}
+}
+
+func TestRouter_IssueCommand_BindFailurePromotesDeferredTaskWithoutAttachmentEvent(t *testing.T) {
+	h := newHarness(t)
+	issueTaskID := uuidFromString(t, "88888888-8888-4888-8888-888888888888")
+	h.binder.appendResult = AppendResult{
+		DedupMarked: true,
+		IssueCommand: &IssueCommand{
+			Title: "Fix broken layout",
+		},
+	}
+	h.binder.bindErr = errors.New("attachment write failed")
+	h.issues.result = service.IssueCreateResult{
+		Issue:          db.Issue{ID: uuidFromString(t, "77777777-7777-7777-7777-777777777777"), Number: 42, Title: "Fix broken layout"},
+		AssignedTaskID: issueTaskID,
+	}
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool {
+		h.tasks.mu.Lock()
+		defer h.tasks.mu.Unlock()
+		return len(h.tasks.issueTaskPromotions) == 1
+	}) {
+		t.Fatal("failed attachment bind left the issue task deferred")
+	}
+	if h.issues.attachmentsChanged.Load() != 0 {
+		t.Fatalf("attachment change events after failed bind = %d, want 0", h.issues.attachmentsChanged.Load())
 	}
 }
 
@@ -434,7 +1592,7 @@ func TestRouter_GroupSessionCreatorIsInstaller(t *testing.T) {
 		t.Fatalf("group session creator must be the installer")
 	}
 	// And the run initiator is the sender, not the installer.
-	if h.tasks.initiator != h.ident.id.UserID {
+	if !waitFor(time.Second, h.tasks.wasCalled) || h.tasks.initiatorArg() != h.ident.id.UserID {
 		t.Fatalf("run initiator must be the message sender")
 	}
 }
@@ -455,19 +1613,19 @@ func TestRouter_FlushOffline_RepliesAgentOffline(t *testing.T) {
 	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	// Inline flush (no batcher) emits the offline notice synchronously via replier.
-	found := false
-	for _, r := range h.replier.calls() {
-		if r.Outcome == OutcomeAgentOffline {
-			found = true
+	if !waitFor(time.Second, func() bool {
+		for _, r := range h.replier.calls() {
+			if r.Outcome == OutcomeAgentOffline {
+				return true
+			}
 		}
-	}
-	if !found {
+		return false
+	}) {
 		t.Fatalf("agent-no-runtime must emit an AgentOffline reply")
 	}
 	// The reaction was added on ingest but no task will run, so the bus-driven
 	// clear never fires — the flush must clear the typing indicator itself.
-	if h.typing.settledCalls() != 1 {
+	if !waitFor(time.Second, func() bool { return h.typing.settledCalls() == 1 }) {
 		t.Fatalf("offline flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
 	}
 }
@@ -478,8 +1636,44 @@ func TestRouter_FlushArchived_ClearsTyping(t *testing.T) {
 	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if h.typing.settledCalls() != 1 {
+	if !waitFor(time.Second, func() bool { return h.typing.settledCalls() == 1 }) {
 		t.Fatalf("archived flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+}
+
+// TestRouter_FlushSessionArchived_ClearsTypingAndSaysNothing pins what the
+// flush does with the refusal EnqueueChatTask returns when the session was
+// archived while the debounce window was still open. Two things have to be
+// true, and the second is the one worth a test: the typing indicator must be
+// cleared here (no task will exist, so the bus-driven clear can never fire),
+// and nothing may be posted back — the archive deleted the channel binding
+// before this flush ran, so a notice would be addressed to a room that is no
+// longer bound to this conversation. The error is not one of the two the
+// switch names, so it falls to the default log branch and says nothing, which
+// is the behaviour this test holds in place.
+func TestRouter_FlushSessionArchived_ClearsTypingAndSaysNothing(t *testing.T) {
+	h := newHarness(t)
+	h.tasks.err = service.ErrChatSessionArchived
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.typing.settledCalls() == 1 }) {
+		t.Fatalf("an archived-session flush must clear the typing indicator, got %d OnSettled calls", h.typing.settledCalls())
+	}
+	// The ingest ACK is the only reply this message is entitled to; anything
+	// else came from the flush. Waiting the window out is the assertion —
+	// waitFor returns false only if it never happened.
+	spoke := func() (Result, bool) {
+		for _, r := range h.replier.calls() {
+			if r.Outcome != OutcomeIngested {
+				return r, true
+			}
+		}
+		return Result{}, false
+	}
+	if waitFor(200*time.Millisecond, func() bool { _, ok := spoke(); return ok }) {
+		reply, _ := spoke()
+		t.Fatalf("archived-session flush posted %q into a room the archive had already unbound", reply.Outcome)
 	}
 }
 
@@ -488,7 +1682,7 @@ func TestRouter_FlushSuccess_DoesNotClearTyping(t *testing.T) {
 	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !h.tasks.wasCalled() {
+	if !waitFor(time.Second, h.tasks.wasCalled) {
 		t.Fatalf("a healthy session must enqueue a task")
 	}
 	// A successfully enqueued task is cleared by the platform's bus-driven
@@ -505,8 +1699,189 @@ func TestRouter_ForceFresh_Propagates(t *testing.T) {
 	if err := h.router.Handle(context.Background(), msg); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if !h.tasks.freshArg() {
+	if !waitFor(time.Second, h.tasks.wasCalled) || !h.tasks.freshArg() {
 		t.Fatalf("ForceFresh must propagate to EnqueueChatTask")
+	}
+}
+
+func TestRouter_NewCommand_ForcesFreshAndStripsDirective(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.Source.ChannelType = channel.Type("test-channel")
+	msg.Text = "/new answer with the current model"
+	h.router.Register(msg.Source.ChannelType, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		OriginType:   "test_chat",
+	})
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !h.tasks.freshArg() {
+		t.Fatal("/new must enqueue a fresh provider session")
+	}
+	if got := h.binder.lastAppend.Message.Text; got != "answer with the current model" {
+		t.Fatalf("appended text=%q, want command stripped", got)
+	}
+	if got := h.binder.lastAppend.Message.CommandText; got != "/new answer with the current model" {
+		t.Fatalf("command text=%q, want original user text", got)
+	}
+}
+
+func TestRouter_NewCommandDoesNotReparseStrippedBodyAsIssue(t *testing.T) {
+	tests := []struct {
+		name        string
+		channelType channel.Type
+		text        string
+		commandText string
+		forceFresh  bool
+	}{
+		{
+			name:        "Slack same line",
+			channelType: channel.Type("slack"),
+			text:        "/new /issue investigate deploy",
+			commandText: "/new /issue investigate deploy",
+		},
+		{
+			name:        "Slack next line",
+			channelType: channel.Type("slack"),
+			text:        "/new\n/issue investigate deploy",
+			commandText: "/new\n/issue investigate deploy",
+		},
+		{
+			name:        "Feishu same line",
+			channelType: channel.TypeFeishu,
+			text:        "/issue investigate deploy",
+			commandText: "/new /issue investigate deploy",
+			forceFresh:  true,
+		},
+		{
+			name:        "Feishu next line",
+			channelType: channel.TypeFeishu,
+			text:        "/issue investigate deploy",
+			commandText: "/new\n/issue investigate deploy",
+			forceFresh:  true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.binder.parseIssue = true
+			msg := p2pMessage(t)
+			msg.Source.ChannelType = tc.channelType
+			msg.Text = tc.text
+			msg.CommandText = tc.commandText
+			msg.ForceFresh = tc.forceFresh
+			if tc.channelType == channel.Type("slack") {
+				h.router.Register(channel.Type("slack"), ResolverSet{
+					Installation: h.inst,
+					Identity:     h.ident,
+					Dedup:        h.dedup,
+					Session:      h.binder,
+					Audit:        h.audit,
+					OriginType:   "slack_chat",
+				})
+			}
+
+			if err := h.router.Handle(context.Background(), msg); err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if h.issues.called {
+				t.Fatal("/new must not be re-parsed as /issue after its directive is stripped")
+			}
+			if !h.binder.lastAppend.Message.ForceFresh {
+				t.Fatal("/new must still request a fresh provider session")
+			}
+		})
+	}
+}
+
+func TestRouter_AdapterFreshBodyIsNotParsedAgain(t *testing.T) {
+	h := newHarness(t)
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+	msg.Text = "<recent_context>\n/new from history\n</recent_context>\n\ncurrent prompt"
+	msg.CommandText = "/new current prompt"
+
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got := h.binder.lastAppend.Message.Text; got != msg.Text {
+		t.Fatalf("adapter-enriched body changed: got %q want %q", got, msg.Text)
+	}
+}
+
+func TestRouter_BareFreshPersistsIntentAndRepliesWithoutEmptyTurn(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+
+	reset := p2pMessage(t)
+	reset.Text = "/new"
+	if err := h.router.Handle(context.Background(), reset); err != nil {
+		t.Fatalf("bare fresh Handle: %v", err)
+	}
+	if h.binder.appendedParams().Message.MessageID != "" {
+		t.Fatal("bare fresh must not append an empty user message")
+	}
+	if h.tasks.wasCalled() {
+		t.Fatal("bare fresh must not schedule an empty agent run")
+	}
+	if h.typing.calls() != 0 {
+		t.Fatal("bare fresh must not start a typing indicator without a run")
+	}
+	if h.dedup.marks() != 1 {
+		t.Fatalf("bare fresh dedup marks = %d, want 1", h.dedup.marks())
+	}
+	if h.binder.pendingFreshCalls() != 1 {
+		t.Fatalf("pending fresh writes = %d, want 1", h.binder.pendingFreshCalls())
+	}
+	if !waitFor(time.Second, func() bool {
+		calls := h.replier.calls()
+		return len(calls) == 1 && calls[0].Outcome == OutcomeFreshPending
+	}) {
+		t.Fatalf("fresh-pending result was not delivered: %+v", h.replier.calls())
+	}
+}
+
+func TestRouter_AdapterBareFreshUsesOriginalCommandText(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+
+	reset := p2pMessage(t)
+	reset.Text = "<recent_context>old topic</recent_context>"
+	reset.CommandText = "/new"
+	reset.ForceFresh = true
+	if err := h.router.Handle(context.Background(), reset); err != nil {
+		t.Fatalf("bare fresh Handle: %v", err)
+	}
+	if h.binder.appendedParams().Message.MessageID != "" {
+		t.Fatal("adapter-enriched bare fresh must not append a user message")
+	}
+	if h.tasks.wasCalled() {
+		t.Fatal("adapter-enriched bare fresh must not schedule an empty agent run")
+	}
+	if h.binder.pendingFreshCalls() != 1 {
+		t.Fatalf("pending fresh writes = %d, want 1", h.binder.pendingFreshCalls())
+	}
+}
+
+func TestRouter_BareFreshPersistenceFailureDoesNotAcknowledge(t *testing.T) {
+	h := newHarness(t)
+	h.media.noMedia = true
+	h.binder.pendingErr = errors.New("database unavailable")
+
+	reset := p2pMessage(t)
+	reset.Text = "/new"
+	if err := h.router.Handle(context.Background(), reset); err == nil {
+		t.Fatal("bare fresh must fail when its durable intent cannot be stored")
+	}
+	if len(h.replier.calls()) != 0 {
+		t.Fatalf("failed persistence emitted a success reply: %+v", h.replier.calls())
 	}
 }
 
@@ -517,7 +1892,7 @@ func TestRouter_DrainJoinsReplies(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	done := make(chan struct{})
-	go func() { h.router.Drain(); close(done) }()
+	go func() { h.router.Drain(context.Background()); close(done) }()
 	select {
 	case <-done:
 	case <-time.After(2 * time.Second):
@@ -526,6 +1901,83 @@ func TestRouter_DrainJoinsReplies(t *testing.T) {
 	if len(h.replier.calls()) != 1 {
 		t.Fatalf("expected exactly one reply after drain, got %d", len(h.replier.calls()))
 	}
+}
+
+func TestRouter_MediaConcurrencyCapAppliesAcrossSessions(t *testing.T) {
+	h := newHarness(t)
+	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{MediaConcurrency: 1, Logger: discardLogger()})
+	release := make(chan struct{})
+	h.media.resolve = func(ctx context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		select {
+		case <-release:
+		case <-ctx.Done():
+		}
+		return msg
+	}
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		Replier:      h.replier,
+		Typing:       h.typing,
+		Media:        h.media,
+		OriginType:   "lark_chat",
+	})
+
+	first := p2pMessage(t)
+	first.MessageID = "m1"
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	if !waitFor(time.Second, func() bool { return h.media.calls() == 1 }) {
+		t.Fatalf("first media job did not start, calls=%d", h.media.calls())
+	}
+
+	// A different session gets its own queue; only the global cap gates it.
+	h.binder.ensureID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	second := p2pMessage(t)
+	second.MessageID = "m2"
+	second.Source.ChatID = "oc_chat_b"
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatalf("second Handle: %v", err)
+	}
+	if waitFor(150*time.Millisecond, func() bool { return h.media.calls() == 2 }) {
+		t.Fatal("second media job ran while the only concurrency slot was held")
+	}
+
+	close(release)
+	if !waitFor(time.Second, func() bool { return h.media.calls() == 2 }) {
+		t.Fatalf("second media job never ran after the slot freed, calls=%d", h.media.calls())
+	}
+}
+
+func TestRouter_DrainHonorsDeadlineWhenMediaResolverIgnoresCancellation(t *testing.T) {
+	h := newHarness(t)
+	release := make(chan struct{})
+	started := make(chan struct{})
+	h.media.resolve = func(_ context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		close(started)
+		<-release
+		return msg
+	}
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("media resolver did not start")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	if h.router.Drain(ctx) {
+		t.Fatal("Drain reported completion for a wedged media resolver")
+	}
+	close(release)
 }
 
 func TestRouter_EmptyMessageID_SkipsDedup(t *testing.T) {
@@ -538,7 +1990,115 @@ func TestRouter_EmptyMessageID_SkipsDedup(t *testing.T) {
 	if h.dedup.claimCalls != 0 {
 		t.Fatalf("empty message id must skip the dedup claim, got %d", h.dedup.claimCalls)
 	}
-	if !h.tasks.wasCalled() {
+	if !waitFor(time.Second, h.tasks.wasCalled) {
 		t.Fatalf("message must still ingest without a dedup key")
+	}
+}
+
+// A media job whose budget expires while it is still QUEUED (waiting for the
+// global slot) must not wait for the front of the line: it finalizes the
+// placeholder (marker clear + promotion) immediately, without ever invoking
+// the resolver, while the slot holder keeps running.
+func TestRouter_MediaQueueWaitExpiryFinalizesWithoutResolving(t *testing.T) {
+	h := newHarness(t)
+	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{MediaConcurrency: 1, MediaTimeout: 150 * time.Millisecond, Logger: discardLogger()})
+	release := make(chan struct{})
+	firstStarted := make(chan struct{})
+	h.media.resolve = func(_ context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		if msg.MessageID == "m1" {
+			close(firstStarted)
+			// Deliberately ignores ctx: the slot must stay held past m2's
+			// expiry so m2 deterministically expires while QUEUED.
+			<-release
+		}
+		return msg
+	}
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		Replier:      h.replier,
+		Typing:       h.typing,
+		Media:        h.media,
+		OriginType:   "lark_chat",
+	})
+
+	first := p2pMessage(t)
+	first.MessageID = "m1"
+	if err := h.router.Handle(context.Background(), first); err != nil {
+		t.Fatalf("first Handle: %v", err)
+	}
+	select {
+	case <-firstStarted:
+	case <-time.After(time.Second):
+		t.Fatal("first media job did not start")
+	}
+
+	// Second job (another session) queues behind the only slot and expires
+	// there; it must finalize while the slot is still held.
+	h.binder.ensureID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	second := p2pMessage(t)
+	second.MessageID = "m2"
+	second.Source.ChatID = "oc_chat_b"
+	if err := h.router.Handle(context.Background(), second); err != nil {
+		t.Fatalf("second Handle: %v", err)
+	}
+	if !waitFor(2*time.Second, func() bool { return h.tasks.promotionCalls() >= 1 }) {
+		t.Fatal("expired queued job did not finalize while the slot was held")
+	}
+	if h.media.calls() != 1 {
+		t.Fatalf("expired job must not invoke the resolver, calls=%d", h.media.calls())
+	}
+	close(release)
+	if !waitFor(2*time.Second, func() bool { return h.tasks.promotionCalls() == 2 }) {
+		t.Fatalf("slot holder promotion missing, promotions=%d", h.tasks.promotionCalls())
+	}
+}
+
+// The local resolve budget must start BEFORE the append transaction: the DB
+// anchors the durable fallback at insert-time now(), so a budget started
+// post-commit would outlive the fallback by the append latency and let the
+// task fire while the resolver still runs. With a slow append, the resolver's
+// context deadline must still be measured from the pre-append instant.
+func TestRouter_MediaDeadlineStartsBeforeAppend(t *testing.T) {
+	h := newHarness(t)
+	const timeout = 300 * time.Millisecond
+	const appendLatency = 150 * time.Millisecond
+	h.router = NewRouter(h.issues, h.tasks, h.reader, RouterConfig{MediaTimeout: timeout, Logger: discardLogger()})
+	h.binder.appendDelay = appendLatency
+	deadlines := make(chan time.Time, 1)
+	h.media.resolve = func(ctx context.Context, msg channel.InboundMessage) channel.InboundMessage {
+		if d, ok := ctx.Deadline(); ok {
+			deadlines <- d
+		}
+		return msg
+	}
+	h.router.Register(channel.TypeFeishu, ResolverSet{
+		Installation: h.inst,
+		Identity:     h.ident,
+		Dedup:        h.dedup,
+		Session:      h.binder,
+		Audit:        h.audit,
+		Replier:      h.replier,
+		Typing:       h.typing,
+		Media:        h.media,
+		OriginType:   "lark_chat",
+	})
+
+	start := time.Now()
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	select {
+	case d := <-deadlines:
+		// Started pre-append: deadline ≈ start+timeout. Started post-append it
+		// would be ≥ start+appendLatency+timeout; the midpoint separates them.
+		if limit := start.Add(timeout + appendLatency/2); d.After(limit) {
+			t.Fatalf("resolve deadline %v exceeds %v — local budget started after the append", d.Sub(start), timeout+appendLatency/2)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("resolver did not run")
 	}
 }

@@ -51,8 +51,11 @@ jobs:
           go-version-file: server/go.mod
           cache-dependency-path: server/go.sum
 
+      - name: Verify Go test wrapper
+        run: bash scripts/test-go.test.sh
+
       - name: Run tests
-        run: cd server && go test -race ./...
+        run: bash scripts/test-go.sh --race
 
   release:
     needs: verify

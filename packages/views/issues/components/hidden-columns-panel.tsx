@@ -18,10 +18,10 @@ import { useT } from "../../i18n";
  * the kanban-style views (board and swimlane).
  *
  * Each consumer renders its own per-row count via the {@link renderRow} slot —
- * the board uses `useLoadMoreByStatus` to fetch the workspace-wide aggregate,
- * while the swimlane uses an in-memory total derived from already-loaded
- * issues. Centralising the chrome here keeps a future view (calendar /
- * timeline / etc.) from forking yet another copy.
+ * the board reads the server status facet's exact total, while the swimlane
+ * uses an in-memory total derived from already-loaded issues. Centralising
+ * the chrome here keeps a future view (calendar / timeline / etc.) from
+ * forking yet another copy.
  */
 export function HiddenColumnsPanel({
   hiddenStatuses,
@@ -34,7 +34,7 @@ export function HiddenColumnsPanel({
   return (
     <div className="flex w-[240px] shrink-0 flex-col">
       <div className="mb-2 flex items-center gap-2 px-1">
-        <span className="text-sm font-medium text-muted-foreground">
+        <span className="text-body font-medium text-muted-foreground">
           {t(($) => $.board.hidden_columns_label)}
         </span>
       </div>
@@ -54,7 +54,7 @@ export function HiddenColumnRow({
   total,
 }: {
   status: IssueStatus;
-  total: number;
+  total?: number;
 }) {
   const { t } = useT("issues");
   const viewStoreApi = useViewStoreApi();
@@ -62,10 +62,12 @@ export function HiddenColumnRow({
     <div className="flex items-center justify-between rounded-lg px-2.5 py-2 hover:bg-muted/50">
       <div className="flex items-center gap-2">
         <StatusIcon status={status} className="h-3.5 w-3.5" />
-        <span className="text-sm">{t(($) => $.status[status])}</span>
+        <span className="text-body">{t(($) => $.status[status])}</span>
       </div>
       <div className="flex items-center gap-1.5">
-        <span className="text-xs text-muted-foreground">{total}</span>
+        {total !== undefined && (
+          <span className="text-caption text-muted-foreground">{total}</span>
+        )}
         <DropdownMenu>
           <DropdownMenuTrigger
             render={

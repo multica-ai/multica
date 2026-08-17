@@ -1,0 +1,199 @@
+---
+title: 開発に参加する
+description: Multica のローカル開発環境を構築し、テストを実行して、リポジトリの規約に従って変更を提出します。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica は Go バックエンドと pnpm monorepo で構成されています。ローカルで起動する最も簡単な方法は `make dev` です。現在の checkout 用に環境、データベース、migration を準備し、Web と API を起動します。
+
+## 必要な環境
+
+- Node.js 22
+- pnpm 10.28.2
+- Go 1.26.1
+- Docker Engine または Docker Desktop
+- Git と Make
+
+バージョンについては、ルートの `package.json`、`server/go.mod`、CI workflow を信頼できる情報源としてください。
+
+## 初回起動
+
+```bash
+git clone https://github.com/multica-ai/multica.git
+cd multica
+make dev
+```
+
+メイン checkout は `.env` を使用します。ファイルがなければ `make dev` が `.env.example` から作成し、共有 PostgreSQL を起動して依存関係をインストールし、migration を実行して API と Web を起動します。
+
+デフォルトのアドレス:
+
+```text
+Web: http://localhost:3000
+API: http://localhost:8080
+```
+
+ローカルの固定確認コードは開発環境の設定から取得されます。ローカルの `.env` を公開インターネット向けのデプロイに使用しないでください。
+
+## worktree での開発
+
+このリポジトリでは、メイン checkout と複数の worktree を同時に実行できます。1 つの PostgreSQL コンテナを共有しますが、データベースとポートは分かれています。
+
+```bash
+git worktree add ../multica-feature -b feat/my-change main
+cd ../multica-feature
+make setup-worktree
+make start-worktree
+```
+
+`make setup-worktree` は `.env.worktree` を生成し、パスからデータベース名とポートを決定します。再び起動するには次を実行します。
+
+```bash
+make start-worktree
+```
+
+現在の worktree の Web と API を停止するには:
+
+```bash
+make stop-worktree
+```
+
+`make dev` を直接実行することもできます。スクリプトが `.git` ファイルから worktree を判定し、`.env.worktree` を選択します。
+
+<Callout type="info">
+worktree 間で共有するのは PostgreSQL コンテナであり、データベースではありません。worktree ごとに新しい Compose project を起動しないでください。まず `.env.worktree` の `POSTGRES_DB`、`PORT`、`FRONTEND_PORT` を確認してください。
+</Callout>
+
+## よく使うコマンド
+
+### 全体フロー
+
+```bash
+make dev              # 現在の checkout を準備して起動
+make start            # 既存の環境で API と Web を起動
+make stop             # 現在の checkout のプロセスを停止
+make check            # ローカルの完全な検証フローを実行
+make build            # server、CLI、migrate バイナリをビルド
+```
+
+### フロントエンド
+
+```bash
+pnpm install
+pnpm dev:web
+pnpm dev:desktop
+pnpm build
+pnpm typecheck
+pnpm lint
+pnpm test
+```
+
+ルートコマンドはデフォルトで Mobile を除外します。Mobile には独自のスクリプトと CI があるため、変更前に `apps/mobile/CLAUDE.md` を読んでください。
+
+### バックエンド
+
+```bash
+make server
+make daemon
+make test
+make migrate-up
+make migrate-down
+make sqlc
+```
+
+ソースから CLI コマンドを実行するには:
+
+```bash
+make cli ARGS="issue list"
+```
+
+## フロントエンド機能の変更
+
+Web と Desktop の両方で必要な機能は、責務に応じて配置します。
+
+1. API 型、query、mutation、プラットフォーム非依存のロジックは `packages/core/` に置きます。
+2. 基礎 UI は `packages/ui/` に置き、ビジネスコードへ依存させません。
+3. ビジネスページとコンポーネントは `packages/views/` に置きます。
+4. Next.js、Electron、ルーティングアダプターは対応する app に残します。
+5. 共有ページは Web と Desktop の両方へ接続します。
+
+サーバーデータは TanStack Query、フィルター、下書き、レイアウトなどのクライアント状態は Zustand が管理します。具体的な境界は[プロジェクトアーキテクチャ](/developers/architecture)とルートの `CLAUDE.md` を参照してください。
+
+API を追加または変更するときは `packages/core/api/` の zod schema も更新し、欠落フィールド、未知の enum、形式不正に対する解析テストを追加します。
+
+## データベースの変更
+
+Migration は `server/migrations/`、クエリは `server/pkg/db/queries/` にあります。
+
+1. 次の未使用の数値 prefix を使い、`.up.sql` と `.down.sql` の両方を作成します。
+2. データベースの foreign key、cascade delete、cascade update を追加しません。関係の検証とクリーンアップはアプリケーション層で行います。
+3. 新しいインデックスはすべて `CREATE INDEX CONCURRENTLY` または `CREATE UNIQUE INDEX CONCURRENTLY` を使用します。
+4. concurrent index は、その 1 文だけを含む migration ファイルに分けます。
+5. クエリ変更後に `make sqlc` を実行し、生成された `server/pkg/db/generated/` の変更をコミットします。
+6. sqlc の生成ファイルを直接編集しません。
+
+複数の書き込みをまとめて成功またはロールバックさせる必要がある場合は、service 層でアプリケーショントランザクションを使用します。
+
+## テストの配置
+
+| 変更 | テストの配置 |
+| --- | --- |
+| 共有ビジネスロジック、query、store | `packages/core/*.test.ts` |
+| 共有ページとコンポーネント | `packages/views/*.test.tsx` |
+| Web または Desktop のプラットフォーム wiring | 対応する `apps/*` ディレクトリ |
+| エンドツーエンドフロー | `e2e/*.spec.ts` |
+| バックエンド | 関連する Go package の `*_test.go` |
+
+まず変更に最も近いチェックを実行し、その後に範囲を広げます。Docs だけの変更例:
+
+```bash
+pnpm --filter @multica/docs typecheck
+```
+
+共有フロントエンドの変更:
+
+```bash
+pnpm typecheck
+pnpm test
+```
+
+バックエンドの変更:
+
+```bash
+make test
+```
+
+提出前:
+
+```bash
+make check
+```
+
+`make check` は TypeScript の typecheck とユニットテスト、Go テスト、Playwright E2E を実行します。CI は変更範囲に応じて build と lint を行い、プラットフォームまたはインストーラー専用テストも実行します。
+
+## 現在の開発データベースをリセット
+
+クリーンなデータが必要な場合は、**現在の checkout の環境ファイルで指定されたデータベース**をリセットできます。
+
+```bash
+make stop
+make db-reset
+make start
+```
+
+`make db-reset` は現在の `POSTGRES_DB` を削除して再作成し、リモートデータベースへの接続を拒否します。実行前に `.env` または `.env.worktree` を確認し、対象データベースが正しいことを確かめてください。
+
+## 提出前の確認
+
+- ルートの `CLAUDE.md` と関連するサブディレクトリの説明を読みます。
+- 現在のタスクに必要な範囲だけを変更します。
+- コードコメントは英語で記述します。
+- `.env`、トークン、ビルド成果物、ローカルパスをコミットしません。
+- `feat(scope)`、`fix(scope)`、`docs` などの conventional commit を使用します。
+- PR に動作変更と実際に実行した検証コマンドを記載します。
+
+## 次のステップ
+
+- [開発規約](/developers/conventions) — 命名、用語、中国語文言に関するリポジトリの契約。
+- [プロジェクトアーキテクチャ](/developers/architecture) — 階層、共有パッケージ、1 回の実行におけるコードパス。

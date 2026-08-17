@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	"github.com/multica-ai/multica/server/internal/selfexec"
 )
 
 const maxSearchDepth = 4
@@ -41,7 +43,7 @@ func ResolveDir() (string, error) {
 
 func searchRoots() []string {
 	roots := []string{"."}
-	if exe, err := os.Executable(); err == nil {
+	if exe, err := selfexec.Resolve(); err == nil {
 		roots = append(roots, filepath.Dir(exe))
 	}
 	return roots

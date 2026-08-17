@@ -30,6 +30,9 @@ export function useChatSessionsRealtime() {
         // chat:done flips `has_unread` server-side; refetch so the dot shows
         // even when the user isn't in the chat screen.
         ws.on("chat:done", invalidateSessions),
+        // Cancellation may delete a queued prompt or append "Stopped.", both
+        // of which change the session preview.
+        ws.on("task:cancelled", invalidateSessions),
         // chat:session_read clears the unread flag (could be triggered from
         // web/desktop on the same account).
         ws.on("chat:session_read", invalidateSessions),

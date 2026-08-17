@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -18,7 +19,6 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 
 	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
-	var output strings.Builder
 
 	msg := claudeSDKMessage{
 		Type: "assistant",
@@ -30,10 +30,14 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
-	if output.String() != "Hello world" {
-		t.Fatalf("expected output 'Hello world', got %q", output.String())
+	if output != "Hello world" {
+		t.Fatalf("expected output 'Hello world', got %q", output)
+	}
+	if tools != 0 {
+		t.Fatalf("expected no tool uses, got %d", tools)
 	}
 	select {
 	case m := <-ch:
@@ -50,7 +54,6 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 
 	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
-	var output strings.Builder
 
 	msg := claudeSDKMessage{
 		Type: "assistant",
@@ -67,10 +70,14 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
-	if output.String() != "" {
-		t.Fatalf("tool_use should not add to output, got %q", output.String())
+	if output != "" {
+		t.Fatalf("tool_use should not add to output, got %q", output)
+	}
+	if tools != 1 {
+		t.Fatalf("expected one tool use, got %d", tools)
 	}
 	select {
 	case m := <-ch:
@@ -267,7 +274,6 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 
 	b := &claudeBackend{cfg: Config{Logger: slog.Default()}}
 	ch := make(chan Message, 10)
-	var output strings.Builder
 
 	msg := claudeSDKMessage{
 		Type:    "assistant",
@@ -275,10 +281,14 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	b.handleAssistant(msg, ch, &output, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
-	if output.String() != "" {
-		t.Fatalf("expected empty output for invalid JSON, got %q", output.String())
+	if output != "" {
+		t.Fatalf("expected empty output for invalid JSON, got %q", output)
+	}
+	if tools != 0 {
+		t.Fatalf("expected no tool uses for invalid JSON, got %d", tools)
 	}
 	select {
 	case m := <-ch:
@@ -307,7 +317,7 @@ func TestTrySendDropsWhenFull(t *testing.T) {
 	}
 }
 
-func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
+func TestBuildClaudeArgsInheritsMCPByDefault(t *testing.T) {
 	t.Parallel()
 
 	args := buildClaudeArgs(ExecOptions{}, slog.Default())
@@ -316,7 +326,6 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
 		"--disallowedTools", "AskUserQuestion",
 	}
@@ -328,6 +337,74 @@ func TestBuildClaudeArgsIncludesStrictMCPConfig(t *testing.T) {
 		if args[i] != want {
 			t.Fatalf("expected args[%d] = %q, got %q", i, want, args[i])
 		}
+	}
+}
+
+func TestBuildClaudeArgsUsesStrictMCPForManagedConfig(t *testing.T) {
+	t.Parallel()
+
+	args := buildClaudeArgs(ExecOptions{McpConfig: json.RawMessage(`{}`)}, slog.Default())
+	if !slices.Contains(args, "--strict-mcp-config") {
+		t.Fatalf("managed MCP config must enable strict mode, got %v", args)
+	}
+}
+
+// Claude Code reads the per-task CLAUDE.md the daemon writes into the workdir,
+// so the daemon never populates SystemPrompt for it (see
+// providerNeedsInlineSystemPrompt). Forwarding it as --append-system-prompt
+// would duplicate the whole runtime brief on every turn.
+func TestBuildClaudeArgsIgnoresSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	const brief = "the entire multica runtime brief"
+	args := buildClaudeArgs(ExecOptions{SystemPrompt: brief}, slog.Default())
+	if slices.Contains(args, "--append-system-prompt") {
+		t.Fatalf("unexpected --append-system-prompt in args: %v", args)
+	}
+	if slices.Contains(args, brief) {
+		t.Fatalf("SystemPrompt leaked into args: %v", args)
+	}
+}
+
+func TestArgsRequestBypassPermissions(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{
+			name: "permission mode bypass",
+			args: []string{"--permission-mode", "bypassPermissions"},
+			want: true,
+		},
+		{
+			name: "dangerous skip permissions",
+			args: []string{"--dangerously-skip-permissions"},
+			want: true,
+		},
+		{
+			name: "neither",
+			args: []string{"--model", "sonnet"},
+			want: false,
+		},
+		{
+			name: "permission mode default",
+			args: []string{"--permission-mode", "default"},
+			want: false,
+		},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := argsRequestBypassPermissions(tc.args); got != tc.want {
+				t.Fatalf("argsRequestBypassPermissions(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -532,7 +609,13 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 		"CLAUDE_CODE_GIT_BASH_PATH=C:\\Program Files\\Git\\bin\\bash.exe",
 		"CLAUDE_CODE_USE_BEDROCK=1",
 		"CLAUDE_CODE_TMPDIR=/custom/tmp",
-	}, map[string]string{"FOO": "bar"})
+		"MULTICA_LLM_API_KEY=daemon-secret",
+		"MULTICA_SERVER_URL=https://daemon.example",
+	}, map[string]string{
+		"FOO":                "bar",
+		"MULTICA_SERVER_URL": "https://task.example",
+		"MULTICA_TOKEN":      "mat_task",
+	})
 
 	// Internal runtime/session markers must be stripped so the child does not
 	// inherit the parent's identity or transport.
@@ -542,6 +625,8 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 		"CLAUDE_CODE_EXECPATH=/opt/claude",
 		"CLAUDE_CODE_SESSION_ID=abc123",
 		"CLAUDE_CODE_SSE_PORT=9999",
+		"MULTICA_LLM_API_KEY=daemon-secret",
+		"MULTICA_SERVER_URL=https://daemon.example",
 	}
 	for _, entry := range env {
 		for _, banned := range filteredOut {
@@ -578,6 +663,9 @@ func TestMergeEnvFiltersClaudeCodeVars(t *testing.T) {
 	if !found["FOO=bar"] {
 		t.Fatalf("expected extra env var to be appended, got %v", env)
 	}
+	if !found["MULTICA_SERVER_URL=https://task.example"] || !found["MULTICA_TOKEN=mat_task"] {
+		t.Fatalf("expected explicit task MULTICA_* values to be appended, got %v", env)
+	}
 }
 
 func TestBuildEnvAppendsExtras(t *testing.T) {
@@ -602,6 +690,82 @@ func TestBuildEnvNilExtras(t *testing.T) {
 	if len(env) == 0 {
 		t.Fatal("expected at least system env vars")
 	}
+}
+
+func TestEnvHasSandbox(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		env  []string
+		want bool
+	}{
+		{name: "one", env: []string{"IS_SANDBOX=1"}, want: true},
+		{name: "true", env: []string{"IS_SANDBOX=true"}, want: true},
+		{name: "yes", env: []string{"IS_SANDBOX=yes"}, want: true},
+		{name: "on", env: []string{"IS_SANDBOX=on"}, want: true},
+		{name: "zero", env: []string{"IS_SANDBOX=0"}, want: false},
+		{name: "false", env: []string{"IS_SANDBOX=false"}, want: false},
+		{name: "empty", env: []string{"IS_SANDBOX="}, want: false},
+		{name: "absent", env: []string{"PATH=/usr/bin"}, want: false},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := envHasSandbox(tc.env); got != tc.want {
+				t.Fatalf("envHasSandbox(%v) = %v, want %v", tc.env, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestClaudeRootSudoPreflight(t *testing.T) {
+	t.Parallel()
+
+	t.Run("sandbox bypass allowed", func(t *testing.T) {
+		t.Parallel()
+
+		err := claudeRootSudoPreflight(
+			[]string{"--permission-mode", "bypassPermissions"},
+			[]string{"IS_SANDBOX=1"},
+		)
+		if err != nil {
+			t.Fatalf("expected sandboxed bypass to pass preflight, got %v", err)
+		}
+	})
+
+	t.Run("non bypass allowed", func(t *testing.T) {
+		t.Parallel()
+
+		err := claudeRootSudoPreflight(
+			[]string{"--permission-mode", "default"},
+			nil,
+		)
+		if err != nil {
+			t.Fatalf("expected non-bypass args to pass preflight, got %v", err)
+		}
+	})
+
+	t.Run("root bypass without sandbox errors", func(t *testing.T) {
+		t.Parallel()
+		if os.Geteuid() != 0 {
+			t.Skip("root-only preflight assertion")
+		}
+
+		err := claudeRootSudoPreflight(
+			[]string{"--permission-mode", "bypassPermissions"},
+			nil,
+		)
+		if err == nil {
+			t.Fatal("expected root bypass without sandbox to fail preflight")
+		}
+		if !strings.Contains(err.Error(), "IS_SANDBOX") || !strings.Contains(err.Error(), "non-root") {
+			t.Fatalf("expected actionable root guidance, got %q", err.Error())
+		}
+	})
 }
 
 func TestBuildClaudeArgsBlocksMcpConfig(t *testing.T) {
@@ -650,13 +814,145 @@ func TestWriteMcpConfigToTemp(t *testing.T) {
 	if !bytes.Equal(data, []byte(raw)) {
 		t.Fatalf("expected %s, got %s", raw, data)
 	}
-
-	// Cleanup should remove the file.
-	if err := os.Remove(path); err != nil {
-		t.Fatalf("remove temp file: %v", err)
+	if runtime.GOOS != "windows" {
+		info, err := os.Stat(path)
+		if err != nil {
+			t.Fatalf("stat temp file %s: %v", path, err)
+		}
+		if info.Mode().Perm()&0o077 != 0 {
+			t.Fatalf("temp MCP file permissions = %o, want no group/other access", info.Mode().Perm())
+		}
 	}
+
+	// Cleanup should remove the temp directory and every related sidecar file.
+	cleanupMcpConfigTemp(path)
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatalf("expected temp file to be removed, but it still exists")
+	}
+}
+
+func TestResumeWasRejected(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name      string
+		requested string
+		emitted   string
+		failed    bool
+		texts     []string
+		want      bool
+	}{
+		{
+			// Verbatim from multica-ai/multica#5704 (Claude Code 2.1.207,
+			// zh-CN). This is the failure the whole signal exists for: the
+			// session belongs to the account the user switched away from, and
+			// claude echoes the requested id back rather than a fresh one.
+			name:      "account binding 400 echoing the requested id is a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"400 此 session 已绑定另外的ai账号，请执行 /new 开启新 session"},
+			want:      true,
+		},
+		{
+			name:      "no conversation found on stderr is a rejection",
+			requested: "sess-dead",
+			emitted:   "sess-dead",
+			failed:    true,
+			texts:     []string{"No conversation found with session ID: sess-dead"},
+			want:      true,
+		},
+		{
+			name:      "a different emitted id means the resume did not land",
+			requested: "sess-dead",
+			emitted:   "fresh-new",
+			failed:    true,
+			want:      true,
+		},
+
+		// Failures a fresh session cannot cure. None of these may set the
+		// flag: doing so would throw away a session the platform's own retry
+		// is expected to resume.
+		{
+			name:      "mid-response network drop is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"API Error: Connection closed mid-response"},
+			want:      false,
+		},
+		{
+			name:      "rate limit is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"API Error: 429 rate_limit_error: rate limit exceeded"},
+			want:      false,
+		},
+		{
+			name:      "overloaded is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"API Error: 529 overloaded_error"},
+			want:      false,
+		},
+		{
+			name:      "quota exhaustion is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"API Error: 402 credit balance is too low"},
+			want:      false,
+		},
+		{
+			// Reported alongside the 400 in #5704 and easy to conflate with
+			// it. This one needs a re-login, not a new session.
+			name:      "revoked oauth token is not a rejection",
+			requested: "sess-old",
+			emitted:   "sess-old",
+			failed:    true,
+			texts:     []string{"401 Invalid authentication credentials: OAuth access token has been revoked"},
+			want:      false,
+		},
+		{
+			name:      "a run that succeeded is never a rejection",
+			requested: "sess-old",
+			emitted:   "fresh-new",
+			failed:    false,
+			texts:     []string{"No conversation found with session ID: sess-old"},
+			want:      false,
+		},
+		{
+			name:      "no resume requested is never a rejection",
+			requested: "",
+			emitted:   "fresh-abc",
+			failed:    true,
+			texts:     []string{"No conversation found with session ID: whatever"},
+			want:      false,
+		},
+		{
+			// A failure before claude emitted anything. Empty is not
+			// evidence of anything, which is why the daemon stopped reading
+			// an empty SessionID as "the resume was rejected".
+			name:      "failure with no emitted id and no matching text is not a rejection",
+			requested: "sess-old",
+			emitted:   "",
+			failed:    true,
+			texts:     []string{"exit status 1"},
+			want:      false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			got := resumeWasRejected(tc.requested, tc.emitted, tc.failed, tc.texts...)
+			if got != tc.want {
+				t.Fatalf("resumeWasRejected(%q, %q, %v, %q) = %v, want %v",
+					tc.requested, tc.emitted, tc.failed, tc.texts, got, tc.want)
+			}
+		})
 	}
 }
 
@@ -668,6 +964,7 @@ func TestResolveSessionID(t *testing.T) {
 		requested string
 		emitted   string
 		failed    bool
+		stderr    string
 		want      string
 	}{
 		{
@@ -675,6 +972,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "",
 			emitted:   "fresh-abc",
 			failed:    false,
+			stderr:    "",
 			want:      "fresh-abc",
 		},
 		{
@@ -682,6 +980,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-old",
 			emitted:   "sess-old",
 			failed:    false,
+			stderr:    "",
 			want:      "sess-old",
 		},
 		{
@@ -689,6 +988,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-old",
 			emitted:   "sess-old",
 			failed:    true,
+			stderr:    "",
 			want:      "sess-old",
 		},
 		{
@@ -696,6 +996,15 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-dead",
 			emitted:   "fresh-new",
 			failed:    true,
+			stderr:    "",
+			want:      "",
+		},
+		{
+			name:      "resume not found stderr clears matching id so daemon fallback fires",
+			requested: "sess-dead",
+			emitted:   "sess-dead",
+			failed:    true,
+			stderr:    "No conversation found with session ID: sess-dead",
 			want:      "",
 		},
 		{
@@ -703,6 +1012,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-dead",
 			emitted:   "fresh-new",
 			failed:    false,
+			stderr:    "No conversation found with session ID: sess-dead",
 			want:      "fresh-new",
 		},
 		{
@@ -710,6 +1020,7 @@ func TestResolveSessionID(t *testing.T) {
 			requested: "sess-old",
 			emitted:   "",
 			failed:    true,
+			stderr:    "",
 			want:      "",
 		},
 	}
@@ -718,10 +1029,10 @@ func TestResolveSessionID(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := resolveSessionID(tc.requested, tc.emitted, tc.failed)
+			got := resolveSessionID(tc.requested, tc.emitted, tc.failed, tc.stderr)
 			if got != tc.want {
-				t.Fatalf("resolveSessionID(%q, %q, %v) = %q, want %q",
-					tc.requested, tc.emitted, tc.failed, got, tc.want)
+				t.Fatalf("resolveSessionID(%q, %q, %v, %q) = %q, want %q",
+					tc.requested, tc.emitted, tc.failed, tc.stderr, got, tc.want)
 			}
 		})
 	}
@@ -746,7 +1057,11 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 		"exit 3\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}
@@ -785,6 +1100,128 @@ func TestClaudeExecuteSurfacesStderrWhenChildExitsEarly(t *testing.T) {
 	}
 }
 
+// End-to-end through the backend rather than the predicate alone: a fake
+// claude reproduces the account-switch guardrail from #5704 — it echoes the
+// resumed session id back on the init frame, then fails the turn with the
+// 400. The result must carry ResumeRejected so the daemon retries fresh, and
+// must not persist the dead session id.
+func TestClaudeExecuteReportsResumeRejectedOnAccountBinding(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`echo '{"type":"system","subtype":"init","session_id":"sess-old"}'` + "\n" +
+		`echo '{"type":"result","subtype":"error","is_error":true,"session_id":"sess-old","result":"400 此 session 已绑定另外的ai账号，请执行 /new 开启新 session"}'` + "\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		ResumeSessionID: "sess-old",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.Status != "failed" {
+			t.Fatalf("expected status=failed, got %q", result.Status)
+		}
+		if !result.ResumeRejected {
+			t.Fatalf("expected ResumeRejected for the account-binding 400, got error=%q", result.Error)
+		}
+		// The session belongs to the previous account; keeping it would make
+		// every later dispatch on this (agent, workdir) fail identically.
+		if result.SessionID != "" {
+			t.Fatalf("expected the dead session id to be dropped, got %q", result.SessionID)
+		}
+		// The provider's own wording has to survive so a matcher miss on some
+		// other locale is diagnosable from the failure itself.
+		if !strings.Contains(result.Error, "已绑定另外") {
+			t.Fatalf("expected the raw provider error to be preserved, got %q", result.Error)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
+// The counterpart: a resumed run that dies from a transient network fault
+// must NOT be reported as a rejected resume, and must keep its session id so
+// the platform's resume-safe retry can continue the conversation.
+func TestClaudeExecuteKeepsSessionOnNetworkFailure(t *testing.T) {
+	t.Parallel()
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "claude")
+	script := "#!/bin/sh\n" +
+		"IFS= read -r _\n" +
+		`echo '{"type":"system","subtype":"init","session_id":"sess-old"}'` + "\n" +
+		`echo '{"type":"result","subtype":"error","is_error":true,"session_id":"sess-old","result":"API Error: Connection closed mid-response"}'` + "\n"
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
+	if err != nil {
+		t.Fatalf("new claude backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	session, err := backend.Execute(ctx, "prompt", ExecOptions{
+		ResumeSessionID: "sess-old",
+		Timeout:         5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		if result.ResumeRejected {
+			t.Fatal("a network drop must not be reported as a rejected resume")
+		}
+		if result.SessionID != "sess-old" {
+			t.Fatalf("expected the session to survive a network failure, got %q", result.SessionID)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+	}
+}
+
 func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 	t.Parallel()
 	if runtime.GOOS == "windows" {
@@ -798,7 +1235,11 @@ func TestClaudeExecuteRecordsResultModelUsage(t *testing.T) {
 		"printf '%s\\n' '{\"type\":\"result\",\"subtype\":\"success\",\"is_error\":false,\"session_id\":\"sess-result-usage\",\"result\":\"done\",\"modelUsage\":{\"zhipu/coding-plan\":{\"inputTokens\":123,\"outputTokens\":45,\"cacheReadInputTokens\":7,\"cacheCreationInputTokens\":11,\"costUSD\":0.01}}}'\n"
 	writeTestExecutable(t, fakePath, []byte(script))
 
-	backend, err := New("claude", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	backend, err := New("claude", Config{
+		ExecutablePath: fakePath,
+		Env:            map[string]string{"IS_SANDBOX": "1"},
+		Logger:         slog.Default(),
+	})
 	if err != nil {
 		t.Fatalf("new claude backend: %v", err)
 	}
@@ -860,5 +1301,23 @@ func TestBuildClaudeArgsExtraArgsBeforeCustomArgsAndFiltersBoth(t *testing.T) {
 	}
 	if extraIdx == -1 || customIdx == -1 || extraIdx > customIdx {
 		t.Fatalf("expected extra args before custom args, got %v", args)
+	}
+}
+
+func TestBuildClaudeArgsManagedSkillSettingsWins(t *testing.T) {
+	args := buildClaudeArgs(ExecOptions{
+		ClaudeSettingsPath: "/tmp/multica-claude-settings.json",
+		ExtraArgs:          []string{"--settings", "/tmp/default.json"},
+		CustomArgs:         []string{"--settings=/tmp/agent.json", "--max-turns", "7"},
+	}, slog.Default())
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "default.json") || strings.Contains(joined, "agent.json") {
+		t.Fatalf("competing settings args were not filtered: %v", args)
+	}
+	if !strings.Contains(joined, "--settings /tmp/multica-claude-settings.json") {
+		t.Fatalf("managed settings missing: %v", args)
+	}
+	if !strings.Contains(joined, "--max-turns 7") {
+		t.Fatalf("unrelated custom arg was dropped: %v", args)
 	}
 }

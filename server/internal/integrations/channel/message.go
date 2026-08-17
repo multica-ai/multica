@@ -86,6 +86,10 @@ type MediaRef struct {
 	Type MsgType
 	// StorageKey locates the persisted object in Multica object storage.
 	StorageKey string
+	// StorageURL is the object URL returned by the storage backend and
+	// persisted on the attachment row so the existing attachment download
+	// endpoints can re-open it later.
+	StorageURL string
 	// Filename is the original display name, when the platform supplies
 	// one.
 	Filename string
@@ -93,6 +97,13 @@ type MediaRef struct {
 	MimeType string
 	// SizeBytes is the object size in bytes, or 0 when unknown.
 	SizeBytes int64
+	// InlinePlaceholder is an optional exact marker in the durable message
+	// body that this attachment should replace with a stable Markdown link.
+	// Empty keeps the attachment standalone and preserves existing platform
+	// behavior. InlineIndex is the zero-based occurrence of that marker, so a
+	// partial media failure cannot shift later attachments into the wrong place.
+	InlinePlaceholder string
+	InlineIndex       int
 }
 
 // ReplyCtx describes the message an inbound message quotes / replies to.
@@ -124,12 +135,22 @@ type InboundMessage struct {
 	// Type is the normalized message kind.
 	Type MsgType
 
-	// Text is the human-readable content, flattened by the adapter. For
-	// non-text messages it may be empty or a short placeholder; the media
+	// Text is the agent-readable content, flattened by the adapter. Router or
+	// an adapter may strip a command directive or enrich it with quoted context.
+	// For non-text messages it may be empty or a short placeholder; the media
 	// itself is in MediaRefs.
 	Text string
 
-	// MediaRefs are the attachments, already persisted to object storage.
+	// CommandText is the user's normalized text before command stripping or
+	// contextual enrichment. Shared command classifiers read this field so a
+	// rewritten Text is never interpreted as a second command. Empty means Text.
+	CommandText string
+
+	// MediaRefs is the OUTPUT channel of engine.MediaResolver.ResolveMedia:
+	// the objects it downloaded and uploaded for this message, each covered
+	// by an intent-ledger row written before its PUT. Inbound messages always
+	// arrive with this empty — adapters must not pre-populate it, because
+	// binding only attaches refs whose ledger intent it can claim.
 	MediaRefs []MediaRef
 
 	// ReplyTo is the quoted/replied-to context, or nil.
@@ -143,11 +164,21 @@ type InboundMessage struct {
 	// arrays, parent ids) stay in Raw.
 	AddressedToBot bool
 
-	// ForceFresh asks the core to start a fresh agent session for this
-	// message instead of resuming the prior one (the platform's "/fresh"
-	// affordance). The adapter normalizes its platform-specific trigger
-	// into this boolean; the core only reads the flag.
+	// ForceFresh asks the core to start a fresh agent session for this message
+	// instead of resuming the prior one. Router recognizes the shared /new text
+	// command; adapters may also set this flag for a native platform affordance.
 	ForceFresh bool
+
+	// SkipAgentRun asks the core to persist this message + create any
+	// engine-side artefacts (issue from /issue command, session binding
+	// row) but NOT to trigger an agent run afterwards. Set by an adapter
+	// when the message is a pure control command whose only meaningful
+	// effect is the artefact (wecom uses it for standalone /issue
+	// invocations, where an agent reply would just quote the command back
+	// as "I don't know this slash command"). Left unset by adapters where
+	// the current cross-platform behaviour — /issue triggers the agent as
+	// a normal chat turn — should be preserved (Feishu, Slack today).
+	SkipAgentRun bool
 
 	// Raw is the untouched platform payload. Adapters stash platform-
 	// specific fields here (Lark raw msg_type / parent_id / root_id /

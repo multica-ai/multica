@@ -1,15 +1,29 @@
-import { forwardRef, useRef, useState, useImperativeHandle } from "react";
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Issue, TimelineEntry } from "@multica/core/types";
+import type { Issue, Label, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { toast } from "sonner";
+import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
+import {
+  DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
+  useSubIssueDisplayStore,
+} from "@multica/core/issues/stores/sub-issue-display-store";
 import enCommon from "../../locales/en/common.json";
 import enIssues from "../../locales/en/issues.json";
 
 const TEST_RESOURCES = { en: { common: enCommon, issues: enIssues } };
 
 const mockViewport = vi.hoisted(() => ({ isMobile: false }));
+
+// Counts MockContentEditor mounts. This pins the description to exactly one
+// eager editor per issue and catches stale editor reuse across issue switches.
+const contentEditorMounts = vi.hoisted(() => ({ count: 0 }));
+// Stable empty-attachments reference: the real store returns a shared constant
+// so the `useCommentDraftStore(s => s.getAttachments(key))` selector keeps a
+// stable identity. A fresh `[]` per call would loop useSyncExternalStore.
+const emptyDraftAttachments = vi.hoisted(() => [] as unknown[]);
 
 vi.mock("@multica/ui/hooks/use-mobile", () => ({
   useIsMobile: () => mockViewport.isMobile,
@@ -106,11 +120,31 @@ vi.mock("../../navigation", () => ({
     pathname: "/issues/issue-1",
     getShareableUrl: (p: string) => `https://app.multica.com${p}`,
   }),
+  useBackOrReplace: () => vi.fn(),
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
 // Mock editor components (Tiptap requires real DOM)
-vi.mock("../../editor", () => ({
+vi.mock("../../editor", async () => ({
+  // Real lazy-mount controller (pure React, no Tiptap) so readonly-first
+  // shell → activate → ready flows behave exactly as in production.
+  ...(await vi.importActual<typeof import("../../editor/use-lazy-editor")>(
+    "../../editor/use-lazy-editor",
+  )),
+  // Real submit gate (pure React) — see comment-composers.test.tsx.
+  ...(await vi.importActual<typeof import("../../editor/use-upload-gate")>(
+    "../../editor/use-upload-gate",
+  )),
+  // Real await-then-render submit hook (pure React) so comment/reply/edit
+  // composers run the production submit path.
+  ...(await vi.importActual<typeof import("../../editor/use-composer-submit")>(
+    "../../editor/use-composer-submit",
+  )),
+  useEditorUpload: () => ({
+    uploadWithToast: vi.fn(),
+    upload: vi.fn(),
+    uploading: false,
+  }),
   useFileDropZone: () => ({ isDragOver: false, dropZoneProps: {} }),
   FileDropOverlay: () => null,
   // No-op so comment-card's AttachmentList can render without hitting the
@@ -124,29 +158,64 @@ vi.mock("../../editor", () => ({
     tryOpen: () => false,
     modal: null,
   }),
+  // Pass-through: the detail page wraps its column in the image-sequence
+  // provider, but paging between images is covered in
+  // image-sequence-context.test.tsx against the real provider.
+  ImageSequenceProvider: ({ children }: { children: React.ReactNode }) =>
+    children,
   isPreviewable: () => false,
   ReadonlyContent: ({ content }: { content: string }) => (
     <div data-testid="readonly-content">{content}</div>
   ),
   ContentEditor: forwardRef(function MockContentEditor(
-    { defaultValue, onUpdate, placeholder, flushPendingOnUnmount }: any,
+    {
+      defaultValue,
+      value: syncedValue,
+      onUpdate,
+      placeholder,
+      flushPendingOnUnmount,
+      onReady,
+    }: any,
     ref: any,
   ) {
-    const valueRef = useRef(defaultValue || "");
-    const [value, setValue] = useState(defaultValue || "");
+    const initialValue = syncedValue ?? defaultValue ?? "";
+    const valueRef = useRef(initialValue);
+    const baseRef = useRef(initialValue);
+    const [editorValue, setEditorValue] = useState(initialValue);
+    useEffect(() => {
+      contentEditorMounts.count += 1;
+      onReady?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+    useEffect(() => {
+      if (syncedValue === undefined) return;
+      valueRef.current = syncedValue;
+      baseRef.current = syncedValue;
+      setEditorValue(syncedValue);
+    }, [syncedValue]);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
-      clearContent: () => { valueRef.current = ""; setValue(""); },
+      clearContent: () => { valueRef.current = ""; setEditorValue(""); },
       focus: () => {},
+      focusAtCoords: () => {},
+      // The top-level composer blurs after a posted comment (afterAccepted).
+      blur: () => {},
+      // Read by the submit-time upload gate; no uploads are exercised here.
+      hasActiveUploads: () => false,
+      // Placeholder rebuild contract: the real handle draws a card for an
+      // upload the document is not showing and reports whether it landed.
+      // Mocks track ids only — no document to draw into.
+      insertUploadPlaceholder: () => true,
+      settleUploadPlaceholder: () => false,
       uploadFile: () => {},
     }));
     return (
       <textarea
-        value={value}
+        value={editorValue}
         onChange={(e) => {
           valueRef.current = e.target.value;
-          setValue(e.target.value);
-          onUpdate?.(e.target.value);
+          setEditorValue(e.target.value);
+          onUpdate?.(e.target.value, baseRef.current);
         }}
         placeholder={placeholder}
         data-testid="rich-text-editor"
@@ -155,14 +224,19 @@ vi.mock("../../editor", () => ({
     );
   }),
   TitleEditor: forwardRef(function MockTitleEditor(
-    { defaultValue, placeholder, onBlur, onChange }: any,
+    { defaultValue, placeholder, onBlur, onChange, onReady }: any,
     ref: any,
   ) {
     const valueRef = useRef(defaultValue || "");
     const [value, setValue] = useState(defaultValue || "");
+    useEffect(() => {
+      onReady?.();
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
     useImperativeHandle(ref, () => ({
       getText: () => valueRef.current,
       focus: () => {},
+      focusAtCoords: () => {},
     }));
     return (
       <input
@@ -206,11 +280,17 @@ const mockApiObj = vi.hoisted(() => ({
   listIssueSubscribers: vi.fn().mockResolvedValue([]),
   subscribeToIssue: vi.fn().mockResolvedValue(undefined),
   unsubscribeFromIssue: vi.fn().mockResolvedValue(undefined),
+  unsubscribeFromIssueSubtree: vi.fn().mockResolvedValue(undefined),
   getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
   listTasksByIssue: vi.fn().mockResolvedValue([]),
   rerunIssue: vi.fn(),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
+  getChildIssueProgress: vi.fn().mockResolvedValue({ progress: [] }),
+  getAgentTaskSnapshot: vi.fn().mockResolvedValue([]),
+  // The sub-issues header chip reads this narrowed to the parent issue.
+  getWorkspaceWorkingAgents: vi.fn().mockResolvedValue([]),
+  listProperties: vi.fn().mockResolvedValue({ properties: [], total: 0 }),
   listIssues: vi.fn().mockResolvedValue({ issues: [], total: 0 }),
   uploadFile: vi.fn(),
   listIssueReactions: vi.fn().mockResolvedValue([]),
@@ -234,7 +314,6 @@ vi.mock("@multica/core/api", () => ({
 // Mock issue config
 vi.mock("@multica/core/issues/config", () => ({
   ALL_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
-  BOARD_STATUSES: ["backlog", "todo", "in_progress", "in_review", "done", "blocked"],
   STATUS_ORDER: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   STATUS_CONFIG: {
     backlog: { label: "Backlog", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
@@ -246,6 +325,7 @@ vi.mock("@multica/core/issues/config", () => ({
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
+  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
   PRIORITY_CONFIG: {
     urgent: { label: "Urgent", bars: 4, color: "text-destructive", badgeBg: "bg-destructive/10", badgeText: "text-destructive" },
     high: { label: "High", bars: 3, color: "text-warning", badgeBg: "bg-warning/10", badgeText: "text-warning" },
@@ -257,7 +337,23 @@ vi.mock("@multica/core/issues/config", () => ({
 
 // Mock recent issues store
 const mockRecordVisit = vi.fn();
-vi.mock("@multica/core/issues/stores", () => ({
+vi.mock("@multica/core/issues/stores", async () => ({
+  // Real store, not a stub: resolved-thread expand/collapse behavior under
+  // test runs through it. Deep import keeps the persisted sibling stores
+  // (which need localStorage) out of this mock.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/resolved-expand-store")
+  >("@multica/core/issues/stores/resolved-expand-store")),
+  // Real store: sub-issue display tests drive it with setState, and the
+  // component reads it through the barrel — both must hit the same instance.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/sub-issue-display-store")
+  >("@multica/core/issues/stores/sub-issue-display-store")),
+  // Real store, in-memory (no localStorage): backs the sub-issues section's
+  // collapsed state.
+  ...(await vi.importActual<
+    typeof import("@multica/core/issues/stores/sub-issues-collapse-store")
+  >("@multica/core/issues/stores/sub-issues-collapse-store")),
   useRecentIssuesStore: Object.assign(
     (selector?: any) => {
       const state = { byWorkspace: {}, recordVisit: mockRecordVisit, pruneWorkspaces: vi.fn() };
@@ -283,20 +379,43 @@ vi.mock("@multica/core/issues/stores", () => ({
   useCommentDraftStore: Object.assign(
     (selector?: any) => {
       const state = {
-        drafts: {} as Record<string, { content: string; updatedAt: number }>,
+        drafts: {} as Record<string, { content: string; attachments: unknown[]; updatedAt: number }>,
         getDraft: () => undefined,
+        getAttachments: () => emptyDraftAttachments,
+        getUploads: () => emptyDraftAttachments,
         setDraft: () => {},
+        setAttachments: () => {},
+        addUpload: () => {},
+        settleUpload: () => {},
+        failUpload: () => {},
+        removeUpload: () => {},
         clearDraft: () => {},
       };
       return selector ? selector(state) : state;
     },
     {
       getState: () => ({
-        drafts: {} as Record<string, { content: string; updatedAt: number }>,
+        drafts: {} as Record<string, { content: string; attachments: unknown[]; updatedAt: number }>,
         getDraft: () => undefined,
+        getAttachments: () => emptyDraftAttachments,
+        getUploads: () => emptyDraftAttachments,
         setDraft: () => {},
+        setAttachments: () => {},
+        addUpload: () => {},
+        settleUpload: () => {},
+        failUpload: () => {},
+        removeUpload: () => {},
         clearDraft: () => {},
       }),
+    },
+  ),
+  useCommentComposerStore: Object.assign(
+    (selector?: any) => {
+      const state = { sticky: true, toggleSticky: () => {} };
+      return selector ? selector(state) : state;
+    },
+    {
+      getState: () => ({ sticky: true, toggleSticky: () => {} }),
     },
   ),
 }));
@@ -311,8 +430,9 @@ vi.mock("@multica/core/issues/stores", () => ({
 // scrollIntoView (it drives the timeline container's scrollTop directly to
 // avoid scrolling ancestor overflow:hidden boxes — see issue-detail.tsx). We
 // keep a no-op stub on the prototype so any stray scrollIntoView call from
-// other components doesn't throw; deep-link tests assert the highlight ring
-// instead, which is mechanism-independent and observable without layout.
+// other components doesn't throw; deep-link tests assert the highlight
+// background instead, which is mechanism-independent and observable without
+// layout.
 const scrollIntoViewSpy = vi.hoisted(() => vi.fn());
 
 vi.mock("react-virtuoso", () => ({
@@ -346,6 +466,9 @@ beforeEach(() => {
     writable: true,
     value: scrollIntoViewSpy,
   });
+  // The resolved-expand store is module-global (not per-mount like the old
+  // useState); reset so one test's expansions can't leak into the next.
+  useResolvedExpandStore.setState({ expandedByIssue: {} });
 });
 
 // Mock modals
@@ -408,6 +531,7 @@ const mockIssue: Issue = {
   start_date: null,
   due_date: "2026-06-01T00:00:00Z",
   metadata: {},
+  properties: {},
   created_at: "2026-01-15T00:00:00Z",
   updated_at: "2026-01-20T00:00:00Z",
 };
@@ -491,6 +615,21 @@ function renderIssueDetailWithHighlight(
   return { ...result, queryClient };
 }
 
+const highlightedCommentBackgroundClass =
+  "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
+
+function hasHighlightedCommentBackground(root: ParentNode | null): boolean {
+  if (!root) return false;
+
+  const elements = root instanceof Element
+    ? [root, ...Array.from(root.querySelectorAll("[class]"))]
+    : Array.from(root.querySelectorAll("[class]"));
+
+  return elements.some(
+    (el) => typeof el.className === "string" && el.className.includes(highlightedCommentBackgroundClass),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -498,6 +637,7 @@ function renderIssueDetailWithHighlight(
 describe("IssueDetail (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    contentEditorMounts.count = 0;
     mockViewport.isMobile = false;
     // Default: issue loads successfully
     mockApiObj.getIssue.mockResolvedValue(mockIssue);
@@ -506,6 +646,10 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssueReactions.mockResolvedValue([]);
     mockApiObj.listIssueSubscribers.mockResolvedValue([]);
     mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    mockApiObj.getChildIssueProgress.mockResolvedValue({ progress: [] });
+    mockApiObj.getAgentTaskSnapshot.mockResolvedValue([]);
+    mockApiObj.getWorkspaceWorkingAgents.mockResolvedValue([]);
+    mockApiObj.listProperties.mockResolvedValue({ properties: [], total: 0 });
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
@@ -529,14 +673,59 @@ describe("IssueDetail (shared)", () => {
     ).toBe(true);
   });
 
+  it("gives the skeleton the same horizontal gutters as the loaded column", async () => {
+    // The skeleton is the loaded column's stand-in, so a gutter change has to
+    // land on both or the column jumps sideways at the moment the issue
+    // arrives. Horizontal only: the loaded column also reserves the chat
+    // launcher's corner at its bottom, which the skeleton has no scroll to
+    // reach.
+    const horizontalGutters = (el: Element | null) =>
+      (el?.className ?? "")
+        .split(/\s+/)
+        .filter((cls) => /(^|:)px-/.test(cls))
+        .sort();
+
+    mockApiObj.getIssue.mockReturnValue(new Promise(() => {}));
+    const loadingRender = renderIssueDetail();
+    const skeletonGutters = horizontalGutters(
+      loadingRender.container.querySelector(".max-w-4xl"),
+    );
+    loadingRender.unmount();
+
+    mockApiObj.getIssue.mockResolvedValue(mockIssue);
+    const { container } = renderIssueDetail();
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    // Non-empty guard: without it a renamed column class passes vacuously.
+    expect(skeletonGutters.length).toBeGreaterThan(0);
+    expect(skeletonGutters).toEqual(
+      horizontalGutters(container.querySelector(".max-w-4xl")),
+    );
+  });
+
+  it("renders comment bodies without Base UI collapsible panels", async () => {
+    const { container } = renderIssueDetail();
+
+    await screen.findByText("Started working on this");
+
+    expect(
+      container.querySelector('[data-slot="collapsible-content"]'),
+    ).toBeNull();
+  });
+
   it("renders issue title and description after loading", async () => {
     renderIssueDetail();
 
-    await waitFor(() => {
-      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
-    });
-
-    expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    // The description is the one eager editor: keeping one renderer avoids the
+    // layout jump caused by swapping a long react-markdown tree for ProseMirror.
+    // Title and comment/reply composers remain readonly-first.
+    expect(await screen.findByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+    expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    expect(screen.queryByTestId("title-editor")).not.toBeInTheDocument();
+    expect(screen.getAllByTestId("rich-text-editor")).toHaveLength(1);
+    expect(contentEditorMounts.count).toBe(1);
   });
 
   it("opts the description editor into the unmount flush", async () => {
@@ -550,6 +739,45 @@ describe("IssueDetail (shared)", () => {
 
     const description = await screen.findByDisplayValue("Add JWT auth to the backend");
     expect(description).toHaveAttribute("data-flush-on-unmount", "true");
+  });
+
+  it("remounts the eager description on issue switch without carrying stale content", async () => {
+    // The web route reuses IssueDetail across issues. The keyed description
+    // editor must remount atomically for the new issue while the title remains
+    // on its cheap stand-in.
+    const queryClient = createTestQueryClient();
+    const issue2 = {
+      ...mockIssue,
+      id: "issue-2",
+      title: "Second issue",
+      description: "Second description",
+    };
+    // The cache seed marks the data stale, so the query refetches in the
+    // background — getIssue must answer per-id or the refetch would clobber
+    // issue-2 with issue-1's payload.
+    mockApiObj.getIssue.mockImplementation((issueId: string) =>
+      Promise.resolve(issueId === "issue-2" ? issue2 : mockIssue),
+    );
+    // Pre-seed issue-2 so its first render skips the loading skeleton.
+    queryClient.setQueryData(["issues", "ws-1", "detail", "issue-2"], issue2);
+    const ui = (issueId: string) => (
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={queryClient}>
+          <IssueDetail issueId={issueId} />
+        </QueryClientProvider>
+      </I18nProvider>
+    );
+    const { rerender } = render(ui("issue-1"));
+
+    await screen.findByDisplayValue("Add JWT auth to the backend");
+    const mountsBeforeSwitch = contentEditorMounts.count;
+
+    rerender(ui("issue-2"));
+
+    expect(await screen.findByDisplayValue("Second description")).toBeInTheDocument();
+    expect(screen.queryByDisplayValue("Add JWT auth to the backend")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("title-editor")).not.toBeInTheDocument();
+    expect(contentEditorMounts.count).toBe(mountsBeforeSwitch + 1);
   });
 
   it("renders the issue title leaf as a link to the issue detail page", async () => {
@@ -658,11 +886,51 @@ describe("IssueDetail (shared)", () => {
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue("Implement authentication")).toBeInTheDocument();
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId("panel-group")).not.toBeInTheDocument();
     expect(screen.queryByText("Properties")).not.toBeInTheDocument();
+  });
+
+  it("pins the comment composer to the scroll viewport on a wide screen", async () => {
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    // `bottom-0` is unique to the composer wrapper — the sticky affordances
+    // inside the timeline (comment headers, resolve bars) all pin to `top-0`.
+    expect(container.querySelector(".sticky.bottom-0")).not.toBeNull();
+  });
+
+  it("lets the composer ride the end of the timeline on mobile", async () => {
+    // A pinned composer on a phone sits on the chat launcher's corner at every
+    // scroll position, and the part it covers is its own send button.
+    mockViewport.isMobile = true;
+
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    expect(container.querySelector(".sticky.bottom-0")).toBeNull();
+  });
+
+  it("reserves the chat launcher's corner at the end of the mobile scroll", async () => {
+    mockViewport.isMobile = true;
+
+    const { container } = renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("Implement authentication")).toBeInTheDocument();
+    });
+
+    // Unpinned, the composer lands in that corner once the reader reaches the
+    // bottom, so the column has to end above the launcher rather than under it.
+    expect(container.querySelector(".max-md\\:pb-chat-launcher")).not.toBeNull();
   });
 
   it("hides metadata content from the sidebar and shows a button when the bag has keys", async () => {
@@ -740,6 +1008,38 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("Updated")).toBeInTheDocument();
   });
 
+  // Details is creator + immutable timestamps, so it ranks below the
+  // execution log, which is what people actually open the sidebar for.
+  it("orders the Details section after the execution log", async () => {
+    mockApiObj.listTasksByIssue.mockResolvedValue([
+      {
+        id: "task-past",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        issue_id: "issue-1",
+        status: "completed",
+        priority: 0,
+        dispatched_at: null,
+        started_at: "2026-06-08T08:00:00Z",
+        completed_at: "2026-06-08T08:05:00Z",
+        result: null,
+        error: null,
+        created_at: "2026-06-08T08:00:00Z",
+        trigger_summary: "Started from comment",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    const executionLog = await screen.findByText("Execution log");
+    const details = screen.getByText("Details");
+
+    // DOCUMENT_POSITION_FOLLOWING: Details comes after the execution log.
+    expect(
+      executionLog.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+  });
+
   it("shows 'not found' message when issue does not exist", async () => {
     mockApiObj.getIssue.mockRejectedValue(new Error("Not found"));
 
@@ -752,13 +1052,13 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  it("shows 'Back to Issues' button when issue is not found and no onDelete prop", async () => {
+  it("shows 'Back' button when issue is not found and no onDelete prop", async () => {
     mockApiObj.getIssue.mockRejectedValue(new Error("Not found"));
 
     renderIssueDetail("nonexistent-id");
 
     await waitFor(() => {
-      expect(screen.getByText("Back to Issues")).toBeInTheDocument();
+      expect(screen.getByText("Back")).toBeInTheDocument();
     });
   });
 
@@ -1112,12 +1412,54 @@ describe("IssueDetail (shared)", () => {
       // The deep-link effect lands on AND highlights the target comment: it
       // drives the timeline container's scrollTop directly (jsdom has no
       // layout, so the scroll itself isn't observable here) and applies the
-      // brand highlight ring. Assert the user-facing highlight.
+      // brand highlight background. Assert the user-facing highlight.
       await waitFor(() => {
         expect(
-          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
-        ).not.toBeNull();
+          hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+        ).toBe(true);
       });
+    });
+
+    it("highlights only the target root comment, not the whole thread", async () => {
+      mockApiObj.listTimeline.mockResolvedValue([
+        {
+          type: "comment",
+          id: "comment-root",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Root target",
+          parent_id: null,
+          created_at: "2026-01-18T00:00:00Z",
+          updated_at: "2026-01-18T00:00:00Z",
+          comment_type: "comment",
+        } as TimelineEntry,
+        {
+          type: "comment",
+          id: "reply-under-root",
+          actor_type: "member",
+          actor_id: "user-1",
+          content: "Reply should stay neutral",
+          parent_id: "comment-root",
+          created_at: "2026-01-18T01:00:00Z",
+          updated_at: "2026-01-18T01:00:00Z",
+          comment_type: "comment",
+        } as TimelineEntry,
+      ]);
+
+      renderIssueDetailWithHighlight("comment-root");
+
+      await waitFor(() => {
+        expect(document.getElementById("comment-comment-root")).not.toBeNull();
+      });
+      await waitFor(() => {
+        expect(
+          hasHighlightedCommentBackground(document.getElementById("comment-comment-root")),
+        ).toBe(true);
+      });
+
+      const reply = document.getElementById("comment-reply-under-root");
+      expect(reply).not.toBeNull();
+      expect(hasHighlightedCommentBackground(reply)).toBe(false);
     });
 
     it("still scrolls when the timeline is ready before the issue (regression for inbox click)", async () => {
@@ -1138,7 +1480,7 @@ describe("IssueDetail (shared)", () => {
         document.getElementById("comment-comment-2"),
       ).toBeNull();
       // Nothing highlighted while the loading skeleton is up.
-      expect(document.querySelector(".ring-2")).toBeNull();
+      expect(hasHighlightedCommentBackground(document)).toBe(false);
 
       resolveIssue(mockIssue);
 
@@ -1149,8 +1491,8 @@ describe("IssueDetail (shared)", () => {
       });
       await waitFor(() => {
         expect(
-          document.getElementById("comment-comment-2")?.querySelector(".ring-2"),
-        ).not.toBeNull();
+          hasHighlightedCommentBackground(document.getElementById("comment-comment-2")),
+        ).toBe(true);
       });
     });
 
@@ -1214,20 +1556,539 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  it("sends empty description when editor is cleared", async () => {
+  it("marks a reply-resolved thread as resolved on the quick-jump rail", async () => {
+    // A resolution on a REPLY leaves the thread expanded, so it flattens to a
+    // plain `comment` item, not a `resolved-bar`. The rail must still read it
+    // as resolved — proof the flag comes from deriveThreadResolution and not
+    // from the fold state.
+    mockApiObj.listTimeline.mockResolvedValue([
+      ...mockTimeline,
+      {
+        type: "comment",
+        id: "reply-1",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "That fixed it",
+        parent_id: "comment-1",
+        created_at: "2026-01-18T00:00:00Z",
+        updated_at: "2026-01-18T00:00:00Z",
+        comment_type: "comment",
+        resolved_at: "2026-01-19T00:00:00Z",
+      } as TimelineEntry,
+    ]);
+
     renderIssueDetail();
 
     await waitFor(() => {
-      expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeInTheDocument();
+      expect(
+        screen.getByRole("button", { name: "Started working on this (resolved)" }),
+      ).toBeInTheDocument();
     });
+    expect(screen.getByRole("button", { name: "I can help with this" })).toBeInTheDocument();
+  });
 
-    const editor = screen.getByPlaceholderText("Add description...");
+  it("sends empty description when editor is cleared", async () => {
+    renderIssueDetail();
+
+    const editor = await screen.findByDisplayValue("Add JWT auth to the backend");
     fireEvent.change(editor, { target: { value: "" } });
 
     await waitFor(() => {
       expect(mockApiObj.updateIssue).toHaveBeenCalledWith(
         "issue-1",
-        expect.objectContaining({ description: "" }),
+        expect.objectContaining({
+          description: "",
+          description_base: "Add JWT auth to the backend",
+        }),
+      );
+    });
+  });
+
+  describe("sub-issues list", () => {
+    beforeEach(() => {
+      useSubIssueDisplayStore.setState({
+        rowProperties: { ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES },
+        rowPropertyIds: [],
+      });
+    });
+
+    const label = (id: string, name: string): Label => ({
+      id,
+      workspace_id: "ws-1",
+      resource_type: "issue",
+      name,
+      color: "#3b82f6",
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+    });
+
+    const subIssue = (overrides: Partial<Issue>): Issue => ({
+      ...mockIssue,
+      parent_issue_id: "issue-1",
+      assignee_type: null,
+      assignee_id: null,
+      due_date: null,
+      priority: "none",
+      ...overrides,
+    });
+
+    it("renders priority, labels, due date and nested progress on rows", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Fix login flow",
+            priority: "urgent",
+            labels: [label("l1", "backend"), label("l2", "auth")],
+            // Past date-only value → overdue styling on an open issue.
+            due_date: "2020-01-01",
+          }),
+          subIssue({
+            id: "child-2",
+            number: 12,
+            identifier: "TES-12",
+            title: "Ship dashboards",
+          }),
+        ],
+      });
+      mockApiObj.getChildIssueProgress.mockResolvedValue({
+        progress: [{ parent_issue_id: "child-1", done: 1, total: 3 }],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Fix login flow");
+      // Label chips ride inside the row link.
+      expect(screen.getByText("backend")).toBeInTheDocument();
+      expect(screen.getByText("auth")).toBeInTheDocument();
+      // Nested own-children progress for child-1 only (header shows 0/2).
+      expect(await screen.findByText("1/3")).toBeInTheDocument();
+      // Overdue open issue renders its due date in the destructive tone.
+      const due = screen.getByText("Jan 1");
+      expect(due.closest("span")?.className).toContain("text-destructive");
+      // Bare row shows no due date / no progress chip of its own.
+      const bareRow = screen.getByText("Ship dashboards").closest("a");
+      expect(bareRow?.textContent).not.toContain("/");
+    });
+
+    it("hides fields the user toggled off in the display preference", async () => {
+      useSubIssueDisplayStore.setState({
+        rowProperties: {
+          ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES,
+          labels: false,
+          dueDate: false,
+        },
+      });
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Fix login flow",
+            labels: [label("l1", "backend")],
+            due_date: "2020-01-01",
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Fix login flow");
+      expect(screen.queryByText("backend")).not.toBeInTheDocument();
+      expect(screen.queryByText("Jan 1")).not.toBeInTheDocument();
+    });
+
+    it("renders opted-in custom property chips on rows that carry a value", async () => {
+      const estimate = {
+        id: "prop-1",
+        workspace_id: "ws-1",
+        name: "Estimate",
+        type: "text",
+        config: {},
+        position: 0,
+        archived: false,
+        created_at: "2026-01-01T00:00:00Z",
+        updated_at: "2026-01-01T00:00:00Z",
+      };
+      mockApiObj.listProperties.mockResolvedValue({
+        properties: [estimate],
+        total: 1,
+      });
+      useSubIssueDisplayStore.setState({ rowPropertyIds: ["prop-1"] });
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Fix login flow",
+            properties: { "prop-1": "Sprint 3" },
+          }),
+          subIssue({
+            id: "child-2",
+            number: 12,
+            identifier: "TES-12",
+            title: "Ship dashboards",
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Fix login flow");
+      // Chip renders only on the row that has a value for the property.
+      expect(await screen.findByText("Sprint 3")).toBeInTheDocument();
+      expect(screen.getAllByText("Sprint 3")).toHaveLength(1);
+    });
+
+    it("mutes the due date on done sub-issues even when past", async () => {
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Wrapped up",
+            status: "done",
+            due_date: "2020-01-01",
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Wrapped up");
+      const due = screen.getByText("Jan 1");
+      expect(due.closest("span")?.className).not.toContain("text-destructive");
+      expect(due.closest("span")?.className).toContain("text-muted-foreground");
+    });
+  });
+
+  // Deliberately drives the real Base UI DropdownMenu rather than a stub: the
+  // bug these tests pin (MUL-5710) was a handler wired to `onSelect`, which
+  // typechecks because Menu.Item's props extend the whole div attribute set,
+  // then lands on the DOM as the native text-selection event and never fires.
+  // Only the real menu reproduces that; any hand-rolled mock hides it.
+  describe("unsubscribe menu", () => {
+    const subscribedAsMember = [
+      {
+        issue_id: "issue-1",
+        user_type: "member" as const,
+        user_id: "user-1",
+        reason: "manual" as const,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    beforeEach(() => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue(subscribedAsMember);
+      // The menu only exists when there is a sub-tree for its second item to
+      // act on. A childless issue renders a direct button instead — covered
+      // by the "no sub-issues" tests below (MUL-5714).
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [{ ...mockIssue, id: "child-1", parent_issue_id: "issue-1" }],
+      });
+    });
+
+    // Base UI portals the popup onto document.body; RTL unmounts it, but wipe
+    // the body too so a leftover portal can't duplicate menu item names.
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    async function openUnsubscribeMenu() {
+      renderIssueDetail();
+      fireEvent.click(await screen.findByText("Unsubscribe"));
+      return screen.findByRole("menu");
+    }
+
+    it("unsubscribes the current member when the single-issue item is clicked", async () => {
+      await openUnsubscribeMenu();
+
+      fireEvent.click(
+        screen.getByRole("menuitem", { name: "Unsubscribe from this issue" }),
+      );
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(mockApiObj.unsubscribeFromIssueSubtree).not.toHaveBeenCalled();
+    });
+
+    it("unsubscribes from the whole subtree when the subtree item is clicked", async () => {
+      await openUnsubscribeMenu();
+
+      fireEvent.click(
+        screen.getByRole("menuitem", {
+          name: "Unsubscribe from this issue and its sub-issues",
+        }),
+      );
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssueSubtree).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(mockApiObj.unsubscribeFromIssue).not.toHaveBeenCalled();
+    });
+
+    it("still offers the menu while the child count is unknown", async () => {
+      // Children never resolve, so the component cannot yet tell a childless
+      // issue from one with a sub-tree. The menu is the safe answer: unlike
+      // the direct button it never picks an opt-out scope for the user.
+      mockApiObj.listChildIssues.mockReturnValue(new Promise(() => {}));
+      renderIssueDetail();
+
+      const control = await screen.findByText("Unsubscribe");
+
+      expect(control.getAttribute("aria-haspopup")).toBe("menu");
+    });
+  });
+
+  // The reported bug: on an issue with no sub-issues the only way to leave was
+  // a menu whose second item pointed at a sub-tree that does not exist
+  // (MUL-5714).
+  describe("unsubscribe without sub-issues", () => {
+    const subscribedAsMember = [
+      {
+        issue_id: "issue-1",
+        user_type: "member" as const,
+        user_id: "user-1",
+        reason: "manual" as const,
+        created_at: "2026-01-01T00:00:00Z",
+      },
+    ];
+
+    beforeEach(() => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue(subscribedAsMember);
+      mockApiObj.listChildIssues.mockResolvedValue({ issues: [] });
+    });
+
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    // The label is the same either way, so aria-haspopup is what separates the
+    // menu trigger from the plain button. The subscribers query resolves first,
+    // so the control is briefly the trigger before the child count settles —
+    // wait for the collapsed form rather than grabbing the first match.
+    async function findDirectUnsubscribeButton() {
+      return waitFor(() => {
+        const el = screen.getByText("Unsubscribe");
+        expect(el.getAttribute("aria-haspopup")).toBeNull();
+        return el;
+      });
+    }
+
+    it("unsubscribes in one click, with no menu", async () => {
+      renderIssueDetail();
+
+      fireEvent.click(await findDirectUnsubscribeButton());
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
+      );
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    // The scope choice, pinned. RemoveIssueSubscriber writes
+    // opt_out_scope='issue'; the subtree route writes 'subtree', which also
+    // blocks FUTURE children from re-subscribing the user. Collapsing the menu
+    // must not quietly upgrade a one-issue opt-out into a whole-tree one
+    // (server/pkg/db/queries/subscriber.sql).
+    it("uses the root-only route, never the subtree one", async () => {
+      renderIssueDetail();
+
+      fireEvent.click(await findDirectUnsubscribeButton());
+
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalled(),
+      );
+      expect(mockApiObj.unsubscribeFromIssueSubtree).not.toHaveBeenCalled();
+    });
+
+    it("sends one request for a rapid double-click", async () => {
+      let release: (() => void) | undefined;
+      mockApiObj.unsubscribeFromIssue.mockReturnValue(
+        new Promise<void>((resolve) => {
+          release = () => resolve();
+        }),
+      );
+      renderIssueDetail();
+      const button = await findDirectUnsubscribeButton();
+
+      // Same tick, no await between. React Query flushes isPending in a
+      // microtask, so `disabled` has not landed yet and the second click still
+      // reaches an enabled button — the in-flight guard is what stops it. Two
+      // overlapping toggles is the one case the mutation's whole-list snapshot
+      // cannot survive: the second snapshots the first one's optimistic patch
+      // and rolls back to it (MUL-5714).
+      fireEvent.click(button);
+      fireEvent.click(button);
+
+      // Both handlers already ran synchronously; only the request dispatch is
+      // async. So once any call has landed, the count is final.
+      await waitFor(() =>
+        expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalled(),
+      );
+      expect(mockApiObj.unsubscribeFromIssue).toHaveBeenCalledTimes(1);
+      release?.();
+    });
+
+    it("disables the button while the toggle is in flight, then reports failure", async () => {
+      let reject: ((err: Error) => void) | undefined;
+      mockApiObj.unsubscribeFromIssue.mockReturnValue(
+        new Promise<void>((_resolve, rej) => {
+          reject = (err) => rej(err);
+        }),
+      );
+      renderIssueDetail();
+      const button = await findDirectUnsubscribeButton();
+
+      fireEvent.click(button);
+
+      await waitFor(() =>
+        expect((button as HTMLButtonElement).disabled).toBe(true),
+      );
+
+      reject?.(new Error("boom"));
+
+      // The optimistic patch rolls itself back, restoring the exact row the
+      // user started from — without this message that is indistinguishable
+      // from a button that never fired.
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          enIssues.detail.subscription_update_failed,
+        ),
+      );
+      await waitFor(() =>
+        expect((button as HTMLButtonElement).disabled).toBe(false),
+      );
+    });
+  });
+
+  // Before the subscribers query resolves the hook's list defaults to empty,
+  // which reads as "not subscribed" for everyone. Rendering that default
+  // showed a Subscribe button to people who were already subscribed, and a
+  // click landing in that window sent a subscribe instead of the unsubscribe
+  // they meant (MUL-5714).
+  describe("subscription state before the query resolves", () => {
+    afterEach(() => {
+      document.body.innerHTML = "";
+    });
+
+    it("renders no subscribe control while subscribers are loading", async () => {
+      mockApiObj.listIssueSubscribers.mockReturnValue(new Promise(() => {}));
+      renderIssueDetail();
+
+      // Wait for the issue itself, so this asserts on a rendered page rather
+      // than on the loading skeleton.
+      await screen.findByText("Implement authentication");
+
+      expect(screen.queryByText("Subscribe")).toBeNull();
+      expect(screen.queryByText("Unsubscribe")).toBeNull();
+    });
+
+    it("renders Subscribe once the query says the user is not subscribed", async () => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+      renderIssueDetail();
+
+      expect(await screen.findByText("Subscribe")).toBeTruthy();
+    });
+  });
+
+  // Same cold-cache hazard as the Subscribe button, but worse to act on. Every
+  // checkbox here is drawn from the subscribers list, so an unresolved query
+  // renders everyone — including people who ARE subscribed — as unchecked.
+  // Clicking one of those rows sends an explicit subscribe, which rewrites the
+  // target's reason to 'manual' and clears any opt-out scope
+  // (server/pkg/db/queries/subscriber.sql), discarding a delegated
+  // subscription or a deliberate opt-out (MUL-5714).
+  describe("subscriber picker before the query resolves", () => {
+    // The picker sits next to the subscribe control in the Activity header.
+    // Anchor on the heading, not on that control — the whole point of these
+    // cases is that it is not rendered yet.
+    async function openSubscriberPicker() {
+      const heading = await screen.findByText("Activity");
+      const header = heading.parentElement?.parentElement;
+      const trigger = header?.querySelector('[data-slot="popover-trigger"]');
+      if (!trigger) throw new Error("subscriber picker trigger not found");
+      fireEvent.click(trigger);
+      return waitFor(() => {
+        const content = document.querySelector('[data-slot="popover-content"]');
+        if (!content) throw new Error("picker did not open");
+        return content;
+      });
+    }
+
+    function memberRow(content: Element) {
+      const row = Array.from(
+        content.querySelectorAll('[data-slot="command-item"]'),
+      ).find((el) => el.textContent?.includes("Test User"));
+      if (!row) throw new Error("member row not found");
+      return row;
+    }
+
+    it("disables the rows while subscribers are loading", async () => {
+      mockApiObj.listIssueSubscribers.mockReturnValue(new Promise(() => {}));
+      renderIssueDetail();
+
+      const row = memberRow(await openSubscriberPicker());
+
+      expect(row.getAttribute("data-disabled")).toBe("true");
+
+      fireEvent.click(row);
+
+      expect(mockApiObj.subscribeToIssue).not.toHaveBeenCalled();
+      expect(mockApiObj.unsubscribeFromIssue).not.toHaveBeenCalled();
+    });
+
+    it("disables the rows when the subscribers query failed", async () => {
+      mockApiObj.listIssueSubscribers.mockRejectedValue(new Error("boom"));
+      renderIssueDetail();
+
+      const row = memberRow(await openSubscriberPicker());
+
+      expect(row.getAttribute("data-disabled")).toBe("true");
+
+      fireEvent.click(row);
+
+      expect(mockApiObj.subscribeToIssue).not.toHaveBeenCalled();
+      expect(mockApiObj.unsubscribeFromIssue).not.toHaveBeenCalled();
+    });
+
+    it("enables the rows once the query has a real answer", async () => {
+      mockApiObj.listIssueSubscribers.mockResolvedValue([]);
+      renderIssueDetail();
+      // Wait for the resolved state before opening, so this is not just the
+      // pending case passing by accident.
+      await screen.findByText("Subscribe");
+
+      const row = memberRow(await openSubscriberPicker());
+
+      expect(row.getAttribute("data-disabled")).not.toBe("true");
+
+      fireEvent.click(row);
+
+      await waitFor(() =>
+        expect(mockApiObj.subscribeToIssue).toHaveBeenCalledWith(
+          "issue-1",
+          "user-1",
+          "member",
+        ),
       );
     });
   });

@@ -5,9 +5,15 @@ import type { JSONContent } from "@tiptap/core";
  * one shot. `@tiptap/markdown` parses via `marked`, whose tokenizer is O(n²) in
  * document length (measured: 533KB plain text → 61.8s parse, while the following
  * ProseMirror setContent is only 40ms). Whole-document parse is the bottleneck;
- * below this threshold the single-parse path is fast enough and stays in use.
+ * Traces from a typical structured 22KB issue showed hundreds of milliseconds
+ * in one parse, so keep the single-parse path only for genuinely small docs.
  */
-export const MARKDOWN_CHUNK_THRESHOLD = 50_000;
+export const MARKDOWN_CHUNK_THRESHOLD = 8_000;
+
+// A smaller parse window matters because the tokenizer cost grows roughly with
+// the square of each chunk's length. 4KB keeps common issue descriptions cheap
+// while still avoiding hundreds of tiny ProseMirror documents.
+export const MARKDOWN_CHUNK_SIZE = 4_000;
 
 export interface MarkdownManagerLike {
   parse(markdown: string): JSONContent;
@@ -29,7 +35,7 @@ export interface MarkdownManagerLike {
 export function parseMarkdownChunked(
   manager: MarkdownManagerLike,
   markdown: string,
-  chunkSize = 16_000,
+  chunkSize = MARKDOWN_CHUNK_SIZE,
 ): JSONContent {
   const lines = markdown.split("\n");
   const chunks: string[] = [];

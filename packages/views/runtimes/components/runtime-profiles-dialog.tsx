@@ -5,6 +5,7 @@ import type { FormEvent } from "react";
 import {
   ChevronDown,
   ChevronLeft,
+  ExternalLink,
   Loader2,
   Pencil,
   Plus,
@@ -51,6 +52,7 @@ import {
   type RuntimeCatalogSections,
 } from "./runtime-profile-catalog";
 import { useT } from "../../i18n";
+import { customRuntimeDocsHref } from "./runtime-docs";
 
 // The dialog runs in two surfaces that swap inside one Popup:
 //   - "browse": custom-first master list + adaptive detail
@@ -62,19 +64,33 @@ type DialogState =
 
 export function RuntimeProfilesDialog({
   wsId,
+  intent = "manage",
+  machineName,
+  initialProfile,
   onProfileCreated,
   onClose,
 }: {
   wsId: string;
+  intent?: "create" | "edit" | "manage";
+  machineName?: string;
+  initialProfile?: RuntimeProfile;
   onProfileCreated?: (profile: RuntimeProfile) => void;
   onClose: () => void;
 }) {
-  const { t } = useT("runtimes");
+  const { t, i18n } = useT("runtimes");
   const { data: profiles = [], isLoading } = useQuery(
     runtimeProfileListOptions(wsId),
   );
 
-  const [state, setState] = useState<DialogState>({ surface: "browse" });
+  const [state, setState] = useState<DialogState>(() => {
+    if (intent === "create") {
+      return { surface: "form", mode: "create", step: "family" };
+    }
+    if (intent === "edit" && initialProfile) {
+      return { surface: "form", mode: "edit", profile: initialProfile };
+    }
+    return { surface: "browse" };
+  });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Carries the chosen family from create-step-1 into the form.
   const [draftFamily, setDraftFamily] =
@@ -89,28 +105,41 @@ export function RuntimeProfilesDialog({
     entries.find((entry) => entry.id === selectedId) ?? null;
   const openCreateForm = () =>
     setState({ surface: "form", mode: "create", step: "family" });
+  const docsHref = customRuntimeDocsHref(i18n.language);
 
   return (
     <Dialog open onOpenChange={(open) => !open && onClose()}>
       <DialogContent
-        className="flex max-h-[88vh] flex-col gap-0 p-0 sm:max-w-3xl"
+        className={cn(
+          "flex max-h-[88vh] flex-col gap-0 overscroll-contain p-0",
+          intent === "manage" ? "sm:max-w-3xl" : "sm:max-w-2xl",
+        )}
         showCloseButton={false}
       >
         <DialogHeader className="border-b px-6 py-5">
           <div className="flex items-start justify-between gap-3">
-            <DialogTitle className="flex min-w-0 items-center gap-2 text-base">
-              <Server className="h-4 w-4 shrink-0 text-muted-foreground" />
-              <span className="truncate">{t(($) => $.profiles.dialog_title)}</span>
+            <DialogTitle className="flex min-w-0 items-center gap-2 text-title-sm">
+              <Server
+                aria-hidden="true"
+                className="h-4 w-4 shrink-0 text-muted-foreground"
+              />
+              <span className="truncate">
+                {intent === "create"
+                  ? t(($) => $.profiles.form.create_title)
+                  : intent === "edit"
+                    ? t(($) => $.profiles.form.edit_title)
+                    : t(($) => $.profiles.dialog_title)}
+              </span>
             </DialogTitle>
             <div className="flex shrink-0 items-center gap-2">
-              {state.surface === "browse" && (
+              {state.surface === "browse" && catalog.customs.length > 0 && (
                 <Button
                   type="button"
                   size="sm"
                   className="h-8 px-2.5"
                   onClick={openCreateForm}
                 >
-                  <Plus className="h-3.5 w-3.5" />
+                  <Plus aria-hidden="true" className="h-3.5 w-3.5" />
                   {t(($) => $.profiles.add_new)}
                 </Button>
               )}
@@ -125,13 +154,28 @@ export function RuntimeProfilesDialog({
                   />
                 }
               >
-                <X className="h-4 w-4" />
+                <X aria-hidden="true" className="h-4 w-4" />
                 <span className="sr-only">{t(($) => $.profiles.close)}</span>
               </DialogClose>
             </div>
           </div>
-          <DialogDescription className="text-xs">
-            {t(($) => $.profiles.dialog_description)}
+          <DialogDescription className="text-caption">
+            <span className="block">
+              {intent === "create"
+                ? t(($) => $.profiles.create_dialog_description, {
+                    machine: machineName ?? t(($) => $.profiles.this_machine),
+                  })
+                : t(($) => $.profiles.dialog_description)}
+            </span>{" "}
+            <a
+              href={docsHref}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-1 inline-flex items-center gap-1 rounded-sm font-medium text-foreground underline underline-offset-2 transition-colors hover:text-foreground/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {t(($) => $.profiles.learn_more)}
+              <ExternalLink aria-hidden="true" className="h-3 w-3" />
+            </a>
           </DialogDescription>
         </DialogHeader>
 
@@ -144,6 +188,8 @@ export function RuntimeProfilesDialog({
               state.mode === "edit" ? state.profile.protocol_family : draftFamily
             }
             profile={state.mode === "edit" ? state.profile : null}
+            standaloneCreate={intent === "create"}
+            standaloneEdit={intent === "edit"}
             onPickFamily={(family) => {
               setDraftFamily(family);
               setState({ surface: "form", mode: "create", step: "details" });
@@ -155,10 +201,20 @@ export function RuntimeProfilesDialog({
                 setState({ surface: "browse" });
               }
             }}
-            onCancel={() => setState({ surface: "browse" })}
+            onCancel={() => {
+              if (intent !== "manage") {
+                onClose();
+              } else {
+                setState({ surface: "browse" });
+              }
+            }}
             onSaved={(profile) => {
               if (state.surface === "form" && state.mode === "create") {
                 onProfileCreated?.(profile);
+              }
+              if (intent !== "manage") {
+                onClose();
+                return;
               }
               setSelectedId(profile.id);
               setState({ surface: "browse" });
@@ -215,7 +271,7 @@ function CatalogList({
   return (
     <div className="flex min-h-0 flex-col border-b md:border-b-0 md:border-r">
       <div className="flex shrink-0 items-center justify-between border-b bg-background px-4 py-3">
-        <h3 className="text-sm font-medium">
+        <h3 className="text-body font-medium">
           {t(($) => $.profiles.list_title)}
         </h3>
       </div>
@@ -229,7 +285,7 @@ function CatalogList({
             <div className="mb-2 flex items-center justify-between gap-3">
               <h4
                 id="runtime-profile-custom-section"
-                className="text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                className="text-caption font-medium uppercase tracking-wide text-muted-foreground"
               >
                 {t(($) => $.profiles.custom_section_title, {
                   count: catalog.customs.length,
@@ -276,13 +332,13 @@ function CatalogList({
               <span className="min-w-0">
                 <span
                   id="runtime-profile-builtin-section"
-                  className="block text-xs font-medium uppercase tracking-wide text-muted-foreground"
+                  className="block text-caption font-medium uppercase tracking-wide text-muted-foreground"
                 >
                   {t(($) => $.profiles.builtin_section_title, {
                     count: catalog.builtins.length,
                   })}
                 </span>
-                <span className="mt-0.5 block truncate text-xs text-muted-foreground">
+                <span className="mt-0.5 block truncate text-caption text-muted-foreground">
                   {t(($) => $.profiles.builtin_section_hint)}
                 </span>
               </span>
@@ -324,11 +380,11 @@ function EmptyCustomState({ onAddNew }: { onAddNew: () => void }) {
     <div className="rounded-md border bg-muted/20 p-4">
       <div className="flex items-start gap-3">
         <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-background">
-          <Server className="h-4 w-4 text-muted-foreground" />
+          <Server aria-hidden="true" className="h-4 w-4 text-muted-foreground" />
         </span>
         <div className="min-w-0 flex-1">
-          <h5 className="text-sm font-medium">{t(($) => $.profiles.empty_title)}</h5>
-          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+          <h5 className="text-body font-medium">{t(($) => $.profiles.empty_title)}</h5>
+          <p className="mt-1 text-caption leading-relaxed text-muted-foreground">
             {t(($) => $.profiles.empty_description)}
           </p>
           <Button
@@ -337,7 +393,7 @@ function EmptyCustomState({ onAddNew }: { onAddNew: () => void }) {
             className="mt-3 h-8 px-2.5"
             onClick={onAddNew}
           >
-            <Plus className="h-3.5 w-3.5" />
+            <Plus aria-hidden="true" className="h-3.5 w-3.5" />
             {t(($) => $.profiles.add_new)}
           </Button>
         </div>
@@ -383,26 +439,26 @@ function CatalogRow({
         <span className="flex items-center gap-1.5">
           <span
             className={cn(
-              "truncate text-sm font-medium",
+              "truncate text-body font-medium",
               entry.kind === "builtin" && "capitalize",
             )}
           >
             {label}
           </span>
           {disabled && (
-            <span className="shrink-0 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+            <span className="shrink-0 rounded bg-muted px-1 text-micro font-medium text-muted-foreground">
               {t(($) => $.profiles.badge_disabled)}
             </span>
           )}
         </span>
         {entry.kind === "custom" && (
-          <span className="block truncate text-xs capitalize text-muted-foreground">
+          <span className="block truncate text-caption capitalize text-muted-foreground">
             {entry.protocolFamily}
           </span>
         )}
       </span>
       {isBuiltin && (
-        <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+        <span className="shrink-0 text-micro font-medium uppercase tracking-wide text-muted-foreground">
           {t(($) => $.profiles.builtin_reference)}
         </span>
       )}
@@ -436,10 +492,10 @@ function DetailPanel({
           <span className="mx-auto flex h-11 w-11 items-center justify-center rounded-md border bg-background">
             <Server className="h-5 w-5 text-muted-foreground" />
           </span>
-          <h3 className="mt-4 text-base font-semibold">
+          <h3 className="mt-4 text-title-sm font-semibold">
             {t(($) => $.profiles.detail.default_title)}
           </h3>
-          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+          <p className="mt-2 text-body leading-relaxed text-muted-foreground">
             {t(($) => $.profiles.detail.default_description)}
           </p>
         </div>
@@ -455,15 +511,15 @@ function DetailPanel({
             <ProviderLogo provider={entry.protocolFamily} className="h-5 w-5" />
           </span>
           <div className="min-w-0">
-            <h3 className="truncate text-base font-semibold capitalize">
+            <h3 className="truncate text-title-sm font-semibold capitalize">
               {entry.protocolFamily}
             </h3>
-            <span className="text-xs text-muted-foreground">
+            <span className="text-caption text-muted-foreground">
               {t(($) => $.profiles.builtin_detail.read_only)}
             </span>
           </div>
         </div>
-        <p className="mt-4 text-sm text-muted-foreground">
+        <p className="mt-4 text-body text-muted-foreground">
           {t(($) => $.profiles.builtin_detail.description, {
             family: entry.protocolFamily,
           })}
@@ -490,10 +546,10 @@ function DetailPanel({
               />
             </span>
             <div className="min-w-0">
-              <h3 className="truncate text-base font-semibold">
+              <h3 className="truncate text-title-sm font-semibold">
                 {profile.display_name}
               </h3>
-              <span className="text-xs capitalize text-muted-foreground">
+              <span className="text-caption capitalize text-muted-foreground">
                 {profile.protocol_family}
               </span>
             </div>
@@ -505,7 +561,7 @@ function DetailPanel({
             <span className="capitalize">{profile.protocol_family}</span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.command)}>
-            <span className="font-mono text-xs">{commandLine}</span>
+            <span className="font-mono text-caption">{commandLine}</span>
           </DetailRow>
           <DetailRow label={t(($) => $.profiles.detail.description)}>
             {profile.description ? (
@@ -564,10 +620,10 @@ function DetailRow({
 }) {
   return (
     <div>
-      <dt className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+      <dt className="text-caption font-medium uppercase tracking-wide text-muted-foreground">
         {label}
       </dt>
-      <dd className="mt-1 text-sm">{children}</dd>
+      <dd className="mt-1 text-body">{children}</dd>
     </div>
   );
 }
@@ -582,6 +638,8 @@ function ProfileFormView({
   step,
   family,
   profile,
+  standaloneCreate,
+  standaloneEdit,
   onPickFamily,
   onBack,
   onCancel,
@@ -592,6 +650,8 @@ function ProfileFormView({
   step: "family" | "details";
   family: RuntimeProtocolFamily;
   profile: RuntimeProfile | null;
+  standaloneCreate: boolean;
+  standaloneEdit: boolean;
   onPickFamily: (family: RuntimeProtocolFamily) => void;
   onBack: () => void;
   onCancel: () => void;
@@ -603,25 +663,25 @@ function ProfileFormView({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
-          <h3 className="text-sm font-medium">
+          <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
+            {t(($) => $.profiles.form.step_progress, { current: 1, total: 2 })}
+          </p>
+          <h3 className="text-body font-medium">
             {t(($) => $.profiles.form.step_family_label)}
           </h3>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.profiles.form.step_family_hint)}
           </p>
           <div
             className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3"
-            role="radiogroup"
             aria-label={t(($) => $.profiles.form.family_label)}
           >
             {PROTOCOL_FAMILIES.map((option) => (
               <button
                 key={option}
                 type="button"
-                role="radio"
-                aria-checked={option === family}
                 onClick={() => onPickFamily(option)}
-                className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-sm transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
+                className="flex items-center gap-2 rounded-md border bg-background px-3 py-2.5 text-left text-body transition-colors hover:bg-accent/50 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
               >
                 <ProviderLogo provider={option} className="h-4 w-4 shrink-0" />
                 <span className="truncate capitalize">{option}</span>
@@ -629,14 +689,22 @@ function ProfileFormView({
             ))}
           </div>
         </div>
-        <div className="flex shrink-0 justify-between gap-2 border-t bg-muted/30 px-6 py-3">
-          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-            <ChevronLeft className="h-3.5 w-3.5" />
-            {t(($) => $.profiles.form.back)}
-          </Button>
-          <Button type="button" variant="outline" size="sm" onClick={onCancel}>
-            {t(($) => $.profiles.form.cancel)}
-          </Button>
+        <div
+          className={cn(
+            "flex shrink-0 gap-2 border-t bg-muted/30 px-6 py-3",
+            standaloneCreate ? "justify-end" : "justify-start",
+          )}
+        >
+          {standaloneCreate ? (
+            <Button type="button" variant="outline" size="sm" onClick={onCancel}>
+              {t(($) => $.profiles.form.cancel)}
+            </Button>
+          ) : (
+            <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+              <ChevronLeft aria-hidden="true" className="h-3.5 w-3.5" />
+              {t(($) => $.profiles.form.back)}
+            </Button>
+          )}
         </div>
       </div>
     );
@@ -648,6 +716,7 @@ function ProfileFormView({
       mode={mode}
       family={family}
       profile={profile}
+      hideEditHeading={standaloneEdit}
       onBack={onBack}
       onCancel={onCancel}
       onSaved={onSaved}
@@ -660,6 +729,7 @@ function ProfileDetailsForm({
   mode,
   family,
   profile,
+  hideEditHeading,
   onBack,
   onCancel,
   onSaved,
@@ -668,6 +738,7 @@ function ProfileDetailsForm({
   mode: "create" | "edit";
   family: RuntimeProtocolFamily;
   profile: RuntimeProfile | null;
+  hideEditHeading: boolean;
   onBack: () => void;
   onCancel: () => void;
   onSaved: (profile: RuntimeProfile) => void;
@@ -780,21 +851,28 @@ function ProfileDetailsForm({
         onSubmit={handleSubmit}
         className="min-h-0 flex-1 space-y-4 overflow-y-auto px-6 py-5"
       >
-        <h3 className="text-sm font-medium">
-          {mode === "create"
-            ? t(($) => $.profiles.form.step_details_label)
-            : t(($) => $.profiles.form.edit_title)}
-        </h3>
+        {mode === "create" && (
+          <p className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
+            {t(($) => $.profiles.form.step_progress, { current: 2, total: 2 })}
+          </p>
+        )}
+        {(mode === "create" || !hideEditHeading) && (
+          <h3 className="text-body font-medium">
+            {mode === "create"
+              ? t(($) => $.profiles.form.step_details_label)
+              : t(($) => $.profiles.form.edit_title)}
+          </h3>
+        )}
 
         <div className="space-y-1.5">
-          <Label className="text-xs text-muted-foreground">
+          <Label className="text-caption text-muted-foreground">
             {t(($) => $.profiles.form.family_label)}
           </Label>
           <div className="flex items-center gap-2 rounded-md border bg-muted/30 px-3 py-2">
             <ProviderLogo provider={family} className="h-4 w-4 shrink-0" />
-            <span className="text-sm capitalize">{family}</span>
+            <span className="text-body capitalize">{family}</span>
           </div>
-          <p className="text-[11px] text-muted-foreground">
+          <p className="text-micro text-muted-foreground">
             {t(($) => $.profiles.form.family_locked_hint)}
           </p>
         </div>
@@ -802,12 +880,14 @@ function ProfileDetailsForm({
         <div className="space-y-1.5">
           <Label
             htmlFor={`${idPrefix}-display-name`}
-            className="text-xs text-muted-foreground"
+            className="text-caption text-muted-foreground"
           >
             {t(($) => $.profiles.form.display_name_label)}
           </Label>
           <Input
             id={`${idPrefix}-display-name`}
+            name="displayName"
+            autoComplete="off"
             value={values.displayName}
             onChange={(e) => setField("displayName", e.target.value)}
             placeholder={t(($) => $.profiles.form.display_name_placeholder)}
@@ -817,12 +897,12 @@ function ProfileDetailsForm({
                 ? `${idPrefix}-display-name-error`
                 : undefined
             }
-            className="h-9 text-sm"
+            className="h-9 text-body"
           />
           {hasError("displayName") && (
             <p
               id={`${idPrefix}-display-name-error`}
-              className="text-xs text-destructive"
+              className="text-caption text-destructive"
             >
               {t(($) => $.profiles.form.error_display_name_required)}
             </p>
@@ -830,7 +910,7 @@ function ProfileDetailsForm({
           {duplicateName && !hasError("displayName") && (
             <p
               id={`${idPrefix}-display-name-error`}
-              className="text-xs text-destructive"
+              className="text-caption text-destructive"
             >
               {t(($) => $.profiles.form.error_duplicate_name)}
             </p>
@@ -840,12 +920,15 @@ function ProfileDetailsForm({
         <div className="space-y-1.5">
           <Label
             htmlFor={`${idPrefix}-command`}
-            className="text-xs text-muted-foreground"
+            className="text-caption text-muted-foreground"
           >
             {t(($) => $.profiles.form.command_name_label)}
           </Label>
           <Input
             id={`${idPrefix}-command`}
+            name="command"
+            autoComplete="off"
+            spellCheck={false}
             value={values.commandLine}
             onChange={(e) => setField("commandLine", e.target.value)}
             placeholder={t(($) => $.profiles.form.command_name_placeholder)}
@@ -853,15 +936,15 @@ function ProfileDetailsForm({
             aria-describedby={
               hasError("commandLine") ? `${idPrefix}-command-error` : undefined
             }
-            className="h-9 font-mono text-sm"
+            className="h-9 font-mono text-body"
           />
           {commandError && (
-            <p id={`${idPrefix}-command-error`} className="text-xs text-destructive">
+            <p id={`${idPrefix}-command-error`} className="text-caption text-destructive">
               {commandError}
             </p>
           )}
           {parsedCommand.ok && (
-            <div className="space-y-1 rounded-md border bg-muted/20 px-3 py-2 text-[11px] text-muted-foreground">
+            <div className="space-y-1 rounded-md border bg-muted/20 px-3 py-2 text-micro text-muted-foreground">
               <div className="flex min-w-0 gap-1">
                 <span>{t(($) => $.profiles.form.command_preview_executable)}</span>
                 <span className="truncate font-mono text-foreground">
@@ -888,16 +971,18 @@ function ProfileDetailsForm({
         <div className="space-y-1.5">
           <Label
             htmlFor={`${idPrefix}-description`}
-            className="text-xs text-muted-foreground"
+            className="text-caption text-muted-foreground"
           >
             {t(($) => $.profiles.form.description_label)}
           </Label>
           <Textarea
             id={`${idPrefix}-description`}
+            name="description"
+            autoComplete="off"
             value={values.description}
             onChange={(e) => setField("description", e.target.value)}
             placeholder={t(($) => $.profiles.form.description_placeholder)}
-            className="min-h-16 text-sm"
+            className="min-h-16 text-body"
           />
         </div>
 
@@ -909,23 +994,29 @@ function ProfileDetailsForm({
             MUL-3308. */}
 
         {formError && (
-          <p role="alert" className="text-xs text-destructive">
+          <p role="alert" className="text-caption text-destructive">
             {formError}
           </p>
         )}
       </form>
 
       <div className="flex shrink-0 justify-between gap-2 border-t bg-muted/30 px-6 py-3">
-        <Button type="button" variant="ghost" size="sm" onClick={onBack}>
-          <ChevronLeft className="h-3.5 w-3.5" />
-          {t(($) => $.profiles.form.back)}
-        </Button>
+        {mode === "create" ? (
+          <Button type="button" variant="ghost" size="sm" onClick={onBack}>
+            <ChevronLeft aria-hidden="true" className="h-3.5 w-3.5" />
+            {t(($) => $.profiles.form.back)}
+          </Button>
+        ) : (
+          <span />
+        )}
         <div className="flex gap-2">
           <Button type="button" variant="outline" size="sm" onClick={onCancel}>
             {t(($) => $.profiles.form.cancel)}
           </Button>
           <Button type="submit" size="sm" form={formId} disabled={submitting}>
-            {submitting && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+            {submitting && (
+              <Loader2 aria-hidden="true" className="h-3.5 w-3.5 animate-spin" />
+            )}
             {mode === "create"
               ? submitting
                 ? t(($) => $.profiles.form.creating)

@@ -7,7 +7,7 @@
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -65,9 +65,64 @@ LIMIT $2 OFFSET $3;
 SELECT * FROM issue
 WHERE id = $1;
 
+-- name: GetIssueGCStatus :one
+SELECT workspace_id, status, updated_at
+FROM issue
+WHERE id = $1;
+
+-- name: ListIssueGCStatuses :many
+SELECT id, status, updated_at
+FROM issue
+WHERE workspace_id = sqlc.arg('workspace_id')
+  AND id = ANY(sqlc.arg('issue_ids')::uuid[]);
+
 -- name: GetIssueInWorkspace :one
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: LockIssueForChannelMediaBind :one
+-- Channel media resolves after /issue creation. Hold a key-share lock while
+-- the attachment row is written so a concurrent issue delete cannot land
+-- between the workspace-scoped validation and the attachment insert.
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE;
+
+-- name: LockIssueForDescriptionUpdate :one
+-- Serialize user description saves with detached channel-media appends. The
+-- handler merges channel media that landed after the editor's submitted base
+-- while holding this lock, then performs UpdateIssue in the same transaction.
+SELECT * FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
+-- name: MaterializeIssueChannelMediaMarkdown :one
+-- Detached channel media resolves after /issue creation. When the description
+-- still equals the exact creation-time base, replace its inline placeholders
+-- with the fully composed Markdown so rich-text ordering survives. If a user
+-- edited concurrently (or the adapter has no inline layout), append instead;
+-- preserving user-authored bytes takes precedence over layout fidelity.
+UPDATE issue
+SET description = CASE
+        WHEN sqlc.narg('base_description')::text IS NOT NULL
+             AND COALESCE(description, '') = sqlc.narg('base_description')::text
+            THEN sqlc.arg('description')::text
+        WHEN description IS NULL OR description = '' THEN sqlc.arg(markdown)
+        ELSE description || E'\n\n' || sqlc.arg(markdown)
+    END,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND workspace_id = sqlc.arg(workspace_id)
+RETURNING *;
+
+-- name: LockIssueForDelete :one
+-- Issue deletion must collect every attachment URL after it has won the same
+-- row-lock race used by channel media binding. FOR UPDATE conflicts with the
+-- binder's FOR KEY SHARE: either bind commits first and its URL is collected,
+-- or delete commits first and the binder leaves its durable intent for cleanup.
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
 
 -- name: CreateIssue :one
 INSERT INTO issue (
@@ -134,20 +189,56 @@ WHERE workspace_id = $1
 ORDER BY created_at ASC
 LIMIT 1;
 
+-- name: FindRecentAutopilotDuplicateIssue :one
+SELECT i.* FROM issue i
+WHERE i.workspace_id = $1
+  AND i.status NOT IN ('done', 'cancelled')
+  AND i.origin_type = 'autopilot'
+  AND i.origin_id = $2
+  AND i.project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
+  AND lower(btrim(regexp_replace(i.title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
+  AND i.created_at >= sqlc.arg('created_after')::timestamptz
+  AND EXISTS (
+    SELECT 1
+    FROM autopilot_run r
+    WHERE r.issue_id = i.id
+      AND r.autopilot_id = i.origin_id
+      AND r.status IN ('issue_created', 'running', 'completed')
+  )
+ORDER BY i.created_at ASC
+LIMIT 1;
+
 -- name: DeleteIssue :exec
 -- Defense-in-depth: the workspace_id predicate makes the tenant invariant a
 -- SQL-layer guarantee rather than a handler-layer one. Handler loaders
 -- (loadIssueForUser / GetIssueInWorkspace) already enforce membership today,
 -- but a future loader bypass or a new caller skipping the loader would be
 -- silently catastrophic without this guard. See incident #1661.
-DELETE FROM issue WHERE id = $1 AND workspace_id = $2;
+--
+-- issue_vcs_pull_request (migration 213) has no FK to issue, so the link rows
+-- are not cascaded away. Sweep them here so they go atomically with the issue.
+-- The mirrored PR rows themselves belong to the connection, not the issue, so
+-- they persist (matching the GitHub link behaviour).
+--
+-- The sweep MUST route through the same workspace-checked target as the issue
+-- delete: deleting links by bare issue_id would drop another tenant's link rows
+-- when a caller passes a foreign issue_id with its own workspace_id (the issue
+-- itself is correctly untouched, but the links are already gone) — the exact
+-- cross-tenant leak the #1661 guard above exists to prevent.
+WITH target AS (
+    SELECT issue.id FROM issue WHERE issue.id = $1 AND issue.workspace_id = $2
+),
+cleared_vcs_pr_links AS (
+    DELETE FROM issue_vcs_pull_request WHERE issue_id IN (SELECT target.id FROM target)
+)
+DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 
 -- name: ListOpenIssues :many
 -- See ListIssues for the semantics of involves_user_id (mirrors the 4-branch
 -- filter; member-direct assignment is intentionally excluded).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
 FROM issue i
 WHERE i.workspace_id = $1
   AND i.status NOT IN ('done', 'cancelled')
@@ -157,6 +248,23 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('creator_id')::uuid IS NULL OR i.creator_id = sqlc.narg('creator_id'))
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
+  -- properties_filter is a jsonb array of groups, each group an array of
+  -- containment patterns (built by parsePropertiesFilterParam): the issue
+  -- must match at least one pattern from EVERY group (AND of ORs). The
+  -- correlated form skips the GIN index, which is fine here: open_only is
+  -- an unpaginated workspace scan already narrowed by status.
+  AND (
+    sqlc.narg('properties_filter')::jsonb IS NULL
+    OR NOT EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(sqlc.narg('properties_filter')::jsonb) AS pf(alternatives)
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
+        WHERE i.properties @> alt.pattern
+      )
+    )
+  )
   AND (
     sqlc.narg('involves_user_id')::uuid IS NULL
     OR (i.assignee_type = 'agent' AND i.assignee_id IN (

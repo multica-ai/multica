@@ -82,7 +82,7 @@ export function AutopilotAccessManager({
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+        <span className="text-caption font-medium uppercase tracking-wider text-muted-foreground">
           {t(($) => $.access.current_label)}
         </span>
         <PropertyPicker
@@ -97,7 +97,7 @@ export function AutopilotAccessManager({
           searchPlaceholder={t(($) => $.access.search_placeholder)}
           onSearchChange={setFilter}
           trigger={
-            <span className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed px-2 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
+            <span className="inline-flex cursor-pointer items-center gap-1 rounded-md border border-dashed px-2 py-1 text-caption text-muted-foreground transition-colors hover:border-primary/40 hover:text-foreground">
               <Plus className="size-3" />
               {t(($) => $.access.add)}
             </span>
@@ -115,7 +115,7 @@ export function AutopilotAccessManager({
                   setPickerOpen(false);
                 }}
               >
-                <ActorAvatar actorType="member" actorId={m.user_id} size={18} />
+                <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                 <span className="truncate">{m.name}</span>
               </PickerItem>
             ))
@@ -124,7 +124,7 @@ export function AutopilotAccessManager({
       </div>
 
       {collaborators.length === 0 ? (
-        <p className="rounded-md border border-dashed px-3 py-4 text-center text-sm text-muted-foreground">
+        <p className="rounded-md border border-dashed px-3 py-4 text-center text-body text-muted-foreground">
           {t(($) => $.access.empty)}
         </p>
       ) : (
@@ -135,8 +135,8 @@ export function AutopilotAccessManager({
               className="flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-muted/50"
             >
               <span className="flex min-w-0 items-center gap-2">
-                <ActorAvatar actorType="member" actorId={c.user_id} size={20} />
-                <span className="truncate text-sm">
+                <ActorAvatar actorType="member" actorId={c.user_id} size="sm" />
+                <span className="truncate text-body">
                   {getActorName("member", c.user_id)}
                 </span>
               </span>
@@ -154,7 +154,7 @@ export function AutopilotAccessManager({
         </ul>
       )}
 
-      <p className="text-xs text-muted-foreground">
+      <p className="text-caption text-muted-foreground">
         {t(($) => $.access.owner_note)}
       </p>
     </div>

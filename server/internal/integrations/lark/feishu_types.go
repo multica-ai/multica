@@ -22,6 +22,11 @@ type InboundMessage struct {
 	MessageID    string
 	SenderOpenID OpenID
 	Body         string
+	// Content is the raw msg_type-specific JSON string Lark sends in
+	// event.message.content. Text/post decoding consumes it immediately; media
+	// ingestion keeps it so the adapter can extract image_key/file_key before
+	// translating to channel.InboundMessage.
+	Content string
 	// ForceFreshSession marks this dispatch as a one-off fresh start: the
 	// daemon should skip prior session resume when it claims the resulting
 	// chat task.
@@ -67,6 +72,10 @@ const (
 	OutcomeNeedsBinding Outcome = "needs_binding"
 	// OutcomeIngested — the message landed and a run was (or will be) enqueued.
 	OutcomeIngested Outcome = "ingested"
+	// OutcomeFreshPending — a bare /new was persisted for the next chat turn.
+	OutcomeFreshPending Outcome = "fresh_pending"
+	// OutcomeIssueUsage — /issue was sent without its required title.
+	OutcomeIssueUsage Outcome = "issue_usage"
 	// OutcomeAgentOffline — landed, but the agent has no runtime bound.
 	OutcomeAgentOffline Outcome = "agent_offline"
 	// OutcomeAgentArchived — landed, but the agent is archived.
@@ -90,4 +99,10 @@ type DispatchResult struct {
 	IssueIdentifier string
 	// IssueTitle is the title supplied on /issue, echoed in the confirmation.
 	IssueTitle string
+	// IssueDuplicate distinguishes an active-issue conflict from a successful
+	// create while carrying the existing issue fields above.
+	IssueDuplicate bool
+	// IssueUsageHadMedia asks the usage reply to tell the sender to include the
+	// current message's media again with the corrected command.
+	IssueUsageHadMedia bool
 }

@@ -51,6 +51,82 @@ SET attempt_count = attempt_count + 1,
 WHERE id = $1
 RETURNING *;
 
+-- name: AcknowledgeWebhookDelivery :one
+-- Best-effort operator metadata for the HTTP acknowledgement. The delivery and
+-- run are already durable, so callers still return their response if this
+-- metadata-only update fails.
+UPDATE webhook_delivery
+SET response_status = $2,
+    response_body = $3,
+    last_attempt_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: ClaimQueuedWebhookDelivery :one
+-- Claims one due delivery. SKIP LOCKED spreads work across replicas; the
+-- expiring token makes a crashed claim visible to a later sweeper pass.
+-- The lease is a scheduling optimization, not the exactly-once guard: if a
+-- slow dispatch outlives it, uq_autopilot_run_webhook_delivery remains the
+-- final protection against duplicate downstream runs.
+WITH candidate AS (
+    SELECT id
+    FROM webhook_delivery
+    WHERE status = 'queued'
+      AND available_at <= now()
+      AND (lease_expires_at IS NULL OR lease_expires_at <= now())
+    ORDER BY available_at, created_at
+    FOR UPDATE SKIP LOCKED
+    LIMIT 1
+)
+UPDATE webhook_delivery AS d
+SET lease_token = gen_random_uuid(),
+    lease_expires_at = now() + interval '2 minutes'
+FROM candidate
+WHERE d.id = candidate.id
+RETURNING d.*;
+
+-- name: DeferClaimedWebhookDelivery :one
+-- Releases a claim without counting a dispatch attempt. Used when the
+-- per-trigger worker budget is exhausted before downstream dispatch begins.
+UPDATE webhook_delivery
+SET available_at = $3,
+    lease_token = NULL,
+    lease_expires_at = NULL
+WHERE id = $1
+  AND lease_token = $2
+  AND status = 'queued'
+RETURNING *;
+
+-- name: RetryClaimedWebhookDelivery :one
+-- Records a transient worker failure and makes the delivery eligible after
+-- its bounded backoff. HTTP response fields intentionally remain the 202
+-- acknowledgement already returned to the provider.
+UPDATE webhook_delivery
+SET available_at = $3,
+    dispatch_attempts = dispatch_attempts + 1,
+    error = $4,
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_attempt_at = now()
+WHERE id = $1
+  AND lease_token = $2
+  AND status = 'queued'
+RETURNING *;
+
+-- name: CompleteClaimedWebhookDelivery :one
+UPDATE webhook_delivery
+SET status = $3,
+    autopilot_run_id = sqlc.narg('autopilot_run_id'),
+    dispatch_attempts = dispatch_attempts + 1,
+    error = sqlc.narg('error'),
+    lease_token = NULL,
+    lease_expires_at = NULL,
+    last_attempt_at = now()
+WHERE id = $1
+  AND lease_token = $2
+  AND status = 'queued'
+RETURNING *;
+
 -- name: UpdateWebhookDeliveryDispatched :one
 -- Finalises a delivery that successfully created (or skipped to) an
 -- autopilot_run. response_status is the HTTP status we returned, recorded
@@ -91,7 +167,8 @@ SELECT
     d.dedupe_key, d.dedupe_source, d.signature_status, d.status,
     d.attempt_count, d.content_type, d.response_status,
     d.autopilot_run_id, d.replayed_from_delivery_id, d.error,
-    d.received_at, d.last_attempt_at, d.created_at
+    d.received_at, d.last_attempt_at, d.created_at,
+    d.available_at, d.dispatch_attempts
 FROM webhook_delivery d
 JOIN autopilot a ON a.id = d.autopilot_id
 WHERE d.autopilot_id = $1

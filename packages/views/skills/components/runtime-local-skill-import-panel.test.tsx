@@ -36,22 +36,50 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("@multica/core/runtimes", () => ({
-  runtimeListOptions: (...args: unknown[]) => mockRuntimeListOptions(...args),
-  runtimeLocalSkillsOptions: (...args: unknown[]) =>
-    mockRuntimeLocalSkillsOptions(...args),
-  runtimeLocalSkillsKeys: {
-    forRuntime: (runtimeId: string) => ["runtimes", "local-skills", runtimeId],
-  },
-  resolveRuntimeLocalSkillImport: (...args: unknown[]) =>
-    mockResolveRuntimeLocalSkillImport(...args),
-}));
+// Spread the real module so alias helpers (runtimeDisplayLabel) and the
+// machine-grouping helpers used transitively by buildRuntimeMachines
+// (deriveRuntimeHealth) stay real; only the data/import entrypoints are mocked.
+vi.mock("@multica/core/runtimes", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    );
+  return {
+    ...actual,
+    runtimeListOptions: (...args: unknown[]) => mockRuntimeListOptions(...args),
+    runtimeLocalSkillsOptions: (...args: unknown[]) =>
+      mockRuntimeLocalSkillsOptions(...args),
+    runtimeLocalSkillsKeys: {
+      forRuntime: (runtimeId: string) => [
+        "runtimes",
+        "local-skills",
+        runtimeId,
+      ],
+    },
+    resolveRuntimeLocalSkillImport: (...args: unknown[]) =>
+      mockResolveRuntimeLocalSkillImport(...args),
+  };
+});
 
 vi.mock("sonner", () => ({
   toast: {
     error: vi.fn(),
     success: vi.fn(),
   },
+}));
+
+vi.mock("motion/react", () => ({
+  AnimatePresence: ({ children }: { children: ReactNode }) => children,
+  motion: {
+    div: ({
+      children,
+      className,
+    }: {
+      children: ReactNode;
+      className?: string;
+    }) => <div className={className}>{children}</div>,
+  },
+  useReducedMotion: () => true,
 }));
 
 import { RuntimeLocalSkillImportPanel } from "./runtime-local-skill-import-panel";
@@ -203,6 +231,29 @@ describe("RuntimeLocalSkillImportPanel", () => {
     );
   });
 
+  it("surfaces the runtime alias and provider in the picker, not the raw daemon name (MUL-5248)", async () => {
+    mockRuntimeListOptions.mockReturnValue({
+      queryKey: ["runtimes", "ws-1", "list"],
+      queryFn: () =>
+        Promise.resolve([{ ...MOCK_RUNTIME, custom_name: "Dev Box" }]),
+    });
+
+    renderPanel();
+
+    // The selected-runtime summary surfaces the user's alias plus the provider
+    // ("Dev Box (Claude)"). The old flat label duplicated the provider as
+    // "Claude (MacBook) (claude)" and dropped the alias entirely.
+    const labels = await screen.findAllByText(
+      "Dev Box (Claude)",
+      {},
+      { timeout: 5000 },
+    );
+    expect(labels.length).toBeGreaterThan(0);
+    expect(
+      screen.queryByText("Claude (MacBook) (claude)"),
+    ).not.toBeInTheDocument();
+  });
+
   it("imports multiple skills in sequence and shows summary", async () => {
     mockRuntimeLocalSkillsOptions.mockReturnValue({
       queryKey: ["runtimes", "local-skills", "runtime-1"],
@@ -255,6 +306,122 @@ describe("RuntimeLocalSkillImportPanel", () => {
 
     // Verify summary shows both as created
     expect(screen.getByText("Created")).toBeInTheDocument();
+  });
+
+  it("filters local runtime skills and selects only visible matches", async () => {
+    mockRuntimeLocalSkillsOptions.mockReturnValue({
+      queryKey: ["runtimes", "local-skills", "runtime-1"],
+      queryFn: () =>
+        Promise.resolve({
+          supported: true,
+          skills: [MOCK_SKILL_A, MOCK_SKILL_B],
+        }),
+    });
+
+    renderPanel();
+
+    expect(
+      await screen.findByText("Review Helper", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Code Gen")).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Search local skills"), {
+      target: { value: "code" },
+    });
+
+    expect(screen.queryByText("Review Helper")).not.toBeInTheDocument();
+    // "Code Gen" survives the filter; its matched substring is now wrapped in a
+    // highlight <mark>, so the row's name text is split across nodes.
+    expect(screen.getByText("Code", { selector: "mark" })).toBeInTheDocument();
+    expect(screen.getByText("Select all (1)")).toBeInTheDocument();
+
+    const selectAllCheckbox = screen
+      .getByText(/Select all/i)
+      .closest("label")!
+      .querySelector("input[type='checkbox']")!;
+    fireEvent.click(selectAllCheckbox);
+
+    const importButton = screen.getByRole("button", {
+      name: /Import to Workspace/i,
+    });
+    await waitFor(() => expect(importButton).not.toBeDisabled(), {
+      timeout: 5000,
+    });
+    fireEvent.click(importButton);
+
+    await waitFor(
+      () => {
+        expect(mockResolveRuntimeLocalSkillImport).toHaveBeenCalledTimes(1);
+        expect(mockResolveRuntimeLocalSkillImport).toHaveBeenCalledWith(
+          "runtime-1",
+          {
+            skill_key: "code-gen",
+            name: "Code Gen",
+            description: "Generate code from specs",
+            supports_conflict: true,
+          },
+        );
+      },
+      { timeout: 5000 },
+    );
+  });
+
+  it("highlights the matched substring in search results", async () => {
+    mockRuntimeLocalSkillsOptions.mockReturnValue({
+      queryKey: ["runtimes", "local-skills", "runtime-1"],
+      queryFn: () =>
+        Promise.resolve({
+          supported: true,
+          skills: [MOCK_SKILL_A, MOCK_SKILL_B],
+        }),
+    });
+
+    renderPanel();
+
+    expect(
+      await screen.findByText("Review Helper", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Search local skills"), {
+      target: { value: "code" },
+    });
+
+    // The surviving row's name has its matched substring wrapped in a <mark>,
+    // so the user can see why the result matched.
+    const nameMark = screen.getByText("Code", { selector: "mark" });
+    expect(nameMark.tagName).toBe("MARK");
+    // The description and path also matched "code", each highlighted too.
+    expect(screen.getAllByText("code", { selector: "mark" }).length).toBe(2);
+    // The non-matching row is gone, so no stray highlights leak from it.
+    expect(screen.queryByText("Review Helper")).not.toBeInTheDocument();
+  });
+
+  it("shows an empty search state when no local skills match", async () => {
+    mockRuntimeLocalSkillsOptions.mockReturnValue({
+      queryKey: ["runtimes", "local-skills", "runtime-1"],
+      queryFn: () =>
+        Promise.resolve({
+          supported: true,
+          skills: [MOCK_SKILL_A, MOCK_SKILL_B],
+        }),
+    });
+
+    renderPanel();
+
+    expect(
+      await screen.findByText("Review Helper", {}, { timeout: 5000 }),
+    ).toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText("Search local skills"), {
+      target: { value: "terraform" },
+    });
+
+    expect(screen.getByText("No matching local skills")).toBeInTheDocument();
+    expect(
+      screen.getByText('No local skills match "terraform".'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Review Helper")).not.toBeInTheDocument();
+    expect(screen.queryByText("Code Gen")).not.toBeInTheDocument();
   });
 
   it("handles partial failures gracefully", async () => {

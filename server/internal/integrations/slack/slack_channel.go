@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"time"
 
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
@@ -35,8 +36,15 @@ type slackChannel struct {
 	appToken  string        // decrypted xapp- — authorizes the Socket Mode connection
 	botAPI    *slack.Client // bot-token client for outbound Send
 	handler   channel.InboundHandler
+	slash     *SlashCommandProcessor // nil disables /issue slash-command handling
 	logger    *slog.Logger
 }
+
+// slashCommandTimeout bounds the detached processing of one `/issue` slash
+// command (installation + identity resolution, issue creation, response_url
+// reply). It runs off the socket receive loop on its own context, so a slow DB
+// or Slack HTTP call cannot wedge event delivery.
+const slashCommandTimeout = 10 * time.Second
 
 func (c *slackChannel) Type() channel.Type { return TypeSlack }
 
@@ -134,6 +142,22 @@ func (c *slackChannel) handleSocketEvent(ctx context.Context, sm *socketmode.Cli
 			}
 		}
 		return c.dispatchEventsAPI(ctx, eventsAPI, mentionRe)
+	case socketmode.EventTypeSlashCommand:
+		// ACK first: like Events API envelopes, Slack expires an un-ACKed slash
+		// command in ~3s, well under the DB + Slack HTTP work below. The reply is
+		// delivered out-of-band via the command's response_url, so an empty ACK
+		// is correct. Handling never fails the connection (product outcomes are
+		// ephemeral replies, not infra errors).
+		if evt.Request != nil {
+			if err := sm.Ack(*evt.Request); err != nil {
+				c.logger.WarnContext(ctx, "slack: ack slash command failed", "error", err)
+			}
+		}
+		cmd, ok := evt.Data.(slack.SlashCommand)
+		if ok {
+			c.dispatchSlashCommand(cmd)
+		}
+		return nil
 	case socketmode.EventTypeConnecting, socketmode.EventTypeConnected, socketmode.EventTypeHello:
 		c.logger.DebugContext(ctx, "slack: socket mode", "event", evt.Type, "app_id", c.appID)
 	case socketmode.EventTypeIncomingError, socketmode.EventTypeErrorBadMessage:
@@ -169,12 +193,33 @@ func (c *slackChannel) dispatchEventsAPI(ctx context.Context, e slackevents.Even
 	return c.handler(ctx, msg)
 }
 
+// dispatchSlashCommand processes an already-ACKed `/issue` slash command on a
+// detached goroutine with its own bounded context, so the issue creation and
+// response_url reply never block the socket receive loop (mirrors the router's
+// detached outbound path). A nil processor (slash handling not wired) drops it.
+func (c *slackChannel) dispatchSlashCommand(cmd slack.SlashCommand) {
+	if c.slash == nil {
+		c.logger.Warn("slack: slash command received but no processor configured",
+			"command", cmd.Command, "app_id", c.appID)
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), slashCommandTimeout)
+		defer cancel()
+		c.slash.Handle(ctx, cmd)
+	}()
+}
+
 // ChannelDeps are the shared dependencies the Slack Factory closes over. The
 // engine inbound handler is supplied per-build via channel.Config.Handler; the
 // Decrypter turns the installation's stored ciphertext tokens into plaintext.
 type ChannelDeps struct {
 	Decrypt Decrypter
 	Logger  *slog.Logger
+	// Slash handles the `/issue` slash command delivered over Socket Mode. Nil
+	// leaves slash-command handling off (the connection still serves messages
+	// and @-mentions); tests that only exercise inbound messages pass nil.
+	Slash *SlashCommandProcessor
 }
 
 // RegisterSlack registers the per-installation Slack Factory so the
@@ -212,6 +257,7 @@ func newSlackFactory(deps ChannelDeps) channel.Factory {
 			appToken:  appToken,
 			botAPI:    slack.New(botToken),
 			handler:   cfg.Handler,
+			slash:     deps.Slash,
 			logger:    logger,
 		}, nil
 	}

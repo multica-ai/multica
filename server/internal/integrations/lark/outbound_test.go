@@ -17,22 +17,28 @@ import (
 )
 
 type fakePatcherQueries struct {
-	mu              sync.Mutex
-	binding         ChatSessionBinding
-	bindingErr      error
-	installation    Installation
-	installationErr error
-	agent           db.Agent
-	agentErr        error
-	card            OutboundCardMessage
-	cardErr         error
-	created         []CreateOutboundCardMessageParams
-	createReturn    OutboundCardMessage
-	statusUpdates   []UpdateOutboundCardStatusParams
+	mu                  sync.Mutex
+	task                db.AgentTaskQueue
+	taskErr             error
+	taskChannelIngested bool
+	binding             ChatSessionBinding
+	bindingErr          error
+	installation        Installation
+	installationErr     error
+	agent               db.Agent
+	agentErr            error
+	card                OutboundCardMessage
+	cardErr             error
+	created             []CreateOutboundCardMessageParams
+	createReturn        OutboundCardMessage
+	statusUpdates       []UpdateOutboundCardStatusParams
 }
 
 func (f *fakePatcherQueries) GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error) {
-	return db.AgentTaskQueue{}, nil
+	return f.task, f.taskErr
+}
+func (f *fakePatcherQueries) TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error) {
+	return f.taskChannelIngested, nil
 }
 func (f *fakePatcherQueries) GetChatSession(ctx context.Context, id pgtype.UUID) (db.ChatSession, error) {
 	return db.ChatSession{}, nil
@@ -149,6 +155,9 @@ func (f *fakeAPIClient) GetMessage(ctx context.Context, creds InstallationCreden
 func (f *fakeAPIClient) ListChatMessages(ctx context.Context, creds InstallationCredentials, p ListMessagesParams) ([]LarkMessage, error) {
 	return nil, nil
 }
+func (f *fakeAPIClient) DownloadMessageResource(ctx context.Context, creds InstallationCredentials, p DownloadResourceParams) (DownloadedResource, error) {
+	return DownloadedResource{}, nil
+}
 func (f *fakeAPIClient) BatchGetUsers(ctx context.Context, creds InstallationCredentials, openIDs []string) (map[string]string, error) {
 	return nil, nil
 }
@@ -191,6 +200,34 @@ func newTestPatcher(t *testing.T) (*Patcher, *fakePatcherQueries, *fakeAPIClient
 // a plain Lark IM text message (msg_type=text), not nested inside an
 // interactive card. This is the load-bearing UX call — the prior card
 // chrome made every reply look like a system notification.
+// TestPatcherSendsSealedChannelTaskReply is the other half of the boundary:
+// a sealed channel task owns an input batch exactly like a direct task, so
+// gating outbound on owner presence alone would silently drop every channel
+// reply. Channel provenance must let the reply through.
+func TestPatcherSendsSealedChannelTaskReply(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	taskID := uuidFromString(t, "ee555555-ee55-ee55-ee55-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = true
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: protocol.ChatDonePayload{
+			TaskID:        uuidString(taskID),
+			ChatSessionID: uuidString(q.binding.ChatSessionID),
+			Content:       "channel answer",
+		},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 || api.textSent[0].Text != "channel answer" {
+		t.Fatalf("sealed channel reply must reach Lark; textSent=%+v", api.textSent)
+	}
+}
+
 func TestPatcherSendsPlainTextOnChatDone(t *testing.T) {
 	p, q, api := newTestPatcher(t)
 	taskID := uuidFromString(t, "ee333333-ee33-ee33-ee33-eeeeeeeeeeee")
@@ -342,6 +379,52 @@ func TestPatcherSkipsWhenNoChatSessionBinding(t *testing.T) {
 	if len(api.textSent) != 0 || len(api.sent) != 0 {
 		t.Fatalf("web-only chat sessions must produce no outbound; got text=%d cards=%d",
 			len(api.textSent), len(api.sent))
+	}
+}
+
+// TestPatcherSkipsDirectChatTaskOnBoundSession guards the channel boundary:
+// opening a Lark-bound session in the web/mobile UI must not make that direct
+// conversation's reply or failure leak back into the external chat. Sealed
+// channel tasks own an input batch too, so the discriminator is the
+// channel_ingested provenance of the owned batch, not owner presence.
+func TestPatcherSkipsDirectChatTaskOnBoundSession(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventType string
+		payload   any
+	}{
+		{
+			name:      "completed reply",
+			eventType: protocol.EventChatDone,
+			payload:   protocol.ChatDonePayload{Content: "web-only answer"},
+		},
+		{
+			name:      "failed run",
+			eventType: protocol.EventTaskFailed,
+			payload:   map[string]any{"error": "web-only failure"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			p, q, api := newTestPatcher(t)
+			taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
+			q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+
+			p.handleEvent(events.Event{
+				Type:          tt.eventType,
+				TaskID:        uuidString(taskID),
+				ChatSessionID: uuidString(q.binding.ChatSessionID),
+				Payload:       tt.payload,
+			})
+
+			api.mu.Lock()
+			defer api.mu.Unlock()
+			if len(api.textSent) != 0 || len(api.mdCardSent) != 0 || len(api.sent) != 0 || len(api.patched) != 0 {
+				t.Fatalf("direct task must produce no channel outbound; got text=%d markdown=%d cards=%d patches=%d",
+					len(api.textSent), len(api.mdCardSent), len(api.sent), len(api.patched))
+			}
+		})
 	}
 }
 
@@ -517,6 +600,65 @@ func TestPatcherRepliesInThreadWhenTriggerWasInThread(t *testing.T) {
 	}
 }
 
+// TestPatcherTopicSessionSendsToRealChatID pins the composite-key outbound
+// contract: a per-topic session stores "chat:thread" as channel_chat_id (the
+// isolation key), so the send target MUST come from the binding config's real
+// chat id — the raw key is not a valid Lark chat id.
+func TestPatcherTopicSessionSendsToRealChatID(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.ChannelChatID = "oc_test_chat:omt_topic1"
+	q.binding.Config = []byte(`{"chat_id":"oc_test_chat"}`)
+	q.binding.ChatType = "group"
+	q.binding.LastMessageID = pgtype.Text{String: "om_trigger", Valid: true}
+	q.binding.LastThreadID = pgtype.Text{String: "omt_topic1", Valid: true}
+	taskID := uuidFromString(t, "eeaaaaaa-eeaa-eeaa-eeaa-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "topic reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	got := api.textSent[0]
+	if got.ChatID != "oc_test_chat" {
+		t.Errorf("chat_id = %q, want the real chat id from binding config", got.ChatID)
+	}
+	if got.ReplyTarget.MessageID != "om_trigger" || !got.ReplyTarget.InThread {
+		t.Errorf("expected thread reply target {om_trigger, InThread:true}; got %+v", got.ReplyTarget)
+	}
+}
+
+// TestPatcherLegacyBindingFallsBackToKey pins backward compatibility: rows
+// created before topic isolation have the raw chat id as the key and "{}" as
+// config — the send target must stay the key itself.
+func TestPatcherLegacyBindingFallsBackToKey(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	q.binding.Config = []byte(`{}`)
+	taskID := uuidFromString(t, "eebbbbbb-eebb-eebb-eebb-eeeeeeeeeeee")
+
+	p.handleEvent(events.Event{
+		Type:          protocol.EventChatDone,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload:       protocol.ChatDonePayload{Content: "legacy reply"},
+	})
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.textSent) != 1 {
+		t.Fatalf("expected one text send; got %d", len(api.textSent))
+	}
+	if got := api.textSent[0].ChatID; got != "oc_test_chat" {
+		t.Errorf("chat_id = %q, want the raw binding key for legacy rows", got)
+	}
+}
+
 // TestPatcherSendsToChatWhenNoThread verifies that a non-thread trigger
 // (no last_lark_thread_id on the binding) keeps the historical
 // chat-level send: ReplyTarget stays empty so SendTextMessage targets
@@ -629,5 +771,133 @@ func TestPatcherThreadReplyDoesNotFallBackOnAmbiguousError(t *testing.T) {
 	}
 	if !api.textSent[0].ReplyTarget.IsSet() {
 		t.Errorf("the single attempt should be the thread reply; got %+v", api.textSent[0].ReplyTarget)
+	}
+}
+
+// A cancelled run publishes neither chat-done nor task-failed, so the Patcher's
+// bus subscription is the only thing that can ever take the Typing badge off
+// the user's message.
+//
+// Two things are pinned here, and each one alone would let the bug through.
+//
+// The event is published on a real bus rather than handed to handleEvent, which
+// is what every sibling test in this file does. handleEvent runs identically
+// whether or not the Patcher subscribed to task:cancelled, so a test written
+// that way passes with Register reverted.
+//
+// And the cancelled task is given the shape the production report had: it owns
+// an input batch (ChatInputTaskID set) that holds no channel-ingested message,
+// so TaskInputIsChannelIngested answers false. That gate exists to keep a web
+// run's reply out of the Lark room; a clear placed behind it is skipped on
+// exactly the cancel that motivated the fix.
+func TestPatcherClearsTypingOnTaskCancelled(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	typingAPI := &fakeTypingAPIClient{addReturn: "reaction-123"}
+	typing := NewTypingIndicatorManager(typingAPI, fakeTypingCreds{secret: "shh"},
+		&fakeTypingQueries{binding: q.binding, installation: q.installation}, newDiscardLogger())
+	p.SetTypingIndicatorManager(typing)
+
+	bus := events.New()
+	p.Register(bus)
+
+	typing.Add(context.Background(), q.installation, q.binding.ChatSessionID, "om_trigger", "")
+	if len(typingAPI.addCalled) != 1 {
+		t.Fatalf("setup: expected the Typing reaction to be added, got %d", len(typingAPI.addCalled))
+	}
+
+	taskID := uuidFromString(t, "ee999999-ee99-ee99-ee99-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = false
+
+	// The shape a cancel is published with: ids on the envelope
+	// and in the payload map, status "cancelled", and no content of any kind.
+	bus.Publish(events.Event{
+		Type:          protocol.EventTaskCancelled,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(q.binding.ChatSessionID),
+		Payload: map[string]any{
+			"task_id":         uuidString(taskID),
+			"chat_session_id": uuidString(q.binding.ChatSessionID),
+			"status":          "cancelled",
+		},
+	})
+
+	if len(typingAPI.deleteCalled) != 1 {
+		t.Fatalf("the run was cancelled and the Typing reaction is still on om_trigger — "+
+			"the user is watching a typing indicator spin for an answer nobody is "+
+			"producing (delete calls: %d)", len(typingAPI.deleteCalled))
+	}
+	if typingAPI.deleteCalled[0].messageID != "om_trigger" || typingAPI.deleteCalled[0].reactionID != "reaction-123" {
+		t.Errorf("cleared the wrong reaction: %+v", typingAPI.deleteCalled[0])
+	}
+
+	// A cancellation has no answer to deliver: nothing may be posted into the chat.
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.sent) != 0 || len(api.textSent) != 0 || len(api.patched) != 0 {
+		t.Errorf("a cancelled run must post nothing; sent=%d textSent=%d patched=%d",
+			len(api.sent), len(api.textSent), len(api.patched))
+	}
+}
+
+// Deleting a chat session cancels its queued turns and deletes the Lark binding
+// in one transaction, then broadcasts the cancels after that transaction
+// commits. By the time the Patcher sees them the binding row is gone, so every
+// step that reads it — the Patcher's own lookup and the credential resolution
+// inside Clear — answers "no such session" for a badge that is still on screen.
+// Deleting a conversation must not leave a Typing badge behind on the message
+// that started it.
+func TestPatcherClearsTypingAfterSessionDeleteRemovedTheBinding(t *testing.T) {
+	p, q, api := newTestPatcher(t)
+	typingQueries := &fakeTypingQueries{
+		installation: q.installation,
+		bindingErr:   pgx.ErrNoRows,
+	}
+	typingAPI := &fakeTypingAPIClient{addReturn: "reaction-456"}
+	typing := NewTypingIndicatorManager(typingAPI, fakeTypingCreds{secret: "shh"},
+		typingQueries, newDiscardLogger())
+	p.SetTypingIndicatorManager(typing)
+
+	bus := events.New()
+	p.Register(bus)
+
+	sessionID := q.binding.ChatSessionID
+	typing.Add(context.Background(), q.installation, sessionID, "om_trigger", "")
+	if len(typingAPI.addCalled) != 1 {
+		t.Fatalf("setup: expected the Typing reaction to be added, got %d", len(typingAPI.addCalled))
+	}
+
+	// The session and its binding are deleted; the cancel is broadcast after.
+	q.binding = ChatSessionBinding{}
+	q.bindingErr = pgx.ErrNoRows
+
+	taskID := uuidFromString(t, "ee888888-ee88-ee88-ee88-eeeeeeeeeeee")
+	q.task = db.AgentTaskQueue{ChatInputTaskID: taskID}
+	q.taskChannelIngested = true
+	bus.Publish(events.Event{
+		Type:          protocol.EventTaskCancelled,
+		TaskID:        uuidString(taskID),
+		ChatSessionID: uuidString(sessionID),
+		Payload: map[string]any{
+			"task_id":         uuidString(taskID),
+			"chat_session_id": uuidString(sessionID),
+			"status":          "cancelled",
+		},
+	})
+
+	if len(typingAPI.deleteCalled) != 1 {
+		t.Fatalf("the session was deleted and the Typing reaction is still on om_trigger — "+
+			"deleting a conversation left a processing badge on the message that "+
+			"started it (delete calls: %d)", len(typingAPI.deleteCalled))
+	}
+	if typingAPI.deleteCalled[0].messageID != "om_trigger" || typingAPI.deleteCalled[0].reactionID != "reaction-456" {
+		t.Errorf("cleared the wrong reaction: %+v", typingAPI.deleteCalled[0])
+	}
+
+	api.mu.Lock()
+	defer api.mu.Unlock()
+	if len(api.sent) != 0 || len(api.textSent) != 0 || len(api.patched) != 0 {
+		t.Errorf("a cancelled run must post nothing; sent=%d textSent=%d patched=%d",
+			len(api.sent), len(api.textSent), len(api.patched))
 	}
 }

@@ -13,14 +13,19 @@ import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { Toaster } from "@multica/ui/components/ui/sonner";
 import { DesktopLoginPage } from "./pages/login";
 import { DesktopShell } from "./components/desktop-layout";
-import { PageviewTracker } from "./components/pageview-tracker";
 import { UpdateNotification } from "./components/update-notification";
+import { IssueWindow } from "./components/issue-window";
 import { useTabStore } from "./stores/tab-store";
 import { useWindowOverlayStore } from "./stores/window-overlay-store";
+import { useOpenSettingsShortcut } from "./hooks/use-open-settings-shortcut";
 import { useDaemonIPCBridge } from "./platform/daemon-ipc-bridge";
+import { syncDaemonOnLogin } from "./platform/daemon-login-sync";
 import { createDesktopLocaleAdapter } from "./platform/i18n-adapter";
 import { captureEvent } from "@multica/core/analytics";
 import { RESOURCES } from "@multica/views/locales";
+import { DesktopClientUsageReporter } from "./platform/client-usage-reporter";
+import { DiagnosticRouteReporter } from "./platform/diagnostic-route-reporter";
+import { flushFreezeBreadcrumb } from "./freeze-flush";
 
 // BCP-47 region tags for the <html lang> attribute, mirroring
 // apps/web/app/layout.tsx HTML_LANG. index.html ships a static lang="en";
@@ -47,6 +52,10 @@ const HTML_LANG: Record<SupportedLocale, string> = {
 function useCmdWCloseTab() {
   useEffect(() => {
     return window.desktopAPI.onCloseActiveTab(() => {
+      if (window.desktopAPI.windowContext?.kind === "issue") {
+        window.desktopAPI.closeWindow();
+        return;
+      }
       const store = useTabStore.getState();
       const { activeWorkspaceSlug, byWorkspace } = store;
       if (!activeWorkspaceSlug) {
@@ -64,6 +73,42 @@ function useCmdWCloseTab() {
       store.closeActiveTab();
     });
   }, []);
+}
+
+function IssueWindowContent() {
+  const user = useAuthStore((state) => state.user);
+  const isLoading = useAuthStore((state) => state.isLoading);
+  const context = window.desktopAPI.windowContext ?? { kind: "main" as const };
+
+  if (context.kind !== "issue") return null;
+  if (isLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center">
+        <MulticaIcon className="size-6 animate-pulse" />
+      </div>
+    );
+  }
+
+  return user ? <IssueWindow context={context} /> : <DesktopLoginPage />;
+}
+
+/**
+ * Keep the main process informed of the resolved account identity without
+ * sharing credentials between renderer processes. Main uses this signal to
+ * close dedicated windows on logout/account switch.
+ */
+function DesktopAuthSessionBridge() {
+  const userId = useAuthStore((state) => state.user?.id ?? null);
+  const isLoading = useAuthStore((state) => state.isLoading);
+
+  useEffect(() => {
+    if (isLoading) return;
+    // Optional chaining keeps renderer HMR safe during the brief interval in
+    // which an old preload is still attached to the refreshed React tree.
+    window.desktopAPI.reportAuthSession?.(userId);
+  }, [isLoading, userId]);
+
+  return null;
 }
 
 function AppContent() {
@@ -125,21 +170,26 @@ function AppContent() {
     });
   }, [qc]);
 
-  // Sync token and start the daemon whenever the user logs in.
+  // Sync token and start the daemon whenever the user logs in. The ordering
+  // inside syncDaemonOnLogin is load-bearing — see that module.
   useEffect(() => {
-    if (!user) return;
+    if (!user || !runtimeConfig) return;
     const token = localStorage.getItem("multica_token");
     if (!token) return;
     const userId = user.id;
     (async () => {
       try {
-        await window.daemonAPI.syncToken(token, userId);
-        await window.daemonAPI.autoStart();
+        await syncDaemonOnLogin(
+          window.daemonAPI,
+          runtimeConfig.apiUrl,
+          token,
+          userId,
+        );
       } catch (err) {
         console.error("Failed to sync daemon on login", err);
       }
     })();
-  }, [user]);
+  }, [user, runtimeConfig]);
 
   // When a user who started the session with zero workspaces creates their
   // first one, restart the daemon so it picks up the new workspace
@@ -277,26 +327,18 @@ function AppContent() {
     );
   }
 
-  // Pageview tracker sits at the app root so it covers every visible
-  // surface (login, overlays, tab paths) — mounting it inside DesktopShell
-  // would miss the logged-out and overlay states.
-  return (
-    <>
-      <PageviewTracker />
-      {user ? <DesktopShell /> : <DesktopLoginPage />}
-    </>
-  );
+  return user ? <DesktopShell /> : <DesktopLoginPage />;
 }
 
 function BlockingRuntimeConfigError({ message }: { message: string }) {
   return (
     <div className="flex h-screen items-center justify-center bg-background p-8 text-foreground">
       <div className="max-w-xl rounded-lg border bg-card p-6 shadow-sm">
-        <h1 className="text-lg font-semibold">Desktop configuration error</h1>
-        <p className="mt-3 text-sm text-muted-foreground">
+        <h1 className="text-title font-semibold">Desktop configuration error</h1>
+        <p className="mt-3 text-body text-muted-foreground">
           Multica Desktop could not load <code>~/.multica/desktop.json</code>. Fix or remove the file and restart the app.
         </p>
-        <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-xs text-muted-foreground">
+        <pre className="mt-4 whitespace-pre-wrap rounded-md bg-muted p-3 text-caption text-muted-foreground">
           {message}
         </pre>
       </div>
@@ -310,6 +352,9 @@ function BlockingRuntimeConfigError({ message }: { message: string }) {
 // useLogout clears the storage key, but the live stores stay populated until
 // we explicitly reset them here.
 async function handleDaemonLogout() {
+  // Report synchronously before async daemon cleanup so a rapidly closed main
+  // window cannot leave authenticated issue renderers behind.
+  window.desktopAPI.reportAuthSession?.(null);
   useTabStore.getState().reset();
   useWindowOverlayStore.getState().close();
   // Drop any post-onboarding welcome signal so user B logging in next
@@ -331,27 +376,29 @@ export default function App() {
   const { version, os } = window.desktopAPI.appInfo;
   const systemLocale = window.desktopAPI.systemLocale;
   const runtimeConfigResult = window.desktopAPI.runtimeConfig;
+  // The fallback keeps renderer HMR safe while a main/preload rebuild is
+  // restarting Electron; packaged builds always expose windowContext.
+  const windowContext =
+    window.desktopAPI.windowContext ?? { kind: "main" as const };
   useCmdWCloseTab();
+  // Mounted at the App root for the same reason as Cmd+W: the chord has to
+  // work in every renderer state, not only inside the tab shell.
+  useOpenSettingsShortcut();
 
   // Flush a freeze/crash breadcrumb the main process parked from a previous
   // session. A true hang or process death can't report itself when it happens
   // (the renderer is blocked or gone), so the main process persists it and we
   // emit it here on the next boot. The in-thread, recoverable freeze tier is
   // handled separately by the shared watchdog in CoreProvider.
-  useEffect(() => {
-    const last = window.desktopAPI.getLastFreeze();
-    if (!last) return;
-    const crashed = last.kind === "render-process-gone";
-    captureEvent(crashed ? "client_crash" : "client_unresponsive", {
-      // Spread context FIRST so our explicit fields below always win — a
-      // future context key (e.g. its own `source`) must not silently override.
-      ...last.context,
-      source: crashed ? "render-process-gone" : "main-unresponsive",
-      recovered: false,
-      breadcrumb_ts: last.ts,
-      crashed_version: last.version,
-    });
-  }, []);
+  useEffect(
+    () =>
+      flushFreezeBreadcrumb({
+        getLastFreeze: () => window.desktopAPI.getLastFreeze(),
+        ackFreeze: (ts) => window.desktopAPI.ackFreeze(ts),
+        capture: captureEvent,
+      }),
+    [],
+  );
 
   // Stable identity reference so downstream effects (WS reconnect) don't
   // tear down on every parent render.
@@ -404,19 +451,32 @@ export default function App() {
         <CoreProvider
           apiBaseUrl={runtimeConfigResult.config.apiUrl}
           wsUrl={runtimeConfigResult.config.wsUrl}
-          onLogout={handleDaemonLogout}
+          onLogout={
+            windowContext.kind === "main" ? handleDaemonLogout : undefined
+          }
           identity={identity}
           locale={locale}
           resources={resources}
           localeAdapter={localeAdapter}
         >
-          <AppContent />
+          <DesktopAuthSessionBridge />
+          {windowContext.kind === "main" && <DiagnosticRouteReporter />}
+          {windowContext.kind === "main" && (
+            <DesktopClientUsageReporter
+              apiUrl={runtimeConfigResult.config.apiUrl}
+            />
+          )}
+          {windowContext.kind === "issue" ? (
+            <IssueWindowContent />
+          ) : (
+            <AppContent />
+          )}
         </CoreProvider>
       ) : (
         <BlockingRuntimeConfigError message={runtimeConfigResult.error.message} />
       )}
       <Toaster />
-      <UpdateNotification />
+      {windowContext.kind === "main" && <UpdateNotification />}
     </ThemeProvider>
   );
 }

@@ -1,162 +1,186 @@
 "use client";
 
-import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { ActorAvatar } from "@multica/ui/components/common/actor-avatar";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   HoverCard,
-  HoverCardTrigger,
   HoverCardContent,
+  HoverCardTrigger,
 } from "@multica/ui/components/ui/hover-card";
-import { useWorkspaceId } from "@multica/core/hooks";
-import { agentTaskSnapshotOptions } from "@multica/core/agents";
-import type { AgentTask } from "@multica/core/types";
+import { useActorName } from "@multica/core/workspace/hooks";
+import type { WorkingAgentSummary } from "@multica/core/types";
 import { AgentAvatarStack } from "../../agents/components/agent-avatar-stack";
-import { AgentActivityHoverContent } from "../../agents/components/agent-activity-hover-content";
 import { useT } from "../../i18n";
 
 interface WorkspaceAgentWorkingChipProps {
-  // Controlled toggle binding. Different surfaces (Issues page singleton
-  // hook, My Issues vanilla store) own the underlying state, so the chip
-  // stays presentational and accepts both forms via plain props.
   value: boolean;
   onToggle: () => void;
-  // When set, only running tasks whose issue id is in this set count
-  // toward the chip — and toward the hover card. Lets the chip stay in
-  // sync with the page's visible issue scope (e.g. My Issues only shows
-  // "my" running tasks, not the whole workspace). When omitted, the chip
-  // shows workspace-wide running agents.
-  scopedIssueIds?: ReadonlySet<string>;
+  /** Agents working inside the surface this header belongs to, already narrowed
+   *  by its scope and every active filter. `undefined` = not resolved yet. */
+  agents: readonly WorkingAgentSummary[] | undefined;
+}
+
+/** What the projection says about activity in this surface. `unknown` is a
+ *  first-class case, not a synonym for `none`. */
+export type ChipActivity = "unknown" | "none" | "some";
+
+export function chipActivity(
+  agents: readonly WorkingAgentSummary[] | undefined,
+): ChipActivity {
+  if (agents === undefined) return "unknown";
+  return agents.length > 0 ? "some" : "none";
 }
 
 /**
- * Filter chip on the issues / my-issues header, sitting to the left of
- * the Filter button. Always rendered so the filter toggle never
- * disappears mid-flight (a previous design hid the chip when no agents
- * were running, which trapped users in an active-but-invisible filter
- * state).
+ * Which colour tier the chip wears, and the only classes allowed alongside
+ * it. Activity uses a tint, the active filter uses the filled brand tier,
+ * and an idle surface stays neutral.
  *
- * Two visual modes:
- *
- *   - Has running agents → avatar stack + count + "working" label,
- *     wrapped in HoverCard that lists every active task on hover.
- *     Brand-filled when the filter is on.
- *
- *   - No running agents  → "0 working" label, muted when off,
- *     brand-filled when on. No HoverCard — there is nothing to show;
- *     the label IS the state.
- *
- * Click toggles the filter in both modes. The button itself is the
- * affordance — no Tooltip wrapping (the popover IS the label when there
- * is one, and the label is self-explanatory when there isn't).
- *
- * `scopedIssueIds` lets a calling header narrow the chip to a subset of
- * issues — typically "what's visible on this page right now". My Issues
- * uses it so the chip count matches the my-scope list; the global
- * /issues page passes the All/Members/Agents-scoped set. Without it the
- * chip is workspace-wide.
+ * The muted text on the neutral tier is what reads as "nothing is happening
+ * here", so an unresolved projection gets the neutral tier WITHOUT it: we do
+ * not yet know whether the surface is idle, and dimming it would claim so.
  */
-export function WorkspaceAgentWorkingChip({
-  value,
-  onToggle,
-  scopedIssueIds,
-}: WorkspaceAgentWorkingChipProps) {
+export function chipAppearance(
+  value: boolean,
+  activity: ChipActivity,
+): { variant: "brand" | "brandSubtle" | "outline"; className: string } {
+  const layout = "h-8 px-2 md:h-7 md:px-2.5";
+  if (value) return { variant: "brand", className: layout };
+  if (activity === "some") return { variant: "brandSubtle", className: layout };
+  if (activity === "unknown") return { variant: "outline", className: layout };
+  return { variant: "outline", className: `${layout} text-muted-foreground` };
+}
+
+/**
+ * Hover body for every surface that reads a working-agents projection — the
+ * surface filter chip here and the sub-issues header chip on issue detail.
+ * Shared so a narrowed read and an unnarrowed one describe activity the same
+ * way; the only difference between the two is the projection's scope.
+ *
+ * Identity comes from the workspace agent directory rather than the payload:
+ * the surface projection is a facet of ids and counts, and resolving names
+ * here keeps one definition of an agent's name/avatar across both callers.
+ *
+ * Three distinct states, and the first two must never collapse into each other:
+ * `undefined` = the projection has not resolved, `[]` = it resolved and this
+ * surface really has nobody working, a non-empty list = the roster. Rendering
+ * the empty sentence for an unresolved projection would assert "no agents
+ * working right now" on no evidence — the same class of unearned claim the chip
+ * count itself had (MUL-5525).
+ */
+export function WorkingAgentsHoverContent({
+  agents,
+}: {
+  agents: readonly WorkingAgentSummary[] | undefined;
+}) {
   const { t } = useT("issues");
-  const wsId = useWorkspaceId();
-  const { data: snapshot = [] } = useQuery(agentTaskSnapshotOptions(wsId));
+  const { getActorName, getActorInitials, getActorAvatarUrl } = useActorName();
 
-  const { runningTasks, agentIds, issueIds } = useMemo(() => {
-    const running: AgentTask[] = [];
-    for (const task of snapshot) {
-      if (task.status !== "running") continue;
-      // When scoped, drop running tasks whose issue isn't in the visible
-      // set — the chip's job is to summarise what the user sees, not
-      // what's happening elsewhere in the workspace.
-      if (scopedIssueIds && !scopedIssueIds.has(task.issue_id)) continue;
-      running.push(task);
-    }
-    // The count tracks active *issues*, not active agents: several agents
-    // can work the same issue at once, and the chip answers "how many
-    // issues are agents working on right now?" (its filter narrows the
-    // list to exactly those issues). The avatar stack still shows the
-    // distinct agents behind that work.
-    const uniqueIssues = [...new Set(running.map((tk) => tk.issue_id))];
-    const uniqueAgents = [...new Set(running.map((tk) => tk.agent_id))];
-    return {
-      runningTasks: running,
-      agentIds: uniqueAgents,
-      issueIds: uniqueIssues,
-    };
-  }, [snapshot, scopedIssueIds]);
-
-  const hasAgents = issueIds.length > 0;
-  // Active (brand-filled) class — must explicitly re-pin text and bg in
-  // every interactive state. Button's `outline` variant ships
-  // `hover:text-foreground` + `aria-expanded:bg-muted aria-expanded:text-foreground`,
-  // which would otherwise repaint the brand chip back to neutral on
-  // hover and while the HoverCard is open.
-  const activeClass = value
-    ? "border-brand bg-brand text-brand-foreground hover:bg-brand/90 hover:text-brand-foreground aria-expanded:bg-brand aria-expanded:text-brand-foreground"
-    : hasAgents
-      ? "text-foreground"
-      : "text-muted-foreground";
-
-  const label = t(($) => $.agent_activity.chip_label);
-
-  // Idle path: no agents in scope. Still wrap in HoverCard with a
-  // single-line placeholder so the chip's hover behavior is consistent
-  // with the active state — an idle chip that does nothing on hover
-  // reads as broken next to an active one that pops a panel.
-  if (!hasAgents) {
+  if (agents === undefined) {
     return (
-      <HoverCard>
-        <HoverCardTrigger
-          render={
-            <Button
-              variant="outline"
-              size="sm"
-              className={`h-8 px-2 md:h-7 md:px-2.5 ${activeClass}`}
-              onClick={onToggle}
-              aria-pressed={value}
-            >
-              <span className="tabular-nums">0</span>
-              <span className="hidden md:inline">{label}</span>
-            </Button>
-          }
-        />
-        <HoverCardContent align="end" className="w-auto">
-          <p className="text-xs text-muted-foreground">
-            {t(($) => $.agent_activity.empty_hover)}
-          </p>
-        </HoverCardContent>
-      </HoverCard>
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.agent_activity.unknown_hover)}
+      </p>
+    );
+  }
+
+  if (agents.length === 0) {
+    return (
+      <p className="text-caption text-muted-foreground">
+        {t(($) => $.agent_activity.empty_hover)}
+      </p>
     );
   }
 
   return (
-    <HoverCard>
-      <HoverCardTrigger
-        render={
-          <Button
-            variant="outline"
-            size="sm"
-            className={`h-8 px-2 md:h-7 md:px-2.5 ${activeClass}`}
-            onClick={onToggle}
-            aria-pressed={value}
-          >
-            <AgentAvatarStack
-              agentIds={agentIds}
-              size={16}
-              max={3}
-              opacity="full"
+    <div className="flex flex-col gap-2">
+      <div className="text-caption font-medium text-muted-foreground">
+        {t(($) => $.agent_activity.hover_header, { count: agents.length })}
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {agents.map((agent) => (
+          <div key={agent.id} className="flex items-center gap-2 text-caption">
+            <ActorAvatar
+              name={getActorName("agent", agent.id)}
+              initials={getActorInitials("agent", agent.id)}
+              avatarUrl={getActorAvatarUrl("agent", agent.id) ?? undefined}
+              isAgent
+              size="sm"
             />
-            <span className="tabular-nums">{issueIds.length}</span>
-            <span className="hidden md:inline">{label}</span>
-          </Button>
-        }
-      />
+            <span className="min-w-0 flex-1 truncate font-medium">
+              {getActorName("agent", agent.id)}
+            </span>
+            <span className="shrink-0 tabular-nums text-muted-foreground">
+              {t(($) => $.agent_activity.tasks_count, {
+                count: agent.running_task_count,
+              })}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Agents-working filter chip for an issue surface header.
+ *
+ * The number IS the post-click row count's authority: it counts the agents
+ * working on rows this surface's scope AND active filters would show, resolved
+ * by the surface controller from the server-side `working_agents` facet — the
+ * same compiled query the rows come from. Before MUL-5525 it ran its own
+ * workspace-wide `/api/working-agents` read, so on a project page it could
+ * advertise agents working nowhere near that project and open an empty list.
+ *
+ * `agents === undefined` means the projection has not resolved. Every surface of
+ * the chip then stays indeterminate — label, compact number, colour tier and
+ * hover body alike — because "0" and "not known yet" are different claims and
+ * the reader cannot tell them apart once one of them is rendered as the other.
+ *
+ * Clicking only toggles view state; the controller turns the running-issue set
+ * into the query's `working_issue_ids` filter.
+ */
+export function WorkspaceAgentWorkingChip({
+  value,
+  onToggle,
+  agents,
+}: WorkspaceAgentWorkingChipProps) {
+  const { t } = useT("issues");
+  const activity = chipActivity(agents);
+  const agentIds = agents?.map((agent) => agent.id) ?? [];
+  const label =
+    activity === "unknown"
+      ? t(($) => $.agent_activity.chip_agents_working_unknown)
+      : t(($) => $.agent_activity.chip_agents_working, { count: agentIds.length });
+  const appearance = chipAppearance(value, activity);
+
+  const trigger = (
+    <Button
+      variant={appearance.variant}
+      size="sm"
+      className={appearance.className}
+      onClick={onToggle}
+      aria-pressed={value}
+      aria-label={label}
+    >
+      {activity === "some" && (
+        <AgentAvatarStack agentIds={agentIds} size="sm" max={3} />
+      )}
+      <span className="tabular-nums md:hidden">
+        {activity === "unknown" ? "—" : agentIds.length}
+      </span>
+      <span className="hidden tabular-nums md:inline">{label}</span>
+    </Button>
+  );
+
+  return (
+    <HoverCard>
+      <HoverCardTrigger render={trigger} />
       <HoverCardContent align="end" className="w-72">
-        <AgentActivityHoverContent tasks={runningTasks} />
+        {/* Pass the projection through untouched. Defaulting to [] here would
+            hand the hover card a definite "nobody is working" for a state we
+            have not resolved. */}
+        <WorkingAgentsHoverContent agents={agents} />
       </HoverCardContent>
     </HoverCard>
   );

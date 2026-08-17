@@ -13,7 +13,7 @@
     "filter_all_description": "当前视图下的所有运行时",
     "empty": {
       "title": "还没有运行时",
-      "hint": "桌面端会自动扫描这台电脑。想把另一台电脑加进来 —— 服务器、远程开发机，或任何能开终端的电脑 —— 在这里添加。"
+      "hint": "桌面端会自动扫描这台电脑。想把另一台电脑加进来——服务器、远程开发机，或任何能开终端的电脑——在这里添加。"
     },
     "no_matches": {
       "title": "无匹配",
@@ -26,6 +26,15 @@
       "title": "正在启动本地运行时...",
       "hint": "通常需要几秒钟。守护进程正在向工作区注册。"
     }
+  },
+  "mika_setup": {
+    "title": "运行时已准备好，和 Mika 开始。",
+    "description": "Mika 会把你的目标转化为任务、协调合适的智能体，并在工作流需要时帮你添加可复用的 specialist。",
+    "action": "和 Mika 开始",
+    "failed": "无法启动 Mika",
+    "dialog_title": "让 Mika 在哪台电脑上运行？",
+    "dialog_description": "选择 Mika 使用的运行时。之后可以在设置里更改。",
+    "cancel": "取消"
   },
   "machine": {
     "search_placeholder": "搜索机器...",
@@ -45,6 +54,11 @@
     "no_matches_title": "没有机器",
     "no_matches_hint": "没有机器匹配当前搜索或筛选。",
     "select_machine": "选择一台机器查看它的运行时。",
+    "select_runtime": "内置运行时会自动出现。选择一项查看设置，或添加自定义命令。",
+    "no_runtimes_title": "还没有注册运行时",
+    "no_runtimes_hint": "启动或重新连接这台机器的守护进程。检测到已安装的 CLI 后，运行时会自动出现在这里。",
+    "not_found_title": "未找到机器",
+    "not_found_hint": "它可能已离线、被移除，或你已无权访问。",
     "metrics": {
       "runtimes": "运行时",
       "runtimes_hint_other": "{{count}} 个在线",
@@ -58,6 +72,19 @@
       "cli": "CLI",
       "cloud_worker": "云端 worker",
       "local_daemon": "本地守护进程"
+    },
+    "rename": "重命名机器",
+    "rename_dialog": {
+      "title": "重命名机器",
+      "description": "给这台机器起一个你能认出来的名字。会应用到这台机器上的所有运行时，并在给 agent 选择运行时时显示。",
+      "placeholder": "例如：我的 MacBook",
+      "hint": "留空则使用设备的默认名称。",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "保存中...",
+      "toast_saved": "已重命名机器",
+      "toast_cleared": "已清除机器名称",
+      "toast_failed": "重命名机器失败"
     }
   },
   "health": {
@@ -83,6 +110,7 @@
     "read_only": "只读",
     "delete_button": "删除运行时",
     "last_seen": "最后活跃 {{when}}",
+    "never_seen": "从未连接",
     "fact_owner": "所有者",
     "fact_device": "设备",
     "fact_runtime": "运行时",
@@ -100,31 +128,35 @@
       "public": "公开"
     },
     "visibility_hint": {
-      "private": "仅你和工作区管理员可以在此运行时上创建智能体。",
+      "private": "仅你可以在此运行时上创建智能体。",
       "public": "工作区内任何成员都可以在此运行时上创建智能体。"
     },
-    "visibility_toast_updated": "可见性已设为「{{visibility}}」",
+    "visibility_hint_readonly": {
+      "private": "仅运行时所有者可以在此运行时上创建智能体，也只有他们能切换为「公开」。",
+      "public": "工作区内任何成员都可以在此运行时上创建智能体。只有运行时所有者能切回「私有」。"
+    },
+    "visibility_toast_updated": "可见性已设为\"{{visibility}}\"",
     "visibility_toast_failed": "更新可见性失败",
     "delete_dialog": {
       "self_heal_notice": "该运行时由正在运行的本地守护进程托管。删除会成功，但守护进程会在数秒内重新注册一个新的运行时——若想彻底移除，请先停止守护进程。",
       "profile_backed_notice": "该运行时来自自定义运行时配置。删除它只会移除当前运行时实例；只要配置仍存在，运行中的守护进程就可以再次注册它。若要彻底移除，请在“自定义运行时”中删除对应配置。",
       "light": {
         "title": "删除运行时？",
-        "description": "确定要删除「{{name}}」吗？此操作无法撤销。",
+        "description": "确定要删除\"{{name}}\"吗？此操作无法撤销。",
         "cancel": "取消",
         "confirm": "删除运行时",
         "submitting": "删除中..."
       },
       "cascade": {
-        "title_other": "归档 {{count}} 个智能体并删除该运行时？",
-        "description": "删除「{{name}}」。下列智能体将被归档并从可用工作流中移除，其排队中或运行中的 task 会被取消，随后运行时本身会被删除。",
-        "warning": "此操作具有破坏性。归档的智能体将从可用工作流中移除，其排队中或运行中的 task 会被取消。",
+        "title_other": "解绑 {{count}} 个智能体并删除该运行时？",
+        "description": "删除\"{{name}}\"。下列智能体会保留——其指令、聊天记录和 task 历史都不会丢失——但它们将被解绑，在重新绑定运行时之前无法运行。其排队中或运行中的 task 会被取消，随后运行时本身会被删除。",
+        "warning": "排队中和运行中的 task 会被取消；在重新绑定运行时之前，这些智能体无法接受新 task。",
         "notice_runtime_has_active_agents": "自打开此弹窗后，又有新的活动智能体加入。请确认新方案后继续。",
         "notice_runtime_delete_plan_changed": "在弹窗打开期间，活动智能体集合发生了变化。请确认新方案后继续。",
-        "checkbox_other": "我已了解：这 {{count}} 个智能体将被归档，其排队中或运行中的 task 会被取消。",
+        "checkbox_other": "我已了解：这 {{count}} 个智能体将被解绑，在重新绑定运行时之前无法运行，其排队中或运行中的 task 会被取消。",
         "cancel": "取消",
-        "confirm_other": "归档 {{count}} 个智能体并删除运行时",
-        "submitting": "正在归档并删除...",
+        "confirm_other": "解绑 {{count}} 个智能体并删除运行时",
+        "submitting": "正在解绑并删除...",
         "delete_failed_toast": "删除运行时失败",
         "table": {
           "header_agent": "智能体",
@@ -167,7 +199,7 @@
     "trouble_intro": "改用 token 登录替代第 2 步，适用于任何有终端的环境。",
     "trouble_token_hint_prefix": "在 ",
     "trouble_token_hint_destination": "设置 → Tokens",
-    "trouble_token_hint_suffix": " 中创建 token。守护进程只使用出站连接 —— 无需开放入站端口。",
+    "trouble_token_hint_suffix": " 中创建 token。守护进程只使用出站连接——无需开放入站端口。",
     "trouble_check_status": "检查状态",
     "trouble_view_logs": "查看日志",
     "copy_aria": "复制",
@@ -221,7 +253,11 @@
     "cli_version_label": "CLI 版本：",
     "version_unknown": "未知",
     "managed_by_desktop": "由桌面端管理",
-    "managed_by_desktop_title": "CLI 二进制由 Multica 桌面端管理 —— 升级桌面端即可升级 CLI。",
+    "managed_by_desktop_title": "CLI 二进制由 Multica 桌面端管理——升级桌面端即可升级 CLI。",
+    "read_only": "只读",
+    "read_only_title": "只有运行时所有者和工作区管理员可以更新 CLI。",
+    "local_build": "本地构建",
+    "local_build_title": "该运行时报告的不是发布版本，Multica 无法判断是否有可升级的版本。请在这台机器上自行更新。",
     "latest": "最新",
     "available": "可用",
     "action": "更新",
@@ -239,6 +275,12 @@
   "charts": {
     "heatmap_less": "少",
     "heatmap_more": "多",
+    "heatmap_no_activity": "无活动",
+    "heatmap_busiest_day": "最活跃日期",
+    "heatmap_most_active_weekday": "最活跃星期",
+    "heatmap_quietest_weekday": "最不活跃星期",
+    "heatmap_average": "平均 {{value}}",
+    "heatmap_window_total_other": "{{count}} 天总计",
     "tooltip_total": "总计"
   },
   "list": {
@@ -251,21 +293,31 @@
     "cost_delta_flat": "持平",
     "cli_managed_badge": "桌面端",
     "row_actions_aria": "行操作",
+    "edit_action": "编辑自定义运行时",
     "delete_action": "删除",
+    "delete_profile_action": "从工作区删除",
     "delete_permission_hint": "只有运行时所有者和工作区管理员可以删除这个运行时",
     "delete_admin_hint": "只有运行时所有者和工作区管理员可以删除运行时。",
     "badge_builtin": "内置",
     "badge_custom": "自定义",
     "badge_registering": "注册中",
+    "badge_disabled": "已禁用",
     "pending_health": "正在向守护进程注册",
     "pending_health_warning": "等待守护进程同步",
     "pending_health_error": "注册错误",
+    "pending_health_disabled": "已禁用",
     "pending_cli_unknown": "等待中"
   },
   "profiles": {
     "cta": "添加运行时",
+    "add_custom": "添加自定义运行时",
+    "this_machine": "这台机器",
+    "unassigned_title": "尚未连接到机器的自定义运行时",
+    "unassigned_description": "这些工作区运行时目前没有连接到任何机器。你可以连接装有对应命令的机器，或通过行操作编辑、删除配置。",
     "dialog_title": "自定义运行时",
-    "dialog_description": "基于下方支持的协议族构建的工作区专属命令。",
+    "dialog_description": "自定义运行时定义属于整个工作区，会同步到所有已连接的机器。只有机器上能找到对应命令时，才会注册该运行时。",
+    "create_dialog_description": "从 {{machine}} 配置一个自定义命令。定义会同步到整个工作区，但只会在能找到该命令的机器上注册。",
+    "learn_more": "查看配置指南",
     "close": "关闭",
     "add_new": "新建自定义运行时",
     "list_title": "运行时后端",
@@ -301,14 +353,15 @@
       "step_family_label": "选择基础协议类型",
       "step_family_hint": "此运行时使用的底层 CLI 协议。",
       "step_details_label": "配置运行时",
+      "step_progress": "第 {{current}} / {{total}} 步",
       "family_label": "基础协议类型",
       "family_locked_hint": "创建后无法更改基础协议类型。",
       "display_name_label": "显示名称",
-      "display_name_placeholder": "我的自定义 Claude",
+      "display_name_placeholder": "例如：我的自定义 Claude...",
       "command_name_label": "命令",
-      "command_name_placeholder": "agent --model composer-2.5",
+      "command_name_placeholder": "例如：agent --model composer-2.5...",
       "description_label": "描述",
-      "description_placeholder": "可选 — 此运行时的用途",
+      "description_placeholder": "描述此运行时的用途（可选）...",
       "error_display_name_required": "显示名称为必填项。",
       "error_command_required": "命令为必填项。",
       "error_command_unclosed_quote": "保存前请先闭合引号。",
@@ -321,21 +374,21 @@
       "cancel": "取消",
       "next": "下一步",
       "create": "创建运行时",
-      "creating": "正在创建…",
+      "creating": "正在创建...",
       "save": "保存更改",
-      "saving": "正在保存…",
+      "saving": "正在保存...",
       "toast_created": "自定义运行时已创建",
       "toast_updated": "自定义运行时已更新",
       "error_duplicate_name": "已存在使用此显示名称的运行时。",
       "error_generic": "保存运行时失败。"
     },
     "delete_dialog": {
-      "title": "删除自定义运行时？",
-      "description": "确定删除“{{name}}”？此操作无法撤销。",
-      "confirm": "删除",
+      "title": "从工作区删除自定义运行时？",
+      "description": "\"{{name}}\" 将从此工作区及所有已注册的机器中移除。此操作无法撤销。",
+      "confirm": "从工作区删除",
       "cancel": "取消",
-      "deleting": "正在删除…",
-      "toast_deleted": "自定义运行时已删除",
+      "deleting": "正在删除...",
+      "toast_deleted": "已从工作区删除自定义运行时",
       "error_bound": "仍有智能体在使用此运行时，无法删除。",
       "error_generic": "删除运行时失败。"
     }
@@ -368,6 +421,8 @@
     "unmapped_notice_other": "有 {{count}} 个模型没有维护价格，相关 token 未计入费用统计。",
     "custom_pricing": {
       "open_button": "设置自定义价格",
+      "edit_button": "编辑自定义价格",
+      "active_notice": "当前时间范围内有模型按你设置的自定义价格计费。",
       "title": "自定义模型价格",
       "description": "为我们未维护官方价格的模型填入每百万 token 的费率。仅保存在本机。",
       "empty": "目前没有需要设置价格的模型。",

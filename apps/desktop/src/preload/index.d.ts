@@ -3,6 +3,19 @@ import type { RuntimeConfigResult } from "../shared/runtime-config";
 import type { NavigationGesture } from "../shared/navigation-gestures";
 import type { RendererRouteContextInput } from "../shared/renderer-route-context";
 import type { FreezeBreadcrumb } from "../shared/freeze-breadcrumb";
+import type {
+  DesktopWindowContext,
+  IssueWindowRequest,
+} from "../shared/issue-window";
+import type {
+  ManualUpdateCheckResult,
+  UpdaterPreferences,
+} from "../shared/updater-types";
+import type {
+  DaemonStatus,
+  DaemonPrefs,
+  LocalRuntimeProbe,
+} from "../shared/daemon-types";
 
 interface DesktopAPI {
   /** App version + normalized OS, captured synchronously at preload time. */
@@ -16,9 +29,17 @@ interface DesktopAPI {
   onSystemLocaleChanged: (callback: (locale: string) => void) => () => void;
   /** Validated runtime endpoint config, or a blocking config error. */
   runtimeConfig: RuntimeConfigResult;
-  /** Read + clear any freeze/crash breadcrumb from a previous session, so the
-   *  renderer can flush it to telemetry on boot. Null when nothing's pending. */
+  /** Main tabbed window or a dedicated issue-only window. */
+  windowContext: DesktopWindowContext;
+  /** Read any freeze/crash breadcrumb from a previous session, so the renderer
+   *  can flush it to telemetry on boot. Null when nothing's pending. Reading
+   *  does not consume it — acknowledge with `ackFreeze`. */
   getLastFreeze: () => FreezeBreadcrumb | null;
+  /** Retire the breadcrumb with this exact timestamp once its event has been
+   *  handed to analytics. Unacknowledged breadcrumbs are retried next boot. */
+  ackFreeze: (ts: number) => void;
+  /** Report the resolved account identity so stale issue windows can close. */
+  reportAuthSession: (userId: string | null) => void;
   /** Listen for auth token delivered via deep link. Returns an unsubscribe function. */
   onAuthToken: (callback: (token: string) => void) => () => void;
   /** Listen for invitation IDs delivered via deep link. Returns an unsubscribe function. */
@@ -77,36 +98,22 @@ interface DesktopAPI {
       | "not_writable"
       | "error";
     error?: string;
+    /** Whether the path sits inside a git working tree. Only set when ok=true.
+     *  Drives the worktree execution-mode option in the resource UI. */
+    is_git_repo?: boolean;
   }>;
   /** Listen for Cmd/Ctrl+W tab-close requests from the main process.
    *  Returns an unsubscribe function. */
   onCloseActiveTab: (callback: () => void) => () => void;
+  /** Listen for Cmd/Ctrl+, requests to open Settings, delivered to the main
+   *  window whichever window had focus. Returns an unsubscribe function. */
+  onOpenSettings: (callback: () => void) => () => void;
   /** Ask the main process to close the window. */
   closeWindow: () => void;
-}
-
-interface DaemonStatus {
-  state:
-    | "running"
-    | "stopped"
-    | "starting"
-    | "stopping"
-    | "installing_cli"
-    | "cli_not_found"
-    | "auth_expired";
-  pid?: number;
-  uptime?: string;
-  daemonId?: string;
-  deviceName?: string;
-  agents?: string[];
-  workspaceCount?: number;
-  profile?: string;
-  serverUrl?: string;
-}
-
-interface DaemonPrefs {
-  autoStart: boolean;
-  autoStop: boolean;
+  /** Open an issue-detail tab in a dedicated native window. */
+  openIssueWindow: (
+    request: IssueWindowRequest,
+  ) => Promise<{ ok: true } | { ok: false; reason: "invalid_request" }>;
 }
 
 type DaemonReauthResult =
@@ -119,6 +126,7 @@ interface DaemonAPI {
   stop: () => Promise<{ success: boolean; error?: string }>;
   restart: () => Promise<{ success: boolean; error?: string }>;
   getStatus: () => Promise<DaemonStatus>;
+  probeRuntimes: () => Promise<LocalRuntimeProbe>;
   getHostName: () => Promise<string>;
   onStatusChange: (callback: (status: DaemonStatus) => void) => () => void;
   setTargetApiUrl: (url: string) => Promise<void>;
@@ -147,10 +155,9 @@ interface UpdaterAPI {
   ) => () => void;
   downloadUpdate: () => Promise<void>;
   installUpdate: () => Promise<void>;
-  checkForUpdates: () => Promise<
-    | { ok: true; currentVersion: string; latestVersion: string; available: boolean }
-    | { ok: false; error: string }
-  >;
+  getPreferences: () => Promise<UpdaterPreferences>;
+  setAutomaticUpdates: (enabled: boolean) => Promise<UpdaterPreferences>;
+  checkForUpdates: () => Promise<ManualUpdateCheckResult>;
 }
 
 declare global {

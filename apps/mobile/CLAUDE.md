@@ -160,6 +160,19 @@ Never copy the visual shape of an existing hand-written `components/ui/` compone
 
 Mobile release cadence is decoupled from main `v*.*.*` tags (server / CLI / desktop).
 
+### Local iOS builds go through `scripts/ios-run.sh`
+
+Every `ios:*` script runs `expo prebuild -p ios` before `expo run:ios`. Keep it that way, and route any new iOS script through the same wrapper.
+
+`expo run:ios` prebuilds **only when `ios/` is missing** (`ensureNativeProjectAsync` in `@expo/cli`) — when the directory exists it returns early and config plugins never re-run. Without the explicit prebuild, everything `app.config.ts` owns (app icon, bundle identifier, display name, URL scheme, Info.plist permission strings) stays pinned to whatever the first prebuild wrote, while the build still reports success. `ios/` is gitignored and fully generated, so re-prebuilding on every run is safe and idempotent.
+
+Two things the wrapper depends on:
+
+- `--no-install` is safe because `run:ios` installs pods itself when `Podfile.lock` is stale.
+- `--clean` is avoided on purpose: `expo-build-properties` sets `buildReactNativeFromSource`, so a clean prebuild forces a from-source pod rebuild that is far too slow for the edit/run loop. Run `npx expo prebuild -p ios --clean` by hand when a native dependency changes.
+
+The wrapper is invoked under the caller's `dotenv`/`cross-env`, so prebuild and run resolve the same `APP_ENV` and bundle identifier. A bare `expo prebuild` inside a prod/staging script would rewrite the project to the dev variant.
+
 ## Realtime / WebSocket strategy
 
 Mobile uses the same WS server protocol as web/desktop, but mounts subscriptions differently. The rules below exist because mobile-specific constraints (cellular data cost, AppState lifecycle, per-screen unmount cleanup, smaller cache surface) make a direct port of web's pattern wrong.
@@ -228,7 +241,7 @@ Each hook registers a single `ws.onReconnect(cb)` that invalidates **only the qu
 |---|---|
 | `useInboxRealtime` | `inboxKeys.list(wsId)` |
 | `useMyIssuesRealtime` | `issueKeys.myAll(wsId)` |
-| `useIssueRealtime(id)` | `issueKeys.detail(wsId, id)` + `issueKeys.timeline(wsId, id)` |
+| `useIssueRealtime(id)` | detail + timeline + attachments + active tasks + task history for that issue |
 
 No global "invalidate everything on reconnect" sweep. The fanout would be every screen the user has ever visited in this session refetching simultaneously — wasteful on cellular and prone to rate-limiting the server in low-signal areas where reconnects happen frequently.
 
@@ -394,8 +407,11 @@ Before opening a PR for a new screen / mutation / realtime hook:
 2. API methods → `fetchValidated` / `fetchValidatedWith` (or raw
    `this.fetch` only for writes with no consumed response).
 3. Query key → factory in `data/queries/<feature>.ts`, 3-segment shape.
-4. Mutations → optimistic three-step (snapshot → patch → rollback) +
-   settle invalidate, all keys via factory.
+4. Mutations → optimistic only when the post-state is locally predictable,
+   the user stays on the same screen, failure is rare, and rollback is
+   trivial. When that gate passes, use snapshot → patch → rollback +
+   settle invalidate, all keys via factory. Create/delete/navigate/confirm
+   flows await the server instead.
 5. Realtime → `useWSSubscriptions(setup, deps)`, typed `ws.on<E>()`,
    per-event patching (no global invalidate) when payload carries the
    full object.

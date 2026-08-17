@@ -63,6 +63,14 @@ const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_CAP_MS = 30_000;
 const RECONNECT_MAX_EXPONENT = 6; // 1s → 64s ceiling, capped at 30s
 
+// React Native does not surface WebSocket control Ping/Pong frames to
+// JavaScript. The server sends control pings, but an iOS/NAT half-open socket
+// can still look OPEN here forever. Its `/ws` handler also supports text
+// {type:"ping"} → {type:"pong"}, which gives the mobile transport an
+// observable liveness check without changing the protocol.
+const HEARTBEAT_INTERVAL_MS = 25_000;
+const HEARTBEAT_TIMEOUT_MS = 10_000;
+
 /**
  * Lifecycle state — drives whether onclose schedules a reconnect:
  *   idle    — never connected, or fully disconnected. No reconnect on close.
@@ -77,6 +85,9 @@ export class WSClient {
   private state: State = "idle";
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  private pongTimer: ReturnType<typeof setTimeout> | null = null;
+  private awaitingPong = false;
   private hasConnectedBefore = false;
 
   private readonly handlers = new Map<WSEventType, Set<EventHandler>>();
@@ -218,6 +229,10 @@ export class WSClient {
         this.onAuthenticated();
         return;
       }
+      if (type === "pong") {
+        this.onPong();
+        return;
+      }
       if (!type) {
         // Server-side error frames have shape {error: "..."}; log and drop.
         // Reconnect loop is bounded by auth-store's 401 handler eventually
@@ -247,6 +262,7 @@ export class WSClient {
       if (!wasOurs) return;
 
       this.ws = null;
+      this.clearHeartbeat();
       this.logger.warn("[ws] socket closed");
       if (this.state === "active") this.scheduleReconnect();
     };
@@ -255,6 +271,7 @@ export class WSClient {
   private onAuthenticated() {
     this.reconnectAttempt = 0;
     this.logger.info("[ws] authenticated");
+    this.startHeartbeat();
     if (this.hasConnectedBefore) {
       for (const cb of this.onReconnectCallbacks) {
         try {
@@ -292,7 +309,76 @@ export class WSClient {
     }
   }
 
+  /**
+   * An application-level heartbeat is deliberately scoped to authenticated,
+   * foreground sockets. A missed pong is treated like any other disconnect:
+   * close the stale socket and feed recovery through the existing exponential
+   * backoff + full-jitter scheduler rather than immediately redialing.
+   */
+  private startHeartbeat() {
+    this.clearHeartbeat();
+    this.sendHeartbeat();
+    this.heartbeatTimer = setInterval(
+      () => this.sendHeartbeat(),
+      HEARTBEAT_INTERVAL_MS,
+    );
+  }
+
+  private sendHeartbeat() {
+    if (this.state !== "active" || this.ws?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    this.awaitingPong = true;
+    try {
+      // `ping`/`pong` are transport frames rather than business events, so
+      // they intentionally stay outside WSEventType / WSMessage.
+      this.ws.send(JSON.stringify({ type: "ping" }));
+    } catch {
+      this.reconnectAfterHeartbeatFailure();
+      return;
+    }
+
+    this.pongTimer = setTimeout(() => {
+      if (this.awaitingPong) {
+        this.logger.warn("[ws] heartbeat timed out");
+        this.reconnectAfterHeartbeatFailure();
+      }
+    }, HEARTBEAT_TIMEOUT_MS);
+  }
+
+  private onPong() {
+    if (!this.awaitingPong) return;
+    this.awaitingPong = false;
+    if (this.pongTimer) {
+      clearTimeout(this.pongTimer);
+      this.pongTimer = null;
+    }
+    this.logger.debug("[ws] heartbeat pong");
+  }
+
+  private reconnectAfterHeartbeatFailure() {
+    if (this.state !== "active") return;
+    this.teardownSocket();
+    // Do not use forceReconnect(): health failures must retain the normal
+    // exponential-backoff + full-jitter protection used by onclose.
+    this.scheduleReconnect();
+  }
+
+  private clearHeartbeat() {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
+    if (this.pongTimer) {
+      clearTimeout(this.pongTimer);
+      this.pongTimer = null;
+    }
+    this.awaitingPong = false;
+  }
+
   private teardownSocket() {
+    this.clearHeartbeat();
     if (!this.ws) return;
     const ws = this.ws;
     // Detach BEFORE close — onclose firing after teardown would re-enter

@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -61,8 +60,8 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	// resolve the value itself rather than blocking the run on a discovery
 	// hiccup (see antigravityModelError).
 	if opts.Model != "" {
-		catalog, _ := ListModels(ctx, "antigravity", execPath)
-		if err := antigravityModelError(opts.Model, catalog); err != nil {
+		catalog, _ := ListModels(ctx, "antigravity", b.cfg.commandAt(execPath))
+		if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
 			return nil, err
 		}
 	}
@@ -80,7 +79,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 	args := buildAntigravityArgs(prompt, logPath, timeout, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
@@ -125,8 +124,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		finalStatus := "completed"
 		var finalError string
 
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 
 		trySend(msgCh, Message{Type: MessageStatus, Status: "running"})
 
@@ -186,9 +184,13 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 			// produced) without writing anything to stdout, leaving a blank but
 			// "completed" run none of the guards above catch (MUL-3726). Recover
 			// the assistant text agy persisted to its conversation transcript so
-			// the user sees the actual answer instead of an empty result.
+			// the user sees the actual answer instead of an empty result. Also
+			// emit it as a MessageText event so the task transcript catches up;
+			// otherwise Result.Output becomes visible only in the synthesized
+			// final comment while the execution transcript remains blank.
 			if recovered := readAntigravityTranscriptOutput(logPath, sessionID); recovered != "" {
 				finalOutput = recovered
+				trySend(msgCh, Message{Type: MessageText, Content: recovered})
 				b.cfg.Logger.Info("agy recovered empty stdout from transcript", "bytes", len(recovered))
 			}
 		}
@@ -349,8 +351,7 @@ func readAntigravityTranscriptOutput(logPath, conversationID string) string {
 	defer f.Close()
 
 	var parts []string
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+	scanner := newAgentStreamScanner(f)
 	for scanner.Scan() {
 		line := scanner.Bytes()
 		if len(line) == 0 {
@@ -416,6 +417,7 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 	"--print-timeout":                blockedWithValue,
 	"--dangerously-skip-permissions": blockedStandalone, // always-on in daemon mode
 	"--log-file":                     blockedWithValue,  // daemon needs it for session capture
+	"--settings":                     blockedWithValue,  // Claude Code-only flag; agy rejects it
 }
 
 // buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy

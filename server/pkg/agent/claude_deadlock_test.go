@@ -15,7 +15,15 @@ import (
 // TestMain intercepts when the test binary is re-executed as a fake
 // child process by the agent backend. The fake's behavior is selected via
 // CLAUDE_FAKE_MODE; absent that env var, this is a normal `go test` run.
+//
+// Dispatching here rather than from a Test function is what lets a fake be
+// invoked with a real agent CLI's argv: TestMain runs before the testing
+// package parses flags, so arguments like `run --format json` never reach it.
 func TestMain(m *testing.M) {
+	if os.Getenv(opencodeStdinHelperEnv) == "1" {
+		runFakeOpencodeStdinHelper()
+		os.Exit(0)
+	}
 	switch mode := os.Getenv("CLAUDE_FAKE_MODE"); mode {
 	case "":
 		os.Exit(m.Run())
@@ -167,7 +175,7 @@ func TestClaudeExecuteDoesNotDeadlockOnStartupStdoutBurst(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "startup_stdout_burst"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "startup_stdout_burst", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -214,7 +222,7 @@ func TestClaudeExecuteRespondsToControlRequest(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "control_request"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "control_request", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -262,7 +270,7 @@ func TestClaudeExecuteForcesBackgroundControlRequestForeground(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "background_control_request"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "background_control_request", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {
@@ -310,7 +318,7 @@ func TestClaudeExecuteFailsLoudlyOnAsyncLaunchedToolResult(t *testing.T) {
 
 	backend, err := New("claude", Config{
 		ExecutablePath: self,
-		Env:            map[string]string{"CLAUDE_FAKE_MODE": "async_launched_tool_result"},
+		Env:            map[string]string{"CLAUDE_FAKE_MODE": "async_launched_tool_result", "IS_SANDBOX": "1"},
 		Logger:         slog.Default(),
 	})
 	if err != nil {

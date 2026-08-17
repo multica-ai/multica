@@ -39,6 +39,13 @@ func TestPgCronConcurrentNoDoubleWrite(t *testing.T) {
 	pool := integrationPool(t)
 	ctx := context.Background()
 
+	// This test forces the shared rollup watermark backwards and asserts
+	// exactly one of N concurrent callers advances it. Serialise against any
+	// other package's rollup test running concurrently against the same DB,
+	// otherwise a stray rollup tick advances the watermark past our window
+	// and we see winners=0 (MUL-3980).
+	lockRollupSingleton(t, pool)
+
 	// Seed an isolated workspace/runtime/agent/task and a handful of
 	// task_usage rows landing in the same UTC hour bucket. The bucket
 	// math is the SQL helper task_usage_hour_bucket(...).
@@ -92,36 +99,53 @@ func TestPgCronConcurrentNoDoubleWrite(t *testing.T) {
 	}
 
 	const callers = 6
-	results := make([]int64, callers)
-	errs := make([]error, callers)
-	var wg sync.WaitGroup
-	gate := make(chan struct{})
-	for i := range callers {
-		i := i
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			<-gate
-			err := pool.QueryRow(ctx, `SELECT rollup_task_usage_hourly()`).Scan(&results[i])
-			errs[i] = err
-		}()
-	}
-	close(gate) // start everyone simultaneously
-	wg.Wait()
+	burst := func() (winners, losers int, winningRowCount int64) {
+		results := make([]int64, callers)
+		errs := make([]error, callers)
+		var wg sync.WaitGroup
+		gate := make(chan struct{})
+		for i := range callers {
+			i := i
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				<-gate
+				err := pool.QueryRow(ctx, `SELECT rollup_task_usage_hourly()`).Scan(&results[i])
+				errs[i] = err
+			}()
+		}
+		close(gate) // start everyone simultaneously
+		wg.Wait()
 
-	winners := 0
-	losers := 0
+		for i, err := range errs {
+			if err != nil {
+				t.Fatalf("caller %d: %v", i, err)
+			}
+			if results[i] > 0 {
+				winners++
+				winningRowCount = results[i]
+			} else {
+				losers++
+			}
+		}
+		return winners, losers, winningRowCount
+	}
+
+	// The singleton guard serialises the rollup tests against each other, but
+	// 4246 belongs to the whole rollup family and every workspace teardown
+	// takes it too (server/internal/handler, running in a parallel binary
+	// against the same database). If such a delete owns the lock for the whole
+	// burst, all six callers correctly report "no work" — winners=0 is a lost
+	// round, not a broken invariant, so retry it. Anything other than 0 or 1
+	// winners is a real double-write and fails immediately.
+	var winners, losers int
 	var winningRowCount int64
-	for i, err := range errs {
-		if err != nil {
-			t.Fatalf("caller %d: %v", i, err)
+	for attempt := 0; attempt < 10; attempt++ {
+		winners, losers, winningRowCount = burst()
+		if winners != 0 {
+			break
 		}
-		if results[i] > 0 {
-			winners++
-			winningRowCount = results[i]
-		} else {
-			losers++
-		}
+		time.Sleep(100 * time.Millisecond)
 	}
 	if winners != 1 {
 		t.Fatalf("advisory lock 4246 must serialise rollup; got winners=%d losers=%d", winners, losers)

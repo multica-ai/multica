@@ -10,7 +10,17 @@ export {
 } from "./title-editor";
 export { ReadonlyContent } from "./readonly-content";
 export { useFileDropZone } from "./use-file-drop-zone";
+export { useUploadGate, type UploadGate } from "./use-upload-gate";
+export {
+  useComposerSubmit,
+  type ComposerSubmit,
+  type ComposerSubmitOptions,
+  type ComposerAfterAccepted,
+} from "./use-composer-submit";
+export { useEditorUpload } from "./use-editor-upload";
 export { FileDropOverlay } from "./file-drop-overlay";
+export { useLazyEditor, type LazyEditorHandle, type LazyFocusTarget } from "./use-lazy-editor";
+export { anchorFromPoint, type TextAnchor } from "./text-anchor";
 export { useDownloadAttachment } from "./use-download-attachment";
 export { AttachmentDownloadProvider } from "./attachment-download-context";
 export {
@@ -18,7 +28,14 @@ export {
   useAttachmentPreview,
   isPreviewable,
 } from "./attachment-preview-modal";
-export type { AttachmentPreviewHandle } from "./attachment-preview-modal";
+export type {
+  AttachmentPreviewHandle,
+  PreviewSequence,
+} from "./attachment-preview-modal";
+export {
+  ImageSequenceProvider,
+  useImageSequencePreview,
+} from "./image-sequence-context";
 export { AttachmentCard } from "./attachment-card";
 export type { AttachmentCardProps } from "./attachment-card";
 export { Attachment } from "./attachment";

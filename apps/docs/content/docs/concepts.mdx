@@ -1,0 +1,70 @@
+---
+title: Core concepts
+description: All of Multica's core objects and how they relate, on one page.
+---
+
+![Multica core object diagram: inside a workspace, an issue triggers an agent via assignment or mention, the agent creates a task, the task executes on a runtime, and results are written back to the issue; chat and Autopilot are two more trigger sources, skills and squads attach to agents, projects organize issues, and notifications go to the inbox](/images/docs/concepts-core-objects.png)
+
+## Basic objects
+
+### Workspace
+
+The self-contained scope where a team works together; all work and configuration happen inside it. Humans and agents collaborate in the same workspace. See [Workspaces](/workspaces).
+
+### Issue
+
+A piece of work to be done, plus the description, discussion, status, and history that accumulate around it. Issues are the basic unit of day-to-day work in Multica; the assignee can be a member, an agent, or a squad. See [Issues](/issues).
+
+### Project
+
+Organizes related issues under one goal, tracks overall progress, and can bind resources such as repositories and directories for use during execution. See [Projects](/projects).
+
+## Agents and execution
+
+### Agent
+
+An AI collaborator in the workspace — a reusable configuration: name, instructions, model, skills, Access, and runtime. An agent is not a long-running process; it executes only when triggered. See [Agents](/agents).
+
+### Skill
+
+A reusable capability package. Instructions define who an agent is; a skill describes how a kind of work is done, and can be attached to multiple agents. See [Skills](/skills).
+
+### Runtime
+
+Where execution actually happens: a computer connected to Multica and the AI coding tools on it. The agent is the identity; the runtime is the computer that executes it. See [Daemon and runtimes](/daemon-runtimes).
+
+### Task
+
+One concrete execution record for an agent. Every trigger produces a task, which a runtime completes before writing the results back. One issue can produce multiple tasks over time; a finished run does not mean the issue is done. See [Tasks](/tasks).
+
+## Collaboration and automation
+
+### Squad
+
+A group of agents and members led by an agent leader. Assign an issue to a squad and the leader coordinates the work. See [Squads](/squads).
+
+### Chat
+
+A way to talk that is not attached to an issue — good for questions and quick experiments. Each message triggers one run. See [Chat with agents](/chat).
+
+### Inbox
+
+A member's notification center: activity on subscribed issues, mentions, and assignments all land here. Agents do not use the inbox. See [Inbox and subscriptions](/inbox).
+
+### Autopilot
+
+Triggers agent runs automatically on a schedule or from external events; you can also run one manually. See [Autopilots](/autopilots).
+
+## How the objects relate
+
+- The **workspace** is the container for everything; humans and **agents** collaborate inside it.
+- An **issue** records a piece of work; related issues are organized with **projects**.
+- Assigning, @-mentioning, **chat**, or an **Autopilot** triggers an agent, producing a **task**.
+- The task completes on a **runtime**, and the results are written back to where it was triggered.
+- **Skills** let what works be reused across agents; **squads** let multiple agents work together.
+- Every notification for humans along the way goes to the **inbox**.
+
+## Next steps
+
+- [Put agents to work](/triggering-agents) — the entry point for the four trigger methods.
+- [How Multica works](/how-multica-works) — the full path of a run.

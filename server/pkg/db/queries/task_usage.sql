@@ -3,14 +3,18 @@
 -- detects the row as dirty and re-aggregates its bucket.
 -- Without the conflict-side bump, a correction to historical token counts
 -- would never propagate to the rollup.
-INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, updated_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, now())
+-- cost_usd_ticks is the provider's own price for this usage (1e-10 USD), NULL
+-- when it reports none. It is overwritten like the token counters so a
+-- corrected report replaces the previous figure rather than accumulating.
+INSERT INTO task_usage (task_id, provider, model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, cost_usd_ticks, updated_at)
+VALUES ($1, $2, $3, $4, $5, $6, $7, sqlc.narg('cost_usd_ticks'), now())
 ON CONFLICT (task_id, provider, model)
 DO UPDATE SET
     input_tokens = EXCLUDED.input_tokens,
     output_tokens = EXCLUDED.output_tokens,
     cache_read_tokens = EXCLUDED.cache_read_tokens,
     cache_write_tokens = EXCLUDED.cache_write_tokens,
+    cost_usd_ticks = EXCLUDED.cost_usd_ticks,
     updated_at = now();
 
 -- name: GetTaskUsage :many
@@ -18,12 +22,44 @@ SELECT * FROM task_usage
 WHERE task_id = $1
 ORDER BY model;
 
+-- name: ListIssueTaskUsage :many
+-- Per-(task, provider, model) usage rows for every task on one issue — the
+-- per-run half of GetIssueUsageSummary's issue-wide total.
+--
+-- The model dimension stays on the wire for the same reason the runtime and
+-- dashboard usage rows keep it: cost is priced client-side from a per-model
+-- rate table, and a row that has collapsed two models into one sum can no
+-- longer be priced at all. The execution log sums the rows per task; the usage
+-- panel shows them split.
+--
+-- Ordering is by task then model so the client can group by task_id in one
+-- pass. Uses idx_agent_task_queue_issue_id (migration 035) + the task_usage
+-- task_id index (migration 032).
+SELECT
+    tu.task_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens,
+    tu.cost_usd_ticks
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.issue_id = $1
+ORDER BY tu.task_id, tu.model;
+
 -- name: GetIssueUsageSummary :one
 SELECT
     COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
     COALESCE(SUM(tu.output_tokens), 0)::bigint AS total_output_tokens,
     COALESCE(SUM(tu.cache_read_tokens), 0)::bigint AS total_cache_read_tokens,
     COALESCE(SUM(tu.cache_write_tokens), 0)::bigint AS total_cache_write_tokens,
+    COALESCE(SUM(tu.cost_usd_ticks), 0)::bigint AS total_cost_usd_ticks,
+    COALESCE(SUM(tu.input_tokens)       FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_input_tokens,
+    COALESCE(SUM(tu.output_tokens)      FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_output_tokens,
+    COALESCE(SUM(tu.cache_read_tokens)  FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_read_tokens,
+    COALESCE(SUM(tu.cache_write_tokens) FILTER (WHERE tu.cost_usd_ticks IS NULL), 0)::bigint AS uncosted_cache_write_tokens,
     COUNT(DISTINCT tu.task_id)::int AS task_count
 FROM task_usage tu
 JOIN agent_task_queue atq ON atq.id = tu.task_id
@@ -55,6 +91,11 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -86,6 +127,11 @@ SELECT
     SUM(output_tokens)::bigint       AS output_tokens,
     SUM(cache_read_tokens)::bigint   AS cache_read_tokens,
     SUM(cache_write_tokens)::bigint  AS cache_write_tokens,
+    SUM(cost_usd_ticks)::bigint                                          AS cost_usd_ticks,
+    SUM(COALESCE(uncosted_input_tokens, input_tokens))::bigint           AS uncosted_input_tokens,
+    SUM(COALESCE(uncosted_output_tokens, output_tokens))::bigint         AS uncosted_output_tokens,
+    SUM(COALESCE(uncosted_cache_read_tokens, cache_read_tokens))::bigint AS uncosted_cache_read_tokens,
+    SUM(COALESCE(uncosted_cache_write_tokens, cache_write_tokens))::bigint AS uncosted_cache_write_tokens,
     SUM(task_count)::int             AS task_count
 FROM task_usage_hourly
 WHERE workspace_id = $1
@@ -102,8 +148,16 @@ ORDER BY agent_id, LOWER(provider), model;
 -- caller-supplied @tz — same Viewing-tz treatment as ListDashboardUsageDaily
 -- so the Time / Tasks tabs cut their day boundary identically to the
 -- Cost / Tokens tabs (a viewer east of UTC would otherwise see the four
--- tabs disagree on a "1d" window). Only terminal tasks (completed or
--- failed) with both started_at and completed_at populated contribute.
+-- tabs disagree on a "1d" window). Only terminal tasks (completed, failed,
+-- or cancelled) with both started_at and completed_at populated contribute.
+--
+-- 'cancelled' is in the filter because a run the user stopped mid-flight
+-- burned real agent time and real tokens before the stop landed
+-- (CancelAgentTask accepts 'running'). Excluding it zeroed that time while
+-- the cost rollup — which has no status filter at all — kept charging for
+-- it, so Time/Tasks and Cost/Tokens were summing different task populations
+-- on the same page. The started_at guard keeps a run cancelled while still
+-- queued out: it never occupied an agent.
 --
 -- @since is already the viewer's local start-of-day-(N) (parseSinceParamInTZ)
 -- — passed straight through, NOT re-truncated; see ListDashboardUsageDaily.
@@ -114,12 +168,13 @@ SELECT
         0
     )::bigint AS total_seconds,
     COUNT(*)::int AS task_count,
-    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
-  AND atq.status IN ('completed', 'failed')
+  AND atq.status IN ('completed', 'failed', 'cancelled')
   AND atq.started_at IS NOT NULL
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= sqlc.arg('since')::timestamptz
@@ -129,14 +184,19 @@ ORDER BY DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) DESC;
 
 -- name: ListDashboardAgentRunTime :many
 -- Per-agent total task run time and task count for the workspace, optionally
--- scoped to a single project. Counts only terminal runs (completed or failed)
--- with both started_at and completed_at populated — queued/running tasks have
--- no finite duration. Anchored on completed_at so the window matches the
--- token cost window (which is anchored on tu.created_at, ~= completion time).
+-- scoped to a single project. Counts only terminal runs (completed, failed,
+-- or cancelled) with both started_at and completed_at populated — queued/
+-- running tasks have no finite duration. Anchored on completed_at so the
+-- window matches the token cost window (which is anchored on tu.created_at,
+-- ~= completion time).
+--
+-- See ListDashboardRunTimeDaily for why 'cancelled' belongs in the filter.
 --
 -- No date bucketing, so no @tz — but @since is the viewer's local
--- start-of-day-(N) so the "last N days" window lines up with the per-agent
--- cost card; passed straight through without re-truncation.
+-- start-of-day for the EXACT N-day window (parseExactSinceParamInTZ), so the
+-- "last N days" window lines up with the per-agent cost card and the daily
+-- charts the client trims to the same span; passed straight through without
+-- re-truncation.
 SELECT
     atq.agent_id,
     COALESCE(
@@ -144,15 +204,84 @@ SELECT
         0
     )::bigint AS total_seconds,
     COUNT(*)::int AS task_count,
-    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count
+    COUNT(*) FILTER (WHERE atq.status = 'failed')::int AS failed_count,
+    COUNT(*) FILTER (WHERE atq.status = 'cancelled')::int AS cancelled_count
 FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 LEFT JOIN issue i ON i.id = atq.issue_id
 WHERE a.workspace_id = $1
-  AND atq.status IN ('completed', 'failed')
+  AND atq.status IN ('completed', 'failed', 'cancelled')
   AND atq.started_at IS NOT NULL
   AND atq.completed_at IS NOT NULL
   AND atq.completed_at >= @since::timestamptz
   AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
 GROUP BY atq.agent_id
 ORDER BY total_seconds DESC;
+
+-- name: ListDashboardFailuresDaily :many
+-- Daily per-(date, failure_reason) terminal-task counts for the workspace,
+-- optionally scoped to a single project. Powers the workspace dashboard's
+-- "Errors" trend and the errors-by-class breakdown.
+--
+-- Shape note: this returns EVERY terminal task, not just the failures. The
+-- `failure_reason = ''` row of each date carries that date's succeeded
+-- count, which is the denominator the client needs for an error rate. A
+-- failed row whose failure_reason column is NULL or empty (pre-MUL-1949
+-- rows, or a failure path that forgot to classify) collapses into the
+-- 'unclassified' bucket so it stays countable instead of masquerading as a
+-- success. Cardinality is bounded by days x (21 reasons + 2), so the whole
+-- window fits in one small payload.
+--
+-- Unlike ListDashboardRunTimeDaily this does NOT require started_at — a task
+-- that expired in the queue (failure_reason='queued_expired') never started
+-- but is unambiguously a failure, and dropping it would under-report exactly
+-- the outage the Errors chart exists to surface. Every failure path sets
+-- completed_at, so bucketing on it covers all of them.
+--
+-- @since is already the viewer's local start-of-day-(N) (parseSinceParamInTZ)
+-- — passed straight through, NOT re-truncated; see ListDashboardUsageDaily.
+SELECT
+    DATE(atq.completed_at AT TIME ZONE sqlc.arg('tz')::text) AS date,
+    CASE
+        WHEN atq.status = 'failed'
+            THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
+        ELSE ''
+    END AS failure_reason,
+    COUNT(*)::int AS task_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= sqlc.arg('since')::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY 1, 2
+ORDER BY 1 DESC, 2;
+
+-- name: ListDashboardFailuresByAgent :many
+-- Per-(agent, failure_reason) terminal-task counts — the "top offenders"
+-- half of the dashboard's errors breakdown. Same `failure_reason = ''`
+-- succeeded-bucket convention as ListDashboardFailuresDaily, so the client
+-- can rank agents by failure rate rather than raw count.
+--
+-- No date bucketing, so no @tz — @since is the viewer's local
+-- start-of-day-(N) so the window lines up with the per-agent run-time card.
+SELECT
+    atq.agent_id,
+    CASE
+        WHEN atq.status = 'failed'
+            THEN COALESCE(NULLIF(atq.failure_reason, ''), 'unclassified')
+        ELSE ''
+    END AS failure_reason,
+    COUNT(*)::int AS task_count
+FROM agent_task_queue atq
+JOIN agent a ON a.id = atq.agent_id
+LEFT JOIN issue i ON i.id = atq.issue_id
+WHERE a.workspace_id = $1
+  AND atq.status IN ('completed', 'failed')
+  AND atq.completed_at IS NOT NULL
+  AND atq.completed_at >= @since::timestamptz
+  AND (sqlc.narg('project_id')::uuid IS NULL OR i.project_id = sqlc.narg('project_id'))
+GROUP BY atq.agent_id, 2
+ORDER BY atq.agent_id, 2;

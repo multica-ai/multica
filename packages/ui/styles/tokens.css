@@ -5,6 +5,15 @@
     --font-sans: var(--font-sans);
     --font-serif: var(--font-serif);
     --font-mono: var(--font-mono);
+    --color-app-shell: var(--app-shell);
+    --color-page-canvas: var(--page-canvas);
+    --color-surface: var(--surface);
+    --color-surface-foreground: var(--surface-foreground);
+    --color-surface-raised: var(--surface-raised);
+    --color-surface-hover: var(--surface-hover);
+    --color-surface-selected: var(--surface-selected);
+    --color-surface-selected-foreground: var(--surface-selected-foreground);
+    --color-surface-border: var(--surface-border);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -29,6 +38,7 @@
     --color-brand-foreground: var(--brand-foreground);
     --color-accent-foreground: var(--accent-foreground);
     --color-accent: var(--accent);
+    --color-faint-foreground: var(--faint-foreground);
     --color-muted-foreground: var(--muted-foreground);
     --color-muted: var(--muted);
     --color-secondary-foreground: var(--secondary-foreground);
@@ -50,23 +60,130 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* Type scale — the only font sizes product UI may use.
+ *
+ * There was no `--text-*` token here before, so sizes grew ad hoc: 51 distinct
+ * font sizes across web + desktop, 370 of them written as arbitrary values,
+ * including half-pixel steps (10.5 / 11.5 / 12.5 / 13.5 / 14.5 / 15.5px) that
+ * nobody chose deliberately — they appeared because there was no step to reach
+ * for. Hierarchy does not come from having more sizes; past a handful, every
+ * extra size makes the hierarchy blurrier, because two values a pixel apart
+ * read as "the same, but wrong" rather than as two levels.
+ *
+ * The steps are named for the role the text plays, not for a t-shirt size.
+ * That is what keeps the scale from drifting again: "what is this text for"
+ * has an answer a reader can check, "is this sm or base" does not.
+ *
+ * Six of the ten steps replace Tailwind's default scale and deliberately keep
+ * that scale's exact size/line-height pairs, so `text-sm` -> `text-body` moves
+ * nothing on screen. Only the steps that fill the old gaps — micro (11), label
+ * (13), body-lg (15) — are new sizes; those are the gaps the arbitrary values
+ * were papering over. Every step carries its own line-height so leading cannot
+ * fragment the way size did; a `leading-*` utility still wins where a specific
+ * block needs to override it.
+ *
+ * Landing-page display type (rem/clamp, 2.2-6.4rem) is marketing typography on
+ * a separate ramp and stays out of this scale on purpose. */
+@theme {
+    /* counters, badges, timestamps, overline labels */
+    --text-micro: 11px;
+    --text-micro--line-height: 15px;
+    /* secondary and helper text — was text-xs */
+    --text-caption: 12px;
+    --text-caption--line-height: 16px;
+    /* dense labels: table headers, metadata rows */
+    --text-label: 13px;
+    --text-label--line-height: 18px;
+    /* UI body, the workhorse — was text-sm */
+    --text-body: 14px;
+    --text-body--line-height: 20px;
+    /* roomier body: dialog copy, onboarding prose */
+    --text-body-lg: 15px;
+    --text-body-lg--line-height: 22px;
+    /* small headings — was text-base */
+    --text-title-sm: 16px;
+    --text-title-sm--line-height: 24px;
+    /* section headings — was text-lg */
+    --text-title: 18px;
+    --text-title--line-height: 28px;
+    /* card and dialog titles — was text-xl */
+    --text-title-lg: 20px;
+    --text-title-lg--line-height: 28px;
+    /* page titles — was text-2xl */
+    --text-display-sm: 24px;
+    --text-display-sm--line-height: 32px;
+    /* hero numbers and empty-state headlines — was text-3xl (30px) */
+    --text-display: 36px;
+    --text-display--line-height: 40px;
+}
+
 :root {
-    --background: oklch(1 0 0);
+    color-scheme: light;
+    /* Surface system: the app shell is the quiet outer frame; the page canvas
+       is where lists, boards, and conversations live; surfaces are reserved
+       for bounded content groups; raised surfaces are ephemeral overlays. */
+    --app-shell: oklch(0.964435 0.001327 286.375);
+    --page-canvas: oklch(0.988087 0 0);
+    --surface: oklch(1 0 0);
+    --surface-foreground: oklch(0.141 0.005 285.823);
+    --surface-raised: oklch(1 0 0);
+    --surface-hover: oklch(0.967 0.001 286.375);
+    --surface-selected: oklch(0.95 0.002 286.375);
+    --surface-selected-foreground: oklch(0.141 0.005 285.823);
+    --surface-border: oklch(0.92 0.004 286.32);
+    --surface-shadow: 0 1px 2px rgb(15 23 42 / 0.04), 0 1px 1px rgb(15 23 42 / 0.03);
+    --floating-shadow: 0 16px 40px rgb(15 23 42 / 0.14), 0 3px 10px rgb(15 23 42 / 0.08);
+
+    /* The chat launcher is an overlay pinned to the dashboard's bottom-right
+       corner on every workspace page, so that corner is not available to page
+       content. Its geometry lives here rather than in the button so that the
+       clearance is derived from it: anything reaching that corner — a footer's
+       action buttons, a floating toolbar — reserves --chat-launcher-clearance
+       and stays correct if the launcher ever moves or changes size. */
+    --chat-launcher-size: 2.5rem;
+    --chat-launcher-inset: 0.5rem;
+    --chat-launcher-clearance: calc(
+      var(--chat-launcher-size) + var(--chat-launcher-inset) * 2
+    );
+    /* Menus (dropdown/context/select/popover) hover just above their trigger,
+       so they carry a lighter shadow than window-level overlays (dialogs,
+       sheets), which keep --floating-shadow. */
+    --menu-shadow: 0 8px 24px rgb(15 23 42 / 0.08), 0 2px 6px rgb(15 23 42 / 0.05);
+    --background: var(--page-canvas);
     --foreground: oklch(0.141 0.005 285.823);
-    --card: oklch(1 0 0);
+    --card: var(--surface);
     --card-foreground: oklch(0.141 0.005 285.823);
-    --popover: oklch(1 0 0);
+    --popover: var(--surface-raised);
     --popover-foreground: oklch(0.141 0.005 285.823);
     --primary: oklch(0.21 0.006 285.885);
     --primary-foreground: oklch(0.985 0 0);
     --secondary: oklch(0.967 0.001 286.375);
     --secondary-foreground: oklch(0.21 0.006 285.885);
     --muted: oklch(0.967 0.001 286.375);
-    --muted-foreground: oklch(0.552 0.016 285.938);
+    /* Lightness is pinned by WCAG AA, not by taste: muted text sits on every
+       light surface we have, and the darkest of them — --sidebar-accent, the
+       nav hover state — is the binding constraint. At the old 0.552 that pair
+       was 3.98:1; 0.505 clears 4.5:1 on all of app-shell / page-canvas /
+       sidebar / sidebar-accent / muted / surface-selected / surface, with the
+       worst case at 4.88:1. Raise it and the nav labels fail again. Hue and
+       chroma are unchanged so the neutral ramp keeps its cast. */
+    --muted-foreground: oklch(0.505 0.016 285.938);
+    /* The quiet step below muted, for marks that are not text: disclosure
+       chevrons, separator glyphs, the em dash standing in for an empty cell,
+       the large icon in an empty state. It exists because the alternative
+       people reached for was alpha — 152 call sites of
+       text-muted-foreground/30..80 — and alpha on light surfaces lands
+       between 1.5:1 and 3.8:1, which fails even the 3:1 floor for non-text.
+       0.606 is the lightest step that still clears 3:1 (WCAG 1.4.11) on every
+       surface, worst case --sidebar-accent at 3.19:1. Deliberately NOT valid
+       for text: text has one floor, --muted-foreground, and there is no room
+       for a third readable step (AA caps a lighter text tone at L 0.523 here,
+       0.018 away from muted — a difference no one can see). */
+    --faint-foreground: oklch(0.606 0.016 285.938);
     --accent: oklch(0.967 0.001 286.375);
     --accent-foreground: oklch(0.21 0.006 285.885);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.92 0.004 286.32);
+    --border: oklch(0.945 0.003 286.32);
     --input: oklch(0.92 0.004 286.32);
     --ring: oklch(0.705 0.015 286.067);
     /* Brand-derived blue gradient (h=255 = brand hue). chart-1 equals brand
@@ -80,11 +197,11 @@
     --chart-4: oklch(0.85 0.06 255);
     --chart-5: oklch(0.92 0.03 255);
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
+    --sidebar: oklch(0.964435 0.001327 286.375);
     --sidebar-foreground: oklch(0.141 0.005 285.823);
     --sidebar-primary: oklch(0.21 0.006 285.885);
     --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.95 0.002 286.375);
+    --sidebar-accent: oklch(0.935 0.003 286.375);
     --sidebar-accent-foreground: oklch(0.21 0.006 285.885);
     --sidebar-border: oklch(0.92 0.004 286.32);
     --sidebar-ring: oklch(0.705 0.015 286.067);
@@ -96,14 +213,33 @@
     --scrollbar-thumb: oklch(0 0 0 / 10%);
     --scrollbar-thumb-hover: oklch(0 0 0 / 18%);
     --scrollbar-track: transparent;
+    /* In-page find (Cmd/Ctrl+F) match tints, painted via the CSS Custom
+       Highlight API. Bright fill + dark text so matches stay legible in
+       both themes; the active match steps to orange. */
+    --find-match: oklch(0.92 0.15 100);
+    --find-match-active: oklch(0.82 0.17 62);
+    --find-match-foreground: oklch(0.22 0.03 92);
 }
 
 .dark {
-    --background: oklch(0.18 0.005 285.823);
+    color-scheme: dark;
+    --app-shell: oklch(0.155 0.005 285.823);
+    --page-canvas: oklch(0.18 0.005 285.823);
+    --surface: oklch(0.21 0.006 285.885);
+    --surface-foreground: oklch(0.985 0 0);
+    --surface-raised: oklch(0.235 0.007 285.885);
+    --surface-hover: oklch(0.274 0.006 286.033);
+    --surface-selected: oklch(0.3 0.006 286.033);
+    --surface-selected-foreground: oklch(0.985 0 0);
+    --surface-border: oklch(1 0 0 / 10%);
+    --surface-shadow: 0 1px 2px rgb(0 0 0 / 0.2), 0 1px 1px rgb(0 0 0 / 0.16);
+    --floating-shadow: 0 20px 48px rgb(0 0 0 / 0.46), 0 4px 12px rgb(0 0 0 / 0.28);
+    --menu-shadow: 0 10px 28px rgb(0 0 0 / 0.3), 0 2px 8px rgb(0 0 0 / 0.18);
+    --background: var(--page-canvas);
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.21 0.006 285.885);
+    --card: var(--surface);
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.21 0.006 285.885);
+    --popover: var(--surface-raised);
     --popover-foreground: oklch(0.985 0 0);
     --primary: oklch(0.92 0.004 286.32);
     --primary-foreground: oklch(0.21 0.006 285.885);
@@ -111,10 +247,15 @@
     --secondary-foreground: oklch(0.985 0 0);
     --muted: oklch(0.274 0.006 286.033);
     --muted-foreground: oklch(0.705 0.015 286.067);
+    /* Same role as light mode, mirrored: fainter means darker here. 0.60 is
+       the darkest step still clearing 3:1 on every dark surface, worst case
+       --surface-selected at 3.45:1. The step away from muted (0.105 L) matches
+       light mode's, so a chevron reads equally quiet in both themes. */
+    --faint-foreground: oklch(0.60 0.015 286.067);
     --accent: oklch(0.274 0.006 286.033);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
+    --border: oklch(1 0 0 / 6%);
     --input: oklch(1 0 0 / 15%);
     --ring: oklch(0.552 0.016 285.938);
     /* Dark mode mirrors light mode's "primary → secondary" gradient on the
@@ -142,4 +283,7 @@
     --scrollbar-thumb: oklch(1 0 0 / 8%);
     --scrollbar-thumb-hover: oklch(1 0 0 / 18%);
     --scrollbar-track: transparent;
+    --find-match: oklch(0.82 0.16 100);
+    --find-match-active: oklch(0.76 0.18 60);
+    --find-match-foreground: oklch(0.18 0.02 92);
 }

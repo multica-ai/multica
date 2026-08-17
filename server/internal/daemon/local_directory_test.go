@@ -138,6 +138,83 @@ func TestFindLocalDirectoryAssignment(t *testing.T) {
 	})
 }
 
+func TestAcquireLocalDirectoryLockSkipsSquadLeaderTasks(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-mine"
+	tmp := t.TempDir()
+	raw, err := json.Marshal(localDirectoryRef{LocalPath: tmp, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resources := []ProjectResourceData{
+		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+	}
+
+	worker := Task{
+		ID:               "worker-task",
+		ProjectResources: resources,
+	}
+	assignment, err := localDirectoryAssignmentForTask(worker, daemonID)
+	if err != nil {
+		t.Fatalf("worker assignment: %v", err)
+	}
+	if assignment == nil {
+		t.Fatal("worker assignment is nil")
+	}
+
+	d := &Daemon{
+		cfg:            Config{DaemonID: daemonID},
+		localPathLocks: NewLocalPathLocker(),
+		logger:         slog.Default(),
+	}
+	leader := Task{
+		ID:               "leader-task",
+		IsLeaderTask:     true,
+		ProjectResources: resources,
+	}
+	leaderAssignment, err := localDirectoryAssignmentForTask(leader, daemonID)
+	if err != nil {
+		t.Fatalf("leader assignment: %v", err)
+	}
+	if leaderAssignment != nil {
+		t.Fatalf("leader assignment = %+v, want nil", leaderAssignment)
+	}
+	leaderRelease, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default())
+	if abort {
+		t.Fatal("leader lock acquisition aborted")
+	}
+	if leaderRelease != nil {
+		t.Fatal("leader lock acquisition returned a release callback")
+	}
+	if got := d.localPathLocks.Holder(assignment.RealPath); got != "" {
+		t.Fatalf("holder after leader skip = %q, want empty", got)
+	}
+
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default())
+	if abort {
+		t.Fatal("worker lock acquisition aborted")
+	}
+	if release == nil {
+		t.Fatal("worker lock acquisition returned nil release")
+	}
+	defer release()
+	if got := d.localPathLocks.Holder(assignment.RealPath); got != worker.ID {
+		t.Fatalf("holder = %q, want %q", got, worker.ID)
+	}
+
+	leaderRelease, abort = d.acquireLocalDirectoryLockIfNeeded(context.Background(), leader, slog.Default())
+	if abort {
+		t.Fatal("leader lock acquisition aborted")
+	}
+	if leaderRelease != nil {
+		t.Fatal("leader lock acquisition returned a release callback")
+	}
+	if got := d.localPathLocks.Holder(assignment.RealPath); got != worker.ID {
+		t.Fatalf("holder after leader skip = %q, want %q", got, worker.ID)
+	}
+}
+
 func TestValidateLocalPath(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("blacklist constants are POSIX-only in this test")
@@ -552,5 +629,339 @@ func TestAcquireLocalDirectoryLock_CancelDuringWait(t *testing.T) {
 
 	if got := waitCall.Load(); got != 1 {
 		t.Errorf("wait-local-directory calls = %d, want 1", got)
+	}
+}
+
+func TestAcquireLocalDirectoryLock_ParentCancellationReportsWaitFailure(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	realDir, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatalf("evalsymlinks: %v", err)
+	}
+
+	parked := make(chan struct{}, 1)
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/wait-local-directory"):
+			select {
+			case parked <- struct{}{}:
+			default:
+			}
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(req.URL.Path, "/status"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		case strings.HasSuffix(req.URL.Path, "/fail"):
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+		default:
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	locker := NewLocalPathLocker()
+	release, err := locker.Acquire(context.Background(), realDir, "task-holder", nil)
+	if err != nil {
+		t.Fatalf("preclaim acquire: %v", err)
+	}
+	t.Cleanup(release)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.Default(),
+		localPathLocks:     locker,
+		cancelPollInterval: time.Hour,
+		cfg:                Config{DaemonID: daemonID},
+	}
+	ref, err := json.Marshal(localDirectoryRef{LocalPath: dir, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal ref: %v", err)
+	}
+	task := Task{
+		ID: "task-waiter",
+		ProjectResources: []ProjectResourceData{
+			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
+		},
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	type result struct {
+		release func()
+		abort   bool
+	}
+	done := make(chan result, 1)
+	go func() {
+		rel, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default())
+		done <- result{release: rel, abort: abort}
+	}()
+
+	select {
+	case <-parked:
+		if got := d.resourceWaitTasks.Load(); got != 1 {
+			t.Fatalf("resource wait count while parked = %d, want 1", got)
+		}
+		cancel()
+	case <-time.After(2 * time.Second):
+		t.Fatal("task never entered local_directory wait")
+	}
+
+	select {
+	case got := <-done:
+		if !got.abort {
+			t.Fatal("expected abort=true after parent cancellation")
+		}
+		if got.release != nil {
+			t.Fatal("expected nil release after parent cancellation")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("acquireLocalDirectoryLockIfNeeded did not return after parent cancellation")
+	}
+
+	if got := failCalls.Load(); got != 1 {
+		t.Fatalf("fail callback calls = %d, want 1", got)
+	}
+	if got := d.resourceWaitTasks.Load(); got != 0 {
+		t.Fatalf("resource wait count after cancellation = %d, want 0", got)
+	}
+}
+
+func TestAcquireLocalDirectoryLock_EarlyFailureReportsWithCancelledParent(t *testing.T) {
+	t.Parallel()
+
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if !strings.HasSuffix(req.URL.Path, "/fail") {
+			t.Errorf("unexpected daemon call: %s %s", req.Method, req.URL.Path)
+		}
+		failCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	const daemonID = "d-test"
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		logger:         slog.Default(),
+		localPathLocks: NewLocalPathLocker(),
+		cfg:            Config{DaemonID: daemonID},
+	}
+	missingPathRef, err := json.Marshal(localDirectoryRef{
+		LocalPath: filepath.Join(t.TempDir(), "missing"),
+		DaemonID:  daemonID,
+	})
+	if err != nil {
+		t.Fatalf("marshal ref: %v", err)
+	}
+	tests := []struct {
+		name string
+		ref  json.RawMessage
+	}{
+		{name: "resource resolution", ref: json.RawMessage(`{not-json`)},
+		{name: "path validation", ref: missingPathRef},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			task := Task{
+				ID: "task-invalid-local-directory",
+				ProjectResources: []ProjectResourceData{
+					{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: tc.ref},
+				},
+			}
+
+			ctx, cancel := context.WithCancel(context.Background())
+			cancel()
+			release, abort := d.acquireLocalDirectoryLockIfNeeded(ctx, task, slog.Default())
+			if !abort {
+				t.Fatal("expected local_directory failure to abort task")
+			}
+			if release != nil {
+				t.Fatal("expected nil release on local_directory failure")
+			}
+		})
+	}
+	if got := failCalls.Load(); got != int32(len(tests)) {
+		t.Fatalf("fail callback calls = %d, want %d", got, len(tests))
+	}
+}
+
+// Worktree mode exists to let sibling tasks on one directory run at the same
+// time, so the per-path mutex must not be taken at all. If it were, the mode
+// would look implemented while still serialising every task.
+func TestAcquireLocalDirectoryLockSkipsWorktreeMode(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-mine"
+	tmp := t.TempDir()
+	raw, err := json.Marshal(localDirectoryRef{
+		LocalPath:     tmp,
+		DaemonID:      daemonID,
+		ExecutionMode: localDirectoryModeWorktree,
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resources := []ProjectResourceData{
+		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+	}
+
+	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID)
+	if err != nil {
+		t.Fatalf("assignment: %v", err)
+	}
+	if !assignment.UsesWorktree() {
+		t.Fatal("UsesWorktree() = false for execution_mode=worktree")
+	}
+
+	d := &Daemon{
+		cfg:            Config{DaemonID: daemonID},
+		localPathLocks: NewLocalPathLocker(),
+		logger:         slog.Default(),
+	}
+
+	// Two tasks on the same path must both proceed without a release callback
+	// and without either becoming the lock holder.
+	for _, taskID := range []string{"task-a", "task-b"} {
+		release, abort := d.acquireLocalDirectoryLockIfNeeded(
+			context.Background(),
+			Task{ID: taskID, ProjectResources: resources},
+			slog.Default(),
+		)
+		if abort {
+			t.Fatalf("%s: acquisition aborted", taskID)
+		}
+		if release != nil {
+			t.Fatalf("%s: got a release callback, so the path mutex was taken", taskID)
+		}
+	}
+	if got := d.localPathLocks.Holder(assignment.RealPath); got != "" {
+		t.Fatalf("holder = %q, want empty: worktree mode must not lock the path", got)
+	}
+}
+
+// The default and any unrecognised mode must keep the historical exclusive
+// lock. Failing open here would let a daemon older than the resource run two
+// tasks in one directory at once.
+func TestUsesWorktreeDefaultsToExclusive(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		mode string
+		want bool
+	}{
+		{"", false},
+		{localDirectoryModeInPlace, false},
+		{localDirectoryModeWorktree, true},
+		{" worktree ", true},
+		{"snapshot", false},
+		{"WORKTREE", false},
+	}
+	for _, tc := range cases {
+		a := &localDirectoryAssignment{Ref: localDirectoryRef{ExecutionMode: tc.mode}}
+		if got := a.UsesWorktree(); got != tc.want {
+			t.Errorf("UsesWorktree(%q) = %v, want %v", tc.mode, got, tc.want)
+		}
+	}
+	var nilAssignment *localDirectoryAssignment
+	if nilAssignment.UsesWorktree() {
+		t.Error("UsesWorktree() on nil assignment = true, want false")
+	}
+}
+
+// An unknown execution_mode means the resource was written by a newer server
+// than this daemon. Running in_place anyway would edit the very directory the
+// user asked to be isolated from, so the task must fail instead.
+func TestAcquireLocalDirectoryLockRejectsUnknownExecutionMode(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-mine"
+	tmp := t.TempDir()
+	raw, err := json.Marshal(localDirectoryRef{
+		LocalPath:     tmp,
+		DaemonID:      daemonID,
+		ExecutionMode: "snapshot", // a mode only a future daemon implements
+	})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	resources := []ProjectResourceData{
+		{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw},
+	}
+
+	assignment, err := localDirectoryAssignmentForTask(Task{ID: "t1", ProjectResources: resources}, daemonID)
+	if err != nil {
+		t.Fatalf("assignment: %v", err)
+	}
+	if assignment.UsesWorktree() {
+		t.Fatal("an unknown mode must not be treated as worktree")
+	}
+	modeErr := assignment.ValidateExecutionMode()
+	if modeErr == nil {
+		t.Fatal("ValidateExecutionMode accepted an unknown mode")
+	}
+	if !strings.Contains(modeErr.Error(), "snapshot") {
+		t.Errorf("error should name the unsupported mode, got: %v", modeErr)
+	}
+
+	// The daemon must report the task as failed rather than quietly running it.
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/fail") {
+			failCalls.Add(1)
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		t.Errorf("unexpected daemon call: %s %s", r.Method, r.URL.Path)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+
+	locker := NewLocalPathLocker()
+	d := &Daemon{
+		cfg:            Config{DaemonID: daemonID},
+		client:         NewClient(srv.URL),
+		localPathLocks: locker,
+		logger:         slog.Default(),
+	}
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(
+		context.Background(),
+		Task{ID: "t1", ProjectResources: resources},
+		slog.Default(),
+	)
+	if !abort {
+		t.Error("abort = false; the task was allowed to run with an unsupported mode")
+	}
+	if release != nil {
+		t.Error("an aborted task must not hold the path lock")
+	}
+	if failCalls.Load() == 0 {
+		t.Error("the task was not reported as failed, so the skew would be invisible")
+	}
+	if got := locker.Holder(assignment.RealPath); got != "" {
+		t.Errorf("holder = %q, want empty after an aborted task", got)
+	}
+}
+
+// Known modes must keep working — the guard above must not become a blanket
+// rejection.
+func TestValidateExecutionModeAcceptsKnownModes(t *testing.T) {
+	t.Parallel()
+
+	for _, mode := range []string{"", localDirectoryModeInPlace, localDirectoryModeWorktree, "  worktree  "} {
+		a := &localDirectoryAssignment{Ref: localDirectoryRef{ExecutionMode: mode}}
+		if err := a.ValidateExecutionMode(); err != nil {
+			t.Errorf("ValidateExecutionMode(%q) = %v, want nil", mode, err)
+		}
+	}
+	var nilAssignment *localDirectoryAssignment
+	if err := nilAssignment.ValidateExecutionMode(); err != nil {
+		t.Errorf("nil assignment should validate, got %v", err)
 	}
 }

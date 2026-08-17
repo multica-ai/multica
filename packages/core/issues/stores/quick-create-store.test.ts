@@ -4,8 +4,6 @@ import { useQuickCreateStore } from "./quick-create-store";
 const RESET_STATE = {
   lastActorType: null,
   lastActorId: null,
-  lastProjectId: null,
-  prompt: "",
   keepOpen: false,
 };
 
@@ -14,26 +12,13 @@ describe("quick create store", () => {
     useQuickCreateStore.setState(RESET_STATE);
   });
 
-  it("persists the agent prompt draft until explicitly cleared", () => {
-    const { setPrompt, clearPrompt } = useQuickCreateStore.getState();
-
-    setPrompt("Investigate the inbox loading regression");
-    expect(useQuickCreateStore.getState().prompt).toBe(
-      "Investigate the inbox loading regression",
-    );
-
-    clearPrompt();
-    expect(useQuickCreateStore.getState().prompt).toBe("");
-  });
-
-  it("remembers the last project picked so frequent users skip the picker", () => {
-    const { setLastProjectId } = useQuickCreateStore.getState();
-
-    setLastProjectId("proj-1");
-    expect(useQuickCreateStore.getState().lastProjectId).toBe("proj-1");
-
-    setLastProjectId(null);
-    expect(useQuickCreateStore.getState().lastProjectId).toBeNull();
+  // The store remembers the actor and nothing else about the last create.
+  // Project is a property of the issue being filed, not a standing
+  // preference, so carrying it forward files the next issue somewhere the
+  // user never picked (MUL-5862).
+  it("does not carry any project memory", () => {
+    expect(useQuickCreateStore.getState()).not.toHaveProperty("lastProjectId");
+    expect(useQuickCreateStore.getState()).not.toHaveProperty("setLastProjectId");
   });
 
   it("remembers the last actor (agent or squad) and clears both fields together", () => {

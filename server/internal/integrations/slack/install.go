@@ -28,11 +28,20 @@ var (
 	// ErrInstallationNotFound surfaces "no row matches in this workspace".
 	ErrInstallationNotFound = errors.New("slack installation not found")
 	// ErrTeamOwnedByAnotherWorkspace is returned when the pasted Slack app is
-	// already connected to a DIFFERENT agent or Multica workspace — it would
-	// collide with the (channel_type, app_id) routing index. A Slack app is one
-	// bot identity and maps to one agent; reusing it elsewhere requires
-	// disconnecting it there first.
-	ErrTeamOwnedByAnotherWorkspace = errors.New("slack: this Slack app is already connected to another agent or Multica workspace")
+	// already connected to a live owner in a DIFFERENT Multica workspace — it
+	// would collide with the (channel_type, app_id) routing index. A Slack app is
+	// one bot identity and maps to one agent; reusing it here requires
+	// disconnecting it in the other workspace first.
+	ErrTeamOwnedByAnotherWorkspace = errors.New("slack: this Slack app is already connected to a different Multica workspace")
+	// ErrTeamOwnedBySameWorkspace is returned when the app is already connected to
+	// a DIFFERENT (live, non-archived) agent in the SAME workspace. The old
+	// catch-all wrongly blamed "another workspace"; naming the same-workspace case
+	// points the user at the Disconnect they can actually reach (#4810).
+	ErrTeamOwnedBySameWorkspace = errors.New("slack: this Slack app is already connected to another agent in this workspace")
+	// ErrTeamOwnedByArchivedAgent is returned when the app's owning agent is
+	// archived (and so still holds the bot, since archiving is reversible). The
+	// user recovers by restoring that agent or disconnecting its bot.
+	ErrTeamOwnedByArchivedAgent = errors.New("slack: this Slack app is connected to an archived agent in this workspace")
 )
 
 // installQueries is the slice of generated queries InstallService needs. WithTx
@@ -41,6 +50,8 @@ var (
 type installQueries interface {
 	WithTx(tx pgx.Tx) installQueries
 	UpsertChannelInstallation(ctx context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error)
+	ReclaimDeadChannelInstallationByAppID(ctx context.Context, arg db.ReclaimDeadChannelInstallationByAppIDParams) (pgtype.UUID, error)
+	GetChannelInstallationOwnerByAppID(ctx context.Context, arg db.GetChannelInstallationOwnerByAppIDParams) (db.GetChannelInstallationOwnerByAppIDRow, error)
 	ListChannelInstallationsByWorkspace(ctx context.Context, arg db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error)
 	GetChannelInstallationInWorkspace(ctx context.Context, arg db.GetChannelInstallationInWorkspaceParams) (db.ChannelInstallation, error)
 	SetChannelInstallationStatus(ctx context.Context, arg db.SetChannelInstallationStatusParams) error
@@ -115,6 +126,10 @@ type installPersist struct {
 	wsID        pgtype.UUID
 	agentID     pgtype.UUID
 	installerID pgtype.UUID
+	// appIDKey is the Slack app id stored at config->>'app_id'; it MUST equal the
+	// app_id inside configJSON. It keys the dead-owner reclaim and the live-owner
+	// lookup that drives the accurate conflict message.
+	appIDKey string
 	// configJSON holds the Slack app id (config->>'app_id') used for inbound
 	// routing; the ROW itself is keyed by (workspace, agent) — one bot per agent.
 	configJSON []byte
@@ -142,6 +157,21 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
 
+	// Free the (slack, app_id) routing slot from any DEAD prior owner — a revoked
+	// placeholder, or an orphan whose owning workspace/agent was deleted (#4810) —
+	// before the upsert, so a bot whose old owner is gone can be rebound. A live
+	// owner (active agent, including an archived one) is left in place and trips
+	// the unique index below, which we turn into an accurate conflict.
+	if _, err := qtx.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
+		ChannelType: string(TypeSlack),
+		AppID:       p.appIDKey,
+		WorkspaceID: p.wsID,
+		AgentID:     p.agentID,
+	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		// pgx.ErrNoRows just means nothing was dead — a no-op, not a failure.
+		return db.ChannelInstallation{}, fmt.Errorf("reclaim dead slack installation: %w", err)
+	}
+
 	inst, err := qtx.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
 		WorkspaceID:     p.wsID,
 		AgentID:         p.agentID,
@@ -152,7 +182,7 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			return db.ChannelInstallation{}, ErrTeamOwnedByAnotherWorkspace
+			return db.ChannelInstallation{}, s.liveOwnerConflictErr(ctx, p.wsID, p.appIDKey)
 		}
 		return db.ChannelInstallation{}, fmt.Errorf("upsert slack installation: %w", err)
 	}
@@ -160,6 +190,31 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 		return db.ChannelInstallation{}, fmt.Errorf("commit slack install: %w", err)
 	}
 	return inst, nil
+}
+
+// liveOwnerConflictErr classifies who holds the (slack, app_id) routing slot
+// after the dead-owner reclaim ran, so persistInstall returns a sentinel the
+// handler renders as an accurate message rather than the old catch-all that
+// always blamed "another workspace" (#4810). Read on the base pool (s.q), since
+// the failed upsert has aborted the tx. A now-free slot (concurrent disconnect)
+// or lookup error falls back to the generic cross-workspace sentinel — a retry
+// then succeeds.
+func (s *InstallService) liveOwnerConflictErr(ctx context.Context, requestingWorkspaceID pgtype.UUID, appID string) error {
+	owner, err := s.q.GetChannelInstallationOwnerByAppID(ctx, db.GetChannelInstallationOwnerByAppIDParams{
+		ChannelType: string(TypeSlack),
+		AppID:       appID,
+	})
+	if err != nil {
+		return ErrTeamOwnedByAnotherWorkspace
+	}
+	switch {
+	case owner.WorkspaceID != requestingWorkspaceID:
+		return ErrTeamOwnedByAnotherWorkspace
+	case owner.AgentArchivedAt.Valid:
+		return ErrTeamOwnedByArchivedAgent
+	default:
+		return ErrTeamOwnedBySameWorkspace
+	}
 }
 
 // ListByWorkspace returns every Slack installation in the workspace (active and

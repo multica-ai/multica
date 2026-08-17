@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+// kiroReaderDrainGrace bounds how long the turn waits for trailing ACP
+// notifications after the session/prompt response. A var, not a const, so
+// tests can shorten it. Mirrors qoderReaderDrainGrace / traecliReaderDrainGrace.
+var kiroReaderDrainGrace = 2 * time.Second
 
 // kiroBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` is the protocol subcommand,
@@ -58,7 +62,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	runCtx, cancel := runContext(ctx, timeout)
 
 	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, kiroArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, kiroArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kiroArgs)
 	if opts.Cwd != "" {
@@ -104,13 +108,37 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Kiro streams interim narration and the final answer as the same
+	// AgentMessageChunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool
-	var sawCompletedGoalComplete atomic.Bool
+	// Completion-preservation state for the -32603 close-handshake guard.
+	//
+	// Kiro raises `session/prompt -32603 "failed to generate a response"`
+	// when the model fails to produce its closing turn AFTER the task has
+	// already done its work. We keep such a run "completed" only when we
+	// have POSITIVE proof the finishing step succeeded — never from the mere
+	// absence of a result. A mid-command crash or internal session failure
+	// produces the very same "tool use, no result, -32603" shape, and
+	// treating that as success would mark a genuinely-unfinished task
+	// completed (see the review on #5511 / MUL-4860).
+	//
+	// The only positive proof available at this layer is a terminal
+	// ToolResult with status=="completed" for a finishing tool
+	// (goal_complete or `multica issue comment add`). We record the status
+	// of the MOST RECENT such result (ordered, keyed per CallID) so a later
+	// failed delivery correctly overrides an earlier success — e.g.
+	// "progress comment completed → final comment failed → -32603" must stay
+	// failed, while "first attempt failed → retry completed → -32603" is a
+	// real completion.
 	var goalCompleteCallIDs sync.Map
+	var issueCommentCallIDs sync.Map
+	var finishingMu sync.Mutex
+	var lastFinishingResultStatus string // "", "completed", or "failed"
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -119,6 +147,12 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		pendingTools: make(map[string]*pendingToolCall),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
 		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
@@ -129,17 +163,31 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				if msg.Tool == "goal_complete" && msg.CallID != "" {
 					goalCompleteCallIDs.Store(msg.CallID, struct{}{})
 				}
-			}
-			if msg.Type == MessageToolResult {
-				if _, ok := goalCompleteCallIDs.LoadAndDelete(msg.CallID); ok {
-					sawCompletedGoalComplete.Store(msg.Status == "completed")
+				// Recognize `multica issue comment add` by its command
+				// payload regardless of how the adapter titled the tool.
+				// GPT-5.6 Sol may label the shell tool something other than
+				// the aliases kiroToolNameFromTitle folds into "terminal"
+				// (e.g. "execute"/"run"), so gating on msg.Tool=="terminal"
+				// here would miss it entirely (issue #5509). We still require
+				// a CallID so the tool use can be correlated to its result.
+				if msg.CallID != "" && isKiroIssueCommentAddTool(msg) {
+					issueCommentCallIDs.Store(msg.CallID, struct{}{})
 				}
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
+			if msg.Type == MessageToolResult {
+				_, isGoal := goalCompleteCallIDs.LoadAndDelete(msg.CallID)
+				_, isComment := issueCommentCallIDs.LoadAndDelete(msg.CallID)
+				if isGoal || isComment {
+					// Record this finishing tool's terminal outcome. The
+					// most recent result wins, so the guard sees the final
+					// delivery attempt's status and a later failure
+					// overrides an earlier success.
+					finishingMu.Lock()
+					lastFinishingResultStatus = msg.Status
+					finishingMu.Unlock()
+				}
 			}
+			deliverable.observe(msg)
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -156,8 +204,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -181,6 +228,11 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		finalStatus := "completed"
 		var finalError string
 		var sessionID string
+		// Set when the ACP runtime refuses the session we asked to
+		// resume. Only that is curable by starting a fresh session, so
+		// handshake/network failures below must leave it false.
+		var resumeRejected bool
+		effectiveModel := strings.TrimSpace(opts.Model)
 
 		initResult, err := c.request(runCtx, "initialize", map[string]any{
 			"protocolVersion": 1,
@@ -201,7 +253,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// advertise. See the matching comment in hermes.go for why
 		// unconditionally sending http/sse to a stdio-only ACP runtime
 		// tanks the whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kiro", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kiro", b.cfg)
 
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -237,6 +289,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					"actual", sessionID,
 				)
 			}
+			if effectiveModel == "" {
+				effectiveModel = extractACPCurrentModelID(result)
+			}
 		} else {
 			result, err := c.request(runCtx, "session/new", map[string]any{
 				"cwd":        cwd,
@@ -254,6 +309,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				finalError = "kiro session/new returned no session ID"
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
+			}
+			if effectiveModel == "" {
+				effectiveModel = extractACPCurrentModelID(result)
 			}
 		}
 
@@ -278,12 +336,14 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 						"session_id", sessionID,
 					)
 					sessionID = ""
+					resumeRejected = true
 				}
 				resCh <- Result{
-					Status:     finalStatus,
-					Error:      finalError,
-					DurationMs: time.Since(startTime).Milliseconds(),
-					SessionID:  sessionID,
+					Status:         finalStatus,
+					Error:          finalError,
+					DurationMs:     time.Since(startTime).Milliseconds(),
+					SessionID:      sessionID,
+					ResumeRejected: resumeRejected,
 				}
 				return
 			}
@@ -318,8 +378,18 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			} else {
 				finalStatus = "failed"
 				finalError = fmt.Sprintf("kiro session/prompt failed: %v", err)
-				if sawCompletedGoalComplete.Load() && isKiroGoalCompleteCloseError(err) {
-					b.cfg.Logger.Warn("kiro session/prompt failed after goal_complete; preserving completed task status", "error", err)
+				// Preserve completion only on POSITIVE proof: the most
+				// recent finishing-tool ToolResult we observed was
+				// status=="completed", paired with the specific -32603 close
+				// handshake. A missing result is NOT proof — a mid-command
+				// crash produces the same result-less shape (Must-fix #1) —
+				// and because we key on the most recent outcome, a later
+				// failed delivery overrides an earlier success (Must-fix #2).
+				finishingMu.Lock()
+				lastFinishing := lastFinishingResultStatus
+				finishingMu.Unlock()
+				if lastFinishing == "completed" && isKiroGoalCompleteCloseError(err) {
+					b.cfg.Logger.Warn("kiro session/prompt failed after a completed finishing-tool result; preserving completed task status", "error", err)
 					finalStatus = "completed"
 					finalError = ""
 				} else if opts.ResumeSessionID != "" && isACPSessionNotFound(err) {
@@ -334,6 +404,25 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 						"session_id", sessionID,
 					)
 					sessionID = ""
+					resumeRejected = true
+				} else if opts.ResumeSessionID != "" && isKiroOversizedHistoryImage(err) {
+					// A resumed session whose history contains an image
+					// exceeding the provider's max pixel dimensions replays
+					// that image on every session/prompt and is rejected
+					// before the current turn runs (GH #5975). Unlike a
+					// missing session the transcript still exists, so this is
+					// permanent for the resume path: only a fresh session
+					// without the resume id can recover. Signal
+					// ResumeRejected so the daemon retries once from a cold
+					// session; keep the (poisoned) session id on the result
+					// so it stays visible for auditing — the daemon gates the
+					// retry on the boolean, not on an empty id, and a
+					// successful fresh retry overwrites it with the new id.
+					b.cfg.Logger.Warn("resumed session has an oversized historical image the provider rejects; signaling resume rejection so the daemon retries with a fresh session",
+						"backend", "kiro",
+						"session_id", sessionID,
+					)
+					resumeRejected = true
 				}
 			}
 		} else {
@@ -343,12 +432,10 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finalStatus = "aborted"
 					finalError = "kiro cancelled the prompt"
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 			}
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, kiroReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)
@@ -362,25 +449,23 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// provider-error sniffer; see hermes.go for the failure mode.
 		<-stderrDone
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Promote completed→failed when stderr or the agent text
 		// stream show a terminal upstream-LLM failure (HTTP 4xx /
 		// rate-limit / expired token). See the helper docs for the
 		// full signal set; the key safety property is that transient
 		// per-attempt warnings followed by a successful retry stay
-		// "completed".
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// "completed". It reads the full text stream, not the
+		// deliverable, so a give-up turn that lands before a tool call
+		// stays visible.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 {
-			model := opts.Model
+		if acpUsagePresent(u) {
+			model := effectiveModel
 			if model == "" {
 				model = "unknown"
 			}
@@ -388,12 +473,13 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		}
 
 		resCh <- Result{
-			Status:     finalStatus,
-			Output:     finalOutput,
-			Error:      finalError,
-			DurationMs: duration.Milliseconds(),
-			SessionID:  sessionID,
-			Usage:      usageMap,
+			Status:         finalStatus,
+			Output:         finalOutput,
+			Error:          finalError,
+			DurationMs:     duration.Milliseconds(),
+			SessionID:      sessionID,
+			ResumeRejected: resumeRejected,
+			Usage:          usageMap,
 		}
 	}()
 
@@ -412,6 +498,107 @@ func isKiroGoalCompleteCloseError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(rpcErr.Data), "failed to generate a response")
+}
+
+// isKiroOversizedHistoryImage reports whether err is Kiro/upstream rejecting a
+// resumed conversation because an image already baked into the session history
+// exceeds the provider's maximum allowed pixel dimensions. Kiro surfaces this
+// at session/prompt time as a -32603 whose `data` names the offending
+// messages[n].content[m].image.source.base64.data block and the dimension
+// limit (GH #5975), e.g.:
+//
+//	session/prompt: Internal error (code=-32603, data=Encountered an error in
+//	the response stream: messages.14.content.0.image.source.base64.data: At
+//	least one of the image dimensions exceed max allowed size: 8000 pixels)
+//
+// Both markers must be present so an unrelated -32603 — a transient "failed to
+// generate a response" close, or a mid-command crash producing the same
+// result-less shape — is never misread as a permanent history incompatibility.
+// This is deliberately distinct from isACPSessionNotFound: the session exists,
+// only its historical multimodal content is unusable, so the recovery is a
+// fresh session started WITHOUT the resume id rather than clearing a dead id.
+func isKiroOversizedHistoryImage(err error) bool {
+	var rpcErr *acpRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	if rpcErr.Method != "session/prompt" || rpcErr.Code != -32603 {
+		return false
+	}
+	data := strings.ToLower(rpcErr.Data)
+	return strings.Contains(data, "image.source.base64.data") &&
+		strings.Contains(data, "image dimensions exceed max allowed size")
+}
+
+// isKiroIssueCommentAddTool reports whether a tool-use message is a
+// `multica issue comment add` invocation. It keys purely off the command
+// payload, not the normalized tool name: GPT-5.6 Sol adapters may title the
+// shell tool with a name that doesn't fold into "terminal" (the earlier
+// msg.Tool=="terminal" gate silently dropped those and left completed tasks
+// marked failed — see #5509). isKiroIssueCommentAddCommand is strict enough
+// that no non-shell tool's input will accidentally match.
+func isKiroIssueCommentAddTool(msg Message) bool {
+	command, _ := msg.Input["command"].(string)
+	return isKiroIssueCommentAddCommand(command)
+}
+
+func isKiroIssueCommentAddCommand(command string) bool {
+	parts := trimLeadingEnvAssignments(strings.Fields(command))
+	// Some runtimes route terminal calls through a shell wrapper such as
+	// `sh -c "multica issue comment add ..."`; unwrap a single such layer so
+	// the real invocation is still recognized.
+	if len(parts) >= 3 && isPOSIXShellName(parts[0]) && parts[1] == "-c" {
+		inner := strings.Trim(strings.Join(parts[2:], " "), "\"'")
+		parts = trimLeadingEnvAssignments(strings.Fields(inner))
+	}
+	if len(parts) < 4 {
+		return false
+	}
+	executable := strings.TrimPrefix(parts[0], "./")
+	if executable != "multica" && !strings.HasSuffix(executable, "/multica") {
+		return false
+	}
+	return parts[1] == "issue" && parts[2] == "comment" && parts[3] == "add"
+}
+
+// trimLeadingEnvAssignments drops leading `KEY=VALUE` tokens so an invocation
+// like `MULTICA_TOKEN=x multica issue comment add ...` is still recognized.
+func trimLeadingEnvAssignments(parts []string) []string {
+	for len(parts) > 0 && isEnvAssignment(parts[0]) {
+		parts = parts[1:]
+	}
+	return parts
+}
+
+// isEnvAssignment reports whether tok is a `NAME=value` shell env assignment.
+func isEnvAssignment(tok string) bool {
+	eq := strings.IndexByte(tok, '=')
+	if eq <= 0 {
+		return false
+	}
+	for i := 0; i < eq; i++ {
+		c := tok[i]
+		switch {
+		case c == '_', c >= 'A' && c <= 'Z', c >= 'a' && c <= 'z':
+		case i > 0 && c >= '0' && c <= '9':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// isPOSIXShellName reports whether tok names a shell that takes `-c <command>`.
+func isPOSIXShellName(tok string) bool {
+	if i := strings.LastIndexByte(tok, '/'); i >= 0 {
+		tok = tok[i+1:]
+	}
+	switch tok {
+	case "sh", "bash", "zsh", "dash":
+		return true
+	default:
+		return false
+	}
 }
 
 func kiroToolNameFromTitle(title string) string {

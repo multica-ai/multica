@@ -62,8 +62,27 @@ func TestNewReturnsQoderBackend(t *testing.T) {
 	if err != nil {
 		t.Fatalf("New(qoder) error: %v", err)
 	}
-	if _, ok := b.(*qoderBackend); !ok {
+	qoder, ok := b.(*qoderBackend)
+	if !ok {
 		t.Fatalf("expected *qoderBackend, got %T", b)
+	}
+	if qoder.defaultExecutable != "qodercli" {
+		t.Fatalf("default executable = %q, want qodercli", qoder.defaultExecutable)
+	}
+}
+
+func TestNewReturnsQoderCNBackend(t *testing.T) {
+	t.Parallel()
+	b, err := New("qoderclicn", Config{})
+	if err != nil {
+		t.Fatalf("New(qoderclicn) error: %v", err)
+	}
+	qoder, ok := b.(*qoderBackend)
+	if !ok {
+		t.Fatalf("expected *qoderBackend, got %T", b)
+	}
+	if qoder.defaultExecutable != "qoderclicn" {
+		t.Fatalf("default executable = %q, want qoderclicn", qoder.defaultExecutable)
 	}
 }
 
@@ -97,7 +116,7 @@ func TestNewDefaultsLogger(t *testing.T) {
 
 func TestDetectVersionFailsForMissingBinary(t *testing.T) {
 	t.Parallel()
-	_, err := DetectVersion(context.Background(), "/nonexistent/binary")
+	_, err := DetectVersion(context.Background(), Command{Path: "/nonexistent/binary"})
 	if err == nil {
 		t.Fatal("expected error for missing binary")
 	}
@@ -149,7 +168,7 @@ func TestDetectVersionTimesOutOnHang(t *testing.T) {
 	done := make(chan error, 1)
 	start := time.Now()
 	go func() {
-		_, err := DetectVersion(context.Background(), script)
+		_, err := DetectVersion(context.Background(), Command{Path: script})
 		done <- err
 	}()
 
@@ -169,15 +188,10 @@ func TestDetectVersionTimesOutOnHang(t *testing.T) {
 func TestLaunchHeaderCoversAllSupportedBackends(t *testing.T) {
 	t.Parallel()
 
-	// The factory in New() enumerates every supported agent type; LaunchHeader
-	// must stay in sync so the UI preview never shows an empty skeleton for a
-	// runtime the daemon actually spawns. If a new backend is added, add an
-	// entry to launchHeaders in agent.go and extend this list.
-	supported := []string{
-		"antigravity", "claude", "codebuddy", "codex", "copilot", "cursor",
-		"hermes", "kimi", "kiro", "openclaw", "opencode", "pi", "qoder",
-	}
-	for _, t_ := range supported {
+	// SupportedTypes is the canonical factory/profile whitelist. Iterating it
+	// directly prevents this coverage check from drifting when a backend is
+	// added, so the UI preview always has a launch skeleton.
+	for _, t_ := range SupportedTypes {
 		if header := LaunchHeader(t_); header == "" {
 			t.Errorf("LaunchHeader(%q) returned empty string — add it to launchHeaders", t_)
 		}

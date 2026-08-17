@@ -288,6 +288,48 @@ func TestListConnectedAccounts_QueryString(t *testing.T) {
 	}
 }
 
+func TestListConnectedAccounts_ParsesNestedAuthConfig(t *testing.T) {
+	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(t, w, http.StatusOK, map[string]any{
+			"items": []map[string]any{
+				{
+					"id":      "ca_nested",
+					"user_id": "u_1",
+					"auth_config": map[string]any{
+						"id":                  "ac_nested",
+						"auth_scheme":         "OAUTH2",
+						"is_composio_managed": true,
+					},
+					"toolkit": map[string]any{"slug": "notion"},
+					"status":  "ACTIVE",
+				},
+				{
+					"id":             "ca_top_level",
+					"user_id":        "u_1",
+					"auth_config_id": "ac_top_level",
+					"auth_config":    map[string]any{"id": "ac_nested_ignored"},
+					"toolkit":        map[string]any{"slug": "gmail"},
+					"status":         "ACTIVE",
+				},
+			},
+		})
+	})
+
+	resp, err := c.ListConnectedAccounts(context.Background(), composio.ListConnectedAccountsRequest{})
+	if err != nil {
+		t.Fatalf("ListConnectedAccounts: %v", err)
+	}
+	if got := resp.Items[0].AuthConfig.ID; got != "ac_nested" {
+		t.Errorf("nested auth config id = %q, want ac_nested", got)
+	}
+	if got := resp.Items[0].AuthConfig.AuthScheme; got != "OAUTH2" {
+		t.Errorf("nested auth scheme = %q, want OAUTH2", got)
+	}
+	if got := resp.Items[1].AuthConfigID; got != "ac_top_level" {
+		t.Errorf("top-level auth config id = %q, want ac_top_level", got)
+	}
+}
+
 func TestRevokeConnection_Success(t *testing.T) {
 	c, _ := newTestServer(t, func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost || r.URL.Path != "/connected_accounts/ca_42/revoke" {
