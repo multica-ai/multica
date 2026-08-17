@@ -8,12 +8,21 @@ import (
 	"log/slog"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channelnotify"
 	"github.com/multica-ai/multica/server/internal/util"
+)
+
+const (
+	// Feishu rejects interactive-card JSON above 30 KiB. The field caps leave
+	// room for JSON escaping, card structure, and the optional deep link.
+	inboxCardMaxBytes      = 30 * 1024
+	inboxCardTitleMaxRunes = 100
+	inboxCardBodyMaxRunes  = 3000
 )
 
 type inboxInstallationStore interface {
@@ -99,7 +108,7 @@ func (s *InboxSender) renderCard(target channelnotify.Target, notification chann
 			"tag": "div",
 			"text": map[string]any{
 				"tag":     "plain_text",
-				"content": notification.Body,
+				"content": truncateInboxCardText(notification.Body, inboxCardBodyMaxRunes),
 			},
 		},
 	}
@@ -122,7 +131,7 @@ func (s *InboxSender) renderCard(target channelnotify.Target, notification chann
 			"template": "blue",
 			"title": map[string]any{
 				"tag":     "plain_text",
-				"content": notification.Title,
+				"content": truncateInboxCardText(notification.Title, inboxCardTitleMaxRunes),
 			},
 		},
 		"elements": elements,
@@ -131,7 +140,31 @@ func (s *InboxSender) renderCard(target channelnotify.Target, notification chann
 	if err != nil {
 		return "", err
 	}
+	if len(raw) > inboxCardMaxBytes {
+		return "", fmt.Errorf("card exceeds %d-byte limit", inboxCardMaxBytes)
+	}
 	return string(raw), nil
+}
+
+func truncateInboxCardText(value string, maxRunes int) string {
+	if maxRunes <= 0 {
+		return ""
+	}
+	if utf8.RuneCountInString(value) <= maxRunes {
+		return value
+	}
+	if maxRunes == 1 {
+		return "…"
+	}
+
+	kept := 0
+	for index := range value {
+		if kept == maxRunes-1 {
+			return value[:index] + "…"
+		}
+		kept++
+	}
+	return value
 }
 
 func (s *InboxSender) deepLink(target channelnotify.Target, notification channelnotify.Notification) string {

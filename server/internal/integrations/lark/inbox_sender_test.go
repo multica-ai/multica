@@ -6,6 +6,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgtype"
 
@@ -133,6 +134,49 @@ func TestInboxSenderKeepsMemberTextPlain(t *testing.T) {
 	}
 	if strings.Contains(card, `"tag":"lark_md"`) || strings.Contains(card, `"tag":"markdown"`) {
 		t.Fatalf("card interprets member text as markdown: %s", card)
+	}
+}
+
+func TestInboxSenderBoundsLongUnicodeCardContent(t *testing.T) {
+	sender, _, client, target, notification := inboxSenderFixture(t)
+	notification.Title = strings.Repeat("深", 200)
+	notification.Body = strings.Repeat("界", 5000)
+
+	if err := sender.SendInbox(context.Background(), target, notification); err != nil {
+		t.Fatalf("SendInbox: %v", err)
+	}
+	cardJSON := client.calls[0].CardJSON
+	if len(cardJSON) > 30*1024 {
+		t.Fatalf("card size = %d bytes, want <= 30720", len(cardJSON))
+	}
+
+	var card map[string]any
+	if err := json.Unmarshal([]byte(cardJSON), &card); err != nil {
+		t.Fatalf("decode card: %v", err)
+	}
+	title := card["header"].(map[string]any)["title"].(map[string]any)["content"].(string)
+	body := card["elements"].([]any)[0].(map[string]any)["text"].(map[string]any)["content"].(string)
+	if want := strings.Repeat("深", 99) + "…"; title != want {
+		t.Fatalf("title = %d runes, want 100-rune truncated title", utf8.RuneCountInString(title))
+	}
+	if want := strings.Repeat("界", 2999) + "…"; body != want {
+		t.Fatalf("body = %d runes, want 3000-rune truncated body", utf8.RuneCountInString(body))
+	}
+	if !utf8.ValidString(title) || !utf8.ValidString(body) {
+		t.Fatal("truncated card content is not valid UTF-8")
+	}
+}
+
+func TestInboxSenderRejectsCardAboveFeishuPayloadLimit(t *testing.T) {
+	sender, _, client, target, notification := inboxSenderFixture(t)
+	sender.appURL = "https://app.multica.test/" + strings.Repeat("a", 31*1024)
+
+	err := sender.SendInbox(context.Background(), target, notification)
+	if err == nil || !strings.Contains(err.Error(), "card exceeds 30720-byte limit") {
+		t.Fatalf("SendInbox error = %v, want card size limit error", err)
+	}
+	if len(client.calls) != 0 {
+		t.Fatalf("SendDMCard calls = %d, want 0", len(client.calls))
 	}
 }
 
