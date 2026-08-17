@@ -22,13 +22,16 @@ func newSelfHealTestDaemon() *Daemon {
 }
 
 // stubDetectVersionFromPath makes detectAgentVersion report the version encoded
-// in an installVersionedCodex path (…/codex/<ver>/bin/codex), so a heal to a
-// v2 directory "detects" v2. checkAgentMinVersion is intentionally left as the
-// real agent.CheckMinVersion so the min-version gate is exercised for real.
+// in a versioned test path, so a heal to a v2 executable "detects" v2.
+// checkAgentMinVersion is intentionally left as the real agent.CheckMinVersion
+// so the min-version gate is exercised for real.
 func stubDetectVersionFromPath(t *testing.T) {
 	t.Helper()
 	orig := detectAgentVersion
 	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+		if base := filepath.Base(path); strings.Count(base, ".") >= 2 {
+			return base, nil
+		}
 		return filepath.Base(filepath.Dir(filepath.Dir(path))), nil
 	}
 	t.Cleanup(func() { detectAgentVersion = orig })
@@ -55,6 +58,24 @@ func installVersionedCodex(t *testing.T, root, version, stableBin string) string
 	versioned := filepath.Join(root, "Caskroom", "codex", version, "bin", "codex")
 	writeExecStub(t, versioned)
 	link := filepath.Join(stableBin, "codex")
+	_ = os.Remove(link) // repoint on upgrade
+	if err := os.MkdirAll(stableBin, 0o755); err != nil {
+		t.Fatalf("mkdir stable bin: %v", err)
+	}
+	if err := os.Symlink(versioned, link); err != nil {
+		t.Fatalf("symlink %s -> %s: %v", link, versioned, err)
+	}
+	return canonicalExecutablePath(link)
+}
+
+// installVersionedClaude lays out the native Claude Code installer shape seen
+// in issue #5683: a stable claude command symlink pointing into
+// ~/.local/share/claude/versions/<version>.
+func installVersionedClaude(t *testing.T, root, version, stableBin string) string {
+	t.Helper()
+	versioned := filepath.Join(root, ".local", "share", "claude", "versions", version)
+	writeExecStub(t, versioned)
+	link := filepath.Join(stableBin, "claude")
 	_ = os.Remove(link) // repoint on upgrade
 	if err := os.MkdirAll(stableBin, 0o755); err != nil {
 		t.Fatalf("mkdir stable bin: %v", err)
@@ -132,6 +153,62 @@ func TestResolveAgentEntry_SelfHealsAfterInPlaceUpgrade(t *testing.T) {
 	t.Setenv("PATH", filepath.Join(root, "empty"))
 	if got, ver := d.resolveAgentEntry(ctx, "codex", entry); got.Path != v2 || ver != "0.144.3" {
 		t.Fatalf("cached self-heal not reused: got (%q, %q), want (%q, %q)", got.Path, ver, v2, "0.144.3")
+	}
+}
+
+// TestResolveAgentEntry_SelfHealsClaudeAfterNativeInstallerUpgrade reproduces
+// GitHub #5683: Claude Code's stable command symlink is resolved to a
+// versioned executable at daemon startup, then an auto-update repoints the
+// symlink and garbage-collects the old version directory before the daemon
+// restarts. A built-in Claude task must re-resolve the bare "claude" command
+// instead of failing permanently on the stale pinned target.
+func TestResolveAgentEntry_SelfHealsClaudeAfterNativeInstallerUpgrade(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink/exec-bit layout is POSIX-specific")
+	}
+	stubDetectVersionFromPath(t)
+
+	root := t.TempDir()
+	stableBin := filepath.Join(root, "bin")
+	t.Setenv("PATH", stableBin)
+	// Disable the login-shell fallback so the test only sees the fake Claude
+	// install rooted under stableBin.
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "fish"))
+
+	v1 := installVersionedClaude(t, root, "2.1.210", stableBin)
+	if !strings.Contains(v1, "2.1.210") {
+		t.Fatalf("pinned path %q does not point into the v1 versioned dir", v1)
+	}
+
+	d := newSelfHealTestDaemon()
+	d.setAgentVersion("claude", "2.1.210")
+	entry := AgentEntry{Path: v1, Command: "claude"}
+	ctx := context.Background()
+
+	if got, ver := d.resolveAgentEntry(ctx, "claude", entry); got.Path != v1 || ver != "2.1.210" {
+		t.Fatalf("live pinned path/version rewritten: got (%q, %q), want (%q, %q)", got.Path, ver, v1, "2.1.210")
+	}
+
+	if err := os.RemoveAll(filepath.Join(root, ".local", "share", "claude", "versions", "2.1.210")); err != nil {
+		t.Fatalf("remove v1 tree: %v", err)
+	}
+	if agentExecutablePresent(v1) {
+		t.Fatalf("v1 path still present after removing its tree: %q", v1)
+	}
+	v2 := installVersionedClaude(t, root, "2.1.215", stableBin)
+
+	got, ver := d.resolveAgentEntry(ctx, "claude", entry)
+	if got.Path != v2 {
+		t.Fatalf("self-heal resolved %q, want re-resolved v2 %q", got.Path, v2)
+	}
+	if !agentExecutablePresent(got.Path) {
+		t.Fatalf("self-healed path is not runnable: %q", got.Path)
+	}
+	if ver != "2.1.215" {
+		t.Fatalf("returned version not paired with healed path: got %q, want %q", ver, "2.1.215")
+	}
+	if v := d.agentVersion("claude"); v != "2.1.215" {
+		t.Fatalf("version cache not updated in lockstep: got %q, want %q", v, "2.1.215")
 	}
 }
 
