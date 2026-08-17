@@ -362,15 +362,15 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		"Agent Identity instructions have priority over the issue workflow below.",
 		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
 		// One enumeration, in Instruction Precedence, covering every action
-		// type Agent Identity can forbid. This and workflow step 4 each used to
+		// type Agent Identity can forbid. This and workflow step 3 each used to
 		// carry their own list and the two disagreed (MUL-5442).
 		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
 		// MUL-5442: the forbids-clause is stated once on the Ownership-mode
 		// header instead of once per status bullet.
 		"skip any status call below that your Agent Identity forbids",
-		"Before step 4, run `multica issue status <issue-id> in_progress`.",
+		"Before step 3, run `multica issue status <issue-id> in_progress`.",
 		"Complete the task within your Agent Identity boundaries",
-		// Step 4 keeps only what the enumeration cannot express: a
+		// Step 3 keeps only what the enumeration cannot express: a
 		// delegation-only role stops once the delegation is delivered.
 		"If your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered",
 		"When done, run `multica issue status <issue-id> in_review`.",
@@ -403,7 +403,7 @@ func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Before step 4, run `multica issue status <issue-id> in_progress`.",
+		"Before step 3, run `multica issue status <issue-id> in_progress`.",
 		"After this initial dispatch, leave the parent issue `in_progress`",
 		// The guest-leader contract test (handler side) bans any runnable
 		// in_review command shape from reaching a guest — the dispatch rule

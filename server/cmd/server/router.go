@@ -547,7 +547,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// reaction on a failed run, which the outbound replier does not handle.
 			slackTyping := slack.NewTypingIndicatorManager(queries, box.Open, slog.Default())
 			slackTyping.Register(bus)
-			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping))
+			// Slack attachments require object storage because each chat
+			// attachment points to an uploaded object. When storage is disabled,
+			// leave the media resolver unset and ingest Slack messages as text.
+			var slackMedia engine.MediaResolver
+			if store != nil {
+				slackMedia = slack.NewMediaResolver(
+					box.Open,
+					store,
+					engine.NewDBMediaIntentLedger(queries),
+					slog.Default(),
+				)
+			}
+			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping, slackMedia))
 			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
 
 			// On-demand history reader behind the unified `multica chat history`

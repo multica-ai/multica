@@ -40,6 +40,7 @@ oauth_config:
     bot:
       - app_mentions:read
       - channels:history
+      - files:read
       - groups:history
       - im:history
       - mpim:history
@@ -63,6 +64,10 @@ settings:
 ```
 
 创建前可以把两个 `Multica` 改成智能体的名字。不要删除 manifest 中的权限或事件，否则私聊、频道提及、回复或 `/issue` 可能无法工作。
+
+<Callout type="warning">
+如果这个 Slack app 是在附件支持上线前安装的，请添加 `files:read` Bot scope，并将 app 重新安装到 workspace。在重新安装 app 前，新增 scope 不会应用到现有 Bot token。
+</Callout>
 
 Bot 使用 Socket Mode 主动连接 Slack，不需要配置公网 Request URL 或 OAuth Redirect URL。
 
@@ -116,6 +121,12 @@ Multica 会验证两个 token 是否来自同一个 app。连接成功后，页�
 
 Bot 只会响应明确 @ 它的频道消息。执行时，它会在权限允许的范围内读取该 thread 的近期上下文。
 
+### 发送文件
+
+在私聊里，或者在 @ 提及 Bot 的频道消息里直接带上文件。文件会作为附件进入同一项工作，智能体可以结合文件和你的诉求一起处理。
+
+这需要 `files:read` 权限 —— 如果这个应用是在附件支持之前安装的，参考第 1 步的提示。单个文件不超过 20 MiB，一条消息最多带 10 个。超出大小、仍在上传，或者存放在 Slack 之外（比如 Google Drive、Dropbox 链接）的文件会被跳过，消息文本仍然会交给智能体。
+
 ### 用 `/issue` 创建 issue
 
 在频道或私聊中输入：
@@ -157,6 +168,7 @@ openssl rand -base64 32
 - **私聊没有入口**：确认 `app_home.messages_tab_enabled` 为 `true`。
 - **频道里没有回复**：确认 Bot 已被邀请进频道，并在消息中 @ 了它。
 - **`/issue` 不存在**：确认 manifest 包含 slash command 和 `commands` scope，随后重新安装 app。
+- **文件没有送达智能体**：确认 manifest 里包含 `files:read`，并且在添加该权限后重新安装过应用，同时确认文件不超过 20 MiB。
 - **Bot 不执行**：检查智能体是否已归档，以及它使用的[运行时](/daemon-runtimes)是否在线。
 
 ## 接下来
