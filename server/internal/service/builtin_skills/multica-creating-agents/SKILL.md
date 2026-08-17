@@ -185,20 +185,25 @@ time: `--thinking` in `custom_args` is filtered because the first-class
 `thinking_level` field owns that flag and must be the only source of its value.
 
 Windows Codex has one platform-owned default: when no `windows.sandbox`
-override exists, persistence and preview use the two literal argv elements
-`-c` and `windows.sandbox="unelevated"` as a managed prefix. A separate
-`is_codex_windows_sandbox_arg_managed` column records ownership; token equality
-alone never authorizes removal, and the settings UI renders managed tokens as
-read-only while saving only user-owned args. An explicit `-c` or `--config`
-override remains authoritative and is not duplicated. Runtime
-metadata carries the OS plus a boolean ownership hint for fixed profile/daemon
-arguments and another for the shared `config.toml` copied into tasks, so
-those lower-priority settings are not shadowed by the managed prefix and
-preview matches launch. The daemon independently applies the same rule from
-its actual GOOS and effective argv immediately before launch, after inspecting
-the copied `config.toml` so its explicit `windows.sandbox` value is not overridden;
-runtime-only edits normalize the stored prefix when an agent moves between
-Windows and another platform.
+override exists, persistence and settings preview use the two literal argv
+elements `-c` and `windows.sandbox="unelevated"` as a managed prefix. A
+separate `is_codex_windows_sandbox_arg_managed` column records ownership;
+token equality alone never authorizes removal, and the settings UI renders
+managed tokens as read-only while saving only user-owned args. Explicit `-c`
+or `--config` overrides remain authoritative and are not duplicated.
+
+Registration metadata carries the OS plus ownership hints for fixed
+profile/daemon arguments and the shared `config.toml`. Those hints drive
+persistence and the registration-scoped settings preview only; a shared-config
+edit can make that preview stale until re-registration, so it is never launch
+authority. At task start the daemon first supplies a safe native-sandbox
+candidate, then Prepare copies the current `config.toml` and derives one
+task-scoped ownership decision from that copy. Effective launch argv and final
+spawn options use that same decision: an added or changed explicit setting
+(including `elevated`) is not shadowed, while a removed setting restores the
+managed unelevated pair without falling through to `danger-full-access`.
+Runtime-only edits re-read and normalize `custom_args` under the agent row
+lock, so a concurrent argument save is preserved.
 
 ## Env & secrets
 
