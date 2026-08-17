@@ -84,6 +84,29 @@ const CONTENT = [
   `${APP_ORIGIN}/acme/issues/${OTHER_ID}.`,
 ].join(" and ");
 
+/**
+ * The self-reference written every other way it can be written, since a
+ * reference reaches the mention card through a different resolution path per
+ * form: the autolink preprocessor for bare prose, and the entity-link unfurl
+ * for a pasted URL — which itself splits on whether "copy link" produced a
+ * UUID or an identifier.
+ *
+ * Each pairs the self-reference with an other-issue reference on the SAME
+ * path, so a failure here means the current-issue check stopped applying, not
+ * that the path stopped resolving at all.
+ */
+const SELF_REFERENCE_FORMS: ReadonlyArray<readonly [string, string]> = [
+  ["a bare identifier", "See MUL-7 and MUL-8."],
+  [
+    "a UUID URL",
+    `See ${APP_ORIGIN}/acme/issues/${CURRENT_ID} and ${APP_ORIGIN}/acme/issues/${OTHER_ID}.`,
+  ],
+  [
+    "an identifier URL",
+    `See ${APP_ORIGIN}/acme/issues/MUL-7 and ${APP_ORIGIN}/acme/issues/MUL-8.`,
+  ],
+];
+
 function makeIssue(id: string, identifier: string): Issue {
   return { id, identifier } as unknown as Issue;
 }
@@ -99,15 +122,18 @@ function adapter(): NavigationAdapter {
   };
 }
 
-function renderContent(context?: CurrentIssueRenderContextValue) {
+function renderContent(
+  context?: CurrentIssueRenderContextValue,
+  content = CONTENT,
+) {
   return renderWithI18n(
     <NavigationProvider value={adapter()}>
       {context ? (
         <CurrentIssueRenderContextProvider value={context}>
-          <RichContent content={CONTENT} />
+          <RichContent content={content} />
         </CurrentIssueRenderContextProvider>
       ) : (
-        <RichContent content={CONTENT} />
+        <RichContent content={content} />
       )}
     </NavigationProvider>,
   );
@@ -136,6 +162,24 @@ describe("RichContent current-issue rendering", () => {
     ]);
     expect(chips[0]).toHaveTextContent("This issue · MUL-7");
   });
+
+  it.each(SELF_REFERENCE_FORMS)(
+    "marks the current issue written as %s, and only it, as current",
+    (_form, content) => {
+      renderContent(CURRENT_CONTEXT, content);
+
+      const chips = screen.getAllByTestId("issue-chip");
+      expect(chips.map((chip) => chip.getAttribute("data-issue-id"))).toEqual([
+        CURRENT_ID,
+        OTHER_ID,
+      ]);
+      expect(chips.map((chip) => chip.getAttribute("data-current"))).toEqual([
+        "true",
+        "false",
+      ]);
+      expect(chips[0]).toHaveTextContent("This issue · MUL-7");
+    },
+  );
 
   it("keeps every chip on regular content without a current-issue provider", () => {
     renderContent();
