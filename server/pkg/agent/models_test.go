@@ -1781,9 +1781,8 @@ func TestAntigravityModelSelectionSupported(t *testing.T) {
 	}
 }
 
-// TestParseAntigravityModels covers the `agy models` line-per-name format:
-// each non-blank line becomes a Model whose ID and Label are the verbatim
-// display string `--model` expects, duplicates collapse, and blanks drop.
+// TestParseAntigravityModels covers the legacy single-column format: each
+// non-blank line remains a compatible ID/label pair.
 func TestParseAntigravityModels(t *testing.T) {
 	t.Parallel()
 
@@ -1832,19 +1831,64 @@ func TestParseAntigravityModelsTSV(t *testing.T) {
 		"gemini-3.1-pro-high\tWrong duplicate label",
 		"missing-label\t",
 		"\tmissing-id",
-		"too\tmany\tfields",
+		"claude-opus-4-6-thinking\tClaude Opus 4.6 (Thinking)\textra metadata",
 	}, "\r\n")
 
 	got := parseAntigravityModels(out)
 	want := []Model{
 		{ID: "gemini-3.7-flash-high", Label: "Gemini 3.7 Flash (High)", Provider: "antigravity"},
 		{ID: "gemini-3.1-pro-high", Label: "Gemini 3.1 Pro (High)", Provider: "antigravity"},
+		{ID: "claude-opus-4-6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("parseAntigravityModels TSV mismatch\n got: %+v\nwant: %+v", got, want)
 	}
 }
 
+func TestParseAntigravityModelsAlignedSpaces(t *testing.T) {
+	t.Parallel()
+
+	out := strings.Join([]string{
+		"gemini-3.7-flash-high    Gemini 3.7 Flash (High)",
+		"claude-opus-4-6-thinking  Claude Opus 4.6 (Thinking)",
+		"Gemini 3.5 Flash (Medium)",
+	}, "\n")
+
+	got := parseAntigravityModels(out)
+	want := []Model{
+		{ID: "gemini-3.7-flash-high", Label: "Gemini 3.7 Flash (High)", Provider: "antigravity"},
+		{ID: "claude-opus-4-6-thinking", Label: "Claude Opus 4.6 (Thinking)", Provider: "antigravity"},
+		{ID: "Gemini 3.5 Flash (Medium)", Label: "Gemini 3.5 Flash (Medium)", Provider: "antigravity"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseAntigravityModels aligned-space mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+}
+
+func TestParseAntigravityModelsJSON(t *testing.T) {
+	t.Parallel()
+
+	out := `{
+		"status": "SUCCESS",
+		"command": {
+			"name": "models",
+			"data": {
+				"models": [
+					{"id": "gemini-3.7-flash-high", "label": "Gemini 3.7 Flash (High)"},
+					{"id": "gemini-3.1-pro-high", "label": "Gemini 3.1 Pro (High)"}
+				]
+			}
+		}
+	}`
+	got := parseAntigravityModelsJSON([]byte(out))
+	want := []Model{
+		{ID: "gemini-3.7-flash-high", Label: "Gemini 3.7 Flash (High)", Provider: "antigravity"},
+		{ID: "gemini-3.1-pro-high", Label: "Gemini 3.1 Pro (High)", Provider: "antigravity"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("parseAntigravityModelsJSON mismatch\n got: %+v\nwant: %+v", got, want)
+	}
+}
 func TestCachedDiscovery(t *testing.T) {
 	calls := 0
 	fn := func() (Catalog, error) {

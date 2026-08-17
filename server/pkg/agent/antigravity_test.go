@@ -42,7 +42,7 @@ func TestBuildAntigravityArgsBasic(t *testing.T) {
 func TestBuildAntigravityArgsModel(t *testing.T) {
 	t.Parallel()
 
-	// agy 1.1.13's --model takes the machine ID from the first column of
+	// agy 1.1.5+ --model takes the machine ID from the first column of
 	// `agy models`. It must ride as a single argv element and sit before the
 	// user's custom args.
 	args := buildAntigravityArgs(
@@ -457,13 +457,7 @@ func TestAntigravityBackendProviderErrorSurfacesAsFailed(t *testing.T) {
 	}
 }
 
-// TestAntigravityModelError is the regression guard for the silent-no-op fix:
-// agy exits 0 with empty output on an unrecognised --model, so Execute must
-// reject a non-empty model that isn't in the `agy models` catalog instead of
-// letting it run to a fake "completed + empty" success. This covers the same
-// validation regardless of whether opts.Model originated from agent.model, a
-// persisted/API value, or the daemon-wide MULTICA_ANTIGRAVITY_MODEL default —
-// they all collapse to opts.Model before Execute runs this check.
+// TestAntigravityModelError pins validation against the installed catalog.
 func TestAntigravityModelError(t *testing.T) {
 	t.Parallel()
 
@@ -489,11 +483,10 @@ func TestAntigravityModelError(t *testing.T) {
 	}
 
 	// Unknown model with a known catalog → actionable error that names the
-	// rejected value and points at `agy models`. THIS is the case that stops
-	// the silent empty-success.
+	// rejected value and points at `agy models`.
 	err := antigravityModelError("Totally Made Up Model", catalog)
 	if err == nil {
-		t.Fatal("unknown model should be rejected, not silently accepted")
+		t.Fatal("unknown model should be rejected")
 	}
 	if !strings.Contains(err.Error(), "Totally Made Up Model") {
 		t.Errorf("error should name the rejected model: %v", err)
@@ -502,13 +495,41 @@ func TestAntigravityModelError(t *testing.T) {
 		t.Errorf("error should point the user at `agy models`: %v", err)
 	}
 
-	// Near-miss (trailing space / dropped suffix) → still rejected, because agy
-	// needs the exact display string and would no-op on anything else.
+	// Near-miss canonical IDs remain invalid after normalization.
 	if err := antigravityModelError("Claude Opus 4.6 (Thinking) ", catalog); err == nil {
 		t.Error("near-miss model (trailing space) should be rejected")
 	}
 	if err := antigravityModelError("Claude Opus 4.6", catalog); err == nil {
 		t.Error("near-miss model (dropped suffix) should be rejected")
+	}
+}
+
+func TestNormalizeAntigravityModel(t *testing.T) {
+	t.Parallel()
+
+	catalog := []Model{
+		{ID: "gemini-3.7-flash-high", Label: "Gemini 3.7 Flash (High)", Provider: "antigravity"},
+		{ID: "gemini-3.1-pro-high", Label: "Gemini 3.1 Pro (High)", Provider: "antigravity"},
+	}
+	tests := []struct {
+		name  string
+		model string
+		want  string
+	}{
+		{name: "empty", model: "", want: ""},
+		{name: "canonical ID", model: "gemini-3.1-pro-high", want: "gemini-3.1-pro-high"},
+		{name: "legacy label", model: "Gemini 3.1 Pro (High)", want: "gemini-3.1-pro-high"},
+		{name: "legacy TSV row", model: "gemini-3.1-pro-high\tGemini 3.1 Pro (High)", want: "gemini-3.1-pro-high"},
+		{name: "unknown", model: "not-a-real-model", want: "not-a-real-model"},
+	}
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := normalizeAntigravityModel(tt.model, catalog); got != tt.want {
+				t.Fatalf("normalizeAntigravityModel(%q) = %q, want %q", tt.model, got, tt.want)
+			}
+		})
 	}
 }
 
@@ -520,12 +541,14 @@ func TestAntigravityTSVModelIDFlowsToValidationAndArgs(t *testing.T) {
 		"gemini-3.1-pro-high\tGemini 3.1 Pro (High)",
 	}, "\r\n"))
 
-	for _, modelID := range []string{
-		"gemini-3.7-flash-high",
+	for _, persisted := range []string{
 		"gemini-3.1-pro-high",
+		"Gemini 3.1 Pro (High)",
+		"gemini-3.1-pro-high\tGemini 3.1 Pro (High)",
 	} {
+		modelID := normalizeAntigravityModel(persisted, catalog)
 		if err := antigravityModelError(modelID, catalog); err != nil {
-			t.Errorf("valid machine ID %q rejected: %v", modelID, err)
+			t.Errorf("normalized model %q from %q rejected: %v", modelID, persisted, err)
 		}
 
 		args := buildAntigravityArgs(
@@ -539,17 +562,8 @@ func TestAntigravityTSVModelIDFlowsToValidationAndArgs(t *testing.T) {
 		if modelFlag < 0 || modelFlag+1 >= len(args) {
 			t.Fatalf("--model flag missing from args: %v", args)
 		}
-		if got := args[modelFlag+1]; got != modelID {
-			t.Errorf("--model value = %q, want machine ID %q", got, modelID)
-		}
-	}
-
-	for _, invalid := range []string{
-		"Gemini 3.1 Pro (High)",
-		"gemini-3.1-pro-high\tGemini 3.1 Pro (High)",
-	} {
-		if err := antigravityModelError(invalid, catalog); err == nil {
-			t.Errorf("non-canonical model value %q should be rejected", invalid)
+		if got := args[modelFlag+1]; got != "gemini-3.1-pro-high" {
+			t.Errorf("--model value = %q, want canonical ID", got)
 		}
 	}
 }

@@ -49,18 +49,12 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 		return nil, fmt.Errorf("agy executable not found at %q: %w", execPath, err)
 	}
 
-	// Guard against agy's silent no-op on an unrecognised --model: it exits 0
-	// with empty output, which would otherwise surface as a "completed" but
-	// empty task. opts.Model is the single funnel for both agent.model and the
-	// daemon-wide MULTICA_ANTIGRAVITY_MODEL default (resolved in daemon.go), so
-	// validating it here covers every source — UI free-text, API, a persisted
-	// value, and the env default alike. Reject a non-empty model the installed
-	// CLI definitively does not advertise, with an actionable error. Validation
-	// is fail-OPEN: if the `agy models` catalog can't be discovered we let agy
-	// resolve the value itself rather than blocking the run on a discovery
-	// hiccup (see antigravityModelError).
+	// Normalize historical persisted forms before validating the canonical model
+	// ID. opts.Model is the single funnel for agent.model, API/UI values, and the
+	// daemon-wide default. Validation remains fail-open when discovery is empty.
 	if opts.Model != "" {
 		catalog, _ := ListModels(ctx, "antigravity", execPath)
+		opts.Model = normalizeAntigravityModel(opts.Model, catalog.Models)
 		if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
 			return nil, err
 		}
@@ -433,11 +427,9 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // no --system-prompt; runtime instructions are delivered via AGENTS.md in the
 // task workdir.
 //
-// agy silently no-ops on a model string it doesn't recognise (empty output,
-// exit 0), so Execute validates opts.Model against the `agy models` catalog
-// and rejects an unrecognised value up front (see antigravityModelError) —
-// by the time we build argv the value is either empty or known-good. When
-// opts.Model is empty we omit the flag and agy resolves its own default.
+// Execute normalizes and validates opts.Model against the discovered catalog
+// before building argv, so the value here is either empty or a canonical ID.
+// When opts.Model is empty we omit the flag and agy resolves its own default.
 func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts ExecOptions, logger *slog.Logger) []string {
 	args := []string{
 		"-p", prompt,
@@ -466,14 +458,31 @@ func buildAntigravityArgs(prompt, logPath string, timeout time.Duration, opts Ex
 	return args
 }
 
-// antigravityModelError returns an actionable error when `model` is non-empty
-// and definitively absent from `available` (the `agy models` catalog); it
-// returns nil otherwise. An empty `available` means discovery couldn't produce
-// a catalog (agy missing, transient failure) — we fail OPEN there and let agy
-// resolve the value, so a discovery hiccup never blocks a run. The match is
-// exact because agy's --model wants the precise machine ID; a near-miss
-// (extra space, dropped suffix) is correctly rejected since agy would silently
-// no-op on it anyway.
+func normalizeAntigravityModel(model string, available []Model) string {
+	if model == "" {
+		return ""
+	}
+	for _, candidate := range available {
+		if candidate.ID == model {
+			return model
+		}
+	}
+	if tab := strings.IndexByte(model, '\t'); tab >= 0 {
+		if id := strings.TrimSpace(model[:tab]); id != "" {
+			return id
+		}
+	}
+	for _, candidate := range available {
+		if candidate.Label == model {
+			return candidate.ID
+		}
+	}
+	return model
+}
+
+// antigravityModelError returns an actionable error when model is non-empty
+// and absent from the discovered catalog. Empty catalogs fail open so a
+// discovery problem does not block execution.
 func antigravityModelError(model string, available []Model) error {
 	if model == "" || len(available) == 0 {
 		return nil

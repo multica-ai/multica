@@ -209,10 +209,8 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_CODEBUDDY_PATH", "codebuddy", "MULTICA_CODEBUDDY_MODEL"); ok {
 		agents["codebuddy"] = e
 	}
-	// agy 1.0.6 added a `--model` flag (MUL-3125), so Antigravity now takes a
-	// model env like every other backend. MULTICA_ANTIGRAVITY_MODEL seeds the
-	// daemon-wide default; its value is the exact `agy models` display string
-	// (e.g. "Claude Opus 4.6 (Thinking)"), not a provider/model slug.
+	// Antigravity accepts a daemon-wide model default. Canonical slugs are
+	// preferred; execution also normalizes labels persisted by older releases.
 	if e, ok := probe("MULTICA_ANTIGRAVITY_PATH", "agy", "MULTICA_ANTIGRAVITY_MODEL"); ok {
 		agents["antigravity"] = e
 	}

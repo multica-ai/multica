@@ -2053,17 +2053,13 @@ func acpModelLabel(name, modelID string) string {
 	return label
 }
 
-// discoverAntigravityModels runs `agy models` and returns the catalog the
-// installed Antigravity CLI advertises.
+// discoverAntigravityModels returns the installed Antigravity catalog. Slug
+// model IDs arrived in agy 1.1.5 and JSON discovery in 1.1.12, so current
+// versions use JSON while older versions fall back to text.
 //
-// Unlike cursor / pi / opencode there is deliberately NO static fallback.
-// agy's `--model` takes the machine ID from the first TSV column and silently
-// no-ops on any value it doesn't recognise, so a guessed static list would risk
-// offering a model the installed CLI can't honour, turning a typo into a
-// "successful" empty run. On any discovery failure we return an empty
-// catalog instead; agent.model stays unset and agy resolves its own
-// default. cachedDiscovery never caches empty results, so this retries on
-// the next request once the cause clears.
+// There is deliberately no static fallback: on discovery failure the catalog
+// stays empty and agy resolves its own default. cachedDiscovery does not cache
+// empty results, so the next request retries once the cause clears.
 func discoverAntigravityModels(ctx context.Context, executablePath string) ([]Model, error) {
 	if executablePath == "" {
 		executablePath = "agy"
@@ -2071,23 +2067,64 @@ func discoverAntigravityModels(ctx context.Context, executablePath string) ([]Mo
 	if _, err := exec.LookPath(executablePath); err != nil {
 		return nil, nil
 	}
-	// `agy models` is a local enumeration (no network round-trip), so a
-	// short cap is plenty; keep it generous enough to absorb cold starts.
+	// Model discovery is local, but cold starts can still take a few seconds.
 	runCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	cmd := exec.CommandContext(runCtx, executablePath, "models")
-	hideAgentWindow(cmd)
-	out, err := cmd.Output()
+
+	jsonCmd := exec.CommandContext(runCtx, executablePath, "--output-format", "json", "models")
+	hideAgentWindow(jsonCmd)
+	if out, err := jsonCmd.Output(); err == nil {
+		if models := parseAntigravityModelsJSON(out); len(models) > 0 {
+			return models, nil
+		}
+	}
+
+	textCmd := exec.CommandContext(runCtx, executablePath, "models")
+	hideAgentWindow(textCmd)
+	out, err := textCmd.Output()
 	if err != nil && len(out) == 0 {
 		return nil, nil
 	}
 	return parseAntigravityModels(string(out)), nil
 }
 
-// parseAntigravityModels turns `agy models` output into Model entries. Current
-// versions emit "<machine-id>\t<display-name>"; older versions emitted a
-// single value per line. Blank, malformed, duplicate, and known status lines
-// are skipped.
+func parseAntigravityModelsJSON(output []byte) []Model {
+	var envelope struct {
+		Command struct {
+			Data struct {
+				Models []struct {
+					ID    string `json:"id"`
+					Label string `json:"label"`
+				} `json:"models"`
+			} `json:"data"`
+		} `json:"command"`
+	}
+	if err := json.Unmarshal(output, &envelope); err != nil {
+		return nil
+	}
+
+	models := make([]Model, 0, len(envelope.Command.Data.Models))
+	seen := make(map[string]bool, len(envelope.Command.Data.Models))
+	for _, entry := range envelope.Command.Data.Models {
+		id := strings.TrimSpace(entry.ID)
+		label := strings.TrimSpace(entry.Label)
+		if id == "" || seen[id] {
+			continue
+		}
+		if label == "" {
+			label = id
+		}
+		seen[id] = true
+		models = append(models, Model{ID: id, Label: label, Provider: "antigravity"})
+	}
+	return models
+}
+
+var antigravityAlignedModelRow = regexp.MustCompile(`^([a-z0-9][a-z0-9._:/-]*) {2,}(.+)$`)
+
+// parseAntigravityModels turns text `agy models` output into Model entries.
+// Current versions emit machine IDs plus labels separated by tabs or aligned
+// spaces; older versions emitted one value per line.
 func parseAntigravityModels(output string) []Model {
 	scanner := bufio.NewScanner(strings.NewReader(output))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
@@ -2103,14 +2140,19 @@ func parseAntigravityModels(output string) []Model {
 		id, label := trimmed, trimmed
 		if strings.Contains(line, "\t") {
 			fields := strings.Split(line, "\t")
-			if len(fields) != 2 {
-				continue
-			}
 			id = strings.TrimSpace(fields[0])
-			label = strings.TrimSpace(fields[1])
+			label = ""
+			for _, field := range fields[1:] {
+				if label = strings.TrimSpace(field); label != "" {
+					break
+				}
+			}
 			if id == "" || label == "" {
 				continue
 			}
+		} else if match := antigravityAlignedModelRow.FindStringSubmatch(trimmed); match != nil {
+			id = match[1]
+			label = strings.TrimSpace(match[2])
 		}
 		if seen[id] {
 			continue
