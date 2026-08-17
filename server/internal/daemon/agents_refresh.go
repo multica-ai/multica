@@ -247,22 +247,30 @@ func (d *Daemon) refreshAgentAvailability() []string {
 			gained = append(gained, name)
 		}
 	}
-	if len(gained) == 0 {
-		return nil
-	}
-	sort.Strings(gained)
 
-	// Copy-on-write: build the union, then publish. Entries for providers we
-	// already knew about are preserved as-is so this never fights the pinned
-	// path / self-heal bookkeeping (resolvedPaths) for a running provider.
+	// Copy-on-write: build the union, then publish — even when nothing was
+	// gained, because a provider rejected at discovery time (dsh without its
+	// Multica runtime profile) must be DROPPED from the availability set. The
+	// rejection is deterministic, and keeping the provider would make converge
+	// re-register the runtime the demotion path just took offline, toggling
+	// every discovery tick. Known providers are otherwise preserved as-is so
+	// this never fights the pinned path / self-heal bookkeeping (resolvedPaths).
 	merged := make(map[string]AgentEntry, len(current)+len(gained))
 	for name, entry := range current {
+		if _, rejected := discoverySkipped[name]; rejected {
+			continue
+		}
 		merged[name] = entry
 	}
 	for _, name := range gained {
 		merged[name] = probed[name]
 	}
 	d.agentsAvailable.Store(&merged)
+
+	if len(gained) == 0 {
+		return nil
+	}
+	sort.Strings(gained)
 	d.logger.Info("agent CLI discovered after startup", "providers", gained)
 	return gained
 }

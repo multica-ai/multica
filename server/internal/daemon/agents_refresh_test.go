@@ -705,6 +705,15 @@ func TestDiscovery_DshWithoutProfileDemotesStaleRuntime(t *testing.T) {
 		t.Errorf("offline reason detail = %q, want it to name the repair command", reason.Detail)
 	}
 
+	// Another discovery round must NOT re-register dsh: the availability set
+	// drops discovery-rejected providers, so converge never sees dsh as missing
+	// again — otherwise demote and converge toggle the row every tick.
+	d.refreshAgentAvailability()
+	d.convergeRuntimeRegistrations(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Fatalf("providers after a second round = %v, want dsh to stay offline (no demote/converge toggle)", got)
+	}
+
 	// The user installs the profile again: dsh re-registers on a later tick.
 	setProbe(map[string]AgentEntry{
 		"codex": {Path: "/fake/codex"},
