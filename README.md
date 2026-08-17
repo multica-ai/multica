@@ -203,7 +203,7 @@ Installing and authenticating them: [Install an agent runtime](https://multica.a
                              │  spawns
                       ┌──────┴───────────────────────────────┐
                       │  Claude Code · Codex · Cursor · …    │
-                      │  (any of the 20 runtimes above)      │
+                      │  (any of the 23 runtimes above)      │
                       └──────────────────────────────────────┘
 ```
 

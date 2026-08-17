@@ -226,7 +226,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		return nil, fmt.Errorf("dim stderr pipe: %w", err)
 	}
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start dim: %w", err)
 	}
@@ -322,6 +322,9 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			case <-time.After(dimProcessWaitTimeout):
 			}
 			waitProcessGroupGone(cmd, dimProcessWaitTimeout)
+			// Release the Windows Job Object ownership handle (no-op on Unix)
+			// so the OS can finalize any processes that were attached to it.
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()

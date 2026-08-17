@@ -71,9 +71,24 @@ while IFS= read -r line; do
       # The real dim ACP server resumes the session and returns configOptions
       # (no sessionId field — the id is the one the client requested). When
       # DIM_LOAD_NOT_FOUND is set, emulate a session that no longer exists so
-      # tests can exercise the ResumeRejected path.
+      # tests can exercise the ResumeRejected path. When DIM_LOAD_HELD_N is set,
+      # return "held by another process" for the first N calls then succeed,
+      # exercising the bounded retry loop.
       if [ -n "$DIM_LOAD_NOT_FOUND" ]; then
         printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32002,"message":"ACP session not found","data":{"sessionId":"ses_prior"}}}\n' "$id"
+      elif [ -n "$DIM_LOAD_HELD_N" ]; then
+        held_file="/tmp/dim_held_counter_$"
+        count=0
+        if [ -f "$held_file" ]; then count=$(cat "$held_file"); fi
+        if [ "$count" -lt "$DIM_LOAD_HELD_N" ]; then
+          count=$((count + 1))
+          echo "$count" > "$held_file"
+          printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session held by another process","data":{"details":"held"}}}\n' "$id"
+        else
+          printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"permission","currentValue":"full-access"},{"id":"mode","currentValue":"agent"}],"models":{"currentModelId":"dim/model-a"}}}\n' "$id"
+        fi
+      elif [ -n "$DIM_LOAD_HELD_ALWAYS" ]; then
+        printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Session held by another process","data":{"details":"held"}}}\n' "$id"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"configOptions":[{"id":"permission","currentValue":"full-access"},{"id":"mode","currentValue":"agent"}],"models":{"currentModelId":"dim/model-a"}}}\n' "$id"
       fi
@@ -638,5 +653,86 @@ func TestDimSetModelFailClosesSession(t *testing.T) {
 	// turn aborts before session/prompt.
 	if strings.Contains(reqs, "session/prompt") {
 		t.Fatal("backend must not send session/prompt after set_model failure")
+	}
+}
+
+// TestDimSessionLoadRetrySucceeds verifies that session/load retries on
+// "held by another process" and eventually succeeds (review #4 round 4).
+func TestDimSessionLoadRetrySucceeds(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{
+		"DIM_LOAD_HELD_N": "2", // held for first 2 calls, succeeds on 3rd
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:             t.TempDir(),
+		Timeout:         50 * time.Second,
+		ResumeSessionID: "ses_prior",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected status=completed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if result.ResumeRejected {
+		t.Fatal("ResumeRejected must be false — retry succeeded")
+	}
+
+	reqs := readDimRequests(t, requestsFile)
+	loadCount := strings.Count(reqs, "session/load")
+	if loadCount < 3 {
+		t.Fatalf("expected at least 3 session/load attempts (2 held + 1 success), got %d", loadCount)
+	}
+	if strings.Contains(reqs, "session/new") {
+		t.Fatal("backend must not fall through to session/new when retry succeeds")
+	}
+}
+
+// TestDimSessionLoadRetryExhausted verifies that after exhausting retries on
+// "held by another process", the backend fails without falling through to
+// session/new (review #4 round 4).
+func TestDimSessionLoadRetryExhausted(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{
+		"DIM_LOAD_HELD_ALWAYS": "1",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:             t.TempDir(),
+		Timeout:         50 * time.Second,
+		ResumeSessionID: "ses_prior",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+	result := <-session.Result
+	if result.Status != "failed" && result.Status != "timeout" {
+		t.Fatalf("expected status=failed or timeout, got %q", result.Status)
+	}
+
+	reqs := readDimRequests(t, requestsFile)
+	loadCount := strings.Count(reqs, "session/load")
+	// dimSessionLoadRetryAttempts=3, so 1 initial + 3 retries = 4 attempts
+	if loadCount > 4 {
+		t.Fatalf("expected at most 4 session/load attempts (1 + 3 retries), got %d", loadCount)
+	}
+	if strings.Contains(reqs, "session/new") {
+		t.Fatal("backend must not fall through to session/new when retries are exhausted")
 	}
 }
