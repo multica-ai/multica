@@ -836,6 +836,13 @@ func (c *Client) GetTaskGCCheck(ctx context.Context, taskID string) (*TaskGCStat
 // must be refused with an explanation (MUL-6164).
 const RuntimeOfflineCodeNotExecutable = "not_executable"
 
+// RuntimeOfflineCodeProfileMissing marks a runtime taken offline because the
+// agent CLI is installed but the Multica runtime profile that makes it usable
+// is not (currently dsh without its "multica" profile). Like not_executable it
+// is deterministic — no amount of waiting fixes it — so the server must refuse
+// work for the runtime with an explanation rather than queue it.
+const RuntimeOfflineCodeProfileMissing = "profile_missing"
+
 // RuntimeOfflineReason is why a runtime went offline, in the form clients can
 // act on: a stable code they switch on and localize, and the command that
 // repairs the install. Prose stays in Detail for logs — never as the thing a

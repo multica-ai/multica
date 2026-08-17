@@ -647,6 +647,76 @@ func TestDiscovery_DshWithoutProfileReportedInSkippedAgents(t *testing.T) {
 	}
 }
 
+// TestDiscovery_DshWithoutProfileDemotesStaleRuntime pins the behavior half
+// of the dsh diagnostic: a dsh runtime that registered while its Multica
+// profile was installed must be taken offline when the profile disappears,
+// instead of lingering as a selectable runtime whose launches all fail with
+// a generic discovery error. Reinstalling the profile must bring it back
+// without a restart.
+func TestDiscovery_DshWithoutProfileDemotesStaleRuntime(t *testing.T) {
+	fx := newBatchFixture(t)
+	fx.enableStableRuntimeIDs()
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"codex": {Path: "/fake/codex"},
+		"dsh":   {Path: "/fake/dsh"},
+	}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+
+	setProbe := stubAgentProbeWithDiscoverySkips(t, map[string]AgentEntry{
+		"codex": {Path: "/fake/codex"},
+		"dsh":   {Path: "/fake/dsh"},
+	}, nil)
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	// Both providers register while the dsh profile is present.
+	d.refreshAgentAvailability()
+	d.convergeRuntimeRegistrations(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 {
+		t.Fatalf("providers = %v, want codex and dsh registered", got)
+	}
+	dshID := fx.runtimeIDFor("ws-1", "dsh")
+	if dshID == "" {
+		t.Fatal("no stable runtime id for dsh")
+	}
+
+	// The user removes the profile: discovery rejects dsh and the stale row
+	// must be taken offline with the reason, not left selectable.
+	setProbe(map[string]AgentEntry{"codex": {Path: "/fake/codex"}}, map[string]string{"dsh": dshProfileMissingReason})
+	d.refreshAgentAvailability()
+	d.demoteDiscoverySkippedRuntimes(context.Background())
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Fatalf("providers = %v, want only codex after dsh loses its profile", got)
+	}
+	if got := fx.deregisteredIDs(); len(got) != 1 || got[0] != dshID {
+		t.Fatalf("deregistered = %v, want the dsh runtime %q deregistered", got, dshID)
+	}
+	reason, ok := fx.runtimeOfflineReason(dshID)
+	if !ok {
+		t.Fatal("dsh row went offline with no reason")
+	}
+	if reason.Code != RuntimeOfflineCodeProfileMissing {
+		t.Errorf("offline reason code = %q, want %q", reason.Code, RuntimeOfflineCodeProfileMissing)
+	}
+	if !strings.Contains(reason.Detail, "dsh plugin --profile multica add") {
+		t.Errorf("offline reason detail = %q, want it to name the repair command", reason.Detail)
+	}
+
+	// The user installs the profile again: dsh re-registers on a later tick.
+	setProbe(map[string]AgentEntry{
+		"codex": {Path: "/fake/codex"},
+		"dsh":   {Path: "/fake/dsh"},
+	}, nil)
+	d.refreshAgentAvailability()
+	d.convergeRuntimeRegistrations(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 || got[0] != "codex" || got[1] != "dsh" {
+		t.Fatalf("providers after profile reinstall = %v, want codex and dsh", got)
+	}
+}
+
 // TestMergeBuiltinRegisterResponse_ReplacesRotatedRuntimeID guards the one case
 // the additive merge still has to handle destructively: the server returning a
 // new ID for a runtime the workspace already had must swap, not duplicate, or

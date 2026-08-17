@@ -78,6 +78,14 @@ func (d *Daemon) agentDiscoveryLoop(ctx context.Context) {
 			d.refreshAgentVersions(ctx)
 		case now := <-ticker.C:
 			gained := d.refreshAgentAvailability()
+			// Discovery-time rejections condemn a provider even when the version
+			// probe never saw it: dsh without its Multica runtime profile is
+			// deterministically unusable, so take any lingering runtime rows
+			// offline with the reason instead of leaving a selectable-but-broken
+			// runtime behind (the "discovery failed" launch error). Self-heals:
+			// installing the profile puts the provider back in the availability
+			// set and converge re-registers it on a later tick.
+			d.demoteDiscoverySkippedRuntimes(ctx)
 			missing := d.providersMissingRuntimes()
 			if len(missing) == 0 {
 				backoff = 0
@@ -173,6 +181,22 @@ func (d *Daemon) setDiscoverySkipped(skipped map[string]string) {
 		out[name] = reason
 	}
 	d.discoverySkipped = out
+}
+
+// discoverySkippedSnapshot copies the current discovery-time rejections for
+// consumers that need to act on them (e.g. demoting a runtime whose profile
+// went missing).
+func (d *Daemon) discoverySkippedSnapshot() map[string]string {
+	d.skippedAgentsMu.RLock()
+	defer d.skippedAgentsMu.RUnlock()
+	if len(d.discoverySkipped) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(d.discoverySkipped))
+	for name, reason := range d.discoverySkipped {
+		out[name] = reason
+	}
+	return out
 }
 
 // mergeDiscoverySkipped folds the latest discovery-time rejections into a
@@ -511,6 +535,39 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 		})
 	}
 	d.notifyRuntimeSetChanged()
+}
+
+// demoteDiscoverySkippedRuntimes takes offline the server-side runtime rows of
+// providers that discovery rejected (currently only dsh without its Multica
+// runtime profile), reusing the demotion path built for confirmed-unusable
+// version verdicts.
+//
+// The rejection is deterministic in the same sense as not_executable: without
+// the profile the CLI has no --stdio protocol, so every task would fail after
+// being advertised as healthy. Leaving the previously registered row in place
+// makes the runtime look selectable, and selecting it fails every launch with
+// a generic discovery error — the silence this diagnostic exists to remove.
+// Demoting it surfaces the reason on the server row and in /health.
+//
+// Recovery needs no new machinery: once the profile is installed the provider
+// reappears in the availability set, its demotion is cleared by the healthy
+// probe, and converge re-registers the runtime on a later tick.
+func (d *Daemon) demoteDiscoverySkippedRuntimes(ctx context.Context) {
+	skipped := d.discoverySkippedSnapshot()
+	if len(skipped) == 0 {
+		return
+	}
+	causes := make(map[string]runtimeVerdict, len(skipped))
+	for provider, reason := range skipped {
+		causes[provider] = runtimeVerdict{
+			reason: reason,
+			offline: &RuntimeOfflineReason{
+				Code:   RuntimeOfflineCodeProfileMissing,
+				Detail: reason,
+			},
+		}
+	}
+	d.demoteUnusableRuntimes(ctx, causes)
 }
 
 // deregisterRevivedRuntimes takes offline the rows a register response brought
