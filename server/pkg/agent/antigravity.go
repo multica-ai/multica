@@ -423,16 +423,17 @@ var antigravityBlockedArgs = map[string]blockedArgMode{
 // buildAntigravityArgs assembles the argv for a daemon-compatible one-shot agy
 // invocation.
 //
-//	agy -p <prompt> --dangerously-skip-permissions [--model <display name>]
+//	agy -p <prompt> --dangerously-skip-permissions [--model <catalog id>]
 //	    --print-timeout <duration> --log-file <tmp>
 //	    [--conversation <id>] [--add-dir <cwd>]
 //
 // agy 1.0.6 added a `--model` flag (MUL-3125), so opts.Model is now wired
-// through when set. The value is the exact human display string `agy models`
-// prints (e.g. "Claude Opus 4.6 (Thinking)"), NOT a provider/model slug —
-// it's passed verbatim as a single exec arg, so spaces and parens need no
-// shell quoting. agy still exposes no --system-prompt; runtime instructions
-// are delivered via AGENTS.md in the task workdir.
+// through when set. The value is the catalog identifier parseAntigravityModels
+// read out of `agy models`: a slug (e.g. "gemini-3.6-flash-high") on agy
+// 1.1.11+, or the verbatim single-column value (e.g. "Claude Opus 4.6
+// (Thinking)") on older output. Either shape ships as one exec arg, so spaces
+// and parens need no shell quoting. agy still exposes no --system-prompt;
+// runtime instructions are delivered via AGENTS.md in the task workdir.
 //
 // agy silently no-ops on a model string it doesn't recognise (empty output,
 // exit 0), so Execute validates opts.Model against the `agy models` catalog

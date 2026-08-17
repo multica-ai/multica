@@ -1745,9 +1745,9 @@ func TestAntigravityModelSelectionSupported(t *testing.T) {
 	}
 }
 
-// TestParseAntigravityModels covers the `agy models` line-per-name format:
-// each non-blank line becomes a Model whose ID and Label are the verbatim
-// display string `--model` expects, duplicates collapse, and blanks drop.
+// TestParseAntigravityModels covers the legacy single-column `agy models`
+// format (pre-1.1.11): each non-blank tab-free line becomes a Model whose ID
+// and Label are that verbatim value, duplicates collapse, and blanks drop.
 func TestParseAntigravityModels(t *testing.T) {
 	t.Parallel()
 
