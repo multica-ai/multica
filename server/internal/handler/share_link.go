@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"math"
 	"net/http"
@@ -16,6 +17,12 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+// expiresInMaxHours is the largest hour count that can be multiplied by
+// time.Hour without overflowing a signed 64-bit time.Duration. Rejecting
+// anything above it prevents expires_in from wrapping to a negative duration
+// (which would make a freshly created link instantly expired).
+const expiresInMaxHours = math.MaxInt64 / int64(time.Hour)
 
 // ShareLinkResponse is the JSON shape returned for a workspace share link.
 type ShareLinkResponse struct {
@@ -85,8 +92,8 @@ func (h *Handler) CreateShareLink(w http.ResponseWriter, r *http.Request) {
 	// avoid wrapping or overflow before conversion.
 	var expiresAt pgtype.Timestamptz
 	if req.ExpiresIn != nil {
-		if *req.ExpiresIn <= 0 || *req.ExpiresIn > math.MaxInt32 {
-			writeError(w, http.StatusBadRequest, "expires_in must be between 1 and 2147483647 hours")
+		if *req.ExpiresIn <= 0 || int64(*req.ExpiresIn) > expiresInMaxHours {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("expires_in must be between 1 and %d hours", expiresInMaxHours))
 			return
 		}
 		expiresAt = pgtype.Timestamptz{Time: time.Now().Add(time.Duration(*req.ExpiresIn) * time.Hour), Valid: true}

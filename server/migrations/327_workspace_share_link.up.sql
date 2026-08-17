@@ -3,8 +3,8 @@
 -- id is NOT declared inline as PRIMARY KEY: the repo convention (see
 -- migrations 207-209 / 227-229) is to build the table without a primary key,
 -- create the backing unique index CONCURRENTLY in its own single-statement
--- migration (315), then attach it with PRIMARY KEY USING INDEX (316). The
--- workspace_id partial unique index (317) enforces the one-active-link-per-
+-- migration (328), then attach it with PRIMARY KEY USING INDEX (329). The
+-- workspace_id partial unique index (330) enforces the one-active-link-per-
 -- workspace invariant and is created CONCURRENTLY as well.
 CREATE TABLE workspace_share_link (
     id           UUID NOT NULL DEFAULT gen_random_uuid(),

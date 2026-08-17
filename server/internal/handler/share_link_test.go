@@ -9,8 +9,10 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -216,24 +218,34 @@ func TestCreateShareLink_RejectsOverflowingInput(t *testing.T) {
 		t.Fatalf("max_uses over MaxInt32: expected 400, got %d: %s", w.Code, w.Body.String())
 	}
 
-	// expires_in above MaxInt32 overflows time.Duration * time.Hour.
-	overExp := 2147483648 // MaxInt32 + 1
+	// expires_in above the duration-safe bound overflows time.Duration * time.Hour.
+	overExp := int(expiresInMaxHours) + 1
 	req2 := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/share-links", CreateShareLinkRequest{Role: "member", ExpiresIn: &overExp})
 	req2 = withURLParam(req2, "id", testWorkspaceID)
 	w2 := httptest.NewRecorder()
 	testHandler.CreateShareLink(w2, req2)
 	if w2.Code != http.StatusBadRequest {
-		t.Fatalf("expires_in over MaxInt32: expected 400, got %d: %s", w2.Code, w2.Body.String())
+		t.Fatalf("expires_in over duration-safe bound: expected 400, got %d: %s", w2.Code, w2.Body.String())
 	}
 
-	// Boundary: MaxInt32 itself must be accepted for both fields.
-	maxExp := 2147483647
+	// Boundary: expires_in == expiresInMaxHours must be accepted, and the
+	// stored expires_at must be strictly in the future (not wrapped negative).
+	maxExp := int(expiresInMaxHours)
 	req3 := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/share-links", CreateShareLinkRequest{Role: "member", ExpiresIn: &maxExp})
 	req3 = withURLParam(req3, "id", testWorkspaceID)
 	w3 := httptest.NewRecorder()
 	testHandler.CreateShareLink(w3, req3)
 	if w3.Code != http.StatusCreated {
-		t.Fatalf("expires_in = MaxInt32: expected 201, got %d: %s", w3.Code, w3.Body.String())
+		t.Fatalf("expires_in = duration-safe max: expected 201, got %d: %s", w3.Code, w3.Body.String())
+	}
+	var expiresAt pgtype.Timestamptz
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT expires_at FROM workspace_share_link WHERE workspace_id = $1 ORDER BY created_at DESC LIMIT 1`,
+		parseUUID(testWorkspaceID)).Scan(&expiresAt); err != nil {
+		t.Fatalf("load created link expiry: %v", err)
+	}
+	if !expiresAt.Valid || !expiresAt.Time.After(time.Now()) {
+		t.Fatalf("accepted max expires_in must persist a future expires_at, got %v", expiresAt.Time)
 	}
 
 	// Deactivate so a fresh active link can be created for the max_uses check.
