@@ -6,6 +6,8 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -21,16 +23,17 @@ func TestSkillBundleResolveTimeout(t *testing.T) {
 		size int64
 		want time.Duration
 	}{
-		{"zero size floors to min", 0, skillBundleResolveMinTimeout},
-		{"negative size floors to min", -5, skillBundleResolveMinTimeout},
-		{"tiny bundle floors to min", 1024, skillBundleResolveMinTimeout},
+		{"zero size floors to min", 0, DefaultSkillBundleResolveMinTimeout},
+		{"negative size floors to min", -5, DefaultSkillBundleResolveMinTimeout},
+		{"tiny bundle floors to min", 1024, DefaultSkillBundleResolveMinTimeout},
 		{"scales with size above the floor", 2 * 1024 * 1024, 40 * time.Second},
-		{"huge bundle caps at max", 100 * 1024 * 1024, skillBundleResolveMaxTimeout},
+		{"huge bundle caps at max", 100 * 1024 * 1024, DefaultSkillBundleResolveMaxTimeout},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := skillBundleResolveTimeout(tc.size); got != tc.want {
-				t.Fatalf("skillBundleResolveTimeout(%d) = %s, want %s", tc.size, got, tc.want)
+			got := skillBundleResolveTimeoutFor(tc.size, DefaultSkillBundleResolveMinTimeout, DefaultSkillBundleResolveMaxTimeout, DefaultSkillBundleResolveMinThroughput)
+			if got != tc.want {
+				t.Fatalf("skillBundleResolveTimeoutFor(%d) = %s, want %s", tc.size, got, tc.want)
 			}
 		})
 	}
@@ -324,5 +327,108 @@ func TestEnsureTaskSkillBundles_DeadlineIsLabelledStructurally(t *testing.T) {
 	want := taskfailure.ReasonSkillBundleUnavailable.String()
 	if got := taskRunFailureReason(err); got != want {
 		t.Errorf("taskRunFailureReason = %q, want %q (retryable platform-side reason)", got, want)
+	}
+}
+
+// TestEnsureTaskSkillBundles_UsesLocalBundle verifies that a bundle maintained
+// in MULTICA_SKILL_BUNDLE_LOCAL_DIR is used before any network or cache lookup.
+func TestEnsureTaskSkillBundles_UsesLocalBundle(t *testing.T) {
+	localDir := t.TempDir()
+	bundle := makeResolvableSkillBundle("local-skill")
+	ref := skillRefFromBundle(bundle)
+
+	// Write the bundle to the local-maintenance layout (no hash in path).
+	localPath := filepath.Join(localDir, "ws-1", "workspace", ref.ID, "bundle.json")
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatalf("mkdir local bundle: %v", err)
+	}
+	data, err := json.Marshal(bundle)
+	if err != nil {
+		t.Fatalf("marshal bundle: %v", err)
+	}
+	if err := os.WriteFile(localPath, data, 0o644); err != nil {
+		t.Fatalf("write local bundle: %v", err)
+	}
+
+	// The server would fail if asked; the local bundle should prevent any request.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected server request to %s", r.URL.Path)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	d := &Daemon{
+		client: NewClient(srv.URL),
+		cfg:    Config{SkillBundleLocalDir: localDir},
+	}
+	task := &Task{
+		ID:          "task-1",
+		RuntimeID:   "rt-1",
+		WorkspaceID: "ws-1",
+		Agent:       &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{ref}},
+	}
+
+	if err := d.ensureTaskSkillBundles(context.Background(), task); err != nil {
+		t.Fatalf("expected local bundle to resolve without server, got %v", err)
+	}
+	if len(task.Agent.Skills) != 1 || task.Agent.Skills[0].ID != ref.ID {
+		t.Fatalf("expected local skill %s, got %+v", ref.ID, task.Agent.Skills)
+	}
+}
+
+// TestEnsureTaskSkillBundles_LocalBundlePrecedenceOverCache verifies that a
+// locally-maintained bundle wins even when the same skill is already cached
+// from a previous server fetch.
+func TestEnsureTaskSkillBundles_LocalBundlePrecedenceOverCache(t *testing.T) {
+	localDir := t.TempDir()
+	cacheDir := t.TempDir()
+
+	cachedBundle := makeResolvableSkillBundleWith("shared", "cached", "cached-rules")
+	localBundle := makeResolvableSkillBundleWith("shared", "local", "local-rules")
+
+	cacheRef := skillRefFromBundle(cachedBundle)
+	localRef := skillRefFromBundle(localBundle)
+
+	// Seed the cache with the server-fetched bundle.
+	cache := NewSkillBundleCache(cacheDir)
+	if err := cache.Store("ws-1", cachedBundle); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
+
+	// Place a different bundle in the local dir for the same source+id.
+	localPath := filepath.Join(localDir, "ws-1", "workspace", localRef.ID, "bundle.json")
+	if err := os.MkdirAll(filepath.Dir(localPath), 0o755); err != nil {
+		t.Fatalf("mkdir local bundle: %v", err)
+	}
+	data, err := json.Marshal(localBundle)
+	if err != nil {
+		t.Fatalf("marshal bundle: %v", err)
+	}
+	if err := os.WriteFile(localPath, data, 0o644); err != nil {
+		t.Fatalf("write local bundle: %v", err)
+	}
+
+	d := &Daemon{
+		client:     NewClient("http://localhost:1"),
+		skillCache: cache,
+		cfg:        Config{SkillBundleLocalDir: localDir},
+	}
+	task := &Task{
+		ID:          "task-1",
+		RuntimeID:   "rt-1",
+		WorkspaceID: "ws-1",
+		Agent:       &AgentData{ID: "agent-1", SkillRefs: []SkillRefData{cacheRef}},
+	}
+
+	if err := d.ensureTaskSkillBundles(context.Background(), task); err != nil {
+		t.Fatalf("expected local bundle to resolve, got %v", err)
+	}
+	if len(task.Agent.Skills) != 1 || task.Agent.Skills[0].Content != "local" {
+		t.Fatalf("expected local bundle content, got %+v", task.Agent.Skills)
+	}
+	// The ref carried by the agent is the cached one, but the local bundle has
+	// a different hash. ensureTaskSkillBundles should still map it by source+id.
+	if got := task.Agent.Skills[0].Hash; got != localRef.Hash {
+		t.Fatalf("expected local bundle hash %s, got %s", localRef.Hash, got)
 	}
 }

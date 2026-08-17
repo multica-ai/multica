@@ -88,4 +88,28 @@ Workspace repos and project resources are not the same thing:
 
 Do not add a project resource just because `repo checkout` failed. First determine whether the user asked for durable project context or just a task checkout.
 
+## Skill bundle resolution on slow or air-gapped runtimes
+
+When a runtime such as 5090 repeatedly fails with `resolve skill bundles: context deadline exceeded`, the daemon can be told to use locally-maintained skill bundles and/or to scale the download timeout.
+
+Set these environment variables before starting the daemon (or export them where the daemon is launched):
+
+- `MULTICA_SKILL_BUNDLE_LOCAL_DIR` — absolute path to a directory containing pre-built skill bundles. The daemon checks this directory before asking the server. Two layouts are accepted:
+  - exact-hash layout (copy from a working skill cache):
+    `<dir>/<workspace>/<source>/<id>/<hash>/bundle.json`
+  - local-maintenance layout (no hash in path):
+    `<dir>/<workspace>/<source>/<id>/bundle.json`
+  A locally-maintained bundle takes precedence over both the on-disk cache and the server.
+- `MULTICA_SKILL_BUNDLE_MIN_TIMEOUT` — per-skill download deadline floor (default `30s`).
+- `MULTICA_SKILL_BUNDLE_MAX_TIMEOUT` — per-skill download deadline ceiling (default `5m`).
+- `MULTICA_SKILL_BUNDLE_MIN_THROUGHPUT` — bytes-per-second floor used to scale the deadline with bundle size (default `51200`, i.e. 50 KiB/s).
+
+Example for an air-gapped 5090 host:
+
+```bash
+export MULTICA_SKILL_BUNDLE_LOCAL_DIR=/opt/multica/skill-bundles
+export MULTICA_SKILL_BUNDLE_MAX_TIMEOUT=10m
+multica daemon start
+```
+
 More source-backed details: `references/runtimes-and-repos-source-map.md`.

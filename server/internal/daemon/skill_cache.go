@@ -104,6 +104,78 @@ func (c *SkillBundleCache) bundlePath(workspaceID string, ref SkillRefData) stri
 	)
 }
 
+// loadLocalSkillBundle looks for a pre-built bundle in dir. It tries two layouts:
+//
+//  1. exact-hash layout (same as the on-disk skill cache):
+//     <dir>/<workspace>/<source>/<id>/<hash>/bundle.json
+//  2. local-maintenance layout (no hash in path):
+//     <dir>/<workspace>/<source>/<id>/bundle.json
+//
+// The exact-hash layout lets operators copy a working skill cache verbatim.
+// The local-maintenance layout lets operators maintain a skill without needing
+// to rename directories when the content (and therefore hash) changes; the
+// bundle is accepted if it is self-consistent.
+func loadLocalSkillBundle(dir, workspaceID string, ref SkillRefData) (SkillData, bool) {
+	if dir == "" {
+		return SkillData{}, false
+	}
+	base := filepath.Join(
+		dir,
+		safeCacheSegment(workspaceID),
+		safeCacheSegment(ref.Source),
+		safeCacheSegment(ref.ID),
+	)
+
+	// Try exact-hash layout first.
+	exactPath := filepath.Join(base, safeCacheSegment(ref.Hash), "bundle.json")
+	if data, err := os.ReadFile(exactPath); err == nil {
+		var bundle SkillData
+		if err := json.Unmarshal(data, &bundle); err == nil && validateSkillBundle(ref, bundle) {
+			return bundle, true
+		}
+	}
+
+	// Fall back to local-maintenance layout: any self-consistent bundle for this
+	// source+id wins. This allows operators to pin a skill locally without
+	// tracking its hash in the directory name.
+	if data, err := os.ReadFile(filepath.Join(base, "bundle.json")); err == nil {
+		var bundle SkillData
+		if err := json.Unmarshal(data, &bundle); err == nil && bundle.Source == ref.Source && bundle.ID == ref.ID {
+			selfRef := skillRefFromBundle(bundle)
+			if validateSkillBundle(selfRef, bundle) {
+				return bundle, true
+			}
+		}
+	}
+	entries, err := os.ReadDir(base)
+	if err != nil {
+		return SkillData{}, false
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(base, entry.Name(), "bundle.json"))
+		if err != nil {
+			continue
+		}
+		var bundle SkillData
+		if err := json.Unmarshal(data, &bundle); err != nil {
+			continue
+		}
+		if bundle.Source != ref.Source || bundle.ID != ref.ID {
+			continue
+		}
+		// Validate self-consistency using the bundle's own derived ref, not the
+		// possibly-stale requested hash.
+		selfRef := skillRefFromBundle(bundle)
+		if validateSkillBundle(selfRef, bundle) {
+			return bundle, true
+		}
+	}
+	return SkillData{}, false
+}
+
 func validateSkillBundle(ref SkillRefData, bundle SkillData) bool {
 	if bundle.ID != ref.ID || bundle.Source != ref.Source || bundle.Hash != ref.Hash {
 		return false
