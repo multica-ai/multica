@@ -142,6 +142,7 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordAutopilotRunSkipped("manual", "throttled")
 	m.RecordWebhookDelivery("github", "dispatched")
 	m.RecordWebhookRateLimited("absolute_ip")
+	m.RecordEmailRateLimited("workspace_invitation", "recipient")
 	m.RecordGithubEventReceived("pull_request", "opened")
 	m.RecordGithubPRReview("approved")
 	m.ObserveGithubPRMergeSeconds(120)

@@ -357,7 +357,7 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		writeWebhookRateLimit(w, r, h.WebhookAbsoluteIPRateLimiter, ip, "absolute_ip", h.Metrics)
 		return
 	}
-	if ip != "" && h.WebhookIPRateLimiter != nil && !webhookLimiterCheck(r.Context(), h.WebhookIPRateLimiter, ip) {
+	if ip != "" && h.WebhookIPRateLimiter != nil && !slidingWindowLimiterCheck(r.Context(), h.WebhookIPRateLimiter, ip) {
 		writeWebhookRateLimit(w, r, h.WebhookIPRateLimiter, ip, "bad_credential_ip", h.Metrics)
 		return
 	}
@@ -914,7 +914,7 @@ func (h *Handler) deliveryProvider(ctx context.Context, id pgtype.UUID) string {
 func writeWebhookRateLimit(w http.ResponseWriter, r *http.Request, limiter WebhookRateLimiter, key, gate string, metrics *obsmetrics.BusinessMetrics) {
 	retryAfter := time.Second
 	if limiter != nil {
-		if retry := webhookLimiterRetryAfter(r.Context(), limiter, key); retry > 0 {
+		if retry := slidingWindowLimiterRetryAfter(r.Context(), limiter, key); retry > 0 {
 			retryAfter = retry
 		}
 	}

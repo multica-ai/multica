@@ -98,6 +98,19 @@ func envPositiveInt(name string, def int) int {
 	return v
 }
 
+func envNonNegativeInt(name string, def int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", def, "error", err)
+		return def
+	}
+	return v
+}
+
 func envPositiveInt64(name string, def int64) int64 {
 	raw := os.Getenv(name)
 	if raw == "" {
