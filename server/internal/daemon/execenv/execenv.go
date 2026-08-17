@@ -499,11 +499,11 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
-			CodexVersion:    params.CodexVersion,
-			GOOS:            params.GOOS,
+			CodexVersion:     params.CodexVersion,
+			GOOS:             params.GOOS,
 			IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil,
-			SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task),
-			CodexCustomArgs: params.CodexCustomArgs,
+			SessionStoreKey:  codexSessionStoreKey(params.Profile, params.Task),
+			CodexCustomArgs:  params.CodexCustomArgs,
 		}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
@@ -779,12 +779,12 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
 		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
-			CodexVersion:    params.CodexVersion,
-			GOOS:            params.GOOS,
-			ResumeSessionID: params.ResumeSessionID,
+			CodexVersion:     params.CodexVersion,
+			GOOS:             params.GOOS,
+			ResumeSessionID:  params.ResumeSessionID,
 			IsLocalDirectory: params.LocalDirectory,
-			SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task),
-			CodexCustomArgs: params.CodexCustomArgs,
+			SessionStoreKey:  codexSessionStoreKey(params.Profile, params.Task),
+			CodexCustomArgs:  params.CodexCustomArgs,
 		}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {

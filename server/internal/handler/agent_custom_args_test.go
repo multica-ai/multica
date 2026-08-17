@@ -192,7 +192,7 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 	}
 	unbound := httptest.NewRecorder()
 	testHandler.UpdateAgent(unbound, withURLParam(newRequest(http.MethodPatch, "/api/agents/"+agentID, map[string]any{
-		"custom_args":                       []string{"--profile", "research"},
+		"custom_args":                          []string{"--profile", "research"},
 		"is_codex_windows_sandbox_arg_managed": false,
 	}), "id", agentID))
 	assertArgs(unbound, http.StatusOK, []string{"--profile", "research"})
@@ -425,4 +425,3 @@ func TestAgentRuntimeOnlyUpdatePreservesConcurrentCustomArgs(t *testing.T) {
 		)
 	}
 }
-

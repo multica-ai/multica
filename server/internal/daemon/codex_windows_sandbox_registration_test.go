@@ -128,12 +128,12 @@ func TestCodexWindowsSandboxTaskPolicyTracksPreparedConfig(t *testing.T) {
 			candidateArgs := policy.effectiveLaunchArgs(baseOpts, nil)
 
 			env, err := execenv.Prepare(execenv.PrepareParams{
-				WorkspacesRoot: t.TempDir(),
-				WorkspaceID:    "workspace",
-				TaskID:         fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1),
-				AgentName:      "agent",
-				Provider:       "codex",
-				GOOS:           "windows",
+				WorkspacesRoot:  t.TempDir(),
+				WorkspaceID:     "workspace",
+				TaskID:          fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1),
+				AgentName:       "agent",
+				Provider:        "codex",
+				GOOS:            "windows",
 				CodexCustomArgs: candidateArgs,
 				Task: execenv.TaskContextForEnv{
 					AgentID:   "agent",
@@ -208,4 +208,3 @@ func TestCodexWindowsSandboxTaskPolicyTracksPreparedConfig(t *testing.T) {
 		t.Fatalf("non-Windows args = %v, want %v", got, want)
 	}
 }
-
