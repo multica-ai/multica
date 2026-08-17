@@ -191,6 +191,9 @@ var concurrentIndexCleanups = map[string]string{
 	"328_workspace_share_link_id_uidx":                          "workspace_share_link_pkey_uidx",
 	"330_workspace_share_link_active_ws_uidx":                   "workspace_share_link_active_ws_uidx",
 	"331_workspace_share_link_code_uidx":                        "workspace_share_link_code_uidx",
+	"333_issue_status_pkey_index":                               "issue_status_pkey_uidx",
+	"335_issue_status_workspace_key_index":                      "idx_issue_status_workspace_key",
+	"336_issue_status_workspace_name_index":                     "idx_issue_status_workspace_name_active",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

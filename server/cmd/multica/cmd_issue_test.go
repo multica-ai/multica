@@ -2705,18 +2705,49 @@ func TestValidIssueStatuses(t *testing.T) {
 	}
 }
 
+// TestValidateIssueStatus pins the post-MUL-6243 contract: the CLI validates
+// the SHAPE of a status key, not its membership. A workspace can define custom
+// statuses, so only the server knows the valid set; rejecting an unknown key
+// locally would make every custom status unreachable from the CLI.
 func TestValidateIssueStatus(t *testing.T) {
 	for _, s := range validIssueStatuses {
 		if err := validateIssueStatus(s); err != nil {
-			t.Errorf("status %q should be valid, got: %v", s, err)
+			t.Errorf("built-in status %q should be valid, got: %v", s, err)
 		}
 	}
-	err := validateIssueStatus("active")
+
+	// Well-formed keys pass locally even though they are not built-ins — they
+	// may name a custom status. The server returns a 400 listing the
+	// workspace's real statuses when they do not.
+	for _, s := range []string{"human_review", "gate_approved", "rework", "active", "s1"} {
+		if err := validateIssueStatus(s); err != nil {
+			t.Errorf("well-formed custom status key %q should pass CLI validation, got: %v", s, err)
+		}
+	}
+
+	// Malformed keys are still caught locally, offline and instantly.
+	for _, s := range []string{
+		"",                      // empty
+		"   ",                   // whitespace only
+		"In Review",             // spaces
+		"in-review",             // hyphen is not in the key charset
+		"_leading",              // must start with a letter or digit
+		"Ünicode",               // non-ASCII
+		strings.Repeat("a", 33), // over the 32-character limit
+	} {
+		if err := validateIssueStatus(s); err == nil {
+			t.Errorf("malformed status key %q should be rejected", s)
+		}
+	}
+
+	// The error still names the built-ins, so a user who typo'd one is pointed
+	// back at the common set.
+	err := validateIssueStatus("In Review")
 	if err == nil {
-		t.Fatal("status \"active\" should be rejected")
+		t.Fatal("expected an error for a malformed key")
 	}
 	if !strings.Contains(err.Error(), "backlog") {
-		t.Errorf("error should list valid statuses, got: %v", err)
+		t.Errorf("error should list the built-in statuses, got: %v", err)
 	}
 }
 
@@ -2748,16 +2779,20 @@ func TestValidateIssuePriority(t *testing.T) {
 	}
 }
 
+// The status must be MALFORMED, not merely unknown: since MUL-6243 a workspace
+// can define custom statuses, so an unknown-but-well-formed key is the server's
+// call, not the CLI's. What still has to hold is that a malformed one never
+// costs a network round trip.
 func TestRunIssueCreateRejectsInvalidStatusBeforeRequest(t *testing.T) {
 	cmd := newIssueCreateTestCmd()
 	_ = cmd.Flags().Set("title", "Invalid status")
-	_ = cmd.Flags().Set("status", "active")
+	_ = cmd.Flags().Set("status", "not a status")
 	err := runIssueCreate(cmd, nil)
 	if err == nil {
-		t.Fatal("runIssueCreate should reject invalid status")
+		t.Fatal("runIssueCreate should reject a malformed status")
 	}
-	if !strings.Contains(err.Error(), "valid values") {
-		t.Fatalf("expected valid values error, got: %v", err)
+	if !strings.Contains(err.Error(), "valid values") && !strings.Contains(err.Error(), "status key") {
+		t.Fatalf("expected a local validation error, got: %v", err)
 	}
 }
 
@@ -2778,13 +2813,13 @@ func TestRunIssueUpdateRejectsInvalidStatusBeforeRequest(t *testing.T) {
 	cmd := &cobra.Command{Use: "update"}
 	cmd.Flags().String("status", "", "")
 	cmd.Flags().String("priority", "", "")
-	_ = cmd.Flags().Set("status", "active")
+	_ = cmd.Flags().Set("status", "not a status")
 	err := runIssueUpdate(cmd, []string{"MUL-1"})
 	if err == nil {
-		t.Fatal("runIssueUpdate should reject invalid status")
+		t.Fatal("runIssueUpdate should reject a malformed status")
 	}
-	if !strings.Contains(err.Error(), "valid values") {
-		t.Fatalf("expected valid values error, got: %v", err)
+	if !strings.Contains(err.Error(), "valid values") && !strings.Contains(err.Error(), "status key") {
+		t.Fatalf("expected a local validation error, got: %v", err)
 	}
 }
 
@@ -3828,5 +3863,63 @@ func TestRunIssueCommentListCompactWiring(t *testing.T) {
 		if _, ok := compacted[0][k]; !ok {
 			t.Errorf("--compact dropped %q — zero-value scalars must survive", k)
 		}
+	}
+}
+
+// TestIsTerminalChildIssue pins the stage-progress terminal test used by
+// `multica issue children --output json`. Since MUL-6243 a workspace can define
+// custom statuses, so counting only the literal done/cancelled would report
+// wrong progress to an agent reading the stage summary.
+func TestIsTerminalChildIssue(t *testing.T) {
+	cases := []struct {
+		name  string
+		issue map[string]any
+		want  bool
+	}{
+		{
+			name:  "built-in done",
+			issue: map[string]any{"status": "done", "status_category": "done"},
+			want:  true,
+		},
+		{
+			name:  "built-in cancelled",
+			issue: map[string]any{"status": "cancelled", "status_category": "cancelled"},
+			want:  true,
+		},
+		{
+			name:  "built-in in_progress",
+			issue: map[string]any{"status": "in_progress", "status_category": "in_progress"},
+			want:  false,
+		},
+		{
+			// The case the literal comparison got wrong.
+			name:  "custom status in the done category",
+			issue: map[string]any{"status": "gate_approved", "status_category": "done"},
+			want:  true,
+		},
+		{
+			name:  "custom status in the in_review category is not terminal",
+			issue: map[string]any{"status": "human_review", "status_category": "in_review"},
+			want:  false,
+		},
+		{
+			// Older backend: no status_category at all. Falling back to the raw
+			// status keeps the built-ins correct rather than reporting zero.
+			name:  "no category from an older backend falls back to status",
+			issue: map[string]any{"status": "done"},
+			want:  true,
+		},
+		{
+			name:  "unknown custom status with no category is not counted",
+			issue: map[string]any{"status": "gate_approved"},
+			want:  false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isTerminalChildIssue(tc.issue); got != tc.want {
+				t.Errorf("isTerminalChildIssue(%v) = %v, want %v", tc.issue, got, tc.want)
+			}
+		})
 	}
 }

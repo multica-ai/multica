@@ -273,6 +273,12 @@ multica issue children <parent-id>             # sub-issues grouped by stage
 multica issue status <stage-2-child-id> todo   # promote when its deps are met
 ```
 
+`issue children --output json` reports per-stage `done` counts. A workspace may
+define custom statuses beyond the 7 built-ins; a custom status counts as done
+here when its category is `done` or `cancelled`, which is what `status_category`
+on each child carries. Read `status_category` rather than matching `status`
+against the built-in names.
+
 Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's
 breakdown, leave it `backlog` and comment to confirm first.
