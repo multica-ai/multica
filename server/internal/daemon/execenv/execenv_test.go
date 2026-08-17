@@ -3681,6 +3681,8 @@ func TestWindowsSandboxFromConfig(t *testing.T) {
 	}{
 		{"unelevated dotted", `windows.sandbox = "unelevated"`, windowsSandboxNative},
 		{"elevated table", "[windows]\nsandbox = \"elevated\"\n", windowsSandboxNative},
+		{"present empty dotted value", `windows.sandbox = ""`, windowsSandboxUndecidable},
+		{"present empty table value", "[windows]\nsandbox = \"\"\n", windowsSandboxUndecidable},
 		{"absent key", `model = "o3"`, windowsSandboxAbsent},
 		{"empty config", "", windowsSandboxAbsent},
 		{"mixed case is invalid to codex", `windows.sandbox = "Unelevated"`, windowsSandboxUndecidable},
@@ -3712,6 +3714,8 @@ func TestWindowsSandboxFromCustomArgs(t *testing.T) {
 		{"inline -c=", []string{"-c=windows.sandbox=unelevated"}, windowsSandboxNative},
 		{"--config long form", []string{"--config", "windows.sandbox=elevated"}, windowsSandboxNative},
 		{"last occurrence wins", []string{"-c", "windows.sandbox=unelevated", "-c", "windows.sandbox=elevated"}, windowsSandboxNative},
+		{"two-token empty value is undecidable", []string{"-c", `windows.sandbox=""`}, windowsSandboxUndecidable},
+		{"inline empty value is undecidable", []string{`-c=windows.sandbox=""`}, windowsSandboxUndecidable},
 		{"invalid value undecidable", []string{"-c", "windows.sandbox=disabled"}, windowsSandboxUndecidable},
 		{"unrelated override ignored", []string{"-c", "model=o3"}, windowsSandboxAbsent},
 		{"no args", nil, windowsSandboxAbsent},
@@ -3937,6 +3941,66 @@ func TestPrepareCodexHomeWritesManagedSandboxBlock(t *testing.T) {
 	// sandboxed; emitting it would imply containment that does not exist.
 	if strings.Contains(s, "sandbox_workspace_write") {
 		t.Errorf("config.toml must not emit sandbox_workspace_write under danger-full-access, got:\n%s", s)
+	}
+}
+
+func TestPrepareCodexHomeWindowsSandboxPresenceControlsPolicy(t *testing.T) {
+	tests := []struct {
+		name       string
+		sharedBody string
+		wantMode   string
+	}{
+		{
+			name:       "present empty value fails closed",
+			sharedBody: "[windows]\nsandbox = \"\"\n",
+			wantMode:   "workspace-write",
+		},
+		{
+			name:       "unelevated value keeps native isolation",
+			sharedBody: "[windows]\nsandbox = \"unelevated\"\n",
+			wantMode:   "workspace-write",
+		},
+		{
+			name:       "elevated value keeps native isolation",
+			sharedBody: "[windows]\nsandbox = \"elevated\"\n",
+			wantMode:   "workspace-write",
+		},
+		{
+			name:       "absent value uses compatibility fallback",
+			sharedBody: "model = \"gpt-5\"\n",
+			wantMode:   "danger-full-access",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sharedHome := t.TempDir()
+			if err := os.WriteFile(filepath.Join(sharedHome, "config.toml"), []byte(tt.sharedBody), 0o644); err != nil {
+				t.Fatalf("write shared config: %v", err)
+			}
+			t.Setenv("CODEX_HOME", sharedHome)
+
+			codexHome := filepath.Join(t.TempDir(), "codex-home")
+			if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+				GOOS:         "windows",
+				CodexVersion: "0.144.5",
+			}, testLogger()); err != nil {
+				t.Fatalf("prepareCodexHomeWithOpts: %v", err)
+			}
+
+			data, err := os.ReadFile(filepath.Join(codexHome, "config.toml"))
+			if err != nil {
+				t.Fatalf("read prepared config: %v", err)
+			}
+			prepared := string(data)
+			wantDirective := fmt.Sprintf("sandbox_mode = %q", tt.wantMode)
+			if !strings.Contains(prepared, wantDirective) {
+				t.Fatalf("prepared config missing %s:\n%s", wantDirective, prepared)
+			}
+			if !strings.Contains(prepared, strings.TrimSpace(tt.sharedBody)) {
+				t.Fatalf("prepared config did not preserve copied user override:\n%s", prepared)
+			}
+		})
 	}
 }
 

@@ -3,14 +3,62 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type gateAgentArgsUpdateTxStarter struct {
+	delegate txStarter
+	entered  chan<- struct{}
+	release  <-chan struct{}
+}
+
+func (s *gateAgentArgsUpdateTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	s.entered <- struct{}{}
+	select {
+	case <-s.release:
+		return s.delegate.Begin(ctx)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+type rollbackOnCommitTx struct {
+	pgx.Tx
+}
+
+func (tx *rollbackOnCommitTx) Commit(ctx context.Context) error {
+	if err := tx.Tx.Rollback(ctx); err != nil {
+		return fmt.Errorf("rollback before injected commit failure: %w", err)
+	}
+	return errors.New("injected agent argument update commit failure")
+}
+
+type failFirstAgentArgsUpdateCommitTxStarter struct {
+	delegate txStarter
+	calls    int
+}
+
+func (s *failFirstAgentArgsUpdateCommitTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.delegate.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.calls++
+	if s.calls == 1 {
+		return &rollbackOnCommitTx{Tx: tx}, nil
+	}
+	return tx, nil
+}
 
 func TestCustomArgsForRuntime(t *testing.T) {
 	t.Parallel()
@@ -422,6 +470,305 @@ func TestAgentRuntimeOnlyUpdatePreservesConcurrentCustomArgs(t *testing.T) {
 			storedRuntimeID,
 			wantArgs,
 			windowsRuntimeID,
+		)
+	}
+}
+
+func TestAgentCustomArgsUpdateUsesRuntimeCommittedWhileWaitingForRowLock(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const managedSandbox = `windows.sandbox="unelevated"`
+	tests := []struct {
+		name              string
+		initialMetadata   string
+		targetMetadata    string
+		requestArgs       []string
+		wantSwitchArgs    []string
+		wantSwitchManaged bool
+		wantArgs          []string
+		wantManaged       bool
+	}{
+		{
+			name:              "linux to windows injects the managed pair",
+			initialMetadata:   `{"os":"linux"}`,
+			targetMetadata:    `{"os":"windows"}`,
+			requestArgs:       []string{"--profile", "concurrent", "--flag"},
+			wantSwitchArgs:    []string{"-c", managedSandbox, "--profile", "initial"},
+			wantSwitchManaged: true,
+			wantArgs:          []string{"-c", managedSandbox, "--profile", "concurrent", "--flag"},
+			wantManaged:       true,
+		},
+		{
+			name:              "windows to linux removes the managed pair",
+			initialMetadata:   `{"os":"windows"}`,
+			targetMetadata:    `{"os":"linux"}`,
+			requestArgs:       []string{"-c", managedSandbox, "--profile", "concurrent", "--flag"},
+			wantSwitchArgs:    []string{"--profile", "initial"},
+			wantSwitchManaged: false,
+			wantArgs:          []string{"--profile", "concurrent", "--flag"},
+		},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			createRuntime := func(suffix, metadata string) string {
+				t.Helper()
+				var runtimeID string
+				name := fmt.Sprintf("custom-args-lock-%d-%s", i, suffix)
+				if err := testPool.QueryRow(ctx, `
+					INSERT INTO agent_runtime (
+						workspace_id, daemon_id, name, runtime_mode, provider, status,
+						device_info, metadata, last_seen_at, owner_id
+					)
+					VALUES ($1, NULL, $2, 'cloud', 'codex', 'online', $3, $4::jsonb, now(), $5)
+					RETURNING id
+				`, testWorkspaceID, name, name, metadata, testUserID).Scan(&runtimeID); err != nil {
+					t.Fatalf("create runtime %s: %v", name, err)
+				}
+				return runtimeID
+			}
+
+			initialRuntimeID := createRuntime("initial", tt.initialMetadata)
+			targetRuntimeID := createRuntime("target", tt.targetMetadata)
+			agentName := fmt.Sprintf("custom-args-lock-%d-agent", i)
+			t.Cleanup(func() {
+				if _, err := testPool.Exec(ctx, `DELETE FROM agent WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, agentName); err != nil {
+					t.Errorf("delete test agent: %v", err)
+				}
+				if _, err := testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = ANY($1::uuid[])`, []string{initialRuntimeID, targetRuntimeID}); err != nil {
+					t.Errorf("delete test runtimes: %v", err)
+				}
+			})
+
+			create := httptest.NewRecorder()
+			testHandler.CreateAgent(create, newRequest(http.MethodPost, "/api/agents", map[string]any{
+				"name":                 agentName,
+				"runtime_id":           initialRuntimeID,
+				"visibility":           "private",
+				"max_concurrent_tasks": 1,
+				"custom_args":          []string{"--profile", "initial"},
+			}))
+			if create.Code != http.StatusCreated {
+				t.Fatalf("create status = %d, want 201: %s", create.Code, create.Body.String())
+			}
+			var created AgentResponse
+			if err := json.NewDecoder(create.Body).Decode(&created); err != nil {
+				t.Fatalf("decode created agent: %v", err)
+			}
+
+			entered := make(chan struct{}, 1)
+			release := make(chan struct{})
+			var releaseOnce sync.Once
+			releaseGate := func() { releaseOnce.Do(func() { close(release) }) }
+			defer releaseGate()
+			customArgsHandler := *testHandler
+			customArgsHandler.TxStarter = &gateAgentArgsUpdateTxStarter{
+				delegate: testHandler.TxStarter,
+				entered:  entered,
+				release:  release,
+			}
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				w := httptest.NewRecorder()
+				req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+created.ID, map[string]any{
+					"custom_args": tt.requestArgs,
+				}), "id", created.ID)
+				customArgsHandler.UpdateAgent(w, req)
+				done <- w
+			}()
+
+			select {
+			case <-entered:
+			case <-time.After(5 * time.Second):
+				t.Fatal("custom_args update did not reach its transaction after observing runtime A")
+			}
+
+			switchResponse := httptest.NewRecorder()
+			testHandler.UpdateAgent(switchResponse, withURLParam(newRequest(http.MethodPatch, "/api/agents/"+created.ID, map[string]any{
+				"runtime_id": targetRuntimeID,
+			}), "id", created.ID))
+			if switchResponse.Code != http.StatusOK {
+				t.Fatalf("runtime-only switch status = %d, want 200: %s", switchResponse.Code, switchResponse.Body.String())
+			}
+			var switched AgentResponse
+			if err := json.NewDecoder(switchResponse.Body).Decode(&switched); err != nil {
+				t.Fatalf("decode runtime-only switch: %v", err)
+			}
+			if switched.RuntimeID != targetRuntimeID ||
+				!reflect.DeepEqual(switched.CustomArgs, tt.wantSwitchArgs) ||
+				switched.IsCodexWindowsSandboxArgManaged != tt.wantSwitchManaged {
+				t.Fatalf(
+					"runtime-only switch = runtime:%s args:%v managed:%v, want runtime:%s args:%v managed:%v",
+					switched.RuntimeID,
+					switched.CustomArgs,
+					switched.IsCodexWindowsSandboxArgManaged,
+					targetRuntimeID,
+					tt.wantSwitchArgs,
+					tt.wantSwitchManaged,
+				)
+			}
+			releaseGate()
+
+			var response *httptest.ResponseRecorder
+			select {
+			case response = <-done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("custom_args update did not finish after runtime switch committed")
+			}
+			if response.Code != http.StatusOK {
+				t.Fatalf("custom_args update status = %d, want 200: %s", response.Code, response.Body.String())
+			}
+
+			var updated AgentResponse
+			if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+				t.Fatalf("decode updated agent: %v", err)
+			}
+			if updated.RuntimeID != targetRuntimeID ||
+				!reflect.DeepEqual(updated.CustomArgs, tt.wantArgs) ||
+				updated.IsCodexWindowsSandboxArgManaged != tt.wantManaged {
+				t.Fatalf(
+					"response = runtime:%s args:%v managed:%v, want runtime:%s args:%v managed:%v",
+					updated.RuntimeID,
+					updated.CustomArgs,
+					updated.IsCodexWindowsSandboxArgManaged,
+					targetRuntimeID,
+					tt.wantArgs,
+					tt.wantManaged,
+				)
+			}
+
+			var storedRaw []byte
+			var storedManaged bool
+			var storedRuntimeID string
+			if err := testPool.QueryRow(ctx, `
+				SELECT custom_args, is_codex_windows_sandbox_arg_managed, runtime_id
+				FROM agent
+				WHERE id = $1
+			`, created.ID).Scan(&storedRaw, &storedManaged, &storedRuntimeID); err != nil {
+				t.Fatalf("read stored agent: %v", err)
+			}
+			var storedArgs []string
+			if err := json.Unmarshal(storedRaw, &storedArgs); err != nil {
+				t.Fatalf("decode stored custom_args: %v", err)
+			}
+			if storedRuntimeID != targetRuntimeID || !reflect.DeepEqual(storedArgs, tt.wantArgs) || storedManaged != tt.wantManaged {
+				t.Fatalf(
+					"stored = runtime:%s args:%v managed:%v, want runtime:%s args:%v managed:%v",
+					storedRuntimeID,
+					storedArgs,
+					storedManaged,
+					targetRuntimeID,
+					tt.wantArgs,
+					tt.wantManaged,
+				)
+			}
+		})
+	}
+}
+
+func TestAgentCustomArgsUpdateTransactionFailureCanRetry(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const agentName = "custom-args-transaction-retry"
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider, status,
+			device_info, metadata, last_seen_at, owner_id
+		)
+		VALUES ($1, NULL, $2, 'cloud', 'codex', 'online', $2, '{"os":"windows"}'::jsonb, now(), $3)
+		RETURNING id
+	`, testWorkspaceID, agentName+"-runtime", testUserID).Scan(&runtimeID); err != nil {
+		t.Fatalf("create runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		if _, err := testPool.Exec(ctx, `DELETE FROM agent WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, agentName); err != nil {
+			t.Errorf("delete test agent: %v", err)
+		}
+		if _, err := testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID); err != nil {
+			t.Errorf("delete test runtime: %v", err)
+		}
+	})
+
+	create := httptest.NewRecorder()
+	testHandler.CreateAgent(create, newRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name":                 agentName,
+		"runtime_id":           runtimeID,
+		"visibility":           "private",
+		"max_concurrent_tasks": 1,
+		"custom_args":          []string{"--profile", "initial"},
+	}))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201: %s", create.Code, create.Body.String())
+	}
+	var created AgentResponse
+	if err := json.NewDecoder(create.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created agent: %v", err)
+	}
+
+	failingHandler := *testHandler
+	failingHandler.TxStarter = &failFirstAgentArgsUpdateCommitTxStarter{delegate: testHandler.TxStarter}
+	requestBody := map[string]any{
+		"custom_args": []string{"-c", `windows.sandbox="unelevated"`, "--profile", "retry"},
+	}
+	update := func() *httptest.ResponseRecorder {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+created.ID, requestBody), "id", created.ID)
+		failingHandler.UpdateAgent(w, req)
+		return w
+	}
+
+	failed := update()
+	if failed.Code != http.StatusInternalServerError {
+		t.Fatalf("injected commit failure status = %d, want 500: %s", failed.Code, failed.Body.String())
+	}
+	var afterFailureRaw []byte
+	var afterFailureManaged bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT custom_args, is_codex_windows_sandbox_arg_managed
+		FROM agent
+		WHERE id = $1
+	`, created.ID).Scan(&afterFailureRaw, &afterFailureManaged); err != nil {
+		t.Fatalf("read agent after injected failure: %v", err)
+	}
+	var afterFailureArgs []string
+	if err := json.Unmarshal(afterFailureRaw, &afterFailureArgs); err != nil {
+		t.Fatalf("decode custom_args after injected failure: %v", err)
+	}
+	if !reflect.DeepEqual(afterFailureArgs, created.CustomArgs) || afterFailureManaged != created.IsCodexWindowsSandboxArgManaged {
+		t.Fatalf(
+			"failed update changed args/provenance: args:%v managed:%v, want args:%v managed:%v",
+			afterFailureArgs,
+			afterFailureManaged,
+			created.CustomArgs,
+			created.IsCodexWindowsSandboxArgManaged,
+		)
+	}
+
+	retried := update()
+	if retried.Code != http.StatusOK {
+		t.Fatalf("retry status = %d, want 200: %s", retried.Code, retried.Body.String())
+	}
+	var updated AgentResponse
+	if err := json.NewDecoder(retried.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode retried agent: %v", err)
+	}
+	wantArgs := []string{"-c", `windows.sandbox="unelevated"`, "--profile", "retry"}
+	if updated.RuntimeID != runtimeID || !updated.IsCodexWindowsSandboxArgManaged || !reflect.DeepEqual(updated.CustomArgs, wantArgs) {
+		t.Fatalf(
+			"retry response = runtime:%s args:%v managed:%v, want runtime:%s args:%v managed:true",
+			updated.RuntimeID,
+			updated.CustomArgs,
+			updated.IsCodexWindowsSandboxArgManaged,
+			runtimeID,
+			wantArgs,
 		)
 	}
 }

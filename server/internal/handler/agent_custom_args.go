@@ -34,22 +34,57 @@ func customArgsForRuntime(runtime db.AgentRuntime, customArgs []string, managed 
 	)
 }
 
-// normalizedRuntimeOnlyCustomArgs re-reads and normalizes the row locked by a
-// runtime-only update. The caller must hold that row lock through UpdateAgent;
-// otherwise a concurrent custom_args replacement can land between this read and
-// the write and be overwritten by a stale normalized copy.
-func normalizedRuntimeOnlyCustomArgs(existing db.Agent, runtime db.AgentRuntime) ([]byte, bool, error) {
+// normalizedAgentCustomArgsForUpdate derives custom_args from an agent row
+// re-read under the update transaction's row lock. runtime is the effective
+// runtime after applying the request (nil for an unbound agent). requestedArgs
+// is nil for a runtime-only update and non-nil for an explicit replacement.
+// requestObservedManaged is the provenance snapshot seen before the explicit
+// replacement waited for the lock; it authenticates a legacy client's echoed
+// managed prefix even if a concurrent runtime switch removes that prefix while
+// this request is waiting. Runtime selection and persisted normalization still
+// come exclusively from the locked row.
+// The caller must hold the row lock through UpdateAgent so runtime and argv can
+// never be persisted from different snapshots.
+func normalizedAgentCustomArgsForUpdate(
+	existing db.Agent,
+	runtime *db.AgentRuntime,
+	requestedArgs *[]string,
+	requestedManaged *bool,
+	requestObservedManaged bool,
+) ([]byte, bool, error) {
+	managed := existing.IsCodexWindowsSandboxArgManaged
 	var customArgs []string
-	if len(existing.CustomArgs) > 0 {
-		if err := json.Unmarshal(existing.CustomArgs, &customArgs); err != nil {
-			return nil, false, err
+	if requestedArgs == nil {
+		if len(existing.CustomArgs) > 0 {
+			if err := json.Unmarshal(existing.CustomArgs, &customArgs); err != nil {
+				return nil, false, err
+			}
+		}
+	} else {
+		customArgs = append([]string(nil), (*requestedArgs)...)
+		switch {
+		case requestedManaged != nil && *requestedManaged:
+			// A client may echo true only to retain already-proven ownership
+			// of the exact prefix it observed; it cannot manufacture
+			// provenance from state committed while this request waited.
+			managed = requestObservedManaged && agent.HasManagedCodexWindowsSandboxPrefix(customArgs)
+		case requestedManaged != nil:
+			managed = false
+		default:
+			// Compatibility with clients that echo the managed pair but
+			// predate the provenance field. Authenticate against the
+			// snapshot this request observed, then apply the locked runtime.
+			managed = requestObservedManaged && agent.HasManagedCodexWindowsSandboxPrefix(customArgs)
 		}
 	}
-	customArgs, managed := customArgsForRuntime(
-		runtime,
-		customArgs,
-		existing.IsCodexWindowsSandboxArgManaged,
-	)
+
+	if runtime == nil {
+		customArgs, managed = agent.NormalizeCodexWindowsSandboxCustomArgs(
+			"", managed, false, customArgs,
+		)
+	} else {
+		customArgs, managed = customArgsForRuntime(*runtime, customArgs, managed)
+	}
 	encoded, err := json.Marshal(customArgs)
 	if err != nil {
 		return nil, false, err

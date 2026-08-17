@@ -1648,7 +1648,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	// runtime to validate a thinking_level change. Resolve once and reuse.
 	targetRuntimeID := existing.RuntimeID
 	targetProvider := ""
-	var targetRuntime *db.AgentRuntime
 	if req.RuntimeID != nil {
 		runtimeUUID, ok := parseUUIDOrBadRequest(w, *req.RuntimeID, "runtime_id")
 		if !ok {
@@ -1677,60 +1676,6 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		params.RuntimeMode = pgtype.Text{String: runtime.RuntimeMode, Valid: true}
 		targetRuntimeID = runtime.ID
 		targetProvider = runtime.Provider
-		targetRuntime = &runtime
-	}
-	if req.CustomArgs != nil {
-		nextCustomArgs := append([]string(nil), (*req.CustomArgs)...)
-		if targetRuntime == nil {
-			if targetRuntimeID.Valid {
-				runtime, err := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
-					ID:          targetRuntimeID,
-					WorkspaceID: existing.WorkspaceID,
-				})
-				if err != nil {
-					writeError(w, http.StatusInternalServerError, "failed to resolve runtime for custom_args")
-					return
-				}
-				targetRuntime = &runtime
-			}
-		}
-		managed := existing.IsCodexWindowsSandboxArgManaged
-		switch {
-		case req.IsCodexWindowsSandboxArgManaged != nil:
-			if *req.IsCodexWindowsSandboxArgManaged {
-				// A client may echo true only to retain already-proven
-				// ownership of the exact prefix; it cannot manufacture
-				// platform provenance for user-authored arguments.
-				managed = managed && agent.HasManagedCodexWindowsSandboxPrefix(nextCustomArgs)
-			} else {
-				managed = false
-			}
-		default:
-			// Compatibility with installed clients that render and echo the
-			// managed pair but predate the provenance field. Only an existing
-			// managed bit plus the exact prefix retains platform ownership.
-			managed = managed && agent.HasManagedCodexWindowsSandboxPrefix(nextCustomArgs)
-		}
-		var nextManaged bool
-		if targetRuntime == nil {
-			// Unbound agents are a supported persisted state. With no runtime to
-			// supply a platform condition, preserve the explicit user replacement
-			// without injecting a platform-owned default.
-			nextCustomArgs, nextManaged = agent.NormalizeCodexWindowsSandboxCustomArgs(
-				"", managed, false, nextCustomArgs,
-			)
-		} else {
-			nextCustomArgs, nextManaged = customArgsForRuntime(
-				*targetRuntime, nextCustomArgs, managed,
-			)
-		}
-		ca, err := json.Marshal(nextCustomArgs)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, "failed to encode custom_args")
-			return
-		}
-		params.CustomArgs = ca
-		params.IsCodexWindowsSandboxArgManaged = pgtype.Bool{Bool: nextManaged, Valid: true}
 	}
 	// Invocation permission (MUL-3963). OWNER-ONLY write: access is the one
 	// agent property a workspace admin may NOT change (only the owner decides
@@ -1948,31 +1893,47 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var updated db.Agent
-	if req.RuntimeID != nil && req.CustomArgs == nil {
-		if targetRuntime == nil {
-			writeError(w, http.StatusInternalServerError, "failed to resolve runtime for custom_args")
-			return
-		}
-
+	if req.RuntimeID != nil || req.CustomArgs != nil {
 		tx, beginErr := h.TxStarter.Begin(r.Context())
 		if beginErr != nil {
-			writeError(w, http.StatusInternalServerError, "failed to start runtime update transaction")
+			writeError(w, http.StatusInternalServerError, "failed to start agent argument update transaction")
 			return
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
 
-		// GetAgentForClaimUpdate is the existing generic SELECT ... FOR UPDATE
-		// row-lock query. Re-read custom_args and its provenance while holding
-		// that lock so a concurrent editor cannot be overwritten by stale data.
+		// Re-read runtime, custom_args, and provenance under one row lock. Both
+		// runtime-only and explicit custom_args requests use this path so neither
+		// can persist normalization derived from the other's prior snapshot.
 		locked, lockErr := qtx.GetAgentForClaimUpdate(r.Context(), existing.ID)
 		if lockErr != nil {
-			writeError(w, http.StatusInternalServerError, "failed to lock agent for runtime update")
+			writeError(w, http.StatusInternalServerError, "failed to lock agent for argument update")
 			return
 		}
-		encodedArgs, managed, normalizeErr := normalizedRuntimeOnlyCustomArgs(
+
+		effectiveRuntimeID := locked.RuntimeID
+		if req.RuntimeID != nil {
+			effectiveRuntimeID = params.RuntimeID
+		}
+		var effectiveRuntime *db.AgentRuntime
+		if effectiveRuntimeID.Valid {
+			runtime, runtimeErr := qtx.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+				ID:          effectiveRuntimeID,
+				WorkspaceID: locked.WorkspaceID,
+			})
+			if runtimeErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to resolve locked runtime for custom_args")
+				return
+			}
+			effectiveRuntime = &runtime
+		}
+
+		encodedArgs, managed, normalizeErr := normalizedAgentCustomArgsForUpdate(
 			locked,
-			*targetRuntime,
+			effectiveRuntime,
+			req.CustomArgs,
+			req.IsCodexWindowsSandboxArgManaged,
+			existing.IsCodexWindowsSandboxArgManaged,
 		)
 		if normalizeErr != nil {
 			writeError(w, http.StatusInternalServerError, "failed to normalize current custom_args")

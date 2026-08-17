@@ -163,6 +163,14 @@ func TestBuildCodexArgsWindowsSandboxPrecedenceAndPlatformTransitions(t *testing
 			want: []string{"app-server", "--listen", "stdio://", "-c", `windows.sandbox="elevated"`, "--profile", "research"},
 		},
 		{
+			name: "present empty override remains explicit without a managed duplicate",
+			opts: ExecOptions{
+				GOOS:       "windows",
+				CustomArgs: []string{"-c", `windows.sandbox=""`, "--profile", "research"},
+			},
+			want: []string{"app-server", "--listen", "stdio://", "-c", `windows.sandbox=""`, "--profile", "research"},
+		},
+		{
 			name: "non-windows spawn removes stale managed prefix",
 			opts: ExecOptions{
 				GOOS:                            "linux",

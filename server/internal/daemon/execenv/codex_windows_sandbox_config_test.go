@@ -17,6 +17,7 @@ func TestCodexWindowsSandboxConfigOwns(t *testing.T) {
 		{name: "missing config", want: false},
 		{name: "unrelated config", content: stringPtr(`model = "gpt-5"`), want: false},
 		{name: "explicit elevated", content: stringPtr("[windows]\nsandbox = \"elevated\"\n"), want: true},
+		{name: "explicit empty fails closed", content: stringPtr("[windows]\nsandbox = \"\"\n"), want: true},
 		{name: "malformed config fails closed", content: stringPtr("[windows\n"), want: true},
 	}
 

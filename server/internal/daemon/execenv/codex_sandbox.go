@@ -203,13 +203,16 @@ func codexSandboxPolicyForWindows(state windowsSandboxConfig) codexSandboxPolicy
 func windowsSandboxFromConfig(config string) windowsSandboxConfig {
 	var probe struct {
 		Windows struct {
-			Sandbox string `toml:"sandbox"`
+			Sandbox *string `toml:"sandbox"`
 		} `toml:"windows"`
 	}
 	if err := toml.Unmarshal([]byte(config), &probe); err != nil {
 		return windowsSandboxUndecidable
 	}
-	return classifyWindowsSandboxValue(probe.Windows.Sandbox)
+	if probe.Windows.Sandbox == nil {
+		return windowsSandboxAbsent
+	}
+	return classifyWindowsSandboxValue(*probe.Windows.Sandbox)
 }
 
 // CodexWindowsSandboxConfigOwns reports whether the task config has an
@@ -247,16 +250,15 @@ func windowsSandboxFromCustomArgs(args []string) windowsSandboxConfig {
 
 // classifyWindowsSandboxValue maps a raw windows.sandbox value (from config.toml
 // or a `-c` arg, possibly surrounded by whitespace/quotes) to a tri-state. Only
-// the exact-lowercase variants Codex accepts count as native; a present but
-// unaccepted value is undecidable (Codex would refuse the config); an empty
-// value is absent.
+// the exact-lowercase variants Codex accepts count as native. Callers preserve
+// assignment presence separately before invoking this function, so every
+// other value — including an explicitly empty one — is undecidable and fails
+// closed (Codex would refuse the config).
 func classifyWindowsSandboxValue(raw string) windowsSandboxConfig {
 	v := strings.TrimSpace(raw)
 	v = strings.Trim(v, `"'`)
 	v = strings.TrimSpace(v)
 	switch v {
-	case "":
-		return windowsSandboxAbsent
 	case "unelevated", "elevated":
 		return windowsSandboxNative
 	default:
