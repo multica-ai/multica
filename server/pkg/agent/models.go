@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strings"
@@ -112,9 +113,15 @@ type modelCacheEntry struct {
 var (
 	modelCacheMu sync.Mutex
 	modelCache   = map[string]modelCacheEntry{}
+
+	openCodexModelCacheMu        sync.Mutex
+	openCodexModelCache          []Model
+	openCodexModelCacheExpiresAt time.Time
+	openCodexModelCacheValid     bool
 )
 
 const modelCacheTTL = 60 * time.Second
+const openCodexModelCacheTTL = 5 * time.Minute
 
 // ListModels returns the models supported by the given agent provider.
 // For providers with a known static catalog it returns the baked-in
@@ -155,7 +162,9 @@ func ListModels(ctx context.Context, providerType, executablePath string) (Catal
 		return Catalog{Models: models}, nil
 	case "codex":
 		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
-			return discovered(discoverCodexModels(ctx, executablePath), nil)
+			models := discoverCodexModels(ctx, executablePath)
+			models = mergeModels(models, discoverOpenCodexModels(ctx))
+			return discovered(models, nil)
 		})
 	case "antigravity":
 		// agy 1.0.6 added a `--model` flag plus an `agy models` catalog
@@ -407,6 +416,25 @@ func discoveryCacheKey(providerType, executablePath string) string {
 	return providerType + ":" + executablePath
 }
 
+// mergeModels appends models that are not already present in the primary
+// catalog. Primary entries win so their runtime-owned default, thinking, and
+// service-tier metadata remain authoritative.
+func mergeModels(primary, additional []Model) []Model {
+	merged := make([]Model, 0, len(primary)+len(additional))
+	seen := make(map[string]struct{}, len(primary)+len(additional))
+	for _, model := range append(primary, additional...) {
+		if model.ID == "" {
+			continue
+		}
+		if _, ok := seen[model.ID]; ok {
+			continue
+		}
+		seen[model.ID] = struct{}{}
+		merged = append(merged, model)
+	}
+	return merged
+}
+
 // ── Static catalogs ──
 
 // claudeStaticModels reflects the Claude Code CLI's accepted --model
@@ -583,6 +611,175 @@ func isOpenAIReasoningSeriesID(id string) bool {
 }
 
 // ── Dynamic discovery ──
+
+// discoverOpenCodexModels discovers provider/model routes configured in the
+// local OpenCodex proxy. OpenCodex models are valid Codex model overrides but
+// are not part of `codex debug models --bundled`, so without this merge they
+// can be used from the CLI yet remain absent from Multica's model picker.
+func discoverOpenCodexModels(ctx context.Context) []Model {
+	return cachedOpenCodexModels(func() ([]Model, error) {
+		return queryOpenCodexModels(ctx)
+	})
+}
+
+// cachedOpenCodexModels keeps the last successful OpenCodex catalog. Unlike
+// the short-lived general discovery cache, an expired successful result is
+// retained when a refresh fails so a transient proxy or network failure does
+// not make previously selectable routed models disappear from the UI.
+func cachedOpenCodexModels(load func() ([]Model, error)) []Model {
+	openCodexModelCacheMu.Lock()
+	if openCodexModelCacheValid && time.Now().Before(openCodexModelCacheExpiresAt) {
+		models := cloneModels(openCodexModelCache)
+		openCodexModelCacheMu.Unlock()
+		return models
+	}
+	openCodexModelCacheMu.Unlock()
+
+	models, err := load()
+	if err == nil && len(models) > 0 {
+		models = cloneModels(models)
+		openCodexModelCacheMu.Lock()
+		openCodexModelCache = models
+		openCodexModelCacheExpiresAt = time.Now().Add(openCodexModelCacheTTL)
+		openCodexModelCacheValid = true
+		openCodexModelCacheMu.Unlock()
+		return cloneModels(models)
+	}
+
+	openCodexModelCacheMu.Lock()
+	stale := cloneModels(openCodexModelCache)
+	valid := openCodexModelCacheValid
+	openCodexModelCacheMu.Unlock()
+	if valid {
+		slog.Debug("OpenCodex model refresh failed; using last successful catalog", "error", err)
+		return stale
+	}
+	return nil
+}
+
+func queryOpenCodexModels(ctx context.Context) ([]Model, error) {
+	executablePath, err := findOpenCodexExecutable()
+	if err != nil {
+		return nil, err
+	}
+	runCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(runCtx, executablePath, "models", "--json")
+	hideAgentWindow(cmd)
+	raw, err := cmd.Output()
+	if err != nil {
+		return nil, err
+	}
+	models, err := parseOpenCodexModels(raw)
+	if err != nil {
+		return nil, err
+	}
+	if len(models) == 0 {
+		return nil, fmt.Errorf("OpenCodex returned an empty model catalog")
+	}
+	return models, nil
+}
+
+// findOpenCodexExecutable includes common user-local install locations because
+// a macOS app launched from Finder does not inherit the interactive shell PATH.
+func findOpenCodexExecutable() (string, error) {
+	if executablePath, err := exec.LookPath("ocx"); err == nil {
+		return executablePath, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	candidates := []string{
+		filepath.Join(home, ".hermes", "node", "bin", "ocx"),
+		filepath.Join(home, ".local", "bin", "ocx"),
+		filepath.Join(home, ".opencode", "bin", "ocx"),
+	}
+	for _, candidate := range candidates {
+		info, statErr := os.Stat(candidate)
+		if statErr == nil && !info.IsDir() && info.Mode()&0o111 != 0 {
+			return candidate, nil
+		}
+	}
+	return "", fmt.Errorf("ocx executable not found")
+}
+
+type openCodexModelsResponse struct {
+	Models []struct {
+		Provider         string   `json:"provider"`
+		Model            string   `json:"model"`
+		ReasoningEfforts []string `json:"reasoningEfforts"`
+	} `json:"models"`
+}
+
+func parseOpenCodexModels(raw []byte) ([]Model, error) {
+	var response openCodexModelsResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, err
+	}
+	models := make([]Model, 0, len(response.Models))
+	seen := make(map[string]struct{}, len(response.Models))
+	for _, entry := range response.Models {
+		provider := strings.TrimSpace(entry.Provider)
+		modelID := strings.TrimSpace(entry.Model)
+		if provider == "" || modelID == "" {
+			continue
+		}
+		id := provider + "/" + modelID
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		models = append(models, Model{
+			ID:       id,
+			Label:    id,
+			Provider: provider,
+			Thinking: openCodexThinkingLevels(entry.ReasoningEfforts),
+		})
+	}
+	return models, nil
+}
+
+func openCodexThinkingLevels(efforts []string) *ModelThinking {
+	levels := make([]ThinkingLevel, 0, len(efforts))
+	seen := make(map[string]struct{}, len(efforts))
+	for _, raw := range efforts {
+		effort := strings.TrimSpace(raw)
+		if effort == "" || !isValidDynamicThinkingValue(effort) {
+			continue
+		}
+		if _, ok := seen[effort]; ok {
+			continue
+		}
+		seen[effort] = struct{}{}
+		label, ok := codexEffortLabel[effort]
+		if !ok {
+			label = strings.Title(effort) //nolint:staticcheck
+		}
+		levels = append(levels, ThinkingLevel{Value: effort, Label: label})
+	}
+	if len(levels) == 0 {
+		return nil
+	}
+	return &ModelThinking{SupportedLevels: levels}
+}
+
+func cloneModels(models []Model) []Model {
+	if models == nil {
+		return nil
+	}
+	cloned := make([]Model, len(models))
+	for i, model := range models {
+		cloned[i] = model
+		cloned[i].ServiceTiers = append([]ModelServiceTier(nil), model.ServiceTiers...)
+		if model.Thinking != nil {
+			thinking := *model.Thinking
+			thinking.SupportedLevels = append([]ThinkingLevel(nil), model.Thinking.SupportedLevels...)
+			cloned[i].Thinking = &thinking
+		}
+	}
+	return cloned
+}
 
 // discoverOpenCodeModels runs `opencode models --verbose` and parses its
 // output. The CLI prints `provider/model` rows, followed by JSON metadata

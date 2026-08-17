@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -11,6 +12,147 @@ import (
 	"testing"
 	"time"
 )
+
+func TestParseOpenCodexModels(t *testing.T) {
+	t.Parallel()
+	raw := []byte(`{
+  "models": [
+    {
+      "provider": "opencode-zen",
+      "model": "deepseek-v4-flash-free",
+      "reasoningEfforts": ["low", "high", "max", "high", "bad value"]
+    },
+    {
+      "provider": "agnes",
+      "model": "agnes-2.0-flash",
+      "reasoningEfforts": null
+    },
+    {
+      "provider": "opencode-zen",
+      "model": "deepseek-v4-flash-free",
+      "reasoningEfforts": ["low"]
+    }
+  ]
+}`)
+
+	got, err := parseOpenCodexModels(raw)
+	if err != nil {
+		t.Fatalf("parseOpenCodexModels: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("models len = %d, want 2: %+v", len(got), got)
+	}
+	deepseek := got[0]
+	if deepseek.ID != "opencode-zen/deepseek-v4-flash-free" ||
+		deepseek.Label != deepseek.ID ||
+		deepseek.Provider != "opencode-zen" {
+		t.Errorf("DeepSeek model = %+v", deepseek)
+	}
+	if deepseek.Thinking == nil {
+		t.Fatal("DeepSeek thinking catalog is nil")
+	}
+	if values := thinkingValues(deepseek.Thinking); !reflect.DeepEqual(values, []string{"low", "high", "max"}) {
+		t.Errorf("DeepSeek thinking levels = %v, want [low high max]", values)
+	}
+	if labels := []string{
+		deepseek.Thinking.SupportedLevels[0].Label,
+		deepseek.Thinking.SupportedLevels[1].Label,
+		deepseek.Thinking.SupportedLevels[2].Label,
+	}; !reflect.DeepEqual(labels, []string{"Low", "High", "Max"}) {
+		t.Errorf("DeepSeek thinking labels = %v, want [Low High Max]", labels)
+	}
+	agnes := got[1]
+	if agnes.ID != "agnes/agnes-2.0-flash" || agnes.Provider != "agnes" {
+		t.Errorf("Agnes model = %+v", agnes)
+	}
+	if agnes.Thinking != nil {
+		t.Errorf("Agnes thinking = %+v, want nil", agnes.Thinking)
+	}
+}
+
+func TestMergeModelsPreservesPrimaryMetadataAndDeduplicates(t *testing.T) {
+	t.Parallel()
+	primary := []Model{{
+		ID:       "gpt-5.6-sol",
+		Label:    "GPT-5.6-Sol",
+		Provider: "openai",
+		Default:  true,
+		ServiceTiers: []ModelServiceTier{{
+			ID:   "fast",
+			Name: "Fast",
+		}},
+		Thinking: &ModelThinking{
+			SupportedLevels: []ThinkingLevel{{Value: "high", Label: "High"}},
+			DefaultLevel:    "high",
+		},
+	}}
+	additional := []Model{
+		{ID: "gpt-5.6-sol", Label: "duplicate"},
+		{ID: "agnes/agnes-2.0-flash", Label: "agnes/agnes-2.0-flash", Provider: "agnes"},
+	}
+
+	got := mergeModels(primary, additional)
+	if len(got) != 2 {
+		t.Fatalf("merged len = %d, want 2: %+v", len(got), got)
+	}
+	if !reflect.DeepEqual(got[0], primary[0]) {
+		t.Errorf("primary metadata changed: got %+v, want %+v", got[0], primary[0])
+	}
+	if got[1].ID != "agnes/agnes-2.0-flash" {
+		t.Errorf("additional model = %+v", got[1])
+	}
+}
+
+func TestOpenCodexModelCacheUsesLastSuccessfulCatalogOnRefreshFailure(t *testing.T) {
+	openCodexModelCacheMu.Lock()
+	previousModels := openCodexModelCache
+	previousExpiry := openCodexModelCacheExpiresAt
+	previousValid := openCodexModelCacheValid
+	openCodexModelCache = nil
+	openCodexModelCacheExpiresAt = time.Time{}
+	openCodexModelCacheValid = false
+	openCodexModelCacheMu.Unlock()
+	t.Cleanup(func() {
+		openCodexModelCacheMu.Lock()
+		openCodexModelCache = previousModels
+		openCodexModelCacheExpiresAt = previousExpiry
+		openCodexModelCacheValid = previousValid
+		openCodexModelCacheMu.Unlock()
+	})
+
+	initial := []Model{{
+		ID:       "opencode-zen/deepseek-v4-flash-free",
+		Label:    "opencode-zen/deepseek-v4-flash-free",
+		Provider: "opencode-zen",
+		ServiceTiers: []ModelServiceTier{{
+			ID:   "free",
+			Name: "Free",
+		}},
+		Thinking: &ModelThinking{
+			SupportedLevels: []ThinkingLevel{{Value: "high", Label: "High"}},
+		},
+	}}
+	got := cachedOpenCodexModels(func() ([]Model, error) {
+		return initial, nil
+	})
+	if !reflect.DeepEqual(got, initial) {
+		t.Fatalf("initial cache result = %+v, want %+v", got, initial)
+	}
+
+	// Mutating a caller-owned result must not corrupt the cached catalog.
+	got[0].ServiceTiers[0].Name = "mutated"
+	got[0].Thinking.SupportedLevels[0].Label = "mutated"
+	openCodexModelCacheMu.Lock()
+	openCodexModelCacheExpiresAt = time.Now().Add(-time.Second)
+	openCodexModelCacheMu.Unlock()
+
+	stale := cachedOpenCodexModels(func() ([]Model, error) {
+		return nil, errors.New("temporary OpenCodex failure")
+	})
+	if !reflect.DeepEqual(stale, initial) {
+		t.Fatalf("stale cache result = %+v, want %+v", stale, initial)
+	}
+}
 
 func TestStaticModelCatalogsHaveValidEntries(t *testing.T) {
 	t.Parallel()
