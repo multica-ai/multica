@@ -187,11 +187,14 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	}()
 
 	go func() {
-		defer cancel()
 		defer msgStream.close()
 		defer close(resCh)
 		defer func() {
 			_ = stdin.Close()
+			// Cancellation must remain reachable before Wait. MCode or a tool
+			// descendant may ignore stdin EOF, so waiting first can deadlock every
+			// early-return path, including a rejected session resume.
+			cancel()
 			_ = cmd.Wait()
 			releaseProcessGroup(cmd)
 		}()
