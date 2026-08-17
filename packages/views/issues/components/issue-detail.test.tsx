@@ -1,7 +1,6 @@
 import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, Label, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -1705,7 +1704,6 @@ describe("IssueDetail (shared)", () => {
     });
 
     it("exposes persistent ordering controls in display settings", async () => {
-      const user = userEvent.setup();
       mockApiObj.listChildIssues.mockResolvedValue({
         issues: [
           subIssue({
@@ -1720,17 +1718,19 @@ describe("IssueDetail (shared)", () => {
       renderIssueDetail();
 
       await screen.findByText("Fix login flow");
-      await user.click(screen.getByRole("button", { name: "Display settings" }));
+      fireEvent.click(screen.getByRole("button", { name: "Display settings" }));
       const ordering = await screen.findByRole("combobox", { name: "Ordering" });
       expect(ordering).toHaveTextContent("Created date");
-      await user.click(ordering);
-      await user.click(await screen.findByRole("option", { name: "Priority" }));
+      fireEvent.click(ordering);
+      const priorityOption = await screen.findByRole("option", { name: "Priority" });
+      fireEvent.mouseMove(priorityOption);
+      fireEvent.click(priorityOption);
       expect(useSubIssueDisplayStore.getState().sortBy).toBe("priority");
       expect(screen.getByRole("combobox", { name: "Ordering" })).toHaveTextContent(
         "Priority",
       );
       const direction = screen.getByRole("button", { name: "Ascending" });
-      await user.click(direction);
+      fireEvent.click(direction);
       expect(useSubIssueDisplayStore.getState().sortDirection).toBe("desc");
       expect(screen.getByRole("button", { name: "Descending" })).toBeInTheDocument();
     });
