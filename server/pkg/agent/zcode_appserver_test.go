@@ -27,20 +27,6 @@ func writeFakeZcodeAppServer(t *testing.T, body string) string {
 	return fakePath
 }
 
-// cleanupZcodeProc closes the registered app-server process for runtimeID and
-// removes it from the package-level registry, so tests do not leak processes.
-func cleanupZcodeProc(t *testing.T, runtimeID string) {
-	t.Helper()
-	t.Cleanup(func() {
-		key := "runtime:" + runtimeID
-		if v, ok := zcodeProcRegistry.Load(key); ok {
-			c := v.(*zcodeClient)
-			c.close()
-			zcodeProcRegistry.Delete(key)
-		}
-	})
-}
-
 // zcodeFakeStdin adds the Close method the client's io.WriteCloser field needs;
 // fakeStdin (shared with codex tests) only implements Write.
 type zcodeFakeStdin struct {
@@ -68,7 +54,6 @@ func executeFakeZcode(t *testing.T, fakePath string, cfg Config, opts ExecOption
 	if cfg.RuntimeID == "" {
 		cfg.RuntimeID = "rt-execute-test"
 	}
-	cleanupZcodeProc(t, cfg.RuntimeID)
 	backend, err := New("zcode", cfg)
 	if err != nil {
 		t.Fatalf("new zcode backend: %v", err)
@@ -636,8 +621,6 @@ func TestZcodeExecuteNilLogger(t *testing.T) {
 		`echo '{"method":"session/event","params":{"type":"turn.started","sessionId":"sess_fresh","payload":{}}}'`+"\n"+
 		`echo '{"method":"session/event","params":{"type":"turn.completed","sessionId":"sess_fresh","payload":{"response":"ok","usage":{}}}}'`+"\n"+
 		`while read line; do :; done`+"\n")
-	cleanupZcodeProc(t, "rt-exec-nil-logger")
-
 	b := &zcodeBackend{cfg: Config{ExecutablePath: fakePath, RuntimeID: "rt-exec-nil-logger"}}
 	session, err := b.Execute(context.Background(), "prompt", ExecOptions{
 		Model:                  "bigmodel/GLM-5.2",
@@ -693,7 +676,6 @@ func TestZcodeExecuteStreamsToolLifecycle(t *testing.T) {
 		`echo '{"method":"session/event","params":{"type":"turn.completed","sessionId":"sess_tools","payload":{"response":"done","usage":{}}}}'`+"\n"+
 		`while read line; do :; done`+"\n")
 
-	cleanupZcodeProc(t, "rt-exec-tool-lifecycle")
 	b := &zcodeBackend{cfg: Config{ExecutablePath: fakePath, RuntimeID: "rt-exec-tool-lifecycle", Logger: slog.Default()}}
 	session, err := b.Execute(context.Background(), "prompt", ExecOptions{Model: "bigmodel/GLM-5.2"})
 	if err != nil {
@@ -755,23 +737,82 @@ func TestZcodeExecuteStreamsToolLifecycle(t *testing.T) {
 	}
 }
 
-// ── registry / model resolution ───────────────────────────────────────────
+// ── per-task process / model resolution ───────────────────────────────────
 
-func TestZcodeProcRegistryReusesLiveProcess(t *testing.T) {
-	fakePath := writeFakeZcodeAppServer(t, `while read line; do :; done`+"\n")
-	cfg := Config{ExecutablePath: fakePath, RuntimeID: "rt-reuse", Logger: slog.Default()}
-	cleanupZcodeProc(t, "rt-reuse")
+// TestZcodeExecuteScopesProcessToTaskToken pins the MULTICA_TOKEN contract the
+// daemon relies on: the app-server process is spawned per Execute with that
+// task's env, so consecutive tasks (fresh task-scoped mat_ tokens, the prior
+// one revoked at completion) never inherit each other's credentials. The fake
+// app-server dumps its MULTICA_TOKEN to a pid-tagged file at startup; two
+// turns with different tokens must produce two files, each carrying its own
+// token, proving two distinct processes with per-turn env.
+func TestZcodeExecuteScopesProcessToTaskToken(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell-script fixture is POSIX-only")
+	}
+	fakePath := writeFakeZcodeAppServer(t, ""+
+		`echo "$MULTICA_TOKEN" > "$0.env.$$"`+"\n"+
+		`read line`+"\n"+ // session/create
+		`echo '{"id":1,"result":{"session":{"sessionId":"sess_test"}}}'`+"\n"+
+		`read line`+"\n"+ // session/subscribe
+		`echo '{"id":2,"result":{"eventSeq":0,"events":[]}}'`+"\n"+
+		`read line`+"\n"+ // session/send
+		`echo '{"id":3,"result":{"accepted":true,"sessionId":"sess_test"}}'`+"\n"+
+		`echo '{"method":"session/event","params":{"type":"turn.completed","sessionId":"sess_test","payload":{"response":"ok","usage":{}}}}'`+"\n"+
+		`while read line; do :; done`+"\n")
 
-	c1, err := getZcodeClient(cfg, fakePath, t.TempDir())
-	if err != nil {
-		t.Fatalf("first get: %v", err)
+	runTurn := func(token string) Result {
+		t.Helper()
+		b := &zcodeBackend{cfg: Config{
+			ExecutablePath: fakePath,
+			RuntimeID:      "rt-token-scope",
+			Logger:         slog.Default(),
+			Env:            map[string]string{"MULTICA_TOKEN": token},
+		}}
+		session, err := b.Execute(context.Background(), "prompt", ExecOptions{Model: "bigmodel/GLM-5.2"})
+		if err != nil {
+			t.Fatalf("execute with token %q: %v", token, err)
+		}
+		go func() {
+			for range session.Messages {
+			}
+		}()
+		select {
+		case result, ok := <-session.Result:
+			if !ok {
+				t.Fatalf("token %q: result channel closed without a value", token)
+			}
+			return result
+		case <-time.After(10 * time.Second):
+			t.Fatalf("token %q: timeout waiting for result", token)
+			return Result{}
+		}
 	}
-	c2, err := getZcodeClient(cfg, fakePath, t.TempDir())
-	if err != nil {
-		t.Fatalf("second get: %v", err)
+
+	if r := runTurn("mat_first"); r.Status != "completed" {
+		t.Fatalf("first turn status = %q, error = %q", r.Status, r.Error)
 	}
-	if c1 != c2 {
-		t.Fatal("expected the same live client to be reused")
+	if r := runTurn("mat_second"); r.Status != "completed" {
+		t.Fatalf("second turn status = %q, error = %q", r.Status, r.Error)
+	}
+
+	files, err := filepath.Glob(fakePath + ".env.*")
+	if err != nil {
+		t.Fatalf("glob env dumps: %v", err)
+	}
+	if len(files) != 2 {
+		t.Fatalf("expected exactly 2 app-server processes (one per task), got %d: %v", len(files), files)
+	}
+	tokens := map[string]bool{}
+	for _, f := range files {
+		data, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		tokens[strings.TrimSpace(string(data))] = true
+	}
+	if !tokens["mat_first"] || !tokens["mat_second"] {
+		t.Fatalf("expected each process to carry its own task token, saw %v", tokens)
 	}
 }
 

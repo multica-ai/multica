@@ -71,7 +71,6 @@ func TestZcodeRealAppServerSmoke(t *testing.T) {
 	}
 
 	runtimeID := fmt.Sprintf("rt-zcode-smoke-%d", time.Now().UnixNano())
-	cleanupZcodeProc(t, runtimeID)
 	backend, err := New("zcode", Config{ExecutablePath: path, Logger: slog.Default(), RuntimeID: runtimeID})
 	if err != nil {
 		t.Fatalf("new zcode backend: %v", err)
@@ -108,26 +107,28 @@ func TestZcodeRealAppServerSmoke(t *testing.T) {
 		}
 		t.Logf("real zcode smoke OK: session=%s output=%q usage=%v", result.SessionID, result.Output, result.Usage)
 
-		// Second turn on the SAME runtime reuses the live app-server process
-		// and resumes the in-memory session — the reason the backend keeps a
-		// long-lived process instead of spawning per turn.
-		if resumed := runZcodeResumeTurn(t, backend, result.SessionID, workdir); resumed != "" {
-			t.Logf("real zcode resume OK: resumed_session=%s", resumed)
+		// Second turn asks to resume the prior session, but each Execute owns
+		// a fresh app-server process (per-task MULTICA_TOKEN scoping) and ZCode
+		// sessions are process-memory-only — so the resume deterministically
+		// falls back to a fresh session with the continuity notice. Pin that
+		// degradation instead of the old shared-process resume.
+		freshSession := runZcodeFollowUpTurn(t, backend, result.SessionID, workdir)
+		t.Logf("real zcode follow-up OK: fresh_session=%s", freshSession)
 
-			// Third turn drives a real tool call: tool.updated phases must
-			// surface as a matched tool_use/tool_result pair on the message
-			// stream (the daemon's in-flight tool window counts on them).
-			runZcodeToolTurn(t, backend, resumed, workdir)
-		}
+		// Third turn drives a real tool call: tool.updated phases must
+		// surface as a matched tool_use/tool_result pair on the message
+		// stream (the daemon's in-flight tool window counts on them).
+		runZcodeToolTurn(t, backend, freshSession, workdir)
 	case <-time.After(120 * time.Second):
 		t.Fatal("timeout waiting for real zcode result")
 	}
 }
 
-// runZcodeResumeTurn executes a follow-up turn that resumes sessionID on the
-// same backend, returning the session id it ran on (or "" if the resume
-// fell back to a fresh session).
-func runZcodeResumeTurn(t *testing.T, backend Backend, sessionID, workdir string) string {
+// runZcodeFollowUpTurn executes a follow-up turn that asks to resume
+// sessionID. Because each Execute owns a fresh app-server process and ZCode
+// sessions are process-memory-only, the resume fails and the turn runs on a
+// fresh session. It returns that fresh session id.
+func runZcodeFollowUpTurn(t *testing.T, backend Backend, sessionID, workdir string) string {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -140,7 +141,7 @@ func runZcodeResumeTurn(t *testing.T, backend Backend, sessionID, workdir string
 		ResumeContinuityNotice: "[continuity lost] ",
 	})
 	if err != nil {
-		t.Fatalf("resume execute: %v", err)
+		t.Fatalf("follow-up execute: %v", err)
 	}
 	go func() {
 		for range session.Messages {
@@ -149,15 +150,15 @@ func runZcodeResumeTurn(t *testing.T, backend Backend, sessionID, workdir string
 	select {
 	case result := <-session.Result:
 		if result.Status != "completed" {
-			t.Fatalf("resume turn did not complete: status=%q error=%q", result.Status, result.Error)
+			t.Fatalf("follow-up turn did not complete: status=%q error=%q", result.Status, result.Error)
 		}
-		if result.SessionID != sessionID {
-			t.Fatalf("resume turn ran on %q, want resumed session %q", result.SessionID, sessionID)
+		if result.SessionID == sessionID {
+			t.Fatalf("follow-up turn resumed memory-only session %q across processes; expected a fresh-session fallback", sessionID)
 		}
-		t.Logf("resume output=%q", result.Output)
+		t.Logf("follow-up output=%q", result.Output)
 		return result.SessionID
 	case <-time.After(60 * time.Second):
-		t.Fatal("timeout waiting for resume result")
+		t.Fatal("timeout waiting for follow-up result")
 		return ""
 	}
 }

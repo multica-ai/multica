@@ -20,28 +20,16 @@ const (
 	zcodeStderrTailBytes                  = 2048
 	defaultZcodeHandshakeTimeout          = 30 * time.Second
 	defaultZcodeSemanticInactivityTimeout = 10 * time.Minute
-	defaultZcodeIdleTimeout               = 30 * time.Minute
 	defaultZcodeTurnPollInterval          = 5 * time.Second
 	zcodeEventChannelSize                 = 256
 	zcodeStopTimeout                      = 5 * time.Second
 )
 
 var (
-	// zcodeIdleTimeoutNanos overrides how long an unused app-server process is
-	// kept alive before the reaper closes it. Set via atomic store in tests.
-	zcodeIdleTimeoutNanos atomic.Int64
 	// zcodeTurnPollIntervalNanos overrides how often the consume loop polls
 	// session/read for the terminal state. Set via atomic store in tests.
 	zcodeTurnPollIntervalNanos atomic.Int64
-	zcodeReaperStarted         atomic.Bool
 )
-
-func zcodeIdleTimeout() time.Duration {
-	if n := zcodeIdleTimeoutNanos.Load(); n > 0 {
-		return time.Duration(n)
-	}
-	return defaultZcodeIdleTimeout
-}
 
 func zcodeTurnPollInterval() time.Duration {
 	if n := zcodeTurnPollIntervalNanos.Load(); n > 0 {
@@ -81,80 +69,21 @@ func (e *zcodeRPCError) Error() string {
 //	session/create (or session/resume) → session/subscribe → session/send
 //	→ consume session/event / state.updated until the turn ends → (next turn)
 //
-// Unlike Codex, ZCode sessions live only in the app-server process memory and
-// cannot be resumed across processes, so this backend keeps ONE long-lived
-// app-server process per runtime (keyed by Config.RuntimeID) in a package-level
-// registry and reuses it across turns; an idle reaper closes processes the
-// daemon stops using.
+// The app-server process is scoped to a single Execute, like every other
+// backend. Config.Env carries the daemon-injected, task-scoped MULTICA_TOKEN
+// (mat_), which the server revokes the moment the task completes — a process
+// shared across tasks would keep the first task's revoked token baked into
+// every later task's tool subprocesses (401 "invalid token" from the Multica
+// API, plus wrong-task attribution via the token's bound X-Task-ID). The cost
+// is that ZCode sessions, which live only in the app-server process's memory
+// (they are not persisted even with persistence:"immediate", so
+// session/resume fails with -32004 from any other process), cannot survive
+// their task: a PriorSessionID from an earlier task deterministically lands
+// on ensureSession's fresh-session fallback and the caller prepends the
+// continuity notice — the same degradation as a reaped or restarted process
+// under the old shared-process design.
 type zcodeBackend struct {
 	cfg Config
-}
-
-// ── long-lived app-server process registry ────────────────────────────────
-//
-// Each zcodeClient owns one `zcode app-server` subprocess and the JSON-RPC
-// transport over its stdio. Processes persist across Backend instances so a
-// resumed task (a fresh daemon dispatch with PriorSessionID) can reuse the
-// session its prior turn created.
-
-var zcodeProcRegistry sync.Map // key -> *zcodeClient
-
-// ensureZcodeReaper starts the single background goroutine that closes idle
-// app-server processes. It runs once for the process lifetime.
-func ensureZcodeReaper(logger *slog.Logger) {
-	if !zcodeReaperStarted.CompareAndSwap(false, true) {
-		return
-	}
-	go func() {
-		ticker := time.NewTicker(5 * time.Minute)
-		defer ticker.Stop()
-		for range ticker.C {
-			deadline := time.Now().Add(-zcodeIdleTimeout())
-			zcodeProcRegistry.Range(func(k, v any) bool {
-				c := v.(*zcodeClient)
-				if time.Unix(0, c.lastActivity.Load()).Before(deadline) && !c.hasActiveHandlers() {
-					if logger != nil {
-						logger.Info("zcode: closing idle app-server process",
-							"key", k, "pid", c.pid(), "idle_for", time.Since(time.Unix(0, c.lastActivity.Load())).Round(time.Second))
-					}
-					c.close()
-					zcodeProcRegistry.Delete(k)
-				}
-				return true
-			})
-		}
-	}()
-}
-
-func zcodeProcKey(cfg Config) string {
-	if cfg.RuntimeID != "" {
-		return "runtime:" + cfg.RuntimeID
-	}
-	return "exec:" + cfg.ExecutablePath
-}
-
-// getZcodeClient returns the live app-server process for cfg, spawning one if
-// needed. A dead registry entry (process exited) is replaced.
-func getZcodeClient(cfg Config, execName, cwd string) (*zcodeClient, error) {
-	ensureZcodeReaper(cfg.Logger)
-	key := zcodeProcKey(cfg)
-	if v, ok := zcodeProcRegistry.Load(key); ok {
-		c := v.(*zcodeClient)
-		if !c.dead() {
-			return c, nil
-		}
-		if cfg.Logger != nil {
-			cfg.Logger.Warn("zcode: replacing dead app-server process", "key", key, "err", c.processError())
-		}
-		zcodeProcRegistry.Delete(key)
-		c.close()
-	}
-	c, err := newZcodeClient(cfg, execName, cwd)
-	if err != nil {
-		return nil, err
-	}
-	zcodeProcRegistry.Store(key, c)
-	return c, nil
 }
 
 // ── zcodeClient: JSON-RPC 2.0 transport over `zcode app-server` stdio ─────
@@ -476,15 +405,9 @@ func (c *zcodeClient) detachSession(sessionID string) {
 	c.mu.Unlock()
 }
 
-func (c *zcodeClient) hasActiveHandlers() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return len(c.handlers) > 0
-}
-
-// close shuts the app-server process down. The reaper (idle processes) and the
-// dead-entry replacement path call it; a running turn must be torn down first
-// via session/stop so the process is idle when close runs.
+// close shuts the app-server process down. It runs when the turn ends (the
+// process is per-task); a running turn must be torn down first via
+// session/stop so the process is idle when close runs.
 func (c *zcodeClient) close() {
 	c.mu.Lock()
 	if c.closed {
@@ -507,12 +430,6 @@ func (c *zcodeClient) close() {
 			signalProcessGroup(c.cmd, syscall.SIGKILL)
 		}
 	}
-}
-
-func (c *zcodeClient) dead() bool {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	return c.processErr != nil
 }
 
 func (c *zcodeClient) processError() error {
@@ -562,14 +479,19 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 
 func (b *zcodeBackend) runTurn(ctx context.Context, prompt string, opts ExecOptions, execName string, msgCh chan<- Message, resCh chan<- Result) {
 	startTime := time.Now()
-	proc, err := getZcodeClient(b.cfg, execName, opts.Cwd)
+	timeout := opts.Timeout
+	runCtx, cancel := runContext(ctx, timeout)
+	defer cancel()
+	proc, err := newZcodeClient(b.cfg, execName, opts.Cwd)
 	if err != nil {
 		resCh <- Result{Status: "failed", Error: err.Error()}
 		return
 	}
-	timeout := opts.Timeout
-	runCtx, cancel := runContext(ctx, timeout)
-	defer cancel()
+	// The app-server process must not outlive this turn: it was spawned with
+	// this task's env (including its task-scoped MULTICA_TOKEN, revoked by the
+	// server at task completion), so a later task reusing it would inherit a
+	// dead credential. Same process-per-task lifecycle as every other backend.
+	defer proc.close()
 
 	handshakeTimeout := opts.HandshakeTimeout
 	if handshakeTimeout <= 0 {
@@ -683,11 +605,13 @@ func isZcodeModelUnavailable(err error) bool {
 	return rpc.Code == zcodeModelUnavailableCode
 }
 
-// ensureSession creates a session in the shared app-server process, resuming
-// the prior one when opts.ResumeSessionID names a session still alive there.
-// When resume is requested but the session is gone (process was reaped or the
-// daemon restarted), a fresh session is created and resumed=false is returned
-// so the caller can prepend the continuity notice.
+// ensureSession creates a session in this turn's app-server process, first
+// attempting session/resume when opts.ResumeSessionID names a prior session.
+// Because the process is per-task and ZCode sessions are process-memory-only,
+// a session from an earlier task can never be resumed — the attempt fails and
+// a fresh session is created with resumed=false so the caller can prepend the
+// continuity notice. (The resume RPC stays for symmetry with the protocol; a
+// same-process session id still round-trips.)
 func (b *zcodeBackend) ensureSession(ctx context.Context, proc *zcodeClient, opts ExecOptions, providerID, modelID string, handshakeTimeout time.Duration) (sessionID string, resumed bool, err error) {
 	if opts.ResumeSessionID != "" {
 		hctx, hcancel := context.WithTimeout(ctx, handshakeTimeout)
