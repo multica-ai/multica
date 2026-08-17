@@ -316,6 +316,7 @@ type ChannelInboundAudit struct {
 	ChannelMessageID pgtype.Text        `json:"channel_message_id"`
 	DropReason       string             `json:"drop_reason"`
 	ReceivedAt       pgtype.Timestamptz `json:"received_at"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
 }
 
 type ChannelInboundMessageDedup struct {
@@ -517,6 +518,31 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type DingtalkConnector struct {
+	ID               pgtype.UUID        `json:"id"`
+	AppID            string             `json:"app_id"`
+	Config           []byte             `json:"config"`
+	Status           string             `json:"status"`
+	WsLeaseToken     pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstallerUserID  pgtype.UUID        `json:"installer_user_id"`
+	InstalledAt      pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DingtalkDirectRoute struct {
+	ID            pgtype.UUID        `json:"id"`
+	ConnectorID   pgtype.UUID        `json:"connector_id"`
+	ChannelUserID string             `json:"channel_user_id"`
+	ChannelChatID string             `json:"channel_chat_id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	AgentID       pgtype.UUID        `json:"agent_id"`
+	Revision      int64              `json:"revision"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DingtalkGroupRoute struct {
 	ID                pgtype.UUID        `json:"id"`
 	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
@@ -527,6 +553,18 @@ type DingtalkGroupRoute struct {
 	Revision          int64              `json:"revision"`
 	DiscoveredAt      pgtype.Timestamptz `json:"discovered_at"`
 	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DingtalkWorkspaceGrant struct {
+	ID              pgtype.UUID        `json:"id"`
+	ConnectorID     pgtype.UUID        `json:"connector_id"`
+	WorkspaceID     pgtype.UUID        `json:"workspace_id"`
+	DefaultAgentID  pgtype.UUID        `json:"default_agent_id"`
+	InstallerUserID pgtype.UUID        `json:"installer_user_id"`
+	Status          string             `json:"status"`
+	InstalledAt     pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Feedback struct {

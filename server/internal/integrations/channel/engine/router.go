@@ -251,13 +251,13 @@ func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.Inbo
 	inst, err := set.Installation.ResolveInstallation(ctx, msg)
 	if err != nil {
 		if errors.Is(err, ErrInstallationNotFound) {
-			_ = set.Audit.RecordDrop(ctx, pgtype.UUID{}, msg, DropReasonInvalidEvent)
+			_ = set.Audit.RecordDrop(ctx, ResolvedInstallation{}, msg, DropReasonInvalidEvent)
 			return Result{Outcome: OutcomeDropped, DropReason: DropReasonInvalidEvent}, ResolvedInstallation{}, nil
 		}
 		return Result{}, ResolvedInstallation{}, fmt.Errorf("resolve installation: %w", err)
 	}
 	if !inst.Active {
-		return r.drop(ctx, set, msg, inst.ID, DropReasonRevokedInstallation), inst, nil
+		return r.drop(ctx, set, msg, inst, DropReasonRevokedInstallation), inst, nil
 	}
 
 	// 2. Two-phase dedup claim with owner fencing — before group filter and
@@ -270,7 +270,7 @@ func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.Inbo
 		token, err := set.Dedup.Claim(ctx, inst.ID, msg.MessageID)
 		if err != nil {
 			if errors.Is(err, ErrDuplicate) {
-				return r.drop(ctx, set, msg, inst.ID, DropReasonDuplicate), inst, nil
+				return r.drop(ctx, set, msg, inst, DropReasonDuplicate), inst, nil
 			}
 			return Result{}, inst, fmt.Errorf("dedup claim: %w", err)
 		}
@@ -278,7 +278,7 @@ func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.Inbo
 		claimed = true
 	}
 
-	res, finalize, err := r.processClaimed(ctx, set, msg, inst, claimToken, bareFresh)
+	res, finalize, err := r.processClaimed(ctx, set, msg, &inst, claimToken, bareFresh)
 
 	if claimed && finalize != finalizeNone {
 		finalizeCtx, finalizeCancel := context.WithTimeout(context.WithoutCancel(ctx), dedupFinalizeTimeout)
@@ -288,7 +288,7 @@ func (r *Router) dispatch(ctx context.Context, set ResolverSet, msg channel.Inbo
 
 	// ErrClaimLost: another worker holds the claim. Surface as duplicate.
 	if errors.Is(err, ErrClaimLost) {
-		return r.drop(ctx, set, msg, inst.ID, DropReasonDuplicate), inst, nil
+		return r.drop(ctx, set, msg, inst, DropReasonDuplicate), inst, nil
 	}
 	return res, inst, err
 }
@@ -304,11 +304,13 @@ const (
 
 // processClaimed runs the post-dedup pipeline. Mirrors
 // lark.Dispatcher.processClaimed; see its boundary contract per step.
-func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channel.InboundMessage, inst ResolvedInstallation, claimToken pgtype.UUID, bareFresh bool) (Result, dedupFinalize, error) {
+func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channel.InboundMessage, finalInst *ResolvedInstallation, claimToken pgtype.UUID, bareFresh bool) (Result, dedupFinalize, error) {
+	inst := *finalInst
+	defer func() { *finalInst = inst }()
 	// 3. Group-mention filter (group chats only), before identity so an
 	//    unbound user's idle group chatter never spams a binding card.
 	if msg.Source.ChatType == channel.ChatTypeGroup && !msg.AddressedToBot {
-		return r.drop(ctx, set, msg, inst.ID, DropReasonNotAddressedInGroup), finalizeMark, nil
+		return r.drop(ctx, set, msg, inst, DropReasonNotAddressedInGroup), finalizeMark, nil
 	}
 
 	// 4. Identity check: map the platform sender to a Multica user and
@@ -317,15 +319,22 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrSenderUnbound):
-			_ = set.Audit.RecordDrop(ctx, inst.ID, msg, DropReasonUnboundUser)
+			_ = set.Audit.RecordDrop(ctx, inst, msg, DropReasonUnboundUser)
 			return Result{
 				Outcome:        OutcomeNeedsBinding,
 				DropReason:     DropReasonUnboundUser,
 				InstallationID: inst.ID,
+				WorkspaceID:    identity.BindingWorkspaceID,
+				Sender:         msg.Source.SenderID,
+			}, finalizeMark, nil
+		case errors.Is(err, ErrWorkspaceSelectionRequired):
+			return Result{
+				Outcome:        OutcomeWorkspaceRequired,
+				InstallationID: inst.ID,
 				Sender:         msg.Source.SenderID,
 			}, finalizeMark, nil
 		case errors.Is(err, ErrSenderNotMember):
-			return r.drop(ctx, set, msg, inst.ID, DropReasonNonWorkspaceMember), finalizeMark, nil
+			return r.drop(ctx, set, msg, inst, DropReasonNonWorkspaceMember), finalizeMark, nil
 		default:
 			return Result{}, finalizeRelease, fmt.Errorf("resolve sender: %w", err)
 		}
@@ -338,10 +347,30 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	if set.Validated != nil {
 		inst, err = set.Validated.ResolveValidatedInbound(ctx, inst, identity, msg)
 		if err != nil {
-			if errors.Is(err, ErrTargetAgentArchived) {
+			switch {
+			case errors.Is(err, ErrTargetAgentArchived):
 				return Result{
 					Outcome:        OutcomeAgentArchived,
 					InstallationID: inst.ID,
+					WorkspaceID:    inst.WorkspaceID,
+					UserID:         identity.UserID,
+					Sender:         msg.Source.SenderID,
+				}, finalizeMark, nil
+			case errors.Is(err, ErrWorkspaceSelectionRequired):
+				return Result{
+					Outcome:        OutcomeWorkspaceRequired,
+					InstallationID: inst.ID,
+					UserID:         identity.UserID,
+					Sender:         msg.Source.SenderID,
+				}, finalizeMark, nil
+			case errors.Is(err, ErrSenderNotMember):
+				return r.drop(ctx, set, msg, inst, DropReasonNonWorkspaceMember), finalizeMark, nil
+			case errors.Is(err, ErrWorkspaceSelected):
+				return Result{
+					Outcome:        OutcomeWorkspaceSelected,
+					InstallationID: inst.ID,
+					WorkspaceID:    inst.WorkspaceID,
+					UserID:         identity.UserID,
 					Sender:         msg.Source.SenderID,
 				}, finalizeMark, nil
 			}
@@ -354,10 +383,6 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	// when a concurrent reassignment committed first. Resolve the latest route
 	// and retry this same claimed message in-process: DingTalk has already ACKed
 	// the callback and will not redeliver it.
-	sessionCreator := identity.UserID
-	if msg.Source.ChatType == channel.ChatTypeGroup {
-		sessionCreator = inst.InstallerUserID
-	}
 	refreshChangedRoute := func() (Result, bool, error) {
 		if set.Validated == nil {
 			return Result{}, false, ErrRouteChanged
@@ -368,6 +393,28 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			return Result{
 				Outcome:        OutcomeAgentArchived,
 				InstallationID: inst.ID,
+				WorkspaceID:    inst.WorkspaceID,
+				UserID:         identity.UserID,
+				Sender:         msg.Source.SenderID,
+			}, true, nil
+		}
+		if errors.Is(routeErr, ErrWorkspaceSelectionRequired) {
+			return Result{
+				Outcome:        OutcomeWorkspaceRequired,
+				InstallationID: inst.ID,
+				UserID:         identity.UserID,
+				Sender:         msg.Source.SenderID,
+			}, true, nil
+		}
+		if errors.Is(routeErr, ErrSenderNotMember) {
+			return r.drop(ctx, set, msg, inst, DropReasonNonWorkspaceMember), true, nil
+		}
+		if errors.Is(routeErr, ErrWorkspaceSelected) {
+			return Result{
+				Outcome:        OutcomeWorkspaceSelected,
+				InstallationID: inst.ID,
+				WorkspaceID:    inst.WorkspaceID,
+				UserID:         identity.UserID,
 				Sender:         msg.Source.SenderID,
 			}, true, nil
 		}
@@ -408,6 +455,14 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return Result{}, finalizeRelease, ctxErr
 		}
+		sessionCreator := identity.UserID
+		if msg.Source.ChatType == channel.ChatTypeGroup {
+			// A route refresh can move a shared connector to another workspace.
+			// Derive the group owner from the current resolved installation on
+			// every retry so the old workspace installer never owns the new
+			// workspace's session.
+			sessionCreator = inst.InstallerUserID
+		}
 		sessionID, err = set.Session.EnsureSession(ctx, EnsureSessionParams{
 			Installation: inst,
 			Sender:       sessionCreator,
@@ -435,7 +490,9 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			return Result{
 				Outcome:        OutcomeFreshPending,
 				InstallationID: inst.ID,
+				WorkspaceID:    inst.WorkspaceID,
 				ChatSessionID:  sessionID,
+				UserID:         identity.UserID,
 				Sender:         msg.Source.SenderID,
 			}, finalizeMark, nil
 		}
@@ -444,6 +501,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			SessionID:           sessionID,
 			Sender:              identity.UserID,
 			InstallationID:      inst.ID,
+			WorkspaceID:         inst.WorkspaceID,
 			AgentID:             inst.AgentID,
 			RouteRevision:       inst.RouteRevision,
 			Message:             msg,
@@ -478,7 +536,9 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	res := Result{
 		Outcome:        OutcomeIngested,
 		InstallationID: inst.ID,
+		WorkspaceID:    inst.WorkspaceID,
 		ChatSessionID:  sessionID,
+		UserID:         identity.UserID,
 		Sender:         msg.Source.SenderID,
 	}
 	var mediaIssue db.Issue
@@ -866,9 +926,9 @@ func (r *Router) applyFinalize(ctx context.Context, set ResolverSet, instID pgty
 	}
 }
 
-func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundMessage, instID pgtype.UUID, reason DropReason) Result {
-	_ = set.Audit.RecordDrop(ctx, instID, msg, reason)
-	return Result{Outcome: OutcomeDropped, DropReason: reason, InstallationID: instID}
+func (r *Router) drop(ctx context.Context, set ResolverSet, msg channel.InboundMessage, inst ResolvedInstallation, reason DropReason) Result {
+	_ = set.Audit.RecordDrop(ctx, inst, msg, reason)
+	return Result{Outcome: OutcomeDropped, DropReason: reason, InstallationID: inst.ID, WorkspaceID: inst.WorkspaceID}
 }
 
 func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, originType string, creatorUserID, sessionID pgtype.UUID, cmd IssueCommand, issuePrefix string, assignedRunFireAt time.Time) (service.IssueCreateResult, error) {

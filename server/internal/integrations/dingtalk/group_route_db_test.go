@@ -43,8 +43,11 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_outbound_card_message WHERE chat_session_id IN ($1, $2)`, chatSessionID, chatSessionB)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id IN ($1, $2)`, chatSessionID, chatSessionB)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_group_route WHERE installation_id = $1`, installation)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_direct_route WHERE connector_id = $1`, installation)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_workspace_grant WHERE connector_id = $1`, installation)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_connector WHERE id = $1`, installation)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_inbound_message_dedup WHERE installation_id = $1`, installation)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installation)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1`, workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, installerID)
 	}
@@ -59,21 +62,23 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}
 	exec(`INSERT INTO "user" (id, name, email) VALUES ($1, 'DingTalk route owner', 'dingtalk-route-owner@multica.test')`, installerID)
 	exec(`INSERT INTO workspace (id, name, slug, description) VALUES ($1, 'DingTalk routes', 'dingtalk-routes-db', '')`, workspaceID)
+	exec(`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')`, workspaceID, installerID)
 	exec(`INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider) VALUES ($1, $2, 'DingTalk route runtime', 'local', 'multica_daemon')`, runtimeID, workspaceID)
 	for _, agent := range []string{defaultAgent, routedAgent} {
 		exec(`INSERT INTO agent (id, workspace_id, name, runtime_mode, runtime_id) VALUES ($1, $2, $3, 'local', $4)`, agent, workspaceID, "DingTalk route "+agent, runtimeID)
 	}
 	exec(`INSERT INTO chat_session (id, workspace_id, agent_id, creator_id, title) VALUES ($1, $2, $3, $4, 'DingTalk route A')`, chatSessionID, workspaceID, defaultAgent, installerID)
 	exec(`INSERT INTO chat_session (id, workspace_id, agent_id, creator_id, title) VALUES ($1, $2, $3, $4, 'DingTalk route B')`, chatSessionB, workspaceID, routedAgent, installerID)
-	exec(`INSERT INTO channel_installation (id, workspace_id, agent_id, channel_type, config, installer_user_id) VALUES ($1, $2, $3, 'dingtalk', jsonb_build_object('app_id', $4::text), $5)`, installation, workspaceID, defaultAgent, appKey, installerID)
+	exec(`INSERT INTO dingtalk_connector (id, app_id, config, installer_user_id) VALUES ($1, $2, jsonb_build_object('app_id', $2::text), $3)`, installation, appKey, installerID)
+	exec(`INSERT INTO dingtalk_workspace_grant (connector_id, workspace_id, default_agent_id, installer_user_id) VALUES ($1, $2, $3, $4)`, installation, workspaceID, defaultAgent, installerID)
 
 	queries := db.New(pool)
 	// Revocation is a query-level fail-closed boundary, not only a Router gate:
 	// a callback that reaches discovery after revoke must neither create a route
 	// nor expose anything through the workspace list.
-	exec(`UPDATE channel_installation SET status = 'revoked' WHERE id = $1`, installation)
+	exec(`UPDATE dingtalk_connector SET status = 'revoked' WHERE id = $1`, installation)
 	_, err := queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
-		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+		InstallationID: util.MustParseUUID(installation), MulticaUserID: util.MustParseUUID(installerID),
 		ConversationID: "cid-revoked-before-discovery", ConversationTitle: "Revoked secret group",
 	})
 	if !errors.Is(err, pgx.ErrNoRows) {
@@ -87,7 +92,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	if err != nil || len(revokedRoutes) != 0 {
 		t.Fatalf("routes listed after pre-discovery revoke = %+v, err=%v", revokedRoutes, err)
 	}
-	exec(`UPDATE channel_installation SET status = 'active' WHERE id = $1`, installation)
+	exec(`UPDATE dingtalk_connector SET status = 'active' WHERE id = $1`, installation)
 
 	// Controlled revoke-wins interleaving: discovery starts from an active
 	// snapshot but must block on the installation row, re-check status after the
@@ -97,7 +102,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		t.Fatalf("begin controlled pre-discovery revoke: %v", err)
 	}
 	defer revokeTx.Rollback(context.Background())
-	if _, err := revokeTx.Exec(ctx, `UPDATE channel_installation SET status = 'revoked' WHERE id = $1`, installation); err != nil {
+	if _, err := revokeTx.Exec(ctx, `UPDATE dingtalk_connector SET status = 'revoked' WHERE id = $1`, installation); err != nil {
 		t.Fatalf("lock installation for controlled revoke: %v", err)
 	}
 	discoveryConn, err := pool.Acquire(ctx)
@@ -112,7 +117,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	discoveryDone := make(chan error, 1)
 	go func() {
 		_, discoverErr := db.New(discoveryConn).DiscoverDingTalkGroupRoute(context.Background(), db.DiscoverDingTalkGroupRouteParams{
-			InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+			InstallationID: util.MustParseUUID(installation), MulticaUserID: util.MustParseUUID(installerID),
 			ConversationID: "cid-revoke-race", ConversationTitle: "Revoke race secret group",
 		})
 		discoveryDone <- discoverErr
@@ -133,10 +138,10 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM dingtalk_group_route WHERE installation_id = $1`, installation).Scan(&revokedDiscoveryCount); err != nil || revokedDiscoveryCount != 0 {
 		t.Fatalf("revoke-wins discovery persisted %d routes, err=%v", revokedDiscoveryCount, err)
 	}
-	exec(`UPDATE channel_installation SET status = 'active' WHERE id = $1`, installation)
+	exec(`UPDATE dingtalk_connector SET status = 'active' WHERE id = $1`, installation)
 
 	resolved, err := queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
-		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+		InstallationID: util.MustParseUUID(installation), MulticaUserID: util.MustParseUUID(installerID),
 		ConversationID: conversation, ConversationTitle: "Platform team",
 	})
 	if err != nil {
@@ -201,7 +206,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}
 
 	resolved, err = queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
-		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+		InstallationID: util.MustParseUUID(installation), MulticaUserID: util.MustParseUUID(installerID),
 		ConversationID: conversation, ConversationTitle: "Platform team renamed",
 	})
 	if err != nil || resolved.AgentID != util.MustParseUUID(routedAgent) || !resolved.AgentActive {
@@ -244,6 +249,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}
 	_, staleFenceErr := queries.WithTx(staleAppendTx).LockDingTalkGroupRouteForAppend(ctx, db.LockDingTalkGroupRouteForAppendParams{
 		InstallationID: util.MustParseUUID(installation), ConversationID: conversation,
+		WorkspaceID: util.MustParseUUID(workspaceID), MulticaUserID: util.MustParseUUID(installerID),
 		AgentID: util.MustParseUUID(defaultAgent), RouteRevision: staleRevision,
 	})
 	_ = staleAppendTx.Rollback(ctx)
@@ -277,6 +283,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 			BeforeWrite: func(lockCtx context.Context, tx pgx.Tx) error {
 				if _, lockErr := queries.WithTx(tx).LockDingTalkGroupRouteForAppend(lockCtx, db.LockDingTalkGroupRouteForAppendParams{
 					InstallationID: util.MustParseUUID(installation), ConversationID: conversation,
+					WorkspaceID: util.MustParseUUID(workspaceID), MulticaUserID: util.MustParseUUID(installerID),
 					AgentID: util.MustParseUUID(defaultAgent), RouteRevision: returnedForAppendFence.Revision,
 				}); lockErr != nil {
 					return lockErr
@@ -369,6 +376,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 			BeforeWrite: func(lockCtx context.Context, tx pgx.Tx) error {
 				if _, lockErr := queries.WithTx(tx).LockDingTalkGroupRouteForAppend(lockCtx, db.LockDingTalkGroupRouteForAppendParams{
 					InstallationID: util.MustParseUUID(installation), ConversationID: conversation,
+					WorkspaceID: util.MustParseUUID(workspaceID), MulticaUserID: util.MustParseUUID(installerID),
 					AgentID: util.MustParseUUID(defaultAgent), RouteRevision: routeForWorkspaceFence.Revision,
 				}); lockErr != nil {
 					return lockErr
@@ -451,7 +459,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	// agent makes the same route active again without silent reassignment.
 	exec(`UPDATE agent SET archived_at = now() WHERE id = $1`, defaultAgent)
 	archivedRoute, err := queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
-		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+		InstallationID: util.MustParseUUID(installation), MulticaUserID: util.MustParseUUID(installerID),
 		ConversationID: conversation, ConversationTitle: "Platform team archived",
 	})
 	if err != nil || archivedRoute.AgentID != util.MustParseUUID(defaultAgent) || archivedRoute.AgentActive {
@@ -466,7 +474,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}
 	exec(`UPDATE agent SET archived_at = NULL, archived_by = NULL WHERE id = $1`, defaultAgent)
 	restoredRoute, err := queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
-		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+		InstallationID: util.MustParseUUID(installation), MulticaUserID: util.MustParseUUID(installerID),
 		ConversationID: conversation, ConversationTitle: "Platform team restored",
 	})
 	if err != nil || restoredRoute.AgentID != util.MustParseUUID(defaultAgent) || !restoredRoute.AgentActive {
@@ -520,7 +528,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}
 	exec(`UPDATE agent SET archived_at = now() WHERE id = $1`, routedAgent)
 	assignmentThenArchive, err := queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
-		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+		InstallationID: util.MustParseUUID(installation), MulticaUserID: util.MustParseUUID(installerID),
 		ConversationID: conversation, ConversationTitle: "Platform team B archived",
 	})
 	if err != nil || assignmentThenArchive.AgentID != util.MustParseUUID(routedAgent) || assignmentThenArchive.AgentActive {
@@ -528,7 +536,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}
 	exec(`UPDATE agent SET archived_at = NULL, archived_by = NULL WHERE id = $1`, routedAgent)
 	restoredAssignedRoute, err := queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
-		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
+		InstallationID: util.MustParseUUID(installation), MulticaUserID: util.MustParseUUID(installerID),
 		ConversationID: conversation, ConversationTitle: "Platform team B restored",
 	})
 	if err != nil || restoredAssignedRoute.AgentID != util.MustParseUUID(routedAgent) || !restoredAssignedRoute.AgentActive {

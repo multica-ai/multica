@@ -21,6 +21,7 @@ type AuditLogger interface {
 
 type AuditDropParams struct {
 	InstallationID pgtype.UUID // may be invalid for installation-less events
+	WorkspaceID    pgtype.UUID // invalid until a workspace route is resolved
 	ChatID         ChatID
 	EventType      string
 	LarkEventID    string

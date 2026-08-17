@@ -56,6 +56,47 @@ const deleteWorkspace = `-- name: DeleteWorkspace :exec
 WITH ws_installations AS (
     SELECT id FROM channel_installation WHERE workspace_id = $1
 ),
+ws_dingtalk_connector_ids AS MATERIALIZED (
+    SELECT connector_id
+    FROM dingtalk_workspace_grant
+    WHERE workspace_id = $1
+),
+locked_dingtalk_connectors AS MATERIALIZED (
+    SELECT c.id
+    FROM dingtalk_connector c
+    JOIN ws_dingtalk_connector_ids target ON target.connector_id = c.id
+    ORDER BY c.id
+    FOR SHARE OF c
+),
+candidate_rehome_memberships AS MATERIALIZED (
+    SELECT DISTINCT w.id AS workspace_id, m.user_id
+    FROM channel_user_binding b
+    JOIN dingtalk_workspace_grant g ON g.connector_id = b.installation_id
+    JOIN workspace w ON w.id = g.workspace_id
+    JOIN member m ON m.workspace_id = w.id
+                 AND m.user_id = b.multica_user_id
+    WHERE b.workspace_id = $1
+      AND b.channel_type = 'dingtalk'
+      AND g.workspace_id <> $1
+      AND g.status = 'active'
+      AND EXISTS (
+          SELECT 1 FROM locked_dingtalk_connectors c
+          WHERE c.id = b.installation_id
+      )
+),
+locked_rehome_memberships AS MATERIALIZED (
+    SELECT w.id AS workspace_id, m.user_id
+    FROM workspace w
+    JOIN member m ON m.workspace_id = w.id
+    JOIN candidate_rehome_memberships candidate
+      ON candidate.workspace_id = w.id
+     AND candidate.user_id = m.user_id
+    ORDER BY w.id, m.user_id
+    FOR SHARE OF w, m SKIP LOCKED
+),
+ws_sessions AS (
+    SELECT id FROM chat_session WHERE workspace_id = $1
+),
 ws_agents AS (
     SELECT id FROM agent WHERE workspace_id = $1
 ),
@@ -69,11 +110,16 @@ cleared_skill_label_assignments AS (
     DELETE FROM skill_to_label WHERE skill_id IN (SELECT id FROM ws_skills)
 ),
 cleared_chat_sessions AS (
-    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
+    DELETE FROM channel_chat_session_binding
+    WHERE installation_id IN (SELECT id FROM ws_installations)
+       OR chat_session_id IN (SELECT id FROM ws_sessions)
     RETURNING chat_session_id
 ),
 cleared_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route WHERE workspace_id = $1
+),
+cleared_dingtalk_direct_routes AS (
+    DELETE FROM dingtalk_direct_route WHERE workspace_id = $1
 ),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
@@ -102,16 +148,83 @@ cleared_audit AS (
     -- Purge, don't detach: the workspace is gone and channel_inbound_audit has no
     -- workspace_id and no reaper, so a detached (NULL) row would be permanently
     -- unattributable. (Reclaim, where the workspace survives, still detaches.)
-    DELETE FROM channel_inbound_audit WHERE installation_id IN (SELECT id FROM ws_installations)
+    DELETE FROM channel_inbound_audit
+    WHERE workspace_id = $1
+       OR installation_id IN (SELECT id FROM ws_installations)
+),
+reassigned_dingtalk_user_bindings AS (
+    UPDATE channel_user_binding b
+    SET workspace_id = (
+        SELECT g.workspace_id
+        FROM dingtalk_workspace_grant g
+        JOIN locked_rehome_memberships target
+          ON target.workspace_id = g.workspace_id
+         AND target.user_id = b.multica_user_id
+        WHERE g.connector_id = b.installation_id
+          AND g.workspace_id <> $1
+          AND g.status = 'active'
+        ORDER BY g.created_at ASC
+        LIMIT 1
+    )
+    WHERE b.workspace_id = $1
+      AND EXISTS (
+          SELECT 1
+          FROM dingtalk_workspace_grant g
+          JOIN locked_rehome_memberships target
+            ON target.workspace_id = g.workspace_id
+           AND target.user_id = b.multica_user_id
+          WHERE g.connector_id = b.installation_id
+            AND g.workspace_id <> $1
+            AND g.status = 'active'
+      )
 ),
 cleared_user_bindings AS (
-    DELETE FROM channel_user_binding WHERE workspace_id = $1
+    DELETE FROM channel_user_binding b
+    WHERE b.workspace_id = $1
+      AND NOT EXISTS (
+          SELECT 1
+          FROM dingtalk_workspace_grant g
+          JOIN locked_rehome_memberships target
+            ON target.workspace_id = g.workspace_id
+           AND target.user_id = b.multica_user_id
+          WHERE b.channel_type = 'dingtalk'
+            AND g.connector_id = b.installation_id
+            AND g.workspace_id <> $1
+            AND g.status = 'active'
+      )
 ),
 cleared_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
 ),
 cleared_installations AS (
     DELETE FROM channel_installation WHERE workspace_id = $1
+),
+cleared_dingtalk_grants AS (
+    DELETE FROM dingtalk_workspace_grant g
+    WHERE g.workspace_id = $1
+      AND g.connector_id IN (SELECT id FROM locked_dingtalk_connectors)
+    RETURNING connector_id
+),
+stopped_dingtalk_connectors AS (
+    UPDATE dingtalk_connector c
+    SET status = 'revoked',
+        config = c.config - 'app_secret_encrypted',
+        ws_lease_token = NULL,
+        ws_lease_expires_at = NULL,
+        updated_at = now()
+    WHERE c.id IN (SELECT connector_id FROM cleared_dingtalk_grants)
+      AND NOT EXISTS (
+          SELECT 1 FROM dingtalk_workspace_grant g
+          WHERE g.connector_id = c.id
+            AND g.workspace_id <> $1
+            AND g.status = 'active'
+      )
+    RETURNING c.id
+),
+cleared_unscoped_dingtalk_audit AS (
+    DELETE FROM channel_inbound_audit audit
+    WHERE audit.installation_id IN (SELECT id FROM stopped_dingtalk_connectors)
+      AND audit.workspace_id IS NULL
 ),
 cleared_issue_properties AS (
     DELETE FROM issue_property WHERE workspace_id = $1

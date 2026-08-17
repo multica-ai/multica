@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_channel_inbound_audit_workspace;

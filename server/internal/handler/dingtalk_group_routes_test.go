@@ -41,12 +41,18 @@ func newDingTalkGroupRouteHandlerFixture(t *testing.T) dingtalkGroupRouteHandler
 	targetAgentID := createHandlerTestAgent(t, "DingTalk Route Target Agent", nil)
 	var installationID string
 	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO channel_installation (
-			workspace_id, agent_id, channel_type, config, installer_user_id
-		) VALUES ($1, $2, 'dingtalk', jsonb_build_object('app_id', $3::text), $4)
+		INSERT INTO dingtalk_connector (app_id, config, installer_user_id)
+		VALUES ($1, jsonb_build_object('app_id', $1::text), $2)
 		RETURNING id
-	`, testWorkspaceID, defaultAgentID, "handler-dingtalk-group-routes", testUserID).Scan(&installationID); err != nil {
+	`, "handler-dingtalk-group-routes", testUserID).Scan(&installationID); err != nil {
 		t.Fatalf("create DingTalk route installation: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO dingtalk_workspace_grant (
+			connector_id, workspace_id, default_agent_id, installer_user_id
+		) VALUES ($1, $2, $3, $4)
+	`, installationID, testWorkspaceID, defaultAgentID, testUserID); err != nil {
+		t.Fatalf("create DingTalk workspace grant: %v", err)
 	}
 	var routeID string
 	if err := testPool.QueryRow(context.Background(), `
@@ -61,7 +67,8 @@ func newDingTalkGroupRouteHandlerFixture(t *testing.T) dingtalkGroupRouteHandler
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE installation_id = $1`, installationID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM dingtalk_group_route WHERE installation_id = $1`, installationID)
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM dingtalk_workspace_grant WHERE connector_id = $1`, installationID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM dingtalk_connector WHERE id = $1`, installationID)
 	})
 	return dingtalkGroupRouteHandlerFixture{
 		installationID: installationID,
@@ -184,7 +191,7 @@ func TestDingTalkGroupRoutePatchRejectsRevokedInstallation(t *testing.T) {
 	fx := newDingTalkGroupRouteHandlerFixture(t)
 	sessionID, revision := seedDingTalkGroupRouteBinding(t, fx)
 	if _, err := testPool.Exec(context.Background(), `
-		UPDATE channel_installation SET status = 'revoked' WHERE id = $1
+		UPDATE dingtalk_connector SET status = 'revoked' WHERE id = $1
 	`, fx.installationID); err != nil {
 		t.Fatalf("revoke DingTalk installation before PATCH: %v", err)
 	}
@@ -209,7 +216,7 @@ func TestDingTalkGroupRoutePatchSerializesWithRevoke(t *testing.T) {
 		t.Fatalf("read controlled revoke backend pid: %v", err)
 	}
 	if _, err := revokeTx.Exec(ctx, `
-		UPDATE channel_installation SET status = 'revoked' WHERE id = $1
+		UPDATE dingtalk_connector SET status = 'revoked' WHERE id = $1
 	`, fx.installationID); err != nil {
 		t.Fatalf("lock installation for controlled revoke: %v", err)
 	}
@@ -326,13 +333,14 @@ func TestListDingTalkInstallationsAdvertisesGroupRoutingCapability(t *testing.T)
 			t.Fatalf("disabled installations status = %d, want 200: %s", rec.Code, rec.Body.String())
 		}
 		var body struct {
-			GroupRoutingSupported bool `json:"group_routing_supported"`
+			GroupRoutingSupported          bool `json:"group_routing_supported"`
+			CrossWorkspaceRoutingSupported bool `json:"cross_workspace_routing_supported"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode disabled installations response: %v", err)
 		}
-		if body.GroupRoutingSupported {
-			t.Fatal("disabled deployment advertised group routing")
+		if body.GroupRoutingSupported || body.CrossWorkspaceRoutingSupported {
+			t.Fatal("disabled deployment advertised DingTalk routing capabilities")
 		}
 	})
 
@@ -359,13 +367,14 @@ func TestListDingTalkInstallationsAdvertisesGroupRoutingCapability(t *testing.T)
 			t.Fatalf("configured installations status = %d, want 200: %s", rec.Code, rec.Body.String())
 		}
 		var body struct {
-			GroupRoutingSupported bool `json:"group_routing_supported"`
+			GroupRoutingSupported          bool `json:"group_routing_supported"`
+			CrossWorkspaceRoutingSupported bool `json:"cross_workspace_routing_supported"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode configured installations response: %v", err)
 		}
-		if !body.GroupRoutingSupported {
-			t.Fatal("configured deployment did not advertise group routing")
+		if !body.GroupRoutingSupported || !body.CrossWorkspaceRoutingSupported {
+			t.Fatal("configured deployment did not advertise DingTalk routing capabilities")
 		}
 	})
 }
@@ -623,7 +632,7 @@ func TestDingTalkGroupRouteAuthorizationWiring(t *testing.T) {
 	if rec := exercise(http.MethodGet, base, memberID, nil); rec.Code != http.StatusOK {
 		t.Errorf("member GET status = %d: %s", rec.Code, rec.Body.String())
 	}
-	if _, err := testPool.Exec(ctx, `UPDATE channel_installation SET status = 'revoked' WHERE id = $1`, fx.installationID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE dingtalk_connector SET status = 'revoked' WHERE id = $1`, fx.installationID); err != nil {
 		t.Fatalf("revoke DingTalk installation before member GET: %v", err)
 	}
 	revokedGET := exercise(http.MethodGet, base, memberID, nil)
@@ -639,7 +648,7 @@ func TestDingTalkGroupRouteAuthorizationWiring(t *testing.T) {
 	if len(revokedBody.Routes) != 0 || strings.Contains(revokedGET.Body.String(), "Handler routes") || strings.Contains(revokedGET.Body.String(), "cid-handler-routes") {
 		t.Fatalf("member GET leaked revoked route metadata: %s", revokedGET.Body.String())
 	}
-	if _, err := testPool.Exec(ctx, `UPDATE channel_installation SET status = 'active' WHERE id = $1`, fx.installationID); err != nil {
+	if _, err := testPool.Exec(ctx, `UPDATE dingtalk_connector SET status = 'active' WHERE id = $1`, fx.installationID); err != nil {
 		t.Fatalf("restore DingTalk installation after member GET regression: %v", err)
 	}
 	if rec := exercise(http.MethodGet, base, outsiderID, nil); rec.Code != http.StatusNotFound {

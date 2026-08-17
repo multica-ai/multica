@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"sync"
 	"sync/atomic"
-	"time"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
@@ -148,33 +147,7 @@ func (c *dingtalkChannel) onMessage(ctx context.Context, data *botCallbackData) 
 func (c *dingtalkChannel) runInbound(ctx context.Context, msg channel.InboundMessage) {
 	if err := c.handler(ctx, msg); err != nil {
 		c.logger.WarnContext(ctx, "dingtalk: inbound handler error", "error", err, "app_id", c.appID)
-		c.notifyIssueDispatchError(msg)
 	}
-}
-
-// issueErrorReplyTimeout bounds the detached dispatch-error reply send.
-const issueErrorReplyTimeout = 5 * time.Second
-
-const issueDispatchFailedText = "⚠️ I couldn't create that issue because an internal error occurred. Please try again."
-
-// notifyIssueDispatchError posts an internal-error notice when an addressed
-// /issue command failed inside the engine pipeline (a transient resolver / DB
-// error, before the shared issue-command path could report a Result).
-// The frame is already ACKed and never redelivered, so without this the
-// command would vanish silently. Detached so onMessage returns promptly.
-func (c *dingtalkChannel) notifyIssueDispatchError(msg channel.InboundMessage) {
-	if !isAddressedIssueCommand(msg) {
-		return
-	}
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), issueErrorReplyTimeout)
-		defer cancel()
-		s := &sender{client: c.client, robotCode: c.robotCode, appKey: c.appKey, appSecret: c.appSecret}
-		if _, err := s.send(ctx, targetFromMessage(msg), issueDispatchFailedText); err != nil {
-			c.logger.WarnContext(ctx, "dingtalk: issue dispatch-error reply failed",
-				"error", err, "app_id", c.appID)
-		}
-	}()
 }
 
 // ChannelDeps are the shared dependencies the DingTalk Factory closes over. The

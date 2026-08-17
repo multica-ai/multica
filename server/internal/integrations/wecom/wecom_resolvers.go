@@ -284,17 +284,18 @@ func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams)
 
 type auditor struct{ store *Store }
 
-func (a *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
+func (a *auditor) RecordDrop(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, reason engine.DropReason) error {
 	var eventType string
 	if wm, err := wecomMsgFromRaw(msg); err == nil {
 		eventType = wm.MsgType
 	}
 	var instIDArg pgtype.UUID
-	if instID.Valid {
-		instIDArg = instID
+	if inst.ID.Valid {
+		instIDArg = inst.ID
 	}
 	return a.store.Queries.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
 		InstallationID:   instIDArg,
+		WorkspaceID:      inst.WorkspaceID,
 		ChannelType:      channelTypeWecom,
 		ChannelChatID:    textOrNull(msg.Source.ChatID),
 		EventType:        eventType,

@@ -222,13 +222,16 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 //   - group_routing_supported: explicit capability gate for version-skewed
 //     Web/Desktop clients. Older backends omit it, so newer clients must require
 //     an exact true before calling the group-routes endpoints.
+//   - cross_workspace_routing_supported: the same AppKey may attach to multiple
+//     workspaces while the server keeps one global Stream connection.
 func (h *Handler) ListDingTalkInstallations(w http.ResponseWriter, r *http.Request) {
 	if h.DingTalkInstall == nil {
 		writeJSON(w, http.StatusOK, map[string]any{
-			"installations":           []DingTalkInstallationResponse{},
-			"configured":              false,
-			"install_supported":       false,
-			"group_routing_supported": false,
+			"installations":                     []DingTalkInstallationResponse{},
+			"configured":                        false,
+			"install_supported":                 false,
+			"group_routing_supported":           false,
+			"cross_workspace_routing_supported": false,
 		})
 		return
 	}
@@ -246,10 +249,11 @@ func (h *Handler) ListDingTalkInstallations(w http.ResponseWriter, r *http.Reque
 		out = append(out, dingtalkInstallationToResponse(row))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"installations":           out,
-		"configured":              true,
-		"install_supported":       true,
-		"group_routing_supported": true,
+		"installations":                     out,
+		"configured":                        true,
+		"install_supported":                 true,
+		"group_routing_supported":           true,
+		"cross_workspace_routing_supported": true,
 	})
 }
 
@@ -315,12 +319,6 @@ func (h *Handler) RegisterDingTalkBYO(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case errors.Is(err, dingtalk.ErrInvalidAppKey), errors.Is(err, dingtalk.ErrInvalidAppSecret):
 			writeError(w, http.StatusBadRequest, err.Error())
-		case errors.Is(err, dingtalk.ErrRobotOwnedBySameWorkspace):
-			writeError(w, http.StatusConflict, "this DingTalk robot is already connected to another agent in this workspace — disconnect it there first, then connect it here")
-		case errors.Is(err, dingtalk.ErrRobotOwnedByArchivedAgent):
-			writeError(w, http.StatusConflict, "this DingTalk robot is connected to an archived agent in this workspace — restore that agent, or disconnect its robot, before connecting it here")
-		case errors.Is(err, dingtalk.ErrRobotOwnedByAnotherWorkspace):
-			writeError(w, http.StatusConflict, "this DingTalk robot is already connected to a different Multica workspace — disconnect it there before connecting it here")
 		case errors.Is(err, dingtalk.ErrCredentialValidation):
 			// The access-token mint rejected the pasted credentials (a user error),
 			// so guide the user to recheck them.
@@ -380,7 +378,7 @@ func (h *Handler) RevokeDingTalkInstallation(w http.ResponseWriter, r *http.Requ
 		writeError(w, http.StatusInternalServerError, "failed to load installation")
 		return
 	}
-	if err := h.DingTalkInstall.Revoke(r.Context(), instUUID); err != nil {
+	if err := h.DingTalkInstall.Revoke(r.Context(), instUUID, wsUUID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to revoke installation")
 		return
 	}

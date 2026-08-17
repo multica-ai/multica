@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY idx_dingtalk_workspace_grant_connector_workspace_unique;

@@ -39,14 +39,20 @@ const (
 	// Refusals for dropped /issue commands, carried over from the deleted
 	// pre-engine IssueCommandProcessor: without them the user's command
 	// vanishes with no signal that it will never be handled.
-	issueNotMemberText = "You're not a member of this Multica workspace, so I can't file an issue for you. Ask a workspace admin to invite you, then send the command again."
-	issueDisabledText  = "This DingTalk robot isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
+	issueNotMemberText    = "You're not a member of this Multica workspace, so I can't file an issue for you. Ask a workspace admin to invite you, then send the command again."
+	issueDisabledText     = "This DingTalk robot isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
+	workspaceRequiredText = "Please choose a Multica workspace first: `/workspace <workspace-slug>`. In a group, a workspace owner or admin must run this command."
+	workspaceSelectedText = "✅ Workspace selected. Send your next message to continue with its assigned agent."
 )
 
 // bindingMinter is the binding-token surface the replier needs.
 // *BindingTokenService satisfies it.
 type bindingMinter interface {
 	Mint(ctx context.Context, workspaceID, installationID pgtype.UUID, dingtalkUserID string) (BindingToken, error)
+}
+
+type guardedBindingMinter interface {
+	MintWithQueries(ctx context.Context, q *db.Queries, workspaceID, installationID pgtype.UUID, dingtalkUserID string) (BindingToken, error)
 }
 
 // OutboundReplier implements engine.OutboundReplier for DingTalk.
@@ -57,6 +63,7 @@ type OutboundReplier struct {
 	appURL      string
 	bindingPath string
 	logger      *slog.Logger
+	guard       *routeSendGuard
 }
 
 // OutboundReplierConfig configures the replier. Binding + AppURL are required for
@@ -66,6 +73,8 @@ type OutboundReplierConfig struct {
 	Binding bindingMinter
 	Decrypt Decrypter
 	Client  *Client
+	Queries *db.Queries
+	Tx      engine.TxStarter
 	// AppURL is the Multica web app host the user clicks into to redeem the
 	// binding token (e.g. https://multica.example). The bind page (/dingtalk/bind)
 	// is served by the web app, so the link must point at the app host, not the
@@ -101,6 +110,7 @@ func NewOutboundReplier(cfg OutboundReplierConfig) *OutboundReplier {
 		appURL:      strings.TrimRight(cfg.AppURL, "/"),
 		bindingPath: bindingPath,
 		logger:      logger,
+		guard:       newRouteSendGuard(cfg.Queries, cfg.Tx),
 	}
 }
 
@@ -109,22 +119,34 @@ func NewOutboundReplier(cfg OutboundReplierConfig) *OutboundReplier {
 func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result) {
 	switch res.Outcome {
 	case engine.OutcomeNeedsBinding:
-		if err := r.sendBindingPrompt(ctx, inst, msg, res); err != nil {
+		if err := r.guard.withConnector(ctx, inst, res.WorkspaceID, func(guarded engine.ResolvedInstallation, qtx *db.Queries) error {
+			return r.sendBindingPrompt(ctx, qtx, guarded, msg, res)
+		}); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: binding prompt failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeAgentOffline:
-		if err := r.post(ctx, inst, msg, agentOfflineText); err != nil {
+		if err := r.postRoute(ctx, inst, msg, res, agentOfflineText); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: offline notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
 	case engine.OutcomeAgentArchived:
-		if err := r.post(ctx, inst, msg, agentArchivedText); err != nil {
+		if err := r.postRoute(ctx, inst, msg, res, agentArchivedText); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: archived notice failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
+	case engine.OutcomeWorkspaceRequired:
+		if err := r.postConnector(ctx, inst, msg, pgtype.UUID{}, workspaceRequiredText); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: workspace selection notice failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
+	case engine.OutcomeWorkspaceSelected:
+		if err := r.postRoute(ctx, inst, msg, res, workspaceSelectedText); err != nil {
+			r.logger.WarnContext(ctx, "dingtalk replier: workspace selection confirmation failed",
+				"installation_id", util.UUIDToString(inst.ID), "error", err)
+		}
 	case engine.OutcomeFreshPending:
-		if err := r.post(ctx, inst, msg, freshPendingText); err != nil {
+		if err := r.postRoute(ctx, inst, msg, res, freshPendingText); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: fresh-start confirmation failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
@@ -133,7 +155,7 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 		if res.IssueUsageHadMedia {
 			text = issueUsageWithMediaText
 		}
-		if err := r.post(ctx, inst, msg, text); err != nil {
+		if err := r.postRoute(ctx, inst, msg, res, text); err != nil {
 			r.logger.WarnContext(ctx, "dingtalk replier: issue usage reply failed",
 				"installation_id", util.UUIDToString(inst.ID), "error", err)
 		}
@@ -143,7 +165,7 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 			if res.IssueDuplicate {
 				text = issueDuplicateText(res)
 			}
-			if err := r.post(ctx, inst, msg, text); err != nil {
+			if err := r.postRoute(ctx, inst, msg, res, text); err != nil {
 				r.logger.WarnContext(ctx, "dingtalk replier: issue outcome reply failed",
 					"installation_id", util.UUIDToString(inst.ID), "error", err)
 			}
@@ -153,7 +175,7 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 		// waiting for an issue that will never be created; every other drop
 		// (duplicates, unaddressed group chatter) stays silent.
 		if text := droppedReplyText(res, msg); text != "" {
-			if err := r.post(ctx, inst, msg, text); err != nil {
+			if err := r.postConnector(ctx, inst, msg, res.WorkspaceID, text); err != nil {
 				r.logger.WarnContext(ctx, "dingtalk replier: drop refusal failed",
 					"installation_id", util.UUIDToString(inst.ID), "error", err)
 			}
@@ -161,7 +183,19 @@ func (r *OutboundReplier) Reply(ctx context.Context, inst engine.ResolvedInstall
 	}
 }
 
-func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result) error {
+func (r *OutboundReplier) postRoute(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result, text string) error {
+	return r.guard.withRoute(ctx, inst, msg, res.UserID, func(guarded engine.ResolvedInstallation) error {
+		return r.post(ctx, guarded, msg, text)
+	})
+}
+
+func (r *OutboundReplier) postConnector(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, workspaceID pgtype.UUID, text string) error {
+	return r.guard.withConnector(ctx, inst, workspaceID, func(guarded engine.ResolvedInstallation, _ *db.Queries) error {
+		return r.post(ctx, guarded, msg, text)
+	})
+}
+
+func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, qtx *db.Queries, inst engine.ResolvedInstallation, msg channel.InboundMessage, res engine.Result) error {
 	sender := res.Sender
 	if sender == "" {
 		sender = msg.Source.SenderID
@@ -175,7 +209,20 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 	if r.appURL == "" {
 		return errors.New("app url not configured")
 	}
-	token, err := r.binding.Mint(ctx, inst.WorkspaceID, inst.ID, sender)
+	workspaceID := res.WorkspaceID
+	if !workspaceID.Valid {
+		workspaceID = inst.WorkspaceID
+	}
+	if !workspaceID.Valid {
+		return errors.New("workspace selection required before binding")
+	}
+	var token BindingToken
+	var err error
+	if guarded, ok := r.binding.(guardedBindingMinter); ok && qtx != nil {
+		token, err = guarded.MintWithQueries(ctx, qtx, workspaceID, inst.ID, sender)
+	} else {
+		token, err = r.binding.Mint(ctx, workspaceID, inst.ID, sender)
+	}
 	if err != nil {
 		return fmt.Errorf("mint binding token: %w", err)
 	}
@@ -206,11 +253,16 @@ func (r *OutboundReplier) post(ctx context.Context, inst engine.ResolvedInstalla
 // platform row and sends text into target. Shared by the OutboundReplier and the
 // ack notifier so both proactive-send paths decode credentials identically.
 func sendInstallationText(ctx context.Context, client *Client, decrypt Decrypter, inst engine.ResolvedInstallation, target sendTarget, text string) (string, error) {
-	row, ok := inst.Platform.(db.ChannelInstallation)
-	if !ok {
+	var config []byte
+	switch row := inst.Platform.(type) {
+	case db.ChannelInstallation:
+		config = row.Config
+	case db.DingtalkConnector:
+		config = row.Config
+	default:
 		return "", errors.New("installation platform row unavailable")
 	}
-	creds, err := decodeCredentials(row.Config, decrypt)
+	creds, err := decodeCredentials(config, decrypt)
 	if err != nil {
 		return "", fmt.Errorf("decode credentials: %w", err)
 	}

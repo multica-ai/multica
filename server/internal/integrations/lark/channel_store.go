@@ -338,6 +338,7 @@ func (s *ChannelStore) RecordLarkInboundDrop(ctx context.Context, arg RecordInbo
 		EventType:        arg.EventType,
 		DropReason:       arg.DropReason,
 		InstallationID:   arg.InstallationID,
+		WorkspaceID:      arg.WorkspaceID,
 		ChannelChatID:    arg.ChannelChatID,
 		ChannelEventID:   arg.ChannelEventID,
 		ChannelMessageID: arg.ChannelMessageID,

@@ -36,7 +36,9 @@ func TestDingTalkRejectedGroupCallbacksDoNotDiscoverRoutesDB(t *testing.T) {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_inbound_message_dedup WHERE installation_id = $1`, installation)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_user_binding WHERE installation_id = $1`, installation)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_group_route WHERE installation_id = $1`, installation)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installation)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_direct_route WHERE connector_id = $1`, installation)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_workspace_grant WHERE connector_id = $1`, installation)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_connector WHERE id = $1`, installation)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
 	}
 	clean()
@@ -51,7 +53,8 @@ func TestDingTalkRejectedGroupCallbacksDoNotDiscoverRoutesDB(t *testing.T) {
 	exec(`INSERT INTO workspace (id, name, slug, description) VALUES ($1, 'DingTalk rejected routes', 'dingtalk-rejected-routes-db', '')`, workspaceID)
 	exec(`INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider) VALUES ($1, $2, 'DingTalk rejected route runtime', 'local', 'multica_daemon')`, runtimeID, workspaceID)
 	exec(`INSERT INTO agent (id, workspace_id, name, runtime_mode, runtime_id) VALUES ($1, $2, 'DingTalk rejected route agent', 'local', $3)`, agentID, workspaceID, runtimeID)
-	exec(`INSERT INTO channel_installation (id, workspace_id, agent_id, channel_type, config, installer_user_id) VALUES ($1, $2, $3, 'dingtalk', jsonb_build_object('app_id', $4::text), $5)`, installation, workspaceID, agentID, appKey, installerID)
+	exec(`INSERT INTO dingtalk_connector (id, app_id, config, installer_user_id) VALUES ($1, $2, jsonb_build_object('app_id', $2::text), $3)`, installation, appKey, installerID)
+	exec(`INSERT INTO dingtalk_workspace_grant (connector_id, workspace_id, default_agent_id, installer_user_id) VALUES ($1, $2, $3, $4)`, installation, workspaceID, agentID, installerID)
 
 	queries := db.New(pool)
 	router := engine.NewRouter(nil, nil, nil, engine.RouterConfig{

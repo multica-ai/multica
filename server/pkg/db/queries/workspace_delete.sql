@@ -257,6 +257,33 @@ SET replayed_from_delivery_id = NULL
 WHERE webhook_delivery.workspace_id = $1
   AND replayed_from_delivery_id IS NOT NULL;
 
+-- name: LockDingTalkConnectorDeleteWriters :exec
+-- Connector row SHARE locks intentionally allow cross-workspace sends. A
+-- connector-scoped advisory X lock serializes two workspace deletions so the
+-- second statement observes the first grant deletion before deciding whether
+-- it must revoke and scrub the now-ungranted connector.
+SELECT pg_advisory_xact_lock(
+    hashtextextended('dingtalk-delete:' || target.connector_id::text, 0)
+)
+FROM (
+    SELECT DISTINCT connector_id
+    FROM dingtalk_workspace_grant
+    WHERE workspace_id = $1
+    ORDER BY connector_id
+) target;
+
+-- name: LockDingTalkConnectorsForWorkspaceDelete :many
+-- The handler already holds workspace and its chat sessions. Lock every shared
+-- connector in deterministic order immediately before the grant sweep. SHARE
+-- blocks credential/grant writers but deliberately allows sends in another
+-- granted workspace to continue during this workspace's teardown.
+SELECT c.id
+FROM dingtalk_connector c
+JOIN dingtalk_workspace_grant g ON g.connector_id = c.id
+WHERE g.workspace_id = $1
+ORDER BY c.id
+FOR SHARE OF c;
+
 -- name: DeleteWorkspaceLeafData :exec
 -- Everything task-keyed moved to DeleteTaskBatch, which runs in bounded batches
 -- before this step; what is left is keyed by the workspace or by one of the
@@ -439,16 +466,17 @@ deleted_channel_chat_bindings AS (
 deleted_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route WHERE workspace_id = $1
 ),
+deleted_dingtalk_direct_routes AS (
+    DELETE FROM dingtalk_direct_route WHERE workspace_id = $1
+),
 deleted_channel_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
 ),
 deleted_channel_inbound_audit AS (
     DELETE FROM channel_inbound_audit
-    WHERE installation_id IN (SELECT id FROM ws_channel_installations)
-),
-deleted_channel_user_bindings AS (
-    DELETE FROM channel_user_binding WHERE workspace_id = $1
+    WHERE workspace_id = $1
+       OR installation_id IN (SELECT id FROM ws_channel_installations)
 ),
 deleted_channel_binding_tokens AS (
     DELETE FROM channel_binding_token WHERE workspace_id = $1
@@ -497,6 +525,109 @@ WHERE chat_session_id IN (
 WITH
 deleted_sessions AS (
     DELETE FROM chat_session WHERE chat_session.workspace_id = $1
+),
+locked_dingtalk_connectors AS MATERIALIZED (
+    SELECT c.id
+    FROM dingtalk_connector c
+    JOIN dingtalk_workspace_grant g ON g.connector_id = c.id
+    WHERE g.workspace_id = $1
+    ORDER BY c.id
+    FOR SHARE OF c
+),
+candidate_rehome_memberships AS MATERIALIZED (
+    SELECT DISTINCT w.id AS workspace_id, m.user_id
+    FROM channel_user_binding b
+    JOIN dingtalk_workspace_grant g ON g.connector_id = b.installation_id
+    JOIN workspace w ON w.id = g.workspace_id
+    JOIN member m ON m.workspace_id = w.id
+                 AND m.user_id = b.multica_user_id
+    WHERE b.workspace_id = $1
+      AND b.channel_type = 'dingtalk'
+      AND g.workspace_id <> $1
+      AND g.status = 'active'
+      AND EXISTS (
+          SELECT 1 FROM locked_dingtalk_connectors c
+          WHERE c.id = b.installation_id
+      )
+),
+locked_rehome_memberships AS MATERIALIZED (
+    SELECT w.id AS workspace_id, m.user_id
+    FROM workspace w
+    JOIN member m ON m.workspace_id = w.id
+    JOIN candidate_rehome_memberships candidate
+      ON candidate.workspace_id = w.id
+     AND candidate.user_id = m.user_id
+    ORDER BY w.id, m.user_id
+    FOR SHARE OF w, m SKIP LOCKED
+),
+reassigned_dingtalk_user_bindings AS (
+    UPDATE channel_user_binding b
+    SET workspace_id = (
+        SELECT g.workspace_id
+        FROM dingtalk_workspace_grant g
+        JOIN locked_rehome_memberships target
+          ON target.workspace_id = g.workspace_id
+         AND target.user_id = b.multica_user_id
+        WHERE g.connector_id = b.installation_id
+          AND g.workspace_id <> $1
+          AND g.status = 'active'
+        ORDER BY g.created_at ASC
+        LIMIT 1
+    )
+    WHERE b.workspace_id = $1
+      AND b.channel_type = 'dingtalk'
+      AND EXISTS (
+          SELECT 1
+          FROM dingtalk_workspace_grant g
+          JOIN locked_rehome_memberships target
+            ON target.workspace_id = g.workspace_id
+           AND target.user_id = b.multica_user_id
+          WHERE g.connector_id = b.installation_id
+            AND g.workspace_id <> $1
+            AND g.status = 'active'
+      )
+),
+deleted_channel_user_bindings AS (
+    DELETE FROM channel_user_binding b
+    WHERE b.workspace_id = $1
+      AND NOT EXISTS (
+          SELECT 1
+          FROM dingtalk_workspace_grant g
+          JOIN locked_rehome_memberships target
+            ON target.workspace_id = g.workspace_id
+           AND target.user_id = b.multica_user_id
+          WHERE b.channel_type = 'dingtalk'
+            AND g.connector_id = b.installation_id
+            AND g.workspace_id <> $1
+            AND g.status = 'active'
+      )
+),
+deleted_dingtalk_grants AS (
+    DELETE FROM dingtalk_workspace_grant g
+    WHERE g.workspace_id = $1
+      AND g.connector_id IN (SELECT id FROM locked_dingtalk_connectors)
+    RETURNING connector_id
+),
+stopped_dingtalk_connectors AS (
+    UPDATE dingtalk_connector c
+    SET status = 'revoked',
+        config = c.config - 'app_secret_encrypted',
+        ws_lease_token = NULL,
+        ws_lease_expires_at = NULL,
+        updated_at = now()
+    WHERE c.id IN (SELECT connector_id FROM deleted_dingtalk_grants)
+      AND NOT EXISTS (
+          SELECT 1 FROM dingtalk_workspace_grant g
+          WHERE g.connector_id = c.id
+            AND g.workspace_id <> $1
+            AND g.status = 'active'
+      )
+    RETURNING c.id
+),
+deleted_unscoped_dingtalk_audit AS (
+    DELETE FROM channel_inbound_audit audit
+    WHERE audit.installation_id IN (SELECT id FROM stopped_dingtalk_connectors)
+      AND audit.workspace_id IS NULL
 ),
 deleted_channel_installations AS (
     DELETE FROM channel_installation

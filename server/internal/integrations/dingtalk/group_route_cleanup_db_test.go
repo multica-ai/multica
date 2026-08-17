@@ -77,11 +77,16 @@ func seedDingTalkRouteCleanupAgent(
 	`, owner.agentID, owner.workspaceID, owner.runtimeID, kind, systemKey, "DingTalk cleanup "+owner.agentID); err != nil {
 		t.Fatalf("seed cleanup agent: %v", err)
 	}
+	// Current DingTalk installations live in dingtalk_connector. These tests
+	// intentionally keep a generic installation row with a legacy DingTalk
+	// route attached so the generic cleanup queries continue removing historical
+	// dependents left by a pre-cutover database. Use a non-DingTalk channel type
+	// because migration 345 correctly rejects creation of new legacy rows.
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO channel_installation (
 			id, workspace_id, agent_id, channel_type, config, installer_user_id, status
 		) VALUES (
-			$1, $2, $3, 'dingtalk', jsonb_build_object('app_id', $4::text), $5, $6
+			$1, $2, $3, 'feishu', jsonb_build_object('app_id', $4::text), $5, $6
 		)
 	`, owner.installationID, owner.workspaceID, owner.agentID, owner.appID, uuid.NewString(), status); err != nil {
 		t.Fatalf("seed cleanup installation: %v", err)
@@ -147,25 +152,6 @@ func requireDingTalkRouteCleanupSchema(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
-func TestDeleteDingTalkInstallationForReplacementCleansOnlyTargetRoutes(t *testing.T) {
-	pool := dingtalkInstallTestDB(t)
-	requireDingTalkRouteCleanupSchema(t, pool)
-	ctx := context.Background()
-	target := seedDingTalkRouteCleanupOwner(t, ctx, pool, "user", "active")
-	unrelated := seedDingTalkRouteCleanupOwner(t, ctx, pool, "user", "active")
-
-	if _, err := db.New(pool).DeleteDingTalkInstallationForReplacement(ctx, db.DeleteDingTalkInstallationForReplacementParams{
-		InstallationID: util.MustParseUUID(target.installationID),
-		WorkspaceID:    util.MustParseUUID(target.workspaceID),
-		AgentID:        util.MustParseUUID(target.agentID),
-	}); err != nil {
-		t.Fatalf("DeleteDingTalkInstallationForReplacement: %v", err)
-	}
-
-	assertDingTalkRouteCleanupState(t, ctx, pool, target, 0)
-	assertDingTalkRouteCleanupState(t, ctx, pool, unrelated, 1)
-}
-
 func TestReclaimDeadChannelInstallationByAppIDCleansOnlyDeadRoutes(t *testing.T) {
 	pool := dingtalkInstallTestDB(t)
 	requireDingTalkRouteCleanupSchema(t, pool)
@@ -174,7 +160,7 @@ func TestReclaimDeadChannelInstallationByAppIDCleansOnlyDeadRoutes(t *testing.T)
 	live := seedDingTalkRouteCleanupOwner(t, ctx, pool, "user", "active")
 
 	if _, err := db.New(pool).ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
-		ChannelType: "dingtalk",
+		ChannelType: "feishu",
 		AppID:       dead.appID,
 		WorkspaceID: util.MustParseUUID(live.workspaceID),
 		AgentID:     util.MustParseUUID(live.agentID),

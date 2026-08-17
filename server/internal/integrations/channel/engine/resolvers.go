@@ -23,13 +23,15 @@ import (
 type Outcome string
 
 const (
-	OutcomeDropped       Outcome = "dropped"
-	OutcomeNeedsBinding  Outcome = "needs_binding"
-	OutcomeIngested      Outcome = "ingested"
-	OutcomeFreshPending  Outcome = "fresh_pending"
-	OutcomeIssueUsage    Outcome = "issue_usage"
-	OutcomeAgentOffline  Outcome = "agent_offline"
-	OutcomeAgentArchived Outcome = "agent_archived"
+	OutcomeDropped           Outcome = "dropped"
+	OutcomeNeedsBinding      Outcome = "needs_binding"
+	OutcomeIngested          Outcome = "ingested"
+	OutcomeFreshPending      Outcome = "fresh_pending"
+	OutcomeIssueUsage        Outcome = "issue_usage"
+	OutcomeAgentOffline      Outcome = "agent_offline"
+	OutcomeAgentArchived     Outcome = "agent_archived"
+	OutcomeWorkspaceRequired Outcome = "workspace_required"
+	OutcomeWorkspaceSelected Outcome = "workspace_selected"
 )
 
 // DropReason enumerates the drop-audit categories. Values match the legacy
@@ -52,7 +54,13 @@ type Result struct {
 	Outcome        Outcome
 	DropReason     DropReason
 	InstallationID pgtype.UUID
-	ChatSessionID  pgtype.UUID
+	// WorkspaceID is set for outcomes that happen before a normal routed
+	// session exists (notably binding and workspace-selection replies).
+	WorkspaceID   pgtype.UUID
+	ChatSessionID pgtype.UUID
+	// UserID is the authenticated Multica sender for route-fenced platform
+	// replies. It is empty for pre-binding outcomes.
+	UserID pgtype.UUID
 	// Sender is the platform-native sender id (e.g. Lark open_id), so the
 	// replier can target a binding prompt back to the sender.
 	Sender          string
@@ -92,6 +100,9 @@ type ResolvedInstallation struct {
 // ResolvedIdentity is the sender mapped to a Multica user.
 type ResolvedIdentity struct {
 	UserID pgtype.UUID
+	// BindingWorkspaceID lets a multi-workspace adapter scope an account-link
+	// token even when the external sender is not bound yet.
+	BindingWorkspaceID pgtype.UUID
 }
 
 // EnsureSessionParams carries the inputs for SessionBinder.EnsureSession.
@@ -113,6 +124,7 @@ type AppendParams struct {
 	SessionID           pgtype.UUID
 	Sender              pgtype.UUID
 	InstallationID      pgtype.UUID
+	WorkspaceID         pgtype.UUID
 	AgentID             pgtype.UUID
 	RouteRevision       int64
 	Message             channel.InboundMessage
@@ -174,6 +186,12 @@ var (
 	// the Router returns the normal archived-agent product outcome without
 	// creating a session or enqueueing work while the target is unavailable.
 	ErrTargetAgentArchived = errors.New("engine: routed agent is archived")
+	// ErrWorkspaceSelectionRequired is a terminal product outcome: the sender
+	// must choose one authorized workspace before a session can be resolved.
+	ErrWorkspaceSelectionRequired = errors.New("engine: workspace selection required")
+	// ErrWorkspaceSelected confirms that a control command updated the route;
+	// the command itself must not be appended to a chat session.
+	ErrWorkspaceSelected = errors.New("engine: workspace selected")
 	// ErrRouteChanged asks the Router to resolve the platform route again and
 	// retry the same claimed message. The durable append must return this before
 	// writing when an administrator changed the route revision concurrently.
@@ -194,9 +212,10 @@ type InstallationResolver interface {
 	ResolveInstallation(ctx context.Context, msg channel.InboundMessage) (ResolvedInstallation, error)
 }
 
-// IdentityResolver maps the message sender to a Multica user within the
-// installation, re-checking workspace membership. Return ErrSenderUnbound or
-// ErrSenderNotMember for the product cases.
+// IdentityResolver maps the message sender to a Multica user. Single-workspace
+// adapters re-check membership here; multi-workspace adapters may defer that
+// check until ValidatedInboundResolver has selected the target workspace.
+// Return ErrSenderUnbound or ErrSenderNotMember for the product cases.
 type IdentityResolver interface {
 	ResolveSender(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage) (ResolvedIdentity, error)
 }
@@ -306,7 +325,7 @@ func (l dbMediaIntentLedger) RecordPendingMediaObject(ctx context.Context, p Rec
 // Auditor records a dropped inbound event (no message body — drop-audit
 // policy). instID may be the zero UUID for installation-less events.
 type Auditor interface {
-	RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason DropReason) error
+	RecordDrop(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, reason DropReason) error
 }
 
 // OutboundReplier delivers the verdict-driven reply (binding prompt, offline /

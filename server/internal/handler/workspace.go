@@ -1186,7 +1186,6 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		failWorkspaceDelete(w, r, workspaceID, "lock workspace", err)
 		return
 	}
-
 	if _, err := qtx.LockChatSessionsByWorkspace(r.Context(), requester.WorkspaceID); err != nil {
 		failWorkspaceDelete(w, r, workspaceID, "lock chat sessions", err)
 		return
@@ -1248,10 +1247,6 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceChatMessages(ctx, requester.WorkspaceID) },
 		},
 		{
-			name: "delete communication roots",
-			run:  func() error { return qtx.DeleteWorkspaceCommunicationRoots(ctx, requester.WorkspaceID) },
-		},
-		{
 			name: "delete comments",
 			run:  func() error { return qtx.DeleteWorkspaceComments(ctx, requester.WorkspaceID) },
 		},
@@ -1292,6 +1287,23 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		{
 			name: "delete plugin data",
 			run:  func() error { return qtx.DeleteWorkspacePluginData(ctx, requester.WorkspaceID) },
+		},
+		{
+			// Chat sessions were locked before any adapter-owned connector.
+			// Take a shared connector fence only immediately before the DingTalk
+			// sweep: sends may continue in other granted workspaces, while
+			// install/revoke waits and the following statement gets a fresh
+			// snapshot after any preceding credential/grant writer commits.
+			name: "delete communication roots",
+			run: func() error {
+				if err := qtx.LockDingTalkConnectorDeleteWriters(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				if _, err := qtx.LockDingTalkConnectorsForWorkspaceDelete(ctx, requester.WorkspaceID); err != nil {
+					return err
+				}
+				return qtx.DeleteWorkspaceCommunicationRoots(ctx, requester.WorkspaceID)
+			},
 		},
 		{
 			name: "delete agents",

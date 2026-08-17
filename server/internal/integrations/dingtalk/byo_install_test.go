@@ -78,12 +78,12 @@ func TestRegisterBYO_PersistsEncryptedSecretKeyedByAppID(t *testing.T) {
 	if row.ID != q.rowID {
 		t.Errorf("row id = %v, want %v", row.ID, q.rowID)
 	}
-	if !q.upsertCalled || q.upsertParams.ChannelType != string(TypeDingTalk) {
-		t.Fatalf("upsert not called for dingtalk: %+v", q.upsertParams)
+	if !q.createCalled || !q.grantCalled {
+		t.Fatalf("connector/grant persist not called: create=%t grant=%t", q.createCalled, q.grantCalled)
 	}
 
 	var cfg installConfig
-	if err := json.Unmarshal(q.upsertParams.Config, &cfg); err != nil {
+	if err := json.Unmarshal(q.createParams.Config, &cfg); err != nil {
 		t.Fatalf("decode upserted config: %v", err)
 	}
 	// Routing key is the AppKey (== robotCode for a Stream-mode robot).
@@ -120,8 +120,8 @@ func TestRegisterBYO_MissingCredentials(t *testing.T) {
 	if _, err := svc.RegisterBYO(context.Background(), p); err != ErrInvalidAppSecret {
 		t.Errorf("empty app secret = %v, want ErrInvalidAppSecret", err)
 	}
-	if q.upsertCalled {
-		t.Error("missing credentials must be rejected before the upsert")
+	if q.createCalled || q.grantCalled {
+		t.Error("missing credentials must be rejected before connector/grant persistence")
 	}
 }
 
@@ -138,7 +138,7 @@ func TestRegisterBYO_AccessTokenFailure(t *testing.T) {
 	)); err == nil {
 		t.Fatal("expected an error when the access-token mint rejects the credentials")
 	}
-	if q.upsertCalled {
+	if q.createCalled || q.grantCalled {
 		t.Error("a failed credential validation must not persist an installation")
 	}
 }
@@ -159,93 +159,76 @@ func TestRegisterBYO_CredentialValidationTimesOut(t *testing.T) {
 	if !errors.Is(err, ErrCredentialValidation) {
 		t.Fatalf("timeout error = %v, want ErrCredentialValidation", err)
 	}
-	if q.upsertCalled {
+	if q.createCalled || q.grantCalled {
 		t.Fatal("timed-out credential validation persisted an installation")
 	}
 }
 
-func TestRegisterBYO_RobotConnectedToAnotherWorkspace_Rejected(t *testing.T) {
+func TestRegisterBYO_SameRobotAcrossWorkspacesSharesConnector(t *testing.T) {
 	srv := dingtalkMockServer(t, true)
 	defer srv.Close()
-	// The pasted robot is live-owned by an agent in a DIFFERENT Multica
-	// workspace, so after the dead-owner reclaim the (channel_type, app_id)
-	// routing index still rejects the upsert. We must refuse, not steal it — and
-	// name the real case (another workspace), not a catch-all.
 	q := &fakeInstallQueries{
-		rowID:            mustUUID(t, "44444444-4444-4444-4444-444444444444"),
-		appIDTaken:       true,
-		ownerWorkspaceID: mustUUID(t, "99999999-9999-9999-9999-999999999999"),
+		rowID: mustUUID(t, "44444444-4444-4444-4444-444444444444"),
 	}
+	svc := newTestInstallService(t, q)
+	svc.apiBase = srv.URL
+
+	first, err := svc.RegisterBYO(context.Background(), byoParams(
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+	))
+	if err != nil {
+		t.Fatalf("register first workspace: %v", err)
+	}
+	second, err := svc.RegisterBYO(context.Background(), byoParams(
+		"99999999-9999-9999-9999-999999999999",
+		"88888888-8888-8888-8888-888888888888",
+	))
+	if err != nil {
+		t.Fatalf("register second workspace: %v", err)
+	}
+	if first.ID != second.ID || first.ID != q.rowID {
+		t.Fatalf("connector ids = %v and %v, want shared %v", first.ID, second.ID, q.rowID)
+	}
+	if !q.createCalled || !q.updateCalled || len(q.grantParams) != 2 {
+		t.Fatalf("persistence calls create=%t update=%t grants=%d, want true, true, 2", q.createCalled, q.updateCalled, len(q.grantParams))
+	}
+}
+
+func TestRegisterBYO_SameWorkspaceUpdatesDefaultAgentGrant(t *testing.T) {
+	srv := dingtalkMockServer(t, true)
+	defer srv.Close()
+	q := &fakeInstallQueries{rowID: mustUUID(t, "44444444-4444-4444-4444-444444444444")}
 	svc := newTestInstallService(t, q)
 	svc.apiBase = srv.URL
 
 	if _, err := svc.RegisterBYO(context.Background(), byoParams(
 		"11111111-1111-1111-1111-111111111111",
 		"22222222-2222-2222-2222-222222222222",
-	)); err != ErrRobotOwnedByAnotherWorkspace {
-		t.Fatalf("robot already connected = %v, want ErrRobotOwnedByAnotherWorkspace", err)
+	)); err != nil {
+		t.Fatalf("register first default agent: %v", err)
 	}
-	if !q.reclaimCalled {
-		t.Error("install must attempt a dead-owner reclaim before the upsert")
-	}
-}
-
-func TestRegisterBYO_RobotConnectedToAnotherAgentSameWorkspace_Rejected(t *testing.T) {
-	srv := dingtalkMockServer(t, true)
-	defer srv.Close()
-	// The pasted robot is live-owned by a DIFFERENT (non-archived) agent in the
-	// SAME workspace. This must surface the same-workspace sentinel so the UI
-	// points at the Disconnect the user can actually reach (#4810).
-	q := &fakeInstallQueries{
-		rowID:            mustUUID(t, "44444444-4444-4444-4444-444444444444"),
-		appIDTaken:       true,
-		ownerWorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
-	}
-	svc := newTestInstallService(t, q)
-	svc.apiBase = srv.URL
-
 	if _, err := svc.RegisterBYO(context.Background(), byoParams(
 		"11111111-1111-1111-1111-111111111111",
-		"22222222-2222-2222-2222-222222222222",
-	)); err != ErrRobotOwnedBySameWorkspace {
-		t.Fatalf("robot owned by another agent in this workspace = %v, want ErrRobotOwnedBySameWorkspace", err)
+		"77777777-7777-7777-7777-777777777777",
+	)); err != nil {
+		t.Fatalf("update default agent: %v", err)
+	}
+	last := q.grantParams[len(q.grantParams)-1]
+	if last.DefaultAgentID != pgtypeUUID("77777777-7777-7777-7777-777777777777") {
+		t.Fatalf("default agent = %v, want updated agent", last.DefaultAgentID)
 	}
 }
 
-func TestRegisterBYO_RobotConnectedToArchivedAgent_Rejected(t *testing.T) {
+func TestRegisterBYO_ReactivatesRevokedConnector(t *testing.T) {
 	srv := dingtalkMockServer(t, true)
 	defer srv.Close()
-	// The pasted robot's owning agent is archived — a live-but-reversible owner —
-	// so the reclaim leaves it in place and the upsert is refused. The user is
-	// told to restore the agent or disconnect its robot, not that it's gone.
+	connectorID := mustUUID(t, "44444444-4444-4444-4444-444444444444")
 	q := &fakeInstallQueries{
-		rowID:            mustUUID(t, "44444444-4444-4444-4444-444444444444"),
-		appIDTaken:       true,
-		ownerWorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
-		ownerArchived:    true,
-	}
-	svc := newTestInstallService(t, q)
-	svc.apiBase = srv.URL
-
-	if _, err := svc.RegisterBYO(context.Background(), byoParams(
-		"11111111-1111-1111-1111-111111111111",
-		"22222222-2222-2222-2222-222222222222",
-	)); err != ErrRobotOwnedByArchivedAgent {
-		t.Fatalf("robot owned by an archived agent = %v, want ErrRobotOwnedByArchivedAgent", err)
-	}
-}
-
-// A DEAD prior owner of the AppKey — a revoked placeholder, or an orphan whose
-// workspace/agent was deleted — is reclaimed by the shared
-// ReclaimDeadChannelInstallationByAppID gate, freeing the routing slot so the
-// upsert inserts a fresh row for the new agent (#4810).
-func TestRegisterBYO_ReclaimsDeadOwner(t *testing.T) {
-	srv := dingtalkMockServer(t, true)
-	defer srv.Close()
-	deadID := mustUUID(t, "99999999-9999-9999-9999-999999999999")
-	q := &fakeInstallQueries{
-		rowID:       mustUUID(t, "44444444-4444-4444-4444-444444444444"),
-		reclaimedID: &deadID, // the reclaim cleared a dead prior owner
+		rowID: connectorID,
+		connector: &db.DingtalkConnector{
+			ID: connectorID, AppID: "ding-app-key-xyz", Status: "revoked",
+		},
 	}
 	svc := newTestInstallService(t, q)
 	svc.apiBase = srv.URL
@@ -255,32 +238,24 @@ func TestRegisterBYO_ReclaimsDeadOwner(t *testing.T) {
 		"22222222-2222-2222-2222-222222222222",
 	))
 	if err != nil {
-		t.Fatalf("RegisterBYO after reclaim: %v", err)
+		t.Fatalf("RegisterBYO after revoke: %v", err)
 	}
-	if !q.reclaimCalled {
-		t.Error("install must run the dead-owner reclaim before the upsert")
+	if !q.updateCalled || !q.grantCalled {
+		t.Fatalf("reactivation calls update=%t grant=%t, want both", q.updateCalled, q.grantCalled)
 	}
-	if !q.upsertCalled {
-		t.Error("upsert must run after reclaiming the dead owner")
-	}
-	if row.ID != q.rowID {
-		t.Errorf("row id = %v, want %v", row.ID, q.rowID)
+	if row.ID != connectorID {
+		t.Errorf("row id = %v, want preserved connector %v", row.ID, connectorID)
 	}
 }
 
-// Re-connecting the SAME (workspace, agent) is an in-place update: the reclaim
-// spares the caller's own row (the SQL guard excludes it), and the upsert's
-// (workspace, agent, channel) conflict target reactivates it with its
-// installation_id — and every binding hanging off it — preserved.
-func TestRegisterBYO_SameAgentReconnect_UpdatesRowInPlace(t *testing.T) {
+func TestRegisterBYO_SameAgentReconnect_PreservesConnectorIdentity(t *testing.T) {
 	srv := dingtalkMockServer(t, true)
 	defer srv.Close()
-	existing := &db.ChannelInstallation{
-		ID:          mustUUID(t, "44444444-4444-4444-4444-444444444444"),
-		WorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
-		AgentID:     mustUUID(t, "22222222-2222-2222-2222-222222222222"),
+	existing := &db.DingtalkConnector{
+		ID:    mustUUID(t, "44444444-4444-4444-4444-444444444444"),
+		AppID: "ding-app-key-xyz", Status: "active",
 	}
-	q := &fakeInstallQueries{existing: existing, existingAppID: "ding-app-key-xyz"}
+	q := &fakeInstallQueries{connector: existing, rowID: existing.ID}
 	svc := newTestInstallService(t, q)
 	svc.apiBase = srv.URL
 
@@ -294,29 +269,22 @@ func TestRegisterBYO_SameAgentReconnect_UpdatesRowInPlace(t *testing.T) {
 	if row.ID != existing.ID {
 		t.Errorf("reconnect row id = %v, want in-place %v", row.ID, existing.ID)
 	}
-	if q.replaceCalled {
-		t.Fatal("same-AppKey reconnect retired the installation identity")
+	if q.createCalled || !q.updateCalled {
+		t.Fatalf("same-AppKey reconnect create=%t update=%t, want false/true", q.createCalled, q.updateCalled)
 	}
 }
 
-// Replacing an agent's robot with a DIFFERENT AppKey must establish a fresh
-// installation identity. Keeping the old installation_id would carry
-// organization-scoped senderStaffId bindings and chat sessions into the new
-// DingTalk organization.
-func TestRegisterBYO_DifferentAppKey_ReplacesInstallationIdentity(t *testing.T) {
+func TestRegisterBYO_DifferentAppKeyCreatesDistinctConnectorIdentity(t *testing.T) {
 	srv := dingtalkMockServer(t, true)
 	defer srv.Close()
 	oldID := mustUUID(t, "44444444-4444-4444-4444-444444444444")
 	newID := mustUUID(t, "55555555-5555-5555-5555-555555555555")
-	existing := &db.ChannelInstallation{
-		ID:          oldID,
-		WorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
-		AgentID:     mustUUID(t, "22222222-2222-2222-2222-222222222222"),
+	existing := &db.DingtalkConnector{
+		ID: oldID, AppID: "ding-old-app-key", Status: "active",
 	}
 	q := &fakeInstallQueries{
-		existing:      existing,
-		existingAppID: "ding-old-app-key",
-		rowID:         newID,
+		connector: existing,
+		rowID:     newID,
 	}
 	svc := newTestInstallService(t, q)
 	svc.apiBase = srv.URL
@@ -331,36 +299,23 @@ func TestRegisterBYO_DifferentAppKey_ReplacesInstallationIdentity(t *testing.T) 
 	if !q.lockCalled {
 		t.Fatal("replacement decision was not serialized")
 	}
-	if !q.replaceCalled || q.replaceParams.InstallationID != oldID {
-		t.Fatalf("retired installation = (%v, %+v), want old id %v", q.replaceCalled, q.replaceParams, oldID)
+	if !q.createCalled || q.updateCalled {
+		t.Fatalf("different AppKey create=%t update=%t, want true/false", q.createCalled, q.updateCalled)
 	}
 	if row.ID != newID || row.ID == oldID {
 		t.Fatalf("replacement row id = %v, want fresh %v (old %v)", row.ID, newID, oldID)
 	}
 }
 
-// A concurrent disconnect can free the slot between the failed upsert and the
-// live-owner lookup; the lookup's ErrNoRows then falls back to the generic
-// cross-workspace sentinel (HTTP 409, a retry succeeds) instead of surfacing an
-// opaque 500.
-func TestRegisterBYO_OwnerLookupMiss_FallsBackToConflict(t *testing.T) {
-	srv := dingtalkMockServer(t, true)
-	defer srv.Close()
-	q := &fakeInstallQueries{
-		rowID:        mustUUID(t, "44444444-4444-4444-4444-444444444444"),
-		appIDTaken:   true,
-		ownerMissing: true,
-	}
+func TestRevokeDingTalkInstallationScopesToWorkspaceGrant(t *testing.T) {
+	q := &fakeInstallQueries{}
 	svc := newTestInstallService(t, q)
-	svc.apiBase = srv.URL
-
-	if _, err := svc.RegisterBYO(context.Background(), byoParams(
-		"11111111-1111-1111-1111-111111111111",
-		"22222222-2222-2222-2222-222222222222",
-	)); err != ErrRobotOwnedByAnotherWorkspace {
-		t.Fatalf("owner lookup miss = %v, want fallback ErrRobotOwnedByAnotherWorkspace", err)
+	connectorID := pgtypeUUID("44444444-4444-4444-4444-444444444444")
+	workspaceID := pgtypeUUID("11111111-1111-1111-1111-111111111111")
+	if err := svc.Revoke(context.Background(), connectorID, workspaceID); err != nil {
+		t.Fatalf("Revoke: %v", err)
 	}
-	if !q.upsertCalled {
-		t.Error("the upsert must run and trip the routing unique index")
+	if q.revokeParams.ConnectorID != connectorID || q.revokeParams.WorkspaceID != workspaceID {
+		t.Fatalf("revoke params = %+v, want connector/workspace scoped", q.revokeParams)
 	}
 }

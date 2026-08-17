@@ -372,13 +372,14 @@ func (r *sessionBinder) BindMedia(ctx context.Context, p engine.BindMediaParams)
 
 type auditor struct{ q *db.Queries }
 
-func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
+func (r *auditor) RecordDrop(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, reason engine.DropReason) error {
 	raw, _ := decodeSlackRaw(msg) // event_type is best-effort; a decode miss still audits the drop
 	return r.q.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
 		ChannelType:      string(TypeSlack),
 		EventType:        raw.EventType,
 		DropReason:       string(reason),
-		InstallationID:   instID,
+		InstallationID:   inst.ID,
+		WorkspaceID:      inst.WorkspaceID,
 		ChannelChatID:    nullText(msg.Source.ChatID),
 		ChannelEventID:   nullText(msg.EventID),
 		ChannelMessageID: nullText(msg.MessageID),

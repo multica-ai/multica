@@ -107,6 +107,7 @@ type RecordInboundDropParams struct {
 	EventType        string
 	DropReason       string
 	InstallationID   pgtype.UUID
+	WorkspaceID      pgtype.UUID
 	ChannelChatID    pgtype.Text
 	ChannelEventID   pgtype.Text
 	ChannelMessageID pgtype.Text

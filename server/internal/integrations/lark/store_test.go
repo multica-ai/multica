@@ -2,15 +2,31 @@ package lark
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+type rollbackDiscoveryQueries struct {
+	rows         []db.ChannelInstallation
+	connectors   []db.DingtalkConnector
+	connectorErr error
+}
+
+func (q rollbackDiscoveryQueries) ListAllActiveChannelInstallations(context.Context) ([]db.ChannelInstallation, error) {
+	return q.rows, nil
+}
+
+func (q rollbackDiscoveryQueries) ListAllActiveDingTalkConnectors(context.Context) ([]db.DingtalkConnector, error) {
+	return q.connectors, q.connectorErr
+}
 
 func uuidFrom(b byte) pgtype.UUID {
 	var u pgtype.UUID
@@ -19,6 +35,24 @@ func uuidFrom(b byte) pgtype.UUID {
 	}
 	u.Valid = true
 	return u
+}
+
+func TestListActiveInstallationsTreatsDroppedDingTalkTableAsEmpty(t *testing.T) {
+	genericID := uuidFrom(0x11)
+	got, err := listActiveInstallations(context.Background(), rollbackDiscoveryQueries{
+		rows: []db.ChannelInstallation{{
+			ID:          genericID,
+			ChannelType: "feishu",
+			Config:      []byte(`{"app_id":"feishu-app"}`),
+		}},
+		connectorErr: &pgconn.PgError{Code: "42P01"},
+	})
+	if err != nil {
+		t.Fatalf("list active installations during rollback: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != genericID || got[0].ChannelType != "feishu" {
+		t.Fatalf("rollback discovery = %+v, want only the generic installation", got)
+	}
 }
 
 // sealedSecret returns an n-byte value standing in for a secretbox-sealed app

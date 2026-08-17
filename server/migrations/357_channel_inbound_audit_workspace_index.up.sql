@@ -1,0 +1,2 @@
+CREATE INDEX CONCURRENTLY idx_channel_inbound_audit_workspace
+ON channel_inbound_audit(workspace_id, received_at DESC);

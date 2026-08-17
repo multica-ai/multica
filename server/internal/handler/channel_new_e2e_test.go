@@ -387,6 +387,6 @@ func (b *channelNewE2ESessionBinder) BindMedia(ctx context.Context, p engine.Bin
 
 type channelNewE2EAuditor struct{}
 
-func (channelNewE2EAuditor) RecordDrop(context.Context, pgtype.UUID, channel.InboundMessage, engine.DropReason) error {
+func (channelNewE2EAuditor) RecordDrop(context.Context, engine.ResolvedInstallation, channel.InboundMessage, engine.DropReason) error {
 	return nil
 }

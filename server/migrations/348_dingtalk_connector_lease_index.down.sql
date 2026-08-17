@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY idx_dingtalk_connector_lease;

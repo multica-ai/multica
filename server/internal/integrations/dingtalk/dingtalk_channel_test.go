@@ -9,7 +9,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -207,7 +206,7 @@ func TestDingTalkChannel_DisconnectDrainsQueuedMessagesBeforeReplacement(t *test
 // A handler (engine dispatch) error on an addressed /issue command must post
 // the internal-error notice: the frame is already ACKed and never redelivered,
 // so silence would lose the command with no signal to the user.
-func TestOnMessage_HandlerError_IssueCommandGetsErrorReply(t *testing.T) {
+func TestOnMessage_HandlerError_DoesNotBypassRouteFence(t *testing.T) {
 	sent := make(chan string, 1)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -215,9 +214,9 @@ func TestOnMessage_HandlerError_IssueCommandGetsErrorReply(t *testing.T) {
 			_, _ = w.Write([]byte(`{"accessToken":"tok","expireIn":7200}`))
 			return
 		}
-		body, _ := io.ReadAll(r.Body)
+		_, _ = io.ReadAll(r.Body)
 		select {
-		case sent <- string(body):
+		case sent <- r.URL.Path:
 		default:
 		}
 		_, _ = w.Write([]byte(`{"processQueryKey":"pqk-1"}`))
@@ -248,12 +247,9 @@ func TestOnMessage_HandlerError_IssueCommandGetsErrorReply(t *testing.T) {
 		t.Fatalf("onMessage: %v", err)
 	}
 	select {
-	case body := <-sent:
-		if !strings.Contains(body, issueDispatchFailedText) {
-			t.Fatalf("reply body = %q, want the internal-error notice", body)
-		}
-	case <-time.After(3 * time.Second):
-		t.Fatal("no error reply was sent for the failed /issue dispatch")
+	case path := <-sent:
+		t.Fatalf("unfenced dispatch-error reply called %q", path)
+	case <-time.After(250 * time.Millisecond):
 	}
 }
 
@@ -294,16 +290,6 @@ func TestOnMessage_ReturnsWithoutWaitingForHandler(t *testing.T) {
 	case <-time.After(time.Second):
 		t.Fatal("the queued job never ran")
 	}
-}
-
-// A handler error on a plain chat turn stays silent — only /issue commands
-// warrant the dispatch-error notice.
-func TestNotifyIssueDispatchError_GatesOnIssueCommand(t *testing.T) {
-	c := &dingtalkChannel{logger: slog.Default()}
-	// Non-issue text and unaddressed messages must return before spawning the
-	// send goroutine; a nil client would panic if they did not.
-	c.notifyIssueDispatchError(channel.InboundMessage{Text: "hello", AddressedToBot: true})
-	c.notifyIssueDispatchError(channel.InboundMessage{Text: "/issue x", AddressedToBot: false})
 }
 
 func TestNewDingTalkFactory_RejectsMissingSecret(t *testing.T) {

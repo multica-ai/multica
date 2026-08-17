@@ -11,72 +11,135 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteDingTalkInstallationForReplacement = `-- name: DeleteDingTalkInstallationForReplacement :one
-WITH retired AS (
-    DELETE FROM channel_installation ci
-    WHERE ci.id = $1
-      AND ci.workspace_id = $2
-      AND ci.agent_id = $3
-      AND ci.channel_type = 'dingtalk'
-    RETURNING ci.id
-),
-cleared_chat_sessions AS (
-    DELETE FROM channel_chat_session_binding
-    WHERE installation_id IN (SELECT id FROM retired)
-    RETURNING chat_session_id
-),
-cleared_group_routes AS (
-    DELETE FROM dingtalk_group_route
-    WHERE installation_id IN (SELECT id FROM retired)
-),
-cleared_outbound_cards AS (
-    DELETE FROM channel_outbound_card_message
-    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
-),
-cleared_binding_tokens AS (
-    DELETE FROM channel_binding_token
-    WHERE installation_id IN (SELECT id FROM retired)
-),
-cleared_user_bindings AS (
-    DELETE FROM channel_user_binding
-    WHERE installation_id IN (SELECT id FROM retired)
-),
-cleared_inbound_dedup AS (
-    DELETE FROM channel_inbound_message_dedup
-    WHERE installation_id IN (SELECT id FROM retired)
-),
-detached_audit AS (
-    UPDATE channel_inbound_audit SET installation_id = NULL
-    WHERE installation_id IN (SELECT id FROM retired)
-),
-detached_media_intents AS (
-    UPDATE channel_media_pending_object SET installation_id = NULL
-    WHERE installation_id IN (SELECT id FROM retired)
-)
-SELECT retired.id FROM retired
+const acquireDingTalkConnectorWSLease = `-- name: AcquireDingTalkConnectorWSLease :one
+UPDATE dingtalk_connector
+SET ws_lease_token = $1,
+    ws_lease_expires_at = $2,
+    updated_at = now()
+WHERE dingtalk_connector.id = $3
+  AND status = 'active'
+  AND EXISTS (
+      SELECT 1 FROM dingtalk_workspace_grant g
+      WHERE g.connector_id = dingtalk_connector.id AND g.status = 'active'
+  )
+  AND (
+      ws_lease_token IS NULL OR ws_lease_expires_at IS NULL OR
+      ws_lease_expires_at < now() OR ws_lease_token = $1
+  )
+RETURNING dingtalk_connector.id
 `
 
-type DeleteDingTalkInstallationForReplacementParams struct {
-	InstallationID pgtype.UUID `json:"installation_id"`
-	WorkspaceID    pgtype.UUID `json:"workspace_id"`
-	AgentID        pgtype.UUID `json:"agent_id"`
+type AcquireDingTalkConnectorWSLeaseParams struct {
+	NewToken     pgtype.Text        `json:"new_token"`
+	NewExpiresAt pgtype.Timestamptz `json:"new_expires_at"`
+	ID           pgtype.UUID        `json:"id"`
 }
 
-// Retires an installation when the same agent is connected with a DIFFERENT
-// AppKey. A senderStaffId is scoped to one DingTalk organization, so none of the
-// old installation's identity, token, session, dedup, or outbound state may
-// cross into the new robot. The caller inserts a fresh installation in the same
-// transaction, giving the replacement a new installation_id that also fences
-// late writes and replies from the old connection.
-//
-// Chat sessions themselves remain as history, but their channel bindings and
-// outbound cards are removed. Audit and media-intent rows remain useful for
-// diagnostics / reconciliation, so their installation references are detached.
-func (q *Queries) DeleteDingTalkInstallationForReplacement(ctx context.Context, arg DeleteDingTalkInstallationForReplacementParams) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, deleteDingTalkInstallationForReplacement, arg.InstallationID, arg.WorkspaceID, arg.AgentID)
+func (q *Queries) AcquireDingTalkConnectorWSLease(ctx context.Context, arg AcquireDingTalkConnectorWSLeaseParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, acquireDingTalkConnectorWSLease, arg.NewToken, arg.NewExpiresAt, arg.ID)
 	var id pgtype.UUID
 	err := row.Scan(&id)
 	return id, err
+}
+
+const countActiveDingTalkWorkspaceGrants = `-- name: CountActiveDingTalkWorkspaceGrants :one
+SELECT count(*)::bigint
+FROM dingtalk_workspace_grant
+WHERE connector_id = $1
+  AND status = 'active'
+`
+
+func (q *Queries) CountActiveDingTalkWorkspaceGrants(ctx context.Context, connectorID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveDingTalkWorkspaceGrants, connectorID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countDingTalkEligibleWorkspaceGrants = `-- name: CountDingTalkEligibleWorkspaceGrants :one
+SELECT count(*)::bigint
+FROM dingtalk_workspace_grant g
+JOIN dingtalk_connector c ON c.id = g.connector_id
+JOIN member m ON m.workspace_id = g.workspace_id
+             AND m.user_id = $1
+WHERE g.connector_id = $2
+  AND g.status = 'active'
+  AND c.status = 'active'
+`
+
+type CountDingTalkEligibleWorkspaceGrantsParams struct {
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ConnectorID   pgtype.UUID `json:"connector_id"`
+}
+
+func (q *Queries) CountDingTalkEligibleWorkspaceGrants(ctx context.Context, arg CountDingTalkEligibleWorkspaceGrantsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countDingTalkEligibleWorkspaceGrants, arg.MulticaUserID, arg.ConnectorID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const createDingTalkConnector = `-- name: CreateDingTalkConnector :one
+INSERT INTO dingtalk_connector (
+    app_id, config, installer_user_id
+) VALUES (
+    $1, $2, $3
+)
+RETURNING id, app_id, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+`
+
+type CreateDingTalkConnectorParams struct {
+	AppID           string      `json:"app_id"`
+	Config          []byte      `json:"config"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+}
+
+func (q *Queries) CreateDingTalkConnector(ctx context.Context, arg CreateDingTalkConnectorParams) (DingtalkConnector, error) {
+	row := q.db.QueryRow(ctx, createDingTalkConnector, arg.AppID, arg.Config, arg.InstallerUserID)
+	var i DingtalkConnector
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const deleteDingTalkStaleDirectChatBinding = `-- name: DeleteDingTalkStaleDirectChatBinding :one
+WITH cleared AS (
+    DELETE FROM channel_chat_session_binding b
+    WHERE b.installation_id = $1
+      AND b.channel_type = 'dingtalk'
+      AND b.channel_chat_id = $2::text
+      AND COALESCE(NULLIF(b.config ->> 'agent_id', ''), '')
+          <> $3::uuid::text
+    RETURNING b.chat_session_id
+), cleared_outbound_cards AS (
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared)
+)
+SELECT count(*)::bigint AS cleared_count
+FROM cleared
+`
+
+type DeleteDingTalkStaleDirectChatBindingParams struct {
+	ConnectorID   pgtype.UUID `json:"connector_id"`
+	ChannelChatID string      `json:"channel_chat_id"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+}
+
+func (q *Queries) DeleteDingTalkStaleDirectChatBinding(ctx context.Context, arg DeleteDingTalkStaleDirectChatBindingParams) (int64, error) {
+	row := q.db.QueryRow(ctx, deleteDingTalkStaleDirectChatBinding, arg.ConnectorID, arg.ChannelChatID, arg.AgentID)
+	var cleared_count int64
+	err := row.Scan(&cleared_count)
+	return cleared_count, err
 }
 
 const deleteDingTalkStaleGroupChatBinding = `-- name: DeleteDingTalkStaleGroupChatBinding :one
@@ -88,9 +151,13 @@ WITH cleared AS (
       AND COALESCE(
           NULLIF(b.config ->> 'agent_id', ''),
           (
-              SELECT i.agent_id::text
-              FROM channel_installation i
-              WHERE i.id = b.installation_id
+              SELECT g.default_agent_id::text
+              FROM dingtalk_group_route r
+              JOIN dingtalk_workspace_grant g
+                ON g.connector_id = r.installation_id
+               AND g.workspace_id = r.workspace_id
+              WHERE r.installation_id = b.installation_id
+                AND r.conversation_id = b.channel_chat_id
           ),
           ''
       ) <> $3::uuid::text
@@ -123,18 +190,64 @@ func (q *Queries) DeleteDingTalkStaleGroupChatBinding(ctx context.Context, arg D
 	return cleared_count, err
 }
 
+const dingTalkDirectRouteMatchesAgent = `-- name: DingTalkDirectRouteMatchesAgent :one
+SELECT EXISTS (
+    SELECT 1
+    FROM dingtalk_direct_route r
+    JOIN dingtalk_connector c ON c.id = r.connector_id
+    JOIN dingtalk_workspace_grant g
+      ON g.connector_id = r.connector_id AND g.workspace_id = r.workspace_id
+    JOIN agent a ON a.id = r.agent_id AND a.workspace_id = r.workspace_id
+    WHERE r.connector_id = $1
+      AND r.channel_user_id = $2
+      AND r.workspace_id = $3
+      AND r.agent_id = $4
+      AND r.revision = $5
+      AND c.status = 'active'
+      AND g.status = 'active'
+      AND a.kind = 'user'
+      AND a.archived_at IS NULL
+) AS matches
+`
+
+type DingTalkDirectRouteMatchesAgentParams struct {
+	ConnectorID   pgtype.UUID `json:"connector_id"`
+	ChannelUserID string      `json:"channel_user_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+	RouteRevision int64       `json:"route_revision"`
+}
+
+func (q *Queries) DingTalkDirectRouteMatchesAgent(ctx context.Context, arg DingTalkDirectRouteMatchesAgentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, dingTalkDirectRouteMatchesAgent,
+		arg.ConnectorID,
+		arg.ChannelUserID,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.RouteRevision,
+	)
+	var matches bool
+	err := row.Scan(&matches)
+	return matches, err
+}
+
 const dingTalkGroupRouteMatchesAgent = `-- name: DingTalkGroupRouteMatchesAgent :one
 SELECT EXISTS (
     SELECT 1
     FROM dingtalk_group_route r
     JOIN agent a ON a.id = r.agent_id
                 AND a.workspace_id = r.workspace_id
+    JOIN dingtalk_connector c ON c.id = r.installation_id
+    JOIN dingtalk_workspace_grant g
+      ON g.connector_id = c.id AND g.workspace_id = r.workspace_id
     WHERE r.installation_id = $1
       AND r.conversation_id = $2::text
       AND r.agent_id = $3
       AND r.revision = $4
       AND a.kind = 'user'
       AND a.archived_at IS NULL
+      AND c.status = 'active'
+      AND g.status = 'active'
 ) AS matches
 `
 
@@ -159,29 +272,63 @@ func (q *Queries) DingTalkGroupRouteMatchesAgent(ctx context.Context, arg DingTa
 
 const discoverDingTalkGroupRoute = `-- name: DiscoverDingTalkGroupRoute :one
 
-WITH workspace_guard AS MATERIALIZED (
+WITH eligible_workspace_ids AS MATERIALIZED (
     SELECT w.id
     FROM workspace w
-    WHERE w.id = $1
-    FOR KEY SHARE
-), installation AS MATERIALIZED (
-    SELECT i.id, i.workspace_id, i.agent_id, i.channel_type, i.config, i.status, i.ws_lease_token, i.ws_lease_expires_at, i.installer_user_id, i.installed_at, i.created_at, i.updated_at
-    FROM channel_installation i
-    JOIN workspace_guard w ON w.id = i.workspace_id
-    WHERE i.id = $2
-      AND i.workspace_id = $1
-      AND i.channel_type = 'dingtalk'
-      AND i.status = 'active'
-    FOR SHARE OF i
+    JOIN dingtalk_workspace_grant g ON g.workspace_id = w.id
+    JOIN member m ON m.workspace_id = w.id
+                 AND m.user_id = $1
+    WHERE g.connector_id = $2
+      AND g.status = 'active'
+), workspace_guards AS MATERIALIZED (
+    SELECT w.id
+    FROM workspace w
+    JOIN eligible_workspace_ids candidate ON candidate.id = w.id
+    ORDER BY w.id
+    FOR KEY SHARE OF w
+), connector AS MATERIALIZED (
+    SELECT c.id
+    FROM dingtalk_connector c
+    WHERE c.id = $2
+      AND c.status = 'active'
+      AND EXISTS (SELECT 1 FROM workspace_guards)
+    FOR SHARE OF c
+), eligible_grants AS MATERIALIZED (
+    SELECT g.workspace_id, g.default_agent_id, g.installer_user_id
+    FROM dingtalk_workspace_grant g
+    JOIN workspace_guards w ON w.id = g.workspace_id
+    JOIN connector c ON c.id = g.connector_id
+    JOIN member m ON m.workspace_id = g.workspace_id
+                 AND m.user_id = $1
+    WHERE g.connector_id = $2
+      AND g.status = 'active'
+    FOR SHARE OF g, m
+), existing_target AS MATERIALIZED (
+    SELECT r.workspace_id, r.agent_id, g.installer_user_id
+    FROM dingtalk_group_route r
+    JOIN eligible_grants g ON g.workspace_id = r.workspace_id
+    WHERE r.installation_id = $2
+      AND r.conversation_id = $3::text
+      AND EXISTS (SELECT 1 FROM connector)
+), candidate AS MATERIALIZED (
+    SELECT workspace_id, agent_id, installer_user_id
+    FROM existing_target
+    UNION ALL
+    SELECT workspace_id, default_agent_id, installer_user_id
+    FROM eligible_grants
+    WHERE NOT EXISTS (SELECT 1 FROM existing_target)
+      AND (SELECT count(*) FROM eligible_grants) = 1
+      AND EXISTS (SELECT 1 FROM connector)
 ), group_route AS (
     INSERT INTO dingtalk_group_route (
         workspace_id, installation_id, conversation_id,
         conversation_title, agent_id
     )
     SELECT
-        i.workspace_id, i.id, $3::text,
-        $4::text, i.agent_id
-    FROM installation i
+        candidate.workspace_id, $2,
+        $3::text,
+        $4::text, candidate.agent_id
+    FROM candidate
     ON CONFLICT (installation_id, conversation_id) DO UPDATE SET
         conversation_title = CASE
             WHEN EXCLUDED.conversation_title = '' THEN dingtalk_group_route.conversation_title
@@ -196,7 +343,9 @@ WITH workspace_guard AS MATERIALIZED (
     RETURNING agent_id, workspace_id, revision
 )
 SELECT r.agent_id,
+       r.workspace_id,
        r.revision,
+       g.installer_user_id,
        EXISTS (
            SELECT 1 FROM agent a
            WHERE a.id = r.agent_id
@@ -205,19 +354,22 @@ SELECT r.agent_id,
              AND a.archived_at IS NULL
        ) AS agent_active
 FROM group_route r
+JOIN eligible_grants g ON g.workspace_id = r.workspace_id
 `
 
 type DiscoverDingTalkGroupRouteParams struct {
-	WorkspaceID       pgtype.UUID `json:"workspace_id"`
+	MulticaUserID     pgtype.UUID `json:"multica_user_id"`
 	InstallationID    pgtype.UUID `json:"installation_id"`
 	ConversationID    string      `json:"conversation_id"`
 	ConversationTitle string      `json:"conversation_title"`
 }
 
 type DiscoverDingTalkGroupRouteRow struct {
-	AgentID     pgtype.UUID `json:"agent_id"`
-	Revision    int64       `json:"revision"`
-	AgentActive bool        `json:"agent_active"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	Revision        int64       `json:"revision"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+	AgentActive     bool        `json:"agent_active"`
 }
 
 // DingTalk-specific installation identity operations. The underlying channel_*
@@ -234,25 +386,186 @@ type DiscoverDingTalkGroupRouteRow struct {
 // first completes before revoke, matching the existing in-flight semantics.
 func (q *Queries) DiscoverDingTalkGroupRoute(ctx context.Context, arg DiscoverDingTalkGroupRouteParams) (DiscoverDingTalkGroupRouteRow, error) {
 	row := q.db.QueryRow(ctx, discoverDingTalkGroupRoute,
-		arg.WorkspaceID,
+		arg.MulticaUserID,
 		arg.InstallationID,
 		arg.ConversationID,
 		arg.ConversationTitle,
 	)
 	var i DiscoverDingTalkGroupRouteRow
-	err := row.Scan(&i.AgentID, &i.Revision, &i.AgentActive)
+	err := row.Scan(
+		&i.AgentID,
+		&i.WorkspaceID,
+		&i.Revision,
+		&i.InstallerUserID,
+		&i.AgentActive,
+	)
+	return i, err
+}
+
+const getActiveDingTalkConnectorInWorkspace = `-- name: GetActiveDingTalkConnectorInWorkspace :one
+SELECT c.id, c.app_id, c.config, c.status, c.ws_lease_token, c.ws_lease_expires_at, c.installer_user_id, c.installed_at, c.created_at, c.updated_at
+FROM dingtalk_connector c
+JOIN dingtalk_workspace_grant g ON g.connector_id = c.id
+WHERE c.id = $1
+  AND g.workspace_id = $2
+  AND c.status = 'active'
+  AND g.status = 'active'
+`
+
+type GetActiveDingTalkConnectorInWorkspaceParams struct {
+	ConnectorID pgtype.UUID `json:"connector_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) GetActiveDingTalkConnectorInWorkspace(ctx context.Context, arg GetActiveDingTalkConnectorInWorkspaceParams) (DingtalkConnector, error) {
+	row := q.db.QueryRow(ctx, getActiveDingTalkConnectorInWorkspace, arg.ConnectorID, arg.WorkspaceID)
+	var i DingtalkConnector
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDingTalkConnector = `-- name: GetDingTalkConnector :one
+SELECT id, app_id, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+FROM dingtalk_connector
+WHERE id = $1
+`
+
+func (q *Queries) GetDingTalkConnector(ctx context.Context, id pgtype.UUID) (DingtalkConnector, error) {
+	row := q.db.QueryRow(ctx, getDingTalkConnector, id)
+	var i DingtalkConnector
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDingTalkConnectorByAppID = `-- name: GetDingTalkConnectorByAppID :one
+SELECT id, app_id, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+FROM dingtalk_connector
+WHERE app_id = $1
+`
+
+func (q *Queries) GetDingTalkConnectorByAppID(ctx context.Context, appID string) (DingtalkConnector, error) {
+	row := q.db.QueryRow(ctx, getDingTalkConnectorByAppID, appID)
+	var i DingtalkConnector
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDingTalkConnectorByAppIDForUpdate = `-- name: GetDingTalkConnectorByAppIDForUpdate :one
+SELECT id, app_id, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+FROM dingtalk_connector
+WHERE app_id = $1
+FOR UPDATE
+`
+
+func (q *Queries) GetDingTalkConnectorByAppIDForUpdate(ctx context.Context, appID string) (DingtalkConnector, error) {
+	row := q.db.QueryRow(ctx, getDingTalkConnectorByAppIDForUpdate, appID)
+	var i DingtalkConnector
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getDingTalkDirectRoute = `-- name: GetDingTalkDirectRoute :one
+SELECT r.workspace_id, r.agent_id, r.revision, g.installer_user_id,
+       EXISTS (
+           SELECT 1 FROM agent a
+           WHERE a.id = r.agent_id
+             AND a.workspace_id = r.workspace_id
+             AND a.kind = 'user'
+             AND a.archived_at IS NULL
+       ) AS agent_active
+FROM dingtalk_direct_route r
+JOIN dingtalk_connector c ON c.id = r.connector_id
+JOIN dingtalk_workspace_grant g
+  ON g.connector_id = r.connector_id AND g.workspace_id = r.workspace_id
+JOIN member m ON m.workspace_id = r.workspace_id
+             AND m.user_id = $1
+WHERE r.connector_id = $2
+  AND r.channel_user_id = $3
+  AND c.status = 'active'
+  AND g.status = 'active'
+`
+
+type GetDingTalkDirectRouteParams struct {
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ConnectorID   pgtype.UUID `json:"connector_id"`
+	ChannelUserID string      `json:"channel_user_id"`
+}
+
+type GetDingTalkDirectRouteRow struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	Revision        int64       `json:"revision"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+	AgentActive     bool        `json:"agent_active"`
+}
+
+func (q *Queries) GetDingTalkDirectRoute(ctx context.Context, arg GetDingTalkDirectRouteParams) (GetDingTalkDirectRouteRow, error) {
+	row := q.db.QueryRow(ctx, getDingTalkDirectRoute, arg.MulticaUserID, arg.ConnectorID, arg.ChannelUserID)
+	var i GetDingTalkDirectRouteRow
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.Revision,
+		&i.InstallerUserID,
+		&i.AgentActive,
+	)
 	return i, err
 }
 
 const getDingTalkGroupRouteInWorkspace = `-- name: GetDingTalkGroupRouteInWorkspace :one
 SELECT r.id, r.workspace_id, r.installation_id, r.conversation_id, r.conversation_title, r.agent_id, r.revision, r.discovered_at, r.updated_at
 FROM dingtalk_group_route r
-JOIN channel_installation i ON i.id = r.installation_id
+JOIN dingtalk_connector c ON c.id = r.installation_id
+JOIN dingtalk_workspace_grant g
+  ON g.connector_id = c.id AND g.workspace_id = r.workspace_id
 WHERE r.id = $1
   AND r.workspace_id = $2
-  AND i.workspace_id = $2
-  AND i.channel_type = 'dingtalk'
-  AND i.status = 'active'
+  AND c.status = 'active'
+  AND g.status = 'active'
 `
 
 type GetDingTalkGroupRouteInWorkspaceParams struct {
@@ -280,44 +593,111 @@ func (q *Queries) GetDingTalkGroupRouteInWorkspace(ctx context.Context, arg GetD
 	return i, err
 }
 
-const getDingTalkInstallationOwnerForUpdate = `-- name: GetDingTalkInstallationOwnerForUpdate :one
-SELECT id, COALESCE(config ->> 'app_id', '')::text AS app_id
-FROM channel_installation
-WHERE workspace_id = $1
-  AND agent_id = $2
-  AND channel_type = 'dingtalk'
-FOR UPDATE
+const getDingTalkInstallationInWorkspace = `-- name: GetDingTalkInstallationInWorkspace :one
+SELECT c.id, g.workspace_id, g.default_agent_id AS agent_id,
+       'dingtalk'::text AS channel_type, c.config,
+       CASE WHEN c.status = 'active' AND g.status = 'active'
+            THEN 'active' ELSE 'revoked' END::text AS status,
+       c.ws_lease_token, c.ws_lease_expires_at, g.installer_user_id,
+       g.installed_at, g.created_at,
+       GREATEST(c.updated_at, g.updated_at)::timestamptz AS updated_at
+FROM dingtalk_workspace_grant g
+JOIN dingtalk_connector c ON c.id = g.connector_id
+WHERE c.id = $1
+  AND g.workspace_id = $2
 `
 
-type GetDingTalkInstallationOwnerForUpdateParams struct {
+type GetDingTalkInstallationInWorkspaceParams struct {
+	ConnectorID pgtype.UUID `json:"connector_id"`
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	AgentID     pgtype.UUID `json:"agent_id"`
 }
 
-type GetDingTalkInstallationOwnerForUpdateRow struct {
-	ID    pgtype.UUID `json:"id"`
-	AppID string      `json:"app_id"`
+type GetDingTalkInstallationInWorkspaceRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	ChannelType      string             `json:"channel_type"`
+	Config           []byte             `json:"config"`
+	Status           string             `json:"status"`
+	WsLeaseToken     pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstallerUserID  pgtype.UUID        `json:"installer_user_id"`
+	InstalledAt      pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
-// Reads the current robot identity after LockDingTalkInstallationOwner has
-// serialized the logical owner slot. app_id is non-null for every DingTalk
-// installation; COALESCE treats malformed legacy config as a different robot,
-// which safely replaces it instead of preserving unknown identity state.
-func (q *Queries) GetDingTalkInstallationOwnerForUpdate(ctx context.Context, arg GetDingTalkInstallationOwnerForUpdateParams) (GetDingTalkInstallationOwnerForUpdateRow, error) {
-	row := q.db.QueryRow(ctx, getDingTalkInstallationOwnerForUpdate, arg.WorkspaceID, arg.AgentID)
-	var i GetDingTalkInstallationOwnerForUpdateRow
-	err := row.Scan(&i.ID, &i.AppID)
+func (q *Queries) GetDingTalkInstallationInWorkspace(ctx context.Context, arg GetDingTalkInstallationInWorkspaceParams) (GetDingTalkInstallationInWorkspaceRow, error) {
+	row := q.db.QueryRow(ctx, getDingTalkInstallationInWorkspace, arg.ConnectorID, arg.WorkspaceID)
+	var i GetDingTalkInstallationInWorkspaceRow
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.ChannelType,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
 	return i, err
+}
+
+const listAllActiveDingTalkConnectors = `-- name: ListAllActiveDingTalkConnectors :many
+SELECT c.id, c.app_id, c.config, c.status, c.ws_lease_token, c.ws_lease_expires_at, c.installer_user_id, c.installed_at, c.created_at, c.updated_at
+FROM dingtalk_connector c
+WHERE c.status = 'active'
+  AND EXISTS (
+      SELECT 1 FROM dingtalk_workspace_grant g
+      WHERE g.connector_id = c.id AND g.status = 'active'
+  )
+ORDER BY c.created_at ASC
+`
+
+func (q *Queries) ListAllActiveDingTalkConnectors(ctx context.Context) ([]DingtalkConnector, error) {
+	rows, err := q.db.Query(ctx, listAllActiveDingTalkConnectors)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []DingtalkConnector{}
+	for rows.Next() {
+		var i DingtalkConnector
+		if err := rows.Scan(
+			&i.ID,
+			&i.AppID,
+			&i.Config,
+			&i.Status,
+			&i.WsLeaseToken,
+			&i.WsLeaseExpiresAt,
+			&i.InstallerUserID,
+			&i.InstalledAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listDingTalkGroupRoutesByWorkspace = `-- name: ListDingTalkGroupRoutesByWorkspace :many
 SELECT r.id, r.workspace_id, r.installation_id, r.conversation_id, r.conversation_title, r.agent_id, r.revision, r.discovered_at, r.updated_at
 FROM dingtalk_group_route r
-JOIN channel_installation i ON i.id = r.installation_id
+JOIN dingtalk_connector c ON c.id = r.installation_id
+JOIN dingtalk_workspace_grant g
+  ON g.connector_id = c.id AND g.workspace_id = r.workspace_id
 WHERE r.workspace_id = $1
-  AND i.workspace_id = $1
-  AND i.channel_type = 'dingtalk'
-  AND i.status = 'active'
+  AND c.status = 'active'
+  AND g.status = 'active'
 ORDER BY r.discovered_at ASC
 `
 
@@ -351,28 +731,458 @@ func (q *Queries) ListDingTalkGroupRoutesByWorkspace(ctx context.Context, worksp
 	return items, nil
 }
 
-const lockDingTalkGroupRouteForAppend = `-- name: LockDingTalkGroupRouteForAppend :one
-WITH target_agent AS MATERIALIZED (
-    SELECT a.id
+const listDingTalkInstallationsByWorkspace = `-- name: ListDingTalkInstallationsByWorkspace :many
+SELECT c.id, g.workspace_id, g.default_agent_id AS agent_id,
+       'dingtalk'::text AS channel_type, c.config,
+       CASE WHEN c.status = 'active' AND g.status = 'active'
+            THEN 'active' ELSE 'revoked' END::text AS status,
+       c.ws_lease_token, c.ws_lease_expires_at, g.installer_user_id,
+       g.installed_at, g.created_at,
+       GREATEST(c.updated_at, g.updated_at)::timestamptz AS updated_at
+FROM dingtalk_workspace_grant g
+JOIN dingtalk_connector c ON c.id = g.connector_id
+WHERE g.workspace_id = $1
+ORDER BY g.installed_at ASC
+`
+
+type ListDingTalkInstallationsByWorkspaceRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	AgentID          pgtype.UUID        `json:"agent_id"`
+	ChannelType      string             `json:"channel_type"`
+	Config           []byte             `json:"config"`
+	Status           string             `json:"status"`
+	WsLeaseToken     pgtype.Text        `json:"ws_lease_token"`
+	WsLeaseExpiresAt pgtype.Timestamptz `json:"ws_lease_expires_at"`
+	InstallerUserID  pgtype.UUID        `json:"installer_user_id"`
+	InstalledAt      pgtype.Timestamptz `json:"installed_at"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListDingTalkInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListDingTalkInstallationsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listDingTalkInstallationsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDingTalkInstallationsByWorkspaceRow{}
+	for rows.Next() {
+		var i ListDingTalkInstallationsByWorkspaceRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.AgentID,
+			&i.ChannelType,
+			&i.Config,
+			&i.Status,
+			&i.WsLeaseToken,
+			&i.WsLeaseExpiresAt,
+			&i.InstallerUserID,
+			&i.InstalledAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockActiveDingTalkConnectorForReply = `-- name: LockActiveDingTalkConnectorForReply :one
+SELECT c.id
+FROM dingtalk_connector c
+WHERE c.id = $1
+  AND c.status = 'active'
+  AND EXISTS (
+      SELECT 1 FROM dingtalk_workspace_grant g
+      WHERE g.connector_id = c.id AND g.status = 'active'
+  )
+FOR SHARE OF c
+`
+
+func (q *Queries) LockActiveDingTalkConnectorForReply(ctx context.Context, connectorID pgtype.UUID) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockActiveDingTalkConnectorForReply, connectorID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockActiveDingTalkConnectorGrantForReply = `-- name: LockActiveDingTalkConnectorGrantForReply :one
+WITH connector_guard AS MATERIALIZED (
+    SELECT c.id
+    FROM dingtalk_connector c
+    WHERE c.id = $1
+      AND c.status = 'active'
+    FOR SHARE OF c
+), grant_guard AS MATERIALIZED (
+    SELECT g.connector_id
+    FROM dingtalk_workspace_grant g
+    JOIN connector_guard c ON c.id = g.connector_id
+    WHERE g.workspace_id = $2
+      AND g.status = 'active'
+    FOR SHARE OF g
+)
+SELECT c.id
+FROM connector_guard c
+JOIN grant_guard g ON g.connector_id = c.id
+`
+
+type LockActiveDingTalkConnectorGrantForReplyParams struct {
+	ConnectorID pgtype.UUID `json:"connector_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) LockActiveDingTalkConnectorGrantForReply(ctx context.Context, arg LockActiveDingTalkConnectorGrantForReplyParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockActiveDingTalkConnectorGrantForReply, arg.ConnectorID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockActiveDingTalkGrantForRoute = `-- name: LockActiveDingTalkGrantForRoute :one
+SELECT g.connector_id
+FROM dingtalk_workspace_grant g
+WHERE g.connector_id = $1
+  AND g.workspace_id = $2
+  AND g.status = 'active'
+FOR SHARE OF g
+`
+
+type LockActiveDingTalkGrantForRouteParams struct {
+	ConnectorID pgtype.UUID `json:"connector_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) LockActiveDingTalkGrantForRoute(ctx context.Context, arg LockActiveDingTalkGrantForRouteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockActiveDingTalkGrantForRoute, arg.ConnectorID, arg.WorkspaceID)
+	var connector_id pgtype.UUID
+	err := row.Scan(&connector_id)
+	return connector_id, err
+}
+
+const lockDingTalkActiveAgentMemberForRoute = `-- name: LockDingTalkActiveAgentMemberForRoute :one
+WITH agent_guard AS MATERIALIZED (
+    SELECT a.id, a.workspace_id
     FROM agent a
-    WHERE a.id = $3
+    WHERE a.id = $1
+      AND a.workspace_id = $2
       AND a.kind = 'user'
       AND a.archived_at IS NULL
-    FOR SHARE
+    FOR SHARE OF a
+), member_guard AS MATERIALIZED (
+    SELECT m.workspace_id
+    FROM member m
+    JOIN agent_guard a ON a.workspace_id = m.workspace_id
+    WHERE m.user_id = $3
+    FOR SHARE OF m
 )
+SELECT a.id
+FROM agent_guard a
+JOIN member_guard m ON m.workspace_id = a.workspace_id
+`
+
+type LockDingTalkActiveAgentMemberForRouteParams struct {
+	AgentID       pgtype.UUID `json:"agent_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+}
+
+// Call after locking the connector and before locking the workspace grant.
+// Agent-before-member matches member revocation (archive agent, delete member).
+func (q *Queries) LockDingTalkActiveAgentMemberForRoute(ctx context.Context, arg LockDingTalkActiveAgentMemberForRouteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockDingTalkActiveAgentMemberForRoute, arg.AgentID, arg.WorkspaceID, arg.MulticaUserID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockDingTalkConnectorAppID = `-- name: LockDingTalkConnectorAppID :exec
+SELECT pg_advisory_xact_lock(
+    hashtextextended(
+        'dingtalk:' || $1::text,
+        0
+    )
+)
+`
+
+// One DingTalk AppKey is one global connector. Serialize connector creation and
+// credential rotation before attaching or reactivating a workspace grant.
+func (q *Queries) LockDingTalkConnectorAppID(ctx context.Context, appID string) error {
+	_, err := q.db.Exec(ctx, lockDingTalkConnectorAppID, appID)
+	return err
+}
+
+const lockDingTalkConnectorForUpdate = `-- name: LockDingTalkConnectorForUpdate :one
+SELECT id, app_id, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+FROM dingtalk_connector
+WHERE id = $1
+FOR UPDATE
+`
+
+func (q *Queries) LockDingTalkConnectorForUpdate(ctx context.Context, id pgtype.UUID) (DingtalkConnector, error) {
+	row := q.db.QueryRow(ctx, lockDingTalkConnectorForUpdate, id)
+	var i DingtalkConnector
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockDingTalkDirectOutboundRoute = `-- name: LockDingTalkDirectOutboundRoute :one
+SELECT r.revision
+FROM dingtalk_direct_route r
+JOIN dingtalk_connector c ON c.id = r.connector_id
+JOIN dingtalk_workspace_grant g
+  ON g.connector_id = r.connector_id AND g.workspace_id = r.workspace_id
+JOIN agent a ON a.id = r.agent_id AND a.workspace_id = r.workspace_id
+JOIN member m ON m.workspace_id = r.workspace_id
+             AND m.user_id = $1
+WHERE r.connector_id = $2
+  AND r.channel_user_id = $3
+  AND r.workspace_id = $4
+  AND r.agent_id = $5
+  AND c.status = 'active'
+  AND g.status = 'active'
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
+FOR SHARE OF r
+`
+
+type LockDingTalkDirectOutboundRouteParams struct {
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ConnectorID   pgtype.UUID `json:"connector_id"`
+	ChannelUserID string      `json:"channel_user_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+}
+
+func (q *Queries) LockDingTalkDirectOutboundRoute(ctx context.Context, arg LockDingTalkDirectOutboundRouteParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockDingTalkDirectOutboundRoute,
+		arg.MulticaUserID,
+		arg.ConnectorID,
+		arg.ChannelUserID,
+		arg.WorkspaceID,
+		arg.AgentID,
+	)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}
+
+const lockDingTalkDirectReplyRoute = `-- name: LockDingTalkDirectReplyRoute :one
+SELECT r.revision
+FROM dingtalk_direct_route r
+JOIN dingtalk_connector c ON c.id = r.connector_id
+JOIN dingtalk_workspace_grant g
+  ON g.connector_id = r.connector_id AND g.workspace_id = r.workspace_id
+JOIN member m ON m.workspace_id = r.workspace_id
+             AND m.user_id = $1
+WHERE r.connector_id = $2
+  AND r.channel_user_id = $3
+  AND r.workspace_id = $4
+  AND r.agent_id = $5
+  AND r.revision = $6
+  AND c.status = 'active'
+  AND g.status = 'active'
+FOR SHARE OF r
+`
+
+type LockDingTalkDirectReplyRouteParams struct {
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ConnectorID   pgtype.UUID `json:"connector_id"`
+	ChannelUserID string      `json:"channel_user_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+	RouteRevision int64       `json:"route_revision"`
+}
+
+func (q *Queries) LockDingTalkDirectReplyRoute(ctx context.Context, arg LockDingTalkDirectReplyRouteParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockDingTalkDirectReplyRoute,
+		arg.MulticaUserID,
+		arg.ConnectorID,
+		arg.ChannelUserID,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.RouteRevision,
+	)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}
+
+const lockDingTalkDirectRouteForAppend = `-- name: LockDingTalkDirectRouteForAppend :one
+SELECT r.revision
+FROM dingtalk_direct_route r
+JOIN dingtalk_connector c ON c.id = r.connector_id
+JOIN dingtalk_workspace_grant g
+  ON g.connector_id = r.connector_id AND g.workspace_id = r.workspace_id
+JOIN agent a ON a.id = r.agent_id AND a.workspace_id = r.workspace_id
+JOIN member m ON m.workspace_id = r.workspace_id
+             AND m.user_id = $1
+WHERE r.connector_id = $2
+  AND r.channel_user_id = $3
+  AND r.workspace_id = $4
+  AND r.agent_id = $5
+  AND r.revision = $6
+  AND c.status = 'active'
+  AND g.status = 'active'
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
+FOR SHARE OF r
+`
+
+type LockDingTalkDirectRouteForAppendParams struct {
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ConnectorID   pgtype.UUID `json:"connector_id"`
+	ChannelUserID string      `json:"channel_user_id"`
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+	RouteRevision int64       `json:"route_revision"`
+}
+
+func (q *Queries) LockDingTalkDirectRouteForAppend(ctx context.Context, arg LockDingTalkDirectRouteForAppendParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockDingTalkDirectRouteForAppend,
+		arg.MulticaUserID,
+		arg.ConnectorID,
+		arg.ChannelUserID,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.RouteRevision,
+	)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}
+
+const lockDingTalkGroupOutboundRoute = `-- name: LockDingTalkGroupOutboundRoute :one
 SELECT r.revision
 FROM dingtalk_group_route r
-WHERE r.installation_id = $1
-  AND r.conversation_id = $2::text
-  AND r.agent_id = $3
-  AND r.revision = $4
-  AND EXISTS (SELECT 1 FROM target_agent)
+JOIN dingtalk_connector c ON c.id = r.installation_id
+JOIN dingtalk_workspace_grant g
+  ON g.connector_id = r.installation_id AND g.workspace_id = r.workspace_id
+JOIN agent a ON a.id = r.agent_id AND a.workspace_id = r.workspace_id
+JOIN member m ON m.workspace_id = r.workspace_id
+             AND m.user_id = $1
+WHERE r.installation_id = $2
+  AND r.conversation_id = $3::text
+  AND r.workspace_id = $4
+  AND r.agent_id = $5
+  AND c.status = 'active'
+  AND g.status = 'active'
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
+FOR SHARE OF r
+`
+
+type LockDingTalkGroupOutboundRouteParams struct {
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ConversationID string      `json:"conversation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+}
+
+// Hold this route through the DingTalk network send. A concurrent workspace or
+// agent switch must either complete first (and make this return no row) or wait
+// until the old route's reply has been delivered.
+func (q *Queries) LockDingTalkGroupOutboundRoute(ctx context.Context, arg LockDingTalkGroupOutboundRouteParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockDingTalkGroupOutboundRoute,
+		arg.MulticaUserID,
+		arg.InstallationID,
+		arg.ConversationID,
+		arg.WorkspaceID,
+		arg.AgentID,
+	)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}
+
+const lockDingTalkGroupReplyRoute = `-- name: LockDingTalkGroupReplyRoute :one
+SELECT r.revision
+FROM dingtalk_group_route r
+JOIN dingtalk_connector c ON c.id = r.installation_id
+JOIN dingtalk_workspace_grant g
+  ON g.connector_id = r.installation_id AND g.workspace_id = r.workspace_id
+JOIN member m ON m.workspace_id = r.workspace_id
+             AND m.user_id = $1
+WHERE r.installation_id = $2
+  AND r.conversation_id = $3::text
+  AND r.workspace_id = $4
+  AND r.agent_id = $5
+  AND r.revision = $6
+  AND c.status = 'active'
+  AND g.status = 'active'
+FOR SHARE OF r
+`
+
+type LockDingTalkGroupReplyRouteParams struct {
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
+	InstallationID pgtype.UUID `json:"installation_id"`
+	ConversationID string      `json:"conversation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+	RouteRevision  int64       `json:"route_revision"`
+}
+
+// Immediate product replies (/issue confirmation, status notices, processing
+// ack) are fenced by the exact inbound route revision. The agent may now be
+// archived; the notice still belongs to this route, so only identity,
+// membership, connector, and grant validity are required here.
+func (q *Queries) LockDingTalkGroupReplyRoute(ctx context.Context, arg LockDingTalkGroupReplyRouteParams) (int64, error) {
+	row := q.db.QueryRow(ctx, lockDingTalkGroupReplyRoute,
+		arg.MulticaUserID,
+		arg.InstallationID,
+		arg.ConversationID,
+		arg.WorkspaceID,
+		arg.AgentID,
+		arg.RouteRevision,
+	)
+	var revision int64
+	err := row.Scan(&revision)
+	return revision, err
+}
+
+const lockDingTalkGroupRouteForAppend = `-- name: LockDingTalkGroupRouteForAppend :one
+SELECT r.revision
+FROM dingtalk_group_route r
+JOIN dingtalk_connector c ON c.id = r.installation_id
+JOIN dingtalk_workspace_grant g
+  ON g.connector_id = c.id AND g.workspace_id = r.workspace_id
+JOIN agent a ON a.id = r.agent_id AND a.workspace_id = r.workspace_id
+JOIN member m ON m.workspace_id = r.workspace_id
+             AND m.user_id = $1
+WHERE r.installation_id = $2
+  AND r.conversation_id = $3::text
+  AND r.workspace_id = $4
+  AND r.agent_id = $5
+  AND r.revision = $6
+  AND c.status = 'active'
+  AND g.status = 'active'
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
 FOR SHARE OF r
 `
 
 type LockDingTalkGroupRouteForAppendParams struct {
+	MulticaUserID  pgtype.UUID `json:"multica_user_id"`
 	InstallationID pgtype.UUID `json:"installation_id"`
 	ConversationID string      `json:"conversation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
 	AgentID        pgtype.UUID `json:"agent_id"`
 	RouteRevision  int64       `json:"route_revision"`
 }
@@ -384,8 +1194,10 @@ type LockDingTalkGroupRouteForAppendParams struct {
 // inbound append that wins first makes PATCH wait until that append commits.
 func (q *Queries) LockDingTalkGroupRouteForAppend(ctx context.Context, arg LockDingTalkGroupRouteForAppendParams) (int64, error) {
 	row := q.db.QueryRow(ctx, lockDingTalkGroupRouteForAppend,
+		arg.MulticaUserID,
 		arg.InstallationID,
 		arg.ConversationID,
+		arg.WorkspaceID,
 		arg.AgentID,
 		arg.RouteRevision,
 	)
@@ -394,28 +1206,74 @@ func (q *Queries) LockDingTalkGroupRouteForAppend(ctx context.Context, arg LockD
 	return revision, err
 }
 
-const lockDingTalkInstallationOwner = `-- name: LockDingTalkInstallationOwner :exec
-SELECT pg_advisory_xact_lock(
-    hashtextextended(
-        ($1::uuid)::text || ':' ||
-        ($2::uuid)::text || ':dingtalk',
-        0
-    )
+const lockDingTalkInstallTarget = `-- name: LockDingTalkInstallTarget :one
+WITH agent_guard AS MATERIALIZED (
+    SELECT a.id, a.workspace_id
+    FROM agent a
+    WHERE a.id = $1
+      AND a.workspace_id = $2
+      AND a.kind = 'user'
+      AND a.archived_at IS NULL
+    FOR SHARE OF a
+), member_guard AS MATERIALIZED (
+    SELECT m.workspace_id
+    FROM member m
+    JOIN agent_guard a ON a.workspace_id = m.workspace_id
+    WHERE m.workspace_id = $2
+      AND m.user_id = $3
+      AND m.role IN ('owner', 'admin')
+    FOR SHARE OF m
 )
+SELECT a.id
+FROM agent_guard a
+JOIN member_guard m ON m.workspace_id = a.workspace_id
 `
 
-type LockDingTalkInstallationOwnerParams struct {
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	AgentID     pgtype.UUID `json:"agent_id"`
+type LockDingTalkInstallTargetParams struct {
+	AgentID         pgtype.UUID `json:"agent_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
 }
 
-// Serializes install / replacement decisions for one logical
-// (workspace, agent, channel) slot. A different-AppKey replacement deletes the
-// old row and inserts a fresh installation id; the advisory lock closes the
-// gap where two concurrent replacements could otherwise miss each other's new
-// row and update it in place, carrying identity state across robot boundaries.
-func (q *Queries) LockDingTalkInstallationOwner(ctx context.Context, arg LockDingTalkInstallationOwnerParams) error {
-	_, err := q.db.Exec(ctx, lockDingTalkInstallationOwner, arg.WorkspaceID, arg.AgentID)
+// The caller first locks workspace then connector. Agent-before-member matches
+// member revocation, which archives owned agents before deleting membership.
+func (q *Queries) LockDingTalkInstallTarget(ctx context.Context, arg LockDingTalkInstallTargetParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockDingTalkInstallTarget, arg.AgentID, arg.WorkspaceID, arg.InstallerUserID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
+}
+
+const lockDingTalkMemberForRoute = `-- name: LockDingTalkMemberForRoute :one
+SELECT m.workspace_id
+FROM member m
+WHERE m.workspace_id = $1
+  AND m.user_id = $2
+FOR SHARE OF m
+`
+
+type LockDingTalkMemberForRouteParams struct {
+	WorkspaceID   pgtype.UUID `json:"workspace_id"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+}
+
+func (q *Queries) LockDingTalkMemberForRoute(ctx context.Context, arg LockDingTalkMemberForRouteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockDingTalkMemberForRoute, arg.WorkspaceID, arg.MulticaUserID)
+	var workspace_id pgtype.UUID
+	err := row.Scan(&workspace_id)
+	return workspace_id, err
+}
+
+const purgeDingTalkConnectorUnscopedAudit = `-- name: PurgeDingTalkConnectorUnscopedAudit :exec
+DELETE FROM channel_inbound_audit
+WHERE installation_id = $1
+  AND workspace_id IS NULL
+`
+
+// Once the last workspace grant is gone there is no tenant that can own
+// connector-level drops recorded before routing resolved a workspace.
+func (q *Queries) PurgeDingTalkConnectorUnscopedAudit(ctx context.Context, connectorID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, purgeDingTalkConnectorUnscopedAudit, connectorID)
 	return err
 }
 
@@ -425,36 +1283,43 @@ WITH workspace_guard AS MATERIALIZED (
     FROM workspace w
     WHERE w.id = $1
     FOR KEY SHARE
+), connector_guard AS MATERIALIZED (
+    SELECT c.id
+    FROM dingtalk_connector c
+    JOIN dingtalk_group_route r ON r.installation_id = c.id
+    WHERE r.id = $2
+      AND r.workspace_id = $1
+      AND c.status = 'active'
+      AND EXISTS (SELECT 1 FROM workspace_guard)
+    FOR SHARE OF c
 ), target_agent AS MATERIALIZED (
     SELECT a.id
     FROM agent a
     JOIN workspace_guard w ON w.id = a.workspace_id
-    WHERE a.id = $2
+    JOIN connector_guard c ON true
+    WHERE a.id = $3
       AND a.workspace_id = $1
       AND a.kind = 'user'
       AND a.archived_at IS NULL
     FOR SHARE
-), active_installation AS MATERIALIZED (
-    SELECT i.id
-    FROM channel_installation i
-    JOIN dingtalk_group_route r ON r.installation_id = i.id
-    WHERE r.id = $3
-      AND r.workspace_id = $1
-      AND i.workspace_id = $1
-      AND i.channel_type = 'dingtalk'
-      AND i.status = 'active'
+), grant_guard AS MATERIALIZED (
+    SELECT g.connector_id
+    FROM dingtalk_workspace_grant g
+    JOIN connector_guard c ON c.id = g.connector_id
+    WHERE g.workspace_id = $1
+      AND g.status = 'active'
       AND EXISTS (SELECT 1 FROM target_agent)
-    FOR SHARE OF i
+    FOR SHARE OF g
 ), target AS (
     SELECT r.id, r.workspace_id, r.installation_id, r.conversation_id, r.conversation_title, r.agent_id, r.revision, r.discovered_at, r.updated_at, r.agent_id AS previous_agent_id
     FROM dingtalk_group_route r
-    JOIN active_installation i ON i.id = r.installation_id
-    WHERE r.id = $3
+    JOIN grant_guard g ON g.connector_id = r.installation_id
+    WHERE r.id = $2
       AND r.workspace_id = $1
     FOR UPDATE OF r
 ), updated AS (
     UPDATE dingtalk_group_route r
-    SET agent_id = $2,
+    SET agent_id = $3,
         revision = r.revision + 1,
         updated_at = now()
     FROM target t
@@ -478,8 +1343,8 @@ FROM updated
 
 type ReassignDingTalkGroupRouteParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
-	AgentID     pgtype.UUID `json:"agent_id"`
 	ID          pgtype.UUID `json:"id"`
+	AgentID     pgtype.UUID `json:"agent_id"`
 }
 
 type ReassignDingTalkGroupRouteRow struct {
@@ -506,7 +1371,7 @@ type ReassignDingTalkGroupRouteRow struct {
 // PATCH-first may finish before revoke, while revoke-first makes PATCH wait,
 // re-check status, and return no row without touching the route or binding.
 func (q *Queries) ReassignDingTalkGroupRoute(ctx context.Context, arg ReassignDingTalkGroupRouteParams) (ReassignDingTalkGroupRouteRow, error) {
-	row := q.db.QueryRow(ctx, reassignDingTalkGroupRoute, arg.WorkspaceID, arg.AgentID, arg.ID)
+	row := q.db.QueryRow(ctx, reassignDingTalkGroupRoute, arg.WorkspaceID, arg.ID, arg.AgentID)
 	var i ReassignDingTalkGroupRouteRow
 	err := row.Scan(
 		&i.ID,
@@ -517,6 +1382,449 @@ func (q *Queries) ReassignDingTalkGroupRoute(ctx context.Context, arg ReassignDi
 		&i.AgentID,
 		&i.Revision,
 		&i.DiscoveredAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const releaseDingTalkConnectorWSLease = `-- name: ReleaseDingTalkConnectorWSLease :exec
+UPDATE dingtalk_connector
+SET ws_lease_token = NULL, ws_lease_expires_at = NULL, updated_at = now()
+WHERE id = $1
+  AND ws_lease_token = $2
+`
+
+type ReleaseDingTalkConnectorWSLeaseParams struct {
+	ID           pgtype.UUID `json:"id"`
+	CurrentToken pgtype.Text `json:"current_token"`
+}
+
+func (q *Queries) ReleaseDingTalkConnectorWSLease(ctx context.Context, arg ReleaseDingTalkConnectorWSLeaseParams) error {
+	_, err := q.db.Exec(ctx, releaseDingTalkConnectorWSLease, arg.ID, arg.CurrentToken)
+	return err
+}
+
+const resolveDingTalkBindingWorkspace = `-- name: ResolveDingTalkBindingWorkspace :one
+WITH candidates AS MATERIALIZED (
+    SELECT g.workspace_id, g.installer_user_id
+    FROM dingtalk_workspace_grant g
+    JOIN dingtalk_connector c ON c.id = g.connector_id
+    JOIN workspace w ON w.id = g.workspace_id
+    WHERE g.connector_id = $2
+      AND g.status = 'active'
+      AND c.status = 'active'
+      AND (
+          $1::text = '' OR
+          w.slug = $1::text
+      )
+)
+SELECT workspace_id, installer_user_id
+FROM candidates
+WHERE $1::text <> ''
+   OR (SELECT count(*) FROM candidates) = 1
+LIMIT 1
+`
+
+type ResolveDingTalkBindingWorkspaceParams struct {
+	WorkspaceSlug string      `json:"workspace_slug"`
+	ConnectorID   pgtype.UUID `json:"connector_id"`
+}
+
+type ResolveDingTalkBindingWorkspaceRow struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+}
+
+func (q *Queries) ResolveDingTalkBindingWorkspace(ctx context.Context, arg ResolveDingTalkBindingWorkspaceParams) (ResolveDingTalkBindingWorkspaceRow, error) {
+	row := q.db.QueryRow(ctx, resolveDingTalkBindingWorkspace, arg.WorkspaceSlug, arg.ConnectorID)
+	var i ResolveDingTalkBindingWorkspaceRow
+	err := row.Scan(&i.WorkspaceID, &i.InstallerUserID)
+	return i, err
+}
+
+const revokeDingTalkConnector = `-- name: RevokeDingTalkConnector :exec
+UPDATE dingtalk_connector
+SET status = 'revoked',
+    config = config - 'app_secret_encrypted',
+    ws_lease_token = NULL,
+    ws_lease_expires_at = NULL,
+    updated_at = now()
+WHERE id = $1
+`
+
+func (q *Queries) RevokeDingTalkConnector(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, revokeDingTalkConnector, id)
+	return err
+}
+
+const revokeDingTalkWorkspaceGrantOnly = `-- name: RevokeDingTalkWorkspaceGrantOnly :one
+UPDATE dingtalk_workspace_grant
+SET status = 'revoked', updated_at = now()
+WHERE connector_id = $1
+  AND workspace_id = $2
+RETURNING connector_id
+`
+
+type RevokeDingTalkWorkspaceGrantOnlyParams struct {
+	ConnectorID pgtype.UUID `json:"connector_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+func (q *Queries) RevokeDingTalkWorkspaceGrantOnly(ctx context.Context, arg RevokeDingTalkWorkspaceGrantOnlyParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, revokeDingTalkWorkspaceGrantOnly, arg.ConnectorID, arg.WorkspaceID)
+	var connector_id pgtype.UUID
+	err := row.Scan(&connector_id)
+	return connector_id, err
+}
+
+const selectDingTalkDirectWorkspaceRoute = `-- name: SelectDingTalkDirectWorkspaceRoute :one
+WITH workspace_guard AS MATERIALIZED (
+    SELECT w.id
+    FROM workspace w
+    WHERE w.slug = $1::text
+      AND EXISTS (
+          SELECT 1
+          FROM dingtalk_workspace_grant g
+          JOIN member m ON m.workspace_id = g.workspace_id
+                       AND m.user_id = $2
+          WHERE g.connector_id = $3
+            AND g.workspace_id = w.id
+            AND g.status = 'active'
+      )
+    FOR KEY SHARE OF w
+), connector_guard AS MATERIALIZED (
+    SELECT c.id
+    FROM dingtalk_connector c
+    WHERE c.id = $3
+      AND c.status = 'active'
+      AND EXISTS (SELECT 1 FROM workspace_guard)
+    FOR SHARE OF c
+), candidate_grant AS MATERIALIZED (
+    SELECT g.workspace_id, g.default_agent_id, g.installer_user_id
+    FROM dingtalk_workspace_grant g
+    JOIN workspace_guard w ON w.id = g.workspace_id
+    JOIN connector_guard c ON c.id = g.connector_id
+    WHERE g.connector_id = $3
+      AND g.status = 'active'
+), agent_guard AS MATERIALIZED (
+    SELECT a.id, a.workspace_id
+    FROM agent a
+    JOIN candidate_grant g ON g.default_agent_id = a.id
+                          AND g.workspace_id = a.workspace_id
+    WHERE a.kind = 'user'
+      AND a.archived_at IS NULL
+    FOR SHARE OF a
+), member_guard AS MATERIALIZED (
+    SELECT m.workspace_id
+    FROM member m
+    JOIN agent_guard a ON a.workspace_id = m.workspace_id
+    WHERE m.user_id = $2
+    FOR SHARE OF m
+), authorization_guard AS MATERIALIZED (
+    SELECT g.workspace_id, g.default_agent_id, g.installer_user_id
+    FROM dingtalk_workspace_grant g
+    JOIN candidate_grant candidate
+      ON candidate.workspace_id = g.workspace_id
+     AND candidate.default_agent_id = g.default_agent_id
+    JOIN agent_guard a ON a.id = g.default_agent_id
+    JOIN member_guard m ON m.workspace_id = g.workspace_id
+    WHERE g.connector_id = $3
+      AND g.status = 'active'
+    FOR SHARE OF g
+), target AS MATERIALIZED (
+    SELECT workspace_id, default_agent_id, installer_user_id
+    FROM authorization_guard
+), previous AS MATERIALIZED (
+    SELECT id, connector_id, channel_user_id, channel_chat_id, workspace_id, agent_id, revision, created_at, updated_at FROM dingtalk_direct_route r
+    WHERE r.connector_id = $3
+      AND r.channel_user_id = $4
+), selected AS (
+    INSERT INTO dingtalk_direct_route (
+        connector_id, channel_user_id, channel_chat_id, workspace_id, agent_id
+    )
+    SELECT $3, $4::text,
+           $5::text, workspace_id, default_agent_id
+    FROM target
+    ON CONFLICT (connector_id, channel_user_id) DO UPDATE SET
+        channel_chat_id = EXCLUDED.channel_chat_id,
+        workspace_id = EXCLUDED.workspace_id,
+        agent_id = EXCLUDED.agent_id,
+        revision = dingtalk_direct_route.revision + 1,
+        updated_at = now()
+    RETURNING id, connector_id, channel_user_id, channel_chat_id, workspace_id, agent_id, revision, created_at, updated_at
+), cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding b
+    USING previous p, selected s
+    WHERE (p.workspace_id, p.agent_id) IS DISTINCT FROM (s.workspace_id, s.agent_id)
+      AND b.installation_id = s.connector_id
+      AND b.channel_type = 'dingtalk'
+      AND b.channel_chat_id IN (p.channel_chat_id, s.channel_chat_id)
+    RETURNING b.chat_session_id
+), cleared_outbound_cards AS (
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+)
+SELECT s.workspace_id, s.agent_id, s.revision, t.installer_user_id,
+       EXISTS (
+           SELECT 1 FROM agent a
+           WHERE a.id = s.agent_id
+             AND a.workspace_id = s.workspace_id
+             AND a.kind = 'user'
+             AND a.archived_at IS NULL
+       ) AS agent_active
+FROM selected s
+JOIN target t ON t.workspace_id = s.workspace_id
+`
+
+type SelectDingTalkDirectWorkspaceRouteParams struct {
+	WorkspaceSlug string      `json:"workspace_slug"`
+	MulticaUserID pgtype.UUID `json:"multica_user_id"`
+	ConnectorID   pgtype.UUID `json:"connector_id"`
+	ChannelUserID string      `json:"channel_user_id"`
+	ChannelChatID string      `json:"channel_chat_id"`
+}
+
+type SelectDingTalkDirectWorkspaceRouteRow struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	Revision        int64       `json:"revision"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+	AgentActive     bool        `json:"agent_active"`
+}
+
+func (q *Queries) SelectDingTalkDirectWorkspaceRoute(ctx context.Context, arg SelectDingTalkDirectWorkspaceRouteParams) (SelectDingTalkDirectWorkspaceRouteRow, error) {
+	row := q.db.QueryRow(ctx, selectDingTalkDirectWorkspaceRoute,
+		arg.WorkspaceSlug,
+		arg.MulticaUserID,
+		arg.ConnectorID,
+		arg.ChannelUserID,
+		arg.ChannelChatID,
+	)
+	var i SelectDingTalkDirectWorkspaceRouteRow
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.Revision,
+		&i.InstallerUserID,
+		&i.AgentActive,
+	)
+	return i, err
+}
+
+const selectDingTalkGroupWorkspaceRoute = `-- name: SelectDingTalkGroupWorkspaceRoute :one
+WITH workspace_guard AS MATERIALIZED (
+    SELECT w.id
+    FROM workspace w
+    WHERE w.slug = $1::text
+      AND EXISTS (
+          SELECT 1
+          FROM dingtalk_workspace_grant g
+          JOIN member m ON m.workspace_id = g.workspace_id
+                       AND m.user_id = $2
+          WHERE g.connector_id = $3
+            AND g.workspace_id = w.id
+            AND g.status = 'active'
+            AND m.role IN ('owner', 'admin')
+      )
+    FOR KEY SHARE OF w
+), connector_guard AS MATERIALIZED (
+    SELECT c.id
+    FROM dingtalk_connector c
+    WHERE c.id = $3
+      AND c.status = 'active'
+      AND EXISTS (SELECT 1 FROM workspace_guard)
+    FOR SHARE OF c
+), candidate_grant AS MATERIALIZED (
+    SELECT g.workspace_id, g.default_agent_id, g.installer_user_id
+    FROM dingtalk_workspace_grant g
+    JOIN workspace_guard w ON w.id = g.workspace_id
+    JOIN connector_guard c ON c.id = g.connector_id
+    WHERE g.connector_id = $3
+      AND g.status = 'active'
+), agent_guard AS MATERIALIZED (
+    SELECT a.id, a.workspace_id
+    FROM agent a
+    JOIN candidate_grant g ON g.default_agent_id = a.id
+                          AND g.workspace_id = a.workspace_id
+    WHERE a.kind = 'user'
+      AND a.archived_at IS NULL
+    FOR SHARE OF a
+), member_guard AS MATERIALIZED (
+    SELECT m.workspace_id
+    FROM member m
+    JOIN agent_guard a ON a.workspace_id = m.workspace_id
+    WHERE m.user_id = $2
+      AND m.role IN ('owner', 'admin')
+    FOR SHARE OF m
+), authorization_guard AS MATERIALIZED (
+    SELECT g.workspace_id, g.default_agent_id, g.installer_user_id
+    FROM dingtalk_workspace_grant g
+    JOIN candidate_grant candidate
+      ON candidate.workspace_id = g.workspace_id
+     AND candidate.default_agent_id = g.default_agent_id
+    JOIN agent_guard a ON a.id = g.default_agent_id
+    JOIN member_guard m ON m.workspace_id = g.workspace_id
+    WHERE g.connector_id = $3
+      AND g.status = 'active'
+    FOR SHARE OF g
+), target AS MATERIALIZED (
+    SELECT workspace_id, default_agent_id, installer_user_id
+    FROM authorization_guard
+), previous AS MATERIALIZED (
+    SELECT id, workspace_id, installation_id, conversation_id, conversation_title, agent_id, revision, discovered_at, updated_at FROM dingtalk_group_route
+    WHERE installation_id = $3
+      AND conversation_id = $4::text
+), selected AS (
+    INSERT INTO dingtalk_group_route (
+        workspace_id, installation_id, conversation_id,
+        conversation_title, agent_id
+    )
+    SELECT workspace_id, $3,
+           $4::text,
+           $5::text, default_agent_id
+    FROM target
+    ON CONFLICT (installation_id, conversation_id) DO UPDATE SET
+        workspace_id = EXCLUDED.workspace_id,
+        conversation_title = CASE
+            WHEN EXCLUDED.conversation_title = '' THEN dingtalk_group_route.conversation_title
+            ELSE EXCLUDED.conversation_title
+        END,
+        agent_id = EXCLUDED.agent_id,
+        revision = dingtalk_group_route.revision + 1,
+        updated_at = now()
+    RETURNING id, workspace_id, installation_id, conversation_id, conversation_title, agent_id, revision, discovered_at, updated_at
+), cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding b
+    USING previous p, selected s
+    WHERE (p.workspace_id, p.agent_id) IS DISTINCT FROM (s.workspace_id, s.agent_id)
+      AND b.installation_id = s.installation_id
+      AND b.channel_type = 'dingtalk'
+      AND b.channel_chat_id = s.conversation_id
+    RETURNING b.chat_session_id
+), cleared_outbound_cards AS (
+    DELETE FROM channel_outbound_card_message
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+)
+SELECT s.workspace_id, s.agent_id, s.revision, t.installer_user_id,
+       EXISTS (
+           SELECT 1 FROM agent a
+           WHERE a.id = s.agent_id
+             AND a.workspace_id = s.workspace_id
+             AND a.kind = 'user'
+             AND a.archived_at IS NULL
+       ) AS agent_active
+FROM selected s
+JOIN target t ON t.workspace_id = s.workspace_id
+`
+
+type SelectDingTalkGroupWorkspaceRouteParams struct {
+	WorkspaceSlug     string      `json:"workspace_slug"`
+	MulticaUserID     pgtype.UUID `json:"multica_user_id"`
+	ConnectorID       pgtype.UUID `json:"connector_id"`
+	ConversationID    string      `json:"conversation_id"`
+	ConversationTitle string      `json:"conversation_title"`
+}
+
+type SelectDingTalkGroupWorkspaceRouteRow struct {
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	AgentID         pgtype.UUID `json:"agent_id"`
+	Revision        int64       `json:"revision"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+	AgentActive     bool        `json:"agent_active"`
+}
+
+func (q *Queries) SelectDingTalkGroupWorkspaceRoute(ctx context.Context, arg SelectDingTalkGroupWorkspaceRouteParams) (SelectDingTalkGroupWorkspaceRouteRow, error) {
+	row := q.db.QueryRow(ctx, selectDingTalkGroupWorkspaceRoute,
+		arg.WorkspaceSlug,
+		arg.MulticaUserID,
+		arg.ConnectorID,
+		arg.ConversationID,
+		arg.ConversationTitle,
+	)
+	var i SelectDingTalkGroupWorkspaceRouteRow
+	err := row.Scan(
+		&i.WorkspaceID,
+		&i.AgentID,
+		&i.Revision,
+		&i.InstallerUserID,
+		&i.AgentActive,
+	)
+	return i, err
+}
+
+const updateDingTalkConnectorCredentials = `-- name: UpdateDingTalkConnectorCredentials :one
+UPDATE dingtalk_connector
+SET config = $1,
+    status = 'active',
+    installer_user_id = $2,
+    updated_at = now()
+WHERE id = $3
+RETURNING id, app_id, config, status, ws_lease_token, ws_lease_expires_at, installer_user_id, installed_at, created_at, updated_at
+`
+
+type UpdateDingTalkConnectorCredentialsParams struct {
+	Config          []byte      `json:"config"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+	ID              pgtype.UUID `json:"id"`
+}
+
+func (q *Queries) UpdateDingTalkConnectorCredentials(ctx context.Context, arg UpdateDingTalkConnectorCredentialsParams) (DingtalkConnector, error) {
+	row := q.db.QueryRow(ctx, updateDingTalkConnectorCredentials, arg.Config, arg.InstallerUserID, arg.ID)
+	var i DingtalkConnector
+	err := row.Scan(
+		&i.ID,
+		&i.AppID,
+		&i.Config,
+		&i.Status,
+		&i.WsLeaseToken,
+		&i.WsLeaseExpiresAt,
+		&i.InstallerUserID,
+		&i.InstalledAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertDingTalkWorkspaceGrant = `-- name: UpsertDingTalkWorkspaceGrant :one
+INSERT INTO dingtalk_workspace_grant (
+    connector_id, workspace_id, default_agent_id, installer_user_id
+) VALUES (
+    $1, $2,
+    $3, $4
+)
+ON CONFLICT (connector_id, workspace_id) DO UPDATE SET
+    default_agent_id = EXCLUDED.default_agent_id,
+    installer_user_id = EXCLUDED.installer_user_id,
+    status = 'active',
+    updated_at = now()
+RETURNING id, connector_id, workspace_id, default_agent_id, installer_user_id, status, installed_at, created_at, updated_at
+`
+
+type UpsertDingTalkWorkspaceGrantParams struct {
+	ConnectorID     pgtype.UUID `json:"connector_id"`
+	WorkspaceID     pgtype.UUID `json:"workspace_id"`
+	DefaultAgentID  pgtype.UUID `json:"default_agent_id"`
+	InstallerUserID pgtype.UUID `json:"installer_user_id"`
+}
+
+func (q *Queries) UpsertDingTalkWorkspaceGrant(ctx context.Context, arg UpsertDingTalkWorkspaceGrantParams) (DingtalkWorkspaceGrant, error) {
+	row := q.db.QueryRow(ctx, upsertDingTalkWorkspaceGrant,
+		arg.ConnectorID,
+		arg.WorkspaceID,
+		arg.DefaultAgentID,
+		arg.InstallerUserID,
+	)
+	var i DingtalkWorkspaceGrant
+	err := row.Scan(
+		&i.ID,
+		&i.ConnectorID,
+		&i.WorkspaceID,
+		&i.DefaultAgentID,
+		&i.InstallerUserID,
+		&i.Status,
+		&i.InstalledAt,
+		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err

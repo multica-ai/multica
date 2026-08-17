@@ -331,6 +331,9 @@ SELECT ci.* FROM channel_installation ci
 JOIN workspace w ON w.id = ci.workspace_id
 JOIN agent a ON a.id = ci.agent_id
 WHERE ci.status = 'active'
+  -- DingTalk moved to dingtalk_connector in migration 345. Ignore any legacy
+  -- row defensively so a partial/rolling cutover can never open two Streams.
+  AND ci.channel_type <> 'dingtalk'
 ORDER BY ci.created_at ASC;
 
 -- name: SetChannelInstallationStatus :exec
@@ -405,6 +408,7 @@ ON CONFLICT (installation_id, channel_user_id) DO UPDATE SET
     -- `union_id = COALESCE(EXCLUDED.union_id, lark_user_binding.union_id)`:
     -- a re-bind that carries `{"union_id": null}` (or omits the key) must NOT
     -- erase a union_id we already captured. Only non-null incoming keys win.
+    workspace_id = EXCLUDED.workspace_id,
     config   = channel_user_binding.config || jsonb_strip_nulls(EXCLUDED.config),
     bound_at = now()
 WHERE channel_user_binding.multica_user_id = EXCLUDED.multica_user_id
@@ -464,9 +468,14 @@ LIMIT 1;
 -- name: DeleteChannelUserBindingsByWorkspaceMember :exec
 -- Application-layer integrity (replaces the old member-FK ON DELETE
 -- CASCADE): prune every binding for a user who has been removed from a
--- workspace, across all installations in that workspace.
+-- workspace, across all installations in that workspace. A workspace delete
+-- may safely rehome DingTalk bindings under its connector/workspace fences;
+-- member removal deliberately deletes instead, avoiding a late agent→member
+-- transaction taking connector/workspace locks in reverse order. The user can
+-- bind the shared connector again from another workspace they still belong to.
 DELETE FROM channel_user_binding
-WHERE workspace_id = $1 AND multica_user_id = $2;
+WHERE channel_user_binding.workspace_id = $1
+  AND channel_user_binding.multica_user_id = $2;
 
 -- name: DeleteChannelUserBindingsByInstallation :exec
 -- Application-layer integrity (schema has no FK/cascade, MUL-3515 §4): drop
@@ -625,10 +634,11 @@ WHERE received_at < $1;
 -- The only write path for dropped events. Deliberately carries no body
 -- column — only routing / identity / drop_reason / timestamp.
 INSERT INTO channel_inbound_audit (
-    installation_id, channel_type, channel_chat_id, event_type,
+    installation_id, workspace_id, channel_type, channel_chat_id, event_type,
     channel_event_id, channel_message_id, drop_reason
 ) VALUES (
     sqlc.narg('installation_id'),
+    sqlc.narg('workspace_id'),
     $1,
     sqlc.narg('channel_chat_id'),
     $2,

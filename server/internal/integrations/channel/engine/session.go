@@ -330,9 +330,10 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
-	// Keep the repo-wide teardown order: chat_session before any adapter-owned
-	// route fence. FOR KEY SHARE is sufficient to serialize deletion without
-	// blocking normal non-key session updates or debounced task enqueueing.
+	// The session lock is the first mutable-row lock in this transaction.
+	// Adapter fences must therefore avoid taking a workspace lock afterwards;
+	// workspace teardown holds workspace before chat_session and would otherwise
+	// form an ABBA cycle. FOR KEY SHARE is sufficient to serialize deletion.
 	if _, err := qtx.LockChatSessionForAppend(ctx, in.SessionID); err != nil {
 		return AppendResult{}, fmt.Errorf("lock chat session for append: %w", err)
 	}

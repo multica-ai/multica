@@ -37,23 +37,17 @@ type RegisterBYOParams struct {
 	AppSecret   string // client secret — access-token mint (encrypted at rest)
 }
 
-// RegisterBYO installs a user-supplied ("bring your own") DingTalk robot for an
-// default agent. The user creates their own DingTalk Stream-mode robot and pastes its
+// RegisterBYO authorizes a user-supplied ("bring your own") DingTalk robot in a
+// workspace and assigns its default agent. The user creates their own Stream-mode robot and pastes its
 // AppKey (client id) + AppSecret (client secret). There is NO OAuth code
 // exchange: we validate the credentials live by minting an access_token (which
 // proves the AppKey/AppSecret pair is valid), encrypt the AppSecret at rest, and
-// persist the installation.
+// persist the global connector and workspace-local grant.
 //
-// Because each BYO robot is a distinct DingTalk app — a distinct bot identity —
-// the SAME DingTalk organization can host several of them, one per agent. The
-// stored config carries the AppKey as the routing key (config->>'app_id', equal
-// to the inbound event's robotCode for a Stream-mode robot); persistInstall keys
-// the row by (workspace, agent), reclaims a DEAD prior owner of that AppKey
-// (a revoked placeholder, or an orphan whose workspace/agent was deleted) so the
-// robot can move to this agent, and refuses a LIVE owner with an accurate
-// conflict sentinel. The dedicated Stream connection that consumes the stored
-// credentials lives in dingtalk_channel.go; this method only persists the
-// installation.
+// AppKey is the global connector identity. Reusing the same AppKey in another
+// workspace adds or reactivates a grant and rotates the shared encrypted
+// credentials; it does not create another Stream connection. Group and direct
+// routes still resolve to exactly one workspace and agent for each message.
 func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (db.ChannelInstallation, error) {
 	appKey := strings.TrimSpace(p.AppKey)
 	appSecret := strings.TrimSpace(p.AppSecret)
@@ -86,12 +80,8 @@ func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (
 		return db.ChannelInstallation{}, fmt.Errorf("encode dingtalk installation config: %w", err)
 	}
 
-	// Persist one installation per default agent (the row is keyed by workspace
-	// + agent). Group routes can target other agents without another Stream
-	// connection. The
-	// stored config carries the AppKey for inbound routing; persistInstall
-	// reclaims a DEAD prior owner of that AppKey so the robot can move to this
-	// agent, and refuses a LIVE owner with an accurate conflict sentinel.
+	// Persist one connector per AppKey and one workspace-local grant. Group
+	// routes can target another agent without opening another Stream connection.
 	return s.persistInstall(ctx, installPersist{
 		wsID:        p.WorkspaceID,
 		agentID:     p.AgentID,

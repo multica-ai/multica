@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -99,14 +98,14 @@ func (s *RedisLeaseStore) Ready(ctx context.Context) error {
 	return nil
 }
 
-func (s *RedisLeaseStore) ListHeldWSLeases(ctx context.Context, ids []pgtype.UUID) (map[string]struct{}, error) {
-	held := make(map[string]struct{}, len(ids))
-	if len(ids) == 0 {
+func (s *RedisLeaseStore) ListHeldWSLeases(ctx context.Context, targets []LeaseTarget) (map[string]struct{}, error) {
+	held := make(map[string]struct{}, len(targets))
+	if len(targets) == 0 {
 		return held, nil
 	}
-	keys := make([]string, len(ids))
-	for i, id := range ids {
-		keys[i] = s.key(id)
+	keys := make([]string, len(targets))
+	for i, target := range targets {
+		keys[i] = s.key(target)
 	}
 	// RedisLeaseStore intentionally takes *redis.Client (standalone/sentinel),
 	// not ClusterClient. A future cluster-mode implementation must group keys by
@@ -117,7 +116,7 @@ func (s *RedisLeaseStore) ListHeldWSLeases(ctx context.Context, ids []pgtype.UUI
 	}
 	for i, value := range values {
 		if value != nil {
-			held[uuidString(ids[i])] = struct{}{}
+			held[leaseTargetKey(targets[i])] = struct{}{}
 		}
 	}
 	return held, nil
@@ -132,7 +131,8 @@ func (s *RedisLeaseStore) RenewWSLease(ctx context.Context, arg AcquireLeasePara
 }
 
 func (s *RedisLeaseStore) ReleaseWSLease(ctx context.Context, arg ReleaseLeaseParams) error {
-	_, err := redisReleaseLease.Run(ctx, s.client, []string{s.key(arg.ID)}, arg.Token).Int64()
+	target := LeaseTarget{ID: arg.ID, ChannelType: arg.ChannelType}
+	_, err := redisReleaseLease.Run(ctx, s.client, []string{s.key(target)}, arg.Token).Int64()
 	if err != nil {
 		return err
 	}
@@ -145,7 +145,8 @@ func (s *RedisLeaseStore) runLeaseScript(ctx context.Context, script *redis.Scri
 	if ttlMillis <= 0 {
 		return errors.New("channel lease TTL must be at least 1ms")
 	}
-	result, err := script.Run(ctx, s.client, []string{s.key(arg.ID)}, arg.Token, ttlMillis).Int64()
+	target := LeaseTarget{ID: arg.ID, ChannelType: arg.ChannelType}
+	result, err := script.Run(ctx, s.client, []string{s.key(target)}, arg.Token, ttlMillis).Int64()
 	if err != nil {
 		return err
 	}
@@ -155,8 +156,12 @@ func (s *RedisLeaseStore) runLeaseScript(ctx context.Context, script *redis.Scri
 	return nil
 }
 
-func (s *RedisLeaseStore) key(id pgtype.UUID) string {
-	return redisLeaseKeyPrefix + s.namespace + ":" + uuidString(id)
+func (s *RedisLeaseStore) key(target LeaseTarget) string {
+	// v1 keys were UUID-only before shared connector tables existed. Keep that
+	// wire format for every source so old DingTalk installations and their new
+	// connector projection contend on the same key throughout rolling deploys.
+	// The in-process supervisor map still uses the source-qualified identity.
+	return redisLeaseKeyPrefix + s.namespace + ":" + uuidString(target.ID)
 }
 
 var _ LeaseStore = (*RedisLeaseStore)(nil)

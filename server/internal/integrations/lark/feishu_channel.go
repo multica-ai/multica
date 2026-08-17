@@ -10,6 +10,7 @@ import (
 	"log/slog"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -241,6 +242,11 @@ type channelInstallationStore struct {
 	q *db.Queries
 }
 
+type activeInstallationQueries interface {
+	ListAllActiveChannelInstallations(context.Context) ([]db.ChannelInstallation, error)
+	ListAllActiveDingTalkConnectors(context.Context) ([]db.DingtalkConnector, error)
+}
+
 // ChannelInstallationStore exposes both PostgreSQL seams used by the engine:
 // durable installation discovery and the explicit rollback lease backend.
 type ChannelInstallationStore interface {
@@ -255,7 +261,11 @@ func NewChannelInstallationStore(q *db.Queries) ChannelInstallationStore {
 }
 
 func (s *channelInstallationStore) ListActiveInstallations(ctx context.Context) ([]engine.Installation, error) {
-	rows, err := s.q.ListAllActiveChannelInstallations(ctx)
+	return listActiveInstallations(ctx, s.q)
+}
+
+func listActiveInstallations(ctx context.Context, q activeInstallationQueries) ([]engine.Installation, error) {
+	rows, err := q.ListAllActiveChannelInstallations(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -268,6 +278,26 @@ func (s *channelInstallationStore) ListActiveInstallations(ctx context.Context) 
 			Config:      row.Config,
 		})
 	}
+	connectors, err := q.ListAllActiveDingTalkConnectors(ctx)
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if !errors.As(err, &pgErr) || pgErr.Code != "42P01" {
+			return nil, err
+		}
+		// During a connector rollback, 342 down removes the table after 345
+		// parks every connector. A still-running new binary must treat that as
+		// an empty connector set so its next sweep reaps the cached Stream and
+		// releases the shared UUID lease instead of renewing it forever.
+		connectors = nil
+	}
+	for _, connector := range connectors {
+		out = append(out, engine.Installation{
+			ID:          connector.ID,
+			ChannelType: channel.Type("dingtalk"),
+			Fingerprint: connectorFingerprint(connector),
+			Config:      connector.Config,
+		})
+	}
 	return out, nil
 }
 
@@ -275,7 +305,7 @@ func (s *channelInstallationStore) ListActiveInstallations(ctx context.Context) 
 // optimization returns no known holders, so the SQL CAS remains authoritative
 // and each unowned installation is attempted once per poll (never in a blind
 // per-installation loop).
-func (s *channelInstallationStore) ListHeldWSLeases(_ context.Context, _ []pgtype.UUID) (map[string]struct{}, error) {
+func (s *channelInstallationStore) ListHeldWSLeases(_ context.Context, _ []engine.LeaseTarget) (map[string]struct{}, error) {
 	return map[string]struct{}{}, nil
 }
 
@@ -288,6 +318,17 @@ func (s *channelInstallationStore) RenewWSLease(ctx context.Context, arg engine.
 }
 
 func (s *channelInstallationStore) acquireOrRenewWSLease(ctx context.Context, arg engine.AcquireLeaseParams) error {
+	if arg.ChannelType == channel.Type("dingtalk") {
+		_, err := s.q.AcquireDingTalkConnectorWSLease(ctx, db.AcquireDingTalkConnectorWSLeaseParams{
+			NewToken:     pgtype.Text{String: arg.Token, Valid: true},
+			NewExpiresAt: pgtype.Timestamptz{Time: arg.ExpiresAt, Valid: true},
+			ID:           arg.ID,
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			return engine.ErrLeaseNotAcquired
+		}
+		return err
+	}
 	_, err := s.q.AcquireChannelWSLease(ctx, db.AcquireChannelWSLeaseParams{
 		NewToken:     pgtype.Text{String: arg.Token, Valid: true},
 		NewExpiresAt: pgtype.Timestamptz{Time: arg.ExpiresAt, Valid: true},
@@ -303,6 +344,12 @@ func (s *channelInstallationStore) acquireOrRenewWSLease(ctx context.Context, ar
 }
 
 func (s *channelInstallationStore) ReleaseWSLease(ctx context.Context, arg engine.ReleaseLeaseParams) error {
+	if arg.ChannelType == channel.Type("dingtalk") {
+		return s.q.ReleaseDingTalkConnectorWSLease(ctx, db.ReleaseDingTalkConnectorWSLeaseParams{
+			ID:           arg.ID,
+			CurrentToken: pgtype.Text{String: arg.Token, Valid: true},
+		})
+	}
 	return s.q.ReleaseChannelWSLease(ctx, db.ReleaseChannelWSLeaseParams{
 		ID:           arg.ID,
 		CurrentToken: pgtype.Text{String: arg.Token, Valid: true},
@@ -311,6 +358,14 @@ func (s *channelInstallationStore) ReleaseWSLease(ctx context.Context, arg engin
 
 var _ engine.InstallationStore = (*channelInstallationStore)(nil)
 var _ engine.LeaseStore = (*channelInstallationStore)(nil)
+
+func connectorFingerprint(row db.DingtalkConnector) string {
+	h := sha256.New()
+	_, _ = h.Write([]byte("dingtalk"))
+	_, _ = h.Write([]byte{0})
+	_, _ = h.Write(row.Config)
+	return hex.EncodeToString(h.Sum(nil))
+}
 
 // rowFingerprint condenses the credential-bearing config of a
 // channel_installation row into an opaque string. Any change to the platform

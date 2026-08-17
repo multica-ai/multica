@@ -244,12 +244,13 @@ func (r *feishuSessionBinder) BindMedia(ctx context.Context, p engine.BindMediaP
 
 type feishuAuditor struct{ audit AuditLogger }
 
-func (r *feishuAuditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
+func (r *feishuAuditor) RecordDrop(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, reason engine.DropReason) error {
 	// event_type is platform-specific (read from Raw); a decode failure is
 	// non-fatal — the drop is still worth auditing without it.
 	lm, _ := larkMsgFromRaw(msg)
 	return r.audit.RecordDrop(ctx, AuditDropParams{
-		InstallationID: instID,
+		InstallationID: inst.ID,
+		WorkspaceID:    inst.WorkspaceID,
 		ChatID:         ChatID(msg.Source.ChatID),
 		EventType:      lm.EventType,
 		LarkEventID:    msg.EventID,

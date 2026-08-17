@@ -1,13 +1,12 @@
 // Package dingtalk is the DingTalk integration for the channel-agnostic engine.
 // It uses the bring-your-own-app (BYO) model: a workspace admin creates their
 // own DingTalk Stream-mode robot and pastes its AppKey (client id) and AppSecret
-// (client secret) into Multica. Each channel_installation carries its OWN
-// AppSecret and gets its OWN Stream-mode connection, supervised per-installation
-// by the engine like Feishu and Slack (dingtalk_channel.go) — so several agents
-// can each have a distinct bot identity in one DingTalk organization.
+// (client secret) into Multica. One dingtalk_connector owns the credentials and
+// Stream connection for an AppKey; workspace grants authorize that connector
+// in one or more Multica workspaces and choose each workspace's default agent.
 //
-// Each installation's Stream connection only ever delivers events for its own
-// robot, so the per-installation connection stamps its AppKey into the inbound
+// Each connector's Stream connection only ever delivers events for its own
+// robot, so the connection stamps its AppKey into the inbound
 // envelope and the resolver routes on it (config->>'app_id'). Unlike Slack's
 // static bot token, DingTalk outbound needs a short-lived access_token minted
 // from AppKey/AppSecret, so the outbound path caches it like Feishu's
@@ -41,16 +40,13 @@ import (
 // adapter (mirroring slack.TypeSlack).
 const TypeDingTalk channel.Type = "dingtalk"
 
-// installConfig is the JSON shape stored in channel_installation.config for a
-// DingTalk installation. The cross-platform columns stay flat; everything
-// DingTalk-specific lives in this opaque blob (the documented config boundary).
+// installConfig is the JSON shape stored in dingtalk_connector.config. All
+// DingTalk-specific credentials live in this opaque blob.
 //
 // app_id holds the AppKey, which for a Stream-mode robot equals the inbound
-// event's robotCode. It is the per-installation routing key: the generic
-// GetChannelInstallationByAppID query (config->>'app_id') and the
-// (channel_type, app_id) unique index map an inbound event's robotCode to its
-// installation, so several robots — several agents — in one DingTalk org stay
-// distinct.
+// event's robotCode. It is the global connector routing key, so one bot can be
+// authorized by several workspaces without opening duplicate Stream
+// connections.
 //
 // robot_code is kept explicit for the outbound send APIs (oToMessages.batchSend
 // / groupMessages.send both require it); it equals app_id but is stored
@@ -77,9 +73,8 @@ func (c installConfig) robotCodeOrAppID() string {
 }
 
 // credentials is the decoded, decrypted form the outbound sender and the
-// access-token cache run on. The installation IDENTITY (workspace / agent /
-// installer) is deliberately absent: it is resolved per message by the Router's
-// InstallationResolver, exactly as the Feishu and Slack adapters do.
+// access-token cache run on. Workspace, agent, and installer identity is
+// deliberately absent: routing resolves it per message from workspace grants.
 type credentials struct {
 	AppKey    string
 	RobotCode string
@@ -91,7 +86,7 @@ type credentials struct {
 // which treats the stored bytes as plaintext).
 type Decrypter func(ciphertext []byte) (plaintext []byte, err error)
 
-// decodeCredentials parses the per-installation config blob and decrypts the
+// decodeCredentials parses the connector config blob and decrypts the
 // stored AppSecret. It is the single place the DingTalk config JSON is
 // interpreted for the outbound/token paths.
 func decodeCredentials(raw json.RawMessage, decrypt Decrypter) (credentials, error) {

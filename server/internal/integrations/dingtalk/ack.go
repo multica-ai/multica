@@ -11,6 +11,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // The classic robot API we send through (oToMessages/batchSend) exposes no
@@ -42,6 +43,7 @@ type ackNotifier struct {
 	logger  *slog.Logger
 	window  time.Duration
 	now     func() time.Time
+	guard   *routeSendGuard
 
 	mu      sync.Mutex
 	lastAck map[string]time.Time
@@ -55,7 +57,7 @@ var _ engine.TypingNotifier = (*ackNotifier)(nil)
 
 // NewAckNotifier builds the ack notifier over the shared outbound client and the
 // credential decrypter.
-func NewAckNotifier(client *Client, decrypt Decrypter, logger *slog.Logger) *ackNotifier {
+func NewAckNotifier(q *db.Queries, tx engine.TxStarter, client *Client, decrypt Decrypter, logger *slog.Logger) *ackNotifier {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -65,6 +67,7 @@ func NewAckNotifier(client *Client, decrypt Decrypter, logger *slog.Logger) *ack
 		logger:  logger,
 		window:  ackCoalesceWindow,
 		lastAck: make(map[string]time.Time),
+		guard:   newRouteSendGuard(q, tx),
 	}
 }
 
@@ -131,6 +134,8 @@ func (n *ackNotifier) clock() time.Time {
 }
 
 func (n *ackNotifier) realSend(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, text string) error {
-	_, err := sendInstallationText(ctx, n.client, n.decrypt, inst, targetFromMessage(msg), text)
-	return err
+	return n.guard.withRoute(ctx, inst, msg, pgtype.UUID{}, func(guarded engine.ResolvedInstallation) error {
+		_, err := sendInstallationText(ctx, n.client, n.decrypt, guarded, targetFromMessage(msg), text)
+		return err
+	})
 }

@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/util"
@@ -36,107 +35,103 @@ func mustUUID(t *testing.T, s string) pgtype.UUID {
 }
 
 type fakeInstallQueries struct {
-	// existing, when set, is the agent's current row; UpsertChannelInstallation
-	// returns it (an UPDATE) so a reconnect reuses the same row id.
-	existing *db.ChannelInstallation
-	// existingAppID is the current row's platform identity returned under lock.
-	// It distinguishes a same-robot reconnect from a different-robot replacement.
-	existingAppID string
-	lockCalled    bool
-	replaceCalled bool
-	replaceParams db.DeleteDingTalkInstallationForReplacementParams
-	// appIDTaken makes UpsertChannelInstallation report a unique-constraint
-	// violation on the (channel_type, app_id) routing index — i.e. the pasted
-	// robot is already connected to a LIVE owner (the reclaim has run by then).
-	appIDTaken   bool
-	upsertParams db.UpsertChannelInstallationParams
-	upsertCalled bool
-	rowID        pgtype.UUID
-
-	// reclaimedID, when set, is returned by ReclaimDeadChannelInstallationByAppID
-	// to model a dead prior owner having been cleared; otherwise it reports
-	// pgx.ErrNoRows (nothing was dead). reclaimCalled records that the install
-	// path ran the reclaim before upserting.
-	reclaimedID   *pgtype.UUID
-	reclaimCalled bool
-	// ownerWorkspaceID / ownerArchived / ownerMissing drive the live-owner lookup
-	// that classifies an appIDTaken conflict into the right sentinel.
-	ownerWorkspaceID pgtype.UUID
-	ownerArchived    bool
-	ownerMissing     bool
+	connector        *db.DingtalkConnector
+	rowID            pgtype.UUID
+	lockCalled       bool
+	createCalled     bool
+	updateCalled     bool
+	grantCalled      bool
+	createParams     db.CreateDingTalkConnectorParams
+	updateParams     db.UpdateDingTalkConnectorCredentialsParams
+	grantParams      []db.UpsertDingTalkWorkspaceGrantParams
+	revokeParams     db.RevokeDingTalkWorkspaceGrantOnlyParams
+	remainingActive  int64
+	connectorRevoked bool
 }
 
 // WithTx returns the same fake — the fake tx is a no-op token.
 func (f *fakeInstallQueries) WithTx(_ pgx.Tx) installQueries { return f }
 
-func (f *fakeInstallQueries) LockDingTalkInstallationOwner(_ context.Context, _ db.LockDingTalkInstallationOwnerParams) error {
+func (f *fakeInstallQueries) LockWorkspaceForChatSessionCreate(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {
+	return id, nil
+}
+
+func (f *fakeInstallQueries) LockDingTalkInstallTarget(_ context.Context, arg db.LockDingTalkInstallTargetParams) (pgtype.UUID, error) {
+	return arg.WorkspaceID, nil
+}
+
+func (f *fakeInstallQueries) LockDingTalkConnectorAppID(_ context.Context, _ string) error {
 	f.lockCalled = true
 	return nil
 }
 
-func (f *fakeInstallQueries) GetDingTalkInstallationOwnerForUpdate(_ context.Context, _ db.GetDingTalkInstallationOwnerForUpdateParams) (db.GetDingTalkInstallationOwnerForUpdateRow, error) {
-	if f.existing == nil {
-		return db.GetDingTalkInstallationOwnerForUpdateRow{}, pgx.ErrNoRows
+func (f *fakeInstallQueries) GetDingTalkConnectorByAppIDForUpdate(_ context.Context, appID string) (db.DingtalkConnector, error) {
+	if f.connector == nil || f.connector.AppID != appID {
+		return db.DingtalkConnector{}, pgx.ErrNoRows
 	}
-	return db.GetDingTalkInstallationOwnerForUpdateRow{ID: f.existing.ID, AppID: f.existingAppID}, nil
+	return *f.connector, nil
 }
 
-func (f *fakeInstallQueries) DeleteDingTalkInstallationForReplacement(_ context.Context, arg db.DeleteDingTalkInstallationForReplacementParams) (pgtype.UUID, error) {
-	f.replaceCalled = true
-	f.replaceParams = arg
-	id := f.existing.ID
-	f.existing = nil
-	return id, nil
+func (f *fakeInstallQueries) LockDingTalkConnectorForUpdate(_ context.Context, id pgtype.UUID) (db.DingtalkConnector, error) {
+	if f.connector != nil {
+		return *f.connector, nil
+	}
+	return db.DingtalkConnector{ID: id, Status: "active"}, nil
 }
 
-func (f *fakeInstallQueries) ReclaimDeadChannelInstallationByAppID(_ context.Context, _ db.ReclaimDeadChannelInstallationByAppIDParams) (pgtype.UUID, error) {
-	f.reclaimCalled = true
-	if f.reclaimedID != nil {
-		return *f.reclaimedID, nil
-	}
-	return pgtype.UUID{}, pgx.ErrNoRows
-}
-
-func (f *fakeInstallQueries) GetChannelInstallationOwnerByAppID(_ context.Context, _ db.GetChannelInstallationOwnerByAppIDParams) (db.GetChannelInstallationOwnerByAppIDRow, error) {
-	if f.ownerMissing {
-		return db.GetChannelInstallationOwnerByAppIDRow{}, pgx.ErrNoRows
-	}
-	return db.GetChannelInstallationOwnerByAppIDRow{
-		WorkspaceID:     f.ownerWorkspaceID,
-		AgentArchivedAt: pgtype.Timestamptz{Valid: f.ownerArchived},
-	}, nil
-}
-
-func (f *fakeInstallQueries) UpsertChannelInstallation(_ context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error) {
-	f.upsertCalled = true
-	f.upsertParams = arg
-	if f.appIDTaken {
-		return db.ChannelInstallation{}, &pgconn.PgError{Code: "23505"}
-	}
-	id := f.rowID
-	if f.existing != nil {
-		id = f.existing.ID // reconnect updates the agent's existing row in place
-	}
-	return db.ChannelInstallation{
-		ID:              id,
-		WorkspaceID:     arg.WorkspaceID,
-		AgentID:         arg.AgentID,
-		ChannelType:     arg.ChannelType,
-		Config:          arg.Config,
+func (f *fakeInstallQueries) CreateDingTalkConnector(_ context.Context, arg db.CreateDingTalkConnectorParams) (db.DingtalkConnector, error) {
+	f.createCalled = true
+	f.createParams = arg
+	row := db.DingtalkConnector{
+		ID: f.rowID, AppID: arg.AppID, Config: arg.Config, Status: "active",
 		InstallerUserID: arg.InstallerUserID,
-		Status:          "active",
+	}
+	f.connector = &row
+	return row, nil
+}
+
+func (f *fakeInstallQueries) UpdateDingTalkConnectorCredentials(_ context.Context, arg db.UpdateDingTalkConnectorCredentialsParams) (db.DingtalkConnector, error) {
+	f.updateCalled = true
+	f.updateParams = arg
+	f.connector.Config = arg.Config
+	f.connector.Status = "active"
+	f.connector.InstallerUserID = arg.InstallerUserID
+	return *f.connector, nil
+}
+
+func (f *fakeInstallQueries) UpsertDingTalkWorkspaceGrant(_ context.Context, arg db.UpsertDingTalkWorkspaceGrantParams) (db.DingtalkWorkspaceGrant, error) {
+	f.grantCalled = true
+	f.grantParams = append(f.grantParams, arg)
+	return db.DingtalkWorkspaceGrant{
+		ID: f.rowID, ConnectorID: arg.ConnectorID, WorkspaceID: arg.WorkspaceID,
+		DefaultAgentID: arg.DefaultAgentID, InstallerUserID: arg.InstallerUserID,
+		Status: "active",
 	}, nil
 }
 
-func (f *fakeInstallQueries) ListChannelInstallationsByWorkspace(_ context.Context, _ db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error) {
+func (f *fakeInstallQueries) ListDingTalkInstallationsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ListDingTalkInstallationsByWorkspaceRow, error) {
 	return nil, nil
 }
 
-func (f *fakeInstallQueries) GetChannelInstallationInWorkspace(_ context.Context, _ db.GetChannelInstallationInWorkspaceParams) (db.ChannelInstallation, error) {
-	return db.ChannelInstallation{}, nil
+func (f *fakeInstallQueries) GetDingTalkInstallationInWorkspace(_ context.Context, _ db.GetDingTalkInstallationInWorkspaceParams) (db.GetDingTalkInstallationInWorkspaceRow, error) {
+	return db.GetDingTalkInstallationInWorkspaceRow{}, nil
 }
 
-func (f *fakeInstallQueries) SetChannelInstallationStatus(_ context.Context, _ db.SetChannelInstallationStatusParams) error {
+func (f *fakeInstallQueries) RevokeDingTalkWorkspaceGrantOnly(_ context.Context, arg db.RevokeDingTalkWorkspaceGrantOnlyParams) (pgtype.UUID, error) {
+	f.revokeParams = arg
+	return arg.ConnectorID, nil
+}
+
+func (f *fakeInstallQueries) CountActiveDingTalkWorkspaceGrants(_ context.Context, _ pgtype.UUID) (int64, error) {
+	return f.remainingActive, nil
+}
+
+func (f *fakeInstallQueries) RevokeDingTalkConnector(_ context.Context, _ pgtype.UUID) error {
+	f.connectorRevoked = true
+	return nil
+}
+
+func (f *fakeInstallQueries) PurgeDingTalkConnectorUnscopedAudit(_ context.Context, _ pgtype.UUID) error {
 	return nil
 }
 

@@ -59,15 +59,15 @@ func (f *fakeStore) ListActiveInstallations(ctx context.Context) ([]Installation
 	return out, nil
 }
 
-func (f *fakeStore) ListHeldWSLeases(_ context.Context, ids []pgtype.UUID) (map[string]struct{}, error) {
+func (f *fakeStore) ListHeldWSLeases(_ context.Context, targets []LeaseTarget) (map[string]struct{}, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if f.listHeldErr != nil {
 		return nil, f.listHeldErr
 	}
-	held := make(map[string]struct{}, len(ids))
-	for _, instID := range ids {
-		id := uuidString(instID)
+	held := make(map[string]struct{}, len(targets))
+	for _, target := range targets {
+		id := leaseTargetKey(target)
 		if _, ok := f.leaseOwner[id]; ok && f.leaseExpiresAt[id].After(f.now()) {
 			held[id] = struct{}{}
 		}
@@ -82,7 +82,7 @@ func (f *fakeStore) TryAcquireWSLease(ctx context.Context, arg AcquireLeaseParam
 	if f.acquireErr != nil {
 		return f.acquireErr
 	}
-	id := uuidString(arg.ID)
+	id := leaseTargetKey(LeaseTarget{ID: arg.ID, ChannelType: arg.ChannelType})
 	owner, hasOwner := f.leaseOwner[id]
 	exp := f.leaseExpiresAt[id]
 	now := f.now()
@@ -107,7 +107,7 @@ func (f *fakeStore) RenewWSLease(_ context.Context, arg AcquireLeaseParams) erro
 	if f.renewErr != nil {
 		return f.renewErr
 	}
-	id := uuidString(arg.ID)
+	id := leaseTargetKey(LeaseTarget{ID: arg.ID, ChannelType: arg.ChannelType})
 	if f.leaseOwner[id] != arg.Token || !f.leaseExpiresAt[id].After(f.now()) {
 		return ErrLeaseNotAcquired
 	}
@@ -134,7 +134,7 @@ func (f *fakeStore) ReleaseWSLease(ctx context.Context, arg ReleaseLeaseParams) 
 	if f.releaseErr != nil {
 		return f.releaseErr
 	}
-	id := uuidString(arg.ID)
+	id := leaseTargetKey(LeaseTarget{ID: arg.ID, ChannelType: arg.ChannelType})
 	if f.leaseOwner[id] == arg.Token {
 		delete(f.leaseOwner, id)
 		delete(f.leaseExpiresAt, id)
@@ -145,14 +145,16 @@ func (f *fakeStore) ReleaseWSLease(ctx context.Context, arg ReleaseLeaseParams) 
 func (f *fakeStore) presetLease(id pgtype.UUID, token string, expires time.Time) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	f.leaseOwner[uuidString(id)] = token
-	f.leaseExpiresAt[uuidString(id)] = expires
+	key := leaseTargetKey(LeaseTarget{ID: id, ChannelType: channel.TypeFeishu})
+	f.leaseOwner[key] = token
+	f.leaseExpiresAt[key] = expires
 }
 
 func (f *fakeStore) leaseHolder(id pgtype.UUID) (string, bool) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	owner, ok := f.leaseOwner[uuidString(id)]
+	key := leaseTargetKey(LeaseTarget{ID: id, ChannelType: channel.TypeFeishu})
+	owner, ok := f.leaseOwner[key]
 	return owner, ok
 }
 
@@ -401,7 +403,8 @@ func TestSupervisorSkipsWhenAnotherReplicaHoldsLease(t *testing.T) {
 	if !waitFor(200*time.Millisecond, func() bool {
 		sup.mu.Lock()
 		defer sup.mu.Unlock()
-		_, ok := sup.contendedSince[uuidString(instID)]
+		key := leaseTargetKey(LeaseTarget{ID: instID, ChannelType: channel.TypeFeishu})
+		_, ok := sup.contendedSince[key]
 		return !ok
 	}) {
 		t.Fatalf("revoked contended installation was not pruned")
@@ -701,9 +704,10 @@ func TestSupervisorClearedLeaseKeyCancelsOldOwner(t *testing.T) {
 
 	// Simulate Redis losing/clearing the key. Strict renewal must treat absence
 	// as lease loss instead of recreating the key from the old owner.
+	key := leaseTargetKey(LeaseTarget{ID: instID, ChannelType: channel.TypeFeishu})
 	q.mu.Lock()
-	delete(q.leaseOwner, uuidString(instID))
-	delete(q.leaseExpiresAt, uuidString(instID))
+	delete(q.leaseOwner, key)
+	delete(q.leaseExpiresAt, key)
 	q.mu.Unlock()
 	select {
 	case <-connectReturned:
@@ -780,7 +784,7 @@ func TestSupervisorOneWayRedisPartitionDisconnectsBeforeConfirmedExpiry(t *testi
 		t.Fatalf("partitioned owner stayed connected beyond confirmed lease")
 	}
 	q.mu.Lock()
-	expiresAt := q.leaseExpiresAt[uuidString(instID)]
+	expiresAt := q.leaseExpiresAt[leaseTargetKey(LeaseTarget{ID: instID, ChannelType: channel.TypeFeishu})]
 	q.mu.Unlock()
 	if !time.Now().Before(expiresAt) {
 		t.Fatalf("connection was not cancelled before backend lease expiry: expires_at=%s", expiresAt)

@@ -242,7 +242,7 @@ type fakeAuditor struct {
 	drops []DropReason
 }
 
-func (f *fakeAuditor) RecordDrop(_ context.Context, _ pgtype.UUID, _ channel.InboundMessage, reason DropReason) error {
+func (f *fakeAuditor) RecordDrop(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage, reason DropReason) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.drops = append(f.drops, reason)
@@ -260,12 +260,22 @@ func (f *fakeAuditor) last() (DropReason, bool) {
 type fakeReplier struct {
 	mu      sync.Mutex
 	results []Result
+	insts   []ResolvedInstallation
 }
 
-func (f *fakeReplier) Reply(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage, res Result) {
+func (f *fakeReplier) Reply(_ context.Context, inst ResolvedInstallation, _ channel.InboundMessage, res Result) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.results = append(f.results, res)
+	f.insts = append(f.insts, inst)
+}
+func (f *fakeReplier) lastInst() ResolvedInstallation {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.insts) == 0 {
+		return ResolvedInstallation{}
+	}
+	return f.insts[len(f.insts)-1]
 }
 func (f *fakeReplier) calls() []Result {
 	f.mu.Lock()
@@ -277,12 +287,14 @@ type fakeTyping struct {
 	mu      sync.Mutex
 	count   int
 	settled int
+	insts   []ResolvedInstallation
 }
 
-func (f *fakeTyping) OnIngested(_ context.Context, _ ResolvedInstallation, _ channel.InboundMessage, _ pgtype.UUID) {
+func (f *fakeTyping) OnIngested(_ context.Context, inst ResolvedInstallation, _ channel.InboundMessage, _ pgtype.UUID) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.count++
+	f.insts = append(f.insts, inst)
 }
 func (f *fakeTyping) OnSettled(_ context.Context, _ pgtype.UUID) {
 	f.mu.Lock()
@@ -291,6 +303,14 @@ func (f *fakeTyping) OnSettled(_ context.Context, _ pgtype.UUID) {
 }
 func (f *fakeTyping) calls() int        { f.mu.Lock(); defer f.mu.Unlock(); return f.count }
 func (f *fakeTyping) settledCalls() int { f.mu.Lock(); defer f.mu.Unlock(); return f.settled }
+func (f *fakeTyping) lastInst() ResolvedInstallation {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if len(f.insts) == 0 {
+		return ResolvedInstallation{}
+	}
+	return f.insts[len(f.insts)-1]
+}
 
 type fakeMedia struct {
 	mu            sync.Mutex
@@ -533,6 +553,70 @@ func TestRouter_NoResolverSet_ReturnsError(t *testing.T) {
 	}
 }
 
+func TestRouter_ImmediateHooksReceiveValidatedRoute(t *testing.T) {
+	h := newHarness(t)
+	connectorOnly := activeResolved(t)
+	connectorOnly.WorkspaceID = pgtype.UUID{}
+	connectorOnly.AgentID = pgtype.UUID{}
+	connectorOnly.RouteRevision = 0
+	validated := activeResolved(t)
+	validated.RouteRevision = 7
+	h.inst.inst = connectorOnly
+	h.validated.inst = validated
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("handle validated route: %v", err)
+	}
+	if !waitFor(time.Second, func() bool {
+		return h.typing.calls() == 1 && len(h.replier.calls()) > 0
+	}) {
+		t.Fatal("validated ingest did not invoke immediate hooks")
+	}
+	for name, got := range map[string]ResolvedInstallation{
+		"typing":  h.typing.lastInst(),
+		"replier": h.replier.lastInst(),
+	} {
+		if got.WorkspaceID != validated.WorkspaceID || got.AgentID != validated.AgentID || got.RouteRevision != validated.RouteRevision {
+			t.Fatalf("%s route = workspace %v agent %v revision %d, want workspace %v agent %v revision %d", name, got.WorkspaceID, got.AgentID, got.RouteRevision, validated.WorkspaceID, validated.AgentID, validated.RouteRevision)
+		}
+	}
+}
+
+func TestRouter_WorkspaceControlOutcomesDoNotCreateSessions(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		err     error
+		outcome Outcome
+	}{
+		{name: "selection required", err: ErrWorkspaceSelectionRequired, outcome: OutcomeWorkspaceRequired},
+		{name: "selection confirmed", err: ErrWorkspaceSelected, outcome: OutcomeWorkspaceSelected},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := newHarness(t)
+			h.validated.err = tc.err
+			if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+				t.Fatalf("Handle: %v", err)
+			}
+			if !waitFor(time.Second, func() bool {
+				for _, result := range h.replier.calls() {
+					if result.Outcome == tc.outcome {
+						return true
+					}
+				}
+				return false
+			}) {
+				t.Fatalf("terminal outcome %q not delivered: %+v", tc.outcome, h.replier.calls())
+			}
+			if h.binder.ensures() != 0 || h.binder.appends() != 0 {
+				t.Fatalf("workspace control created session/message: ensure=%d append=%d", h.binder.ensures(), h.binder.appends())
+			}
+			if h.dedup.marks() != 1 || h.dedup.releases() != 0 {
+				t.Fatalf("workspace control dedup finalize = marks %d releases %d, want 1/0", h.dedup.marks(), h.dedup.releases())
+			}
+		})
+	}
+}
+
 func TestRouter_InstallationNotFound_Drops(t *testing.T) {
 	h := newHarness(t)
 	h.inst.err = ErrInstallationNotFound
@@ -716,6 +800,7 @@ func TestRouter_EnsureSessionConflictRefreshesAndRetriesSameClaim(t *testing.T) 
 	oldRoute.RouteRevision = 1
 	newRoute := oldRoute
 	newRoute.AgentID = uuidFromString(t, "77777777-7777-4777-8777-777777777777")
+	newRoute.InstallerUserID = uuidFromString(t, "88888888-8888-4888-8888-888888888888")
 	newRoute.RouteRevision = 2
 	h.inst.inst = oldRoute
 	h.validated.insts = []ResolvedInstallation{oldRoute, newRoute}
@@ -731,6 +816,9 @@ func TestRouter_EnsureSessionConflictRefreshesAndRetriesSameClaim(t *testing.T) 
 	ensures := h.binder.ensureAttempts()
 	if len(ensures) != 2 || ensures[0].Installation.AgentID != oldRoute.AgentID || ensures[1].Installation.AgentID != newRoute.AgentID {
 		t.Fatalf("ensure attempts = %+v, want old route then new route", ensures)
+	}
+	if ensures[0].Sender != oldRoute.InstallerUserID || ensures[1].Sender != newRoute.InstallerUserID {
+		t.Fatalf("ensure creators = (%v, %v), want old installer then refreshed installer", ensures[0].Sender, ensures[1].Sender)
 	}
 	appended := h.binder.successfulAppends()
 	if len(appended) != 1 || appended[0].AgentID != newRoute.AgentID || appended[0].ClaimToken != h.dedup.token {

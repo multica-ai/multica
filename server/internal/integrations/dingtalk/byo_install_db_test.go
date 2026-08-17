@@ -2,15 +2,11 @@ package dingtalk
 
 import (
 	"context"
-	"errors"
 	"os"
 	"testing"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/multica-ai/multica/server/internal/integrations/channel"
-	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -32,91 +28,58 @@ func dingtalkInstallTestDB(t *testing.T) *pgxpool.Pool {
 	}
 	var migrated bool
 	if err := pool.QueryRow(ctx, `
-SELECT to_regclass('public.channel_installation') IS NOT NULL
-   AND to_regclass('public.channel_media_pending_object') IS NOT NULL
+SELECT to_regclass('public.dingtalk_connector') IS NOT NULL
+   AND to_regclass('public.dingtalk_workspace_grant') IS NOT NULL
 `).Scan(&migrated); err != nil || !migrated {
 		pool.Close()
-		t.Skip("channel installation tables not present (database not migrated)")
+		t.Skip("DingTalk connector tables not present (database not migrated)")
 	}
 	t.Cleanup(pool.Close)
 	return pool
 }
 
-// A DingTalk senderStaffId is only unique inside one organization. Swapping an
-// agent from one AppKey to another must therefore produce a new installation
-// identity, require the colliding staff id to bind again, and make the old chat
-// session unavailable to the new robot.
-func TestRegisterBYO_DifferentAppKey_IsolatesIdentityStateDB(t *testing.T) {
+func TestRegisterBYO_SharesConnectorAcrossWorkspaceGrantsDB(t *testing.T) {
 	pool := dingtalkInstallTestDB(t)
 	ctx := context.Background()
 	const (
-		workspaceID    = "d1470000-0000-4000-8000-000000000001"
-		agentID        = "d1470000-0000-4000-8000-000000000002"
-		installerID    = "d1470000-0000-4000-8000-000000000003"
-		multicaUserID  = "d1470000-0000-4000-8000-000000000004"
-		oldInstallID   = "d1470000-0000-4000-8000-000000000010"
-		chatSessionID  = "d1470000-0000-4000-8000-000000000020"
-		mediaMessageID = "d1470000-0000-4000-8000-000000000030"
-		oldAppKey      = "dingtalk_identity_old_app"
-		newAppKey      = "dingtalk_identity_new_app"
-		staffID        = "staff-id-collision"
-		chatID         = "cid-old-organization-chat"
-		tokenHash      = "dingtalk_identity_old_token"
-		auditEventID   = "dingtalk_identity_old_audit"
-		storageKey     = "test/dingtalk/identity-old-image"
+		workspaceA = "d1470000-0000-4000-8000-000000000001"
+		workspaceB = "d1470000-0000-4000-8000-000000000002"
+		agentA     = "d1470000-0000-4000-8000-000000000003"
+		agentB     = "d1470000-0000-4000-8000-000000000004"
+		installer  = "d1470000-0000-4000-8000-000000000005"
+		runtimeA   = "d1470000-0000-4000-8000-000000000006"
+		runtimeB   = "d1470000-0000-4000-8000-000000000007"
+		appKey     = "dingtalk_cross_workspace_connector_db"
 	)
 
 	clean := func() {
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_outbound_card_message WHERE chat_session_id = $1`, chatSessionID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSessionID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_binding_token WHERE token_hash = $1`, tokenHash)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_user_binding WHERE workspace_id = $1 AND channel_user_id = $2`, workspaceID, staffID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_inbound_message_dedup WHERE message_id = 'dingtalk-identity-old-message'`)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_inbound_audit WHERE channel_event_id = $1`, auditEventID)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_media_pending_object WHERE storage_key = $1`, storageKey)
-		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE workspace_id = $1 AND agent_id = $2 AND channel_type = 'dingtalk'`, workspaceID, agentID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_inbound_audit WHERE installation_id IN (SELECT id FROM dingtalk_connector WHERE app_id = $1)`, appKey)
+		_, _ = pool.Exec(context.Background(), `
+DELETE FROM dingtalk_workspace_grant
+WHERE connector_id IN (SELECT id FROM dingtalk_connector WHERE app_id = $1)
+`, appKey)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_connector WHERE app_id = $1`, appKey)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id IN ($1, $2)`, workspaceA, workspaceB)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE id IN ($1, $2)`, workspaceA, workspaceB)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, installer)
 	}
 	clean()
 	t.Cleanup(clean)
-
-	exec := func(query string, args ...any) {
-		t.Helper()
-		if _, err := pool.Exec(ctx, query, args...); err != nil {
-			t.Fatalf("seed replacement fixture: %v", err)
-		}
+	if _, err := pool.Exec(ctx, `INSERT INTO "user" (id, name, email) VALUES ($1, 'DingTalk shared connector owner', 'dingtalk-shared-connector@multica.test')`, installer); err != nil {
+		t.Fatalf("seed shared connector user: %v", err)
 	}
-	exec(`
-INSERT INTO channel_installation (id, workspace_id, agent_id, channel_type, config, installer_user_id)
-VALUES ($1, $2, $3, 'dingtalk', jsonb_build_object('app_id', $4::text), $5)
-`, oldInstallID, workspaceID, agentID, oldAppKey, installerID)
-	exec(`
-INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id)
-VALUES ($1, $2, $3, 'dingtalk', $4)
-`, workspaceID, multicaUserID, oldInstallID, staffID)
-	exec(`
-INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
-VALUES ($1, $2, 'dingtalk', $3, 'p2p')
-`, chatSessionID, oldInstallID, chatID)
-	exec(`
-INSERT INTO channel_binding_token (token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at)
-VALUES ($1, $2, $3, 'dingtalk', $4, now() + interval '10 minutes')
-`, tokenHash, workspaceID, oldInstallID, staffID)
-	exec(`
-INSERT INTO channel_outbound_card_message (chat_session_id, channel_type, channel_chat_id, channel_card_message_id)
-VALUES ($1, 'dingtalk', $2, 'old-outbound-message')
-`, chatSessionID, chatID)
-	exec(`
-INSERT INTO channel_inbound_message_dedup (installation_id, message_id)
-VALUES ($1, 'dingtalk-identity-old-message')
-`, oldInstallID)
-	exec(`
-INSERT INTO channel_inbound_audit (installation_id, channel_type, event_type, channel_event_id, drop_reason)
-VALUES ($1, 'dingtalk', 'chatbot-message', $2, 'test')
-`, oldInstallID, auditEventID)
-	exec(`
-INSERT INTO channel_media_pending_object (storage_key, workspace_id, chat_message_id, storage_url, installation_id)
-VALUES ($1, $2, $3, 'https://storage.example.test/old-image', $4)
-`, storageKey, workspaceID, mediaMessageID, oldInstallID)
+	if _, err := pool.Exec(ctx, `INSERT INTO workspace (id, name, slug, description) VALUES ($1, 'DingTalk install A', 'dingtalk-install-a', ''), ($2, 'DingTalk install B', 'dingtalk-install-b', '')`, workspaceA, workspaceB); err != nil {
+		t.Fatalf("seed shared connector workspaces: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $3, 'owner'), ($2, $3, 'owner')`, workspaceA, workspaceB, installer); err != nil {
+		t.Fatalf("seed shared connector memberships: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider) VALUES ($1, $2, 'DingTalk install runtime A', 'local', 'multica_daemon'), ($3, $4, 'DingTalk install runtime B', 'local', 'multica_daemon')`, runtimeA, workspaceA, runtimeB, workspaceB); err != nil {
+		t.Fatalf("seed shared connector runtimes: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO agent (id, workspace_id, name, runtime_mode, runtime_id) VALUES ($1, $2, 'DingTalk install agent A', 'local', $3), ($4, $5, 'DingTalk install agent B', 'local', $6)`, agentA, workspaceA, runtimeA, agentB, workspaceB, runtimeB); err != nil {
+		t.Fatalf("seed shared connector agents: %v", err)
+	}
 
 	srv := dingtalkMockServer(t, true)
 	defer srv.Close()
@@ -125,50 +88,77 @@ VALUES ($1, $2, $3, 'https://storage.example.test/old-image', $4)
 		t.Fatalf("NewInstallService: %v", err)
 	}
 	svc.apiBase = srv.URL
-	params := byoParams(workspaceID, agentID)
-	params.AppKey = newAppKey
-	row, err := svc.RegisterBYO(ctx, params)
-	if err != nil {
-		t.Fatalf("RegisterBYO replacement: %v", err)
-	}
-	oldUUID := util.MustParseUUID(oldInstallID)
-	if row.ID == oldUUID {
-		t.Fatalf("different AppKey reused installation id %s", oldInstallID)
-	}
 
-	resolver := identityResolver{q: db.New(pool)}
-	_, err = resolver.ResolveSender(ctx, engine.ResolvedInstallation{
-		ID:          row.ID,
-		WorkspaceID: util.MustParseUUID(workspaceID),
-	}, channel.InboundMessage{Source: channel.Source{SenderID: staffID}})
-	if !errors.Is(err, engine.ErrSenderUnbound) {
-		t.Fatalf("colliding staff id resolved after AppKey swap: %v, want ErrSenderUnbound", err)
-	}
-
-	queries := db.New(pool)
-	if _, err := queries.GetChannelChatSessionBinding(ctx, db.GetChannelChatSessionBindingParams{
-		InstallationID: row.ID,
-		ChannelChatID:  chatID,
-	}); !errors.Is(err, pgx.ErrNoRows) {
-		t.Fatalf("old chat session reused by replacement: %v, want pgx.ErrNoRows", err)
-	}
-
-	assertCount := func(name, query string, want int, args ...any) {
+	register := func(workspaceID, agentID string) db.ChannelInstallation {
 		t.Helper()
-		var got int
-		if err := pool.QueryRow(ctx, query, args...).Scan(&got); err != nil {
-			t.Fatalf("count %s: %v", name, err)
+		row, registerErr := svc.RegisterBYO(ctx, RegisterBYOParams{
+			WorkspaceID: util.MustParseUUID(workspaceID),
+			AgentID:     util.MustParseUUID(agentID),
+			InitiatorID: util.MustParseUUID(installer),
+			AppKey:      appKey,
+			AppSecret:   "shared-secret",
+		})
+		if registerErr != nil {
+			t.Fatalf("RegisterBYO(%s): %v", workspaceID, registerErr)
 		}
-		if got != want {
-			t.Fatalf("%s rows = %d, want %d", name, got, want)
-		}
+		return row
 	}
-	assertCount("old installation", `SELECT count(*) FROM channel_installation WHERE id = $1`, 0, oldInstallID)
-	assertCount("old user binding", `SELECT count(*) FROM channel_user_binding WHERE installation_id = $1`, 0, oldInstallID)
-	assertCount("old chat binding", `SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, 0, oldInstallID)
-	assertCount("old binding token", `SELECT count(*) FROM channel_binding_token WHERE installation_id = $1`, 0, oldInstallID)
-	assertCount("old outbound state", `SELECT count(*) FROM channel_outbound_card_message WHERE chat_session_id = $1`, 0, chatSessionID)
-	assertCount("old dedup state", `SELECT count(*) FROM channel_inbound_message_dedup WHERE installation_id = $1`, 0, oldInstallID)
-	assertCount("detached audit", `SELECT count(*) FROM channel_inbound_audit WHERE channel_event_id = $1 AND installation_id IS NULL`, 1, auditEventID)
-	assertCount("detached media intent", `SELECT count(*) FROM channel_media_pending_object WHERE storage_key = $1 AND installation_id IS NULL`, 1, storageKey)
+
+	first := register(workspaceA, agentA)
+	second := register(workspaceB, agentB)
+	if first.ID != second.ID {
+		t.Fatalf("connector ids differ: %s vs %s", util.UUIDToString(first.ID), util.UUIDToString(second.ID))
+	}
+
+	var connectorCount, activeGrantCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM dingtalk_connector WHERE app_id = $1`, appKey).Scan(&connectorCount); err != nil {
+		t.Fatalf("count connectors: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+SELECT count(*) FROM dingtalk_workspace_grant
+WHERE connector_id = $1 AND status = 'active'
+`, first.ID).Scan(&activeGrantCount); err != nil {
+		t.Fatalf("count grants: %v", err)
+	}
+	if connectorCount != 1 || activeGrantCount != 2 {
+		t.Fatalf("connector/grant counts = %d/%d, want 1/2", connectorCount, activeGrantCount)
+	}
+	if _, err := pool.Exec(ctx, `INSERT INTO channel_inbound_audit (installation_id, channel_type, event_type, channel_event_id, drop_reason) VALUES ($1, 'dingtalk', 'message', 'dingtalk-unscoped-last-revoke', 'workspace_required')`, first.ID); err != nil {
+		t.Fatalf("seed unscoped connector audit: %v", err)
+	}
+
+	if err := svc.Revoke(ctx, first.ID, util.MustParseUUID(workspaceA)); err != nil {
+		t.Fatalf("revoke first workspace: %v", err)
+	}
+	var connectorStatus, secondGrantStatus string
+	if err := pool.QueryRow(ctx, `SELECT status FROM dingtalk_connector WHERE id = $1`, first.ID).Scan(&connectorStatus); err != nil {
+		t.Fatalf("read connector after first revoke: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+SELECT status FROM dingtalk_workspace_grant
+WHERE connector_id = $1 AND workspace_id = $2
+`, first.ID, workspaceB).Scan(&secondGrantStatus); err != nil {
+		t.Fatalf("read second grant: %v", err)
+	}
+	if connectorStatus != "active" || secondGrantStatus != "active" {
+		t.Fatalf("first revoke stopped shared connector: connector=%s second_grant=%s", connectorStatus, secondGrantStatus)
+	}
+
+	if err := svc.Revoke(ctx, first.ID, util.MustParseUUID(workspaceB)); err != nil {
+		t.Fatalf("revoke final workspace: %v", err)
+	}
+	var secretRetained bool
+	if err := pool.QueryRow(ctx, `SELECT status, config ? 'app_secret_encrypted' FROM dingtalk_connector WHERE id = $1`, first.ID).Scan(&connectorStatus, &secretRetained); err != nil {
+		t.Fatalf("read connector after final revoke: %v", err)
+	}
+	if connectorStatus != "revoked" || secretRetained {
+		t.Fatalf("final revoke connector status/secret = %s/%t, want revoked/false", connectorStatus, secretRetained)
+	}
+	var unscopedAuditCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM channel_inbound_audit WHERE installation_id = $1 AND workspace_id IS NULL`, first.ID).Scan(&unscopedAuditCount); err != nil {
+		t.Fatalf("count unscoped connector audit after final revoke: %v", err)
+	}
+	if unscopedAuditCount != 0 {
+		t.Fatalf("unscoped connector audit rows after final revoke = %d, want 0", unscopedAuditCount)
+	}
 }

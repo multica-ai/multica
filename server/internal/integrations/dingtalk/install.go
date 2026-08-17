@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
@@ -22,26 +21,12 @@ import (
 // Stream-mode robot, and pastes its AppKey (client id) + AppSecret (client
 // secret) into Multica (the paste path lives in byo_install.go). The
 // InstallService owns the at-rest encryption of the AppSecret — so no caller can
-// write a channel_installation with a plaintext secret — plus the shared
+// write a dingtalk_connector with a plaintext secret — plus the shared
 // persistInstall transaction and the list / get / revoke management surface.
 
 var (
 	// ErrInstallationNotFound surfaces "no row matches in this workspace".
 	ErrInstallationNotFound = errors.New("dingtalk installation not found")
-	// ErrRobotOwnedByAnotherWorkspace is returned when the pasted DingTalk robot
-	// is already connected to a live owner in a DIFFERENT Multica workspace — it
-	// would collide with the (channel_type, app_id) routing index. A DingTalk
-	// robot is one bot identity and maps to one installation/default agent;
-	// group-specific routes may target other agents inside that workspace.
-	ErrRobotOwnedByAnotherWorkspace = errors.New("dingtalk: this DingTalk robot is already connected to a different Multica workspace")
-	// ErrRobotOwnedBySameWorkspace is returned when the robot is already connected
-	// to a DIFFERENT (live, non-archived) agent in the SAME workspace, pointing
-	// the user at the Disconnect they can actually reach (#4810).
-	ErrRobotOwnedBySameWorkspace = errors.New("dingtalk: this DingTalk robot is already connected to another agent in this workspace")
-	// ErrRobotOwnedByArchivedAgent is returned when the robot's owning agent is
-	// archived (and so still holds the robot, since archiving is reversible). The
-	// user recovers by restoring that agent or disconnecting its robot.
-	ErrRobotOwnedByArchivedAgent = errors.New("dingtalk: this DingTalk robot is connected to an archived agent in this workspace")
 )
 
 // installQueries is the slice of generated queries InstallService needs. WithTx
@@ -49,15 +34,20 @@ var (
 // upsert atomically (and so tests can inject a fake without a real DB).
 type installQueries interface {
 	WithTx(tx pgx.Tx) installQueries
-	LockDingTalkInstallationOwner(ctx context.Context, arg db.LockDingTalkInstallationOwnerParams) error
-	GetDingTalkInstallationOwnerForUpdate(ctx context.Context, arg db.GetDingTalkInstallationOwnerForUpdateParams) (db.GetDingTalkInstallationOwnerForUpdateRow, error)
-	DeleteDingTalkInstallationForReplacement(ctx context.Context, arg db.DeleteDingTalkInstallationForReplacementParams) (pgtype.UUID, error)
-	UpsertChannelInstallation(ctx context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error)
-	ReclaimDeadChannelInstallationByAppID(ctx context.Context, arg db.ReclaimDeadChannelInstallationByAppIDParams) (pgtype.UUID, error)
-	GetChannelInstallationOwnerByAppID(ctx context.Context, arg db.GetChannelInstallationOwnerByAppIDParams) (db.GetChannelInstallationOwnerByAppIDRow, error)
-	ListChannelInstallationsByWorkspace(ctx context.Context, arg db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error)
-	GetChannelInstallationInWorkspace(ctx context.Context, arg db.GetChannelInstallationInWorkspaceParams) (db.ChannelInstallation, error)
-	SetChannelInstallationStatus(ctx context.Context, arg db.SetChannelInstallationStatusParams) error
+	LockWorkspaceForChatSessionCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
+	LockDingTalkInstallTarget(ctx context.Context, arg db.LockDingTalkInstallTargetParams) (pgtype.UUID, error)
+	LockDingTalkConnectorAppID(ctx context.Context, appID string) error
+	GetDingTalkConnectorByAppIDForUpdate(ctx context.Context, appID string) (db.DingtalkConnector, error)
+	LockDingTalkConnectorForUpdate(ctx context.Context, id pgtype.UUID) (db.DingtalkConnector, error)
+	CreateDingTalkConnector(ctx context.Context, arg db.CreateDingTalkConnectorParams) (db.DingtalkConnector, error)
+	UpdateDingTalkConnectorCredentials(ctx context.Context, arg db.UpdateDingTalkConnectorCredentialsParams) (db.DingtalkConnector, error)
+	UpsertDingTalkWorkspaceGrant(ctx context.Context, arg db.UpsertDingTalkWorkspaceGrantParams) (db.DingtalkWorkspaceGrant, error)
+	ListDingTalkInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListDingTalkInstallationsByWorkspaceRow, error)
+	GetDingTalkInstallationInWorkspace(ctx context.Context, arg db.GetDingTalkInstallationInWorkspaceParams) (db.GetDingTalkInstallationInWorkspaceRow, error)
+	RevokeDingTalkWorkspaceGrantOnly(ctx context.Context, arg db.RevokeDingTalkWorkspaceGrantOnlyParams) (pgtype.UUID, error)
+	CountActiveDingTalkWorkspaceGrants(ctx context.Context, connectorID pgtype.UUID) (int64, error)
+	RevokeDingTalkConnector(ctx context.Context, id pgtype.UUID) error
+	PurgeDingTalkConnectorUnscopedAudit(ctx context.Context, connectorID pgtype.UUID) error
 }
 
 // dbInstallQueries adapts *db.Queries to installQueries — the generated WithTx
@@ -70,7 +60,7 @@ func (q dbInstallQueries) WithTx(tx pgx.Tx) installQueries {
 }
 
 // InstallService owns the at-rest encryption of the AppSecret (so no caller can
-// write a channel_installation with a plaintext secret) and the shared install
+// write a dingtalk_connector with a plaintext secret) and the shared install
 // transaction. The box MUST be non-nil (we refuse plaintext storage even in
 // dev).
 type InstallService struct {
@@ -122,9 +112,8 @@ func newInstallService(q installQueries, tx engine.TxStarter, box *secretbox.Box
 	}, nil
 }
 
-// installPersist carries the resolved fields persistInstall writes. configJSON
-// holds the AppKey (config->>'app_id') used for inbound routing; the ROW itself
-// is keyed by (workspace, agent) — one installation/default agent per bot.
+// installPersist carries the connector identity and the workspace-local grant
+// persistInstall writes in one transaction.
 type installPersist struct {
 	wsID        pgtype.UUID
 	agentID     pgtype.UUID
@@ -136,22 +125,10 @@ type installPersist struct {
 	configJSON []byte
 }
 
-// pgUniqueViolation is the Postgres SQLSTATE for a unique-constraint violation.
-const pgUniqueViolation = "23505"
-
-// persistInstall stores one DingTalk installation per (workspace, default
-// agent). Reconnecting
-// the SAME AppKey updates the row in place and preserves its installation-scoped
-// state. Connecting a DIFFERENT AppKey retires that state and inserts a fresh
-// installation id: DingTalk senderStaffId is only organization-scoped, so user
-// and session bindings must never cross from one robot identity to another.
-//
-// The (channel_type, app_id) routing index is the only OTHER unique constraint.
-// It is NOT this upsert's conflict target, so binding the robot to a DIFFERENT
-// agent would trip it. Before upserting we therefore reclaim a DEAD prior owner
-// of the AppKey (a revoked placeholder, or an orphan whose workspace/agent was
-// deleted) so the robot can move to the new agent; a LIVE owner trips the unique
-// index and is refused with an accurate conflict sentinel.
+// persistInstall creates or rotates one global connector per AppKey, then
+// creates/reactivates this workspace's grant. The connector UUID remains the
+// installation_id used by generic channel state, so every authorized workspace
+// shares one Stream connection without sharing chat sessions or route targets.
 func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (db.ChannelInstallation, error) {
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
@@ -159,111 +136,74 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
-
-	// A replacement deletes and recreates the unique (workspace, agent,
-	// channel) row. Serialize the logical slot across that gap so concurrent
-	// installs cannot update the newly-created identity in place.
-	if err := qtx.LockDingTalkInstallationOwner(ctx, db.LockDingTalkInstallationOwnerParams{
-		WorkspaceID: p.wsID,
-		AgentID:     p.agentID,
-	}); err != nil {
-		return db.ChannelInstallation{}, fmt.Errorf("lock dingtalk installation owner: %w", err)
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(ctx, p.wsID); err != nil {
+		return db.ChannelInstallation{}, fmt.Errorf("lock dingtalk install workspace: %w", err)
+	}
+	if err := qtx.LockDingTalkConnectorAppID(ctx, p.appIDKey); err != nil {
+		return db.ChannelInstallation{}, fmt.Errorf("lock dingtalk connector: %w", err)
 	}
 
-	// Free the (dingtalk, app_id) routing slot from any DEAD prior owner — a
-	// revoked placeholder, or an orphan whose owning workspace/agent was deleted
-	// (#4810) — before the upsert, so a robot whose old owner is gone can be
-	// rebound. A live owner (active agent, including an archived one) is left in
-	// place and trips the unique index below, which we turn into an accurate
-	// conflict.
-	if _, err := qtx.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
-		ChannelType: string(TypeDingTalk),
-		AppID:       p.appIDKey,
-		WorkspaceID: p.wsID,
-		AgentID:     p.agentID,
-	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		// pgx.ErrNoRows just means nothing was dead — a no-op, not a failure.
-		return db.ChannelInstallation{}, fmt.Errorf("reclaim dead dingtalk installation: %w", err)
+	connector, err := qtx.GetDingTalkConnectorByAppIDForUpdate(ctx, p.appIDKey)
+	switch {
+	case errors.Is(err, pgx.ErrNoRows):
+		connector, err = qtx.CreateDingTalkConnector(ctx, db.CreateDingTalkConnectorParams{
+			AppID:           p.appIDKey,
+			Config:          p.configJSON,
+			InstallerUserID: p.installerID,
+		})
+	case err == nil:
+		connector, err = qtx.UpdateDingTalkConnectorCredentials(ctx, db.UpdateDingTalkConnectorCredentialsParams{
+			ID:              connector.ID,
+			Config:          p.configJSON,
+			InstallerUserID: p.installerID,
+		})
 	}
-
-	current, err := qtx.GetDingTalkInstallationOwnerForUpdate(ctx, db.GetDingTalkInstallationOwnerForUpdateParams{
-		WorkspaceID: p.wsID,
-		AgentID:     p.agentID,
-	})
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return db.ChannelInstallation{}, fmt.Errorf("load current dingtalk installation: %w", err)
+	if err != nil {
+		return db.ChannelInstallation{}, fmt.Errorf("persist dingtalk connector: %w", err)
 	}
-	if err == nil && current.AppID != p.appIDKey {
-		if _, err := qtx.DeleteDingTalkInstallationForReplacement(ctx, db.DeleteDingTalkInstallationForReplacementParams{
-			InstallationID: current.ID,
-			WorkspaceID:    p.wsID,
-			AgentID:        p.agentID,
-		}); err != nil {
-			return db.ChannelInstallation{}, fmt.Errorf("retire replaced dingtalk installation: %w", err)
-		}
-	}
-
-	inst, err := qtx.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
-		WorkspaceID:     p.wsID,
+	if _, err := qtx.LockDingTalkInstallTarget(ctx, db.LockDingTalkInstallTargetParams{
+		InstallerUserID: p.installerID,
 		AgentID:         p.agentID,
-		ChannelType:     string(TypeDingTalk),
-		Config:          p.configJSON,
+		WorkspaceID:     p.wsID,
+	}); err != nil {
+		return db.ChannelInstallation{}, fmt.Errorf("lock dingtalk install target: %w", err)
+	}
+
+	grant, err := qtx.UpsertDingTalkWorkspaceGrant(ctx, db.UpsertDingTalkWorkspaceGrantParams{
+		ConnectorID:     connector.ID,
+		WorkspaceID:     p.wsID,
+		DefaultAgentID:  p.agentID,
 		InstallerUserID: p.installerID,
 	})
 	if err != nil {
-		var pgErr *pgconn.PgError
-		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			return db.ChannelInstallation{}, s.liveOwnerConflictErr(ctx, p.wsID, p.appIDKey)
-		}
-		return db.ChannelInstallation{}, fmt.Errorf("upsert dingtalk installation: %w", err)
+		return db.ChannelInstallation{}, fmt.Errorf("persist dingtalk workspace grant: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.ChannelInstallation{}, fmt.Errorf("commit dingtalk install: %w", err)
 	}
-	return inst, nil
-}
-
-// liveOwnerConflictErr classifies who holds the (dingtalk, app_id) routing slot
-// after the dead-owner reclaim ran, so persistInstall returns a sentinel the
-// handler renders as an accurate message rather than a catch-all that always
-// blames "another workspace" (#4810). Read on the base pool (s.q), since the
-// failed upsert has aborted the tx. A now-free slot (concurrent disconnect) or
-// lookup error falls back to the generic cross-workspace sentinel — a retry
-// then succeeds.
-func (s *InstallService) liveOwnerConflictErr(ctx context.Context, requestingWorkspaceID pgtype.UUID, appID string) error {
-	owner, err := s.q.GetChannelInstallationOwnerByAppID(ctx, db.GetChannelInstallationOwnerByAppIDParams{
-		ChannelType: string(TypeDingTalk),
-		AppID:       appID,
-	})
-	if err != nil {
-		return ErrRobotOwnedByAnotherWorkspace
-	}
-	switch {
-	case owner.WorkspaceID != requestingWorkspaceID:
-		return ErrRobotOwnedByAnotherWorkspace
-	case owner.AgentArchivedAt.Valid:
-		return ErrRobotOwnedByArchivedAgent
-	default:
-		return ErrRobotOwnedBySameWorkspace
-	}
+	return channelInstallationFromConnectorGrant(connector, grant), nil
 }
 
 // ListByWorkspace returns every DingTalk installation in the workspace (active
 // and revoked), for the management surface.
 func (s *InstallService) ListByWorkspace(ctx context.Context, wsID pgtype.UUID) ([]db.ChannelInstallation, error) {
-	return s.q.ListChannelInstallationsByWorkspace(ctx, db.ListChannelInstallationsByWorkspaceParams{
-		WorkspaceID: wsID,
-		ChannelType: string(TypeDingTalk),
-	})
+	rows, err := s.q.ListDingTalkInstallationsByWorkspace(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]db.ChannelInstallation, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, channelInstallationFromListRow(row))
+	}
+	return out, nil
 }
 
 // GetInWorkspace is the workspace-scoped lookup so a forged installation id from
 // another workspace returns NotFound instead of leaking existence.
 func (s *InstallService) GetInWorkspace(ctx context.Context, id, wsID pgtype.UUID) (db.ChannelInstallation, error) {
-	inst, err := s.q.GetChannelInstallationInWorkspace(ctx, db.GetChannelInstallationInWorkspaceParams{
-		ID:          id,
+	row, err := s.q.GetDingTalkInstallationInWorkspace(ctx, db.GetDingTalkInstallationInWorkspaceParams{
+		ConnectorID: id,
 		WorkspaceID: wsID,
-		ChannelType: string(TypeDingTalk),
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -271,16 +211,83 @@ func (s *InstallService) GetInWorkspace(ctx context.Context, id, wsID pgtype.UUI
 		}
 		return db.ChannelInstallation{}, err
 	}
-	return inst, nil
+	return channelInstallationFromGetRow(row), nil
 }
 
-// Revoke flips status to 'revoked'. The row is preserved for audit; a re-install
-// flips it back to 'active'. The Supervisor stops supervising the installation
-// (ListActiveInstallations filters to active), so its Stream connection winds
-// down, and outbound drops too.
-func (s *InstallService) Revoke(ctx context.Context, id pgtype.UUID) error {
-	return s.q.SetChannelInstallationStatus(ctx, db.SetChannelInstallationStatusParams{
-		ID:     id,
-		Status: "revoked",
-	})
+// Revoke disables only this workspace's grant. The shared connector remains
+// active while another workspace grant is active; revoking the last grant also
+// stops the connector and its Stream connection. Reinstalling reactivates both.
+func (s *InstallService) Revoke(ctx context.Context, id, wsID pgtype.UUID) error {
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin dingtalk revoke tx: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	qtx := s.q.WithTx(tx)
+	if _, err := qtx.LockWorkspaceForChatSessionCreate(ctx, wsID); err != nil {
+		return err
+	}
+	if _, err := qtx.LockDingTalkConnectorForUpdate(ctx, id); err != nil {
+		return err
+	}
+	if _, err := qtx.RevokeDingTalkWorkspaceGrantOnly(ctx, db.RevokeDingTalkWorkspaceGrantOnlyParams{
+		ConnectorID: id,
+		WorkspaceID: wsID,
+	}); err != nil {
+		return err
+	}
+	remaining, err := qtx.CountActiveDingTalkWorkspaceGrants(ctx, id)
+	if err != nil {
+		return err
+	}
+	if remaining == 0 {
+		if err := qtx.RevokeDingTalkConnector(ctx, id); err != nil {
+			return err
+		}
+		if err := qtx.PurgeDingTalkConnectorUnscopedAudit(ctx, id); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit dingtalk revoke: %w", err)
+	}
+	return nil
+}
+
+func channelInstallationFromConnectorGrant(connector db.DingtalkConnector, grant db.DingtalkWorkspaceGrant) db.ChannelInstallation {
+	return db.ChannelInstallation{
+		ID: connector.ID, WorkspaceID: grant.WorkspaceID,
+		AgentID: grant.DefaultAgentID, ChannelType: string(TypeDingTalk),
+		Config: connector.Config, Status: grant.Status,
+		WsLeaseToken: connector.WsLeaseToken, WsLeaseExpiresAt: connector.WsLeaseExpiresAt,
+		InstallerUserID: grant.InstallerUserID, InstalledAt: grant.InstalledAt,
+		CreatedAt: grant.CreatedAt, UpdatedAt: laterTimestamp(connector.UpdatedAt, grant.UpdatedAt),
+	}
+}
+
+func channelInstallationFromListRow(row db.ListDingTalkInstallationsByWorkspaceRow) db.ChannelInstallation {
+	return db.ChannelInstallation{
+		ID: row.ID, WorkspaceID: row.WorkspaceID, AgentID: row.AgentID,
+		ChannelType: row.ChannelType, Config: row.Config, Status: row.Status,
+		WsLeaseToken: row.WsLeaseToken, WsLeaseExpiresAt: row.WsLeaseExpiresAt,
+		InstallerUserID: row.InstallerUserID, InstalledAt: row.InstalledAt,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	}
+}
+
+func channelInstallationFromGetRow(row db.GetDingTalkInstallationInWorkspaceRow) db.ChannelInstallation {
+	return db.ChannelInstallation{
+		ID: row.ID, WorkspaceID: row.WorkspaceID, AgentID: row.AgentID,
+		ChannelType: row.ChannelType, Config: row.Config, Status: row.Status,
+		WsLeaseToken: row.WsLeaseToken, WsLeaseExpiresAt: row.WsLeaseExpiresAt,
+		InstallerUserID: row.InstallerUserID, InstalledAt: row.InstalledAt,
+		CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	}
+}
+
+func laterTimestamp(a, b pgtype.Timestamptz) pgtype.Timestamptz {
+	if !a.Valid || (b.Valid && b.Time.After(a.Time)) {
+		return b
+	}
+	return a
 }

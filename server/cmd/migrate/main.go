@@ -194,6 +194,16 @@ var concurrentIndexCleanups = map[string]string{
 	"333_issue_status_pkey_index":                               "issue_status_pkey_uidx",
 	"335_issue_status_workspace_key_index":                      "idx_issue_status_workspace_key",
 	"336_issue_status_workspace_name_index":                     "idx_issue_status_workspace_name_active",
+	"346_dingtalk_connector_id_unique":                          "idx_dingtalk_connector_id_unique",
+	"347_dingtalk_connector_app_id_unique":                      "idx_dingtalk_connector_app_id_unique",
+	"348_dingtalk_connector_lease_index":                        "idx_dingtalk_connector_lease",
+	"349_dingtalk_workspace_grant_id_unique":                    "idx_dingtalk_workspace_grant_id_unique",
+	"350_dingtalk_workspace_grant_connector_workspace_unique":   "idx_dingtalk_workspace_grant_connector_workspace_unique",
+	"351_dingtalk_workspace_grant_workspace_index":              "idx_dingtalk_workspace_grant_workspace",
+	"352_dingtalk_direct_route_id_unique":                       "idx_dingtalk_direct_route_id_unique",
+	"353_dingtalk_direct_route_connector_user_unique":           "idx_dingtalk_direct_route_connector_user_unique",
+	"354_dingtalk_direct_route_workspace_index":                 "idx_dingtalk_direct_route_workspace",
+	"357_channel_inbound_audit_workspace_index":                 "idx_channel_inbound_audit_workspace",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

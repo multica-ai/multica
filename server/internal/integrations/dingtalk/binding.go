@@ -73,12 +73,27 @@ func NewBindingTokenService(q *db.Queries, tx engine.TxStarter) *BindingTokenSer
 // returns the raw secret + expiry. The raw value must be delivered over DingTalk
 // (encrypted in transit by the platform) and never logged.
 func (s *BindingTokenService) Mint(ctx context.Context, workspaceID, installationID pgtype.UUID, dingtalkUserID string) (BindingToken, error) {
+	return s.mint(ctx, s.q, workspaceID, installationID, dingtalkUserID)
+}
+
+// MintWithQueries persists the token through an existing guarded transaction.
+// It avoids acquiring a second pool connection while a connector reply fence
+// is held, which would otherwise starve a small pool under binding bursts.
+func (s *BindingTokenService) MintWithQueries(ctx context.Context, q *db.Queries, workspaceID, installationID pgtype.UUID, dingtalkUserID string) (BindingToken, error) {
+	return s.mint(ctx, q, workspaceID, installationID, dingtalkUserID)
+}
+
+type bindingTokenWriter interface {
+	CreateChannelBindingToken(ctx context.Context, arg db.CreateChannelBindingTokenParams) (db.ChannelBindingToken, error)
+}
+
+func (s *BindingTokenService) mint(ctx context.Context, q bindingTokenWriter, workspaceID, installationID pgtype.UUID, dingtalkUserID string) (BindingToken, error) {
 	raw, err := randomBindingToken(32)
 	if err != nil {
 		return BindingToken{}, fmt.Errorf("generate token: %w", err)
 	}
 	expiresAt := s.now().Add(BindingTokenTTL)
-	if _, err := s.q.CreateChannelBindingToken(ctx, db.CreateChannelBindingTokenParams{
+	if _, err := q.CreateChannelBindingToken(ctx, db.CreateChannelBindingTokenParams{
 		TokenHash:      hashBindingToken(raw),
 		WorkspaceID:    workspaceID,
 		InstallationID: installationID,

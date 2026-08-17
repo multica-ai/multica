@@ -224,12 +224,17 @@ func (m *mediaResolver) ResolveMedia(ctx context.Context, inst engine.ResolvedIn
 		m.logWarn(msg, errors.New("media dependency missing"))
 		return msg
 	}
-	row, ok := inst.Platform.(db.ChannelInstallation)
-	if !ok {
+	var config []byte
+	switch row := inst.Platform.(type) {
+	case db.ChannelInstallation:
+		config = row.Config
+	case db.DingtalkConnector:
+		config = row.Config
+	default:
 		m.logWarn(msg, errors.New("installation platform row unavailable"))
 		return msg
 	}
-	creds, err := decodeCredentials(row.Config, m.decrypt)
+	creds, err := decodeCredentials(config, m.decrypt)
 	if err != nil {
 		m.logWarn(msg, fmt.Errorf("decode credentials: %w", err))
 		return msg

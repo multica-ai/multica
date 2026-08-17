@@ -16,17 +16,27 @@ import (
 )
 
 type fakeInstallationQueries struct {
-	params db.GetChannelInstallationByAppIDParams
-	row    db.ChannelInstallation
-	err    error
-	calls  int
+	appID string
+	row   db.DingtalkConnector
+	err   error
+	calls int
 }
 
 type fakeValidatedInboundQueries struct {
-	params db.DiscoverDingTalkGroupRouteParams
-	row    db.DiscoverDingTalkGroupRouteRow
-	err    error
-	calls  int
+	params             db.DiscoverDingTalkGroupRouteParams
+	row                db.DiscoverDingTalkGroupRouteRow
+	err                error
+	calls              int
+	count              int64
+	countErr           error
+	directRow          db.GetDingTalkDirectRouteRow
+	directErr          error
+	directCalls        int
+	selectDirectRow    db.SelectDingTalkDirectWorkspaceRouteRow
+	selectDirectErr    error
+	selectDirectParams db.SelectDingTalkDirectWorkspaceRouteParams
+	selectGroupRow     db.SelectDingTalkGroupWorkspaceRouteRow
+	selectGroupErr     error
 }
 
 type fakeSessionQueries struct {
@@ -68,8 +78,16 @@ func (f *fakeSessionQueries) DeleteDingTalkStaleGroupChatBinding(_ context.Conte
 	return count, err
 }
 
-func (f *fakeInstallationQueries) GetChannelInstallationByAppID(_ context.Context, params db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {
-	f.params = params
+func (f *fakeSessionQueries) DingTalkDirectRouteMatchesAgent(context.Context, db.DingTalkDirectRouteMatchesAgentParams) (bool, error) {
+	return true, nil
+}
+
+func (f *fakeSessionQueries) DeleteDingTalkStaleDirectChatBinding(context.Context, db.DeleteDingTalkStaleDirectChatBindingParams) (int64, error) {
+	return 0, nil
+}
+
+func (f *fakeInstallationQueries) GetDingTalkConnectorByAppID(_ context.Context, appID string) (db.DingtalkConnector, error) {
+	f.appID = appID
 	f.calls++
 	return f.row, f.err
 }
@@ -78,6 +96,24 @@ func (f *fakeValidatedInboundQueries) DiscoverDingTalkGroupRoute(_ context.Conte
 	f.params = params
 	f.calls++
 	return f.row, f.err
+}
+
+func (f *fakeValidatedInboundQueries) CountDingTalkEligibleWorkspaceGrants(context.Context, db.CountDingTalkEligibleWorkspaceGrantsParams) (int64, error) {
+	return f.count, f.countErr
+}
+
+func (f *fakeValidatedInboundQueries) GetDingTalkDirectRoute(context.Context, db.GetDingTalkDirectRouteParams) (db.GetDingTalkDirectRouteRow, error) {
+	f.directCalls++
+	return f.directRow, f.directErr
+}
+
+func (f *fakeValidatedInboundQueries) SelectDingTalkDirectWorkspaceRoute(_ context.Context, params db.SelectDingTalkDirectWorkspaceRouteParams) (db.SelectDingTalkDirectWorkspaceRouteRow, error) {
+	f.selectDirectParams = params
+	return f.selectDirectRow, f.selectDirectErr
+}
+
+func (f *fakeValidatedInboundQueries) SelectDingTalkGroupWorkspaceRoute(context.Context, db.SelectDingTalkGroupWorkspaceRouteParams) (db.SelectDingTalkGroupWorkspaceRouteRow, error) {
+	return f.selectGroupRow, f.selectGroupErr
 }
 
 type captureChatSession struct {
@@ -121,12 +157,10 @@ func TestNewDingTalkResolverSetUsesDatabaseBackedIssueOrigin(t *testing.T) {
 }
 
 func TestInstallationResolverGroupLookupIsReadOnly(t *testing.T) {
-	var installationID, workspaceID, defaultAgentID, installerID pgtype.UUID
-	installationID.Bytes[0], workspaceID.Bytes[0], defaultAgentID.Bytes[0], installerID.Bytes[0] = 1, 2, 3, 5
-	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, installerID.Valid = true, true, true, true
-	fake := &fakeInstallationQueries{row: db.ChannelInstallation{
-		ID: installationID, WorkspaceID: workspaceID, AgentID: defaultAgentID,
-		InstallerUserID: installerID, Status: "active",
+	var installationID pgtype.UUID
+	installationID.Bytes[0], installationID.Valid = 1, true
+	fake := &fakeInstallationQueries{row: db.DingtalkConnector{
+		ID: installationID, AppID: "app-key", Status: "active",
 	}}
 	raw, _ := json.Marshal(dingtalkRawEvent{AppID: "app-key", ConversationTitle: "Platform team"})
 	resolved, err := (&installationResolver{q: fake}).ResolveInstallation(context.Background(), channel.InboundMessage{
@@ -136,15 +170,15 @@ func TestInstallationResolverGroupLookupIsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.ID != installationID || resolved.WorkspaceID != workspaceID || resolved.AgentID != defaultAgentID || resolved.InstallerUserID != installerID || !resolved.Active {
+	if resolved.ID != installationID || resolved.WorkspaceID.Valid || resolved.AgentID.Valid || !resolved.Active {
 		t.Fatalf("resolved group installation = %+v", resolved)
 	}
-	if fake.params.ChannelType != string(TypeDingTalk) || fake.params.AppID != "app-key" {
-		t.Fatalf("installation lookup params = %+v", fake.params)
+	if fake.appID != "app-key" {
+		t.Fatalf("installation lookup app id = %q", fake.appID)
 	}
-	platform, ok := resolved.Platform.(db.ChannelInstallation)
-	if !ok || platform.AgentID != defaultAgentID {
-		t.Fatalf("platform installation must retain default agent: %#v", resolved.Platform)
+	platform, ok := resolved.Platform.(db.DingtalkConnector)
+	if !ok || platform.ID != installationID {
+		t.Fatalf("platform connector unavailable: %#v", resolved.Platform)
 	}
 }
 
@@ -187,7 +221,7 @@ func TestValidatedInboundResolverReturnsDiscoveryQueryErrorWithoutChangingRoute(
 	}
 }
 
-func TestDingTalkP2PSkipsGroupDiscoveryAndUsesDefaultAgentSession(t *testing.T) {
+func TestDingTalkP2PUsesExplicitDirectRoute(t *testing.T) {
 	var installationID, workspaceID, defaultAgentID, senderID pgtype.UUID
 	installationID.Bytes[0], workspaceID.Bytes[0], defaultAgentID.Bytes[0], senderID.Bytes[0] = 1, 2, 3, 4
 	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, senderID.Valid = true, true, true, true
@@ -195,13 +229,18 @@ func TestDingTalkP2PSkipsGroupDiscoveryAndUsesDefaultAgentSession(t *testing.T) 
 	msg := channel.InboundMessage{Source: channel.Source{
 		ChatID: "cid-direct", ChatType: channel.ChatTypeP2P, SenderID: "staff-7",
 	}}
-	discovery := &fakeValidatedInboundQueries{err: errors.New("must not query group routes for p2p")}
+	discovery := &fakeValidatedInboundQueries{
+		err: errors.New("must not query group routes for p2p"),
+		directRow: db.GetDingTalkDirectRouteRow{
+			WorkspaceID: workspaceID, AgentID: defaultAgentID, AgentActive: true,
+		},
+	}
 
 	resolved, err := (&validatedInboundResolver{q: discovery}).ResolveValidatedInbound(
 		context.Background(), inst, engine.ResolvedIdentity{}, msg,
 	)
-	if err != nil || resolved.AgentID != defaultAgentID || discovery.calls != 0 {
-		t.Fatalf("p2p validated resolution = %+v err=%v discovery calls=%d", resolved, err, discovery.calls)
+	if err != nil || resolved.AgentID != defaultAgentID || discovery.calls != 0 || discovery.directCalls != 1 {
+		t.Fatalf("p2p validated resolution = %+v err=%v discovery/direct calls=%d/%d", resolved, err, discovery.calls, discovery.directCalls)
 	}
 
 	queries := &fakeSessionQueries{matchErrs: []error{errors.New("must not query group route session fence for p2p")}}
@@ -241,18 +280,61 @@ func TestDingTalkP2PSkipsGroupDiscoveryAndUsesDefaultAgentSession(t *testing.T) 
 	}
 }
 
+func TestDingTalkP2PRequiresWorkspaceSelectionWhenRouteIsMissing(t *testing.T) {
+	fake := &fakeValidatedInboundQueries{directErr: pgx.ErrNoRows, count: 2}
+	_, err := (&validatedInboundResolver{q: fake}).ResolveValidatedInbound(
+		context.Background(),
+		engine.ResolvedInstallation{ID: pgtype.UUID{Bytes: [16]byte{1}, Valid: true}},
+		engine.ResolvedIdentity{UserID: pgtype.UUID{Bytes: [16]byte{2}, Valid: true}},
+		channel.InboundMessage{CommandText: "hello", Source: channel.Source{
+			ChatID: "cid-direct", ChatType: channel.ChatTypeP2P, SenderID: "staff-7",
+		}},
+	)
+	if !errors.Is(err, engine.ErrWorkspaceSelectionRequired) {
+		t.Fatalf("missing direct route error = %v, want workspace selection", err)
+	}
+}
+
+func TestDingTalkP2PWorkspaceCommandSelectsRouteWithoutIngest(t *testing.T) {
+	connectorID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	userID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	workspaceID := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	agentID := pgtype.UUID{Bytes: [16]byte{4}, Valid: true}
+	installerID := pgtype.UUID{Bytes: [16]byte{5}, Valid: true}
+	fake := &fakeValidatedInboundQueries{selectDirectRow: db.SelectDingTalkDirectWorkspaceRouteRow{
+		WorkspaceID: workspaceID, AgentID: agentID, InstallerUserID: installerID,
+		Revision: 9, AgentActive: true,
+	}}
+	resolved, err := (&validatedInboundResolver{q: fake}).ResolveValidatedInbound(
+		context.Background(), engine.ResolvedInstallation{ID: connectorID},
+		engine.ResolvedIdentity{UserID: userID},
+		channel.InboundMessage{CommandText: "/workspace platform", Source: channel.Source{
+			ChatID: "cid-direct", ChatType: channel.ChatTypeP2P, SenderID: "staff-7",
+		}},
+	)
+	if !errors.Is(err, engine.ErrWorkspaceSelected) {
+		t.Fatalf("workspace command error = %v, want selected terminal outcome", err)
+	}
+	if resolved.WorkspaceID != workspaceID || resolved.AgentID != agentID || resolved.InstallerUserID != installerID || resolved.RouteRevision != 9 {
+		t.Fatalf("selected direct route = %+v", resolved)
+	}
+	if fake.selectDirectParams.ConnectorID != connectorID || fake.selectDirectParams.MulticaUserID != userID || fake.selectDirectParams.WorkspaceSlug != "platform" || fake.selectDirectParams.ChannelUserID != "staff-7" {
+		t.Fatalf("direct selection params = %+v", fake.selectDirectParams)
+	}
+}
+
 func TestValidatedInboundResolverDiscoversGroupAndFinalizesAgent(t *testing.T) {
 	var installationID, workspaceID, defaultAgentID, routeAgentID pgtype.UUID
 	installationID.Bytes[0], workspaceID.Bytes[0], defaultAgentID.Bytes[0], routeAgentID.Bytes[0] = 1, 2, 3, 4
 	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, routeAgentID.Valid = true, true, true, true
 	fake := &fakeValidatedInboundQueries{row: db.DiscoverDingTalkGroupRouteRow{
-		AgentID: routeAgentID, Revision: 7, AgentActive: true,
+		WorkspaceID: workspaceID, AgentID: routeAgentID, Revision: 7, AgentActive: true,
 	}}
 	raw, _ := json.Marshal(dingtalkRawEvent{ConversationTitle: "Platform team"})
 	resolved, err := (&validatedInboundResolver{q: fake}).ResolveValidatedInbound(
 		context.Background(),
 		engine.ResolvedInstallation{ID: installationID, WorkspaceID: workspaceID, AgentID: defaultAgentID},
-		engine.ResolvedIdentity{},
+		engine.ResolvedIdentity{UserID: defaultAgentID},
 		channel.InboundMessage{
 			Source: channel.Source{ChatID: "cid-platform", ChatType: channel.ChatTypeGroup},
 			Raw:    raw,
@@ -264,7 +346,7 @@ func TestValidatedInboundResolverDiscoversGroupAndFinalizesAgent(t *testing.T) {
 	if resolved.AgentID != routeAgentID || resolved.RouteRevision != 7 {
 		t.Fatalf("resolved route = agent %v revision %d, want agent %v revision 7", resolved.AgentID, resolved.RouteRevision, routeAgentID)
 	}
-	if fake.params.InstallationID != installationID || fake.params.WorkspaceID != workspaceID || fake.params.ConversationID != "cid-platform" || fake.params.ConversationTitle != "Platform team" {
+	if fake.params.InstallationID != installationID || fake.params.MulticaUserID != defaultAgentID || fake.params.ConversationID != "cid-platform" || fake.params.ConversationTitle != "Platform team" {
 		t.Fatalf("discovery params = %+v", fake.params)
 	}
 }
@@ -533,6 +615,36 @@ func TestSessionBinder_AppendFenceMapsStaleRevisionToRouteChanged(t *testing.T) 
 	}
 	if got.InstallationID != installationID || got.AgentID != agentID || got.ConversationID != "cid-fenced" || got.RouteRevision != 11 {
 		t.Fatalf("append fence params = %+v", got)
+	}
+}
+
+func TestSessionBinder_DirectAppendFenceMapsWorkspaceSwitchToRouteChanged(t *testing.T) {
+	connectorID := pgtype.UUID{Bytes: [16]byte{8}, Valid: true}
+	workspaceID := pgtype.UUID{Bytes: [16]byte{7}, Valid: true}
+	agentID := pgtype.UUID{Bytes: [16]byte{9}, Valid: true}
+	capture := &captureChatSession{runGuard: true}
+	var got db.LockDingTalkDirectRouteForAppendParams
+	binder := &sessionBinder{
+		session: capture,
+		lockDirectRouteForAppend: func(_ context.Context, _ pgx.Tx, params db.LockDingTalkDirectRouteForAppendParams) error {
+			got = params
+			return pgx.ErrNoRows
+		},
+	}
+	_, err := binder.AppendMessage(context.Background(), engine.AppendParams{
+		InstallationID: connectorID,
+		WorkspaceID:    workspaceID,
+		AgentID:        agentID,
+		RouteRevision:  12,
+		Message: channel.InboundMessage{Source: channel.Source{
+			ChatID: "cid-direct", ChatType: channel.ChatTypeP2P, SenderID: "staff-7",
+		}},
+	})
+	if !errors.Is(err, engine.ErrRouteChanged) {
+		t.Fatalf("stale direct append fence error = %v, want route changed", err)
+	}
+	if got.ConnectorID != connectorID || got.WorkspaceID != workspaceID || got.AgentID != agentID || got.ChannelUserID != "staff-7" || got.RouteRevision != 12 {
+		t.Fatalf("direct append fence params = %+v", got)
 	}
 }
 

@@ -32,6 +32,9 @@ export interface ListDingTalkInstallationsResponse {
    * with `=== true` so newer Web/Desktop clients do not call a route that an
    * older or version-skewed backend does not have. */
   group_routing_supported?: boolean;
+  /** Whether one DingTalk AppKey can be granted to multiple workspaces while
+   * sharing one connector. Optional for compatibility with older servers. */
+  cross_workspace_routing_supported?: boolean;
 }
 
 /** A DingTalk group observed by one Stream-mode robot and routed to a fixed

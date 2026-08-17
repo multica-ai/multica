@@ -27,6 +27,7 @@ func (l *dbAuditLogger) RecordDrop(ctx context.Context, p AuditDropParams) error
 		EventType:        p.EventType,
 		DropReason:       string(p.Reason),
 		InstallationID:   p.InstallationID,
+		WorkspaceID:      p.WorkspaceID,
 		ChannelChatID:    textIfNonEmpty(string(p.ChatID)),
 		ChannelEventID:   textIfNonEmpty(p.LarkEventID),
 		ChannelMessageID: textIfNonEmpty(p.LarkMessageID),

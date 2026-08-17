@@ -2542,6 +2542,7 @@ export const ListDingTalkInstallationsResponseSchema = z.object({
   configured: z.boolean().default(false),
   install_supported: z.boolean().optional(),
   group_routing_supported: z.boolean().optional(),
+  cross_workspace_routing_supported: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallationsResponse = {

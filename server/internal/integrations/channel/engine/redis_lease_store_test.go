@@ -7,7 +7,8 @@ import (
 	"time"
 
 	redismock "github.com/go-redis/redismock/v9"
-	"github.com/jackc/pgx/v5/pgtype"
+
+	"github.com/multica-ai/multica/server/internal/integrations/channel"
 )
 
 func TestRedisLeaseStoreRequiresSafeNamespace(t *testing.T) {
@@ -51,7 +52,7 @@ func TestRedisLeaseStoreAtomicOperationsAreTokenFenced(t *testing.T) {
 	}
 	id := uuidFromString(t, "12121212-1212-1212-1212-121212121212")
 	key := "multica:channel-lease:v1:prod:12121212-1212-1212-1212-121212121212"
-	arg := AcquireLeaseParams{ID: id, Token: "node-g1", TTL: 180 * time.Second}
+	arg := AcquireLeaseParams{ID: id, ChannelType: channel.TypeFeishu, Token: "node-g1", TTL: 180 * time.Second}
 
 	mock.ExpectEvalSha(redisTryAcquireLease.Hash(), []string{key}, "node-g1", int64(180000)).SetVal(int64(1))
 	if err := store.TryAcquireWSLease(context.Background(), arg); err != nil {
@@ -66,7 +67,7 @@ func TestRedisLeaseStoreAtomicOperationsAreTokenFenced(t *testing.T) {
 		t.Fatalf("mismatched renewal error = %v, want ErrLeaseNotAcquired", err)
 	}
 	mock.ExpectEvalSha(redisReleaseLease.Hash(), []string{key}, "node-g1").SetVal(int64(0))
-	if err := store.ReleaseWSLease(context.Background(), ReleaseLeaseParams{ID: id, Token: "node-g1"}); err != nil {
+	if err := store.ReleaseWSLease(context.Background(), ReleaseLeaseParams{ID: id, ChannelType: channel.TypeFeishu, Token: "node-g1"}); err != nil {
 		t.Fatalf("stale release should be a fenced no-op: %v", err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -82,15 +83,35 @@ func TestRedisLeaseStoreListsOnlyHeldKeys(t *testing.T) {
 	}
 	id1 := uuidFromString(t, "13131313-1313-1313-1313-131313131313")
 	id2 := uuidFromString(t, "14141414-1414-1414-1414-141414141414")
-	mock.ExpectMGet(store.key(id1), store.key(id2)).SetVal([]interface{}{"owner", nil})
-	held, err := store.ListHeldWSLeases(context.Background(), []pgtype.UUID{id1, id2})
+	target1 := LeaseTarget{ID: id1, ChannelType: channel.TypeFeishu}
+	target2 := LeaseTarget{ID: id2, ChannelType: channel.Type("dingtalk")}
+	mock.ExpectMGet(store.key(target1), store.key(target2)).SetVal([]interface{}{"owner", nil})
+	held, err := store.ListHeldWSLeases(context.Background(), []LeaseTarget{target1, target2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := held[uuidString(id1)]; !ok {
+	if _, ok := held[leaseTargetKey(target1)]; !ok {
 		t.Fatalf("first ID should be held: %#v", held)
 	}
-	if _, ok := held[uuidString(id2)]; ok {
+	if _, ok := held[leaseTargetKey(target2)]; ok {
 		t.Fatalf("second ID should be absent: %#v", held)
+	}
+}
+
+func TestRedisLeaseStorePreservesLegacyUUIDKeyForDingTalkCutover(t *testing.T) {
+	rdb, _ := redismock.NewClientMock()
+	store, err := NewRedisLeaseStore(rdb, "prod")
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := uuidFromString(t, "15151515-1515-1515-1515-151515151515")
+	feishu := store.key(LeaseTarget{ID: id, ChannelType: channel.TypeFeishu})
+	dingtalk := store.key(LeaseTarget{ID: id, ChannelType: channel.Type("dingtalk")})
+	legacy := "multica:channel-lease:v1:prod:15151515-1515-1515-1515-151515151515"
+	if feishu != legacy || dingtalk != legacy {
+		t.Fatalf("old and new DingTalk replicas must contend on legacy key %q: feishu=%q dingtalk=%q", legacy, feishu, dingtalk)
+	}
+	if leaseTargetKey(LeaseTarget{ID: id, ChannelType: channel.TypeFeishu}) == leaseTargetKey(LeaseTarget{ID: id, ChannelType: channel.Type("dingtalk")}) {
+		t.Fatal("in-process supervisor identities must still include the connector source")
 	}
 }

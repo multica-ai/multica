@@ -383,6 +383,7 @@ describe("ApiClient schema fallback", () => {
       expect(res.configured).toBe(true);
       expect(res.install_supported).toBeUndefined();
       expect(res.group_routing_supported).toBeUndefined();
+      expect(res.cross_workspace_routing_supported).toBeUndefined();
     });
 
     it("parses the new-server group-routing capability", async () => {
@@ -391,10 +392,12 @@ describe("ApiClient schema fallback", () => {
         configured: true,
         install_supported: true,
         group_routing_supported: true,
+        cross_workspace_routing_supported: true,
       });
       const client = new ApiClient("https://api.example.test");
       const res = await client.listDingTalkInstallations("ws-1");
       expect(res.group_routing_supported).toBe(true);
+      expect(res.cross_workspace_routing_supported).toBe(true);
     });
   });
 
