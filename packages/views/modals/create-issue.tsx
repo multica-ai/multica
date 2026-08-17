@@ -520,9 +520,6 @@ export function ManualCreatePanel({
             updateIssueMutation.mutateAsync({
               id: child.id,
               parent_issue_id: issue.id,
-              ...(child.revision !== undefined
-                ? { expected_revision: child.revision }
-                : {}),
             }),
           ),
         );

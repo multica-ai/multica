@@ -313,7 +313,7 @@ func (h *Handler) CreatePluginComment(w http.ResponseWriter, r *http.Request) {
 		rootComment = &parent
 	}
 
-	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	createdComment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:     issue.ID,
 		WorkspaceID: caller.WorkspaceID,
 		AuthorType:  "member",
@@ -327,6 +327,7 @@ func (h *Handler) CreatePluginComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create the comment")
 		return
 	}
+	comment := createdComment.Comment()
 
 	// The same two follow-ups every other comment path performs. Skipping them
 	// made a plugin-posted comment invisible until the next refetch, and left a

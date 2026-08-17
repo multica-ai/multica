@@ -3,18 +3,88 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+var errInjectedIssueAttachmentLink = errors.New("injected issue attachment link failure")
+
+type failIssueAttachmentLinkTxStarter struct {
+	inner txStarter
+}
+
+func (s failIssueAttachmentLinkTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.inner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &failIssueAttachmentLinkTx{Tx: tx}, nil
+}
+
+type failIssueAttachmentLinkTx struct {
+	pgx.Tx
+}
+
+func (tx *failIssueAttachmentLinkTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if strings.Contains(sql, "LinkAttachmentsToIssue") {
+		return failingIssueAttachmentLinkRow{}
+	}
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
+
+type failingIssueAttachmentLinkRow struct{}
+
+func (failingIssueAttachmentLinkRow) Scan(...any) error {
+	return errInjectedIssueAttachmentLink
+}
+
+type pauseIssueAttachmentLinkTxStarter struct {
+	inner   txStarter
+	reached chan<- struct{}
+	release <-chan struct{}
+}
+
+func (s pauseIssueAttachmentLinkTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.inner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &pauseIssueAttachmentLinkTx{
+		Tx:      tx,
+		reached: s.reached,
+		release: s.release,
+	}, nil
+}
+
+type pauseIssueAttachmentLinkTx struct {
+	pgx.Tx
+	reached chan<- struct{}
+	release <-chan struct{}
+}
+
+func (tx *pauseIssueAttachmentLinkTx) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if strings.Contains(sql, "LinkAttachmentsToIssue") {
+		tx.reached <- struct{}{}
+		select {
+		case <-tx.release:
+		case <-ctx.Done():
+			return failingIssueAttachmentLinkRow{}
+		}
+	}
+	return tx.Tx.QueryRow(ctx, sql, args...)
+}
 
 func insertWorkflowTestIssue(t *testing.T, title string, number int) string {
 	t.Helper()
@@ -48,21 +118,21 @@ func TestRevisionConflictsPreserveLatestIssueAndComment(t *testing.T) {
 		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
 	})
 
-	updateIssue := func(title string, revision int64) *httptest.ResponseRecorder {
+	updateIssue := func(title, base string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
-			"title": title, "expected_revision": revision,
+			"title": title, "title_base": base,
 		}), "id", issueID)
 		testHandler.UpdateIssue(w, req)
 		return w
 	}
-	if w := updateIssue("revision latest", 1); w.Code != http.StatusOK {
+	if w := updateIssue("revision latest", "revision original"); w.Code != http.StatusOK {
 		t.Fatalf("first issue update = %d: %s", w.Code, w.Body.String())
 	}
-	if w := updateIssue("revision latest", 2); w.Code != http.StatusOK {
+	if w := updateIssue("revision latest", "revision latest"); w.Code != http.StatusOK {
 		t.Fatalf("no-op issue update = %d: %s", w.Code, w.Body.String())
 	}
-	if w := updateIssue("revision stale overwrite", 1); w.Code != http.StatusConflict {
+	if w := updateIssue("revision stale overwrite", "revision original"); w.Code != http.StatusConflict {
 		t.Fatalf("stale issue update = %d, want 409: %s", w.Code, w.Body.String())
 	}
 	var title string
@@ -87,21 +157,21 @@ func TestRevisionConflictsPreserveLatestIssueAndComment(t *testing.T) {
 		t.Fatalf("legacy issue update = (%q, %d), want legacy issue update/3", title, issueRevision)
 	}
 
-	updateComment := func(content string, revision int64) *httptest.ResponseRecorder {
+	updateComment := func(content, base string) *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPut, "/api/comments/"+commentID, map[string]any{
-			"content": content, "expected_revision": revision,
+			"content": content, "content_base": base,
 		}), "commentId", commentID)
 		testHandler.UpdateComment(w, req)
 		return w
 	}
-	if w := updateComment("comment latest", 1); w.Code != http.StatusOK {
+	if w := updateComment("comment latest", "comment original"); w.Code != http.StatusOK {
 		t.Fatalf("first comment update = %d: %s", w.Code, w.Body.String())
 	}
-	if w := updateComment("comment latest", 2); w.Code != http.StatusOK {
+	if w := updateComment("comment latest", "comment latest"); w.Code != http.StatusOK {
 		t.Fatalf("no-op comment update = %d: %s", w.Code, w.Body.String())
 	}
-	if w := updateComment("comment stale overwrite", 1); w.Code != http.StatusConflict {
+	if w := updateComment("comment stale overwrite", "comment original"); w.Code != http.StatusConflict {
 		t.Fatalf("stale comment update = %d, want 409: %s", w.Code, w.Body.String())
 	}
 	var content string
@@ -124,20 +194,20 @@ func TestRevisionConflictsPreserveLatestIssueAndComment(t *testing.T) {
 	`, testWorkspaceID, issueID, testUserID).Scan(&attachmentID); err != nil {
 		t.Fatalf("insert revision attachment: %v", err)
 	}
-	updateAttachments := func(revision int64) *httptest.ResponseRecorder {
+	updateAttachments := func() *httptest.ResponseRecorder {
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPut, "/api/comments/"+commentID, map[string]any{
-			"content":           "comment latest",
-			"attachment_ids":    []string{attachmentID},
-			"expected_revision": revision,
+			"content":        "comment latest",
+			"attachment_ids": []string{attachmentID},
+			"content_base":   "comment latest",
 		}), "commentId", commentID)
 		testHandler.UpdateComment(w, req)
 		return w
 	}
-	if w := updateAttachments(2); w.Code != http.StatusOK {
+	if w := updateAttachments(); w.Code != http.StatusOK {
 		t.Fatalf("attachment-only comment update = %d: %s", w.Code, w.Body.String())
 	}
-	if w := updateAttachments(3); w.Code != http.StatusOK {
+	if w := updateAttachments(); w.Code != http.StatusOK {
 		t.Fatalf("attachment no-op comment update = %d: %s", w.Code, w.Body.String())
 	}
 	if err := testPool.QueryRow(ctx, `SELECT revision FROM comment WHERE id = $1`, commentID).Scan(&commentRevision); err != nil {
@@ -158,6 +228,80 @@ func TestRevisionConflictsPreserveLatestIssueAndComment(t *testing.T) {
 	}
 	if content != "legacy comment update" || commentRevision != 4 {
 		t.Fatalf("legacy comment update = (%q, %d), want legacy comment update/4", content, commentRevision)
+	}
+}
+
+func TestTextBaselinesIgnoreUnrelatedAggregateRevisionChanges(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issueID := insertWorkflowTestIssue(t, "baseline title", int(time.Now().UnixNano()%100000)+8_755_000)
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET description = 'baseline description' WHERE id = $1`, issueID); err != nil {
+		t.Fatalf("seed issue description: %v", err)
+	}
+	var commentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content)
+		VALUES ($1, $2, 'member', $3, 'baseline comment')
+		RETURNING id
+	`, issueID, testWorkspaceID, testUserID).Scan(&commentID); err != nil {
+		t.Fatalf("insert baseline comment: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM comment WHERE id = $1`, commentID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// An unrelated priority write advances the aggregate owner revision.
+	priority := httptest.NewRecorder()
+	testHandler.UpdateIssue(priority, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+		"priority": "high",
+	}), "id", issueID))
+	if priority.Code != http.StatusOK {
+		t.Fatalf("unrelated issue update = %d: %s", priority.Code, priority.Body.String())
+	}
+
+	text := httptest.NewRecorder()
+	testHandler.UpdateIssue(text, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+		"title":            "edited title",
+		"title_base":       "baseline title",
+		"description":      "edited description",
+		"description_base": "baseline description",
+	}), "id", issueID))
+	if text.Code != http.StatusOK {
+		t.Fatalf("text update after unrelated revision = %d: %s", text.Code, text.Body.String())
+	}
+	staleDescription := httptest.NewRecorder()
+	testHandler.UpdateIssue(staleDescription, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+		"description":      "stale description overwrite",
+		"description_base": "baseline description",
+	}), "id", issueID))
+	if staleDescription.Code != http.StatusConflict {
+		t.Fatalf("true issue description conflict = %d, want 409: %s", staleDescription.Code, staleDescription.Body.String())
+	}
+
+	// A reaction/resolve-style aggregate bump on the comment must likewise not
+	// reject a body edit whose content baseline is still current.
+	if _, err := testPool.Exec(ctx, `UPDATE comment SET revision = revision + 1 WHERE id = $1`, commentID); err != nil {
+		t.Fatalf("bump comment revision: %v", err)
+	}
+	comment := httptest.NewRecorder()
+	testHandler.UpdateComment(comment, withURLParam(newRequest(http.MethodPut, "/api/comments/"+commentID, map[string]any{
+		"content":      "edited comment",
+		"content_base": "baseline comment",
+	}), "commentId", commentID))
+	if comment.Code != http.StatusOK {
+		t.Fatalf("comment edit after unrelated revision = %d: %s", comment.Code, comment.Body.String())
+	}
+
+	stale := httptest.NewRecorder()
+	testHandler.UpdateComment(stale, withURLParam(newRequest(http.MethodPut, "/api/comments/"+commentID, map[string]any{
+		"content":      "stale overwrite",
+		"content_base": "baseline comment",
+	}), "commentId", commentID))
+	if stale.Code != http.StatusConflict {
+		t.Fatalf("true comment content conflict = %d, want 409: %s", stale.Code, stale.Body.String())
 	}
 }
 
@@ -208,7 +352,7 @@ func TestConcurrentRevisionWritesHaveExactlyOneWinner(t *testing.T) {
 	assertOneWinner(func(title string) int {
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
-			"title": title, "expected_revision": 1,
+			"title": title, "title_base": "concurrent revision",
 		}), "id", issueID)
 		testHandler.UpdateIssue(w, req)
 		return w.Code
@@ -217,7 +361,7 @@ func TestConcurrentRevisionWritesHaveExactlyOneWinner(t *testing.T) {
 	assertOneWinner(func(content string) int {
 		w := httptest.NewRecorder()
 		req := withURLParam(newRequest(http.MethodPut, "/api/comments/"+commentID, map[string]any{
-			"content": content, "expected_revision": 1,
+			"content": content, "content_base": "concurrent original",
 		}), "commentId", commentID)
 		testHandler.UpdateComment(w, req)
 		return w.Code
@@ -262,8 +406,8 @@ func TestConcurrentCommentRevisionConflictCancelsTaskBatchOnce(t *testing.T) {
 			<-start
 			w := httptest.NewRecorder()
 			req := withURLParam(newRequest(http.MethodPut, "/api/comments/"+fixture.commentID[2], map[string]any{
-				"content":           content,
-				"expected_revision": 1,
+				"content":      content,
+				"content_base": fixture.content[2],
 			}), "commentId", fixture.commentID[2])
 			testHandler.UpdateComment(w, req)
 			results <- w.Code
@@ -305,12 +449,47 @@ func TestConcurrentCommentRevisionConflictCancelsTaskBatchOnce(t *testing.T) {
 	}
 }
 
-func TestIssueUpdatePublishesOwnerBeforeSameRevisionAttachmentEvent(t *testing.T) {
+func TestNoOpIssueUpdateDoesNotAdvanceRevisionOrUpdatedAt(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issueID := insertWorkflowTestIssue(t, "no-op issue update", int(time.Now().UnixNano()%100000)+8_768_000)
+	oldUpdatedAt := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET updated_at = $2 WHERE id = $1`, issueID, oldUpdatedAt); err != nil {
+		t.Fatalf("seed old issue timestamp: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	w := httptest.NewRecorder()
+	testHandler.UpdateIssue(w, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+		"title":             "no-op issue update",
+		"expected_revision": 1,
+	}), "id", issueID))
+	if w.Code != http.StatusOK {
+		t.Fatalf("no-op update = %d: %s", w.Code, w.Body.String())
+	}
+	var revision int64
+	var updatedAt time.Time
+	if err := testPool.QueryRow(ctx, `SELECT revision, updated_at FROM issue WHERE id = $1`, issueID).Scan(&revision, &updatedAt); err != nil {
+		t.Fatalf("load no-op issue: %v", err)
+	}
+	if revision != 1 || !updatedAt.Equal(oldUpdatedAt) {
+		t.Fatalf("no-op issue = revision %d, updated_at %s; want 1 and %s", revision, updatedAt, oldUpdatedAt)
+	}
+}
+
+func TestNoOpIssueWithAttachmentPublishesFreshOwnerBeforeAttachmentEvent(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 	ctx := context.Background()
 	issueID := insertWorkflowTestIssue(t, "ordered attachment events", int(time.Now().UnixNano()%100000)+8_770_000)
+	if _, err := testPool.Exec(ctx, `UPDATE issue SET updated_at = '2000-01-01T00:00:00Z' WHERE id = $1`, issueID); err != nil {
+		t.Fatalf("seed old issue timestamp: %v", err)
+	}
 	var attachmentID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO attachment (
@@ -338,7 +517,7 @@ func TestIssueUpdatePublishesOwnerBeforeSameRevisionAttachmentEvent(t *testing.T
 
 	w := httptest.NewRecorder()
 	h.UpdateIssue(w, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
-		"title":             "ordered attachment events updated",
+		"title":             "ordered attachment events",
 		"attachment_ids":    []string{attachmentID},
 		"expected_revision": 1,
 	}), "id", issueID))
@@ -356,9 +535,191 @@ func TestIssueUpdatePublishesOwnerBeforeSameRevisionAttachmentEvent(t *testing.T
 	if !ok {
 		t.Fatalf("updated issue = %#v", updatedPayload["issue"])
 	}
+	if updatedIssue.Revision != 2 {
+		t.Fatalf("no-op owner revision = %d, want 2", updatedIssue.Revision)
+	}
+	responseUpdatedAt, err := time.Parse(time.RFC3339Nano, updatedIssue.UpdatedAt)
+	if err != nil {
+		t.Fatalf("parse response updated_at %q: %v", updatedIssue.UpdatedAt, err)
+	}
+	if !responseUpdatedAt.After(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("response updated_at = %s, want refreshed timestamp", responseUpdatedAt)
+	}
+	var updatedAt time.Time
+	if err := testPool.QueryRow(ctx, `SELECT updated_at FROM issue WHERE id = $1`, issueID).Scan(&updatedAt); err != nil {
+		t.Fatalf("load no-op updated_at: %v", err)
+	}
+	if !updatedAt.After(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("no-op updated_at = %s, want refreshed timestamp", updatedAt)
+	}
 	attachmentPayload, ok := ordered[1].Payload.(map[string]any)
 	if !ok || attachmentPayload["issue_revision"] != updatedIssue.Revision {
 		t.Fatalf("event revisions = updated:%#v attachment:%#v", updatedIssue.Revision, attachmentPayload["issue_revision"])
+	}
+}
+
+func TestIssueUpdateAndAttachmentBindingExcludeInterleavingMutation(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issueID := insertWorkflowTestIssue(t, "atomic attachment binding", int(time.Now().UnixNano()%100000)+8_772_000)
+	var attachmentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO attachment (
+			workspace_id, uploader_type, uploader_id,
+			filename, url, content_type, size_bytes
+		)
+		VALUES ($1, 'member', $2, 'atomic.txt', '/atomic.txt', 'text/plain', 1)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&attachmentID); err != nil {
+		t.Fatalf("insert atomic attachment: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, attachmentID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	reachedLink := make(chan struct{}, 1)
+	releaseLink := make(chan struct{})
+	defer func() {
+		select {
+		case <-releaseLink:
+		default:
+			close(releaseLink)
+		}
+	}()
+	h := *testHandler
+	h.TxStarter = pauseIssueAttachmentLinkTxStarter{
+		inner:   testHandler.TxStarter,
+		reached: reachedLink,
+		release: releaseLink,
+	}
+	handlerDone := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		h.UpdateIssue(w, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+			"title":             "atomic attachment binding",
+			"attachment_ids":    []string{attachmentID},
+			"expected_revision": 1,
+		}), "id", issueID))
+		handlerDone <- w
+	}()
+
+	select {
+	case <-reachedLink:
+	case <-time.After(5 * time.Second):
+		t.Fatal("issue update did not reach the attachment link")
+	}
+
+	concurrentDone := make(chan error, 1)
+	go func() {
+		_, execErr := testPool.Exec(ctx, `
+			/* issue_revision_interleaving */
+			UPDATE issue
+			SET priority = 'high', revision = revision + 1
+			WHERE id = $1
+		`, issueID)
+		concurrentDone <- execErr
+	}()
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var waiting bool
+		if err := testPool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE datname = current_database()
+				  AND wait_event_type = 'Lock'
+				  AND query LIKE '%issue_revision_interleaving%'
+			)
+		`).Scan(&waiting); err != nil {
+			t.Fatalf("observe blocked concurrent mutation: %v", err)
+		}
+		if waiting {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("concurrent mutation was not blocked by the issue update transaction")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	close(releaseLink)
+	response := <-handlerDone
+	if response.Code != http.StatusOK {
+		t.Fatalf("combined update = %d: %s", response.Code, response.Body.String())
+	}
+	var updated IssueResponse
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode combined update: %v", err)
+	}
+	if updated.Revision != 2 {
+		t.Fatalf("combined update revision = %d, want 2", updated.Revision)
+	}
+	if err := <-concurrentDone; err != nil {
+		t.Fatalf("concurrent mutation after commit: %v", err)
+	}
+
+	var linkedIssueID, priority string
+	var revision int64
+	if err := testPool.QueryRow(ctx, `
+		SELECT a.issue_id, i.priority, i.revision
+		FROM attachment AS a
+		JOIN issue AS i ON i.id = a.issue_id
+		WHERE a.id = $1
+	`, attachmentID).Scan(&linkedIssueID, &priority, &revision); err != nil {
+		t.Fatalf("load atomic result: %v", err)
+	}
+	if linkedIssueID != issueID || priority != "high" || revision != 3 {
+		t.Fatalf("atomic result = issue %s, priority %s, revision %d; want %s/high/3", linkedIssueID, priority, revision, issueID)
+	}
+}
+
+func TestIssueUpdateRollsBackWhenAttachmentBindingFails(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	issueID := insertWorkflowTestIssue(t, "attachment rollback original", int(time.Now().UnixNano()%100000)+8_774_000)
+	var attachmentID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO attachment (
+			workspace_id, uploader_type, uploader_id,
+			filename, url, content_type, size_bytes
+		)
+		VALUES ($1, 'member', $2, 'rollback.txt', '/rollback.txt', 'text/plain', 1)
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&attachmentID); err != nil {
+		t.Fatalf("insert rollback attachment: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, attachmentID)
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	h := *testHandler
+	h.TxStarter = failIssueAttachmentLinkTxStarter{inner: testHandler.TxStarter}
+	w := httptest.NewRecorder()
+	h.UpdateIssue(w, withURLParam(newRequest(http.MethodPut, "/api/issues/"+issueID, map[string]any{
+		"title":          "attachment rollback changed",
+		"attachment_ids": []string{attachmentID},
+	}), "id", issueID))
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("injected link failure = %d, want 500: %s", w.Code, w.Body.String())
+	}
+
+	var title string
+	var revision int64
+	if err := testPool.QueryRow(ctx, `SELECT title, revision FROM issue WHERE id = $1`, issueID).Scan(&title, &revision); err != nil {
+		t.Fatalf("load rolled-back issue: %v", err)
+	}
+	var linked bool
+	if err := testPool.QueryRow(ctx, `SELECT issue_id IS NOT NULL FROM attachment WHERE id = $1`, attachmentID).Scan(&linked); err != nil {
+		t.Fatalf("load rolled-back attachment: %v", err)
+	}
+	if title != "attachment rollback original" || revision != 1 || linked {
+		t.Fatalf("rollback result = title %q, revision %d, linked %t", title, revision, linked)
 	}
 }
 

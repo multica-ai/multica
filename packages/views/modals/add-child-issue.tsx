@@ -52,9 +52,6 @@ export function AddChildIssueModal({
           {
             id: selected.id,
             parent_issue_id: issueId,
-            ...(selected.revision !== undefined
-              ? { expected_revision: selected.revision }
-              : {}),
           },
           {
             onSuccess: () =>

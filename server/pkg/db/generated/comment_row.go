@@ -20,6 +20,7 @@ func (r CreateCommentRow) Comment() Comment {
 		ResolvedByID:   r.ResolvedByID,
 		SourceTaskID:   r.SourceTaskID,
 		QuickActionID:  r.QuickActionID,
+		ViaPluginID:    r.ViaPluginID,
 		Revision:       r.Revision,
 	}
 }

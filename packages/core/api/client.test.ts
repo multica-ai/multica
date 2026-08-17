@@ -6,8 +6,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe("ApiClient revision guards", () => {
-  it("serializes expected_revision for issue and comment writes", async () => {
+describe("ApiClient edit guards", () => {
+  it("serializes field baselines for issue and comment writes", async () => {
     const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
       new Response("{}", {
         status: 200,
@@ -17,16 +17,16 @@ describe("ApiClient revision guards", () => {
     vi.stubGlobal("fetch", fetchMock);
     const client = new ApiClient("https://api.example.test");
 
-    await client.updateIssue("issue-1", { title: "Latest", expected_revision: 4 });
-    await client.updateComment("comment-1", "Latest", [], undefined, 7);
+    await client.updateIssue("issue-1", { title: "Latest", title_base: "Original" });
+    await client.updateComment("comment-1", "Latest", [], undefined, "Original");
 
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
       title: "Latest",
-      expected_revision: 4,
+      title_base: "Original",
     });
     expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
       content: "Latest",
-      expected_revision: 7,
+      content_base: "Original",
     });
   });
 

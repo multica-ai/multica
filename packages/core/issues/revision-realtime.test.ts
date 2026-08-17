@@ -7,7 +7,7 @@ import {
   onIssueMetadataChanged,
   onIssuePropertiesChanged,
   onIssueUpdated,
-  patchIssueRevision,
+  onIssueAuxiliaryRevision,
 } from "./ws-updaters";
 
 function issue(revision: number, title: string): Issue {
@@ -85,14 +85,14 @@ describe("issue realtime revision admission", () => {
     expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
-  it("advances auxiliary owner revisions per projection without downgrading fresher caches", () => {
+  it("invalidates stale owner projections without claiming a partial event is a full snapshot", () => {
     const qc = new QueryClient();
     qc.setQueryData(issueKeys.detail("ws-1", "issue-1"), issue(5, "detail"));
     qc.setQueryData(issueKeys.children("ws-1", "parent-1"), [
       issue(3, "child"),
     ]);
 
-    patchIssueRevision(qc, "ws-1", "issue-1", 4);
+    onIssueAuxiliaryRevision(qc, "ws-1", "issue-1", 4);
 
     expect(
       qc.getQueryData<Issue>(issueKeys.detail("ws-1", "issue-1"))?.revision,
@@ -100,7 +100,33 @@ describe("issue realtime revision admission", () => {
     expect(
       qc.getQueryData<Issue[]>(issueKeys.children("ws-1", "parent-1"))?.[0]
         ?.revision,
-    ).toBe(4);
+    ).toBe(3);
+    expect(
+      qc.getQueryState(issueKeys.detail("ws-1", "issue-1"))?.isInvalidated,
+    ).toBe(false);
+    expect(
+      qc.getQueryState(issueKeys.children("ws-1", "parent-1"))?.isInvalidated,
+    ).toBe(true);
+  });
+
+  it("admits a fuller snapshot after a newer revision-only event", () => {
+    const qc = new QueryClient();
+    const detailKey = issueKeys.detail("ws-1", "issue-1");
+    qc.setQueryData(detailKey, issue(1, "A"));
+
+    onIssueAuxiliaryRevision(qc, "ws-1", "issue-1", 3);
+    expect(qc.getQueryData<Issue>(detailKey)).toMatchObject({
+      revision: 1,
+      title: "A",
+    });
+    expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
+
+    onIssueUpdated(qc, "ws-1", issue(2, "B"));
+    expect(qc.getQueryData<Issue>(detailKey)).toMatchObject({
+      revision: 2,
+      title: "B",
+    });
+    expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
   it("rejects stale auxiliary snapshots as a whole, not only their revision", () => {
@@ -150,6 +176,26 @@ describe("issue realtime revision admission", () => {
     expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
+  it("orders each auxiliary projection independently", () => {
+    const qc = new QueryClient();
+    const detailKey = issueKeys.detail("ws-1", "issue-1");
+    qc.setQueryData(detailKey, {
+      ...issue(1, "base"),
+      metadata: { state: "base" },
+      properties: { estimate: 1 },
+    });
+
+    onIssueMetadataChanged(qc, "ws-1", "issue-1", { state: "latest" }, 3);
+    onIssueMetadataChanged(qc, "ws-1", "issue-1", { state: "stale" }, 2);
+    onIssuePropertiesChanged(qc, "ws-1", "issue-1", { estimate: 2 }, 2);
+
+    expect(qc.getQueryData<Issue>(detailKey)).toMatchObject({
+      revision: 1,
+      metadata: { state: "latest" },
+      properties: { estimate: 2 },
+    });
+  });
+
   it("uses an equal-revision auxiliary event to heal only older projections", () => {
     const qc = new QueryClient();
     qc.setQueryData(issueKeys.detail("ws-1", "issue-1"), {
@@ -168,6 +214,9 @@ describe("issue realtime revision admission", () => {
     ).toBe("detail");
     expect(
       qc.getQueryData<Issue[]>(issueKeys.children("ws-1", "parent-1"))?.[0],
-    ).toMatchObject({ revision: 3, metadata: { state: "latest" } });
+    ).toMatchObject({ revision: 2, metadata: { state: "latest" } });
+    expect(
+      qc.getQueryState(issueKeys.children("ws-1", "parent-1"))?.isInvalidated,
+    ).toBe(true);
   });
 });

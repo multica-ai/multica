@@ -5,7 +5,6 @@ import { toast } from "sonner";
 import { useWorkspaceId } from "@multica/core/hooks";
 import {
   childIssuesOptions,
-  issueDetailOptions,
 } from "@multica/core/issues/queries";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { IssuePickerModal } from "./issue-picker-modal";
@@ -22,11 +21,6 @@ export function SetParentIssueModal({
   const issueId = (data?.issueId as string) || "";
   const wsId = useWorkspaceId();
   const updateIssue = useUpdateIssue();
-
-  const { data: issue = null } = useQuery({
-    ...issueDetailOptions(wsId, issueId),
-    enabled: !!issueId,
-  });
 
   const { data: children = [] } = useQuery({
     ...childIssuesOptions(wsId, issueId),
@@ -49,9 +43,6 @@ export function SetParentIssueModal({
           {
             id: issueId,
             parent_issue_id: selected.id,
-            ...(issue?.revision !== undefined
-              ? { expected_revision: issue.revision }
-              : {}),
           },
           {
             onSuccess: () =>

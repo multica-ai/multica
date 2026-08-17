@@ -217,8 +217,8 @@ describe("comment edit — draft snapshot", () => {
   });
 });
 
-describe("comment edit — revision conflict", () => {
-  it("keeps the local draft visible and resubmits with the captured revision", async () => {
+describe("comment edit — content conflict", () => {
+  it("keeps the local draft visible and resubmits with the captured content", async () => {
     const onEdit = vi.fn().mockRejectedValue({
       body: { code: "revision_conflict" },
     });
@@ -236,7 +236,7 @@ describe("comment edit — revision conflict", () => {
         "My local edit",
         [],
         undefined,
-        7,
+        "Original body",
       ),
     );
     expect(await screen.findByText("The comment was changed concurrently. Compare both versions.")).toBeVisible();

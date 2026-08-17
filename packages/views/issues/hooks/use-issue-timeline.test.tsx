@@ -176,7 +176,7 @@ describe("useIssueTimeline", () => {
     });
   });
 
-  it("passes the captured comment revision through editComment", async () => {
+  it("passes the captured comment content through editComment", async () => {
     const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
 
     await act(async () => {
@@ -185,7 +185,7 @@ describe("useIssueTimeline", () => {
         "updated",
         [],
         undefined,
-        7,
+        "original",
       );
     });
 
@@ -194,7 +194,7 @@ describe("useIssueTimeline", () => {
       content: "updated",
       attachmentIds: [],
       suppressAgentIds: undefined,
-      expectedRevision: 7,
+      contentBase: "original",
     });
   });
 

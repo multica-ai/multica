@@ -3234,6 +3234,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Content          string    `json:"content"`
+		ContentBase      *string   `json:"content_base,omitempty"`
 		AttachmentIDs    *[]string `json:"attachment_ids"`
 		SuppressAgentIDs []string  `json:"suppress_agent_ids"`
 		ExpectedRevision *int64    `json:"expected_revision,omitempty"`
@@ -3246,6 +3247,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// rejects before the empty check, so an edit that introduces such a byte
 	// can't 500 (GH #5388).
 	req.Content = sanitizeNullBytes(req.Content)
+	if req.ContentBase != nil {
+		sanitized := sanitizeNullBytes(*req.ContentBase)
+		req.ContentBase = &sanitized
+	}
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
@@ -3260,6 +3265,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	strictContentEdit := req.ContentBase != nil || req.ExpectedRevision != nil
 
 	var attachmentIDs []pgtype.UUID
 	replaceAttachments := req.AttachmentIDs != nil
@@ -3311,7 +3317,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		// Legacy clients keep the existing cancel-before-update behavior. Strict
 		// revision writes defer cancellation until the conditional UPDATE wins,
 		// so a race that returns 409 cannot mutate the task queue.
-		if req.ExpectedRevision == nil {
+		if !strictContentEdit {
 			cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
 			if err != nil {
 				slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
@@ -3326,11 +3332,14 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		Content:      req.Content,
 		SourceTaskID: sourceTaskID,
 	}
+	if req.ContentBase != nil {
+		updateParams.ContentBase = pgtype.Text{String: *req.ContentBase, Valid: true}
+	}
 	if req.ExpectedRevision != nil {
 		updateParams.ExpectedRevision = pgtype.Int8{Int64: *req.ExpectedRevision, Valid: true}
 	}
 	var comment db.Comment
-	transactionalEdit := replaceAttachments || (oldContent != req.Content && req.ExpectedRevision != nil)
+	transactionalEdit := replaceAttachments || (oldContent != req.Content && strictContentEdit)
 	if transactionalEdit {
 		// Strict body edits, attachment-set edits, and cancellation of tasks built
 		// from the old body are one database outcome. UpdateComment takes the row
@@ -3345,7 +3354,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
 		comment, err = qtx.UpdateComment(r.Context(), updateParams)
-		if err == nil && oldContent != req.Content && req.ExpectedRevision != nil {
+		if err == nil && oldContent != req.Content && strictContentEdit {
 			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
 		}
 		if err == nil && replaceAttachments {
@@ -3373,15 +3382,19 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
-		if triggerIssue != nil && req.ExpectedRevision == nil {
+		if triggerIssue != nil && !strictContentEdit {
 			// Cancellation committed but the edit did not. Restore the complete
 			// original batch, including the still-valid unchanged comment.
 			h.retriggerCancelledTaskSurvivors(r.Context(), *triggerIssue, cancelled, pgtype.UUID{})
 		}
-		if errors.Is(err, pgx.ErrNoRows) && req.ExpectedRevision != nil {
+		if errors.Is(err, pgx.ErrNoRows) && strictContentEdit {
 			current, reloadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{ID: commentUUID, WorkspaceID: wsUUID})
 			if reloadErr == nil {
-				writeRevisionConflict(w, "comment", current.ID, *req.ExpectedRevision, current.Revision)
+				if req.ExpectedRevision != nil {
+					writeRevisionConflict(w, "comment", current.ID, *req.ExpectedRevision, current.Revision)
+				} else {
+					writeEditConflict(w, "comment", current.ID)
+				}
 				return
 			}
 		}

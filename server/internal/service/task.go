@@ -5069,7 +5069,7 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("find recovery comment: %w", err)
 		}
-		comment, err = qtx.CreateComment(ctx, db.CreateCommentParams{
+		createdComment, err := qtx.CreateComment(ctx, db.CreateCommentParams{
 			IssueID:      target.issue.ID,
 			WorkspaceID:  target.issue.WorkspaceID,
 			AuthorType:   "system",
@@ -5081,7 +5081,7 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 		if err != nil {
 			return fmt.Errorf("create recovery comment: %w", err)
 		}
-		target.comment = comment
+		target.comment = createdComment.Comment()
 		created = true
 		return nil
 	}); err != nil {
@@ -5174,7 +5174,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 			return fmt.Errorf("find delegated failure exhaustion comment: %w", err)
 		}
 
-		comment, err = qtx.CreateComment(ctx, db.CreateCommentParams{
+		createdComment, err := qtx.CreateComment(ctx, db.CreateCommentParams{
 			IssueID:      target.issue.ID,
 			WorkspaceID:  target.issue.WorkspaceID,
 			AuthorType:   "system",
@@ -5186,7 +5186,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 		if err != nil {
 			return fmt.Errorf("create delegated failure exhaustion comment: %w", err)
 		}
-		exhaustedComment = comment
+		exhaustedComment = createdComment.Comment()
 		created = true
 
 		// Exhaustion deliberately does not @mention the coordinator agent: doing

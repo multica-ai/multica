@@ -97,7 +97,6 @@ type SwimLaneMoveTargetUpdates = Pick<
   | "assignee_id"
   | "status"
   | "position"
-  | "expected_revision"
 >;
 
 type SwimLaneMoveUpdates = SwimLaneMoveTargetUpdates & {
@@ -1284,7 +1283,6 @@ function SwimLaneViewImpl({
           ...targetLane.moveUpdates,
           status: finalOverCell.status as IssueStatus,
           position: newPosition,
-          expected_revision: currentIssue?.revision,
           ...getMoveAnchors(finalIds, activeId),
         },
         () => {

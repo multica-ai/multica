@@ -380,7 +380,7 @@ const deleteIssueMetadataKey = `-- name: DeleteIssueMetadataKey :one
 UPDATE issue SET
     metadata = metadata - $1::text,
     revision = revision + CASE WHEN metadata ? $1::text THEN 1 ELSE 0 END,
-    updated_at = CASE WHEN metadata ? $1::text THEN now() ELSE updated_at END
+    updated_at = now()
 WHERE id = $2 AND workspace_id = $3
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision
 `
@@ -1305,9 +1305,10 @@ type LockIssueForDescriptionUpdateParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Serialize user description saves with detached channel-media appends. The
-// handler merges channel media that landed after the editor's submitted base
-// while holding this lock, then performs UpdateIssue in the same transaction.
+// Serialize field-baseline checks and combined attachment binding on the
+// owner row. The handler merges channel media that landed after the editor's
+// submitted base, updates the issue, and binds this request's attachments in
+// the same transaction while holding this lock.
 func (q *Queries) LockIssueForDescriptionUpdate(ctx context.Context, arg LockIssueForDescriptionUpdateParams) (Issue, error) {
 	row := q.db.QueryRow(ctx, lockIssueForDescriptionUpdate, arg.ID, arg.WorkspaceID)
 	var i Issue
@@ -1450,7 +1451,7 @@ const setIssueMetadataKey = `-- name: SetIssueMetadataKey :one
 UPDATE issue SET
     metadata = jsonb_set(metadata, ARRAY[$1::text], $2::jsonb),
     revision = revision + CASE WHEN metadata -> $1::text IS DISTINCT FROM $2::jsonb THEN 1 ELSE 0 END,
-    updated_at = CASE WHEN metadata -> $1::text IS DISTINCT FROM $2::jsonb THEN now() ELSE updated_at END
+    updated_at = now()
 WHERE id = $3 AND workspace_id = $4
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision
 `
@@ -1507,48 +1508,55 @@ func (q *Queries) SetIssueMetadataKey(ctx context.Context, arg SetIssueMetadataK
 }
 
 const updateIssue = `-- name: UpdateIssue :one
-UPDATE issue SET
-    title = COALESCE($2, title),
-    description = COALESCE($3, description),
-    status = COALESCE($4, status),
-    priority = COALESCE($5, priority),
-    assignee_type = $6,
-    assignee_id = $7,
-    position = COALESCE($8, position),
-    start_date = $9,
-    due_date = $10,
-    parent_issue_id = $11,
-    project_id = $12,
-    stage = $13,
-    revision = revision + CASE WHEN ROW(
-        title, description, status, priority, assignee_type, assignee_id,
-        position, start_date, due_date, parent_issue_id, project_id, stage
-    ) IS DISTINCT FROM ROW(
-        COALESCE($2, title),
-        COALESCE($3, description),
-        COALESCE($4, status),
-        COALESCE($5, priority),
-        $6, $7,
-        COALESCE($8, position),
-        $9, $10,
-        $11, $12, $13
-    ) THEN 1 ELSE 0 END,
-    updated_at = CASE WHEN ROW(
-        title, description, status, priority, assignee_type, assignee_id,
-        position, start_date, due_date, parent_issue_id, project_id, stage
-    ) IS DISTINCT FROM ROW(
-        COALESCE($2, title),
-        COALESCE($3, description),
-        COALESCE($4, status),
-        COALESCE($5, priority),
-        $6, $7,
-        COALESCE($8, position),
-        $9, $10,
-        $11, $12, $13
-    ) THEN now() ELSE updated_at END
-WHERE id = $1
-  AND ($14::bigint IS NULL OR revision = $14::bigint)
-RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision
+WITH candidate AS (
+    SELECT
+        i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision,
+        COALESCE($2::text, i.title) AS next_title,
+        COALESCE($3::text, i.description) AS next_description,
+        COALESCE($4::text, i.status) AS next_status,
+        COALESCE($5::text, i.priority) AS next_priority,
+        $6::text AS next_assignee_type,
+        $7::uuid AS next_assignee_id,
+        COALESCE($8::double precision, i.position) AS next_position,
+        $9::date AS next_start_date,
+        $10::date AS next_due_date,
+        $11::uuid AS next_parent_issue_id,
+        $12::uuid AS next_project_id,
+        $13::integer AS next_stage
+    FROM issue AS i
+    WHERE i.id = $1
+      AND ($14::bigint IS NULL OR i.revision = $14::bigint)
+), changed AS (
+    SELECT
+        candidate.id, candidate.workspace_id, candidate.title, candidate.description, candidate.status, candidate.priority, candidate.assignee_type, candidate.assignee_id, candidate.creator_type, candidate.creator_id, candidate.parent_issue_id, candidate.acceptance_criteria, candidate.context_refs, candidate.position, candidate.due_date, candidate.created_at, candidate.updated_at, candidate.number, candidate.project_id, candidate.origin_type, candidate.origin_id, candidate.first_executed_at, candidate.start_date, candidate.metadata, candidate.stage, candidate.properties, candidate.revision, candidate.next_title, candidate.next_description, candidate.next_status, candidate.next_priority, candidate.next_assignee_type, candidate.next_assignee_id, candidate.next_position, candidate.next_start_date, candidate.next_due_date, candidate.next_parent_issue_id, candidate.next_project_id, candidate.next_stage,
+        ROW(
+            title, description, status, priority, assignee_type, assignee_id,
+            position, start_date, due_date, parent_issue_id, project_id, stage
+        ) IS DISTINCT FROM ROW(
+            next_title, next_description, next_status, next_priority,
+            next_assignee_type, next_assignee_id, next_position, next_start_date,
+            next_due_date, next_parent_issue_id, next_project_id, next_stage
+        ) AS did_change
+    FROM candidate
+)
+UPDATE issue AS i SET
+    title = changed.next_title,
+    description = changed.next_description,
+    status = changed.next_status,
+    priority = changed.next_priority,
+    assignee_type = changed.next_assignee_type,
+    assignee_id = changed.next_assignee_id,
+    position = changed.next_position,
+    start_date = changed.next_start_date,
+    due_date = changed.next_due_date,
+    parent_issue_id = changed.next_parent_issue_id,
+    project_id = changed.next_project_id,
+    stage = changed.next_stage,
+    revision = i.revision + changed.did_change::integer,
+    updated_at = CASE WHEN changed.did_change THEN now() ELSE i.updated_at END
+FROM changed
+WHERE i.id = changed.id
+RETURNING i.id, i.workspace_id, i.title, i.description, i.status, i.priority, i.assignee_type, i.assignee_id, i.creator_type, i.creator_id, i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.origin_type, i.origin_id, i.first_executed_at, i.start_date, i.metadata, i.stage, i.properties, i.revision
 `
 
 type UpdateIssueParams struct {
@@ -1622,7 +1630,7 @@ const updateIssueStatus = `-- name: UpdateIssueStatus :one
 UPDATE issue SET
     status = $2,
     revision = revision + CASE WHEN status IS DISTINCT FROM $2 THEN 1 ELSE 0 END,
-    updated_at = CASE WHEN status IS DISTINCT FROM $2 THEN now() ELSE updated_at END
+    updated_at = now()
 WHERE id = $1 AND workspace_id = $3
 RETURNING id, workspace_id, title, description, status, priority, assignee_type, assignee_id, creator_type, creator_id, parent_issue_id, acceptance_criteria, context_refs, position, due_date, created_at, updated_at, number, project_id, origin_type, origin_id, first_executed_at, start_date, metadata, stage, properties, revision
 `

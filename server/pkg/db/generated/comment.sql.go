@@ -17,7 +17,7 @@ SET revision = revision + 1,
     updated_at = now()
 WHERE id = $1
   AND workspace_id = $2
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision
 `
 
 type BumpCommentRevisionParams struct {
@@ -44,8 +44,8 @@ func (q *Queries) BumpCommentRevision(ctx context.Context, arg BumpCommentRevisi
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }
@@ -85,7 +85,7 @@ UPDATE comment SET
 WHERE comment.id IN (SELECT id FROM descendants)
   AND comment.id <> $1
   AND comment.resolved_at IS NOT NULL
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision
 `
 
 type ClearOtherThreadResolutionsParams struct {
@@ -129,8 +129,8 @@ func (q *Queries) ClearOtherThreadResolutions(ctx context.Context, arg ClearOthe
 			&i.ResolvedByID,
 			&i.SourceTaskID,
 			&i.QuickActionID,
-			&i.Revision,
 			&i.ViaPluginID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -206,9 +206,9 @@ WITH touched_issue AS (
     INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id)
     SELECT ti.id, ti.workspace_id, $3, $4, $5, $6, $7, $8, $9, $10
     FROM touched_issue ti
-    RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id
+    RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision
 )
-SELECT inserted_comment.id, inserted_comment.issue_id, inserted_comment.author_type, inserted_comment.author_id, inserted_comment.content, inserted_comment.type, inserted_comment.created_at, inserted_comment.updated_at, inserted_comment.parent_id, inserted_comment.workspace_id, inserted_comment.resolved_at, inserted_comment.resolved_by_type, inserted_comment.resolved_by_id, inserted_comment.source_task_id, inserted_comment.quick_action_id, inserted_comment.revision, inserted_comment.via_plugin_id, touched_issue.revision AS issue_revision
+SELECT inserted_comment.id, inserted_comment.issue_id, inserted_comment.author_type, inserted_comment.author_id, inserted_comment.content, inserted_comment.type, inserted_comment.created_at, inserted_comment.updated_at, inserted_comment.parent_id, inserted_comment.workspace_id, inserted_comment.resolved_at, inserted_comment.resolved_by_type, inserted_comment.resolved_by_id, inserted_comment.source_task_id, inserted_comment.quick_action_id, inserted_comment.via_plugin_id, inserted_comment.revision, touched_issue.revision AS issue_revision
 FROM inserted_comment
 JOIN touched_issue ON touched_issue.id = inserted_comment.issue_id
 `
@@ -242,8 +242,8 @@ type CreateCommentRow struct {
 	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
 	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
 	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
-	Revision       int64              `json:"revision"`
 	ViaPluginID    pgtype.UUID        `json:"via_plugin_id"`
+	Revision       int64              `json:"revision"`
 	IssueRevision  int64              `json:"issue_revision"`
 }
 
@@ -293,8 +293,8 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 		&i.IssueRevision,
 	)
 	return i, err
@@ -316,7 +316,7 @@ func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) er
 }
 
 const getComment = `-- name: GetComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE id = $1
 `
 
@@ -339,14 +339,14 @@ func (q *Queries) GetComment(ctx context.Context, id pgtype.UUID) (Comment, erro
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const getCommentInWorkspace = `-- name: GetCommentInWorkspace :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -374,14 +374,14 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const getDelegatedFailureRecoveryComment = `-- name: GetDelegatedFailureRecoveryComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE issue_id = $1
   AND workspace_id = $2
   AND author_type = 'system'
@@ -420,14 +420,14 @@ func (q *Queries) GetDelegatedFailureRecoveryComment(ctx context.Context, arg Ge
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const getDelegatedFailureRecoveryExhaustionComment = `-- name: GetDelegatedFailureRecoveryExhaustionComment :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE issue_id = $1
   AND workspace_id = $2
   AND author_type = 'system'
@@ -466,14 +466,14 @@ func (q *Queries) GetDelegatedFailureRecoveryExhaustionComment(ctx context.Conte
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }
 
 const getLatestMemberCommentForIssueSince = `-- name: GetLatestMemberCommentForIssueSince :one
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE issue_id = $1
   AND author_type = 'member'
   AND created_at > $2
@@ -514,8 +514,8 @@ func (q *Queries) GetLatestMemberCommentForIssueSince(ctx context.Context, arg G
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }
@@ -530,7 +530,7 @@ WITH RECURSIVE root_of AS (
     FROM comment p
     JOIN root_of r ON p.id = r.parent_id
 )
-SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.revision, c.via_plugin_id FROM comment c
+SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type, c.created_at, c.updated_at, c.parent_id, c.workspace_id, c.resolved_at, c.resolved_by_type, c.resolved_by_id, c.source_task_id, c.quick_action_id, c.via_plugin_id, c.revision FROM comment c
 WHERE c.id = (SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1)
 `
 
@@ -563,8 +563,8 @@ func (q *Queries) GetThreadRoot(ctx context.Context, arg GetThreadRootParams) (C
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }
@@ -613,7 +613,7 @@ func (q *Queries) HasAgentRepliedInThread(ctx context.Context, arg HasAgentRepli
 }
 
 const listChildCommentsForParents = `-- name: ListChildCommentsForParents :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE parent_id = ANY($1::uuid[])
   AND issue_id = $2
   AND workspace_id = $3
@@ -672,8 +672,8 @@ func (q *Queries) ListChildCommentsForParents(ctx context.Context, arg ListChild
 			&i.ResolvedByID,
 			&i.SourceTaskID,
 			&i.QuickActionID,
-			&i.Revision,
 			&i.ViaPluginID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -686,7 +686,7 @@ func (q *Queries) ListChildCommentsForParents(ctx context.Context, arg ListChild
 }
 
 const listCommentsByIDsForIssue = `-- name: ListCommentsByIDsForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE id = ANY($1::uuid[])
   AND issue_id = $2
   AND workspace_id = $3
@@ -733,8 +733,8 @@ func (q *Queries) ListCommentsByIDsForIssue(ctx context.Context, arg ListComment
 			&i.ResolvedByID,
 			&i.SourceTaskID,
 			&i.QuickActionID,
-			&i.Revision,
 			&i.ViaPluginID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -747,8 +747,8 @@ func (q *Queries) ListCommentsByIDsForIssue(ctx context.Context, arg ListComment
 }
 
 const listCommentsForIssue = `-- name: ListCommentsForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM (
-    SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM (
+    SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
     WHERE issue_id = $1 AND workspace_id = $2
     ORDER BY created_at DESC, id DESC
     LIMIT $3
@@ -804,8 +804,8 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 			&i.ResolvedByID,
 			&i.SourceTaskID,
 			&i.QuickActionID,
-			&i.Revision,
 			&i.ViaPluginID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -818,7 +818,7 @@ func (q *Queries) ListCommentsForIssue(ctx context.Context, arg ListCommentsForI
 }
 
 const listCommentsSinceForIssue = `-- name: ListCommentsSinceForIssue :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE issue_id = $1 AND workspace_id = $2 AND created_at > $3
 ORDER BY created_at ASC, id ASC
 LIMIT $4
@@ -863,8 +863,8 @@ func (q *Queries) ListCommentsSinceForIssue(ctx context.Context, arg ListComment
 			&i.ResolvedByID,
 			&i.SourceTaskID,
 			&i.QuickActionID,
-			&i.Revision,
 			&i.ViaPluginID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -1024,7 +1024,7 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 }
 
 const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableCommentsForIssueSince :many
-SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id FROM comment
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE issue_id = $1
   AND (
       (
@@ -1104,8 +1104,8 @@ func (q *Queries) ListReconcilableCommentsForIssueSince(ctx context.Context, arg
 			&i.ResolvedByID,
 			&i.SourceTaskID,
 			&i.QuickActionID,
-			&i.Revision,
 			&i.ViaPluginID,
+			&i.Revision,
 		); err != nil {
 			return nil, err
 		}
@@ -1515,7 +1515,7 @@ UPDATE comment SET
     revision = revision + CASE WHEN resolved_at IS NULL THEN 1 ELSE 0 END,
     updated_at = CASE WHEN resolved_at IS NULL THEN now() ELSE updated_at END
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision
 `
 
 type ResolveCommentParams struct {
@@ -1545,8 +1545,8 @@ func (q *Queries) ResolveComment(ctx context.Context, arg ResolveCommentParams) 
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }
@@ -1559,7 +1559,7 @@ UPDATE comment SET
     revision = revision + CASE WHEN resolved_at IS NOT NULL THEN 1 ELSE 0 END,
     updated_at = CASE WHEN resolved_at IS NOT NULL THEN now() ELSE updated_at END
 WHERE id = $1
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision
 `
 
 // Idempotent: a no-op clear (already unresolved) just returns the row.
@@ -1582,8 +1582,8 @@ func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }
@@ -1596,7 +1596,12 @@ UPDATE comment SET
     updated_at = CASE WHEN ROW(content, source_task_id) IS DISTINCT FROM ROW($2, $3) THEN now() ELSE updated_at END
 WHERE id = $1
   AND ($4::bigint IS NULL OR revision = $4::bigint)
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, revision, via_plugin_id
+  AND (
+    $5::text IS NULL
+    OR content IS NOT DISTINCT FROM $5::text
+    OR content IS NOT DISTINCT FROM $2
+  )
+RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision
 `
 
 type UpdateCommentParams struct {
@@ -1604,6 +1609,7 @@ type UpdateCommentParams struct {
 	Content          string      `json:"content"`
 	SourceTaskID     pgtype.UUID `json:"source_task_id"`
 	ExpectedRevision pgtype.Int8 `json:"expected_revision"`
+	ContentBase      pgtype.Text `json:"content_base"`
 }
 
 func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (Comment, error) {
@@ -1612,6 +1618,7 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		arg.Content,
 		arg.SourceTaskID,
 		arg.ExpectedRevision,
+		arg.ContentBase,
 	)
 	var i Comment
 	err := row.Scan(
@@ -1630,8 +1637,8 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		&i.ResolvedByID,
 		&i.SourceTaskID,
 		&i.QuickActionID,
-		&i.Revision,
 		&i.ViaPluginID,
+		&i.Revision,
 	)
 	return i, err
 }

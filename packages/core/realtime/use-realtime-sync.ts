@@ -35,7 +35,7 @@ import {
   onIssueLabelsChanged,
   onIssuePropertiesChanged,
   onIssueMetadataChanged,
-  patchIssueRevision,
+  onIssueAuxiliaryRevision,
 } from "../issues/ws-updaters";
 import { invalidateUpdatedAtSortedIssueLists } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
@@ -998,7 +998,7 @@ export function useRealtimeSync(
       if (!issue_id) return;
       qc.invalidateQueries({ queryKey: issueKeys.attachments(issue_id) });
       const wsId = getCurrentWsId();
-      if (wsId) patchIssueRevision(qc, wsId, issue_id, issue_revision);
+      if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
     });
 
     const unsubIssueMetadataChanged = ws.on("issue_metadata:changed", (p) => {
@@ -1076,10 +1076,10 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         invalidateUpdatedAtSortedIssueLists(qc, wsId);
-        // The additive owner revision lets every loaded issue projection keep
-        // its strict-write precondition current without invalidating lists
-        // whose ordering is unaffected by a comment.
-        patchIssueRevision(qc, wsId, comment.issue_id, issueRevision);
+        // A comment carries only the aggregate owner revision, not a full
+        // Issue snapshot. Mark stale projections for an authoritative fetch
+        // without making a later full snapshot look older than the cache.
+        onIssueAuxiliaryRevision(qc, wsId, comment.issue_id, issueRevision);
       }
     });
 
@@ -1125,7 +1125,7 @@ export function useRealtimeSync(
       if (issue_id) {
         qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
         const wsId = getCurrentWsId();
-        if (wsId) patchIssueRevision(qc, wsId, issue_id, issue_revision);
+        if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
       }
     });
 
@@ -1134,7 +1134,7 @@ export function useRealtimeSync(
       if (issue_id) {
         qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
         const wsId = getCurrentWsId();
-        if (wsId) patchIssueRevision(qc, wsId, issue_id, issue_revision);
+        if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
       }
     });
 

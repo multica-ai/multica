@@ -35,7 +35,10 @@ import type {
 } from "../types";
 import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
-import { patchIssueRevision } from "./ws-updaters";
+import {
+  onIssueAuxiliaryRevision,
+  reconcileIssueFullSnapshotRevision,
+} from "./ws-updaters";
 
 // ---------------------------------------------------------------------------
 // Shared mutation variable types — used by both mutation hooks and
@@ -105,13 +108,9 @@ export function useUpdateIssue() {
   const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({ id, move_intent: moveIntent, ...data }: UpdateIssueMutationInput) => {
-      const cachedRevision = qc.getQueryData<Issue>(issueKeys.detail(wsId, id))?.revision;
-      const request = data.expected_revision === undefined && cachedRevision !== undefined
-        ? { ...data, expected_revision: cachedRevision }
-        : data;
-      if (!moveIntent) return api.updateIssue(id, request);
+      if (!moveIntent) return api.updateIssue(id, data);
       const { position: _optimisticPosition, ...target } = data;
-      return api.moveIssue(id, { ...target, ...(request.expected_revision !== undefined ? { expected_revision: request.expected_revision } : {}), ...moveIntent });
+      return api.moveIssue(id, { ...target, ...moveIntent });
     },
     onMutate: ({ id, move_intent: _moveIntent, ...data }) => {
       // suppress_run / handoff_note are write-time control fields, not Issue
@@ -125,6 +124,7 @@ export function useUpdateIssue() {
         handoff_note: _handoffNote,
         description: _description,
         description_base: _descriptionBase,
+        title_base: _titleBase,
         expected_revision: _expectedRevision,
         ...patch
       } = data;
@@ -256,6 +256,12 @@ export function useUpdateIssue() {
           (serverIssue.revision !== undefined &&
             serverIssue.revision > current.revision),
       });
+      reconcileIssueFullSnapshotRevision(
+        qc,
+        wsId,
+        serverIssue.id,
+        serverIssue.revision,
+      );
       // The server has committed — safe to flush any drift it reported now.
       invalidateStaleListKeys(qc, reconcile.staleKeys);
     },
@@ -725,7 +731,7 @@ export function useCreateComment(issueId: string) {
       suppressAgentIds?: string[];
     }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
     onSuccess: (comment) => {
-      patchIssueRevision(qc, wsId, issueId, comment.issue_revision);
+      onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
       const entry: TimelineEntry = {
         type: "comment",
         id: comment.id,
@@ -770,14 +776,16 @@ export function useUpdateComment(issueId: string) {
       content,
       attachmentIds,
       suppressAgentIds,
+      contentBase,
       expectedRevision,
     }: {
       commentId: string;
       content: string;
       attachmentIds: string[];
       suppressAgentIds?: string[];
+      contentBase?: string;
       expectedRevision?: number;
-    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds, expectedRevision),
+    }) => api.updateComment(commentId, content, attachmentIds, suppressAgentIds, contentBase, expectedRevision),
     onMutate: async ({ commentId, content, attachmentIds }) => {
       await qc.cancelQueries({ queryKey: issueKeys.timeline(issueId) });
       const prev = qc.getQueryData<TimelineCache>(issueKeys.timeline(issueId));
@@ -975,7 +983,7 @@ export function useToggleIssueReaction(issueId: string) {
       return api.addIssueReaction(issueId, emoji);
     },
     onSuccess: (reaction) => {
-      patchIssueRevision(qc, wsId, issueId, reaction?.issue_revision);
+      onIssueAuxiliaryRevision(qc, wsId, issueId, reaction?.issue_revision);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.reactions(issueId) });

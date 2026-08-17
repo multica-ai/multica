@@ -403,13 +403,13 @@ export function useIssueTimeline(issueId: string, userId?: string) {
   );
 
   const editComment = useCallback(
-    async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], expectedRevision?: number) => {
+    async (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => {
       const comment = await updateComment({
         commentId,
         content,
         attachmentIds,
         suppressAgentIds,
-        expectedRevision,
+        contentBase,
       });
       warnUnhandledTriggers(comment?.trigger_outcomes, comment?.content);
     },

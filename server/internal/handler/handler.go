@@ -498,6 +498,15 @@ func writeRevisionConflict(w http.ResponseWriter, resourceType string, resourceI
 	})
 }
 
+func writeEditConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":         "resource field changed since it was loaded",
+		"code":          "revision_conflict",
+		"resource_type": resourceType,
+		"resource_id":   uuidToString(resourceID),
+	})
+}
+
 // Thin wrappers around util functions.
 //
 // parseUUID is intentionally the panicking variant: any handler call site

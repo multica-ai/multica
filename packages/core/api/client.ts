@@ -1156,13 +1156,14 @@ export class ApiClient {
     return this.fetch("/api/assignee-frequency");
   }
 
-  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], expectedRevision?: number): Promise<Comment> {
+  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}`, {
       method: "PUT",
       body: JSON.stringify({
         content,
         attachment_ids: attachmentIds,
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
+        ...(contentBase !== undefined ? { content_base: contentBase } : {}),
         ...(expectedRevision !== undefined ? { expected_revision: expectedRevision } : {}),
       }),
     });

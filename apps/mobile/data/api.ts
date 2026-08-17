@@ -719,7 +719,7 @@ class ApiClient {
     commentId: string,
     content: string,
     attachmentIds?: string[],
-    expectedRevision?: number,
+    contentBase?: string,
   ): Promise<Comment> {
     return this.fetchValidatedWith(
       `/api/comments/${commentId}`,
@@ -728,7 +728,7 @@ class ApiClient {
       {
         method: "PUT",
         body: JSON.stringify(
-          buildCommentUpdateBody(content, attachmentIds, expectedRevision),
+          buildCommentUpdateBody(content, attachmentIds, contentBase),
         ),
       },
       { endpoint: "updateComment" },

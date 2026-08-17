@@ -69,18 +69,12 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueAssigneeType = issue?.assignee_type ?? null;
   const issueAssigneeId = issue?.assignee_id ?? null;
   const issueStatus = issue?.status ?? null;
-  const issueRevision = issue?.revision;
-
   const updateField = useCallback(
     (
       updates: Partial<UpdateIssueRequest>,
       options?: IssueSurfaceMutationOptions,
     ) => {
       if (!issueId) return;
-      const revisionedUpdates =
-        updates.expected_revision === undefined && issueRevision !== undefined
-          ? { ...updates, expected_revision: issueRevision }
-          : updates;
       // Assigning to an agent/squad may start a run. Route through the
       // pre-trigger confirm modal (preview + optional handoff note + "暂不开始"),
       // which applies the change itself — the four entry points share this one
@@ -92,27 +86,26 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       // an empty "won't start" box with a single Apply button. Apply directly,
       // matching the batch backlog short-circuit in BatchActionToolbar.
       if (
-        (revisionedUpdates.assignee_type === "agent" || revisionedUpdates.assignee_type === "squad") &&
-        revisionedUpdates.assignee_id &&
+        (updates.assignee_type === "agent" || updates.assignee_type === "squad") &&
+        updates.assignee_id &&
         issueStatus !== "backlog"
       ) {
         openModal("issue-run-confirm", {
           issueIds: [issueId],
           mode: "assign",
-          assigneeType: revisionedUpdates.assignee_type,
-          assigneeId: revisionedUpdates.assignee_id,
-          ...(issueRevision !== undefined ? { issueRevision } : {}),
+          assigneeType: updates.assignee_type,
+          assigneeId: updates.assignee_id,
         });
         return;
       }
       if (surfaceActions) {
-        surfaceActions.updateIssue(issueId, revisionedUpdates, {
+        surfaceActions.updateIssue(issueId, updates, {
           errorMessage: t(($) => $.detail.update_failed),
           ...options,
         });
       } else {
         updateIssue.mutate(
-          { id: issueId, ...revisionedUpdates },
+          { id: issueId, ...updates },
           {
             onSuccess: options?.onSuccess,
             onError: (err) => {
@@ -130,7 +123,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         );
       }
     },
-    [issueId, issueRevision, issueStatus, surfaceActions, updateIssue, openModal, t],
+    [issueId, issueStatus, surfaceActions, updateIssue, openModal, t],
   );
 
   // Explicit "open it somewhere else" CTA, so the new tab takes focus
@@ -229,9 +222,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         {
           parent_issue_id: null,
           stage: null,
-          ...(issueRevision !== undefined
-            ? { expected_revision: issueRevision }
-            : {}),
         },
         {
           onSuccess: () =>
@@ -245,9 +235,6 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
           id: issueId,
           parent_issue_id: null,
           stage: null,
-          ...(issueRevision !== undefined
-            ? { expected_revision: issueRevision }
-            : {}),
         },
         {
           onSuccess: () =>
@@ -261,7 +248,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
         },
       );
     }
-  }, [issueId, issueRevision, surfaceActions, updateIssue, t]);
+  }, [issueId, surfaceActions, updateIssue, t]);
 
   const openAddChild = useCallback(() => {
     if (!issueId) return;

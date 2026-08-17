@@ -698,9 +698,6 @@ function SubIssueRow({
         {
           id: child.id,
           ...updates,
-          ...(child.revision !== undefined
-            ? { expected_revision: child.revision }
-            : {}),
         },
         {
           onError: (err) =>
@@ -712,7 +709,7 @@ function SubIssueRow({
         },
       );
     },
-    [child.id, child.revision, updateIssue, t],
+    [child.id, updateIssue, t],
   );
 
   // AppLink wraps only the title/identifier area. Pickers and checkbox are
@@ -1958,7 +1955,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
-  const descriptionRevisionRef = useRef<number | undefined>(issue?.revision);
   const descriptionEditingRef = useRef(false);
   const [descriptionConflictDraft, setDescriptionConflictDraft] = useState<string | null>(null);
   const descriptionAttachmentIdsRef = useRef<string[]>([]);
@@ -1975,19 +1971,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // accumulating into a visible scroll/layout jump. The chunked Markdown path
   // keeps this single eager editor affordable; title and composers stay lazy.
   const titleEditorRef = useRef<TitleEditorRef>(null);
-  const titleRevisionRef = useRef<number | undefined>(issue?.revision);
+  const titleBaseRef = useRef<string | undefined>(issue?.title);
   const [titleConflictDraft, setTitleConflictDraft] = useState<string | null>(null);
-  useEffect(() => {
-    if (titleConflictDraft !== null) titleRevisionRef.current = issue?.revision;
-    if (descriptionConflictDraft !== null) {
-      descriptionRevisionRef.current = issue?.revision;
-    }
-  }, [descriptionConflictDraft, issue?.revision, titleConflictDraft]);
   useEffect(() => {
     setTitleConflictDraft(null);
     setDescriptionConflictDraft(null);
-    titleRevisionRef.current = undefined;
-    descriptionRevisionRef.current = undefined;
+    titleBaseRef.current = undefined;
     descriptionAttachmentIdsRef.current = [];
     descriptionSaveInFlightRef.current = false;
     descriptionSaveIssueIdRef.current = id;
@@ -2227,7 +2216,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
 
   const persistDescriptionSave = (
     draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
-    revision: number | undefined,
   ) => {
     descriptionSaveInFlightRef.current = true;
     handleUpdateField(
@@ -2236,18 +2224,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         description_base: draft.baseMarkdown,
         attachment_ids:
           draft.attachmentIds.length > 0 ? draft.attachmentIds : undefined,
-        expected_revision: revision,
       },
       {
-        onSuccess: () => {
+        onSuccess: (serverIssue) => {
           if (descriptionSaveIssueIdRef.current !== id) return;
           setDescriptionConflictDraft(null);
-          const nextRevision = revision === undefined ? undefined : revision + 1;
-          descriptionRevisionRef.current = nextRevision;
           descriptionSaveInFlightRef.current = false;
           const pending = pendingDescriptionSaveRef.current;
           pendingDescriptionSaveRef.current = null;
-          if (pending) persistDescriptionSave(pending, nextRevision);
+          if (pending) {
+            // Usually the accepted document is exactly what we submitted. If
+            // the server appended late channel media, keep the submitted body
+            // as the next editor baseline: the server can recognize that the
+            // only delta is media the editor never saw and preserve it again.
+            const nextBase = serverIssue.description === draft.markdown
+              ? serverIssue.description
+              : draft.markdown;
+            persistDescriptionSave({ ...pending, baseMarkdown: nextBase });
+          }
         },
         onError: (error) => {
           if (descriptionSaveIssueIdRef.current !== id) return;
@@ -2272,7 +2266,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       pendingDescriptionSaveRef.current = draft;
       return;
     }
-    persistDescriptionSave(draft, descriptionRevisionRef.current);
+    persistDescriptionSave(draft);
   };
 
   const sidebarContent = (
@@ -2865,13 +2859,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   if (trimmed && trimmed !== issue.title) {
                     handleUpdateField({
                       title: trimmed,
-                      expected_revision: titleRevisionRef.current,
+                      title_base: titleBaseRef.current,
                     }, {
-                      onSuccess: () => {
+                      onSuccess: (serverIssue) => {
                         setTitleConflictDraft(null);
-                        if (titleRevisionRef.current !== undefined) {
-                          titleRevisionRef.current += 1;
-                        }
+                        titleBaseRef.current = serverIssue.title;
                       },
                       onError: (error) => {
                         if (errorCode(error) === "revision_conflict") {
@@ -2893,13 +2885,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 // A drag-selection (copying the title) must not summon the editor.
                 const sel = window.getSelection();
                 if (sel && !sel.isCollapsed) return;
-                titleRevisionRef.current = issue.revision;
+                titleBaseRef.current = issue.title;
                 titleLazy.activate({ x: e.clientX, y: e.clientY });
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
-                  titleRevisionRef.current = issue.revision;
+                  titleBaseRef.current = issue.title;
                   titleLazy.activate();
                 }
               }}
@@ -2924,12 +2916,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                     const draft = titleConflictDraft.trim();
                     if (!draft) return;
                     handleUpdateField(
-                      { title: draft, expected_revision: issue.revision },
+                      { title: draft, title_base: issue.title },
                       {
-                        onSuccess: () => {
+                        onSuccess: (serverIssue) => {
                           setTitleConflictDraft(null);
-                          titleRevisionRef.current =
-                            issue.revision === undefined ? undefined : issue.revision + 1;
+                          titleBaseRef.current = serverIssue.title;
                         },
                       },
                     );
@@ -2976,7 +2967,6 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             onFocusCapture={() => {
               if (!descriptionEditingRef.current) {
                 descriptionEditingRef.current = true;
-                descriptionRevisionRef.current = issue.revision;
               }
             }}
             onBlurCapture={(event) => {
@@ -3049,13 +3039,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                             descriptionAttachmentIdsRef.current.length > 0
                               ? descriptionAttachmentIdsRef.current
                               : undefined,
-                          expected_revision: issue.revision,
                         },
                         {
                           onSuccess: () => {
                             setDescriptionConflictDraft(null);
-                            descriptionRevisionRef.current =
-                              issue.revision === undefined ? undefined : issue.revision + 1;
                           },
                         },
                       );

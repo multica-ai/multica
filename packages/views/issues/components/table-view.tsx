@@ -1108,12 +1108,7 @@ function IssueTableBodyCell({
   const setEditorOpen = (open: boolean) =>
     meta.setEditingCellKey(open ? cellKey : null);
   const onUpdate = (updates: Partial<UpdateIssueRequest>) =>
-    meta.updateIssue(issue.id, {
-      ...updates,
-      ...(updates.expected_revision === undefined && issue.revision !== undefined
-        ? { expected_revision: issue.revision }
-        : {}),
-    });
+    meta.updateIssue(issue.id, updates);
 
   const propertyId = propertyIdFromViewKey(key);
   if (propertyId) {

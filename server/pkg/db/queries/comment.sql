@@ -487,6 +487,11 @@ UPDATE comment SET
     updated_at = CASE WHEN ROW(content, source_task_id) IS DISTINCT FROM ROW($2, sqlc.narg(source_task_id)) THEN now() ELSE updated_at END
 WHERE id = $1
   AND (sqlc.narg('expected_revision')::bigint IS NULL OR revision = sqlc.narg('expected_revision')::bigint)
+  AND (
+    sqlc.narg('content_base')::text IS NULL
+    OR content IS NOT DISTINCT FROM sqlc.narg('content_base')::text
+    OR content IS NOT DISTINCT FROM $2
+  )
 RETURNING *;
 
 -- name: BumpCommentRevision :one

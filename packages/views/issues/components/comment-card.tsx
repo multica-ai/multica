@@ -109,7 +109,7 @@ interface CommentCardProps {
   canModerate?: boolean;
   onReply: (parentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
   onReplyAccepted?: (commentId: string) => void;
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], expectedRevision?: number) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   /** Resolve/unresolve any comment in this thread (commentId = the target row). */
@@ -305,15 +305,13 @@ function TaskCommentRetryButton({
 function useEditAttachmentState(
   issueId: string,
   entry: TimelineEntry,
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], expectedRevision?: number) => Promise<void>,
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>,
 ) {
   const { t } = useT("issues");
   const { t: tEditor } = useT("editor");
   const [editing, setEditing] = useState(false);
   const [initialValue, setInitialValue] = useState(entry.content ?? "");
-  const [initialRevision, setInitialRevision] = useState<number | undefined>(
-    entry.revision,
-  );
+  const [initialContentBase, setInitialContentBase] = useState(entry.content ?? "");
   const [revisionConflict, setRevisionConflict] = useState(false);
   const editorRef = useRef<ContentEditorRef>(null);
   // Saving mid-upload would persist the edit without the file the user just
@@ -346,8 +344,8 @@ function useEditAttachmentState(
     setSuppressedAgentIds(new Set());
   }, [issueId, entry.id, entry.parent_id]);
   useEffect(() => {
-    if (revisionConflict) setInitialRevision(entry.revision);
-  }, [entry.revision, revisionConflict]);
+    if (revisionConflict) setInitialContentBase(entry.content ?? "");
+  }, [entry.content, revisionConflict]);
 
   const { isDragOver, dropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => editorRef.current?.uploadFile(f)),
@@ -393,7 +391,7 @@ function useEditAttachmentState(
     cancelledRef.current = false;
     const draft = getDraft(draftKey) ?? entry.content ?? "";
     setInitialValue(draft);
-    setInitialRevision(entry.revision);
+    setInitialContentBase(entry.content ?? "");
     setContent(draft);
     setRetainedStandaloneIds(initialStandaloneAttachmentIds(entry));
     setEditing(true);
@@ -452,7 +450,7 @@ function useEditAttachmentState(
           trimmed,
           activeIds,
           suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-          initialRevision,
+          initialContentBase,
         );
         setRevisionConflict(false);
         return true;
@@ -564,7 +562,7 @@ function CommentRow({
   isResolution?: boolean;
   /** True when this row is the deep-link target currently being highlighted. */
   isHighlighted?: boolean;
-  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], expectedRevision?: number) => Promise<void>;
+  onEdit: (commentId: string, content: string, attachmentIds: string[], suppressAgentIds?: string[], contentBase?: string) => Promise<void>;
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;

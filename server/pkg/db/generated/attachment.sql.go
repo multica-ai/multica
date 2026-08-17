@@ -411,7 +411,8 @@ WITH linked AS (
   RETURNING attachment.issue_id
 ), bumped_issue AS (
   UPDATE issue
-  SET revision = revision + 1
+  SET revision = revision + 1,
+      updated_at = now()
   WHERE id = $1
     AND $4::boolean
     AND EXISTS (SELECT 1 FROM linked)
@@ -766,6 +767,43 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockAttachmentsForIssueLink = `-- name: LockAttachmentsForIssueLink :many
+SELECT id FROM attachment
+WHERE workspace_id = $1
+  AND issue_id IS NULL
+  AND id = ANY($2::uuid[])
+ORDER BY id
+FOR UPDATE
+`
+
+type LockAttachmentsForIssueLinkParams struct {
+	WorkspaceID   pgtype.UUID   `json:"workspace_id"`
+	AttachmentIds []pgtype.UUID `json:"attachment_ids"`
+}
+
+// Issue updates bind attachments and then touch the owner row. Lock eligible
+// attachment rows first so every attachment -> issue mutation uses the same
+// lock order as DeleteAttachment and cannot deadlock with it.
+func (q *Queries) LockAttachmentsForIssueLink(ctx context.Context, arg LockAttachmentsForIssueLinkParams) ([]pgtype.UUID, error) {
+	rows, err := q.db.Query(ctx, lockAttachmentsForIssueLink, arg.WorkspaceID, arg.AttachmentIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []pgtype.UUID{}
+	for rows.Next() {
+		var id pgtype.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

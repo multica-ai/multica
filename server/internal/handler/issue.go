@@ -152,12 +152,12 @@ var errIssueStatusArchivedRace = errors.New("issue status was archived while the
 // 400 — but an archive can commit between that pre-flight check and the write.
 // Re-checking here, under the lock, means the status is provably active at the
 // moment the row is written. ArchiveIssueStatus holds the EXCLUSIVE side around
-// its in-use census, so the two orderings are both covered:
+// retirement, so the two orderings are both covered:
 //
 //   - archive first: it commits, this re-resolve then fails and the write is
-//     rejected, so no issue is stranded on an archived status;
-//   - writer first: the census blocks until this transaction commits, then sees
-//     the issue and refuses the archive with a conflict.
+//     rejected, so no new assignment lands on an archived status;
+//   - writer first: archive blocks until this transaction commits, then retires
+//     the status from future use while the issue keeps its existing assignment.
 //
 // A built-in status is a no-op: it can never be archived (enforced by
 // issue_status_system_not_archivable), so the common path takes no lock and
@@ -2994,7 +2994,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 type UpdateIssueRequest struct {
 	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
 	Title            *string `json:"title"`
-	Description      *string `json:"description"`
+	// TitleBase is the title adopted by the editor before producing Title. It
+	// protects title edits without coupling them to unrelated issue mutations.
+	TitleBase   *string `json:"title_base,omitempty"`
+	Description *string `json:"description"`
 	// DescriptionBase is the authoritative Markdown the editor had adopted
 	// before producing Description. It lets the server preserve channel media
 	// that landed asynchronously after that base without making media already
@@ -3106,60 +3109,102 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 	}
 }
 
-func (h *Handler) updateIssueWithDescriptionMerge(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, base *string, statusKey string) (db.Issue, db.Issue, error) {
+var errIssueFieldConflict = errors.New("issue text field conflict")
+
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
-		return db.Issue{}, db.Issue{}, errors.New("issue description update requires transaction starter")
+		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("begin issue description update: %w", err)
+		return db.Issue{}, db.Issue{}, false, fmt.Errorf("begin atomic issue update: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
 	qtx := h.Queries.WithTx(tx)
 	// This path opens its own transaction, so it carries the archive-race guard
-	// itself rather than going through runWithIssueStatusGuard. Taken before the
-	// row lock below to keep the global catalog-then-row lock order. (MUL-6243)
+	// itself rather than going through runWithIssueStatusGuard. The catalog lock
+	// must precede both attachment and issue row locks everywhere. (MUL-6243)
 	if err := assertIssueStatusStillActive(ctx, qtx, workspaceID, statusKey); err != nil {
-		return db.Issue{}, db.Issue{}, err
+		return db.Issue{}, db.Issue{}, false, err
+	}
+	if len(attachmentIDs) > 0 {
+		if _, err := qtx.LockAttachmentsForIssueLink(ctx, db.LockAttachmentsForIssueLinkParams{
+			WorkspaceID:   workspaceID,
+			AttachmentIds: attachmentIDs,
+		}); err != nil {
+			return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue attachments: %w", err)
+		}
 	}
 	current, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
 		ID:          params.ID,
 		WorkspaceID: workspaceID,
 	})
 	if err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("lock issue description: %w", err)
-	}
-	attachments, err := qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
-		IssueID:     current.ID,
-		WorkspaceID: current.WorkspaceID,
-	})
-	if err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("list issue attachments for description merge: %w", err)
+		return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue for update: %w", err)
 	}
 
-	currentDescription := ""
-	if current.Description.Valid {
-		currentDescription = current.Description.String
+	if params.Title.Valid && titleBase != nil && current.Title != *titleBase && current.Title != params.Title.String {
+		return db.Issue{}, current, false, errIssueFieldConflict
 	}
-	incomingDescription := ""
+
 	if params.Description.Valid {
-		incomingDescription = params.Description.String
-	}
-	params.Description = pgtype.Text{
-		String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, base, attachments),
-		Valid:  true,
+		attachments, listErr := qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
+			IssueID:     current.ID,
+			WorkspaceID: current.WorkspaceID,
+		})
+		if listErr != nil {
+			return db.Issue{}, current, false, fmt.Errorf("list issue attachments for description merge: %w", listErr)
+		}
+		currentDescription := ""
+		if current.Description.Valid {
+			currentDescription = current.Description.String
+		}
+		incomingDescription := params.Description.String
+		if descriptionBase != nil && currentDescription != *descriptionBase && currentDescription != incomingDescription {
+			baseWithLateMedia := mergeIssueChannelMediaDescription(currentDescription, *descriptionBase, descriptionBase, attachments)
+			if currentDescription != baseWithLateMedia {
+				return db.Issue{}, current, false, errIssueFieldConflict
+			}
+		}
+		params.Description = pgtype.Text{
+			String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, descriptionBase, attachments),
+			Valid:  true,
+		}
 	}
 	refreshUntouchedNullableIssueParams(&params, current, rawFields)
 
 	issue, err := qtx.UpdateIssue(ctx, params)
 	if err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("update locked issue description: %w", err)
+		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
+	}
+
+	attachmentsChanged := false
+	if len(attachmentIDs) > 0 {
+		linked, linkErr := qtx.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
+			IssueID:       issue.ID,
+			WorkspaceID:   issue.WorkspaceID,
+			AttachmentIds: attachmentIDs,
+			BumpRevision:  issue.Revision == current.Revision,
+		})
+		if linkErr != nil {
+			return db.Issue{}, current, false, fmt.Errorf("link issue attachments: %w", linkErr)
+		}
+		attachmentsChanged = linked.LinkedCount > 0
+		if linked.IssueRevision > 0 {
+			issue, err = qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+				ID:          issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				return db.Issue{}, current, false, fmt.Errorf("reload issue after attachment link: %w", err)
+			}
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("commit issue description update: %w", err)
+		return db.Issue{}, current, false, fmt.Errorf("commit atomic issue update: %w", err)
 	}
-	return issue, current, nil
+	return issue, current, attachmentsChanged, nil
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -3375,12 +3420,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var issue db.Issue
-	if req.Description != nil {
+	attachmentsChanged := false
+	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
-		issue, lockedPrev, err = h.updateIssueWithDescriptionMerge(
-			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.DescriptionBase, statusKeyForGuard,
+		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
 		)
-		if err == nil {
+		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
 		}
 	} else {
@@ -3392,6 +3438,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 	if err != nil {
 		if writeIssueStatusRaceError(w, err) {
+			return
+		}
+		if errors.Is(err, errIssueFieldConflict) {
+			writeEditConflict(w, "issue", prevIssue.ID)
 			return
 		}
 		if errors.Is(err, pgx.ErrNoRows) && req.ExpectedRevision != nil {
@@ -3408,21 +3458,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	// Determine actor identity: agent (via X-Agent-ID header) or member.
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
-	attachmentsChanged := false
-	if len(attachmentIDs) > 0 {
-		linked, linkErr := h.linkAttachmentsByIssueIDs(
-			r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs, issue.Revision == prevIssue.Revision,
-		)
-		if linkErr != nil {
-			slog.Warn("link issue attachments failed", append(logger.RequestAttrs(r), "error", linkErr, "issue_id", id, "workspace_id", workspaceID)...)
-		} else if linked.LinkedCount > 0 {
-			attachmentsChanged = true
-			if linked.IssueRevision > 0 {
-				issue.Revision = linked.IssueRevision
-			}
-		}
-	}
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
@@ -4039,8 +4074,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// Preserve every marked channel-media block conservatively, matching
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
-			issue, lockedPrev, err = h.updateIssueWithDescriptionMerge(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, batchStatusKey,
+			issue, lockedPrev, _, err = h.updateIssueAtomically(
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey,
 			)
 			if err == nil {
 				prevIssue = lockedPrev

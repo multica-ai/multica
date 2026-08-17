@@ -163,9 +163,6 @@ export function RunConfirmModal({
         await updateIssue.mutateAsync({
           id: issueIds[0]!,
           ...payload,
-          ...(d.issueRevision !== undefined
-            ? { expected_revision: d.issueRevision }
-            : {}),
         });
       } else {
         await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });

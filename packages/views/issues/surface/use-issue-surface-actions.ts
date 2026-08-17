@@ -25,7 +25,6 @@ export type MoveIssueUpdates = Pick<
   | "position"
   | "parent_issue_id"
   | "project_id"
-  | "expected_revision"
 > & {
   before_id: string | null;
   after_id: string | null;
@@ -61,7 +60,7 @@ export function useIssueSurfaceActions({
       updateIssueMutation.mutate(
         { id: issueId, ...updates },
         {
-          onSuccess: () => options?.onSuccess?.(),
+          onSuccess: (issue) => options?.onSuccess?.(issue),
           onError: (err) => {
             toast.error(
               errorCode(err) === "revision_conflict"

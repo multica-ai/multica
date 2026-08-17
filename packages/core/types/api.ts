@@ -23,9 +23,12 @@ export interface CreateIssueRequest {
 }
 
 export interface UpdateIssueRequest {
-  /** Revision captured when the editor or move gesture started. */
+  /** Legacy aggregate compare-and-swap token. New text editors use field
+   * baselines so unrelated issue activity does not reject their edits. */
   expected_revision?: number;
   title?: string;
+  /** Authoritative title the editor adopted before producing this update. */
+  title_base?: string;
   description?: string;
   /** Authoritative description the editor had adopted before producing this
    * update. The server uses it to merge channel media that landed meanwhile. */
@@ -68,7 +71,6 @@ export interface MoveIssueRequest
     | "assignee_id"
     | "parent_issue_id"
     | "project_id"
-    | "expected_revision"
   > {
   before_id: string | null;
   after_id: string | null;

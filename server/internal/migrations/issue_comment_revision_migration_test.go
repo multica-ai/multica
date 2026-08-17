@@ -51,7 +51,7 @@ func TestIssueCommentRevisionMigrationUpDownPreservesData(t *testing.T) {
 		t.Fatalf("create pre-migration fixtures: %v", err)
 	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "327_issue_comment_revision.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "351_issue_comment_revision.up.sql")
 	assertRevisionColumn(t, ctx, conn.Conn(), "issue")
 	assertRevisionColumn(t, ctx, conn.Conn(), "comment")
 	assertRevisionValues(t, ctx, conn.Conn(), 1, 1)
@@ -64,7 +64,7 @@ func TestIssueCommentRevisionMigrationUpDownPreservesData(t *testing.T) {
 	}
 	assertRevisionValues(t, ctx, conn.Conn(), 2, 2)
 
-	applyMigrationFile(t, ctx, conn.Conn(), "327_issue_comment_revision.down.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "351_issue_comment_revision.down.sql")
 	assertRevisionColumnMissing(t, ctx, conn.Conn(), "issue")
 	assertRevisionColumnMissing(t, ctx, conn.Conn(), "comment")
 
@@ -76,7 +76,7 @@ func TestIssueCommentRevisionMigrationUpDownPreservesData(t *testing.T) {
 		t.Fatalf("row counts after down migration = (%d, %d), want (2, 2)", issueCount, commentCount)
 	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "327_issue_comment_revision.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "351_issue_comment_revision.up.sql")
 	assertRevisionValues(t, ctx, conn.Conn(), 2, 2)
 }
 

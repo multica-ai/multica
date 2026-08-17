@@ -147,6 +147,17 @@ SELECT * FROM attachment
 WHERE chat_message_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC;
 
+-- name: LockAttachmentsForIssueLink :many
+-- Issue updates bind attachments and then touch the owner row. Lock eligible
+-- attachment rows first so every attachment -> issue mutation uses the same
+-- lock order as DeleteAttachment and cannot deadlock with it.
+SELECT id FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND issue_id IS NULL
+  AND id = ANY(sqlc.arg(attachment_ids)::uuid[])
+ORDER BY id
+FOR UPDATE;
+
 -- name: LinkAttachmentsToIssue :one
 WITH linked AS (
   UPDATE attachment
@@ -157,7 +168,8 @@ WITH linked AS (
   RETURNING attachment.issue_id
 ), bumped_issue AS (
   UPDATE issue
-  SET revision = revision + 1
+  SET revision = revision + 1,
+      updated_at = now()
   WHERE id = sqlc.arg(issue_id)
     AND sqlc.arg(bump_revision)::boolean
     AND EXISTS (SELECT 1 FROM linked)

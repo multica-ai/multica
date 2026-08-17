@@ -17,7 +17,7 @@ import {
   issueKeys,
   type IssueSortParam,
 } from "./queries";
-import { onIssueUpdated } from "./ws-updaters";
+import { onIssueUpdated, onIssueAuxiliaryRevision } from "./ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import type {
   InboxItem,
@@ -184,7 +184,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     }
   });
 
-  it("uses the cached revision when the caller does not provide one", async () => {
+  it("does not couple a field update to the cached aggregate revision", async () => {
     qc.setQueryData(
       issueKeys.detail(WS_ID, "issue-1"),
       makeIssue(1, { revision: 6 }),
@@ -200,7 +200,6 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     expect(updateIssue).toHaveBeenCalledWith("issue-1", {
       title: "Renamed",
-      expected_revision: 6,
     });
   });
 
@@ -235,6 +234,36 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
       title: "newer remote",
       revision: 3,
     });
+  });
+
+  it("keeps a full response admissible after a newer revision-only response", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((done) => {
+        resolve = done;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(detailKey, makeIssue(1, { title: "A", revision: 1 }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", title: "local" });
+    });
+    await waitFor(() => expect(updateIssue).toHaveBeenCalled());
+    onIssueAuxiliaryRevision(qc, WS_ID, "issue-1", 3);
+
+    await act(async () => {
+      resolve(makeIssue(1, { title: "B", revision: 2 }));
+    });
+
+    expect(qc.getQueryData<Issue>(detailKey)).toMatchObject({
+      title: "B",
+      revision: 2,
+    });
+    expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
   });
 
   it("keeps the authoritative description base while a description update is pending", async () => {

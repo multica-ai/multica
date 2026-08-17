@@ -1,34 +1,23 @@
-import type { TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { TimelineEntry } from "@multica/core/types";
 
-export function withCachedIssueRevision(
-  patch: UpdateIssueRequest,
-  cachedRevision: number | undefined,
-): UpdateIssueRequest {
-  return patch.expected_revision === undefined && cachedRevision !== undefined
-    ? { ...patch, expected_revision: cachedRevision }
-    : patch;
-}
-
-export function commentRevisionFromTimeline(
+export function commentContentFromTimeline(
   timeline: TimelineEntry[] | undefined,
   commentId: string,
-): number | undefined {
+): string | undefined {
   return timeline?.find(
     (entry) => entry.type === "comment" && entry.id === commentId,
-  )?.revision;
+  )?.content;
 }
 
 export function buildCommentUpdateBody(
   content: string,
   attachmentIds: string[] | undefined,
-  expectedRevision: number | undefined,
+  contentBase: string | undefined,
 ) {
   return {
     content,
     ...(attachmentIds ? { attachment_ids: attachmentIds } : {}),
-    ...(expectedRevision !== undefined
-      ? { expected_revision: expectedRevision }
-      : {}),
+    ...(contentBase !== undefined ? { content_base: contentBase } : {}),
   };
 }
 

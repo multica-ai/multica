@@ -73,7 +73,6 @@ describe.each([
     expectedMutation: {
       id: "selected-1",
       parent_issue_id: "issue-1",
-      expected_revision: 5,
     },
   },
   {
@@ -82,7 +81,6 @@ describe.each([
     expectedMutation: {
       id: "issue-1",
       parent_issue_id: "selected-1",
-      expected_revision: 7,
     },
   },
 ])("$name", ({ Component, expectedMutation }) => {
@@ -90,7 +88,7 @@ describe.each([
     vi.clearAllMocks();
   });
 
-  it("shows success only after the CAS mutation succeeds", () => {
+  it("shows success only after the mutation succeeds", () => {
     mocks.mutate.mockImplementation((_variables, callbacks) => {
       callbacks.onSuccess();
     });
@@ -109,7 +107,7 @@ describe.each([
     expect(mocks.toast.error).not.toHaveBeenCalled();
   });
 
-  it("does not report success when the CAS mutation fails", () => {
+  it("does not report success when the mutation fails", () => {
     mocks.mutate.mockImplementation((_variables, callbacks) => {
       callbacks.onError(new Error("revision conflict"));
     });

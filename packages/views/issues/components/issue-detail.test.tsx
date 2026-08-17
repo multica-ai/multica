@@ -1641,7 +1641,7 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
-  it("keeps a description draft visible when its captured revision conflicts", async () => {
+  it("keeps a description draft visible when its captured content conflicts", async () => {
     mockApiObj.updateIssue.mockRejectedValueOnce({
       body: { code: "revision_conflict" },
     });
@@ -1656,7 +1656,7 @@ describe("IssueDetail (shared)", () => {
         "issue-1",
         expect.objectContaining({
           description: "My local description",
-          expected_revision: 3,
+          description_base: "Add JWT auth to the backend",
         }),
       ),
     );
@@ -1667,7 +1667,7 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("My local description")).toBeVisible();
   });
 
-  it("serializes description saves and advances the queued draft revision", async () => {
+  it("serializes description saves and rebases the queued draft on submitted content", async () => {
     let resolveFirst!: (issue: Issue) => void;
     const firstSave = new Promise<Issue>((resolve) => {
       resolveFirst = resolve;
@@ -1699,7 +1699,7 @@ describe("IssueDetail (shared)", () => {
       "issue-1",
       expect.objectContaining({
         description: "Second local description",
-        expected_revision: 4,
+        description_base: "First local description",
       }),
     );
   });
@@ -1778,7 +1778,7 @@ describe("IssueDetail (shared)", () => {
     expect(mockApiObj.updateIssue).toHaveBeenNthCalledWith(
       2,
       "issue-2",
-      expect.objectContaining({ expected_revision: 8 }),
+      expect.objectContaining({ description_base: "Second issue description" }),
     );
 
     await act(async () => {
@@ -1790,7 +1790,7 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("Issue two draft")).toBeVisible();
   });
 
-  it("keeps a title draft visible when its captured revision conflicts", async () => {
+  it("keeps a title draft visible when its captured content conflicts", async () => {
     mockApiObj.updateIssue.mockRejectedValueOnce({
       body: { code: "revision_conflict" },
     });
@@ -1806,7 +1806,7 @@ describe("IssueDetail (shared)", () => {
         "issue-1",
         expect.objectContaining({
           title: "My local title",
-          expected_revision: 3,
+          title_base: "Implement authentication",
         }),
       ),
     );
