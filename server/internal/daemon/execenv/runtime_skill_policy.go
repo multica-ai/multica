@@ -31,7 +31,11 @@ func cleanRuntimeSkillKey(key string) (string, bool) {
 
 func prepareClaudeSkillSettings(envRoot string, disabled []RuntimeSkillRefForEnv, workspaceSkills []SkillContextForEnv) (string, error) {
 	path := filepath.Join(envRoot, claudeRuntimeSkillSettingsFile)
-	if len(disabled) == 0 {
+	bundle, err := loadAgentSecurityBundle()
+	if err != nil {
+		return "", err
+	}
+	if len(disabled) == 0 && bundle == nil {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
@@ -71,7 +75,7 @@ func prepareClaudeSkillSettings(envRoot string, disabled []RuntimeSkillRefForEnv
 		addDeny("Skill(" + invocationName + ")")
 		addDeny("Skill(" + invocationName + " *)")
 	}
-	if len(overrides) == 0 && len(deny) == 0 {
+	if len(overrides) == 0 && len(deny) == 0 && bundle == nil {
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 			return "", err
 		}
@@ -82,6 +86,22 @@ func prepareClaudeSkillSettings(envRoot string, disabled []RuntimeSkillRefForEnv
 		"permissions": map[string]any{
 			"deny": deny,
 		},
+	}
+	if bundle != nil {
+		for key, value := range bundle.Claude {
+			if key == "permissions" {
+				securityPermissions, _ := value.(map[string]any)
+				securityDeny, _ := securityPermissions["deny"].([]any)
+				for _, rule := range securityDeny {
+					if text, ok := rule.(string); ok {
+						addDeny(text)
+					}
+				}
+				payload["permissions"] = map[string]any{"deny": deny}
+				continue
+			}
+			payload[key] = value
+		}
 	}
 	data, err := json.Marshal(payload)
 	if err != nil {

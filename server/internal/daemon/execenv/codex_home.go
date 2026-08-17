@@ -285,8 +285,16 @@ func prepareCodexHomeWithOpts(codexHome string, opts CodexHomeOptions, logger *s
 	if resolveGOOS(opts.GOOS) == "windows" {
 		winState = resolveWindowsSandboxState(configFile, configSyncErr, statSharedCodexConfig(sharedHome), opts.CodexCustomArgs, logger)
 	}
+	bundle, bundleErr := loadAgentSecurityBundle()
+	if bundleErr != nil {
+		return fmt.Errorf("load agent security bundle: %w", bundleErr)
+	}
 	policy := codexSandboxPolicyForConfig(opts.GOOS, opts.CodexVersion, winState)
-	if err := ensureCodexSandboxConfig(configFile, policy, opts.CodexVersion, logger); err != nil {
+	if bundle != nil {
+		if err := applyCodexAgentSecurityBundle(configFile, bundle); err != nil {
+			return fmt.Errorf("apply agent security bundle: %w", err)
+		}
+	} else if err := ensureCodexSandboxConfig(configFile, policy, opts.CodexVersion, logger); err != nil {
 		// The managed block is the authoritative on-disk sandbox policy. If it
 		// can't be written, config.toml keeps whatever it already had — on a
 		// reused home that may be a stale danger-full-access from a prior run —
