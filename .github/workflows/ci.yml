@@ -11,12 +11,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Decides whether the (heavy, ~6min) frontend job has anything to do.
-  # The frontend job validates the web/desktop apps, the shared packages,
-  # the install graph, and the selfhost / reserved-slugs scripts it runs;
-  # a pure backend-only or docs-only PR touches none of those and gains
-  # nothing from a full web build. This job emits a single `frontend`
-  # output consumed by the frontend job below.
+  # Decides whether the heavy validation jobs have anything to do. The
+  # frontend jobs validate the web/desktop apps, the shared packages, the
+  # install graph, and the selfhost / reserved-slugs scripts they run; the
+  # backend job validates the Go server, its test wrapper scripts, and the
+  # Helm chart. A pure backend-only or docs-only PR gains nothing from a
+  # full web build, and a pure frontend-only or docs-only PR gains nothing
+  # from a ~5min race-enabled Go suite. This job emits one output per side,
+  # consumed by the jobs below.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -24,6 +26,7 @@ jobs:
       pull-requests: read
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
+      backend: ${{ steps.decide.outputs.backend }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -66,23 +69,46 @@ jobs:
               - 'docker-compose.selfhost.yml'
               - 'docker-compose.selfhost.build.yml'
               - 'Makefile'
+            # Everything backend-test executes or reads: the Go module
+            # (go.mod / go.sum / migrations live under server/), the
+            # test-go wrapper plus its guard and CLI-name list under
+            # scripts/, and the Helm chart that helm-config.test.sh
+            # renders. scripts/** deliberately over-matches (installer or
+            # selfhost script edits re-run the Go suite needlessly) for
+            # the same reason as the frontend list: a missed path silently
+            # skips validation. windows-execenv is intentionally NOT gated
+            # on this output yet; it keeps running unconditionally.
+            backend:
+              - 'server/**'
+              - 'scripts/**'
+              - 'deploy/**'
+              - '.github/workflows/ci.yml'
 
       - name: Decide
         id: decide
-        # Always run the frontend job on push to main (full validation);
-        # on pull_request, run only when frontend-relevant paths changed.
-        # The frontend job itself always runs and reports success — its
-        # steps are gated on this output rather than the job being skipped
-        # — so the required "frontend" status check is satisfied with a
-        # genuine green instead of being left pending on filtered PRs.
+        # Always run everything on push to main (full validation); on
+        # pull_request, run only the sides whose paths changed. The
+        # frontend jobs always run and report success — their steps are
+        # gated on this output rather than the jobs being skipped — so the
+        # required "frontend" status check is satisfied with a genuine
+        # green instead of being left pending on filtered PRs. The backend
+        # side can't afford that trick (its service containers boot before
+        # step conditions are evaluated), so backend-test skips at the job
+        # level and the "backend" gate below supplies the genuine green.
         env:
           EVENT_NAME: ${{ github.event_name }}
           FRONTEND_CHANGED: ${{ steps.filter.outputs.frontend }}
+          BACKEND_CHANGED: ${{ steps.filter.outputs.backend }}
         run: |
           if [ "$EVENT_NAME" != "pull_request" ] || [ "$FRONTEND_CHANGED" = "true" ]; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
           else
             echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$BACKEND_CHANGED" = "true" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
           fi
 
   # The frontend validation is split across two runners on purpose. Both
@@ -148,6 +174,26 @@ jobs:
           restore-keys: |
             turbo-build-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
 
+      # Webpack's persistent cache lives in .next/cache, which turbo's
+      # outputs deliberately exclude (a replayed turbo archive must be the
+      # exact build output, nothing more). Without restoring it separately,
+      # every web:build that misses the turbo cache pays a full cold
+      # compile — ~2.6min of the job's ~4min on a 4 vCPU runner (run
+      # 30887181748). With it restored, webpack recompiles only modules
+      # whose inputs changed. Key strategy matches the turbo caches
+      # (immutable per-SHA entries, most-recent prefix fallback); the
+      # lockfile hash starts a fresh lineage when dependencies move, since
+      # webpack invalidates dependency-derived entries itself and a
+      # crossing restore would be pure dead weight.
+      - name: Restore Next.js build cache
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/cache@v6
+        with:
+          path: apps/web/.next/cache
+          key: nextjs-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-${{ hashFiles('pnpm-lock.yaml') }}-${{ github.sha }}
+          restore-keys: |
+            nextjs-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-${{ hashFiles('pnpm-lock.yaml') }}-
+
       - name: Test self-host env derivation
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
@@ -175,9 +221,37 @@ jobs:
         # exclude @multica/mobile.
         run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
 
+  # The test half is itself sharded: @multica/views alone is ~300 jsdom
+  # files / ~3500 tests and ~1000 CPU-seconds (measured in run
+  # 30887181748 — about 2/3 of that is per-file jsdom + import-graph
+  # overhead, not assertions), so as a single turbo task it pins this
+  # job at ~6min of wall clock that no amount of runner parallelism can
+  # touch. vitest
+  # --shard partitions the suite by file across three runners (~2min
+  # each); every other package's suite fits comfortably in the fourth
+  # leg. Each shard is its own turbo task (see turbo.json) so an
+  # untouched shard still replays from cache, and its own actions/cache
+  # lineage so concurrent legs don't race to save one key. Shard count
+  # lives in three places that must stay in sync: this matrix, the
+  # test:shard-* scripts in packages/views/package.json, and the task
+  # entries in turbo.json.
   frontend-test:
     needs: changes
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: packages
+            run: >-
+              pnpm exec turbo test --filter='!@multica/docs'
+              --filter='!@multica/mobile' --filter='!@multica/views'
+          - group: views-1
+            run: pnpm exec turbo test:shard-1 --filter=@multica/views
+          - group: views-2
+            run: pnpm exec turbo test:shard-2 --filter=@multica/views
+          - group: views-3
+            run: pnpm exec turbo test:shard-3 --filter=@multica/views
     env:
       TURBO_CACHE_DIR: .turbo/cache
     steps:
@@ -208,15 +282,18 @@ jobs:
       # See frontend-build for the key strategy. These entries are tiny (~60KB
       # measured): `test` declares no outputs, so turbo caches exit codes and
       # logs rather than artifacts -- yet a hit still skips the whole suite,
-      # which is the single most expensive task in the graph.
+      # which is the single most expensive task in the graph. The matrix
+      # group in the key gives each leg its own lineage; a shared key would
+      # make the four concurrent saves race and three of them lose their
+      # results every run.
       - name: Restore turbo cache
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         uses: actions/cache@v6
         with:
           path: .turbo/cache
-          key: turbo-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-${{ github.sha }}
+          key: turbo-test-${{ matrix.group }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-${{ github.sha }}
           restore-keys: |
-            turbo-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
+            turbo-test-${{ matrix.group }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
 
       - name: Test
         if: ${{ needs.changes.outputs.frontend == 'true' }}
@@ -224,7 +301,7 @@ jobs:
         # job's responsibility -- frontend-build owns the `typecheck` task.
         # `test` reaches dependency sources through the hash-only
         # `^cache-inputs` edge (see turbo.json), so no `tsc` runs here.
-        run: pnpm exec turbo test --filter='!@multica/docs' --filter='!@multica/mobile'
+        run: ${{ matrix.run }}
 
   # Aggregate gate. `frontend` is the status-check name the repository's
   # branch rules refer to, so it has to survive the split above: this job
@@ -252,7 +329,16 @@ jobs:
             exit 1
           fi
 
-  backend:
+  # Unlike the frontend jobs, this one skips at the JOB level when the
+  # path filter rules it out: its Postgres and Redis service containers
+  # are created before any step condition is evaluated, so step-gating
+  # would still pay image pulls and health checks on every filtered PR.
+  # A skipped job reports no green under the "backend" name, so the
+  # aggregate gate below owns that contract — mirroring how "frontend"
+  # survived the build/test split.
+  backend-test:
+    needs: changes
+    if: ${{ needs.changes.outputs.backend == 'true' }}
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -311,6 +397,42 @@ jobs:
 
       - name: Test
         run: bash scripts/test-go.sh --race
+
+  # Aggregate gate: "backend" is the status-check name the repository's
+  # branch rules refer to, so it must keep reporting green now that the
+  # real work can be skipped by the path filter. Fails closed: a filter
+  # decision that never materialized (changes failed) or a backend-test
+  # in any state other than the one the decision implies is an error,
+  # not a pass.
+  backend:
+    needs: [changes, backend-test]
+    # `!cancelled()` rather than `always()` for the same reason as the
+    # frontend gate; it also lets this job run when backend-test was
+    # skipped by the path filter (a skipped `needs` would otherwise skip
+    # this job too).
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check backend job results
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BACKEND_NEEDED: ${{ needs.changes.outputs.backend }}
+          TEST_RESULT: ${{ needs.backend-test.result }}
+        run: |
+          echo "changes:      $CHANGES_RESULT (backend=$BACKEND_NEEDED)"
+          echo "backend-test: $TEST_RESULT"
+          if [ "$CHANGES_RESULT" != "success" ]; then
+            echo "::error::path-filter job failed, backend validation undetermined"
+            exit 1
+          fi
+          if [ "$BACKEND_NEEDED" = "true" ] && [ "$TEST_RESULT" != "success" ]; then
+            echo "::error::backend validation failed"
+            exit 1
+          fi
+          if [ "$BACKEND_NEEDED" != "true" ] && [ "$TEST_RESULT" != "skipped" ]; then
+            echo "::error::backend-test ran (or failed) despite the filter ruling it out"
+            exit 1
+          fi
 
   windows-execenv:
     # The environment-preparation deadline owns a process tree, not just a Go
