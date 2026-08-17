@@ -191,7 +191,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 
 	dimArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, dimBlockedArgs, b.cfg.Logger)...)
 
-	cmd := exec.CommandContext(runCtx, execPath, dimArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, dimArgs...)
 	hideAgentWindow(cmd)
 	configureProcessGroup(cmd)
 	// Take over context cancellation: the default would SIGKILL only the
