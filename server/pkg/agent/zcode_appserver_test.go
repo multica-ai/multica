@@ -9,7 +9,6 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 )
@@ -64,24 +63,22 @@ func executeFakeZcode(t *testing.T, fakePath string, cfg Config, opts ExecOption
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
-	var mu sync.Mutex
-	var messages []Message
-	go func() {
-		for msg := range session.Messages {
-			mu.Lock()
-			messages = append(messages, msg)
-			mu.Unlock()
-		}
-	}()
+	// The turn goroutine writes messages before the Result, but a drain
+	// goroutine may not have moved them out of the channel buffer yet when the
+	// Result arrives — snapshotting then races (TestZcodeExecuteStreamsToolLifecycle
+	// documents the same trap). Receive the Result first, then drain Messages
+	// synchronously: Execute's goroutine closes the channel after the turn
+	// finishes, so the range terminates.
 	select {
 	case result, ok := <-session.Result:
 		if !ok {
 			t.Fatal("result channel closed without a value")
 		}
-		mu.Lock()
-		collected := append([]Message(nil), messages...)
-		mu.Unlock()
-		return result, collected
+		var messages []Message
+		for msg := range session.Messages {
+			messages = append(messages, msg)
+		}
+		return result, messages
 	case <-time.After(budget):
 		t.Fatal("timeout waiting for result")
 		return Result{}, nil
