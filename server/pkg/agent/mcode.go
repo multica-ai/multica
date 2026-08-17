@@ -89,7 +89,7 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	args := []string{"acp"}
 	args = append(args, filterCustomArgs(opts.ExtraArgs, mcodeBlockedArgs, b.cfg.Logger)...)
 	args = append(args, filterCustomArgs(opts.CustomArgs, mcodeBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error {
