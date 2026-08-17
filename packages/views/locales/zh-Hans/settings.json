@@ -135,7 +135,6 @@
     "fixed": {
       "title": "固定的系统快捷键",
       "description": "窗口和无障碍快捷键保持固定，确保始终可靠。缩放和标签页操作仅适用于桌面端。",
-      "open_settings": "打开设置",
       "close_tab": "关闭当前标签页",
       "zoom_in": "放大",
       "zoom_out": "缩小",

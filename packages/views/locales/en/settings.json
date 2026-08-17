@@ -135,7 +135,6 @@
     "fixed": {
       "title": "Fixed system shortcuts",
       "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
-      "open_settings": "Open Settings",
       "close_tab": "Close active tab",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",

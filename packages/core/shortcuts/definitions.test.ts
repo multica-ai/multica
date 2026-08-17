@@ -184,19 +184,6 @@ describe("keyboard shortcut definitions", () => {
     ).toBe(false);
   });
 
-  it("reserves the preferences chord on every runtime", () => {
-    // Desktop opens Settings from the main process (before-input-event) and
-    // browsers open their own settings, so Mod+, can never be recorded for a
-    // product action.
-    const chord = createShortcutChord(",", { primary: true });
-    expect(isReservedShortcut(chord, "macos", "desktop")).toBe(true);
-    expect(isReservedShortcut(chord, "macos", "web")).toBe(true);
-    expect(isReservedShortcut(chord, "windows", "desktop")).toBe(true);
-    expect(isShortcutAllowedForAction("goSettings", chord, "macos", "desktop")).toBe(false);
-    // Only with the primary modifier — a bare comma stays typeable.
-    expect(isReservedShortcut(createShortcutChord(","), "macos", "desktop")).toBe(false);
-  });
-
   it("reserves browser-owned accelerators on web but frees the bare chords on desktop", () => {
     for (const key of ["P", "L", "T", "N", "D", "U"]) {
       const chord = createShortcutChord(key, { primary: true });
