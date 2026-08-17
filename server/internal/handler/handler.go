@@ -410,6 +410,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		LLM: llmClient,
 		cfg: cfg,
 	}
+	taskSvc.IssueTaskTerminalReconciler = h.reconcileParentAfterChildTaskTerminal
 	h.WebhookDeliveryWorker = NewWebhookDeliveryWorker(h)
 
 	// GitHub API snapshot pipeline for PR cards (MUL-5265). Built

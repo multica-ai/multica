@@ -452,6 +452,18 @@ SELECT EXISTS (
       AND created_at >= @since
 ) AS commented;
 
+-- name: HasSystemCommentForIssueAndSourceTask :one
+-- Recovery notifications are keyed to the terminal task that discovered the
+-- stalled child. Persisting that key on the comment makes reconciliation safe
+-- to replay after duplicate terminal callbacks or a server restart.
+SELECT EXISTS (
+    SELECT 1 FROM comment
+    WHERE issue_id = @issue_id
+      AND workspace_id = @workspace_id
+      AND author_type = 'system'
+      AND source_task_id = @source_task_id
+) AS commented;
+
 -- name: HasAgentRepliedInThread :one
 -- Returns true if the given agent has posted a reply in the thread rooted at
 -- the specified parent comment. Used to detect agent participation in a

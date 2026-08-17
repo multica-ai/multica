@@ -93,6 +93,11 @@ const (
 	chatFinalizeGraceSeconds = 60.0
 	// chatFinalizeBatchSize caps deferred finalizations per tick.
 	chatFinalizeBatchSize = 100
+	// Defaults for the optional stale-stage recovery scan. The threshold is
+	// deliberately discovery-only: it never completes, cancels, or unblocks an
+	// issue. Operators can tune it without changing task semantics.
+	stageRecoveryDefaultThreshold = 15 * time.Minute
+	stageRecoveryDefaultBatchSize = 100
 )
 
 type runtimeGCTxStarter interface {
@@ -113,6 +118,8 @@ type runtimeGCTxStarter interface {
 func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
+	stageRecoveryThreshold := envDurationPositive("MULTICA_STAGE_RECOVERY_THRESHOLD", stageRecoveryDefaultThreshold)
+	stageRecoveryBatchSize := envPositiveInt("MULTICA_STAGE_RECOVERY_BATCH_SIZE", stageRecoveryDefaultBatchSize)
 
 	for {
 		select {
@@ -123,8 +130,29 @@ func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, querie
 			sweepStaleTasks(ctx, queries, taskSvc, bus)
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
+			sweepStalledStageChildren(ctx, queries, taskSvc, stageRecoveryThreshold, stageRecoveryBatchSize)
 			gcRuntimes(ctx, txStarter, queries, taskSvc.Metrics, bus)
 		}
+	}
+}
+
+func sweepStalledStageChildren(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, threshold time.Duration, batchSize int) {
+	if taskSvc == nil || threshold <= 0 || batchSize <= 0 {
+		return
+	}
+	tasks, err := queries.ListStalledStageChildTasks(ctx, db.ListStalledStageChildTasksParams{
+		StaleSecs: threshold.Seconds(),
+		MaxRows:   int32(batchSize),
+	})
+	if err != nil {
+		slog.Warn("stage recovery sweeper: list stalled children failed", "error", err)
+		return
+	}
+	for _, task := range tasks {
+		taskSvc.ReconcileIssueAfterTaskTerminal(ctx, task, task.Status == "failed")
+	}
+	if len(tasks) > 0 {
+		slog.Info("stage recovery sweeper: reconciled stalled children", "count", len(tasks))
 	}
 }
 

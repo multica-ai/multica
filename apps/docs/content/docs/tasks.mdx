@@ -79,6 +79,8 @@ An Autopilot's **run only** mode does not retry automatically, to avoid overlapp
 
 When an issue has no other active task and no new retry waiting to run, a failure moves an `in_progress` issue back to `todo`.
 
+For a sub-issue in the current stage, the same terminal reconciliation also wakes the parent coordinator when the child remains non-terminal with no active task. The recovery notice points to review, unblock, or rerun; it never completes or cancels the child automatically. A configurable periodic scan catches reconciliation events missed during downtime and suppresses duplicate notices across restarts.
+
 ## Failure reason reference
 
 The failure reasons shown in the execution log and usage stats fall into two groups: unprefixed reason codes are recorded by the platform; `agent_error.*` codes are classified from the AI coding tool's own errors.

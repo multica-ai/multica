@@ -132,6 +132,9 @@ and is hidden from the PR list.
 | `StartTask` / `CompleteTask` do not write issue status (agent CLI owns progress) | `server/internal/service/task.go` (`StartTask` / `CompleteTask` comments) | new citation |
 | Assignment brief: ordinary agent `in_progress` then `in_review`; squad leader `in_progress` only on first dispatch | `server/internal/daemon/execenv/runtime_config_sections.go` (`writeWorkflowAssignment`) | new citation |
 | Failed task may roll `in_progress` → `todo` when no active task remains | `server/internal/service/task.go` (`HandleFailedTasks`) | new citation |
+| Terminal issue-task reconciliation and parent recovery callback | `server/internal/service/task.go` (`ReconcileIssueAfterTaskTerminal`); `server/internal/handler/issue_child_done.go` (`reconcileParentAfterChildTaskTerminal`) | WS-18 |
+| Restart-safe recovery dedup by `(issue_id, source_task_id)` | `server/pkg/db/queries/comment.sql` (`HasSystemCommentForIssueAndSourceTask`); `server/migrations/313_system_comment_source_task_unique.up.sql` | WS-18 |
+| Configurable stale-child recovery scan | `server/cmd/server/runtime_sweeper.go` (`sweepStalledStageChildren`); `server/pkg/db/queries/agent.sql` (`ListStalledStageChildTasks`) | WS-18 |
 
 Creation with `--status todo` (or any non-backlog status) on an agent-assigned
 issue fires the agent immediately; `--status backlog` parks it with the assignee
@@ -167,6 +170,7 @@ on those assignments creating their normal queued runs.
 | `issue.stage` column (nullable, `>= 1`) | `server/migrations/123_issue_stage.up.sql` |
 | Stage barrier: notify+wake fire only when the lowest unfinished stage is all-terminal; unstaged set = one implicit stage | `server/internal/handler/issue_child_done.go:231` (`stageBarrierClosed`) |
 | Per-stage summary + next stage for the wake comment | `server/internal/handler/issue_child_done.go:254` (`stageProgressSummary`) |
+| Failed/current-stage child frontier check | `server/internal/handler/issue_child_done.go` (`childHoldsCurrentStageBarrier`) |
 | `--stage` on `issue create` / `issue update` | `server/cmd/multica/cmd_issue.go:328,350` |
 | `multica issue children <id>` (sub-issues grouped by stage) | `server/cmd/multica/cmd_issue.go:114,678`; route `GET /api/issues/{id}/children` → `ListChildIssues` |
 

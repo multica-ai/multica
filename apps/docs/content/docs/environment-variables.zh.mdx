@@ -39,6 +39,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数 |
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
+| `MULTICA_STAGE_RECOVERY_THRESHOLD` | `15m` | 无活动 run 的非终态阶段子任务达到该时长后，服务端重新检查并唤醒父协调器给出恢复指引；仅用于发现，不会自动完成或取消 |
+| `MULTICA_STAGE_RECOVERY_BATCH_SIZE` | `100` | 每 30 秒巡检最多重算的疑似卡住阶段子任务数量 |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 

@@ -42,6 +42,12 @@ type TaskService struct {
 	Analytics analytics.Client
 	Metrics   *obsmetrics.BusinessMetrics
 	Wakeup    TaskWakeupNotifier
+	// IssueTaskTerminalReconciler runs after an issue task reaches a terminal
+	// state and no retry or sibling task remains active. The handler wires the
+	// parent/stage recovery notification here; keeping the callback at this seam
+	// makes direct daemon callbacks and batch sweepers share one reconciliation
+	// path without importing the HTTP handler package into service.
+	IssueTaskTerminalReconciler func(context.Context, db.AgentTaskQueue, db.Issue)
 	// FeatureFlags is the server-side toggle router. Nil is valid and returns
 	// each call site's default.
 	FeatureFlags *featureflag.Service
@@ -2433,6 +2439,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 
 	// Broadcast cancellation as a task:failed event so frontends clear the live card
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	s.ReconcileIssueAfterTaskTerminal(ctx, task, false)
 	s.NotifyTaskFinished(task)
 
 	return &CancelTaskResult{
@@ -3750,6 +3757,7 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 
 	// Broadcast
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCompleted, task)
+	s.ReconcileIssueAfterTaskTerminal(ctx, task, false)
 
 	return &task, nil
 }
@@ -4236,6 +4244,7 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 	// was persisted in the chat transcript. A retry-pending attempt stays silent
 	// because its child reports the eventual terminal outcome.
 	s.broadcastTaskFailedEvent(ctx, task, errMsg, failureReason, retried != nil)
+	s.ReconcileIssueAfterTaskTerminal(ctx, task, retried == nil)
 
 	return &task, nil
 }
@@ -4733,7 +4742,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	}
 
 	affectedAgents := make(map[string]pgtype.UUID)
-	processedIssues := make(map[string]bool)
+	reconcileTasks := make(map[string]db.AgentTaskQueue)
 	retriedIssues := make(map[string]bool)
 	retried := 0
 
@@ -4759,38 +4768,6 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		if t.IssueID.Valid {
 			if issue, err := s.Queries.GetIssue(ctx, t.IssueID); err == nil {
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
-				// Reset stuck in_progress issues only when no other active
-				// task exists for the issue and no retry was just enqueued.
-				issueKey := util.UUIDToString(t.IssueID)
-				if issue.Status == "in_progress" && !processedIssues[issueKey] && !retriedIssues[issueKey] {
-					processedIssues[issueKey] = true
-					hasActive, checkErr := s.Queries.HasActiveTaskForIssue(ctx, t.IssueID)
-					if checkErr != nil {
-						slog.Warn("handle failed tasks: active check failed",
-							"issue_id", issueKey,
-							"error", checkErr,
-						)
-					} else if !hasActive {
-						updatedIssue, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
-							ID:          t.IssueID,
-							Status:      "todo",
-							WorkspaceID: issue.WorkspaceID,
-						})
-						if updateErr != nil {
-							slog.Warn("handle failed tasks: reset stuck issue failed",
-								"issue_id", issueKey,
-								"error", updateErr,
-							)
-						} else {
-							// This direct reset bypasses the HTTP UpdateIssue
-							// handler that normally emits issue:updated, so emit
-							// it here too. Without it the board / status-filter
-							// caches keep showing the issue as in_progress until
-							// the next write touches it (#4648 / MUL-3782).
-							s.broadcastIssueUpdated(updatedIssue, issue.Status)
-						}
-					}
-				}
 			}
 		}
 		if workspaceID == "" {
@@ -4798,6 +4775,9 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 		}
 
 		s.publishTaskFailedEvent(workspaceID, t, t.Error.String, failureReason, retryPending)
+		if t.IssueID.Valid {
+			reconcileTasks[util.UUIDToString(t.IssueID)] = t
+		}
 
 		affectedAgents[util.UUIDToString(t.AgentID)] = t.AgentID
 	}
@@ -4805,8 +4785,73 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, agentID := range affectedAgents {
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
+	// Reconcile each issue only after every failed row in this batch has had a
+	// chance to create its automatic retry. This prevents input order from
+	// transiently resetting or notifying an issue before a later row creates a
+	// retry, and collapses multi-agent failures on one issue to one parent wake.
+	for issueKey, task := range reconcileTasks {
+		s.ReconcileIssueAfterTaskTerminal(ctx, task, !retriedIssues[issueKey])
+	}
 	s.notifyTasksFinished(tasks)
 	return retried
+}
+
+// ReconcileIssueAfterTaskTerminal re-evaluates an issue after one of its runs
+// ends. A failed in_progress issue is rolled back to todo only after every
+// active task (including an automatic retry) is gone. Regardless of status,
+// the handler callback then gets one durable snapshot with which to notify a
+// parent coordinator about a non-terminal child that would otherwise hold its
+// stage barrier forever.
+// It is exported so the periodic stale-child scan can replay the same logic
+// for terminal events missed before deployment or during a server outage.
+func (s *TaskService) ReconcileIssueAfterTaskTerminal(ctx context.Context, task db.AgentTaskQueue, resetInProgress bool) {
+	if !task.IssueID.Valid {
+		return
+	}
+	hasActive, err := s.Queries.HasActiveTaskForIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("terminal issue reconcile: active check failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err)
+		return
+	}
+	if hasActive {
+		return
+	}
+	// Terminal callbacks and sweeper batches can arrive out of order. Always
+	// anchor recovery and its durable dedup key to the newest terminal run for
+	// the issue, so an older callback cannot create a second recovery cycle.
+	latest, err := s.Queries.GetLatestTerminalTaskForIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	task = latest
+
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		return
+	}
+	if resetInProgress && task.Status == "failed" && issue.Status == "in_progress" {
+		updated, updateErr := s.Queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{
+			ID:          issue.ID,
+			Status:      "todo",
+			WorkspaceID: issue.WorkspaceID,
+		})
+		if updateErr != nil {
+			slog.Warn("terminal issue reconcile: reset stuck issue failed",
+				"task_id", util.UUIDToString(task.ID),
+				"issue_id", util.UUIDToString(issue.ID),
+				"error", updateErr)
+			return
+		}
+		s.broadcastIssueUpdated(updated, issue.Status)
+		issue = updated
+	}
+
+	if s.IssueTaskTerminalReconciler != nil {
+		s.IssueTaskTerminalReconciler(ctx, task, issue)
+	}
 }
 
 // runInTx executes fn inside a single DB transaction. If TxStarter is nil

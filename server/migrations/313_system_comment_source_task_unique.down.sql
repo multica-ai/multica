@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_comment_system_issue_source_task_unique;

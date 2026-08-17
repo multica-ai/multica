@@ -227,3 +227,78 @@ func TestStageBarrierClosed_UnstagedIgnoredInStagedSet(t *testing.T) {
 		}
 	})
 }
+
+func TestChildHoldsCurrentStageBarrier(t *testing.T) {
+	tests := []struct {
+		name      string
+		children  []db.Issue
+		candidate db.Issue
+		want      bool
+	}{
+		{
+			name:      "unstaged child belongs to the implicit current barrier",
+			children:  []db.Issue{child(0, "done"), child(0, "todo")},
+			candidate: child(0, "todo"),
+			want:      true,
+		},
+		{
+			name: "open child in lowest unfinished stage is actionable",
+			children: []db.Issue{
+				child(1, "done"), child(1, "todo"), child(2, "backlog"),
+			},
+			candidate: child(1, "todo"),
+			want:      true,
+		},
+		{
+			name: "later stage child is deliberately parked",
+			children: []db.Issue{
+				child(1, "todo"), child(2, "in_review"),
+			},
+			candidate: child(2, "in_review"),
+			want:      false,
+		},
+		{
+			name: "unstaged child is outside an explicit staged frontier",
+			children: []db.Issue{
+				child(0, "todo"), child(1, "todo"),
+			},
+			candidate: child(0, "todo"),
+			want:      false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := childHoldsCurrentStageBarrier(tt.children, tt.candidate); got != tt.want {
+				t.Fatalf("childHoldsCurrentStageBarrier = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestChildRecoveryInstruction(t *testing.T) {
+	const childID = "child-uuid"
+	tests := []struct {
+		status string
+		want   []string
+		ban    []string
+	}{
+		{status: "todo", want: []string{"multica issue rerun " + childID, "explicit confirmation"}, ban: []string{"mark it `done`"}},
+		{status: "in_review", want: []string{"Review its result", "move the child to `done`"}},
+		{status: "blocked", want: []string{"stays blocked", "explicit confirmation"}, ban: []string{"multica issue rerun " + childID + "` when it is ready"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.status, func(t *testing.T) {
+			got := childRecoveryInstruction(tt.status, childID)
+			for _, want := range tt.want {
+				if !strings.Contains(got, want) {
+					t.Fatalf("instruction %q missing %q", got, want)
+				}
+			}
+			for _, banned := range tt.ban {
+				if strings.Contains(got, banned) {
+					t.Fatalf("instruction %q unexpectedly contains %q", got, banned)
+				}
+			}
+		})
+	}
+}
