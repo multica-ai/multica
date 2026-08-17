@@ -219,18 +219,16 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		if oc := openclawOverrideFrom(cliCfg); oc != nil {
 			applyOpenclawOverride(oc)
 		}
-		// Per-machine custom-runtime command path overrides (MUL-3284).
-		// Copy into our own map so later mutation of the loaded config can't
-		// alias daemon state, and so an empty map normalizes to nil.
-		if len(cliCfg.ProfileCommandOverrides) > 0 {
-			profileCommandOverrides = make(map[string]string, len(cliCfg.ProfileCommandOverrides))
-			for id, path := range cliCfg.ProfileCommandOverrides {
-				if id == "" || strings.TrimSpace(path) == "" {
-					continue
-				}
-				profileCommandOverrides[id] = path
-			}
-		}
+	}
+	// set-path is machine-scoped, not daemon-profile-scoped. Merge the default
+	// config into a named daemon's overrides so Desktop and CLI daemons on the
+	// same computer resolve the same application-owned executable. A named
+	// profile remains the final override for backward compatibility.
+	if merged, err := loadProfileCommandOverrides(overrides.Profile); err != nil {
+		slog.Warn("could not load custom runtime path overrides; proceeding without",
+			"profile", overrides.Profile, "err", err)
+	} else {
+		profileCommandOverrides = merged
 	}
 
 	// Discover installed agent CLIs. Extracted so the periodic workspace sync
@@ -550,6 +548,31 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		QwenpawArgs:                     qwenpawArgs,
 		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
+}
+
+func loadProfileCommandOverrides(profile string) (map[string]string, error) {
+	profiles := []string{""}
+	if strings.TrimSpace(profile) != "" {
+		profiles = append(profiles, profile)
+	}
+	merged := make(map[string]string)
+	for _, name := range profiles {
+		cfg, err := loadCLIConfigForProfile(name)
+		if err != nil {
+			return nil, err
+		}
+		for id, path := range cfg.ProfileCommandOverrides {
+			id = strings.TrimSpace(id)
+			path = strings.TrimSpace(path)
+			if id != "" && path != "" {
+				merged[id] = path
+			}
+		}
+	}
+	if len(merged) == 0 {
+		return nil, nil
+	}
+	return merged, nil
 }
 
 // officialCloudHost is the hostname of Multica's hosted cloud. It's the only

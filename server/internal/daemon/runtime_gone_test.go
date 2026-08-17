@@ -32,6 +32,9 @@ func freshDaemon(serverURL string) *Daemon {
 		runtimeGoneInflight:       make(map[string]struct{}),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
+		profileOverrideLoader: func(string) (map[string]string, error) {
+			return nil, nil
+		},
 	}
 }
 

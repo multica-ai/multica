@@ -11,6 +11,28 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+func TestRuntimeProfileAllowsInstanceDelete(t *testing.T) {
+	if !runtimeProfileAllowsInstanceDelete(runtimeProfileActivationLocal) {
+		t.Fatal("local activation must allow deleting one daemon runtime instance")
+	}
+	for _, mode := range []string{"", runtimeProfileActivationWorkspace, "future-mode"} {
+		if runtimeProfileAllowsInstanceDelete(mode) {
+			t.Fatalf("activation mode %q unexpectedly allowed instance deletion", mode)
+		}
+	}
+}
+
+func TestRuntimeProfileCapabilitiesAdvertiseLocalActivation(t *testing.T) {
+	capabilities := runtimeProfileCapabilities()
+	modes, ok := capabilities["activation_modes"].([]string)
+	if !ok {
+		t.Fatalf("activation_modes = %#v", capabilities["activation_modes"])
+	}
+	if len(modes) != 2 || modes[0] != runtimeProfileActivationWorkspace || modes[1] != runtimeProfileActivationLocal {
+		t.Fatalf("activation_modes = %v", modes)
+	}
+}
+
 // insertRuntimeProfileFixture creates a runtime_profile in testWorkspaceID and
 // returns its id, registering cleanup.
 func insertRuntimeProfileFixture(t *testing.T, ctx context.Context, displayName, protocolFamily, commandName string) string {
@@ -188,6 +210,166 @@ func TestDeleteRuntimeProfile_ActiveAgentBlocks(t *testing.T) {
 	}
 	if rtRows != 1 {
 		t.Fatalf("expected runtime to survive 409, found %d", rtRows)
+	}
+}
+
+// Hidden system agents are execution infrastructure owned by the runtime
+// teardown. They must not trip the user-agent guard before teardown can delete
+// them, otherwise a profile used by Agent Builder becomes permanently stuck.
+func TestDeleteRuntimeProfile_SystemAgentDoesNotBlock(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	profileID := insertRuntimeProfileFixture(t, ctx, "Cascade Profile System", "codex", "company-codex-system")
+	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "Cascade Profile System Runtime", "codex")
+	agentID := createCascadeFixtureAgent(t, ctx, runtimeID, "Cascade Profile System Agent")
+	if _, err := testPool.Exec(ctx,
+		`UPDATE agent SET kind = 'system', system_key = 'profile_delete_probe' WHERE id = $1`,
+		agentID); err != nil {
+		t.Fatalf("make agent a system agent: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles/"+profileID, nil)
+	req = withURLParams(req, "id", testWorkspaceID, "profileId", profileID)
+	testHandler.DeleteRuntimeProfile(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+	var profileRows, runtimeRows, agentRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM runtime_profile WHERE id = $1`, profileID).Scan(&profileRows); err != nil {
+		t.Fatalf("count profile rows: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimeRows); err != nil {
+		t.Fatalf("count runtime rows: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent WHERE id = $1`, agentID).Scan(&agentRows); err != nil {
+		t.Fatalf("count system agent rows: %v", err)
+	}
+	if profileRows != 0 || runtimeRows != 0 || agentRows != 0 {
+		t.Fatalf("profile teardown left rows: profile=%d runtime=%d system_agent=%d", profileRows, runtimeRows, agentRows)
+	}
+}
+
+func TestCreateRuntimeProfile_DisabledNameCanBeReused(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	legacyID := insertRuntimeProfileFixture(t, ctx, "Reusable Disabled Profile", "claude", "legacy-command")
+	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET enabled = false WHERE id = $1`, legacyID); err != nil {
+		t.Fatalf("disable legacy profile: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+		"display_name":    "Reusable Disabled Profile",
+		"protocol_family": "reasonix",
+		"command_name":    "replacement-command",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.CreateRuntimeProfile(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp RuntimeProfileResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, resp.ID)
+	})
+}
+
+func TestCreateRuntimeProfile_LocalActivationPersists(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+		"display_name":    "Local Activation Profile",
+		"protocol_family": "reasonix",
+		"command_name":    "local-activation-command",
+		"activation_mode": "local",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.CreateRuntimeProfile(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp RuntimeProfileResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM runtime_profile WHERE id = $1`, resp.ID)
+	})
+	if resp.ActivationMode != runtimeProfileActivationLocal {
+		t.Fatalf("response activation_mode = %q", resp.ActivationMode)
+	}
+	var stored string
+	if err := testPool.QueryRow(ctx, `SELECT activation_mode FROM runtime_profile WHERE id = $1`, resp.ID).Scan(&stored); err != nil {
+		t.Fatalf("read activation_mode: %v", err)
+	}
+	if stored != runtimeProfileActivationLocal {
+		t.Fatalf("stored activation_mode = %q", stored)
+	}
+}
+
+func TestCreateRuntimeProfile_RejectsInvalidActivation(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/runtime-profiles", map[string]any{
+		"display_name":    "Invalid Activation Profile",
+		"protocol_family": "reasonix",
+		"command_name":    "invalid-activation-command",
+		"activation_mode": "device-ish",
+	})
+	req = withURLParam(req, "id", testWorkspaceID)
+	testHandler.CreateRuntimeProfile(w, req)
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "activation_mode") {
+		t.Fatalf("expected activation_mode 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestDeleteAgentRuntime_LocalActivationKeepsSharedProfile(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	profileID := insertRuntimeProfileFixture(t, ctx, "Local Runtime Delete Profile", "reasonix", "local-runtime-delete")
+	if _, err := testPool.Exec(ctx, `UPDATE runtime_profile SET activation_mode = 'local' WHERE id = $1`, profileID); err != nil {
+		t.Fatalf("set local activation: %v", err)
+	}
+	runtimeID := insertProfileRuntimeFixture(t, ctx, profileID, "Local Runtime Delete Instance", "reasonix")
+
+	w := httptest.NewRecorder()
+	req := newRequest("DELETE", "/api/runtimes/"+runtimeID, nil)
+	req = withURLParam(req, "runtimeId", runtimeID)
+	testHandler.DeleteAgentRuntime(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var profileRows, runtimeRows int
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM runtime_profile WHERE id = $1`, profileID).Scan(&profileRows); err != nil {
+		t.Fatalf("count profile: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&runtimeRows); err != nil {
+		t.Fatalf("count runtime: %v", err)
+	}
+	if profileRows != 1 || runtimeRows != 0 {
+		t.Fatalf("local disconnect rows: profile=%d runtime=%d", profileRows, runtimeRows)
 	}
 }
 

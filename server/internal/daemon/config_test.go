@@ -1444,6 +1444,38 @@ func TestLoadConfig_BackendOverrides_MalformedConfigFileNonFatal(t *testing.T) {
 	// make sure log/slog stays imported.
 }
 
+func TestLoadProfileCommandOverrides_MergesMachineDefaultIntoNamedDaemon(t *testing.T) {
+	previous := loadCLIConfigForProfile
+	t.Cleanup(func() { loadCLIConfigForProfile = previous })
+	loadCLIConfigForProfile = func(profile string) (cli.CLIConfig, error) {
+		switch profile {
+		case "":
+			return cli.CLIConfig{ProfileCommandOverrides: map[string]string{
+				"studio": "/Applications/North Studio.app/Contents/Resources/multica/north-studio-multica",
+				"shared": "/default/shared",
+			}}, nil
+		case "desktop-api.multica.ai":
+			return cli.CLIConfig{ProfileCommandOverrides: map[string]string{
+				"shared": "/desktop/shared",
+			}}, nil
+		default:
+			t.Fatalf("unexpected profile load: %q", profile)
+			return cli.CLIConfig{}, nil
+		}
+	}
+
+	got, err := loadProfileCommandOverrides("desktop-api.multica.ai")
+	if err != nil {
+		t.Fatalf("loadProfileCommandOverrides: %v", err)
+	}
+	if got["studio"] != "/Applications/North Studio.app/Contents/Resources/multica/north-studio-multica" {
+		t.Fatalf("default machine override missing: %#v", got)
+	}
+	if got["shared"] != "/desktop/shared" {
+		t.Fatalf("named profile did not win merge: %#v", got)
+	}
+}
+
 // agentKeys is a tiny helper to make agent-map missing-key error messages
 // readable. Returns sorted keys.
 func agentKeys(m map[string]AgentEntry) []string {

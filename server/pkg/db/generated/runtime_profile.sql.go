@@ -14,7 +14,10 @@ import (
 const countAgentsByProfile = `-- name: CountAgentsByProfile :one
 SELECT count(*) FROM agent a
 JOIN agent_runtime ar ON ar.id = a.runtime_id
-WHERE ar.profile_id = $1 AND ar.workspace_id = $2 AND a.archived_at IS NULL
+WHERE ar.profile_id = $1
+  AND ar.workspace_id = $2
+  AND a.archived_at IS NULL
+  AND a.kind = 'user'
 `
 
 type CountAgentsByProfileParams struct {
@@ -22,9 +25,9 @@ type CountAgentsByProfileParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
-// Counts active (non-archived) agents bound to any runtime instance of this
-// profile. The profile-delete path uses this to refuse deletion (409) while
-// agents still depend on it, mirroring the runtime-delete guard.
+// Counts active, user-visible agents bound to any runtime instance of this
+// profile. Hidden system agents are teardown-owned infrastructure and must not
+// block the code path that deletes them.
 func (q *Queries) CountAgentsByProfile(ctx context.Context, arg CountAgentsByProfileParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countAgentsByProfile, arg.ProfileID, arg.WorkspaceID)
 	var count int64
@@ -42,10 +45,11 @@ INSERT INTO runtime_profile (
     description,
     fixed_args,
     visibility,
+    activation_mode,
     created_by,
     enabled
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-RETURNING id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+RETURNING id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, activation_mode, created_by, enabled, created_at, updated_at
 `
 
 type CreateRuntimeProfileParams struct {
@@ -56,6 +60,7 @@ type CreateRuntimeProfileParams struct {
 	Description    pgtype.Text `json:"description"`
 	FixedArgs      []byte      `json:"fixed_args"`
 	Visibility     string      `json:"visibility"`
+	ActivationMode string      `json:"activation_mode"`
 	CreatedBy      pgtype.UUID `json:"created_by"`
 	Enabled        bool        `json:"enabled"`
 }
@@ -72,6 +77,7 @@ func (q *Queries) CreateRuntimeProfile(ctx context.Context, arg CreateRuntimePro
 		arg.Description,
 		arg.FixedArgs,
 		arg.Visibility,
+		arg.ActivationMode,
 		arg.CreatedBy,
 		arg.Enabled,
 	)
@@ -85,6 +91,7 @@ func (q *Queries) CreateRuntimeProfile(ctx context.Context, arg CreateRuntimePro
 		&i.Description,
 		&i.FixedArgs,
 		&i.Visibility,
+		&i.ActivationMode,
 		&i.CreatedBy,
 		&i.Enabled,
 		&i.CreatedAt,
@@ -158,7 +165,7 @@ func (q *Queries) DeleteRuntimeProfile(ctx context.Context, arg DeleteRuntimePro
 }
 
 const getRuntimeProfile = `-- name: GetRuntimeProfile :one
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, activation_mode, created_by, enabled, created_at, updated_at FROM runtime_profile
 WHERE id = $1
 `
 
@@ -174,6 +181,7 @@ func (q *Queries) GetRuntimeProfile(ctx context.Context, id pgtype.UUID) (Runtim
 		&i.Description,
 		&i.FixedArgs,
 		&i.Visibility,
+		&i.ActivationMode,
 		&i.CreatedBy,
 		&i.Enabled,
 		&i.CreatedAt,
@@ -183,7 +191,7 @@ func (q *Queries) GetRuntimeProfile(ctx context.Context, id pgtype.UUID) (Runtim
 }
 
 const getRuntimeProfileForWorkspace = `-- name: GetRuntimeProfileForWorkspace :one
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, activation_mode, created_by, enabled, created_at, updated_at FROM runtime_profile
 WHERE id = $1 AND workspace_id = $2
 `
 
@@ -204,6 +212,7 @@ func (q *Queries) GetRuntimeProfileForWorkspace(ctx context.Context, arg GetRunt
 		&i.Description,
 		&i.FixedArgs,
 		&i.Visibility,
+		&i.ActivationMode,
 		&i.CreatedBy,
 		&i.Enabled,
 		&i.CreatedAt,
@@ -250,7 +259,7 @@ func (q *Queries) ListAgentRuntimeIDsByProfile(ctx context.Context, arg ListAgen
 }
 
 const listEnabledRuntimeProfilesForWorkspace = `-- name: ListEnabledRuntimeProfilesForWorkspace :many
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, activation_mode, created_by, enabled, created_at, updated_at FROM runtime_profile
 WHERE workspace_id = $1 AND enabled = true
 ORDER BY created_at ASC
 `
@@ -275,6 +284,7 @@ func (q *Queries) ListEnabledRuntimeProfilesForWorkspace(ctx context.Context, wo
 			&i.Description,
 			&i.FixedArgs,
 			&i.Visibility,
+			&i.ActivationMode,
 			&i.CreatedBy,
 			&i.Enabled,
 			&i.CreatedAt,
@@ -291,7 +301,7 @@ func (q *Queries) ListEnabledRuntimeProfilesForWorkspace(ctx context.Context, wo
 }
 
 const listRuntimeProfiles = `-- name: ListRuntimeProfiles :many
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, activation_mode, created_by, enabled, created_at, updated_at FROM runtime_profile
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -314,6 +324,7 @@ func (q *Queries) ListRuntimeProfiles(ctx context.Context, workspaceID pgtype.UU
 			&i.Description,
 			&i.FixedArgs,
 			&i.Visibility,
+			&i.ActivationMode,
 			&i.CreatedBy,
 			&i.Enabled,
 			&i.CreatedAt,
@@ -330,7 +341,7 @@ func (q *Queries) ListRuntimeProfiles(ctx context.Context, workspaceID pgtype.UU
 }
 
 const lockRuntimeProfileForDelete = `-- name: LockRuntimeProfileForDelete :one
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, activation_mode, created_by, enabled, created_at, updated_at FROM runtime_profile
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE
 `
@@ -354,6 +365,7 @@ func (q *Queries) LockRuntimeProfileForDelete(ctx context.Context, arg LockRunti
 		&i.Description,
 		&i.FixedArgs,
 		&i.Visibility,
+		&i.ActivationMode,
 		&i.CreatedBy,
 		&i.Enabled,
 		&i.CreatedAt,
@@ -363,7 +375,7 @@ func (q *Queries) LockRuntimeProfileForDelete(ctx context.Context, arg LockRunti
 }
 
 const lockRuntimeProfileForRegistration = `-- name: LockRuntimeProfileForRegistration :one
-SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, activation_mode, created_by, enabled, created_at, updated_at FROM runtime_profile
 WHERE id = $1 AND workspace_id = $2
 FOR KEY SHARE
 `
@@ -389,6 +401,7 @@ func (q *Queries) LockRuntimeProfileForRegistration(ctx context.Context, arg Loc
 		&i.Description,
 		&i.FixedArgs,
 		&i.Visibility,
+		&i.ActivationMode,
 		&i.CreatedBy,
 		&i.Enabled,
 		&i.CreatedAt,
@@ -404,21 +417,23 @@ SET display_name = COALESCE($1, display_name),
     description  = COALESCE($3, description),
     fixed_args   = COALESCE($4, fixed_args),
     visibility   = COALESCE($5, visibility),
-    enabled      = COALESCE($6, enabled),
+    activation_mode = COALESCE($6, activation_mode),
+    enabled      = COALESCE($7, enabled),
     updated_at   = now()
-WHERE id = $7 AND workspace_id = $8
-RETURNING id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at
+WHERE id = $8 AND workspace_id = $9
+RETURNING id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, activation_mode, created_by, enabled, created_at, updated_at
 `
 
 type UpdateRuntimeProfileParams struct {
-	DisplayName pgtype.Text `json:"display_name"`
-	CommandName pgtype.Text `json:"command_name"`
-	Description pgtype.Text `json:"description"`
-	FixedArgs   []byte      `json:"fixed_args"`
-	Visibility  pgtype.Text `json:"visibility"`
-	Enabled     pgtype.Bool `json:"enabled"`
-	ID          pgtype.UUID `json:"id"`
-	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	DisplayName    pgtype.Text `json:"display_name"`
+	CommandName    pgtype.Text `json:"command_name"`
+	Description    pgtype.Text `json:"description"`
+	FixedArgs      []byte      `json:"fixed_args"`
+	Visibility     pgtype.Text `json:"visibility"`
+	ActivationMode pgtype.Text `json:"activation_mode"`
+	Enabled        pgtype.Bool `json:"enabled"`
+	ID             pgtype.UUID `json:"id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
 }
 
 // Partial update via COALESCE: NULL args leave the column unchanged. The
@@ -432,6 +447,7 @@ func (q *Queries) UpdateRuntimeProfile(ctx context.Context, arg UpdateRuntimePro
 		arg.Description,
 		arg.FixedArgs,
 		arg.Visibility,
+		arg.ActivationMode,
 		arg.Enabled,
 		arg.ID,
 		arg.WorkspaceID,
@@ -446,6 +462,7 @@ func (q *Queries) UpdateRuntimeProfile(ctx context.Context, arg UpdateRuntimePro
 		&i.Description,
 		&i.FixedArgs,
 		&i.Visibility,
+		&i.ActivationMode,
 		&i.CreatedBy,
 		&i.Enabled,
 		&i.CreatedAt,

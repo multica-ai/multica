@@ -94,12 +94,14 @@ func init() {
 	runtimeProfileCreateCmd.Flags().String("command-name", "", "Executable the daemon resolves on PATH (required)")
 	runtimeProfileCreateCmd.Flags().String("display-name", "", "Human-readable profile name (required)")
 	runtimeProfileCreateCmd.Flags().String("description", "", "Optional description")
+	runtimeProfileCreateCmd.Flags().String("activation-mode", "workspace", "Activation mode: workspace or local")
 	runtimeProfileCreateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// update
 	runtimeProfileUpdateCmd.Flags().String("display-name", "", "New display name")
 	runtimeProfileUpdateCmd.Flags().String("command-name", "", "New command name")
 	runtimeProfileUpdateCmd.Flags().String("description", "", "New description")
+	runtimeProfileUpdateCmd.Flags().String("activation-mode", "", "Activation mode: workspace or local")
 	// NOTE: --fixed-arg remains out of the CLI create/update surface for now:
 	// the product path parses command + args in the UI and stores them as
 	// command_name + fixed_args. Keep this CLI shape narrow until we add an
@@ -116,6 +118,32 @@ func runtimeProfilesPath(workspaceID string) string {
 	return fmt.Sprintf("/api/workspaces/%s/runtime-profiles", workspaceID)
 }
 
+type runtimeProfileCollectionResponse struct {
+	RuntimeProfiles []map[string]any `json:"runtime_profiles"`
+	Capabilities    struct {
+		ActivationModes []string `json:"activation_modes"`
+	} `json:"capabilities"`
+}
+
+func requireRuntimeProfileActivationSupport(ctx context.Context, client *cli.APIClient, workspaceID, mode string) error {
+	if mode == "workspace" {
+		return nil
+	}
+	var resp runtimeProfileCollectionResponse
+	if err := client.GetJSON(ctx, runtimeProfilesPath(workspaceID), &resp); err != nil {
+		return fmt.Errorf("check runtime profile activation capabilities: %w", err)
+	}
+	for _, supported := range resp.Capabilities.ActivationModes {
+		if supported == mode {
+			return nil
+		}
+	}
+	return fmt.Errorf(
+		"Multica server does not support runtime profile activation mode %q; upgrade the server before retrying",
+		mode,
+	)
+}
+
 // validateProtocolFamily checks a protocol family against the canonical agent
 // whitelist client-side so an obvious typo fails fast with a helpful list
 // instead of an opaque server 400.
@@ -123,6 +151,13 @@ func validateProtocolFamily(family string) error {
 	if !agent.IsSupportedType(family) {
 		return fmt.Errorf("invalid --protocol-family %q: must be one of %s",
 			family, strings.Join(agent.SupportedTypes, ", "))
+	}
+	return nil
+}
+
+func validateRuntimeProfileActivationMode(mode string) error {
+	if mode != "workspace" && mode != "local" {
+		return fmt.Errorf("invalid --activation-mode %q: must be workspace or local", mode)
 	}
 	return nil
 }
@@ -145,9 +180,7 @@ func runRuntimeProfileList(cmd *cobra.Command, _ []string) error {
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
 
-	var resp struct {
-		RuntimeProfiles []map[string]any `json:"runtime_profiles"`
-	}
+	var resp runtimeProfileCollectionResponse
 	if err := client.GetJSON(ctx, runtimeProfilesPath(workspaceID), &resp); err != nil {
 		return fmt.Errorf("list runtime profiles: %w", err)
 	}
@@ -165,6 +198,7 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 	commandName, _ := cmd.Flags().GetString("command-name")
 	displayName, _ := cmd.Flags().GetString("display-name")
 	description, _ := cmd.Flags().GetString("description")
+	activationMode, _ := cmd.Flags().GetString("activation-mode")
 
 	if strings.TrimSpace(family) == "" {
 		return fmt.Errorf("--protocol-family is required")
@@ -176,6 +210,9 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 		return fmt.Errorf("--display-name is required")
 	}
 	if err := validateProtocolFamily(family); err != nil {
+		return err
+	}
+	if err := validateRuntimeProfileActivationMode(activationMode); err != nil {
 		return err
 	}
 
@@ -192,6 +229,7 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 		"display_name":    displayName,
 		"protocol_family": family,
 		"command_name":    commandName,
+		"activation_mode": activationMode,
 	}
 	if description != "" {
 		body["description"] = description
@@ -199,6 +237,9 @@ func runRuntimeProfileCreate(cmd *cobra.Command, _ []string) error {
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
+	if err := requireRuntimeProfileActivationSupport(ctx, client, workspaceID, activationMode); err != nil {
+		return err
+	}
 
 	var profile map[string]any
 	if err := client.PostJSON(ctx, runtimeProfilesPath(workspaceID), body, &profile); err != nil {
@@ -223,13 +264,20 @@ func runRuntimeProfileUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("description")
 		body["description"] = v
 	}
+	if cmd.Flags().Changed("activation-mode") {
+		v, _ := cmd.Flags().GetString("activation-mode")
+		if err := validateRuntimeProfileActivationMode(v); err != nil {
+			return err
+		}
+		body["activation_mode"] = v
+	}
 	if cmd.Flags().Changed("enabled") {
 		v, _ := cmd.Flags().GetBool("enabled")
 		body["enabled"] = v
 	}
 
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update: pass at least one of --display-name, --command-name, --description, --enabled")
+		return fmt.Errorf("no fields to update: pass at least one of --display-name, --command-name, --description, --activation-mode, --enabled")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -243,6 +291,11 @@ func runRuntimeProfileUpdate(cmd *cobra.Command, args []string) error {
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
+	if mode, ok := body["activation_mode"].(string); ok {
+		if err := requireRuntimeProfileActivationSupport(ctx, client, workspaceID, mode); err != nil {
+			return err
+		}
+	}
 
 	path := runtimeProfilesPath(workspaceID) + "/" + profileID
 	var profile map[string]any

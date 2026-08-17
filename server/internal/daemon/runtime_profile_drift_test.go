@@ -83,6 +83,11 @@ func TestProfileSetSignature_DetectsRegistrationAffectingChanges(t *testing.T) {
 			out[0].Visibility = "private"
 			return out
 		}},
+		{"change activation_mode", func(in []RuntimeProfile) []RuntimeProfile {
+			out := append([]RuntimeProfile(nil), in...)
+			out[0].ActivationMode = "local"
+			return out
+		}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -92,6 +97,47 @@ func TestProfileSetSignature_DetectsRegistrationAffectingChanges(t *testing.T) {
 					tc.name, baseSig, got)
 			}
 		})
+	}
+}
+
+func TestEffectiveProfileSetSignature_DetectsLocalPathOverrideChanges(t *testing.T) {
+	profiles := []RuntimeProfile{{
+		ID:             "p1",
+		ProtocolFamily: "reasonix",
+		CommandName:    "north-studio-insider-multica",
+		Visibility:     "workspace",
+		Enabled:        true,
+	}}
+	d := freshDaemon("http://127.0.0.1")
+	withoutOverride := d.effectiveProfileSetSignature(profiles)
+	d.profileOverridesMu.Lock()
+	d.cfg.ProfileCommandOverrides = map[string]string{
+		"p1": "/Applications/North Studio Insider.app/Contents/Resources/multica/north-studio-insider-multica",
+	}
+	d.profileOverridesMu.Unlock()
+	withOverride := d.effectiveProfileSetSignature(profiles)
+	if withOverride == withoutOverride {
+		t.Fatal("effective signature did not change after set-path override")
+	}
+}
+
+func TestReloadProfileCommandOverrides_UsesLiveProfileConfig(t *testing.T) {
+	d := freshDaemon("http://127.0.0.1")
+	d.cfg.Profile = "desktop-test"
+	d.profileOverrideLoader = func(profile string) (map[string]string, error) {
+		if profile != "desktop-test" {
+			t.Fatalf("unexpected profile load: %q", profile)
+		}
+		return map[string]string{
+			"p1": "/Applications/North Studio.app/Contents/Resources/multica/north-studio-multica",
+		}, nil
+	}
+
+	if err := d.reloadProfileCommandOverrides(); err != nil {
+		t.Fatalf("reloadProfileCommandOverrides: %v", err)
+	}
+	if got := d.profileCommandOverride("p1"); got != "/Applications/North Studio.app/Contents/Resources/multica/north-studio-multica" {
+		t.Fatalf("profile override = %q", got)
 	}
 }
 

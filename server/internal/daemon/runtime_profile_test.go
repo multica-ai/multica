@@ -31,6 +31,30 @@ type osExecNotFound struct{ cmd string }
 
 func (e *osExecNotFound) Error() string { return "exec: " + e.cmd + ": not found in $PATH" }
 
+func TestClassifyProfileActivation(t *testing.T) {
+	stubProfilePathExecutable(t, map[string]bool{"/app/north-studio-multica": true})
+	cases := []struct {
+		name     string
+		mode     string
+		override string
+		want     profileActivationState
+	}{
+		{name: "legacy workspace default", want: profileActivationWorkspace},
+		{name: "workspace with override", mode: "workspace", override: "/missing", want: profileActivationWorkspace},
+		{name: "local unbound", mode: "local", want: profileActivationLocalUnbound},
+		{name: "local bound", mode: "local", override: "/app/north-studio-multica", want: profileActivationLocalBound},
+		{name: "local broken", mode: "local", override: "/missing", want: profileActivationLocalBroken},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := classifyProfileActivation(RuntimeProfile{ActivationMode: tc.mode}, tc.override)
+			if got != tc.want {
+				t.Fatalf("activation state = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 // TestClient_GetRuntimeProfiles_RequestShape asserts the daemon GETs the
 // documented path and parses the server's runtime_profiles payload.
 func TestClient_GetRuntimeProfiles_RequestShape(t *testing.T) {
@@ -50,6 +74,7 @@ func TestClient_GetRuntimeProfiles_RequestShape(t *testing.T) {
 				"description":null,
 				"fixed_args":["--foo"],
 				"visibility":"workspace",
+				"activation_mode":"local",
 				"created_by":null,
 				"enabled":true,
 				"created_at":"2026-01-01T00:00:00Z",
@@ -80,6 +105,9 @@ func TestClient_GetRuntimeProfiles_RequestShape(t *testing.T) {
 	}
 	if !p.Enabled {
 		t.Errorf("profile should be enabled")
+	}
+	if p.ActivationMode != "local" {
+		t.Errorf("activation_mode = %q, want local", p.ActivationMode)
 	}
 	if len(p.FixedArgs) != 1 || p.FixedArgs[0] != "--foo" {
 		t.Errorf("fixed_args = %v, want [--foo]", p.FixedArgs)
@@ -292,6 +320,98 @@ func TestRegisterRuntimes_SkipsProfileNotOnPath(t *testing.T) {
 	}
 	if len(fx.sentFailures) != 1 || fx.sentFailures[0]["profile_id"] != "prof-1" {
 		t.Fatalf("sent failures = %+v, want prof-1", fx.sentFailures)
+	}
+}
+
+func TestAppendProfileRuntimes_LocalProfileWithoutBindingIsSilent(t *testing.T) {
+	stubLookPath(t, map[string]string{"north-studio-multica": "/stale/path/north-studio-multica"})
+	profiles := []RuntimeProfile{{
+		ID:             "prof-local",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "North Studio",
+		ProtocolFamily: "reasonix",
+		CommandName:    "north-studio-multica",
+		ActivationMode: "local",
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{}
+
+	var runtimes, failures []map[string]string
+	sig := d.appendProfileRuntimes(context.Background(), "ws-1", &runtimes, &failures)
+	if sig == "" {
+		t.Fatal("local profile must still contribute to the drift signature")
+	}
+	if len(runtimes) != 0 || len(failures) != 0 {
+		t.Fatalf("unbound local profile registered or failed: runtimes=%+v failures=%+v", runtimes, failures)
+	}
+	if _, ok := d.profileLaunchSpecs["prof-local"]; ok {
+		t.Fatal("unbound local profile recorded a launch spec")
+	}
+}
+
+func TestRegisterRuntimes_LocalProfileUsesSetPathBinding(t *testing.T) {
+	t.Cleanup(stubAgentVersion(t))
+	stubLookPath(t, map[string]string{})
+	stubProfilePathExecutable(t, map[string]bool{"/Applications/North Studio.app/Contents/Resources/multica/north-studio-multica": true})
+	profiles := []RuntimeProfile{{
+		ID:             "prof-local",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "North Studio",
+		ProtocolFamily: "reasonix",
+		CommandName:    "north-studio-multica",
+		ActivationMode: "local",
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{}
+	d.cfg.ProfileCommandOverrides = map[string]string{
+		"prof-local": "/Applications/North Studio.app/Contents/Resources/multica/north-studio-multica",
+	}
+
+	resp, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("register local profile: %v", err)
+	}
+	if len(fx.sentFailures) != 0 || len(fx.sentRuntimes) != 1 {
+		t.Fatalf("local profile payload: runtimes=%+v failures=%+v", fx.sentRuntimes, fx.sentFailures)
+	}
+	if len(resp.Runtimes) != 1 || resp.Runtimes[0].ProfileID != "prof-local" {
+		t.Fatalf("local profile response = %+v", resp.Runtimes)
+	}
+	if got := d.profileLaunchSpecs["prof-local"].path; got != d.cfg.ProfileCommandOverrides["prof-local"] {
+		t.Fatalf("local launch path = %q", got)
+	}
+}
+
+func TestRegisterRuntimes_LocalProfileBrokenBindingDoesNotFallBackToPath(t *testing.T) {
+	stubLookPath(t, map[string]string{"north-studio-multica": "/stale/path/north-studio-multica"})
+	stubProfilePathExecutable(t, map[string]bool{})
+	profiles := []RuntimeProfile{{
+		ID:             "prof-local",
+		WorkspaceID:    "ws-1",
+		DisplayName:    "North Studio",
+		ProtocolFamily: "reasonix",
+		CommandName:    "north-studio-multica",
+		ActivationMode: "local",
+		Enabled:        true,
+	}}
+	fx := newProfileRegisterFixture(t, profiles, http.StatusOK)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{}
+	d.cfg.ProfileCommandOverrides = map[string]string{"prof-local": "/deleted/north-studio-multica"}
+
+	_, _, _, err := d.registerRuntimesForWorkspaceLocked(context.Background(), "ws-1")
+	if err != nil {
+		t.Fatalf("report broken local binding: %v", err)
+	}
+	if len(fx.sentRuntimes) != 0 || len(fx.sentFailures) != 1 {
+		t.Fatalf("broken local binding payload: runtimes=%+v failures=%+v", fx.sentRuntimes, fx.sentFailures)
+	}
+	if fx.sentFailures[0]["profile_id"] != "prof-local" {
+		t.Fatalf("broken local binding failure = %+v", fx.sentFailures[0])
 	}
 }
 
