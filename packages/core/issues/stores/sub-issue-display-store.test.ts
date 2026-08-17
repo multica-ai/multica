@@ -29,6 +29,8 @@ describe("sub-issue display store", () => {
     useSubIssueDisplayStore.setState({
       rowProperties: { ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES },
       rowPropertyIds: [],
+      sortBy: "created",
+      sortDirection: "asc",
     });
   });
 
@@ -42,6 +44,8 @@ describe("sub-issue display store", () => {
       assignee: true,
     });
     expect(s.rowPropertyIds).toEqual([]);
+    expect(s.sortBy).toBe("created");
+    expect(s.sortDirection).toBe("asc");
   });
 
   it("toggleRowProperty flips a single field without touching the rest", () => {
@@ -67,5 +71,16 @@ describe("sub-issue display store", () => {
 
     useSubIssueDisplayStore.getState().toggleRowPropertyId("prop-1");
     expect(useSubIssueDisplayStore.getState().rowPropertyIds).toEqual(["prop-2"]);
+  });
+
+  it("updates sub-issue ordering independently from row properties", () => {
+    useSubIssueDisplayStore.getState().setSortBy("priority");
+    useSubIssueDisplayStore.getState().setSortDirection("desc");
+
+    const s = useSubIssueDisplayStore.getState();
+    expect(s.sortBy).toBe("priority");
+    expect(s.sortDirection).toBe("desc");
+    expect(s.rowProperties).toEqual(DEFAULT_SUB_ISSUE_ROW_PROPERTIES);
+    expect(s.rowPropertyIds).toEqual([]);
   });
 });

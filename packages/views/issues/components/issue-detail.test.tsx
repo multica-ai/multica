@@ -1,6 +1,7 @@
 import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Issue, Label, TimelineEntry } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -565,7 +566,7 @@ const mockTimeline: TimelineEntry[] = [
 // Import component under test (after mocks)
 // ---------------------------------------------------------------------------
 
-import { IssueDetail, groupSubIssuesByStage } from "./issue-detail";
+import { IssueDetail, groupSubIssuesByStage, sortSubIssues } from "./issue-detail";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -1609,6 +1610,8 @@ describe("IssueDetail (shared)", () => {
       useSubIssueDisplayStore.setState({
         rowProperties: { ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES },
         rowPropertyIds: [],
+        sortBy: "created",
+        sortDirection: "asc",
       });
     });
 
@@ -1701,6 +1704,37 @@ describe("IssueDetail (shared)", () => {
       expect(screen.queryByText("Jan 1")).not.toBeInTheDocument();
     });
 
+    it("exposes persistent ordering controls in display settings", async () => {
+      const user = userEvent.setup();
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-1",
+            number: 11,
+            identifier: "TES-11",
+            title: "Fix login flow",
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Fix login flow");
+      await user.click(screen.getByRole("button", { name: "Display settings" }));
+      const ordering = await screen.findByRole("combobox", { name: "Ordering" });
+      expect(ordering).toHaveTextContent("Created date");
+      await user.click(ordering);
+      await user.click(await screen.findByRole("option", { name: "Priority" }));
+      expect(useSubIssueDisplayStore.getState().sortBy).toBe("priority");
+      expect(screen.getByRole("combobox", { name: "Ordering" })).toHaveTextContent(
+        "Priority",
+      );
+      const direction = screen.getByRole("button", { name: "Ascending" });
+      await user.click(direction);
+      expect(useSubIssueDisplayStore.getState().sortDirection).toBe("desc");
+      expect(screen.getByRole("button", { name: "Descending" })).toBeInTheDocument();
+    });
+
     it("renders opted-in custom property chips on rows that carry a value", async () => {
       const estimate = {
         id: "prop-1",
@@ -1764,6 +1798,52 @@ describe("IssueDetail (shared)", () => {
       const due = screen.getByText("Jan 1");
       expect(due.closest("span")?.className).not.toContain("text-destructive");
       expect(due.closest("span")?.className).toContain("text-muted-foreground");
+    });
+
+    it("orders sub-issues by priority with issue number as a stable tie-breaker", async () => {
+      useSubIssueDisplayStore.setState({ sortBy: "priority", sortDirection: "asc" });
+      mockApiObj.listChildIssues.mockResolvedValue({
+        issues: [
+          subIssue({
+            id: "child-14",
+            number: 14,
+            identifier: "TES-14",
+            title: "Later high priority",
+            priority: "high",
+          }),
+          subIssue({
+            id: "child-11",
+            number: 11,
+            identifier: "TES-11",
+            title: "No priority",
+            priority: "none",
+          }),
+          subIssue({
+            id: "child-13",
+            number: 13,
+            identifier: "TES-13",
+            title: "Urgent work",
+            priority: "urgent",
+          }),
+          subIssue({
+            id: "child-12",
+            number: 12,
+            identifier: "TES-12",
+            title: "Earlier high priority",
+            priority: "high",
+          }),
+        ],
+      });
+
+      renderIssueDetail();
+
+      await screen.findByText("Urgent work");
+      const rowOrder = screen
+        .getAllByRole("link")
+        .map((link) => link.textContent ?? "")
+        .filter((text) => /TES-(11|12|13|14)/.test(text))
+        .map((text) => text.match(/TES-\d+/)?.[0]);
+      expect(rowOrder).toEqual(["TES-13", "TES-12", "TES-14", "TES-11"]);
     });
   });
 
@@ -2095,11 +2175,18 @@ describe("IssueDetail (shared)", () => {
 });
 
 describe("groupSubIssuesByStage", () => {
-  const child = (id: string, stage: number | null): Issue => ({
+  const child = (
+    id: string,
+    stage: number | null,
+    priority: Issue["priority"] = "none",
+    number = 1,
+  ): Issue => ({
     ...mockIssue,
     id,
     parent_issue_id: "parent-1",
     stage,
+    priority,
+    number,
   });
 
   it("returns a single null-stage group when nothing is staged", () => {
@@ -2124,5 +2211,29 @@ describe("groupSubIssuesByStage", () => {
   it("omits the unstaged group when every child is staged", () => {
     const groups = groupSubIssuesByStage([child("s1", 1), child("s2", 2)]);
     expect(groups.map((g) => g.stage)).toEqual([1, 2]);
+  });
+
+  it("keeps stage order while priority-sorting within each stage", () => {
+    const sorted = sortSubIssues(
+      [
+        child("stage-2-urgent", 2, "urgent", 14),
+        child("stage-1-low", 1, "low", 11),
+        child("stage-1-high-later", 1, "high", 13),
+        child("stage-1-high-earlier", 1, "high", 12),
+      ],
+      "priority",
+      "asc",
+    );
+
+    const groups = groupSubIssuesByStage(sorted);
+    expect(groups.map((group) => group.stage)).toEqual([1, 2]);
+    expect(groups[0]?.items.map((issue) => issue.id)).toEqual([
+      "stage-1-high-earlier",
+      "stage-1-high-later",
+      "stage-1-low",
+    ]);
+    expect(groups[1]?.items.map((issue) => issue.id)).toEqual([
+      "stage-2-urgent",
+    ]);
   });
 });

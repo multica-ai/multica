@@ -3,13 +3,14 @@ import { createJSONStorage, persist } from "zustand/middleware";
 import { defaultStorage } from "../../platform/storage";
 
 /**
- * Which properties the issue-detail sub-issues rows display.
+ * Which properties the issue-detail sub-issue rows display and how the rows
+ * are ordered.
  *
  * This is a personal reading preference (like the comment composer's sticky
  * toggle), not a per-view setting: every issue's sub-issues panel shares the
  * one configuration, persisted globally via `defaultStorage`. Defaults match
- * the panel's built-in row layout so the preference is invisible until the
- * user changes it.
+ * the panel's built-in row layout and stable creation order, so the preference
+ * is invisible until the user changes it.
  *
  * `rowPropertyIds` holds workspace custom property definition ids. The list
  * is global while property ids are workspace-scoped — renderers resolve ids
@@ -28,6 +29,10 @@ export type SubIssueRowPropertyKey =
   (typeof SUB_ISSUE_ROW_PROPERTY_KEYS)[number];
 export type SubIssueRowProperties = Record<SubIssueRowPropertyKey, boolean>;
 
+export const SUB_ISSUE_SORT_FIELDS = ["created", "priority"] as const;
+export type SubIssueSortField = (typeof SUB_ISSUE_SORT_FIELDS)[number];
+export type SubIssueSortDirection = "asc" | "desc";
+
 export const DEFAULT_SUB_ISSUE_ROW_PROPERTIES: SubIssueRowProperties = {
   priority: true,
   labels: true,
@@ -39,8 +44,12 @@ export const DEFAULT_SUB_ISSUE_ROW_PROPERTIES: SubIssueRowProperties = {
 interface SubIssueDisplayStore {
   rowProperties: SubIssueRowProperties;
   rowPropertyIds: string[];
+  sortBy: SubIssueSortField;
+  sortDirection: SubIssueSortDirection;
   toggleRowProperty: (key: SubIssueRowPropertyKey) => void;
   toggleRowPropertyId: (propertyId: string) => void;
+  setSortBy: (field: SubIssueSortField) => void;
+  setSortDirection: (direction: SubIssueSortDirection) => void;
 }
 
 export const useSubIssueDisplayStore = create<SubIssueDisplayStore>()(
@@ -48,6 +57,8 @@ export const useSubIssueDisplayStore = create<SubIssueDisplayStore>()(
     (set) => ({
       rowProperties: { ...DEFAULT_SUB_ISSUE_ROW_PROPERTIES },
       rowPropertyIds: [],
+      sortBy: "created",
+      sortDirection: "asc",
       toggleRowProperty: (key) =>
         set((s) => ({
           rowProperties: { ...s.rowProperties, [key]: !s.rowProperties[key] },
@@ -58,6 +69,8 @@ export const useSubIssueDisplayStore = create<SubIssueDisplayStore>()(
             ? s.rowPropertyIds.filter((id) => id !== propertyId)
             : [...s.rowPropertyIds, propertyId],
         })),
+      setSortBy: (sortBy) => set({ sortBy }),
+      setSortDirection: (sortDirection) => set({ sortDirection }),
     }),
     {
       name: "multica_sub_issue_display",
@@ -74,6 +87,14 @@ export const useSubIssueDisplayStore = create<SubIssueDisplayStore>()(
             ...current.rowProperties,
             ...(p.rowProperties ?? {}),
           },
+          sortBy:
+            p.sortBy === "created" || p.sortBy === "priority"
+              ? p.sortBy
+              : current.sortBy,
+          sortDirection:
+            p.sortDirection === "asc" || p.sortDirection === "desc"
+              ? p.sortDirection
+              : current.sortDirection,
         };
       },
     },
