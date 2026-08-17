@@ -27,6 +27,9 @@
     "ui:add": "cd packages/ui && npx shadcn@latest add",
     "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
   },
+  "engines": {
+    "node": ">=22"
+  },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {
     "onlyBuiltDependencies": [

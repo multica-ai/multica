@@ -31,6 +31,7 @@ type Registry struct {
 	HTTP         *HTTPMetrics
 	Business     *BusinessMetrics
 	ChannelMedia *ChannelMediaReconcilerMetrics
+	ChannelLease *ChannelLeaseMetrics
 	Wecom        *WecomMetrics
 	// Sampler is non-nil only when RegistryOptions.BusinessSampler was
 	// supplied with a valid Pool. Exposed so the cmd/server entrypoint
@@ -59,6 +60,9 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	channelMedia := NewChannelMediaReconcilerMetrics()
 	reg.MustRegister(channelMedia.Collectors()...)
 
+	channelLease := NewChannelLeaseMetrics()
+	reg.MustRegister(channelLease.Collectors()...)
+
 	wecomMetrics := NewWecomMetrics()
 	reg.MustRegister(wecomMetrics.Collectors()...)
 
@@ -82,6 +86,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 		HTTP:         httpMetrics,
 		Business:     businessMetrics,
 		ChannelMedia: channelMedia,
+		ChannelLease: channelLease,
 		Wecom:        wecomMetrics,
 		Sampler:      sampler,
 	}

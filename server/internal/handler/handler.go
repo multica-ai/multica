@@ -198,6 +198,7 @@ type Handler struct {
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
+	InvitationRateLimiters       InvitationRateLimiters
 	WebhookDeliveryWorker        *WebhookDeliveryWorker
 	CloudRuntime                 cloudRuntimeProxy
 	// Lark integration. All three are nil when the Lark master key
@@ -229,9 +230,10 @@ type Handler struct {
 	// ChannelSupervisor owns the per-installation supervisor goroutines
 	// that hold the §4.4 WS lease and drive each channel.Channel
 	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic
-	// engine). The router constructs it UNCONDITIONALLY — it drives any
-	// channel type, not just Feishu, so it does not depend on the Lark
-	// master key; each platform registers its Factory only when configured
+	// engine). The router constructs it independently of platform secrets — it
+	// drives any channel type, not just Feishu. It remains nil when lease
+	// configuration is unsafe or a selected Redis backend fails its startup
+	// readiness check; each platform registers its Factory only when configured
 	// (Feishu when MULTICA_LARK_SECRET_KEY is set). The router does NOT
 	// call Run; the process owner (main.go) starts it under a long-running
 	// context and joins via WaitWithTimeout (bounded, fenced by
@@ -403,6 +405,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
+		InvitationRateLimiters:       NewMemoryInvitationRateLimiters(DefaultInvitationRateLimits()),
 		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,

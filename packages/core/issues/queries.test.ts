@@ -2,14 +2,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 
 import { setApiInstance } from "../api";
-import type { ApiClient } from "../api/client";
+import { ApiError, type ApiClient } from "../api/client";
 import type {
   Issue,
   IssueTableRowsRequest,
   IssueTableRowsResponse,
   ListIssuesParams,
   ListIssuesResponse,
-  SearchIssuesResponse,
 } from "../types";
 import {
   CHILDREN_BY_PARENTS_CHUNK_SIZE,
@@ -72,14 +71,10 @@ function installFakeChildApi(
   setApiInstance({ listChildIssues } as unknown as ApiClient);
 }
 
-function installFakeSearchApi(
-  searchIssues: (params: { q: string }) => Promise<SearchIssuesResponse>,
+function installFakeIssueApi(
+  getIssue: (id: string, options?: { signal?: AbortSignal }) => Promise<Issue>,
 ) {
-  setApiInstance({ searchIssues } as unknown as ApiClient);
-}
-
-function makeSearchResult(idx: number, identifier: string) {
-  return { ...makeIssue(idx), identifier, match_source: "title" as const };
+  setApiInstance({ getIssue } as unknown as ApiClient);
 }
 
 describe("childIssuesOptions", () => {
@@ -509,47 +504,51 @@ describe("issueIdentifierOptions", () => {
     vi.restoreAllMocks();
   });
 
-  it("returns the issue whose identifier exactly matches the query", async () => {
-    const searchIssues = vi
-      .fn<(params: { q: string }) => Promise<SearchIssuesResponse>>()
-      .mockResolvedValue({
-        issues: [makeSearchResult(7, "MUL-7")],
-        total: 1,
-      });
-    installFakeSearchApi(searchIssues);
+  it("resolves the identifier through the exact-lookup endpoint, not search", async () => {
+    const getIssue = vi
+      .fn<(id: string, options?: { signal?: AbortSignal }) => Promise<Issue>>()
+      .mockResolvedValue(makeIssue(7));
+    installFakeIssueApi(getIssue);
 
     const data = await qc.fetchQuery(issueIdentifierOptions(WS_ID, "MUL-7"));
 
     expect(data?.id).toBe("issue-7");
-    expect(searchIssues).toHaveBeenCalledWith(
-      expect.objectContaining({ q: "MUL-7" }),
-    );
+    expect(getIssue).toHaveBeenCalledTimes(1);
+    expect(getIssue.mock.calls[0]?.[0]).toBe("MUL-7");
   });
 
-  it("returns null when no result's identifier matches (wrong prefix / number-only hit)", async () => {
-    // Backend number-match returns MUL-7 for a TES-7 query; exact filter rejects it.
-    const searchIssues = vi
-      .fn<(params: { q: string }) => Promise<SearchIssuesResponse>>()
-      .mockResolvedValue({
-        issues: [makeSearchResult(7, "MUL-7")],
-        total: 1,
-      });
-    installFakeSearchApi(searchIssues);
+  it("returns null on 404 (unknown number or wrong workspace prefix)", async () => {
+    // The server enforces the prefix now: TES-7 in a MUL workspace 404s.
+    const getIssue = vi
+      .fn<(id: string) => Promise<Issue>>()
+      .mockRejectedValue(new ApiError("issue not found", 404, "Not Found"));
+    installFakeIssueApi(getIssue);
 
     const data = await qc.fetchQuery(issueIdentifierOptions(WS_ID, "TES-7"));
 
     expect(data).toBeNull();
   });
 
-  it("returns null on an empty (or malformed→empty) search response", async () => {
-    const searchIssues = vi
-      .fn<(params: { q: string }) => Promise<SearchIssuesResponse>>()
-      .mockResolvedValue({ issues: [], total: 0 });
-    installFakeSearchApi(searchIssues);
+  it("propagates non-404 failures instead of caching them as 'no such issue'", async () => {
+    const getIssue = vi
+      .fn<(id: string) => Promise<Issue>>()
+      .mockRejectedValue(new ApiError("boom", 500, "Internal Server Error"));
+    installFakeIssueApi(getIssue);
 
-    const data = await qc.fetchQuery(issueIdentifierOptions(WS_ID, "MUL-999"));
+    await expect(
+      qc.fetchQuery(issueIdentifierOptions(WS_ID, "MUL-9")),
+    ).rejects.toThrow("boom");
+  });
 
-    expect(data).toBeNull();
+  it("passes the query's abort signal down so unmount cancels the lookup", async () => {
+    const getIssue = vi
+      .fn<(id: string, options?: { signal?: AbortSignal }) => Promise<Issue>>()
+      .mockResolvedValue(makeIssue(7));
+    installFakeIssueApi(getIssue);
+
+    await qc.fetchQuery(issueIdentifierOptions(WS_ID, "MUL-7"));
+
+    expect(getIssue.mock.calls[0]?.[1]?.signal).toBeInstanceOf(AbortSignal);
   });
 
   it("keys the query by workspace and identifier", () => {

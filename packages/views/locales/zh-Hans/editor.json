@@ -10,6 +10,11 @@
     "task_list": "待办列表",
     "quote": "引用",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "应用链接",
+      "remove": "移除链接",
+      "close": "关闭链接编辑器"
+    },
     "heading_dropdown": {
       "text": "正文",
       "normal_text": "正文",

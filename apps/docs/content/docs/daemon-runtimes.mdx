@@ -98,6 +98,23 @@ The profile is shared across the workspace. Each connected computer looks up the
 
 The command field takes an executable and arguments, not a shell script. Plain arguments, quotes, and backslash escapes work; pipes, redirects, `&&`, `;`, backticks, and environment variable expansion do not. When you need those behaviors, put them in a wrapper script and use that script as the command.
 
+### How your arguments are ordered
+
+Everything you type in the command field stays directly after the executable, ahead of the arguments Multica adds:
+
+```text
+<your command> <your fixed arguments> <Multica's protocol arguments> <the agent's custom arguments>
+```
+
+This is what makes a subcommand-style wrapper work. If your command is `ccms start q36`, the tool sees `start q36` first and can select its subcommand before Multica's `-p` and the rest arrive — which is the only order such a wrapper accepts.
+
+Your arguments used to be appended last instead. Most flag-style commands parse the same either way, but not all of them do — a command that distinguishes global flags from subcommand flags can care where a flag sits. If you already have a profile with fixed arguments, re-run one task on it after upgrading to confirm it still starts.
+
+Two more consequences worth knowing:
+
+- **Multica's own values win a conflict.** If your fixed arguments set a flag Multica also sets, Multica's value comes later and takes effect. Most importantly, a model chosen on the agent overrides a `--model` pinned in the profile. To pin a model for everyone, leave the agents' model field empty.
+- **Protocol-critical flags are ignored.** `-p`, `--output-format`, `--input-format`, `--permission-mode`, and the equivalents for other families are dropped from your fixed arguments, because overriding them would break the daemon's connection to the tool. Subcommands and other positional arguments always pass through.
+
 If a Desktop-launched daemon cannot find a command your terminal can run, set an absolute path for the current computer:
 
 ```bash

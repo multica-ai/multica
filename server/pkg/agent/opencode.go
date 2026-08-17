@@ -109,7 +109,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// extension is too long" (#6538). Keeping the prompt off argv also stops it
 	// from being echoed into the "agent command" log line below.
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	// Run opencode in its own process group so cancellation can reach the
 	// whole tree (opencode plus any tool subprocess it spawns), not just the

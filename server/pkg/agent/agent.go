@@ -260,6 +260,16 @@ type Config struct {
 	// vendor's binary; it defaults to false so an unset caller fails
 	// closed onto standard behavior.
 	BuiltinRuntime bool
+	// LaunchPrefix is the argv prefix that belongs to ExecutablePath itself —
+	// a custom runtime profile's fixed_args. It is spliced in directly after
+	// the executable, ahead of every argument a backend builds, because a
+	// wrapper's subcommand has to be consumed before the wrapped CLI's own
+	// flags mean anything (`ccms start q36` then `-p …`, GH #7046).
+	//
+	// Unlike ExtraArgs this is not opt-in: New filters it once and the
+	// Command boundary applies it to every process the package spawns, task
+	// launches and CLI probes alike. Backends never read it directly.
+	LaunchPrefix []string
 }
 
 // New creates a Backend for the given agent type.
@@ -348,6 +358,12 @@ func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	// Filter the launch prefix here, at the one point that knows both the
+	// prefix and the protocol family. Doing it per-backend would be the same
+	// opt-in arrangement that let ExtraArgs rot: a family that forgot the call
+	// would accept a fixed_args `--output-format text` and break its own
+	// stream-json channel.
+	cfg.LaunchPrefix = filterLaunchPrefix(cfg.LaunchPrefix, agentType, cfg.Logger)
 
 	switch agentType {
 	case "claude":
@@ -396,8 +412,13 @@ func New(agentType string, cfg Config) (Backend, error) {
 }
 
 // DetectVersion runs the agent CLI with --version and returns the output.
-func DetectVersion(ctx context.Context, executablePath string) (string, error) {
-	return detectCLIVersion(ctx, executablePath)
+//
+// cmd carries the runtime's launch prefix, so a custom profile is probed the
+// way it is launched: `ccms start q36 --version` reports the version of the
+// CLI the wrapper actually execs, where a bare `ccms --version` would report
+// the wrapper's own and pin the runtime to the wrong compatibility policy.
+func DetectVersion(ctx context.Context, cmd Command) (string, error) {
+	return detectCLIVersion(ctx, cmd)
 }
 
 // launchHeaders maps each supported agent type to the user-visible skeleton

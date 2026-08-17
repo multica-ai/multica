@@ -79,6 +79,7 @@ var businessMetricLabels = map[string][]string{
 	"multica_autopilot_run_skipped_total":              {labelCadence, labelReason},
 	"multica_webhook_delivery_total":                   {labelProvider, labelStatus},
 	"multica_webhook_rate_limited_total":               {labelGate},
+	"multica_email_rate_limited_total":                 {labelAction, labelGate},
 	"multica_github_event_received_total":              {labelEventKind, labelAction},
 	"multica_github_pr_review_total":                   {labelResult},
 	"multica_cloudruntime_request_total":               {labelOp, labelStatus},

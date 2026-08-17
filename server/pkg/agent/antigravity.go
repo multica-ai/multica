@@ -53,7 +53,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	// ID. opts.Model is the single funnel for agent.model, API/UI values, and the
 	// daemon-wide default. Validation remains fail-open when discovery is empty.
 	if opts.Model != "" {
-		catalog, _ := ListModels(ctx, "antigravity", execPath)
+		catalog, _ := ListModels(ctx, "antigravity", b.cfg.commandAt(execPath))
 		opts.Model = normalizeAntigravityModel(opts.Model, catalog.Models)
 		if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
 			return nil, err
@@ -73,7 +73,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 	args := buildAntigravityArgs(prompt, logPath, timeout, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second

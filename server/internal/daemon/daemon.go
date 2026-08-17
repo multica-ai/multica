@@ -1067,7 +1067,7 @@ func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath,
 	// older or broken install must not be launched under the daemon's stale
 	// version policy, and must not slip past the minimum-version gate that the
 	// registration path applies (MUL-4486 review).
-	version, err := detectAgentVersion(ctx, newPath)
+	version, err := detectAgentVersion(ctx, agent.Command{Path: newPath})
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
@@ -2298,7 +2298,7 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
 			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
 		}
-		version, err := detectAgentVersion(ctx, resolved.Path)
+		version, err := detectAgentVersion(ctx, agent.Command{Path: resolved.Path})
 		if err != nil {
 			lastErr = err
 			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
@@ -2792,8 +2792,14 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 			}
 			resolved = r
 		}
-		// Best-effort version detection; an empty version is acceptable.
-		version, verErr := detectAgentVersion(ctx, resolved)
+		// Best-effort version detection; an empty version is acceptable. The
+		// probe carries the profile's fixed_args so a wrapper reports the
+		// version of the CLI it execs rather than its own: `ccms start q36
+		// --version` is Claude Code's version, `ccms --version` is the
+		// wrapper's, and only the former means anything to the min-version
+		// gate (GH #7046).
+		version, verErr := detectAgentVersion(ctx, agent.NewCommand(resolved,
+			agent.FilterLaunchPrefix(profile.ProtocolFamily, profile.FixedArgs, d.logger)))
 		if verErr != nil {
 			d.logger.Debug("custom runtime profile: version probe failed (registering with empty version)",
 				"workspace_id", workspaceID, "profile_id", profile.ID, "path", resolved, "error", verErr)
@@ -4043,10 +4049,16 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 	// path is also never re-resolved: like runTask, we don't second-guess a
 	// path the profile pinned.
 	var execPath string
+	// fixedArgs mirrors the launch prefix runTask would use. Discovery has to
+	// enumerate the CLI the profile actually runs, so a subcommand wrapper is
+	// probed as `ccms start q36 models`, not `ccms models` (GH #7046).
+	var fixedArgs []string
 	if customSpec, isCustom := d.customProfileLaunchForRuntime(rt.ID); isCustom {
 		execPath = customSpec.path
+		fixedArgs = agent.FilterLaunchPrefix(rt.Provider, customSpec.fixedArgs, d.logger)
 		d.logger.Info("model list uses custom runtime profile command",
-			"runtime_id", rt.ID, "provider", rt.Provider, "command_path", execPath)
+			"runtime_id", rt.ID, "provider", rt.Provider, "command_path", execPath,
+			"fixed_args", len(fixedArgs))
 	} else if entry, ok := d.agents()[rt.Provider]; ok {
 		// Built-in provider: self-heal a pinned executable path an in-place
 		// upgrade deleted (MUL-4486).
@@ -4060,7 +4072,7 @@ func (d *Daemon) handleModelList(ctx context.Context, rt Runtime, requestID stri
 		return
 	}
 
-	catalog, err := listModels(ctx, rt.Provider, execPath)
+	catalog, err := listModels(ctx, rt.Provider, agent.NewCommand(execPath, fixedArgs))
 	if err != nil {
 		d.reportModelListResult(ctx, rt, requestID, map[string]any{
 			"status": "failed",
@@ -6131,7 +6143,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		usesCustomProfileCommand = true
 		entry.Path = customSpec.path
 		resolvedVersion = customSpec.version
-		profileFixedArgs = customSpec.fixedArgs
+		// Filter here rather than relying on agent.New doing it, so that the
+		// launch and the catalog lookups below agree on one prefix. They share
+		// a discovery memo keyed on the command, and two spellings of the same
+		// runtime would key two entries.
+		profileFixedArgs = agent.FilterLaunchPrefix(provider, customSpec.fixedArgs, d.logger)
 		ok = true
 		d.logger.Info("task uses custom runtime profile command",
 			"task_id", task.ID, "runtime_id", task.RuntimeID,
@@ -6327,6 +6343,10 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// instead of silently downgrading a user's isolation opt-in (MUL-4957).
 	var codexSandboxArgs []string
 	if provider == "codex" {
+		// profileFixedArgs still belongs in this reconstruction even though it
+		// no longer travels via ExtraArgs: it is a launch prefix now, so it is
+		// still on codex's argv, and a `-c windows.sandbox=...` written there
+		// must still be visible to the sandbox decision.
 		extraArgs := append(append([]string{}, profileFixedArgs...), defaultArgsForProvider(d.cfg, provider)...)
 		codexSandboxArgs = agent.NormalizeCodexLaunchArgs(extraArgs, agentCustomArgs, effectiveMcpConfig, d.logger)
 	}
@@ -6347,7 +6367,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	var hermesMemoryStore string
 	var hermesSessionStore string
 	if provider == "hermes" {
-		sel := agent.ParseHermesProfileArgs(agentCustomArgs)
+		// Resolve from the argv hermes will actually parse — launch prefix,
+		// `acp`, then the filtered custom args — which agent.HermesLaunchArgv
+		// assembles the same way the backend does. A custom runtime profile's
+		// fixed_args are the launch prefix now, so they are scanned before
+		// custom_args, and the backend's own `acp` token sits between them and
+		// participates in the scan. Approximating that argv reads a different
+		// profile than the process does, and the overlay ends up seeded from
+		// the wrong home (GH #7046).
+		sel := agent.ParseHermesProfileArgs(agent.HermesLaunchArgv(profileFixedArgs, agentCustomArgs, d.logger))
 		res := execenv.ResolveHermesProfile(agentEnvOverrides["HERMES_HOME"], sel.Name, sel.Found, sel.Inline)
 		if res.Err != nil {
 			return TaskResult{}, fmt.Errorf("resolve hermes profile: %w", res.Err)
@@ -6810,6 +6838,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err := configureCodexTaskShellEnvironment(provider, env.CodexHome, os.Environ(), agentEnv, agentCustomEnv, d.logger); err != nil {
 		return TaskResult{}, err
 	}
+	// The overlay is authoritative once built, so nothing on the command line
+	// may re-point HERMES_HOME out of it. Both argv regions are stripped
+	// together, against the same assembled argv the resolver read: a selection
+	// can straddle them (a prefix ending in a bare `-p` captures the backend's
+	// `acp`), which per-region stripping cannot see.
+	var hermesOverlayCustomArgs []string
+	hermesOverlayActive := provider == "hermes" && env != nil && env.HermesHome != ""
+	if hermesOverlayActive {
+		var rawCustomArgs []string
+		if task.Agent != nil {
+			rawCustomArgs = task.Agent.CustomArgs
+		}
+		profileFixedArgs, hermesOverlayCustomArgs = agent.StripHermesProfileSelectors(
+			profileFixedArgs, rawCustomArgs, d.logger)
+	}
 	// Resolve the backend through the unified runtime resolver: built-in
 	// runtime identities (e.g. "omp") dispatch through NewRuntime, protocol
 	// families go through New. This is the single production boundary — the
@@ -6817,6 +6860,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// factories stay meaning exactly one thing each.
 	backend, err := agent.ResolveBackend(provider, agent.Config{
 		ExecutablePath: entry.Path,
+		LaunchPrefix:   profileFixedArgs,
 		CLIVersion:     resolvedVersion,
 		Env:            agentEnv,
 		Logger:         d.logger,
@@ -6843,17 +6887,21 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	taskStart := time.Now()
 
 	var customArgs []string
+	// profileFixedArgs deliberately does NOT go here. It travels as
+	// agent.Config.LaunchPrefix instead, because ExtraArgs is honoured by only
+	// six of the twenty-one backends and lands *after* the protocol flags in
+	// the ones that do — so a wrapper's subcommand was either dropped on the
+	// floor or spliced in behind `-p` (GH #7046).
 	extraArgs := defaultArgsForProvider(d.cfg, provider)
-	if len(profileFixedArgs) > 0 {
-		extraArgs = append(append([]string{}, profileFixedArgs...), extraArgs...)
-	}
 	var mcpConfig json.RawMessage
 	if task.Agent != nil {
 		customArgs = task.Agent.CustomArgs
 		mcpConfig = effectiveMcpConfig
 	}
-	if provider == "hermes" {
-		customArgs = hermesLaunchArgs(customArgs, env != nil && env.HermesHome != "")
+	if hermesOverlayActive {
+		// Stripped above, alongside the launch prefix. A skill-less hermes task
+		// has no overlay to protect and keeps its flags untouched.
+		customArgs = hermesOverlayCustomArgs
 	}
 	// Two-tier model resolution: an explicit agent.model wins,
 	// then the daemon-wide MULTICA_<PROVIDER>_MODEL env var. If
@@ -6883,7 +6931,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// through so a transient discovery failure does not silently disable a
 	// previously valid user choice.
 	if serviceTier != "" {
-		ok, err := agent.ValidateServiceTier(ctx, provider, entry.Path, model, serviceTier)
+		ok, err := agent.ValidateServiceTier(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs), model, serviceTier)
 		if err != nil {
 			taskLog.Warn("service_tier: catalog lookup failed; passing through",
 				"provider", provider,
@@ -6912,7 +6960,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// level here. Discovery errors fail open for resolved models: if we can't
 	// list models, we keep the persisted level and let the CLI object.
 	if thinkingLevel != "" {
-		ok, err := agent.ValidateThinkingLevel(ctx, provider, entry.Path, model, thinkingLevel)
+		ok, err := agent.ValidateThinkingLevel(ctx, provider, agent.NewCommand(entry.Path, profileFixedArgs), model, thinkingLevel)
 		if err != nil {
 			taskLog.Warn("thinking_level: catalog lookup failed; passing through",
 				"provider", provider,
@@ -8343,22 +8391,6 @@ func sanitizeAgentEnv(customEnv map[string]string) map[string]string {
 		out[k] = v
 	}
 	return out
-}
-
-// hermesLaunchArgs decides the final Hermes custom_args: with the per-task
-// overlay active, the -p/--profile flags are stripped (the overlay was seeded
-// from that profile's home and exports its own HERMES_HOME, so the flag must not
-// re-resolve the profile past it); with no overlay, the flags pass through so a
-// skill-less task's profile behavior is unchanged.
-func hermesLaunchArgs(customArgs []string, overlayActive bool) []string {
-	if !overlayActive {
-		return customArgs
-	}
-	// Strip exactly the occurrence the resolver acted on. This re-parses with the
-	// same authoritative parser used to resolve the source home, so parsing and
-	// stripping never diverge.
-	sel := agent.ParseHermesProfileArgs(customArgs)
-	return agent.StripHermesProfileArgs(customArgs, sel)
 }
 
 // hermesProviderUnconfiguredHint is appended verbatim to a "no LLM provider
