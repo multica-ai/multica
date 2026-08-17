@@ -1,0 +1,66 @@
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "multica.frontend.fullname" . }}
+  labels:
+    {{- include "multica.labels" . | nindent 4 }}
+    app.kubernetes.io/component: frontend
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: multica
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: frontend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- toYaml .Values.networkPolicy.ingress.frontend | nindent 4 }}
+  egress:
+    {{- toYaml .Values.networkPolicy.egress.frontend | nindent 4 }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "multica.backend.fullname" . }}
+  labels:
+    {{- include "multica.labels" . | nindent 4 }}
+    app.kubernetes.io/component: backend
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: multica
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: backend
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- toYaml .Values.networkPolicy.ingress.backend | nindent 4 }}
+  egress:
+    {{- toYaml .Values.networkPolicy.egress.backend | nindent 4 }}
+{{- if not .Values.postgres.external.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "multica.postgres.fullname" . }}
+  labels:
+    {{- include "multica.labels" . | nindent 4 }}
+    app.kubernetes.io/component: postgres
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: multica
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: postgres
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    {{- toYaml .Values.networkPolicy.ingress.postgres | nindent 4 }}
+  egress:
+    {{- toYaml .Values.networkPolicy.egress.postgres | nindent 4 }}
+{{- end }}
+{{- end }}

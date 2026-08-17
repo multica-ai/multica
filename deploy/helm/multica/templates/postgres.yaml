@@ -1,4 +1,4 @@
-{{- if not .Values.postgres.external.enabled -}}
+{{- if not .Values.postgres.external.enabled }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
@@ -33,14 +33,31 @@ spec:
       app.kubernetes.io/component: postgres
   template:
     metadata:
+      {{- with .Values.postgres.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       labels:
-        {{- include "multica.labels" . | nindent 8 }}
-        app.kubernetes.io/component: postgres
+        {{- include "multica.podLabels" (dict "root" . "component" "postgres" "custom" .Values.postgres.podLabels) | nindent 8 }}
     spec:
+      serviceAccountName: {{ include "multica.serviceAccountName" . }}
+      automountServiceAccountToken: {{ .Values.serviceAccount.automountServiceAccountToken }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgres.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: postgres
-          image: "{{ .Values.images.postgres.repository }}:{{ .Values.images.postgres.tag }}"
+          image: {{ include "multica.postgres.image" . | quote }}
           imagePullPolicy: {{ .Values.images.postgres.pullPolicy }}
+          {{- with .Values.postgres.containerSecurityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           ports:
             - containerPort: 5432
               name: postgres
@@ -60,8 +77,6 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.existingSecret }}
                   key: POSTGRES_PASSWORD
-            # local-path PVCs mount with a lost+found directory — point PGDATA
-            # at a subdir so initdb sees an empty target.
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           volumeMounts:
@@ -77,12 +92,20 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.postgres.resources | nindent 12 }}
+      {{- with .Values.postgres.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.postgres.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       {{- with .Values.postgres.tolerations }}
       tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.postgres.topologySpreadConstraints }}
+      topologySpreadConstraints:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       volumes:
@@ -105,6 +128,6 @@ spec:
     app.kubernetes.io/component: postgres
   ports:
     - port: 5432
-      targetPort: 5432
-
+      targetPort: postgres
+      name: postgres
 {{- end }}
