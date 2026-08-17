@@ -1043,6 +1043,26 @@
         "label": "成员",
         "description": "创建并处理任务"
       }
-    }
+    },
+    "share_links_title": "分享链接",
+    "role_field": "角色：",
+    "expiry_field": "有效期：",
+    "share_links_create_title": "创建分享链接",
+    "share_links_create_button": "生成",
+    "share_links_creating": "生成中...",
+    "share_link_uses": "已用 {{used}} / {{max}} 次",
+    "share_link_expires": "过期：{{date}}",
+    "share_link_copy_tooltip": "复制链接",
+    "share_link_revoke_tooltip": "撤销链接",
+    "toast_share_link_created": "分享链接已创建",
+    "toast_share_link_failed": "创建分享链接失败",
+    "toast_share_link_revoked": "分享链接已撤销",
+    "toast_share_link_revoke_failed": "撤销分享链接失败",
+    "toast_share_link_copied": "链接已复制",
+    "toast_share_link_copy_failed": "复制链接失败",
+    "expiry_24h": "24 小时",
+    "expiry_7d": "7 天",
+    "expiry_30d": "30 天",
+    "expiry_never": "永久有效"
   }
 }

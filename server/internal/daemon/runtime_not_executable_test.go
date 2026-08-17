@@ -23,7 +23,8 @@ func stubNotExecutableProbe(t *testing.T, path string) {
 	t.Helper()
 	orig := detectAgentVersion
 	t.Cleanup(func() { detectAgentVersion = orig })
-	detectAgentVersion = func(_ context.Context, p string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		p := runtimeCmd.Path
 		enoexec := &fs.PathError{Op: "fork/exec", Path: p, Err: syscall.ENOEXEC}
 		return "", fmt.Errorf("detect version for %s: %w", p, agent.ExplainExecError(enoexec))
 	}
@@ -202,7 +203,8 @@ func TestDetectBuiltinRuntimes_HealthyProbeClearsPendingVerdict(t *testing.T) {
 	broken := true
 	orig := detectAgentVersion
 	t.Cleanup(func() { detectAgentVersion = orig })
-	detectAgentVersion = func(_ context.Context, p string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		p := runtimeCmd.Path
 		if broken {
 			enoexec := &fs.PathError{Op: "fork/exec", Path: p, Err: syscall.ENOEXEC}
 			return "", fmt.Errorf("detect version for %s: %w", p, agent.ExplainExecError(enoexec))

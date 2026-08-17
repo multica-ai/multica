@@ -242,6 +242,7 @@
     "back": "뒤로",
     "title_placeholder": "태스크 제목",
     "desc_placeholder": "설명 추가...",
+    "current_issue": "현재 작업",
     "sub_issues_label": "하위 태스크",
     "sub_issue_of": "상위 태스크",
     "add_sub_issues": "하위 태스크 추가",

@@ -60,7 +60,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 	// resolve the value itself rather than blocking the run on a discovery
 	// hiccup (see antigravityModelError).
 	if opts.Model != "" {
-		catalog, _ := ListModels(ctx, "antigravity", execPath)
+		catalog, _ := ListModels(ctx, "antigravity", b.cfg.commandAt(execPath))
 		if err := antigravityModelError(opts.Model, catalog.Models); err != nil {
 			return nil, err
 		}
@@ -79,7 +79,7 @@ func (b *antigravityBackend) Execute(ctx context.Context, prompt string, opts Ex
 
 	args := buildAntigravityArgs(prompt, logPath, timeout, opts, b.cfg.Logger)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second

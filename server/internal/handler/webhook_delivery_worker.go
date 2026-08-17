@@ -122,7 +122,7 @@ func (w *WebhookDeliveryWorker) ProcessNext(ctx context.Context) (bool, error) {
 		key := uuidToString(delivery.TriggerID)
 		if !w.h.WebhookRateLimiter.Allow(ctx, key) {
 			w.h.Metrics.RecordWebhookRateLimited("worker_trigger")
-			retryAfter := webhookLimiterRetryAfter(ctx, w.h.WebhookRateLimiter, key)
+			retryAfter := slidingWindowLimiterRetryAfter(ctx, w.h.WebhookRateLimiter, key)
 			if retryAfter <= 0 {
 				retryAfter = time.Second
 			}

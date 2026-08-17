@@ -118,6 +118,18 @@ func (h *Handler) CreateInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Consume every applicable budget only after validation and idempotency
+	// checks, but before the invitation row or email side effect is created.
+	if !h.admitInvitation(
+		w,
+		r,
+		uuidToString(requester.UserID),
+		uuidToString(requester.WorkspaceID),
+		email,
+	) {
+		return
+	}
+
 	// Resolve invitee_user_id if the user already exists.
 	var inviteeUserID pgtype.UUID
 	if existingUser.ID.Valid {

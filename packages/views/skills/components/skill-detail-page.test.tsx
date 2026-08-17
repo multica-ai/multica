@@ -425,3 +425,55 @@ describe("SkillDetailPage draft baseline (MUL-5645)", () => {
     ).toBe("my unsaved edit");
   });
 });
+
+describe("SkillDetailPage origin link", () => {
+  const SOURCE_URL = "https://github.com/anthropics/skills/tree/main/animations";
+
+  it("links the imported-origin chip to its source", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      config: { origin: { type: "github", source_url: SOURCE_URL } },
+    };
+    renderPage();
+    const link = (await screen.findByRole("link", {
+      name: "Imported · GitHub",
+    })) as HTMLAnchorElement;
+    expect(link.getAttribute("href")).toBe(SOURCE_URL);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toContain("noopener");
+  });
+
+  it("keeps manual origins as plain text", async () => {
+    renderPage();
+    expect(await screen.findByText("Created manually")).toBeTruthy();
+    expect(
+      screen.queryByRole("link", { name: "Created manually" }),
+    ).toBeNull();
+  });
+
+  it("does not link an imported origin whose source_url is missing", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      config: { origin: { type: "github" } },
+    };
+    renderPage();
+    expect(await screen.findByText("Imported · GitHub")).toBeTruthy();
+    expect(
+      screen.queryByRole("link", { name: "Imported · GitHub" }),
+    ).toBeNull();
+  });
+
+  it("does not link a source_url whose host does not match the origin type", async () => {
+    skillRef.current = {
+      ...baseSkill,
+      config: {
+        origin: { type: "github", source_url: "https://evil.example/skills" },
+      },
+    };
+    renderPage();
+    expect(await screen.findByText("Imported · GitHub")).toBeTruthy();
+    expect(
+      screen.queryByRole("link", { name: "Imported · GitHub" }),
+    ).toBeNull();
+  });
+});

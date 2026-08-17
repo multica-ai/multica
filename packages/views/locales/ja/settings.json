@@ -1043,6 +1043,26 @@
         "label": "メンバー",
         "description": "タスクの作成と作業"
       }
-    }
+    },
+    "share_links_title": "共有リンク",
+    "role_field": "ロール：",
+    "expiry_field": "有効期限：",
+    "share_links_create_title": "共有リンクを作成",
+    "share_links_create_button": "生成",
+    "share_links_creating": "生成中...",
+    "share_link_uses": "{{used}} / {{max}} 回使用",
+    "share_link_expires": "有効期限 {{date}}",
+    "share_link_copy_tooltip": "リンクをコピー",
+    "share_link_revoke_tooltip": "リンクを取り消す",
+    "toast_share_link_created": "共有リンクを作成しました",
+    "toast_share_link_failed": "共有リンクの作成に失敗しました",
+    "toast_share_link_revoked": "共有リンクを取り消しました",
+    "toast_share_link_revoke_failed": "共有リンクの取り消しに失敗しました",
+    "toast_share_link_copied": "リンクをコピーしました",
+    "toast_share_link_copy_failed": "リンクのコピーに失敗しました",
+    "expiry_24h": "24時間",
+    "expiry_7d": "7日",
+    "expiry_30d": "30日",
+    "expiry_never": "無期限"
   }
 }

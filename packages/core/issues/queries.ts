@@ -4,7 +4,7 @@ import {
   queryOptions,
   type QueryClient,
 } from "@tanstack/react-query";
-import { api } from "../api";
+import { api, ApiError } from "../api";
 import type {
   Issue,
   IssueAssigneeType,
@@ -413,11 +413,18 @@ export function issueDetailOptions(wsId: string, id: string) {
 /**
  * Resolve a bare issue identifier ("MUL-123") to its issue, or `null`.
  *
- * Backs the Linear-style autolink: the backend `q` search matches an
- * identifier on issue NUMBER only (prefix-agnostic — `MUL-123` and `TES-123`
- * both hit number 123), so the exact `identifier === value` filter here is
- * what enforces the workspace prefix. A non-existent or wrong-prefix
- * identifier resolves to `null` and renders as plain text.
+ * Backs the Linear-style autolink. This is an EXACT lookup, so it goes to
+ * `GET /api/issues/{identifier}` — the server parses `PREFIX-NUMBER`, checks
+ * the prefix against the workspace's own `issue_prefix`, and reads the issue
+ * through the unique `(workspace_id, number)` index. A non-existent or
+ * wrong-prefix identifier 404s, which maps to `null` here and renders as
+ * plain text — the same contract the previous implementation had.
+ *
+ * It deliberately does NOT use `/api/issues/search`: that endpoint runs the
+ * workspace-wide full-text query (title/description/comment `LIKE`, ranking,
+ * snippet subquery, `COUNT(*) OVER()`) which is orders of magnitude more
+ * expensive than a point read, and autolink resolution was the dominant
+ * caller of it (MUL-6268).
  *
  * Server state → TanStack Query; the key includes `wsId` and the identifier,
  * so identical identifiers across the app share one request. Caller gates
@@ -427,13 +434,15 @@ export function issueIdentifierOptions(wsId: string, identifier: string) {
   return queryOptions({
     queryKey: issueKeys.identifier(wsId, identifier),
     queryFn: async ({ signal }) => {
-      const res = await api.searchIssues({
-        q: identifier,
-        limit: 10,
-        include_closed: true,
-        signal,
-      });
-      return res.issues.find((i) => i.identifier === identifier) ?? null;
+      try {
+        return await api.getIssue(identifier, { signal });
+      } catch (err) {
+        // Unknown identifier / wrong workspace prefix → render as plain text.
+        // Any other failure (401/5xx/abort) must keep propagating so the query
+        // is retried or cancelled instead of being cached as "no such issue".
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }
     },
     // Identifier→issue mapping is effectively immutable; avoid refetch churn
     // when the same key renders across many comments/messages.

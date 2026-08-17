@@ -142,16 +142,19 @@ Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, fo
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_URL` | empty | Used for auth rate limiting, realtime events, and the token cache; when unset, realtime events fall back to in-process memory and auth rate limiting is off |
+| `REDIS_URL` | empty | Used for shared rate limiting, realtime events, and the token cache; when unset, realtime events and invitation limits fall back to in-process memory, while auth rate limiting is off |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | Set `true` when a managed Redis blocks `CLIENT SETNAME` |
 | `RATE_LIMIT_AUTH` | `5` | Per-IP requests per minute to send a verification code or start Google sign-in |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Per-IP code verifications per minute |
+| `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | Workspace invitations each inviter may create per 10-minute sliding window; `0` disables this gate |
+| `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | Workspace invitations all admins may create per workspace per 24-hour sliding window; `0` disables this gate |
+| `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | Invitations one normalized recipient email may receive across workspaces per 24-hour sliding window; `0` disables this gate |
 | `RATE_LIMIT_TRUSTED_PROXIES` | empty | Comma-separated proxy CIDRs allowed to provide `X-Forwarded-For` |
 | `MULTICA_TRUSTED_PROXIES` | empty | Trusted proxy CIDRs for automation webhooks and realtime connections |
 
 Deployments behind a reverse proxy must list their real proxy ranges. Do not blanket-trust all sources, or clients can forge forwarded IPs.
 
-The `RATE_LIMIT_*` variables above only take effect once `REDIS_URL` is set; without it, the startup log notes that rate limiting is disabled. If Redis becomes temporarily unavailable, the limiter fails open and does not block normal sign-ins.
+The auth rate limits require `REDIS_URL`; without it, the startup log notes that auth rate limiting is disabled. Invitation limits still run in process-local memory without Redis and become shared across replicas when Redis is configured. If configured Redis becomes temporarily unavailable, auth rate limiting fails open, while invitation creation returns a retryable `503` instead of sending email without protection.
 
 ## External integrations
 

@@ -142,16 +142,19 @@ allowlist의 정확한 판단 순서는 [로그인과 가입](/auth-setup#가입
 
 | 변수 | 기본값 | 설명 |
 |---|---|---|
-| `REDIS_URL` | 비어 있음 | 인증 rate limit, 실시간 이벤트, token cache에 사용. 설정하지 않으면 실시간 이벤트는 프로세스 메모리로 fallback하고 인증 rate limit은 비활성화 |
+| `REDIS_URL` | 비어 있음 | 공유 rate limit, 실시간 이벤트, token cache에 사용. 설정하지 않으면 실시간 이벤트와 초대 제한은 프로세스 메모리로 fallback하고 인증 rate limit은 비활성화 |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 관리형 Redis가 `CLIENT SETNAME`을 금지하면 `true`로 설정 |
 | `RATE_LIMIT_AUTH` | `5` | IP당 1분에 인증 코드 전송 또는 Google 로그인 시작 허용 횟수 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | IP당 1분에 인증 코드 검증 허용 횟수 |
+| `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 초대자별 10분 슬라이딩 윈도 내 워크스페이스 초대 생성 횟수. `0`이면 이 제한을 비활성화 |
+| `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | 워크스페이스의 모든 관리자가 24시간 슬라이딩 윈도 내 생성할 수 있는 총 초대 수. `0`이면 이 제한을 비활성화 |
+| `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | 정규화된 동일 수신 이메일이 워크스페이스 전체에서 24시간 슬라이딩 윈도 내 받을 수 있는 초대 수. `0`이면 이 제한을 비활성화 |
 | `RATE_LIMIT_TRUSTED_PROXIES` | 비어 있음 | `X-Forwarded-For`를 제공하도록 허용할 proxy CIDR, 쉼표로 구분 |
 | `MULTICA_TRUSTED_PROXIES` | 비어 있음 | 자동화 webhook과 실시간 연결에서 사용할 신뢰 proxy CIDR |
 
 reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 합니다. 모든 출처를 그대로 신뢰하지 마세요. 클라이언트가 전달 IP를 위조할 수 있습니다.
 
-위 `RATE_LIMIT_*` 변수는 `REDIS_URL`을 설정한 경우에만 작동합니다. 설정하지 않으면 시작 로그에 rate limiting disabled가 표시됩니다. Redis를 일시적으로 사용할 수 없을 때는 rate limit이 요청을 허용하는 쪽으로 동작해 정상 로그인을 차단하지 않습니다.
+인증 rate limit에는 `REDIS_URL`이 필요하며, 설정하지 않으면 시작 로그에 인증 rate limit이 비활성화되었다고 표시됩니다. 초대 제한은 Redis 없이도 프로세스 메모리에서 동작하고, Redis를 설정하면 여러 replica가 할당량을 공유합니다. 설정된 Redis를 일시적으로 사용할 수 없으면 인증 rate limit은 fail-open하지만, 초대 생성은 보호 없이 이메일을 보내지 않고 재시도 가능한 `503`을 반환합니다.
 
 ## 외부 연동
 

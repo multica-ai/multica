@@ -209,7 +209,7 @@ func TestInjectRuntimeConfigKeepsTriggerCommentOutOfBrief(t *testing.T) {
 		// a further compression that drops the one-block rule or the
 		// no-mode-line fallback must fail here (stage-1 review).
 		"**Turn mode.**",
-		"Steps 1–6 are shared",
+		"Steps 1–5 are shared",
 		"apply exactly one mode block",
 		"differ on issue status",
 		// The full fallback MAPPING, not its halves: "No mode line" and
@@ -268,7 +268,7 @@ func TestWindowsCommentReplyInstructionsHaveNoStdin(t *testing.T) {
 // "post your final results" step literally would pipe its final comment through
 // PowerShell and drop non-ASCII bytes (#2198 / #2236 / #2376). The OS-aware
 // ## Comment Formatting section (file-only on Windows) is the single source of
-// truth; the Available Commands entry and step 6 must defer to it, not re-offer
+// truth; the Available Commands entry and step 5 must defer to it, not re-offer
 // stdin. The flag synopsis may still *list* `--content-stdin` as available.
 //
 // Not parallel: mutates the package-level runtimeGOOS.

@@ -65,7 +65,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	// a safe granting option the agent offered (see
 	// selectACPApprovalOptionID) for each session/request_permission request.
 	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, kimiArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, kimiArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kimiArgs)
 	if opts.Cwd != "" {

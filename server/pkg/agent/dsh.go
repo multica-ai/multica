@@ -220,7 +220,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 
 	runCtx, cancel := runContext(ctx, opts.Timeout)
 	args := dshLaunchArgs()
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return nil }
@@ -429,11 +429,11 @@ func handleDshFrame(frame dshFrame, requestID string, ch chan<- Message, state *
 	}
 }
 
-func discoverDshModels(ctx context.Context, executablePath string) ([]Model, error) {
-	if executablePath == "" {
-		executablePath = "dsh"
+func discoverDshModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	if runtimeCmd.Path == "" {
+		runtimeCmd.Path = "dsh"
 	}
-	cmd := exec.CommandContext(ctx, executablePath, "--profile", dshProfile, "--list-models")
+	cmd := runtimeCmd.exec(ctx, "--profile", dshProfile, "--list-models")
 	hideAgentWindow(cmd)
 	cmd.WaitDelay = time.Second
 	stdout, err := cmd.StdoutPipe()

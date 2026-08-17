@@ -69,6 +69,11 @@ func TestMain(m *testing.M) {
 	testHandler.WebhookRateLimiter = NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	testHandler.WebhookIPRateLimiter = NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	testHandler.WebhookAbsoluteIPRateLimiter = NewMemoryWebhookAbsoluteIPRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
+	testHandler.InvitationRateLimiters = NewMemoryInvitationRateLimiters(InvitationRateLimits{
+		Actor:     SlidingWindowRateLimit{Limit: 1_000_000, Window: time.Minute},
+		Workspace: SlidingWindowRateLimit{Limit: 1_000_000, Window: time.Minute},
+		Recipient: SlidingWindowRateLimit{Limit: 1_000_000, Window: time.Minute},
+	})
 	testPool = pool
 
 	testUserID, testWorkspaceID, err = setupHandlerTestFixture(ctx, pool)

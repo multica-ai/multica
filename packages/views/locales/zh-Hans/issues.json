@@ -242,6 +242,7 @@
     "back": "返回",
     "title_placeholder": "任务标题",
     "desc_placeholder": "添加描述...",
+    "current_issue": "当前任务",
     "sub_issues_label": "子任务",
     "sub_issue_of": "属于父任务",
     "add_sub_issues": "添加子任务",

@@ -7,6 +7,7 @@ export const workspaceKeys = {
   list: () => ["workspaces", "list"] as const,
   members: (wsId: string) => ["workspaces", wsId, "members"] as const,
   invitations: (wsId: string) => ["workspaces", wsId, "invitations"] as const,
+  shareLinks: (wsId: string) => ["workspaces", wsId, "share-links"] as const,
   myInvitations: () => ["invitations", "mine"] as const,
   agents: (wsId: string) => ["workspaces", wsId, "agents"] as const,
   agent: (wsId: string, agentId: string) =>
@@ -154,6 +155,14 @@ export function invitationListOptions(wsId: string) {
   return queryOptions({
     queryKey: workspaceKeys.invitations(wsId),
     queryFn: () => api.listWorkspaceInvitations(wsId),
+  });
+}
+
+export function shareLinkListOptions(wsId: string, enabled = true) {
+  return queryOptions({
+    queryKey: workspaceKeys.shareLinks(wsId),
+    queryFn: () => api.listShareLinks(wsId),
+    enabled: enabled && !!wsId,
   });
 }
 
