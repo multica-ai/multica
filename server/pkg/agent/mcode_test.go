@@ -96,7 +96,7 @@ func TestMcodeFreshSessionUsesACPAndForwardsMCP(t *testing.T) {
 	}
 	session, err := backend.Execute(context.Background(), "ship it", ExecOptions{
 		Cwd:       t.TempDir(),
-		McpConfig: json.RawMessage(`{"mcpServers":{"docs":{"command":"docs-server","args":["--stdio"]},"remote":{"type":"http","url":"https://example.test/mcp"}}}`),
+		McpConfig: json.RawMessage(`{"mcpServers":{"docs":{"command":"docs-server","args":["--stdio"]},"remote":{"type":"http","url":"https://example.test/mcp"},"events":{"type":"sse","url":"https://example.test/events"}}}`),
 	})
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
@@ -110,6 +110,9 @@ func TestMcodeFreshSessionUsesACPAndForwardsMCP(t *testing.T) {
 	result := <-session.Result
 	if result.Status != "completed" || result.SessionID != "mcode-session-new" {
 		t.Fatalf("result = %+v", result)
+	}
+	if result.Output != "MCode completed the task" {
+		t.Fatalf("result output = %q, want final MCode message", result.Output)
 	}
 	if !strings.Contains(text.String(), "MCode completed the task") {
 		t.Fatalf("streamed text = %q", text.String())
@@ -127,7 +130,7 @@ func TestMcodeFreshSessionUsesACPAndForwardsMCP(t *testing.T) {
 		t.Fatalf("read requests: %v", err)
 	}
 	raw := string(requests)
-	for _, want := range []string{`"method":"session/new"`, `"mcpServers"`, `"docs-server"`, `"https://example.test/mcp"`, `"method":"session/prompt"`, `"text":"ship it"`} {
+	for _, want := range []string{`"method":"session/new"`, `"mcpServers"`, `"docs-server"`, `"https://example.test/mcp"`, `"https://example.test/events"`, `"type":"sse"`, `"method":"session/prompt"`, `"text":"ship it"`} {
 		if !strings.Contains(raw, want) {
 			t.Fatalf("requests missing %s:\n%s", want, raw)
 		}

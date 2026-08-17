@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"syscall"
 	"time"
 )
 
@@ -90,6 +91,14 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	args = append(args, filterCustomArgs(opts.CustomArgs, mcodeBlockedArgs, b.cfg.Logger)...)
 	cmd := exec.CommandContext(runCtx, execPath, args...)
 	hideAgentWindow(cmd)
+	configureProcessGroup(cmd)
+	cmd.Cancel = func() error {
+		if cmd.Process != nil {
+			signalProcessGroup(cmd, syscall.SIGKILL)
+		}
+		return nil
+	}
+	cmd.WaitDelay = mcodeReaderDrainGrace
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -112,7 +121,7 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		cancel()
 		return nil, fmt.Errorf("mcode stderr pipe: %w", err)
 	}
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		cancel()
 		return nil, fmt.Errorf("start mcode: %w", err)
 	}
@@ -184,6 +193,7 @@ func (b *mcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 		defer func() {
 			_ = stdin.Close()
 			_ = cmd.Wait()
+			releaseProcessGroup(cmd)
 		}()
 
 		startTime := time.Now()
