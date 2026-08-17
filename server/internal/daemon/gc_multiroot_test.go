@@ -1,10 +1,13 @@
 package daemon
 
 import (
+	"context"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 // TestGCWorkspaceRootsMultiProfile verifies that a single GC pass walks the
@@ -105,5 +108,66 @@ func TestProfileDaemonActive(t *testing.T) {
 	}
 	if d.profileDaemonActive(dead) {
 		t.Errorf("profile %q without daemon.pid should be inactive", dead)
+	}
+}
+
+// TestRunGCReclaimsAbandonedProfileRoot 是端到端验证：真实构造一个
+// 废弃 profile 的 workspace root（daemon 已退出、无 daemon.pid），里面留一个
+// 无 .gc_meta.json 且 mtime 超过 GCOrphanTTL 的孤儿 task 目录，然后真实调用
+// runGC，断言孤儿目录被删除、而 mtime 较新的活跃目录被保留。
+func TestRunGCReclaimsAbandonedProfileRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	// 当前 profile (default) 的 workspace root（空）
+	currentRoot := filepath.Join(home, "multica_workspaces")
+	if err := os.MkdirAll(currentRoot, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// 废弃 profile：daemon 已退出，profiles 目录存在但无 daemon.pid
+	const abandoned = "old-profile"
+	abandonedProfileDir := filepath.Join(home, ".multica", "profiles", abandoned)
+	if err := os.MkdirAll(abandonedProfileDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	abandonedRoot := filepath.Join(home, "multica_workspaces_"+abandoned)
+	wsDir := filepath.Join(abandonedRoot, "ws-abc")
+
+	// 孤儿 task 目录：无 .gc_meta.json，mtime 73 小时前
+	orphanTask := filepath.Join(wsDir, "task-orphan")
+	if err := os.MkdirAll(orphanTask, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(orphanTask, "leftover.txt"), []byte("orphan"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	orphanMtime := time.Now().Add(-73 * time.Hour)
+	if err := os.Chtimes(orphanTask, orphanMtime, orphanMtime); err != nil {
+		t.Fatal(err)
+	}
+
+	// 活跃 task 目录：mtime 1 小时前，不应被删除
+	activeTask := filepath.Join(wsDir, "task-active")
+	if err := os.MkdirAll(activeTask, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(activeTask, "recent.txt"), []byte("active"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	d := New(Config{
+		Profile:        "",
+		WorkspacesRoot: currentRoot,
+		GCOrphanTTL:    72 * time.Hour,
+	}, slog.New(slog.NewTextHandler(io.Discard, nil)))
+
+	d.runGC(context.Background())
+
+	if _, err := os.Stat(orphanTask); !os.IsNotExist(err) {
+		t.Errorf("废弃 profile 的孤儿 task 目录未被 GC 删除: %v", err)
+	}
+	if _, err := os.Stat(activeTask); err != nil {
+		t.Errorf("活跃 task 目录不应被删除: %v", err)
 	}
 }
