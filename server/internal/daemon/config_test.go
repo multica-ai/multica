@@ -960,23 +960,16 @@ func TestResolveAgentsViaLoginShell_HardTimeoutOnBackgroundedStdout(t *testing.T
 	if runtime.GOOS == "windows" {
 		t.Skip("POSIX shell not available on Windows")
 	}
-	sh := "/bin/sh"
-	if _, err := os.Stat(sh); err != nil {
-		t.Skipf("no /bin/sh available: %v", err)
-	}
 
-	// rc backgrounds a sleeper that holds stdout for far longer than any
-	// reasonable WaitDelay. The resolver script never gets to print
-	// anything (we never even reach the for-loop because rc is still
-	// being sourced when the sleeper forks), but that's exactly the
-	// scenario we care about — we don't want to leak time-to-startup.
-	rc := filepath.Join(t.TempDir(), "sh.rc")
-	rcBody := "( sleep 60 ) &\n"
-	if err := os.WriteFile(rc, []byte(rcBody), 0o644); err != nil {
-		t.Fatalf("write rc: %v", err)
+	// Use a test-created supported shell so the fixture cannot source the
+	// developer's login files. It exits after starting a child that keeps
+	// stdout open, reproducing the pipe leak without consulting the host shell.
+	sh := filepath.Join(t.TempDir(), "sh")
+	shBody := "#!/bin/sh\n(sleep 60) &\nexit 0\n"
+	if err := os.WriteFile(sh, []byte(shBody), 0o755); err != nil {
+		t.Fatalf("write fake shell: %v", err)
 	}
 	t.Setenv("SHELL", sh)
-	t.Setenv("ENV", rc)
 
 	// Cap = context timeout + wait delay + generous slack for goroutine
 	// scheduling. A bug that disables WaitDelay would blow past 60s here.
@@ -989,7 +982,11 @@ func TestResolveAgentsViaLoginShell_HardTimeoutOnBackgroundedStdout(t *testing.T
 	}()
 	select {
 	case <-done:
-		if elapsed := time.Since(start); elapsed > cap {
+		elapsed := time.Since(start)
+		if elapsed < loginShellResolveWaitDelay {
+			t.Errorf("resolver took %v, expected the background child to hold stdout for at least %v", elapsed, loginShellResolveWaitDelay)
+		}
+		if elapsed > cap {
 			t.Errorf("resolver took %v, expected <= %v (WaitDelay leak?)", elapsed, cap)
 		}
 	case <-time.After(cap):
