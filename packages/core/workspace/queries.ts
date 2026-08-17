@@ -158,10 +158,11 @@ export function invitationListOptions(wsId: string) {
   });
 }
 
-export function shareLinkListOptions(wsId: string) {
+export function shareLinkListOptions(wsId: string, enabled = true) {
   return queryOptions({
     queryKey: workspaceKeys.shareLinks(wsId),
     queryFn: () => api.listShareLinks(wsId),
+    enabled: enabled && !!wsId,
   });
 }
 

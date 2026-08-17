@@ -305,7 +305,6 @@ export function MembersTab() {
   const navigation = useOptionalNavigation();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: invitations = [] } = useQuery(invitationListOptions(wsId));
-  const { data: shareLinks = [] } = useQuery(shareLinkListOptions(wsId));
 
   const [inviteEmail, setInviteEmail] = useState("");
   const [inviteRole, setInviteRole] = useState<MemberRole>("member");
@@ -327,6 +326,9 @@ export function MembersTab() {
   const canManageWorkspace = currentMember?.role === "owner" || currentMember?.role === "admin";
   const isOwner = currentMember?.role === "owner";
   const ownerCount = members.filter((m) => m.role === "owner").length;
+  // Only owners/admins may list share links; skip the request for plain
+  // members (the server would 403) once the current member's role is known.
+  const { data: shareLinks = [] } = useQuery(shareLinkListOptions(wsId, canManageWorkspace));
 
   const handleInviteMember = async () => {
     if (!workspace) return;

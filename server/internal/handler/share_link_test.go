@@ -203,6 +203,55 @@ func TestCreateShareLink_RejectsInvalidInput(t *testing.T) {
 	}
 }
 
+func TestCreateShareLink_RejectsOverflowingInput(t *testing.T) {
+	clearShareLinksForTestWorkspace(t)
+
+	// max_uses above math.MaxInt32 wraps in int32(...) — must be rejected.
+	overMax := 2147483648 // MaxInt32 + 1
+	req := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/share-links", CreateShareLinkRequest{Role: "member", MaxUses: &overMax})
+	req = withURLParam(req, "id", testWorkspaceID)
+	w := httptest.NewRecorder()
+	testHandler.CreateShareLink(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("max_uses over MaxInt32: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// expires_in above MaxInt32 overflows time.Duration * time.Hour.
+	overExp := 2147483648 // MaxInt32 + 1
+	req2 := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/share-links", CreateShareLinkRequest{Role: "member", ExpiresIn: &overExp})
+	req2 = withURLParam(req2, "id", testWorkspaceID)
+	w2 := httptest.NewRecorder()
+	testHandler.CreateShareLink(w2, req2)
+	if w2.Code != http.StatusBadRequest {
+		t.Fatalf("expires_in over MaxInt32: expected 400, got %d: %s", w2.Code, w2.Body.String())
+	}
+
+	// Boundary: MaxInt32 itself must be accepted for both fields.
+	maxExp := 2147483647
+	req3 := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/share-links", CreateShareLinkRequest{Role: "member", ExpiresIn: &maxExp})
+	req3 = withURLParam(req3, "id", testWorkspaceID)
+	w3 := httptest.NewRecorder()
+	testHandler.CreateShareLink(w3, req3)
+	if w3.Code != http.StatusCreated {
+		t.Fatalf("expires_in = MaxInt32: expected 201, got %d: %s", w3.Code, w3.Body.String())
+	}
+
+	// Deactivate so a fresh active link can be created for the max_uses check.
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE workspace_share_link SET is_active = false WHERE workspace_id = $1`,
+		parseUUID(testWorkspaceID)); err != nil {
+		t.Fatalf("deactivate for max_uses boundary: %v", err)
+	}
+	maxUse := 2147483647
+	req4 := newRequest("POST", "/api/workspaces/"+testWorkspaceID+"/share-links", CreateShareLinkRequest{Role: "member", MaxUses: &maxUse})
+	req4 = withURLParam(req4, "id", testWorkspaceID)
+	w4 := httptest.NewRecorder()
+	testHandler.CreateShareLink(w4, req4)
+	if w4.Code != http.StatusCreated {
+		t.Fatalf("max_uses = MaxInt32: expected 201, got %d: %s", w4.Code, w4.Body.String())
+	}
+}
+
 func TestJoinShareLink_ExpiredAndRevoked(t *testing.T) {
 	clearShareLinksForTestWorkspace(t)
 

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -78,11 +79,14 @@ func (h *Handler) CreateShareLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Validate expiry and usage bounds instead of silently treating bad input
-	// as "no limit": negative/overflowing values are rejected outright.
+	// as "no limit": zero/negative and overflow-range values are rejected
+	// outright. max_uses is stored as int32, and expires_in is multiplied by
+	// time.Hour into a time.Duration, so both need an explicit upper bound to
+	// avoid wrapping or overflow before conversion.
 	var expiresAt pgtype.Timestamptz
 	if req.ExpiresIn != nil {
-		if *req.ExpiresIn <= 0 {
-			writeError(w, http.StatusBadRequest, "expires_in must be a positive number of hours")
+		if *req.ExpiresIn <= 0 || *req.ExpiresIn > math.MaxInt32 {
+			writeError(w, http.StatusBadRequest, "expires_in must be between 1 and 2147483647 hours")
 			return
 		}
 		expiresAt = pgtype.Timestamptz{Time: time.Now().Add(time.Duration(*req.ExpiresIn) * time.Hour), Valid: true}
@@ -90,8 +94,8 @@ func (h *Handler) CreateShareLink(w http.ResponseWriter, r *http.Request) {
 
 	var maxUses pgtype.Int4
 	if req.MaxUses != nil {
-		if *req.MaxUses <= 0 {
-			writeError(w, http.StatusBadRequest, "max_uses must be a positive integer")
+		if *req.MaxUses <= 0 || *req.MaxUses > math.MaxInt32 {
+			writeError(w, http.StatusBadRequest, "max_uses must be between 1 and 2147483647")
 			return
 		}
 		maxUses = pgtype.Int4{Int32: int32(*req.MaxUses), Valid: true}
