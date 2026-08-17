@@ -49,7 +49,10 @@ func TestDimBackendUsesOwnedProcessTree(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	go func() { for range session.Messages {} }()
+	go func() {
+		for range session.Messages {
+		}
+	}()
 
 	// Wait for the descendant to be spawned by the fake dim.
 	descendantPid := waitForDescendantPid(t, pidPath)

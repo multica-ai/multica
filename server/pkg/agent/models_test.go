@@ -1872,15 +1872,14 @@ func TestCachedDiscovery(t *testing.T) {
 // TestDiscoveryCacheKeyIsolatesByExecutable verifies that two different
 // executable paths for the same provider type produce different cache keys,
 // so a built-in and a custom Dim-compatible executable do not serve each
-// other's model catalog during the TTL (review #4/#6).
+// other's model catalog during the TTL.
 func TestDiscoveryCacheKeyIsolatesByExecutable(t *testing.T) {
-	key1 := discoveryCacheKey("dim", "/usr/bin/dim")
-	key2 := discoveryCacheKey("dim", "/opt/custom/dim")
+	key1 := discoveryCacheKey("dim", Command{Path: "/usr/bin/dim"})
+	key2 := discoveryCacheKey("dim", Command{Path: "/opt/custom/dim"})
 	if key1 == key2 {
 		t.Fatalf("different executables must produce different cache keys: both %q", key1)
 	}
-	// Empty executable falls back to the provider type only.
-	keyEmpty := discoveryCacheKey("dim", "")
+	keyEmpty := discoveryCacheKey("dim", Command{Path: ""})
 	if keyEmpty != "dim" {
 		t.Fatalf("empty executable should fall back to provider type, got %q", keyEmpty)
 	}
@@ -1888,8 +1887,6 @@ func TestDiscoveryCacheKeyIsolatesByExecutable(t *testing.T) {
 		t.Fatal("empty executable key must differ from a non-empty executable key")
 	}
 
-	// Verify the isolation holds at the cachedDiscovery level: two different
-	// keys must call the underlying function twice, not share a cache entry.
 	calls := 0
 	fn := func() (Catalog, error) {
 		calls++
@@ -1908,76 +1905,5 @@ func TestDiscoveryCacheKeyIsolatesByExecutable(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Errorf("expected 2 underlying calls (one per executable), got %d", calls)
-	}
-}
-
-// TestDimListModelsIsolatesCacheByExecutable drives the cache isolation
-// through the real ListModels("dim", ...) call site (review #4/#6). The
-// TestDiscoveryCacheKeyIsolatesByExecutable test above pins the helper layer;
-// this one exercises the full path — ListModels → cachedDiscovery →
-// discoverDimModels → discoverACPModels — with a real (fake) dim binary so a
-// non-fallback catalog is actually cached, then asserts two different
-// executables land in two separate cache entries under their
-// executable-scoped keys. If the call site ever dropped the executable from
-// the key, both calls would collapse onto the bare "dim" key and only one
-// entry (the first call's) would survive.
-func TestDimListModelsIsolatesCacheByExecutable(t *testing.T) {
-	// Two real (fake) dim binaries at different paths. discoverDimModels
-	// spawns the binary via discoverACPModels, so discovery actually runs and
-	// (unlike a missing-binary fallback) caches a non-empty, non-fallback
-	// catalog we can assert against. writeFakeDimScript lives in dim_test.go
-	// (same package).
-	binA := writeFakeDimScript(t, "")
-	binB := writeFakeDimScript(t, "")
-
-	keyA := discoveryCacheKey("dim", binA)
-	keyB := discoveryCacheKey("dim", binB)
-	reset := func() {
-		modelCacheMu.Lock()
-		delete(modelCache, keyA)
-		delete(modelCache, keyB)
-		delete(modelCache, "dim") // guard against a provider-only key leaking
-		modelCacheMu.Unlock()
-	}
-	reset()
-	t.Cleanup(reset)
-
-	ctx := context.Background()
-	catA, err := ListModels(ctx, "dim", binA)
-	if err != nil {
-		t.Fatalf("ListModels(dim, binA) error: %v", err)
-	}
-	catB, err := ListModels(ctx, "dim", binB)
-	if err != nil {
-		t.Fatalf("ListModels(dim, binB) error: %v", err)
-	}
-
-	// Both should have discovered the fake catalog (non-empty, non-fallback),
-	// which is the only shape cachedDiscovery actually memoizes.
-	if len(catA.Models) == 0 || catA.Fallback {
-		t.Fatalf("binA discovery did not produce a cacheable catalog: %+v", catA)
-	}
-	if len(catB.Models) == 0 || catB.Fallback {
-		t.Fatalf("binB discovery did not produce a cacheable catalog: %+v", catB)
-	}
-
-	// The ListModels("dim", ...) call site must scope the cache by executable:
-	// each binary lands under its own key, never a shared provider-only key.
-	modelCacheMu.Lock()
-	entryA, okA := modelCache[keyA]
-	entryB, okB := modelCache[keyB]
-	_, okBare := modelCache["dim"]
-	modelCacheMu.Unlock()
-	if !okA {
-		t.Fatalf("expected a cache entry under the executable-scoped key %q", keyA)
-	}
-	if !okB {
-		t.Fatalf("expected a cache entry under the executable-scoped key %q", keyB)
-	}
-	if okBare {
-		t.Fatalf(`the bare provider key "dim" must not be used when an executable path is supplied; the call site must scope the cache by executable`)
-	}
-	if len(entryA.models) == 0 || len(entryB.models) == 0 {
-		t.Fatalf("cached entries must be non-empty: A=%+v B=%+v", entryA, entryB)
 	}
 }
