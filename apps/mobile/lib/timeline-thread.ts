@@ -26,16 +26,20 @@
  * "Counts must agree" parity rule against web.
  */
 import type { TimelineEntry } from "@multica/core/types";
+import { sortTimelineEntriesAsc } from "@multica/core/issues/timeline-sort";
+import type { TimelineSortDirection } from "@multica/core/issues/timeline-sort";
 
 export interface TimelineRow {
   entry: TimelineEntry;
-  /** Flattened descendant chain in BFS / chronological order. Empty for
-   *  activity rows and for top-level comments without replies. */
+  /** Flattened descendant chain, strictly ASC by `(created_at, id)`
+   *  regardless of the top-level sort direction. Empty for activity rows
+   *  and for top-level comments without replies. */
   replies: TimelineEntry[];
 }
 
 export function buildTimelineRows(
   entries: TimelineEntry[],
+  direction: TimelineSortDirection = "oldest",
 ): TimelineRow[] {
   const commentIds = new Set<string>();
   for (const e of entries) {
@@ -61,10 +65,13 @@ export function buildTimelineRows(
   }
 
   function collectDescendants(parentId: string): TimelineEntry[] {
-    // BFS — children are inserted in chronological order during the scan
-    // above, so the bundle preserves "first reply first" without extra
-    // sorting. Reply-to-reply gets appended after all top-level replies of
-    // the same parent.
+    // BFS gives a topological "parent before child" ordering, but that is
+    // NOT the same as strict chronological order across branches: a late
+    // direct reply to the root can arrive after an earlier branch's nested
+    // reply (e.g. root A, replies B→B2 and C with timestamps A<C<B<B2
+    // produces BFS [B, C, B2] but chronological [C, B, B2]). Sort the
+    // self-owned output array to lock in the ASC invariant — matches web's
+    // collectThreadReplies which does the same.
     const out: TimelineEntry[] = [];
     const queue: string[] = [parentId];
     while (queue.length > 0) {
@@ -76,12 +83,17 @@ export function buildTimelineRows(
         queue.push(child.id);
       }
     }
-    return out;
+    return sortTimelineEntriesAsc(out);
   }
 
-  return topLevel.map((entry) => ({
+  const ascRows = topLevel.map((entry) => ({
     entry,
     replies:
       entry.type === "comment" ? collectDescendants(entry.id) : [],
   }));
+
+  // Newest-first reverses only the top-level row sequence on a copy; each
+  // row's `replies` array stays ASC (thread-internal order is direction-
+  // independent, same as web). Never reverse `ascRows` in place.
+  return direction === "newest" ? ascRows.slice().reverse() : ascRows;
 }

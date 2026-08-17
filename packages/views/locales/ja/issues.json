@@ -352,7 +352,10 @@
     "link_copy_failed": "リンクをコピーできませんでした",
     "workdir_path_copied": "作業ディレクトリのパスをコピーしました",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
-    "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません"
+    "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません",
+    "sort_oldest": "古い順",
+    "sort_newest": "新しい順",
+    "sort_toggle_label": "コメント並び順"
   },
   "timeline": {
     "loading": "読み込み中..."

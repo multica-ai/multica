@@ -352,7 +352,10 @@
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
     "workdir_path_unavailable": "暂无本地 workdir — 这个任务还没被本地 agent 运行过",
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
-    "subscription_update_failed": "无法更新订阅状态，请重试。"
+    "subscription_update_failed": "无法更新订阅状态，请重试。",
+    "sort_oldest": "从旧到新",
+    "sort_newest": "从新到旧",
+    "sort_toggle_label": "评论排序"
   },
   "timeline": {
     "loading": "加载中…"
