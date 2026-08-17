@@ -400,6 +400,14 @@ type Daemon struct {
 	// (MUL-5439). Guarded by skippedAgentsMu.
 	skippedAgentsMu sync.RWMutex
 	skippedAgents   map[string]string // provider -> human-readable reason
+	// discoverySkipped records providers rejected at discovery time, before any
+	// registration round — currently only dsh whose Multica runtime profile is
+	// missing (dshProfileMissingReason). Folded into the same /health
+	// skipped_agents diagnostic as skippedAgents, but replaced by each
+	// refreshAgentAvailability instead of each registration round, so
+	// installing the missing profile clears the entry on the next discovery
+	// tick. Guarded by skippedAgentsMu.
+	discoverySkipped map[string]string
 
 	// demotedProviders remembers the built-in providers whose version was
 	// CONFIRMED below the minimum supported one and whose runtimes
@@ -657,6 +665,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		initialAgents[name] = entry
 	}
 	d.agentsAvailable.Store(&initialAgents)
+	d.setDiscoverySkipped(cfg.DiscoverySkipped)
 	d.executionEnvironmentCommand = defaultExecutionEnvironmentCommand
 	d.runner = taskRunnerFunc(d.runTask)
 	d.runUpdateFn = d.runUpdate
@@ -2487,7 +2496,7 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 	// Publish this round's drops for /health. Replacing (not merging) keeps the
 	// diagnostic honest: a provider that registered successfully this round must
 	// not stay listed as skipped.
-	d.setSkippedAgents(skipped)
+	d.setSkippedAgents(d.mergeDiscoverySkipped(skipped))
 
 	// Source iteration (a map) and parallel completion order are both
 	// nondeterministic; sort by provider so the registration payload is stable

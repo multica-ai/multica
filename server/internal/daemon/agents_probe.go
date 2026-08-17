@@ -74,8 +74,13 @@ func cachedShellResolvedAgents() map[string]string {
 }
 
 // probeAgentCLIs discovers which built-in agent CLIs are installed on this
-// machine and returns one AgentEntry per provider that resolved.
-//
+// machine and returns one AgentEntry per provider that resolved, plus the
+// providers that resolved but were rejected at discovery time, keyed by
+// human-readable reason (currently only dsh without its Multica runtime
+// profile — see dshProfileMissingReason). Discovery rejections are recorded
+// here because they never reach the per-registration-round version gate that
+// produces /health's skipped_agents; without them a host with dsh but no
+// profile showed nothing at all, in the UI or the log.
 // This is pure discovery: no version detection and no minimum-version gate
 // (detectBuiltinRuntimes owns those, per registration round). The result is
 // therefore the machine's *availability* set, which is exactly what
@@ -88,7 +93,14 @@ func cachedShellResolvedAgents() map[string]string {
 // so re-running it is the only way to observe such an install.
 //
 // A var so tests can stub discovery without installing real CLIs.
-var probeAgentCLIs = func() map[string]AgentEntry {
+
+// dshProfileMissingReason is the /health skipped_agents entry for a dsh CLI
+// that was found but rejected because its Multica runtime profile is not
+// installed. It names the exact repair command so the diagnostic is
+// actionable, matching the style of the registration-round skip reasons.
+const dshProfileMissingReason = "dsh CLI is installed but the Multica runtime profile is missing: run 'dsh plugin --profile multica add <bundle>' (see https://github.com/multica-ai/dsh-multica-runtime)"
+
+var probeAgentCLIs = func() (map[string]AgentEntry, map[string]string) {
 	// Probe available agent CLIs. exec.LookPath is the primary path, but on
 	// macOS/Linux a GUI-launched daemon (Electron, Launchpad) does not
 	// inherit the user's interactive shell PATH — fnm/nvm/volta multishells,
@@ -152,6 +164,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	}
 
 	agents := map[string]AgentEntry{}
+	skipped := map[string]string{}
 	if e, ok := probe("MULTICA_CLAUDE_PATH", "claude", "MULTICA_CLAUDE_MODEL"); ok {
 		agents["claude"] = e
 	}
@@ -200,8 +213,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// DSH is registered only when its Multica runtime profile is installed.
 	// A bare dsh binary is not enough: without the bundle it has no --stdio
 	// protocol and every task would fail after being advertised as healthy.
-	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok && probeDshMulticaProfile(e.Path) {
-		agents["dsh"] = e
+	// This is the only discovery-time rejection: a resolvable dsh whose probe
+	// fails never reaches the registration round, so it must be reported here
+	// or the host looks exactly like one with no dsh at all.
+	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok {
+		if probeDshMulticaProfile(e.Path) {
+			agents["dsh"] = e
+		} else {
+			skipped["dsh"] = dshProfileMissingReason
+		}
 	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
@@ -269,7 +289,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
 		agents["mcode"] = e
 	}
-	return agents
+	return agents, skipped
 }
 
 func probeDshMulticaProfile(executablePath string) bool {

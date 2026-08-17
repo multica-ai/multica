@@ -151,6 +151,10 @@ type daemonRuntimeProbe struct {
 	ProbeResult     string         `json:"probe_result"`
 	RuntimeCount    int            `json:"runtime_count"`
 	ProviderSummary map[string]int `json:"provider_summary"`
+	// SkippedAgents reports providers that CLI discovery found but rejected
+	// before registration (currently only dsh without its Multica runtime
+	// profile), so probe-runtimes shows why a CLI on PATH is not a runtime.
+	SkippedAgents map[string]string `json:"skipped_agents,omitempty"`
 }
 
 func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
@@ -164,15 +168,21 @@ func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	probe := daemonRuntimeProbeFromAgents(cfg.Agents)
+	probe := daemonRuntimeProbeFromAgents(cfg.Agents, cfg.DiscoverySkipped)
 	return json.NewEncoder(cmd.OutOrStdout()).Encode(probe)
 }
 
-func daemonRuntimeProbeFromAgents(agents map[string]daemon.AgentEntry) daemonRuntimeProbe {
+func daemonRuntimeProbeFromAgents(agents map[string]daemon.AgentEntry, discoverySkipped map[string]string) daemonRuntimeProbe {
 	probe := daemonRuntimeProbe{
 		ProbeResult:     "success",
 		RuntimeCount:    len(agents),
 		ProviderSummary: make(map[string]int, len(agents)),
+	}
+	if len(discoverySkipped) > 0 {
+		probe.SkippedAgents = make(map[string]string, len(discoverySkipped))
+		for name, reason := range discoverySkipped {
+			probe.SkippedAgents[name] = reason
+		}
 	}
 	for provider := range agents {
 		probe.ProviderSummary[provider]++

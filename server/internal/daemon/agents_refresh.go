@@ -155,6 +155,48 @@ func (d *Daemon) skippedAgentsSnapshot() map[string]string {
 	return out
 }
 
+// setDiscoverySkipped records providers that CLI discovery rejected before
+// any registration round (currently only dsh without its Multica runtime
+// profile — see dshProfileMissingReason). Unlike setSkippedAgents, which is
+// replaced by each registration round, this set is replaced by each
+// refreshAgentAvailability, so installing the missing profile clears the
+// entry on the next discovery tick.
+func (d *Daemon) setDiscoverySkipped(skipped map[string]string) {
+	d.skippedAgentsMu.Lock()
+	defer d.skippedAgentsMu.Unlock()
+	if len(skipped) == 0 {
+		d.discoverySkipped = nil
+		return
+	}
+	out := make(map[string]string, len(skipped))
+	for name, reason := range skipped {
+		out[name] = reason
+	}
+	d.discoverySkipped = out
+}
+
+// mergeDiscoverySkipped folds the latest discovery-time rejections into a
+// registration round's own drop set for /health. Round drops win on a name
+// collision; discovery reasons that no longer apply (the profile is now
+// installed) are absent from discoverySkipped and therefore not carried over.
+func (d *Daemon) mergeDiscoverySkipped(round map[string]string) map[string]string {
+	d.skippedAgentsMu.RLock()
+	defer d.skippedAgentsMu.RUnlock()
+	if len(d.discoverySkipped) == 0 {
+		return round
+	}
+	merged := make(map[string]string, len(round)+len(d.discoverySkipped))
+	for name, reason := range round {
+		merged[name] = reason
+	}
+	for name, reason := range d.discoverySkipped {
+		if _, exists := merged[name]; !exists {
+			merged[name] = reason
+		}
+	}
+	return merged
+}
+
 // refreshAgentAvailability re-runs CLI discovery and publishes providers that
 // appeared since the last probe. It performs no registration — that is
 // convergeRuntimeRegistrations, driven by live state so a failure retries.
@@ -169,7 +211,11 @@ func (d *Daemon) skippedAgentsSnapshot() map[string]string {
 // Returns the providers that were added, for logging and tests.
 func (d *Daemon) refreshAgentAvailability() []string {
 	current := d.agents()
-	probed := probeAgentCLIs()
+	probed, discoverySkipped := probeAgentCLIs()
+	d.setDiscoverySkipped(discoverySkipped)
+	for name, reason := range discoverySkipped {
+		d.logger.Warn("skip registering runtime: rejected at discovery", "name", name, "reason", reason)
+	}
 
 	var gained []string
 	for name := range probed {
