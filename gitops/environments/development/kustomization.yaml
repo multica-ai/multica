@@ -43,4 +43,4 @@ images:
     newTag: "d7452016"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "afa2cebc"
+    newTag: "d7452016"
