@@ -332,7 +332,7 @@ func stageFakeAgent(t *testing.T) string {
 	}
 	t.Setenv("PATH", binDir)
 	// Keep missing providers from consulting the developer's login shell.
-	t.Setenv("SHELL", "/usr/bin/fish")
+	t.Setenv("SHELL", filepath.Join(t.TempDir(), "unsupported-shell"))
 	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
 	// Clear any inherited env-var override so the test sees the URL-based
 	// default, not whatever the developer happens to have exported.
