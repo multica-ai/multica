@@ -190,7 +190,11 @@ func TestOmpExecuteCompletesFromEventStream(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{Timeout: 5 * time.Second})
+	sessionPath := filepath.Join(t.TempDir(), "session.jsonl")
+	session, err := backend.Execute(ctx, "prompt-ignored", ExecOptions{
+		Timeout:         5 * time.Second,
+		ResumeSessionID: sessionPath,
+	})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}

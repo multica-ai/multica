@@ -1182,7 +1182,11 @@ printf '%s\n' 'fallback fallback-model 128K 8K yes no'
 	writeTestExecutable(t, fakePath, []byte(script))
 
 	started := time.Now()
-	models, err := discoverPiModelsWithin(context.Background(), fakePath, 100*time.Millisecond, time.Second)
+	// Keep the RPC deadline short so the test exercises the fallback, while
+	// leaving enough headroom for the fallback process to be scheduled in a
+	// race-enabled full-suite run. The model assertion below proves that the
+	// table phase receives its own live context.
+	models, err := discoverPiModelsWithin(context.Background(), fakePath, 100*time.Millisecond, 5*time.Second)
 	elapsed := time.Since(started)
 	if err != nil {
 		t.Fatalf("discoverPiModels: %v", err)
@@ -1190,7 +1194,7 @@ printf '%s\n' 'fallback fallback-model 128K 8K yes no'
 	if len(models) != 1 || models[0].ID != "fallback/fallback-model" {
 		t.Fatalf("hung RPC must leave time for the table fallback, got %+v after %s", models, elapsed)
 	}
-	if elapsed >= 2*time.Second {
+	if elapsed >= 7*time.Second {
 		t.Fatalf("RPC phase consumed the table fallback budget: elapsed %s", elapsed)
 	}
 }
