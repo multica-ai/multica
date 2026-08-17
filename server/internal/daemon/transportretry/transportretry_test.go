@@ -360,8 +360,6 @@ func (o *testObserver) RecordCacheReadTokens(_, _ string, _ int64) {}
 func (o *testObserver) RecordWallSeconds(_, _ string, _ float64) {}
 
 func TestResolveConfigAgentCustomEnvOverridesEnv(t *testing.T) {
-	t.Parallel()
-
 	t.Setenv("MULTICA_TRANSPORT_RETRY_CONFIG", `{"enabled":true}`)
 	cfg := transportretry.ResolveConfig(map[string]string{
 		"MULTICA_TRANSPORT_RETRY_CONFIG": `{"enabled":false}`,

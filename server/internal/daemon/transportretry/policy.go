@@ -64,7 +64,7 @@ func DefaultPolicies() []Policy {
 			Providers:        []string{"cursor"},
 			MatchError:       matchCursorWritableIterable,
 			MaxExtraAttempts: 2,
-			DelaysMs: []int{0, 0, 0, 5000},
+			DelaysMs: []int{0, 0, 5000},
 			SessionStrategy: []SessionRetryMode{
 				SessionRetrySame,
 				SessionRetrySame,
