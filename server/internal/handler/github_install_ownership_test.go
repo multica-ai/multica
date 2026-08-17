@@ -21,7 +21,14 @@ import (
 // authorization code a setup callback should carry. Requests the ownership
 // flow does not own fall through to `rest` (nil = 404), so callers can keep
 // controlling what fetchInstallationAccount sees.
-func stubGitHubInstallOwnership(t *testing.T, owned []int64, rest http.HandlerFunc) string {
+type stubGitHubUserInstallation struct {
+	ID        int64
+	Login     string
+	Type      string
+	AvatarURL string
+}
+
+func stubGitHubInstallOwnership(t *testing.T, owned []stubGitHubUserInstallation, rest http.HandlerFunc) string {
 	t.Helper()
 	const (
 		code      = "test-user-auth-code"
@@ -45,8 +52,15 @@ func stubGitHubInstallOwnership(t *testing.T, owned []int64, rest http.HandlerFu
 				return
 			}
 			installations := make([]map[string]any, 0, len(owned))
-			for _, id := range owned {
-				installations = append(installations, map[string]any{"id": id})
+			for _, installation := range owned {
+				installations = append(installations, map[string]any{
+					"id": installation.ID,
+					"account": map[string]any{
+						"login":      installation.Login,
+						"type":       installation.Type,
+						"avatar_url": installation.AvatarURL,
+					},
+				})
 			}
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -91,7 +105,9 @@ func TestSetupCallback_RejectsInstallationTheUserDoesNotControl(t *testing.T) {
 	})
 
 	// The attacker controls only their own installation.
-	code := stubGitHubInstallOwnership(t, []int64{attackerInstallationID}, nil)
+	code := stubGitHubInstallOwnership(t, []stubGitHubUserInstallation{{
+		ID: attackerInstallationID,
+	}}, nil)
 
 	state, err := signState(testWorkspaceID)
 	if err != nil {
@@ -210,12 +226,13 @@ func TestSetupCallback_RefreshesAnExistingBindingWithoutACode(t *testing.T) {
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, installationID)
 	})
-	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+	_, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
 		WorkspaceID:    parseUUID(testWorkspaceID),
 		InstallationID: installationID,
 		AccountLogin:   "already-connected",
 		AccountType:    "Organization",
-	}); err != nil {
+	})
+	if err != nil {
 		t.Fatalf("seed installation: %v", err)
 	}
 
@@ -233,8 +250,132 @@ func TestSetupCallback_RefreshesAnExistingBindingWithoutACode(t *testing.T) {
 	if rec.Code != http.StatusFound {
 		t.Fatalf("setup callback: got %d, want 302", rec.Code)
 	}
-	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "github_connected=1") {
-		t.Fatalf("redirect = %q, want github_connected=1", loc)
+	redirect, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse redirect: %v", err)
+	}
+	if redirect.Query().Get("github_connected") != "1" {
+		t.Fatalf("redirect = %q, want github_connected=1", redirect.String())
+	}
+	if got := redirect.Query().Get("github_installation"); got != "" {
+		t.Fatalf("GitHub settings redirect leaked installation row id %q", got)
+	}
+}
+
+func TestSetupCallback_ClaimsExistingInstallationByAuthorizedAccount(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "ownership-secret")
+	t.Setenv("FRONTEND_ORIGIN", "https://app.example.test")
+
+	const (
+		installationID        int64 = 91919195
+		spoofedInstallationID int64 = 91919196
+	)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id IN ($1, $2)`, installationID, spoofedInstallationID)
+	})
+	code := stubGitHubInstallOwnership(t, []stubGitHubUserInstallation{{
+		ID:        installationID,
+		Login:     "Acme-Org",
+		Type:      "Organization",
+		AvatarURL: "https://example.test/acme.png",
+	}}, nil)
+	state, err := signGitHubClaimState(
+		testWorkspaceID,
+		githubReturnToRepositories,
+		"acme-org",
+	)
+	if err != nil {
+		t.Fatalf("sign claim state: %v", err)
+	}
+
+	// A caller-controlled installation_id must not override the account that
+	// was sealed into the authenticated claim flow.
+	req := httptest.NewRequest("GET", fmt.Sprintf(
+		"/api/github/setup?installation_id=%d&code=%s&state=%s",
+		spoofedInstallationID,
+		code,
+		url.QueryEscape(state),
+	), nil)
+	rec := httptest.NewRecorder()
+	testHandler.GitHubSetupCallback(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("setup callback: got %d, want 302", rec.Code)
+	}
+	redirect, err := url.Parse(rec.Header().Get("Location"))
+	if err != nil {
+		t.Fatalf("parse redirect: %v", err)
+	}
+	if redirect.Query().Get("github_connected") != "1" {
+		t.Fatalf("redirect = %q, want github_connected=1", redirect.String())
+	}
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, installationID)
+	if err != nil {
+		t.Fatalf("list claimed installation: %v", err)
+	}
+	if len(rows) != 1 || rows[0].AccountLogin != "Acme-Org" {
+		t.Fatalf("claimed rows = %#v, want one Acme-Org binding", rows)
+	}
+	if got := redirect.Query().Get("github_installation"); got != uuidToString(rows[0].ID) {
+		t.Fatalf("repository redirect installation = %q, want %q", got, uuidToString(rows[0].ID))
+	}
+	spoofedRows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, spoofedInstallationID)
+	if err != nil {
+		t.Fatalf("list spoofed installation: %v", err)
+	}
+	if len(spoofedRows) != 0 {
+		t.Fatalf("claim trusted spoofed installation_id and created %d row(s)", len(spoofedRows))
+	}
+}
+
+func TestSetupCallback_RejectsExistingInstallationAccountTheUserCannotAccess(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "ownership-secret")
+	t.Setenv("FRONTEND_ORIGIN", "https://app.example.test")
+	const accessibleInstallationID int64 = 91919197
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE installation_id = $1`, accessibleInstallationID)
+	})
+	code := stubGitHubInstallOwnership(t, []stubGitHubUserInstallation{{
+		ID:    accessibleInstallationID,
+		Login: "other-org",
+		Type:  "Organization",
+	}}, nil)
+	state, err := signGitHubClaimState(
+		testWorkspaceID,
+		githubReturnToGitHub,
+		"victim-org",
+	)
+	if err != nil {
+		t.Fatalf("sign claim state: %v", err)
+	}
+	req := httptest.NewRequest(
+		"GET",
+		"/api/github/setup?code="+code+"&state="+url.QueryEscape(state),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	testHandler.GitHubSetupCallback(rec, req)
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("setup callback: got %d, want 302", rec.Code)
+	}
+	if loc := rec.Header().Get("Location"); !strings.Contains(loc, "github_error=installation_account_not_authorized") {
+		t.Fatalf("redirect = %q, want installation_account_not_authorized", loc)
+	}
+	rows, err := testHandler.Queries.ListGitHubInstallationsByInstallationID(ctx, accessibleInstallationID)
+	if err != nil {
+		t.Fatalf("list accessible installation: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("claim bound %d row(s) for a different requested account", len(rows))
 	}
 }
 
@@ -318,6 +459,36 @@ func TestState_ExpiresAfterMaxAge(t *testing.T) {
 	}
 	if _, ok := verifyState(future); ok {
 		t.Error("state token issued beyond the tolerated clock skew was accepted")
+	}
+
+	freshClaim, err := signGitHubClaimStateAt(
+		wsID,
+		githubReturnToRepositories,
+		"acme-org",
+		time.Now(),
+	)
+	if err != nil {
+		t.Fatalf("signGitHubClaimStateAt: %v", err)
+	}
+	if gotWorkspace, gotReturn, gotAccount, ok := verifyGitHubClaimState(freshClaim); !ok ||
+		gotWorkspace != wsID || gotReturn != githubReturnToRepositories || gotAccount != "acme-org" {
+		t.Fatalf("fresh claim state rejected or changed: (%q, %q, %q, %v)", gotWorkspace, gotReturn, gotAccount, ok)
+	}
+	tamperedClaim := strings.Replace(freshClaim, "YWNtZS1vcmc", "dmljdGltLW9yZw", 1)
+	if _, _, _, ok := verifyGitHubClaimState(tamperedClaim); ok {
+		t.Error("claim state with a substituted account was accepted")
+	}
+	staleClaim, err := signGitHubClaimStateAt(
+		wsID,
+		githubReturnToGitHub,
+		"acme-org",
+		time.Now().Add(-githubStateMaxAge-time.Minute),
+	)
+	if err != nil {
+		t.Fatalf("sign stale claim state: %v", err)
+	}
+	if _, _, _, ok := verifyGitHubClaimState(staleClaim); ok {
+		t.Error("expired claim state was accepted")
 	}
 }
 

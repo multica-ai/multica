@@ -3410,6 +3410,24 @@ export class ApiClient {
     );
   }
 
+  async getGitHubClaimURL(
+    workspaceId: string,
+    account: string,
+    returnTo?: "github" | "repositories",
+  ): Promise<GitHubConnectResponse> {
+    const search = new URLSearchParams({ account });
+    if (returnTo) search.set("return_to", returnTo);
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/github/claim?${search.toString()}`,
+    );
+    return parseWithFallback(
+      raw,
+      GitHubConnectResponseSchema,
+      EMPTY_GITHUB_CONNECT_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/github/claim" },
+    );
+  }
+
   async listGitHubInstallations(workspaceId: string): Promise<ListGitHubInstallationsResponse> {
     const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/github/installations`,

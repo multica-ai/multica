@@ -138,6 +138,13 @@ export function RepositoriesTab() {
     () => githubData?.installations ?? [],
     [githubData?.installations],
   );
+  const selectedInstallation = useMemo(
+    () =>
+      githubInstallations.find(
+        (installation) => installation.id === selectedInstallationID,
+      ) ?? null,
+    [githubInstallations, selectedInstallationID],
+  );
   const githubConnectConfigured = githubData?.configured === true;
   const githubBrowseConfigured =
     githubData?.repository_browse_configured === true;
@@ -195,6 +202,9 @@ export function RepositoriesTab() {
   useEffect(() => {
     const connected = navigation.searchParams.get("github_connected") === "1";
     const githubError = navigation.searchParams.get("github_error");
+    const returnedInstallationID = navigation.searchParams.get(
+      "github_installation",
+    );
     if ((!connected && !githubError) || !canManageWorkspace) return;
     if (
       !githubError &&
@@ -206,7 +216,12 @@ export function RepositoriesTab() {
     if (githubError) {
       toast.error(t(($) => $.repositories.github_connect_failed));
     } else if (githubInstallations.length > 0 && githubBrowseConfigured) {
-      setSelectedInstallationID(githubInstallations[0]!.id);
+      const returnedInstallation = githubInstallations.find(
+        (installation) => installation.id === returnedInstallationID,
+      );
+      setSelectedInstallationID(
+        returnedInstallation?.id ?? githubInstallations[0]!.id,
+      );
       setGitHubPickerOpen(true);
     } else if (githubInstallations.length > 0) {
       toast.error(t(($) => $.repositories.github_browse_not_configured));
@@ -215,6 +230,7 @@ export function RepositoriesTab() {
     const next = new URLSearchParams(navigation.searchParams);
     next.delete("github_connected");
     next.delete("github_error");
+    next.delete("github_installation");
     const search = next.toString();
     navigation.replace(`${navigation.pathname}${search ? `?${search}` : ""}`);
   }, [
@@ -283,11 +299,7 @@ export function RepositoriesTab() {
     setGitHubPickerOpen(true);
   };
 
-  const handleGitHubAction = async () => {
-    if (githubInstallations.length > 0) {
-      openGitHubPicker();
-      return;
-    }
+  const startGitHubConnection = async () => {
     setConnectingGitHub(true);
     try {
       const response = await api.getGitHubConnectURL(wsId, "repositories");
@@ -305,6 +317,19 @@ export function RepositoriesTab() {
     } finally {
       setConnectingGitHub(false);
     }
+  };
+
+  const handleGitHubAction = () => {
+    if (githubInstallations.length > 0) {
+      openGitHubPicker();
+      return;
+    }
+    void startGitHubConnection();
+  };
+
+  const openExistingGitHubClaim = () => {
+    closeGitHubPicker();
+    navigation.push(`${navigation.pathname}?tab=github&github_claim=1`);
   };
 
   const closeGitHubPicker = () => {
@@ -460,6 +485,37 @@ export function RepositoriesTab() {
                     ? t(($) => $.repositories.choose_from_github)
                     : t(($) => $.repositories.connect_github)}
                 </Button>
+                {githubInstallations.length > 0 ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void startGitHubConnection()}
+                    disabled={connectingGitHub || !githubConnectConfigured}
+                    title={
+                      !githubConnectConfigured
+                        ? t(($) => $.repositories.github_not_configured)
+                        : undefined
+                    }
+                  >
+                    {t(
+                      ($) =>
+                        $.repositories.github_add_account_or_organization,
+                    )}
+                  </Button>
+                ) : null}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={openExistingGitHubClaim}
+                  disabled={!githubConnectConfigured}
+                  title={
+                    !githubConnectConfigured
+                      ? t(($) => $.repositories.github_not_configured)
+                      : undefined
+                  }
+                >
+                  {t(($) => $.repositories.github_claim_existing)}
+                </Button>
               </div>
               {!allUrlsValid ? (
                 <span className="text-caption text-muted-foreground">
@@ -492,39 +548,62 @@ export function RepositoriesTab() {
           </DialogHeader>
 
           <div className="space-y-3 px-6 py-4">
-            {githubInstallations.length > 1 ? (
-              <Select
-                items={githubInstallations.map((installation) => ({
-                  value: installation.id,
-                  label: installation.account_login,
-                }))}
-                value={selectedInstallationID}
-                onValueChange={(value) =>
-                  setSelectedInstallationID(value ?? "")
-                }
-              >
-                <SelectTrigger
-                  aria-label={t(($) => $.repositories.github_account)}
+            <div className="flex items-center justify-between gap-3">
+              {githubInstallations.length > 1 ? (
+                <Select
+                  items={githubInstallations.map((installation) => ({
+                    value: installation.id,
+                    label: installation.account_login,
+                  }))}
+                  value={selectedInstallationID}
+                  onValueChange={(value) =>
+                    setSelectedInstallationID(value ?? "")
+                  }
                 >
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {githubInstallations.map((installation) => (
-                    <SelectItem
-                      key={installation.id}
-                      value={installation.id}
-                    >
-                      {installation.account_login}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : githubInstallations[0] ? (
+                  <SelectTrigger
+                    aria-label={t(($) => $.repositories.github_account)}
+                  >
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {githubInstallations.map((installation) => (
+                      <SelectItem
+                        key={installation.id}
+                        value={installation.id}
+                      >
+                        {installation.account_login}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => void startGitHubConnection()}
+                  disabled={connectingGitHub || !githubConnectConfigured}
+                >
+                  {t(
+                    ($) => $.repositories.github_add_account_or_organization,
+                  )}
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={openExistingGitHubClaim}
+                  disabled={!githubConnectConfigured}
+                >
+                  {t(($) => $.repositories.github_claim_existing)}
+                </Button>
+              </div>
+            </div>
+
+            {selectedInstallation ? (
               <p className="text-caption text-muted-foreground">
-                {t(($) => $.repositories.github_account)}:{" "}
-                <span className="font-medium text-foreground">
-                  {githubInstallations[0].account_login}
-                </span>
+                {t(($) => $.repositories.github_scope, {
+                  account: selectedInstallation.account_login,
+                })}
               </p>
             ) : null}
 

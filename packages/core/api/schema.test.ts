@@ -60,6 +60,22 @@ describe("ApiClient schema fallback", () => {
         expect.any(Object),
       );
     });
+
+    it("encodes the requested account in the existing-installation claim request", async () => {
+      stubFetchJson({
+        configured: true,
+        url: "https://github.com/login/oauth/authorize?state=claim",
+      });
+      const client = new ApiClient("https://api.example.test");
+
+      await client.getGitHubClaimURL("ws-1", "Acme Org", "github");
+
+      const fetchMock = vi.mocked(fetch);
+      expect(fetchMock).toHaveBeenCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/github/claim?account=Acme+Org&return_to=github",
+        expect.any(Object),
+      );
+    });
   });
 
   describe("listTimeline", () => {

@@ -9,6 +9,7 @@ import enSettings from "../../locales/en/settings.json";
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
 const mockGetGitHubConnectURL = vi.hoisted(() => vi.fn());
 const mockFetchNextPage = vi.hoisted(() => vi.fn());
+const mockNavPush = vi.hoisted(() => vi.fn());
 const mockNavReplace = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 const workspaceRef = vi.hoisted(() => ({
@@ -118,7 +119,7 @@ vi.mock("sonner", () => ({
 
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({
-    push: vi.fn(),
+    push: mockNavPush,
     replace: mockNavReplace,
     back: vi.fn(),
     pathname: "/acme/settings",
@@ -339,6 +340,56 @@ describe("RepositoriesTab — automatic updates", () => {
     open.mockRestore();
   });
 
+  it("keeps adding another GitHub account or organization reachable after connecting", async () => {
+    githubRef.current = {
+      installations: [{ id: "installation-row-1", account_login: "personal" }],
+      configured: true,
+      repository_browse_configured: true,
+      can_manage: true,
+    };
+    mockGetGitHubConnectURL.mockResolvedValue({
+      configured: true,
+      url: "https://github.com/apps/multica/installations/new",
+    });
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const user = setupUser();
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    await user.click(
+      screen.getByRole("button", { name: "Add account or organization" }),
+    );
+
+    expect(mockGetGitHubConnectURL).toHaveBeenCalledWith(
+      "workspace-1",
+      "repositories",
+    );
+    expect(open).toHaveBeenCalledWith(
+      "https://github.com/apps/multica/installations/new",
+      "_blank",
+      "noopener",
+    );
+    open.mockRestore();
+  });
+
+  it("routes an already-installed organization through the secure claim form", async () => {
+    githubRef.current = {
+      installations: [{ id: "installation-row-1", account_login: "personal" }],
+      configured: true,
+      repository_browse_configured: true,
+      can_manage: true,
+    };
+    const user = setupUser();
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    await user.click(
+      screen.getByRole("button", { name: "Connect existing installation" }),
+    );
+
+    expect(mockNavPush).toHaveBeenCalledWith(
+      "/acme/settings?tab=github&github_claim=1",
+    );
+  });
+
   it("keeps GitHub import disabled when repository browsing is unavailable", () => {
     githubRef.current = {
       installations: [],
@@ -395,6 +446,14 @@ describe("RepositoriesTab — automatic updates", () => {
     await user.click(
       screen.getByRole("button", { name: "Choose from GitHub" }),
     );
+    expect(
+      screen.getByRole("button", {
+        name: "Connect existing installation",
+      }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Only repositories authorized for multica-ai are shown."),
+    ).toBeTruthy();
     const checkboxes = screen.getAllByRole("checkbox");
     expect(checkboxes).toHaveLength(2);
     expect(
@@ -427,15 +486,18 @@ describe("RepositoriesTab — automatic updates", () => {
     ).toBe("github.com/acme/repo");
   });
 
-  it("opens the picker after returning from a GitHub connection", async () => {
+  it("opens the picker on the installation returned by GitHub", async () => {
     githubRef.current = {
-      installations: [{ id: "installation-row-1", account_login: "multica-ai" }],
+      installations: [
+        { id: "installation-row-1", account_login: "personal" },
+        { id: "installation-row-2", account_login: "acme-org" },
+      ],
       configured: true,
       repository_browse_configured: true,
       can_manage: true,
     };
     searchParamsRef.current = new URLSearchParams(
-      "tab=repositories&github_connected=1",
+      "tab=repositories&github_connected=1&github_installation=installation-row-2",
     );
 
     render(<RepositoriesTab />, { wrapper: I18nWrapper });
@@ -444,6 +506,30 @@ describe("RepositoriesTab — automatic updates", () => {
       await screen.findByRole("heading", {
         name: "Choose GitHub repositories",
       }),
+    ).toBeTruthy();
+    expect(
+      screen.getByText("Only repositories authorized for acme-org are shown."),
+    ).toBeTruthy();
+    expect(mockNavReplace).toHaveBeenCalledWith(
+      "/acme/settings?tab=repositories",
+    );
+  });
+
+  it("falls back safely when the returned installation is not in this workspace", async () => {
+    githubRef.current = {
+      installations: [{ id: "installation-row-1", account_login: "personal" }],
+      configured: true,
+      repository_browse_configured: true,
+      can_manage: true,
+    };
+    searchParamsRef.current = new URLSearchParams(
+      "tab=repositories&github_connected=1&github_installation=other-workspace-row",
+    );
+
+    render(<RepositoriesTab />, { wrapper: I18nWrapper });
+
+    expect(
+      await screen.findByText("Only repositories authorized for personal are shown."),
     ).toBeTruthy();
     expect(mockNavReplace).toHaveBeenCalledWith(
       "/acme/settings?tab=repositories",

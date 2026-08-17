@@ -9,8 +9,10 @@ import enSettings from "../../locales/en/settings.json";
 const mockUpdateWorkspace = vi.hoisted(() => vi.fn());
 const mockDeleteInstallation = vi.hoisted(() => vi.fn());
 const mockGetConnectURL = vi.hoisted(() => vi.fn());
+const mockGetClaimURL = vi.hoisted(() => vi.fn());
 const mockInvalidate = vi.hoisted(() => vi.fn());
 const mockNavPush = vi.hoisted(() => vi.fn());
+const mockNavReplace = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
 const mockToastSuccess = vi.hoisted(() => vi.fn());
 
@@ -38,6 +40,9 @@ const installationsRef = vi.hoisted(() => ({
     configured: true,
     can_manage: true as boolean,
   },
+}));
+const searchParamsRef = vi.hoisted(() => ({
+  current: new URLSearchParams("tab=github"),
 }));
 
 vi.mock("@tanstack/react-query", () => ({
@@ -84,6 +89,7 @@ vi.mock("@multica/core/api", () => ({
     updateWorkspace: mockUpdateWorkspace,
     deleteGitHubInstallation: mockDeleteInstallation,
     getGitHubConnectURL: mockGetConnectURL,
+    getGitHubClaimURL: mockGetClaimURL,
   },
 }));
 
@@ -101,10 +107,10 @@ vi.mock("@multica/core/auth", () => {
 vi.mock("../../navigation/context", () => ({
   useNavigation: () => ({
     push: mockNavPush,
-    replace: vi.fn(),
+    replace: mockNavReplace,
     back: vi.fn(),
     pathname: "/acme/settings",
-    searchParams: new URLSearchParams("tab=github"),
+    searchParams: searchParamsRef.current,
     getShareableUrl: (p: string) => `https://app.example${p}`,
   }),
 }));
@@ -138,6 +144,10 @@ function resetFixtures() {
   };
   membersRef.current = [{ user_id: "user-1", role: "owner" }];
   installationsRef.current = { installations: [], configured: true, can_manage: true };
+  searchParamsRef.current = new URLSearchParams("tab=github");
+  mockNavReplace.mockImplementation((path: string) => {
+    searchParamsRef.current = new URLSearchParams(path.split("?")[1] ?? "");
+  });
 }
 
 describe("GitHubTab", () => {
@@ -207,8 +217,8 @@ describe("GitHubTab", () => {
 
     render(<GitHubTab />, { wrapper: I18nWrapper });
 
-    await user.click(screen.getByRole("button", { name: /^Disconnect$/ }));
-    expect(screen.getByText(/Multica will stop receiving webhooks/i)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Disconnect acme" }));
+    expect(screen.getByText(/stop receiving webhooks for acme/i)).toBeTruthy();
     expect(mockDeleteInstallation).not.toHaveBeenCalled();
 
     const dialogConfirm = screen
@@ -221,6 +231,41 @@ describe("GitHubTab", () => {
     });
   });
 
+  it("disconnects the installation the administrator selected", async () => {
+    const user = userEvent.setup();
+    installationsRef.current = {
+      configured: true,
+      can_manage: true,
+      installations: [
+        { id: "inst-personal", account_login: "personal", installation_id: 1 },
+        { id: "inst-org", account_login: "acme-org", installation_id: 2 },
+      ],
+    };
+    mockDeleteInstallation.mockResolvedValue(undefined);
+
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    await user.click(
+      screen.getByRole("button", { name: "Disconnect acme-org" }),
+    );
+    expect(screen.getByText(/stop receiving webhooks for acme-org/i)).toBeTruthy();
+    const confirm = screen
+      .getAllByRole("button", { name: /^Disconnect$/ })
+      .at(-1)!;
+    await user.click(confirm);
+
+    await waitFor(() => {
+      expect(mockDeleteInstallation).toHaveBeenCalledWith(
+        "workspace-1",
+        "inst-org",
+      );
+      expect(mockDeleteInstallation).not.toHaveBeenCalledWith(
+        "workspace-1",
+        "inst-personal",
+      );
+    });
+  });
+
   it("Disconnect button is still visible when the master switch is off", () => {
     workspaceRef.current.settings = { github_enabled: false };
     installationsRef.current = {
@@ -229,7 +274,103 @@ describe("GitHubTab", () => {
       installations: [{ id: "inst-1", account_login: "acme", installation_id: 1 }],
     };
     render(<GitHubTab />, { wrapper: I18nWrapper });
-    expect(screen.getByRole("button", { name: /^Disconnect$/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Disconnect acme" })).toBeTruthy();
+  });
+
+  it("can connect another account or organization without disconnecting the first", async () => {
+    installationsRef.current = {
+      configured: true,
+      can_manage: true,
+      installations: [{ id: "inst-1", account_login: "personal", installation_id: 1 }],
+    };
+    mockGetConnectURL.mockResolvedValue({
+      configured: true,
+      url: "https://github.com/apps/multica/installations/new",
+    });
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const user = userEvent.setup();
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    await user.click(
+      screen.getByRole("button", { name: "Add account or organization" }),
+    );
+
+    expect(mockGetConnectURL).toHaveBeenCalledWith("workspace-1");
+    expect(open).toHaveBeenCalledWith(
+      "https://github.com/apps/multica/installations/new",
+      "_blank",
+      "noopener",
+    );
+    expect(screen.getByRole("button", { name: "Disconnect personal" })).toBeTruthy();
+    open.mockRestore();
+  });
+
+  it("explains why additional-installation actions are disabled when GitHub is not configured", () => {
+    installationsRef.current = {
+      configured: false,
+      can_manage: true,
+      installations: [{ id: "inst-1", account_login: "personal", installation_id: 1 }],
+    };
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen
+        .getByRole("button", { name: "Add account or organization" })
+        .getAttribute("title"),
+    ).toBe("GitHub App is not configured on this server");
+    expect(
+      screen
+        .getByRole("button", { name: "Connect existing installation" })
+        .getAttribute("title"),
+    ).toBe("GitHub App is not configured on this server");
+  });
+
+  it("securely starts a claim for an existing GitHub App installation", async () => {
+    mockGetClaimURL.mockResolvedValue({
+      configured: true,
+      url: "https://github.com/login/oauth/authorize?state=claim",
+    });
+    const open = vi.spyOn(window, "open").mockImplementation(() => null);
+    const user = userEvent.setup();
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    await user.click(
+      screen.getByRole("button", { name: "Connect existing installation" }),
+    );
+    await user.type(
+      screen.getByRole("textbox", { name: "GitHub account or organization" }),
+      "Acme-Org",
+    );
+    await user.click(
+      screen.getByRole("button", { name: "Authorize and connect" }),
+    );
+
+    expect(mockGetClaimURL).toHaveBeenCalledWith(
+      "workspace-1",
+      "Acme-Org",
+      "github",
+    );
+    expect(open).toHaveBeenCalledWith(
+      "https://github.com/login/oauth/authorize?state=claim",
+      "_blank",
+      "noopener",
+    );
+    open.mockRestore();
+  });
+
+  it("opens the existing-installation form from the repositories shortcut and cleans callback params", async () => {
+    searchParamsRef.current = new URLSearchParams(
+      "tab=github&github_claim=1&github_connected=1&github_installation=internal-row",
+    );
+
+    render(<GitHubTab />, { wrapper: I18nWrapper });
+
+    expect(
+      screen.getByRole("textbox", { name: "GitHub account or organization" }),
+    ).toBeTruthy();
+    await waitFor(() => {
+      expect(mockNavReplace).toHaveBeenCalledWith("/acme/settings?tab=github");
+    });
   });
 
   it("non-admin sees the existing connection but no Connect/Disconnect controls", () => {
@@ -244,7 +385,9 @@ describe("GitHubTab", () => {
     expect(screen.getByText(/Connected to acme/i)).toBeTruthy();
     expect(screen.getByText(/Read-only view\./i)).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Connect GitHub$/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: /^Disconnect$/ })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: /^Disconnect / }),
+    ).toBeNull();
   });
 
   it("non-admin with no connection sees the contact-admin hint", () => {

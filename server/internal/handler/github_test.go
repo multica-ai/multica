@@ -343,6 +343,96 @@ func TestGitHubConnectRepositoryReturnTarget(t *testing.T) {
 	}
 }
 
+func TestGitHubClaimExistingInstallation(t *testing.T) {
+	t.Setenv("GITHUB_APP_SLUG", "multica-test")
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
+	t.Setenv("GITHUB_APP_CLIENT_ID", "Iv1.test-client")
+	t.Setenv("GITHUB_APP_CLIENT_SECRET", "test-client-secret")
+	oldOAuth := githubOAuthBase
+	githubOAuthBase = "https://github.example.test"
+	t.Cleanup(func() { githubOAuthBase = oldOAuth })
+
+	wsID := "11111111-2222-3333-4444-555555555555"
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/"+wsID+"/github/claim?account=Acme-Org&return_to=repositories",
+		nil,
+	)
+	req = withURLParam(req, "id", wsID)
+	rec := httptest.NewRecorder()
+	(&Handler{}).GitHubClaim(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GitHubClaim: got %d (%s)", rec.Code, rec.Body.String())
+	}
+	var body GitHubConnectResponse
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode claim response: %v", err)
+	}
+	oauthURL, err := url.Parse(body.URL)
+	if err != nil {
+		t.Fatalf("parse OAuth URL: %v", err)
+	}
+	if oauthURL.Path != "/login/oauth/authorize" {
+		t.Fatalf("OAuth path = %q, want /login/oauth/authorize", oauthURL.Path)
+	}
+	if got := oauthURL.Query().Get("client_id"); got != "Iv1.test-client" {
+		t.Fatalf("client_id = %q, want configured client id", got)
+	}
+	gotWorkspaceID, gotReturnTo, gotAccount, ok := verifyGitHubClaimState(
+		oauthURL.Query().Get("state"),
+	)
+	if !ok || gotWorkspaceID != wsID || gotReturnTo != githubReturnToRepositories || gotAccount != "acme-org" {
+		t.Fatalf(
+			"claim state = (%q, %q, %q, valid=%v), want (%q, repositories, acme-org, true)",
+			gotWorkspaceID,
+			gotReturnTo,
+			gotAccount,
+			ok,
+			wsID,
+		)
+	}
+
+	badReq := httptest.NewRequest(
+		http.MethodGet,
+		"/api/workspaces/"+wsID+"/github/claim?account=not/a/login",
+		nil,
+	)
+	badReq = withURLParam(badReq, "id", wsID)
+	badRec := httptest.NewRecorder()
+	(&Handler{}).GitHubClaim(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("invalid account: got %d, want 400", badRec.Code)
+	}
+}
+
+func TestGitHubClaimCallbackFailsClosedWithoutAuthorizationCode(t *testing.T) {
+	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
+	t.Setenv("GITHUB_APP_CLIENT_ID", "Iv1.test-client")
+	t.Setenv("GITHUB_APP_CLIENT_SECRET", "test-client-secret")
+	t.Setenv("FRONTEND_ORIGIN", "https://app.multica.test")
+	state, err := signGitHubClaimState(
+		"11111111-2222-3333-4444-555555555555",
+		githubReturnToGitHub,
+		"acme-org",
+	)
+	if err != nil {
+		t.Fatalf("sign claim state: %v", err)
+	}
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/github/setup?state="+url.QueryEscape(state),
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	(&Handler{}).GitHubSetupCallback(rec, req)
+	if rec.Code != http.StatusFound {
+		t.Fatalf("GitHubSetupCallback: got %d, want 302", rec.Code)
+	}
+	if got := rec.Header().Get("Location"); !strings.Contains(got, "github_error=missing_authorization") {
+		t.Fatalf("redirect = %q, want missing_authorization", got)
+	}
+}
+
 func TestGitHubSetupCallbackRepositoryReturnTarget(t *testing.T) {
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
 	t.Setenv("FRONTEND_ORIGIN", "https://app.multica.test/")
@@ -1878,7 +1968,7 @@ func TestListGitHubInstallations_RoleGating(t *testing.T) {
 
 // TestGitHubRoutes_RoleGating exercises the router-level middleware split
 // introduced in MUL-2413: GET installations runs under
-// RequireWorkspaceMemberFromURL while connect / delete remain behind
+// RequireWorkspaceMemberFromURL while connect / claim / delete remain behind
 // RequireWorkspaceRoleFromURL(owner, admin). The handler-level tests above
 // inject a member into context directly and so do not cover the middleware
 // itself — a future routing change that accidentally moved one of the
@@ -1964,6 +2054,7 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
 			r.Get("/github/connect", testHandler.GitHubConnect)
+			r.Get("/github/claim", testHandler.GitHubClaim)
 			r.Get("/github/installations/{installationId}/repositories", testHandler.ListGitHubInstallationRepositories)
 			r.Delete("/github/installations/{installationId}", testHandler.DeleteGitHubInstallation)
 		})
@@ -2006,6 +2097,19 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3)
 		}
 		if code := exercise(t, http.MethodGet, "/api/workspaces/"+wsID+"/github/connect", outsiderUserID); code != http.StatusNotFound {
 			t.Errorf("outsider GET connect: want 404, got %d", code)
+		}
+	})
+
+	t.Run("GET claim remains owner/admin only", func(t *testing.T) {
+		path := "/api/workspaces/" + wsID + "/github/claim?account=routes-acct"
+		if code := exercise(t, http.MethodGet, path, adminUserID); code != http.StatusOK {
+			t.Errorf("admin GET claim: want 200, got %d", code)
+		}
+		if code := exercise(t, http.MethodGet, path, memberUserID); code != http.StatusForbidden {
+			t.Errorf("member GET claim: want 403, got %d", code)
+		}
+		if code := exercise(t, http.MethodGet, path, outsiderUserID); code != http.StatusNotFound {
+			t.Errorf("outsider GET claim: want 404, got %d", code)
 		}
 	})
 
@@ -2716,7 +2820,9 @@ func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
 	// passes. Everything else 401s, which forces fetchInstallationAccount down
 	// its degraded path — that pins that the final real account name comes
 	// from the earlier webhook, not the setup callback's synchronous lookup.
-	code := stubGitHubInstallOwnership(t, []int64{installationID}, func(w http.ResponseWriter, r *http.Request) {
+	code := stubGitHubInstallOwnership(t, []stubGitHubUserInstallation{{
+		ID: installationID,
+	}}, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "auth required", http.StatusUnauthorized)
 	})
 

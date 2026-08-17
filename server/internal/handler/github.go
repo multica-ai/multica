@@ -6,6 +6,7 @@ import (
 	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -42,6 +43,7 @@ var githubOAuthBase = "https://github.com"
 const (
 	githubReturnToGitHub       = "github"
 	githubReturnToRepositories = "repositories"
+	githubClaimStatePrefix     = "claim"
 	githubAPIResponseLimit     = 4 << 20
 )
 
@@ -448,6 +450,43 @@ func signStateForReturnAt(workspaceID, returnTo string, now time.Time) (string, 
 	return payload + "." + signGitHubState(secret, payload), nil
 }
 
+// signGitHubClaimState seals the account login selected by the workspace
+// administrator into a separate OAuth flow. Unlike the installation URL,
+// this flow does not trust an installation_id from the browser: the callback
+// resolves the sealed account against GitHub's user-authenticated installation
+// list before binding anything to the workspace.
+// Format: "claim.<workspaceID>.<returnTo>.<accountB64>.<issuedAtUnix>.<nonce>.<sigHex>".
+func signGitHubClaimState(workspaceID, returnTo, accountLogin string) (string, error) {
+	return signGitHubClaimStateAt(workspaceID, returnTo, accountLogin, time.Now())
+}
+
+func signGitHubClaimStateAt(workspaceID, returnTo, accountLogin string, now time.Time) (string, error) {
+	secret := githubWebhookSecret()
+	if secret == "" {
+		return "", errors.New("github integration is not configured")
+	}
+	if !isAllowedGitHubReturnTo(returnTo) {
+		return "", errors.New("invalid github return target")
+	}
+	accountLogin = strings.ToLower(strings.TrimSpace(accountLogin))
+	if !isValidGitHubAccountLogin(accountLogin) {
+		return "", errors.New("invalid github account login")
+	}
+	nonceBytes := make([]byte, 12)
+	if _, err := rand.Read(nonceBytes); err != nil {
+		return "", err
+	}
+	payload := strings.Join([]string{
+		githubClaimStatePrefix,
+		workspaceID,
+		returnTo,
+		base64.RawURLEncoding.EncodeToString([]byte(accountLogin)),
+		strconv.FormatInt(now.Unix(), 10),
+		hex.EncodeToString(nonceBytes),
+	}, ".")
+	return payload + "." + signGitHubState(secret, payload), nil
+}
+
 func signGitHubState(secret, payload string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(payload))
@@ -489,6 +528,52 @@ func verifyStateWithReturnAt(token string, now time.Time) (workspaceID, returnTo
 		return "", "", false
 	}
 	return workspaceID, returnTo, true
+}
+
+func verifyGitHubClaimState(token string) (workspaceID, returnTo, accountLogin string, ok bool) {
+	return verifyGitHubClaimStateAt(token, time.Now())
+}
+
+func verifyGitHubClaimStateAt(token string, now time.Time) (workspaceID, returnTo, accountLogin string, ok bool) {
+	secret := githubWebhookSecret()
+	if secret == "" {
+		return "", "", "", false
+	}
+	parts := strings.Split(token, ".")
+	if len(parts) != 7 || parts[0] != githubClaimStatePrefix {
+		return "", "", "", false
+	}
+	payload := strings.Join(parts[:6], ".")
+	if !hmac.Equal([]byte(signGitHubState(secret, payload)), []byte(parts[6])) {
+		return "", "", "", false
+	}
+	workspaceID, returnTo = parts[1], parts[2]
+	if !isAllowedGitHubReturnTo(returnTo) {
+		return "", "", "", false
+	}
+	accountBytes, err := base64.RawURLEncoding.DecodeString(parts[3])
+	if err != nil {
+		return "", "", "", false
+	}
+	accountLogin = string(accountBytes)
+	if !isValidGitHubAccountLogin(accountLogin) {
+		return "", "", "", false
+	}
+	issuedAt, err := strconv.ParseInt(parts[4], 10, 64)
+	if err != nil {
+		return "", "", "", false
+	}
+	age := now.Sub(time.Unix(issuedAt, 0))
+	if age > githubStateMaxAge || age < -githubStateClockSkew {
+		return "", "", "", false
+	}
+	return workspaceID, returnTo, accountLogin, true
+}
+
+var githubAccountLoginRe = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]{0,37}[a-z0-9])?$`)
+
+func isValidGitHubAccountLogin(accountLogin string) bool {
+	return githubAccountLoginRe.MatchString(strings.ToLower(strings.TrimSpace(accountLogin)))
 }
 
 func isAllowedGitHubReturnTo(returnTo string) bool {
@@ -536,9 +621,48 @@ func (h *Handler) GitHubConnect(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, GitHubConnectResponse{URL: installURL, Configured: true})
 }
 
+// GitHubClaim returns a user-authorization URL for binding a GitHub App
+// installation that already exists on the named account. The account is
+// sealed into state here, while the authenticated callback proves GitHub
+// lists that exact account among the user's installations.
+func (h *Handler) GitHubClaim(w http.ResponseWriter, r *http.Request) {
+	workspaceID := chi.URLParam(r, "id")
+	if _, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace id"); !ok {
+		return
+	}
+	if !isGitHubConfigured() {
+		writeJSON(w, http.StatusOK, GitHubConnectResponse{Configured: false})
+		return
+	}
+	accountLogin := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("account")))
+	if !isValidGitHubAccountLogin(accountLogin) {
+		writeError(w, http.StatusBadRequest, "invalid github account login")
+		return
+	}
+	returnTo := strings.TrimSpace(r.URL.Query().Get("return_to"))
+	if returnTo == "" {
+		returnTo = githubReturnToGitHub
+	}
+	if !isAllowedGitHubReturnTo(returnTo) {
+		writeError(w, http.StatusBadRequest, "invalid return target")
+		return
+	}
+	state, err := signGitHubClaimState(workspaceID, returnTo, accountLogin)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to sign state")
+		return
+	}
+	query := url.Values{}
+	query.Set("client_id", githubAppClientID())
+	query.Set("state", state)
+	oauthURL := strings.TrimRight(githubOAuthBase, "/") + "/login/oauth/authorize?" + query.Encode()
+	writeJSON(w, http.StatusOK, GitHubConnectResponse{URL: oauthURL, Configured: true})
+}
+
 // GitHubSetupCallback (GET /api/github/setup) handles the redirect GitHub
-// sends after a user installs (or re-authorizes) the App. We expect
-// ?installation_id=<id>&code=<user authorization code>&state=<signed token>.
+// sends after a user installs (or re-authorizes) the App. A fresh install
+// carries installation_id plus a user-authorization code. The explicit claim
+// flow for an already-installed account carries only code and a claim state.
 // We prove the installation belongs to the person finishing the flow, persist
 // the installation row (workspace ↔ installation_id mapping), then bounce the
 // user back to the new Settings → GitHub tab in the web app (RFC MUL-2414
@@ -565,52 +689,79 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, settingsURL+"&github_error=missing_params", http.StatusFound)
 		return
 	}
-	workspaceID, returnTo, ok := verifyStateWithReturn(state)
-	if !ok {
+	workspaceID, returnTo, claimAccount, claimStateOK := verifyGitHubClaimState(state)
+	installStateOK := false
+	if !claimStateOK {
+		workspaceID, returnTo, installStateOK = verifyStateWithReturn(state)
+	}
+	if !claimStateOK && !installStateOK {
 		http.Redirect(w, r, settingsURL+"&github_error=invalid_state", http.StatusFound)
 		return
 	}
 	settingsURL = githubSettingsURL(frontend, returnTo)
-	if installationIDStr == "" {
-		http.Redirect(w, r, settingsURL+"&github_error=missing_params", http.StatusFound)
-		return
-	}
-	installationID, err := strconv.ParseInt(installationIDStr, 10, 64)
-	if err != nil {
-		http.Redirect(w, r, settingsURL+"&github_error=bad_installation_id", http.StatusFound)
-		return
-	}
 	wsUUID, err := parseStrictUUID(workspaceID)
 	if err != nil {
 		http.Redirect(w, r, settingsURL+"&github_error=bad_workspace", http.StatusFound)
 		return
 	}
-	// Ownership proof, before ANY persistence: without it the numeric
-	// installation_id in the query is enough to bind an unrelated org's
-	// installation into this workspace, which leaks that org's private
-	// repository names and its whole PR event stream (MUL-6056).
-	//
-	// A callback for a binding this workspace already has grants nothing new,
-	// so it skips the proof: GitHub only issues a user-authorization code when
-	// the user authorizes the App, and the "redirect on update" callback that
-	// fires when someone edits an existing installation's repository selection
-	// carries none. Requiring one there would fail every update.
-	if !h.workspaceHasGitHubInstallation(r.Context(), wsUUID, installationID) {
-		if err := verifyGitHubInstallationOwnership(r.Context(), q.Get("code"), installationID); err != nil {
-			slog.Warn("github: refused unverified installation bind",
+
+	var installationID int64
+	var login, accountType string
+	var avatar *string
+	if claimStateOK {
+		claimed, err := resolveGitHubInstallationForAccount(r.Context(), q.Get("code"), claimAccount)
+		if err != nil {
+			slog.Warn("github: refused existing installation claim",
 				"err", err,
-				"installation_id", installationID,
+				"account_login", claimAccount,
 				"workspace_id", workspaceID,
 			)
 			http.Redirect(w, r, settingsURL+"&github_error="+githubOwnershipErrorCode(err), http.StatusFound)
 			return
 		}
-	}
+		installationID = claimed.ID
+		login = claimed.Account.Login
+		accountType = coalesce(claimed.Account.Type, "User")
+		if claimed.Account.AvatarURL != "" {
+			avatar = &claimed.Account.AvatarURL
+		}
+	} else {
+		if installationIDStr == "" {
+			http.Redirect(w, r, settingsURL+"&github_error=missing_params", http.StatusFound)
+			return
+		}
+		installationID, err = strconv.ParseInt(installationIDStr, 10, 64)
+		if err != nil {
+			http.Redirect(w, r, settingsURL+"&github_error=bad_installation_id", http.StatusFound)
+			return
+		}
+		// Ownership proof, before ANY persistence: without it the numeric
+		// installation_id in the query is enough to bind an unrelated org's
+		// installation into this workspace, which leaks that org's private
+		// repository names and its whole PR event stream (MUL-6056).
+		//
+		// A callback for a binding this workspace already has grants nothing new,
+		// so it skips the proof: GitHub only issues a user-authorization code when
+		// the user authorizes the App, and the "redirect on update" callback that
+		// fires when someone edits an existing installation's repository selection
+		// carries none. Requiring one there would fail every update.
+		if !h.workspaceHasGitHubInstallation(r.Context(), wsUUID, installationID) {
+			if err := verifyGitHubInstallationOwnership(r.Context(), q.Get("code"), installationID); err != nil {
+				slog.Warn("github: refused unverified installation bind",
+					"err", err,
+					"installation_id", installationID,
+					"workspace_id", workspaceID,
+				)
+				http.Redirect(w, r, settingsURL+"&github_error="+githubOwnershipErrorCode(err), http.StatusFound)
+				return
+			}
+		}
 
-	// Resolve the installation against GitHub's API to capture display info.
-	// If the App auth is not configured we still create the row with the
-	// minimum we know; webhook events will refresh it as soon as one fires.
-	login, accountType, avatar := fetchInstallationAccount(r.Context(), installationID)
+		// Resolve the installation against GitHub's API to capture display info.
+		// If the App auth is not configured we still create the row with the
+		// minimum we know; webhook events will refresh it as soon as one fires.
+		login, accountType, avatar = fetchInstallationAccount(r.Context(), installationID)
+	}
 
 	// Best-effort capture of the connecting user (may be nil if the public
 	// callback was hit without a session — e.g. user wasn't logged in to
@@ -645,7 +796,11 @@ func (h *Handler) GitHubSetupCallback(w http.ResponseWriter, r *http.Request) {
 	h.publish(protocol.EventGitHubInstallationCreated, workspaceID, "system", "", map[string]any{
 		"installation": githubInstallationToBroadcast(inst),
 	})
-	http.Redirect(w, r, settingsURL+"&github_connected=1", http.StatusFound)
+	redirectURL := settingsURL + "&github_connected=1"
+	if returnTo == githubReturnToRepositories {
+		redirectURL += "&github_installation=" + url.QueryEscape(uuidToString(inst.ID))
+	}
+	http.Redirect(w, r, redirectURL, http.StatusFound)
 }
 
 // ── Install ownership proof ─────────────────────────────────────────────────
@@ -680,11 +835,13 @@ var (
 	// errGitHubInstallationNotAuthorized means GitHub told us this user
 	// cannot see the installation they asked us to bind. This is the attack
 	// signature, not a misconfiguration.
-	errGitHubInstallationNotAuthorized = errors.New("github: installation is not accessible to the installing user")
+	errGitHubInstallationNotAuthorized        = errors.New("github: installation is not accessible to the installing user")
+	errGitHubInstallationAccountNotAuthorized = errors.New("github: no accessible installation matches the requested account")
 )
 
 const (
 	githubUserInstallationsPageSize = 100
+	githubUserAuthorizationTimeout  = 30 * time.Second
 	// githubUserInstallationsMaxPages caps the walk at 2000 installations so a
 	// hostile or pathological account cannot hold the callback open forever.
 	githubUserInstallationsMaxPages = 20
@@ -713,6 +870,8 @@ func verifyGitHubInstallationOwnership(ctx context.Context, code string, install
 	if strings.TrimSpace(code) == "" {
 		return errGitHubUserAuthorizationMissing
 	}
+	ctx, cancel := context.WithTimeout(ctx, githubUserAuthorizationTimeout)
+	defer cancel()
 	client := &http.Client{Timeout: 15 * time.Second}
 	userToken, err := exchangeGitHubUserCode(ctx, client, clientID, clientSecret, code)
 	if err != nil {
@@ -724,14 +883,55 @@ func verifyGitHubInstallationOwnership(ctx context.Context, code string, install
 	return assertUserCanAccessInstallation(ctx, client, userToken, installationID)
 }
 
+type githubUserInstallation struct {
+	ID      int64 `json:"id"`
+	Account struct {
+		Login     string `json:"login"`
+		Type      string `json:"type"`
+		AvatarURL string `json:"avatar_url"`
+	} `json:"account"`
+}
+
+func resolveGitHubInstallationForAccount(
+	ctx context.Context,
+	code, accountLogin string,
+) (githubUserInstallation, error) {
+	clientID, clientSecret := githubAppClientID(), githubAppClientSecret()
+	if clientID == "" || clientSecret == "" {
+		return githubUserInstallation{}, errors.New("github: user authorization credentials are not configured")
+	}
+	if strings.TrimSpace(code) == "" {
+		return githubUserInstallation{}, errGitHubUserAuthorizationMissing
+	}
+	ctx, cancel := context.WithTimeout(ctx, githubUserAuthorizationTimeout)
+	defer cancel()
+	client := &http.Client{Timeout: 15 * time.Second}
+	userToken, err := exchangeGitHubUserCode(ctx, client, clientID, clientSecret, code)
+	if err != nil {
+		return githubUserInstallation{}, err
+	}
+	defer revokeGitHubUserToken(client, clientID, clientSecret, userToken)
+	installations, err := listGitHubUserInstallations(ctx, client, userToken)
+	if err != nil {
+		return githubUserInstallation{}, err
+	}
+	for _, installation := range installations {
+		if strings.EqualFold(installation.Account.Login, accountLogin) {
+			return installation, nil
+		}
+	}
+	return githubUserInstallation{}, errGitHubInstallationAccountNotAuthorized
+}
+
 // githubOwnershipErrorCode maps a verification failure to the `github_error`
-// code carried back to Settings. The frontend renders one generic "connect
-// failed" toast for all of them; the distinction is for operators reading
-// logs and support tickets.
+// code carried back to Settings. Account-claim failures get actionable UI;
+// the remaining distinctions help operators diagnose logs and support cases.
 func githubOwnershipErrorCode(err error) string {
 	switch {
 	case errors.Is(err, errGitHubInstallationNotAuthorized):
 		return "installation_not_authorized"
+	case errors.Is(err, errGitHubInstallationAccountNotAuthorized):
+		return "installation_account_not_authorized"
 	case errors.Is(err, errGitHubUserAuthorizationMissing):
 		return "missing_authorization"
 	default:
@@ -791,6 +991,24 @@ func assertUserCanAccessInstallation(
 	userToken string,
 	installationID int64,
 ) error {
+	installations, err := listGitHubUserInstallations(ctx, client, userToken)
+	if err != nil {
+		return err
+	}
+	for _, installation := range installations {
+		if installation.ID == installationID {
+			return nil
+		}
+	}
+	return errGitHubInstallationNotAuthorized
+}
+
+func listGitHubUserInstallations(
+	ctx context.Context,
+	client *http.Client,
+	userToken string,
+) ([]githubUserInstallation, error) {
+	installations := make([]githubUserInstallation, 0)
 	for page := 1; page <= githubUserInstallationsMaxPages; page++ {
 		endpoint := fmt.Sprintf(
 			"%s/user/installations?per_page=%d&page=%d",
@@ -800,38 +1018,32 @@ func assertUserCanAccessInstallation(
 		)
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		setGitHubAPIHeaders(req, userToken)
 		resp, err := client.Do(req)
 		if err != nil {
-			return fmt.Errorf("list user installations: %w", err)
+			return nil, fmt.Errorf("list user installations: %w", err)
 		}
 		if resp.StatusCode != http.StatusOK {
 			_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, githubAPIResponseLimit))
 			resp.Body.Close()
-			return fmt.Errorf("list user installations: github status %d", resp.StatusCode)
+			return nil, fmt.Errorf("list user installations: github status %d", resp.StatusCode)
 		}
 		var body struct {
-			Installations []struct {
-				ID int64 `json:"id"`
-			} `json:"installations"`
+			Installations []githubUserInstallation `json:"installations"`
 		}
 		decodeErr := json.NewDecoder(io.LimitReader(resp.Body, githubAPIResponseLimit)).Decode(&body)
 		resp.Body.Close()
 		if decodeErr != nil {
-			return fmt.Errorf("decode user installations: %w", decodeErr)
+			return nil, fmt.Errorf("decode user installations: %w", decodeErr)
 		}
-		for _, installation := range body.Installations {
-			if installation.ID == installationID {
-				return nil
-			}
-		}
+		installations = append(installations, body.Installations...)
 		if len(body.Installations) < githubUserInstallationsPageSize {
 			break
 		}
 	}
-	return errGitHubInstallationNotAuthorized
+	return installations, nil
 }
 
 // revokeGitHubUserToken drops the short-lived user token as soon as the
