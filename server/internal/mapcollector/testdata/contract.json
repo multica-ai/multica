@@ -1,0 +1,150 @@
+{
+  "mapping_version": "NEW31-MAP-v1",
+  "snapshot_label": "fixture-source-restore-equivalent",
+  "postgres_version": "17.10",
+  "schema": "map_fixture",
+  "tables": [
+    {
+      "name": "workspace",
+      "domain": "identity_workspace",
+      "id_field": "id",
+      "fields": [
+        {"name": "id", "type": "text", "nullable": false, "role": "stable_id"},
+        {"name": "visibility", "type": "text", "nullable": false, "role": "enum", "enum": ["private", "public"]},
+        {"name": "created_at", "type": "timestamp with time zone", "nullable": false, "role": "time"}
+      ],
+      "denied_columns": ["display_name"],
+      "unique": [{"name": "workspace_id", "fields": ["id"]}]
+    },
+    {
+      "name": "member",
+      "domain": "identity_workspace",
+      "id_field": "id",
+      "fields": [
+        {"name": "id", "type": "text", "nullable": false, "role": "stable_id"},
+        {"name": "workspace_id", "type": "text", "nullable": false, "role": "workspace_ref"},
+        {"name": "role", "type": "text", "nullable": false, "role": "enum", "enum": ["owner", "admin", "member"]}
+      ],
+      "denied_columns": ["email"],
+      "unique": [{"name": "member_id", "fields": ["id"]}]
+    },
+    {
+      "name": "agent",
+      "domain": "agent_permissions",
+      "id_field": "id",
+      "fields": [
+        {"name": "id", "type": "text", "nullable": false, "role": "stable_id"},
+        {"name": "workspace_id", "type": "text", "nullable": false, "role": "workspace_ref"},
+        {"name": "owner_member_id", "type": "text", "nullable": false, "role": "owner_ref"},
+        {"name": "permission_mode", "type": "text", "nullable": false, "role": "enum", "enum": ["private", "public_to"]}
+      ],
+      "denied_columns": ["instructions", "secret_config"]
+    },
+    {
+      "name": "agent_target",
+      "domain": "agent_permissions",
+      "id_field": "id",
+      "fields": [
+        {"name": "id", "type": "text", "nullable": false, "role": "stable_id"},
+        {"name": "agent_id", "type": "text", "nullable": false, "role": "parent_ref"},
+        {"name": "target_type", "type": "text", "nullable": false, "role": "enum", "enum": ["workspace", "member"]},
+        {"name": "target_id", "type": "text", "nullable": false, "role": "owner_ref"},
+        {"name": "scope", "type": "text", "nullable": false, "role": "enum", "enum": ["invocation"]},
+        {"name": "action", "type": "text", "nullable": false, "role": "enum", "enum": ["invoke"]},
+        {"name": "inheritance", "type": "text", "nullable": false, "role": "enum", "enum": ["none"]}
+      ],
+      "denied_columns": []
+    },
+    {
+      "name": "issue",
+      "domain": "project_issue_comment",
+      "id_field": "id",
+      "fields": [
+        {"name": "id", "type": "text", "nullable": false, "role": "stable_id"},
+        {"name": "workspace_id", "type": "text", "nullable": false, "role": "workspace_ref"},
+        {"name": "parent_id", "type": "text", "nullable": true, "role": "parent_ref"},
+        {"name": "status", "type": "text", "nullable": false, "role": "enum", "enum": ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"]},
+        {"name": "position", "type": "integer", "nullable": false, "role": "ordering"}
+      ],
+      "denied_columns": ["title", "body"]
+    },
+    {
+      "name": "comment",
+      "domain": "project_issue_comment",
+      "id_field": "id",
+      "fields": [
+        {"name": "id", "type": "text", "nullable": false, "role": "stable_id"},
+        {"name": "workspace_id", "type": "text", "nullable": false, "role": "workspace_ref"},
+        {"name": "issue_id", "type": "text", "nullable": false, "role": "parent_ref"},
+        {"name": "parent_id", "type": "text", "nullable": true, "role": "parent_ref"}
+      ],
+      "denied_columns": ["body"]
+    },
+    {
+      "name": "task",
+      "domain": "chat_task",
+      "id_field": "id",
+      "fields": [
+        {"name": "id", "type": "text", "nullable": false, "role": "stable_id"},
+        {"name": "workspace_id", "type": "text", "nullable": false, "role": "workspace_ref"},
+        {"name": "agent_id", "type": "text", "nullable": false, "role": "owner_ref"},
+        {"name": "status", "type": "text", "nullable": false, "role": "enum", "enum": ["queued", "dispatched", "running", "waiting", "completed", "failed", "cancelled"]},
+        {"name": "originator_member_id", "type": "text", "nullable": true, "role": "owner_ref"},
+        {"name": "accountable_member_id", "type": "text", "nullable": true, "role": "owner_ref"}
+      ],
+      "denied_columns": ["result", "error_text"]
+    },
+    {
+      "name": "attachment",
+      "domain": "attachments",
+      "id_field": "id",
+      "fields": [
+        {"name": "id", "type": "text", "nullable": false, "role": "stable_id"},
+        {"name": "workspace_id", "type": "text", "nullable": false, "role": "workspace_ref"},
+        {"name": "issue_id", "type": "text", "nullable": false, "role": "owner_ref"},
+        {"name": "uploader_member_id", "type": "text", "nullable": false, "role": "owner_ref"},
+        {"name": "storage_type", "type": "text", "nullable": false, "role": "enum", "enum": ["local", "object"]},
+        {"name": "storage_key", "type": "text", "nullable": false, "role": "storage_key"},
+        {"name": "size_bytes", "type": "bigint", "nullable": false, "role": "size"},
+        {"name": "byte_sha256", "type": "text", "nullable": false, "role": "byte_hash"}
+      ],
+      "denied_columns": ["filename", "source_url"]
+    },
+    {
+      "name": "usage",
+      "domain": "usage",
+      "id_field": "id",
+      "fields": [
+        {"name": "id", "type": "text", "nullable": false, "role": "stable_id"},
+        {"name": "task_id", "type": "text", "nullable": false, "role": "task_ref"},
+        {"name": "input_tokens", "type": "bigint", "nullable": false, "role": "usage"},
+        {"name": "output_tokens", "type": "bigint", "nullable": false, "role": "usage"},
+        {"name": "cost_microusd", "type": "bigint", "nullable": false, "role": "cost"}
+      ],
+      "denied_columns": ["provider_payload"]
+    }
+  ],
+  "references": [
+    {"name": "member_workspace", "domain": "identity_workspace", "from_table": "member", "from_fields": ["workspace_id"], "to_table": "workspace", "to_fields": ["id"], "allow_null": false},
+    {"name": "agent_owner", "domain": "agent_permissions", "from_table": "agent", "from_fields": ["owner_member_id"], "to_table": "member", "to_fields": ["id"], "allow_null": false, "from_workspace_field": "workspace_id", "to_workspace_field": "workspace_id"},
+    {"name": "target_agent", "domain": "agent_permissions", "from_table": "agent_target", "from_fields": ["agent_id"], "to_table": "agent", "to_fields": ["id"], "allow_null": false},
+    {"name": "issue_workspace", "domain": "project_issue_comment", "from_table": "issue", "from_fields": ["workspace_id"], "to_table": "workspace", "to_fields": ["id"], "allow_null": false},
+    {"name": "issue_parent", "domain": "project_issue_comment", "from_table": "issue", "from_fields": ["parent_id"], "to_table": "issue", "to_fields": ["id"], "allow_null": true, "acyclic": true, "from_workspace_field": "workspace_id", "to_workspace_field": "workspace_id"},
+    {"name": "comment_issue", "domain": "project_issue_comment", "from_table": "comment", "from_fields": ["issue_id"], "to_table": "issue", "to_fields": ["id"], "allow_null": false, "from_workspace_field": "workspace_id", "to_workspace_field": "workspace_id"},
+    {"name": "comment_parent", "domain": "project_issue_comment", "from_table": "comment", "from_fields": ["parent_id"], "to_table": "comment", "to_fields": ["id"], "allow_null": true, "acyclic": true, "from_workspace_field": "workspace_id", "to_workspace_field": "workspace_id"},
+    {"name": "task_agent", "domain": "chat_task", "from_table": "task", "from_fields": ["agent_id"], "to_table": "agent", "to_fields": ["id"], "allow_null": false, "from_workspace_field": "workspace_id", "to_workspace_field": "workspace_id"},
+    {"name": "attachment_issue", "domain": "attachments", "from_table": "attachment", "from_fields": ["issue_id"], "to_table": "issue", "to_fields": ["id"], "allow_null": false, "from_workspace_field": "workspace_id", "to_workspace_field": "workspace_id"},
+    {"name": "attachment_uploader", "domain": "attachments", "from_table": "attachment", "from_fields": ["uploader_member_id"], "to_table": "member", "to_fields": ["id"], "allow_null": false, "from_workspace_field": "workspace_id", "to_workspace_field": "workspace_id"},
+    {"name": "usage_task", "domain": "usage", "from_table": "usage", "from_fields": ["task_id"], "to_table": "task", "to_fields": ["id"], "allow_null": false}
+  ],
+  "owners": {"workspace_table": "workspace", "workspace_id_field": "id", "member_table": "member", "member_workspace_field": "workspace_id", "member_role_field": "role", "owner_role": "owner"},
+  "permissions": {
+    "agent_table": "agent", "agent_id_field": "id", "agent_workspace_field": "workspace_id", "mode_field": "permission_mode", "private_mode": "private", "public_mode": "public_to",
+    "target_table": "agent_target", "target_agent_field": "agent_id", "target_type_field": "target_type", "target_id_field": "target_id",
+    "scope_field": "scope", "action_field": "action", "inheritance_field": "inheritance", "allowed_targets": ["workspace", "member"],
+    "workspace_target_type": "workspace", "member_target_type": "member", "member_table": "member", "member_id_field": "id", "member_workspace_field": "workspace_id"
+  },
+  "attachments": {"table": "attachment", "storage_key_field": "storage_key", "storage_type_field": "storage_type", "size_field": "size_bytes", "sha256_field": "byte_sha256"},
+  "usage": {"table": "usage", "task_field": "task_id", "unit_fields": {"input_tokens": "token", "output_tokens": "token", "cost_microusd": "micro_usd"}},
+  "tasks": {"table": "task", "status_field": "status", "terminal_statuses": ["completed", "failed", "cancelled"], "originator_field": "originator_member_id", "accountable_field": "accountable_member_id"}
+}
