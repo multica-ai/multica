@@ -9,11 +9,10 @@ import (
 )
 
 // customArgsForRuntime applies platform-owned defaults immediately before the
-// agent custom_args JSON is persisted. Runtime metadata carries the daemon OS
-// plus whether fixed arguments or the shared config copied into tasks already
-// own the setting; the daemon independently applies the same rule from
-// runtime.GOOS, effective argv, and the copied config at launch, so a missing
-// or stale metadata hint cannot weaken execution behavior.
+// agent custom_args JSON is persisted. Registration metadata is a persistence
+// and UI-preview hint only. At task start the daemon derives execution
+// authority again from its actual GOOS, effective argv, and the config copied
+// by Prepare, so a stale registration hint cannot weaken launch behavior.
 func customArgsForRuntime(runtime db.AgentRuntime, customArgs []string, managed bool) ([]string, bool) {
 	if !strings.EqualFold(strings.TrimSpace(runtime.Provider), "codex") {
 		return agent.NormalizeCodexWindowsSandboxCustomArgs("", managed, false, customArgs)
@@ -33,4 +32,27 @@ func customArgsForRuntime(runtime db.AgentRuntime, customArgs []string, managed 
 		metadata.CodexWindowsSandboxArgConfigured || metadata.CodexWindowsSandboxConfigConfigured,
 		customArgs,
 	)
+}
+
+// normalizedRuntimeOnlyCustomArgs re-reads and normalizes the row locked by a
+// runtime-only update. The caller must hold that row lock through UpdateAgent;
+// otherwise a concurrent custom_args replacement can land between this read and
+// the write and be overwritten by a stale normalized copy.
+func normalizedRuntimeOnlyCustomArgs(existing db.Agent, runtime db.AgentRuntime) ([]byte, bool, error) {
+	var customArgs []string
+	if len(existing.CustomArgs) > 0 {
+		if err := json.Unmarshal(existing.CustomArgs, &customArgs); err != nil {
+			return nil, false, err
+		}
+	}
+	customArgs, managed := customArgsForRuntime(
+		runtime,
+		customArgs,
+		existing.IsCodexWindowsSandboxArgManaged,
+	)
+	encoded, err := json.Marshal(customArgs)
+	if err != nil {
+		return nil, false, err
+	}
+	return encoded, managed, nil
 }
