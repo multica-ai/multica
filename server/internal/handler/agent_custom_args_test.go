@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+	"time"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -267,3 +268,161 @@ func TestAgentCustomArgsPersistenceAcrossRuntimeOnlySwitches(t *testing.T) {
 		"-c", `windows.sandbox="unelevated"`, "--profile", "research",
 	})
 }
+
+func TestAgentRuntimeOnlyUpdatePreservesConcurrentCustomArgs(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	const agentName = "custom-args-concurrent-runtime-switch"
+	createRuntime := func(name, metadata string) string {
+		t.Helper()
+		var runtimeID string
+		if err := testPool.QueryRow(ctx, `
+			INSERT INTO agent_runtime (
+				workspace_id, daemon_id, name, runtime_mode, provider, status,
+				device_info, metadata, last_seen_at, owner_id
+			)
+			VALUES ($1, NULL, $2, 'cloud', 'codex', 'online', $3, $4::jsonb, now(), $5)
+			RETURNING id
+		`, testWorkspaceID, name, name, metadata, testUserID).Scan(&runtimeID); err != nil {
+			t.Fatalf("create runtime %s: %v", name, err)
+		}
+		return runtimeID
+	}
+
+	linuxRuntimeID := createRuntime("custom-args-concurrent-linux", `{"os":"linux"}`)
+	windowsRuntimeID := createRuntime("custom-args-concurrent-windows", `{"os":"windows"}`)
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM agent WHERE workspace_id = $1 AND name = $2`, testWorkspaceID, agentName)
+		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = ANY($1::uuid[])`, []string{linuxRuntimeID, windowsRuntimeID})
+	})
+
+	create := httptest.NewRecorder()
+	testHandler.CreateAgent(create, newRequest(http.MethodPost, "/api/agents", map[string]any{
+		"name":                 agentName,
+		"runtime_id":           linuxRuntimeID,
+		"visibility":           "private",
+		"max_concurrent_tasks": 1,
+		"custom_args":          []string{"--profile", "stale"},
+	}))
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create status = %d, want 201: %s", create.Code, create.Body.String())
+	}
+	var created AgentResponse
+	if err := json.NewDecoder(create.Body).Decode(&created); err != nil {
+		t.Fatalf("decode created agent: %v", err)
+	}
+
+	editorTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer editorTx.Rollback(ctx)
+
+	var editorPID int32
+	if err := editorTx.QueryRow(ctx, `SELECT pg_backend_pid()`).Scan(&editorPID); err != nil {
+		t.Fatalf("read editor backend pid: %v", err)
+	}
+	concurrentArgs, err := json.Marshal([]string{"--profile", "concurrent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := editorTx.Exec(ctx, `
+		UPDATE agent
+		SET custom_args = $2::jsonb,
+		    is_codex_windows_sandbox_arg_managed = FALSE
+		WHERE id = $1
+	`, created.ID, string(concurrentArgs)); err != nil {
+		t.Fatalf("stage concurrent custom_args edit: %v", err)
+	}
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req := withURLParam(newRequest(http.MethodPatch, "/api/agents/"+created.ID, map[string]any{
+			"runtime_id": windowsRuntimeID,
+		}), "id", created.ID)
+		testHandler.UpdateAgent(w, req)
+		done <- w
+	}()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		var blocked bool
+		if err := testPool.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_stat_activity
+				WHERE $1 = ANY(pg_blocking_pids(pid))
+			)
+		`, editorPID).Scan(&blocked); err != nil {
+			t.Fatalf("inspect blocked runtime update: %v", err)
+		}
+		if blocked {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("runtime-only update never reached the row locked by the concurrent editor")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if err := editorTx.Commit(ctx); err != nil {
+		t.Fatalf("commit concurrent custom_args edit: %v", err)
+	}
+
+	var response *httptest.ResponseRecorder
+	select {
+	case response = <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("runtime-only update did not finish after concurrent editor committed")
+	}
+	if response.Code != http.StatusOK {
+		t.Fatalf("runtime update status = %d, want 200: %s", response.Code, response.Body.String())
+	}
+
+	var updated AgentResponse
+	if err := json.NewDecoder(response.Body).Decode(&updated); err != nil {
+		t.Fatalf("decode updated agent: %v", err)
+	}
+	wantArgs := []string{
+		"-c", `windows.sandbox="unelevated"`, "--profile", "concurrent",
+	}
+	if !reflect.DeepEqual(updated.CustomArgs, wantArgs) {
+		t.Fatalf("response custom_args = %v, want concurrent edit %v", updated.CustomArgs, wantArgs)
+	}
+	if !updated.IsCodexWindowsSandboxArgManaged {
+		t.Fatal("runtime-only Windows normalization did not retain managed provenance")
+	}
+	if updated.RuntimeID != windowsRuntimeID {
+		t.Fatalf("runtime_id = %s, want %s", updated.RuntimeID, windowsRuntimeID)
+	}
+
+	var storedRaw []byte
+	var storedManaged bool
+	var storedRuntimeID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT custom_args, is_codex_windows_sandbox_arg_managed, runtime_id
+		FROM agent
+		WHERE id = $1
+	`, created.ID).Scan(&storedRaw, &storedManaged, &storedRuntimeID); err != nil {
+		t.Fatalf("read stored agent: %v", err)
+	}
+	var storedArgs []string
+	if err := json.Unmarshal(storedRaw, &storedArgs); err != nil {
+		t.Fatalf("decode stored custom_args: %v", err)
+	}
+	if !reflect.DeepEqual(storedArgs, wantArgs) || !storedManaged || storedRuntimeID != windowsRuntimeID {
+		t.Fatalf(
+			"stored runtime update = args:%v managed:%v runtime:%s, want args:%v managed:true runtime:%s",
+			storedArgs,
+			storedManaged,
+			storedRuntimeID,
+			wantArgs,
+			windowsRuntimeID,
+		)
+	}
+}
+

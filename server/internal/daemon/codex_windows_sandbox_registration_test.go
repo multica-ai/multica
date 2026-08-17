@@ -42,7 +42,6 @@ func TestSetCodexWindowsSandboxRegistrationMetadataWithConfig(t *testing.T) {
 	}
 }
 
-
 func TestCodexWindowsSandboxRegistrationSnapshotFallsBackForLegacyServer(t *testing.T) {
 	codexHome := t.TempDir()
 	t.Setenv("CODEX_HOME", codexHome)
@@ -64,22 +63,34 @@ func TestCodexWindowsSandboxRegistrationSnapshotFallsBackForLegacyServer(t *test
 	}
 }
 
-func TestCodexWindowsSandboxRegistrationSnapshotSurvivesConfigChanges(t *testing.T) {
+func TestCodexWindowsSandboxTaskPolicyTracksConfigChanges(t *testing.T) {
 	const sandbox = `windows.sandbox="unelevated"`
 	tests := []struct {
 		name          string
 		initialConfig string
 		changedConfig string
+		persistedArgs []string
+		managed       bool
 		wantPreview   []string
 	}{
 		{
 			name:          "added after registration",
 			changedConfig: "[windows]\nsandbox = \"elevated\"\n",
-			wantPreview:   []string{"-c", sandbox, "--profile", "research"},
+			persistedArgs: []string{"-c", sandbox, "--profile", "research"},
+			managed:       true,
+			wantPreview:   []string{"--profile", "research"},
 		},
 		{
 			name:          "removed after registration",
 			initialConfig: "[windows]\nsandbox = \"elevated\"\n",
+			persistedArgs: []string{"--profile", "research"},
+			wantPreview:   []string{"-c", sandbox, "--profile", "research"},
+		},
+		{
+			name:          "changed after registration",
+			initialConfig: "[windows]\nsandbox = \"elevated\"\n",
+			changedConfig: "[windows]\nsandbox = \"unelevated\"\n",
+			persistedArgs: []string{"--profile", "research"},
 			wantPreview:   []string{"--profile", "research"},
 		},
 	}
@@ -107,24 +118,27 @@ func TestCodexWindowsSandboxRegistrationSnapshotSurvivesConfigChanges(t *testing
 					CodexWindowsSandboxConfigConfigured: boolPointer(registeredConfigOwns),
 				},
 			}
-			task := Task{}
+			task := Task{
+				Agent: &AgentData{
+					CustomArgs:                      tt.persistedArgs,
+					IsCodexWindowsSandboxArgManaged: tt.managed,
+				},
+			}
 			captureCodexWindowsSandboxRegistrationSnapshot(&task, registered)
-
 			policy := newCodexWindowsSandboxSessionPolicy(task)
-			opts := agent.ExecOptions{
-				GOOS:       "windows",
-				CustomArgs: []string{"--profile", "research"},
-			}
-			previewArgs := policy.effectiveLaunchArgs(opts, nil)
-			if !reflect.DeepEqual(previewArgs, tt.wantPreview) {
-				t.Fatalf("preview args = %v, want %v", previewArgs, tt.wantPreview)
-			}
 
 			if err := os.WriteFile(configPath, []byte(tt.changedConfig), 0o600); err != nil {
 				t.Fatal(err)
 			}
-			if live := execenv.SharedCodexWindowsSandboxConfigOwns(); live == registeredConfigOwns {
-				t.Fatalf("test setup did not change live config ownership: got %v", live)
+			liveConfigOwns := execenv.SharedCodexWindowsSandboxConfigOwns()
+
+			opts := agent.ExecOptions{
+				GOOS:       "windows",
+				CustomArgs: tt.persistedArgs,
+			}
+			previewArgs := policy.effectiveLaunchArgs(opts, nil)
+			if !reflect.DeepEqual(previewArgs, tt.wantPreview) {
+				t.Fatalf("preview args = %v, want %v", previewArgs, tt.wantPreview)
 			}
 
 			launchOpts := policy.applyToExecOptions(opts)
@@ -132,13 +146,28 @@ func TestCodexWindowsSandboxRegistrationSnapshotSurvivesConfigChanges(t *testing
 			if !reflect.DeepEqual(launchArgs, previewArgs) {
 				t.Fatalf("spawn args drifted after config change: preview=%v launch=%v", previewArgs, launchArgs)
 			}
-			if launchOpts.CodexWindowsSandboxConfigOwns != registeredConfigOwns {
+			if launchOpts.CodexWindowsSandboxConfigOwns != liveConfigOwns {
 				t.Fatalf(
-					"spawn config ownership = %v, want registration snapshot %v",
+					"spawn config ownership = %v, want prepared config ownership %v",
 					launchOpts.CodexWindowsSandboxConfigOwns,
-					registeredConfigOwns,
+					liveConfigOwns,
 				)
 			}
 		})
 	}
+
+	nonWindows := newCodexWindowsSandboxSessionPolicy(Task{
+		Agent: &AgentData{
+			CustomArgs:                      []string{"-c", sandbox, "--profile", "research"},
+			IsCodexWindowsSandboxArgManaged: true,
+		},
+	})
+	got := nonWindows.effectiveLaunchArgs(agent.ExecOptions{
+		GOOS:       "linux",
+		CustomArgs: []string{"-c", sandbox, "--profile", "research"},
+	}, nil)
+	if want := []string{"--profile", "research"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("non-Windows args = %v, want %v", got, want)
+	}
 }
+
