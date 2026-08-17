@@ -171,10 +171,54 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state の署名シークレット。`JWT_SECRET` から派生可能 |
 | セルフホスト Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 連携のスイッチ。compose ではデフォルトで有効 |
 | セルフホスト Git | `MULTICA_VCS_SECRET_KEY` | base64 エンコードされた 32 バイトの暗号化キー（`openssl rand -base64 32`）。未設定の場合、この機能全体が利用できません |
+| ntfy | `NTFY_ENABLED` | Android 通知ミラーの明示的なスイッチ。デフォルトは `false` |
+| ntfy | `NTFY_BASE_URL` | ntfy サーバーの HTTPS origin。公開サービスは `https://ntfy.sh` |
+| ntfy | `NTFY_TOPIC` | 32〜64 文字のランダムな topic。シークレットとして扱い、ログには出力しません |
+| ntfy | `NTFY_RECIPIENT_ID` | 通知をミラーする Multica メンバーの UUID |
+| ntfy | `NTFY_TOKEN` | 認証済み ntfy サーバー用の任意の Bearer token |
+| ntfy | `NTFY_APP_URL` | 通知タップ時に開く任意の Multica HTTPS URL。`MULTICA_APP_URL`、`FRONTEND_ORIGIN` の順にフォールバック |
+| ntfy | `NTFY_TIMEOUT` | データベース照会と送信の合計タイムアウト。`100ms`〜`10s`、デフォルトは `3s` |
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージによる done への遷移は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
 
 設定手順は [GitHub 連携](/github-integration#セルフホスト設定)、[Lark Bot](/lark-bot-integration#セルフホスト設定)、[Slack Bot](/slack-bot-integration#セルフホスト設定)を参照してください。
+
+### ntfy Android 通知ミラー
+
+ntfy アダプターはベストエフォートのミラーであり、アプリ内の受信トレイを置き換えたり変更したりしません。メンバーへのメンション、タスクの割り当て、エージェント実行の最終的な完了または失敗、タスクが `blocked` に入るイベントを対象にします。完了または失敗は、設定したメンバーがそのタスクを引き続きフォローし、`agent_activity` をミュートしていない場合だけ送信されます。自動再試行中の失敗は送信しません。
+
+通知文には業務本文を含めず、固定のイベント要約だけを使用します。HTTPS app URL が設定されている場合は、Multica の受信トレイへのリンクも付けます。タスクのタイトル、コメント、添付ファイル、エラー本文、資格情報、topic、token は通知のタイトル・本文やログに出ません。topic は ntfy のルーティングフィールドとしてだけ使用します。配信は上限付きメモリキュー、短いタイムアウト、再試行なしで動くため、タイムアウト、`429`、ntfy 障害、キュー満杯が Multica のリクエストをブロックすることはありません。
+
+<Callout type="warning">
+公開 ntfy サービスでは、予約されていない topic は実質的にパスワードであり、メッセージがサービスにキャッシュされる場合があります。新しいランダムな topic を生成し、保護された経路だけで共有してください。タスク、コミット、スクリーンショット、ログには貼り付けないでください。
+</Callout>
+
+topic を生成し、受信メンバーの UUID を確認します。結果はソース管理に入れないでください。
+
+```bash
+openssl rand -hex 32
+multica user me --output json
+```
+
+値はバックエンドのデプロイ環境だけに設定します。
+
+```dotenv
+NTFY_ENABLED=true
+NTFY_BASE_URL=https://ntfy.sh
+NTFY_TOPIC=<64-character-random-value>
+NTFY_RECIPIENT_ID=<multica-user-uuid>
+NTFY_TIMEOUT=3s
+```
+
+認証済み ntfy サーバーでは `NTFY_TOKEN` を任意で設定できます。`MULTICA_APP_URL` または `FRONTEND_ORIGIN` がメンバーから到達できる HTTPS app URL なら、`NTFY_APP_URL` は不要です。`.env` を編集した後はバックエンドを再作成してください。通常の Compose restart では設定を再読込しません。
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d --force-recreate backend
+```
+
+ntfy Android App で購読を追加し、サーバーに `https://ntfy.sh` を選び、保護された経路から topic を貼り付けます。端末上の表示名は「Multica」などに設定できます。公開 topic のリスクをデプロイ責任者が確認するまでは、手動テストメッセージを送信しないでください。承認後、対象の Multica イベントを 1 件だけ発生させ、固定要約とアプリ内リンクを確認します。
+
+ローテーションでは、新しい topic を生成して `NTFY_TOPIC` を置き換え、バックエンドを再作成し、Android で新しい topic を購読します。承認済みイベントを 1 件確認してから古い topic の購読を解除します。コードやデータベースの変更は不要です。ロールバックでは `NTFY_ENABLED=false` にしてバックエンドを再作成します。アプリ内通知はそのまま動作します。不要になった topic と token はデプロイのシークレットストアから削除してください。
 
 ## サーバーサイド LLM
 

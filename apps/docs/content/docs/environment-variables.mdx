@@ -171,10 +171,54 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state signing secret; can be derived from `JWT_SECRET` |
 | Self-hosted Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab integration switch; enabled by default in compose |
 | Self-hosted Git | `MULTICA_VCS_SECRET_KEY` | Base64-encoded 32-byte encryption key (`openssl rand -base64 32`); the feature is entirely unavailable without it |
+| ntfy | `NTFY_ENABLED` | Explicit switch for the Android notification mirror; defaults to `false` |
+| ntfy | `NTFY_BASE_URL` | HTTPS ntfy server origin; use `https://ntfy.sh` for the public service |
+| ntfy | `NTFY_TOPIC` | 32-64 character random topic; treated as a secret and never logged |
+| ntfy | `NTFY_RECIPIENT_ID` | Multica member UUID whose notifications are mirrored |
+| ntfy | `NTFY_TOKEN` | Optional Bearer token for authenticated ntfy servers |
+| ntfy | `NTFY_APP_URL` | Optional HTTPS Multica URL used for click-through; falls back to `MULTICA_APP_URL`, then `FRONTEND_ORIGIN` |
+| ntfy | `NTFY_TIMEOUT` | Database lookup and publish deadline, from `100ms` to `10s`; defaults to `3s` |
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and trigger merge-to-done normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 
 For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), and [Slack bot](/slack-bot-integration#self-hosting-setup).
+
+### ntfy Android notification mirror
+
+The ntfy adapter is a best-effort mirror: it never replaces or changes the in-app inbox. It covers direct member mentions, assignments, final agent-run completion or failure, and issues entering `blocked`. A completion or failure is sent only when the configured member still follows that issue and has not muted `agent_activity`; retrying failures are suppressed.
+
+Push text is deliberately content-free. It contains a fixed event summary and, when an HTTPS app URL is configured, a link to the Multica inbox. Issue titles, comments, attachments, error text, credentials, topics, and tokens never appear in the notification title/body or logs; the topic is used only as the ntfy routing field. Delivery runs through a bounded in-memory queue with a short timeout and no retries, so a timeout, `429`, outage, or full queue cannot block Multica requests.
+
+<Callout type="warning">
+On a public ntfy server, an unreserved topic is effectively a password and messages may be cached by the service. Generate a new random topic, share it only through a protected channel, and never paste it into an issue, commit, screenshot, or log.
+</Callout>
+
+Generate the topic and find the recipient UUID without putting either value in source control:
+
+```bash
+openssl rand -hex 32
+multica user me --output json
+```
+
+Set the values only in the backend deployment environment:
+
+```dotenv
+NTFY_ENABLED=true
+NTFY_BASE_URL=https://ntfy.sh
+NTFY_TOPIC=<64-character-random-value>
+NTFY_RECIPIENT_ID=<multica-user-uuid>
+NTFY_TIMEOUT=3s
+```
+
+`NTFY_TOKEN` is optional for an authenticated server. `NTFY_APP_URL` is optional when `MULTICA_APP_URL` or `FRONTEND_ORIGIN` already contains the user-reachable HTTPS app URL. Recreate the backend after editing `.env`; a plain Compose restart does not reload it:
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d --force-recreate backend
+```
+
+In the ntfy Android app, add a subscription, choose `https://ntfy.sh` as the server, and paste the topic from the protected channel. Give it a local display name such as "Multica". Do not publish a manual test until the deployment owner has reviewed the public-topic risk; when approved, trigger one covered Multica event and confirm the fixed summary and click-through link.
+
+To rotate, generate a new topic, replace `NTFY_TOPIC`, recreate the backend, subscribe to the new topic on Android, verify one approved event, then unsubscribe from the old topic. Rotation needs no code or database change. To roll back, set `NTFY_ENABLED=false` and recreate the backend; in-app notifications continue unchanged. After rollback, remove the topic and token from the deployment secret store if they are no longer needed.
 
 ## Server-side LLM
 

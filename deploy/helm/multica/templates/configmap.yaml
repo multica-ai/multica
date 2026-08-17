@@ -18,6 +18,10 @@ data:
   ALLOWED_EMAIL_DOMAINS: {{ .Values.backend.config.allowedEmailDomains | quote }}
   DISABLE_WORKSPACE_CREATION: {{ .Values.backend.config.disableWorkspaceCreation | quote }}
   MULTICA_VCS_INTEGRATION_ENABLED: {{ .Values.backend.config.vcsIntegrationEnabled | quote }}
+  NTFY_ENABLED: {{ .Values.backend.config.ntfyEnabled | quote }}
+  NTFY_BASE_URL: {{ .Values.backend.config.ntfyBaseUrl | quote }}
+  NTFY_APP_URL: {{ .Values.backend.config.ntfyAppUrl | quote }}
+  NTFY_TIMEOUT: {{ .Values.backend.config.ntfyTimeout | quote }}
   GOOGLE_CLIENT_ID: {{ .Values.backend.config.googleClientId | quote }}
   GOOGLE_REDIRECT_URI: {{ .Values.backend.config.googleRedirectUri | quote }}
   S3_BUCKET: {{ .Values.backend.config.s3Bucket | quote }}

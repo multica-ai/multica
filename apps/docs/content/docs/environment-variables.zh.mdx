@@ -171,10 +171,54 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 签名密钥；可从 `JWT_SECRET` 派生 |
 | 自托管 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 集成开关，compose 默认开启 |
 | 自托管 Git | `MULTICA_VCS_SECRET_KEY` | base64 编码的 32 字节加密密钥（`openssl rand -base64 32`）；未配置时该功能整体不可用 |
+| ntfy | `NTFY_ENABLED` | Android 通知镜像的显式开关，默认 `false` |
+| ntfy | `NTFY_BASE_URL` | ntfy 服务的 HTTPS origin；公共服务使用 `https://ntfy.sh` |
+| ntfy | `NTFY_TOPIC` | 32-64 字符的随机 topic；按密钥保护且不写入日志 |
+| ntfy | `NTFY_RECIPIENT_ID` | 要镜像通知的 Multica 成员 UUID |
+| ntfy | `NTFY_TOKEN` | 鉴权 ntfy 服务使用的可选 Bearer token |
+| ntfy | `NTFY_APP_URL` | 通知点击后打开的可选 Multica HTTPS 地址；依次回退到 `MULTICA_APP_URL`、`FRONTEND_ORIGIN` |
+| ntfy | `NTFY_TIMEOUT` | 数据库查询与发布的总超时，范围 `100ms` 到 `10s`，默认 `3s` |
 
 不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像和触发合并转 done，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
 
 配置步骤见 [GitHub 集成](/github-integration#自托管配置)、[飞书 Bot](/lark-bot-integration#自托管配置)和 [Slack Bot](/slack-bot-integration#自托管配置)。
+
+### ntfy Android 通知镜像
+
+ntfy 适配器只做尽力而为的镜像，不会替换或改变站内收件箱。首版覆盖成员被提及、任务分配、智能体 task 最终完成或失败，以及任务进入 `blocked`。只有配置的成员仍在关注该任务，并且没有静音 `agent_activity` 时，才推送 task 完成或失败；自动重试中的失败不会推送。
+
+推送文案不携带业务正文，只包含固定的事件摘要；配置了 HTTPS app 地址时，再附带 Multica 收件箱链接。任务标题、评论、附件、错误文本、凭据、topic 和 token 都不会进入通知标题、正文或日志；topic 只作为 ntfy 路由字段使用。投递使用有界内存队列、短超时且不重试，因此超时、`429`、ntfy 故障或队列满都不会阻塞 Multica 请求。
+
+<Callout type="warning">
+公共 ntfy 服务上未预留的 topic 实际上就是密码，消息也可能由服务缓存。请生成新的随机 topic，只通过受保护渠道传递，不要粘贴到任务、提交、截图或日志中。
+</Callout>
+
+用下面的命令生成 topic 并查询接收成员 UUID，不要把结果写入源码：
+
+```bash
+openssl rand -hex 32
+multica user me --output json
+```
+
+只在后端部署环境中填写：
+
+```dotenv
+NTFY_ENABLED=true
+NTFY_BASE_URL=https://ntfy.sh
+NTFY_TOPIC=<64-character-random-value>
+NTFY_RECIPIENT_ID=<multica-user-uuid>
+NTFY_TIMEOUT=3s
+```
+
+鉴权 ntfy 服务可选填 `NTFY_TOKEN`。如果 `MULTICA_APP_URL` 或 `FRONTEND_ORIGIN` 已经是成员可访问的 HTTPS app 地址，就不需要单独设置 `NTFY_APP_URL`。修改 `.env` 后要重建后端；普通 Compose restart 不会重新读取配置：
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d --force-recreate backend
+```
+
+在 ntfy Android App 中新增订阅，服务端选择 `https://ntfy.sh`，再粘贴受保护渠道中的 topic；显示名称可以在手机本地设为 "Multica"。部署负责人审阅公共 topic 风险前，不要发布手工测试消息；确认后触发一项覆盖范围内的 Multica 事件，检查固定摘要和站内跳转链接。
+
+轮换时生成新 topic，替换 `NTFY_TOPIC`，重建后端，在 Android 上订阅新 topic，确认一个获批事件后再取消旧订阅。轮换不需要改代码或数据库。回滚时设为 `NTFY_ENABLED=false` 并重建后端，站内通知不受影响；如果不再使用，再从部署密钥存储中删除 topic 和 token。
 
 ## 服务端 LLM
 

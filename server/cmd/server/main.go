@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	ntfyintegration "github.com/multica-ai/multica/server/internal/integrations/ntfy"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -369,6 +370,18 @@ func main() {
 	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
+	var ntfyMirror *ntfyintegration.Mirror
+	if ntfyConfig, err := ntfyintegration.ConfigFromEnv(); err != nil {
+		slog.Warn("ntfy mirror disabled: invalid configuration", "error", err)
+	} else if ntfyConfig != nil {
+		ntfyMirror = ntfyintegration.New(*ntfyConfig, queries, slog.Default(), nil)
+		ntfyMirror.Register(bus)
+		slog.Info("ntfy mirror enabled",
+			"recipient_scoped", true,
+			"timeout", ntfyConfig.Timeout.String(),
+			"queue_capacity", ntfyConfig.QueueCapacity,
+		)
+	}
 
 	metricsConfig := obsmetrics.ConfigFromEnv()
 	var metricsServer *http.Server
@@ -574,6 +587,13 @@ func main() {
 	// final batch of queued heartbeat bumps.
 	sweepCancel()
 	heartbeatScheduler.Stop()
+	if ntfyMirror != nil {
+		ntfyStopCtx, ntfyStopCancel := context.WithTimeout(context.Background(), time.Second)
+		if !ntfyMirror.Stop(ntfyStopCtx) {
+			slog.Warn("ntfy mirror did not exit within shutdown timeout")
+		}
+		ntfyStopCancel()
+	}
 	if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
 		slog.Warn("webhook delivery worker did not exit within shutdown timeout")
 	}
