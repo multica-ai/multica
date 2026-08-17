@@ -331,11 +331,42 @@ func stageFakeAgent(t *testing.T) string {
 		t.Fatalf("write fake claude: %v", err)
 	}
 	t.Setenv("PATH", binDir)
+	// Keep missing providers from consulting the developer's login shell.
+	t.Setenv("SHELL", "/usr/bin/fish")
 	t.Setenv("MULTICA_DAEMON_ID", "11111111-1111-1111-1111-111111111111")
 	// Clear any inherited env-var override so the test sees the URL-based
 	// default, not whatever the developer happens to have exported.
 	t.Setenv("MULTICA_DAEMON_AUTO_UPDATE", "")
 	return binDir
+}
+
+func TestStageFakeAgentIgnoresLoginShellAgents(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("POSIX shell fixture is unavailable on Windows")
+	}
+
+	kiro := filepath.Join(t.TempDir(), "kiro-cli")
+	if err := os.WriteFile(kiro, []byte("#!/bin/sh\nexit 0\n"), 0o755); err != nil {
+		t.Fatalf("write fake kiro: %v", err)
+	}
+	shell := filepath.Join(t.TempDir(), "sh")
+	if err := os.WriteFile(shell, []byte("#!/bin/sh\nprintf 'kiro-cli\\t"+kiro+"\\n'\n"), 0o755); err != nil {
+		t.Fatalf("write fake shell: %v", err)
+	}
+	t.Setenv("SHELL", shell)
+	stageFakeAgent(t)
+	resetShellResolveCacheForTest(t)
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:0",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig: %v", err)
+	}
+	if _, found := cfg.Agents["kiro"]; found {
+		t.Fatal("stageFakeAgent discovered a login-shell agent")
+	}
 }
 
 func TestLoadConfig_DiscoversQwenCode(t *testing.T) {
