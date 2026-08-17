@@ -22,8 +22,8 @@ type AgentEntry struct {
 }
 
 type RuntimeRegistrationMetadata struct {
-	// Pointer distinguishes an explicit false published by current runtimes from
-	// a missing key returned by a pre-feature server.
+	// Registration reports this persistence/UI hint to the server. Task launch
+	// derives execution authority from the config actually copied by Prepare.
 	CodexWindowsSandboxConfigConfigured *bool `json:"codex_windows_sandbox_config_configured,omitempty"`
 }
 
@@ -136,10 +136,6 @@ type Task struct {
 	QuickCreateDueDate            string                 `json:"quick_create_due_date,omitempty"`            // explicit calendar due date selected in quick-create
 	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
 	HandoffNote                   string                 `json:"handoff_note,omitempty"`                     // assignment handoff instruction; rendered into the opening prompt + issue_context.md
-
-	// Snapshot from the runtime registration response. It is intentionally
-	// unexported so a claim response cannot replace the session's precedence.
-	codexWindowsSandboxConfigOwnsAtRegistration bool
 
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text

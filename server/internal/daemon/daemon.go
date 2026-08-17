@@ -4987,7 +4987,6 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 		return
 	}
 	provider := rt.Provider
-	captureCodexWindowsSandboxRegistrationSnapshot(&task, rt)
 
 	// Task-scoped logger with short ID for readable concurrent logs.
 	taskLog := d.logger.With("task", shortID(task.ID))
@@ -6327,10 +6326,12 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		agentEnvOverrides = task.Agent.CustomEnv
 		agentCustomArgs = task.Agent.CustomArgs
 	}
-	// Registration is the session boundary: preview and process launch must use
-	// the same ownership snapshot even if the shared config changes during
-	// Prepare.
-	codexSandboxPolicy := newCodexWindowsSandboxSessionPolicy(task)
+	// Prepare is the task boundary for shared-config ownership. Before the
+	// config is copied, assume it does not own windows.sandbox so the candidate
+	// argv always carries a native Windows sandbox. Prepare then exposes the
+	// copied config's ownership and the same task policy drives effective argv
+	// plus the final spawn options.
+	codexSandboxPolicy := newCodexWindowsSandboxTaskPolicy(task)
 	// Effective Codex CLI args the task will launch with, normalized through the
 	// same agent.EffectiveCodexLaunchArgs path buildCodexArgs uses (shell
 	// unquoting + blocked-flag filtering), preserving its ExtraArgs
@@ -6441,6 +6442,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			WorkDir:               task.PriorWorkDir,
 			Provider:              provider,
 			CodexVersion:          codexVersion,
+			GOOS:                  runtime.GOOS,
 			ResumeSessionID:       task.PriorSessionID,
 			OpenclawBin:           openclawBin,
 			McpConfig:             effectiveMcpConfig,
@@ -6473,6 +6475,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			AgentName:             agentName,
 			Provider:              provider,
 			CodexVersion:          codexVersion,
+			GOOS:                  runtime.GOOS,
 			OpenclawBin:           openclawBin,
 			McpConfig:             effectiveMcpConfig,
 			CursorMcpAuthSource:   cursorMcpAuthSource,
@@ -6562,6 +6565,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				return TaskResult{}, fmt.Errorf("prepare execution environment: %w", err)
 			}
 		}
+	}
+	if provider == "codex" {
+		codexSandboxPolicy = codexSandboxPolicy.withPreparedConfigOwnership(
+			env.CodexWindowsSandboxConfigOwns,
+		)
 	}
 	// Belt-and-suspenders: also mark whatever root we ended up with, in case
 	// future changes diverge from PredictRootDir.
@@ -8569,48 +8577,36 @@ const (
 	codexWindowsSandboxConfigConfiguredKey = "codex_windows_sandbox_config_configured"
 )
 
-func captureCodexWindowsSandboxRegistrationSnapshot(task *Task, registered Runtime) {
-	task.codexWindowsSandboxConfigOwnsAtRegistration =
-		codexWindowsSandboxConfigOwnsAtRegistration(registered)
+type codexWindowsSandboxTaskPolicy struct {
+	customArgManaged   bool
+	preparedConfigOwns bool
 }
 
-func codexWindowsSandboxConfigOwnsAtRegistration(registered Runtime) bool {
-	if !strings.EqualFold(strings.TrimSpace(registered.Provider), "codex") {
-		return false
-	}
-	if configured := registered.Metadata.CodexWindowsSandboxConfigConfigured; configured != nil {
-		return *configured
-	}
-	// Compatibility with a pre-feature server that did not echo the daemon's
-	// registration metadata. Current servers always persist an explicit bool.
-	return execenv.SharedCodexWindowsSandboxConfigOwns()
-}
-
-type codexWindowsSandboxSessionPolicy struct {
-	customArgManaged         bool
-	configOwnsAtRegistration bool
-}
-
-func newCodexWindowsSandboxSessionPolicy(task Task) codexWindowsSandboxSessionPolicy {
-	return codexWindowsSandboxSessionPolicy{
-		customArgManaged:         task.Agent != nil && task.Agent.IsCodexWindowsSandboxArgManaged,
-		configOwnsAtRegistration: task.codexWindowsSandboxConfigOwnsAtRegistration,
+func newCodexWindowsSandboxTaskPolicy(task Task) codexWindowsSandboxTaskPolicy {
+	return codexWindowsSandboxTaskPolicy{
+		customArgManaged: task.Agent != nil && task.Agent.IsCodexWindowsSandboxArgManaged,
 	}
 }
 
-func (p codexWindowsSandboxSessionPolicy) applyToExecOptions(opts agent.ExecOptions) agent.ExecOptions {
+func (p codexWindowsSandboxTaskPolicy) withPreparedConfigOwnership(owns bool) codexWindowsSandboxTaskPolicy {
+	p.preparedConfigOwns = owns
+	return p
+}
+
+func (p codexWindowsSandboxTaskPolicy) applyToExecOptions(opts agent.ExecOptions) agent.ExecOptions {
 	opts.IsCodexWindowsSandboxArgManaged = p.customArgManaged
-	opts.CodexWindowsSandboxConfigOwns = p.configOwnsAtRegistration
+	opts.CodexWindowsSandboxConfigOwns = p.preparedConfigOwns
 	return opts
 }
 
-func (p codexWindowsSandboxSessionPolicy) effectiveLaunchArgs(opts agent.ExecOptions, logger *slog.Logger) []string {
+func (p codexWindowsSandboxTaskPolicy) effectiveLaunchArgs(opts agent.ExecOptions, logger *slog.Logger) []string {
 	return agent.EffectiveCodexLaunchArgs(p.applyToExecOptions(opts), logger)
 }
 
-// setCodexWindowsSandboxRegistrationMetadata tells persistence and preview
-// whether profile/daemon arguments already own windows.sandbox without
-// exposing the arguments themselves through runtime metadata.
+// setCodexWindowsSandboxRegistrationMetadata publishes a persistence/UI hint
+// about profile, daemon, and shared-config ownership without exposing those
+// arguments. Task execution does not trust this registration snapshot: Prepare
+// derives ownership again from the config actually copied for that task.
 func setCodexWindowsSandboxRegistrationMetadata(entry map[string]string, provider string, argGroups ...[]string) {
 	if !strings.EqualFold(strings.TrimSpace(provider), "codex") {
 		return

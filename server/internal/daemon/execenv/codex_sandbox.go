@@ -227,10 +227,10 @@ func CodexWindowsSandboxConfigOwns(configFile string) bool {
 	return windowsSandboxFromConfig(string(data)) != windowsSandboxAbsent
 }
 
-// SharedCodexWindowsSandboxConfigOwns reports whether the config that will be
-// copied into each task already owns windows.sandbox. Runtime registration
-// publishes this bit so persistence and command previews make the same
-// precedence decision as the launch-time backstop.
+// SharedCodexWindowsSandboxConfigOwns reports registration-time ownership from
+// the shared copy source. Registration publishes it only as a persistence/UI
+// hint; task execution derives authority again from the config actually copied
+// by Prepare, so a mid-session edit cannot control launch through stale state.
 func SharedCodexWindowsSandboxConfigOwns() bool {
 	return CodexWindowsSandboxConfigOwns(filepath.Join(resolveSharedCodexHome(), "config.toml"))
 }

@@ -45,7 +45,10 @@ type PrepareParams struct {
 	Profile      string
 	Provider     string // agent provider (determines runtime config and skill injection paths)
 	CodexVersion string // detected Codex CLI version (only used when Provider == "codex")
-	OpenclawBin  string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
+	// GOOS is the task host platform used for Codex sandbox preparation. Empty
+	// uses runtime.GOOS; tests set it to exercise Windows behavior on any host.
+	GOOS        string
+	OpenclawBin string // resolved openclaw CLI path (only used when Provider == "openclaw"); empty = look up on PATH
 	// McpConfig is the agent's saved `mcp_config` JSON, forwarded to the
 	// provider-specific config preparer when that provider materialises MCP
 	// via a per-task config file. Cursor and OpenClaw consume it here; other
@@ -105,10 +108,11 @@ type PrepareParams struct {
 	// resolves to, so an agent that re-points (or clears) REASONIX_HOME moves the
 	// daemon's read with it. Only used for reasonix.
 	ReasonixEnv map[string]string
-	// CodexCustomArgs are the effective Codex CLI args this task launches with
-	// (daemon defaults + profile-fixed + per-agent custom_args). Only the
-	// Windows sandbox decision reads them, to honor a `-c windows.sandbox=...`
-	// override that never lands in config.toml (MUL-4957).
+	// CodexCustomArgs are safe candidate launch args (daemon defaults +
+	// profile-fixed + per-agent custom_args). On Windows the caller assumes the
+	// not-yet-copied config does not own windows.sandbox, so preparation cannot
+	// fall through to danger-full-access. Environment reports the copied
+	// config's ownership for the caller to build the final argv.
 	CodexCustomArgs []string
 	Task            TaskContextForEnv // context data for writing files
 }
@@ -256,6 +260,10 @@ type Environment struct {
 	LocalWorktree *LocalWorktree
 	// CodexHome is the path to the per-task CODEX_HOME directory (set only for codex provider).
 	CodexHome string
+	// CodexWindowsSandboxConfigOwns is derived from the config.toml actually
+	// copied into CodexHome during Prepare/Reuse. It is the task-scoped
+	// precedence decision used by both effective argv preview and final spawn.
+	CodexWindowsSandboxConfigOwns bool
 	// ClaudeSettingsPath is a task-local --settings JSON file that applies
 	// disabled runtime-skill policy without mutating the user's Claude config.
 	ClaudeSettingsPath string
@@ -490,13 +498,21 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	// For Codex, set up a per-task CODEX_HOME seeded from ~/.codex/ with skills.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(envRoot, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+			CodexVersion:    params.CodexVersion,
+			GOOS:            params.GOOS,
+			IsLocalDirectory: params.LocalWorkDir != "" || params.LocalWorktree != nil,
+			SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task),
+			CodexCustomArgs: params.CodexCustomArgs,
+		}, logger); err != nil {
 			return nil, fmt.Errorf("execenv: prepare codex-home: %w", err)
 		}
 		if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 			return nil, fmt.Errorf("execenv: hydrate codex skills: %w", err)
 		}
 		env.CodexHome = codexHome
+		env.CodexWindowsSandboxConfigOwns =
+			CodexWindowsSandboxConfigOwns(filepath.Join(codexHome, "config.toml"))
 	}
 
 	if params.Provider == "claude" {
@@ -612,6 +628,7 @@ type ReuseParams struct {
 	WorkDir        string
 	Provider       string
 	CodexVersion   string // only used when Provider == "codex"
+	GOOS           string // empty uses runtime.GOOS; mirrors PrepareParams.GOOS
 	// ResumeSessionID is the prior Codex thread/session ID this reused task
 	// intends to resume, when any. Only consulted when Provider == "codex" and
 	// only used while migrating a legacy per-task home whose sessions/ still
@@ -652,9 +669,8 @@ type ReuseParams struct {
 	// ReasonixEnv mirrors PrepareParams.ReasonixEnv on reuse so the rewritten
 	// reasonix.toml keeps restating the owner's current permissions.
 	ReasonixEnv map[string]string
-	// CodexCustomArgs mirrors PrepareParams.CodexCustomArgs on reuse so the
-	// Windows sandbox decision honors a `-c windows.sandbox=...` override here
-	// too (MUL-4957).
+	// CodexCustomArgs mirrors PrepareParams.CodexCustomArgs on reuse; the
+	// returned Environment carries ownership from the refreshed config copy.
 	CodexCustomArgs []string
 	Task            TaskContextForEnv // refreshed context files / skills
 }
@@ -762,10 +778,19 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// config (especially sandbox/network access) is up to date.
 	if params.Provider == "codex" {
 		codexHome := filepath.Join(env.RootDir, codexHomeDirName)
-		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{CodexVersion: params.CodexVersion, ResumeSessionID: params.ResumeSessionID, IsLocalDirectory: params.LocalDirectory, SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task), CodexCustomArgs: params.CodexCustomArgs}, logger); err != nil {
+		if err := prepareCodexHomeWithOpts(codexHome, CodexHomeOptions{
+			CodexVersion:    params.CodexVersion,
+			GOOS:            params.GOOS,
+			ResumeSessionID: params.ResumeSessionID,
+			IsLocalDirectory: params.LocalDirectory,
+			SessionStoreKey: codexSessionStoreKey(params.Profile, params.Task),
+			CodexCustomArgs: params.CodexCustomArgs,
+		}, logger); err != nil {
 			logger.Warn("execenv: refresh codex-home failed", "error", err)
 		} else {
 			env.CodexHome = codexHome
+			env.CodexWindowsSandboxConfigOwns =
+				CodexWindowsSandboxConfigOwns(filepath.Join(codexHome, "config.toml"))
 			if err := hydrateCodexSkills(codexHome, params.Task.AgentSkills, params.Task.DisabledRuntimeSkills, logger); err != nil {
 				logger.Warn("execenv: refresh codex skills failed", "error", err)
 			}

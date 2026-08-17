@@ -1,18 +1,18 @@
 package daemon
 
 import (
+	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
-
-func boolPointer(value bool) *bool {
-	return &value
-}
 
 func TestSetCodexWindowsSandboxRegistrationMetadataWithConfig(t *testing.T) {
 	entry := map[string]string{}
@@ -42,66 +42,50 @@ func TestSetCodexWindowsSandboxRegistrationMetadataWithConfig(t *testing.T) {
 	}
 }
 
-func TestCodexWindowsSandboxRegistrationSnapshotFallsBackForLegacyServer(t *testing.T) {
-	codexHome := t.TempDir()
-	t.Setenv("CODEX_HOME", codexHome)
-	if err := os.WriteFile(
-		filepath.Join(codexHome, "config.toml"),
-		[]byte("[windows]\nsandbox = \"elevated\"\n"),
-		0o600,
-	); err != nil {
-		t.Fatal(err)
-	}
-
-	task := Task{}
-	captureCodexWindowsSandboxRegistrationSnapshot(
-		&task,
-		Runtime{Provider: "codex"},
-	)
-	if !task.codexWindowsSandboxConfigOwnsAtRegistration {
-		t.Fatal("missing registration metadata should use the legacy safe fallback")
-	}
-}
-
-func TestCodexWindowsSandboxTaskPolicyTracksConfigChanges(t *testing.T) {
+func TestCodexWindowsSandboxTaskPolicyTracksPreparedConfig(t *testing.T) {
 	const sandbox = `windows.sandbox="unelevated"`
 	tests := []struct {
-		name          string
-		initialConfig string
-		changedConfig string
-		persistedArgs []string
-		managed       bool
-		wantPreview   []string
+		name              string
+		initialConfig     string
+		changedConfig     string
+		removeAfter       bool
+		wantConfigOwns    bool
+		wantCopiedSetting string
+		wantPreview       []string
 	}{
 		{
-			name:          "added after registration",
-			changedConfig: "[windows]\nsandbox = \"elevated\"\n",
-			persistedArgs: []string{"-c", sandbox, "--profile", "research"},
-			managed:       true,
-			wantPreview:   []string{"--profile", "research"},
+			name:              "added after registration",
+			changedConfig:     "[windows]\nsandbox = \"elevated\"\n",
+			wantConfigOwns:    true,
+			wantCopiedSetting: `sandbox = "elevated"`,
+			wantPreview:       []string{"--profile", "research"},
 		},
 		{
 			name:          "removed after registration",
 			initialConfig: "[windows]\nsandbox = \"elevated\"\n",
-			persistedArgs: []string{"--profile", "research"},
+			removeAfter:   true,
 			wantPreview:   []string{"-c", sandbox, "--profile", "research"},
 		},
 		{
-			name:          "changed after registration",
-			initialConfig: "[windows]\nsandbox = \"elevated\"\n",
-			changedConfig: "[windows]\nsandbox = \"unelevated\"\n",
-			persistedArgs: []string{"--profile", "research"},
-			wantPreview:   []string{"--profile", "research"},
+			name:              "changed after registration",
+			initialConfig:     "[windows]\nsandbox = \"elevated\"\n",
+			changedConfig:     "[windows]\nsandbox = \"unelevated\"\n",
+			wantConfigOwns:    true,
+			wantCopiedSetting: `sandbox = "unelevated"`,
+			wantPreview:       []string{"--profile", "research"},
 		},
 	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 
-	for _, tt := range tests {
+	for i, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			codexHome := t.TempDir()
-			t.Setenv("CODEX_HOME", codexHome)
-			configPath := filepath.Join(codexHome, "config.toml")
-			if err := os.WriteFile(configPath, []byte(tt.initialConfig), 0o600); err != nil {
-				t.Fatal(err)
+			sharedHome := t.TempDir()
+			t.Setenv("CODEX_HOME", sharedHome)
+			sharedConfig := filepath.Join(sharedHome, "config.toml")
+			if tt.initialConfig != "" {
+				if err := os.WriteFile(sharedConfig, []byte(tt.initialConfig), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
 
 			entry := map[string]string{}
@@ -112,56 +96,110 @@ func TestCodexWindowsSandboxTaskPolicyTracksConfigChanges(t *testing.T) {
 			)
 			registeredConfigOwns :=
 				entry[codexWindowsSandboxConfigConfiguredKey] == "true"
-			registered := Runtime{
-				Provider: "codex",
-				Metadata: RuntimeRegistrationMetadata{
-					CodexWindowsSandboxConfigConfigured: boolPointer(registeredConfigOwns),
-				},
+			persistedArgs, managed := agent.NormalizeCodexWindowsSandboxCustomArgs(
+				"windows",
+				false,
+				registeredConfigOwns,
+				[]string{"--profile", "research"},
+			)
+
+			switch {
+			case tt.removeAfter:
+				if err := os.Remove(sharedConfig); err != nil {
+					t.Fatal(err)
+				}
+			default:
+				if err := os.WriteFile(sharedConfig, []byte(tt.changedConfig), 0o600); err != nil {
+					t.Fatal(err)
+				}
 			}
+
 			task := Task{
 				Agent: &AgentData{
-					CustomArgs:                      tt.persistedArgs,
-					IsCodexWindowsSandboxArgManaged: tt.managed,
+					CustomArgs:                      persistedArgs,
+					IsCodexWindowsSandboxArgManaged: managed,
 				},
 			}
-			captureCodexWindowsSandboxRegistrationSnapshot(&task, registered)
-			policy := newCodexWindowsSandboxSessionPolicy(task)
-
-			if err := os.WriteFile(configPath, []byte(tt.changedConfig), 0o600); err != nil {
-				t.Fatal(err)
-			}
-			liveConfigOwns := execenv.SharedCodexWindowsSandboxConfigOwns()
-
-			opts := agent.ExecOptions{
+			policy := newCodexWindowsSandboxTaskPolicy(task)
+			baseOpts := agent.ExecOptions{
 				GOOS:       "windows",
-				CustomArgs: tt.persistedArgs,
+				CustomArgs: persistedArgs,
 			}
-			previewArgs := policy.effectiveLaunchArgs(opts, nil)
+			candidateArgs := policy.effectiveLaunchArgs(baseOpts, nil)
+
+			env, err := execenv.Prepare(execenv.PrepareParams{
+				WorkspacesRoot: t.TempDir(),
+				WorkspaceID:    "workspace",
+				TaskID:         fmt.Sprintf("00000000-0000-0000-0000-%012d", i+1),
+				AgentName:      "agent",
+				Provider:       "codex",
+				GOOS:           "windows",
+				CodexCustomArgs: candidateArgs,
+				Task: execenv.TaskContextForEnv{
+					AgentID:   "agent",
+					AgentName: "agent",
+				},
+			}, logger)
+			if err != nil {
+				t.Fatalf("Prepare: %v", err)
+			}
+
+			if env.CodexWindowsSandboxConfigOwns != tt.wantConfigOwns {
+				t.Fatalf(
+					"prepared config ownership = %v, want %v",
+					env.CodexWindowsSandboxConfigOwns,
+					tt.wantConfigOwns,
+				)
+			}
+			policy = policy.withPreparedConfigOwnership(
+				env.CodexWindowsSandboxConfigOwns,
+			)
+			previewArgs := policy.effectiveLaunchArgs(baseOpts, nil)
 			if !reflect.DeepEqual(previewArgs, tt.wantPreview) {
 				t.Fatalf("preview args = %v, want %v", previewArgs, tt.wantPreview)
 			}
 
-			launchOpts := policy.applyToExecOptions(opts)
+			copiedConfig, err := os.ReadFile(filepath.Join(env.CodexHome, "config.toml"))
+			if err != nil {
+				t.Fatalf("read prepared config: %v", err)
+			}
+			copied := string(copiedConfig)
+			if tt.wantCopiedSetting == "" {
+				if strings.Contains(copied, "windows.sandbox") ||
+					strings.Contains(copied, "[windows]") {
+					t.Fatalf("removed shared setting survived prepared config:\n%s", copied)
+				}
+			} else if !strings.Contains(copied, tt.wantCopiedSetting) {
+				t.Fatalf("prepared config does not contain %q:\n%s", tt.wantCopiedSetting, copied)
+			}
+			if !strings.Contains(copied, `sandbox_mode = "workspace-write"`) {
+				t.Fatalf("prepared Windows config is not workspace-write:\n%s", copied)
+			}
+			if strings.Contains(copied, `sandbox_mode = "danger-full-access"`) {
+				t.Fatalf("prepared Windows config silently fell through to danger-full-access:\n%s", copied)
+			}
+
+			launchOpts := policy.applyToExecOptions(baseOpts)
 			launchArgs := agent.EffectiveCodexLaunchArgs(launchOpts, nil)
 			if !reflect.DeepEqual(launchArgs, previewArgs) {
-				t.Fatalf("spawn args drifted after config change: preview=%v launch=%v", previewArgs, launchArgs)
+				t.Fatalf("spawn args drifted from preview: preview=%v launch=%v", previewArgs, launchArgs)
 			}
-			if launchOpts.CodexWindowsSandboxConfigOwns != liveConfigOwns {
+			if launchOpts.CodexWindowsSandboxConfigOwns != tt.wantConfigOwns {
 				t.Fatalf(
-					"spawn config ownership = %v, want prepared config ownership %v",
+					"spawn config ownership = %v, want %v",
 					launchOpts.CodexWindowsSandboxConfigOwns,
-					liveConfigOwns,
+					tt.wantConfigOwns,
 				)
 			}
 		})
 	}
 
-	nonWindows := newCodexWindowsSandboxSessionPolicy(Task{
+	nonWindows := newCodexWindowsSandboxTaskPolicy(Task{
 		Agent: &AgentData{
 			CustomArgs:                      []string{"-c", sandbox, "--profile", "research"},
 			IsCodexWindowsSandboxArgManaged: true,
 		},
-	})
+	}).withPreparedConfigOwnership(true)
 	got := nonWindows.effectiveLaunchArgs(agent.ExecOptions{
 		GOOS:       "linux",
 		CustomArgs: []string{"-c", sandbox, "--profile", "research"},
