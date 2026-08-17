@@ -77,7 +77,7 @@ while IFS= read -r line; do
       if [ -n "$DIM_LOAD_NOT_FOUND" ]; then
         printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32002,"message":"ACP session not found","data":{"sessionId":"ses_prior"}}}\n' "$id"
       elif [ -n "$DIM_LOAD_HELD_N" ]; then
-        held_file="/tmp/dim_held_counter_$"
+        held_file="${DIM_REQUESTS_FILE}_held_counter"
         count=0
         if [ -f "$held_file" ]; then count=$(cat "$held_file"); fi
         if [ "$count" -lt "$DIM_LOAD_HELD_N" ]; then
@@ -734,5 +734,46 @@ func TestDimSessionLoadRetryExhausted(t *testing.T) {
 	}
 	if strings.Contains(reqs, "session/new") {
 		t.Fatal("backend must not fall through to session/new when retries are exhausted")
+	}
+}
+
+// TestDimSessionLoadRetryCancelled verifies that cancelling the context during
+// the retry delay aborts the loop without falling through to session/new
+// (review #4 round 4).
+func TestDimSessionLoadRetryCancelled(t *testing.T) {
+	t.Parallel()
+	requestsFile := filepath.Join(t.TempDir(), "requests.jsonl")
+	b := newDimTestBackendWithEnv(t, requestsFile, map[string]string{
+		"DIM_LOAD_HELD_ALWAYS": "1",
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	session, err := b.Execute(ctx, "test prompt", ExecOptions{
+		Cwd:             t.TempDir(),
+		Timeout:         50 * time.Second,
+		ResumeSessionID: "ses_prior",
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	// Cancel the context shortly after Execute starts — the retry delay is
+	// 2s per attempt, so cancelling at 1s interrupts the first retry.
+	time.Sleep(1 * time.Second)
+	cancel()
+
+	result := <-session.Result
+	if result.Status != "failed" && result.Status != "aborted" && result.Status != "timeout" {
+		t.Fatalf("expected status=failed/aborted/timeout, got %q", result.Status)
+	}
+
+	reqs := readDimRequests(t, requestsFile)
+	if strings.Contains(reqs, "session/new") {
+		t.Fatal("backend must not fall through to session/new when cancelled during retry")
 	}
 }
