@@ -310,9 +310,11 @@ func newBatchFixture(t *testing.T) *batchFixture {
 	}
 
 	origDetect := detectAgentVersion
+	origPrimeDetect := detectPrimeAgentVersion
 	origCheck := checkAgentMinVersion
 	t.Cleanup(func() {
 		detectAgentVersion = origDetect
+		detectPrimeAgentVersion = origPrimeDetect
 		checkAgentMinVersion = origCheck
 	})
 	detectAgentVersion = func(_ context.Context, path string) (string, error) {
@@ -329,6 +331,7 @@ func newBatchFixture(t *testing.T) *batchFixture {
 		}
 		return version, nil
 	}
+	detectPrimeAgentVersion = detectAgentVersion
 	checkAgentMinVersion = func(_, _ string) error { return nil }
 
 	var runtimeSeq atomic.Int32

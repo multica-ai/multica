@@ -225,8 +225,9 @@ var (
 	// real agent helpers so tests can run the registration path without
 	// shelling out to a real CLI. Mirrors the pattern used for the brew
 	// helpers above.
-	detectAgentVersion   = agent.DetectVersion
-	checkAgentMinVersion = agent.CheckMinVersion
+	detectAgentVersion      = agent.DetectVersion
+	detectPrimeAgentVersion = agent.DetectPrimeVersion
+	checkAgentMinVersion    = agent.CheckMinVersion
 
 	// listModels is an indirection over agent.ListModels so model-discovery
 	// tests can assert which executable path the daemon enumerates without
@@ -1067,7 +1068,13 @@ func (d *Daemon) adoptAgentPath(ctx context.Context, provider, command, newPath,
 	// older or broken install must not be launched under the daemon's stale
 	// version policy, and must not slip past the minimum-version gate that the
 	// registration path applies (MUL-4486 review).
-	version, err := detectAgentVersion(ctx, newPath)
+	var version string
+	var err error
+	if provider == "prime" {
+		version, err = detectPrimeAgentVersion(ctx, newPath)
+	} else {
+		version, err = detectAgentVersion(ctx, newPath)
+	}
 	if err != nil {
 		d.logger.Warn("re-resolved agent executable failed version detection; keeping pinned path",
 			"provider", provider, "command", command, "new_path", newPath, "error", err)
@@ -2298,7 +2305,13 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 				"name", name, "version", heal.rejected.Detected, "error", heal.rejected.Error())
 			return heal.rejected.Detected, heal.rejected.Error(), builtinProbeBelowMinimum
 		}
-		version, err := detectAgentVersion(ctx, resolved.Path)
+		var version string
+		var err error
+		if name == "prime" {
+			version, err = detectPrimeAgentVersion(ctx, resolved.Path)
+		} else {
+			version, err = detectAgentVersion(ctx, resolved.Path)
+		}
 		if err != nil {
 			lastErr = err
 			if time.Since(startedAt) >= runtimeVersionProbeRetryWindow {
@@ -2310,6 +2323,10 @@ func (d *Daemon) probeBuiltinRuntime(ctx context.Context, name string, entry Age
 			continue
 		}
 		if err := checkAgentMinVersion(name, version); err != nil {
+			if name == "prime" {
+				d.logger.Warn("skip registering Prime Agent: incompatible exact version", "version", version, "error", err)
+				return version, err.Error(), builtinProbeBelowMinimum
+			}
 			var tooOld *agent.BelowMinimumError
 			if errors.As(err, &tooOld) {
 				// The verdict is a pure function of a version that PARSED, so a
@@ -2431,6 +2448,15 @@ func (d *Daemon) detectBuiltinRuntimes(ctx context.Context) ([]map[string]string
 	for name, entry := range d.agents() {
 		name, entry := name, entry
 		g.Go(func() error {
+			if name == "prime" {
+				if err := agent.CheckPrimeAdmission(); err != nil {
+					mu.Lock()
+					skipped[name] = err.Error()
+					demotable[name] = newRuntimeVerdict(builtinProbeBelowMinimum, err.Error(), entry.Path)
+					mu.Unlock()
+					return nil
+				}
+			}
 			version, reason, verdict := d.probeBuiltinRuntime(ctx, name, entry)
 			if verdict != builtinProbeOK {
 				// A not-executable verdict is deterministic, but the file can be
@@ -2747,6 +2773,12 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 			})
 			continue
 		}
+		if profile.ProtocolFamily == "prime" {
+			if err := agent.CheckPrimeAdmission(); err != nil {
+				*failedProfiles = append(*failedProfiles, map[string]string{"profile_id": profile.ID, "command_name": profile.CommandName, "reason": err.Error()})
+				continue
+			}
+		}
 		// Resolve the executable to launch for this profile. A per-machine
 		// path override (MUL-3284, `multica runtime profile set-path`) wins
 		// over the PATH lookup when it is set AND points at a real
@@ -2792,8 +2824,20 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 			}
 			resolved = r
 		}
-		// Best-effort version detection; an empty version is acceptable.
-		version, verErr := detectAgentVersion(ctx, resolved)
+		// Best-effort for legacy protocols; Prime has no versioned RPC handshake
+		// and is therefore exact-pin/fail-closed even for custom profiles.
+		var version string
+		var verErr error
+		if profile.ProtocolFamily == "prime" {
+			version, verErr = detectPrimeAgentVersion(ctx, resolved)
+		} else {
+			version, verErr = detectAgentVersion(ctx, resolved)
+		}
+		if profile.ProtocolFamily == "prime" && (verErr != nil || agent.CheckPrimeVersion(version) != nil) {
+			reason := "Prime Agent exact version " + agent.PrimeAgentVersion + " is required"
+			*failedProfiles = append(*failedProfiles, map[string]string{"profile_id": profile.ID, "command_name": profile.CommandName, "reason": reason})
+			continue
+		}
 		if verErr != nil {
 			d.logger.Debug("custom runtime profile: version probe failed (registering with empty version)",
 				"workspace_id", workspaceID, "profile_id", profile.ID, "path", resolved, "error", verErr)
@@ -5558,6 +5602,7 @@ var runtimeDisplayNameOverrides = map[string]string{
 	"qoderclicn": "Qoder CN",
 	"qwen":       "Qwen Code",
 	"qwenpaw":    "QwenPaw",
+	"prime":      "Prime Agent",
 }
 
 func init() {
@@ -6774,6 +6819,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if env.OpenclawConfigPath != "" {
 		agentEnv["OPENCLAW_CONFIG_PATH"] = env.OpenclawConfigPath
 	}
+	if provider == "prime" {
+		primeStateDir, err := preparePrimeAgentStateDir(d.cfg.Profile, task.WorkspaceID, task.RuntimeID, task.AgentID)
+		if err != nil {
+			return TaskResult{}, fmt.Errorf("prepare Prime Agent state directory: %w", err)
+		}
+		agentEnv["PRIME_AGENT_CODING_AGENT_DIR"] = primeStateDir
+	}
 	// Grant the wrapper config permission to $include the user's active
 	// config across directories. OpenClaw's $include defaults to confining
 	// resolution to the wrapper's own directory; without this, the
@@ -7109,21 +7161,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	)
 
 	// Convert agent usage map to task usage entries.
-	var usageEntries []TaskUsageEntry
-	for model, u := range result.Usage {
-		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 {
-			continue
-		}
-		usageEntries = append(usageEntries, TaskUsageEntry{
-			Provider:         provider,
-			Model:            model,
-			InputTokens:      u.InputTokens,
-			OutputTokens:     u.OutputTokens,
-			CacheReadTokens:  u.CacheReadTokens,
-			CacheWriteTokens: u.CacheWriteTokens,
-			CostUSDTicks:     u.CostUSDTicks,
-		})
-	}
+	usageEntries := taskUsageEntries(provider, result.Usage)
 
 	// MUL-5305: withhold a Codex session whose rollout never reached the per-issue
 	// store, for ANY terminal state — including `completed`, since a completed
@@ -7331,6 +7369,25 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			FailureReason: failureReason,
 		}, nil
 	}
+}
+
+func taskUsageEntries(provider string, usage map[string]agent.TokenUsage) []TaskUsageEntry {
+	var entries []TaskUsageEntry
+	for model, u := range usage {
+		if u.InputTokens == 0 && u.OutputTokens == 0 && u.CacheReadTokens == 0 && u.CacheWriteTokens == 0 && u.CostUSDTicks == 0 {
+			continue
+		}
+		entries = append(entries, TaskUsageEntry{
+			Provider:         provider,
+			Model:            model,
+			InputTokens:      u.InputTokens,
+			OutputTokens:     u.OutputTokens,
+			CacheReadTokens:  u.CacheReadTokens,
+			CacheWriteTokens: u.CacheWriteTokens,
+			CostUSDTicks:     u.CostUSDTicks,
+		})
+	}
+	return entries
 }
 
 // shouldRetryWithFreshSession reports whether a failed run that requested
@@ -8313,7 +8370,7 @@ func isBlockedEnvKey(key string) bool {
 		return true
 	}
 	switch upper {
-	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
+	case "HOME", "PATH", "USER", "SHELL", "TERM", "TMPDIR", "TMP", "TEMP", "CODEX_HOME", "REASONIX_STATE_HOME", "PRIME_AGENT_CODING_AGENT_DIR", "RLM_MAX_DEPTH", "CURSOR_DATA_DIR", execenv.CursorMcpAuthSourceEnv, "OPENCLAW_CONFIG_PATH", "OPENCLAW_INCLUDE_ROOTS":
 		return true
 	}
 	return false
@@ -8445,6 +8502,29 @@ func prepareReasonixTaskStateHome(profile, runtimeID, agentID string) (string, e
 		return "", err
 	}
 	return path, nil
+}
+
+// preparePrimeAgentStateDir isolates Prime's persistent sessions, settings,
+// auth, and user-level skills per Multica runtime/agent pair. Task TMPDIR stays
+// ephemeral and separately owns the detached daemon socket.
+func preparePrimeAgentStateDir(profile, workspaceID, runtimeID, agentID string) (string, error) {
+	profileDir, err := cli.ProfileDir(profile)
+	if err != nil {
+		return "", err
+	}
+	workspaceSegment, err := validateReasonixStateSegment("workspace", workspaceID)
+	if err != nil {
+		return "", err
+	}
+	runtimeSegment, err := validateReasonixStateSegment("runtime", runtimeID)
+	if err != nil {
+		return "", err
+	}
+	agentSegment, err := validateReasonixStateSegment("agent", agentID)
+	if err != nil {
+		return "", err
+	}
+	return securePrimeStateDir(profileDir, "prime-agent-state", workspaceSegment, runtimeSegment, agentSegment)
 }
 
 // prepareDshTaskSessionRoot keeps DSH transcripts private to one Multica

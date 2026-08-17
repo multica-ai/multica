@@ -16,9 +16,11 @@ import {
 import { toast } from "sonner";
 import { useQuery } from "@tanstack/react-query";
 import { ApiError } from "@multica/core/api";
-import type {
-  RuntimeProfile,
-  RuntimeProtocolFamily,
+import {
+  isCreatableRuntimeProfileProtocolFamily,
+  type CreatableRuntimeProtocolFamily,
+  type RuntimeProfile,
+  type RuntimeProtocolFamily,
 } from "@multica/core/types";
 import {
   runtimeProfileListOptions,
@@ -94,7 +96,7 @@ export function RuntimeProfilesDialog({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   // Carries the chosen family from create-step-1 into the form.
   const [draftFamily, setDraftFamily] =
-    useState<RuntimeProtocolFamily>(PROTOCOL_FAMILIES[0] ?? "claude");
+    useState<CreatableRuntimeProtocolFamily>(PROTOCOL_FAMILIES[0] ?? "claude");
 
   const catalog = useMemo(() => buildRuntimeCatalog(profiles), [profiles]);
   const entries = useMemo(
@@ -652,7 +654,7 @@ function ProfileFormView({
   profile: RuntimeProfile | null;
   standaloneCreate: boolean;
   standaloneEdit: boolean;
-  onPickFamily: (family: RuntimeProtocolFamily) => void;
+  onPickFamily: (family: CreatableRuntimeProtocolFamily) => void;
   onBack: () => void;
   onCancel: () => void;
   onSaved: (profile: RuntimeProfile) => void;
@@ -789,6 +791,10 @@ function ProfileDetailsForm({
 
     try {
       if (mode === "create") {
+        if (!isCreatableRuntimeProfileProtocolFamily(family)) {
+          setFormError(t(($) => $.profiles.form.error_generic));
+          return;
+        }
         const created = await createProfile.mutateAsync({
           display_name: values.displayName.trim(),
           protocol_family: family,

@@ -16,6 +16,23 @@ var MinVersions = map[string]string{
 	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
 	"grok":    "0.2.89",  // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
 	"qwen":    "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
+	"prime":   PrimeAgentVersion,
+}
+
+// PrimeAgentVersion is the only upstream release whose RPC contract this
+// adapter accepts. Prime's RPC currently has no protocol-version handshake, so
+// a minimum-version policy would silently accept an incompatible future wire.
+const PrimeAgentVersion = "0.7.2"
+
+var primeAgentVersionLine = regexp.MustCompile(`^(?:v?0\.7\.2|prime-agent v?0\.7\.2)$`)
+
+// CheckPrimeVersion enforces the exact audited Prime Agent release.
+func CheckPrimeVersion(detected string) error {
+	detected = strings.TrimSpace(detected)
+	if !primeAgentVersionLine.MatchString(detected) {
+		return fmt.Errorf("prime version %s is incompatible; exact version %s is required", detected, PrimeAgentVersion)
+	}
+	return nil
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
@@ -188,6 +205,9 @@ func (e *BelowMinimumError) Error() string {
 // *BelowMinimumError when the version parsed and is confirmed too old, and a
 // plain error when the version could not be parsed at all.
 func CheckMinVersion(agentType, detectedVersion string) error {
+	if agentType == "prime" {
+		return CheckPrimeVersion(detectedVersion)
+	}
 	minRaw, ok := MinVersions[agentType]
 	if !ok {
 		return nil

@@ -6,10 +6,15 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
+	"os/exec"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -260,13 +265,16 @@ type Config struct {
 	// vendor's binary; it defaults to false so an unset caller fails
 	// closed onto standard behavior.
 	BuiltinRuntime bool
+	// primeTestBypassSafetyAdmission is package-private test plumbing. Shipping
+	// callers cannot enable a runtime blocked by Prime's upstream safety gate.
+	primeTestBypassSafetyAdmission bool
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw".
+// Supported types include first-party coding CLIs plus the managed Prime Agent runtime.
 //
-// SupportedTypes is the canonical whitelist of agent types eligible to back a
-// custom runtime profile. It MUST stay in lockstep with the
+// SupportedTypes is the canonical readable/factory whitelist of agent protocol
+// families. It MUST stay in lockstep with the
 // runtime_profile.protocol_family CHECK constraint (migration 120, widened by
 // migration 134 to add qoder, migration 136 to add traecli, migration 175 to
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
@@ -303,13 +311,36 @@ var SupportedTypes = []string{
 	"grok",
 	"qwen",
 	"qwenpaw",
+	"prime",
 }
 
-// IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
-// Used to validate a custom runtime profile's protocol_family before it is
-// persisted or registered.
+// CreatableRuntimeProfileTypes is the public profile-creation whitelist.
+// Prime stays readable in SupportedTypes for migration compatibility and
+// diagnostics, but v0.7.2 is admission-disabled and must not be newly exposed
+// through API or CLI profile creation.
+var CreatableRuntimeProfileTypes = []string{
+	"claude", "codebuddy", "codex", "copilot", "opencode", "deveco",
+	"openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh",
+	"kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok",
+	"qwen", "qwenpaw",
+}
+
+// IsSupportedType reports whether agentType is in the readable/factory
+// whitelist. Daemons use it for existing profile registration; public writes
+// must use IsCreatableRuntimeProfileType instead.
 func IsSupportedType(agentType string) bool {
 	for _, t := range SupportedTypes {
+		if t == agentType {
+			return true
+		}
+	}
+	return false
+}
+
+// IsCreatableRuntimeProfileType reports whether clients may persist a new
+// custom profile for this family. Existing rows use IsSupportedType on reads.
+func IsCreatableRuntimeProfileType(agentType string) bool {
+	for _, t := range CreatableRuntimeProfileTypes {
 		if t == agentType {
 			return true
 		}
@@ -390,14 +421,71 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qwenBackend{cfg: cfg}, nil
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
+	case "prime":
+		return &primeBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
 }
 
 // DetectVersion runs the agent CLI with --version and returns the output.
 func DetectVersion(ctx context.Context, executablePath string) (string, error) {
 	return detectCLIVersion(ctx, executablePath)
+}
+
+const primeVersionOutputLimit = 4096
+
+type boundedPrimeVersionOutput struct {
+	mu       sync.Mutex
+	buf      bytes.Buffer
+	exceeded bool
+}
+
+func (w *boundedPrimeVersionOutput) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	remaining := primeVersionOutputLimit - w.buf.Len()
+	if remaining > 0 {
+		keep := len(p)
+		if keep > remaining {
+			keep = remaining
+		}
+		_, _ = w.buf.Write(p[:keep])
+	}
+	if len(p) > remaining {
+		w.exceeded = true
+	}
+	return len(p), nil
+}
+
+func (w *boundedPrimeVersionOutput) result() (string, bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return strings.TrimSpace(w.buf.String()), w.exceeded
+}
+
+// DetectPrimeVersion is deliberately separate from DetectVersion because the
+// audited Prime Agent v0.7.2 binary writes its successful --version line to
+// stderr. No other provider's probe semantics are changed.
+func DetectPrimeVersion(ctx context.Context, executablePath string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, executablePath, "--version")
+	hideAgentWindow(cmd)
+	cmd.WaitDelay = 2 * time.Second
+	output := &boundedPrimeVersionOutput{}
+	cmd.Stdout, cmd.Stderr = output, output
+	if err := cmd.Run(); err != nil {
+		return "", fmt.Errorf("Prime version probe failed: %w", err)
+	}
+	detected, exceeded := output.result()
+	if exceeded {
+		return "", errors.New("Prime version output exceeded the bounded probe limit")
+	}
+	if err := CheckPrimeVersion(detected); err != nil {
+		return detected, err
+	}
+	return detected, nil
 }
 
 // launchHeaders maps each supported agent type to the user-visible skeleton
@@ -428,6 +516,7 @@ var launchHeaders = map[string]string{
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
+	"prime":       "prime-agent (managed)",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

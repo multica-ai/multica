@@ -30,6 +30,7 @@ Multica currently detects these commands:
 | OpenClaw | `openclaw` | [Install OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode quickstart](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
+| Prime Agent | `prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) |
 | Oh-My-Pi | `omp` | [Oh-My-Pi install](https://omp.sh) |
 | Qoder CLI | `qodercli` | [Qoder CLI quickstart](https://docs.qoder.com/en/cli/quick-start) |
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI quickstart](https://help.aliyun.com/en/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
@@ -49,6 +50,8 @@ For Reasonix, run `reasonix setup` and configure a default provider and model be
 For QwenPaw, choose the provider and model in QwenPaw's own configuration. Multica cannot override a QwenPaw model at run time.
 
 For DeepSeek Harness, install Node.js 20+ and run `npm install -g @deepseek-ai/dsh`, then add the Multica runtime profile to it (`dsh plugin --profile multica add <bundle>`). The daemon registers DeepSeek Harness only after `dsh --profile multica --probe` succeeds. Set `DEEPSEEK_API_KEY` (or store it in dsh's own settings) before starting the daemon.
+
+For Prime Agent, install the official MIT-licensed **v0.7.2** release and verify `prime-agent-0.7.2.tgz` SHA-256 `bc5471f2a626d727b88a45eb745fff93b10c554a3c4fc5912f25d8c64b987f5e` (release source commit `83a0f9f9566219551fcb6ffaf7f519a815749a58`). Multica rejects every other version because the RPC protocol has no compatibility handshake. Run the daemon as non-root in an isolated container or restricted OS identity, then set `MULTICA_PRIME_AGENT_ISOLATED=1`; this is an operator attestation, not a sandbox. Prime v0.7.2 nevertheless remains admission-disabled until upstream provides a managed mode that hard-disables schedules and heartbeats while retaining coding tools.
 
 Those login credentials are stored locally by the tool itself. Multica never receives login tokens from Claude, Codex, Cursor, or any other CLI.
 

@@ -46,6 +46,7 @@ const PROVIDER_DISPLAY_NAMES: Record<string, string> = {
   traecli: "Trae",
   qwen: "Qwen Code",
   qwenpaw: "QwenPaw",
+  prime: "Prime Agent",
   omp: "Oh-My-Pi",
 };
 

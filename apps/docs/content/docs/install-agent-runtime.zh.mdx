@@ -30,6 +30,7 @@ Multica 当前会检测以下命令：
 | OpenClaw | `openclaw` | [安装 OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 快速开始](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
+| Prime Agent | `prime-agent` | [Prime Agent](https://github.com/PrimeIntellect-ai/prime-agent) |
 | Oh-My-Pi | `omp` | [Oh-My-Pi 安装](https://omp.sh) |
 | Qoder CLI | `qodercli` | [Qoder CLI 快速开始](https://docs.qoder.com/en/cli/quick-start) |
 | Qoder CN CLI | `qoderclicn` | [Qoder CN CLI 快速开始](https://help.aliyun.com/zh/lingma/qodercli-cn/user-guide/qoder-cli-cn-get-started-quickly) |
@@ -49,6 +50,8 @@ Multica 当前会检测以下命令：
 使用 QwenPaw 时，请在 QwenPaw 自身的配置里选择模型服务和模型。Multica 无法在执行时覆盖 QwenPaw 的模型。
 
 使用 DeepSeek Harness 时，请先安装 Node.js 20+ 并运行 `npm install -g @deepseek-ai/dsh`，然后为它安装 Multica 运行时 profile（`dsh plugin --profile multica add <bundle>`）。守护进程只有在 `dsh --profile multica --probe` 成功后才注册 DeepSeek Harness。启动守护进程前请设置 `DEEPSEEK_API_KEY`（或在 dsh 自身设置中保存）。
+
+Prime Agent 仅支持官方 v0.7.2。`prime-agent-0.7.2.tgz` 的 SHA-256 为 `bc5471f2a626d727b88a45eb745fff93b10c554a3c4fc5912f25d8c64b987f5e`。请以非 root 身份在隔离容器或受限 OS 用户中运行守护进程，并设置 `MULTICA_PRIME_AGENT_ISOLATED=1`；这只是运维者声明，并非 sandbox。但在上游提供既保留 coding tools 又能强制禁用 schedules/heartbeats 的 managed mode 之前，v0.7.2 admission 仍处于禁用状态。
 
 这些登录凭据由工具保存在本机。Multica 不会接收 Claude、Codex、Cursor 或其他 CLI 的登录 token。
 

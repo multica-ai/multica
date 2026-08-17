@@ -27,6 +27,7 @@ describe("providerSupportsMcpConfig", () => {
     expect(providerSupportsMcpConfig("antigravity")).toBe(false);
     expect(providerSupportsMcpConfig("copilot")).toBe(false);
     expect(providerSupportsMcpConfig("pi")).toBe(false);
+    expect(providerSupportsMcpConfig("prime")).toBe(false);
     expect(providerSupportsMcpConfig(undefined)).toBe(false);
     expect(providerSupportsMcpConfig(null)).toBe(false);
   });

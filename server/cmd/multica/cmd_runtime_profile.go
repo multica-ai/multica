@@ -120,9 +120,9 @@ func runtimeProfilesPath(workspaceID string) string {
 // whitelist client-side so an obvious typo fails fast with a helpful list
 // instead of an opaque server 400.
 func validateProtocolFamily(family string) error {
-	if !agent.IsSupportedType(family) {
+	if !agent.IsCreatableRuntimeProfileType(family) {
 		return fmt.Errorf("invalid --protocol-family %q: must be one of %s",
-			family, strings.Join(agent.SupportedTypes, ", "))
+			family, strings.Join(agent.CreatableRuntimeProfileTypes, ", "))
 	}
 	return nil
 }

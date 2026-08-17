@@ -1,5 +1,6 @@
 import {
-  RUNTIME_PROFILE_PROTOCOL_FAMILIES,
+  CREATABLE_RUNTIME_PROFILE_PROTOCOL_FAMILIES,
+  type CreatableRuntimeProtocolFamily,
   type RuntimeProfile,
   type RuntimeProtocolFamily,
 } from "@multica/core/types";
@@ -28,8 +29,8 @@ export interface RuntimeCatalogSections {
 
 // Re-export the whitelist as a typed array so callers (the family picker,
 // the catalog builder) share the single source of truth.
-export const PROTOCOL_FAMILIES: readonly RuntimeProtocolFamily[] =
-  RUNTIME_PROFILE_PROTOCOL_FAMILIES;
+export const PROTOCOL_FAMILIES: readonly CreatableRuntimeProtocolFamily[] =
+  CREATABLE_RUNTIME_PROFILE_PROTOCOL_FAMILIES;
 
 // buildRuntimeCatalog keeps user-owned custom profiles separate from built-in
 // protocol families. The dialog renders customs as the primary management

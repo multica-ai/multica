@@ -158,6 +158,8 @@ func TestIsBlockedEnvKey(t *testing.T) {
 		{key: "TEMP", want: true},
 		{key: "CODEX_HOME", want: true},
 		{key: "REASONIX_STATE_HOME", want: true},
+		{key: "PRIME_AGENT_CODING_AGENT_DIR", want: true},
+		{key: "RLM_MAX_DEPTH", want: true},
 		{key: "CURSOR_DATA_DIR", want: true},
 		{key: "cursor_data_dir", want: true},
 		{key: "CURSOR_MCP_AUTH_SOURCE", want: true},
@@ -204,6 +206,56 @@ func TestPrepareReasonixTaskStateHome(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
 		t.Fatalf("state home mode = %o, want 700", info.Mode().Perm())
+	}
+}
+
+func TestPreparePrimeAgentStateDir(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got, err := preparePrimeAgentStateDir("work", "workspace-3", "runtime-1", "agent_2")
+	if err != nil {
+		t.Fatalf("preparePrimeAgentStateDir: %v", err)
+	}
+	want := filepath.Join(home, ".multica", "profiles", "work", "prime-agent-state", "workspace-3", "runtime-1", "agent_2")
+	if got != want {
+		t.Fatalf("state dir = %q, want %q", got, want)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("state dir mode = %o, want 700", info.Mode().Perm())
+	}
+	agentEnv := map[string]string{"PRIME_AGENT_CODING_AGENT_DIR": got}
+	layerCustomEnvAndHermesHome(agentEnv, map[string]string{"PRIME_AGENT_CODING_AGENT_DIR": "/shared/unsafe"}, "", nil)
+	if agentEnv["PRIME_AGENT_CODING_AGENT_DIR"] != got {
+		t.Fatal("custom env overrode daemon-owned Prime state directory")
+	}
+	sibling, err := preparePrimeAgentStateDir("work", "workspace-4", "runtime-1", "agent_2")
+	if err != nil || sibling == got || !strings.Contains(sibling, "workspace-4") {
+		t.Fatalf("workspace sibling isolation failed: path=%q err=%v", sibling, err)
+	}
+}
+
+func TestPreparePrimeAgentStateDirRejectsPreplacedSymlink(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows Prime admission is disabled and symlink creation requires privileges")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	profileDir := filepath.Join(home, ".multica", "profiles", "work")
+	if err := os.MkdirAll(profileDir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	target := t.TempDir()
+	if err := os.Symlink(target, filepath.Join(profileDir, "prime-agent-state")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := preparePrimeAgentStateDir("work", "workspace-3", "runtime-1", "agent_2"); err == nil {
+		t.Fatal("preplaced Prime state symlink was accepted")
 	}
 }
 
@@ -1618,6 +1670,30 @@ func TestMergeUsage(t *testing.T) {
 	}
 	if got := mergeUsage(a, nil); len(got) != 1 {
 		t.Fatal("mergeUsage(a, nil) should return a")
+	}
+}
+
+func TestTaskUsageEntriesPreservesCostOnlyAndFiltersOnlyTrulyEmpty(t *testing.T) {
+	entries := taskUsageEntries("prime", map[string]agent.TokenUsage{
+		"prime/cost-only": {CostUSDTicks: 42},
+		"prime/empty":     {},
+		"prime/tokens":    {InputTokens: 3},
+	})
+	if len(entries) != 2 {
+		t.Fatalf("usage entries = %+v, want cost-only and token entries", entries)
+	}
+	got := make(map[string]TaskUsageEntry, len(entries))
+	for _, entry := range entries {
+		got[entry.Model] = entry
+	}
+	if costOnly, ok := got["prime/cost-only"]; !ok || costOnly.Provider != "prime" || costOnly.CostUSDTicks != 42 || costOnly.InputTokens != 0 || costOnly.OutputTokens != 0 {
+		t.Fatalf("Prime-style cost-only usage was lost or changed: %+v", costOnly)
+	}
+	if _, ok := got["prime/empty"]; ok {
+		t.Fatal("truly empty usage entry was not filtered")
+	}
+	if got["prime/tokens"].InputTokens != 3 {
+		t.Fatalf("token usage changed: %+v", got["prime/tokens"])
 	}
 }
 
@@ -4454,6 +4530,7 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 	t.Parallel()
 
 	var callOrder []string
+	var reportedUsage atomic.Value
 	var mu sync.Mutex
 	recordCall := func(name string) {
 		mu.Lock()
@@ -4470,6 +4547,14 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/usage"):
 			recordCall("usage")
+			var body struct {
+				Usage []TaskUsageEntry `json:"usage"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Errorf("decode usage body: %v", err)
+			} else {
+				reportedUsage.Store(body.Usage)
+			}
 			w.WriteHeader(http.StatusOK)
 		case strings.HasSuffix(r.URL.Path, "/status"):
 			recordCall("status")
@@ -4490,14 +4575,14 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 		cancelPollInterval: time.Hour, // effectively disable poll-cancel path; we want the post-run status check
 	}
 
-	// Inject a fake runner that returns a result with usage tokens, bypassing
-	// real agent process execution.
+	// Feed Prime-style cost-only agent usage through the same conversion helper
+	// runTask uses, then through handleTask's ReportTaskUsage path.
 	d.runner = taskRunnerFunc(func(_ context.Context, _ Task, _ string, _ int, _ *slog.Logger) (TaskResult, error) {
 		return TaskResult{
 			Status: "completed",
-			Usage: []TaskUsageEntry{
-				{Provider: "anthropic", Model: "claude-opus-4-6", InputTokens: 100, OutputTokens: 50},
-			},
+			Usage: taskUsageEntries("prime", map[string]agent.TokenUsage{
+				"prime/cost-only": {CostUSDTicks: 42},
+			}),
 		}, nil
 	})
 
@@ -4534,6 +4619,10 @@ func TestHandleTask_ReportsUsageBeforeCancel(t *testing.T) {
 	}
 	if usageIdx > statusIdx {
 		t.Fatalf("usage was reported AFTER status check (order: %v) — regression", order)
+	}
+	reported, _ := reportedUsage.Load().([]TaskUsageEntry)
+	if len(reported) != 1 || reported[0].Provider != "prime" || reported[0].Model != "prime/cost-only" || reported[0].CostUSDTicks != 42 {
+		t.Fatalf("cost-only usage was lost before reporting: %+v", reported)
 	}
 }
 
