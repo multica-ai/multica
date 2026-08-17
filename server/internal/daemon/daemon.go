@@ -25,6 +25,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/cli"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/daemon/transportretry"
 	"github.com/multica-ai/multica/server/internal/selfexec"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/redact"
@@ -4858,6 +4859,9 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 			if assignment, _ := localDirectoryAssignmentForTask(task, d.cfg.DaemonID); assignment != nil {
 				meta.LocalDirectory = true
 			}
+			if len(result.TransportRetryReceipt) > 0 {
+				meta.TransportRetry = result.TransportRetryReceipt
+			}
 			if err := execenv.WriteGCMeta(result.EnvRoot, meta, taskLog); err != nil {
 				taskLog.Warn("write gc meta failed (non-fatal)", "error", err)
 			}
@@ -6397,12 +6401,40 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		"idle_watchdog", execOpts.IdleWatchdogTimeout,
 	)
 
-	// Shared across the resume-retry below so the retry's transcript rows
-	// keep ascending seq values for the same task.
+	// Shared across transport-retry and the resume-retry below so every launch's
+	// transcript rows keep ascending seq values for the same task.
 	var msgSeq atomic.Int32
-	result, tools, err := d.executeAndDrain(ctx, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
+	onTransportFreshSession := func(opts *agent.ExecOptions) string {
+		task.PriorSessionID = ""
+		task.PriorSessionResumeUnavailable = true
+		opts.ResumeContinuityNotice = ""
+		taskCtx.PriorSessionResumed = false
+		if freshBrief, briefErr := execenv.InjectRuntimeConfig(env.WorkDir, provider, taskCtx); briefErr != nil {
+			taskLog.Warn("execenv: re-inject cold runtime config for transport fresh retry failed (non-fatal)", "error", briefErr)
+		} else {
+			runtimeBrief = freshBrief
+			if providerNeedsInlineSystemPrompt(provider) {
+				opts.SystemPrompt = runtimeBrief
+			}
+		}
+		return BuildPrompt(task, provider)
+	}
+	transportCfg := transportretry.ResolveConfig(agentCustomEnv)
+	result, tools, transportStats, transportRetired, transportReceiptJSON, err := d.executeWithTransportRetry(
+		ctx, transportCfg, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq,
+		provider, task.PriorSessionID, onTransportFreshSession,
+	)
 	if err != nil {
 		return TaskResult{}, err
+	}
+	if len(transportReceiptJSON) > 0 {
+		taskResult.TransportRetryReceipt = transportReceiptJSON
+		taskLog.Info("transport_retry finished",
+			"policy", transportStats.PolicyID,
+			"attempts", transportStats.Attempts,
+			"recovered_on_attempt", transportStats.RecoveredOnAttempt,
+			"surfaced_to_server", transportStats.SurfacedToServer,
+		)
 	}
 
 	// retiredSessionID is the session this run was told to resume and then
@@ -6412,6 +6444,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// row but still reachable through an older completed row on the issue or
 	// through the chat_session pointer (GH #6066).
 	var retiredSessionID string
+	if transportRetired != "" {
+		retiredSessionID = transportRetired
+	}
 	defer func() { taskResult.RetiredSessionID = retiredSessionID }()
 
 	if shouldRetryWithFreshSession(result, task.PriorSessionID, tools, provider) {

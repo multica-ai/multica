@@ -23,6 +23,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
+	"github.com/multica-ai/multica/server/internal/daemon/transportretry"
 	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 	"github.com/pelletier/go-toml/v2"
@@ -2147,6 +2148,63 @@ func TestExecuteAndDrain_ResumeFailureFallback(t *testing.T) {
 	// Second call should NOT have ResumeSessionID.
 	if fb.calls[1].ResumeSessionID != "" {
 		t.Fatal("retry should not have ResumeSessionID")
+	}
+}
+
+func TestExecuteWithTransportRetry_RecoversWritableIterable(t *testing.T) {
+	t.Parallel()
+
+	d := newTestDaemon(t)
+	ctx := context.Background()
+	taskLog := slog.Default()
+
+	failErr := "WritableIterable is closed (result_seen=false)"
+	fb := &fakeBackend{
+		results: []agent.Result{
+			{Status: "failed", Error: failErr, SessionID: "sess-stream"},
+			{Status: "failed", Error: failErr, SessionID: "sess-stream"},
+			{Status: "completed", Output: "ok", SessionID: "sess-stream"},
+		},
+	}
+
+	cfg := transportretry.Config{
+		Enabled: true,
+		Policies: []transportretry.Policy{
+			{
+				ID:               "cursor_writable_iterable",
+				Providers:        []string{"cursor"},
+				MatchError:       transportretry.DefaultPolicies()[0].MatchError,
+				DelaysMs:         []int{0, 0, 0},
+				SessionStrategy: []transportretry.SessionRetryMode{
+					transportretry.SessionRetrySame,
+					transportretry.SessionRetrySame,
+					transportretry.SessionRetryFresh,
+				},
+				Enabled: true,
+			},
+		},
+	}
+
+	var msgSeq atomic.Int32
+	opts := agent.ExecOptions{}
+	result, _, stats, _, receiptJSON, err := d.executeWithTransportRetry(
+		ctx, cfg, fb, "prompt", opts, taskLog, "task-transport", "", &msgSeq,
+		"cursor", "", nil,
+	)
+	if err != nil {
+		t.Fatalf("executeWithTransportRetry: %v", err)
+	}
+	if result.Status != "completed" {
+		t.Fatalf("result status = %q, want completed", result.Status)
+	}
+	if stats.RecoveredOnAttempt != 3 {
+		t.Fatalf("recovered_on_attempt = %d, want 3", stats.RecoveredOnAttempt)
+	}
+	if len(receiptJSON) == 0 {
+		t.Fatal("expected transport retry receipt JSON")
+	}
+	if fb.calls[1].ResumeSessionID != "sess-stream" {
+		t.Fatalf("retry resume = %q, want sess-stream", fb.calls[1].ResumeSessionID)
 	}
 }
 

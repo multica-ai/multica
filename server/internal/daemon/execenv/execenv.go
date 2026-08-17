@@ -817,6 +817,9 @@ type GCMeta struct {
 	// the agent did in their own tree). Pattern-based artifact cleanup is
 	// still allowed.
 	LocalDirectory bool `json:"local_directory,omitempty"`
+	// TransportRetry holds optional in-turn transport-retry receipt JSON
+	// (daemon-local task-run metadata, not sent to the server).
+	TransportRetry json.RawMessage `json:"transport_retry,omitempty"`
 }
 
 const gcMetaFile = ".gc_meta.json"

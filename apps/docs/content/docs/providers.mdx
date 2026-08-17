@@ -86,6 +86,18 @@ Codex, Hermes, and OpenClaw are handled slightly differently:
 
 For creating and binding skills, see [Skills](/skills).
 
+## Transport retry
+
+When a provider CLI drops its streaming connection mid-turn (for example Cursor Agent exiting with `WritableIterable is closed` before a final `result` event), the daemon can retry **inside the same task** before Multica records a failed run. Retries prefer resuming the same provider session so prompt-cache tokens can be reused.
+
+Safety gates:
+
+- Retries run only when **no tool** was observed in the failing attempt (`tools == 0`).
+- A configurable session ladder applies per policy — typically same-session resume first, then a single fresh-session attempt.
+- Disable globally with `MULTICA_TRANSPORT_RETRY_CONFIG` set to `{"enabled":false}`, or override individual policies in that JSON document. Per-agent overrides use the same variable in agent `custom_env` (wins over the daemon process env).
+
+Daemon task logs emit structured `transport_retry` lines and Prometheus counters under `multica_agent_transport_retry_*` for attempts, recoveries, cache-read tokens, and extra wall time.
+
 ## Next steps
 
 - [Create and configure an agent](/agents-create) — model and thinking-effort settings.

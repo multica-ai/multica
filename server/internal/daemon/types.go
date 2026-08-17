@@ -274,4 +274,6 @@ type TaskResult struct {
 	// precisely when the abandoned id would otherwise stay selectable.
 	RetiredSessionID string           `json:"-"`
 	Usage            []TaskUsageEntry `json:"usage,omitempty"` // per-model token usage
+	// TransportRetryReceipt is optional daemon-local JSON persisted in .gc_meta.json.
+	TransportRetryReceipt json.RawMessage `json:"-"`
 }
