@@ -1,4 +1,4 @@
--- Restore the pre-327 whitelist (the set after migration 313 added dsh).
+-- Restore the pre-341 whitelist (the set after migration 313 added dsh).
 -- Existing Dim rows remain valid because the replacement constraint is NOT
 -- VALID, but new Dim profiles are blocked.
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
