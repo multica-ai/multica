@@ -13,7 +13,7 @@ spec:
     kind: Deployment
     name: agentfarm-web
   minReplicas: 2
-  maxReplicas: 6
+  maxReplicas: 8
   metrics:
     - type: Resource
       resource:
