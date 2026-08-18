@@ -166,17 +166,7 @@ export const SlashCommandList = forwardRef<
 
 const NO_MATCH = 4;
 
-/**
- * Relevance tier for one skill, best first:
- *
- *   0 exact name → 1 name prefix → 2 name substring → 3 description only
- *
- * The name is what the user types after `/`; a description hit is a fallback
- * for "I forget what it's called". Without the tiers, typing `/wa` left
- * `wayfinder` behind every skill whose description happens to contain "wa"
- * ("throwaway", "software"), because the list kept the agent's configured
- * order.
- */
+/** Returns the match tier: exact name, prefix, substring, then description. */
 function skillMatchRank(
   skill: { name: string; description?: string },
   q: string,
@@ -189,12 +179,7 @@ function skillMatchRank(
   return NO_MATCH;
 }
 
-/**
- * Matching skills, best tier first. Ranking runs BEFORE the MAX_ITEMS
- * truncation so a name match gives up neither its position nor its slot to a
- * description hit. Sorting is stable, so the agent's configured order still
- * decides ties within a tier.
- */
+/** Ranks matches by relevance while preserving configured order within each tier. */
 function rankSkillMatches<T extends { name: string; description?: string }>(
   skills: T[],
   q: string,
