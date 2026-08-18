@@ -202,8 +202,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// registry in server/pkg/agent/builtin_runtimes.go. Each one probes a
 	// separate CLI independently so a host with both pi and omp installed gets
 	// two runtimes. The env prefix and default command come from the
-	// descriptor, so adding a compatible fork is a descriptor entry, not a
-	// probe edit.
+	// descriptor, so adding a new fork is a descriptor entry, not a probe edit.
 	for _, desc := range agent.BuiltinRuntimes {
 		pathEnv := desc.EnvPrefix + "_PATH"
 		modelEnv := desc.EnvPrefix + "_MODEL"
