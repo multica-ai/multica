@@ -21,8 +21,17 @@ import type {
   Comment,
   CreateBillingCheckoutSessionResponse,
   CreateBillingPortalSessionResponse,
+  WorkspaceSubscriptionEntitlements,
+  WorkspaceSubscriptionSummary,
+  WorkspaceSubscriptionPrice,
+  WorkspaceSubscriptionPrices,
+  CreateWorkspaceSubscriptionCheckoutResponse,
+  WorkspaceSubscriptionSeatReconcileResult,
+  CreateWorkspaceSubscriptionPortalResponse,
   CronPreviewResponse,
+  DingTalkGroupRoute,
   DingTalkInstallation,
+  ListDingTalkGroupRoutesResponse,
   ListDingTalkInstallationsResponse,
   RedeemDingTalkBindingTokenResponse,
   WecomInstallation,
@@ -34,6 +43,7 @@ import type {
   InboxItem,
   InboxWorkspaceUnread,
   Label,
+  MemberWithUser,
   IssueProperty,
   ListPropertiesResponse,
   QuickAction,
@@ -48,18 +58,133 @@ import type {
   ListGitHubRepositoriesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
+  IssueStatusEntry,
+  ListIssueStatusesResponse,
   NotificationPreferenceResponse,
+  PluginInstallation,
+  PluginInstallationListResponse,
+  PluginPreview,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  ShareLink,
+  ShareLinkInfo,
+  Skill,
   Squad,
   TimelineEntry,
   User,
   WebhookDelivery,
+  WorkspaceMcpServer,
 } from "../types";
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
+
+export const PluginConfigFieldSchema = z.object({
+  key: z.string(),
+  type: z.string().default("string"),
+  label: z.string().default(""),
+  description: z.string().optional(),
+  required: z.boolean().default(false),
+  options: z.array(z.string()).default([]),
+  placeholder: z.string().optional(),
+}).loose();
+
+export const PluginSurfaceSchema = z.object({
+  key: z.string(),
+  type: z.string().default(""),
+  name: z.string().default(""),
+  entry: z.string().default(""),
+  platforms: z.array(z.string()).default([]),
+}).loose();
+
+export const PluginHookSchema = z.object({
+  key: z.string(),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  triggers: z.array(z.string()).default([]),
+  events: z.array(z.string()).default([]),
+  transport: z.string().default(""),
+}).loose();
+
+export const PluginResourceSchema = z.object({
+  type: z.string().default(""),
+  key: z.string(),
+  entry: z.string().default(""),
+}).loose();
+
+export const PluginInstallationSchema = z.object({
+  id: z.string(),
+  plugin_key: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().optional(),
+  version: z.string().default(""),
+  source_url: z.string().default(""),
+  enabled: z.boolean().default(false),
+  granted_scopes: z.array(z.string()).default([]),
+  config_schema: z.array(PluginConfigFieldSchema).default([]),
+  config: z.record(z.string(), z.unknown()).default({}),
+  configured_secrets: z.array(z.string()).default([]),
+  surfaces: z.array(PluginSurfaceSchema).default([]),
+  hooks: z.array(PluginHookSchema).default([]),
+  resources: z.array(PluginResourceSchema).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_PLUGIN_INSTALLATION: PluginInstallation = {
+  id: "",
+  plugin_key: "",
+  name: "",
+  version: "",
+  source_url: "",
+  enabled: false,
+  granted_scopes: [],
+  config_schema: [],
+  config: {},
+  configured_secrets: [],
+  surfaces: [],
+  hooks: [],
+  resources: [],
+  created_at: "",
+  updated_at: "",
+};
+
+export const PluginInstallationListResponseSchema = z.object({
+  plugins: z.array(PluginInstallationSchema).default([]),
+}).loose();
+
+export const EMPTY_PLUGIN_INSTALLATION_LIST: PluginInstallationListResponse = {
+  plugins: [],
+};
+
+export const PluginManifestSummarySchema = z.object({
+  key: z.string().default(""),
+  name: z.string().default(""),
+  description: z.string().optional(),
+  version: z.string().default(""),
+  author: z.object({
+    name: z.string().default(""),
+    url: z.string().optional(),
+  }).loose().default({ name: "" }),
+}).loose();
+
+export const PluginPreviewSchema = z.object({
+  manifest: PluginManifestSummarySchema,
+  scopes: z.array(z.string()).default([]),
+  config_schema: z.array(PluginConfigFieldSchema).default([]),
+  installed: z.boolean().default(false),
+  installed_version: z.string().optional(),
+  added_scopes: z.array(z.string()).default([]),
+}).loose();
+
+export const EMPTY_PLUGIN_PREVIEW: PluginPreview = {
+  manifest: { key: "", name: "", version: "", author: { name: "" } },
+  scopes: [],
+  config_schema: [],
+  installed: false,
+  added_scopes: [],
+};
 
 export const GitHubInstallationSchema = z.object({
   id: z.string(),
@@ -196,6 +321,55 @@ export const ListLabelsResponseSchema = z.object({
 
 export const EMPTY_LIST_LABELS_RESPONSE: ListLabelsResponse = {
   labels: [],
+  total: 0,
+};
+
+// Issue status catalog (MUL-6243). `category` is parsed as a plain string
+// rather than an enum: a newer server could in principle report a category this
+// build does not know, and failing the whole catalog parse would leave the UI
+// with no statuses at all. Consumers fall back to rendering by `color`/`name`
+// when they do not recognize a category.
+export const IssueStatusEntrySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  key: z.string(),
+  name: z.string(),
+  description: z.string().optional().default(""),
+  category: z.string(),
+  color: z.string().optional().default("#6b7280"),
+  is_system: z.boolean().optional().default(false),
+  position: z.number().optional().default(0),
+  archived_at: z.string().nullable().optional().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_ISSUE_STATUS_ENTRY: IssueStatusEntry = {
+  id: "",
+  workspace_id: "",
+  key: "",
+  name: "",
+  description: "",
+  category: "backlog",
+  color: "#6b7280",
+  is_system: false,
+  position: 0,
+  archived_at: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListIssueStatusesResponseSchema = z.object({
+  statuses: z.array(IssueStatusEntrySchema).default([]),
+  categories: z.array(z.string()).default([]),
+  total: z.number().default(0),
+}).loose();
+
+// The fallback carries the 7 built-ins' keys as categories, so a client talking
+// to a server that predates this endpoint still has the canonical list.
+export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
+  statuses: [],
+  categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   total: 0,
 };
 
@@ -419,6 +593,14 @@ export interface AppConfigResponse {
    * Settings → Integrations "Git providers" section. */
   vcs_integration_available?: boolean;
   feature_flags?: Record<string, boolean>;
+  /** Whether this server understands local_directory `execution_mode` and
+   * gates worktree mode at save time. Absent on every server that predates this
+   * capability signal, which includes the ones that silently DROPPED an unknown
+   * `execution_mode` and answered 201 — the resource then ran in place while
+   * the user was promised isolation (#7113). Servers between that fix and this
+   * signal do validate but cannot say so, and are treated as unable: the client
+   * has no way to tell them apart, and only one of the two answers is safe. */
+  local_worktree_supported?: boolean;
   server_version?: string;
 }
 
@@ -613,6 +795,7 @@ export const AppConfigSchema = z.object({
   workspace_creation_disabled: BooleanWithDefaultSchema(false).optional(),
   vcs_integration_available: BooleanWithDefaultSchema(false).optional(),
   feature_flags: FeatureFlagsSchema,
+  local_worktree_supported: BooleanWithDefaultSchema(false),
   server_version: OptionalStringSchema,
 }).loose();
 
@@ -625,6 +808,9 @@ export const EMPTY_APP_CONFIG: AppConfigResponse = {
   daemon_app_url: "",
   workspace_creation_disabled: false,
   vcs_integration_available: false,
+  // Fail closed: an unreadable config must not look like a server that
+  // validates execution_mode.
+  local_worktree_supported: false,
   feature_flags: {},
 };
 
@@ -749,6 +935,12 @@ export const IssueSchema = z.object({
   title: z.string(),
   description: z.string().nullable(),
   status: z.string(),
+  // The canonical status whose platform behavior `status` carries — equal to
+  // `status` for the 7 built-ins, and the inherited category for a custom
+  // status. Optional because only endpoints that resolve it emit it, so
+  // consumers must fall back to `status` rather than treat "" as a category.
+  // (MUL-6243)
+  status_category: z.string().optional(),
   priority: z.string(),
   assignee_type: z.string().nullable(),
   assignee_id: z.string().nullable(),
@@ -2026,6 +2218,170 @@ export const EMPTY_CREATE_BILLING_PORTAL_SESSION_RESPONSE: CreateBillingPortalSe
 };
 
 // ---------------------------------------------------------------------------
+// Workspace subscriptions (`/api/cloud-subscriptions/*`)
+//
+// These schemas are the compatibility boundary with multica-cloud. Three rules
+// hold for all of them:
+//
+//  1. There is no fallback value. Callers get `null` on any parse failure and
+//     must render "unavailable" — never a synthetic Free plan, because that
+//     turns an upstream outage or an older cloud into a silent downgrade of a
+//     paying workspace.
+//  2. `.loose()` keeps unknown keys, so a cloud that adds fields does not break
+//     an older client.
+//  3. `plan` and `status` stay open strings. A new plan or Stripe status must
+//     surface as unknown rather than be coerced into a known one.
+
+const WorkspaceSubscriptionIntervalSchema = z.enum(["month", "year"]);
+
+// Stripe hosts Checkout and Portal, so those URLs leave the app. `z.string()
+// .url()` is not enough on its own — `new URL("javascript:...")` parses — and
+// the caller hands this value to location.assign, so the scheme is pinned here.
+const StripeHostedURLSchema = z.string().url().refine(
+  (value) => value.startsWith("https://"),
+  { message: "Stripe hosted URL must use HTTPS" },
+);
+
+
+export const WorkspaceSubscriptionEntitlementsSchema = z
+  .object({
+    workspace_id: z.string(),
+    plan: z.string(),
+    status: z.string(),
+    // Cloud documents seats as >= 1, but accepting 0 costs nothing and keeps a
+    // workspace that momentarily reports no human members readable instead of
+    // failing the whole snapshot.
+    seats: z.number().int().nonnegative(),
+    issue_window: z.number().int().nonnegative().nullable(),
+    autopilot_runs: z.number().int().nonnegative().nullable(),
+    current_period_end: z.string().nullable().optional(),
+    snapshot_expires_at: z.string().nullable().optional(),
+    version: z.number().int().nonnegative(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionEntitlements => ({
+      workspaceId: value.workspace_id,
+      plan: value.plan,
+      status: value.status,
+      seats: value.seats,
+      issueWindow: value.issue_window,
+      autopilotRuns: value.autopilot_runs,
+      currentPeriodEnd: value.current_period_end ?? null,
+      snapshotExpiresAt: value.snapshot_expires_at ?? null,
+      version: value.version,
+    }),
+  );
+
+export const WorkspaceSubscriptionSummarySchema = z
+  .object({
+    entitlement: WorkspaceSubscriptionEntitlementsSchema,
+    billing_interval: WorkspaceSubscriptionIntervalSchema.nullable().optional(),
+    actual_seats: z.number().int().nonnegative(),
+    billed_seats: z.number().int().nonnegative().nullable().optional(),
+    pending_seat_quantity: z.number().int().nonnegative().nullable().optional(),
+    cancel_at_period_end: z.boolean().optional(),
+    grace_until: z.string().nullable().optional(),
+    has_stripe_customer: z.boolean().optional(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionSummary => ({
+      entitlement: value.entitlement,
+      billingInterval: value.billing_interval ?? null,
+      actualSeats: value.actual_seats,
+      billedSeats: value.billed_seats ?? null,
+      pendingSeatQuantity: value.pending_seat_quantity ?? null,
+      cancelAtPeriodEnd: value.cancel_at_period_end ?? false,
+      graceUntil: value.grace_until ?? null,
+      hasStripeCustomer: value.has_stripe_customer ?? false,
+    }),
+  );
+
+const WorkspaceSubscriptionPriceSchema = (
+  expected: "month" | "year",
+) =>
+  z
+    .object({
+      currency: z.string().min(1),
+      // Reject 0 and negatives: a free or malformed Price must read as
+      // "price unavailable", not as a real amount shown next to a purchase
+      // button.
+      unit_amount: z.number().int().positive(),
+      // Pinned to the slot it arrived in. Cloud validates this too, but a
+      // schema that accepted a yearly Price under `month` would let the UI
+      // quote a yearly amount as a monthly one — the schema is an independent
+      // boundary, so it checks the correspondence itself.
+      interval: z.literal(expected),
+      interval_count: z.literal(1),
+    })
+    .loose()
+    .transform(
+      (value): WorkspaceSubscriptionPrice => ({
+        currency: value.currency,
+        unitAmount: value.unit_amount,
+        interval: value.interval,
+        intervalCount: value.interval_count,
+      }),
+    );
+
+export const WorkspaceSubscriptionPricesSchema = z
+  .object({
+    month: WorkspaceSubscriptionPriceSchema("month"),
+    year: WorkspaceSubscriptionPriceSchema("year"),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionPrices => ({
+      month: value.month,
+      year: value.year,
+    }),
+  );
+
+export const CreateWorkspaceSubscriptionCheckoutResponseSchema = z
+  .object({
+    request_id: z.string(),
+    session_id: z.string(),
+    url: StripeHostedURLSchema,
+  })
+  .loose()
+  .transform(
+    (value): CreateWorkspaceSubscriptionCheckoutResponse => ({
+      requestId: value.request_id,
+      sessionId: value.session_id,
+      url: value.url,
+    }),
+  );
+
+export const WorkspaceSubscriptionSeatReconcileResultSchema = z
+  .object({
+    workspace_id: z.string(),
+    billed_seats: z.number().int().nonnegative(),
+    actual_seats: z.number().int().nonnegative(),
+    action: z.string(),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSubscriptionSeatReconcileResult => ({
+      workspaceId: value.workspace_id,
+      billedSeats: value.billed_seats,
+      actualSeats: value.actual_seats,
+      action: value.action,
+    }),
+  );
+
+export const CreateWorkspaceSubscriptionPortalResponseSchema = z
+  .object({
+    url: StripeHostedURLSchema,
+  })
+  .loose()
+  .transform(
+    (value): CreateWorkspaceSubscriptionPortalResponse => ({
+      url: value.url,
+    }),
+  );
+
+// ---------------------------------------------------------------------------
 // Runtime model discovery (`POST /api/runtimes/:id/models`,
 // `GET /api/runtimes/:id/models/:requestId`). Both endpoints return the same
 // request record, and the UI drives a state machine off `status`, so the two
@@ -2128,11 +2484,42 @@ export const ListDingTalkInstallationsResponseSchema = z.object({
   installations: z.array(DingTalkInstallationSchema).default([]),
   configured: z.boolean().default(false),
   install_supported: z.boolean().optional(),
+  group_routing_supported: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallationsResponse = {
   installations: [],
   configured: false,
+};
+
+export const DingTalkGroupRouteSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  installation_id: z.string().default(""),
+  conversation_id: z.string().default(""),
+  conversation_title: z.string().default(""),
+  agent_id: z.string().default(""),
+  discovered_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_DINGTALK_GROUP_ROUTE: DingTalkGroupRoute = {
+  id: "",
+  workspace_id: "",
+  installation_id: "",
+  conversation_id: "",
+  conversation_title: "",
+  agent_id: "",
+  discovered_at: "",
+  updated_at: "",
+};
+
+export const ListDingTalkGroupRoutesResponseSchema = z.object({
+  routes: z.array(DingTalkGroupRouteSchema).default([]),
+}).loose();
+
+export const EMPTY_LIST_DINGTALK_GROUP_ROUTES_RESPONSE: ListDingTalkGroupRoutesResponse = {
+  routes: [],
 };
 
 export const RedeemDingTalkBindingTokenResponseSchema = z.object({
@@ -2193,4 +2580,157 @@ export const EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE: RedeemWecomBindingTokenR
   workspace_id: "",
   installation_id: "",
   wecom_user_id: "",
+};
+
+// Skills. Introduced for `POST /api/skills/:id/refresh` (update a skill from
+// its imported source). `config` stays a loose record: the server owns the
+// `origin` provenance shape and may extend it freely.
+export const SkillFileSchema = z.object({
+  id: z.string(),
+  skill_id: z.string(),
+  path: z.string(),
+  content: z.string().optional().default(""),
+  created_at: z.string().optional().default(""),
+  updated_at: z.string().optional().default(""),
+}).loose();
+
+export const SkillSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  name: z.string(),
+  description: z.string().optional().default(""),
+  content: z.string().optional().default(""),
+  config: z.record(z.string(), z.unknown()).optional().default({}),
+  created_by: z.string().nullable().optional().default(null),
+  created_at: z.string().optional().default(""),
+  updated_at: z.string().optional().default(""),
+  files: z.array(SkillFileSchema).optional().default([]),
+}).loose();
+
+export const EMPTY_SKILL: Skill = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  description: "",
+  content: "",
+  config: {},
+  created_by: null,
+  created_at: "",
+  updated_at: "",
+  files: [],
+};
+
+/**
+ * Read shape of one workspace MCP server.
+ *
+ * This is the ONLY schema in this file that must not be `.loose()`. Everywhere
+ * else, keeping unknown fields is forward-compatibility; here it would be a
+ * hole in the write-only boundary — a server that regressed to returning the
+ * stored entry (or a `url` / `headers` on the summary) would have it land in
+ * the parsed object and in the query cache. zod strips unknown keys by
+ * default, so the client only ever holds the safe summary.
+ *
+ * `transport` stays a plain string (not an enum) so an unknown value from a
+ * newer backend still parses — the UI has a default branch for it.
+ */
+export const WorkspaceMcpServerSchema = z.object({
+  id: z.string().default(""),
+  workspace_id: z.string().default(""),
+  name: z.string().default(""),
+  transport: z.string().default("unknown"),
+  enabled: z.boolean().optional(),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+});
+
+export const WorkspaceMcpServerListSchema = z.array(WorkspaceMcpServerSchema);
+
+export const EMPTY_WORKSPACE_MCP_SERVER: WorkspaceMcpServer = {
+  id: "",
+  workspace_id: "",
+  name: "",
+  transport: "unknown",
+  created_at: "",
+  updated_at: "",
+};
+
+// Share links. Introduced with the workspace share-link invite flow; schemas
+// mirror the API responses so malformed payloads fall back to safe defaults.
+export const ShareLinkSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  code: z.string(),
+  created_by: z.string(),
+  role: z.string(),
+  expires_at: z.string().nullable().optional().default(null),
+  max_uses: z.number().nullable().optional().default(null),
+  use_count: z.number().optional().default(0),
+  is_active: z.boolean().optional().default(true),
+  created_at: z.string().optional().default(""),
+  creator_name: z.string().optional().default(""),
+  creator_email: z.string().optional().default(""),
+}).loose();
+
+export const EMPTY_SHARE_LINK: ShareLink = {
+  id: "",
+  workspace_id: "",
+  code: "",
+  created_by: "",
+  role: "member",
+  expires_at: null,
+  max_uses: null,
+  use_count: 0,
+  is_active: false,
+  created_at: "",
+};
+
+export const ShareLinkListResponseSchema = z.array(ShareLinkSchema).default([]);
+
+export const ShareLinkInfoSchema = z.object({
+  workspace_name: z.string().optional().default(""),
+  workspace_slug: z.string().optional().default(""),
+  creator_name: z.string().optional().default(""),
+  role: z.string().optional().default("member"),
+}).loose();
+
+export const EMPTY_SHARE_LINK_INFO: ShareLinkInfo = {
+  workspace_name: "",
+  workspace_slug: "",
+  role: "member",
+};
+
+export const MemberWithUserSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  user_id: z.string(),
+  role: z.string(),
+  created_at: z.string().optional().default(""),
+  name: z.string().optional().default(""),
+  email: z.string().optional().default(""),
+  avatar_url: z.string().nullable().optional().default(null),
+}).loose();
+
+export const JoinShareLinkResponseSchema = z.object({
+  member: MemberWithUserSchema,
+  workspace_id: z.string(),
+  workspace_slug: z.string().optional().default(""),
+}).loose();
+
+export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
+  member: MemberWithUser;
+  workspace_id: string;
+  workspace_slug: string;
+} = {
+  member: {
+    id: "",
+    workspace_id: "",
+    user_id: "",
+    role: "member",
+    created_at: "",
+    name: "",
+    email: "",
+    avatar_url: null,
+  },
+  workspace_id: "",
+  workspace_slug: "",
 };

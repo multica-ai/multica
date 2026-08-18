@@ -101,7 +101,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       label: "\u8fd0\u884c\u65f6",
       title: "\u4e00\u4e2a\u63a7\u5236\u53f0\u7ba1\u7406\u6240\u6709\u7b97\u529b",
       description:
-        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 14 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
+        "\u672c\u5730\u5b88\u62a4\u8fdb\u7a0b\u548c\u4e91\u7aef\u8fd0\u884c\u65f6\uff0c\u5728\u540c\u4e00\u4e2a\u9762\u677f\u4e2d\u7ba1\u7406\u3002\u5b9e\u65f6\u76d1\u63a7\u5728\u7ebf/\u79bb\u7ebf\u72b6\u6001\u3001\u4f7f\u7528\u91cf\u56fe\u8868\u548c\u6d3b\u52a8\u70ed\u529b\u56fe\u3002\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 22 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u3002",
       cards: [
         {
           title: "\u7edf\u4e00\u8fd0\u884c\u65f6\u9762\u677f",
@@ -116,7 +116,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         {
           title: "\u9996\u6b21\u542f\u52a8\u81ea\u52a8\u6ce8\u518c",
           description:
-            "Multica \u626b\u63cf\u672c\u673a\u7684 21 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Copilot\u3001Cursor\u3001DevEco Code\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
+            "Multica \u626b\u63cf\u672c\u673a\u7684 22 \u6b3e\u652f\u6301\u7684 AI \u7f16\u7a0b\u5de5\u5177\u2014\u2014Antigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u2014\u2014\u5e76\u4e3a\u6bcf\u6b3e\u5df2\u5b89\u88c5\u7684\u5de5\u5177\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         title: "\u5b89\u88c5 CLI \u5e76\u8fde\u63a5\u4f60\u7684\u673a\u5668",
         description:
-          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 21 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI）。本机已安装的工具会被自动注册成运行时。",
+          "运行 multica setup——它会引导你完成 OAuth 登录、启动守护进程、并扫描 22 款支持的 AI 编程工具（Antigravity、Claude Code、CodeBuddy、Codex、Copilot、Cursor、DeepSeek Harness、DevEco Code、Grok、Hermes、Kimi、Kiro CLI、Oh-My-Pi、OpenClaw、OpenCode、Pi、Qoder、Qoder CN、Qwen Code、QwenPaw、Reasonix、Trae CLI）。本机已安装的工具会被自动注册成运行时。",
       },
       {
         title: "\u521b\u5efa\u4f60\u7684\u7b2c\u4e00\u4e2a 智能体",
@@ -192,7 +192,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       {
         question: "Multica \u652f\u6301\u54ea\u4e9b\u7f16\u7801 智能体\uff1f",
         answer:
-          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 21 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Copilot\u3001Cursor\u3001DevEco Code\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
+          "Multica \u5f00\u7bb1\u5373\u7528\u652f\u6301 22 \u6b3e AI \u7f16\u7a0b\u5de5\u5177\uff1aAntigravity\u3001Claude Code\u3001CodeBuddy\u3001Codex\u3001Copilot\u3001Cursor\u3001DeepSeek Harness\u3001DevEco Code\u3001Grok\u3001Hermes\u3001Kimi\u3001Kiro CLI\u3001Oh-My-Pi\u3001OpenClaw\u3001OpenCode\u3001Pi\u3001Qoder\u3001Qoder CN\u3001Qwen Code\u3001QwenPaw\u3001Reasonix\u3001Trae CLI\u3002\u5b88\u62a4\u8fdb\u7a0b\u4f1a\u81ea\u52a8\u68c0\u6d4b\u672c\u673a\u5df2\u5b89\u88c5\u7684 CLI \u5e76\u4e3a\u6bcf\u6b3e\u6ce8\u518c\u4e00\u4e2a\u8fd0\u884c\u65f6\u3002\u56e0\u4e3a\u5f00\u6e90\uff0c\u4f60\u4e5f\u53ef\u4ee5\u81ea\u5df1\u6dfb\u52a0\u540e\u7aef\u3002",
       },
       {
         question: "\u9700\u8981\u81ea\u6258\u7ba1\u5417\uff0c\u8fd8\u662f\u6709\u4e91\u7248\u672c\uff1f",
@@ -293,6 +293,136 @@ export function createZhDict(allowSignup: boolean): LandingDict {
       fixes: "问题修复",
     },
     entries: [
+      {
+        version: "0.4.29",
+        date: "2026-08-18",
+        title: "MiniMax Code、运行记录优化、Hermes 智能体行为修复",
+        changes: [],
+        features: [
+          "现在可以用 MiniMax Code 运行智能体。",
+          "按 Cmd/Ctrl+, 就能在桌面端新标签页打开设置。",
+        ],
+        improvements: [
+          "Hermes 智能体调用工具时，运行记录会立即显示。",
+          "运行记录去掉了重复的智能体名称，更容易浏览。",
+        ],
+        fixes: [
+          "短暂断线后，智能体任务会继续运行。",
+          "日度和周度费用图现在计入缓存读取费用。",
+          "在飞书里直接发的文件和音频现在会传给智能体。",
+          "委派任务失败后，会回到原来的协调智能体。",
+          "下载页面现在只会显示最新的完整版本。",
+        ],
+      },
+      {
+        version: "0.4.28",
+        date: "2026-08-17",
+        title: "成员自定义字段、技能批量更新、更清楚的桌面端更新提示",
+        changes: [],
+        features: [
+          "自定义字段现在可以填工作区成员，单个或多个都行。",
+          "选中多个导入的技能，可以一次性全部更新到最新版。",
+        ],
+        improvements: [
+          "桌面端的更新提示现在能直接打开这个版本的更新日志。",
+          "命令行里填指派人的地方，现在也认成员的邮箱。",
+        ],
+        fixes: [
+          "桌面端新开标签页不会再丢掉当前工作区。",
+          "成员筛选条件现在显示名字和头像，不再只是一个数字。",
+        ],
+      },
+      {
+        version: "0.4.27",
+        date: "2026-08-17",
+        title: "工作区 MCP 服务器、分享链接邀请、全新运行记录",
+        changes: [],
+        features: [
+          "MCP 服务器可以在工作区里配一次，再指派给各个智能体。",
+          "你可以生成一个分享链接，让别人直接加入工作区。",
+          "运行记录改成按步骤看，配双轨时间线和结果概览。",
+          "Slack 消息里发的文件现在会作为附件出现在对话里。",
+          "手机上可以把 Multica 添加到主屏幕，像应用一样打开。",
+          "浏览器标签页会显示你正打开的工作区页面名。",
+          "导入的技能现在会显示它来自哪里。",
+          "提到你正在看的这个 Issue 时，会显示成「本 Issue」。",
+        ],
+        improvements: [
+          "跑不起来的智能体会自动下线，并告诉你修好它的命令。",
+          "输入 Issue 编号时，提及出得比以前快得多。",
+          "多台服务器部署时，频道消息不再重复或掉线。",
+          "工作区邀请不会再被大量刷发。",
+          "编辑器的悬浮工具栏现在能被读屏软件念出来。",
+        ],
+        fixes: [
+          "桌面端启动失败后重开，不用再重新登录。",
+          "删掉最后一个工作区后，桌面端不再白屏。",
+          "Pi 出错结束回合时，任务会判定失败，不再卡住。",
+          "Antigravity 的模型列表现在能正常加载了。",
+          "切换标签页后，HTML 附件会回到你原来看的位置。",
+          "自定义运行时的固定参数现在按你写的顺序传入。",
+          "拖动卡片中途取消，看板不会再拖不动。",
+          "手机网页版的快速记录现在能正常用了。",
+          "页面标题栏不再多出一个侧边栏开关。",
+          "创建智能体时不会再闪一下错误提示。",
+          "鼠标停在运行时间线的条上，图表不再抖动。",
+          "自托管升级中途被打断，重跑一次就能安全接上。",
+        ],
+      },
+      {
+        version: "0.4.26",
+        date: "2026-08-14",
+        title: "DeepSeek Harness 运行时、看板拖拽平移、Inbox 归档快捷键",
+        changes: [],
+        features: [
+          "你现在可以用 DeepSeek Harness 跑智能体了。",
+          "在看板空白处按住拖动，就能左右平移看板。",
+          "在 Inbox 里按 E 就能归档当前打开的那条通知。",
+          "自托管时可以把任务工作目录放到你指定的磁盘上。",
+        ],
+        improvements: [
+          "各个页面的标题和工具栏现在都对齐同一条左边线。",
+          "Codex 首轮启动慢时，你可以给它更长的等待时间。",
+          "指派 Issue 或改状态时，可以选择不启动新任务。",
+        ],
+        fixes: [
+          "跑不起来的智能体 CLI 会直接告诉你怎么修好。",
+          "别人的私有运行时不会再被 API 或 CLI 拿去用。",
+          "任务残留不会再让整个目录里的 multica 命令失效。",
+          "用 Volta 或 Vite Plus 装的智能体现在能被识别了。",
+          "对话里最后一条回复和输入框之间的间距回来了。",
+          "深色模式下当前标签页不再出现暗色方块，悬停圆角也完整了。",
+          "智能体不会再为同一个 Issue 重复开一份工作。",
+        ],
+      },
+      {
+        version: "0.4.25",
+        date: "2026-08-13",
+        title: "本地目录并行模式、钉钉分群路由、技能一键更新",
+        changes: [],
+        features: [
+          "本地目录可以选并行模式，多个任务同时跑，各自交一个分支。",
+          "一个钉钉机器人可以给不同群指定不同的智能体。",
+          "导入的技能可以一键更新到最新版，智能体绑定照旧保留。",
+          "鼠标停在 Issue 提及上，就能看到标题、负责人和子任务进度。",
+          "jcode 的智能体现在可以选思考强度了。",
+          "自托管时可以把任务临时文件放到更大的磁盘上。",
+        ],
+        improvements: [
+          "`multica daemon logs` 会直接告诉你日志文件在哪。",
+          "Hermes 任务现在会说清读的是哪个 HERMES_HOME。",
+        ],
+        fixes: [
+          "清理离线的运行时不会再带走历史任务和消息。",
+          "Hermes 的对话记录不会再在任务结束后消失。",
+          "Windows 上用 npm 装的智能体现在都能正常启动。",
+          "Windows 上任务结束后不再留下 Codex 的残余进程。",
+          "看板卡片上点头像就能直接改负责人。",
+          "运行时活跃度和甘特图的日期跟着界面语言显示。",
+          "深色模式下，标签页与页面之间的描边不再变色。",
+          "内置的 Bug 分类 Autopilot 现在能正常跑起来。",
+        ],
+      },
       {
         version: "0.4.24",
         date: "2026-08-12",

@@ -11,6 +11,100 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const acknowledgeExhaustedDelegatedFailureRecovery = `-- name: AcknowledgeExhaustedDelegatedFailureRecovery :one
+UPDATE agent_task_queue AS acknowledged
+SET delivered_comment_ids = (
+    SELECT COALESCE(array_agg(DISTINCT receipt.id), '{}')::uuid[]
+    FROM unnest(array_append(acknowledged.delivered_comment_ids, $1::uuid)) AS receipt(id)
+)
+WHERE acknowledged.id = (
+    SELECT attempt.id
+    FROM agent_task_queue attempt
+    WHERE attempt.trigger_evidence_kind = 'delegated_failure'
+      AND attempt.trigger_evidence_ref_id = $2
+    ORDER BY attempt.created_at DESC, attempt.id DESC
+    LIMIT 1
+    FOR UPDATE
+)
+  AND (
+      SELECT count(*)
+      FROM agent_task_queue attempt_count
+      WHERE attempt_count.trigger_evidence_kind = 'delegated_failure'
+        AND attempt_count.trigger_evidence_ref_id = $2
+  ) >= $3::int
+RETURNING acknowledged.id, acknowledged.agent_id, acknowledged.issue_id, acknowledged.status, acknowledged.priority, acknowledged.dispatched_at, acknowledged.started_at, acknowledged.completed_at, acknowledged.result, acknowledged.error, acknowledged.created_at, acknowledged.context, acknowledged.runtime_id, acknowledged.session_id, acknowledged.work_dir, acknowledged.trigger_comment_id, acknowledged.chat_session_id, acknowledged.autopilot_run_id, acknowledged.attempt, acknowledged.max_attempts, acknowledged.parent_task_id, acknowledged.failure_reason, acknowledged.trigger_summary, acknowledged.force_fresh_session, acknowledged.is_leader_task, acknowledged.wait_reason, acknowledged.initiator_user_id, acknowledged.handoff_note, acknowledged.prepare_lease_expires_at, acknowledged.squad_id, acknowledged.runtime_mcp_overlay, acknowledged.escalation_for_task_id, acknowledged.fire_at, acknowledged.originator_user_id, acknowledged.runtime_connected_apps, acknowledged.coalesced_comment_ids, acknowledged.delivered_comment_ids, acknowledged.chat_input_task_id, acknowledged.chat_finalize_deferred_at, acknowledged.originator_source, acknowledged.delegated_from_task_id, acknowledged.retry_of_task_id, acknowledged.rerun_of_task_id, acknowledged.rule_version_id, acknowledged.trigger_evidence_kind, acknowledged.trigger_evidence_ref_id, acknowledged.accountable_user_id, acknowledged.session_rollout_missing, acknowledged.retired_session_id, acknowledged.quick_actions_disabled, acknowledged.regenerate_quick_actions_for, acknowledged.branch_name
+`
+
+type AcknowledgeExhaustedDelegatedFailureRecoveryParams struct {
+	CommentID    pgtype.UUID `json:"comment_id"`
+	FailedTaskID pgtype.UUID `json:"failed_task_id"`
+	MaxAttempts  int32       `json:"max_attempts"`
+}
+
+// Once the bounded automatic attempts are exhausted, record a terminal
+// acknowledgement on the newest recovery task. The outbox treats this receipt
+// as settled, while the service writes a separate visible system comment that
+// tells the user why no further task will be generated.
+func (q *Queries) AcknowledgeExhaustedDelegatedFailureRecovery(ctx context.Context, arg AcknowledgeExhaustedDelegatedFailureRecoveryParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, acknowledgeExhaustedDelegatedFailureRecovery, arg.CommentID, arg.FailedTaskID, arg.MaxAttempts)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+	)
+	return i, err
+}
+
 const archiveAgent = `-- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
@@ -204,9 +298,11 @@ const cancelAgentTask = `-- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
+// Automatic cancellation without an explicit persisted failure reason. Unlike
+// CancelAgentTaskByUser, this deliberately leaves recovery inputs replayable.
 func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
 	row := q.db.QueryRow(ctx, cancelAgentTask, id)
 	var i AgentTaskQueue
@@ -262,6 +358,212 @@ func (q *Queries) CancelAgentTask(ctx context.Context, id pgtype.UUID) (AgentTas
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+	)
+	return i, err
+}
+
+const cancelAgentTaskByUser = `-- name: CancelAgentTaskByUser :one
+UPDATE agent_task_queue AS task
+SET status = 'cancelled',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL,
+    delivered_comment_ids = CASE
+      -- Chat and ordinary issue tasks almost never carry a delegated-failure
+      -- recovery signal. Keep their high-frequency user-cancel path to a
+      -- no-join update; only validate task lineage after the cheap comment
+      -- shape probe finds a possible recovery signal.
+      WHEN task.trigger_comment_id IS NULL
+       AND COALESCE(cardinality(task.coalesced_comment_ids), 0) = 0
+        THEN task.delivered_comment_ids
+      WHEN NOT EXISTS (
+        SELECT 1
+        FROM comment recovery_signal
+        WHERE (
+            recovery_signal.id = task.trigger_comment_id
+            OR recovery_signal.id = ANY(task.coalesced_comment_ids)
+        )
+          AND recovery_signal.author_type = 'system'
+          AND recovery_signal.type = 'progress_update'
+          AND recovery_signal.source_task_id IS NOT NULL
+      ) THEN task.delivered_comment_ids
+      ELSE (
+        SELECT COALESCE(array_agg(DISTINCT receipt.id), '{}')::uuid[]
+        FROM unnest(array_cat(
+            task.delivered_comment_ids,
+            ARRAY(
+                SELECT recovery.id
+                FROM comment recovery
+                JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
+                JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
+                WHERE (
+                    recovery.id = task.trigger_comment_id
+                    OR recovery.id = ANY(task.coalesced_comment_ids)
+                )
+                  AND recovery.author_type = 'system'
+                  AND recovery.type = 'progress_update'
+                  AND recovery.source_task_id IS NOT NULL
+                  AND failed.status = 'failed'
+                  AND failed.delegated_from_task_id IS NOT NULL
+                  AND failed.autopilot_run_id IS NULL
+                  AND failed.trigger_evidence_kind IS DISTINCT FROM 'delegated_failure'
+                  AND source.autopilot_run_id IS NULL
+                  AND source.issue_id = task.issue_id
+                  AND source.agent_id = task.agent_id
+                  AND recovery.issue_id = source.issue_id
+            )
+        )) AS receipt(id)
+      )
+    END
+WHERE task.id = $1
+  AND task.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING task.id, task.agent_id, task.issue_id, task.status, task.priority, task.dispatched_at, task.started_at, task.completed_at, task.result, task.error, task.created_at, task.context, task.runtime_id, task.session_id, task.work_dir, task.trigger_comment_id, task.chat_session_id, task.autopilot_run_id, task.attempt, task.max_attempts, task.parent_task_id, task.failure_reason, task.trigger_summary, task.force_fresh_session, task.is_leader_task, task.wait_reason, task.initiator_user_id, task.handoff_note, task.prepare_lease_expires_at, task.squad_id, task.runtime_mcp_overlay, task.escalation_for_task_id, task.fire_at, task.originator_user_id, task.runtime_connected_apps, task.coalesced_comment_ids, task.delivered_comment_ids, task.chat_input_task_id, task.chat_finalize_deferred_at, task.originator_source, task.delegated_from_task_id, task.retry_of_task_id, task.rerun_of_task_id, task.rule_version_id, task.trigger_evidence_kind, task.trigger_evidence_ref_id, task.accountable_user_id, task.session_rollout_missing, task.retired_session_id, task.quick_actions_disabled, task.regenerate_quick_actions_for, task.branch_name
+`
+
+// An explicit user cancellation is a terminal acknowledgement for any
+// delegated-failure recovery signal planned into this task. Server-initiated
+// cancellations keep using CancelAgentTask / CancelAgentTaskWithReason so a
+// stale plan, claim failure, or other automatic repair can still be replayed.
+func (q *Queries) CancelAgentTaskByUser(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, cancelAgentTaskByUser, id)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+	)
+	return i, err
+}
+
+const cancelAgentTaskWithReason = `-- name: CancelAgentTaskWithReason :one
+UPDATE agent_task_queue
+SET status = 'cancelled',
+    completed_at = now(),
+    error = $1,
+    failure_reason = $2,
+    prepare_lease_expires_at = NULL
+WHERE id = $3 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
+`
+
+type CancelAgentTaskWithReasonParams struct {
+	Error         pgtype.Text `json:"error"`
+	FailureReason pgtype.Text `json:"failure_reason"`
+	ID            pgtype.UUID `json:"id"`
+}
+
+// Cancels a task AND records why, for cancellations the user did not ask for.
+//
+// CancelAgentTaskByUser leaves error/failure_reason NULL because the user knows
+// why. A server-initiated refusal is the opposite: without a persisted reason
+// the run surfaces as an unexplained "cancelled", and the only trace is a 4xx
+// in a daemon log the user never sees. Retrying cannot help either (the task is
+// refused for a durable reason), so this terminal state carries its explanation.
+func (q *Queries) CancelAgentTaskWithReason(ctx context.Context, arg CancelAgentTaskWithReasonParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, cancelAgentTaskWithReason, arg.Error, arg.FailureReason, arg.ID)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -270,7 +572,7 @@ const cancelAgentTasksByAgent = `-- name: CancelAgentTasksByAgent :many
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE agent_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 // Bulk-cancel every active (queued/dispatched/running) task for an agent.
@@ -339,6 +641,7 @@ func (q *Queries) CancelAgentTasksByAgent(ctx context.Context, agentID pgtype.UU
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -354,7 +657,7 @@ const cancelAgentTasksByChatSession = `-- name: CancelAgentTasksByChatSession :m
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE chat_session_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 // Cancels active tasks belonging to a chat session. Called from
@@ -423,6 +726,7 @@ func (q *Queries) CancelAgentTasksByChatSession(ctx context.Context, chatSession
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -438,7 +742,7 @@ const cancelAgentTasksByIssue = `-- name: CancelAgentTasksByIssue :many
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 // Cancels every active task on the issue and returns the affected rows so the
@@ -507,6 +811,7 @@ func (q *Queries) CancelAgentTasksByIssue(ctx context.Context, issueID pgtype.UU
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -522,7 +827,7 @@ const cancelAgentTasksByIssueAndAgent = `-- name: CancelAgentTasksByIssueAndAgen
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE issue_id = $1 AND agent_id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type CancelAgentTasksByIssueAndAgentParams struct {
@@ -595,6 +900,7 @@ func (q *Queries) CancelAgentTasksByIssueAndAgent(ctx context.Context, arg Cance
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -611,7 +917,7 @@ UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE (trigger_comment_id = $1 OR $1 = ANY(coalesced_comment_ids))
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 // Cancels active tasks whose planned batch contains the edited/deleted comment.
@@ -679,6 +985,7 @@ func (q *Queries) CancelAgentTasksByTriggerComment(ctx context.Context, triggerC
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -699,9 +1006,9 @@ WITH cancelled AS (
       AND fallback.status IN ('deferred', 'queued', 'dispatched', 'waiting_local_directory')
       AND primary_task.issue_id = $1
       AND primary_task.agent_id = $2
-    RETURNING fallback.id, fallback.agent_id, fallback.issue_id, fallback.status, fallback.priority, fallback.dispatched_at, fallback.started_at, fallback.completed_at, fallback.result, fallback.error, fallback.created_at, fallback.context, fallback.runtime_id, fallback.session_id, fallback.work_dir, fallback.trigger_comment_id, fallback.chat_session_id, fallback.autopilot_run_id, fallback.attempt, fallback.max_attempts, fallback.parent_task_id, fallback.failure_reason, fallback.trigger_summary, fallback.force_fresh_session, fallback.is_leader_task, fallback.wait_reason, fallback.initiator_user_id, fallback.handoff_note, fallback.prepare_lease_expires_at, fallback.squad_id, fallback.runtime_mcp_overlay, fallback.escalation_for_task_id, fallback.fire_at, fallback.originator_user_id, fallback.runtime_connected_apps, fallback.coalesced_comment_ids, fallback.delivered_comment_ids, fallback.chat_input_task_id, fallback.chat_finalize_deferred_at, fallback.originator_source, fallback.delegated_from_task_id, fallback.retry_of_task_id, fallback.rerun_of_task_id, fallback.rule_version_id, fallback.trigger_evidence_kind, fallback.trigger_evidence_ref_id, fallback.accountable_user_id, fallback.session_rollout_missing, fallback.retired_session_id, fallback.quick_actions_disabled, fallback.regenerate_quick_actions_for
+    RETURNING fallback.id, fallback.agent_id, fallback.issue_id, fallback.status, fallback.priority, fallback.dispatched_at, fallback.started_at, fallback.completed_at, fallback.result, fallback.error, fallback.created_at, fallback.context, fallback.runtime_id, fallback.session_id, fallback.work_dir, fallback.trigger_comment_id, fallback.chat_session_id, fallback.autopilot_run_id, fallback.attempt, fallback.max_attempts, fallback.parent_task_id, fallback.failure_reason, fallback.trigger_summary, fallback.force_fresh_session, fallback.is_leader_task, fallback.wait_reason, fallback.initiator_user_id, fallback.handoff_note, fallback.prepare_lease_expires_at, fallback.squad_id, fallback.runtime_mcp_overlay, fallback.escalation_for_task_id, fallback.fire_at, fallback.originator_user_id, fallback.runtime_connected_apps, fallback.coalesced_comment_ids, fallback.delivered_comment_ids, fallback.chat_input_task_id, fallback.chat_finalize_deferred_at, fallback.originator_source, fallback.delegated_from_task_id, fallback.retry_of_task_id, fallback.rerun_of_task_id, fallback.rule_version_id, fallback.trigger_evidence_kind, fallback.trigger_evidence_ref_id, fallback.accountable_user_id, fallback.session_rollout_missing, fallback.retired_session_id, fallback.quick_actions_disabled, fallback.regenerate_quick_actions_for, fallback.branch_name
 )
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM cancelled
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM cancelled
 `
 
 type CancelDeferredEscalationsForIssueAgentParams struct {
@@ -761,6 +1068,7 @@ type CancelDeferredEscalationsForIssueAgentRow struct {
 	RetiredSessionID          pgtype.Text        `json:"retired_session_id"`
 	QuickActionsDisabled      bool               `json:"quick_actions_disabled"`
 	RegenerateQuickActionsFor pgtype.UUID        `json:"regenerate_quick_actions_for"`
+	BranchName                pgtype.Text        `json:"branch_name"`
 }
 
 func (q *Queries) CancelDeferredEscalationsForIssueAgent(ctx context.Context, arg CancelDeferredEscalationsForIssueAgentParams) ([]CancelDeferredEscalationsForIssueAgentRow, error) {
@@ -824,6 +1132,7 @@ func (q *Queries) CancelDeferredEscalationsForIssueAgent(ctx context.Context, ar
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -840,7 +1149,7 @@ UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE escalation_for_task_id = $1
   AND status IN ('deferred', 'queued', 'dispatched', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 func (q *Queries) CancelDeferredEscalationsForTask(ctx context.Context, escalationForTaskID pgtype.UUID) ([]AgentTaskQueue, error) {
@@ -904,6 +1213,7 @@ func (q *Queries) CancelDeferredEscalationsForTask(ctx context.Context, escalati
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -921,7 +1231,7 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE id = $1
   AND chat_session_id = $2
   AND status = 'queued'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type CancelQueuedAgentTaskParams struct {
@@ -986,6 +1296,7 @@ func (q *Queries) CancelQueuedAgentTask(ctx context.Context, arg CancelQueuedAge
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -1013,7 +1324,7 @@ SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE queued.chat_session_id = $1
   AND queued.status = 'queued'
   AND queued.id IS DISTINCT FROM (SELECT id FROM head)
-RETURNING queued.id, queued.agent_id, queued.issue_id, queued.status, queued.priority, queued.dispatched_at, queued.started_at, queued.completed_at, queued.result, queued.error, queued.created_at, queued.context, queued.runtime_id, queued.session_id, queued.work_dir, queued.trigger_comment_id, queued.chat_session_id, queued.autopilot_run_id, queued.attempt, queued.max_attempts, queued.parent_task_id, queued.failure_reason, queued.trigger_summary, queued.force_fresh_session, queued.is_leader_task, queued.wait_reason, queued.initiator_user_id, queued.handoff_note, queued.prepare_lease_expires_at, queued.squad_id, queued.runtime_mcp_overlay, queued.escalation_for_task_id, queued.fire_at, queued.originator_user_id, queued.runtime_connected_apps, queued.coalesced_comment_ids, queued.delivered_comment_ids, queued.chat_input_task_id, queued.chat_finalize_deferred_at, queued.originator_source, queued.delegated_from_task_id, queued.retry_of_task_id, queued.rerun_of_task_id, queued.rule_version_id, queued.trigger_evidence_kind, queued.trigger_evidence_ref_id, queued.accountable_user_id, queued.session_rollout_missing, queued.retired_session_id, queued.quick_actions_disabled, queued.regenerate_quick_actions_for
+RETURNING queued.id, queued.agent_id, queued.issue_id, queued.status, queued.priority, queued.dispatched_at, queued.started_at, queued.completed_at, queued.result, queued.error, queued.created_at, queued.context, queued.runtime_id, queued.session_id, queued.work_dir, queued.trigger_comment_id, queued.chat_session_id, queued.autopilot_run_id, queued.attempt, queued.max_attempts, queued.parent_task_id, queued.failure_reason, queued.trigger_summary, queued.force_fresh_session, queued.is_leader_task, queued.wait_reason, queued.initiator_user_id, queued.handoff_note, queued.prepare_lease_expires_at, queued.squad_id, queued.runtime_mcp_overlay, queued.escalation_for_task_id, queued.fire_at, queued.originator_user_id, queued.runtime_connected_apps, queued.coalesced_comment_ids, queued.delivered_comment_ids, queued.chat_input_task_id, queued.chat_finalize_deferred_at, queued.originator_source, queued.delegated_from_task_id, queued.retry_of_task_id, queued.rerun_of_task_id, queued.rule_version_id, queued.trigger_evidence_kind, queued.trigger_evidence_ref_id, queued.accountable_user_id, queued.session_rollout_missing, queued.retired_session_id, queued.quick_actions_disabled, queued.regenerate_quick_actions_for, queued.branch_name
 `
 
 // Clear only positional follow-ups. The first visible task is current even
@@ -1081,6 +1392,7 @@ func (q *Queries) CancelQueuedAgentTasksForSession(ctx context.Context, chatSess
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -1096,10 +1408,19 @@ const claimAgentTask = `-- name: ClaimAgentTask :one
 UPDATE agent_task_queue
 SET status = 'dispatched',
     dispatched_at = now(),
-    prepare_lease_expires_at = now() + make_interval(secs => $2::double precision)
+    prepare_lease_expires_at = now() + make_interval(secs => $1::double precision)
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
-    WHERE atq.agent_id = $1 AND atq.status = 'queued'
+    WHERE atq.agent_id = $2
+      AND atq.runtime_id = $3
+      AND atq.status = 'queued'
+      AND EXISTS (
+          SELECT 1 FROM agent_runtime r
+          WHERE r.id = atq.runtime_id
+            AND r.status = 'online'
+            AND COALESCE(r.last_seen_at, r.updated_at) >=
+                now() - make_interval(secs => $4::double precision)
+      )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -1121,15 +1442,18 @@ WHERE id = (
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type ClaimAgentTaskParams struct {
-	AgentID          pgtype.UUID `json:"agent_id"`
 	PrepareLeaseSecs float64     `json:"prepare_lease_secs"`
+	AgentID          pgtype.UUID `json:"agent_id"`
+	RuntimeID        pgtype.UUID `json:"runtime_id"`
+	RuntimeStaleSecs float64     `json:"runtime_stale_secs"`
 }
 
-// Claims the next queued task for an agent, enforcing per-(issue, agent) serialization:
+// Claims the next queued task for an agent on one healthy runtime, enforcing
+// per-(issue, agent) serialization:
 // a task is only claimable when no other task for the same issue AND same agent is
 // already dispatched or running. This allows different agents to work on the same
 // issue in parallel while preventing a single agent from running duplicate tasks.
@@ -1139,7 +1463,12 @@ type ClaimAgentTaskParams struct {
 // otherwise a user mashing the create button could fire concurrent quick-creates
 // whose completion lookup would race over "most recent issue by this agent".
 func (q *Queries) ClaimAgentTask(ctx context.Context, arg ClaimAgentTaskParams) (AgentTaskQueue, error) {
-	row := q.db.QueryRow(ctx, claimAgentTask, arg.AgentID, arg.PrepareLeaseSecs)
+	row := q.db.QueryRow(ctx, claimAgentTask,
+		arg.PrepareLeaseSecs,
+		arg.AgentID,
+		arg.RuntimeID,
+		arg.RuntimeStaleSecs,
+	)
 	var i AgentTaskQueue
 	err := row.Scan(
 		&i.ID,
@@ -1193,6 +1522,7 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, arg ClaimAgentTaskParams) 
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -1201,7 +1531,7 @@ const claimChatFinalizeDeferred = `-- name: ClaimChatFinalizeDeferred :one
 UPDATE agent_task_queue
 SET chat_finalize_deferred_at = NULL
 WHERE id = $1 AND chat_finalize_deferred_at IS NOT NULL
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 // Atomically claims the deferred marker so the daemon ack and the sweeper
@@ -1261,6 +1591,7 @@ func (q *Queries) ClaimChatFinalizeDeferred(ctx context.Context, id pgtype.UUID)
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -1449,11 +1780,12 @@ UPDATE agent_task_queue
 SET status = 'completed', completed_at = now(), result = $2,
     session_id = CASE WHEN $5 THEN NULL ELSE $3 END,
     work_dir = $4,
+    branch_name = COALESCE($6, branch_name),
     session_rollout_missing = $5,
-    retired_session_id = COALESCE($6, retired_session_id),
+    retired_session_id = COALESCE($7, retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status = 'running'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type CompleteAgentTaskParams struct {
@@ -1462,6 +1794,7 @@ type CompleteAgentTaskParams struct {
 	SessionID             pgtype.Text `json:"session_id"`
 	WorkDir               pgtype.Text `json:"work_dir"`
 	SessionRolloutMissing bool        `json:"session_rollout_missing"`
+	BranchName            pgtype.Text `json:"branch_name"`
 	RetiredSessionID      pgtype.Text `json:"retired_session_id"`
 }
 
@@ -1483,6 +1816,7 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 		arg.SessionID,
 		arg.WorkDir,
 		arg.SessionRolloutMissing,
+		arg.BranchName,
 		arg.RetiredSessionID,
 	)
 	var i AgentTaskQueue
@@ -1538,8 +1872,26 @@ func (q *Queries) CompleteAgentTask(ctx context.Context, arg CompleteAgentTaskPa
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
+}
+
+const countDelegatedFailureRecoveryTasks = `-- name: CountDelegatedFailureRecoveryTasks :one
+SELECT count(*)
+FROM agent_task_queue
+WHERE trigger_evidence_kind = 'delegated_failure'
+  AND trigger_evidence_ref_id = $1
+`
+
+// Counts dedicated coordinator wakeups for one failed delegated task. Merged
+// recovery signals do not create a new row and therefore do not consume an
+// automatic attempt until they need a standalone successor.
+func (q *Queries) CountDelegatedFailureRecoveryTasks(ctx context.Context, failedTaskID pgtype.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countDelegatedFailureRecoveryTasks, failedTaskID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const countRunningTasks = `-- name: CountRunningTasks :one
@@ -1758,7 +2110,7 @@ SELECT
     $21,
     $22
 WHERE lock_task_owner_rows($1, $3, $2)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type CreateAgentTaskParams struct {
@@ -1875,6 +2227,7 @@ func (q *Queries) CreateAgentTask(ctx context.Context, arg CreateAgentTaskParams
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -1901,7 +2254,7 @@ SELECT
     $18,
     $19
 WHERE lock_task_owner_rows($1, $3, $2)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type CreateDeferredAgentTaskParams struct {
@@ -2012,6 +2365,7 @@ func (q *Queries) CreateDeferredAgentTask(ctx context.Context, arg CreateDeferre
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -2048,7 +2402,7 @@ SELECT
     $22,
     $23
 WHERE lock_task_owner_rows($1, $3, $2)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type CreateDeferredChannelIssueTaskParams struct {
@@ -2163,6 +2517,7 @@ func (q *Queries) CreateDeferredChannelIssueTask(ctx context.Context, arg Create
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -2183,7 +2538,7 @@ SELECT
     $10,
     $11
 WHERE lock_task_owner_rows($1, NULL, $2)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type CreateQuickCreateTaskParams struct {
@@ -2277,6 +2632,7 @@ func (q *Queries) CreateQuickCreateTask(ctx context.Context, arg CreateQuickCrea
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -2313,7 +2669,7 @@ SELECT
 FROM agent_task_queue p
 WHERE p.id = $1
   AND lock_task_owner_rows(p.agent_id, p.issue_id, p.runtime_id)
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type CreateRetryTaskParams struct {
@@ -2370,9 +2726,10 @@ type CreateRetryTaskParams struct {
 // fire_at arms a backoff before the retry: when non-NULL the child is inserted
 // as 'deferred' with that fire_at and stays inert until the existing
 // PromoteDueDeferredTasksForRuntime sweeper (run promote-first on every claim
-// poll) flips it to 'queued'. Used for provider_network's final attempt so it
-// waits ~5s instead of firing back-to-back with the immediate retry (MUL-4910).
-// NULL keeps the historical behaviour: an immediately-claimable 'queued' child.
+// poll) flips it to 'queued'. Used for runtime_offline so the child waits for a
+// healthy runtime, and for provider_network's final attempt so it waits ~5s
+// instead of firing back-to-back with the immediate retry (MUL-4910). NULL
+// keeps the historical behaviour: an immediately-claimable 'queued' child.
 //
 // max_attempts overrides the inherited budget when non-NULL (NULL inherits
 // p.max_attempts unchanged). Callers persist the reason-aware effective ceiling
@@ -2441,6 +2798,7 @@ func (q *Queries) CreateRetryTask(ctx context.Context, arg CreateRetryTaskParams
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -2552,6 +2910,11 @@ WITH victims AS (
     SELECT id FROM agent_task_queue
     WHERE status = 'queued'
       AND created_at < now() - make_interval(secs => $1::double precision)
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_task_queue retry_parent
+          WHERE retry_parent.id = agent_task_queue.parent_task_id
+            AND retry_parent.failure_reason = 'runtime_offline'
+      )
     ORDER BY created_at ASC
     LIMIT $2::int
     FOR UPDATE SKIP LOCKED
@@ -2566,7 +2929,12 @@ FROM victims v
 WHERE t.id = v.id
   AND t.status = 'queued'
   AND t.created_at < now() - make_interval(secs => $1::double precision)
-RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue retry_parent
+      WHERE retry_parent.id = t.parent_task_id
+        AND retry_parent.failure_reason = 'runtime_offline'
+  )
+RETURNING t.id, t.agent_id, t.issue_id, t.status, t.priority, t.dispatched_at, t.started_at, t.completed_at, t.result, t.error, t.created_at, t.context, t.runtime_id, t.session_id, t.work_dir, t.trigger_comment_id, t.chat_session_id, t.autopilot_run_id, t.attempt, t.max_attempts, t.parent_task_id, t.failure_reason, t.trigger_summary, t.force_fresh_session, t.is_leader_task, t.wait_reason, t.initiator_user_id, t.handoff_note, t.prepare_lease_expires_at, t.squad_id, t.runtime_mcp_overlay, t.escalation_for_task_id, t.fire_at, t.originator_user_id, t.runtime_connected_apps, t.coalesced_comment_ids, t.delivered_comment_ids, t.chat_input_task_id, t.chat_finalize_deferred_at, t.originator_source, t.delegated_from_task_id, t.retry_of_task_id, t.rerun_of_task_id, t.rule_version_id, t.trigger_evidence_kind, t.trigger_evidence_ref_id, t.accountable_user_id, t.session_rollout_missing, t.retired_session_id, t.quick_actions_disabled, t.regenerate_quick_actions_for, t.branch_name
 `
 
 type ExpireStaleQueuedTasksParams struct {
@@ -2580,7 +2948,9 @@ type ExpireStaleQueuedTasksParams struct {
 // is offline, we still need to drain the historical 87k+ doomed rows and
 // handle edge cases where a runtime goes offline AFTER a task is already
 // queued (the admission check protects new enqueues, not in-flight queue
-// depth).
+// depth). A retry created by runtime_offline is exempt: it deliberately waits
+// for that runtime to reconnect, so time spent in this recovery state must not
+// consume the generic queue TTL.
 //
 // Concurrency safety: the daemon's claim path may race with this sweeper to
 // transition the same row out of 'queued'. We protect against that two
@@ -2658,6 +3028,7 @@ func (q *Queries) ExpireStaleQueuedTasks(ctx context.Context, arg ExpireStaleQue
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -2676,7 +3047,7 @@ WHERE id = $1
   AND runtime_id = $2
   AND status IN ('dispatched', 'waiting_local_directory')
   AND started_at IS NULL
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type ExtendAgentTaskPrepareLeaseParams struct {
@@ -2744,6 +3115,7 @@ func (q *Queries) ExtendAgentTaskPrepareLease(ctx context.Context, arg ExtendAge
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -2756,11 +3128,12 @@ SET status = 'failed',
     failure_reason = COALESCE($3, 'agent_error'),
     session_id = CASE WHEN $4 THEN NULL ELSE COALESCE($5, session_id) END,
     work_dir = COALESCE($6, work_dir),
+    branch_name = COALESCE($7, branch_name),
     session_rollout_missing = $4,
-    retired_session_id = COALESCE($7, retired_session_id),
+    retired_session_id = COALESCE($8, retired_session_id),
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type FailAgentTaskParams struct {
@@ -2770,6 +3143,7 @@ type FailAgentTaskParams struct {
 	SessionRolloutMissing bool        `json:"session_rollout_missing"`
 	SessionID             pgtype.Text `json:"session_id"`
 	WorkDir               pgtype.Text `json:"work_dir"`
+	BranchName            pgtype.Text `json:"branch_name"`
 	RetiredSessionID      pgtype.Text `json:"retired_session_id"`
 }
 
@@ -2796,6 +3170,7 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 		arg.SessionRolloutMissing,
 		arg.SessionID,
 		arg.WorkDir,
+		arg.BranchName,
 		arg.RetiredSessionID,
 	)
 	var i AgentTaskQueue
@@ -2851,78 +3226,71 @@ func (q *Queries) FailAgentTask(ctx context.Context, arg FailAgentTaskParams) (A
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
 
-const failStaleTasks = `-- name: FailStaleTasks :many
-UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'task timed out',
-    failure_reason = 'timeout',
+const failExpiredRuntimeReconnectRetries = `-- name: FailExpiredRuntimeReconnectRetries :many
+WITH victims AS (
+    SELECT retry.id
+    FROM agent_task_queue retry
+    JOIN agent_task_queue parent ON parent.id = retry.parent_task_id
+    WHERE retry.status = 'deferred'
+      AND retry.fire_at < now() - make_interval(secs => $1::double precision)
+      AND parent.failure_reason = 'runtime_offline'
+      AND NOT EXISTS (
+          SELECT 1 FROM agent_runtime runtime
+          WHERE runtime.id = retry.runtime_id
+            AND runtime.status = 'online'
+            AND COALESCE(runtime.last_seen_at, runtime.updated_at) >=
+                now() - make_interval(secs => $2::double precision)
+      )
+    ORDER BY retry.fire_at, retry.created_at
+    LIMIT $3::int
+    FOR UPDATE OF retry SKIP LOCKED
+)
+UPDATE agent_task_queue AS retry
+SET status = 'failed',
+    completed_at = now(),
+    error = 'runtime did not reconnect within the configured grace period',
+    failure_reason = 'runtime_reconnect_timeout',
+    wait_reason = NULL,
     prepare_lease_expires_at = NULL
-WHERE (
-    status = 'dispatched'
-    AND dispatched_at < now() - make_interval(secs => $1::double precision)
-    AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
+FROM victims
+WHERE retry.id = victims.id
+  AND retry.status = 'deferred'
+  AND retry.fire_at < now() - make_interval(secs => $1::double precision)
+  AND EXISTS (
+      SELECT 1 FROM agent_task_queue parent
+      WHERE parent.id = retry.parent_task_id
+        AND parent.failure_reason = 'runtime_offline'
   )
-   OR (
-    status = 'running'
-    AND started_at < now() - make_interval(secs => $2::double precision)
-    AND NOT EXISTS (
-      SELECT 1 FROM agent_runtime r
-      WHERE r.id = agent_task_queue.runtime_id
-        AND r.status = 'online'
-        AND r.last_seen_at >= now() - make_interval(secs => $3::double precision)
-    )
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = retry.runtime_id
+        AND runtime.status = 'online'
+        AND COALESCE(runtime.last_seen_at, runtime.updated_at) >=
+            now() - make_interval(secs => $2::double precision)
   )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING retry.id, retry.agent_id, retry.issue_id, retry.status, retry.priority, retry.dispatched_at, retry.started_at, retry.completed_at, retry.result, retry.error, retry.created_at, retry.context, retry.runtime_id, retry.session_id, retry.work_dir, retry.trigger_comment_id, retry.chat_session_id, retry.autopilot_run_id, retry.attempt, retry.max_attempts, retry.parent_task_id, retry.failure_reason, retry.trigger_summary, retry.force_fresh_session, retry.is_leader_task, retry.wait_reason, retry.initiator_user_id, retry.handoff_note, retry.prepare_lease_expires_at, retry.squad_id, retry.runtime_mcp_overlay, retry.escalation_for_task_id, retry.fire_at, retry.originator_user_id, retry.runtime_connected_apps, retry.coalesced_comment_ids, retry.delivered_comment_ids, retry.chat_input_task_id, retry.chat_finalize_deferred_at, retry.originator_source, retry.delegated_from_task_id, retry.retry_of_task_id, retry.rerun_of_task_id, retry.rule_version_id, retry.trigger_evidence_kind, retry.trigger_evidence_ref_id, retry.accountable_user_id, retry.session_rollout_missing, retry.retired_session_id, retry.quick_actions_disabled, retry.regenerate_quick_actions_for, retry.branch_name
 `
 
-type FailStaleTasksParams struct {
-	DispatchTimeoutSecs float64 `json:"dispatch_timeout_secs"`
-	RunningTimeoutSecs  float64 `json:"running_timeout_secs"`
-	RuntimeStaleSecs    float64 `json:"runtime_stale_secs"`
+type FailExpiredRuntimeReconnectRetriesParams struct {
+	ReconnectGraceSecs float64 `json:"reconnect_grace_secs"`
+	RuntimeStaleSecs   float64 `json:"runtime_stale_secs"`
+	MaxPerTick         int32   `json:"max_per_tick"`
 }
 
-// Fails tasks stuck in dispatched/running beyond the given thresholds.
-//
-// Each branch pairs a wall-clock deadline with a task-appropriate liveness
-// signal, so the sweeper only kills tasks whose owning daemon is no longer
-// proving it is alive:
-//
-//   - Dispatched: `prepare_lease_expires_at` is refreshed every 15s by the
-//     daemon between claim and StartTask (see startTaskPrepareLeaseExtender).
-//     A live lease excludes the row.
-//
-//   - Running: no per-task lease is renewed once StartTask fires, so we key
-//     off the daemon-wide heartbeat instead — `agent_runtime.last_seen_at`,
-//     which the daemon bumps every ~15s while it is up. A running task whose
-//     runtime is `online` AND whose `last_seen_at` is within
-//     @runtime_stale_secs is treated as alive and is NOT killed by this
-//     wall-clock backstop, even after `started_at` exceeds the running
-//     timeout. This is what lets healthy multi-hour research / training runs
-//     survive on self-hosted deployments (MUL-4107): the daemon side is
-//     bounded only by inactivity watchdogs (idle / per-tool), so the
-//     server-side wall clock must not shadow that with a coarser cap.
-//
-// The daemon-dead case is the primary responsibility of `sweepStaleRuntimes`
-// (which mixes DB `last_seen_at` with the Redis LivenessStore and calls
-// `FailTasksForOfflineRuntimes` in the same tick). The wall-clock branch
-// here is a defensive backstop for pathological cases where a runtime row
-// somehow retains status='online' with a stale DB heartbeat for longer than
-// the wall clock allows.
-//
-// runtime_id IS NULL: a running row with no runtime is by definition not
-// proving liveness, so the wall clock is allowed to fire — same shape as
-// the legacy pure-wall-clock behavior for that (rare / historical) case.
-//
-// waiting_local_directory rows are intentionally excluded: the daemon owns
-// the wait (with its own ctx-driven timeout) and a legitimate queue ahead
-// of this task can exceed the dispatch / running timeouts without being
-// "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
-// those rows at restart.
-func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, failStaleTasks, arg.DispatchTimeoutSecs, arg.RunningTimeoutSecs, arg.RuntimeStaleSecs)
+// A runtime_offline retry waits in deferred until its runtime returns healthy.
+// Give that recovery state a bounded exit: after one full reconnect grace,
+// fail it with a non-retryable reason so issues, agents, and runtime GC can
+// converge. A runtime that is healthy when this query runs wins the race and
+// remains deferred for the next daemon poll to promote. The parent join is the
+// lineage discriminator; provider backoff and other deferred task types are
+// intentionally excluded.
+func (q *Queries) FailExpiredRuntimeReconnectRetries(ctx context.Context, arg FailExpiredRuntimeReconnectRetriesParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, failExpiredRuntimeReconnectRetries, arg.ReconnectGraceSecs, arg.RuntimeStaleSecs, arg.MaxPerTick)
 	if err != nil {
 		return nil, err
 	}
@@ -2982,6 +3350,170 @@ func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) 
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const failStaleTasks = `-- name: FailStaleTasks :many
+UPDATE agent_task_queue
+SET status = 'failed', completed_at = now(), error = 'task timed out',
+    failure_reason = 'timeout',
+    prepare_lease_expires_at = NULL
+WHERE (
+    status = 'dispatched'
+    AND dispatched_at < now() - make_interval(secs => $1::double precision)
+    AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
+    AND (
+      runtime_id IS NULL
+      OR NOT EXISTS (
+        SELECT 1 FROM agent_runtime r
+        WHERE r.id = agent_task_queue.runtime_id
+      )
+      OR EXISTS (
+        SELECT 1 FROM agent_runtime r
+        WHERE r.id = agent_task_queue.runtime_id
+          AND (
+            (
+              r.status = 'online'
+              AND COALESCE(r.last_seen_at, r.updated_at) >=
+                  now() - make_interval(secs => $2::double precision)
+            )
+            OR COALESCE(r.last_seen_at, r.updated_at) <
+               now() - make_interval(secs => $3::double precision)
+          )
+      )
+    )
+  )
+   OR (
+    status = 'running'
+    AND started_at < now() - make_interval(secs => $4::double precision)
+    AND (
+      runtime_id IS NULL
+      OR NOT EXISTS (
+        SELECT 1 FROM agent_runtime r
+        WHERE r.id = agent_task_queue.runtime_id
+          AND COALESCE(r.last_seen_at, r.updated_at) >=
+              now() - make_interval(secs => $3::double precision)
+      )
+    )
+  )
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
+`
+
+type FailStaleTasksParams struct {
+	DispatchTimeoutSecs       float64 `json:"dispatch_timeout_secs"`
+	RuntimeStaleSecs          float64 `json:"runtime_stale_secs"`
+	RuntimeReconnectGraceSecs float64 `json:"runtime_reconnect_grace_secs"`
+	RunningTimeoutSecs        float64 `json:"running_timeout_secs"`
+}
+
+// Fails tasks stuck in dispatched/running beyond the given thresholds.
+//
+// Each branch pairs a wall-clock deadline with a task-appropriate liveness
+// signal, so the sweeper only kills tasks whose owning daemon is no longer
+// proving it is alive:
+//
+//   - Dispatched: `prepare_lease_expires_at` is refreshed every 15s by the
+//     daemon between claim and StartTask (see startTaskPrepareLeaseExtender).
+//     A live lease excludes the row. An expired lease may fail immediately on
+//     a healthy runtime, but a disconnected runtime gets the same reconnect
+//     grace as a running task.
+//
+//   - Running: no per-task lease is renewed once StartTask fires, so we key
+//     off the daemon-wide heartbeat instead — `agent_runtime.last_seen_at`,
+//     which the daemon bumps every ~15s while it is up. A running task is not
+//     killed until that heartbeat has been absent for the full reconnect
+//     grace, even when its own wall-clock timeout elapsed earlier. This keeps
+//     healthy multi-hour work alive through a network partition.
+//
+// The daemon-dead case is recovered immediately when that daemon restarts via
+// RecoverOrphanedTasksForRuntime. Until then, this query and
+// FailTasksForOfflineRuntimes share the same bounded reconnect grace.
+//
+// runtime_id IS NULL: a running row with no runtime is by definition not
+// proving liveness, so the wall clock is allowed to fire — same shape as
+// the legacy pure-wall-clock behavior for that (rare / historical) case.
+//
+// waiting_local_directory rows are intentionally excluded: the daemon owns
+// the wait (with its own ctx-driven timeout) and a legitimate queue ahead
+// of this task can exceed the dispatch / running timeouts without being
+// "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
+// those rows at restart.
+func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, failStaleTasks,
+		arg.DispatchTimeoutSecs,
+		arg.RuntimeStaleSecs,
+		arg.RuntimeReconnectGraceSecs,
+		arg.RunningTimeoutSecs,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -3218,7 +3750,7 @@ func (q *Queries) GetAgentInWorkspace(ctx context.Context, arg GetAgentInWorkspa
 }
 
 const getAgentTask = `-- name: GetAgentTask :one
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM agent_task_queue
 WHERE id = $1
 `
 
@@ -3277,12 +3809,82 @@ func (q *Queries) GetAgentTask(ctx context.Context, id pgtype.UUID) (AgentTaskQu
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+	)
+	return i, err
+}
+
+const getAgentTaskForDelegatedFailureUpdate = `-- name: GetAgentTaskForDelegatedFailureUpdate :one
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM agent_task_queue
+WHERE id = $1
+FOR UPDATE
+`
+
+// Serializes the idempotent delegated-failure recovery signal for one failed
+// task. FailTask and the stale-task sweepers can converge on the same row; the
+// lock ensures they cannot create two recovery comments/tasks for it.
+func (q *Queries) GetAgentTaskForDelegatedFailureUpdate(ctx context.Context, id pgtype.UUID) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, getAgentTaskForDelegatedFailureUpdate, id)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
 
 const getAgentTaskInWorkspace = `-- name: GetAgentTaskInWorkspace :one
-SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for FROM agent_task_queue atq
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for, atq.branch_name FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE atq.id = $1 AND a.workspace_id = $2
 `
@@ -3354,6 +3956,7 @@ func (q *Queries) GetAgentTaskInWorkspace(ctx context.Context, arg GetAgentTaskI
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -3879,6 +4482,65 @@ func (q *Queries) HasPendingTaskForIssueAndAgentExcludingTriggerComment(ctx cont
 	return has_pending, err
 }
 
+const hasRetryTaskForParent = `-- name: HasRetryTaskForParent :one
+SELECT count(*) > 0
+FROM agent_task_queue
+WHERE parent_task_id = $1
+  AND status <> 'cancelled'
+`
+
+// Defense-in-depth for the recovery path: a delegated failure with any retry
+// child is still intermediate and must not wake its coordinator.
+func (q *Queries) HasRetryTaskForParent(ctx context.Context, parentTaskID pgtype.UUID) (bool, error) {
+	row := q.db.QueryRow(ctx, hasRetryTaskForParent, parentTaskID)
+	var column_1 bool
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const hasTaskCoveringDelegatedFailureComment = `-- name: HasTaskCoveringDelegatedFailureComment :one
+SELECT count(*) > 0 AS covered
+FROM agent_task_queue
+WHERE issue_id = $1
+  AND agent_id = $2
+  AND (
+      $3::uuid = ANY(delivered_comment_ids)
+      OR (
+          id IS DISTINCT FROM $4::uuid
+          AND (
+              status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+              OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
+          )
+          AND (trigger_comment_id = $3::uuid OR $3::uuid = ANY(coalesced_comment_ids))
+      )
+  )
+`
+
+type HasTaskCoveringDelegatedFailureCommentParams struct {
+	IssueID       pgtype.UUID `json:"issue_id"`
+	AgentID       pgtype.UUID `json:"agent_id"`
+	CommentID     pgtype.UUID `json:"comment_id"`
+	ExcludeTaskID pgtype.UUID `json:"exclude_task_id"`
+}
+
+// Durable idempotency check for a recovery comment. The completion reconciler
+// excludes its own just-completed task when replaying a planned-but-undelivered
+// signal. A planned comment is covered only while its task can still execute;
+// after a task becomes terminal, delivered_comment_ids is the sole durable
+// receipt. This prevents cancelled/failed pre-delivery tasks from swallowing
+// the recovery obligation while still avoiding a loop after real delivery.
+func (q *Queries) HasTaskCoveringDelegatedFailureComment(ctx context.Context, arg HasTaskCoveringDelegatedFailureCommentParams) (bool, error) {
+	row := q.db.QueryRow(ctx, hasTaskCoveringDelegatedFailureComment,
+		arg.IssueID,
+		arg.AgentID,
+		arg.CommentID,
+		arg.ExcludeTaskID,
+	)
+	var covered bool
+	err := row.Scan(&covered)
+	return covered, err
+}
+
 const linkTaskToIssue = `-- name: LinkTaskToIssue :exec
 UPDATE agent_task_queue
 SET issue_id = $2
@@ -4029,8 +4691,86 @@ func (q *Queries) ListActiveAgentsByRuntimeForUpdate(ctx context.Context, runtim
 	return items, nil
 }
 
+const listActiveSiblingIssueTasks = `-- name: ListActiveSiblingIssueTasks :many
+SELECT
+    atq.id AS task_id,
+    i.id AS issue_id,
+    w.issue_prefix,
+    i.number AS issue_number,
+    i.title AS issue_title,
+    atq.status,
+    atq.created_at,
+    atq.started_at
+FROM agent_task_queue atq
+JOIN issue i ON i.id = atq.issue_id
+JOIN workspace w ON w.id = i.workspace_id
+WHERE atq.agent_id = $1
+  AND atq.id <> $2
+  AND i.workspace_id = $3
+  AND atq.status IN ('dispatched', 'running', 'waiting_local_directory')
+ORDER BY
+    CASE atq.status
+        WHEN 'running' THEN 0
+        WHEN 'waiting_local_directory' THEN 1
+        ELSE 2
+    END,
+    atq.created_at DESC
+LIMIT 5
+`
+
+type ListActiveSiblingIssueTasksParams struct {
+	AgentID     pgtype.UUID `json:"agent_id"`
+	TaskID      pgtype.UUID `json:"task_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+type ListActiveSiblingIssueTasksRow struct {
+	TaskID      pgtype.UUID        `json:"task_id"`
+	IssueID     pgtype.UUID        `json:"issue_id"`
+	IssuePrefix string             `json:"issue_prefix"`
+	IssueNumber int32              `json:"issue_number"`
+	IssueTitle  string             `json:"issue_title"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+}
+
+// Claim-time context for agents that can work concurrently. Only tasks already
+// handed to a runtime can coordinate with the new claim; queued work is omitted
+// so the warning stays high-signal. Bounded so one heavily-used agent cannot
+// inflate every claim payload; issue-bound rows carry a concrete run-messages
+// lookup target.
+func (q *Queries) ListActiveSiblingIssueTasks(ctx context.Context, arg ListActiveSiblingIssueTasksParams) ([]ListActiveSiblingIssueTasksRow, error) {
+	rows, err := q.db.Query(ctx, listActiveSiblingIssueTasks, arg.AgentID, arg.TaskID, arg.WorkspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListActiveSiblingIssueTasksRow{}
+	for rows.Next() {
+		var i ListActiveSiblingIssueTasksRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.IssueID,
+			&i.IssuePrefix,
+			&i.IssueNumber,
+			&i.IssueTitle,
+			&i.Status,
+			&i.CreatedAt,
+			&i.StartedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listActiveTasksByIssue = `-- name: ListActiveTasksByIssue :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM agent_task_queue
 WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 ORDER BY created_at DESC
 `
@@ -4101,6 +4841,7 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -4113,7 +4854,7 @@ func (q *Queries) ListActiveTasksByIssue(ctx context.Context, issueID pgtype.UUI
 }
 
 const listAgentTasks = `-- name: ListAgentTasks :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM agent_task_queue
 WHERE agent_id = $1
 ORDER BY created_at DESC
 `
@@ -4179,6 +4920,7 @@ func (q *Queries) ListAgentTasks(ctx context.Context, agentID pgtype.UUID) ([]Ag
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -4366,7 +5108,7 @@ func (q *Queries) ListAllAgentsAnyKind(ctx context.Context, workspaceID pgtype.U
 }
 
 const listChatFinalizeDeferredExpired = `-- name: ListChatFinalizeDeferredExpired :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM agent_task_queue
 WHERE chat_finalize_deferred_at IS NOT NULL
   AND chat_finalize_deferred_at < now() - make_interval(secs => $1::double precision)
 ORDER BY chat_finalize_deferred_at
@@ -4442,6 +5184,103 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingDelegatedFailureRecoveries = `-- name: ListPendingDelegatedFailureRecoveries :many
+SELECT recovery.id, recovery.issue_id, recovery.author_type, recovery.author_id, recovery.content, recovery.type, recovery.created_at, recovery.updated_at, recovery.parent_id, recovery.workspace_id, recovery.resolved_at, recovery.resolved_by_type, recovery.resolved_by_id, recovery.source_task_id, recovery.quick_action_id
+FROM comment recovery
+JOIN agent_task_queue failed ON failed.id = recovery.source_task_id
+JOIN agent_task_queue source ON source.id = failed.delegated_from_task_id
+JOIN issue source_issue ON source_issue.id = source.issue_id
+JOIN agent source_agent ON source_agent.id = source.agent_id
+WHERE recovery.author_type = 'system'
+  AND recovery.type = 'progress_update'
+  AND recovery.source_task_id IS NOT NULL
+  AND recovery.issue_id = source_issue.id
+  AND recovery.workspace_id = source_issue.workspace_id
+  AND failed.status = 'failed'
+  AND failed.delegated_from_task_id IS NOT NULL
+  AND failed.autopilot_run_id IS NULL
+  AND failed.trigger_evidence_kind IS DISTINCT FROM 'delegated_failure'
+  AND source.autopilot_run_id IS NULL
+  AND source.issue_id IS NOT NULL
+  AND source.agent_id <> failed.agent_id
+  AND issue_effective_status(source_issue.workspace_id, source_issue.status) NOT IN ('done', 'cancelled', 'backlog')
+  AND source_agent.archived_at IS NULL
+  AND source_agent.runtime_id IS NOT NULL
+  AND source_agent.workspace_id = source_issue.workspace_id
+  AND NOT EXISTS (
+      SELECT 1
+      FROM agent_task_queue retry
+      WHERE retry.parent_task_id = failed.id
+        AND retry.status <> 'cancelled'
+  )
+  AND NOT EXISTS (
+      SELECT 1
+      FROM agent_task_queue covering
+      WHERE covering.issue_id = source_issue.id
+        AND covering.agent_id = source.agent_id
+        AND (
+            recovery.id = ANY(covering.delivered_comment_ids)
+            OR (
+                (
+                    covering.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+                    OR (
+                        covering.status = 'deferred'
+                        AND covering.context->>'channel_issue_media_pending' = 'true'
+                    )
+                )
+                AND (
+                    covering.trigger_comment_id = recovery.id
+                    OR recovery.id = ANY(covering.coalesced_comment_ids)
+                )
+            )
+        )
+  )
+ORDER BY recovery.created_at ASC, recovery.id ASC
+LIMIT $1
+`
+
+// Durable outbox scan for platform recovery comments that are not yet owned by
+// an executable task and have no terminal delivery receipt. Starting from the
+// explicit recovery signal avoids retroactively waking unrelated historical
+// delegated failures. A bounded runtime sweeper replays these comments after a
+// transient dispatch error or process restart.
+func (q *Queries) ListPendingDelegatedFailureRecoveries(ctx context.Context, maxPerTick int32) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listPendingDelegatedFailureRecoveries, maxPerTick)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Comment{}
+	for rows.Next() {
+		var i Comment
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+			&i.SourceTaskID,
+			&i.QuickActionID,
 		); err != nil {
 			return nil, err
 		}
@@ -4454,7 +5293,7 @@ func (q *Queries) ListChatFinalizeDeferredExpired(ctx context.Context, arg ListC
 }
 
 const listPendingTasksByRuntime = `-- name: ListPendingTasksByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM agent_task_queue
 WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
 ORDER BY priority DESC, created_at ASC
 `
@@ -4520,6 +5359,7 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -4532,7 +5372,7 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
 ORDER BY priority DESC, created_at ASC
 `
@@ -4606,6 +5446,7 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -4618,7 +5459,7 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 }
 
 const listQueuedClaimCandidatesByRuntimes = `-- name: ListQueuedClaimCandidatesByRuntimes :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM agent_task_queue
 WHERE runtime_id = ANY($1::uuid[]) AND status = 'queued'
 ORDER BY priority DESC, created_at ASC
 `
@@ -4694,6 +5535,7 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntimes(ctx context.Context, runti
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -4706,7 +5548,7 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntimes(ctx context.Context, runti
 }
 
 const listTasksByIssue = `-- name: ListTasksByIssue :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for FROM agent_task_queue
+SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name FROM agent_task_queue
 WHERE issue_id = $1
 ORDER BY created_at DESC
 `
@@ -4772,6 +5614,7 @@ func (q *Queries) ListTasksByIssue(ctx context.Context, issueID pgtype.UUID) ([]
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -4845,16 +5688,16 @@ func (q *Queries) ListUserAgentsByRuntimeForUpdate(ctx context.Context, runtimeI
 }
 
 const listWorkspaceAgentTaskSnapshot = `-- name: ListWorkspaceAgentTaskSnapshot :many
-SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for FROM agent_task_queue atq
+SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for, atq.branch_name FROM agent_task_queue atq
 JOIN agent a ON a.id = atq.agent_id
 WHERE a.workspace_id = $1
   AND atq.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 
 UNION ALL
 
-SELECT latest.id, latest.agent_id, latest.issue_id, latest.status, latest.priority, latest.dispatched_at, latest.started_at, latest.completed_at, latest.result, latest.error, latest.created_at, latest.context, latest.runtime_id, latest.session_id, latest.work_dir, latest.trigger_comment_id, latest.chat_session_id, latest.autopilot_run_id, latest.attempt, latest.max_attempts, latest.parent_task_id, latest.failure_reason, latest.trigger_summary, latest.force_fresh_session, latest.is_leader_task, latest.wait_reason, latest.initiator_user_id, latest.handoff_note, latest.prepare_lease_expires_at, latest.squad_id, latest.runtime_mcp_overlay, latest.escalation_for_task_id, latest.fire_at, latest.originator_user_id, latest.runtime_connected_apps, latest.coalesced_comment_ids, latest.delivered_comment_ids, latest.chat_input_task_id, latest.chat_finalize_deferred_at, latest.originator_source, latest.delegated_from_task_id, latest.retry_of_task_id, latest.rerun_of_task_id, latest.rule_version_id, latest.trigger_evidence_kind, latest.trigger_evidence_ref_id, latest.accountable_user_id, latest.session_rollout_missing, latest.retired_session_id, latest.quick_actions_disabled, latest.regenerate_quick_actions_for FROM agent a
+SELECT latest.id, latest.agent_id, latest.issue_id, latest.status, latest.priority, latest.dispatched_at, latest.started_at, latest.completed_at, latest.result, latest.error, latest.created_at, latest.context, latest.runtime_id, latest.session_id, latest.work_dir, latest.trigger_comment_id, latest.chat_session_id, latest.autopilot_run_id, latest.attempt, latest.max_attempts, latest.parent_task_id, latest.failure_reason, latest.trigger_summary, latest.force_fresh_session, latest.is_leader_task, latest.wait_reason, latest.initiator_user_id, latest.handoff_note, latest.prepare_lease_expires_at, latest.squad_id, latest.runtime_mcp_overlay, latest.escalation_for_task_id, latest.fire_at, latest.originator_user_id, latest.runtime_connected_apps, latest.coalesced_comment_ids, latest.delivered_comment_ids, latest.chat_input_task_id, latest.chat_finalize_deferred_at, latest.originator_source, latest.delegated_from_task_id, latest.retry_of_task_id, latest.rerun_of_task_id, latest.rule_version_id, latest.trigger_evidence_kind, latest.trigger_evidence_ref_id, latest.accountable_user_id, latest.session_rollout_missing, latest.retired_session_id, latest.quick_actions_disabled, latest.regenerate_quick_actions_for, latest.branch_name FROM agent a
 JOIN LATERAL (
-  SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for
+  SELECT atq.id, atq.agent_id, atq.issue_id, atq.status, atq.priority, atq.dispatched_at, atq.started_at, atq.completed_at, atq.result, atq.error, atq.created_at, atq.context, atq.runtime_id, atq.session_id, atq.work_dir, atq.trigger_comment_id, atq.chat_session_id, atq.autopilot_run_id, atq.attempt, atq.max_attempts, atq.parent_task_id, atq.failure_reason, atq.trigger_summary, atq.force_fresh_session, atq.is_leader_task, atq.wait_reason, atq.initiator_user_id, atq.handoff_note, atq.prepare_lease_expires_at, atq.squad_id, atq.runtime_mcp_overlay, atq.escalation_for_task_id, atq.fire_at, atq.originator_user_id, atq.runtime_connected_apps, atq.coalesced_comment_ids, atq.delivered_comment_ids, atq.chat_input_task_id, atq.chat_finalize_deferred_at, atq.originator_source, atq.delegated_from_task_id, atq.retry_of_task_id, atq.rerun_of_task_id, atq.rule_version_id, atq.trigger_evidence_kind, atq.trigger_evidence_ref_id, atq.accountable_user_id, atq.session_rollout_missing, atq.retired_session_id, atq.quick_actions_disabled, atq.regenerate_quick_actions_for, atq.branch_name
   FROM agent_task_queue atq
   WHERE atq.agent_id = a.id
     AND atq.status IN ('completed', 'failed')
@@ -4950,6 +5793,7 @@ func (q *Queries) ListWorkspaceAgentTaskSnapshot(ctx context.Context, workspaceI
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -5199,7 +6043,7 @@ SET status = 'waiting_local_directory',
     wait_reason = $2,
     prepare_lease_expires_at = now() + make_interval(secs => $3::double precision)
 WHERE id = $1 AND status = 'dispatched'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type MarkAgentTaskWaitingLocalDirectoryParams struct {
@@ -5272,6 +6116,7 @@ func (q *Queries) MarkAgentTaskWaitingLocalDirectory(ctx context.Context, arg Ma
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -5280,7 +6125,7 @@ const markChatFinalizeDeferred = `-- name: MarkChatFinalizeDeferred :one
 UPDATE agent_task_queue
 SET chat_finalize_deferred_at = now()
 WHERE id = $1
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 // Arms the deferred chat-finalize marker for a cancelled chat task whose
@@ -5340,6 +6185,7 @@ func (q *Queries) MarkChatFinalizeDeferred(ctx context.Context, id pgtype.UUID) 
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -5478,11 +6324,114 @@ func (q *Queries) MergeCommentIntoPendingTask(ctx context.Context, arg MergeComm
 	return i, err
 }
 
+const mergeDelegatedFailureCommentIntoPendingTask = `-- name: MergeDelegatedFailureCommentIntoPendingTask :one
+UPDATE agent_task_queue
+SET coalesced_comment_ids = (
+        SELECT COALESCE(array_agg(DISTINCT e), '{}')
+        FROM unnest(array_append(coalesced_comment_ids, trigger_comment_id)) AS e
+        WHERE e IS NOT NULL AND e <> $1::uuid
+    ),
+    trigger_comment_id = $1::uuid,
+    trigger_summary = $2
+WHERE id = (
+    SELECT t.id FROM agent_task_queue t
+    WHERE t.issue_id = $3
+      AND t.agent_id = $4
+      AND (
+          t.status = 'queued'
+          OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
+      )
+      AND t.trigger_comment_id IS DISTINCT FROM $1::uuid
+      AND NOT ($1::uuid = ANY(t.coalesced_comment_ids))
+    ORDER BY t.created_at DESC
+    LIMIT 1
+)
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
+`
+
+type MergeDelegatedFailureCommentIntoPendingTaskParams struct {
+	CommentID      pgtype.UUID `json:"comment_id"`
+	TriggerSummary pgtype.Text `json:"trigger_summary"`
+	IssueID        pgtype.UUID `json:"issue_id"`
+	AgentID        pgtype.UUID `json:"agent_id"`
+}
+
+// A delegated failure is a platform-owned input, not a new human instruction:
+// fold it into the coordinator's pre-claim task without replacing that task's
+// attribution snapshot. The recovery comment is the newest input, so it becomes
+// the trigger and the prior trigger joins the coalesced plan. This preserves the
+// claim/prompt invariant that trigger_comment_id names the newest comment while
+// retaining the pending task's original human authority and connected apps.
+func (q *Queries) MergeDelegatedFailureCommentIntoPendingTask(ctx context.Context, arg MergeDelegatedFailureCommentIntoPendingTaskParams) (AgentTaskQueue, error) {
+	row := q.db.QueryRow(ctx, mergeDelegatedFailureCommentIntoPendingTask,
+		arg.CommentID,
+		arg.TriggerSummary,
+		arg.IssueID,
+		arg.AgentID,
+	)
+	var i AgentTaskQueue
+	err := row.Scan(
+		&i.ID,
+		&i.AgentID,
+		&i.IssueID,
+		&i.Status,
+		&i.Priority,
+		&i.DispatchedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.Result,
+		&i.Error,
+		&i.CreatedAt,
+		&i.Context,
+		&i.RuntimeID,
+		&i.SessionID,
+		&i.WorkDir,
+		&i.TriggerCommentID,
+		&i.ChatSessionID,
+		&i.AutopilotRunID,
+		&i.Attempt,
+		&i.MaxAttempts,
+		&i.ParentTaskID,
+		&i.FailureReason,
+		&i.TriggerSummary,
+		&i.ForceFreshSession,
+		&i.IsLeaderTask,
+		&i.WaitReason,
+		&i.InitiatorUserID,
+		&i.HandoffNote,
+		&i.PrepareLeaseExpiresAt,
+		&i.SquadID,
+		&i.RuntimeMcpOverlay,
+		&i.EscalationForTaskID,
+		&i.FireAt,
+		&i.OriginatorUserID,
+		&i.RuntimeConnectedApps,
+		&i.CoalescedCommentIds,
+		&i.DeliveredCommentIds,
+		&i.ChatInputTaskID,
+		&i.ChatFinalizeDeferredAt,
+		&i.OriginatorSource,
+		&i.DelegatedFromTaskID,
+		&i.RetryOfTaskID,
+		&i.RerunOfTaskID,
+		&i.RuleVersionID,
+		&i.TriggerEvidenceKind,
+		&i.TriggerEvidenceRefID,
+		&i.AccountableUserID,
+		&i.SessionRolloutMissing,
+		&i.RetiredSessionID,
+		&i.QuickActionsDisabled,
+		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
+	)
+	return i, err
+}
+
 const promoteDeferredChannelIssueTask = `-- name: PromoteDeferredChannelIssueTask :one
 UPDATE agent_task_queue
 SET status = 'queued', fire_at = NULL
 WHERE id = $1 AND issue_id IS NOT NULL AND status = 'deferred'
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 // Early promotion is idempotent at the service layer: a task already promoted
@@ -5542,6 +6491,7 @@ func (q *Queries) PromoteDeferredChannelIssueTask(ctx context.Context, id pgtype
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -5552,11 +6502,23 @@ SET status = 'queued'
 WHERE runtime_id = $1
   AND status = 'deferred'
   AND fire_at <= now()
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+  AND EXISTS (
+    SELECT 1 FROM agent_runtime r
+    WHERE r.id = agent_task_queue.runtime_id
+      AND r.status = 'online'
+      AND COALESCE(r.last_seen_at, r.updated_at) >=
+          now() - make_interval(secs => $2::double precision)
+  )
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
-func (q *Queries) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, promoteDueDeferredTasksForRuntime, runtimeID)
+type PromoteDueDeferredTasksForRuntimeParams struct {
+	RuntimeID        pgtype.UUID `json:"runtime_id"`
+	RuntimeStaleSecs float64     `json:"runtime_stale_secs"`
+}
+
+func (q *Queries) PromoteDueDeferredTasksForRuntime(ctx context.Context, arg PromoteDueDeferredTasksForRuntimeParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, promoteDueDeferredTasksForRuntime, arg.RuntimeID, arg.RuntimeStaleSecs)
 	if err != nil {
 		return nil, err
 	}
@@ -5616,6 +6578,7 @@ func (q *Queries) PromoteDueDeferredTasksForRuntime(ctx context.Context, runtime
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -5633,13 +6596,25 @@ SET status = 'queued'
 WHERE runtime_id = ANY($1::uuid[])
   AND status = 'deferred'
   AND fire_at <= now()
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+  AND EXISTS (
+    SELECT 1 FROM agent_runtime r
+    WHERE r.id = agent_task_queue.runtime_id
+      AND r.status = 'online'
+      AND COALESCE(r.last_seen_at, r.updated_at) >=
+          now() - make_interval(secs => $2::double precision)
+  )
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
+
+type PromoteDueDeferredTasksForRuntimesParams struct {
+	RuntimeIds       []pgtype.UUID `json:"runtime_ids"`
+	RuntimeStaleSecs float64       `json:"runtime_stale_secs"`
+}
 
 // Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all
 // due deferred tasks across the runtime set in one UPDATE.
-func (q *Queries) PromoteDueDeferredTasksForRuntimes(ctx context.Context, runtimeIds []pgtype.UUID) ([]AgentTaskQueue, error) {
-	rows, err := q.db.Query(ctx, promoteDueDeferredTasksForRuntimes, runtimeIds)
+func (q *Queries) PromoteDueDeferredTasksForRuntimes(ctx context.Context, arg PromoteDueDeferredTasksForRuntimesParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, promoteDueDeferredTasksForRuntimes, arg.RuntimeIds, arg.RuntimeStaleSecs)
 	if err != nil {
 		return nil, err
 	}
@@ -5699,6 +6674,7 @@ func (q *Queries) PromoteDueDeferredTasksForRuntimes(ctx context.Context, runtim
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -5795,17 +6771,25 @@ WHERE id = (
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
+      AND EXISTS (
+          SELECT 1 FROM agent_runtime r
+          WHERE r.id = atq.runtime_id
+            AND r.status = 'online'
+            AND COALESCE(r.last_seen_at, r.updated_at) >=
+                now() - make_interval(secs => $4::double precision)
+      )
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
     LIMIT 1
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type ReclaimStaleDispatchedTaskForRuntimeParams struct {
 	RuntimeID         pgtype.UUID `json:"runtime_id"`
 	PrepareLeaseSecs  float64     `json:"prepare_lease_secs"`
 	ClaimRecoverySecs float64     `json:"claim_recovery_secs"`
+	RuntimeStaleSecs  float64     `json:"runtime_stale_secs"`
 }
 
 // Re-delivers a task whose previous claim likely succeeded server-side but
@@ -5814,7 +6798,12 @@ type ReclaimStaleDispatchedTaskForRuntimeParams struct {
 // Refresh dispatched_at so the server-side dispatch timeout measures from the
 // recovered delivery attempt.
 func (q *Queries) ReclaimStaleDispatchedTaskForRuntime(ctx context.Context, arg ReclaimStaleDispatchedTaskForRuntimeParams) (AgentTaskQueue, error) {
-	row := q.db.QueryRow(ctx, reclaimStaleDispatchedTaskForRuntime, arg.RuntimeID, arg.PrepareLeaseSecs, arg.ClaimRecoverySecs)
+	row := q.db.QueryRow(ctx, reclaimStaleDispatchedTaskForRuntime,
+		arg.RuntimeID,
+		arg.PrepareLeaseSecs,
+		arg.ClaimRecoverySecs,
+		arg.RuntimeStaleSecs,
+	)
 	var i AgentTaskQueue
 	err := row.Scan(
 		&i.ID,
@@ -5868,6 +6857,7 @@ func (q *Queries) ReclaimStaleDispatchedTaskForRuntime(ctx context.Context, arg 
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -5883,17 +6873,25 @@ WHERE id IN (
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
       AND (atq.prepare_lease_expires_at IS NULL OR atq.prepare_lease_expires_at < now())
+      AND EXISTS (
+          SELECT 1 FROM agent_runtime r
+          WHERE r.id = atq.runtime_id
+            AND r.status = 'online'
+            AND COALESCE(r.last_seen_at, r.updated_at) >=
+                now() - make_interval(secs => $4::double precision)
+      )
     ORDER BY atq.priority DESC, atq.dispatched_at ASC
-    LIMIT $4::int
+    LIMIT $5::int
     FOR UPDATE SKIP LOCKED
 )
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type ReclaimStaleDispatchedTasksForRuntimesParams struct {
 	PrepareLeaseSecs  float64       `json:"prepare_lease_secs"`
 	RuntimeIds        []pgtype.UUID `json:"runtime_ids"`
 	ClaimRecoverySecs float64       `json:"claim_recovery_secs"`
+	RuntimeStaleSecs  float64       `json:"runtime_stale_secs"`
 	MaxTasks          int32         `json:"max_tasks"`
 }
 
@@ -5909,6 +6907,7 @@ func (q *Queries) ReclaimStaleDispatchedTasksForRuntimes(ctx context.Context, ar
 		arg.PrepareLeaseSecs,
 		arg.RuntimeIds,
 		arg.ClaimRecoverySecs,
+		arg.RuntimeStaleSecs,
 		arg.MaxTasks,
 	)
 	if err != nil {
@@ -5970,6 +6969,7 @@ func (q *Queries) ReclaimStaleDispatchedTasksForRuntimes(ctx context.Context, ar
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -5990,7 +6990,7 @@ SET status = 'failed',
     wait_reason = NULL,
     prepare_lease_expires_at = NULL
 WHERE runtime_id = $1 AND status IN ('dispatched', 'running', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 // Called by the daemon at startup. Atomically fails any dispatched/running/
@@ -6060,6 +7060,7 @@ func (q *Queries) RecoverOrphanedTasksForRuntime(ctx context.Context, runtimeID 
 			&i.RetiredSessionID,
 			&i.QuickActionsDisabled,
 			&i.RegenerateQuickActionsFor,
+			&i.BranchName,
 		); err != nil {
 			return nil, err
 		}
@@ -6207,7 +7208,7 @@ WHERE id = $1
   AND status = 'dispatched'
   AND started_at IS NULL
   AND dispatched_at = $3
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 type RequeueAgentTaskAfterClaimFailureParams struct {
@@ -6276,6 +7277,7 @@ func (q *Queries) RequeueAgentTaskAfterClaimFailure(ctx context.Context, arg Req
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }
@@ -6320,6 +7322,60 @@ func (q *Queries) RestoreAgent(ctx context.Context, id pgtype.UUID) (Agent, erro
 		&i.ServiceTier,
 	)
 	return i, err
+}
+
+const setAgentTaskBranchName = `-- name: SetAgentTaskBranchName :exec
+UPDATE agent_task_queue
+SET branch_name = COALESCE(branch_name, $1)
+WHERE id = $2 AND status = 'cancelled'
+`
+
+type SetAgentTaskBranchNameParams struct {
+	BranchName pgtype.Text `json:"branch_name"`
+	ID         pgtype.UUID `json:"id"`
+}
+
+// Records the delivered branch on a CANCELLED task. Needed because the daemon
+// finalizes its worktree (committing whatever the agent produced) BEFORE it
+// learns the task was cancelled, so the branch exists but the cancel path has
+// no result payload to carry it. Without this the branch is real and
+// completely undiscoverable from the UI.
+//
+// Never overwrites a name already recorded by a complete/fail callback, and
+// never touches any OTHER terminal state: the daemon acks on every terminal
+// status it observes, so a late or replayed ack from a stale run could
+// otherwise write its branch into a completed/failed row whose own callback —
+// the authoritative channel for those states — recorded nothing. status is
+// stable once terminal, so this CAS cannot race a legitimate write.
+func (q *Queries) SetAgentTaskBranchName(ctx context.Context, arg SetAgentTaskBranchNameParams) error {
+	_, err := q.db.Exec(ctx, setAgentTaskBranchName, arg.BranchName, arg.ID)
+	return err
+}
+
+const setAgentTaskErrorIfEmpty = `-- name: SetAgentTaskErrorIfEmpty :exec
+UPDATE agent_task_queue
+SET error = $1,
+    failure_reason = COALESCE(failure_reason, $2)
+WHERE id = $3 AND (error IS NULL OR error = '') AND status = 'cancelled'
+`
+
+type SetAgentTaskErrorIfEmptyParams struct {
+	Error         pgtype.Text `json:"error"`
+	FailureReason pgtype.Text `json:"failure_reason"`
+	ID            pgtype.UUID `json:"id"`
+}
+
+// Companion to SetAgentTaskBranchName for the cancel-ack path. A cancelled
+// worktree task whose Finalize ABORTED has no branch to deliver — the error
+// text carrying the preserved-worktree path is the only pointer to the agent's
+// work, and the cancel flow discarded the rest of the result. A user-initiated
+// cancel leaves error NULL, so filling it here never overwrites a reason
+// recorded by a fail callback or the claim gate; the status CAS keeps a late
+// ack from stamping an error onto a completed/failed row (see
+// SetAgentTaskBranchName above).
+func (q *Queries) SetAgentTaskErrorIfEmpty(ctx context.Context, arg SetAgentTaskErrorIfEmptyParams) error {
+	_, err := q.db.Exec(ctx, setAgentTaskErrorIfEmpty, arg.Error, arg.FailureReason, arg.ID)
+	return err
 }
 
 const setDeferredChannelIssueTaskRuntimeOverlay = `-- name: SetDeferredChannelIssueTaskRuntimeOverlay :execrows
@@ -6410,7 +7466,7 @@ SET status = 'running',
     wait_reason = NULL,
     prepare_lease_expires_at = NULL
 WHERE id = $1 AND status IN ('dispatched', 'waiting_local_directory')
-RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name
 `
 
 // Transitions a task to running. Accepts either 'dispatched' (the normal
@@ -6474,6 +7530,7 @@ func (q *Queries) StartAgentTask(ctx context.Context, id pgtype.UUID) (AgentTask
 		&i.RetiredSessionID,
 		&i.QuickActionsDisabled,
 		&i.RegenerateQuickActionsFor,
+		&i.BranchName,
 	)
 	return i, err
 }

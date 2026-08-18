@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/pkg/agent"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 // Mirrors AGENT_DESCRIPTION_MAX_LENGTH in packages/core/agents/constants.ts
@@ -293,42 +294,62 @@ type ProjectResourceData struct {
 // while sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
 
+// ActiveSiblingRunData is bounded claim-time context about another in-flight
+// issue task for the same agent. Queued tasks are intentionally absent because
+// they cannot coordinate yet. It lets the daemon warn a newly claimed run
+// before it repeats code or PR work already underway elsewhere.
+type ActiveSiblingRunData struct {
+	TaskID          string `json:"task_id"`
+	IssueID         string `json:"issue_id"`
+	IssueIdentifier string `json:"issue_identifier"`
+	IssueTitle      string `json:"issue_title"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	StartedAt       string `json:"started_at,omitempty"`
+}
+
 type AgentTaskResponse struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ID                   string                 `json:"id"`
+	AgentID              string                 `json:"agent_id"`
+	RuntimeID            string                 `json:"runtime_id"`
+	IssueID              string                 `json:"issue_id"`
+	WorkspaceID          string                 `json:"workspace_id"`
+	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
+	// RemoteMCPDaemonToken is a short-lived, workspace-and-daemon scoped
+	// credential used only by the local daemon's write-only Remote MCP broker.
+	// It is never injected into the agent process.
+	RemoteMCPDaemonToken string `json:"remote_mcp_daemon_token,omitempty"`
 	// WorkspaceContext is the workspace-level system prompt set in workspace
 	// settings (`workspace.context` DB column). Injected into the agent brief
 	// as `## Workspace Context` so every agent running in this workspace —
 	// regardless of issue / chat / autopilot / quick-create — sees the same
 	// shared context. Empty when the workspace owner hasn't set it.
-	WorkspaceContext   string                `json:"workspace_context,omitempty"`
-	ThreadName         string                `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
-	Status             string                `json:"status"`
-	Priority           int32                 `json:"priority"`
-	DispatchedAt       *string               `json:"dispatched_at"`
-	StartedAt          *string               `json:"started_at"`
-	CompletedAt        *string               `json:"completed_at"`
-	Result             any                   `json:"result"`
-	Error              *string               `json:"error"`
-	FailureReason      string                `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
-	Attempt            int32                 `json:"attempt"`
-	MaxAttempts        int32                 `json:"max_attempts"`
-	ParentTaskID       *string               `json:"parent_task_id,omitempty"`
-	IsLeaderTask       bool                  `json:"is_leader_task,omitempty"`
-	LeaderRoleResolved bool                  `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
-	Agent              *TaskAgentData        `json:"agent,omitempty"`
-	ConnectedApps      []ConnectedAppData    `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
-	Repos              []RepoData            `json:"repos,omitempty"`
-	ProjectID          string                `json:"project_id,omitempty"`          // issue's project, when present
-	ProjectTitle       string                `json:"project_title,omitempty"`       // for surfacing in agent context
-	ProjectDescription string                `json:"project_description,omitempty"` // durable project-level context injected into the brief
-	ProjectResources   []ProjectResourceData `json:"project_resources,omitempty"`   // resources attached to the project
-	CreatedAt          string                `json:"created_at"`
-	PriorSessionID     string                `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
-	PriorWorkDir       string                `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
+	WorkspaceContext   string                 `json:"workspace_context,omitempty"`
+	ActiveSiblingRuns  []ActiveSiblingRunData `json:"active_sibling_runs,omitempty"`
+	ThreadName         string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
+	Status             string                 `json:"status"`
+	Priority           int32                  `json:"priority"`
+	DispatchedAt       *string                `json:"dispatched_at"`
+	StartedAt          *string                `json:"started_at"`
+	CompletedAt        *string                `json:"completed_at"`
+	Result             any                    `json:"result"`
+	Error              *string                `json:"error"`
+	FailureReason      string                 `json:"failure_reason,omitempty"` // see TaskService.MaybeRetryFailedTask
+	Attempt            int32                  `json:"attempt"`
+	MaxAttempts        int32                  `json:"max_attempts"`
+	ParentTaskID       *string                `json:"parent_task_id,omitempty"`
+	IsLeaderTask       bool                   `json:"is_leader_task,omitempty"`
+	LeaderRoleResolved bool                   `json:"leader_role_resolved,omitempty"` // claim-only capability, always true here: IsLeaderTask/SquadID authoritatively answer "is this a leader run", so the daemon must not infer the role from briefing text. Servers predating it make no such promise — before #4951 they sent no is_leader_task at all, after it they sent the flag without guaranteeing a briefing — so a daemon seeing no capability keeps the legacy inference. Never rendered into a prompt; see daemon.taskIsSquadLeader (MUL-5811). Mirror field: internal/daemon/types.go, same JSON name
+	Agent              *TaskAgentData         `json:"agent,omitempty"`
+	ConnectedApps      []ConnectedAppData     `json:"connected_apps,omitempty"` // daemon-claim only: per-run app capabilities mounted through runtime MCP overlays
+	Repos              []RepoData             `json:"repos,omitempty"`
+	ProjectID          string                 `json:"project_id,omitempty"`          // issue's project, when present
+	ProjectTitle       string                 `json:"project_title,omitempty"`       // for surfacing in agent context
+	ProjectDescription string                 `json:"project_description,omitempty"` // durable project-level context injected into the brief
+	ProjectResources   []ProjectResourceData  `json:"project_resources,omitempty"`   // resources attached to the project
+	CreatedAt          string                 `json:"created_at"`
+	PriorSessionID     string                 `json:"prior_session_id,omitempty"` // session ID from a previous task on same issue
+	PriorWorkDir       string                 `json:"prior_work_dir,omitempty"`   // work_dir from a previous task on same issue
 	// PriorSessionResumeUnavailable is set when a more recent Codex session was
 	// withheld because its rollout was missing (MUL-5305); PriorSessionID (if
 	// any) is then an older fallback. The daemon surfaces the continuity gap in
@@ -346,7 +367,13 @@ type AgentTaskResponse struct {
 	// when WorkDir is empty, or when stripping leaves nothing. See
 	// relativeWorkDir() for the full rules. Older clients can still read
 	// WorkDir directly; newer UIs should prefer RelativeWorkDir.
-	RelativeWorkDir          string                 `json:"relative_work_dir,omitempty"`
+	RelativeWorkDir string `json:"relative_work_dir,omitempty"`
+	// BranchName is the git branch this run delivered its work on, set only by
+	// worktree-mode local_directory tasks. Unlike WorkDir it is safe to show
+	// verbatim: it is a ref inside the user's own repo, not a filesystem path.
+	// Populated on both terminal paths — a failed run can still have committed
+	// partial work, and that is when the pointer matters most.
+	BranchName               string                 `json:"branch_name,omitempty"`
 	TriggerCommentID         *string                `json:"trigger_comment_id,omitempty"`          // comment that triggered this task
 	CoalescedCommentIDs      []string               `json:"coalesced_comment_ids,omitempty"`       // MUL-4195: earlier comments folded into this run when it had not yet started, so a single run still covers every deliberate comment; trigger_comment_id is the newest. Surfaced so the UI can show which comments a run covered. omitempty so old clients ignore it
 	CoalescedComments        []CoalescedCommentData `json:"coalesced_comments,omitempty"`          // MUL-4195: full detail (thread_id/author/created_at/content) of the folded comments, so the daemon prompt can address each without assuming they share the triggering thread. omitempty so old clients ignore it
@@ -668,6 +695,10 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 	if t.HandoffNote.Valid {
 		handoffNote = t.HandoffNote.String
 	}
+	branchName := ""
+	if t.BranchName.Valid {
+		branchName = t.BranchName.String
+	}
 	return AgentTaskResponse{
 		ID:                  uuidToString(t.ID),
 		AgentID:             uuidToString(t.AgentID),
@@ -682,6 +713,7 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 		Result:              result,
 		Error:               textToPtr(t.Error),
 		FailureReason:       failureReason,
+		BranchName:          branchName,
 		Attempt:             t.Attempt,
 		MaxAttempts:         t.MaxAttempts,
 		ParentTaskID:        uuidToPtr(t.ParentTaskID),
@@ -1115,7 +1147,7 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !canUseRuntimeForAgent(member, runtime) {
-		writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can create agents on it")
+		writeError(w, http.StatusForbidden, "this runtime is private; only its owner can create agents on it")
 		return
 	}
 
@@ -1127,6 +1159,19 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if !agent.IsKnownThinkingValue(runtime.Provider, req.ThinkingLevel) {
 		writeError(w, http.StatusBadRequest, thinkingLevelRejection(runtime.Provider, req.ThinkingLevel))
 		return
+	}
+	// For ACP-catalog providers the provider name is not the capability answer
+	// — this runtime's own discovered catalog is. Keeps a Hermes Agent user's
+	// clear 400 instead of accepting a level the daemon would later drop.
+	if req.ThinkingLevel != "" {
+		switch h.acpThinkingDecision(r.Context(), runtime.Provider, runtime.ID) {
+		case acpEffortAbsent:
+			writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(runtime.Provider))
+			return
+		case acpEffortUnknown:
+			writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(runtime.Provider))
+			return
+		}
 	}
 	if !agent.IsKnownServiceTier(runtime.Provider, req.ServiceTier) {
 		writeError(w, http.StatusBadRequest, fmt.Sprintf("service_tier %q is not a recognised value for runtime %q", req.ServiceTier, runtime.Provider))
@@ -1613,7 +1658,7 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !canUseRuntimeForAgent(member, runtime) {
-			writeError(w, http.StatusForbidden, "this runtime is private; only its owner or a workspace admin can move agents onto it")
+			writeError(w, http.StatusForbidden, "this runtime is private; only its owner can move agents onto it")
 			return
 		}
 		params.RuntimeID = runtime.ID
@@ -1718,6 +1763,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 				writeError(w, http.StatusBadRequest, thinkingLevelRejection(provider, value))
 				return
 			}
+			switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
+			case acpEffortAbsent:
+				writeError(w, http.StatusBadRequest, thinkingCapabilityRejection(provider))
+				return
+			case acpEffortUnknown:
+				writeError(w, http.StatusBadRequest, thinkingCapabilityUnknownRejection(provider))
+				return
+			}
 			params.ThinkingLevel = pgtype.Text{String: value, Valid: true}
 		}
 	} else if req.RuntimeID != nil && existing.ThinkingLevel.Valid && existing.ThinkingLevel.String != "" {
@@ -1739,6 +1792,14 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 		}
 		if !agent.IsKnownThinkingValue(provider, existing.ThinkingLevel.String) {
 			writeError(w, http.StatusBadRequest, existingThinkingLevelRejection(provider, existing.ThinkingLevel.String))
+			return
+		}
+		switch h.acpThinkingDecision(r.Context(), provider, targetRuntimeID) {
+		case acpEffortAbsent:
+			writeError(w, http.StatusBadRequest, existingThinkingCapabilityRejection(provider, existing.ThinkingLevel.String))
+			return
+		case acpEffortUnknown:
+			writeError(w, http.StatusBadRequest, existingThinkingCapabilityUnknownRejection(provider, existing.ThinkingLevel.String))
 			return
 		}
 	}
@@ -1970,12 +2031,114 @@ func (h *Handler) resolveAgentProvider(r *http.Request, workspaceID pgtype.UUID,
 // so it now names the capability gap instead.
 func thinkingLevelRejection(provider, value string) string {
 	if !agent.ThinkingControlSupported(provider) {
-		return fmt.Sprintf(
-			"runtime %q does not support a per-agent reasoning effort; leave thinking_level empty to use the runtime default",
-			provider,
-		)
+		return thinkingCapabilityRejection(provider)
 	}
 	return fmt.Sprintf("thinking_level %q is not a recognised value for runtime %q", value, provider)
+}
+
+// existingThinkingCapabilityRejection is the carry-over path's capability
+// sentence — same answer as thinkingCapabilityRejection, but it names the value
+// already on the agent and the escape hatch that clears it.
+func existingThinkingCapabilityRejection(provider, value string) string {
+	return fmt.Sprintf(
+		"runtime %q does not support a per-agent reasoning effort; pass thinking_level=\"\" to clear the existing %q",
+		provider, value,
+	)
+}
+
+// thinkingCapabilityUnknownRejection covers the ambiguous case: the provider
+// name does not say which binary is installed and no catalog has been reported
+// yet, so we can neither confirm nor deny the capability.
+//
+// It deliberately does NOT reuse the "does not support" sentence. That claim
+// would be actively wrong for a jcode runtime — sending its owner off to look
+// for a limitation that does not exist — whereas naming the missing evidence
+// points at the thing that resolves it.
+func thinkingCapabilityUnknownRejection(provider string) string {
+	return fmt.Sprintf(
+		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Open the model picker for this runtime to trigger discovery and retry, or leave thinking_level empty to use the runtime default",
+		provider,
+	)
+}
+
+// existingThinkingCapabilityUnknownRejection is the carry-over path's version of
+// the same answer: it names the value already on the agent and the escape hatch.
+func existingThinkingCapabilityUnknownRejection(provider, value string) string {
+	return fmt.Sprintf(
+		"cannot confirm whether runtime %q supports a per-agent reasoning effort: it has not reported a model catalog yet. Pass thinking_level=\"\" to clear the existing %q, or retry once the runtime has reported its models",
+		provider, value,
+	)
+}
+
+// thinkingCapabilityRejection is the "this runtime has no reasoning dial"
+// sentence. Split out because the same answer can now be reached two ways: from
+// the provider name alone, or — for ACP-catalog providers, where the provider
+// name is not decisive — from a discovered catalog that advertises no effort.
+func thinkingCapabilityRejection(provider string) string {
+	return fmt.Sprintf(
+		"runtime %q does not support a per-agent reasoning effort; leave thinking_level empty to use the runtime default",
+		provider,
+	)
+}
+
+// acpEffortEvidence is what the discovered model catalog says about a runtime's
+// reasoning-effort support.
+type acpEffortEvidence int
+
+const (
+	// acpEffortUnknown — no catalog has been discovered for this runtime.
+	//
+	// This is NOT a transient cold-start state. The catalog is written only by
+	// ReportModelListResult, i.e. only after a client explicitly asks for a
+	// model list, so a caller who never opens a model picker (pure CLI use) can
+	// sit here indefinitely. Treating unknown as "supported" is therefore not a
+	// brief window — it is a permanent hole for anyone who works this way.
+	acpEffortUnknown acpEffortEvidence = iota
+	// acpEffortAbsent — a catalog exists and no model in it advertises an effort.
+	acpEffortAbsent
+	// acpEffortPresent — a catalog exists and at least one model advertises one.
+	acpEffortPresent
+)
+
+// ambiguousACPEffortProviders are providers whose name does not determine which
+// binary is actually installed, so "not discovered yet" cannot be read as
+// "supported".
+//
+// `hermes` is the only one: it covers jcode (advertises an effort and applies
+// it) and Hermes Agent (advertises none). reasonix is deliberately absent — that
+// provider means one binary, which does support an effort, so an undiscovered
+// reasonix runtime is safely allowed rather than blocked before its first
+// discovery.
+var ambiguousACPEffortProviders = map[string]bool{
+	"hermes": true,
+}
+
+// acpThinkingDecision answers whether this runtime may carry a thinking level,
+// consulting the model catalog its daemon reported.
+//
+// acpEffortPresent means "allow". Providers outside the ACP-catalog set, and
+// unambiguous ACP providers with no catalog yet, are reported as present — their
+// capability is already settled by the provider name. Only an ambiguous provider
+// turns an undiscovered catalog into a refusal, because for those the name
+// genuinely does not answer the question and guessing "yes" is what let a Hermes
+// Agent user persist a level the daemon would later drop.
+func (h *Handler) acpThinkingDecision(ctx context.Context, provider string, runtimeID pgtype.UUID) acpEffortEvidence {
+	if !agent.UsesACPCatalogThinking(provider) {
+		return acpEffortPresent
+	}
+	snapshot := h.cachedModelCatalog(ctx, uuidToString(runtimeID))
+	if snapshot == nil || len(snapshot.Models) == 0 {
+		if ambiguousACPEffortProviders[provider] {
+			return acpEffortUnknown
+		}
+		return acpEffortPresent
+	}
+	for _, m := range snapshot.Models {
+		if m.Thinking != nil && len(m.Thinking.SupportedLevels) > 0 {
+			return acpEffortPresent
+		}
+	}
+	return acpEffortAbsent
 }
 
 // existingThinkingLevelRejection is thinkingLevelRejection for the carry-over
@@ -1984,10 +2147,7 @@ func thinkingLevelRejection(provider, value string) string {
 // user does not have to guess that clearing is allowed.
 func existingThinkingLevelRejection(provider, value string) string {
 	if !agent.ThinkingControlSupported(provider) {
-		return fmt.Sprintf(
-			"runtime %q does not support a per-agent reasoning effort; pass thinking_level=\"\" to clear the existing %q",
-			provider, value,
-		)
+		return existingThinkingCapabilityRejection(provider, value)
 	}
 	return fmt.Sprintf(
 		"existing thinking_level %q is not valid for runtime %q; pass thinking_level=\"\" to clear or set a value valid for the new runtime",

@@ -25,6 +25,7 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { cn } from "@multica/ui/lib/utils";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
@@ -761,9 +762,18 @@ export function AgentCreatePanel({
           )}
         </div>
 
-        {/* Footer */}
-        <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex min-h-7 items-center gap-2">
+        {/* Footer. Two layouts, one flat child list:
+            - Phones get a 2x2 grid — attach / switch on the top row, keep-open
+              toggle / Create on the bottom one. Laid out as a single row the
+              four controls need ~383px of the 398px a 430px phone has left
+              after padding, which reads as jammed and wraps outright below
+              ~410px (MUL-6236).
+            - From `sm` up it is the original single flex row: `mr-auto` on the
+              attach group reproduces what `justify-between` did when the
+              children were two wrapper divs, and `justify-self-end` goes
+              inert on flex items. */}
+        <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+          <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
             {/* Deliberately NOT disabled while uploading: each file is its
                 own queue entry, so queueing a second one is safe and waiting
                 for the first to land just to attach the next is busywork. */}
@@ -778,58 +788,62 @@ export function AgentCreatePanel({
               </span>
             )}
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <button
-              type="button"
-              onClick={switchToManual}
-              disabled={gate.uploading}
-              aria-disabled={gate.uploading || undefined}
-              aria-busy={gate.uploading || undefined}
-              title={t(($) => $.create_issue.switch_to_manual_tooltip)}
-              className="flex shrink-0 items-center gap-1.5 text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <ArrowLeftRight className="size-3.5" />
-              {t(($) => $.create_issue.switch_to_manual)}
-            </button>
-            <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-              <Switch
-                size="sm"
-                checked={keepOpen}
-                onCheckedChange={setKeepOpen}
-              />
-              {t(($) => $.create_issue.create_another)}
-            </label>
-            <Button
+          <button
+            type="button"
+            onClick={switchToManual}
+            disabled={gate.uploading}
+            aria-disabled={gate.uploading || undefined}
+            aria-busy={gate.uploading || undefined}
+            title={t(($) => $.create_issue.switch_to_manual_tooltip)}
+            className="flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground hover:text-foreground hover:bg-accent/60 transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ArrowLeftRight className="size-3.5" />
+            {t(($) => $.create_issue.switch_to_manual)}
+          </button>
+          <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+            <Switch
               size="sm"
-              onClick={submit}
-              disabled={!hasContent || !actor || submitting || versionBlocked || gate.uploading}
-              aria-disabled={gate.uploading || undefined}
-              // Sending is a busy state too, not just uploading.
-              aria-busy={gate.uploading || submitting || undefined}
-              title={
-                versionBlocked
-                  ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
-                  : undefined
-              }
-              className={justSent ? "min-w-28 !bg-emerald-600 !text-white" : "min-w-28"}
-            >
-              {submitting ? t(($) => $.create_issue.agent.sending) : gate.uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
-                <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
-              ) : (
-                <>
-                  {t(($) => $.create_issue.agent.submit)}
-                  {sendShortcut ? (
-                    <ShortcutKeycaps
-                      shortcut={sendShortcut}
-                      decorative
-                      className="ml-1"
-                      keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
-                    />
-                  ) : null}
-                </>
-              )}
-            </Button>
-          </div>
+              checked={keepOpen}
+              onCheckedChange={setKeepOpen}
+            />
+            {t(($) => $.create_issue.create_another)}
+          </label>
+          <Button
+            size="sm"
+            onClick={submit}
+            disabled={!hasContent || !actor || submitting || versionBlocked || gate.uploading}
+            aria-disabled={gate.uploading || undefined}
+            // Sending is a busy state too, not just uploading.
+            aria-busy={gate.uploading || submitting || undefined}
+            title={
+              versionBlocked
+                ? t(($) => $.create_issue.agent.version_blocked_tooltip, { min: versionCheck.min })
+                : undefined
+            }
+            className={cn(
+              "justify-self-end min-w-28",
+              justSent && "!bg-emerald-600 !text-white",
+            )}
+          >
+            {submitting ? t(($) => $.create_issue.agent.sending) : gate.uploading ? t(($) => $.create_issue.agent.uploading) : justSent ? (
+              <span className="flex items-center gap-1"><Check className="size-3.5" />{t(($) => $.create_issue.agent.sent_label)}</span>
+            ) : (
+              <>
+                {t(($) => $.create_issue.agent.submit)}
+                {sendShortcut ? (
+                  // Touch phones have no ⌘ key and the narrowest footer row
+                  // to spare — drop the hint at the same breakpoint the
+                  // footer reflows at.
+                  <ShortcutKeycaps
+                    shortcut={sendShortcut}
+                    decorative
+                    className="ml-1 max-sm:hidden"
+                    keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+                  />
+                ) : null}
+              </>
+            )}
+          </Button>
         </div>
     </>
   );

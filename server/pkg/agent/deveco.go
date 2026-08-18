@@ -119,7 +119,7 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	args = append(args, filterCustomArgs(opts.CustomArgs, devecoBlockedArgs, b.cfg.Logger)...)
 	args = append(args, prompt)
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	// Run deveco in its own process group so cancellation can reach the whole
 	// tree (deveco plus any tool subprocess it spawns), not just the direct
@@ -182,11 +182,11 @@ func (b *devecoBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		case <-runCtx.Done():
 		}
 		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGTERM)
+			signalProcessGroup(cmd, syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
 			case <-time.After(devecoTerminateGrace()):
-				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				signalProcessGroup(cmd, syscall.SIGKILL)
 			}
 		}
 		_ = stdout.Close()

@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
@@ -118,6 +119,32 @@ func newDaemonTokenRequest(method, path string, body any, workspaceID, daemonID 
 	// No X-User-ID — daemon tokens don't set it.
 	ctx := middleware.WithDaemonContext(req.Context(), workspaceID, daemonID)
 	return req.WithContext(ctx)
+}
+
+func TestRemoteMCPDaemonTokenForClaim(t *testing.T) {
+	runtime := db.AgentRuntime{
+		WorkspaceID: parseUUID(testWorkspaceID),
+		DaemonID:    strToText("daemon-remote-mcp"),
+	}
+	raw, params, err := remoteMCPDaemonTokenForClaim(AgentTaskResponse{
+		RemoteMCPConnections: []remotemcp.Connection{{ContributionKey: "mobbin"}},
+	}, runtime)
+	if err != nil {
+		t.Fatalf("remoteMCPDaemonTokenForClaim: %v", err)
+	}
+	if !strings.HasPrefix(raw, "mdt_") {
+		t.Fatalf("raw token has unexpected prefix")
+	}
+	if len(params) != 1 || params[0].TokenHash != auth.HashToken(raw) {
+		t.Fatalf("daemon token params do not contain the generated token hash")
+	}
+	if params[0].WorkspaceID != runtime.WorkspaceID || params[0].DaemonID != "daemon-remote-mcp" {
+		t.Fatalf("daemon token scope = (%v, %q)", params[0].WorkspaceID, params[0].DaemonID)
+	}
+	remaining := time.Until(params[0].ExpiresAt.Time)
+	if remaining < 23*time.Hour || remaining > 24*time.Hour {
+		t.Fatalf("daemon token lifetime = %s, want about 24h", remaining)
+	}
 }
 
 func TestListDaemonWorkspaces_UserScopedAndConditional(t *testing.T) {
@@ -949,6 +976,7 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 			},
 		},
 	}, testWorkspaceID, "test-daemon-profile-failure")
+	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityLocalWorktreeV1)
 
 	testHandler.DaemonRegister(w, req)
 	if w.Code != http.StatusOK {
@@ -978,6 +1006,21 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	}
 	if meta["runtime_profile_failure_reason"] != "command not found on PATH: missing-codex" {
 		t.Fatalf("failure reason metadata = %#v", meta["runtime_profile_failure_reason"])
+	}
+	// This row is written AFTER the successful runtimes of the same request, so
+	// its last_seen_at is the newest for the daemon until the first heartbeat —
+	// and the worktree gates read the newest row. A failed profile must not make
+	// a capable daemon look incapable for that window, nor (on the UI side) make
+	// this server look too old to record capabilities at all.
+	caps, _ := meta["capabilities"].([]any)
+	found := false
+	for _, c := range caps {
+		if c == protocol.DaemonCapabilityLocalWorktreeV1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("advertised capabilities missing from failure row: %#v", meta["capabilities"])
 	}
 }
 

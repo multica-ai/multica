@@ -1,4 +1,54 @@
 {
+  "issue_statuses": {
+    "title": "议题状态",
+    "description": "在内置的 7 个状态之外添加自己的状态。每个状态都属于一个分类，分类决定了它的行为。",
+    "loading": "正在加载状态…",
+    "add": "添加状态",
+    "show_archived": "显示已归档（{{count}}）",
+    "archived_badge": "已归档",
+    "archived_hint": "已停止用于新的指派，已经在该状态上的议题保持不变。",
+    "built_in_locked": "内置状态，名称、颜色和分类均不可修改。",
+    "flag_off": "当前部署尚未开启自定义状态，下面的内置状态照常使用。",
+    "reorder_failed": "排序保存失败。",
+    "actions": {
+      "open": "{{name}} 的操作",
+      "edit": "编辑",
+      "archive": "归档",
+      "reorder": "拖动排序 {{name}}"
+    },
+    "editor": {
+      "create_title": "新建状态",
+      "edit_title": "编辑状态",
+      "behavior_hint": "该状态的行为与「{{category}}」完全一致。",
+      "name": "名称",
+      "name_placeholder": "例如：Code Review",
+      "category": "分类",
+      "category_locked": "分类不可修改 —— 已经处于该状态的议题依赖它。",
+      "description": "描述",
+      "description_placeholder": "这个状态对团队意味着什么",
+      "color": "颜色",
+      "cancel": "取消",
+      "save": "保存",
+      "saving": "保存中…",
+      "save_failed": "状态保存失败。"
+    },
+    "archive_dialog": {
+      "title": "归档这个状态？",
+      "description": "「{{name}}」将不再能被指派给新的议题。已经处于该状态的议题保持不变，行为也完全不变。",
+      "cancel": "取消",
+      "confirm": "归档",
+      "failed": "归档失败。"
+    },
+    "categories": {
+      "backlog": "搁置。把议题移到这里不会启动 agent。",
+      "todo": "排队中。把议题移到这里会启动指派的 agent。",
+      "in_progress": "正在进行。",
+      "in_review": "已交付，等待人工 review。会结束 autopilot 运行。",
+      "done": "已完成。",
+      "blocked": "被外部依赖阻塞。",
+      "cancelled": "决定不做。"
+    }
+  },
   "quick_actions": {
     "title": "快捷操作",
     "description": "预先配置好执行的 Agent 和提示词，之后在任意任务侧边栏一键触发。",
@@ -115,6 +165,7 @@
       "toggleChat": { "label": "显示或隐藏聊天窗", "description": "打开或关闭悬浮聊天窗，打开时自动聚焦输入框。" },
       "findInIssue": { "label": "在任务中查找", "description": "搜索当前打开的任务详情。" },
       "openThreadNav": { "label": "打开讨论导航", "description": "列出、搜索并跳转当前任务的评论讨论。" },
+      "archiveInboxItem": { "label": "归档通知", "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。" },
       "send": { "label": "发送", "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建任务。" },
       "goBack": { "label": "后退", "description": "像浏览器一样在历史记录中后退。" },
       "goForward": { "label": "前进", "description": "像浏览器一样在历史记录中前进。" },
@@ -134,6 +185,7 @@
     "fixed": {
       "title": "固定的系统快捷键",
       "description": "窗口和无障碍快捷键保持固定，确保始终可靠。缩放和标签页操作仅适用于桌面端。",
+      "open_settings": "打开设置",
       "close_tab": "关闭当前标签页",
       "zoom_in": "放大",
       "zoom_out": "缩小",
@@ -162,6 +214,28 @@
       "start_date": "开始日期"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "本工作区的 MCP 服务库。在这里添加不会分配给任何智能体——由智能体的负责人在该智能体自己的 MCP 页里分配，并可按智能体单独开关。",
+    "servers_title": "共享服务",
+    "write_only_note": "已保存的配置是只写的——URL、命令、请求头和环境变量不会再次展示，因此编辑一个服务等于整条替换它的配置。改名是安全的：已分配的智能体不受影响。",
+    "add_server": "添加服务",
+    "edit_server": "编辑服务",
+    "remove_server": "移除服务",
+    "empty_title": "还没有共享的 MCP 服务",
+    "empty_description": "先在这里添加服务，再到需要用它的智能体的 MCP 页里分配。",
+    "disabled_badge": "已禁用",
+    "admin_only_note": "只有工作区 owner 和 admin 可以修改共享的 MCP 服务。",
+    "delete_title": "移除共享服务？",
+    "delete_description": "{{name}} 将从服务库以及所有已分配的智能体上移除，在它们的下一个任务起生效。",
+    "delete_confirm": "移除",
+    "cancel": "取消",
+    "added_toast": "已添加共享 MCP 服务",
+    "updated_toast": "已更新共享 MCP 服务",
+    "removed_toast": "已移除共享 MCP 服务",
+    "save_failed_toast": "共享 MCP 服务保存失败",
+    "remove_failed_toast": "共享 MCP 服务移除失败"
+  },
   "page": {
     "title": "设置",
     "my_account": "我的账号",
@@ -181,8 +255,75 @@
       "labs": "实验室",
       "members": "成员",
       "labels": "标签",
+      "issue_statuses": "议题状态",
       "properties": "属性",
-      "quick_actions": "快捷操作"
+      "quick_actions": "快捷操作",
+    "plugins": "Plugins",
+    "mcp": "MCP",
+    "billing": "账单与套餐"
+    }
+  },
+  "plugins": {
+    "title": "Plugins",
+    "description": "通过 URL 安装 Plugin，并逐条查看它能访问什么。",
+    "loading": "正在加载 Plugins",
+    "load_failed": "无法加载 Plugins",
+    "load_failed_description": "请重试。已安装的 Plugin 不受影响。",
+    "read_only": "只读访问",
+    "read_only_description": "工作区 owner 和 admin 可以安装、配置和移除 Plugin。",
+    "empty": "还没有安装任何 Plugin。",
+    "action_failed": "Plugin 操作失败",
+    "enabled": "Plugin 已启用",
+    "disabled": "Plugin 已停用",
+    "enabled_label": "启用 Plugin",
+    "uninstall": "卸载",
+    "uninstalled": "Plugin 已卸载，其存储数据与密钥一并删除",
+    "granted_scopes": "已授予的访问权限",
+    "contributes": "提供的能力",
+    "version": "v{{version}}",
+    "byline": "{{author}} · v{{version}}",
+    "source": "来源",
+    "states": {
+      "disabled": "已停用"
+    },
+    "install": {
+      "title": "安装 Plugin",
+      "description": "粘贴 Plugin manifest 的 URL。安装前你会先看到它请求的全部权限。",
+      "placeholder": "https://example.com/multica.plugin.json",
+      "review": "查看权限"
+    },
+    "installed": {
+      "title": "已安装"
+    },
+    "consent": {
+      "title": "该 Plugin 请求以下访问权限",
+      "description": "Multica 从不在服务器上运行 Plugin 代码。Plugin 只能做这些权限允许的事，且永远不会超过使用者本人的权限。",
+      "cancel": "取消",
+      "confirm": "授权并安装",
+      "confirm_upgrade": "授权并升级",
+      "installed": "Plugin 已安装",
+      "upgrade_from": " · 从 v{{version}} 升级",
+      "new_scope": "新增"
+    },
+    "config": {
+      "title": "配置",
+      "save": "保存",
+      "saved": "配置已保存",
+      "secret_set": "已保存 — 输入新值可替换"
+    },
+    "scopes": {
+      "issues_read": "读取 issue",
+      "issues_write": "创建和修改 issue",
+      "comments_read": "读取评论",
+      "comments_write": "发表评论",
+      "tasks_read": "读取 agent task",
+      "tasks_write": "启动和更新 agent task",
+      "agents_read": "读取 agent 列表",
+      "members_read": "读取成员列表",
+      "storage_user": "为每位成员单独存储数据",
+      "storage_workspace": "存储工作区共享数据",
+      "net": "向 {{domain}} 发送数据",
+      "unknown": "无法识别的权限 — 请勿安装"
     }
   },
   "properties": {
@@ -213,7 +354,9 @@
       "multi_select": "多选",
       "date": "日期",
       "checkbox": "勾选",
-      "url": "链接"
+      "url": "链接",
+      "actor": "成员",
+      "multi_actor": "成员（多选）"
     },
     "actions": {
       "open": "{{name}} 的操作",
@@ -688,7 +831,24 @@
   },
   "dingtalk": {
     "section_title": "钉钉",
-    "page_description": "将每个 Multica 智能体连接到专属的钉钉机器人。成员可私聊机器人、在群里 @ 它，或输入 /issue 直接创建 Multica issue。",
+    "page_description": "将钉钉机器人连接到 Multica。私聊使用机器人的默认智能体；同一个机器人在不同群里可分别绑定不同智能体。",
+    "group_routes_title": "群路由",
+    "group_routes_description": "将同一个机器人加入多个钉钉群，并在每个群里 @ 它一次。Multica 会自动发现群聊，后续消息将交给这里选择的智能体。",
+    "group_routes_empty_title": "尚未发现群聊",
+    "group_routes_empty_description": "将已连接的机器人加入钉钉群，并 @ 它一次。该群会自动显示在这里。",
+    "group_routes_error_title": "无法加载群路由",
+    "group_routes_error_description": "自动刷新已暂停。请检查服务器后重试。",
+    "group_routes_retry": "重试",
+    "group_routes_agents_loading": "正在加载群路由可用的智能体…",
+    "group_routes_agents_empty_title": "没有可用的智能体",
+    "group_routes_agents_empty_description": "请先创建或恢复智能体，再重新分配钉钉群。",
+    "group_routes_agents_error_title": "无法加载智能体",
+    "group_routes_agents_error_description": "加载智能体列表前，群路由重新分配不可用。",
+    "group_routes_agents_retry": "重试加载智能体",
+    "group_routes_agent_label": "此群绑定的智能体",
+    "group_routes_unknown_agent": "未知智能体",
+    "group_routes_updated": "已更新群智能体",
+    "group_routes_update_failed": "无法更新群智能体",
     "not_enabled_title": "钉钉集成未启用",
     "not_enabled_description_prefix": "在服务器上设置",
     "not_enabled_description_suffix": "以启用钉钉机器人安装。",
@@ -875,6 +1035,26 @@
         "label": "成员",
         "description": "创建并处理任务"
       }
-    }
+    },
+    "share_links_title": "分享链接",
+    "role_field": "角色：",
+    "expiry_field": "有效期：",
+    "share_links_create_title": "创建分享链接",
+    "share_links_create_button": "生成",
+    "share_links_creating": "生成中...",
+    "share_link_uses": "已用 {{used}} / {{max}} 次",
+    "share_link_expires": "过期：{{date}}",
+    "share_link_copy_tooltip": "复制链接",
+    "share_link_revoke_tooltip": "撤销链接",
+    "toast_share_link_created": "分享链接已创建",
+    "toast_share_link_failed": "创建分享链接失败",
+    "toast_share_link_revoked": "分享链接已撤销",
+    "toast_share_link_revoke_failed": "撤销分享链接失败",
+    "toast_share_link_copied": "链接已复制",
+    "toast_share_link_copy_failed": "复制链接失败",
+    "expiry_24h": "24 小时",
+    "expiry_7d": "7 天",
+    "expiry_30d": "30 天",
+    "expiry_never": "永久有效"
   }
 }

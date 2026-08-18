@@ -13,25 +13,14 @@ _features
 .kilo
 .idea
 .DS_Store
-.husky
 .vscode
 
 /.dockerignore
 /.goreleaser.yml
-/AGENTS.md
-/CLAUDE.md
-/CLI_AND_DAEMON.md
-/CLI_INSTALL.md
-/CONTRIBUTING.md
 /Dockerfile
 /Dockerfile.web
-/HANDOFF_ARCHITECTURE_AUDIT.md
 /Makefile
-/README.md
-/README.zh-CN.md
-/SELF_HOSTING.md
-/SELF_HOSTING_ADVANCED.md
-/SELF_HOSTING_AI.md
+/*.md
 /docker-compose*.yml
 /playwright.config.ts
 /skills-lock.json
@@ -41,7 +30,9 @@ _features
 /docs/
 /e2e/
 /server/
-/apps/desktop/
+/apps/*
+!/apps/web/
+!/apps/docs/
 /scripts/
 
 *.log

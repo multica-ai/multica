@@ -1118,7 +1118,10 @@ func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError(t *testing.T) {
 	stub := installOpenclawStub(t, map[string]openclawResponse{
 		"config file":                   {stdout: userCfgPath},
 		"config get agents.list --json": {stdout: "null"},
-		"config get --json":             {err: errors.New("openclaw: schema validation failed")},
+		"config get --json": {
+			stdout: `{"error":"schema validation failed","resolved":{"apiKey":"must-not-leak"}}`,
+			err:    errors.New("openclaw config get --json: exit status 1"),
+		},
 	})
 	mcpConfig := json.RawMessage(`{"mcpServers": {"context7": {"command": "uvx"}}}`)
 
@@ -1131,6 +1134,12 @@ func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "resolved config") {
 		t.Errorf("error %q does not name the resolved-config step", err.Error())
+	}
+	if !strings.Contains(err.Error(), "json error: schema validation failed") {
+		t.Errorf("error %q omits the structured CLI diagnostic", err.Error())
+	}
+	if strings.Contains(err.Error(), "must-not-leak") {
+		t.Errorf("error leaked a non-diagnostic JSON field: %q", err.Error())
 	}
 	// No stale wrapper / snapshot left behind.
 	if _, err := os.Stat(filepath.Join(envRoot, openclawConfigFile)); !os.IsNotExist(err) {
@@ -1494,10 +1503,127 @@ func TestIsOpenclawKeyMissing(t *testing.T) {
 	}
 }
 
+// TestIsOpenclawKeyMissingResult covers the JSON error contract observed in
+// OpenClaw 2026.7.2-beta.7. In JSON mode the CLI writes the missing-path error
+// to stdout and leaves stderr empty, so the process error alone contains only
+// "exit status 1". Only a structured missing-path envelope may trigger the
+// registry fallback; other failures must preserve the preparer's fail-closed
+// posture.
+func TestIsOpenclawKeyMissingResult(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		stdout string
+		err    error
+		want   bool
+	}{
+		{
+			name:   "2026.7.2-beta.7 stdout json missing path",
+			stdout: `{"error":"Config path not found: agents.list"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   true,
+		},
+		{
+			name: "2026.6.x stderr missing path remains supported",
+			err:  errors.New("openclaw config get agents.list --json: exit status 1 (stderr: Config path not found: agents.list)"),
+			want: true,
+		},
+		{
+			name:   "other json error stays an error",
+			stdout: `{"error":"OpenClaw config is invalid"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   false,
+		},
+		{
+			name:   "unrelated not-set json error stays an error",
+			stdout: `{"error":"OPENAI_API_KEY is not set"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   false,
+		},
+		{
+			name:   "agents-list not-set json error remains compatible",
+			stdout: `{"error":"agents.list is not set"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   true,
+		},
+		{
+			name:   "malformed json stays an error",
+			stdout: `{"error":`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   false,
+		},
+		{
+			name:   "successful output is never reclassified",
+			stdout: `{"error":"Config path not found: agents.list"}`,
+			want:   false,
+		},
+		{
+			name:   "timeout remains a timeout",
+			stdout: `{"error":"Config path not found: agents.list"}`,
+			err:    fmt.Errorf("openclaw config get agents.list --json: %w (stderr: Config path not found: agents.list)", context.DeadlineExceeded),
+			want:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isOpenclawKeyMissingResult(tc.stdout, tc.err); got != tc.want {
+				t.Errorf("isOpenclawKeyMissingResult(%q, %v) = %v, want %v", tc.stdout, tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnnotateOpenclawJSONError(t *testing.T) {
+	t.Parallel()
+	t.Run("keeps only a normalized error field and the cause", func(t *testing.T) {
+		t.Parallel()
+		cause := errors.New("exit status 1")
+		got := annotateOpenclawJSONError(
+			cause,
+			`{"error":"  schema\nvalidation failed  ","resolved":{"apiKey":"must-not-leak"}}`,
+		)
+		if !errors.Is(got, cause) {
+			t.Fatalf("annotated error lost its cause: %v", got)
+		}
+		if !strings.Contains(got.Error(), "json error: schema validation failed") {
+			t.Fatalf("annotated error omitted or failed to normalize the diagnostic: %v", got)
+		}
+		if strings.Contains(got.Error(), "must-not-leak") {
+			t.Fatalf("annotated error leaked a sibling JSON field: %v", got)
+		}
+	})
+
+	t.Run("bounds the diagnostic", func(t *testing.T) {
+		t.Parallel()
+		cause := errors.New("exit status 1")
+		prefix := strings.Repeat("界", openclawJSONErrorMaxRunes)
+		got := annotateOpenclawJSONError(
+			cause,
+			`{"error":"`+prefix+`extra"}`,
+		)
+		if !strings.Contains(got.Error(), "json error: "+prefix+"…") {
+			t.Fatalf("annotated error was not truncated at the rune limit: %v", got)
+		}
+		if strings.Contains(got.Error(), "extra") {
+			t.Fatalf("annotated error exceeded its bound: %v", got)
+		}
+	})
+
+	t.Run("ignores malformed envelopes", func(t *testing.T) {
+		t.Parallel()
+		cause := errors.New("exit status 1")
+		if got := annotateOpenclawJSONError(cause, `{"error":`); got != cause {
+			t.Fatalf("malformed JSON changed the original error: %v", got)
+		}
+	})
+}
+
 // TestPrepareOpenclawConfigNewSchemaOmitsAgentsList — OpenClaw 2026.6.x
-// removed the `agents.list` config path; `config get agents.list` exits
-// non-zero with "Config path not found" and the agents live in a sqlite
-// registry reachable via the `openclaw agents list --json` subcommand.
+// removed the `agents.list` config path and OpenClaw 2026.7.2-beta.7 reports
+// that missing path as a JSON error on stdout. In both versions the agents
+// live in a sqlite registry reachable via the `openclaw agents list --json`
+// subcommand.
 //
 // The preparer must (a) treat the config-path error as "missing, fall back"
 // (read-side, #3028 first half) and (b) NOT write the registry-sourced agents
@@ -1524,8 +1650,13 @@ func TestPrepareOpenclawConfigNewSchemaOmitsAgentsList(t *testing.T) {
 	registry := `[{"id":"main","identityName":"Beau","identitySource":"identity","workspace":"/Users/cob/.openclaw/workspace","agentDir":"/Users/cob/.openclaw/agents/main/agent","model":"anthropic/claude-sonnet-4-6","bindings":0,"isDefault":true}]`
 	stub := installOpenclawStub(t, map[string]openclawResponse{
 		"config file": {stdout: userConfigPath},
-		// New-schema error, verbatim #3028 string.
-		"config get agents.list --json": {err: errors.New("openclaw config get agents.list --json: exit status 1 (stderr: Config path not found: agents.list. Run openclaw config validate to inspect config shape.)")},
+		// OpenClaw 2026.7.2-beta.7 writes this JSON error to stdout and
+		// leaves stderr empty, so the process error carries no missing-path
+		// text of its own (#7130).
+		"config get agents.list --json": {
+			stdout: `{"error":"Config path not found: agents.list"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+		},
 		// Registry subcommand returns the real agents.
 		"agents list --json": {stdout: registry},
 	})

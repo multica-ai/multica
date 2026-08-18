@@ -71,6 +71,13 @@ type AgentInvocationTarget struct {
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
+type AgentMcpServer struct {
+	AgentID   pgtype.UUID        `json:"agent_id"`
+	ServerID  pgtype.UUID        `json:"server_id"`
+	Enabled   bool               `json:"enabled"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentRuntime struct {
 	ID             pgtype.UUID        `json:"id"`
 	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
@@ -161,6 +168,7 @@ type AgentTaskQueue struct {
 	RetiredSessionID          pgtype.Text `json:"retired_session_id"`
 	QuickActionsDisabled      bool        `json:"quick_actions_disabled"`
 	RegenerateQuickActionsFor pgtype.UUID `json:"regenerate_quick_actions_for"`
+	BranchName                pgtype.Text `json:"branch_name"`
 }
 
 type AgentToLabel struct {
@@ -508,6 +516,18 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type DingtalkGroupRoute struct {
+	ID                pgtype.UUID        `json:"id"`
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	InstallationID    pgtype.UUID        `json:"installation_id"`
+	ConversationID    string             `json:"conversation_id"`
+	ConversationTitle string             `json:"conversation_title"`
+	AgentID           pgtype.UUID        `json:"agent_id"`
+	Revision          int64              `json:"revision"`
+	DiscoveredAt      pgtype.Timestamptz `json:"discovered_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Feedback struct {
 	ID          pgtype.UUID        `json:"id"`
 	UserID      pgtype.UUID        `json:"user_id"`
@@ -704,6 +724,21 @@ type IssueReaction struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type IssueStatus struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Key         string             `json:"key"`
+	Name        string             `json:"name"`
+	Description string             `json:"description"`
+	Category    string             `json:"category"`
+	Color       string             `json:"color"`
+	IsSystem    bool               `json:"is_system"`
+	Position    float64            `json:"position"`
+	ArchivedAt  pgtype.Timestamptz `json:"archived_at"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type IssueSubscriber struct {
 	IssueID        pgtype.UUID        `json:"issue_id"`
 	UserType       string             `json:"user_type"`
@@ -871,6 +906,41 @@ type PinnedItem struct {
 	ItemID      pgtype.UUID        `json:"item_id"`
 	Position    float64            `json:"position"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type PluginInstallation struct {
+	ID            pgtype.UUID        `json:"id"`
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	PluginKey     string             `json:"plugin_key"`
+	SourceUrl     string             `json:"source_url"`
+	Version       string             `json:"version"`
+	Manifest      []byte             `json:"manifest"`
+	GrantedScopes []byte             `json:"granted_scopes"`
+	Config        []byte             `json:"config"`
+	Enabled       bool               `json:"enabled"`
+	InstalledBy   pgtype.UUID        `json:"installed_by"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PluginSecret struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	Key            string             `json:"key"`
+	Ciphertext     []byte             `json:"ciphertext"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PluginStorage struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	ScopeType      string             `json:"scope_type"`
+	ScopeID        pgtype.UUID        `json:"scope_id"`
+	Key            string             `json:"key"`
+	Value          string             `json:"value"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Project struct {
@@ -1240,4 +1310,27 @@ type WorkspaceInvitation struct {
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
+}
+
+type WorkspaceMcpServer struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Name        string             `json:"name"`
+	Config      []byte             `json:"config"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkspaceShareLink struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Code        string             `json:"code"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	Role        string             `json:"role"`
+	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
+	MaxUses     pgtype.Int4        `json:"max_uses"`
+	UseCount    int32              `json:"use_count"`
+	IsActive    bool               `json:"is_active"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }

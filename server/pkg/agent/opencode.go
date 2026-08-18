@@ -109,7 +109,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// extension is too long" (#6538). Keeping the prompt off argv also stops it
 	// from being echoed into the "agent command" log line below.
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	// Run opencode in its own process group so cancellation can reach the
 	// whole tree (opencode plus any tool subprocess it spawns), not just the
@@ -232,11 +232,11 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// strand that goroutine for the lifetime of the daemon.
 		closeStdin()
 		if cmd.Process != nil {
-			signalProcessGroup(cmd.Process, syscall.SIGTERM)
+			signalProcessGroup(cmd, syscall.SIGTERM)
 			select {
 			case <-procDone: // exited within the grace window
 			case <-time.After(opencodeTerminateGrace()):
-				signalProcessGroup(cmd.Process, syscall.SIGKILL)
+				signalProcessGroup(cmd, syscall.SIGKILL)
 			}
 		}
 		_ = stdout.Close()

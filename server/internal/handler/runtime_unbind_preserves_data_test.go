@@ -207,50 +207,6 @@ func TestCountUndrainedTasksByRuntimeOrAgent_IncludesCrossRuntimeTask(t *testing
 	}
 }
 
-func TestDeleteStaleOfflineRuntimes_UnboundAgentDoesNotDisableGC(t *testing.T) {
-	if testHandler == nil {
-		t.Skip("database not available")
-	}
-	ctx := context.Background()
-
-	boundRuntimeID := createCascadeFixtureRuntime(t, ctx, "GC Unbound Agent Source")
-	agentID := createCascadeFixtureAgent(t, ctx, boundRuntimeID, "GC Unbound Agent")
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET runtime_id = NULL WHERE id = $1`, agentID); err != nil {
-		t.Fatalf("unbind GC fixture agent: %v", err)
-	}
-
-	var staleRuntimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
-			workspace_id, name, runtime_mode, provider, status,
-			device_info, metadata, owner_id, last_seen_at
-		)
-		VALUES ($1, 'GC stale candidate', 'cloud', 'gc-regression', 'offline',
-			'GC stale candidate', '{}'::jsonb, $2, now() - interval '200 years')
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&staleRuntimeID); err != nil {
-		t.Fatalf("seed stale runtime: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, staleRuntimeID)
-	})
-
-	deleted, err := testHandler.Queries.DeleteStaleOfflineRuntimes(ctx, 3_000_000_000)
-	if err != nil {
-		t.Fatalf("delete stale runtimes: %v", err)
-	}
-	found := false
-	for _, row := range deleted {
-		if uuidToString(row.ID) == staleRuntimeID {
-			found = true
-			break
-		}
-	}
-	if !found {
-		t.Fatal("unbound agent made stale-runtime GC skip an unrelated candidate")
-	}
-}
-
 // TestUnbindAgentsAndDeleteRuntime_KeepsAutopilotConfig pauses an automation
 // whose assignee cannot run after teardown. Leaving it active would append an
 // identical skipped run every schedule tick forever. Its assignee and config

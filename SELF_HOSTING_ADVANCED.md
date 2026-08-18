@@ -211,6 +211,7 @@ Agent-specific overrides:
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_OPENCLAW_CLI_TIMEOUT` | Deadline for each `openclaw config ...` call during task preparation (default 30s; accepts `45s` or `45`). Raise it when the local CLI is slow to start; the daemon also reads it from `backends.openclaw.cli_timeout` in the CLI config |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
@@ -312,7 +313,7 @@ If you are upgrading from a binary that pre-dates MUL-2957 (or the auto-hook fai
 
 If you prefer to build and run services manually:
 
-**Prerequisites:** Go 1.26+, Node.js 20+, pnpm 10.28+, PostgreSQL 17 with pgvector.
+**Prerequisites:** Go 1.26.6, Node.js 22, pnpm 10.28.2, PostgreSQL 17 with pgvector.
 
 ```bash
 # Start your PostgreSQL (or use: docker compose up -d postgres)

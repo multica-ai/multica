@@ -4,11 +4,12 @@ import (
 	"encoding/json"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 // AgentEntry describes a single available agent CLI.
 type AgentEntry struct {
-	Path string // path to CLI binary (pinned at startup; symlink-resolved to a concrete, possibly versioned, path)
+	Path string // stable startup-resolved CLI entry point; launch resolution may follow platform links to a concrete path
 	// Command is the bare command name or MULTICA_*_PATH value that Path was
 	// resolved from at startup. It is kept so the daemon can re-resolve Path
 	// if the pinned executable later vanishes — e.g. a version manager
@@ -57,19 +58,37 @@ type ProjectResourceData struct {
 // sharing the canonical JSON shape with the runtime app metadata package.
 type ConnectedAppData = runtimeapps.ConnectedApp
 
+// ActiveSiblingRunData mirrors the claim-time warning context returned by the
+// server for another in-flight issue task owned by this agent. Queued tasks are
+// intentionally excluded from this context.
+type ActiveSiblingRunData struct {
+	TaskID          string `json:"task_id"`
+	IssueID         string `json:"issue_id"`
+	IssueIdentifier string `json:"issue_identifier"`
+	IssueTitle      string `json:"issue_title"`
+	Status          string `json:"status"`
+	CreatedAt       string `json:"created_at"`
+	StartedAt       string `json:"started_at,omitempty"`
+}
+
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID          string `json:"id"`
-	AgentID     string `json:"agent_id"`
-	RuntimeID   string `json:"runtime_id"`
-	IssueID     string `json:"issue_id"`
-	WorkspaceID string `json:"workspace_id"`
+	ID                   string                 `json:"id"`
+	AgentID              string                 `json:"agent_id"`
+	RuntimeID            string                 `json:"runtime_id"`
+	IssueID              string                 `json:"issue_id"`
+	WorkspaceID          string                 `json:"workspace_id"`
+	RemoteMCPConnections []remotemcp.Connection `json:"remote_mcp_connections,omitempty"`
+	// RemoteMCPDaemonToken stays inside the daemon and authenticates the local
+	// broker's credential-resolution calls. It must never enter agent env/config.
+	RemoteMCPDaemonToken string `json:"remote_mcp_daemon_token,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
 	// into the brief. Empty when the owner hasn't set one.
 	WorkspaceContext              string                 `json:"workspace_context,omitempty"`
+	ActiveSiblingRuns             []ActiveSiblingRunData `json:"active_sibling_runs,omitempty"`
 	ThreadName                    string                 `json:"thread_name,omitempty"` // semantic title for provider-native session/thread history
 	Agent                         *AgentData             `json:"agent,omitempty"`
 	ConnectedApps                 []ConnectedAppData     `json:"connected_apps,omitempty"` // per-run app capabilities mounted through runtime MCP overlays

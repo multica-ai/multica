@@ -39,6 +39,22 @@ func TestRedisClientName(t *testing.T) {
 	}
 }
 
+func TestChannelLeaseRedisURLFromEnvPrefersDedicatedInstance(t *testing.T) {
+	t.Setenv("REDIS_URL", "redis://shared:6379/0")
+	t.Setenv("CHANNEL_WS_LEASE_REDIS_URL", "redis://leases:6379/0")
+	if got := channelLeaseRedisURLFromEnv(); got != "redis://leases:6379/0" {
+		t.Fatalf("channel lease Redis URL = %q", got)
+	}
+}
+
+func TestChannelLeaseRedisURLFromEnvFallsBackToSharedRedis(t *testing.T) {
+	t.Setenv("REDIS_URL", "redis://shared:6379/0")
+	t.Setenv("CHANNEL_WS_LEASE_REDIS_URL", "")
+	if got := channelLeaseRedisURLFromEnv(); got != "redis://shared:6379/0" {
+		t.Fatalf("channel lease Redis URL = %q", got)
+	}
+}
+
 func TestNewNamedRedisClient_SetsClientName(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "")
 	base := &redis.Options{Addr: "localhost:6379"}
@@ -326,6 +342,35 @@ func TestEnvNonNegativeDuration(t *testing.T) {
 			}
 			if got := envNonNegativeDuration(key, tt.def); got != tt.want {
 				t.Fatalf("envNonNegativeDuration(%q, %s) = %s, want %s", key, tt.def, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEnvNonNegativeInt(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		def   int
+		want  int
+	}{
+		{name: "unset returns default", def: 10, want: 10},
+		{name: "zero disables gate", value: "0", def: 10, want: 0},
+		{name: "positive override", value: "25", def: 10, want: 25},
+		{name: "invalid returns default", value: "many", def: 10, want: 10},
+		{name: "negative returns default", value: "-1", def: 10, want: 10},
+	}
+
+	for i, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			key := "TEST_NON_NEGATIVE_INT_" + strconv.Itoa(i)
+			if tt.name == "unset returns default" {
+				os.Unsetenv(key)
+			} else {
+				t.Setenv(key, tt.value)
+			}
+			if got := envNonNegativeInt(key, tt.def); got != tt.want {
+				t.Fatalf("envNonNegativeInt(%q, %d) = %d, want %d", key, tt.def, got, tt.want)
 			}
 		})
 	}

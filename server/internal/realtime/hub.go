@@ -685,6 +685,9 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 		if !ok {
 			return "", `{"error":"invalid token"}`
 		}
+		if auth.IsTemporarilyDisabledUserID(uid) {
+			return "", `{"error":"account disabled"}`
+		}
 		return uid, ""
 	}
 
@@ -706,6 +709,10 @@ func authenticateToken(tokenStr string, pr PATResolver, ctx context.Context) (st
 	uid, ok := claims["sub"].(string)
 	if !ok || strings.TrimSpace(uid) == "" {
 		return "", `{"error":"invalid claims"}`
+	}
+	email, _ := claims["email"].(string)
+	if auth.IsTemporarilyDisabledUser(uid, email) {
+		return "", `{"error":"account disabled"}`
 	}
 	return uid, ""
 }
@@ -786,7 +793,11 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
 		uid, errMsg := authenticateToken(cookie.Value, pr, r.Context())
 		if errMsg != "" {
-			http.Error(w, errMsg, http.StatusUnauthorized)
+			status := http.StatusUnauthorized
+			if errMsg == `{"error":"account disabled"}` {
+				status = http.StatusForbidden
+			}
+			http.Error(w, errMsg, status)
 			return
 		}
 		if !mc.IsMember(r.Context(), uid, workspaceID) {

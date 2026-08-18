@@ -174,6 +174,12 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				reasonixHome = filepath.Join(home, ".reasonix")
 			}
 			providerRoot = filepath.Join(reasonixHome, "skills")
+		case "dsh":
+			dshHome := strings.TrimSpace(os.Getenv("DSH_HOME"))
+			if dshHome == "" {
+				dshHome = filepath.Join(home, ".dsh")
+			}
+			providerRoot = filepath.Join(dshHome, "skills")
 		case "kiro":
 			providerRoot = filepath.Join(home, ".kiro", "skills")
 		case "qoder":
@@ -225,6 +231,11 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				}
 			}
 			providerRoot = filepath.Join(qwenpawHome, "skill_pool")
+		case "mcode":
+			// MCode's default data directory is ~/.minimax; global skills live
+			// directly below it. Project skills are injected separately under
+			// <workDir>/.minimax/skills.
+			providerRoot = filepath.Join(home, ".minimax", "skills")
 		default:
 			return nil, false, nil
 		}

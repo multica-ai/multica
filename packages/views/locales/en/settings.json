@@ -1,4 +1,54 @@
 {
+  "issue_statuses": {
+    "title": "Issue Statuses",
+    "description": "Add statuses of your own on top of the seven built-in ones. Every status belongs to a category, and the category is what determines its behavior.",
+    "loading": "Loading statuses…",
+    "add": "Add status",
+    "show_archived": "Show archived ({{count}})",
+    "archived_badge": "Archived",
+    "archived_hint": "Retired from new assignments. Issues already on it keep it.",
+    "built_in_locked": "Built-in status. Name, color and category are fixed.",
+    "flag_off": "Custom statuses are not enabled for this deployment yet. The built-in statuses below work as usual.",
+    "reorder_failed": "Could not save the new order.",
+    "actions": {
+      "open": "Actions for {{name}}",
+      "edit": "Edit",
+      "archive": "Archive",
+      "reorder": "Reorder {{name}}"
+    },
+    "editor": {
+      "create_title": "New status",
+      "edit_title": "Edit status",
+      "behavior_hint": "This status behaves exactly like {{category}}.",
+      "name": "Name",
+      "name_placeholder": "e.g. Code Review",
+      "category": "Category",
+      "category_locked": "Category cannot be changed — issues already on this status depend on it.",
+      "description": "Description",
+      "description_placeholder": "What this status means for your team",
+      "color": "Color",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…",
+      "save_failed": "Could not save the status."
+    },
+    "archive_dialog": {
+      "title": "Archive this status?",
+      "description": "\"{{name}}\" stops being available for new issues. Issues already on it keep it and keep behaving exactly as they do now.",
+      "cancel": "Cancel",
+      "confirm": "Archive",
+      "failed": "Could not archive the status."
+    },
+    "categories": {
+      "backlog": "Parked. Assigning an issue here never starts an agent run.",
+      "todo": "Queued. Moving an issue here starts the assigned agent.",
+      "in_progress": "Actively being worked on.",
+      "in_review": "Delivered, waiting on human review. Finalizes the autopilot run.",
+      "done": "Completed.",
+      "blocked": "Stalled on an external dependency.",
+      "cancelled": "Decided not to do."
+    }
+  },
   "quick_actions": {
     "title": "Quick Actions",
     "description": "Preset an agent and a prompt once, then trigger it from any issue's sidebar with a single click.",
@@ -115,6 +165,7 @@
       "toggleChat": { "label": "Toggle chat window", "description": "Open or close the floating chat window. Opening it focuses the message input." },
       "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
       "openThreadNav": { "label": "Open thread navigator", "description": "List, search, and jump between the comment threads of the open issue." },
+      "archiveInboxItem": { "label": "Archive notification", "description": "Archive the open inbox notification, or restore it while reading the archive." },
       "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
       "goBack": { "label": "Go back", "description": "Navigate back through history, like a browser." },
       "goForward": { "label": "Go forward", "description": "Navigate forward through history, like a browser." },
@@ -134,6 +185,7 @@
     "fixed": {
       "title": "Fixed system shortcuts",
       "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
+      "open_settings": "Open Settings",
       "close_tab": "Close active tab",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",
@@ -162,6 +214,28 @@
       "start_date": "Start date"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "A library of MCP servers for this workspace. Adding one here gives it to no agent — an agent owner assigns it on the agent's own MCP tab, where it also gets a per-agent on/off toggle.",
+    "servers_title": "Shared servers",
+    "write_only_note": "Saved configurations are write-only — urls, commands, headers, and environment values are never shown again, so editing a server replaces its configuration. Renaming is safe: agents keep their assignment.",
+    "add_server": "Add server",
+    "edit_server": "Edit server",
+    "remove_server": "Remove server",
+    "empty_title": "No shared MCP servers",
+    "empty_description": "Add a server here, then assign it to the agents that should use it from their own MCP tab.",
+    "disabled_badge": "Disabled",
+    "admin_only_note": "Only workspace owners and admins can change the shared MCP servers.",
+    "delete_title": "Remove shared server?",
+    "delete_description": "{{name}} will be removed from the library and from every agent it is assigned to, taking effect on their next task.",
+    "delete_confirm": "Remove",
+    "cancel": "Cancel",
+    "added_toast": "Shared MCP server added",
+    "updated_toast": "Shared MCP server updated",
+    "removed_toast": "Shared MCP server removed",
+    "save_failed_toast": "Could not save the shared MCP server",
+    "remove_failed_toast": "Could not remove the shared MCP server"
+  },
   "page": {
     "title": "Settings",
     "my_account": "My Account",
@@ -181,8 +255,75 @@
       "labs": "Labs",
       "members": "Members",
       "labels": "Labels",
+      "issue_statuses": "Issue Statuses",
       "properties": "Properties",
-      "quick_actions": "Quick Actions"
+      "quick_actions": "Quick Actions",
+    "plugins": "Plugins",
+    "mcp": "MCP",
+    "billing": "Billing"
+    }
+  },
+  "plugins": {
+    "title": "Plugins",
+    "description": "Install plugins by URL and review exactly what each one is allowed to reach.",
+    "loading": "Loading Plugins",
+    "load_failed": "Plugins couldn't be loaded",
+    "load_failed_description": "Try again. Installed Plugins are unaffected.",
+    "read_only": "Read-only access",
+    "read_only_description": "Workspace owners and admins can install, configure, and remove Plugins.",
+    "empty": "No Plugins are installed yet.",
+    "action_failed": "Plugin action failed",
+    "enabled": "Plugin enabled",
+    "disabled": "Plugin disabled",
+    "enabled_label": "Enable Plugin",
+    "uninstall": "Uninstall",
+    "uninstalled": "Plugin uninstalled. Its stored data and secrets were removed.",
+    "granted_scopes": "Granted access",
+    "contributes": "Contributes",
+    "version": "v{{version}}",
+    "byline": "{{author}} · v{{version}}",
+    "source": "Source",
+    "states": {
+      "disabled": "Disabled"
+    },
+    "install": {
+      "title": "Install a Plugin",
+      "description": "Paste the URL of a plugin manifest. You'll see what it asks for before anything is installed.",
+      "placeholder": "https://example.com/multica.plugin.json",
+      "review": "Review"
+    },
+    "installed": {
+      "title": "Installed"
+    },
+    "consent": {
+      "title": "This Plugin is asking for the following access",
+      "description": "Multica never runs plugin code on its servers. A Plugin can only do what these scopes allow, and never more than the person using it can already do.",
+      "cancel": "Cancel",
+      "confirm": "Grant and install",
+      "confirm_upgrade": "Grant and upgrade",
+      "installed": "Plugin installed",
+      "upgrade_from": " · upgrading from v{{version}}",
+      "new_scope": "New"
+    },
+    "config": {
+      "title": "Configuration",
+      "save": "Save",
+      "saved": "Configuration saved",
+      "secret_set": "Saved — enter a new value to replace it"
+    },
+    "scopes": {
+      "issues_read": "Read issues",
+      "issues_write": "Create and edit issues",
+      "comments_read": "Read comments",
+      "comments_write": "Post comments",
+      "tasks_read": "Read agent tasks",
+      "tasks_write": "Start and update agent tasks",
+      "agents_read": "Read the agent list",
+      "members_read": "Read the member list",
+      "storage_user": "Store data for each member individually",
+      "storage_workspace": "Store data shared by the workspace",
+      "net": "Send data to {{domain}}",
+      "unknown": "Unrecognized access — do not install"
     }
   },
   "properties": {
@@ -214,7 +355,9 @@
       "multi_select": "Multi-select",
       "date": "Date",
       "checkbox": "Checkbox",
-      "url": "URL"
+      "url": "URL",
+      "actor": "Member",
+      "multi_actor": "Members"
     },
     "actions": {
       "open": "Actions for {{name}}",
@@ -689,7 +832,24 @@
   },
   "dingtalk": {
     "section_title": "DingTalk",
-    "page_description": "Connect each Multica Agent to its own DingTalk robot. Members can DM the bot, @mention it in a group, and type /issue to spin up a new Multica issue.",
+    "page_description": "Connect a DingTalk robot to Multica. Direct messages use its default Agent; each group can route the same robot to a different Agent.",
+    "group_routes_title": "Group routing",
+    "group_routes_description": "Add this robot to multiple DingTalk groups, then @mention it once in each group. Multica discovers the group automatically and routes future messages to the Agent selected here.",
+    "group_routes_empty_title": "No groups discovered yet",
+    "group_routes_empty_description": "Add the connected robot to a DingTalk group and @mention it once. The group will appear here automatically.",
+    "group_routes_error_title": "Could not load group routes",
+    "group_routes_error_description": "Automatic refresh is paused. Check the server and try again.",
+    "group_routes_retry": "Retry",
+    "group_routes_agents_loading": "Loading Agents for group routing…",
+    "group_routes_agents_empty_title": "No eligible Agents",
+    "group_routes_agents_empty_description": "Create or restore an Agent before reassigning DingTalk groups.",
+    "group_routes_agents_error_title": "Could not load Agents",
+    "group_routes_agents_error_description": "Group reassignment is unavailable until the Agent list loads.",
+    "group_routes_agents_retry": "Retry Agents",
+    "group_routes_agent_label": "Agent for this group",
+    "group_routes_unknown_agent": "Unknown Agent",
+    "group_routes_updated": "Group Agent updated",
+    "group_routes_update_failed": "Could not update the Group Agent",
     "not_enabled_title": "DingTalk integration not enabled",
     "not_enabled_description_prefix": "Set",
     "not_enabled_description_suffix": "on the server to enable DingTalk robot installations.",
@@ -876,6 +1036,26 @@
         "label": "Member",
         "description": "Create and work on issues"
       }
-    }
+    },
+    "share_links_title": "Share links",
+    "role_field": "Role:",
+    "expiry_field": "Expiry:",
+    "share_links_create_title": "Create share link",
+    "share_links_create_button": "Generate",
+    "share_links_creating": "Generating...",
+    "share_link_uses": "{{used}} / {{max}} uses",
+    "share_link_expires": "Expires {{date}}",
+    "share_link_copy_tooltip": "Copy link",
+    "share_link_revoke_tooltip": "Revoke link",
+    "toast_share_link_created": "Share link created",
+    "toast_share_link_failed": "Failed to create share link",
+    "toast_share_link_revoked": "Share link revoked",
+    "toast_share_link_revoke_failed": "Failed to revoke share link",
+    "toast_share_link_copied": "Link copied",
+    "toast_share_link_copy_failed": "Failed to copy link",
+    "expiry_24h": "24 hours",
+    "expiry_7d": "7 days",
+    "expiry_30d": "30 days",
+    "expiry_never": "Never"
   }
 }

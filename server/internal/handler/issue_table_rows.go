@@ -458,9 +458,12 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		issueIDs[index] = row.issue.ID
 	}
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
+	// One Resolver for the page — see newStatusCategoryFiller. (MUL-6243)
+	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)
+		fillTableRow(&issue)
 		labels := labelsByIssue[issue.ID]
 		if labels == nil {
 			labels = []LabelResponse{}

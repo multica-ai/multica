@@ -197,6 +197,22 @@ UPDATE agent_runtime
 SET status = 'offline', updated_at = now()
 WHERE id = $1;
 
+-- name: SetAgentRuntimeOfflineWithReason :exec
+-- Takes a runtime offline and records WHY, for the one class of cause the user
+-- has to repair before the runtime can come back (MUL-6164). Everything that
+-- merely stops — daemon shutdown, laptop asleep — uses SetAgentRuntimeOffline
+-- and leaves no reason, because "wait for it" needs no explanation.
+--
+-- Merged into metadata rather than a column: registration overwrites metadata
+-- wholesale (`metadata = EXCLUDED.metadata`), so a runtime that comes back
+-- drops the reason as a side effect of being usable again — there is no stale
+-- explanation to clean up and no code path that has to remember to clear it.
+UPDATE agent_runtime
+SET status = 'offline',
+    metadata = metadata || jsonb_build_object('offline_reason', @offline_reason::jsonb),
+    updated_at = now()
+WHERE id = $1;
+
 -- name: SelectStaleOnlineRuntimes :many
 -- Lists online runtimes whose last_seen_at exceeds the stale window. The
 -- sweeper uses this as a candidate set, then optionally filters via the
@@ -227,17 +243,33 @@ RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: FailTasksForOfflineRuntimes :many
 -- Marks dispatched/running/waiting_local_directory tasks as failed when
--- their runtime is offline. This cleans up orphaned tasks after a daemon
--- crash or network partition.
-UPDATE agent_task_queue
+-- their runtime has remained offline beyond the reconnect grace. A short or
+-- medium network partition must not terminate a daemon process that is still
+-- running locally; a real daemon restart is recovered separately through
+-- RecoverOrphanedTasksForRuntime. Bounded per tick so a large recovery backlog
+-- cannot monopolise the sweeper transaction. last_seen_at is normally set by
+-- the first heartbeat; updated_at is only the fallback for a never-heartbeated
+-- runtime, and a forced-offline write starts its grace from that update.
+WITH victims AS (
+  SELECT task.id
+  FROM agent_task_queue task
+  JOIN agent_runtime runtime ON runtime.id = task.runtime_id
+  WHERE task.status IN ('dispatched', 'running', 'waiting_local_directory')
+    AND runtime.status = 'offline'
+    AND COALESCE(runtime.last_seen_at, runtime.updated_at) <
+        now() - make_interval(secs => @reconnect_grace_secs::double precision)
+  ORDER BY COALESCE(runtime.last_seen_at, runtime.updated_at), task.created_at
+  LIMIT @max_per_tick::int
+  FOR UPDATE OF task SKIP LOCKED
+)
+UPDATE agent_task_queue AS task
 SET status = 'failed', completed_at = now(), error = 'runtime went offline',
     failure_reason = 'runtime_offline',
     wait_reason = NULL
-WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
-  AND runtime_id IN (
-    SELECT id FROM agent_runtime WHERE status = 'offline'
-  )
-RETURNING *;
+FROM victims
+WHERE task.id = victims.id
+  AND task.status IN ('dispatched', 'running', 'waiting_local_directory')
+RETURNING task.*;
 
 -- name: ListAgentRuntimesByOwner :many
 SELECT * FROM agent_runtime
@@ -441,11 +473,13 @@ UPDATE agent_runtime
 SET legacy_daemon_id = COALESCE(legacy_daemon_id, $2)
 WHERE id = $1;
 
--- name: DeleteStaleOfflineRuntimes :many
--- Deletes runtimes that have been offline for longer than the TTL and have
--- no agents bound (active or archived). The FK constraint on agent.runtime_id
--- is ON DELETE RESTRICT, so we must exclude all agent references.
-DELETE FROM agent_runtime
+-- name: ListStaleOfflineRuntimeGCCandidates :many
+-- Bounded gather for runtime GC. Non-terminal task owners are deliberately
+-- excluded here so one permanently-deferred task cannot monopolise the front
+-- of every batch and starve otherwise-drainable runtimes. The per-runtime
+-- transaction re-checks every predicate after taking FOR UPDATE, so this is an
+-- efficiency filter rather than the correctness boundary.
+SELECT id FROM agent_runtime
 WHERE status = 'offline'
   AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
   AND NOT EXISTS (
@@ -453,4 +487,57 @@ WHERE status = 'offline'
     FROM agent
     WHERE agent.runtime_id = agent_runtime.id
   )
-RETURNING id, workspace_id;
+  AND NOT EXISTS (
+    SELECT 1
+    FROM agent_task_queue
+    WHERE agent_task_queue.runtime_id = agent_runtime.id
+      AND agent_task_queue.completed_at IS NULL
+  )
+ORDER BY last_seen_at ASC, id ASC
+LIMIT @max_per_tick::int;
+
+-- name: IsAgentRuntimeEligibleForGC :one
+-- Re-checks the mutable GC predicates after the caller has locked the runtime
+-- row FOR UPDATE. Agent inserts/updates and task ownership writes take FOR KEY
+-- SHARE on that row, so no new dependency can commit between this check and
+-- DeleteAgentRuntime in the same transaction.
+SELECT EXISTS (
+  SELECT 1 FROM agent_runtime
+  WHERE agent_runtime.id = @id
+    AND status = 'offline'
+    AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM agent
+      WHERE agent.runtime_id = agent_runtime.id
+    )
+) AS eligible;
+
+-- name: CountTasksByRuntime :one
+-- Final fail-closed assertion after UnbindTasksFromRuntime. A non-zero result
+-- aborts the transaction instead of relying on the legacy ON DELETE CASCADE.
+SELECT count(*) FROM agent_task_queue WHERE runtime_id = $1;
+
+-- name: CountStaleOfflineRuntimesBlockedByTasks :one
+-- Bounded observability sample of runtimes that are otherwise GC-eligible but
+-- retain a non-terminal task. In particular, deferred tasks have no generic
+-- TTL, so silently filtering them from the candidate batch would hide a
+-- permanently-starved runtime. The count saturates at max_rows so this
+-- recurring safety signal cannot become an unbounded backlog scan.
+SELECT count(*) FROM (
+  SELECT 1 FROM agent_runtime
+  WHERE status = 'offline'
+    AND last_seen_at < now() - make_interval(secs => @stale_seconds::double precision)
+    AND NOT EXISTS (
+      SELECT 1
+      FROM agent
+      WHERE agent.runtime_id = agent_runtime.id
+    )
+    AND EXISTS (
+      SELECT 1
+      FROM agent_task_queue
+      WHERE agent_task_queue.runtime_id = agent_runtime.id
+        AND agent_task_queue.completed_at IS NULL
+    )
+  LIMIT @max_rows::int
+) AS blocked_runtimes;

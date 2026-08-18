@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -30,6 +31,7 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
+	"github.com/multica-ai/multica/server/pkg/skillbundle"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -455,10 +457,15 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 		if runtime.Status == "offline" {
 			status = "offline"
 		}
+		// Persist what this daemon advertised, so surfaces that cannot see the
+		// live request — the resource-save gate and the UI — decide from the
+		// same signal the claim path uses, instead of re-deriving it from a
+		// version string (MUL-5707).
 		metadata, _ := json.Marshal(map[string]any{
-			"version":     runtime.Version,
-			"cli_version": req.CLIVersion,
-			"launched_by": req.LaunchedBy,
+			"version":      runtime.Version,
+			"cli_version":  req.CLIVersion,
+			"launched_by":  req.LaunchedBy,
+			"capabilities": requestClientCapabilities(r),
 		})
 
 		var registered db.AgentRuntime
@@ -654,10 +661,17 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 				if resolvedCommandName == "" {
 					resolvedCommandName = profile.CommandName
 				}
+				// Capabilities belong on this row too. It is written AFTER the
+				// successful runtimes in the same request, so its last_seen_at is
+				// the newest for this daemon until the first heartbeat — and the
+				// worktree gates read the newest row. Omitting them made a failed
+				// profile look, for that window, like a daemon that advertises
+				// nothing (and now like a capability-blind server).
 				metadata, _ := json.Marshal(map[string]any{
 					"version":                            "",
 					"cli_version":                        req.CLIVersion,
 					"launched_by":                        req.LaunchedBy,
+					"capabilities":                       requestClientCapabilities(r),
 					"runtime_profile_registration_error": true,
 					"runtime_profile_failure_reason":     reason,
 					"command_name":                       resolvedCommandName,
@@ -884,10 +898,28 @@ func (h *Handler) GetDaemonWorkspaceRepos(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, workspaceReposResponse(workspaceID, ws.Repos, ws.Settings))
 }
 
+// setRuntimeOffline flips a runtime offline, recording the daemon's reason when
+// it sent one. An absent or unusable reason falls back to the plain offline
+// write: a malformed payload must never cost the caller the state change it
+// actually asked for.
+func (h *Handler) setRuntimeOffline(ctx context.Context, runtimeID pgtype.UUID, reason json.RawMessage) error {
+	if len(reason) > 0 && json.Valid(reason) {
+		return h.Queries.SetAgentRuntimeOfflineWithReason(ctx, db.SetAgentRuntimeOfflineWithReasonParams{
+			ID:            runtimeID,
+			OfflineReason: reason,
+		})
+	}
+	return h.Queries.SetAgentRuntimeOffline(ctx, runtimeID)
+}
+
 // DaemonDeregister marks runtimes as offline when the daemon shuts down.
 func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RuntimeIDs []string `json:"runtime_ids"`
+		// OfflineReasons is optional and keyed by runtime id. Present only for
+		// causes the user must repair — a daemon shutting down sends none, so an
+		// older daemon simply keeps today's behaviour (MUL-6164).
+		OfflineReasons map[string]json.RawMessage `json:"offline_reasons"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -920,7 +952,7 @@ func (h *Handler) DaemonDeregister(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		if err := h.Queries.SetAgentRuntimeOffline(r.Context(), rt.ID); err != nil {
+		if err := h.setRuntimeOffline(r.Context(), rt.ID, req.OfflineReasons[rid]); err != nil {
 			slog.Warn("deregister: failed to set offline", "runtime_id", rid, "error", err)
 			continue
 		}
@@ -1425,6 +1457,44 @@ func logClaimEndpointSlow(runtimeID, outcome string, start time.Time, authMs, cl
 
 // requestHasClientCapability reports whether the caller advertised a capability
 // in X-Client-Capabilities. Daemons and app clients share the header.
+// requestClientCapabilities returns the advertised capability list, trimmed and
+// with empties dropped. Nil when the header is absent — which is exactly what an
+// older daemon looks like.
+func requestClientCapabilities(r *http.Request) []string {
+	raw := strings.Split(r.Header.Get("X-Client-Capabilities"), ",")
+	out := make([]string, 0, len(raw))
+	for _, part := range raw {
+		if trimmed := strings.TrimSpace(part); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// runtimeHasCapability reports whether a stored runtime row advertised the
+// capability at registration. Absent metadata means an older daemon that never
+// sent the header, so this fails closed.
+func runtimeHasCapability(metadata []byte, capability string) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	var m struct {
+		Capabilities []string `json:"capabilities"`
+	}
+	if err := json.Unmarshal(metadata, &m); err != nil {
+		return false
+	}
+	for _, c := range m.Capabilities {
+		if c == capability {
+			return true
+		}
+	}
+	return false
+}
+
 func requestHasClientCapability(r *http.Request, capability string) bool {
 	for _, part := range strings.Split(r.Header.Get("X-Client-Capabilities"), ",") {
 		if strings.TrimSpace(part) == capability {
@@ -1658,6 +1728,16 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			}
 			continue
 		}
+		remoteMCPToken, daemonTokens, derr := remoteMCPDaemonTokenForClaim(resp, rt)
+		if derr != nil {
+			slog.Error("batch claim: generate Remote MCP daemon token failed; requeueing claim",
+				"task_id", uuidToString(task.ID), "error", derr)
+			if _, rerr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), task); rerr != nil {
+				slog.Error("batch claim: requeue after Remote MCP token failure failed",
+					"task_id", uuidToString(task.ID), "error", rerr)
+			}
+			continue
+		}
 		// Route through the SAME finalization as the per-runtime endpoint so the
 		// token and the comment-delivery receipt (delivered_comment_ids for
 		// comment/coalesced-comment tasks) are persisted atomically; on failure
@@ -1670,7 +1750,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			WorkspaceID: parseUUID(resp.WorkspaceID),
 			UserID:      rt.OwnerID,
 			ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-		}, deliveredCommentIDs, commentBackedTask)
+		}, deliveredCommentIDs, commentBackedTask, daemonTokens...)
 		if ferr != nil {
 			slog.Error("batch claim: finalize task claim failed; requeueing claim",
 				"task_id", uuidToString(task.ID), "error", ferr)
@@ -1681,6 +1761,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		resp.AuthToken = tokenStr
+		resp.RemoteMCPDaemonToken = remoteMCPToken
 		resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 		out = append(out, resp)
 	}
@@ -1702,6 +1783,75 @@ type claimBuildFailure struct {
 	outcome string
 	status  int
 	message string
+}
+
+// remoteMCPDaemonTokenForClaim prepares the short-lived credential the daemon
+// uses to resolve write-only Remote MCP secrets for this task. The raw token is
+// returned only in the claim response; its hash is committed atomically with
+// the task-scoped agent token by FinalizeTaskClaim.
+func remoteMCPDaemonTokenForClaim(resp AgentTaskResponse, runtime db.AgentRuntime) (string, []db.CreateDaemonTokenParams, error) {
+	if len(resp.RemoteMCPConnections) == 0 {
+		return "", nil, nil
+	}
+	if !runtime.DaemonID.Valid || strings.TrimSpace(runtime.DaemonID.String) == "" {
+		return "", nil, errors.New("runtime daemon_id is required for Remote MCP")
+	}
+	raw, err := auth.GenerateDaemonToken()
+	if err != nil {
+		return "", nil, fmt.Errorf("generate Remote MCP daemon token: %w", err)
+	}
+	return raw, []db.CreateDaemonTokenParams{{
+		TokenHash:   auth.HashToken(raw),
+		WorkspaceID: runtime.WorkspaceID,
+		DaemonID:    runtime.DaemonID.String,
+		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
+	}}, nil
+}
+
+// failClaimedTaskBeforeLaunch settles a durable claim-time rejection before
+// the daemon ever receives the task. Leaving these failures in dispatched
+// makes the stale-claim reaper deliver the same impossible task forever and
+// leaves chat showing "starting" with no actionable outcome. If settlement
+// itself fails, release the exact claim so a later attempt can retry the gate.
+func (h *Handler) failClaimedTaskBeforeLaunch(
+	ctx context.Context,
+	task *db.AgentTaskQueue,
+	userMessage string,
+	failureReason taskfailure.Reason,
+	outcome string,
+	status int,
+	claimMessage string,
+) *claimBuildFailure {
+	if _, err := h.TaskService.FailTask(
+		ctx,
+		task.ID,
+		userMessage,
+		"",
+		"",
+		"",
+		failureReason.String(),
+		false,
+		"",
+	); err != nil {
+		slog.Error("task claim: fail rejected task failed; requeueing claim",
+			"task_id", uuidToString(task.ID),
+			"outcome", outcome,
+			"error", err,
+		)
+		if _, requeueErr := h.TaskService.RequeueTaskAfterClaimFailure(ctx, *task); requeueErr != nil {
+			slog.Error("task claim: requeue after rejected-task settlement failure failed; stale reclaim will recover it",
+				"task_id", uuidToString(task.ID),
+				"outcome", outcome,
+				"error", requeueErr,
+			)
+		}
+		return &claimBuildFailure{
+			outcome: outcome + "_settle",
+			status:  http.StatusInternalServerError,
+			message: "failed to settle a task rejected before launch",
+		}
+	}
+	return &claimBuildFailure{outcome: outcome, status: status, message: claimMessage}
 }
 
 // buildClaimedTaskResponse assembles the full daemon claim payload for a
@@ -1747,6 +1897,28 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		var mcpConfig json.RawMessage
 		if agent.McpConfig != nil {
 			mcpConfig = json.RawMessage(agent.McpConfig)
+		}
+		// Fold in the workspace MCP servers this agent has been explicitly
+		// given (GH #6062). Only bound AND enabled servers are read, so a
+		// workspace library entry nobody added reaches nothing. Read on every
+		// claim, exactly like the agent column, so an admin's edit or a toggle
+		// lands on the agent's next task with nothing to restart. Errors —
+		// including a failed read — leave the agent config untouched: a broken
+		// shared entry must never take away servers the agent runs with today.
+		if bound, err := h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID); err != nil {
+			slog.Warn("daemon claim: load agent mcp servers failed; using agent mcp_config",
+				"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
+		} else if len(bound) > 0 {
+			bindings := make([]WorkspaceMcpBinding, 0, len(bound))
+			for _, server := range bound {
+				bindings = append(bindings, WorkspaceMcpBinding{Name: server.Name, Config: json.RawMessage(server.Config)})
+			}
+			if resolved, err := ResolveAgentMcpConfig(bindings, mcpConfig); err != nil {
+				slog.Warn("daemon claim: resolve agent mcp servers failed; falling back to agent mcp_config",
+					"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
+			} else {
+				mcpConfig = resolved
+			}
 		}
 		// Layer the per-task overlay (set at enqueue from the initiator
 		// user's active integrations — currently Composio) on top of the
@@ -2655,6 +2827,37 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
+	// Surface a bounded snapshot of the same agent's other in-flight issue
+	// tasks. Queued tasks cannot coordinate yet and are intentionally omitted.
+	// This is advisory context, not a queue gate: cross-issue parallelism and
+	// serial handoffs remain valid, while the prompt can stop an unaware second
+	// run from opening a duplicate PR. Scope the query to the already-validated
+	// runtime workspace so corrupt cross-tenant task links never leak.
+	if siblings, err := h.Queries.ListActiveSiblingIssueTasks(r.Context(), db.ListActiveSiblingIssueTasksParams{
+		AgentID:     task.AgentID,
+		TaskID:      task.ID,
+		WorkspaceID: parseUUID(resp.WorkspaceID),
+	}); err == nil {
+		resp.ActiveSiblingRuns = make([]ActiveSiblingRunData, 0, len(siblings))
+		for _, sibling := range siblings {
+			resp.ActiveSiblingRuns = append(resp.ActiveSiblingRuns, ActiveSiblingRunData{
+				TaskID:          uuidToString(sibling.TaskID),
+				IssueID:         uuidToString(sibling.IssueID),
+				IssueIdentifier: fmt.Sprintf("%s-%d", sibling.IssuePrefix, sibling.IssueNumber),
+				IssueTitle:      sibling.IssueTitle,
+				Status:          sibling.Status,
+				CreatedAt:       timestampToString(sibling.CreatedAt),
+				StartedAt:       timestampToString(sibling.StartedAt),
+			})
+		}
+	} else {
+		slog.Warn("task claim: failed to load active sibling runs",
+			"task_id", uuidToString(task.ID),
+			"agent_id", uuidToString(task.AgentID),
+			"error", err,
+		)
+	}
+
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
 	// system prompt that workspace owners set in Settings → General. Inject it
 	// into the brief regardless of task kind (issue / chat / autopilot /
@@ -2673,7 +2876,110 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		)
 	}
 
+	// Last gate before dispatch: refuse to hand a worktree-mode local_directory
+	// task to a daemon that cannot implement the mode.
+	//
+	// The save-time gate in project_resource.go cannot cover this. It checks the
+	// version at the moment the resource is written; a machine downgraded
+	// afterwards still claims tasks, and an old daemon json-skips execution_mode
+	// entirely — it would run the task IN PLACE, editing the working copy the
+	// user asked to isolate. That is the exact outcome worktree mode exists to
+	// prevent, so it fails closed here, against the version of the runtime that
+	// is actually claiming.
+	if reason := worktreeClaimBlockReason(
+		resp.ProjectResources,
+		runtime,
+		requestHasClientCapability(r, protocol.DaemonCapabilityLocalWorktreeV1),
+	); reason != "" {
+		slog.Error("task claim: runtime too old for worktree mode; cancelling rather than running in place",
+			"task_id", uuidToString(task.ID),
+			"runtime_id", runtimeID,
+			"daemon_id", runtime.DaemonID.String,
+			"reason", reason,
+		)
+		// Cancel rather than leave it dispatched: the resource is pinned to this
+		// daemon, so redelivery would hand it straight back to the same too-old
+		// runtime forever.
+		//
+		// Cancel WITH the reason persisted on the row. The 4xx below only
+		// reaches the daemon's log, and the batch-claim path drops the task from
+		// its response entirely — so without this the user is left with a task
+		// that says "cancelled" and nothing else, for a condition only they can
+		// fix (update the app on that machine).
+		//
+		// Through the TaskService, not a raw query: cancellation has side
+		// effects beyond the row — audit capture, chat settle, agent status
+		// reconcile, the task:cancelled broadcast that clears live cards, and
+		// NotifyTaskFinished waking capacity/serial waiters. A direct query
+		// leaves all of those stale.
+		if _, cerr := h.TaskService.CancelTaskWithReason(r.Context(), task.ID, reason, "local_directory_error"); cerr != nil {
+			// The cancel did not commit, so the row is still claimed. The
+			// daemon is about to be refused, so left alone the task would
+			// strand in dispatched until stale reclaim, with no visible
+			// reason. Requeue it instead — the next claim re-runs this gate
+			// and retries the cancel — and report a 5xx so the daemon reads
+			// this as a transient server problem, not a claim refusal.
+			slog.Error("task claim: cancel after worktree version gate failed; requeueing so the gate can run again",
+				"task_id", uuidToString(task.ID), "error", cerr)
+			if _, rerr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); rerr != nil {
+				slog.Error("task claim: requeue after worktree-gate cancel failure failed; stale reclaim will recover it",
+					"task_id", uuidToString(task.ID), "error", rerr)
+			}
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_worktree_gate_cancel",
+				status:  http.StatusInternalServerError,
+				message: "failed to cancel a worktree task blocked by daemon version; task requeued",
+			}
+		}
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			outcome: "error_worktree_daemon_version",
+			status:  http.StatusUnprocessableEntity,
+			message: reason,
+		}
+	}
+
 	return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, nil
+}
+
+// worktreeClaimBlockReason returns a user-facing reason when this runtime must
+// not run the task, or "" when it may proceed.
+//
+// The decision is made on the CAPABILITY the daemon advertised on this very
+// request, not on its version string. A daemon without the implementation does
+// not merely lose concurrency — it json-skips execution_mode and runs the task
+// in place, editing the working copy the user asked to isolate. Version strings
+// could not answer that reliably: the git-describe dev-build exemption that
+// keeps `make daemon` unblocked let a v0.4.23-era daemon straight through, and
+// two tasks silently ran in the user's own directory (MUL-5707).
+//
+// Only resources bound to the claiming runtime's own daemon are considered: a
+// project may carry one local_directory per machine, and another machine's
+// worktree resource says nothing about this one's ability to run the task.
+func worktreeClaimBlockReason(resources []ProjectResourceData, runtime db.AgentRuntime, hasWorktreeCapability bool) string {
+	if !runtime.DaemonID.Valid || runtime.DaemonID.String == "" {
+		return ""
+	}
+	if hasWorktreeCapability {
+		return ""
+	}
+	for _, res := range resources {
+		if res.ResourceType != "local_directory" {
+			continue
+		}
+		var ref localDirectoryRef
+		if err := json.Unmarshal(res.ResourceRef, &ref); err != nil {
+			continue
+		}
+		if ref.ExecutionMode != localDirectoryModeWorktree || ref.DaemonID != runtime.DaemonID.String {
+			continue
+		}
+		return fmt.Sprintf(
+			"This machine's Multica runtime does not support parallel (worktree) mode, which %q is set to use. "+
+				"Update the Multica app on that machine to the latest version, then re-run this task. "+
+				"Refusing to run rather than falling back to editing the directory directly, which is what this mode exists to prevent.",
+			ref.LocalPath)
+	}
+	return ""
 }
 
 // ClaimTaskByRuntime atomically claims the next queued task for a runtime.
@@ -2795,6 +3101,15 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to mint task token")
 		return
 	}
+	remoteMCPToken, daemonTokens, derr := remoteMCPDaemonTokenForClaim(resp, runtime)
+	if derr != nil {
+		outcome = "error_remote_mcp_token"
+		slog.Error("task claim: failed to generate Remote MCP daemon token",
+			"task_id", uuidToString(task.ID), "error", derr)
+		requeueFailedClaim("remote_mcp_token_generation")
+		writeError(w, http.StatusInternalServerError, "failed to mint Remote MCP daemon token")
+		return
+	}
 	receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), *task, db.CreateTaskTokenParams{
 		TokenHash:   auth.HashToken(tokenStr),
 		TaskID:      task.ID,
@@ -2802,7 +3117,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		WorkspaceID: parseUUID(resp.WorkspaceID),
 		UserID:      runtime.OwnerID,
 		ExpiresAt:   pgtype.Timestamptz{Time: time.Now().Add(24 * time.Hour), Valid: true},
-	}, deliveredCommentIDs, commentBackedTask)
+	}, deliveredCommentIDs, commentBackedTask, daemonTokens...)
 	if ferr != nil {
 		outcome = "error_claim_finalize"
 		slog.Error("task claim: failed to finalize token and comment delivery receipt",
@@ -2816,6 +3131,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp.AuthToken = tokenStr
+	resp.RemoteMCPDaemonToken = remoteMCPToken
 	task.DeliveredCommentIds = receipt
 	resp.DeliveredCommentIDs = uuidStringsOrEmpty(receipt)
 
@@ -2896,6 +3212,10 @@ func (h *Handler) ResolveTaskSkillBundles(w http.ResponseWriter, r *http.Request
 		bundle, ok := allowed[ref.Source+"\x00"+ref.ID]
 		if !ok {
 			writeError(w, http.StatusNotFound, "skill bundle not found")
+			return
+		}
+		if ref.Source == skillbundle.SourcePlugin && bundle.Hash != ref.Hash {
+			writeError(w, http.StatusConflict, "pinned plugin skill bundle hash mismatch")
 			return
 		}
 		resolved = append(resolved, bundle)
@@ -3092,6 +3412,10 @@ type TaskCompleteRequest struct {
 	Output    string `json:"output"`
 	SessionID string `json:"session_id"` // Claude session ID for future resumption
 	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	// BranchName is the branch this run delivered its work on. Worktree-mode
+	// local_directory tasks never touch the user's working copy, so this is the
+	// only pointer to where the changes went. Empty for every other task kind.
+	BranchName string `json:"branch_name,omitempty"`
 	// SessionRolloutMissing: the daemon withheld this task's Codex session
 	// because its rollout was missing (MUL-5305). Clear the resume pointer and
 	// flag the continuity gap for the next claim.
@@ -3101,6 +3425,30 @@ type TaskCompleteRequest struct {
 	// to report" — this says "never hand this id to a later run". Older
 	// daemons omit it, which is exactly the pre-fix behaviour.
 	RetiredSessionID string `json:"retired_session_id,omitempty"`
+}
+
+// sanitizeTaskCompleteRequest / sanitizeTaskFailRequest scrub every
+// caller-supplied string on a terminal task callback. Both request types are
+// flat bags of strings, so this is exhaustive by construction — but that also
+// means a NEW string field must be added here, or it reopens GH #7098 through a
+// fresh door. The task-row columns these feed (error, work_dir, branch_name,
+// session_id) are all TEXT, and result is JSONB; neither tolerates a NUL.
+func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
+	req.PRURL = util.SanitizeTextForPostgres(req.PRURL)
+	req.Output = util.SanitizeTextForPostgres(req.Output)
+	req.SessionID = util.SanitizeTextForPostgres(req.SessionID)
+	req.WorkDir = util.SanitizeTextForPostgres(req.WorkDir)
+	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
+	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
+}
+
+func sanitizeTaskFailRequest(req *TaskFailRequest) {
+	req.Error = util.SanitizeTextForPostgres(req.Error)
+	req.SessionID = util.SanitizeTextForPostgres(req.SessionID)
+	req.WorkDir = util.SanitizeTextForPostgres(req.WorkDir)
+	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
+	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
+	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
 }
 
 func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
@@ -3117,6 +3465,15 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// Strip bytes PostgreSQL cannot store BEFORE anything reads this payload
+	// (GH #7098). The whole request is marshalled into agent_task_queue.result,
+	// a JSONB column, and encoding/json renders an embedded NUL as \u0000 —
+	// which JSONB rejects (SQLSTATE 22P05), rolling the completion transaction
+	// back and leaving the task stuck in 'running' forever. Sanitizing here
+	// rather than just before the Marshal is deliberate: the context-exhaustion
+	// re-route below feeds req.Output into the failure classifier, and that
+	// classifier must see exactly the text we are going to persist.
+	sanitizeTaskCompleteRequest(&req)
 
 	// GH #6402: a daemon whose backend does not (yet) read the provider's
 	// structured terminal reason reports a context-exhausted run as a clean
@@ -3135,10 +3492,14 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			"failure_reason", taskfailure.ReasonAgentContextOverflow,
 		)
 		h.failTask(w, r, taskID, workspaceID, TaskFailRequest{
-			Error:                 req.Output,
-			FailureReason:         string(taskfailure.ReasonAgentContextOverflow),
-			SessionID:             req.SessionID,
-			WorkDir:               req.WorkDir,
+			Error:         req.Output,
+			FailureReason: string(taskfailure.ReasonAgentContextOverflow),
+			SessionID:     req.SessionID,
+			WorkDir:       req.WorkDir,
+			// Carry the branch across the reroute. The run still delivered one:
+			// it ran out of context, it did not fail to produce anything, and
+			// dropping the name here would hide the work it did commit.
+			BranchName:            req.BranchName,
 			SessionRolloutMissing: req.SessionRolloutMissing,
 			RetiredSessionID:      req.RetiredSessionID,
 		})
@@ -3150,7 +3511,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.SessionRolloutMissing, req.RetiredSessionID)
+	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID)
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
@@ -3325,6 +3686,24 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 			continue
 		}
 		if isNoteComment(c.Content) {
+			continue
+		}
+		// A delegated failure recovery signal is platform-authored and targets
+		// the exact source coordinator recorded by the failed task. It bypasses
+		// generic comment routing (which deliberately treats system authors as
+		// unattributed) and excludes this just-completed task from the coverage
+		// check because the signal was planned after claim, not delivered to it.
+		if service.IsDelegatedFailureRecoveryComment(c) {
+			if err := h.TaskService.DispatchDelegatedFailureRecoveryComment(ctx, c, task.ID); err != nil {
+				slog.Warn("reconcile comments on completion: delegated failure recovery replay failed",
+					"issue_id", uuidToString(task.IssueID),
+					"task_id", uuidToString(task.ID),
+					"comment_id", uuidToString(c.ID),
+					"error", err,
+				)
+			} else {
+				scheduled++
+			}
 			continue
 		}
 		var parentComment *db.Comment
@@ -3779,6 +4158,10 @@ type TaskFailRequest struct {
 	SessionID     string `json:"session_id,omitempty"`
 	WorkDir       string `json:"work_dir,omitempty"`
 	FailureReason string `json:"failure_reason,omitempty"`
+	// BranchName: a failed run can still have produced a branch — worktree mode
+	// commits whatever the agent left before tearing the worktree down. Report
+	// it so a partially-successful run is still findable.
+	BranchName string `json:"branch_name,omitempty"`
 	// SessionRolloutMissing: the daemon withheld this task's Codex session
 	// because its rollout was missing (MUL-5305). Clear the resume pointer and
 	// flag the continuity gap for the next claim.
@@ -3804,6 +4187,10 @@ func (h *Handler) FailTask(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
+	// TaskService.FailTask normalizes req.Error itself, but every other field
+	// here lands in a TEXT column too and a NUL in any one of them fails the
+	// same transaction (GH #7098).
+	sanitizeTaskFailRequest(&req)
 
 	h.failTask(w, r, taskID, workspaceID, req)
 }
@@ -3819,7 +4206,7 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID)
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the
@@ -3900,6 +4287,23 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		msg.Output = redact.Text(msg.Output)
 		msg.Input = redact.InputMap(msg.Input)
 
+		// redact.Text only masks secret-shaped substrings; it has no opinion on
+		// bytes PostgreSQL refuses to store. Tool output is the likeliest
+		// carrier of a stray NUL in the whole system — an agent that cats a
+		// binary, or a Windows tool emitting UTF-16 — and this endpoint has no
+		// retry on the daemon side, so an unsanitized batch is silently lost
+		// (GH #7098). Input is a JSONB column, so it needs the deep walk: the
+		// offending byte can sit at any depth of a tool's arguments.
+		msg.Type = util.SanitizeTextForPostgres(msg.Type)
+		msg.Tool = util.SanitizeTextForPostgres(msg.Tool)
+		msg.Content = util.SanitizeTextForPostgres(msg.Content)
+		msg.Output = util.SanitizeTextForPostgres(msg.Output)
+		if msg.Input != nil {
+			if cleaned, ok := util.SanitizeJSONForPostgres(msg.Input).(map[string]any); ok {
+				msg.Input = cleaned
+			}
+		}
+
 		var inputJSON []byte
 		if msg.Input != nil {
 			inputJSON, _ = json.Marshal(msg.Input)
@@ -3932,11 +4336,82 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 // task cancellation and finished flushing the transcript. Settles the chat
 // finalization that CancelTaskWithResult deferred for a started-but-empty
 // transcript (#5219); idempotent when nothing was deferred.
+// TaskCancelAckRequest is the body of the daemon's cancel acknowledgement.
+type TaskCancelAckRequest struct {
+	// BranchName: a cancelled worktree task has already committed whatever the
+	// agent produced — the worktree is finalized before the daemon learns of
+	// the cancellation. The rest of the result is discarded on this path, so
+	// this is the only channel that can report where the work went.
+	BranchName string `json:"branch_name,omitempty"`
+	// ErrorMessage / FailureReason: set when the cancelled run's worktree
+	// Finalize ABORTED — there is no branch, and the error text naming the
+	// preserved worktree is the only pointer left to the agent's work.
+	ErrorMessage  string `json:"error_message,omitempty"`
+	FailureReason string `json:"failure_reason,omitempty"`
+}
+
 func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 	taskID := chi.URLParam(r, "taskId")
 	task, ok := h.requireDaemonTaskAccess(w, r, taskID)
 	if !ok {
 		return
+	}
+	// Body is optional: older daemons send `{}`, and a decode failure must not
+	// break the cancellation contract this endpoint exists for.
+	var req TaskCancelAckRequest
+	_ = json.NewDecoder(r.Body).Decode(&req)
+	// Same persistence hazard as /fail and /complete: these strings go straight
+	// into TEXT columns, and this endpoint fails LOUD on write errors, so an
+	// unsanitized NUL here turns a cancelled task's only pointer to its work
+	// into an endless 500 retry loop (GH #7098).
+	req.ErrorMessage = util.SanitizeTextForPostgres(req.ErrorMessage)
+	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
+	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
+
+	// Terminal deliveries first, failing LOUD on persistence errors: these
+	// fields are the only pointer to a cancelled task's work, and the daemon
+	// retries this ack on transient failures — a warn-and-200 would turn one
+	// DB blip into a permanently undiscoverable branch. Both writes never
+	// overwrite already-recorded values, so replays are idempotent — and both
+	// carry a status='cancelled' CAS, because the daemon acks on EVERY
+	// terminal status it observes: a late ack from a stale run must not stamp
+	// its branch or error onto a completed/failed row whose own callback is
+	// the authoritative channel. A CAS-refused write is a deliberate no-op
+	// (Exec reports no error), so the ack still returns 200 — there is
+	// nothing for the daemon to retry — and the rebroadcast below is guarded
+	// by the same status check inside RebroadcastCancelledTask.
+	delivered := false
+	if branch := strings.TrimSpace(req.BranchName); branch != "" {
+		if err := h.Queries.SetAgentTaskBranchName(r.Context(), db.SetAgentTaskBranchNameParams{
+			ID:         task.ID,
+			BranchName: pgtype.Text{String: branch, Valid: true},
+		}); err != nil {
+			slog.Error("cancel ack: record branch name failed",
+				"task_id", taskID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to record branch name")
+			return
+		}
+		delivered = true
+	}
+	if msg := strings.TrimSpace(req.ErrorMessage); msg != "" {
+		reason := strings.TrimSpace(req.FailureReason)
+		if err := h.Queries.SetAgentTaskErrorIfEmpty(r.Context(), db.SetAgentTaskErrorIfEmptyParams{
+			ID:            task.ID,
+			Error:         pgtype.Text{String: msg, Valid: true},
+			FailureReason: pgtype.Text{String: reason, Valid: reason != ""},
+		}); err != nil {
+			slog.Error("cancel ack: record preserved-work error failed",
+				"task_id", taskID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to record task error")
+			return
+		}
+		delivered = true
+	}
+	if delivered {
+		// The task:cancelled broadcast fired at cancel time, before this ack —
+		// clients may already hold a refetched row without the branch/error
+		// and will not refetch again on their own.
+		h.TaskService.RebroadcastCancelledTask(r.Context(), task.ID)
 	}
 	h.TaskService.FinalizeDeferredCancelledChat(r.Context(), task.ID)
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -4049,7 +4524,7 @@ func (h *Handler) CancelTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	task, err := h.TaskService.CancelTask(r.Context(), existing.ID)
+	task, err := h.TaskService.CancelTaskByUser(r.Context(), existing.ID)
 	if err != nil {
 		slog.Warn("cancel task failed", "task_id", taskID, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())
@@ -4294,7 +4769,12 @@ func (h *Handler) BatchIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 		row, found := rows[canonicalIDs[i]]
 		item := batchIssueGCCheckItem{ID: issueID, Found: found}
 		if found {
-			item.Status = row.Status
+			// The daemon consumes this purely as a machine signal ("is this
+			// issue terminal, so its workdir can be reclaimed?") and has no
+			// database of its own, so the canonical status is resolved here.
+			// Normalizing server-side also means daemons that predate custom
+			// statuses keep making correct GC decisions. (MUL-6243)
+			item.Status = issuestatus.Effective(r.Context(), h.Queries, workspaceUUID, row.Status)
 			updatedAt := row.UpdatedAt.Time
 			item.UpdatedAt = &updatedAt
 		}
@@ -4321,7 +4801,9 @@ func (h *Handler) GetIssueGCCheck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
-		"status":     issue.Status,
+		// Same reasoning as BatchIssueGCCheck: normalize server-side so the
+		// daemon's terminal-status test stays correct. (MUL-6243)
+		"status":     issuestatus.Effective(r.Context(), h.Queries, issue.WorkspaceID, issue.Status),
 		"updated_at": issue.UpdatedAt.Time,
 	})
 }

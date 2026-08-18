@@ -216,10 +216,8 @@ export function ChatPage() {
   );
 
   const listHeader = (
-    <PageHeader className="justify-between">
-      <div className="flex items-center gap-2">
-        <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
-      </div>
+    <PageHeader>
+      <h1 className="flex-1 text-body font-semibold">{t(($) => $.page.title)}</h1>
       {newChatButton}
     </PageHeader>
   );

@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-shellwords"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -71,6 +72,7 @@ const (
 	DefaultGCArtifactTTL                  = 12 * time.Hour      // 12h — drop regenerable artifacts once a task has been completed this long
 	DefaultGCCodexSessionTTL              = 14 * 24 * time.Hour // 14 days — reclaim per-issue Codex session stores untouched this long
 	DefaultGCHermesMemoryTTL              = 90 * 24 * time.Hour // 90 days — reclaim per-agent Hermes memory stores untouched this long (long: reclaiming these is visible amnesia, and they are a few markdown files)
+	DefaultGCHermesSessionTTL             = 14 * 24 * time.Hour // 14 days — reclaim per-conversation Hermes session stores untouched this long (matches Codex: these hold transcripts, and losing an idle one restarts the thread rather than the agent's notes)
 	DefaultGCRepoTTL                      = 30 * 24 * time.Hour // 30 days — evict a bare repo cache no task has checked out this long
 	DefaultAutoUpdateCheckInterval        = 6 * time.Hour       // how often the daemon polls GitHub for a newer CLI release
 )
@@ -93,7 +95,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -108,6 +110,7 @@ type Config struct {
 	GCRepoMaintenanceEnabled       bool                  // run reflog expiry and git gc after stale agent refs are removed (default: true; disable independently as an operational kill switch)
 	GCCodexSessionTTL              time.Duration         // reclaim a per-issue Codex session store (~/.codex/multica-sessions/<agent>/<issue>) untouched for at least this long, so a done/abandoned issue's conversation history does not accumulate forever (default: 14d, set 0 to disable)
 	GCHermesMemoryTTL              time.Duration         // reclaim a per-agent Hermes memory store (<profile dir>/hermes-state/<agent>/<profile>) untouched for at least this long, so a deleted agent's memory does not sit on disk forever (default: 90d, set 0 to disable)
+	GCHermesSessionTTL             time.Duration         // reclaim a per-conversation Hermes session store (<profile dir>/hermes-sessions/<agent>/<profile>/<conversation>) untouched for at least this long, so a done or abandoned conversation's transcript does not accumulate forever (default: 14d, set 0 to disable)
 	AutoUpdateEnabled              bool                  // periodically check for a newer CLI release and self-update when idle (default: true on Multica Cloud, false on self-host)
 	AutoUpdateCheckInterval        time.Duration         // how often the auto-update loop polls for a new release (default: 6h)
 	AutoReloadEnabled              bool                  // restart when the multica binary on disk no longer matches the running version (default: true for CLI-launched daemons)
@@ -115,15 +118,21 @@ type Config struct {
 	HeartbeatInterval              time.Duration
 	AgentTimeout                   time.Duration
 	CodexSemanticInactivityTimeout time.Duration
-	CodexHandshakeTimeout          time.Duration
-	OpenCodeIdleWatchdog           time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
-	AgentIdleWatchdog              time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
-	AgentToolWatchdog              time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
-	ClaudeArgs                     []string
-	CodexArgs                      []string
-	CodebuddyArgs                  []string
-	QwenArgs                       []string
-	QwenpawArgs                    []string
+	// CodexFirstTurnNoProgressTimeout is an explicit override for the Codex
+	// first-turn no-progress ceiling (MULTICA_CODEX_FIRST_TURN_TIMEOUT). 0 means
+	// unset: the backend keeps its default ceiling, which CodexSemanticInactivityTimeout
+	// can only shrink. A positive value raises (or lowers) that ceiling outright,
+	// for app-servers that are legitimately slow to their first event (GH #3262).
+	CodexFirstTurnNoProgressTimeout time.Duration
+	CodexHandshakeTimeout           time.Duration
+	OpenCodeIdleWatchdog            time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
+	AgentIdleWatchdog               time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
+	AgentToolWatchdog               time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
+	ClaudeArgs                      []string
+	CodexArgs                       []string
+	CodebuddyArgs                   []string
+	QwenArgs                        []string
+	QwenpawArgs                     []string
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -190,6 +199,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	//     binary lookup; pre-existing path.
 	//   - OPENCLAW_STATE_DIR:    OpenClaw's own env var; the daemon already
 	//     forwards it to spawned children via mergeEnv (server/pkg/agent/...).
+	//   - MULTICA_OPENCLAW_CLI_TIMEOUT: read by execenv when it sets the
+	//     deadline on each `openclaw config ...` call during task prep.
 	//
 	// Precedence is "env wins over config wins over default" — same shape
 	// users already get with MULTICA_OPENCLAW_PATH today. We achieve it with
@@ -229,7 +240,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// can re-run the same discovery on a live daemon (MUL-5439).
 	agents := probeAgentCLIs()
 	if len(agents) == 0 && !overrides.AllowNoAgents {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, or qwenpaw and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, or mcode and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -290,6 +301,36 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if overrides.CodexSemanticInactivityTimeout > 0 {
 		codexSemanticInactivityTimeout = overrides.CodexSemanticInactivityTimeout
+	}
+
+	// 0 = unset: the codex backend keeps its default first-turn ceiling. A
+	// positive value is an explicit operator override (GH #3262 / #5959).
+	codexFirstTurnNoProgressTimeout, err := durationFromEnv("MULTICA_CODEX_FIRST_TURN_TIMEOUT", 0)
+	if err != nil {
+		return Config{}, err
+	}
+	// The first-turn override only raises the first-turn watchdog, not the
+	// concurrent semantic-inactivity timer that the same first status:running
+	// arms — and the semantic timer is armed FIRST (codex.go resets it before
+	// creating the first-turn timer). When the override is >= the semantic
+	// timeout the effective first-item wait is truncated to the semantic
+	// timeout: at equal durations the semantic deadline is reached first, and
+	// even when both fire together Go's select does not deterministically
+	// favour the first-turn branch. The failure is then classified as semantic
+	// inactivity rather than first-turn no-progress, which disables the
+	// transient model-catalog startup retry (GH #3291). Warn unless the semantic
+	// timeout is set strictly above the first-turn timeout.
+	if codexFirstTurnNoProgressTimeout > 0 {
+		effectiveSemanticTimeout := codexSemanticInactivityTimeout
+		if effectiveSemanticTimeout <= 0 {
+			effectiveSemanticTimeout = DefaultCodexSemanticInactivityTimeout
+		}
+		if codexFirstTurnNoProgressTimeout >= effectiveSemanticTimeout {
+			slog.Warn("MULTICA_CODEX_FIRST_TURN_TIMEOUT is greater than or equal to the semantic-inactivity timeout; the effective first-turn wait is truncated to the semantic timeout and the model-catalog startup retry is disabled. Because the semantic timer is armed first and equal durations do not deterministically favour the first-turn deadline, set MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT strictly above MULTICA_CODEX_FIRST_TURN_TIMEOUT (with some margin) to preserve it.",
+				"first_turn_timeout", codexFirstTurnNoProgressTimeout.String(),
+				"semantic_inactivity_timeout", effectiveSemanticTimeout.String(),
+			)
+		}
 	}
 
 	codexHandshakeTimeout, err := durationFromEnv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", DefaultCodexHandshakeTimeout)
@@ -427,6 +468,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
+	gcHermesSessionTTL, err := durationFromEnv("MULTICA_GC_HERMES_SESSION_TTL", DefaultGCHermesSessionTTL)
+	if err != nil {
+		return Config{}, err
+	}
 	gcRepoTTL, err := durationFromEnv("MULTICA_GC_REPO_TTL", DefaultGCRepoTTL)
 	if err != nil {
 		return Config{}, err
@@ -467,44 +512,46 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 
 	return Config{
-		ServerBaseURL:                  serverBaseURL,
-		DaemonID:                       daemonID,
-		LegacyDaemonIDs:                legacyDaemonIDs,
-		DeviceName:                     deviceName,
-		RuntimeName:                    runtimeName,
-		Profile:                        profile,
-		Agents:                         agents,
-		WorkspacesRoot:                 workspacesRoot,
-		KeepEnvAfterTask:               keepEnv,
-		GCEnabled:                      gcEnabled,
-		GCInterval:                     gcInterval,
-		GCTTL:                          gcTTL,
-		GCOrphanTTL:                    gcOrphanTTL,
-		GCArtifactTTL:                  gcArtifactTTL,
-		GCArtifactPatterns:             gcArtifactPatterns,
-		GCRepoTTL:                      gcRepoTTL,
-		GCRepoMaintenanceEnabled:       gcRepoMaintenanceEnabled,
-		GCCodexSessionTTL:              gcCodexSessionTTL,
-		GCHermesMemoryTTL:              gcHermesMemoryTTL,
-		AutoUpdateEnabled:              autoUpdateEnabled,
-		AutoUpdateCheckInterval:        autoUpdateInterval,
-		AutoReloadEnabled:              autoReloadEnabled,
-		HealthPort:                     healthPort,
-		MaxConcurrentTasks:             maxConcurrentTasks,
-		PollInterval:                   pollInterval,
-		HeartbeatInterval:              heartbeatInterval,
-		AgentTimeout:                   agentTimeout,
-		CodexSemanticInactivityTimeout: codexSemanticInactivityTimeout,
-		CodexHandshakeTimeout:          codexHandshakeTimeout,
-		OpenCodeIdleWatchdog:           openCodeIdleWatchdog,
-		AgentIdleWatchdog:              agentIdleWatchdog,
-		AgentToolWatchdog:              agentToolWatchdog,
-		ClaudeArgs:                     claudeArgs,
-		CodexArgs:                      codexArgs,
-		CodebuddyArgs:                  codebuddyArgs,
-		QwenArgs:                       qwenArgs,
-		QwenpawArgs:                    qwenpawArgs,
-		ProfileCommandOverrides:        profileCommandOverrides,
+		ServerBaseURL:                   serverBaseURL,
+		DaemonID:                        daemonID,
+		LegacyDaemonIDs:                 legacyDaemonIDs,
+		DeviceName:                      deviceName,
+		RuntimeName:                     runtimeName,
+		Profile:                         profile,
+		Agents:                          agents,
+		WorkspacesRoot:                  workspacesRoot,
+		KeepEnvAfterTask:                keepEnv,
+		GCEnabled:                       gcEnabled,
+		GCInterval:                      gcInterval,
+		GCTTL:                           gcTTL,
+		GCOrphanTTL:                     gcOrphanTTL,
+		GCArtifactTTL:                   gcArtifactTTL,
+		GCArtifactPatterns:              gcArtifactPatterns,
+		GCRepoTTL:                       gcRepoTTL,
+		GCRepoMaintenanceEnabled:        gcRepoMaintenanceEnabled,
+		GCCodexSessionTTL:               gcCodexSessionTTL,
+		GCHermesMemoryTTL:               gcHermesMemoryTTL,
+		GCHermesSessionTTL:              gcHermesSessionTTL,
+		AutoUpdateEnabled:               autoUpdateEnabled,
+		AutoUpdateCheckInterval:         autoUpdateInterval,
+		AutoReloadEnabled:               autoReloadEnabled,
+		HealthPort:                      healthPort,
+		MaxConcurrentTasks:              maxConcurrentTasks,
+		PollInterval:                    pollInterval,
+		HeartbeatInterval:               heartbeatInterval,
+		AgentTimeout:                    agentTimeout,
+		CodexSemanticInactivityTimeout:  codexSemanticInactivityTimeout,
+		CodexFirstTurnNoProgressTimeout: codexFirstTurnNoProgressTimeout,
+		CodexHandshakeTimeout:           codexHandshakeTimeout,
+		OpenCodeIdleWatchdog:            openCodeIdleWatchdog,
+		AgentIdleWatchdog:               agentIdleWatchdog,
+		AgentToolWatchdog:               agentToolWatchdog,
+		ClaudeArgs:                      claudeArgs,
+		CodexArgs:                       codexArgs,
+		CodebuddyArgs:                   codebuddyArgs,
+		QwenArgs:                        qwenArgs,
+		QwenpawArgs:                     qwenpawArgs,
+		ProfileCommandOverrides:         profileCommandOverrides,
 	}, nil
 }
 
@@ -632,9 +679,15 @@ func shellArgsFromEnv(name string) ([]string, error) {
 	return args, nil
 }
 
-// resolveAgentExecutablePath returns the concrete executable path the daemon
+// resolveAgentExecutablePath returns the executable entry point the daemon
 // should keep for an agent command. Bare command names are pinned to the path
 // resolved during startup so later PATH changes cannot redirect task launches.
+// Ordinary executables are pinned to their concrete target; entrypoints owned
+// by a name-dispatching shim keep the command name the manager needs to select
+// the right package (see discoveredExecutablePath).
+// On Windows this deliberately keeps the stable discovered junction path;
+// resolveAgentEntryWithHeal follows it for each launch so installer upgrades
+// that retarget a still-live junction take effect without a daemon restart.
 // When ~/.multica/hooks shadows a real agent binary, skip that hooks directory:
 // previously generated hook wrappers can execute the same command name and
 // recurse forever if the daemon records or launches the wrapper.
@@ -644,14 +697,14 @@ func resolveAgentExecutablePath(cmd string) (string, error) {
 		return "", err
 	}
 	if strings.ContainsAny(cmd, "/\\") {
-		return resolved, nil
+		return canonicalConfiguredExecutablePath(resolved), nil
 	}
 	if isInMulticaHooksDir(resolved) {
 		if unshadowed, err := lookPathExcludingMulticaHooks(cmd); err == nil {
 			return unshadowed, nil
 		}
 	}
-	return canonicalExecutablePath(resolved), nil
+	return discoveredExecutablePath(resolved), nil
 }
 
 // agentExecutablePresent reports whether path currently resolves to a runnable
@@ -705,7 +758,7 @@ func lookPathExcludingMulticaHooks(cmd string) (string, error) {
 		}
 		candidate := filepath.Join(dir, cmd)
 		if isExecutableFile(candidate) {
-			return canonicalExecutablePath(candidate), nil
+			return discoveredExecutablePath(candidate), nil
 		}
 	}
 	return "", exec.ErrNotFound
@@ -749,10 +802,13 @@ func samePathDir(a, b string) bool {
 func canonicalExecutablePath(path string) string {
 	abs, err := filepath.Abs(path)
 	if err != nil {
+		slog.Debug("make agent executable path absolute failed; keeping configured path", "path", path, "error", err)
 		return path
 	}
-	if real, err := filepath.EvalSymlinks(abs); err == nil {
+	if real, err := canonicalPath(abs); err == nil {
 		return real
+	} else {
+		slog.Debug("canonicalize agent executable path failed; keeping absolute path", "path", abs, "error", err)
 	}
 	return abs
 }
@@ -776,7 +832,7 @@ func isExecutableFile(path string) bool {
 // doesn't require editing this list by hand.
 var defaultAgentCommandNames = append([]string{
 	"claude", "codex", "opencode", "deveco", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw",
+	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "dsh", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode",
 }, agent.BuiltinRuntimeCommands()...)
 
 // codexDesktopAppBundlePaths returns candidate macOS app-bundle locations for
@@ -830,8 +886,8 @@ var supportedLoginShells = map[string]struct{}{
 	"ksh":  {},
 }
 
-// resolveAgentsViaLoginShell asks the user's login shell to print the canonical
-// (symlink-resolved) absolute path to each name in `names`. It returns a map
+// resolveAgentsViaLoginShell asks the user's login shell to print an absolute,
+// invocation-safe path to each name in `names`. It returns a map
 // of name → path for whatever the shell could find, and an empty map if the
 // shell is unavailable / unsupported / times out / produces no usable output.
 //
@@ -932,7 +988,8 @@ var resolveAgentsViaLoginShell = func(names []string) map[string]string {
 //     still print the alias/function definition, and we'd rather drop it
 //     than hand back garbage),
 //  5. canonicalises the directory via `cd ... && pwd -P` so symlinked prefix
-//     dirs (fnm/nvm/volta) collapse to stable paths,
+//     dirs (fnm/nvm/volta) collapse to stable paths while the invoked command
+//     name is kept,
 //  6. if the resolved path lives in ~/.multica/hooks, searches the same
 //     shell-expanded PATH for the first executable outside that hooks dir,
 //  7. prints `<name>\t<canonical_path>` one entry per line for the caller.
@@ -1022,7 +1079,8 @@ func openclawOverrideFrom(cfg cli.CLIConfig) *cli.OpenClawOverride {
 //
 // Side-effecting on os.Setenv is intentional and scoped:
 //
-//   - The two vars touched (MULTICA_OPENCLAW_PATH, OPENCLAW_STATE_DIR) are
+//   - The three vars touched (MULTICA_OPENCLAW_PATH, OPENCLAW_STATE_DIR,
+//     MULTICA_OPENCLAW_CLI_TIMEOUT) are
 //     OpenClaw-specific. Other backends do not read them; setting them in the
 //     daemon process has no observable effect on, e.g., Claude Code or Codex
 //     spawn behavior.
@@ -1042,6 +1100,11 @@ func applyOpenclawOverride(oc *cli.OpenClawOverride) {
 	if oc.StateDir != "" {
 		if _, set := os.LookupEnv("OPENCLAW_STATE_DIR"); !set {
 			_ = os.Setenv("OPENCLAW_STATE_DIR", oc.StateDir)
+		}
+	}
+	if oc.CLITimeout != "" {
+		if _, set := os.LookupEnv(execenv.OpenclawCLITimeoutEnv); !set {
+			_ = os.Setenv(execenv.OpenclawCLITimeoutEnv, oc.CLITimeout)
 		}
 	}
 }

@@ -28,7 +28,9 @@ interface ReplyInputProps {
   avatarId: string;
   /** Resolves true on success, false on failure — the reply box keeps its text
    *  (locked + spinning) until then, clearing only on success. */
-  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
+  onSubmit: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
+  /** Called after the server accepts the reply and the composer is cleared. */
+  onAccepted?: (commentId: string) => void;
   size?: "sm" | "default";
   /** When set, hydrates/persists the in-progress reply via the draft store.
    *  Required for replies inside virtualized timeline threads, where the
@@ -47,6 +49,7 @@ function ReplyInput({
   avatarType,
   avatarId,
   onSubmit,
+  onAccepted,
   size = "default",
   draftKey,
 }: ReplyInputProps) {
@@ -147,6 +150,7 @@ function ReplyInput({
   // See CommentInput: bound to the branch that actually wiped the editor, so a
   // draft the stale-submit guard kept is never disturbed.
   const editorScrubbedRef = useRef(false);
+  const acceptedCommentIdRef = useRef<string | null>(null);
 
   const { submitting, submit } = useComposerSubmit({
     editorRef,
@@ -179,7 +183,10 @@ function ReplyInput({
         content,
         activeIds.length > 0 ? activeIds : undefined,
         suppressAgentIds.length > 0 ? suppressAgentIds : undefined,
-      );
+      ).then((commentId) => {
+        acceptedCommentIdRef.current = typeof commentId === "string" ? commentId : null;
+        return !!commentId;
+      });
     },
     onAccepted: () => {
       // Success may only consume the entry it submitted — see CommentInput.
@@ -200,6 +207,7 @@ function ReplyInput({
       setIsEmpty(true);
       setSuppressedAgentIds(new Set());
       editorScrubbedRef.current = true;
+      if (acceptedCommentIdRef.current) onAccepted?.(acceptedCommentIdRef.current);
     },
   });
 

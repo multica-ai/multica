@@ -304,6 +304,94 @@ func (q *Queries) GetCommentInWorkspace(ctx context.Context, arg GetCommentInWor
 	return i, err
 }
 
+const getDelegatedFailureRecoveryComment = `-- name: GetDelegatedFailureRecoveryComment :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND author_type = 'system'
+  AND type = 'progress_update'
+  AND source_task_id = $3
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+type GetDelegatedFailureRecoveryCommentParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+}
+
+// The failed task row is locked by the caller before this lookup/insert pair,
+// making (source issue, failed task) a durable idempotency key without a new
+// hot-table index or schema migration. Platform recovery signals are the only
+// system-authored progress updates that carry source_task_id.
+func (q *Queries) GetDelegatedFailureRecoveryComment(ctx context.Context, arg GetDelegatedFailureRecoveryCommentParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getDelegatedFailureRecoveryComment, arg.IssueID, arg.WorkspaceID, arg.SourceTaskID)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.QuickActionID,
+	)
+	return i, err
+}
+
+const getDelegatedFailureRecoveryExhaustionComment = `-- name: GetDelegatedFailureRecoveryExhaustionComment :one
+SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id FROM comment
+WHERE issue_id = $1
+  AND workspace_id = $2
+  AND author_type = 'system'
+  AND type = 'system'
+  AND source_task_id = $3
+ORDER BY created_at ASC, id ASC
+LIMIT 1
+`
+
+type GetDelegatedFailureRecoveryExhaustionCommentParams struct {
+	IssueID      pgtype.UUID `json:"issue_id"`
+	WorkspaceID  pgtype.UUID `json:"workspace_id"`
+	SourceTaskID pgtype.UUID `json:"source_task_id"`
+}
+
+// The failed task and newest recovery-attempt row are locked by the caller
+// before this lookup/insert pair. Keeping exhaustion as a separate system
+// comment preserves the original recovery signal while making the automatic
+// stop visible in the issue timeline.
+func (q *Queries) GetDelegatedFailureRecoveryExhaustionComment(ctx context.Context, arg GetDelegatedFailureRecoveryExhaustionCommentParams) (Comment, error) {
+	row := q.db.QueryRow(ctx, getDelegatedFailureRecoveryExhaustionComment, arg.IssueID, arg.WorkspaceID, arg.SourceTaskID)
+	var i Comment
+	err := row.Scan(
+		&i.ID,
+		&i.IssueID,
+		&i.AuthorType,
+		&i.AuthorID,
+		&i.Content,
+		&i.Type,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ParentID,
+		&i.WorkspaceID,
+		&i.ResolvedAt,
+		&i.ResolvedByType,
+		&i.ResolvedByID,
+		&i.SourceTaskID,
+		&i.QuickActionID,
+	)
+	return i, err
+}
+
 const getLatestMemberCommentForIssueSince = `-- name: GetLatestMemberCommentForIssueSince :one
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id FROM comment
 WHERE issue_id = $1
@@ -844,10 +932,17 @@ func (q *Queries) ListRecentThreadCommentsForIssue(ctx context.Context, arg List
 const listReconcilableCommentsForIssueSince = `-- name: ListReconcilableCommentsForIssueSince :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id FROM comment
 WHERE issue_id = $1
-  AND author_type IN ('member', 'agent')
   AND (
-      created_at > $2
-      OR id = ANY($3::uuid[])
+      (
+          author_type IN ('member', 'agent')
+          AND (created_at > $2 OR id = ANY($3::uuid[]))
+      )
+      OR (
+          author_type = 'system'
+          AND type = 'progress_update'
+          AND source_task_id IS NOT NULL
+          AND id = ANY($3::uuid[])
+      )
   )
 ORDER BY created_at ASC, id ASC
 `
@@ -861,6 +956,11 @@ type ListReconcilableCommentsForIssueSinceParams struct {
 // MUL-4195 / MUL-4304 completion reconciliation: every MEMBER- or AGENT-authored
 // comment on an issue created strictly after @since (the completing run's
 // created_at anchor), plus every id in its planned trigger/coalesced batch.
+// The one platform-authored exception is a delegated-failure recovery signal:
+// author_type=system, type=progress_update, source_task_id set. Such a signal
+// can be registered after a coordinator was claimed and must be replayed when
+// that run completes; the handler routes it through the dedicated recovery
+// path instead of generic comment/mention routing.
 // Planned ids matter for retry children because their input comments predate
 // the child's created_at; if one could not be embedded at claim time it still
 // needs reconciliation. The handler excludes only delivered_comment_ids, then

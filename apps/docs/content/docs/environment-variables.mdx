@@ -39,6 +39,7 @@ Do not use the default `JWT_SECRET` in production, and do not set `MULTICA_DEV_V
 | `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds |
 | `LOG_LEVEL` | application default | Log level |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | How long to wait after a termination signal before graceful shutdown begins |
+| `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | How long an offline runtime may reconnect before its in-flight tasks fail; values below `150s` are clamped |
 
 When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must exceed the hold plus the time the actual shutdown needs.
 
@@ -142,16 +143,19 @@ Use `ATTACHMENT_DOWNLOAD_MODE=proxy` when the endpoint — an internal MinIO, fo
 
 | Variable | Default | Description |
 |---|---|---|
-| `REDIS_URL` | empty | Used for auth rate limiting, realtime events, and the token cache; when unset, realtime events fall back to in-process memory and auth rate limiting is off |
+| `REDIS_URL` | empty | Used for shared rate limiting, realtime events, and the token cache; when unset, realtime events and invitation limits fall back to in-process memory, while auth rate limiting is off |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | Set `true` when a managed Redis blocks `CLIENT SETNAME` |
 | `RATE_LIMIT_AUTH` | `5` | Per-IP requests per minute to send a verification code or start Google sign-in |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | Per-IP code verifications per minute |
+| `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | Workspace invitations each inviter may create per 10-minute sliding window; `0` disables this gate |
+| `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | Workspace invitations all admins may create per workspace per 24-hour sliding window; `0` disables this gate |
+| `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | Invitations one normalized recipient email may receive across workspaces per 24-hour sliding window; `0` disables this gate |
 | `RATE_LIMIT_TRUSTED_PROXIES` | empty | Comma-separated proxy CIDRs allowed to provide `X-Forwarded-For` |
 | `MULTICA_TRUSTED_PROXIES` | empty | Trusted proxy CIDRs for automation webhooks and realtime connections |
 
 Deployments behind a reverse proxy must list their real proxy ranges. Do not blanket-trust all sources, or clients can forge forwarded IPs.
 
-The `RATE_LIMIT_*` variables above only take effect once `REDIS_URL` is set; without it, the startup log notes that rate limiting is disabled. If Redis becomes temporarily unavailable, the limiter fails open and does not block normal sign-ins.
+The auth rate limits require `REDIS_URL`; without it, the startup log notes that auth rate limiting is disabled. Invitation limits still run in process-local memory without Redis and become shared across replicas when Redis is configured. If configured Redis becomes temporarily unavailable, auth rate limiting fails open, while invitation creation returns a retryable `503` instead of sending email without protection.
 
 ## External integrations
 
@@ -202,14 +206,16 @@ The variables below are read on the computer that runs your agents, not in the A
 | `MULTICA_AGENT_TOOL_WATCHDOG` | `2h` | Silence ceiling for a single tool call |
 | `MULTICA_OPENCODE_IDLE_WATCHDOG` | `10m` | OpenCode-specific silence threshold |
 | `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` | `10m` | Codex semantic-silence threshold |
+| `MULTICA_CODEX_FIRST_TURN_TIMEOUT` | `0` | Explicit override for the Codex first-turn no-progress ceiling; `0` keeps the default. The effective first-turn wait stays bounded by `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` and the overall execution timeout — set `MULTICA_CODEX_SEMANTIC_INACTIVITY_TIMEOUT` strictly above this value (with some margin), or the wait is truncated to it and the model-catalog startup retry is skipped. Equal values are not enough: the semantic timer is armed first, so at equal durations the retry can still be lost |
 | `MULTICA_CODEX_HANDSHAKE_TIMEOUT` | `30s` | Codex app-server startup handshake ceiling |
 | `MULTICA_DAEMON_AUTO_UPDATE` | Cloud `true`; self-hosted `false` | Whether to check for and apply CLI updates automatically |
 | `MULTICA_DAEMON_AUTO_UPDATE_INTERVAL` | `6h` | Update check interval |
 | `MULTICA_DAEMON_AUTO_RELOAD` | `true` | Whether to restart into a `multica` binary replaced on disk out of band (`brew upgrade`, a re-download, a local build). Independent of `MULTICA_DAEMON_AUTO_UPDATE` |
 | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` | Root directory for task working directories |
+| `MULTICA_AGENT_TEMP_BASE` | `/tmp` (Linux/macOS) | Linux/macOS only. Parent directory for private per-task temp dirs; must be an existing, writable absolute directory, and an invalid value fails task startup instead of falling back to `/tmp`. Pick a short path — child tools may bind AF_UNIX sockets under it, and `sun_path` is limited to 108 bytes on Linux and 104 on macOS |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | Keep task directories for debugging |
 
-Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and `MULTICA_<PROVIDER>_MODEL` to override the command path and default model. QwenPaw is the exception: it has no `MULTICA_QWENPAW_MODEL`, because Multica never sends it a model — see [AI coding tools comparison](/providers#model-sources). Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
+Each AI coding tool accepts `MULTICA_<PROVIDER>_PATH` and, when model overrides are supported, `MULTICA_<PROVIDER>_MODEL`. QwenPaw and MiniMax Code have no model variable because Multica never sends them a model; MiniMax Code's path variable is `MULTICA_MCODE_PATH` — see [AI coding tools comparison](/providers#model-sources). DeepSeek Harness supports `MULTICA_DSH_PATH` and `MULTICA_DSH_MODEL` (a model id from the dsh catalog, e.g. `deepseek-official/deepseek-chat`). Machine-wide default arguments via `MULTICA_<PROVIDER>_ARGS` are currently supported for five tools: Claude Code, Codex, CodeBuddy, Qwen Code, and QwenPaw. The variables are `MULTICA_CLAUDE_ARGS`, `MULTICA_CODEX_ARGS`, `MULTICA_CODEBUDDY_ARGS`, `MULTICA_QWEN_ARGS`, and `MULTICA_QWENPAW_ARGS`. For example:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
@@ -236,6 +242,7 @@ Supported keys:
 | `workspace_id` | empty | Default workspace |
 | `device_name` | hostname | Device name shown in the runtime list |
 | `runtime_name` | `Local Agent` | Runtime display name |
+| `workspaces_root` | profile-aware path under `~` | Root directory for task working directories |
 | `max_concurrent_tasks` | `20` | Concurrent task ceiling; `0` or empty means unset |
 | `poll_interval` | `30s` | Task polling interval |
 | `heartbeat_interval` | `15s` | Heartbeat interval |
@@ -251,6 +258,7 @@ A few value rules:
 - Duration keys accept positive Go durations (such as `10s`, `2h`); `0s` and negative values are rejected. The one exception is `agent_timeout`: `0s` is valid and explicitly disables the run time limit.
 - Passing an empty string clears a persisted value and falls back to the env var or built-in default, for example `multica config set poll_interval ""`.
 - `max_concurrent_tasks` requires a non-negative integer.
+- Relative `workspaces_root` values are converted to absolute paths when saved.
 
 ## Observability and analytics
 

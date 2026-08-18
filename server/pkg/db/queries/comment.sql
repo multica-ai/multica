@@ -350,6 +350,11 @@ LIMIT 1;
 -- MUL-4195 / MUL-4304 completion reconciliation: every MEMBER- or AGENT-authored
 -- comment on an issue created strictly after @since (the completing run's
 -- created_at anchor), plus every id in its planned trigger/coalesced batch.
+-- The one platform-authored exception is a delegated-failure recovery signal:
+-- author_type=system, type=progress_update, source_task_id set. Such a signal
+-- can be registered after a coordinator was claimed and must be replayed when
+-- that run completes; the handler routes it through the dedicated recovery
+-- path instead of generic comment/mention routing.
 -- Planned ids matter for retry children because their input comments predate
 -- the child's created_at; if one could not be embedded at claim time it still
 -- needs reconciliation. The handler excludes only delivered_comment_ids, then
@@ -376,10 +381,17 @@ LIMIT 1;
 -- the first.
 SELECT * FROM comment
 WHERE issue_id = @issue_id
-  AND author_type IN ('member', 'agent')
   AND (
-      created_at > @since
-      OR id = ANY(@planned_comment_ids::uuid[])
+      (
+          author_type IN ('member', 'agent')
+          AND (created_at > @since OR id = ANY(@planned_comment_ids::uuid[]))
+      )
+      OR (
+          author_type = 'system'
+          AND type = 'progress_update'
+          AND source_task_id IS NOT NULL
+          AND id = ANY(@planned_comment_ids::uuid[])
+      )
   )
 ORDER BY created_at ASC, id ASC;
 
@@ -434,6 +446,34 @@ INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, ty
 SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id)
 FROM touched_issue ti
 RETURNING *;
+
+-- name: GetDelegatedFailureRecoveryComment :one
+-- The failed task row is locked by the caller before this lookup/insert pair,
+-- making (source issue, failed task) a durable idempotency key without a new
+-- hot-table index or schema migration. Platform recovery signals are the only
+-- system-authored progress updates that carry source_task_id.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND author_type = 'system'
+  AND type = 'progress_update'
+  AND source_task_id = @source_task_id
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
+
+-- name: GetDelegatedFailureRecoveryExhaustionComment :one
+-- The failed task and newest recovery-attempt row are locked by the caller
+-- before this lookup/insert pair. Keeping exhaustion as a separate system
+-- comment preserves the original recovery signal while making the automatic
+-- stop visible in the issue timeline.
+SELECT * FROM comment
+WHERE issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND author_type = 'system'
+  AND type = 'system'
+  AND source_task_id = @source_task_id
+ORDER BY created_at ASC, id ASC
+LIMIT 1;
 
 -- name: UpdateComment :one
 UPDATE comment SET

@@ -208,6 +208,28 @@ func TestPrepareReasonixTaskStateHome(t *testing.T) {
 	}
 }
 
+func TestPrepareDshTaskSessionRoot(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+
+	got, err := prepareDshTaskSessionRoot("work", "runtime-1", "agent_2")
+	if err != nil {
+		t.Fatalf("prepareDshTaskSessionRoot: %v", err)
+	}
+	want := filepath.Join(home, ".multica", "profiles", "work", "dsh-sessions", "runtime-1", "agent_2")
+	if got != want {
+		t.Fatalf("session root = %q, want %q", got, want)
+	}
+	info, err := os.Stat(got)
+	if err != nil {
+		t.Fatalf("stat session root: %v", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o700 {
+		t.Fatalf("session root mode = %o, want 700", info.Mode().Perm())
+	}
+}
+
 func TestLayerCustomEnvKeepsReasonixCredentialsHomeButBlocksStateHome(t *testing.T) {
 	t.Parallel()
 	agentEnv := map[string]string{}
@@ -687,6 +709,8 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 		{provider: "kimi", want: true},
 		// Reasonix loads AGENTS.md from the ACP session cwd.
 		{provider: "reasonix", want: false},
+		// DSH loads AGENTS.md from the agent session cwd.
+		{provider: "dsh", want: false},
 		{provider: "traecli", want: true},
 		// Qwen Code loads the per-task QWEN.md file natively.
 		{provider: "qwen", want: false},
@@ -1935,12 +1959,17 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
-		name        string
-		sessionID   string
-		priorDir    string
-		envDir      string
-		wantSession string
-		wantReused  bool
+		name      string
+		sessionID string
+		priorDir  string
+		envDir    string
+		// sessionHomeUnreachable models a provider whose session store this run
+		// cannot reach even though the workdir matches — the Hermes
+		// local_directory case (GH #6806). Zero value keeps the cwd-keyed
+		// providers' behaviour.
+		sessionHomeUnreachable bool
+		wantSession            string
+		wantReused             bool
 	}{
 		{
 			name:        "same workdir keeps session",
@@ -1974,6 +2003,19 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 			wantSession: "",
 			wantReused:  false,
 		},
+		{
+			// The local_directory flow: workdir is the user's own directory
+			// and therefore identical across tasks, but reuse is disabled so
+			// the session store is a fresh, empty one. Forwarding the id here
+			// is what made every turn silently restart the conversation.
+			name:                   "matching workdir but unreachable session store drops session",
+			sessionID:              "sess-1",
+			priorDir:               "/repo",
+			envDir:                 "/repo",
+			sessionHomeUnreachable: true,
+			wantSession:            "",
+			wantReused:             false,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1981,7 +2023,7 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 			task := Task{PriorSessionID: tt.sessionID, PriorWorkDir: tt.priorDir}
 			taskCtx := execenv.TaskContextForEnv{PriorSessionResumed: tt.sessionID != ""}
 
-			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, slog.Default())
+			reused := gateResumeToReusedWorkdir(&task, &taskCtx, tt.envDir, !tt.sessionHomeUnreachable, slog.Default())
 
 			if reused != tt.wantReused {
 				t.Fatalf("reused = %v, want %v", reused, tt.wantReused)
@@ -1997,6 +2039,79 @@ func TestGateResumeToReusedWorkdir(t *testing.T) {
 			wantUnavailable := tt.sessionID != "" && tt.wantSession == ""
 			if taskCtx.PriorSessionResumeUnavailable != wantUnavailable {
 				t.Fatalf("PriorSessionResumeUnavailable = %v, want %v", taskCtx.PriorSessionResumeUnavailable, wantUnavailable)
+			}
+		})
+	}
+}
+
+func TestSessionHomeReachable(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		provider   string
+		env        *execenv.Environment
+		envReused  bool
+		wantReturn bool
+	}{
+		{
+			// Every non-Hermes backend keys its sessions by cwd (or resolves
+			// its own store), so this predicate must not narrow their gate.
+			name:       "cwd-keyed provider is always reachable",
+			provider:   "claude",
+			env:        &execenv.Environment{},
+			wantReturn: true,
+		},
+		{
+			name:     "hermes with a mounted store holding history",
+			provider: "hermes",
+			env: &execenv.Environment{
+				HermesSessionStore:          "/profile/hermes-sessions/a/default/issue-1",
+				HermesSessionHistoryPresent: true,
+			},
+			wantReturn: true,
+		},
+		{
+			// Mounted onto nothing: a first turn, a store the GC reclaimed
+			// between turns, a switched profile, or a dangling link. Reading
+			// "mounted" as "resumable" here would forward a dead session id.
+			name:       "hermes with a mounted but empty session store",
+			provider:   "hermes",
+			env:        &execenv.Environment{HermesSessionStore: "/profile/hermes-sessions/a/default/issue-1"},
+			wantReturn: false,
+		},
+		{
+			// A store is mounted, so the env-reuse fallback must not override
+			// the store's own answer — the transcript lives in the store now.
+			name:       "hermes with an empty store is not rescued by env reuse",
+			provider:   "hermes",
+			env:        &execenv.Environment{HermesSessionStore: "/profile/hermes-sessions/a/default/issue-1"},
+			envReused:  true,
+			wantReturn: false,
+		},
+		{
+			// No store, but the prior task's env root — and therefore its
+			// overlay's task-local state.db — carried over.
+			name:       "hermes on a reused env root",
+			provider:   "hermes",
+			env:        &execenv.Environment{},
+			envReused:  true,
+			wantReturn: true,
+		},
+		{
+			// The GH #6806 shape: a fresh overlay with an empty state.db, so
+			// no session recorded by a prior task can be found here.
+			name:       "hermes on a fresh overlay with no store",
+			provider:   "hermes",
+			env:        &execenv.Environment{},
+			wantReturn: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := sessionHomeReachable(tt.provider, tt.env, tt.envReused); got != tt.wantReturn {
+				t.Fatalf("sessionHomeReachable() = %v, want %v", got, tt.wantReturn)
 			}
 		})
 	}
@@ -2929,7 +3044,7 @@ func TestShouldRetryWithFreshSession_CompatPathIsBackendScoped(t *testing.T) {
 		})
 	}
 
-	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "reasonix", "kiro", "qoder", "qoderclicn", "traecli", "pi", "omp", "openclaw"}
+	detectable := []string{"claude", "codebuddy", "qwen", "codex", "grok", "hermes", "kimi", "reasonix", "dsh", "kiro", "qoder", "qoderclicn", "traecli", "pi", "omp", "openclaw"}
 	for _, provider := range detectable {
 		t.Run(provider+" does not retry", func(t *testing.T) {
 			t.Parallel()
@@ -2996,7 +3111,7 @@ func TestShouldRetryWithFreshSession_UnresumableHistoryIsBackendAgnostic(t *test
 	}
 }
 
-func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T) {
+func TestExecuteAndDrain_CodexInactivityReportsMCPToolResultTranscript(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell-script fixture is POSIX-only")
 	}
@@ -3011,8 +3126,8 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 		`read line` + "\n" +
 		`echo '{"jsonrpc":"2.0","id":3,"result":{}}'` + "\n" +
 		`echo '{"jsonrpc":"2.0","method":"turn/started","params":{"threadId":"thr-drain","turn":{"id":"turn-drain"}}}'` + "\n" +
-		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-drain","item":{"type":"commandExecution","id":"cmd-1","command":"git status"}}}'` + "\n" +
-		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-drain","item":{"type":"commandExecution","id":"cmd-1","aggregatedOutput":"clean"}}}'` + "\n" +
+		`echo '{"jsonrpc":"2.0","method":"item/started","params":{"threadId":"thr-drain","item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"inProgress"}}}'` + "\n" +
+		`echo '{"jsonrpc":"2.0","method":"item/completed","params":{"threadId":"thr-drain","item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"completed","durationMs":1627,"result":{"content":[{"type":"text","text":"private provider payload"}]}}}}'` + "\n" +
 		`sleep 5` + "\n"
 	if err := os.WriteFile(fakePath, []byte(script), 0o755); err != nil {
 		t.Fatalf("write fake codex: %v", err)
@@ -3067,10 +3182,11 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 		mu.Lock()
 		var gotToolUse, gotToolResult bool
 		for _, msg := range reported {
-			if msg.Seq == 1 && msg.Type == "tool_use" && msg.Tool == "exec_command" {
-				gotToolUse = true
+			if msg.Seq == 1 && msg.Type == "tool_use" && msg.Tool == "web_search_exa" {
+				arguments, _ := msg.Input["arguments"].(map[string]any)
+				gotToolUse = msg.Input["server"] == "plugin-exa-search" && arguments["query"] == "latest Multica news"
 			}
-			if msg.Seq == 2 && msg.Type == "tool_result" && msg.Tool == "exec_command" && msg.Output == "clean" {
+			if msg.Seq == 2 && msg.Type == "tool_result" && msg.Tool == "web_search_exa" && msg.Output == "completed\nduration: 1627 ms" {
 				gotToolResult = true
 			}
 		}
@@ -3081,7 +3197,7 @@ func TestExecuteAndDrain_CodexInactivityReportsToolResultTranscript(t *testing.T
 		if time.Now().After(deadline) {
 			mu.Lock()
 			defer mu.Unlock()
-			t.Fatalf("expected tool_use seq=1 and tool_result seq=2 in transcript, got %+v", reported)
+			t.Fatalf("expected MCP tool_use seq=1 and tool_result seq=2 in transcript, got %+v", reported)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
@@ -5128,9 +5244,9 @@ func TestHermesLaunchArgsAndEnvByScenario(t *testing.T) {
 	customArgs := []string{"-p", "research", "--yolo"}
 	customEnv := map[string]string{"HERMES_HOME": "/home/u/.hermes"}
 
-	// No overlay (skill-less): profile flag passes through, and the user's
-	// HERMES_HOME passes through — behavior unchanged.
-	noOverlayArgs := hermesLaunchArgs(customArgs, false)
+	// No overlay (skill-less): runTask never strips, so the profile flag passes
+	// through, and the user's HERMES_HOME passes through — behavior unchanged.
+	noOverlayArgs := customArgs
 	if len(noOverlayArgs) != 3 || noOverlayArgs[0] != "-p" || noOverlayArgs[1] != "research" {
 		t.Errorf("skill-less task must keep its profile flags, got %v", noOverlayArgs)
 	}
@@ -5141,7 +5257,7 @@ func TestHermesLaunchArgsAndEnvByScenario(t *testing.T) {
 	}
 
 	// Overlay active: profile flag is stripped, and HERMES_HOME is the overlay.
-	overlayArgs := hermesLaunchArgs(customArgs, true)
+	_, overlayArgs := agent.StripHermesProfileSelectors(nil, customArgs, slog.Default())
 	if len(overlayArgs) != 1 || overlayArgs[0] != "--yolo" {
 		t.Errorf("overlay task must strip profile flags, got %v", overlayArgs)
 	}
@@ -5503,5 +5619,44 @@ func TestBuildPromptSquadLeaderMultiThreadCarvesOutNoAction(t *testing.T) {
 	}
 	if strings.Contains(ordinary, "Unless your outcome is") || strings.Contains(ordinary, "skip this ENTIRE fan-out block") {
 		t.Fatalf("ordinary multi-thread prompt leaked the leader carve-out\n---\n%s", ordinary)
+	}
+}
+
+// TestHermesProfileChainCoversLaunchPrefix is the daemon half of GH #7046's
+// Hermes regression. A custom runtime profile's fixed_args are no longer folded
+// into custom_args — they become the launch prefix and reach hermes ahead of
+// custom_args, with the backend's own `acp` token between the two.
+//
+// Both halves of the profile chain therefore have to run against the argv the
+// backend really assembles. Resolving or stripping against a hand-built
+// approximation reads a different profile than the process does, and the
+// overlay gets seeded from the wrong home.
+func TestHermesProfileChainCoversLaunchPrefix(t *testing.T) {
+	t.Parallel()
+
+	// A prefix ending in a value-taking flag: the `acp` token decides which
+	// selection hermes sees, so it must be present when the daemon resolves.
+	launchPrefix := []string{"--model"}
+	customArgs := []string{"-p", "research", "--yolo"}
+
+	sel := agent.ParseHermesProfileArgs(
+		agent.HermesLaunchArgv(launchPrefix, customArgs, slog.Default()))
+	if !sel.Found || sel.Name != "research" {
+		t.Fatalf("effective profile = %+v, want the `research` hermes actually selects", sel)
+	}
+
+	// Overlay active: both regions are stripped together, and the launched argv
+	// can no longer redirect HERMES_HOME out of the overlay.
+	strippedPrefix, strippedCustom := agent.StripHermesProfileSelectors(
+		launchPrefix, customArgs, slog.Default())
+	if sel := agent.ParseHermesProfileArgs(
+		agent.HermesLaunchArgv(strippedPrefix, strippedCustom, slog.Default())); sel.Found {
+		t.Fatalf("the launched argv can still redirect HERMES_HOME: %+v", sel)
+	}
+	if strings.Join(strippedPrefix, "\x00") != "--model" {
+		t.Errorf("prefix = %v, want the non-selector token kept", strippedPrefix)
+	}
+	if strings.Join(strippedCustom, "\x00") != "--yolo" {
+		t.Errorf("custom = %v, want only the selector removed", strippedCustom)
 	}
 }

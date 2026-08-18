@@ -191,6 +191,35 @@ describe("ChatMessageList live timeline (MUL-3960 regression)", () => {
   });
 });
 
+describe("ChatMessageList footer spacing", () => {
+  it("keeps the bottom inset when no task is pending", () => {
+    const { container } = render(
+      <I18nProvider locale="en" resources={TEST_RESOURCES}>
+        <QueryClientProvider client={new QueryClient()}>
+          <ChatMessageList
+            messages={[
+              {
+                id: "assistant-idle",
+                chat_session_id: "session-idle",
+                role: "assistant",
+                content: "Idle reply",
+                task_id: null,
+                created_at: "2026-08-12T00:00:00Z",
+              },
+            ]}
+            pendingTask={null}
+            availability="online"
+          />
+        </QueryClientProvider>
+      </I18nProvider>,
+    );
+
+    const list = container.querySelector("[data-row-key]")?.parentElement;
+    expect(list?.lastElementChild).toHaveClass("pb-4");
+    expect(screen.queryByText(/working|queued/i)).not.toBeInTheDocument();
+  });
+});
+
 describe("ChatMessageList quick actions", () => {
   it("renders up to three suggestions and sends the hidden prompt", async () => {
     const qc = new QueryClient();

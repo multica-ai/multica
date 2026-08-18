@@ -33,7 +33,9 @@ func dupRaceFixture(t *testing.T, agentName string, issueNumber int) (agentID, i
 	`, testWorkspaceID, testUserID, issueNumber, agentID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID) })
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
 	return agentID, issueID, runtimeID
@@ -219,7 +221,9 @@ func TestCommentEnqueueRaceDifferentHeadNotCoalesced(t *testing.T) {
 	`, testWorkspaceID, dupRaceHeadB).Scan(&prID); err != nil {
 		t.Fatalf("seed PR: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
 	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
 		t.Fatalf("link PR: %v", err)
@@ -425,7 +429,6 @@ func TestCommentEnqueueRaceQueuedWinnerReattributesOriginator(t *testing.T) {
 	}
 }
 
-
 // TestCommentEnqueueRaceNewerDifferentHeadNotDeferred is the regression for Elon
 // round-5 must-fix: when the different-head task holding the slot is NEWER than
 // the losing comment (and the comment is not in its planned ids), completion
@@ -449,7 +452,9 @@ func TestCommentEnqueueRaceNewerDifferentHeadNotDeferred(t *testing.T) {
 	`, testWorkspaceID, dupRaceHeadB).Scan(&prID); err != nil {
 		t.Fatalf("seed PR: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
 	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
 		t.Fatalf("link PR: %v", err)
@@ -525,7 +530,9 @@ func TestCommentEnqueueRaceMixedCoveringAndNewerNotDeferred(t *testing.T) {
 	`, testWorkspaceID, dupRaceHeadB).Scan(&prID); err != nil {
 		t.Fatalf("seed PR: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
 	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
 		t.Fatalf("link PR: %v", err)
@@ -636,7 +643,9 @@ func seedDupRacePR(t *testing.T, issueID string, prNumber int) {
 	`, testWorkspaceID, prNumber, dupRaceHeadB).Scan(&prID); err != nil {
 		t.Fatalf("seed PR: %v", err)
 	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID) })
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue_pull_request WHERE pull_request_id = $1`, prID)
+	})
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM github_pull_request WHERE id = $1`, prID) })
 	if _, err := testPool.Exec(ctx, `INSERT INTO issue_pull_request (issue_id, pull_request_id) VALUES ($1, $2)`, issueID, prID); err != nil {
 		t.Fatalf("link PR: %v", err)

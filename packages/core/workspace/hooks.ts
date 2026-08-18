@@ -2,9 +2,14 @@
 
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Agent, MemberWithUser, Squad } from "../types";
+import type { Agent, MemberWithUser, Squad, Workspace } from "../types";
 import { useWorkspaceId } from "../hooks";
-import { memberListOptions, agentListOptions, squadListOptions } from "./queries";
+import {
+  memberListOptions,
+  agentListOptions,
+  squadListOptions,
+  workspaceListOptions,
+} from "./queries";
 import { resolvePublicFileUrl } from "./avatar-url";
 
 // Stable empties for the still-loading directory queries. A fresh `= []`
@@ -20,6 +25,32 @@ import { resolvePublicFileUrl } from "./avatar-url";
 const EMPTY_MEMBERS: MemberWithUser[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 const EMPTY_SQUADS: Squad[] = [];
+const EMPTY_WORKSPACES: Workspace[] = [];
+
+/**
+ * Shared authoritative-state contract for the workspace list.
+ *
+ * TanStack Query's `isFetched` also becomes true after an initial failure, so
+ * it cannot distinguish "the account has no workspaces" from "the first
+ * request failed before any list arrived". Data presence can: a successful
+ * empty response is `[]`, while an initial failure remains `undefined`.
+ * Background failures retain cached data and therefore remain ready.
+ */
+export function useWorkspaceList({ enabled = true }: { enabled?: boolean } = {}) {
+  const query = useQuery({
+    ...workspaceListOptions(),
+    enabled,
+  });
+  const ready = query.data !== undefined;
+
+  return {
+    workspaces: query.data ?? EMPTY_WORKSPACES,
+    ready,
+    unavailable: enabled && !ready && query.isLoadingError,
+    isFetching: query.isFetching,
+    refetch: query.refetch,
+  };
+}
 
 /**
  * Pure actor-name resolution over explicit directory snapshots. Async flows

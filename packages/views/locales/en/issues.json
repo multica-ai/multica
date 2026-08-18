@@ -1,4 +1,9 @@
 {
+  "status_catalog_error": {
+    "title": "Couldn't load the status list",
+    "hint": "Issues are hidden until it loads, because a status filter can't be applied without it.",
+    "retry": "Try again"
+  },
   "page": {
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "Workspace",
@@ -37,6 +42,7 @@
   "filters": {
     "tooltip": "Filter",
     "placeholder": "Filter...",
+    "search_status": "Search status...",
     "no_results": "No results",
     "no_labels": "No labels yet",
     "no_assignee": "No assignee",
@@ -244,6 +250,7 @@
     "back": "Back",
     "title_placeholder": "Issue title",
     "desc_placeholder": "Add description...",
+    "current_issue": "This issue",
     "sub_issues_label": "Sub-issues",
     "sub_issue_of": "Sub-issue of",
     "add_sub_issues": "Add sub-issues",
@@ -414,11 +421,13 @@
     "trigger_blocked_invocation_not_allowed": "This target can't be found, or you don't have permission to use it",
     "trigger_blocked_target_unavailable": "This target is unavailable",
     "trigger_blocked_runtime_offline": "This target's runtime is offline",
+    "trigger_blocked_runtime_unusable": "This target's agent CLI can't run on its machine — reinstall it there",
     "trigger_blocked_agent_runtime_required": "This target has no runtime — bind one to run it",
     "trigger_blocked_generic": "This target won't be triggered",
     "trigger_blocked_short_invocation_not_allowed": "Not found or no permission",
     "trigger_blocked_short_target_unavailable": "Unavailable",
     "trigger_blocked_short_runtime_offline": "Runtime offline",
+    "trigger_blocked_short_runtime_unusable": "CLI can't run",
     "trigger_blocked_short_agent_runtime_required": "Needs a runtime",
     "trigger_blocked_short_generic": "Won't start",
     "send_reply_failed": "Failed to send reply",
@@ -644,8 +653,11 @@
       "value_placeholder": "Enter value…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
+      "actor_search_placeholder": "Search members…",
       "open_link": "Open link",
-      "archived_hint": "Archived property — value is read-only"
+      "archived_hint": "Archived property — value is read-only",
+      "unknown_value": "Unavailable",
+      "unknown_value_hint": "This value was set by a newer version of Multica and can't be edited here — update the app, or clear it"
     },
     "filter_options_aria": "Filter options",
     "no_results": "No results",

@@ -436,6 +436,9 @@ deleted_channel_chat_bindings AS (
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
        OR chat_session_id IN (SELECT id FROM ws_sessions)
 ),
+deleted_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
+),
 deleted_channel_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup
     WHERE installation_id IN (SELECT id FROM ws_channel_installations)
@@ -564,6 +567,25 @@ WITH deleted_squads AS (
 )
 DELETE FROM skill WHERE skill.workspace_id = $1;
 
+-- name: DeleteWorkspacePluginData :exec
+-- Plugin relationships have no foreign keys or cascades. Storage and secrets
+-- hang off the installation, so both leaf tables are cleared through the
+-- workspace's installation ids before the installations themselves.
+WITH installations AS MATERIALIZED (
+    SELECT plugin_installation.id
+    FROM plugin_installation
+    WHERE plugin_installation.workspace_id = $1
+),
+deleted_storage AS (
+    DELETE FROM plugin_storage
+    WHERE installation_id IN (SELECT id FROM installations)
+),
+deleted_secrets AS (
+    DELETE FROM plugin_secret
+    WHERE installation_id IN (SELECT id FROM installations)
+)
+DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);
+
 -- name: DeleteWorkspaceAgents :exec
 DELETE FROM agent WHERE agent.workspace_id = $1;
 
@@ -601,6 +623,10 @@ detached_client_usage AS (
     UPDATE client_usage_daily
     SET workspace_id = NULL
     WHERE client_usage_daily.workspace_id = $1
+),
+deleted_share_links AS (
+    DELETE FROM workspace_share_link
+    WHERE workspace_share_link.workspace_id = $1
 )
 DELETE FROM workspace_invitation
 WHERE workspace_invitation.workspace_id = $1;

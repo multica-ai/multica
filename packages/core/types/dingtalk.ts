@@ -1,4 +1,5 @@
-/** A DingTalk robot installation bound to a single Multica agent.
+/** A DingTalk robot installation with one default Multica agent. Group routes
+ * may target other agents without duplicating the installation.
  *
  * Wire shape mirrors `DingTalkInstallationResponse` in
  * `server/internal/handler/dingtalk.go`. New fields the backend adds in the
@@ -27,6 +28,32 @@ export interface ListDingTalkInstallationsResponse {
    * compat; optional so an older desktop build that predates it treats it as
    * off. */
   install_supported?: boolean;
+  /** Whether this backend exposes DingTalk group routing. Optional and gated
+   * with `=== true` so newer Web/Desktop clients do not call a route that an
+   * older or version-skewed backend does not have. */
+  group_routing_supported?: boolean;
+}
+
+/** A DingTalk group observed by one Stream-mode robot and routed to a fixed
+ * Multica agent. Groups are discovered from inbound callbacks; admins can
+ * reassign the agent without reconnecting or duplicating the robot. */
+export interface DingTalkGroupRoute {
+  id: string;
+  workspace_id: string;
+  installation_id: string;
+  conversation_id: string;
+  conversation_title: string;
+  agent_id: string;
+  discovered_at: string;
+  updated_at: string;
+}
+
+export interface ListDingTalkGroupRoutesResponse {
+  routes: DingTalkGroupRoute[];
+}
+
+export interface UpdateDingTalkGroupRouteRequest {
+  agent_id: string;
 }
 
 /** Request body for a bring-your-own-app (BYO) install: the AppKey and

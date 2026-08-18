@@ -36,6 +36,11 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 		for _, want := range []string{
 			protocol.DaemonCapabilitySkillBundlesV1,
 			protocol.DaemonCapabilityCoalescedCommentsV1,
+			// The worktree gate is decided entirely from this header: if the
+			// daemon stops advertising it, every worktree task on this machine
+			// is cancelled with an upgrade prompt (MUL-5707). Pin it here so
+			// dropping it from the list can never be a silent change.
+			protocol.DaemonCapabilityLocalWorktreeV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)
@@ -78,6 +83,33 @@ func TestClient_IdentityHeaders_GetJSON(t *testing.T) {
 	var out map[string]any
 	if err := c.getJSON(context.Background(), "/api/daemon/test", &out); err != nil {
 		t.Fatalf("getJSON: %v", err)
+	}
+}
+
+func TestClient_ResolveRemoteMCPCredentialUsesExplicitDaemonToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer mdt_task_broker" {
+			t.Errorf("Authorization = %q, want short-lived daemon token", got)
+		}
+		if got := r.URL.Path; got != "/api/daemon/tasks/task-1/remote-mcp/contribution-1/credential" {
+			t.Errorf("path = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"credential_header":"Authorization","credential":"Bearer upstream"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("mul_owner_pat")
+	headers, err := c.ResolveRemoteMCPCredential(context.Background(), "mdt_task_broker", "task-1", "contribution-1")
+	if err != nil {
+		t.Fatalf("ResolveRemoteMCPCredential: %v", err)
+	}
+	if got := headers.Get("Authorization"); got != "Bearer upstream" {
+		t.Fatalf("resolved credential = %q", got)
+	}
+	if got := c.Token(); got != "mul_owner_pat" {
+		t.Fatalf("client PAT was mutated to %q", got)
 	}
 }
 
@@ -290,7 +322,7 @@ func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "timeout", true, ""); err != nil {
+	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "", "timeout", true, ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 	if got := calls.Load(); got != 3 {
@@ -427,7 +459,7 @@ func TestTerminalReportsCarryRetiredSessionID(t *testing.T) {
 			name:     "fail",
 			endpoint: "/api/daemon/tasks/task-1/fail",
 			call: func(c *Client) error {
-				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "api_invalid_request", false, "POISONED-S")
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "api_invalid_request", false, "POISONED-S")
 			},
 		},
 	} {

@@ -1,5 +1,6 @@
 "use client";
 
+import { issueStatusCategory, statusCategoryOfKey } from "@multica/core/issues";
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   DndContext,
@@ -24,6 +25,7 @@ import type {
   Issue,
   IssueAssigneeType,
   IssueStatus,
+  IssueStatusCategory,
   IssueTableGroupDescriptor,
   Project,
   UpdateIssueRequest,
@@ -35,6 +37,7 @@ import { getMoveAnchors } from "../utils/drag-utils";
 import type { SwimlaneGrouping } from "@multica/core/issues/stores/view-store";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { childrenByParentsOptions, issueKeys } from "@multica/core/issues/queries";
 import {
@@ -624,8 +627,8 @@ function SwimLaneViewImpl({
    */
   unfilteredIssues?: Issue[];
   activeFilters?: Omit<IssueFilters, "statusFilters">;
-  visibleStatuses?: IssueStatus[];
-  hiddenStatuses?: IssueStatus[];
+  visibleStatuses?: IssueStatusCategory[];
+  hiddenStatuses?: IssueStatusCategory[];
   onMoveIssue: (
     issueId: string,
     updates: SwimLaneMoveUpdates,
@@ -649,6 +652,7 @@ function SwimLaneViewImpl({
   const swimlaneOrder = swimlaneOrders[swimlaneGrouping];
 
   const wsId = useWorkspaceId();
+  const { categoryOf } = useIssueStatuses(wsId);
 
   const activeFilters = useMemo(() => ({
     // Status is enforced by visible-column rendering, not by filterIssues
@@ -926,21 +930,24 @@ function SwimLaneViewImpl({
   // parent gets promoted to a lane header and the count for that status
   // drops by 1. Tracked as a follow-up.
   const statusTotals = useMemo(() => {
+    // Columns are CATEGORIES, so totals bucket by category: a custom status
+    // contributes to the column it behaves as, never to a column of its own.
     if (groupBranches?.enabled) {
-      const totals = new Map<IssueStatus, number>();
+      const totals = new Map<IssueStatusCategory, number>();
       for (const lane of groupBranches.descriptors) {
         for (const cell of lane.secondary_groups ?? []) {
           if (cell.value.kind !== "status") continue;
-          const status = cell.value.status as IssueStatus;
-          totals.set(status, (totals.get(status) ?? 0) + cell.count);
+          const category = categoryOf(cell.value.status as IssueStatus);
+          totals.set(category, (totals.get(category) ?? 0) + cell.count);
         }
       }
       return totals;
     }
-    const totals = new Map<IssueStatus, number>();
+    const totals = new Map<IssueStatusCategory, number>();
     for (const issue of laneSourceIssues) {
       if (headerIssueIds.has(issue.id)) continue;
-      totals.set(issue.status, (totals.get(issue.status) ?? 0) + 1);
+      const category = categoryOf(issue.status);
+      totals.set(category, (totals.get(category) ?? 0) + 1);
     }
     return totals;
   }, [groupBranches, laneSourceIssues, headerIssueIds]);
@@ -1339,6 +1346,16 @@ function SwimLaneViewImpl({
     ],
   );
 
+  // An aborted drag (pointercancel, window resize, tab hide, Escape) fires
+  // onDragCancel instead of onDragEnd. Releasing the drag lock here keeps
+  // localCells resyncing with the cache afterwards — see the same handler in
+  // list-view for the touch path that makes this routine (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setLocalCells(cells);
+  }, [cells]);
+
   const computeLaneKey = (_index: number, lane: LaneGroup) => lane.key;
   const renderLane = (index: number, lane: LaneGroup) => (
     <div className={index === 0 ? undefined : "pt-4"}>
@@ -1368,6 +1385,7 @@ function SwimLaneViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div ref={attachScroller} data-tab-scroll-root="swimlane" className="flex flex-1 min-h-0 gap-4 overflow-auto p-4">
         <div className="flex shrink-0 flex-col" style={{ width: `${trackWidth}px` }}>
@@ -1384,7 +1402,7 @@ function SwimLaneViewImpl({
         <div className="sticky top-0 z-10 mb-2 bg-background/95 pb-2 backdrop-blur supports-[backdrop-filter]:bg-background/75">
           <div style={gridStyle}>
             {sortedStatuses.map((status) => {
-              const cfg = STATUS_CONFIG[status];
+              const cfg = STATUS_CONFIG[statusCategoryOfKey(status)];
               const total = statusTotals.get(status) ?? 0;
               return (
                 <div
@@ -1601,7 +1619,11 @@ function DraggableSwimLane({
             className={`!size-3 shrink-0 stroke-[2.5] text-muted-foreground transition-transform ${isCollapsed ? "" : "rotate-90"}`}
           />
           {lane.parentIssue && (
-            <StatusIcon status={lane.parentIssue.status} className="size-3.5" />
+            <StatusIcon
+              status={lane.parentIssue.status}
+              category={issueStatusCategory(lane.parentIssue) ?? undefined}
+              className="size-3.5"
+            />
           )}
           {lane.project && <ProjectIcon project={lane.project} size="sm" />}
           {lane.actor && (
@@ -1709,7 +1731,7 @@ function SwimLaneCell({
   // reject the drop, so visual confirmation would be misleading.
   const isOver = readOnly ? false : droppableIsOver;
   const { t } = useT("issues");
-  const cfg = STATUS_CONFIG[status];
+  const cfg = STATUS_CONFIG[statusCategoryOfKey(status)];
 
   const resolvedIssues = useMemo(
     () =>
@@ -1792,8 +1814,8 @@ function SwimLaneHiddenColumnsPanel({
   hiddenStatuses,
   statusTotals,
 }: {
-  hiddenStatuses: IssueStatus[];
-  statusTotals: Map<IssueStatus, number>;
+  hiddenStatuses: IssueStatusCategory[];
+  statusTotals: Map<IssueStatusCategory, number>;
 }) {
   return (
     <HiddenColumnsPanel

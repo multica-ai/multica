@@ -220,7 +220,7 @@ func TestQwenpawListModels(t *testing.T) {
 	marker := filepath.Join(dir, "invoked")
 	bin := writeFakeQwenpawScript(t, "#!/bin/sh\ntouch '"+marker+"'\nexit 0\n")
 
-	cat, err := ListModels(context.Background(), "qwenpaw", bin)
+	cat, err := ListModels(context.Background(), "qwenpaw", Command{Path: bin})
 	if err != nil {
 		t.Fatalf("qwenpaw ListModels should not error, got: %v", err)
 	}

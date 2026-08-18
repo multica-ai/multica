@@ -31,8 +31,12 @@ type BusinessMetrics struct {
 	llmUnpricedTokens *prometheus.CounterVec
 	llmRequests       *prometheus.CounterVec
 
-	taskQueuedExpired *prometheus.CounterVec
-	taskLeaseExpired  *prometheus.CounterVec
+	taskQueuedExpired                 *prometheus.CounterVec
+	taskLeaseExpired                  *prometheus.CounterVec
+	runtimeGCDeleted                  prometheus.Counter
+	runtimeGCFailed                   prometheus.Counter
+	runtimeGCBlocked                  prometheus.Gauge
+	runtimeGCBlockedObservationFailed prometheus.Counter
 
 	activeMu    sync.Mutex
 	activeTasks map[string]activeTaskLabels
@@ -145,6 +149,30 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Name:      "lease_expired_total",
 			Help:      "Total dispatched or running task leases expired by the scheduler.",
 		}, metricLabels("multica_task_lease_expired_total")),
+		runtimeGCDeleted: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "runtime_gc",
+			Name:      "deleted_total",
+			Help:      "Total stale offline runtimes safely deleted by garbage collection.",
+		}),
+		runtimeGCFailed: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "runtime_gc",
+			Name:      "failed_total",
+			Help:      "Total runtime garbage-collection operations that failed.",
+		}),
+		runtimeGCBlocked: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "multica",
+			Subsystem: "runtime_gc",
+			Name:      "blocked_runtimes",
+			Help:      "Bounded count of stale offline runtimes blocked from garbage collection by non-terminal tasks.",
+		}),
+		runtimeGCBlockedObservationFailed: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "runtime_gc",
+			Name:      "blocked_observation_failed_total",
+			Help:      "Total failures while observing stale runtimes blocked from garbage collection.",
+		}),
 		activeTasks: map[string]activeTaskLabels{},
 		events:      newBusinessEventMetrics(),
 	}
@@ -170,7 +198,39 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.llmRequests,
 		m.taskQueuedExpired,
 		m.taskLeaseExpired,
+		m.runtimeGCDeleted,
+		m.runtimeGCFailed,
+		m.runtimeGCBlocked,
+		m.runtimeGCBlockedObservationFailed,
 	}, m.events.collectors()...)
+}
+
+func (m *BusinessMetrics) RecordRuntimeGCDeleted() {
+	if m == nil {
+		return
+	}
+	m.runtimeGCDeleted.Inc()
+}
+
+func (m *BusinessMetrics) RecordRuntimeGCFailed() {
+	if m == nil {
+		return
+	}
+	m.runtimeGCFailed.Inc()
+}
+
+func (m *BusinessMetrics) SetRuntimeGCBlocked(count int64) {
+	if m == nil {
+		return
+	}
+	m.runtimeGCBlocked.Set(float64(count))
+}
+
+func (m *BusinessMetrics) RecordRuntimeGCBlockedObservationFailed() {
+	if m == nil {
+		return
+	}
+	m.runtimeGCBlockedObservationFailed.Inc()
 }
 
 func (m *BusinessMetrics) RecordTaskEnqueued(source, runtimeMode string) {

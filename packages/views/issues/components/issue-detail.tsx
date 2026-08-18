@@ -1,5 +1,13 @@
 "use client";
 
+import {
+  issueBehavesAs,
+  issueBehavesAsAny,
+  issueStatusCategory,
+  statusCategoryOfKey,
+} from "@multica/core/issues";
+import { useStatusLabel } from "../utils/status-label";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useState, useEffect, useCallback, useMemo, useRef, Fragment, type ReactNode } from "react";
 import { Virtuoso, type VirtuosoHandle } from "react-virtuoso";
 import { useDefaultLayout, usePanelRef } from "react-resizable-panels";
@@ -52,7 +60,7 @@ import { AvatarGroup, AvatarGroupCount } from "@multica/ui/components/ui/avatar"
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropRow } from "../../common/prop-row";
 import { PropertyIcon } from "../../common/property-icon";
-import type { Attachment, Issue, IssueProperty, IssueStatus, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
+import type { Attachment, Issue, IssueProperty, IssueStatus, IssueStatusCategory, IssuePriority, TimelineEntry, UpdateIssueRequest } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
@@ -70,6 +78,7 @@ import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
 import { CommentInput } from "./comment-input";
+import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { isImeComposing } from "@multica/core/utils";
@@ -117,6 +126,7 @@ import {
   useViewStateWriter,
 } from "../../platform";
 import { cn } from "@multica/ui/lib/utils";
+import { PAGE_GUTTER } from "../../layout/page-header";
 
 import { ProgressRing } from "./progress-ring";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
@@ -251,9 +261,20 @@ function shortDate(date: string | null): string {
 
 type ActivityT = ReturnType<typeof useT<"issues">>["t"];
 
-function statusLabel(status: string, t: ActivityT): string {
+/**
+ * Labels a status key from the activity feed. `resolveLabel` is the workspace
+ * catalog resolver, which names custom statuses; without it — or for a status
+ * since deleted — a built-in still gets its i18n name and anything else falls
+ * back to the raw key. (MUL-6243)
+ */
+function statusLabel(
+  status: string,
+  t: ActivityT,
+  resolveLabel?: (statusKey: string) => string,
+): string {
+  if (resolveLabel) return resolveLabel(status);
   if (status in STATUS_CONFIG) {
-    return t(($) => $.status[status as IssueStatus]);
+    return t(($) => $.status[statusCategoryOfKey(status)]);
   }
   return status;
 }
@@ -269,6 +290,7 @@ function formatActivity(
   entry: TimelineEntry,
   t: ActivityT,
   resolveActorName?: (type: string, id: string) => string,
+  resolveStatusLabel?: (statusKey: string) => string,
 ): string {
   const details = (entry.details ?? {}) as Record<string, string>;
   switch (entry.action) {
@@ -276,8 +298,8 @@ function formatActivity(
       return t(($) => $.activity.created);
     case "status_changed":
       return t(($) => $.activity.status_changed, {
-        from: statusLabel(details.from ?? "?", t),
-        to: statusLabel(details.to ?? "?", t),
+        from: statusLabel(details.from ?? "?", t, resolveStatusLabel),
+        to: statusLabel(details.to ?? "?", t, resolveStatusLabel),
       });
     case "priority_changed":
       return t(($) => $.activity.priority_changed, {
@@ -505,6 +527,8 @@ function ActivityBlock({
   showOlder,
   onToggleShowOlder,
   getActorName,
+  resolveStatusLabel,
+  resolveStatusCategory,
   t,
   timeAgo,
 }: {
@@ -518,6 +542,8 @@ function ActivityBlock({
   showOlder: boolean;
   onToggleShowOlder: () => void;
   getActorName: (type: string, id: string) => string;
+  resolveStatusLabel: (statusKey: string) => string;
+  resolveStatusCategory: (statusKey: string) => IssueStatusCategory;
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
 }) {
@@ -580,7 +606,13 @@ function ActivityBlock({
 
         let leadIcon: React.ReactNode;
         if (isStatusChange && details.to) {
-          leadIcon = <StatusIcon status={details.to as IssueStatus} className="h-4 w-4 shrink-0" />;
+          leadIcon = (
+            <StatusIcon
+              status={details.to as IssueStatus}
+              category={resolveStatusCategory(details.to ?? "")}
+              className="h-4 w-4 shrink-0"
+            />
+          );
         } else if (isPriorityChange && details.to) {
           leadIcon = <PriorityIcon priority={details.to as IssuePriority} className="h-4 w-4 shrink-0" />;
         } else if (isStartDateChange) {
@@ -598,7 +630,7 @@ function ActivityBlock({
             </div>
             <div className="flex min-w-0 flex-1 items-center gap-1">
               <span className="shrink-0 font-medium">{getActorName(entry.actor_type, entry.actor_id)}</span>
-              <span className="truncate">{formatActivity(entry, t, getActorName)}</span>
+              <span className="truncate">{formatActivity(entry, t, getActorName, resolveStatusLabel)}</span>
               {(entry.coalesced_count ?? 1) > 1 &&
                 entry.action !== "task_completed" &&
                 entry.action !== "task_failed" && (
@@ -649,7 +681,9 @@ function SubIssueRow({
   const updateIssue = useUpdateIssue();
   const selected = useIssueSelectionStore((s) => s.selectedIds.has(child.id));
   const toggleSelected = useIssueSelectionStore((s) => s.toggle);
-  const isDone = child.status === "done" || child.status === "cancelled";
+  // Category, not key: a custom status in the done/cancelled categories is
+  // finished work and has to strike through like any other. (MUL-6243)
+  const isDone = issueBehavesAsAny(child, ["done", "cancelled"]);
   const labels = rowProps.labels ? (child.labels ?? []) : [];
   const customPropsWithValue = customProperties.filter(
     (p) => child.properties?.[p.id] !== undefined,
@@ -984,7 +1018,7 @@ export function IssueNotFound({
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       {leading && (
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">{leading}</div>
+        <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>{leading}</div>
       )}
       <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-3 text-body text-muted-foreground">
         <p>{t(($) => $.detail.not_found)}</p>
@@ -1014,7 +1048,7 @@ export function IssueDetailSkeleton({ leading }: { leading?: ReactNode } = {}) {
       {/* The way back is real from the first frame, not once the issue lands:
           a host that gave up its own bar for `leadingAction` has nothing else
           to offer while this skeleton owns the screen. */}
-      <div className="flex h-12 shrink-0 items-center gap-2 border-b px-4">
+      <div className={cn("flex h-12 shrink-0 items-center gap-2 border-b", PAGE_GUTTER)}>
         {leading ?? (
           <>
             <Skeleton className="h-4 w-16" />
@@ -1093,6 +1127,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     currentUserRole === "owner" || currentUserRole === "admin";
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
+  const resolveStatusLabel = useStatusLabel(wsId);
+  const { categoryOf: resolveStatusCategory } = useIssueStatuses(wsId);
   // Description autosave is deliberately NOT gated (no explicit submit; the
   // editor already strips `blob:` before serializing and binds ids on the
   // later save). It still needs the failure toast, or a failed upload just
@@ -1155,6 +1191,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso prop would never receive the element. Callback ref + state fixes
   // that: setState triggers the re-render that hands Virtuoso the element.
   const [scrollContainerEl, setScrollContainerEl] = useState<HTMLDivElement | null>(null);
+  // Bottom comment composer. Measured when scrolling a freshly posted comment
+  // into view so its bottom lands above the composer rather than behind it.
+  const composerRef = useRef<HTMLDivElement | null>(null);
   // Pull-based scroll restoration (MUL-4741): the platform serves the offset
   // captured when this route was last left. The ref-attach assignment covers
   // the flat render modes (real heights at commit); the virtualized browsing
@@ -1192,6 +1231,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     },
     [restoreScrollRef],
   );
+  const [pendingPostedCommentId, setPendingPostedCommentId] = useState<string | null>(null);
+  const scrollToTimelineBottom = useCallback((commentId: string) => {
+    setPendingPostedCommentId(commentId);
+  }, []);
   const [highlightedId, setHighlightedId] = useState<string | null>(null);
   // User preference: pin the bottom comment bar to the scroll viewport. Off
   // below `md` regardless of the preference — see the hook.
@@ -1541,6 +1584,73 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   // Virtuoso instance — minimap jumps drive the scroll container directly.
   const isFlatTimeline = !!highlightCommentId || find.open;
   const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // Scroll a freshly posted comment into view, aligned so its bottom sits just
+  // above the sticky composer (never behind it). A reply lives inside its root
+  // CommentCard, so the containing top-level row is the scroll target. Flat and
+  // virtualized timelines need separate scroll drivers, so they split into two
+  // effects below — kept apart because only the flat one depends on
+  // `scrollContainerEl`, and adding that dep to the virtualized effect would
+  // let a container re-measure cancel its in-flight scroll mid-flight.
+
+  // Virtualized mode: Virtuoso owns the scroll. The first jump materializes the
+  // row at its estimated height; once measured, the repeat aligns using the
+  // real height. The extra `offset` lifts the row's bottom clear of the sticky
+  // composer.
+  useEffect(() => {
+    if (!pendingPostedCommentId || isFlatTimeline) return;
+    const rootId = replyToRoot.get(pendingPostedCommentId) ?? pendingPostedCommentId;
+    const index = items.findIndex((item) => item.id === rootId);
+    if (index < 0) return;
+    let timer: number | undefined;
+    const scrollEnd = () => {
+      const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 0;
+      virtuosoRef.current?.scrollToIndex({ index, align: "end", offset: composerHeight });
+    };
+    const frame = requestAnimationFrame(() => {
+      scrollEnd();
+      timer = window.setTimeout(() => {
+        scrollEnd();
+        setPendingPostedCommentId(null);
+      }, 100);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [pendingPostedCommentId, items, replyToRoot, isFlatTimeline]);
+
+  // Flat mode (find bar / deep link) has no Virtuoso, so drive scrollTop by
+  // hand: align the row's bottom to the composer's top edge. The comment's
+  // async layout (markdown, code highlight, images) keeps shifting its height,
+  // so re-align each frame until it settles (within 1px) or ~0.5s elapses — the
+  // same rAF stabilization the deep-link landing uses.
+  useEffect(() => {
+    if (!pendingPostedCommentId || !isFlatTimeline) return;
+    const rootId = replyToRoot.get(pendingPostedCommentId) ?? pendingPostedCommentId;
+    if (items.findIndex((item) => item.id === rootId) < 0) return;
+    let rafId = 0;
+    let frames = 0;
+    let last = -1;
+    const alignBottom = () => {
+      const el = document.getElementById(`comment-${rootId}`);
+      const container = scrollContainerEl;
+      if (el && container) {
+        const c = container.getBoundingClientRect();
+        const e = el.getBoundingClientRect();
+        const composerHeight = composerRef.current?.getBoundingClientRect().height ?? 0;
+        const target = Math.max(0, container.scrollTop + (e.bottom - c.bottom) + composerHeight);
+        container.scrollTop = target;
+        if (Math.abs(target - last) > 1 && ++frames < 30) {
+          last = target;
+          rafId = requestAnimationFrame(alignBottom);
+          return;
+        }
+      }
+      setPendingPostedCommentId(null);
+    };
+    rafId = requestAnimationFrame(alignBottom);
+    return () => cancelAnimationFrame(rafId);
+  }, [pendingPostedCommentId, items, replyToRoot, isFlatTimeline, scrollContainerEl]);
   const jumpFlashTimerRef = useRef<number | null>(null);
   useEffect(
     () => () => {
@@ -2057,6 +2167,18 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     overrideTop: restoredScrollTop,
   });
 
+  // Keep the identity value stable across unrelated issue-detail updates so
+  // context consumers only re-render when the owning issue changes identity.
+  const resolvedIssueId = issue?.id;
+  const resolvedIssueIdentifier = issue?.identifier;
+  const currentIssueRenderContext = useMemo(
+    () =>
+      resolvedIssueId && resolvedIssueIdentifier
+        ? { id: resolvedIssueId, identifier: resolvedIssueIdentifier }
+        : null,
+    [resolvedIssueId, resolvedIssueIdentifier],
+  );
+
   if (loading) {
     return <IssueDetailSkeleton leading={leadingAction} />;
   }
@@ -2286,7 +2408,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 href={paths.issueDetail(parentIssue.id)}
                 className="flex flex-1 min-w-0 items-center gap-1.5 py-1.5 text-caption"
               >
-                <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+                <StatusIcon
+                  status={parentIssue.status}
+                  category={issueStatusCategory(parentIssue) ?? undefined}
+                  className="h-3.5 w-3.5 shrink-0"
+                />
                 <span className="text-muted-foreground shrink-0">{parentIssue.identifier}</span>
                 <span className="truncate group-hover:text-foreground">{parentIssue.title}</span>
               </AppLink>
@@ -2420,6 +2546,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             currentUserId={user?.id}
             canModerate={canModerateComments}
             onReply={submitReply}
+            onReplyAccepted={scrollToTimelineBottom}
             onEdit={editComment}
             onDelete={deleteComment}
             onToggleReaction={handleToggleReaction}
@@ -2449,6 +2576,8 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         showOlder={showOlder}
         onToggleShowOlder={() => showOlderActivities(item.id)}
         getActorName={getActorName}
+        resolveStatusLabel={resolveStatusLabel}
+        resolveStatusCategory={resolveStatusCategory}
         t={t}
         timeAgo={timeAgo}
       />
@@ -2482,6 +2611,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     // Hosts the one image viewer this issue's images page through — see
     // ImageSequenceProvider. Wraps the whole column so the description
     // editor's images and the timeline's images share one sequence.
+    <CurrentIssueRenderContextProvider value={currentIssueRenderContext}>
     <ImageSequenceProvider items={imageSequence}>
     <div className="relative flex h-full min-w-0 flex-1 flex-col">
         {/* In-page find bar — floats over the top-right of the content column
@@ -2533,7 +2663,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 onOpenChange={handleThreadNavOpenChange}
               />
             )}
-            {onDone && issue.status !== "done" && issue.status !== "cancelled" && (
+            {onDone && !issueBehavesAsAny(issue, ["done", "cancelled"]) && (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -2550,7 +2680,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 <TooltipContent side="bottom">{t(($) => $.detail.mark_done_tooltip)}</TooltipContent>
               </Tooltip>
             )}
-            {onDone && issue.status === "done" && (
+            {onDone && issueBehavesAs(issue, "done") && (
               <Tooltip>
                 <TooltipTrigger
                   render={
@@ -2676,13 +2806,17 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               className="mt-2 inline-flex max-w-full items-center gap-1.5 text-caption text-muted-foreground hover:text-foreground transition-colors group/parent"
             >
               <span className="font-medium shrink-0">{t(($) => $.detail.sub_issue_of)}</span>
-              <StatusIcon status={parentIssue.status} className="h-3.5 w-3.5 shrink-0" />
+              <StatusIcon
+                  status={parentIssue.status}
+                  category={issueStatusCategory(parentIssue) ?? undefined}
+                  className="h-3.5 w-3.5 shrink-0"
+                />
               <span className="tabular-nums shrink-0">{parentIssue.identifier}</span>
               <span className="truncate group-hover/parent:text-foreground">
                 {parentIssue.title}
               </span>
               {parentChildIssues.length > 0 && (() => {
-                const done = parentChildIssues.filter((c) => c.status === "done").length;
+                const done = parentChildIssues.filter((c) => issueBehavesAs(c, "done")).length;
                 return (
                   <span className="ml-1 inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 shrink-0">
                     <ProgressRing done={done} total={parentChildIssues.length} size={11} />
@@ -2768,7 +2902,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </div>
           )}
           {childIssues.length > 0 && (() => {
-            const doneCount = childIssues.filter((c) => c.status === "done").length;
+            const doneCount = childIssues.filter((c) => issueBehavesAs(c, "done")).length;
             return (
               // Provider hosts the shared right-click actions menu the rows
               // delegate to (one singleton menu, not one per row).
@@ -3087,6 +3221,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               off the viewport edge — with -mb-4 giving the padding back to
               the column's py-8 so the at-rest layout doesn't shift. */}
           <div
+            ref={composerRef}
             className={cn(
               "mt-4",
               stickyComposer &&
@@ -3098,7 +3233,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 keeps the previous issue's in-memory content and the
                 next keystroke would flush it into the new issue's
                 draft key. */}
-            <CommentInput key={id} issueId={id} onSubmit={submitComment} />
+            <CommentInput
+              key={id}
+              issueId={id}
+              onSubmit={submitComment}
+              onAccepted={scrollToTimelineBottom}
+            />
           </div>
         </div>
         </div>
@@ -3124,6 +3264,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         )}
       </div>
     </ImageSequenceProvider>
+    </CurrentIssueRenderContextProvider>
   );
 
   if (isMobile) {

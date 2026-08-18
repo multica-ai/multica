@@ -1,7 +1,10 @@
 package daemon
 
 import (
+	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
@@ -194,6 +197,12 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_REASONIX_PATH", "reasonix", "MULTICA_REASONIX_MODEL"); ok {
 		agents["reasonix"] = e
 	}
+	// DSH is registered only when its Multica runtime profile is installed.
+	// A bare dsh binary is not enough: without the bundle it has no --stdio
+	// protocol and every task would fail after being advertised as healthy.
+	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok && probeDshMulticaProfile(e.Path) {
+		agents["dsh"] = e
+	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
 	}
@@ -249,5 +258,33 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
+	// MiniMax Code (`mcode`) exposes an ACP v1 server through `mcode acp`.
+	// Model selection is owned by the MCode runtime, so there is no model env.
+	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
+		agents["mcode"] = e
+	}
 	return agents
+}
+
+func probeDshMulticaProfile(executablePath string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, executablePath, "--profile", "multica", "--probe")
+	cmd.WaitDelay = time.Second
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		var frame struct {
+			Version         int    `json:"v"`
+			Type            string `json:"type"`
+			Runtime         string `json:"runtime"`
+			ProtocolVersion int    `json:"protocol_version"`
+		}
+		if json.Unmarshal([]byte(line), &frame) == nil && frame.Version == 1 && frame.Type == "probe" && frame.Runtime == "dsh" && frame.ProtocolVersion == 1 {
+			return true
+		}
+	}
+	return false
 }

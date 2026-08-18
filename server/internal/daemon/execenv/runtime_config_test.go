@@ -139,13 +139,19 @@ func TestBriefHasNoParentNotificationGuidance(t *testing.T) {
 	}
 }
 
-// Comment-triggered briefs must NOT carry any unconditional status-flip
-// command targeting the current issue. Previous revisions had a
-// dedicated protocol step that wrote `multica issue status <this-issue-id> in_review`;
-// the comment-triggered workflow rule "Do NOT change the issue status
-// unless the comment explicitly asks for it" must remain the source of
-// truth (Elon's blocking review on PR #2918).
-func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
+// Reply mode owns the same status arc as Ownership mode, but only for turns
+// that carry work on this agent's own issue (MUL-6300). Two invariants from
+// the original prohibition (PR #205, reinforced by Elon's blocking review on
+// PR #2918) survive it and are pinned here:
+//
+//   - a purely conversational turn never writes status;
+//   - a turn on an issue not assigned to this agent never writes status
+//     (someone else's issue, or an unassigned one reached via @mention).
+//
+// The brief must also still carry no unconditional placeholder flip: a bare
+// `multica issue status <this-issue-id> in_review` command would fire on every
+// reply turn regardless of whether the turn delivered anything.
+func TestReplyModeStatusRuleIsScopedToOwnedWorkTurns(t *testing.T) {
 	t.Parallel()
 	ctx := TaskContextForEnv{
 		IssueID:          "55555555-6666-7777-8888-999999999999",
@@ -154,27 +160,38 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	out := buildMetaSkillContent("claude", ctx)
 
 	if strings.Contains(out, "`multica issue status <this-issue-id> in_review`") {
-		t.Errorf("comment-triggered brief must not contain a placeholder `<this-issue-id> in_review` flip — that conflicts with the comment-triggered \"do not change status unless asked\" rule")
+		t.Errorf("reply brief must not contain a placeholder `<this-issue-id> in_review` flip — the arc is conditional on the turn having delivered work")
 	}
 
-	const guardrail = "Do NOT change the issue status unless the comment explicitly asks for it"
-	if !strings.Contains(out, guardrail) {
-		t.Errorf("expected the comment-triggered workflow guardrail %q to be present", guardrail)
+	for _, want := range []string{
+		// The arc itself: both ends, and the ceiling that keeps `done` human.
+		"when this issue is assigned to you and this turn does substantive work on it",
+		"set `in_progress` when you start",
+		"delivered and awaiting acceptance = `in_review`; `done` stays human",
+		// Invariant 1: conversation does not move the board.
+		"Purely conversational turns (question, discussion, acknowledgement) never touch status",
+		// Invariant 2: no status writes on an issue not assigned to this agent —
+		// "not assigned to you" on purpose, so the unassigned @mention path is
+		// covered, not just issues owned by someone else.
+		"neither does any turn on an issue not assigned to you",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("reply-mode status rule missing %q\n---\n%s", want, out)
+		}
 	}
 
-	// For an ordinary agent the guardrail is absolute — the squad-leader
-	// carve-out below must not leak into this path.
+	// The squad-leader carve-out below must not leak into the ordinary path.
 	if strings.Contains(out, "Own the parent issue status") {
 		t.Errorf("ordinary-agent comment brief must not reference the squad status grant:\n%s", out)
 	}
 }
 
-// A squad leader on a comment-triggered turn gets the same guardrail plus a
-// named exception. Without it the guardrail and the Squad Operating Protocol's
-// "Own the parent issue status" responsibility contradict each other on the
-// @mention-dispatch shape, where the member's delivery comment never asks for
-// a status change and no child-done system comment exists to ask on its
-// behalf — so the parent would sit in in_progress forever.
+// A squad leader's authority over the parent's status is granted by the Squad
+// Operating Protocol, not by this brief: the server injects "Own the parent
+// issue status" only when the issue is assigned to THIS squad. The reply-mode
+// bullet therefore routes on that section by name, so the same text is correct
+// for an owning leader (dispatch, wait, then in_review) and for a guest leader
+// @squad-mentioned on someone else's issue (no status writes at all).
 func TestCommentTriggeredSquadLeaderDefersToStatusOwnershipGrant(t *testing.T) {
 	t.Parallel()
 	out := buildMetaSkillContent("claude", TaskContextForEnv{
@@ -184,21 +201,25 @@ func TestCommentTriggeredSquadLeaderDefersToStatusOwnershipGrant(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Do NOT change the issue status unless the comment explicitly asks for it",
 		`Squad Operating Protocol's "Own the parent issue status"`,
 		"only appears when this issue is assigned to your squad",
 		"without waiting to be asked",
-		"When it is absent, the rule above is absolute.",
+		// Dispatch is not delivery: without this the leader would close out
+		// the parent on the turn it hands work to members.
+		"Dispatching members is not completion.",
+		// No grant → no status writes, the guest-leader path (MUL-3724).
+		"When absent, this issue is not yours: never run `multica issue status` on it.",
+		"Purely conversational turns (question, discussion, acknowledgement) never touch status",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("squad-leader comment brief missing %q\n---\n%s", want, out)
 		}
 	}
 
-	// The unqualified sentence must be gone: its presence alongside the grant
-	// is the contradiction this branch exists to remove.
-	if strings.Contains(out, "explicitly asks for it\n") {
-		t.Errorf("squad-leader comment brief still ends the guardrail unqualified\n---\n%s", out)
+	// The leader must NOT inherit the ordinary agent's arc: it keys off
+	// assignment to the agent itself, which is never true for a squad parent.
+	if strings.Contains(out, "when this issue is assigned to you and this turn does substantive work on it") {
+		t.Errorf("squad-leader comment brief must not carry the ordinary-agent status arc\n---\n%s", out)
 	}
 }
 
@@ -362,15 +383,15 @@ func TestIssueWorkflowHonorsAgentIdentity(t *testing.T) {
 		"Agent Identity instructions have priority over the issue workflow below.",
 		"If a workflow step conflicts with Agent Identity, skip the conflicting action",
 		// One enumeration, in Instruction Precedence, covering every action
-		// type Agent Identity can forbid. This and workflow step 4 each used to
+		// type Agent Identity can forbid. This and workflow step 3 each used to
 		// carry their own list and the two disagreed (MUL-5442).
 		"Never treat this runtime workflow as permission to change issue status, investigate, implement, create issues, update issues, delegate, or otherwise act beyond your Agent Identity.",
 		// MUL-5442: the forbids-clause is stated once on the Ownership-mode
 		// header instead of once per status bullet.
 		"skip any status call below that your Agent Identity forbids",
-		"Before step 4, run `multica issue status <issue-id> in_progress`.",
+		"Before step 3, run `multica issue status <issue-id> in_progress`.",
 		"Complete the task within your Agent Identity boundaries",
-		// Step 4 keeps only what the enumeration cannot express: a
+		// Step 3 keeps only what the enumeration cannot express: a
 		// delegation-only role stops once the delegation is delivered.
 		"If your role is delegation-only, perform the allowed delegation work and stop once that outcome is delivered",
 		"When done, run `multica issue status <issue-id> in_review`.",
@@ -403,7 +424,7 @@ func TestSquadLeaderIssueWorkflowKeepsParentInProgress(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Before step 4, run `multica issue status <issue-id> in_progress`.",
+		"Before step 3, run `multica issue status <issue-id> in_progress`.",
 		"After this initial dispatch, leave the parent issue `in_progress`",
 		// The guest-leader contract test (handler side) bans any runnable
 		// in_review command shape from reaching a guest — the dispatch rule
@@ -940,6 +961,7 @@ func TestInjectRuntimeConfigPreservesUserContent(t *testing.T) {
 		{"cursor", "AGENTS.md"},
 		{"kimi", "AGENTS.md"},
 		{"reasonix", "AGENTS.md"},
+		{"dsh", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1316,6 +1338,7 @@ func TestCleanupRuntimeConfigByProvider(t *testing.T) {
 		{"cursor", "AGENTS.md"},
 		{"kimi", "AGENTS.md"},
 		{"reasonix", "AGENTS.md"},
+		{"dsh", "AGENTS.md"},
 		{"kiro", "AGENTS.md"},
 		{"antigravity", "AGENTS.md"},
 		{"qwen", "QWEN.md"},
@@ -1972,5 +1995,65 @@ func TestBriefSkillsListIsNamesOnly(t *testing.T) {
 				t.Errorf("brief lost the native-discovery framing:\n%s", out)
 			}
 		})
+	}
+}
+
+// Every brief that teaches `--output json` also says not to merge stderr into
+// it, because the two facts are only useful together. The CLI is right:
+// confirmations go to stderr, JSON goes to stdout, and `--output json | jq` has
+// always worked. It stays right only while the caller keeps the streams apart,
+// and `2>&1` is ordinary shell habit. The cost of merging them is not a cosmetic
+// parse error: a confirmation line inside the JSON makes the parse fail, so a
+// write that SUCCEEDED reads as one that failed, and the retry posts the comment
+// or sends the file a second time.
+//
+// The assertions are on the rule's wording, not on loose substrings, because
+// `2>&1` and "look like it failed" both survive a brief that says to merge the
+// streams. Each builder must carry the prohibition verbatim, exactly once, with
+// the consequence attached.
+//
+// Both brief builders are checked, not one. The quick-create brief is a
+// separate function with its own copy of the `--output json` line, so guidance
+// added to the full brief alone would be missing from exactly the runs that are
+// given the least context to work it out for themselves.
+func TestEveryBriefThatTeachesJSONOutputAlsoWarnsAgainstMergingStderr(t *testing.T) {
+	t.Parallel()
+	const (
+		wantFlag = "--output json"
+		// The premise the rule rests on. "Do not merge them" says nothing about
+		// WHICH stream carries what, so a brief that swapped the two would pass
+		// every other assertion here while telling an agent the opposite of the
+		// truth — the same defect one clause to the left.
+		wantPremise = "writes JSON to stdout; confirmations and warnings go to stderr"
+		// The prohibition itself, not just the operator it names: "Always merge
+		// them (`2>&1`)" contains `2>&1` and would pass a bare-operator check.
+		wantRule = "Do not merge them (`2>&1`)"
+		// The consequence, in the direction that makes the rule worth obeying;
+		// the inverse claim ("failed write looks like it succeeded") is a
+		// different bug and must not satisfy this.
+		wantWhy = "a write that SUCCEEDED look like it failed"
+	)
+	briefs := map[string]string{
+		"full":         buildMetaSkillContent("claude", TaskContextForEnv{IssueID: "11111111-2222-3333-4444-555555555555"}),
+		"quick-create": buildMetaSkillContent("claude", TaskContextForEnv{QuickCreatePrompt: "make an issue"}),
+	}
+	for name, brief := range briefs {
+		if !strings.Contains(brief, wantFlag) {
+			t.Fatalf("%s brief does not mention %s at all; this test's premise is gone", name, wantFlag)
+		}
+		if !strings.Contains(brief, wantPremise) {
+			t.Errorf("%s brief teaches %s without saying %q — the rule below it is only correct while the streams carry what this says they carry", name, wantFlag, wantPremise)
+		}
+		switch got := strings.Count(brief, wantRule); got {
+		case 1:
+		case 0:
+			t.Errorf("%s brief teaches %s without saying %q — the habit it has to displace is the one thing an agent will not infer", name, wantFlag, wantRule)
+			continue // the reason check below would report a rule that is not there
+		default:
+			t.Errorf("%s brief repeats %q %d times; one rule, one place, or the next edit fixes only one of them", name, wantRule, got)
+		}
+		if !strings.Contains(brief, wantWhy) {
+			t.Errorf("%s brief states %q without %q; a rule with no reason is the first one dropped under pressure", name, wantRule, wantWhy)
+		}
 	}
 }

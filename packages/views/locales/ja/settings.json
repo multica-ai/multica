@@ -1,4 +1,54 @@
 {
+  "issue_statuses": {
+    "title": "イシューステータス",
+    "description": "組み込みの 7 つのステータスに加えて独自のステータスを追加できます。各ステータスはカテゴリに属し、カテゴリが挙動を決めます。",
+    "loading": "ステータスを読み込み中…",
+    "add": "ステータスを追加",
+    "show_archived": "アーカイブ済みを表示（{{count}}）",
+    "archived_badge": "アーカイブ済み",
+    "archived_hint": "新規の割り当てには使えません。すでにこのステータスのイシューはそのままです。",
+    "built_in_locked": "組み込みステータス。名前・色・カテゴリは変更できません。",
+    "flag_off": "このデプロイではカスタムステータスがまだ有効化されていません。下の組み込みステータスは通常どおり使えます。",
+    "reorder_failed": "並び順を保存できませんでした。",
+    "actions": {
+      "open": "{{name}} の操作",
+      "edit": "編集",
+      "archive": "アーカイブ",
+      "reorder": "{{name}} を並べ替え"
+    },
+    "editor": {
+      "create_title": "新しいステータス",
+      "edit_title": "ステータスを編集",
+      "behavior_hint": "このステータスは「{{category}}」とまったく同じ挙動になります。",
+      "name": "名前",
+      "name_placeholder": "例: Code Review",
+      "category": "カテゴリ",
+      "category_locked": "カテゴリは変更できません。すでにこのステータスのイシューが依存しています。",
+      "description": "説明",
+      "description_placeholder": "チームにとってこのステータスが意味すること",
+      "color": "色",
+      "cancel": "キャンセル",
+      "save": "保存",
+      "saving": "保存中…",
+      "save_failed": "ステータスを保存できませんでした。"
+    },
+    "archive_dialog": {
+      "title": "このステータスをアーカイブしますか？",
+      "description": "「{{name}}」は新しいイシューに割り当てられなくなります。すでにこのステータスのイシューはそのまま残り、挙動も変わりません。",
+      "cancel": "キャンセル",
+      "confirm": "アーカイブ",
+      "failed": "アーカイブできませんでした。"
+    },
+    "categories": {
+      "backlog": "保留。ここに移動してもエージェントは起動しません。",
+      "todo": "待機中。ここに移動すると担当エージェントが起動します。",
+      "in_progress": "作業中。",
+      "in_review": "納品済み、レビュー待ち。オートパイロットの実行を完了します。",
+      "done": "完了。",
+      "blocked": "外部依存でブロック中。",
+      "cancelled": "見送り。"
+    }
+  },
   "quick_actions": {
     "title": "クイックアクション",
     "description": "実行するエージェントとプロンプトを事前に設定し、任意のタスクのサイドバーからワンクリックで実行します。",
@@ -115,6 +165,7 @@
       "toggleChat": { "label": "チャットウィンドウを切り替え", "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。" },
       "findInIssue": { "label": "タスク内を検索", "description": "開いているタスクの詳細を検索します。" },
       "openThreadNav": { "label": "スレッドナビゲーターを開く", "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。" },
+      "archiveInboxItem": { "label": "通知をアーカイブ", "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。" },
       "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。" },
       "goBack": { "label": "戻る", "description": "ブラウザーのように履歴を戻ります。" },
       "goForward": { "label": "進む", "description": "ブラウザーのように履歴を進みます。" },
@@ -134,6 +185,7 @@
     "fixed": {
       "title": "固定のシステムショートカット",
       "description": "ウィンドウとアクセシビリティのショートカットは信頼性のため固定されています。ズームとタブ操作はデスクトップアプリに適用されます。",
+      "open_settings": "設定を開く",
       "close_tab": "アクティブなタブを閉じる",
       "zoom_in": "拡大",
       "zoom_out": "縮小",
@@ -162,6 +214,28 @@
       "start_date": "開始日"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "このワークスペースの MCP サーバーライブラリ。ここに追加してもどのエージェントにも割り当てられません。エージェントの所有者が各エージェントの MCP タブで割り当て、エージェントごとにオン/オフを切り替えます。",
+    "servers_title": "共有サーバー",
+    "write_only_note": "保存された設定は書き込み専用です — url、コマンド、ヘッダー、環境変数は二度と表示されないため、サーバーの編集は設定の置き換えになります。名前の変更は安全です。割り当ては維持されます。",
+    "add_server": "サーバーを追加",
+    "edit_server": "サーバーを編集",
+    "remove_server": "サーバーを削除",
+    "empty_title": "共有 MCP サーバーはありません",
+    "empty_description": "まずここにサーバーを追加し、使用するエージェントの MCP タブから割り当ててください。",
+    "disabled_badge": "無効",
+    "admin_only_note": "共有 MCP サーバーを変更できるのはワークスペースの owner と admin のみです。",
+    "delete_title": "共有サーバーを削除しますか？",
+    "delete_description": "{{name}} はライブラリからも、割り当てられている全エージェントからも削除され、各エージェントの次のタスクから反映されます。",
+    "delete_confirm": "削除",
+    "cancel": "キャンセル",
+    "added_toast": "共有 MCP サーバーを追加しました",
+    "updated_toast": "共有 MCP サーバーを更新しました",
+    "removed_toast": "共有 MCP サーバーを削除しました",
+    "save_failed_toast": "共有 MCP サーバーを保存できませんでした",
+    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした"
+  },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
@@ -181,8 +255,75 @@
       "labs": "ラボ",
       "members": "メンバー",
       "labels": "ラベル",
+      "issue_statuses": "ステータス",
       "properties": "プロパティ",
-      "quick_actions": "クイックアクション"
+      "quick_actions": "クイックアクション",
+    "plugins": "Plugins",
+    "mcp": "MCP",
+    "billing": "請求とプラン"
+    }
+  },
+  "plugins": {
+    "title": "Plugins",
+    "description": "URL から Plugin をインストールし、各 Plugin が何にアクセスできるかを確認します。",
+    "loading": "Plugins を読み込み中",
+    "load_failed": "Plugins を読み込めませんでした",
+    "load_failed_description": "再試行してください。インストール済みの Plugin には影響しません。",
+    "read_only": "読み取り専用",
+    "read_only_description": "ワークスペースの owner と admin が Plugin をインストール、設定、削除できます。",
+    "empty": "インストール済みの Plugin はありません。",
+    "action_failed": "Plugin 操作に失敗しました",
+    "enabled": "Plugin を有効にしました",
+    "disabled": "Plugin を無効にしました",
+    "enabled_label": "Plugin を有効化",
+    "uninstall": "アンインストール",
+    "uninstalled": "Plugin をアンインストールし、保存データとシークレットも削除しました",
+    "granted_scopes": "許可したアクセス",
+    "contributes": "提供する機能",
+    "version": "v{{version}}",
+    "byline": "{{author}} · v{{version}}",
+    "source": "ソース",
+    "states": {
+      "disabled": "無効"
+    },
+    "install": {
+      "title": "Plugin をインストール",
+      "description": "Plugin manifest の URL を貼り付けてください。インストール前に要求される権限を確認できます。",
+      "placeholder": "https://example.com/multica.plugin.json",
+      "review": "権限を確認"
+    },
+    "installed": {
+      "title": "インストール済み"
+    },
+    "consent": {
+      "title": "この Plugin は次のアクセスを要求しています",
+      "description": "Multica はサーバー上で Plugin のコードを実行しません。Plugin はこれらの権限の範囲内でのみ動作し、利用者本人の権限を超えることはありません。",
+      "cancel": "キャンセル",
+      "confirm": "許可してインストール",
+      "confirm_upgrade": "許可してアップグレード",
+      "installed": "Plugin をインストールしました",
+      "upgrade_from": " · v{{version}} からアップグレード",
+      "new_scope": "新規"
+    },
+    "config": {
+      "title": "設定",
+      "save": "保存",
+      "saved": "設定を保存しました",
+      "secret_set": "保存済み — 新しい値を入力すると置き換わります"
+    },
+    "scopes": {
+      "issues_read": "issue を読み取る",
+      "issues_write": "issue を作成・編集する",
+      "comments_read": "コメントを読み取る",
+      "comments_write": "コメントを投稿する",
+      "tasks_read": "agent task を読み取る",
+      "tasks_write": "agent task を開始・更新する",
+      "agents_read": "agent 一覧を読み取る",
+      "members_read": "メンバー一覧を読み取る",
+      "storage_user": "メンバーごとにデータを保存する",
+      "storage_workspace": "ワークスペース共有のデータを保存する",
+      "net": "{{domain}} にデータを送信する",
+      "unknown": "認識できない権限です — インストールしないでください"
     }
   },
   "properties": {
@@ -213,7 +354,9 @@
       "multi_select": "複数選択",
       "date": "日付",
       "checkbox": "チェックボックス",
-      "url": "URL"
+      "url": "URL",
+      "actor": "メンバー",
+      "multi_actor": "メンバー（複数選択）"
     },
     "actions": {
       "open": "{{name}} の操作",
@@ -688,7 +831,24 @@
   },
   "dingtalk": {
     "section_title": "DingTalk",
-    "page_description": "各 Multica エージェントを専用の DingTalk ロボットに接続します。メンバーはボットに DM したり、グループで @メンションしたり、/issue と入力して新しい Multica イシューを起こすことができます。",
+    "page_description": "DingTalk ロボットを Multica に接続します。DM はデフォルトのエージェントを使用し、同じロボットでもグループごとに別のエージェントへルーティングできます。",
+    "group_routes_title": "グループルーティング",
+    "group_routes_description": "同じロボットを複数の DingTalk グループに追加し、各グループで一度 @メンションしてください。Multica がグループを自動検出し、以後のメッセージをここで選んだエージェントに送ります。",
+    "group_routes_empty_title": "まだグループが検出されていません",
+    "group_routes_empty_description": "接続済みロボットを DingTalk グループに追加し、一度 @メンションしてください。グループが自動的にここへ表示されます。",
+    "group_routes_error_title": "グループルートを読み込めませんでした",
+    "group_routes_error_description": "自動更新を一時停止しました。サーバーを確認して再試行してください。",
+    "group_routes_retry": "再試行",
+    "group_routes_agents_loading": "グループルーティング用のエージェントを読み込み中…",
+    "group_routes_agents_empty_title": "利用可能なエージェントがありません",
+    "group_routes_agents_empty_description": "DingTalk グループを再割り当てする前に、エージェントを作成または復元してください。",
+    "group_routes_agents_error_title": "エージェントを読み込めませんでした",
+    "group_routes_agents_error_description": "エージェント一覧が読み込まれるまで、グループの再割り当ては利用できません。",
+    "group_routes_agents_retry": "エージェントを再読み込み",
+    "group_routes_agent_label": "このグループのエージェント",
+    "group_routes_unknown_agent": "不明なエージェント",
+    "group_routes_updated": "グループのエージェントを更新しました",
+    "group_routes_update_failed": "グループのエージェントを更新できませんでした",
     "not_enabled_title": "DingTalk 連携が有効になっていません",
     "not_enabled_description_prefix": "サーバーで",
     "not_enabled_description_suffix": "を設定すると DingTalk ロボットのインストールが有効になります。",
@@ -875,6 +1035,26 @@
         "label": "メンバー",
         "description": "タスクの作成と作業"
       }
-    }
+    },
+    "share_links_title": "共有リンク",
+    "role_field": "ロール：",
+    "expiry_field": "有効期限：",
+    "share_links_create_title": "共有リンクを作成",
+    "share_links_create_button": "生成",
+    "share_links_creating": "生成中...",
+    "share_link_uses": "{{used}} / {{max}} 回使用",
+    "share_link_expires": "有効期限 {{date}}",
+    "share_link_copy_tooltip": "リンクをコピー",
+    "share_link_revoke_tooltip": "リンクを取り消す",
+    "toast_share_link_created": "共有リンクを作成しました",
+    "toast_share_link_failed": "共有リンクの作成に失敗しました",
+    "toast_share_link_revoked": "共有リンクを取り消しました",
+    "toast_share_link_revoke_failed": "共有リンクの取り消しに失敗しました",
+    "toast_share_link_copied": "リンクをコピーしました",
+    "toast_share_link_copy_failed": "リンクのコピーに失敗しました",
+    "expiry_24h": "24時間",
+    "expiry_7d": "7日",
+    "expiry_30d": "30日",
+    "expiry_never": "無期限"
   }
 }

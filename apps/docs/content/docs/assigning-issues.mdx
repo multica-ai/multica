@@ -71,10 +71,14 @@ Changing the assignee, unassigning, or changing the issue status doesn't stop a 
 
 ```bash
 multica issue assign MUL-42 --to "Agent name"
+multica issue assign MUL-42 --to-id <agent-uuid> --no-start
+multica issue status MUL-42 in_progress --no-start
 multica issue assign MUL-42 --unassign
 ```
 
 In scripts, use `--to-id <uuid>` to avoid matching the wrong object with the same name. Look up UUIDs with `multica agent list --output json` or `multica workspace member list --output json`.
+
+Use `--no-start` when the assignment should record ownership without creating a new task — for example, when the same agent is already handling the issue from another run. The same flag is available on `issue update` and `issue status`. If an ownership-only flow changes both assignment and status, pass it to both commands; suppressing the assignment does not suppress a later status-triggered run.
 
 ## Next steps
 

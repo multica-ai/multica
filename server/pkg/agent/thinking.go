@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -24,15 +23,19 @@ import (
 
 // ── Cache ────────────────────────────────────────────────────────────
 //
-// Discovery is keyed on (provider, executablePath, cliVersion). Bumping
+// Discovery is keyed on (provider, command, cliVersion). Bumping
 // the local CLI invalidates entries that referenced the older version's
 // help/`debug models` output, which is exactly the failure mode we hit
 // when Anthropic / OpenAI add or remove a level (Elon's review note).
+//
+// command is Command.cacheKey(), not a bare path: two custom runtime
+// profiles can wrap one binary behind different launch prefixes and get
+// different answers out of it.
 
 type thinkingCacheKey struct {
-	provider       string
-	executablePath string
-	cliVersion     string
+	provider   string
+	command    string
+	cliVersion string
 }
 
 type thinkingCacheEntry struct {
@@ -131,8 +134,8 @@ var claudeStaticEffortFullSuperset = []string{"low", "medium", "high", "xhigh", 
 // through claudeModelEffortAllow. Errors are silently absorbed so a
 // missing CLI doesn't break model listing — the UI just hides the
 // picker for that model.
-func annotateClaudeThinking(ctx context.Context, models []Model, executablePath string) {
-	mapping := loadClaudeThinkingByModel(ctx, executablePath)
+func annotateClaudeThinking(ctx context.Context, models []Model, cmd Command) {
+	mapping := loadClaudeThinkingByModel(ctx, cmd)
 	for i := range models {
 		if t, ok := mapping[models[i].ID]; ok && t != nil {
 			models[i].Thinking = t
@@ -140,17 +143,17 @@ func annotateClaudeThinking(ctx context.Context, models []Model, executablePath 
 	}
 }
 
-func loadClaudeThinkingByModel(ctx context.Context, executablePath string) map[string]*ModelThinking {
-	if executablePath == "" {
-		executablePath = "claude"
+func loadClaudeThinkingByModel(ctx context.Context, cmd Command) map[string]*ModelThinking {
+	if cmd.Path == "" {
+		cmd.Path = "claude"
 	}
-	version, _ := DetectVersion(ctx, executablePath)
-	key := thinkingCacheKey{provider: "claude", executablePath: executablePath, cliVersion: version}
+	version, _ := DetectVersion(ctx, cmd)
+	key := thinkingCacheKey{provider: "claude", command: cmd.cacheKey(), cliVersion: version}
 	if cached, ok := thinkingCacheGet(key); ok {
 		return cached
 	}
 
-	superset := claudeEffortSuperset(ctx, executablePath)
+	superset := claudeEffortSuperset(ctx, cmd)
 	result := map[string]*ModelThinking{}
 	for _, m := range claudeStaticModels() {
 		allow := claudeModelEffortAllow[m.ID]
@@ -171,8 +174,8 @@ func loadClaudeThinkingByModel(ctx context.Context, executablePath string) map[s
 // the help output can't be captured at all it returns the static
 // fallback rather than nothing so callers can still render a usable
 // picker.
-func claudeEffortSuperset(ctx context.Context, executablePath string) []string {
-	cmd := exec.CommandContext(ctx, executablePath, "--help")
+func claudeEffortSuperset(ctx context.Context, runtimeCmd Command) []string {
+	cmd := runtimeCmd.exec(ctx, "--help")
 	hideAgentWindow(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -312,16 +315,16 @@ type codexDebugServiceTier struct {
 // catalog, including reasoning metadata. Version detection happens before the
 // debug command so old binaries do not log a predictable "unknown command"
 // failure on every cache refresh.
-func discoverCodexModels(ctx context.Context, executablePath string) []Model {
-	if executablePath == "" {
-		executablePath = "codex"
+func discoverCodexModels(ctx context.Context, cmd Command) []Model {
+	if cmd.Path == "" {
+		cmd.Path = "codex"
 	}
-	version, err := DetectVersion(ctx, executablePath)
+	version, err := DetectVersion(ctx, cmd)
 	if err != nil || !codexSupportsDebugModels(version) {
 		return codexStaticModels()
 	}
 
-	raw, err := runCodexDebugModels(ctx, executablePath)
+	raw, err := runCodexDebugModels(ctx, cmd)
 	if err != nil {
 		return codexStaticModels()
 	}
@@ -352,8 +355,8 @@ func codexSupportsDebugModels(version string) bool {
 // in thinking_test.go.
 var codexDebugModelsArgs = []string{"debug", "models", "--bundled"}
 
-func runCodexDebugModels(ctx context.Context, executablePath string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, executablePath, codexDebugModelsArgs...)
+func runCodexDebugModels(ctx context.Context, runtimeCmd Command) ([]byte, error) {
+	cmd := runtimeCmd.exec(ctx, codexDebugModelsArgs...)
 	hideAgentWindow(cmd)
 	return cmd.Output()
 }
@@ -616,7 +619,7 @@ func parseACPCodebuddyEffort(raw json.RawMessage) (levels []string, defaultLevel
 // map. The function is intentionally pure of HTTP concerns so the
 // daemon's pre-execution guard and the server's UpdateAgent gate can
 // share the same source of truth.
-func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, model, value string) (bool, error) {
+func ValidateThinkingLevel(ctx context.Context, providerType string, cmd Command, model, value string) (bool, error) {
 	if value == "" {
 		return true, nil
 	}
@@ -627,7 +630,7 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 	if model == "" && providerType == "codex" {
 		return false, nil
 	}
-	catalog, err := ListModels(ctx, providerType, executablePath)
+	catalog, err := ListModels(ctx, providerType, cmd)
 	if err != nil {
 		return false, err
 	}
@@ -672,14 +675,14 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 // Codex catalog for the explicit model. An empty value is always valid and
 // means "inherit runtime configuration". An empty Codex model fails closed:
 // its effective model comes from config.toml and may not support the tier.
-func ValidateServiceTier(ctx context.Context, providerType, executablePath, model, value string) (bool, error) {
+func ValidateServiceTier(ctx context.Context, providerType string, cmd Command, model, value string) (bool, error) {
 	if value == "" {
 		return true, nil
 	}
 	if providerType != "codex" || model == "" {
 		return false, nil
 	}
-	catalog, err := ListModels(ctx, providerType, executablePath)
+	catalog, err := ListModels(ctx, providerType, cmd)
 	if err != nil {
 		return false, err
 	}
@@ -769,6 +772,7 @@ var providerThinkingEnums = map[string]map[string]bool{
 // per-model check decide before execution.
 var thinkingDynamicCatalogProviders = map[string]bool{
 	"codex":    true,
+	"dsh":      true,
 	"opencode": true,
 	"kimi":     true,
 }
@@ -801,6 +805,26 @@ var acpCatalogThinkingProviders = map[string]bool{
 	// config surface. Its catalog is per model — see
 	// annotateACPThinkingForSessionModel.
 	"reasonix": true,
+	// hermes covers two unrelated binaries, and membership here is safe only
+	// because the catalog decides per session which one answered:
+	//
+	//   - jcode advertises option id `reasoning_effort` (category
+	//     `thought_level`) and genuinely applies it — set_config_option waits
+	//     for an `effort_changed` ack, and the provider request carries
+	//     `reasoning.effort` upstream. Confirmed against jcode v0.71.1 and
+	//     v0.73.0 (GitHub #6720). Its catalog is per model too: jcode
+	//     revalidates the effort against the new model's advertised list on a
+	//     model switch.
+	//   - Hermes Agent advertises no configOptions at all, so it gets an empty
+	//     catalog, no picker, and no set_config_option call. Re-verified
+	//     against v0.20.0 on 2026-08-11: session/new still returns only
+	//     `_meta`, `models`, `modes`, `sessionId` — unchanged from the v0.18.2
+	//     finding in MUL-5770.
+	//
+	// That split is why this feature is catalog-driven rather than gated on a
+	// version string: one provider, two binaries, and the session answers the
+	// capability question directly.
+	"hermes": true,
 }
 
 // usesDynamicThinkingCatalog reports whether a provider's effort vocabulary is
@@ -809,30 +833,35 @@ func usesDynamicThinkingCatalog(providerType string) bool {
 	return thinkingDynamicCatalogProviders[providerType] || acpCatalogThinkingProviders[providerType]
 }
 
+// UsesACPCatalogThinking reports whether a provider's effort support is decided
+// per session by what its ACP handshake advertises, rather than by the provider
+// name alone.
+//
+// Callers that can reach a discovered catalog should use it to answer the
+// capability question for a specific runtime: `hermes` covers both jcode (which
+// advertises and applies an effort) and Hermes Agent (which advertises none), so
+// the provider name is not a sufficient answer for either. See
+// acpCatalogThinkingProviders.
+func UsesACPCatalogThinking(providerType string) bool {
+	return acpCatalogThinkingProviders[providerType]
+}
+
 // ThinkingControlSupported reports whether Multica can deliver a per-agent
 // reasoning effort to this runtime at all. False means the answer to any
 // thinking_level is "no", regardless of the token: the runtime exposes no
 // effort dial on the surface the daemon speaks to it over, so there is nothing
 // to inject and nothing a different spelling would fix.
 //
-// Hermes is the instructive case (MUL-5770). The Hermes CLI does support
-// reasoning effort — `agent.reasoning_effort` in `<HERMES_HOME>/config.yaml`,
-// checked against its own `minimal|low|medium|high|xhigh|max|ultra` set — but
-// Multica drives Hermes over ACP (`hermes acp`), and its ACP adapter does not
-// carry that setting onto the session:
-//   - `session/new` advertises `models` and `modes` only, no `configOptions`,
-//     so there is no effort catalog to discover;
-//   - `session/set_config_option` records the value on the session and never
-//     applies it;
-//   - `acp_adapter/session.py::_make_agent` constructs the agent without
-//     `reasoning_config`, so every ACP session runs at the transport default.
+// Copilot is the instructive case. It speaks ACP for model discovery but
+// executes through its own CLI surface (`--acp` is blocked in copilot.go), so
+// there is no live ACP session to carry an effort onto — a picker there would
+// be inert no matter what discovery advertised.
 //
-// Verified against Hermes Agent v0.18.2. Because the config file is read by
-// the CLI/gateway paths but not the ACP one, writing an effort into a per-task
-// HERMES_HOME would be just as inert as accepting the value here — which is
-// why this is a capability gap to report, not a value to pass through. Revisit
-// when Hermes' ACP surface exposes reasoning; the picker then follows from the
-// discovered catalog like every other runtime's.
+// True at provider granularity only. The `hermes` provider covers two
+// unrelated binaries whose answers differ — jcode applies an advertised
+// effort, Hermes Agent has no effort surface on ACP at all — so it reports
+// true here and the per-session catalog decides whether a picker actually
+// appears. See acpCatalogThinkingProviders for the evidence on each.
 func ThinkingControlSupported(providerType string) bool {
 	if usesDynamicThinkingCatalog(providerType) {
 		return true

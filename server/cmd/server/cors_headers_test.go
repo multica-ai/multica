@@ -23,6 +23,15 @@ func TestCORSAllowedHeaders_IncludeClientCapabilities(t *testing.T) {
 	}
 }
 
+// Workspace subscription checkout and portal requests use Idempotency-Key to
+// make retries safe. Browsers preflight that custom request header, so omitting
+// it from AllowedHeaders prevents the billing request from reaching the server.
+func TestCORSAllowedHeaders_IncludeIdempotencyKey(t *testing.T) {
+	if !slices.Contains(corsAllowedHeaders, "Idempotency-Key") {
+		t.Fatalf("Idempotency-Key missing from CORS allowed headers: %v", corsAllowedHeaders)
+	}
+}
+
 // Timeline and comment-list endpoints report defensive hard-cap clamps with
 // custom response headers.
 // Custom response headers are not readable from browser JS unless the server

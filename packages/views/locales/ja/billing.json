@@ -66,10 +66,133 @@
     "row_meta": "{{date}} · stripe: {{checkout}}",
     "stripe_empty": "—"
   },
+  "workspace": {
+    "title": "請求とプラン",
+    "description": "このワークスペースのプラン、上限、ユーザー席、Stripe 請求を管理します。",
+    "loading": "ワークスペースの請求情報を読み込み中",
+    "plan": {
+      "free": "Free",
+      "pro": "Pro",
+      "unknown": "不明なプラン"
+    },
+    "status": {
+      "inactive": "未契約",
+      "active": "有効",
+      "trialing": "トライアル中",
+      "past_due": "支払い遅延",
+      "canceled": "キャンセル済み",
+      "unknown": "不明なステータス"
+    },
+    "load_failed": {
+      "title": "請求サービスは一時的に利用できません",
+      "description": "信頼できるサブスクリプション情報を取得できませんでした。プランは変更されていません。"
+    },
+    "actions": {
+      "retry": "再試行",
+      "upgrade": "Pro にアップグレード",
+      "manage": "請求を管理",
+      "refresh_seats": "席数を更新",
+      "cancel": "キャンセル",
+      "continue_to_stripe": "Stripe に進む"
+    },
+    "errors": {
+      "action_title": "請求操作に失敗しました",
+      "temporarily_unavailable": "請求サービスは一時的に利用できません。しばらくしてから再試行してください。",
+      "permission_changed": "現在のワークスペース権限ではこの操作を実行できません。ページを更新して権限を確認してください。",
+      "checkout_response": "サーバー応答を読み取れないため Checkout を開けませんでした。選択した期間を変えずに再試行してください。",
+      "already_subscribed": "このワークスペースにはすでにサブスクリプションがあります。現在のプランを更新しました。",
+      "checkout_failed": "Checkout を作成できませんでした。しばらくしてから再試行してください。",
+      "portal_response": "サーバー応答を読み取れないため Billing Portal を開けませんでした。",
+      "portal_unavailable": "このワークスペースでは Billing Portal を利用できません。現在のプランを更新しました。",
+      "portal_failed": "Billing Portal を開けませんでした。しばらくしてから再試行してください。",
+      "reconcile_response": "席数は更新されましたが、結果を読み取れませんでした。ページを再読み込みして確認してください。",
+      "reconcile_failed": "席数を更新できませんでした。メンバー変更は保存済みで、定期照合は引き続き再試行されます。"
+    },
+    "return": {
+      "cancel_title": "Checkout をキャンセルしました",
+      "cancel_description": "プランは変更されていません。",
+      "portal_title": "請求情報を更新しました",
+      "portal_description": "最新のサブスクリプション情報を下に表示しています。",
+      "syncing_title": "サブスクリプションを有効化しています",
+      "syncing_description": "支払いが完了しました。Stripe によるプラン変更の確認を待っています。",
+      "timeout_description": "支払いは受領済みですが、サブスクリプションは同期中です。しばらくしてからページを更新してください。",
+      "active_title": "Pro が有効になりました",
+      "active_description": "このワークスペースで Pro を利用できます。"
+    },
+    "past_due": {
+      "title": "お支払い方法の確認が必要です",
+      "description": "Pro を継続するには Billing Portal でお支払い方法を更新してください。"
+    },
+    "read_only": {
+      "title": "請求情報の閲覧のみ",
+      "description": "ワークスペースのプランと上限を確認できます。サブスクリプションの購入と管理は owner と admin のみ実行できます。"
+    },
+    "current": {
+      "title": "現在のプラン",
+      "plan": "ワークスペースプラン",
+      "plan_description": "このワークスペースに現在適用されている entitlement です。",
+      "members": "ユーザー席",
+      "members_description": "エージェントと保留中の招待は席数に含まれません。",
+      "member_count_other": "{{count}}名",
+      "period_end": "現在の期間終了日",
+      "period_end_description": "現在のサブスクリプション情報で報告された日付です。"
+    },
+    "upgrade": {
+      "title": "Pro にアップグレード",
+      "description": "請求期間を選び、Stripe Checkout で現在の席数と最終金額を確認します。",
+      "interval_label": "請求期間",
+      "monthly": "月払い",
+      "yearly": "年払い",
+      "pro_for_team_other": "{{count}}席で Pro を利用",
+      "price_loading": "サブスクリプション価格を読み込んでいます",
+      "unit_price": "1席あたり {{price}}",
+      "estimated_monthly_total": "月払いの見積合計：{{price}}",
+      "estimated_yearly_total": "年払いの見積合計：{{price}}",
+      "price_at_checkout": "購入前にサーバーがユーザーメンバーを再集計します。お支払い前に Stripe Checkout で正式な席単価と合計金額を確認できます。"
+    },
+    "management": {
+      "title": "サブスクリプション管理",
+      "description": "お支払い方法、請求書、キャンセルは Stripe で安全に管理されます。",
+      "portal": "Stripe Billing Portal",
+      "portal_description": "Stripe でこのワークスペースのサブスクリプションを管理します。",
+      "portal_unavailable": "このワークスペースで利用できる Stripe Billing Portal はありません。"
+    },
+    "limits": {
+      "title": "使用量と上限",
+      "description": "サーバーがまだ提供していない使用済み件数を 0 とせず、現在の上限のみ表示します。",
+      "issues": "最近のタスク",
+      "issues_description": "Free では最近アクティブなタスクを利用できます。Pro には件数制限がありません。",
+      "autopilots": "成功した自動化",
+      "autopilots_description": "Free の上限は UTC の暦月ごとにリセットされます。Pro は無制限です。",
+      "unlimited": "無制限",
+      "per_month": "月 {{count}} 回"
+    },
+    "seats": {
+      "title": "席数",
+      "description": "現在のユーザーメンバーはそれぞれ Pro の 1 席として数えられます。エージェントと保留中の招待は含まれません。",
+      "human_members": "現在のユーザーメンバー",
+      "human_members_description": "メンバー変更後に更新すると、Cloud Billing が Stripe の quantity を照合します。",
+      "updated": "席数を更新しました",
+      "reconciled": "現在のメンバー: {{actual}} · 請求席数: {{billed}}"
+    },
+    "confirm": {
+      "title": "Stripe Checkout に進みますか？",
+      "description": "請求期間: {{interval}}。現在のユーザーメンバー: {{count}}。Stripe が席数を再集計し、お支払い前に最終金額を表示します。"
+    }
+  },
   "shared": {
     "request_failed": "リクエストに失敗しました",
     "refresh": "更新",
     "paging": "{{page}} / {{totalPages}} ページ · 合計 {{total}}件",
     "date_dash": "—"
+  },
+  "return_page": {
+    "redirecting": "ワークスペースの請求ページに戻ります…",
+    "load_failed_title": "ワークスペースの請求ページを開けませんでした",
+    "load_failed_description": "Stripe から戻りましたが、ワークスペース一覧を読み込めず該当の請求ページを開けませんでした。「ワークスペース設定 → 請求」で現在の状態を確認してください。",
+    "workspace_missing_title": "ワークスペースが見つかりません",
+    "workspace_missing_description": "Stripe から戻りましたが、このワークスペースは利用できません。削除されたか、アクセス権が変更された可能性があります。対象のワークスペースの請求ページで現在の状態を確認してください。",
+    "retry": "再試行",
+    "go_to_app": "Multica を開く"
   }
 }
