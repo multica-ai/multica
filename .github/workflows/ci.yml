@@ -34,24 +34,28 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
-          # apps/docs is excluded from the frontend turbo run, so a
-          # docs-only change does not need this job. apps/mobile has its
-          # own mobile-verify workflow. Everything else the frontend job
-          # touches is listed here; bias toward over-matching since a
-          # missed path silently skips validation.
+          # apps/docs is excluded from the frontend turbo run, but knip does
+          # analyze it, so a docs-only change still needs this job.
+          # apps/mobile has its own mobile-verify workflow. Everything else
+          # the frontend job touches is listed here; bias toward
+          # over-matching since a missed path silently skips validation.
           filters: |
             frontend:
               - 'apps/web/**'
               - 'apps/desktop/**'
+              - 'apps/docs/**'
               - 'packages/**'
               - 'package.json'
               - '.npmrc'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'turbo.json'
+              - 'knip.jsonc'
               - '.github/workflows/ci.yml'
               - 'scripts/generate-reserved-slugs.mjs'
               - 'server/internal/handler/reserved_slugs.json'
+              - 'scripts/check-ui-wildcard-exports.mjs'
+              - 'scripts/check-ui-wildcard-exports.test.sh'
               - 'scripts/selfhost-config.test.sh'
               - 'scripts/drop-database.sh'
               - 'scripts/remove-worktree.sh'
@@ -212,6 +216,35 @@ jobs:
         # filter in sync with the root package.json scripts, which also
         # exclude @multica/mobile.
         run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
+
+      # Blocking from the start: it reports nothing today, and it covers the
+      # one regression knip structurally cannot see. packages/ui exports four
+      # wildcards, which knip expands into entry-point globs over every file
+      # in those directories — so a newly stranded component there always
+      # reads as "used". See the script header for the options ruled out.
+      - name: Check packages/ui wildcard exports
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: |
+          bash scripts/check-ui-wildcard-exports.test.sh
+          node scripts/check-ui-wildcard-exports.mjs
+
+      # WARN PHASE — reports, never blocks. `shamefully-hoist=true` in .npmrc
+      # hides both halves of the drift this catches: an undeclared import still
+      # resolves, and an obsolete declaration still installs. Neither shows up
+      # in build, typecheck, or lint.
+      #
+      # `continue-on-error` alone, with no `|| true`: the real exit code has to
+      # reach Actions for the step to show as a warning rather than a silent
+      # pass, and it is what makes the promotion below a one-line change.
+      #
+      # TO PROMOTE TO BLOCKING: once this step has run clean for a full cycle
+      # on main, drop `continue-on-error`. The findings it reports today are
+      # pre-existing dead code left out of the cleanup that introduced it
+      # (MUL-6353) — clear those first, or the flip turns them into a red main.
+      - name: Check for dead code and phantom dependencies (knip)
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        continue-on-error: true
+        run: pnpm knip
 
   frontend-test:
     needs: changes

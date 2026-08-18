@@ -43,11 +43,10 @@ interface IssueHoverCardProps {
  * The inline chip shows status, identifier, and as much title as fits inside
  * its `min(18rem, 100%)` cap — so a long title arrives truncated. The card
  * carries what the chip cannot: the full untruncated title, priority, a
- * description snippet, the assignee, and sub-issue progress. Member and agent
- * mentions already preview this way via MentionHoverCard
- * (packages/ui/components/common/mention-hover-card.tsx); this is the issue
- * equivalent, and lives here rather than in packages/ui because it reads
- * workspace queries.
+ * description snippet, the assignee, and sub-issue progress. Issue mentions are
+ * the only kind with a hover preview — member and agent mentions render as a
+ * plain `.mention` span in rich-content.tsx. This lives here rather than in
+ * packages/ui because it reads workspace queries.
  *
  * Every query lives in IssueHoverCardBody rather than here on purpose: Base UI
  * mounts the popup only while the card is open, so this component adds no
