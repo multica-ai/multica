@@ -598,7 +598,17 @@ function LoadingSkeleton() {
 // Page
 // ---------------------------------------------------------------------------
 
-export function AutopilotsPage() {
+export function AutopilotsPage({
+  title,
+  createLabel,
+  emptyTitle,
+  emptyHint,
+}: {
+  title?: string;
+  createLabel?: string;
+  emptyTitle?: string;
+  emptyHint?: string;
+} = {}) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -766,12 +776,12 @@ export function AutopilotsPage() {
       {/* Header */}
       <CollectionPageHeader
         icon={Zap}
-        title={t(($) => $.page.title)}
+        title={title ?? t(($) => $.page.title)}
         count={totalCount}
         actions={
           <CollectionPageHeaderAction
             icon={Plus}
-            label={t(($) => $.page.new_autopilot)}
+            label={createLabel ?? t(($) => $.page.new_autopilot)}
             onClick={() => openCreate()}
           />
         }
@@ -804,10 +814,10 @@ export function AutopilotsPage() {
         <div className="flex flex-col items-center px-5 py-16">
           <Zap className="mb-3 h-10 w-10 text-faint-foreground" />
           <p className="text-body text-muted-foreground">
-            {t(($) => $.page.empty.title)}
+            {emptyTitle ?? t(($) => $.page.empty.title)}
           </p>
           <p className="mb-6 mt-1 text-caption text-muted-foreground">
-            {t(($) => $.page.empty.hint)}
+            {emptyHint ?? t(($) => $.page.empty.hint)}
           </p>
           <div className="grid w-full max-w-3xl grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {TEMPLATES.map((tpl) => {

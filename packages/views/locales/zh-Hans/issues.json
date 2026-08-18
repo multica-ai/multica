@@ -6,6 +6,16 @@
     "empty_hint": "创建一个任务开始使用。",
     "move_failed": "移动任务失败"
   },
+  "task_center": {
+    "navigation_label": "任务分区",
+    "tasks": "任务",
+    "mine": "我的任务",
+    "activity": "动态",
+    "automations": "自动化",
+    "new_automation": "新建自动化",
+    "no_automations": "还没有自动化",
+    "automations_hint": "为你的 AI 智能体安排周期性任务。"
+  },
   "status": {
     "backlog": "待规划",
     "todo": "待办",

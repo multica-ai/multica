@@ -37,6 +37,7 @@
     "./issues/timeline-sort": "./issues/timeline-sort.ts",
     "./issues/comment-trigger-outcomes": "./issues/comment-trigger-outcomes.ts",
     "./issues/date": "./issues/date.ts",
+    "./issues/task-center": "./issues/task-center.ts",
     "./issues/ws-updaters": "./issues/ws-updaters.ts",
     "./issues/surface/*": "./issues/surface/*.ts",
     "./issues/config": "./issues/config/index.ts",

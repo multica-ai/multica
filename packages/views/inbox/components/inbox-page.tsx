@@ -75,7 +75,13 @@ import { useTypeLabels } from "./inbox-detail-label";
 import { getInboxDisplayTitle, isQuickCreateOutcome } from "./inbox-display";
 import { useT } from "../../i18n";
 
-export function InboxPage() {
+export function InboxPage({
+  title,
+  backLabel,
+}: {
+  title?: string;
+  backLabel?: string;
+} = {}) {
   const { t } = useT("inbox");
   const { searchParams, replace } = useNavigation();
   const urlIssue = searchParams.get("issue") ?? "";
@@ -433,7 +439,7 @@ export function InboxPage() {
   const listHeader = (
     <PageHeader>
       <div className="flex flex-1 items-center gap-2">
-        <h1 className="text-body font-semibold">{t(($) => $.page.title)}</h1>
+        <h1 className="text-body font-semibold">{title ?? t(($) => $.page.title)}</h1>
         {unreadCount > 0 && (
           <NumberFlow
             value={unreadCount}
@@ -554,7 +560,7 @@ export function InboxPage() {
       <ArrowLeft className="h-4 w-4" />
       {/* Back goes to the list the user came FROM, so the label has to
           name it — "Inbox" here would be a lie about the destination. */}
-      {isArchivedView ? t(($) => $.list.archived_title) : t(($) => $.page.back)}
+      {isArchivedView ? t(($) => $.list.archived_title) : backLabel ?? t(($) => $.page.back)}
     </Button>
   ) : undefined;
 

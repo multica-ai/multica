@@ -5,6 +5,7 @@ export { StatusPicker, PriorityPicker, StagePicker, AssigneePicker, canAssignAge
 export { IssueDetail, IssueDetailSkeleton, issueHighlightMementoKey } from "./issue-detail";
 export { IssueDetailRoute } from "./issue-detail-route";
 export { IssuesPage } from "./issues-page";
+export { TaskCenterPage } from "./task-center-page";
 export { CommentCard } from "./comment-card";
 export { CommentInput } from "./comment-input";
 export { ReplyInput } from "./reply-input";

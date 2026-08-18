@@ -6,6 +6,16 @@
     "empty_hint": "태스크를 만들어 시작하세요.",
     "move_failed": "태스크를 이동하지 못했습니다"
   },
+  "task_center": {
+    "navigation_label": "태스크 섹션",
+    "tasks": "태스크",
+    "mine": "내 태스크",
+    "activity": "활동",
+    "automations": "자동화",
+    "new_automation": "자동화 만들기",
+    "no_automations": "아직 자동화가 없습니다",
+    "automations_hint": "AI 에이전트의 반복 태스크를 예약하세요."
+  },
   "status": {
     "backlog": "백로그",
     "todo": "할 일",

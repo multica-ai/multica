@@ -6,6 +6,16 @@
     "empty_hint": "タスクを作成して始めましょう。",
     "move_failed": "タスクを移動できませんでした"
   },
+  "task_center": {
+    "navigation_label": "タスクのセクション",
+    "tasks": "タスク",
+    "mine": "マイタスク",
+    "activity": "アクティビティ",
+    "automations": "自動化",
+    "new_automation": "自動化を作成",
+    "no_automations": "自動化はまだありません",
+    "automations_hint": "AI エージェントの定期タスクをスケジュールします。"
+  },
   "status": {
     "backlog": "バックログ",
     "todo": "未着手",

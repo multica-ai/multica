@@ -6,6 +6,16 @@
     "empty_hint": "Create an issue to get started.",
     "move_failed": "Failed to move issue"
   },
+  "task_center": {
+    "navigation_label": "Tasks sections",
+    "tasks": "Tasks",
+    "mine": "My Tasks",
+    "activity": "Activity",
+    "automations": "Automations",
+    "new_automation": "New automation",
+    "no_automations": "No automations yet",
+    "automations_hint": "Schedule recurring tasks for your AI agents."
+  },
   "status": {
     "backlog": "Backlog",
     "todo": "Todo",

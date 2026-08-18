@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { IssuesPage } from '@multica/views/issues/components';
+import { TaskCenterPage } from '@multica/views/issues/components';
 import { TaskCreateButton } from '@/workspace/task-create-button';
 import { TaskWorkspaceRoute } from '@/workspace/task-workspace-route';
 
@@ -13,7 +13,7 @@ function TagWorkspaceTasksRoute() {
   return (
     <TaskWorkspaceRoute workspaceSlug={workspaceSlug}>
       <TaskCreateButton />
-      <IssuesPage />
+      <TaskCenterPage workspaceSlug={workspaceSlug} />
     </TaskWorkspaceRoute>
   );
 }
