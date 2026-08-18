@@ -23,8 +23,9 @@ const CONTENT_LANG_BY_LOCALE: Record<SupportedLocale, ContentLang> = {
 
 /**
  * Pick persisted onboarding content for the given user language. Maps
- * supported BCP-47 prefixes to the matching variant; everything else falls
- * back to English. Mirrors the locale picker used by the frontend i18n layer.
+ * supported BCP-47 prefixes to the matching variant; everything else follows
+ * the shared default locale. Mirrors the locale picker used by the frontend
+ * i18n layer.
  */
 export function pickContentLang(
   language: string | null | undefined,

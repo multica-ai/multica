@@ -10,16 +10,16 @@
   },
   "balance": {
     "title": "余额",
-    "credits_suffix": "credits",
-    "meta": "raw micro: {{micro}} · owner: {{owner}}… · updated {{updated}}"
+    "credits_suffix": "点数",
+    "meta": "原始 micro：{{micro}} · 所有者：{{owner}}… · 更新于 {{updated}}"
   },
   "buy": {
-    "title": "购买 credits / 管理账单",
+    "title": "购买点数 / 管理账单",
     "no_tiers": "未配置任何价格档位。Cloud 那边应该没有配 Stripe key——checkout 会返回 503。",
-    "tier_money_to_credits": "{{money}} → {{credits}} credits",
+    "tier_money_to_credits": "{{money}} → {{credits}} 点数",
     "tier_bonus": " + 赠送 {{credits}}",
     "tier_bonus_with_expiry": " + 赠送 {{credits}}（{{expiry}}）",
-    "tier_id": "id: {{id}}",
+    "tier_id": "ID：{{id}}",
     "open_portal": "打开 Stripe Billing Portal",
     "portal_hint": "对于尚未付款的用户预期返回 400（Stripe 还没建 customer 记录）。",
     "toast_no_url": "Cloud 没有返回 checkout URL",
@@ -28,42 +28,42 @@
     "toast_portal_failed": "打开 Portal 失败"
   },
   "checkout": {
-    "session_label": "Checkout session {{prefix}}…",
+    "session_label": "结账会话 {{prefix}}…",
     "loading": "正在加载订单状态…",
     "fetch_failed": "拉取订单状态失败：{{error}}",
     "fetch_failed_unknown": "未知错误",
     "final_status": "最终状态：{{status}}",
     "polling_status": "正在轮询订单状态…当前：{{status}}",
-    "status_unknown": "unknown",
+    "status_unknown": "未知",
     "label_order": "订单",
     "label_tier": "档位",
     "label_charged": "已收款",
-    "charged_value": "{{money}} · {{credits}} credits",
-    "charged_with_bonus": "{{money}} · {{credits}} credits + {{bonus}} 赠送",
+    "charged_value": "{{money}} · {{credits}} 点数",
+    "charged_with_bonus": "{{money}} · {{credits}} 点数 + {{bonus}} 赠送",
     "clear_url": "从 URL 清除"
   },
   "transactions": {
     "title": "流水",
     "empty": "暂无流水。",
-    "credits_value": "{{value}} credits",
-    "row_meta": "{{date}} · balance after: {{balance}} credits · ref: {{ref}}",
+    "credits_value": "{{value}} 点数",
+    "row_meta": "{{date}} · 之后余额：{{balance}} 点数 · 引用：{{ref}}",
     "ref_empty": "—"
   },
   "batches": {
-    "title": "Credit 批次",
+    "title": "点数批次",
     "empty": "暂无批次。",
-    "remaining_over_total": "{{remaining}} / {{total}} credits",
+    "remaining_over_total": "{{remaining}} / {{total}} 点数",
     "id_suffix": "{{id}}…",
-    "consumed": "已消耗：{{value}} credits",
+    "consumed": "已消耗：{{value}} 点数",
     "expires_suffix": " · 过期时间 {{value}}",
     "never_expires_suffix": " · 永不过期"
   },
   "topups": {
     "title": "充值订单",
     "empty": "暂无充值订单。",
-    "amount_to_credits": "{{money}} → {{credits}} credits",
-    "amount_to_credits_with_bonus": "{{money}} → {{credits}} credits + {{bonus}} 赠送",
-    "row_meta": "{{date}} · stripe: {{checkout}}",
+    "amount_to_credits": "{{money}} → {{credits}} 点数",
+    "amount_to_credits_with_bonus": "{{money}} → {{credits}} 点数 + {{bonus}} 赠送",
+    "row_meta": "{{date}} · Stripe：{{checkout}}",
     "stripe_empty": "—"
   },
   "workspace": {

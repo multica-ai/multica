@@ -71,7 +71,7 @@
     "name_placeholder": "例如：前端团队",
     "description_label": "描述",
     "description_placeholder": "描述这个 Squad 负责什么...",
-    "leader_label": "Leader Agent",
+    "leader_label": "负责人智能体",
     "leader_hint": "Leader 接收分配给此 Squad 的所有任务并协调团队。",
     "leader_placeholder": "选择一个 Leader Agent",
     "members_label": "附加成员",

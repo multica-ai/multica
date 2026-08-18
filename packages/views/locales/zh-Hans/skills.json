@@ -1,6 +1,6 @@
 {
   "page": {
-    "title": "Skills",
+    "title": "skill",
     "tagline": "工作区里任何智能体都能使用的指令。",
     "learn_more": "了解更多 →",
     "new_skill": "新建 skill",
@@ -131,7 +131,7 @@
     },
     "conflict_banner": {
       "title": "其他人更新了这个 skill",
-      "body": "你的修改已保留。Discard 来拉取他们的版本，或 Save 覆盖。"
+      "body": "你的修改已保留。点击“丢弃”可拉取对方版本，点击“保存”可覆盖。"
     },
     "save_bar": {
       "changed_summary": "已修改:{{parts}}",
@@ -143,7 +143,7 @@
     "not_found": {
       "title": "未找到该 skill",
       "fallback": "这个 skill 可能已被删除，或你没有访问权限。",
-      "back": "返回 Skills"
+      "back": "返回 skill"
     },
     "toast_saved": "已保存 skill",
     "toast_save_failed": "保存 skill 失败",

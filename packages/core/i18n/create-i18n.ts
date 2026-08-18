@@ -13,7 +13,7 @@ export function createI18n(
   const instance = i18next.createInstance();
   instance.use(initReactI18next).init({
     lng: locale,
-    fallbackLng: "en",
+    fallbackLng: "zh-Hans",
     resources,
     interpolation: { escapeValue: false },
     initAsync: false,

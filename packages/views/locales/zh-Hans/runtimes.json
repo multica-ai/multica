@@ -233,11 +233,11 @@
     "fields": {
       "name": "名称",
       "instance_type": "实例规格",
-      "region": "Region",
+      "region": "区域",
       "disk_size": "磁盘大小 GiB",
       "image_id": "AMI ID",
       "subnet_id": "Subnet ID",
-      "key_name": "Key pair",
+      "key_name": "密钥对",
       "bootstrap_pat": "Bootstrap PAT"
     },
     "placeholders": {
