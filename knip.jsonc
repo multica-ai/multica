@@ -43,11 +43,23 @@
     "apps/docs": {},
 
     // The three shared packages export raw .ts/.tsx compiled by their
-    // consumers (CLAUDE.md "Project Shape"). Their package.json `exports`
-    // maps list every public file, so taking those as knip entry points would
-    // mark all of them reachable and report nothing. `entry: []` instead makes
-    // the apps the only entry points, so a file is live only when an app
-    // reaches it — that is what makes a stranded component visible here.
+    // consumers (CLAUDE.md "Project Shape"), so `entry` names only the config
+    // files knip would otherwise miss and the apps supply the real entry
+    // points — a file is live when an app reaches it.
+    //
+    // That holds for views and core, whose `exports` name specific files
+    // (44 of views' 45). It does NOT hold for the four wildcard exports in
+    // packages/ui: knip expands each into a glob over its whole directory and
+    // registers every match as an entry point, so nothing under
+    // components/ui, components/common, markdown, or hooks can ever be
+    // reported unused here. `entry: []`, negated `entry` patterns, and
+    // `--production` were all tried — manifest entries come from a separate
+    // code path that none of them subtract from.
+    //
+    // scripts/check-ui-wildcard-exports.mjs covers exactly those four
+    // directories and runs as its own blocking CI step. Narrow a wildcard
+    // export and knip picks that directory back up; the script reads the same
+    // manifest, so the two stay in step without overlapping.
     "packages/ui": {
       "entry": ["eslint.config.mjs"],
       "project": ["**/*.{ts,tsx}"]
