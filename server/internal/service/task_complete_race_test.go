@@ -282,6 +282,29 @@ func TestTaskFailureClassifiers(t *testing.T) {
 	}
 }
 
+// TestRuntimeCLITimeoutIsNotAutoRetried pins the retry posture for #7112. A
+// local runtime CLI that missed its preparation deadline is not transient: the
+// same host runs the same CLI on the next attempt and takes the same 8-11s to
+// fail again, so every retry is pure cost with a guaranteed outcome. That is
+// the difference from agent_error.provider_network, which the old text-based
+// classification lumped it in with — and which IS on the allowlist.
+//
+// Resume stays safe: the agent process never started, so the session the retry
+// (or the user's next message) resumes is untouched.
+func TestRuntimeCLITimeoutIsNotAutoRetried(t *testing.T) {
+	const reason = "runtime_cli_timeout"
+
+	if retryableReasons[reason] {
+		t.Errorf("retryableReasons[%q] = true, want false: the stall is local and deterministic", reason)
+	}
+	if resumeUnsafeFailureReason(reason) {
+		t.Errorf("resumeUnsafeFailureReason(%q) = true, want false: the agent never started", reason)
+	}
+	if !retryableReasons["agent_error.provider_network"] {
+		t.Error("agent_error.provider_network must stay retryable: real provider stalls are transient")
+	}
+}
+
 // TestOpencodeStreamEndedFailureRetries walks the full chain for #6522: the
 // error string pkg/agent/opencode.go's terminal-signal guard produces, through
 // taskfailure.Classify, into the retry gate.

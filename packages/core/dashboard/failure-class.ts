@@ -65,6 +65,11 @@ const REASON_CLASS: Record<string, FailureClass> = {
   // operator response is "check the daemon's link to Multica", the same as a
   // daemon that went offline — the model provider is not involved.
   skill_bundle_unavailable: "runtime",
+  // The local runtime CLI (OpenClaw config discovery today) missed its
+  // deadline during preparation. "runtime" for the same reason: the operator
+  // fix is on the host running the daemon — a faster CLI or a raised timeout —
+  // not with the model provider, which was never contacted.
+  runtime_cli_timeout: "runtime",
 
   // The agent process itself produced the failure.
   "agent_error.process_failure": "agent",

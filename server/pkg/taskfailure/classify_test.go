@@ -498,3 +498,72 @@ func TestProviderUnconfiguredAgreesWithClassify(t *testing.T) {
 		t.Errorf("Classify(%q) = %q, want %q", errText, got, ReasonAgentMissingConfig)
 	}
 }
+
+// TestNormalizeDaemonReasonUpgradesOpenclawCLITimeout covers the mixed-version
+// window for #7112. A daemon that predates the timeout sentinel classifies the
+// failure from its text and lands on agent_error.provider_network, which is
+// worse than merely imprecise: that reason is on the auto-retry allowlist, so
+// every attempt re-pays the same 8-11s stall and fails identically, and the
+// chat bubble tells the user to check a network that was never involved.
+// Recognising the wire shape fixes both the moment the server deploys.
+func TestNormalizeDaemonReasonUpgradesOpenclawCLITimeout(t *testing.T) {
+	t.Parallel()
+
+	const rawError = "prepare execution environment: execenv: prepare openclaw config: " +
+		"locate openclaw active config: openclaw config file: context deadline exceeded " +
+		"(process: signal: killed)"
+
+	for _, legacy := range []string{
+		string(ReasonAgentProviderNetwork),
+		string(ReasonAgentUnknown),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(legacy, rawError); got != ReasonRuntimeCLITimeout {
+			t.Errorf("NormalizeDaemonReason(%q, openclaw timeout) = %q, want %q", legacy, got, ReasonRuntimeCLITimeout)
+		}
+	}
+
+	// A current daemon already reports the precise reason; normalization must
+	// leave it alone.
+	if got := NormalizeDaemonReason(string(ReasonRuntimeCLITimeout), rawError); got != ReasonRuntimeCLITimeout {
+		t.Errorf("NormalizeDaemonReason(runtime_cli_timeout) = %q, want it preserved", got)
+	}
+
+	// Both witnesses are required. A real provider-side deadline, and an
+	// openclaw prep failure that is not a timeout, must keep their own
+	// classification — the global "deadline exceeded" rule still belongs to
+	// genuine network stalls.
+	unrelated := map[string]struct {
+		reason   string
+		rawError string
+		want     Reason
+	}{
+		"provider deadline stays provider_network": {
+			reason:   string(ReasonAgentProviderNetwork),
+			rawError: "API Error: context deadline exceeded while streaming from provider",
+			want:     ReasonAgentProviderNetwork,
+		},
+		"openclaw prep failure without a timeout is untouched": {
+			reason:   string(ReasonAgentUnknown),
+			rawError: "execenv: prepare openclaw config: read openclaw agents.list: exit status 1",
+			want:     ReasonAgentUnknown,
+		},
+	}
+	for name, tc := range unrelated {
+		if got := NormalizeDaemonReason(tc.reason, tc.rawError); got != tc.want {
+			t.Errorf("%s: NormalizeDaemonReason = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// TestClassifyKeepsDeadlineExceededAsProviderNetwork pins the rule the fix
+// deliberately did NOT touch. Local runtime CLI timeouts are recognised
+// structurally, upstream of Classify; the text rule still has to serve real
+// provider stalls, which are transient and retryable.
+func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
+	t.Parallel()
+
+	if got := Classify("post to provider: context deadline exceeded"); got != ReasonAgentProviderNetwork {
+		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
+	}
+}
