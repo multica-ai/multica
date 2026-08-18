@@ -1,0 +1,45 @@
+{
+  "page": {
+    "breadcrumb": "Мои задачи",
+    "workspace_fallback": "Рабочая область",
+    "empty_title": "Вам не назначено ни одной задачи",
+    "empty_description": "Здесь будут отображаться задачи, которые вы создаете или которым назначены."
+  },
+  "header": {
+    "scope": {
+      "all_label": "Все",
+      "all_description": "Назначено мне, создано мной или с участием моих агентов и отрядов",
+      "assigned_label": "Назначено",
+      "assigned_description": "Задачи, порученные мне",
+      "created_label": "Создано",
+      "created_description": "Задачи, которые я создал",
+      "agents_label": "Мои агенты и отряды",
+      "agents_description": "Задачи, назначенные моим агентам"
+    },
+    "filter_button": "Фильтр",
+    "filter_status": "Статус",
+    "filter_priority": "Приоритет",
+    "issue_count_one": "Задача {{count}}",
+    "issue_count_other": "{{count}} задач",
+    "reset_filters": "Сбросить все фильтры",
+    "display_settings": "Настройки дисплея",
+    "grouping": "Группировка",
+    "group_status": "Статус",
+    "group_assignee": "Правопреемник",
+    "ordering": "Заказ",
+    "ascending": "восходящий",
+    "descending": "По убыванию",
+    "card_properties": "Свойства карты",
+    "view_board": "Вид на доску",
+    "view_list": "Просмотр списка",
+    "view_swimlane": "Вид на дорожку",
+    "view_label": "Посмотреть",
+    "view_board_short": "Совет",
+    "view_list_short": "Список",
+    "view_swimlane_short": "Дорожка для плавания",
+    "sort_manual": "Руководство"
+  },
+  "errors": {
+    "move_failed": "Не удалось переместить задачу"
+  }
+}

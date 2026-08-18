@@ -1,0 +1,108 @@
+{
+  "title": "Аналитика",
+  "tab_usage": "Использование",
+  "header": {
+    "timezone_and_updated": "{{tz}} · обновлен {{time}}",
+    "refresh": "Обновить"
+  },
+  "filter": {
+    "project_label": "Проект",
+    "all_projects": "Все проекты",
+    "period_label": "Период"
+  },
+  "kpi": {
+    "cost_label": "Стоимость · {{days}}D",
+    "tokens_label": "Токены · {{days}}D",
+    "tokens_hint": "Вход {{input}} · Выход {{output}}",
+    "run_time_label": "Время выполнения · {{days}}D",
+    "run_time_hint": "По задачам {{tasks}}",
+    "tasks_label": "Задачи · {{days}}D",
+    "tasks_hint": "{{failed}} не удалось"
+  },
+  "dim": {
+    "label": "Размерность",
+    "daily": "Ежедневно",
+    "weekly": "Еженедельно"
+  },
+  "daily": {
+    "title_cost": "Ежедневная стоимость",
+    "title_tokens": "Ежедневные жетоны",
+    "title_time": "Ежедневное время работы",
+    "title_tasks": "Ежедневные задачи",
+    "title_errors": "Ежедневные ошибки",
+    "metric_cost": "Стоимость",
+    "metric_tokens": "Токены",
+    "metric_time": "Время",
+    "metric_tasks": "Задачи",
+    "no_data": "В этом окне нет использования.",
+    "metric_label": "Метрика"
+  },
+  "weekly": {
+    "title_cost": "Еженедельная стоимость",
+    "title_tokens": "Еженедельные жетоны",
+    "title_time": "Еженедельное время работы",
+    "title_tasks": "Еженедельные задания",
+    "title_errors": "Еженедельные ошибки",
+    "partial_label": "{{range}} (частично · {{covered}} / 7 дней)"
+  },
+  "errors": {
+    "kpi_failed_label": "Невыполненные задачи · {{days}}D",
+    "kpi_failed_hint": "Из {{total}} запусков",
+    "kpi_rate_label": "Частота отказов · {{days}}D",
+    "kpi_agents_label": "Затронутые агенты · {{days}}D",
+    "kpi_agents_hint": "Худший {{name}} · {{count}}",
+    "tooltip_rate": "Частота ошибок",
+    "class": {
+      "auth": "Авторизация",
+      "rate_limit": "Ограничение скорости",
+      "timeout": "Тайм-аут",
+      "provider": "Поставщик",
+      "runtime": "Время выполнения",
+      "agent": "Агент",
+      "other": "Другое"
+    },
+    "title": "Ошибки",
+    "summary": "{{failed}} из {{total}} не удалось выполнить · {{rate}}",
+    "mix_title": "Набор ошибок · {{failed}}",
+    "mix_label": "Микс неудач",
+    "codes_label": "Коды ошибок",
+    "by_agent": "Главные нарушители",
+    "sort_label": "Ранжируйте правонарушителей по",
+    "sort_failed": "Неудачи",
+    "sort_rate": "Оценить",
+    "header_agent": "Агент",
+    "header_failed": "Не удалось",
+    "header_runs": "Бежит",
+    "header_rate": "Оценить",
+    "other_agents": "Другие агенты",
+    "low_sample": "В этом окне выполняется менее {{count}} — эта скорость не имеет смысла.",
+    "no_data": "В этом окне нет неудачных запусков.",
+    "show_reasons": "Показать коды ошибок",
+    "hide_reasons": "Скрыть коды ошибок",
+    "show_all": "Показать все {{count}}",
+    "show_less": "Показать топ {{count}}"
+  },
+  "leaderboard": {
+    "title": "Таблица лидеров",
+    "caption": "{{count}} агентов",
+    "caption_with_deleted": "{{count}} агенты · {{deleted}} удалено",
+    "sort_label": "Ранжируйте агентов по",
+    "deleted_agents": "Удаленные агенты",
+    "other_agents": "Другие агенты",
+    "header_agent": "Агент",
+    "header_tokens": "Токены",
+    "header_cost": "Стоимость",
+    "header_time": "Время",
+    "header_tasks": "Задачи",
+    "show_all": "Показать все",
+    "show_less": "Показать топ {{count}}",
+    "no_data": "В этом окне нет активности агента."
+  },
+  "empty": {
+    "title": "Пока не использовался",
+    "body": "Как только агенты начнут выполнять здесь задачи, в этом представлении отобразятся расходы их токенов и время выполнения."
+  },
+  "duration": {
+    "less_than_minute": "<1 м"
+  }
+}

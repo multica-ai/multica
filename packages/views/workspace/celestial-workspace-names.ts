@@ -2,7 +2,7 @@ import type { SupportedLocale } from "@multica/core/i18n";
 
 export interface CelestialWorkspaceName {
   slugBase: string;
-  names: Record<SupportedLocale, string>;
+  names: Partial<Record<SupportedLocale, string>> & { en: string };
 }
 
 export const CELESTIAL_WORKSPACE_NAMES = [

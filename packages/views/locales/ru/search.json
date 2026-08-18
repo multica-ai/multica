@@ -1,0 +1,37 @@
+{
+  "title": "Поиск",
+  "description": "Поиск страниц, задач, проектов и участников",
+  "placeholder": "Введите команду или выполните поиск...",
+  "groups": {
+    "pages": "Страницы",
+    "commands": "Команды",
+    "members": "Члены",
+    "projects": "Проекты",
+    "issues": "Задачи",
+    "cancelled": "Отменено",
+    "recent": "Недавние"
+  },
+  "commands": {
+    "current_theme_aria": "Текущая тема",
+    "new_issue": "Новая задача",
+    "new_project": "Новый проект",
+    "copy_issue_link": "Копировать ссылку на задачу",
+    "copy_identifier": "Копировать идентификатор ({{identifier}})",
+    "fold_all_comments": "Свернуть все комментарии",
+    "unfold_all_comments": "Развернуть все комментарии",
+    "switch_to_light": "Переключиться на светлую тему",
+    "switch_to_dark": "Переключиться на темную тему",
+    "use_system_theme": "Использовать системную тему"
+  },
+  "toast": {
+    "link_copied": "Ссылка скопирована",
+    "copied_identifier": "Скопировано {{identifier}}"
+  },
+  "empty": {
+    "no_results": "Результаты не найдены.",
+    "type_to_search": "Введите текст для поиска задач и проектов"
+  },
+  "trigger": {
+    "label": "Искать..."
+  }
+}

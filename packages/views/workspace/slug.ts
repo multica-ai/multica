@@ -92,6 +92,9 @@ export function randomCelestialWorkspaceIdentity(
     CELESTIAL_WORKSPACE_NAMES[
       Math.floor(random() * CELESTIAL_WORKSPACE_NAMES.length)
     ]!;
+  const localizedNames: Partial<Record<SupportedLocale, string>> & {
+    en: string;
+  } = celestial.names;
   let suffix = "";
 
   for (let i = 0; i < WORKSPACE_SLUG_SUFFIX_LENGTH; i += 1) {
@@ -102,7 +105,7 @@ export function randomCelestialWorkspaceIdentity(
   }
 
   return {
-    name: celestial.names[locale],
+    name: localizedNames[locale] ?? localizedNames.en,
     slug: `${celestial.slugBase}-${suffix}`,
   };
 }

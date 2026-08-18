@@ -22,6 +22,7 @@ describe("matchLocale", () => {
     expect(matchLocale(["zh-Hans"])).toBe("zh-Hans");
     expect(matchLocale(["ko"])).toBe("ko");
     expect(matchLocale(["ja"])).toBe("ja");
+    expect(matchLocale(["ru"])).toBe("ru");
     expect(matchLocale(["en"])).toBe("en");
   });
 
@@ -30,6 +31,7 @@ describe("matchLocale", () => {
     expect(matchLocale(["zh-Hans-CN"])).toBe("zh-Hans");
     expect(matchLocale(["ko-KR"])).toBe("ko");
     expect(matchLocale(["ja-JP"])).toBe("ja");
+    expect(matchLocale(["ru-RU"])).toBe("ru");
   });
 
   it("falls back to DEFAULT_LOCALE when no candidate matches", () => {
@@ -44,6 +46,7 @@ describe("matchLocale", () => {
     expect(matchLocale(["fr", "zh-Hans", "en"])).toBe("zh-Hans");
     expect(matchLocale(["fr", "ko-KR", "en"])).toBe("ko");
     expect(matchLocale(["fr", "ja-JP", "en"])).toBe("ja");
+    expect(matchLocale(["fr", "ru-RU", "en"])).toBe("ru");
   });
 
   it("returns DEFAULT_LOCALE for malformed BCP-47 tags rather than throwing", () => {
