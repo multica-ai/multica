@@ -11,9 +11,10 @@
     "description": "工作区是团队协作处理项目和任务的共享空间。"
   },
   "delete_issue": {
-    "title": "删除任务",
-    "description": "将永久删除该任务及其所有评论。此操作不可撤销。",
-    "hint": "工作区任何成员都可以删除任务。",
+    "title": "删除该任务？",
+    "title_named": "删除 {{identifier}}？",
+    "description": "评论和附件一并删除，不可撤销。",
+    "sub_issues_detached_other": "{{count}} 个子任务会变成独立任务。",
     "cancel": "取消",
     "confirm": "删除",
     "deleting": "删除中...",

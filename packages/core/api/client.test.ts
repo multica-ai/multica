@@ -69,6 +69,47 @@ describe("ApiClient pull-request response schema", () => {
   });
 });
 
+describe("ApiClient batch-delete response schema", () => {
+  function stubBatchDeleteResponse(body: unknown) {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+  }
+
+  it("returns the count the server actually deleted", async () => {
+    stubBatchDeleteResponse({ deleted: 2 });
+
+    await expect(
+      new ApiClient("https://api.example.test").batchDeleteIssues(["a", "b", "c"]),
+    ).resolves.toEqual({ deleted: 2 });
+  });
+
+  // The UI branches on this count to decide between "deleted them all" and
+  // "some could not be deleted", so an unreadable body must read as zero
+  // deletions rather than as a silent success.
+  it("reports zero deletions for a malformed body", async () => {
+    stubBatchDeleteResponse({ deleted: "two" });
+
+    await expect(
+      new ApiClient("https://api.example.test").batchDeleteIssues(["a", "b"]),
+    ).resolves.toEqual({ deleted: 0 });
+  });
+
+  it("reports zero deletions when the count is missing entirely", async () => {
+    stubBatchDeleteResponse({});
+
+    await expect(
+      new ApiClient("https://api.example.test").batchDeleteIssues(["a"]),
+    ).resolves.toEqual({ deleted: 0 });
+  });
+});
+
 describe("ApiClient Remote MCP OAuth response schema", () => {
   it("degrades a malformed start response without inventing a navigation URL", async () => {
     vi.stubGlobal(

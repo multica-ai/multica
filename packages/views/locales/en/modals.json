@@ -11,9 +11,11 @@
     "description": "Workspaces are shared environments where teams can work on projects and issues."
   },
   "delete_issue": {
-    "title": "Delete issue",
-    "description": "This will permanently delete this issue and all its comments. This action cannot be undone.",
-    "hint": "Any workspace member can delete issues.",
+    "title": "Delete this issue?",
+    "title_named": "Delete {{identifier}}?",
+    "description": "Comments and attachments go with it. This cannot be undone.",
+    "sub_issues_detached_one": "{{count}} sub-issue becomes a standalone issue.",
+    "sub_issues_detached_other": "{{count}} sub-issues become standalone issues.",
     "cancel": "Cancel",
     "confirm": "Delete",
     "deleting": "Deleting...",

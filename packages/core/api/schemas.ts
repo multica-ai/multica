@@ -356,6 +356,24 @@ export const EMPTY_ISSUE_PULL_REQUESTS_RESPONSE: { pull_requests: GitHubPullRequ
   pull_requests: [],
 };
 
+/**
+ * Batch delete reports how many issues it actually removed, and the server
+ * skips (rather than fails) any issue it cannot delete — so `deleted` can be
+ * lower than the number requested and the UI reports the shortfall.
+ *
+ * That makes this a count the UI branches on, which is why it goes through a
+ * schema. The fallback deliberately reads 0: a response we cannot parse is not
+ * evidence that anything was deleted, and claiming success we cannot verify is
+ * the exact failure this endpoint's UI is being fixed for.
+ */
+export const BatchDeleteIssuesResponseSchema = z.object({
+  deleted: z.number().default(0),
+}).loose();
+
+export const EMPTY_BATCH_DELETE_ISSUES_RESPONSE: { deleted: number } = {
+  deleted: 0,
+};
+
 // Label responses are consumed by settings tables and resource pickers. Keep
 // the resource type lenient so newer server scopes do not break older clients,
 // while defaulting fields that predate scoped label catalogs.

@@ -192,10 +192,7 @@ export function ChatSessionHeader({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>{t(($) => $.session_history.delete_dialog.cancel)}</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={doDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-            >
+            <AlertDialogAction variant="destructive" onClick={doDelete}>
               {t(($) => $.session_history.delete_dialog.confirm)}
             </AlertDialogAction>
           </AlertDialogFooter>

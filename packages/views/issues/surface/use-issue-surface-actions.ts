@@ -128,9 +128,7 @@ export function useIssueSurfaceActions({
       batchUpdate: async (issueIds, updates) => {
         await batchUpdateMutation.mutateAsync({ ids: issueIds, updates });
       },
-      batchDelete: async (issueIds) => {
-        await batchDeleteMutation.mutateAsync(issueIds);
-      },
+      batchDelete: (issueIds) => batchDeleteMutation.mutateAsync(issueIds),
     }),
     [
       batchDeleteMutation,

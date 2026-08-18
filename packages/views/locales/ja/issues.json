@@ -567,13 +567,14 @@
     "priority": "優先度",
     "assignee": "担当者",
     "delete": "削除",
+    "deleting": "削除中...",
     "update_success_other": "タスク {{count}} 件を更新しました",
     "update_failed": "タスクを更新できませんでした",
     "delete_success_other": "タスク {{count}} 件を削除しました",
     "delete_failed": "タスクを削除できませんでした",
+    "delete_partial_other": "{{deleted}} 件を削除しましたが、{{failed}} 件は削除できませんでした",
     "delete_dialog_title_other": "タスク {{count}} 件を削除しますか？",
     "delete_dialog_desc_other": "この操作は元に戻せません。選択したタスクと関連データがすべて完全に削除されます。",
-    "delete_dialog_warning": "ワークスペースのメンバーであれば誰でもタスクを削除できます。",
     "cancel": "キャンセル"
   },
   "card": {

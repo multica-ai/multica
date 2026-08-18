@@ -146,6 +146,15 @@ export default function IssueDetail() {
           confirmDelete(issue, () =>
             deleteIssue.mutate(issue.id, {
               onSuccess: () => router.back(),
+              // Without this the failure is invisible: the mutation rolls the
+              // row back into the list and nothing else happens, so a delete
+              // that never happened looks identical to one the user simply
+              // mis-remembers. Same Alert pattern as the edit screens.
+              onError: (err) =>
+                Alert.alert(
+                  "Failed to delete issue",
+                  err instanceof Error ? err.message : "Unknown error",
+                ),
             }),
           );
         }

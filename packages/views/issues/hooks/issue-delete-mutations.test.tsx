@@ -295,6 +295,39 @@ describe("useDeleteIssue", () => {
     expectInvalidated(qc, issueKeys.children(WS_ID, PARENT_ISSUE_ID));
   });
 
+  // The confirm modal is still on screen while this request is in flight, with
+  // the issue's own detail page behind it. Pulling the detail entry out from
+  // under that mounted view collapses it to a skeleton and fires a GET for the
+  // issue being deleted, so the rows leave the lists immediately but the detail
+  // entry waits for the server.
+  it("keeps the detail cache until the server confirms the delete", async () => {
+    const pendingDelete = deferred<void>();
+    const { qc, wrapper } = setup(vi.fn(() => pendingDelete.promise));
+    qc.setQueryData<ListIssuesCache>(
+      issueKeys.list(WS_ID),
+      makeListCache(baseIssue, otherIssue),
+    );
+    qc.setQueryData<Issue>(issueKeys.detail(WS_ID, ISSUE_ID), baseIssue);
+
+    const { result } = renderHook(() => useDeleteIssue(), { wrapper });
+    let mutation!: Promise<void>;
+
+    await act(async () => {
+      mutation = result.current.mutateAsync(ISSUE_ID);
+      await Promise.resolve();
+    });
+
+    expect(ids(qc.getQueryData(issueKeys.list(WS_ID)))).toEqual([OTHER_ISSUE_ID]);
+    expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toEqual(baseIssue);
+
+    await act(async () => {
+      pendingDelete.resolve();
+      await mutation;
+    });
+
+    expect(qc.getQueryData(issueKeys.detail(WS_ID, ISSUE_ID))).toBeUndefined();
+  });
+
   it("invalidates child progress when a single delete removes a parent issue", async () => {
     const { qc, wrapper } = setup();
     const parentIssue = { ...baseIssue, parent_issue_id: null };

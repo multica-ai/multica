@@ -567,13 +567,14 @@
     "priority": "优先级",
     "assignee": "负责人",
     "delete": "删除",
+    "deleting": "删除中...",
     "update_success_other": "已更新 {{count}} 个任务",
     "update_failed": "更新任务失败",
     "delete_success_other": "已删除 {{count}} 个任务",
     "delete_failed": "删除任务失败",
+    "delete_partial_other": "已删除 {{deleted}} 个，{{failed}} 个未能删除",
     "delete_dialog_title_other": "删除 {{count}} 个任务？",
     "delete_dialog_desc_other": "此操作无法撤销，所选任务及其全部关联数据都会被永久删除。",
-    "delete_dialog_warning": "任何工作区成员都可以删除任务。",
     "cancel": "取消"
   },
   "card": {

@@ -28,7 +28,13 @@ export interface IssueSurfaceActions {
     issueIds: string[],
     updates: Partial<UpdateIssueRequest>,
   ) => Promise<void>;
-  batchDelete: (issueIds: string[]) => Promise<void>;
+  /**
+   * Resolves with the number of issues the server actually deleted, which can
+   * be lower than `issueIds.length` — batch delete skips what it cannot remove
+   * and still answers 200. Callers must report that shortfall instead of
+   * assuming a resolved promise means every id is gone.
+   */
+  batchDelete: (issueIds: string[]) => Promise<{ deleted: number }>;
 }
 
 const IssueSurfaceActionsContext = createContext<IssueSurfaceActions | null>(

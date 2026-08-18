@@ -365,6 +365,8 @@ import {
   EMPTY_ISSUE_PROPERTIES_RESPONSE,
   EMPTY_ISSUE_PULL_REQUESTS_RESPONSE,
   IssuePullRequestsResponseSchema,
+  BatchDeleteIssuesResponseSchema,
+  EMPTY_BATCH_DELETE_ISSUES_RESPONSE,
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
@@ -1080,10 +1082,16 @@ export class ApiClient {
   }
 
   async batchDeleteIssues(issueIds: string[]): Promise<{ deleted: number }> {
-    return this.fetch("/api/issues/batch-delete", {
+    const raw = await this.fetch<unknown>("/api/issues/batch-delete", {
       method: "POST",
       body: JSON.stringify({ issue_ids: issueIds }),
     });
+    return parseWithFallback(
+      raw,
+      BatchDeleteIssuesResponseSchema,
+      EMPTY_BATCH_DELETE_ISSUES_RESPONSE,
+      { endpoint: "POST /api/issues/batch-delete" },
+    );
   }
 
   // Comments

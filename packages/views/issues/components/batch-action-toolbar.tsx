@@ -77,6 +77,7 @@ export function BatchActionToolbar({
   const [priorityOpen, setPriorityOpen] = useState(false);
   const [assigneeOpen, setAssigneeOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const surfaceActions = useIssueSurfaceActionsOptional();
   const batchUpdate = useBatchUpdateIssues();
   const batchDelete = useBatchDeleteIssues();
@@ -145,23 +146,47 @@ export function BatchActionToolbar({
     void handleBatchUpdate(updates);
   };
 
+  // The server deletes what it can and reports the count; anything it skipped
+  // stays alive and comes back on the refetch the mutation triggers. Reporting
+  // the requested count as deleted would tell the user their issues are gone
+  // while the rows reappear underneath the toast, so branch on `deleted`.
+  //
+  // The selection is only cleared on a full delete: on a partial one the rows
+  // that survived are still selected, which is what lets the user retry them
+  // (the deleted ids drop out of `selectedIssues` on their own, since it is
+  // intersected with the visible universe).
   const handleBatchDelete = async () => {
+    if (deleting) return;
+    setDeleting(true);
     try {
-      if (surfaceActions) {
-        await surfaceActions.batchDelete(ids);
+      const { deleted } = surfaceActions
+        ? await surfaceActions.batchDelete(ids)
+        : await batchDelete.mutateAsync(ids);
+      if (deleted >= count) {
+        clear();
+        toast.success(t(($) => $.batch.delete_success, { count }));
       } else {
-        await batchDelete.mutateAsync(ids);
+        toast.error(
+          // `count` drives the plural form and names the failures, which is
+          // what the sentence is about; `deleted` / `failed` are the numbers
+          // it interpolates.
+          t(($) => $.batch.delete_partial, {
+            count: count - deleted,
+            deleted,
+            failed: count - deleted,
+          }),
+        );
       }
-      clear();
-      toast.success(t(($) => $.batch.delete_success, { count }));
+      setDeleteOpen(false);
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
           ? err.message
           : t(($) => $.batch.delete_failed),
       );
-    } finally {
       setDeleteOpen(false);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -269,7 +294,10 @@ export function BatchActionToolbar({
         )}
       </AnimatePresence>
 
-      {count > 0 && <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      {count > 0 && <AlertDialog
+        open={deleteOpen}
+        onOpenChange={(v) => { if (!v && deleting) return; setDeleteOpen(v); }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -277,18 +305,20 @@ export function BatchActionToolbar({
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t(($) => $.batch.delete_dialog_desc, { count })}
-              <span className="mt-2 block text-caption text-muted-foreground">
-                {t(($) => $.batch.delete_dialog_warning)}
-              </span>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>{t(($) => $.batch.cancel)}</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>{t(($) => $.batch.cancel)}</AlertDialogCancel>
+            {/* `AlertDialogAction` here is a plain Button — it does not close
+                the dialog on click — so without the pending state the confirm
+                button stays live for the whole request and a second click
+                fires a second batch delete. */}
             <AlertDialogAction
+              variant="destructive"
               onClick={handleBatchDelete}
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleting}
             >
-              {t(($) => $.batch.delete)}
+              {deleting ? t(($) => $.batch.deleting) : t(($) => $.batch.delete)}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

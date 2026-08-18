@@ -9,25 +9,46 @@ vi.mock("@multica/core/issues/mutations", () => ({
   useDeleteIssue: () => ({ mutateAsync: mockDelete }),
 }));
 
+vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
+
+// Workspace-wide child-progress map, warm exactly as it is on every surface
+// that can open this dialog. `childProgress` drives the "sub-issues become
+// standalone" warning; an empty map stands in for a surface that never loaded
+// it, where the dialog must stay silent rather than claim zero.
+const childProgress = new Map<string, { done: number; total: number }>();
+vi.mock("@tanstack/react-query", () => ({
+  useQuery: ({ queryKey }: { queryKey: string[] }) =>
+    queryKey[0] === "child-progress" ? { data: childProgress } : { data: undefined },
+}));
+vi.mock("@multica/core/issues/queries", () => ({
+  childIssueProgressOptions: () => ({ queryKey: ["child-progress"] }),
+}));
+
 vi.mock("sonner", () => ({
   toast: { success: vi.fn(), error: vi.fn() },
 }));
 
 vi.mock("../i18n", () => ({
   useT: () => ({
-    t: (sel: (x: Record<string, Record<string, string>>) => string) =>
-      sel({
+    t: (
+      sel: (x: Record<string, Record<string, string>>) => string,
+      vars?: Record<string, unknown>,
+    ) => {
+      const raw = sel({
         delete_issue: {
-          title: "Delete issue?",
-          description: "This cannot be undone.",
-          hint: "Sub-issues are deleted too.",
+          title: "Delete this issue?",
+          title_named: "Delete {{identifier}}?",
+          description: "Comments and attachments go with it.",
+          sub_issues_detached: "{{count}} sub-issues become standalone.",
           cancel: "Cancel",
           confirm: "Delete",
           deleting: "Deleting...",
           toast_deleted: "Issue deleted",
           toast_delete_failed: "Delete failed",
         },
-      }),
+      });
+      return raw.replace(/\{\{(\w+)\}\}/g, (_m, k) => String(vars?.[k] ?? ""));
+    },
   }),
 }));
 
@@ -45,7 +66,7 @@ function makeAdapter(
   };
 }
 
-async function deleteWith(
+function renderModal(
   adapter: NavigationAdapter,
   data: Record<string, unknown> | null,
 ) {
@@ -55,6 +76,14 @@ async function deleteWith(
       <DeleteIssueConfirmModal onClose={onClose} data={data} />
     </NavigationProvider>,
   );
+  return onClose;
+}
+
+async function deleteWith(
+  adapter: NavigationAdapter,
+  data: Record<string, unknown> | null,
+) {
+  const onClose = renderModal(adapter, data);
   fireEvent.click(screen.getByText("Delete"));
   await waitFor(() => expect(mockDelete).toHaveBeenCalledWith("issue-1"));
   return onClose;
@@ -63,6 +92,7 @@ async function deleteWith(
 describe("DeleteIssueConfirmModal", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    childProgress.clear();
   });
 
   // The bug this guards (GH #5995): deleting from an issue opened out of My
@@ -112,18 +142,73 @@ describe("DeleteIssueConfirmModal", () => {
     mockDelete.mockRejectedValueOnce(new Error("nope"));
     const adapter = makeAdapter({ canGoBack: () => true });
 
-    render(
-      <NavigationProvider value={adapter}>
-        <DeleteIssueConfirmModal
-          onClose={vi.fn()}
-          data={{ issueId: "issue-1", onDeletedFallbackPath: "/acme/issues" }}
-        />
-      </NavigationProvider>,
-    );
+    // The adapter under assertion must be the one the component got: rendering
+    // a second `makeAdapter()` here left the assertions below pointing at an
+    // object no component ever touched, so they passed no matter what the
+    // failure path did.
+    renderModal(adapter, {
+      issueId: "issue-1",
+      onDeletedFallbackPath: "/acme/issues",
+    });
     fireEvent.click(screen.getByText("Delete"));
 
     await waitFor(() => expect(screen.getByText("Delete")).toBeInTheDocument());
     expect(adapter.back).not.toHaveBeenCalled();
     expect(adapter.replace).not.toHaveBeenCalled();
+  });
+
+  // Opened as often from a row's context menu as from the issue's own page,
+  // where a generic heading gives the user nothing to check their aim against
+  // before a permanent delete. It goes in the title so naming the subject
+  // costs no extra line of prose.
+  it("names the issue being deleted in the title", () => {
+    renderModal(makeAdapter(), { issueId: "issue-1", identifier: "TST-1" });
+
+    expect(screen.getByText("Delete TST-1?")).toBeInTheDocument();
+  });
+
+  it("falls back to the unnamed title when no identifier came through", () => {
+    renderModal(makeAdapter(), { issueId: "issue-1" });
+
+    expect(screen.getByText("Delete this issue?")).toBeInTheDocument();
+  });
+
+  // The server clears the children's parent link rather than deleting them, so
+  // a parent delete quietly promotes every sub-issue to top level.
+  it("warns that sub-issues survive as standalone issues", () => {
+    childProgress.set("issue-1", { done: 1, total: 3 });
+
+    renderModal(makeAdapter(), { issueId: "issue-1", identifier: "TST-1" });
+
+    expect(
+      screen.getByText("3 sub-issues become standalone."),
+    ).toBeInTheDocument();
+  });
+
+  it("stays silent about sub-issues when the issue has none", () => {
+    childProgress.set("other-issue", { done: 0, total: 2 });
+
+    renderModal(makeAdapter(), { issueId: "issue-1", identifier: "TST-1" });
+
+    expect(screen.queryByText(/become standalone/)).not.toBeInTheDocument();
+  });
+
+  // `AlertDialogAction` is a plain Button here — it does not close the dialog
+  // on click — so the pending state is the only thing standing between an
+  // impatient second click and a second DELETE.
+  it("does not fire a second delete while the first is in flight", async () => {
+    let resolveDelete!: () => void;
+    mockDelete.mockImplementationOnce(
+      () => new Promise<void>((res) => { resolveDelete = () => res(); }),
+    );
+
+    renderModal(makeAdapter(), { issueId: "issue-1", identifier: "TST-1" });
+    fireEvent.click(screen.getByText("Delete"));
+
+    await waitFor(() => expect(screen.getByText("Deleting...")).toBeInTheDocument());
+    fireEvent.click(screen.getByText("Deleting..."));
+
+    expect(mockDelete).toHaveBeenCalledTimes(1);
+    resolveDelete();
   });
 });
