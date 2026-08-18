@@ -51,7 +51,73 @@
 #                                 cannot be --parent'ed under it.
 #   SYNC_JIRA_TIMEOUT             default 30 — seconds per acli call
 #   SYNC_JIRA_DISABLE=1           skip the JIRA mirror entirely
+#   SYNC_AUTOFIX_MAX_ATTEMPTS     default 2 — cap on retry/autofix attempts per
+#                                 hop per block reason, so a failure this
+#                                 script can't actually fix still falls through
+#                                 to a human instead of looping forever
+#                                 (ANK-96 postmortem, see below)
+#   SYNC_CI_RETRY_CONCLUSIONS     default "cancelled" — workflow-run conclusions
+#                                 treated as a free flake retry (no autofix
+#                                 budget spent) rather than a real failure
 #
+# ── CI auto-remediation on block (ANK-96 postmortem) ──────────────────────────
+# Blocked used to be a dead end this script never looked at again: every block
+# reason parked until a human read the ticket, diagnosed it and either fixed it
+# by hand or removed the block. In practice this meant genuinely transient or
+# mechanically-fixable CI failures (an intermittent runner flake, a stray
+# version-pin drift between two files in the same sync) sat blocked for a full
+# day even though nothing about them needed human judgement (ANK-96: the dev
+# deploy failed on a `GO_VERSION` pin drift that a `git-diff`-visible one-line
+# bump would have fixed, and instead sat `blocked` for ~24h).
+#
+# stage_blocked() now re-examines dev_deploy / tools_deploy failures on every
+# tick, not just dev_smoke / tools_smoke:
+#   * intermittent  — re-running the SAME run's failed jobs costs one
+#     `gh run rerun --failed` and no autofix-attempt budget; a flaky runner
+#     clears itself without ever bumping stage_entered_at away from the
+#     original failure.
+#   * simple/known  — a small, explicitly-recognised class of fixes (today:
+#     the agent-runtime-base GO_VERSION lagging server/go.mod's `go` directive,
+#     the one root cause behind ANK-96) is applied as a follow-up commit pushed
+#     to the SAME sync branch, which re-triggers dev.yml/publish.yml on
+#     `synchronize`. Bounded by SYNC_AUTOFIX_MAX_ATTEMPTS so a class of failure
+#     this script cannot actually fix still surfaces to a human instead of
+#     spinning.
+#   * unrecognised — falls through to the pre-existing behaviour: parked,
+#     human notified once, no further action.
+# `rollout_stale` and every other reason are unaffected by this section — they
+# have no CI-run failure to re-classify — but do get the human-comment handling
+# below.
+# Every attempt is on the audit thread either way, so "the tick tried X and it
+# didn't help" is exactly as visible as "the tick is stuck and needs you".
+#
+# ── Human comments while blocked (ANK-96 postmortem) ──────────────────────────
+# The second half of the same postmortem: a human resolved the ANK-96 block by
+# commenting "The deployment to development is now successful. Remove block"
+# directly on the sync ticket, without touching `blocked_reason` or the
+# `sync-blocked` label — and the tick never looked at the comment thread at
+# all, so the hop sat blocked for a full day after it was already fixable.
+# stage_blocked() now reads for a new human comment on every tick it is
+# invoked. What happens to it depends on the reason already parked:
+#   * the reasons this script actively re-polls itself (dev_smoke, tools_smoke
+#     via their existing smoke-verdict check; dev_deploy, tools_deploy,
+#     rollout_stale via the auto-remediation above) get an acknowledgement
+#     reply — the human's note was read, but the re-check already in flight is
+#     the thing that actually clears the block, so nothing is force-retried
+#     from the comment alone.
+#   * every other reason (sync_conflict, sync_invariant, unknown_stage, a
+#     stale/interrupted branch, ...) has no automatic re-check today, so a
+#     comment that reads as a resolution (see RESOLUTION_KEYWORDS) triggers
+#     exactly one resume: clear blocked_reason and hand the hop back to the
+#     stage it was in before the block, so THAT stage's own next-tick logic
+#     re-validates state rather than this code guessing the human's fix
+#     worked. Bounded by SYNC_AUTOFIX_MAX_ATTEMPTS per reason, same budget as
+#     the CI autofixes above, so a comment that doesn't actually fix anything
+#     doesn't bounce forever either.
+# Comments are matched by id against `human_comment_seen_<reason>`, so a tick
+# never reacts to the same comment twice, and only comments posted at or after
+# the CURRENT blocked_reason's stage_entered_at count — an old comment from a
+# prior block on this same hop cannot resurrect a new one.
 # ── Throwaway smoke tickets (ANK-43 scope 2) ──────────────────────────────────
 # A hop leaves two disposable Multica issues behind: the tools-smoke dispatch
 # ticket this script creates, and the inner agent-claim check the smoke script
@@ -127,6 +193,9 @@ JIRA_TYPE="${SYNC_JIRA_TYPE:-Task}"
 JIRA_UMBRELLA="${SYNC_JIRA_UMBRELLA:-AIPLAT-166}"
 JIRA_TIMEOUT="${SYNC_JIRA_TIMEOUT:-30}"
 JIRA_DISABLE="${SYNC_JIRA_DISABLE:-}"
+
+AUTOFIX_MAX_ATTEMPTS="${SYNC_AUTOFIX_MAX_ATTEMPTS:-2}"
+CI_RETRY_CONCLUSIONS="${SYNC_CI_RETRY_CONCLUSIONS:-cancelled}"
 
 DEV_HOST="https://agentfarm.development.g2.com"
 TOOLS_HOST="https://agentfarm.g2.com"
@@ -554,6 +623,285 @@ gh_latest_run() {
           | sort_by(.created_at) | last // empty' 2>/dev/null
 }
 
+# ── CI auto-remediation helpers (ANK-96 postmortem) ───────────────────────────
+# Count of autofix/retry attempts already spent on THIS block reason for THIS
+# hop. Keyed by reason so dev_deploy and tools_deploy track separately, and
+# reset implicitly every time a hop starts (fresh ticket, fresh metadata).
+autofix_attempts() { mget "autofix_attempts_$1"; }
+bump_autofix_attempts() {
+  local reason="$1" n; n="$(autofix_attempts "${reason}")"; n="${n:-0}"
+  mset "autofix_attempts_${reason}" "$(( n + 1 ))" number || true
+}
+
+# Re-run only the failed jobs of a completed workflow run, in place, no new
+# commit. Free — does not consume the autofix budget — because it changes
+# nothing about the tree; it is the correct response to a flake and nothing
+# else. `gh run rerun` is a REST-backed CLI command (not a GraphQL mutation),
+# confirmed reachable from the same GitHub App identity that already does
+# every other write in this script.
+gh_rerun_failed() {
+  local runid="$1"
+  [[ -n "${DRY_RUN}" ]] && { log "DRY: rerun failed jobs of run ${runid}"; return 0; }
+  gh run rerun "${runid}" --repo "${FORK_SLUG}" --failed >/dev/null 2>&1 \
+    || { log "could not rerun failed jobs of run ${runid}"; return 1; }
+  return 0
+}
+
+# Grep the failed jobs' logs of a completed run for a pattern, bounded to what
+# we need to classify the failure — never used to decide pass/fail, only to
+# pick which autofix (if any) applies. `--allow-escape-sequences` is required
+# by this `gh` version even for a grep-only consumer; ANSI codes are stripped
+# before matching so they cannot hide or fake a match.
+gh_run_failed_log_grep() {
+  local runid="$1" pattern="$2"
+  gh api "repos/${FORK_SLUG}/actions/runs/${runid}/jobs" --jq '.jobs[] | select(.conclusion=="failure") | .id' 2>/dev/null \
+    | while IFS= read -r jobid; do
+        [[ -z "${jobid}" ]] && continue
+        gh api "repos/${FORK_SLUG}/actions/jobs/${jobid}/logs" --allow-escape-sequences 2>/dev/null \
+          | sed 's/\x1b\[[0-9;]*m//g'
+      done \
+    | grep -qE -- "${pattern}"
+}
+
+# Known-cause autofix (root cause of ANK-96): agent-runtime-base's pinned
+# GO_VERSION lagging server/go.mod's `go` directive fails `go mod download`
+# deterministically with `go: go.mod requires go >= X.Y.Z` on EVERY retry —
+# a rerun can never clear it, only a version bump can. Bumps both places that
+# pin it (the bake file's default and the Dockerfile ARG default, which the
+# bake file's own header comment already says must agree) and pushes straight
+# to the sync branch, so the PR's existing `synchronize` trigger redeploys —
+# same re-trigger path `dev_deploying`'s `cancelled` case already relies on,
+# just via a new commit instead of a label cycle.
+#
+# Deliberately dev_deploy ONLY. tools_deploy runs `publish.yml` against
+# `merge_sha` on `main` — pushing any commit there, autofix or not, is exactly
+# the irreversible step ANK-34 Q4 reserves for a human, and stage_tools_deploying
+# already says "the pipeline deliberately does not roll back" for that reason.
+# A tools_deploy failure gets the free flake-retry below and nothing more.
+#
+# Runs in a throwaway `git worktree`, never the tick's own checkout — the sync
+# branch may be at a different commit than whatever HEAD this script started
+# at, and this must never touch main or the merge upstream-sync.sh already
+# sealed. Reads GO_VERSION / the go.mod directive off the BRANCH TIP on
+# origin, not this checkout, so it is correct even if this checkout is stale.
+apply_go_version_autofix() {
+  local pr branch required current new_sha worktree rc
+  pr="$(mget sync_pr)"
+  branch="$(gh_pr_json "${pr}" | jq -r '.head.ref // empty')"
+  [[ -z "${branch}" ]] && { log "could not resolve the PR branch for the GO_VERSION autofix"; return 1; }
+
+  git fetch --quiet origin "${branch}" || { log "could not fetch ${branch} for the GO_VERSION autofix"; return 1; }
+  required="$(git show "origin/${branch}:server/go.mod" 2>/dev/null \
+    | sed -nE 's/^go[[:space:]]+([0-9]+\.[0-9]+\.[0-9]+).*/\1/p' | head -1)"
+  current="$(git show "origin/${branch}:docker/agent-runtime-base/docker-bake.hcl" 2>/dev/null \
+    | sed -nE 's/^variable "GO_VERSION"[[:space:]]*\{[[:space:]]*default[[:space:]]*=[[:space:]]*"([^"]*)".*/\1/p' | head -1)"
+  if [[ -z "${required}" || -z "${current}" ]]; then
+    log "could not read GO_VERSION/go.mod's go directive off ${branch} — skipping the autofix"
+    return 1
+  fi
+  if [[ "${current}" == "${required}" ]]; then
+    log "GO_VERSION (${current}) already matches server/go.mod — not the cause here"
+    return 1
+  fi
+
+  if [[ -n "${DRY_RUN}" ]]; then
+    log "DRY: would bump GO_VERSION ${current} → ${required} on ${branch}"
+    return 0
+  fi
+
+  worktree="${TMPD}/autofix-gover"
+  rm -rf "${worktree}"
+  # A prior tick killed mid-autofix (pod eviction, task timeout) can leave a
+  # worktree registration pointing at a directory this rm just removed, or a
+  # `_autofix/<branch>` ref still checked out there — `prune` clears the first,
+  # `--force` on both the branch and the add handles the second.
+  git worktree prune >/dev/null 2>&1 || true
+  git branch -D "_autofix/${branch}" >/dev/null 2>&1 || true
+  if ! git worktree add --quiet --force -B "_autofix/${branch}" "${worktree}" "origin/${branch}" >/dev/null 2>&1; then
+    log "could not create the autofix worktree for ${branch}"
+    return 1
+  fi
+  # `set -e` does not abort on a compound command's nonzero status when that
+  # status is captured by an explicit `|| rc=$?` — but WOULD abort the whole
+  # tick on a bare `( ... )` followed by `rc=$?` on the next line, since that
+  # is two separate simple commands. Keep the assignment on the same command.
+  rc=0
+  (
+    cd "${worktree}"
+    sed -i -E "s#(variable \"GO_VERSION\"[[:space:]]*\{[[:space:]]*default[[:space:]]*=[[:space:]]*\")[^\"]*(\")#\1${required}\2#" \
+      docker/agent-runtime-base/docker-bake.hcl
+    sed -i -E "s#^(ARG GO_VERSION=).*#\1${required}#" docker/agent-runtime-base/Dockerfile
+    git add docker/agent-runtime-base/docker-bake.hcl docker/agent-runtime-base/Dockerfile
+    git commit --quiet -m "fix(agent-runtime-base): bump GO_VERSION to ${required} to match server/go.mod"
+    git push --quiet origin "HEAD:${branch}"
+  ) || rc=$?
+  git worktree remove --force "${worktree}" >/dev/null 2>&1 || true
+  git branch -D "_autofix/${branch}" >/dev/null 2>&1 || true
+  if (( rc != 0 )); then
+    log "GO_VERSION autofix commit/push failed for ${branch}"
+    return 1
+  fi
+
+  new_sha="$(gh_pr_json "${pr}" | jq -r '.head.sha // empty')"
+  bump_autofix_attempts dev_deploy
+  mset pr_sha "${new_sha}" string || true
+  mdel blocked_reason
+  mdel notified_blocked_dev_deploy
+  set_sync_label sync-active
+  [[ -n "${DRY_RUN}" ]] || multica issue status "${TICKET}" in_progress >/dev/null 2>&1 || true
+  advance dev_deploying "\`dev.yml\`'s build failed because \`docker/agent-runtime-base\`'s pinned \`GO_VERSION\` (\`${current}\`) is older than \`server/go.mod\`'s \`go ${required}\` directive — every retry would fail identically. Pushed a follow-up commit bumping \`GO_VERSION\` to \`${required}\` (autofix attempt $(autofix_attempts dev_deploy)/${AUTOFIX_MAX_ATTEMPTS}), now at \`${new_sha:0:8}\`. Clearing the \`dev_deploy\` block — \`synchronize\` will re-trigger the dev deploy."
+  say "Applied the GO_VERSION autofix to #${pr}; sync ${TICKET} resumed at dev_deploying."
+  return 0
+}
+
+# A flake retry costs nothing but is only ever attempted once per run id —
+# `autofix_last_retry_run_<reason>` remembers which run this hop already
+# re-ran, so a run stuck retrying forever cannot be re-kicked every 15 minutes.
+# Returns 0 (handled — caller should stop here) whenever the conclusion looks
+# retryable, whether or not the rerun call itself succeeded.
+try_flake_retry() {
+  local reason="$1" runid="$2" conclusion="$3" wf="$4" last
+  [[ " ${CI_RETRY_CONCLUSIONS} " == *" ${conclusion} "* ]] || return 1
+  last="$(mget "autofix_last_retry_run_${reason}")"
+  if [[ "${last}" == "${runid}" ]]; then
+    log "already retried ${reason} run ${runid}; waiting on it"
+    return 0
+  fi
+  if gh_rerun_failed "${runid}"; then
+    mset "autofix_last_retry_run_${reason}" "${runid}" string || true
+    audit "\`${wf}\` [run ${runid}](https://github.com/${FORK_SLUG}/actions/runs/${runid}) concluded \`${conclusion}\`, which looks like a runner-level flake rather than a real regression. Re-ran its failed jobs (no autofix budget spent) — staying \`${reason}\` until the retry reports."
+  fi
+  return 0
+}
+
+# Decide what to do about a dev_deploy failure that stage_blocked() is
+# re-examining: a free retry for a runner-level flake, the one known-cause
+# autofix if the logs match it, or leave it parked (unrecognised failures are
+# exactly what still needs a human — this never widens to guessing).
+try_dev_deploy_autofix() {
+  local runid="$1" conclusion="$2" attempts
+  try_flake_retry dev_deploy "${runid}" "${conclusion}" dev.yml && return 0
+
+  attempts="$(autofix_attempts dev_deploy)"; attempts="${attempts:-0}"
+  if (( attempts >= AUTOFIX_MAX_ATTEMPTS )); then
+    log "autofix budget (${AUTOFIX_MAX_ATTEMPTS}) exhausted for dev_deploy — leaving parked for a human"
+    return 0
+  fi
+
+  if gh_run_failed_log_grep "${runid}" 'go\.mod requires go [>=]+ [0-9]+\.[0-9]+\.[0-9]+'; then
+    apply_go_version_autofix
+    return 0
+  fi
+
+  log "dev_deploy failure on run ${runid} (${conclusion}) does not match a known autofix — leaving parked for a human"
+}
+
+# tools_deploy runs publish.yml against merge_sha on main — see the note on
+# apply_go_version_autofix for why this stops at the free flake retry and
+# never pushes a fix commit.
+try_tools_deploy_autofix() {
+  local runid="$1" conclusion="$2"
+  try_flake_retry tools_deploy "${runid}" "${conclusion}" publish.yml && return 0
+  log "tools_deploy failure on run ${runid} (${conclusion}) is post-merge — no auto-remediation, leaving parked for a human"
+}
+
+# ── Human intervention on a blocked hop ───────────────────────────────────────
+# stage_blocked() used to be one-way for every reason except the two smoke
+# gates: it waited silently for a human to edit metadata or the label by hand.
+# In practice a human resolves a block by commenting on the ticket — "fixed,
+# please continue", "remove block" — without ever touching blocked_reason or
+# the sync-blocked label (ANK-96: a human posted "The deployment to
+# development is now successful. Remove block" and it sat unactioned because
+# nothing ever read it). This surfaces that comment every tick and, for the
+# reasons this script can safely re-attempt on its own, acts on it — once per
+# comment, so a tick never re-reacts to the same note twice.
+RESOLUTION_KEYWORDS='resolved|fixed|retry|remove.?block|unblock|clear(ed)?|resume|go ahead|proceed|deploy(ment)?.*(now )?(successful|passed|green|works|ok)'
+
+latest_unseen_human_comment() {
+  local reason="$1" since seen comments
+  since="$(mget stage_entered_at)"; since="${since:-0}"
+  seen="$(mget "human_comment_seen_${reason}")"
+  comments="$(multica issue comment list "${TICKET}" --output json 2>/dev/null || echo '[]')"
+  printf '%s' "${comments}" | jq -c --argjson since "${since}" --arg seen "${seen}" '
+    [ .[] | select(.author_type == "member")
+          | select((.created_at | fromdateiso8601) >= $since)
+          | select(.id != $seen) ]
+    | sort_by(.created_at) | last // empty' 2>/dev/null
+}
+
+# Reasons this script already re-polls on its own every tick: the two smoke
+# gates, dev_deploy/tools_deploy (try_dev_deploy_autofix / try_tools_deploy_autofix)
+# and rollout_stale (re-reads deployed_version() below). A comment on one of
+# these gets acknowledged, not force-retried — the re-check already running is
+# what actually clears it, and force-retrying on top of that could race it
+# (e.g. resetting a rerun already in flight).
+is_self_repolled_reason() {
+  case "$1" in
+    dev_smoke|tools_smoke|dev_deploy|tools_deploy|rollout_stale) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Reads for a new human comment on the blocked ticket and, for reasons with no
+# automatic re-check, resumes the hop once if the comment reads as a
+# resolution. Sets HUMAN_COMMENT_ACTED=1 when it actually resumed the hop this
+# tick, so the stage_blocked() caller does not also fall through to the
+# (now stale) reason-based wait case in the same tick.
+handle_human_comment() {
+  local reason="$1" c id body quoted attempts resume_stage
+  HUMAN_COMMENT_ACTED=0
+  c="$(latest_unseen_human_comment "${reason}")"
+  [[ -z "${c}" || "${c}" == "null" ]] && return 1
+  id="$(printf '%s' "${c}" | jq -r '.id')"
+  body="$(printf '%s' "${c}" | jq -r '.content // empty')"
+  mset "human_comment_seen_${reason}" "${id}" string || true
+  quoted="$(printf '%s' "${body}" | head -5 | sed 's/^/> /')"
+
+  if is_self_repolled_reason "${reason}"; then
+    # Already re-checked against live GH/PR state every tick regardless of any
+    # comment — acknowledge so the human sees their note was read, not just
+    # eventually superseded by a silent auto-clear.
+    audit "Noticed a comment on this blocked hop — re-checking \`${reason}\` against current CI/PR state now.
+
+${quoted}"
+    return 0
+  fi
+
+  if ! printf '%s' "${body}" | grep -qiE "${RESOLUTION_KEYWORDS}"; then
+    audit "Noticed a comment on this blocked hop. \`${reason}\` has no automatic re-check, so this still needs your explicit next step (see the block note above) unless your comment already resolved it.
+
+${quoted}"
+    return 0
+  fi
+
+  attempts="$(autofix_attempts "retry_${reason}")"; attempts="${attempts:-0}"
+  if (( attempts >= AUTOFIX_MAX_ATTEMPTS )); then
+    audit "A comment looks like it's marking \`${reason}\` resolved, but this hop already used its resume budget (${AUTOFIX_MAX_ATTEMPTS}) on that reason. Leaving it blocked for you to clear by hand (edit \`blocked_reason\` or close the ticket).
+
+${quoted}"
+    return 0
+  fi
+
+  # Hand the hop back to the stage it was actually blocked FROM, so that
+  # stage's own next-tick logic re-validates live state rather than this code
+  # assuming the human's fix worked. Falls back to `syncing` only for a block
+  # raised before any stage was recorded (defensive — block() always records
+  # one today).
+  resume_stage="$(mget "blocked_from_stage_${reason}")"
+  resume_stage="${resume_stage:-syncing}"
+  bump_autofix_attempts "retry_${reason}"
+  mdel blocked_reason
+  mdel "notified_blocked_${reason}"
+  mdel "blocked_from_stage_${reason}"
+  set_sync_label sync-active
+  [[ -n "${DRY_RUN}" ]] || multica issue status "${TICKET}" in_progress >/dev/null 2>&1 || true
+  advance "${resume_stage}" "A comment looks like it's marking \`${reason}\` resolved — resuming at \`${resume_stage}\` (attempt $(( attempts + 1 ))/${AUTOFIX_MAX_ATTEMPTS}). That stage will re-validate live state on its own rather than trusting this blindly.
+
+${quoted}"
+  HUMAN_COMMENT_ACTED=1
+  return 0
+}
+
 # Minutes since the current stage was entered, or empty if unknown.
 stage_age_min() {
   local entered; entered="$(mget stage_entered_at)"
@@ -628,11 +976,33 @@ ${note}"
 }
 
 block() {
-  local reason="$1" detail="$2"
+  local reason="$1" detail="$2" prev_reason prev_stage
+  prev_reason="$(mget blocked_reason)"
+  # Recorded before advance() overwrites pipeline_stage to `blocked`, so an
+  # unrecognised reason that a human resolves by comment (see
+  # handle_human_comment) can hand the hop back to the stage it was actually
+  # in, rather than guessing. Only set on a genuine reason change — re-blocking
+  # on the same reason must not clobber the original stage with `blocked`.
+  if [[ "${prev_reason}" != "${reason}" ]]; then
+    prev_stage="$(mget pipeline_stage)"
+    [[ -n "${prev_stage}" && "${prev_stage}" != "blocked" ]] \
+      && mset "blocked_from_stage_${reason}" "${prev_stage}" string || true
+  fi
   mset blocked_reason "${reason}" string || true
-  advance blocked "**Blocked — \`${reason}\`**
+  # Re-blocking on the SAME reason is now routine: stage_blocked() actively
+  # re-polls dev_deploy/tools_deploy/rollout_stale every tick (ANK-96 /
+  # AIPLAT-218 — a dev-deploy failure that later went green sat blocked
+  # indefinitely because nothing ever looked again). Without this guard every
+  # one of those polls would re-post the same audit/JIRA comment and reset
+  # stage_entered_at, turning a quiet retry into 15-minute spam. A genuine
+  # reason CHANGE (or the first block) still reports as before.
+  if [[ "${prev_reason}" != "${reason}" ]]; then
+    advance blocked "**Blocked — \`${reason}\`**
 
 ${detail}"
+  else
+    log "still blocked on ${reason} — not re-posting an unchanged block note"
+  fi
   set_sync_label sync-blocked
   [[ -n "${DRY_RUN}" ]] || multica issue status "${TICKET}" blocked >/dev/null 2>&1 || true
   notify_once "blocked_${reason}" "This sync is **blocked** on \`${reason}\` and needs a human.
@@ -1188,11 +1558,15 @@ Hop \`$(mget sync_from)\` → \`$(mget sync_to)\` complete: merged, deployed, ro
   esac
 }
 
-# Only smoke gates auto-clear, and only for the exact artifact they attest (Q6).
-# Everything else — conflicts, invariant breaches, deploy failures, rollout_stale
-# — parks until a human clears blocked_reason.
+# Smoke gates auto-clear on the exact artifact they attest (Q6). dev_deploy and
+# tools_deploy re-examine their latest CI run every tick (ANK-96 postmortem —
+# see the header comment) via try_dev_deploy_autofix / try_tools_deploy_autofix.
+# Every other reason — conflicts, invariant breaches, rollout_stale, unknown —
+# has no automatic re-check; it parks until a human clears blocked_reason,
+# though a resolution-looking comment can still resume it once (see
+# handle_human_comment).
 stage_blocked() {
-  local reason pr verdict tstatus
+  local reason pr verdict tstatus run status conclusion runid
   reason="$(mget blocked_reason)"
   pr="$(mget sync_pr)"
 
@@ -1210,6 +1584,16 @@ stage_blocked() {
       return 0
       ;;
   esac
+
+  # Read for a new human comment before deciding anything else — see the
+  # "Human comments while blocked" header comment. HUMAN_COMMENT_ACTED=1 means
+  # this tick already resumed the hop from the comment; the reason-based checks
+  # below would just re-evaluate a reason that is no longer current, so skip.
+  handle_human_comment "${reason}"
+  if [[ "${HUMAN_COMMENT_ACTED}" == "1" ]]; then
+    say "Sync ${TICKET} resumed by a human comment on the blocked ticket."
+    return 0
+  fi
 
   case "${reason}" in
     dev_smoke)
@@ -1236,6 +1620,80 @@ stage_blocked() {
         say "Tools smoke now passes; sync ${TICKET} auto-unblocked."
       else
         log "still blocked on tools_smoke"
+      fi
+      ;;
+    dev_deploy)
+      # Re-derive against the CURRENT pr_sha, not whatever sha the original
+      # block fired on: apply_go_version_autofix advances the stage and clears
+      # the block itself on success, so getting here at all means either that
+      # sha's run is still the latest word, or an autofix already moved
+      # pr_sha and this read is simply confirming the retry's own run.
+      run="$(gh_latest_run dev.yml "$(mget pr_sha)")"
+      if [[ -z "${run}" ]]; then
+        log "no dev.yml run yet for $(mget pr_sha) — waiting"
+      else
+        status="$(printf '%s' "${run}" | jq -r '.status')"
+        conclusion="$(printf '%s' "${run}" | jq -r '.conclusion // ""')"
+        runid="$(printf '%s' "${run}" | jq -r '.id')"
+        if [[ "${status}" != "completed" ]]; then
+          log "dev deploy ${runid} ${status} — waiting"
+        elif [[ "${conclusion}" == "success" ]]; then
+          # The retry (or autofix) actually landed. Same handoff dev_deploying
+          # uses on a green run: request the dev smoke and move on.
+          if [[ "$(smoke_requested "${pr}" pr_sha "$(mget pr_sha)")" == "0" ]]; then
+            gh_pr_comment "${pr}" "<!-- smoke-request pr_sha=$(mget pr_sha) -->"
+          fi
+          mdel blocked_reason
+          mdel "notified_blocked_${reason}"
+          set_sync_label sync-active
+          [[ -n "${DRY_RUN}" ]] || multica issue status "${TICKET}" in_progress >/dev/null 2>&1 || true
+          advance dev_smoke_pending "Dev deploy [run ${runid}](https://github.com/${FORK_SLUG}/actions/runs/${runid}) is now green for \`$(mget pr_sha | cut -c1-8)\` — clearing the \`dev_deploy\` block. Requested a dev smoke; the dev-workspace autopilot picks it up from there."
+          say "Dev deploy now green; sync ${TICKET} auto-unblocked."
+        else
+          try_dev_deploy_autofix "${runid}" "${conclusion}"
+        fi
+      fi
+      ;;
+    tools_deploy)
+      run="$(gh_latest_run publish.yml "$(mget merge_sha)")"
+      if [[ -z "${run}" ]]; then
+        log "no publish.yml run yet for $(mget merge_sha) — waiting"
+      else
+        status="$(printf '%s' "${run}" | jq -r '.status')"
+        conclusion="$(printf '%s' "${run}" | jq -r '.conclusion // ""')"
+        runid="$(printf '%s' "${run}" | jq -r '.id')"
+        if [[ "${status}" != "completed" ]]; then
+          log "tools deploy ${runid} ${status} — waiting"
+        elif [[ "${conclusion}" == "success" ]]; then
+          mdel blocked_reason
+          mdel "notified_blocked_${reason}"
+          set_sync_label sync-active
+          [[ -n "${DRY_RUN}" ]] || multica issue status "${TICKET}" in_progress >/dev/null 2>&1 || true
+          advance tools_deploying "Tools deploy [run ${runid}](https://github.com/${FORK_SLUG}/actions/runs/${runid}) is now green for \`$(mget merge_sha | cut -c1-8)\` — clearing the \`tools_deploy\` block. Watching for the rollout."
+          say "Tools deploy now green; sync ${TICKET} auto-unblocked."
+        else
+          try_tools_deploy_autofix "${runid}" "${conclusion}"
+        fi
+      fi
+      ;;
+    rollout_stale)
+      # The staleness guard fires on a slow rollout, not a failed one — the
+      # deploy itself may still complete after the deadline (a busy runner, a
+      # slow node roll). Re-reading our own runtime version costs nothing and
+      # is exactly the signal stage_tools_deploying already trusts for "did it
+      # actually roll", so a late-but-successful rollout clears on its own
+      # instead of waiting for a human to notice and re-run the same check.
+      local deployed target
+      deployed="$(deployed_version)" || deployed=""
+      target="$(mget sync_to)"
+      if [[ -n "${deployed}" && "${deployed}" == "${target}" ]]; then
+        mdel blocked_reason
+        mdel "notified_blocked_${reason}"
+        set_sync_label sync-active
+        [[ -n "${DRY_RUN}" ]] || multica issue status "${TICKET}" in_progress >/dev/null 2>&1 || true
+        dispatch_tools_smoke "$(mget merge_sha)"
+      else
+        log "still blocked on rollout_stale — runtime reports ${deployed:-unknown}, waiting for ${target}"
       fi
       ;;
     *)

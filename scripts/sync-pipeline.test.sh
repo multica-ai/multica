@@ -385,6 +385,140 @@ else
   fi
 fi
 
+# ── CI auto-remediation on block (ANK-96) ─────────────────────────────────────
+# The postmortem this fixes: a dev-deploy failure that later went green sat
+# `blocked` for ~24h because nothing ever looked again, and a human's "remove
+# block" comment on the ticket was never read. These tests exercise the parts
+# that don't need live GitHub/Multica state; the GO_VERSION autofix's git
+# plumbing and the try_*_deploy_autofix orchestration are exercised for real
+# only against a live sync (covered by manual verification, same as the rest
+# of the CI-facing stage handlers in this file).
+echo "==> sync-tick.sh: CI auto-remediation classification"
+
+expect_eq "dev_smoke is self-repolled" "0" \
+  "$(is_self_repolled_reason dev_smoke; echo $?)"
+expect_eq "tools_smoke is self-repolled" "0" \
+  "$(is_self_repolled_reason tools_smoke; echo $?)"
+expect_eq "dev_deploy is self-repolled" "0" \
+  "$(is_self_repolled_reason dev_deploy; echo $?)"
+expect_eq "tools_deploy is self-repolled" "0" \
+  "$(is_self_repolled_reason tools_deploy; echo $?)"
+expect_eq "rollout_stale is self-repolled" "0" \
+  "$(is_self_repolled_reason rollout_stale; echo $?)"
+expect_eq "sync_conflict is NOT self-repolled (needs a human)" "1" \
+  "$(is_self_repolled_reason sync_conflict; echo $?)"
+expect_eq "unknown_stage is NOT self-repolled (needs a human)" "1" \
+  "$(is_self_repolled_reason unknown_stage; echo $?)"
+
+# The exact ANK-96 comment that motivated this: it must be recognised as a
+# resolution so handle_human_comment() does not repeat that miss.
+expect_eq "the actual ANK-96 comment reads as a resolution" "0" \
+  "$(printf '%s' 'The deployment to development is now successful. Remove block' \
+     | grep -qiE "${RESOLUTION_KEYWORDS}"; echo $?)"
+expect_eq "'please retry' reads as a resolution" "0" \
+  "$(printf '%s' 'please retry' | grep -qiE "${RESOLUTION_KEYWORDS}"; echo $?)"
+expect_eq "'unblock this' reads as a resolution" "0" \
+  "$(printf '%s' 'unblock this' | grep -qiE "${RESOLUTION_KEYWORDS}"; echo $?)"
+expect_eq "an unrelated status update does not read as a resolution" "1" \
+  "$(printf '%s' 'looking into it, will update later' \
+     | grep -qiE "${RESOLUTION_KEYWORDS}"; echo $?)"
+
+# ── stub multica for the metadata/label/comment writes below ────────────────
+# Fakes just enough of the CLI surface so block()/mset()/mdel()/set_sync_label()
+# run their real logic against in-memory META_JSON without touching the actual
+# workspace. `issue metadata list`/`label list` return empty so mget/label_id
+# behave as if nothing exists remotely; every write subcommand exits 0.
+AUTOFIX_STUB_DIR="${TMPD}/autofix-test-stub"
+mkdir -p "${AUTOFIX_STUB_DIR}"
+cat > "${AUTOFIX_STUB_DIR}/multica" <<'STUB'
+#!/usr/bin/env bash
+case "$1 $2" in
+  "issue metadata"*) [[ "$3" == "list" ]] && echo '{}' ;;
+  "label list")      echo '[]' ;;
+esac
+exit 0
+STUB
+chmod +x "${AUTOFIX_STUB_DIR}/multica"
+
+echo "==> sync-tick.sh: block() dedups a re-block on the same reason"
+# `advance()` is the only thing that logs "stage → blocked" to stderr, so
+# counting that line is a direct proxy for "did block() re-post", independent
+# of now_epoch()'s subshell-local counter not surviving back into this scope.
+(
+  PATH="${AUTOFIX_STUB_DIR}:${PATH}"
+  TICKET="test-ticket-autofix"
+  META_JSON='{}'
+  DRY_RUN=""
+
+  block dev_deploy "first failure" >/dev/null
+  echo "REASON:$(mget blocked_reason)"
+  log "---after-first---"
+  block dev_deploy "second failure, same reason" >/dev/null
+  log "---after-second---"
+  block dev_deploy_never_started "a genuinely different reason" >/dev/null
+  log "---after-third---"
+) > "${AUTOFIX_STUB_DIR}/result" 2>"${AUTOFIX_STUB_DIR}/result.stderr"
+BLOCK_RESULT="$(cat "${AUTOFIX_STUB_DIR}/result")"
+br_reason="$(printf '%s\n' "${BLOCK_RESULT}" | sed -n 's/^REASON://p')"
+# `grep -c` exits 1 on a zero count, which would kill this whole script under
+# `set -e` inside a `$(...)` assignment — `|| true` keeps a legitimate "0" a
+# passing read instead of an abort.
+advances_after_first="$(sed -n '1,/---after-first---/p' "${AUTOFIX_STUB_DIR}/result.stderr" | grep -c 'stage → blocked' || true)"
+advances_after_second="$(sed -n '/---after-first---/,/---after-second---/p' "${AUTOFIX_STUB_DIR}/result.stderr" | grep -c 'stage → blocked' || true)"
+advances_after_third="$(sed -n '/---after-second---/,/---after-third---/p' "${AUTOFIX_STUB_DIR}/result.stderr" | grep -c 'stage → blocked' || true)"
+expect_eq "block() records the reason" "dev_deploy" "${br_reason}"
+expect_eq "the first block advances the stage once" "1" "${advances_after_first}"
+expect_eq "re-blocking on the SAME reason does not re-advance the stage" "0" "${advances_after_second}"
+expect_eq "blocking on a DIFFERENT reason still advances the stage" "1" "${advances_after_third}"
+
+echo "==> sync-tick.sh: autofix attempt counter"
+(
+  PATH="${AUTOFIX_STUB_DIR}:${PATH}"
+  TICKET="test-ticket-autofix"
+  META_JSON='{}'
+  DRY_RUN=""
+  n0="$(autofix_attempts dev_deploy)"
+  bump_autofix_attempts dev_deploy
+  n1="$(autofix_attempts dev_deploy)"
+  bump_autofix_attempts dev_deploy
+  n2="$(autofix_attempts dev_deploy)"
+  # A different reason's counter must not share state with dev_deploy's.
+  n_other="$(autofix_attempts tools_deploy)"
+  printf '%s|%s|%s|%s\n' "${n0:-0}" "${n1}" "${n2}" "${n_other:-0}"
+) > "${AUTOFIX_STUB_DIR}/counter-result" 2>/dev/null
+COUNTER_RESULT="$(cat "${AUTOFIX_STUB_DIR}/counter-result")"
+IFS='|' read -r ac0 ac1 ac2 ac_other <<< "${COUNTER_RESULT}"
+expect_eq "no attempts yet reads as unset" "0" "${ac0}"
+expect_eq "first bump → 1" "1" "${ac1}"
+expect_eq "second bump → 2" "2" "${ac2}"
+expect_eq "a different reason's counter is independent" "0" "${ac_other}"
+
+echo "==> sync-tick.sh: flake retry is attempted once per run id"
+cat > "${AUTOFIX_STUB_DIR}/gh" <<'STUB'
+#!/usr/bin/env bash
+[[ "$1 $2" == "run rerun" ]] && { echo "$3" >> "${GH_RERUN_LOG}"; exit 0; }
+exit 1
+STUB
+chmod +x "${AUTOFIX_STUB_DIR}/gh"
+(
+  PATH="${AUTOFIX_STUB_DIR}:${PATH}"
+  TICKET="test-ticket-autofix"
+  META_JSON='{}'
+  DRY_RUN=""
+  export GH_RERUN_LOG="${AUTOFIX_STUB_DIR}/rerun.log"
+  : > "${GH_RERUN_LOG}"
+  try_flake_retry dev_deploy 999 cancelled dev.yml >/dev/null
+  try_flake_retry dev_deploy 999 cancelled dev.yml >/dev/null   # same run id — must not re-fire
+  try_flake_retry dev_deploy 1000 cancelled dev.yml >/dev/null  # a new run id — fires again
+  cat "${GH_RERUN_LOG}"
+) > "${AUTOFIX_STUB_DIR}/rerun-result" 2>/dev/null
+RERUN_CALLS="$(wc -l < "${AUTOFIX_STUB_DIR}/rerun-result" | tr -d ' ')"
+RERUN_IDS="$(tr '\n' ',' < "${AUTOFIX_STUB_DIR}/rerun-result")"
+expect_eq "the same run id is only rerun once" "2" "${RERUN_CALLS}"
+expect_eq "rerun fires for 999 then 1000, not a repeated 999" "999,1000," "${RERUN_IDS}"
+expect_eq "a non-retryable conclusion is left to the caller" \
+  "1" "$(try_flake_retry dev_deploy 2000 failure dev.yml >/dev/null; echo $?)"
+
 echo
 if (( FAILURES > 0 )); then
   printf '✗ %s check(s) failed.\n' "${FAILURES}"
