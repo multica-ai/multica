@@ -14,12 +14,15 @@ class FakeWebSocket {
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
   readyState = 0;
+  sent: string[] = [];
   constructor(url: string) {
     FakeWebSocket.lastUrl = url;
     FakeWebSocket.lastInstance = this;
   }
   close() {}
-  send() {}
+  send(data: string) {
+    this.sent.push(data);
+  }
 }
 
 describe("WSClient", () => {
@@ -398,6 +401,46 @@ describe("WSClient", () => {
       vi.runOnlyPendingTimers();
       simulateAuthAck();
 
+      expect(onReconnect).toHaveBeenCalledTimes(1);
+    });
+
+    it("reconnects the cookie-auth Tag socket to the same workspace without a token frame", () => {
+      vi.stubGlobal(
+        "Math",
+        new Proxy(Math, {
+          get(target, prop) {
+            if (prop === "random") return () => 0.5;
+            return (target as any)[prop];
+          },
+        }),
+      );
+
+      const ws = new WSClient("wss://vibes.test/ws/tag", {
+        cookieAuth: true,
+      });
+      ws.setAuth(null, "workspace-b");
+      const onReconnect = vi.fn();
+      ws.onReconnect(onReconnect);
+      ws.connect();
+
+      const first = FakeWebSocket.lastInstance!;
+      first.onopen?.();
+      expect(first.sent).toEqual([]);
+
+      first.onclose?.();
+      vi.advanceTimersByTime(1000);
+
+      const second = FakeWebSocket.lastInstance!;
+      expect(second).not.toBe(first);
+      const reconnectUrl = new URL(FakeWebSocket.lastUrl!);
+      expect(reconnectUrl.pathname).toBe("/ws/tag");
+      expect(reconnectUrl.searchParams.get("workspace_slug")).toBe(
+        "workspace-b",
+      );
+      expect(reconnectUrl.searchParams.has("token")).toBe(false);
+
+      second.onopen?.();
+      expect(second.sent).toEqual([]);
       expect(onReconnect).toHaveBeenCalledTimes(1);
     });
 

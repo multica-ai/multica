@@ -29,6 +29,14 @@ func (m *mockMembershipChecker) IsMember(_ context.Context, _, _ string) bool {
 	return true
 }
 
+type workspaceMembershipChecker struct {
+	allowed map[string]bool
+}
+
+func (m *workspaceMembershipChecker) IsMember(_ context.Context, userID, workspaceID string) bool {
+	return m.allowed[userID+":"+workspaceID]
+}
+
 func makeTestToken(t *testing.T) string {
 	return makeTestTokenForUser(t, testUserID, "")
 }
@@ -248,6 +256,103 @@ func TestHub_ClientDisconnect(t *testing.T) {
 	countAfter := totalClients(hub)
 	if countAfter != 0 {
 		t.Fatalf("expected 0 clients after disconnect, got %d", countAfter)
+	}
+}
+
+func TestHandleWebSocket_TagCookieSessionIsScopedToResolvedWorkspace(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	membership := &workspaceMembershipChecker{allowed: map[string]bool{
+		"user-b:workspace-b": true,
+	}}
+	resolveSlug := func(_ context.Context, slug string) (string, error) {
+		if slug != "workspace-b" {
+			return "", errors.New("workspace not found")
+		}
+		return "workspace-b", nil
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/tag", func(w http.ResponseWriter, r *http.Request) {
+		HandleWebSocket(hub, membership, nil, resolveSlug, w, r)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	headers := http.Header{}
+	headers.Set("Cookie", auth.AuthCookieName+"="+makeTestTokenForUser(t, "user-b", ""))
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/tag?workspace_slug=workspace-b"
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if err != nil {
+		status := 0
+		if response != nil {
+			status = response.StatusCode
+		}
+		t.Fatalf("cookie-auth Tag WebSocket failed with status %d: %v", status, err)
+	}
+
+	waitFor(t, "workspace-b subscription", func() bool {
+		return hub.HasLocalSubscribers(ScopeWorkspace, "workspace-b")
+	})
+	if hub.HasLocalSubscribers(ScopeWorkspace, "workspace-a") {
+		t.Fatal("Tag WebSocket must not subscribe to the previous workspace")
+	}
+
+	message := []byte(`{"type":"daemon:register","payload":{"workspace_id":"workspace-b"}}`)
+	hub.BroadcastToScope(ScopeWorkspace, "workspace-b", message)
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, received, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatalf("failed to read workspace-scoped event: %v", err)
+	}
+	if string(received) != string(message) {
+		t.Fatalf("received %s, want %s", received, message)
+	}
+
+	if err := conn.Close(); err != nil {
+		t.Fatalf("close Tag WebSocket: %v", err)
+	}
+	waitFor(t, "workspace-b subscription cleanup", func() bool {
+		return !hub.HasLocalSubscribers(ScopeWorkspace, "workspace-b")
+	})
+}
+
+func TestHandleWebSocket_TagCookieSessionRejectsNonMemberBeforeUpgrade(t *testing.T) {
+	hub := NewHub()
+	go hub.Run()
+
+	membership := &workspaceMembershipChecker{allowed: map[string]bool{}}
+	resolveSlug := func(_ context.Context, slug string) (string, error) {
+		return "workspace-b", nil
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/ws/tag", func(w http.ResponseWriter, r *http.Request) {
+		HandleWebSocket(hub, membership, nil, resolveSlug, w, r)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	headers := http.Header{}
+	headers.Set("Cookie", auth.AuthCookieName+"="+makeTestTokenForUser(t, "user-a", ""))
+	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws/tag?workspace_slug=workspace-b"
+	conn, response, err := websocket.DefaultDialer.Dial(wsURL, headers)
+	if conn != nil {
+		conn.Close()
+		t.Fatal("non-member unexpectedly upgraded to a Tag WebSocket")
+	}
+	if err == nil {
+		t.Fatal("non-member Tag WebSocket should be rejected")
+	}
+	if response == nil || response.StatusCode != http.StatusForbidden {
+		status := 0
+		if response != nil {
+			status = response.StatusCode
+		}
+		t.Fatalf("non-member status = %d, want %d", status, http.StatusForbidden)
+	}
+	if totalClients(hub) != 0 {
+		t.Fatalf("non-member rejection registered %d clients", totalClients(hub))
 	}
 }
 
