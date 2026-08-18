@@ -9,7 +9,7 @@ const TASK_TERMS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bissue\b/gu, 'task'],
 ];
 
-const TASK_RESOURCE_NAMESPACES = ['issues', 'modals'] as const;
+const TASK_RESOURCE_NAMESPACES = ['issues', 'modals', 'projects'] as const;
 
 function adaptTaskTerms(value: unknown): unknown {
   if (typeof value === 'string') {
