@@ -315,6 +315,7 @@ var SupportedTypes = []string{
 	"grok",
 	"qwen",
 	"qwenpaw",
+	"mcode",
 	"dim",
 }
 
@@ -457,6 +458,7 @@ var launchHeaders = map[string]string{
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
 	"dim":         "dim acp",
+	"mcode":       "mcode acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an
