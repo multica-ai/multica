@@ -1,6 +1,6 @@
--- Restore the whitelist as it was after 326 (before 327 added zcode).
--- Existing ZCode rows remain valid because the replacement constraint is NOT
--- VALID, but new ZCode profiles are blocked.
+-- Add ZCode (Z.ai, driven over ACP through the zcode-acp-server bridge) as
+-- a first-party protocol family. NOT VALID preserves historical-row tolerance
+-- while enforcing the expanded whitelist for new rows.
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
 
 ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
@@ -25,5 +25,9 @@ ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
         'deveco',
         'grok',
         'qwen',
-        'qwenpaw'
+        'qwenpaw',
+        'mcode',
+        'dim',
+        'zeroclaw',
+        'zcode'
     )) NOT VALID;

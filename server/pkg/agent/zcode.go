@@ -120,7 +120,10 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// request, and the bridge's default session mode is already yolo, so no
 	// permission preset needs lifting (unlike dim).
 	zcodeArgs := filterCustomArgs(opts.CustomArgs, zcodeBlockedArgs, b.cfg.Logger)
-	cmd := exec.CommandContext(runCtx, execPath, zcodeArgs...)
+	// Build the *exec.Cmd through Config.commandAt so a custom runtime
+	// profile's launch prefix (fixed_args, GH #7046) is applied — the same
+	// boundary every other backend routes through.
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, zcodeArgs...)
 	hideAgentWindow(cmd)
 	// Cancellation is graceful-first: neutralise exec's instant SIGKILL so
 	// the watcher below gets to deliver session/cancel first (the bridge
@@ -128,7 +131,7 @@ func (b *zcodeBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	// WaitDelay is the hard backstop that reaps a bridge ignoring it.
 	cmd.Cancel = func() error { return nil }
 	cmd.WaitDelay = zcodeCancelWaitDelay
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", zcodeArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(zcodeArgs))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
