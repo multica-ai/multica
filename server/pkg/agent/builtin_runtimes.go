@@ -70,10 +70,11 @@ type BuiltinRuntime struct {
 }
 
 // ModelDiscoveryFunc discovers available models for a runtime identity.
-// It receives the context and the resolved executable path, and returns
-// a model catalog. When the binary is missing or too old, it returns an
-// empty slice (ListModels swallows the error and degrades to manual entry).
-type ModelDiscoveryFunc func(ctx context.Context, executablePath string) ([]Model, error)
+// It receives the context and the resolved command — executable plus the
+// runtime's launch prefix — and returns a model catalog. When the binary is
+// missing or too old, it returns an empty slice (ListModels swallows the
+// error and degrades to manual entry).
+type ModelDiscoveryFunc func(ctx context.Context, runtimeCmd Command) ([]Model, error)
 
 // BuiltinRuntimes is the registry of built-in runtime identities that are
 // NOT in SupportedTypes (they are protocol-family derivatives, not families

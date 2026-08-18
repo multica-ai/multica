@@ -72,6 +72,7 @@ import { useSkillPermissions } from "@multica/core/permissions";
 import { CapabilityBanner } from "@multica/ui/components/common/capability-banner";
 import {
   isRefreshableOrigin,
+  originSourceUrl,
   readOrigin,
   totalFileCount,
   type OriginInfo,
@@ -307,6 +308,7 @@ function SkillIdentity({
   const timeAgo = useTimeAgo();
   const originLabel = useOriginLabel(origin, originRuntime);
   const isRuntimeOrigin = origin?.type === "runtime_local";
+  const sourceUrl = originSourceUrl(origin);
 
   return (
     <div className="shrink-0 border-b px-4 py-3 sm:px-6">
@@ -332,7 +334,25 @@ function SkillIdentity({
               ) : (
                 <Download className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
               )}
-              <span className="truncate">{originLabel}</span>
+              {sourceUrl ? (
+                <Tooltip>
+                  <TooltipTrigger
+                    render={
+                      <a
+                        href={sourceUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="truncate hover:underline"
+                      >
+                        {originLabel}
+                      </a>
+                    }
+                  />
+                  <TooltipContent side="top">{sourceUrl}</TooltipContent>
+                </Tooltip>
+              ) : (
+                <span className="truncate">{originLabel}</span>
+              )}
             </span>
           )}
           <span className="inline-flex items-center gap-1.5">

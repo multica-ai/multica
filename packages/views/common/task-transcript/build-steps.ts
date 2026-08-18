@@ -358,6 +358,27 @@ export function timelineTicks(totalMs: number, maxTicks = 6): number[] {
   return ticks;
 }
 
+/** A bar thinner than this would vanish; a fast call has to stay clickable. */
+const SEGMENT_MIN_PX = 3;
+
+/**
+ * Where one segment sits on its lane, as CSS.
+ *
+ * The width floor is what makes this more than two percentages: a 40ms call in
+ * a 40-minute run rounds to a fraction of a pixel, so every bar is given a
+ * visible minimum and zooming is what makes its width truthful. That floor is
+ * also why `left` is clamped — a sliver starting at 99.99% would otherwise
+ * paint its 3px past the end of the axis, and those 3px of scrollable overflow
+ * hand the track a horizontal scrollbar it has nothing to scroll with (#6278).
+ */
+export function laneSegmentPosition(
+  segment: LaneSegment,
+  totalMs: number,
+): { left: string; width: string } {
+  const width = `max(${SEGMENT_MIN_PX}px, ${(segment.durationMs / totalMs) * 100}%)`;
+  return { left: `min(${(segment.startMs / totalMs) * 100}%, 100% - ${width})`, width };
+}
+
 /**
  * How the tool lane's time splits by what the calls were doing.
  *

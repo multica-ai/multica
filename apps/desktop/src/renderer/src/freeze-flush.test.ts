@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Two regressions are pinned here, both found in review of MUL-5345.
  *

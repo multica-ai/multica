@@ -533,8 +533,10 @@ func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
 //
 // The two modes are expressed as a router rather than two concatenated step
 // lists: the mode-specific status rules live INSIDE their own mode block so
-// "own the status arc" and "do not touch the status" can never be read as
-// peer instructions with no arbitration.
+// the unconditional arc and the conditional one can never be read as peer
+// instructions with no arbitration. Ownership mode opens the arc on every
+// turn (the trigger itself is the intent); Reply mode opens it only when the
+// turn does substantive work on an issue assigned to this agent.
 //
 // Step 3 asks for a roots scan first, not `--recent 10` (MUL-5372). `--recent N`
 // caps THREADS, not comments: each returned thread carries its root plus every
@@ -553,19 +555,26 @@ func writeWorkflowAutopilot(b *strings.Builder, ctx TaskContextForEnv) {
 // step is what made this one bloat in the first place.
 //
 // Ordinary agents own the full status arc for their issue: open with
-// in_progress, deliver with in_review. Squad leaders share the opening
-// in_progress step so the parent leaves todo as soon as coordination
-// starts, but their first assignment turn is only a dispatch — flipping
-// the parent to in_review there would mark unfinished multi-stage work
-// as ready for review. Leaders move the parent to in_review later, when
-// a re-trigger (member update / stage barrier) confirms the overall goal
-// is met; see the Squad Operating Protocol and child-done system comments.
+// in_progress, deliver with in_review. That arc is the agent's on BOTH
+// modes (MUL-6300) — a comment asking for rework is the same work as an
+// assignment, so gating the arc on trigger type left delivered-then-reworked
+// issues stale until a human moved the card. What stays out of the arc is
+// what never carried work: conversational turns, and turns on an issue not
+// assigned to this agent (someone else's, or unassigned).
+//
+// Squad leaders share the opening in_progress step so the parent leaves todo
+// as soon as coordination starts, but their first assignment turn is only a
+// dispatch — flipping the parent to in_review there would mark unfinished
+// multi-stage work as ready for review. Leaders move the parent to in_review
+// later, when a re-trigger (member update / stage barrier) confirms the
+// overall goal is met; see the Squad Operating Protocol and child-done system
+// comments.
 //
 // ctx.IsSquadLeader is a PER-TASK role, not agent configuration: branching on
 // it here does move brief bytes when the same agent runs leader one turn and
 // worker the next. Owner-accepted tradeoff; decision recorded in MUL-5811.
 func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
-	b.WriteString("**Turn mode.** The per-turn user message names this run's mode on a line of its own: `Turn mode: Reply.` (respond to the comment that message carries — it brings the triggering comment's id and your `--parent` value) or `Turn mode: Ownership.` (an assignment or status change started this run). Steps 1–5 are shared; then **apply exactly one mode block, the one the user message named** — they differ on issue status. No mode line → Reply mode, do not change the issue status.\n\n")
+	b.WriteString("**Turn mode.** The per-turn user message names this run's mode on a line of its own: `Turn mode: Reply.` (respond to the comment that message carries — it brings the triggering comment's id and your `--parent` value) or `Turn mode: Ownership.` (an assignment or status change started this run). Steps 1–5 are shared; then **apply exactly one mode block, the one the user message named** — they differ on issue status. No mode line → Reply mode.\n\n")
 
 	b.WriteString("**Steps 1–5 — both modes** (the per-turn user message carries this issue's real id and ready-to-run context-read commands; assemble other calls from `## Available Commands`)\n\n")
 	b.WriteString("1. Read the issue (`multica issue get`) to understand the context — its JSON already carries the issue's `metadata` bag (empty `{}` is normal), so no separate metadata read is needed. What to look for: `## Issue Metadata`.\n")
@@ -599,21 +608,37 @@ func writeWorkflowIssue(b *strings.Builder, ctx TaskContextForEnv) {
 		b.WriteString("- **Posting your reply as a comment is mandatory** (`## Output`). Use the `--parent` value the per-turn user message gives you for this turn; do NOT reuse a `--parent` from an earlier turn in this session. When that message lists more than one thread to answer, post one reply per thread instead of merging them.\n")
 	}
 	if ctx.IsSquadLeader {
-		// The default rule below and the Squad Operating Protocol's
-		// "Own the parent issue status" responsibility would otherwise
-		// contradict each other on the squad's most common shape:
-		// @mention dispatch with no child issues, where the member's
-		// delivery comment never "explicitly asks" for a status change and
-		// no child-done system comment exists to carry that ask. Naming the
-		// protocol section as the exception resolves it in one direction.
+		// A leader's authority over the parent's status comes from the Squad
+		// Operating Protocol's "Own the parent issue status" responsibility,
+		// which the server injects ONLY when the issue is assigned to this
+		// squad (see buildSquadLeaderBriefing). Naming that section is what
+		// keeps this bullet correct on both leader paths: a guest leader —
+		// @squad-mentioned on an issue owned by someone else — never receives
+		// the grant, so the no-status-writes half below governs.
 		//
-		// The exception is safe to state unconditionally here because the
-		// grant only exists in the instructions when the server determined
-		// this issue is assigned to this squad (see buildSquadLeaderBriefing);
-		// a guest leader gets the opposite text and this stays a no-op.
-		b.WriteString("- Do NOT change the issue status unless the comment explicitly asks for it — **or** a section in your instructions explicitly grants you ownership of this issue's status (the Squad Operating Protocol's \"Own the parent issue status\" responsibility). That section only appears when this issue is assigned to your squad; when it is there, treat it as a standing instruction and move the parent to `in_review` on the turn you confirm the overall goal is met, without waiting to be asked. When it is absent, the rule above is absolute. **The Ownership-mode status steps above do not apply in Reply mode.**\n\n")
+		// The leader's arc is not the ordinary one: dispatch is not delivery,
+		// so the parent stays in_progress until a later re-trigger confirms
+		// the goal is met.
+		b.WriteString("- Issue status: your instructions may grant you ownership of this issue's status (the Squad Operating Protocol's \"Own the parent issue status\" responsibility — it only appears when this issue is assigned to your squad). When present, treat it as standing: keep the parent `in_progress` while members work, and move it to `in_review` on the turn you confirm the overall goal is met, without waiting to be asked. Dispatching members is not completion. When absent, this issue is not yours: never run `multica issue status` on it. Purely conversational turns (question, discussion, acknowledgement) never touch status.\n\n")
 	} else {
-		b.WriteString("- Do NOT change the issue status unless the comment explicitly asks for it. **The Ownership-mode status steps above do not apply in Reply mode.**\n\n")
+		// MUL-6300 replaces the original "do NOT change the issue status
+		// unless the comment explicitly asks for it" (PR #205) with the arc
+		// this rule always meant to protect. That prohibition was written to
+		// stop conversational turns from churning the board, but it also
+		// covered the most common real trigger — a comment asking for rework
+		// on a delivered issue — so the status sat stale until a human moved
+		// the card by hand.
+		//
+		// Two invariants survive verbatim from #205 / #2918, and the guard
+		// tests pin both: a conversational turn never writes status, and a
+		// turn on an issue not assigned to this agent never writes status
+		// either. The second is deliberately "not assigned to you", not
+		// "assigned to someone else": an @mention can also land the agent on
+		// an UNASSIGNED issue (triage), and that case must stay no-write too.
+		// Whether this agent is the assignee is answerable on every turn:
+		// step 1 already reads `assignee_id`, and `## Agent Identity` carries
+		// this agent's own id.
+		b.WriteString("- Issue status: when this issue is assigned to you and this turn does substantive work on it, own the status arc as Ownership mode does — set `in_progress` when you start, and at turn end set the status the work has reached (delivered and awaiting acceptance = `in_review`; `done` stays human). Purely conversational turns (question, discussion, acknowledgement) never touch status; neither does any turn on an issue not assigned to you.\n\n")
 	}
 }
 

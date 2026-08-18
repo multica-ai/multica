@@ -265,6 +265,36 @@ const VirtuosoList = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElem
   },
 );
 const LIST_COMPONENTS: Components<TraceRow> = { List: VirtuosoList };
+const COPY_FEEDBACK_DURATION_MS = 2000;
+
+function useCopyFeedback() {
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const showCopied = useCallback(() => {
+    if (!mountedRef.current) return;
+    setCopied(true);
+    if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = setTimeout(() => {
+      resetTimerRef.current = null;
+      if (mountedRef.current) setCopied(false);
+    }, COPY_FEEDBACK_DURATION_MS);
+  }, []);
+
+  return [copied, showCopied] as const;
+}
 
 export function AgentTranscriptDialog({
   open,
@@ -280,9 +310,9 @@ export function AgentTranscriptDialog({
   const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
   const [query, setQuery] = useState("");
   const [elapsed, setElapsed] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [copiedWorkdir, setCopiedWorkdir] = useState(false);
-  const [copiedBranch, setCopiedBranch] = useState(false);
+  const [copied, showCopied] = useCopyFeedback();
+  const [copiedWorkdir, showCopiedWorkdir] = useCopyFeedback();
+  const [copiedBranch, showCopiedBranch] = useCopyFeedback();
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
@@ -581,10 +611,9 @@ export function AgentTranscriptDialog({
     if (!task.relative_work_dir) return;
     void copyText(task.relative_work_dir).then((ok) => {
       if (!ok) return;
-      setCopiedWorkdir(true);
-      setTimeout(() => setCopiedWorkdir(false), 2000);
+      showCopiedWorkdir();
     });
-  }, [task.relative_work_dir]);
+  }, [task.relative_work_dir, showCopiedWorkdir]);
 
   // Worktree-mode runs deliver a branch instead of edits in the working copy,
   // so copying the name is the fastest path to `git diff <branch>`.
@@ -592,10 +621,9 @@ export function AgentTranscriptDialog({
     if (!task.branch_name) return;
     void copyText(task.branch_name).then((ok) => {
       if (!ok) return;
-      setCopiedBranch(true);
-      setTimeout(() => setCopiedBranch(false), 2000);
+      showCopiedBranch();
     });
-  }, [task.branch_name]);
+  }, [task.branch_name, showCopiedBranch]);
 
   const handleCopyAll = useCallback(() => {
     // Copy the full body of each event (not the truncated row summary), with
@@ -620,10 +648,9 @@ export function AgentTranscriptDialog({
     const text = events.map((event) => redactSecrets(traceEventCopyText(event))).join("\n\n");
     void copyText(text).then((ok) => {
       if (!ok) return;
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      showCopied();
     });
-  }, [displayRows]);
+  }, [displayRows, showCopied]);
 
   const handleToggleGroup = useCallback((seq: number) => {
     setExpandedGroups((prev) => {
@@ -1515,7 +1542,7 @@ function StepInspector({
   onClose: () => void;
 }) {
   const { t } = useT("agents");
-  const [copied, setCopied] = useState(false);
+  const [copied, showCopied] = useCopyFeedback();
 
   const at = timeMs(step.startedAt);
   const offset = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : null;
@@ -1533,10 +1560,9 @@ function StepInspector({
     }
     void copyText(redactSecrets(parts.join("\n\n"))).then((ok) => {
       if (!ok) return;
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      showCopied();
     });
-  }, [call, message]);
+  }, [call, message, showCopied]);
 
   const title =
     call

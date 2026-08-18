@@ -39,6 +39,22 @@ func TestRedisClientName(t *testing.T) {
 	}
 }
 
+func TestChannelLeaseRedisURLFromEnvPrefersDedicatedInstance(t *testing.T) {
+	t.Setenv("REDIS_URL", "redis://shared:6379/0")
+	t.Setenv("CHANNEL_WS_LEASE_REDIS_URL", "redis://leases:6379/0")
+	if got := channelLeaseRedisURLFromEnv(); got != "redis://leases:6379/0" {
+		t.Fatalf("channel lease Redis URL = %q", got)
+	}
+}
+
+func TestChannelLeaseRedisURLFromEnvFallsBackToSharedRedis(t *testing.T) {
+	t.Setenv("REDIS_URL", "redis://shared:6379/0")
+	t.Setenv("CHANNEL_WS_LEASE_REDIS_URL", "")
+	if got := channelLeaseRedisURLFromEnv(); got != "redis://shared:6379/0" {
+		t.Fatalf("channel lease Redis URL = %q", got)
+	}
+}
+
 func TestNewNamedRedisClient_SetsClientName(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "")
 	base := &redis.Options{Addr: "localhost:6379"}

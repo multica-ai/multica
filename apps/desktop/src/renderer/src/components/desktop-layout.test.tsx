@@ -1,9 +1,16 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { useSidebar } from "@multica/ui/components/ui/sidebar";
 import { RESOURCES } from "@multica/views/locales";
+
+// The shell resolves the mocked `getCurrentSlug()` against the workspace list
+// before mounting workspace-scoped chrome, so the list has to contain it or
+// the sidebar under test never renders. Gating behaviour itself is covered by
+// desktop-layout.workspace-gate.test.tsx.
+const WORKSPACES = [{ id: "ws-1", slug: "acme" }];
 
 // The shell is the only thing under test here, so everything it mounts around
 // the sidebar is stubbed out. What survives is the pair that has to agree:
@@ -37,6 +44,13 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("@multica/core/platform", () => ({
   getCurrentSlug: () => "acme",
   subscribeToCurrentSlug: () => () => {},
+}));
+
+vi.mock("@multica/core/workspace", () => ({
+  workspaceListOptions: () => ({
+    queryKey: ["workspace-list"],
+    queryFn: async () => WORKSPACES,
+  }),
 }));
 
 vi.mock("@multica/views/navigation", () => ({
@@ -82,10 +96,17 @@ function renderShell() {
     onInboxOpen: () => () => {},
   };
 
+  const qc = new QueryClient({
+    defaultOptions: { queries: { retry: false, gcTime: 0 } },
+  });
+  qc.setQueryData(["workspace-list"], WORKSPACES);
+
   return render(
-    <I18nProvider locale="en" resources={RESOURCES}>
-      <DesktopShell />
-    </I18nProvider>,
+    <QueryClientProvider client={qc}>
+      <I18nProvider locale="en" resources={RESOURCES}>
+        <DesktopShell />
+      </I18nProvider>
+    </QueryClientProvider>,
   );
 }
 

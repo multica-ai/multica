@@ -391,6 +391,28 @@ describe("McpConfigTab workspace servers", () => {
     await waitFor(() => expect(mockAddServer).toHaveBeenCalledWith("srv-9"));
   });
 
+  // A workspace can accumulate a lot of shared servers, and the picker is a
+  // menu anchored to a small button: it has to stay inside a bounded, scrolling
+  // box and keep the trigger's width instead of growing down the page.
+  it("keeps the picker bounded, scrollable, and anchored when the library is long", async () => {
+    const user = userEvent.setup();
+    workspaceMcp.library = Array.from({ length: 40 }, (_, i) =>
+      wsServer({ id: `srv-${i}`, name: `shared-server-${i}` }),
+    );
+    renderTab({ mcp_config: null });
+
+    await user.click(
+      await screen.findByRole("button", { name: /Add from workspace/ }),
+    );
+
+    const items = await screen.findAllByRole("menuitem");
+    expect(items).toHaveLength(40);
+    const menu = items[0]!.closest("[data-slot='dropdown-menu-content']");
+    expect(menu?.className).toMatch(/\bmax-h-72\b/);
+    expect(menu?.className).toMatch(/\boverflow-y-auto\b/);
+    expect(menu?.className).toMatch(/min-w-\(--anchor-width\)/);
+  });
+
   it("toggles an assignment off without dropping it", async () => {
     const user = userEvent.setup();
     workspaceMcp.assigned = [wsServer({ enabled: true })];

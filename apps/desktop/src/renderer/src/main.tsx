@@ -1,5 +1,6 @@
 import ReactDOM from "react-dom/client";
 import App from "./App";
+import { AppCrashBoundary } from "./components/app-crash-boundary";
 // Inter variable font covers all weights (100-900) in a single file.
 // CJK is handled by system font fallback (see globals.css --font-sans chain).
 // Keep font stack in sync with apps/web/app/layout.tsx.
@@ -37,4 +38,8 @@ if (import.meta.env.DEV && import.meta.env.VITE_REACT_GRAB) {
   document.head.appendChild(grab);
 }
 
-ReactDOM.createRoot(document.getElementById("root")!).render(<App />);
+ReactDOM.createRoot(document.getElementById("root")!).render(
+  <AppCrashBoundary>
+    <App />
+  </AppCrashBoundary>,
+);

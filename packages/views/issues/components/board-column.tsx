@@ -1,5 +1,6 @@
 "use client";
 
+import { statusCategoryOfKey } from "@multica/core/issues";
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
@@ -111,7 +112,7 @@ export const BoardColumn = memo(function BoardColumn({
   sortLabel?: string | null;
 }) {
   const status = group.status;
-  const cfg = status ? STATUS_CONFIG[status] : null;
+  const cfg = status ? STATUS_CONFIG[statusCategoryOfKey(status)] : null;
   const { setNodeRef, isOver } = useDroppable({ id: group.id });
   const viewStoreApi = useViewStoreApi();
   // A status fixed by the open saved view cannot be hidden from the board —

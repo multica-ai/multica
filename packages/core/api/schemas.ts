@@ -43,6 +43,7 @@ import type {
   InboxItem,
   InboxWorkspaceUnread,
   Label,
+  MemberWithUser,
   IssueProperty,
   ListPropertiesResponse,
   QuickAction,
@@ -57,6 +58,8 @@ import type {
   ListGitHubRepositoriesResponse,
   ListLabelsResponse,
   ListWebhookDeliveriesResponse,
+  IssueStatusEntry,
+  ListIssueStatusesResponse,
   NotificationPreferenceResponse,
   PluginCatalogResponse,
   PluginInstallation,
@@ -65,6 +68,8 @@ import type {
   RuntimeModelListRequest,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  ShareLink,
+  ShareLinkInfo,
   Skill,
   Squad,
   TimelineEntry,
@@ -385,6 +390,55 @@ export const ListLabelsResponseSchema = z.object({
 
 export const EMPTY_LIST_LABELS_RESPONSE: ListLabelsResponse = {
   labels: [],
+  total: 0,
+};
+
+// Issue status catalog (MUL-6243). `category` is parsed as a plain string
+// rather than an enum: a newer server could in principle report a category this
+// build does not know, and failing the whole catalog parse would leave the UI
+// with no statuses at all. Consumers fall back to rendering by `color`/`name`
+// when they do not recognize a category.
+export const IssueStatusEntrySchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  key: z.string(),
+  name: z.string(),
+  description: z.string().optional().default(""),
+  category: z.string(),
+  color: z.string().optional().default("#6b7280"),
+  is_system: z.boolean().optional().default(false),
+  position: z.number().optional().default(0),
+  archived_at: z.string().nullable().optional().default(null),
+  created_at: z.string(),
+  updated_at: z.string(),
+}).loose();
+
+export const EMPTY_ISSUE_STATUS_ENTRY: IssueStatusEntry = {
+  id: "",
+  workspace_id: "",
+  key: "",
+  name: "",
+  description: "",
+  category: "backlog",
+  color: "#6b7280",
+  is_system: false,
+  position: 0,
+  archived_at: null,
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListIssueStatusesResponseSchema = z.object({
+  statuses: z.array(IssueStatusEntrySchema).default([]),
+  categories: z.array(z.string()).default([]),
+  total: z.number().default(0),
+}).loose();
+
+// The fallback carries the 7 built-ins' keys as categories, so a client talking
+// to a server that predates this endpoint still has the canonical list.
+export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
+  statuses: [],
+  categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
   total: 0,
 };
 
@@ -938,6 +992,12 @@ export const IssueSchema = z.object({
   title: z.string(),
   description: z.string().nullable(),
   status: z.string(),
+  // The canonical status whose platform behavior `status` carries — equal to
+  // `status` for the 7 built-ins, and the inherited category for a custom
+  // status. Optional because only endpoints that resolve it emit it, so
+  // consumers must fall back to `status` rather than treat "" as a category.
+  // (MUL-6243)
+  status_category: z.string().optional(),
   priority: z.string(),
   assignee_type: z.string().nullable(),
   assignee_id: z.string().nullable(),
@@ -2649,4 +2709,85 @@ export const EMPTY_WORKSPACE_MCP_SERVER: WorkspaceMcpServer = {
   transport: "unknown",
   created_at: "",
   updated_at: "",
+};
+
+// Share links. Introduced with the workspace share-link invite flow; schemas
+// mirror the API responses so malformed payloads fall back to safe defaults.
+export const ShareLinkSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  code: z.string(),
+  created_by: z.string(),
+  role: z.string(),
+  expires_at: z.string().nullable().optional().default(null),
+  max_uses: z.number().nullable().optional().default(null),
+  use_count: z.number().optional().default(0),
+  is_active: z.boolean().optional().default(true),
+  created_at: z.string().optional().default(""),
+  creator_name: z.string().optional().default(""),
+  creator_email: z.string().optional().default(""),
+}).loose();
+
+export const EMPTY_SHARE_LINK: ShareLink = {
+  id: "",
+  workspace_id: "",
+  code: "",
+  created_by: "",
+  role: "member",
+  expires_at: null,
+  max_uses: null,
+  use_count: 0,
+  is_active: false,
+  created_at: "",
+};
+
+export const ShareLinkListResponseSchema = z.array(ShareLinkSchema).default([]);
+
+export const ShareLinkInfoSchema = z.object({
+  workspace_name: z.string().optional().default(""),
+  workspace_slug: z.string().optional().default(""),
+  creator_name: z.string().optional().default(""),
+  role: z.string().optional().default("member"),
+}).loose();
+
+export const EMPTY_SHARE_LINK_INFO: ShareLinkInfo = {
+  workspace_name: "",
+  workspace_slug: "",
+  role: "member",
+};
+
+export const MemberWithUserSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  user_id: z.string(),
+  role: z.string(),
+  created_at: z.string().optional().default(""),
+  name: z.string().optional().default(""),
+  email: z.string().optional().default(""),
+  avatar_url: z.string().nullable().optional().default(null),
+}).loose();
+
+export const JoinShareLinkResponseSchema = z.object({
+  member: MemberWithUserSchema,
+  workspace_id: z.string(),
+  workspace_slug: z.string().optional().default(""),
+}).loose();
+
+export const EMPTY_JOIN_SHARE_LINK_RESPONSE: {
+  member: MemberWithUser;
+  workspace_id: string;
+  workspace_slug: string;
+} = {
+  member: {
+    id: "",
+    workspace_id: "",
+    user_id: "",
+    role: "member",
+    created_at: "",
+    name: "",
+    email: "",
+    avatar_url: null,
+  },
+  workspace_id: "",
+  workspace_slug: "",
 };

@@ -230,9 +230,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildPiArgs(sessionPath, opts, b.cfg.Logger)
-	argv0, cmdArgs := choosePiInvocation(execName, lookedUp, args, b.cfg.Logger)
-
-	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
+	cmd, argv0, cmdArgs := b.cfg.commandAt(execName).execVia(runCtx, choosePiInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
 	cmd.WaitDelay = 10 * time.Second
@@ -299,6 +297,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		var output strings.Builder
 		finalStatus := "completed"
 		var finalError string
+		var lastTurnError string
 		usage := make(map[string]TokenUsage)
 
 		// Pi message_update events can be large (they embed the full message
@@ -323,6 +322,7 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 			case "turn_start":
 				output.Reset()
 				textBuffer.Reset()
+				lastTurnError = ""
 
 			case "message_update":
 				if evt.AssistantMessageEvent == nil {
@@ -360,7 +360,11 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 				})
 
 			case "turn_end":
-				if msg := decodePiMessage(evt.Message); msg != nil && msg.Usage != nil {
+				msg := decodePiMessage(evt.Message)
+				if msg == nil {
+					continue
+				}
+				if msg.Usage != nil {
 					model := msg.Model
 					if model == "" {
 						model = opts.Model
@@ -374,6 +378,16 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 					u.CacheReadTokens += msg.Usage.CacheRead
 					u.CacheWriteTokens += msg.Usage.CacheWrite
 					usage[model] = u
+				}
+				// A turn Pi ends on an error is only terminal when nothing
+				// follows it. Pi emits the same stopReason before an automatic
+				// retry, and turn_start clears this, so a later successful turn
+				// leaves nothing behind.
+				if msg.StopReason == "error" {
+					lastTurnError = msg.ErrorMessage
+					if lastTurnError == "" {
+						lastTurnError = label + " ended the turn with an error"
+					}
 				}
 
 			case "error":
@@ -419,6 +433,12 @@ func (b *piBackend) Execute(ctx context.Context, prompt string, opts ExecOptions
 		} else if writeErr != nil && finalStatus == "completed" {
 			finalStatus = "failed"
 			finalError = fmt.Sprintf("%s prompt write failed: %v", label, writeErr)
+		} else if lastTurnError != "" && finalStatus == "completed" {
+			// Pi exits 0 after a turn it could not complete and did not retry,
+			// and emits neither an `error` event nor `auto_retry_end`. Without
+			// this the run reports success with no output.
+			finalStatus = "failed"
+			finalError = lastTurnError
 		}
 
 		b.cfg.Logger.Info(label+" finished", "pid", cmd.Process.Pid, "status", finalStatus, "duration", duration.Round(time.Millisecond).String())
@@ -472,6 +492,12 @@ type piMessage struct {
 	Role  string   `json:"role,omitempty"`
 	Model string   `json:"model,omitempty"`
 	Usage *piUsage `json:"usage,omitempty"`
+
+	// turn_end carries the terminal state of the turn. Pi sets StopReason to
+	// "error" for a provider call it could not complete, whether or not it
+	// goes on to retry, and puts the provider's message in ErrorMessage.
+	StopReason   string `json:"stopReason,omitempty"`
+	ErrorMessage string `json:"errorMessage,omitempty"`
 }
 
 type piUsage struct {

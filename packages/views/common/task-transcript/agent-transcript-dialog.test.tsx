@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { readFileSync } from "node:fs";
-import { cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
@@ -401,7 +401,7 @@ describe("AgentTranscriptDialog", () => {
     expect(screen.getByText("Tools")).toBeInTheDocument();
   });
 
-  it("copies RFC 3339 timestamps before event labels", () => {
+  it("copies RFC 3339 timestamps before event labels", async () => {
     renderDialog([
       {
         seq: 1,
@@ -417,7 +417,9 @@ describe("AgentTranscriptDialog", () => {
       },
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    });
 
     // Full body (not the truncated summary) with the RFC 3339 prefix, events
     // separated by a blank line.
@@ -429,7 +431,7 @@ describe("AgentTranscriptDialog", () => {
     );
   });
 
-  it("keeps older events without a valid timestamp copyable", () => {
+  it("keeps older events without a valid timestamp copyable", async () => {
     renderDialog([
       {
         seq: 1,
@@ -444,12 +446,35 @@ describe("AgentTranscriptDialog", () => {
       },
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    });
 
     expect(copyTextMock).toHaveBeenCalledWith(
       ["[Agent] Missing timestamp", "[Error] Invalid timestamp"].join("\n\n"),
     );
   });
+
+  it("cancels copy feedback timers when the dialog unmounts", async () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = renderDialog();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+        await Promise.resolve();
+      });
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      unmount();
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it("renders a file edit as a diff instead of escaped JSON strings", () => {
     const { container } = renderDialog([
       {

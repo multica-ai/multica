@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Minus, Plus } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
-import { timelineTicks, type LaneSegment, type TraceLanes, type ToolKindTotals } from "./build-steps";
+import {
+  laneSegmentPosition,
+  timelineTicks,
+  type LaneSegment,
+  type TraceLanes,
+  type ToolKindTotals,
+} from "./build-steps";
 import { useT } from "../../i18n";
 
 /**
@@ -94,13 +100,7 @@ function LaneTrack({
             "absolute inset-y-0 rounded-[3px] transition-opacity hover:opacity-80",
             SEGMENT_TONE[segment.kind],
           )}
-          style={{
-            left: `${(segment.startMs / totalMs) * 100}%`,
-            // Sub-pixel bars would vanish; a visible minimum keeps a fast call
-            // clickable. Zooming in is what makes the width truthful — which is
-            // the whole reason the track scrolls.
-            width: `max(3px, ${(segment.durationMs / totalMs) * 100}%)`,
-          }}
+          style={laneSegmentPosition(segment, totalMs)}
         />
       ))}
     </div>
@@ -190,9 +190,17 @@ export function RunTimeline({
           </div>
         </div>
 
+        {/* Zoom scrolls this track sideways; nothing ever scrolls it down.
+            Saying so matters: `overflow-x: auto` alone computes `overflow-y`
+            to `auto` as well, so a stray pixel of paint below the lanes buys a
+            vertical scrollbar, and that scrollbar narrows the track, which
+            re-decides whether the horizontal one is needed. Two lanes 15px
+            tall have no fixed point to settle on, and any `:hover` inside
+            re-runs the decision every frame — the timeline shakes for as long
+            as the pointer rests on a bar (#6278). */}
         <div
           ref={scrollerRef}
-          className="min-w-0 flex-1 overflow-x-auto overscroll-x-contain"
+          className="min-w-0 flex-1 overflow-x-auto overflow-y-hidden overscroll-x-contain"
         >
           <div className="relative" style={{ width: `${zoom * 100}%` }}>
             <div className="relative h-3">
@@ -230,7 +238,9 @@ export function RunTimeline({
             {selectedOffsetMs !== undefined && (
               <div
                 aria-hidden
-                className="pointer-events-none absolute bottom-[-2px] top-2.5 w-0.5 rounded-full bg-brand"
+                // Ends on the lanes, not below them: the track clips its own
+                // vertical overflow now, so an overhang would only be cropped.
+                className="pointer-events-none absolute bottom-0 top-2.5 w-0.5 rounded-full bg-brand"
                 style={{
                   left: `${
                     (Math.min(Math.max(selectedOffsetMs, 0), lanes.totalMs) / lanes.totalMs) * 100

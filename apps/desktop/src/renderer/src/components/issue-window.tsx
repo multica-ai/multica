@@ -1,5 +1,4 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
 import {
   createMemoryRouter,
   RouterProvider,
@@ -10,13 +9,14 @@ import { AlertTriangle, RotateCw, X } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
-import { workspaceBySlugOptions } from "@multica/core/workspace";
+import { useWorkspaceList } from "@multica/core/workspace";
 import { Button } from "@multica/ui/components/ui/button";
 import { MulticaIcon } from "@multica/ui/components/common/multica-icon";
 import { ModalRegistry } from "@multica/views/modals/registry";
 import { WorkspacePresencePrefetch } from "@multica/views/layout";
 import { DragStrip } from "@multica/views/platform";
 import type { IssueWindowContext } from "../../../shared/issue-window";
+import { DesktopAuthRecoveryPage } from "../pages/auth-recovery";
 import { IssueDetailPage } from "../pages/issue-detail-page";
 import { IssueWindowNavigationProvider } from "../platform/issue-window-navigation";
 
@@ -42,16 +42,28 @@ export function IssueWindow({ context }: { context: IssueWindowContext }) {
 function IssueWindowRoute() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
   const user = useAuthStore((state) => state.user);
-  const { data: workspace, isFetched } = useQuery({
-    ...workspaceBySlugOptions(workspaceSlug ?? ""),
-    enabled: !!user && !!workspaceSlug,
-  });
+  const { workspaces, ready, unavailable, isFetching, refetch } =
+    useWorkspaceList({
+      enabled: !!user && !!workspaceSlug,
+    });
+  const workspace = workspaces.find((item) => item.slug === workspaceSlug);
 
   if (workspace && workspaceSlug) {
     setCurrentWorkspace(workspaceSlug, workspace.id);
   }
 
-  if (!isFetched) {
+  if (unavailable) {
+    return (
+      <DesktopAuthRecoveryPage
+        isRetrying={isFetching}
+        onRetry={() => {
+          void refetch();
+        }}
+      />
+    );
+  }
+
+  if (!ready) {
     return (
       <IssueWindowFrame>
         <div className="flex min-h-0 flex-1 items-center justify-center">

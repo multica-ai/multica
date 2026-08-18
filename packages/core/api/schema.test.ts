@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
-import { ApiClient } from "./client";
+import { ApiClient, ApiError } from "./client";
 import { parseWithFallback } from "./schema";
 
 // Helper: stub fetch with a single JSON response. Status defaults to 200.
@@ -126,6 +126,73 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listIssues();
       expect(res).toEqual({ issues: [], total: 0 });
+    });
+  });
+
+  describe("getIssue", () => {
+    // Unlike a list, a single issue has no safe-empty shape, and the bare
+    // identifier autolink caches this result for 5 minutes. A malformed 2xx
+    // must therefore fail the call instead of becoming a truthy issue with an
+    // `undefined` id — and it must fail with something OTHER than an
+    // ApiError 404, which `issueIdentifierOptions` maps to "no such issue".
+    const validIssue = {
+      id: "issue-1",
+      workspace_id: "ws-1",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Existing",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      start_date: null,
+      due_date: null,
+      created_at: "2025-01-01T00:00:00Z",
+      updated_at: "2025-01-01T00:00:00Z",
+    };
+
+    it("resolves a well-formed issue, defaulting the fields older servers omit", async () => {
+      stubFetchJson({ ...validIssue, unknown_field: "kept" });
+      const client = new ApiClient("https://api.example.test");
+      const issue = await client.getIssue("MUL-1");
+      expect(issue.id).toBe("issue-1");
+      expect(issue.stage).toBeNull();
+      expect(issue.metadata).toEqual({});
+      expect(issue.properties).toEqual({});
+    });
+
+    it("rejects a 200 body that is not a usable issue (no truthy issue with an undefined id)", async () => {
+      stubFetchJson({ not: "an issue" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getIssue("MUL-1")).rejects.toThrow();
+    });
+
+    it("rejects a 200 body whose required field drifted type", async () => {
+      stubFetchJson({ ...validIssue, number: "1" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getIssue("MUL-1")).rejects.toThrow();
+    });
+
+    it("does not disguise a malformed body as a 404", async () => {
+      stubFetchJson({ id: "issue-1" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getIssue("MUL-1")).rejects.not.toBeInstanceOf(
+        ApiError,
+      );
+    });
+
+    it("still surfaces a real 404 as an ApiError so autolink can resolve to null", async () => {
+      stubFetchJson({ error: "issue not found" }, 404);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.getIssue("TES-1")).rejects.toMatchObject({
+        status: 404,
+      });
     });
   });
 

@@ -135,7 +135,6 @@
     "fixed": {
       "title": "고정 시스템 단축키",
       "description": "창 및 접근성 단축키는 안정성을 위해 고정됩니다. 확대/축소 및 탭 제어는 데스크톱 앱에 적용됩니다.",
-      "open_settings": "설정 열기",
       "close_tab": "활성 탭 닫기",
       "zoom_in": "확대",
       "zoom_out": "축소",
@@ -364,7 +363,9 @@
       "multi_select": "다중 선택",
       "date": "날짜",
       "checkbox": "체크박스",
-      "url": "URL"
+      "url": "URL",
+      "actor": "멤버",
+      "multi_actor": "멤버(다중 선택)"
     },
     "actions": {
       "open": "{{name}} 작업",
@@ -792,7 +793,27 @@
         "label": "멤버",
         "description": "태스크 생성 및 작업"
       }
-    }
+    },
+    "share_links_title": "공유 링크",
+    "role_field": "역할：",
+    "expiry_field": "만료：",
+    "share_links_create_title": "공유 링크 만들기",
+    "share_links_create_button": "생성",
+    "share_links_creating": "생성 중...",
+    "share_link_uses": "{{used}} / {{max}}회 사용",
+    "share_link_expires": "만료 {{date}}",
+    "share_link_copy_tooltip": "링크 복사",
+    "share_link_revoke_tooltip": "링크 취소",
+    "toast_share_link_created": "공유 링크가 생성되었습니다",
+    "toast_share_link_failed": "공유 링크 생성에 실패했습니다",
+    "toast_share_link_revoked": "공유 링크가 취소되었습니다",
+    "toast_share_link_revoke_failed": "공유 링크 취소에 실패했습니다",
+    "toast_share_link_copied": "링크가 복사되었습니다",
+    "toast_share_link_copy_failed": "링크 복사에 실패했습니다",
+    "expiry_24h": "24시간",
+    "expiry_7d": "7일",
+    "expiry_30d": "30일",
+    "expiry_never": "무기한"
   },
   "lark": {
     "section_title": "Lark",

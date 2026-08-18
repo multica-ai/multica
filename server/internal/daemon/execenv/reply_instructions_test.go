@@ -216,7 +216,9 @@ func TestInjectRuntimeConfigKeepsTriggerCommentOutOfBrief(t *testing.T) {
 		// "Reply mode" pinned separately could both pass while the text
 		// says "No mode line → Ownership mode" (final-review catch).
 		"No mode line → Reply mode",
-		"do not change the issue status",
+		// The fallback is only safe because Reply mode's own status rule is
+		// conditional: no work, no status write (MUL-6300).
+		"Purely conversational turns (question, discussion, acknowledgement) never touch status",
 		"`Turn mode: Reply.`",
 		"`Turn mode: Ownership.`",
 		"Use the `--parent` value the per-turn user message gives you for this turn",

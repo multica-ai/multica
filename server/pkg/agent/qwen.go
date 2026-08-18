@@ -96,7 +96,7 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 			mcpFileCleanup()
 		}
 	}()
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	// args contain the task prompt; never expose it in daemon logs.
 	b.cfg.Logger.Info("agent command", "exec", execPath, "provider", "qwen")

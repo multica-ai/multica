@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/analytics"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -514,7 +515,15 @@ func broadcastFailedTasks(ctx context.Context, queries *db.Queries, taskSvc *ser
 			if issue, err := queries.GetIssue(ctx, t.IssueID); err == nil {
 				workspaceID = util.UUIDToString(issue.WorkspaceID)
 				issueKey := util.UUIDToString(t.IssueID)
-				if issue.Status == "in_progress" && !processedIssues[issueKey] {
+				// Only issues whose status means "an agent is actively working"
+				// get reset. in_review and blocked are deliberately excluded —
+				// they mean a human or an external dependency owns the issue
+				// now, and resetting those to todo would re-trigger an agent on
+				// work someone else is holding. A custom status resolves to the
+				// canonical status it inherits, so a custom review gate is
+				// excluded for the same reason In Review is. (MUL-6243)
+				effectiveStatus := issuestatus.Effective(ctx, queries, issue.WorkspaceID, issue.Status)
+				if effectiveStatus == "in_progress" && !processedIssues[issueKey] {
 					processedIssues[issueKey] = true
 					if hasActive, herr := queries.HasActiveTaskForIssue(ctx, t.IssueID); herr == nil && !hasActive {
 						queries.UpdateIssueStatus(ctx, db.UpdateIssueStatusParams{ID: t.IssueID, Status: "todo", WorkspaceID: issue.WorkspaceID})

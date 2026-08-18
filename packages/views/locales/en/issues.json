@@ -244,6 +244,7 @@
     "back": "Back",
     "title_placeholder": "Issue title",
     "desc_placeholder": "Add description...",
+    "current_issue": "This issue",
     "sub_issues_label": "Sub-issues",
     "sub_issue_of": "Sub-issue of",
     "add_sub_issues": "Add sub-issues",
@@ -646,8 +647,11 @@
       "value_placeholder": "Enter value…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
+      "actor_search_placeholder": "Search members…",
       "open_link": "Open link",
-      "archived_hint": "Archived property — value is read-only"
+      "archived_hint": "Archived property — value is read-only",
+      "unknown_value": "Unavailable",
+      "unknown_value_hint": "This value was set by a newer version of Multica and can't be edited here — update the app, or clear it"
     },
     "filter_options_aria": "Filter options",
     "no_results": "No results",

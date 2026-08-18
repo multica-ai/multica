@@ -116,6 +116,10 @@ import type {
   CreateLabelRequest,
   UpdateLabelRequest,
   ListLabelsResponse,
+  ListIssueStatusesResponse,
+  IssueStatusEntry,
+  CreateIssueStatusRequest,
+  UpdateIssueStatusRequest,
   IssueLabelsResponse,
   LabelResourceType,
   ResourceLabelsResponse,
@@ -124,6 +128,8 @@ import type {
   PinnedItemType,
   ReorderPinsRequest,
   Invitation,
+  ShareLink,
+  ShareLinkInfo,
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
@@ -277,6 +283,7 @@ import {
   UNREADABLE_CRON_PREVIEW_RESPONSE,
   ListIssuesResponseSchema,
   CreateIssueResponseSchema,
+  IssueSchema,
   ListWebhookDeliveriesResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
@@ -341,6 +348,8 @@ import {
   EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
   LabelSchema,
   ListLabelsResponseSchema,
+  ListIssueStatusesResponseSchema,
+  IssueStatusEntrySchema,
   IssuePropertySchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
@@ -359,6 +368,8 @@ import {
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
+  EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+  EMPTY_ISSUE_STATUS_ENTRY,
   EMPTY_RESOURCE_LABELS_RESPONSE,
   GitHubConnectResponseSchema,
   ListGitHubInstallationsResponseSchema,
@@ -386,6 +397,13 @@ import {
   EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
   WorkspaceMcpServerListSchema,
   WorkspaceMcpServerSchema,
+  ShareLinkSchema,
+  ShareLinkListResponseSchema,
+  ShareLinkInfoSchema,
+  JoinShareLinkResponseSchema,
+  EMPTY_SHARE_LINK,
+  EMPTY_SHARE_LINK_INFO,
+  EMPTY_JOIN_SHARE_LINK_RESPONSE,
   type IssueView,
   type IssueViewPreference,
   type CreateIssueViewRequest,
@@ -918,8 +936,36 @@ export class ApiClient {
     });
   }
 
-  async getIssue(id: string): Promise<Issue> {
-    return this.fetch(`/api/issues/${id}`);
+  /**
+   * Fetch one issue by UUID **or** by bare identifier ("MUL-123"): the server
+   * resolves `PREFIX-NUMBER` against the workspace's own prefix through the
+   * unique `(workspace_id, number)` index, and 404s on a wrong prefix or a
+   * missing number.
+   *
+   * `signal` is optional so cancel-on-unmount callers (identifier autolink
+   * resolution) can abort an in-flight lookup the same way search does.
+   *
+   * The 2xx body is validated, not cast. A single issue is not a list: there
+   * is no safe-empty shape to degrade to, and the identifier-autolink caller
+   * caches this result for 5 minutes, so a field-missing or type-drifted 200
+   * must not become a truthy issue with an `undefined` id. Like createIssue,
+   * an unusable body fails the call — and it fails with a plain Error, never
+   * an ApiError 404, so `issueIdentifierOptions` propagates it instead of
+   * caching it as "no such issue".
+   */
+  async getIssue(id: string, options?: { signal?: AbortSignal }): Promise<Issue> {
+    const raw = await this.fetch<unknown>(
+      `/api/issues/${encodeURIComponent(id)}`,
+      options?.signal ? { signal: options.signal } : undefined,
+    );
+    const issue = parseWithFallback<Issue | null>(raw, IssueSchema, null, {
+      endpoint: "GET /api/issues/:id",
+    });
+    if (!issue) {
+      // parseWithFallback already logged the zod issues + raw payload.
+      throw new Error("GET /api/issues/:id returned a malformed issue");
+    }
+    return issue;
   }
 
   async createIssue(data: CreateIssueRequest): Promise<Issue> {
@@ -2556,6 +2602,46 @@ export class ApiClient {
     });
   }
 
+  async createShareLink(workspaceId: string, data: { role?: string; expires_in?: number; max_uses?: number }): Promise<ShareLink> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/share-links`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, ShareLinkSchema, EMPTY_SHARE_LINK, {
+      endpoint: "POST /api/workspaces/{id}/share-links",
+    });
+  }
+
+  async listShareLinks(workspaceId: string): Promise<ShareLink[]> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/share-links`);
+    return parseWithFallback(raw, ShareLinkListResponseSchema, [], {
+      endpoint: "GET /api/workspaces/{id}/share-links",
+    });
+  }
+
+  async revokeShareLink(workspaceId: string, linkId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/share-links/${linkId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async joinByShareLink(code: string): Promise<{ member: MemberWithUser; workspace_id: string; workspace_slug: string }> {
+    const raw = await this.fetch<unknown>("/api/share-links/join", {
+      method: "POST",
+      body: JSON.stringify({ code }),
+    });
+    return parseWithFallback(raw, JoinShareLinkResponseSchema, EMPTY_JOIN_SHARE_LINK_RESPONSE, {
+      endpoint: "POST /api/share-links/join",
+    });
+  }
+
+  async getShareLinkInfo(code: string): Promise<ShareLinkInfo> {
+    const raw = await this.fetch<unknown>(`/api/share-links/${encodeURIComponent(code)}`);
+    return parseWithFallback(raw, ShareLinkInfoSchema, EMPTY_SHARE_LINK_INFO, {
+      endpoint: "GET /api/share-links/{code}",
+    });
+  }
+
   async deleteWorkspace(workspaceId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}`, {
       method: "DELETE",
@@ -3166,6 +3252,48 @@ export class ApiClient {
 
   async deleteLabel(id: string): Promise<void> {
     await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
+  }
+
+  // Issue status catalog (MUL-6243). Reads are open to any workspace member;
+  // the mutations below are owner/admin only and return 403 otherwise.
+  async listIssueStatuses(includeArchived = false): Promise<ListIssueStatusesResponse> {
+    const query = includeArchived ? "?include_archived=true" : "";
+    const raw = await this.fetch<unknown>(`/api/issue-statuses${query}`);
+    return parseWithFallback(raw, ListIssueStatusesResponseSchema, EMPTY_LIST_ISSUE_STATUSES_RESPONSE, {
+      endpoint: "GET /api/issue-statuses",
+    });
+  }
+
+  async createIssueStatus(data: CreateIssueStatusRequest): Promise<IssueStatusEntry> {
+    const raw = await this.fetch<unknown>(`/api/issue-statuses`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
+      endpoint: "POST /api/issue-statuses",
+    });
+  }
+
+  async updateIssueStatus(id: string, data: UpdateIssueStatusRequest): Promise<IssueStatusEntry> {
+    const raw = await this.fetch<unknown>(`/api/issue-statuses/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
+      endpoint: "PATCH /api/issue-statuses/{id}",
+    });
+  }
+
+  /**
+   * Archives a custom status, retiring it from future use. Issues already on it
+   * keep it and keep behaving as their category prescribes; only new
+   * assignments are refused. Built-in statuses return 403.
+   */
+  async archiveIssueStatus(id: string): Promise<IssueStatusEntry> {
+    const raw = await this.fetch<unknown>(`/api/issue-statuses/${id}`, { method: "DELETE" });
+    return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
+      endpoint: "DELETE /api/issue-statuses/{id}",
+    });
   }
 
   // Custom issue properties

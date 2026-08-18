@@ -98,7 +98,7 @@ pnpm ui:add badge     # shadcn/Base UI component into packages/ui
 
 Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. `pnpm dev:desktop` additionally self-isolates per worktree (its own renderer port + app name) automatically, independent of `.env.worktree`.
 
-CI runs Node 22, Go 1.26.1, and a `pgvector/pgvector:pg17` PostgreSQL service.
+CI runs Node 22, the latest Go 1.26 patch, and a `pgvector/pgvector:pg17` PostgreSQL service.
 
 ## Database and Migration Rules
 
@@ -208,6 +208,8 @@ Tests follow the code:
 Rules:
 
 - Never test shared component behavior in an app test file.
+- Give each product behavior ONE canonical layer. Pure parsing, state transitions and boundary matrices belong in a `.test.ts` beside the helper; the component suite keeps the happy path, the wiring, accessibility and named regressions, and points at the canonical file in a comment. Do not re-run a helper's matrix through a DOM mount.
+- A `.test.ts` that needs no DOM must start with `// @vitest-environment node`. jsdom costs ~0.8s of setup per file and buys such a suite nothing. Do not add it to a test whose code under test branches on `typeof window`/`document` — under node it would silently take the SSR path and still pass.
 - `packages/views/` tests must not mock `next/*` or `react-router-dom`.
 - Mock `@multica/core` stores with the Zustand callable-store shape (`selectorFn` plus `getState`).
 - Mock `@multica/core/api` for API calls.

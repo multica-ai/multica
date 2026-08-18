@@ -511,6 +511,141 @@ export function DeleteSkillsDialog({
 }
 
 // ---------------------------------------------------------------------------
+// Bulk update-from-source (batch toolbar)
+// ---------------------------------------------------------------------------
+
+/**
+ * Confirm-and-run dialog for updating several imported skills from their
+ * sources. Every updatable selection entry is re-downloaded — deliberately
+ * no upstream freshness probe first (product call on #6930): re-fetching an
+ * already-current skill costs one download on an explicit Update click,
+ * which beats probing every source to find out it was current.
+ *
+ * Refreshes run sequentially with per-item failure tolerance (unlike bulk
+ * delete's all-or-nothing loop): a single 409 from an upstream rename
+ * collision must not strand the rest of the batch. A partial failure keeps
+ * the selection (`onUpdated` only fires on a clean run) so retry is one
+ * click away.
+ */
+export function UpdateSkillsDialog({
+  rows,
+  skippedCount,
+  ctx,
+  open,
+  onOpenChange,
+  onUpdated,
+}: {
+  /** The updatable subset of the selection (canEdit + refreshable origin). */
+  rows: SkillRow[];
+  /** Selection entries that are not updatable (manual, runtime, no permission). */
+  skippedCount: number;
+  ctx: SkillActionsContext;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  /** Fired only after a fully successful run, so a partial failure keeps the selection for retry. */
+  onUpdated?: () => void;
+}) {
+  const { t } = useT("skills");
+  const qc = useQueryClient();
+  const [updating, setUpdating] = useState(false);
+  const [progress, setProgress] = useState(0);
+
+  const handleConfirm = async () => {
+    setUpdating(true);
+    let updated = 0;
+    let failed = 0;
+    try {
+      for (const row of rows) {
+        setProgress(updated + failed + 1);
+        try {
+          await api.refreshSkill(row.skill.id);
+          updated++;
+        } catch {
+          failed++;
+        }
+      }
+      qc.invalidateQueries({ queryKey: workspaceKeys.skills(ctx.wsId) });
+      qc.invalidateQueries({ queryKey: workspaceKeys.agents(ctx.wsId) });
+      if (failed === 0) {
+        toast.success(t(($) => $.actions.updated_toast, { count: updated }));
+        onOpenChange(false);
+        onUpdated?.();
+      } else {
+        toast.error(
+          t(($) => $.actions.update_partial_toast, { count: updated, failed }),
+        );
+        onOpenChange(false);
+      }
+    } finally {
+      setUpdating(false);
+      setProgress(0);
+    }
+  };
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!updating) onOpenChange(v);
+      }}
+    >
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>{t(($) => $.actions.update_dialog_title)}</DialogTitle>
+        </DialogHeader>
+        <ul className="space-y-1 text-caption text-muted-foreground">
+          <li>
+            {t(($) => $.actions.update_summary_selected, {
+              count: rows.length,
+            })}
+          </li>
+          {skippedCount > 0 && (
+            <li>
+              {t(($) => $.actions.update_summary_skipped, {
+                count: skippedCount,
+              })}
+            </li>
+          )}
+        </ul>
+        <div className="rounded-md bg-warning/10 px-3 py-2 text-caption text-muted-foreground">
+          {t(($) => $.detail.refresh.dialog.warning)}
+        </div>
+        <DialogFooter>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => onOpenChange(false)}
+            disabled={updating}
+          >
+            {t(($) => $.actions.cancel)}
+          </Button>
+          <Button
+            type="button"
+            onClick={handleConfirm}
+            disabled={updating || rows.length === 0}
+          >
+            {updating ? (
+              <>
+                <Loader2 className="h-3 w-3 animate-spin" />
+                {t(($) => $.actions.update_updating, {
+                  done: progress,
+                  total: rows.length,
+                })}
+              </>
+            ) : (
+              <>
+                <RotateCw className="h-3 w-3" />
+                {t(($) => $.actions.update_confirm, { count: rows.length })}
+              </>
+            )}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Row kebab
 // ---------------------------------------------------------------------------
 
@@ -631,11 +766,28 @@ export function SkillBatchToolbar({
 }) {
   const { t } = useT("skills");
   const [addOpen, setAddOpen] = useState(false);
+  const [updateOpen, setUpdateOpen] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
 
   if (rows.length === 0) return null;
 
   const allDeletable = rows.every((r) => r.canEdit);
+  const updatable = rows.filter(
+    (r) => r.canEdit && isRefreshableOrigin(readOrigin(r.skill)),
+  );
+
+  const updateButton = (
+    <Button
+      variant="ghost"
+      size="sm"
+      disabled={updatable.length === 0}
+      onClick={() => setUpdateOpen(true)}
+      className={cn(updatable.length === 0 && "pointer-events-none")}
+    >
+      <RotateCw className="mr-1 size-3.5" />
+      {t(($) => $.actions.update)}
+    </Button>
+  );
 
   const deleteButton = (
     <Button
@@ -679,6 +831,19 @@ export function SkillBatchToolbar({
           {t(($) => $.actions.add_to_agent)}
         </Button>
 
+        {updatable.length > 0 ? (
+          updateButton
+        ) : (
+          <Tooltip>
+            <TooltipTrigger
+              render={<span className="inline-flex">{updateButton}</span>}
+            />
+            <TooltipContent side="top">
+              {t(($) => $.actions.update_none)}
+            </TooltipContent>
+          </Tooltip>
+        )}
+
         {allDeletable ? (
           deleteButton
         ) : (
@@ -698,6 +863,14 @@ export function SkillBatchToolbar({
         ctx={ctx}
         open={addOpen}
         onOpenChange={setAddOpen}
+      />
+      <UpdateSkillsDialog
+        rows={updatable}
+        skippedCount={rows.length - updatable.length}
+        ctx={ctx}
+        open={updateOpen}
+        onOpenChange={setUpdateOpen}
+        onUpdated={onClear}
       />
       <DeleteSkillsDialog
         rows={rows}

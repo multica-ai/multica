@@ -72,7 +72,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 	}()
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	// Run claude in its own process group so cancellation can reach the whole
 	// tree — the claude CLI plus the MCP servers and tool subprocesses it
@@ -1106,11 +1106,11 @@ func cleanupMcpConfigTemp(path string) {
 // tests can shrink it without waiting out the real bound.
 var detectVersionTimeout = 10 * time.Second
 
-func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
+func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, execPath, "--version")
+	cmd := runtimeCmd.exec(ctx, "--version")
 	hideAgentWindow(cmd)
 	// exec.CommandContext only kills the direct child on timeout. A broken CLI
 	// (node/bun shim) can leave grandchildren that inherited and still hold our
@@ -1124,7 +1124,7 @@ func detectCLIVersion(ctx context.Context, execPath string) (string, error) {
 		// provider through here, so an ENOEXEC diagnosis added at this point
 		// reaches the reason the daemon reports for a skipped runtime
 		// (MUL-6164).
-		return "", fmt.Errorf("detect version for %s: %w", execPath, ExplainExecError(err))
+		return "", fmt.Errorf("detect version for %s: %w", runtimeCmd, ExplainExecError(err))
 	}
 	return extractVersionLine(string(data)), nil
 }
