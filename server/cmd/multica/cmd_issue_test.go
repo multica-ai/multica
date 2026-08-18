@@ -906,6 +906,33 @@ func TestResolveIssueRef(t *testing.T) {
 		}
 	})
 
+	t.Run("full UUID resolves locally with zero HTTP requests", func(t *testing.T) {
+		// A full UUID is self-identifying — the resolver used to GET
+		// /api/issues/<uuid> just to learn the id it already had, and
+		// agents pay that per `multica issue …` call during run
+		// bootstrap (GH #7017). Any HTTP call here means the local
+		// resolve regressed.
+		var hits []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			hits = append(hits, r.Method+" "+r.URL.Path)
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
+		got, err := resolveIssueRef(context.Background(), client, "1881A167-4BB6-4602-944B-F40CE4192FE6")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		// Canonical lowercase, whatever case the user pasted.
+		if got.ID != "1881a167-4bb6-4602-944b-f40ce4192fe6" || got.Display != got.ID {
+			t.Fatalf("got %#v", got)
+		}
+		if len(hits) != 0 {
+			t.Fatalf("full UUID must not perform any HTTP call; got %#v", hits)
+		}
+	})
+
 	t.Run("short UUID prefix is rejected without any HTTP call", func(t *testing.T) {
 		// Until commit 9a3a99c this called fetchIssueCandidates and paged
 		// /api/issues client-side, which timed out on large workspaces
@@ -998,31 +1025,6 @@ func TestResolveIssueRef(t *testing.T) {
 		}
 	})
 
-	t.Run("full UUID still resolves via single GET", func(t *testing.T) {
-		// Sanity check: the canonical reference forms must still work.
-		var hits []string
-		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			hits = append(hits, r.Method+" "+r.URL.Path)
-			if r.URL.Path == "/api/issues/"+issue["id"].(string) {
-				json.NewEncoder(w).Encode(issue)
-				return
-			}
-			http.NotFound(w, r)
-		}))
-		defer srv.Close()
-
-		client := cli.NewAPIClient(srv.URL, "ws-1", "test-token")
-		got, err := resolveIssueRef(context.Background(), client, issue["id"].(string))
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if got.ID != issue["id"] || got.Display != "MUL-1852" {
-			t.Fatalf("got %#v", got)
-		}
-		if len(hits) != 1 {
-			t.Fatalf("full UUID must resolve via a single request; got %#v", hits)
-		}
-	})
 }
 
 func TestFetchAutopilotCandidatesPaginates(t *testing.T) {
