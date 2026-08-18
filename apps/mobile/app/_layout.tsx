@@ -31,6 +31,7 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
   const signingOutRef = useRef(false);
 
   useEffect(() => {
+    const controller = new AbortController();
     // Wire 401 handling onto the shared ApiClient singleton. Must be set
     // before any request fires — initialize() below kicks off the first
     // getMe() call, so do this synchronously first.
@@ -51,7 +52,11 @@ function AuthInitializer({ children }: { children: React.ReactNode }) {
         })();
       },
     });
+    void api.loadConfig({ signal: controller.signal }).catch(() => {
+      // Older/offline servers keep the 100 MiB compatibility fallback.
+    });
     initialize();
+    return () => controller.abort();
   }, [initialize, qc]);
 
   return <>{children}</>;

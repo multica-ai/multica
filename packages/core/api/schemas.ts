@@ -644,6 +644,7 @@ export const EMPTY_ISSUE_PROPERTIES_RESPONSE: IssuePropertiesResponse = {
 
 export interface AppConfigResponse {
   cdn_domain: string;
+  max_upload_size_bytes: number;
   // True when the CDN domain serves private content via time-bounded signed
   // URLs (CloudFront signing) — raw storage URLs on that domain are NOT
   // publicly fetchable and must not be used as native media sources
@@ -845,6 +846,16 @@ const FeatureFlagsSchema = z.preprocess(
 
 export const AppConfigSchema = z.object({
   cdn_domain: z.string().default(""),
+  max_upload_size_bytes: z.preprocess(
+    (value) =>
+      typeof value === "number" &&
+      Number.isSafeInteger(value) &&
+      value > 0 &&
+      value <= 1024 * 1024 * 1024
+        ? value
+        : undefined,
+    z.number().default(100 * 1024 * 1024),
+  ),
   cdn_signed: BooleanWithDefaultSchema(false),
   allow_signup: BooleanWithDefaultSchema(true),
   google_client_id: OptionalStringSchema,
@@ -861,6 +872,7 @@ export const AppConfigSchema = z.object({
 
 export const EMPTY_APP_CONFIG: AppConfigResponse = {
   cdn_domain: "",
+  max_upload_size_bytes: 100 * 1024 * 1024,
   cdn_signed: false,
   allow_signup: true,
   google_client_id: "",

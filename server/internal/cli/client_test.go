@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -279,6 +280,26 @@ func TestDownloadFile(t *testing.T) {
 			t.Fatal("expected error, got nil")
 		}
 	})
+}
+
+func TestDownloadFileToRejectsOversizeBodyWithoutSilentTruncation(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "12345")
+	}))
+	defer srv.Close()
+
+	client := NewAPIClient(srv.URL, "", "")
+	var dst bytes.Buffer
+	written, err := client.DownloadFileTo(context.Background(), srv.URL, &dst, 4)
+	if err == nil {
+		t.Fatal("expected oversize error")
+	}
+	if written != 5 {
+		t.Fatalf("written = %d, want 5 bytes observed", written)
+	}
+	if !strings.Contains(err.Error(), "exceeds 4-byte limit") {
+		t.Fatalf("unexpected error: %v", err)
+	}
 }
 
 func TestUploadFileWithURL(t *testing.T) {

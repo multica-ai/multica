@@ -4,7 +4,7 @@ import { useState, useCallback } from "react";
 import type { ApiClient } from "../api/client";
 import type { Attachment } from "../types";
 import { attachmentDownloadPath } from "../types/attachment-url";
-import { MAX_FILE_SIZE } from "../constants/upload";
+import { formatFileSizeLimit, getMaxFileSize } from "../constants/upload";
 
 // Carries the full Attachment so editors that need preview metadata
 // (`content_type`, `download_url`) get it directly. Two URL fields are
@@ -115,8 +115,9 @@ export function useFileUpload(
 
   const upload = useCallback(
     async (file: File, ctx?: UploadContext): Promise<UploadResult | null> => {
-      if (file.size > MAX_FILE_SIZE) {
-        throw new Error("File exceeds 100 MB limit");
+      const maxFileSize = getMaxFileSize();
+      if (file.size > maxFileSize) {
+        throw new Error(`File exceeds ${formatFileSizeLimit(maxFileSize)} limit`);
       }
 
       setInFlight((n) => n + 1);

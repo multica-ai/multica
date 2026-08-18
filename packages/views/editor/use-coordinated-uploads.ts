@@ -55,7 +55,10 @@ import {
   type UploadContext,
   type UploadResult,
 } from "@multica/core/hooks/use-file-upload";
-import { MAX_FILE_SIZE } from "@multica/core/constants/upload";
+import {
+  formatFileSizeLimit,
+  getMaxFileSize,
+} from "@multica/core/constants/upload";
 import { useT } from "../i18n";
 import type { UploadGate } from "./use-upload-gate";
 import type { ContentEditorRef } from "./content-editor";
@@ -392,10 +395,11 @@ export function useCoordinatedUploads(
 
       const pastedText = pastedTextSource(file);
 
-      if (file.size > MAX_FILE_SIZE) {
+      const maxFileSize = getMaxFileSize();
+      if (file.size > maxFileSize) {
         // Never enters the coordinator, and never enters the draft either —
         // see the settle handler below for why a failure leaves no placeholder.
-        const reason = "File exceeds 100 MB limit";
+        const reason = `File exceeds ${formatFileSizeLimit(maxFileSize)} limit`;
         if (pastedText !== undefined) {
           // A paste has no on-disk copy to re-attach from, so the text goes
           // back into the composer instead of being lost with the upload.

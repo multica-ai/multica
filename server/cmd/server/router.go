@@ -147,6 +147,18 @@ func parseTrustedProxies(raw string) []netip.Prefix {
 	return out
 }
 
+func configuredMaxUploadSize(raw string) int64 {
+	size, err := handler.ParseMaxUploadSize(raw)
+	if err != nil {
+		slog.Warn("invalid MULTICA_MAX_UPLOAD_SIZE, using default",
+			"value", raw,
+			"default_bytes", handler.DefaultMaxUploadSizeBytes,
+			"error", err)
+		return handler.DefaultMaxUploadSizeBytes
+	}
+	return size
+}
+
 // normalizeServerVersion maps the unstamped "dev" default (main.go's
 // `version` var, unchanged when the binary wasn't built with
 // -X main.version=<tag>) to an empty string. handler.Config.ServerVersion
@@ -326,6 +338,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	origins := allowedOrigins()
 
 	signupConfig := handler.Config{
+		MaxUploadSizeBytes:       configuredMaxUploadSize(os.Getenv("MULTICA_MAX_UPLOAD_SIZE")),
 		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
 		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),

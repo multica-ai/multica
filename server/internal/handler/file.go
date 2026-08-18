@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -30,8 +31,6 @@ var extContentTypes = map[string]string{
 	".json": "application/json",
 	".wasm": "application/wasm",
 }
-
-const maxUploadSize = 100 << 20 // 100 MB
 
 const defaultAttachmentDownloadURLTTL = 30 * time.Minute
 
@@ -388,11 +387,27 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	workspaceID := h.resolveWorkspaceID(r)
+	var uploaderType, uploaderID string
+	if workspaceID != "" {
+		// Reject unauthorized workspace uploads before reading any attacker-
+		// controlled body bytes.
+		if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
+			writeError(w, http.StatusForbidden, "not a member of this workspace")
+			return
+		}
+		uploaderType, uploaderID = h.resolveActor(r, userID, workspaceID)
+	}
 
-	r.Body = http.MaxBytesReader(w, r.Body, maxUploadSize)
+	maxFileSize := h.maxUploadSizeBytes()
+	r.Body = http.MaxBytesReader(w, r.Body, maxFileSize+multipartEnvelopeBytes)
 
-	if err := r.ParseMultipartForm(maxUploadSize); err != nil {
-		writeError(w, http.StatusBadRequest, "file too large or invalid multipart form")
+	if err := r.ParseMultipartForm(multipartMemoryBytes); err != nil {
+		var maxBytesErr *http.MaxBytesError
+		if errors.As(err, &maxBytesErr) {
+			writeUploadTooLarge(w, maxFileSize)
+			return
+		}
+		writeError(w, http.StatusBadRequest, "invalid multipart form")
 		return
 	}
 	defer r.MultipartForm.RemoveAll()
@@ -403,6 +418,10 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer file.Close()
+	if header.Size > maxFileSize {
+		writeUploadTooLarge(w, maxFileSize)
+		return
+	}
 
 	// Sniff actual content type from file bytes instead of trusting the client header.
 	buf := make([]byte, 512)
@@ -419,12 +438,6 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	// Seek back so the full file is uploaded.
 	if _, err := file.Seek(0, io.SeekStart); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to read file")
-		return
-	}
-
-	data, err := io.ReadAll(file)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, "failed to read file")
 		return
 	}
 
@@ -445,13 +458,6 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 
 	// If workspace context is available, validate membership before uploading.
 	if workspaceID != "" {
-		if _, err := h.getWorkspaceMember(r.Context(), userID, workspaceID); err != nil {
-			writeError(w, http.StatusForbidden, "not a member of this workspace")
-			return
-		}
-
-		uploaderType, uploaderID := h.resolveActor(r, userID, workspaceID)
-
 		params := db.CreateAttachmentParams{
 			ID:           pgtype.UUID{Bytes: id, Valid: true},
 			WorkspaceID:  parseUUID(workspaceID),
@@ -459,7 +465,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			UploaderID:   parseUUID(uploaderID),
 			Filename:     header.Filename,
 			ContentType:  contentType,
-			SizeBytes:    int64(len(data)),
+			SizeBytes:    header.Size,
 		}
 
 		if issueID := r.FormValue("issue_id"); issueID != "" {
@@ -556,7 +562,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			params.ChatSessionID = task.ChatSessionID
 		}
 
-		link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
+		link, err := h.uploadFileContents(r.Context(), key, file, header.Size, contentType, header.Filename)
 		if err != nil {
 			slog.Error("file upload failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "upload failed")
@@ -583,7 +589,7 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// No workspace context (e.g. avatar upload) — upload directly.
-	link, err := h.Storage.Upload(r.Context(), key, data, contentType, header.Filename)
+	link, err := h.uploadFileContents(r.Context(), key, file, header.Size, contentType, header.Filename)
 	if err != nil {
 		slog.Error("file upload failed", "error", err)
 		writeError(w, http.StatusInternalServerError, "upload failed")
@@ -593,6 +599,23 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 		"id":       id.String(),
 		"url":      link,
 		"filename": header.Filename,
+	})
+}
+
+func (h *Handler) uploadFileContents(ctx context.Context, key string, file io.Reader, sizeBytes int64, contentType, filename string) (string, error) {
+	if sizeBytes > 0 {
+		return h.Storage.UploadStream(ctx, key, file, sizeBytes, contentType, filename)
+	}
+
+	// The S3 streaming uploader requires a positive content length.
+	return h.Storage.Upload(ctx, key, nil, contentType, filename)
+}
+
+func writeUploadTooLarge(w http.ResponseWriter, maxBytes int64) {
+	writeJSON(w, http.StatusRequestEntityTooLarge, map[string]any{
+		"error":          fmt.Sprintf("file exceeds configured upload limit of %d bytes", maxBytes),
+		"code":           "file_too_large",
+		"max_size_bytes": maxBytes,
 	})
 }
 

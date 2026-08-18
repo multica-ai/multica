@@ -52,7 +52,7 @@ import { router, type Href } from "expo-router";
 import * as Haptics from "expo-haptics";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
-import { api, MAX_FILE_SIZE } from "@/data/api";
+import { api } from "@/data/api";
 import { useMentionDraftStore } from "@/data/stores/mention-draft-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { stripMarkdown } from "@/lib/strip-markdown";
@@ -346,8 +346,11 @@ export function MessageComposer({
     if (picker.canceled) return;
     const picked = picker.assets[0];
     if (!picked) return;
-    if (picked.fileSize != null && picked.fileSize > MAX_FILE_SIZE) {
-      Alert.alert("File too large", "Files must be smaller than 100 MB.");
+    if (picked.fileSize != null && picked.fileSize > api.uploadSizeLimitBytes) {
+      Alert.alert(
+        "File too large",
+        `Files must be no larger than ${api.uploadSizeLimitLabel}.`,
+      );
       return;
     }
     const filename = picked.fileName ?? `image-${Date.now()}.jpg`;
@@ -379,8 +382,11 @@ export function MessageComposer({
     if (picker.canceled) return;
     const picked = picker.assets[0];
     if (!picked) return;
-    if (picked.size != null && picked.size > MAX_FILE_SIZE) {
-      Alert.alert("File too large", "Files must be smaller than 100 MB.");
+    if (picked.size != null && picked.size > api.uploadSizeLimitBytes) {
+      Alert.alert(
+        "File too large",
+        `Files must be no larger than ${api.uploadSizeLimitLabel}.`,
+      );
       return;
     }
     const mimeType = picked.mimeType ?? "application/octet-stream";

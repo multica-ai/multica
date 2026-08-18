@@ -61,6 +61,9 @@ type dbExecutor interface {
 }
 
 type Config struct {
+	// MaxUploadSizeBytes is the per-file upload limit exposed through
+	// /api/config. It is populated from MULTICA_MAX_UPLOAD_SIZE.
+	MaxUploadSizeBytes  int64
 	AllowSignup         bool
 	AllowedEmails       []string
 	AllowedEmailDomains []string
@@ -353,6 +356,9 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	}
 	if cfg.AttachmentDownloadURLTTL <= 0 {
 		cfg.AttachmentDownloadURLTTL = defaultAttachmentDownloadURLTTL
+	}
+	if cfg.MaxUploadSizeBytes <= 0 {
+		cfg.MaxUploadSizeBytes = DefaultMaxUploadSizeBytes
 	}
 
 	var daemonHub *daemonws.Hub

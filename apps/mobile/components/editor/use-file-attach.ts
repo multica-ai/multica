@@ -20,7 +20,7 @@ import { useCallback, useState } from "react";
 import { Alert } from "react-native";
 import * as ImagePicker from "expo-image-picker";
 import * as DocumentPicker from "expo-document-picker";
-import { api, MAX_FILE_SIZE, type FileAsset } from "@/data/api";
+import { api, type FileAsset } from "@/data/api";
 
 export interface FileAttachResult {
   /** Attachment id from the server. Callers MUST carry this to the mutation
@@ -50,10 +50,10 @@ export function useFileAttach() {
       asset: PickedAsset,
       ctx?: UploadContext,
     ): Promise<FileAttachResult | null> => {
-      if (asset.size != null && asset.size > MAX_FILE_SIZE) {
+      if (asset.size != null && asset.size > api.uploadSizeLimitBytes) {
         Alert.alert(
           "File too large",
-          "Files must be smaller than 100 MB.",
+          `Files must be no larger than ${api.uploadSizeLimitLabel}.`,
         );
         return null;
       }

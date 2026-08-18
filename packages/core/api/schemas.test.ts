@@ -842,6 +842,17 @@ describe("dashboard + runtime usage schema drift", () => {
 });
 
 describe("AppConfigSchema cdn_signed drift", () => {
+  it("defaults malformed or missing upload limits to 100 MiB", () => {
+    expect(AppConfigSchema.parse({}).max_upload_size_bytes).toBe(100 * 1024 * 1024);
+    expect(
+      AppConfigSchema.parse({ max_upload_size_bytes: "unlimited" })
+        .max_upload_size_bytes,
+    ).toBe(100 * 1024 * 1024);
+    expect(AppConfigSchema.parse({ max_upload_size_bytes: 256 << 20 }).max_upload_size_bytes).toBe(
+      256 << 20,
+    );
+  });
+
   it("defaults cdn_signed to false when the server omits it (pre-MUL-3254 servers)", () => {
     const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
     expect(parsed.cdn_signed).toBe(false);

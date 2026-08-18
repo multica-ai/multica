@@ -8,6 +8,7 @@ import (
 
 type Storage interface {
 	Upload(ctx context.Context, key string, data []byte, contentType string, filename string) (string, error)
+	UploadStream(ctx context.Context, key string, data io.Reader, sizeBytes int64, contentType string, filename string) (string, error)
 	Delete(ctx context.Context, key string)
 	// DeleteObject is Delete with the error surfaced — the channel-media
 	// reconciler schedules retries on failure instead of assuming success.

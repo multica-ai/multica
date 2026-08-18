@@ -602,16 +602,6 @@ export class ApiClient {
     this.options.onUnauthorized?.();
   }
 
-  private async parseErrorMessage(res: Response, fallback: string): Promise<string> {
-    try {
-      const data = await res.json() as { error?: string };
-      if (typeof data.error === "string" && data.error) return data.error;
-    } catch {
-      // Ignore non-JSON error bodies.
-    }
-    return fallback;
-  }
-
   // Reads the response body once for both human-readable error message and
   // structured fields. The Response stream can only be consumed once, so
   // both pieces have to come from a single read.
@@ -2784,9 +2774,12 @@ export class ApiClient {
 
     if (!res.ok) {
       if (res.status === 401) this.handleUnauthorized();
-      const message = await this.parseErrorMessage(res, `Upload failed: ${res.status}`);
+      const { message, body } = await this.parseErrorBody(
+        res,
+        `Upload failed: ${res.status}`,
+      );
       this.logger.error(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms`, error: message });
-      throw new Error(message);
+      throw new ApiError(message, res.status, res.statusText, body);
     }
 
     this.logger.info(`← ${res.status} /api/upload-file`, { rid, duration: `${Date.now() - start}ms` });

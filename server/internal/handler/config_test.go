@@ -9,6 +9,24 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 )
 
+func TestGetConfigExposesMaxUploadSize(t *testing.T) {
+	h := &Handler{cfg: Config{MaxUploadSizeBytes: 256 << 20}}
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+
+	h.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if cfg.MaxUploadSizeBytes != 256<<20 {
+		t.Fatalf("max_upload_size_bytes = %d, want %d", cfg.MaxUploadSizeBytes, 256<<20)
+	}
+}
+
 func TestGetConfigReportsCdnSignedMode(t *testing.T) {
 	origStorage := testHandler.Storage
 	origSigner := testHandler.CFSigner

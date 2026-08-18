@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
+import { unstable_doesMiddlewareMatch } from "next/experimental/testing/server";
 import { MULTICA_LOCALE_HEADER } from "./lib/locale-routing";
-import { proxy } from "./proxy";
+import { config, proxy } from "./proxy";
 
 function makeRequest(
   path: string,
@@ -134,6 +135,23 @@ describe("proxy legacy workspace route redirects", () => {
 });
 
 describe("proxy runtime upstream rewrites", () => {
+  it("leaves upload-file to the streaming route handler", () => {
+    expect(
+      unstable_doesMiddlewareMatch({
+        config,
+        nextConfig: {},
+        url: "https://app.multica.test/api/upload-file",
+      }),
+    ).toBe(false);
+    expect(
+      unstable_doesMiddlewareMatch({
+        config,
+        nextConfig: {},
+        url: "https://app.multica.test/api/config",
+      }),
+    ).toBe(true);
+  });
+
   it("does not rewrite API requests when no runtime API origin is configured", () => {
     withoutRuntimeUpstreams(() => {
       const res = proxy(makeRequest("/api/config?x=1"));

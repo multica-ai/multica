@@ -709,7 +709,9 @@ func (c *APIClient) UploadPrivatePlugin(ctx context.Context, path string, archiv
 
 // DownloadFile downloads a file from the given URL and returns the response body.
 // This is used for downloading attachments via their signed download_url.
-// Downloads are limited to 100 MB to match the upload size limit.
+// This legacy in-memory helper is capped at 100 MiB and returns an explicit
+// error instead of truncating. File-oriented callers should use
+// DownloadFileTo with the attachment's advertised size.
 //
 // The URL may be absolute (a signed CloudFront/S3 URL) or relative
 // (a server-relative path like "/api/attachments/{id}/download" or
@@ -718,17 +720,28 @@ func (c *APIClient) UploadPrivatePlugin(ctx context.Context, path string, archiv
 // BaseURL and sent with the standard auth headers; absolute URLs are
 // used as-is so that their query-string signatures are not disturbed.
 func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byte, error) {
+	var body bytes.Buffer
+	const maxDownloadSize = 100 << 20
+	if _, err := c.DownloadFileTo(ctx, downloadURL, &body, maxDownloadSize); err != nil {
+		return nil, err
+	}
+	return body.Bytes(), nil
+}
+
+// DownloadFileTo streams a download into dst and fails explicitly if the body
+// exceeds maxBytes. A negative maxBytes means no client-side cap.
+func (c *APIClient) DownloadFileTo(ctx context.Context, downloadURL string, dst io.Writer, maxBytes int64) (int64, error) {
 	isRelative := !strings.HasPrefix(downloadURL, "http://") && !strings.HasPrefix(downloadURL, "https://")
 	if isRelative {
 		if c.BaseURL == "" {
-			return nil, fmt.Errorf("download URL %q is relative but client has no BaseURL", downloadURL)
+			return 0, fmt.Errorf("download URL %q is relative but client has no BaseURL", downloadURL)
 		}
 		downloadURL = c.BaseURL + downloadURL
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, downloadURL, nil)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	if isRelative {
 		c.setHeaders(req)
@@ -737,16 +750,26 @@ func (c *APIClient) DownloadFile(ctx context.Context, downloadURL string) ([]byt
 	resp, err := c.HTTPClient.Do(req)
 	err = wrapTransport(req, err)
 	if err != nil {
-		return nil, err
+		return 0, err
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		return nil, newHTTPError(http.MethodGet, downloadURL, resp)
+		return 0, newHTTPError(http.MethodGet, downloadURL, resp)
 	}
 
-	const maxDownloadSize = 100 << 20 // 100 MB
-	return io.ReadAll(io.LimitReader(resp.Body, maxDownloadSize))
+	reader := io.Reader(resp.Body)
+	if maxBytes >= 0 {
+		reader = io.LimitReader(resp.Body, maxBytes+1)
+	}
+	written, err := io.Copy(dst, reader)
+	if err != nil {
+		return written, err
+	}
+	if maxBytes >= 0 && written > maxBytes {
+		return written, fmt.Errorf("download exceeds %d-byte limit", maxBytes)
+	}
+	return written, nil
 }
 
 // HealthCheck hits the /health endpoint and returns the response body.

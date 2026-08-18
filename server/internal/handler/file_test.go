@@ -57,6 +57,7 @@ type mockStorage struct {
 	files               map[string][]byte
 	presignCalls        []string
 	presignDispositions []string
+	streamUploads       int
 }
 
 func (m *mockStorage) Upload(_ context.Context, key string, data []byte, _ string, _ string) (string, error) {
@@ -67,6 +68,17 @@ func (m *mockStorage) Upload(_ context.Context, key string, data []byte, _ strin
 	}
 	m.files[key] = append([]byte(nil), data...)
 	return fmt.Sprintf("https://cdn.example.com/%s", key), nil
+}
+
+func (m *mockStorage) UploadStream(ctx context.Context, key string, data io.Reader, _ int64, contentType string, filename string) (string, error) {
+	contents, err := io.ReadAll(data)
+	if err != nil {
+		return "", err
+	}
+	m.mu.Lock()
+	m.streamUploads++
+	m.mu.Unlock()
+	return m.Upload(ctx, key, contents, contentType, filename)
 }
 
 func (m *mockStorage) Delete(_ context.Context, key string) {
@@ -208,7 +220,8 @@ func (m *failingMockStorage) GetReader(_ context.Context, key string) (io.ReadCl
 
 func TestUploadFileForeignWorkspace(t *testing.T) {
 	origStorage := testHandler.Storage
-	testHandler.Storage = &mockStorage{}
+	store := &mockStorage{}
+	testHandler.Storage = store
 	defer func() { testHandler.Storage = origStorage }()
 
 	var body bytes.Buffer
@@ -230,6 +243,94 @@ func TestUploadFileForeignWorkspace(t *testing.T) {
 	testHandler.UploadFile(w, req)
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("UploadFile with foreign workspace: expected 403, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+type countingReadCloser struct {
+	io.Reader
+	reads int
+}
+
+func (r *countingReadCloser) Read(p []byte) (int, error) {
+	r.reads++
+	return r.Reader.Read(p)
+}
+
+func (*countingReadCloser) Close() error { return nil }
+
+func TestUploadFileRejectsForeignWorkspaceBeforeReadingBody(t *testing.T) {
+	origStorage := testHandler.Storage
+	testHandler.Storage = &mockStorage{}
+	t.Cleanup(func() { testHandler.Storage = origStorage })
+
+	body := &countingReadCloser{Reader: strings.NewReader("untrusted body")}
+	req := httptest.NewRequest(http.MethodPost, "/api/upload-file", nil)
+	req.Body = body
+	req.Header.Set("Content-Type", "multipart/form-data; boundary=test")
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", "00000000-0000-0000-0000-000000000099")
+
+	w := httptest.NewRecorder()
+	testHandler.UploadFile(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403: %s", w.Code, w.Body.String())
+	}
+	if body.reads != 0 {
+		t.Fatalf("unauthorized request body was read %d time(s)", body.reads)
+	}
+}
+
+func TestUploadFileConfiguredLimit(t *testing.T) {
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	store := &mockStorage{}
+	testHandler.Storage = store
+	testHandler.cfg.MaxUploadSizeBytes = 10
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+	})
+
+	request := func(contents string) *http.Request {
+		t.Helper()
+		var body bytes.Buffer
+		writer := multipart.NewWriter(&body)
+		part, err := writer.CreateFormFile("file", "limit.txt")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := part.Write([]byte(contents)); err != nil {
+			t.Fatal(err)
+		}
+		if err := writer.Close(); err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/upload-file", &body)
+		req.Header.Set("Content-Type", writer.FormDataContentType())
+		req.Header.Set("X-User-ID", testUserID)
+		return req
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.UploadFile(w, request("0123456789"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("exact limit: status = %d, want 200: %s", w.Code, w.Body.String())
+	}
+	if store.streamUploads != 1 {
+		t.Fatalf("stream uploads = %d, want 1", store.streamUploads)
+	}
+
+	w = httptest.NewRecorder()
+	testHandler.UploadFile(w, request("01234567890"))
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("over limit: status = %d, want 413: %s", w.Code, w.Body.String())
+	}
+	var response map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode 413: %v", err)
+	}
+	if response["code"] != "file_too_large" || response["max_size_bytes"] != float64(10) {
+		t.Fatalf("unexpected 413 response: %#v", response)
 	}
 }
 

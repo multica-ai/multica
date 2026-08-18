@@ -1670,6 +1670,31 @@ describe("ApiClient", () => {
       ).rejects.toMatchObject({ name: "AbortError" });
     });
 
+    it("preserves a structured 413 upload response", async () => {
+      const body = {
+        error: "file exceeds configured upload limit",
+        code: "file_too_large",
+        max_size_bytes: 10,
+      };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(
+          new Response(JSON.stringify(body), {
+            status: 413,
+            statusText: "Payload Too Large",
+            headers: { "Content-Type": "application/json" },
+          }),
+        ),
+      );
+
+      const error = await new ApiClient("https://api.example.test")
+        .uploadFile(new File(["too large"], "large.bin"))
+        .catch((err: unknown) => err);
+
+      expect(error).toBeInstanceOf(ApiError);
+      expect(error).toMatchObject({ status: 413, body });
+    });
+
     it("sendChatMessage serialises attachment_ids onto the JSON body when present", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "2026-08-01T00:00:00Z" }), {

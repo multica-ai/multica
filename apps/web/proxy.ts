@@ -117,7 +117,10 @@ export const config = {
   // proxy routes whose upstream origins are resolved from process.env at
   // request time instead of being baked into next.config.js at build time.
   matcher: [
-    "/api/:path*",
+    // Uploads use an App Router handler that forwards the request body as a
+    // stream. Keeping this path out of Proxy avoids Next buffering the whole
+    // multipart request before the backend can read it.
+    "/api/((?!upload-file(?:/|$)).*)",
     "/auth/:path*",
     "/uploads/:path*",
     "/docs/:path*",
