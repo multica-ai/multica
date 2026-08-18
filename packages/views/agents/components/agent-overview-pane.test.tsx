@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
+import { render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
@@ -14,65 +14,30 @@ import {
 
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
-// AgentOverviewPane pulls in ActorIssuesPanel which in turn touches the api
-// layer. The test only cares about which top-of-pane tab buttons render,
-// not what each tab does, so we stub the heavy children.
-vi.mock("./tabs/activity-tab", () => ({
-  ActivityTab: () => <div>activity-tab</div>,
-  AgentPerformanceSummary: () => <div>performance-summary</div>,
+vi.mock("@multica/core/hooks", () => ({
+  useWorkspaceId: () => "ws-1",
+}));
+vi.mock("@multica/core/paths", () => ({
+  useWorkspacePaths: () => ({ issues: () => "/acme/issues" }),
+}));
+vi.mock("@multica/core/workspace/queries", () => ({
+  squadListOptions: () => ({
+    queryKey: ["squads"],
+    queryFn: () => Promise.resolve([]),
+  }),
+  workspaceKeys: { squads: () => ["squads"] },
 }));
 vi.mock("./agent-overview-summary", () => ({
   AgentOverviewSummary: () => <div>agent-overview-summary</div>,
 }));
-vi.mock("./agent-access-settings", () => ({
-  AgentAccessSettings: () => <div>agent-access-settings</div>,
+vi.mock("./agent-detail-inspector", () => ({
+  AgentDetailInspector: () => <div>agent-detail-inspector</div>,
 }));
 vi.mock("./tabs/instructions-tab", () => ({
   InstructionsTab: () => <div>instructions-tab</div>,
 }));
 vi.mock("./tabs/skills-tab", () => ({
   SkillsTab: () => <div>skills-tab</div>,
-}));
-vi.mock("./tabs/env-tab", () => ({
-  EnvTab: () => <div>env-tab</div>,
-}));
-vi.mock("./tabs/custom-args-tab", () => ({
-  CustomArgsTab: () => <div>custom-args-tab</div>,
-}));
-vi.mock("./tabs/mcp-config-tab", () => ({
-  McpConfigTab: () => <div>mcp-config-tab</div>,
-}));
-vi.mock("./tabs/integrations-tab", () => ({
-  IntegrationsTab: () => <div>integrations-tab</div>,
-}));
-vi.mock("../../common/actor-issues-panel", () => ({
-  ActorIssuesPanel: () => <div>actor-issues-panel</div>,
-}));
-
-// The pane now reads workspace context to decide whether the Integrations
-// tab is worth showing (it queries Lark installations to learn whether the
-// deployment has the feature configured). Provide a stable workspace id and
-// a listing query backed by a ref so each test can flip `configured`.
-const larkListingRef = vi.hoisted(() => ({
-  current: { installations: [] as unknown[], configured: false },
-}));
-const slackListingRef = vi.hoisted(() => ({
-  current: { installations: [] as unknown[], configured: false },
-}));
-vi.mock("@multica/core/hooks", () => ({
-  useWorkspaceId: () => "ws-1",
-}));
-vi.mock("@multica/core/lark", () => ({
-  larkInstallationsOptions: () => ({
-    queryKey: ["lark", "installations"],
-    queryFn: () => Promise.resolve(larkListingRef.current),
-  }),
-}));
-vi.mock("@multica/core/slack", () => ({
-  slackInstallationsOptions: () => ({
-    queryKey: ["slack", "installations"],
-    queryFn: () => Promise.resolve(slackListingRef.current),
-  }),
 }));
 
 import { AgentOverviewPane } from "./agent-overview-pane";
@@ -102,30 +67,25 @@ const baseAgent: Agent = {
   archived_by: null,
 };
 
-function makeRuntime(provider: string): AgentRuntime {
-  return {
-    id: "runtime-1",
-    workspace_id: "ws-1",
-    daemon_id: null,
-    name: "Runtime",
-    runtime_mode: "local",
-    provider,
-    launch_header: "",
-    status: "online",
-    device_info: "",
-    metadata: {},
-    owner_id: null,
-    visibility: "private",
-    last_seen_at: null,
-    created_at: "2026-05-28T00:00:00Z",
-    updated_at: "2026-05-28T00:00:00Z",
-  };
-}
+const runtime: AgentRuntime = {
+  id: "runtime-1",
+  workspace_id: "ws-1",
+  daemon_id: null,
+  name: "Runtime",
+  runtime_mode: "local",
+  provider: "codex",
+  launch_header: "",
+  status: "online",
+  device_info: "",
+  metadata: {},
+  owner_id: null,
+  visibility: "private",
+  last_seen_at: null,
+  created_at: "2026-05-28T00:00:00Z",
+  updated_at: "2026-05-28T00:00:00Z",
+};
 
-function renderPane(
-  runtimes: AgentRuntime[],
-  { canEdit = true }: { canEdit?: boolean } = {},
-) {
+function renderPane() {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -143,12 +103,12 @@ function renderPane(
         <QueryClientProvider client={queryClient}>
           <AgentOverviewPane
             agent={baseAgent}
-            runtime={runtimes[0] ?? null}
+            runtime={runtime}
             owner={null}
-            runtimes={runtimes}
+            runtimes={[runtime]}
             members={[]}
             onUpdate={vi.fn().mockResolvedValue(undefined)}
-            canEdit={canEdit}
+            canEdit
           />
         </QueryClientProvider>
       </NavigationProvider>
@@ -156,112 +116,24 @@ function renderPane(
   );
 }
 
-function openCapabilities() {
-  fireEvent.click(screen.getByRole("tab", { name: /^Capabilities$/i }));
-}
+describe("AgentOverviewPane role center", () => {
+  it("keeps the approved role-center tabs and excludes advanced administration", () => {
+    renderPane();
 
-function openSettings() {
-  fireEvent.click(screen.getByRole("tab", { name: /^Settings$/i }));
-}
-
-beforeEach(() => {
-  larkListingRef.current = { installations: [], configured: false };
-  slackListingRef.current = { installations: [], configured: false };
-});
-
-describe("AgentOverviewPane MCP tab visibility", () => {
-  it.each([
-    ["Claude", "claude"],
-    ["Codex", "codex"],
-    ["Cursor", "cursor"],
-    ["Hermes", "hermes"],
-    ["Kimi", "kimi"],
-    ["Kiro", "kiro"],
-    ["OpenCode", "opencode"],
-    ["OpenClaw", "openclaw"],
-  ])("renders the MCP tab when the agent runs on the %s runtime", (_label, provider) => {
-    renderPane([makeRuntime(provider)]);
-    openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
+    for (const label of ["Overview", "Skills", "Instructions", "General"]) {
+      expect(screen.getByRole("tab", { name: label })).toBeInTheDocument();
+    }
+    for (const label of ["Work", "Capabilities", "Settings", "MCP", "Environment"]) {
+      expect(screen.queryByRole("tab", { name: label })).not.toBeInTheDocument();
+    }
   });
 
-  it("hides the MCP tab for providers whose backend does not read mcp_config", () => {
-    // Saving an MCP config on e.g. Gemini would be a silent no-op at run
-    // time — that's the bug this hiding logic is meant to prevent.
-    renderPane([makeRuntime("gemini")]);
-    openCapabilities();
-    expect(
-      screen.queryByRole("tab", { name: /^MCP$/i }),
-    ).not.toBeInTheDocument();
-  });
+  it("links the full work surface back to Tasks", () => {
+    renderPane();
 
-  it("keeps the MCP tab visible when the runtime row hasn't loaded yet", () => {
-    // Empty runtimes[] mimics the brief window between the page mounting and
-    // the runtimes query resolving. Hiding the tab would flicker it off and
-    // then back on, which reads as a bug.
-    renderPane([]);
-    openCapabilities();
-    expect(screen.getByRole("tab", { name: /^MCP$/i })).toBeInTheDocument();
-  });
-});
-
-describe("AgentOverviewPane Integrations tab visibility", () => {
-  it("shows the Integrations tab once the deployment has Lark configured", async () => {
-    larkListingRef.current = { installations: [], configured: true };
-    renderPane([makeRuntime("claude")]);
-    openCapabilities();
-    expect(
-      await screen.findByRole("tab", { name: /^Integrations$/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("shows the Integrations tab when only Slack is configured (Lark off)", async () => {
-    // Regression: the tab gate must consider Slack too, not just Lark —
-    // a Slack-only deployment was hiding the tab (and its bind entry).
-    slackListingRef.current = { installations: [], configured: true };
-    renderPane([makeRuntime("claude")]);
-    openCapabilities();
-    expect(
-      await screen.findByRole("tab", { name: /^Integrations$/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("hides the Integrations tab when neither Lark nor Slack is configured", () => {
-    // Default refs are configured:false; the tab must not appear on
-    // deployments without either integration, the common case.
-    renderPane([makeRuntime("claude")]);
-    openCapabilities();
-    expect(
-      screen.queryByRole("tab", { name: /^Integrations$/i }),
-    ).not.toBeInTheDocument();
-  });
-});
-
-describe("AgentOverviewPane Settings navigation", () => {
-  it("gives Access its own settings tab", () => {
-    renderPane([makeRuntime("claude")]);
-    openSettings();
-    expect(screen.getByRole("tab", { name: /^Access$/i })).toBeInTheDocument();
-  });
-});
-
-describe("AgentOverviewPane Environment tab visibility", () => {
-  it("shows the Environment tab to someone who can manage the agent", () => {
-    renderPane([makeRuntime("claude")]);
-    openSettings();
-    expect(
-      screen.getByRole("tab", { name: /^Environment$/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("hides the Environment tab from users who cannot manage the agent", () => {
-    // The env endpoints admit the agent owner or a workspace owner/admin
-    // (MUL-5438) — the rule `canEdit` already encodes. Anyone else who opens
-    // the tab hits a guaranteed 403 on "Reveal & edit".
-    renderPane([makeRuntime("claude")], { canEdit: false });
-    openSettings();
-    expect(
-      screen.queryByRole("tab", { name: /^Environment$/i }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Tasks/i })).toHaveAttribute(
+      "href",
+      "/acme/issues",
+    );
   });
 });

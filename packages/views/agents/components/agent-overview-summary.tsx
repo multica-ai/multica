@@ -85,33 +85,6 @@ export function AgentOverviewSummary({
         </dl>
       </section>
 
-      <section className="mt-5 border-t pt-5">
-        <div className="flex items-center justify-between gap-3">
-          <h2 className="text-body font-medium">
-            {t(($) => $.inspector.section_skills)}
-          </h2>
-          <span className="font-mono text-caption tabular-nums text-muted-foreground">
-            {agent.skills.length}
-          </span>
-        </div>
-        {agent.skills.length > 0 ? (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {agent.skills.map((skill) => (
-              <span
-                key={skill.id}
-                className="max-w-full truncate rounded-md border border-surface-border bg-surface-hover px-2 py-1 text-caption text-muted-foreground"
-              >
-                {skill.name}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <p className="mt-3 text-caption text-muted-foreground">
-            {t(($) => $.tab_body.skills.empty_title)}
-          </p>
-        )}
-      </section>
-
       <AgentPerformanceSummary agent={agent} />
     </aside>
   );

@@ -155,18 +155,15 @@ describe("SkillsTab", () => {
     });
   });
 
-  it("separates workspace assignments from inherited runtime skills", async () => {
+  it("shows only runtime-local skills", async () => {
     renderSkillsTab();
 
-    expect(
-      await screen.findByText("Assigned to agent"),
-    ).toBeInTheDocument();
     expect(screen.getByText("Inherited from runtime")).toBeInTheDocument();
+    expect(screen.queryByText("Assigned to agent")).not.toBeInTheDocument();
     expect(screen.getByText(/Assign a local runtime/i)).toBeInTheDocument();
   });
 
-  it("disables an assigned skill without removing it", async () => {
-    const user = userEvent.setup();
+  it("does not expose workspace-skill controls on an agent", () => {
     renderSkillsTab({
       skills: [
         {
@@ -178,13 +175,10 @@ describe("SkillsTab", () => {
       ],
     });
 
-    await user.click(screen.getByRole("switch", { name: /Toggle Review changes/i }));
-
-    expect(mockSetAgentSkillEnabled).toHaveBeenCalledWith(
-      "agent-1",
-      "skill-1",
-      false,
-    );
+    expect(
+      screen.queryByRole("switch", { name: /Toggle Review changes/i }),
+    ).not.toBeInTheDocument();
+    expect(mockSetAgentSkillEnabled).not.toHaveBeenCalled();
     expect(mockRemoveAgentSkill).not.toHaveBeenCalled();
   });
 

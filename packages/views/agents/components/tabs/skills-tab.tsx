@@ -3,12 +3,9 @@
 import { useState } from "react";
 import {
   Loader2,
-  Plus,
   RefreshCw,
   Server,
-  Trash2,
 } from "lucide-react";
-import { SkillIcon } from "../../../skills/lib/skill-icon";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type {
@@ -23,11 +20,7 @@ import {
   runtimeCapabilitiesOptions,
   runtimeDisplayLabel,
 } from "@multica/core/runtimes";
-import {
-  skillDetailOptions,
-  skillListOptions,
-  workspaceKeys,
-} from "@multica/core/workspace/queries";
+import { workspaceKeys } from "@multica/core/workspace/queries";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -39,11 +32,9 @@ import {
 } from "@multica/ui/components/ui/dialog";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { cn } from "@multica/ui/lib/utils";
-import { SkillAddDialog } from "../skill-add-dialog";
 import { useT } from "../../../i18n";
 
 type SelectedSkill =
-  | { kind: "workspace"; id: string }
   | { kind: "runtime"; skill: RuntimeLocalSkillSummary }
   | null;
 
@@ -59,52 +50,16 @@ export function SkillsTab({
   const { t } = useT("agents");
   const qc = useQueryClient();
   const wsId = useWorkspaceId();
-  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
   const runtimeId =
     runtime?.runtime_mode === "local" && runtime.status === "online"
       ? runtime.id
       : null;
   const runtimeQuery = useQuery(runtimeCapabilitiesOptions(runtimeId));
   const [busyId, setBusyId] = useState<string | null>(null);
-  const [showAdd, setShowAdd] = useState(false);
   const [selected, setSelected] = useState<SelectedSkill>(null);
-  const selectedWorkspaceId = selected?.kind === "workspace" ? selected.id : "";
-  const detailQuery = useQuery(skillDetailOptions(wsId, selectedWorkspaceId));
 
   const refreshAgent = async () => {
     await qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
-  };
-
-  const handleRemove = async (skillId: string) => {
-    setBusyId(skillId);
-    try {
-      await api.removeAgentSkill(agent.id, skillId);
-      await refreshAgent();
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t(($) => $.tab_body.skills.remove_failed_toast),
-      );
-    } finally {
-      setBusyId(null);
-    }
-  };
-
-  const handleToggle = async (skillId: string, enabled: boolean) => {
-    setBusyId(skillId);
-    try {
-      await api.setAgentSkillEnabled(agent.id, skillId, enabled);
-      await refreshAgent();
-    } catch (error) {
-      toast.error(
-        error instanceof Error
-          ? error.message
-          : t(($) => $.tab_body.skills.toggle_failed_toast),
-      );
-    } finally {
-      setBusyId(null);
-    }
   };
 
   const handleRuntimeToggle = async (
@@ -138,96 +93,12 @@ export function SkillsTab({
   const runtimeSkills = runtimeQuery.data?.skills ?? [];
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <p className="text-body leading-6 text-muted-foreground">
-        {t(($) => $.tab_body.skills.intro)}
+        Local skills are discovered from the runtime this agent uses. You can
+        turn off an inherited skill for this agent without changing the
+        runtime.
       </p>
-
-      <CapabilitySection
-        title={t(($) => $.tab_body.skills.assigned_title)}
-        description={t(($) => $.tab_body.skills.assigned_hint)}
-        action={
-          canEdit ? (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowAdd(true)}
-              disabled={workspaceSkills.length === 0}
-            >
-              <Plus className="h-3.5 w-3.5" />
-              {t(($) => $.tab_body.skills.add_action)}
-            </Button>
-          ) : null
-        }
-      >
-        {agent.skills.length === 0 ? (
-          <EmptyState
-            icon={<SkillIcon className="h-6 w-6" />}
-            title={t(($) => $.tab_body.skills.empty_title)}
-            hint={t(($) => $.tab_body.skills.empty_hint)}
-          />
-        ) : (
-          <ul className="divide-y rounded-lg border bg-surface-raised/40">
-            {agent.skills.map((skill) => {
-              const enabled = skill.enabled !== false;
-              const busy = busyId === skill.id;
-              return (
-                <li key={skill.id} className="flex items-center gap-3 p-3">
-                  <button
-                    type="button"
-                    onClick={() => setSelected({ kind: "workspace", id: skill.id })}
-                    className="flex min-w-0 flex-1 items-center gap-3 rounded-md text-left outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <span
-                      className={cn(
-                        "flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
-                        !enabled && "text-faint-foreground",
-                      )}
-                    >
-                      <SkillIcon className="h-4 w-4" />
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className={cn("block text-body font-medium", !enabled && "text-muted-foreground")}>
-                        {skill.name}
-                      </span>
-                      <span className="block truncate text-caption text-muted-foreground">
-                        {skill.description || t(($) => $.tab_body.skills.no_description)}
-                      </span>
-                    </span>
-                  </button>
-                  {canEdit && (
-                    <>
-                      {busy ? (
-                        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground motion-reduce:animate-none" />
-                      ) : (
-                        <Switch
-                          checked={enabled}
-                          onCheckedChange={(checked) => handleToggle(skill.id, checked)}
-                          aria-label={t(($) => $.tab_body.skills.toggle_aria, {
-                            name: skill.name,
-                          })}
-                        />
-                      )}
-                      <Button
-                        variant="ghost"
-                        size="icon-sm"
-                        onClick={() => handleRemove(skill.id)}
-                        disabled={busyId !== null}
-                        aria-label={t(($) => $.tab_body.skills.remove_aria, {
-                          name: skill.name,
-                        })}
-                        className="text-muted-foreground hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </Button>
-                    </>
-                  )}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </CapabilitySection>
 
       <CapabilitySection
         title={t(($) => $.tab_body.skills.runtime_title)}
@@ -341,12 +212,9 @@ export function SkillsTab({
         )}
       </CapabilitySection>
 
-      <SkillAddDialog agent={agent} open={showAdd} onOpenChange={setShowAdd} />
       <SkillDetailDialog
         selected={selected}
         onOpenChange={(open) => !open && setSelected(null)}
-        workspaceSkill={detailQuery.data}
-        loading={selected?.kind === "workspace" && detailQuery.isLoading}
       />
     </div>
   );
@@ -397,16 +265,6 @@ function CapabilitySection({
   );
 }
 
-function EmptyState({ icon, title, hint }: { icon: React.ReactNode; title: string; hint: string }) {
-  return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-10 text-muted-foreground">
-      <span className="opacity-50">{icon}</span>
-      <p className="mt-3 text-body">{title}</p>
-      <p className="mt-1 max-w-sm text-center text-caption">{hint}</p>
-    </div>
-  );
-}
-
 function RuntimeNotice({ text, loading = false }: { text: string; loading?: boolean }) {
   return (
     <div className="flex items-center gap-2 rounded-lg border border-dashed px-4 py-6 text-caption text-muted-foreground">
@@ -423,18 +281,14 @@ function RuntimeNotice({ text, loading = false }: { text: string; loading?: bool
 function SkillDetailDialog({
   selected,
   onOpenChange,
-  workspaceSkill,
-  loading,
 }: {
   selected: SelectedSkill;
   onOpenChange: (open: boolean) => void;
-  workspaceSkill?: Awaited<ReturnType<typeof api.getSkill>>;
-  loading: boolean;
 }) {
   const { t } = useT("agents");
   const runtimeSkill = selected?.kind === "runtime" ? selected.skill : null;
-  const title = runtimeSkill?.name || workspaceSkill?.name || t(($) => $.tab_body.skills.detail_title);
-  const description = runtimeSkill?.description || workspaceSkill?.description;
+  const title = runtimeSkill?.name || t(($) => $.tab_body.skills.detail_title);
+  const description = runtimeSkill?.description;
 
   return (
     <Dialog open={selected !== null} onOpenChange={onOpenChange}>
@@ -442,20 +296,13 @@ function SkillDetailDialog({
         <DialogHeader>
           <div className="flex items-center gap-2 pr-8">
             <DialogTitle>{title}</DialogTitle>
-            <Badge variant={runtimeSkill ? "secondary" : "outline"}>
-              {runtimeSkill
-                ? t(($) => $.tab_body.skills.inherited_badge)
-                : t(($) => $.tab_body.skills.workspace_badge)}
+            <Badge variant="secondary">
+              {t(($) => $.tab_body.skills.inherited_badge)}
             </Badge>
           </div>
           {description && <DialogDescription>{description}</DialogDescription>}
         </DialogHeader>
-        {loading ? (
-          <div className="flex items-center gap-2 py-8 text-muted-foreground">
-            <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
-            {t(($) => $.tab_body.skills.detail_loading)}
-          </div>
-        ) : runtimeSkill ? (
+        {runtimeSkill ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 rounded-lg border p-4 text-caption">
             <dt className="text-muted-foreground">{t(($) => $.tab_body.skills.detail_source)}</dt>
             <dd className="break-all">{runtimeSkill.source_path}</dd>
@@ -470,24 +317,6 @@ function SkillDetailDialog({
             <dt className="text-muted-foreground">{t(($) => $.tab_body.skills.detail_files)}</dt>
             <dd>{runtimeSkill.file_count}</dd>
           </dl>
-        ) : workspaceSkill ? (
-          <div className="space-y-4">
-            <div className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-4">
-              <pre className="whitespace-pre-wrap break-words font-mono text-caption leading-5">
-                {workspaceSkill.content}
-              </pre>
-            </div>
-            {(workspaceSkill.files ?? []).length > 0 && (
-              <div>
-                <h4 className="text-caption font-medium">{t(($) => $.tab_body.skills.detail_supporting_files)}</h4>
-                <div className="mt-2 flex flex-wrap gap-2">
-                  {(workspaceSkill.files ?? []).map((file) => (
-                    <Badge key={file.id} variant="outline">{file.path}</Badge>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
         ) : null}
       </DialogContent>
     </Dialog>
