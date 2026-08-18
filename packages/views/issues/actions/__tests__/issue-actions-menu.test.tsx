@@ -375,6 +375,45 @@ describe("IssueActionsDropdown", () => {
       expect(copyTextMock).toHaveBeenCalledWith("/Users/dev/project");
     });
   });
+
+  it("falls back to the task workdir while local context is loading", async () => {
+    localDaemonState.current = {
+      daemonId: "daemon-local",
+      deviceName: "MacBook",
+      running: true,
+    };
+    const projectIssue = { ...mockIssue, project_id: "project-1" } as Issue;
+    listTasksByIssueMock.mockResolvedValue([
+      {
+        runtime_id: "runtime-local",
+        created_at: "2026-08-18T10:00:00Z",
+        work_dir: "/managed/task/worktree",
+      } as AgentTask,
+    ]);
+    listRuntimesMock.mockImplementation(() => new Promise(() => {}));
+    listProjectResourcesMock.mockImplementation(() => new Promise(() => {}));
+
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={projectIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    await waitFor(() => {
+      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1");
+      expect(listRuntimesMock).toHaveBeenCalled();
+      expect(listProjectResourcesMock).toHaveBeenCalledWith("project-1");
+    });
+    fireEvent.click(await screen.findByText("Copy local workdir path"));
+
+    await waitFor(() => {
+      expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
+    });
+  });
 });
 
 describe("Open in new tab", () => {
