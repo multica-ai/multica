@@ -268,6 +268,7 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	// Model selection is owned by the MCode runtime, so there is no model env.
 	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
 		agents["mcode"] = e
+	}
 	// ZCode (Z.ai) is driven through the zcode-acp-server ACP bridge, so the
 	// probed binary is the bridge, not a zcode CLI. MULTICA_ZCODE_MODEL seeds
 	// the daemon-wide default with a model id from the bridge's advertised
