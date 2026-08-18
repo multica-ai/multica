@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/netip"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -145,6 +146,30 @@ func parseTrustedProxies(raw string) []netip.Prefix {
 		out = append(out, p)
 	}
 	return out
+}
+
+// codexCapacityRetryCountFromEnv parses the deployment-wide number of
+// additional retries for Codex's exact selected-model capacity error. The task
+// attempt columns are signed int32, so the configured count must leave room
+// for the initial execution when the service persists count+1 as max_attempts.
+func codexCapacityRetryCountFromEnv() int32 {
+	const maxRetryCount int64 = 2147483646
+
+	raw := strings.TrimSpace(os.Getenv("MULTICA_CODEX_CAPACITY_RETRY_COUNT"))
+	if raw == "" {
+		return service.DefaultCodexCapacityRetryCount
+	}
+	value, err := strconv.ParseInt(raw, 10, 32)
+	if err != nil || value < 0 || value > maxRetryCount {
+		slog.Warn("invalid env var, using default",
+			"name", "MULTICA_CODEX_CAPACITY_RETRY_COUNT",
+			"value", raw,
+			"default", service.DefaultCodexCapacityRetryCount,
+			"error", err,
+		)
+		return service.DefaultCodexCapacityRetryCount
+	}
+	return int32(value)
 }
 
 // normalizeServerVersion maps the unstamped "dev" default (main.go's
@@ -341,6 +366,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
 		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
+		CodexCapacityRetryCount:  codexCapacityRetryCountFromEnv(),
 		ServerVersion:            normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)

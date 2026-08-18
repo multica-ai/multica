@@ -46,6 +46,12 @@ type TaskService struct {
 	// FeatureFlags is the server-side toggle router. Nil is valid and returns
 	// each call site's default.
 	FeatureFlags *featureflag.Service
+	// CodexCapacityRetryCount is the number of additional immediate attempts
+	// allowed only for Codex's exact selected-model capacity error. Zero
+	// disables that dedicated policy. The API composition boundary supplies
+	// the deployment default; direct test/service construction may leave it
+	// zero intentionally.
+	CodexCapacityRetryCount int32
 	// EmptyClaim caches "this runtime has no queued task" so the daemon
 	// poll path can skip a Postgres scan on the steady-state empty case.
 	// Optional — a nil cache disables the fast path and every claim
@@ -3995,20 +4001,20 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 		retryFireAt      pgtype.Timestamptz
 		retryMaxAttempts pgtype.Int4
 	)
-	if retryableReasons[failureReason] {
+	if retryCandidate(failureReason, errMsg, s.CodexCapacityRetryCount) {
 		if parent, perr := s.Queries.GetAgentTask(ctx, taskID); perr != nil {
 			slog.Warn("fail task auto-retry: load parent failed",
 				"task_id", util.UUIDToString(taskID), "error", perr)
-		} else if retryEligible(failureReason, parent) {
+		} else if retryEligible(failureReason, errMsg, parent, s.CodexCapacityRetryCount) {
 			wantRetry = true
 			// Persist the reason-aware effective budget into the child so the
 			// retry chain self-describes (e.g. provider_network → max_attempts=3),
 			// rather than leaking a contradictory attempt=N/max_attempts=2 row.
-			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, parent.MaxAttempts), Valid: true}
+			retryMaxAttempts = pgtype.Int4{Int32: retryAttemptCeiling(failureReason, errMsg, parent.MaxAttempts, s.CodexCapacityRetryCount), Valid: true}
 			// Defer this attempt when the reason's schedule calls for a backoff
 			// (provider_network's final attempt waits ~5s); a zero delay leaves
 			// fire_at NULL so the child is created immediately-claimable.
-			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
+			if delay := retryDelayForAttempt(failureReason, errMsg, parent.Attempt); delay > 0 {
 				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 			}
 			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
@@ -4267,6 +4273,11 @@ var retryableReasons = map[string]bool{
 	string(taskfailure.ReasonSkillBundleUnavailable): true,
 }
 
+// DefaultCodexCapacityRetryCount is the number of additional executions the
+// API server allows for Codex's exact selected-model capacity error when the
+// deployment does not override MULTICA_CODEX_CAPACITY_RETRY_COUNT.
+const DefaultCodexCapacityRetryCount int32 = 6
+
 // Transient provider stream cuts (provider_network) get a bespoke three-tier
 // schedule (MUL-4910): first run + immediate retry + one retry deferred ~5s.
 // A blip that survives the immediate retry gets a short cooldown before the
@@ -4278,17 +4289,20 @@ const (
 )
 
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
-// a failure reason. It only ever WIDENS the task's generic max_attempts, and
-// only for reasons with a bespoke schedule; everything else keeps the column's
-// value (default 2 = first run + one retry).
+// a failure reason. Generic failures honor the task's max_attempts value
+// (default 2 = first run + one retry), including max_attempts <= 1 disabling
+// retries. The dedicated Codex capacity policy is an explicit exception: when
+// enabled, its configured ceiling overrides the inherited max_attempts value.
+// Other bespoke schedules may only widen an enabled generic retry budget.
 //
-// max_attempts <= 1 explicitly disables auto-retry (055_task_lease_and_retry.up
-// .sql: "1 disables retry"), so it is never overridden — a disabled task must
-// not be revived by a raised ceiling. Callers persist this value into the retry
-// child (CreateRetryTask's max_attempts) so the row stays self-consistent:
-// provider_network's chain records attempt=3, max_attempts=3, not a
+// Callers persist this reason-aware value into the retry child
+// (CreateRetryTask's max_attempts) so the row stays self-consistent: for
+// example, provider_network's chain records attempt=3, max_attempts=3, not a
 // contradictory attempt=3, max_attempts=2 (MUL-4910).
-func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
+func retryAttemptCeiling(reason, rawError string, taskMaxAttempts, capacityRetryCount int32) int32 {
+	if taskfailure.IsCodexSelectedModelCapacityError(rawError) && capacityRetryCount > 0 {
+		return capacityRetryCount + 1
+	}
 	if taskMaxAttempts <= 1 {
 		return taskMaxAttempts
 	}
@@ -4303,7 +4317,10 @@ func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 // (~5s); every other retry — including provider_network's first — is immediate
 // (zero delay → the child is created 'queued', claimable at once). Callers pass
 // the returned delay to CreateRetryTask via fire_at.
-func retryDelayForAttempt(reason string, failedAttempt int32) time.Duration {
+func retryDelayForAttempt(reason, rawError string, failedAttempt int32) time.Duration {
+	if taskfailure.IsCodexSelectedModelCapacityError(rawError) {
+		return 0
+	}
 	if reason == string(taskfailure.ReasonAgentProviderNetwork) &&
 		failedAttempt >= providerNetworkMaxAttempts-1 {
 		return providerNetworkFinalRetryWait
@@ -4372,14 +4389,26 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 	return taskfailure.UnresumableHistory(errorText)
 }
 
+// retryCandidate keeps the exact Codex capacity policy separate from the
+// generic failure-reason allowlist. An exact raw error always takes this branch,
+// so a configured zero disables it even if a stale daemon supplied an unrelated
+// generic-retry reason.
+func retryCandidate(failureReason, rawError string, capacityRetryCount int32) bool {
+	if taskfailure.IsCodexSelectedModelCapacityError(rawError) {
+		return capacityRetryCount > 0
+	}
+	return retryableReasons[failureReason]
+}
+
 // retryEligible reports whether a failed task qualifies for an automatic retry
-// attempt: an infrastructure-shaped failure_reason, remaining attempt budget,
-// not an autopilot run, and linked to an issue or chat session. Shared by
-// FailTask's in-transaction retry and the orphan sweeper's MaybeRetryFailedTask
-// so both agree on which failures re-run.
-func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
-	return retryableReasons[failureReason] &&
-		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
+// attempt: either a generic infrastructure-shaped reason or the exact Codex
+// capacity error, remaining policy-specific attempt budget, not an autopilot
+// run, and linked to an issue or chat session. Shared by FailTask's
+// in-transaction retry and the orphan sweeper's MaybeRetryFailedTask so both
+// agree on which failures re-run.
+func retryEligible(failureReason, rawError string, t db.AgentTaskQueue, capacityRetryCount int32) bool {
+	return retryCandidate(failureReason, rawError, capacityRetryCount) &&
+		t.Attempt < retryAttemptCeiling(failureReason, rawError, t.MaxAttempts, capacityRetryCount) &&
 		!t.AutopilotRunID.Valid &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
 }
@@ -4402,7 +4431,11 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	if parent.FailureReason.Valid {
 		reason = parent.FailureReason.String
 	}
-	if !retryableReasons[reason] {
+	rawError := ""
+	if parent.Error.Valid {
+		rawError = parent.Error.String
+	}
+	if !retryCandidate(reason, rawError, s.CodexCapacityRetryCount) {
 		return nil, nil
 	}
 	// Use the reason-aware ceiling, not the raw max_attempts column, so an
@@ -4410,19 +4443,20 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// allowed its deferred 3rd attempt (retryAttemptCeiling raises the ceiling
 	// to 3). Kept in sync with retryEligible below, which applies the same
 	// ceiling to the primary FailTask path.
-	if parent.Attempt >= retryAttemptCeiling(reason, parent.MaxAttempts) {
+	ceiling := retryAttemptCeiling(reason, rawError, parent.MaxAttempts, s.CodexCapacityRetryCount)
+	if parent.Attempt >= ceiling {
 		slog.Info("task auto-retry skipped: budget exhausted",
 			"task_id", util.UUIDToString(parent.ID),
 			"attempt", parent.Attempt,
 			"max_attempts", parent.MaxAttempts,
-			"ceiling", retryAttemptCeiling(reason, parent.MaxAttempts),
+			"ceiling", ceiling,
 		)
 		return nil, nil
 	}
 	// Autopilot has its own retry semantics (don't double-trigger) and a task
 	// with no issue/chat link has nowhere to report its retry — retryEligible
 	// covers both, keeping this sweeper path in sync with FailTask's in-tx retry.
-	if !retryEligible(reason, parent) {
+	if !retryEligible(reason, rawError, parent, s.CodexCapacityRetryCount) {
 		return nil, nil
 	}
 
@@ -4445,13 +4479,13 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	// NULL for an immediate child), and write the reason-aware ceiling into the
 	// child's max_attempts so the retry chain stays self-consistent.
 	var retryFireAt pgtype.Timestamptz
-	if delay := retryDelayForAttempt(reason, parent.Attempt); delay > 0 {
+	if delay := retryDelayForAttempt(reason, rawError, parent.Attempt); delay > 0 {
 		retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 	}
 	child, err := s.Queries.CreateRetryTask(ctx, db.CreateRetryTaskParams{
 		ID:                   parent.ID,
 		FireAt:               retryFireAt,
-		MaxAttempts:          pgtype.Int4{Int32: retryAttemptCeiling(reason, parent.MaxAttempts), Valid: true},
+		MaxAttempts:          pgtype.Int4{Int32: ceiling, Valid: true},
 		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
 		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
 	})
