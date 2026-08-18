@@ -212,8 +212,8 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 			return discovered(discoverOpenCodeModels(ctx, runtimeCmd))
 		})
 	case "codearts":
-		return cachedDiscovery(discoveryCacheKey(providerType, executablePath), func() (Catalog, error) {
-			return discovered(discoverCodeArtsModels(ctx, executablePath))
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discovered(discoverCodeArtsModels(ctx, runtimeCmd))
 		})
 	case "deveco":
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {

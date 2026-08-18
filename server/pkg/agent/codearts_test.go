@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -45,7 +46,10 @@ func TestCodeArtsExecuteUsesNativeRunFlagsAndStdin(t *testing.T) {
 
 	backend, err := ResolveBackend("codearts", Config{
 		ExecutablePath: self,
-		Logger:         slog.Default(),
+		LaunchPrefix: []string{
+			"wrapper", "--format", "text", "--auto", "--dir", "wrong-root",
+		},
+		Logger: slog.Default(),
 		Env: map[string]string{
 			opencodeStdinHelperEnv:      "1",
 			opencodeStdinHelperArgvFile: argvPath,
@@ -83,7 +87,7 @@ func TestCodeArtsExecuteUsesNativeRunFlagsAndStdin(t *testing.T) {
 		t.Fatal(err)
 	}
 	args := strings.Split(string(argvRaw), "\n")
-	want := []string{"run", "--format", "json", "--auto", "--model", "huaweicloud-maas/deepseek-v3.2", "--session", "ses_existing", "--title", "Multica task"}
+	want := []string{"wrapper", "run", "--format", "json", "--auto", "--model", "huaweicloud-maas/deepseek-v3.2", "--session", "ses_existing", "--title", "Multica task"}
 	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("argv = %#v, want %#v", args, want)
 	}
@@ -125,6 +129,17 @@ func TestCodeArtsEnvironmentMatchesLauncherAndAllowsOverrides(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	oldTLS, hadTLS := os.LookupEnv("NODE_TLS_REJECT_UNAUTHORIZED")
+	if err := os.Unsetenv("NODE_TLS_REJECT_UNAUTHORIZED"); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		if hadTLS {
+			_ = os.Setenv("NODE_TLS_REJECT_UNAUTHORIZED", oldTLS)
+		} else {
+			_ = os.Unsetenv("NODE_TLS_REJECT_UNAUTHORIZED")
+		}
+	})
 	env := buildCodeArtsEnv(map[string]string{"PLUGIN_ENV": "custom"})
 	values := map[string]string{}
 	for _, entry := range env {
@@ -140,6 +155,16 @@ func TestCodeArtsEnvironmentMatchesLauncherAndAllowsOverrides(t *testing.T) {
 	if values["OPENCODE_CONFIG"] != wantConfig {
 		t.Fatalf("OPENCODE_CONFIG = %q, want %q", values["OPENCODE_CONFIG"], wantConfig)
 	}
+	if _, ok := values["NODE_TLS_REJECT_UNAUTHORIZED"]; ok {
+		t.Fatal("CodeArts launcher must not disable TLS verification by default")
+	}
+
+	// Disabling certificate verification remains possible only as an explicit
+	// per-agent custom_env opt-in; the launcher must never do it by default.
+	insecureValues := envValues(buildCodeArtsEnv(map[string]string{"NODE_TLS_REJECT_UNAUTHORIZED": "0"}))
+	if insecureValues["NODE_TLS_REJECT_UNAUTHORIZED"] != "0" {
+		t.Fatalf("explicit NODE_TLS_REJECT_UNAUTHORIZED override was not preserved: %q", insecureValues["NODE_TLS_REJECT_UNAUTHORIZED"])
+	}
 }
 
 func TestDiscoverCodeArtsModels(t *testing.T) {
@@ -148,7 +173,9 @@ func TestDiscoverCodeArtsModels(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv(codeartsModelHelperEnv, "1")
-	models, err := discoverCodeArtsModels(context.Background(), self)
+	argvPath := filepath.Join(t.TempDir(), "model-argv.txt")
+	t.Setenv(codeartsModelHelperArgvFile, argvPath)
+	models, err := discoverCodeArtsModels(context.Background(), Command{Path: self, Prefix: []string{"wrapper"}})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,6 +185,84 @@ func TestDiscoverCodeArtsModels(t *testing.T) {
 	if models[0].Thinking != nil {
 		t.Fatalf("CodeArts model must not advertise OpenCode variants: %+v", models[0])
 	}
+	argvRaw, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Split(string(argvRaw), "\n"), []string{"wrapper", "models", "--verbose"}; strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("model discovery argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestDetectVersionUsesCodeArtsCommandPrefix(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(codeartsModelHelperEnv, "1")
+	argvPath := filepath.Join(t.TempDir(), "version-argv.txt")
+	t.Setenv(codeartsModelHelperArgvFile, argvPath)
+
+	version, err := DetectVersion(context.Background(), Command{Path: self, Prefix: []string{"wrapper"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != "CodeArts Agent 1.2.3" {
+		t.Fatalf("version = %q, want CodeArts Agent 1.2.3", version)
+	}
+	argvRaw, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Split(string(argvRaw), "\n"), []string{"wrapper", "--version"}; strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("version argv = %#v, want %#v", got, want)
+	}
+}
+
+func TestCodeArtsListModelsCacheSeparatesCommandPrefixes(t *testing.T) {
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(codeartsModelHelperEnv, "1")
+	commands := []Command{
+		{Path: self, Prefix: []string{"profile-a"}},
+		{Path: self, Prefix: []string{"profile-b"}},
+	}
+	modelCacheMu.Lock()
+	for _, command := range commands {
+		delete(modelCache, discoveryCacheKey("codearts", command))
+	}
+	modelCacheMu.Unlock()
+	t.Cleanup(func() {
+		modelCacheMu.Lock()
+		defer modelCacheMu.Unlock()
+		for _, command := range commands {
+			delete(modelCache, discoveryCacheKey("codearts", command))
+		}
+	})
+
+	for i, command := range commands {
+		catalog, err := ListModels(context.Background(), "codearts", command)
+		if err != nil {
+			t.Fatal(err)
+		}
+		want := fmt.Sprintf("test/profile-%c", 'a'+rune(i))
+		if len(catalog.Models) != 1 || catalog.Models[0].ID != want {
+			t.Fatalf("prefix %q catalog = %+v, want model %q", command.Prefix[0], catalog, want)
+		}
+	}
+}
+
+func envValues(env []string) map[string]string {
+	values := make(map[string]string, len(env))
+	for _, entry := range env {
+		key, value, ok := strings.Cut(entry, "=")
+		if ok {
+			values[key] = value
+		}
+	}
+	return values
 }
 
 func TestResolveCodeArtsNativeFromShim(t *testing.T) {

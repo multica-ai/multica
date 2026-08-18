@@ -1111,8 +1111,8 @@ func detectCLIVersion(ctx context.Context, runtimeCmd Command) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, detectVersionTimeout)
 	defer cancel()
 	if runtime.GOOS == "windows" {
-		if native := resolveCodeArtsNativeFromShim(execPath, os.Stat); native != "" {
-			execPath = native
+		if native := resolveCodeArtsNativeFromShim(runtimeCmd.Path, os.Stat); native != "" {
+			runtimeCmd.Path = native
 		}
 	}
 

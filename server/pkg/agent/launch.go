@@ -304,6 +304,7 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"antigravity": antigravityBlockedArgs,
 	"claude":      claudeBlockedArgs,
 	"codebuddy":   codebuddyBlockedArgs,
+	"codearts":    codeartsBlockedArgs,
 	"codex":       codexBlockedArgs,
 	"copilot":     copilotBlockedArgs,
 	"cursor":      cursorBlockedArgs,

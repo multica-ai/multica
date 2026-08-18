@@ -243,7 +243,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, codearts, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim)
 	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
@@ -286,8 +286,8 @@ type Config struct {
 // migration 134 to add qoder, migration 136 to add traecli, migration 175 to
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
 // migration 242 to add qoderclicn, migration 253 to add qwenpaw,
-// migration 254 to add reasonix, migration 313 to add dsh, migration 315 to
-// add codearts, and migration 327 to add mcode): a custom runtime profile may
+// migration 254 to add reasonix, migration 313 to add dsh, migration 342 to
+// add mcode, and migration 348 to add codearts): a custom runtime profile may
 // only be based on a backend Multica officially supports.
 // qoder and qoderclicn share the same ACP backend; keeping both provider keys
 // lets the daemon auto-detect and register the international and China-region

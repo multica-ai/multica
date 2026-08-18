@@ -17,9 +17,29 @@ const (
 	opencodeStdinHelperInFile   = "MULTICA_OPENCODE_STDIN_HELPER_STDIN_FILE"
 )
 
-const codeartsModelHelperEnv = "CODEARTS_MODEL_TEST_HELPER"
+const (
+	codeartsModelHelperEnv      = "CODEARTS_MODEL_TEST_HELPER"
+	codeartsModelHelperArgvFile = "CODEARTS_MODEL_TEST_HELPER_ARGV_FILE"
+)
 
 func runFakeCodeArtsModelHelper() {
+	args := os.Args[1:]
+	if path := os.Getenv(codeartsModelHelperArgvFile); path != "" {
+		if err := os.WriteFile(path, []byte(strings.Join(args, "\n")), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "helper: write CodeArts model argv: %v\n", err)
+			os.Exit(1)
+		}
+	}
+	for _, arg := range args {
+		if arg == "--version" {
+			fmt.Println("CodeArts Agent 1.2.3")
+			return
+		}
+	}
+	if len(args) > 0 && strings.HasPrefix(args[0], "profile-") {
+		fmt.Println("test/" + args[0])
+		return
+	}
 	fmt.Println("huaweicloud-maas/deepseek-v3.2")
 }
 
