@@ -3129,6 +3129,68 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	}
 }
 
+// Different channel context generations have independent debounce timers. If
+// the newer generation finishes first, its Chat-wide pointer must not become
+// the resume source for a delayed task from the older generation.
+func TestClaimTask_ChannelContextRevisionScopesProviderResume(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	ctx := context.Background()
+	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "channel generation resume scope",
+		"session_id": "new-generation-session",
+		"work_dir":   "/tmp/new-generation-workdir",
+		"runtime_id": runtimeID,
+	})
+
+	dbfx.Exec(t, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, chat_session_id, status, priority,
+			started_at, completed_at, session_id, work_dir,
+			channel_context_revision
+		)
+		VALUES
+			($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '2 minutes',
+			 'old-generation-session', '/tmp/old-generation-workdir', 1),
+			($1, $2, $3, 'completed', 0, now() - interval '1 minute', now() - interval '1 minute',
+			 'new-generation-session', '/tmp/new-generation-workdir', 2)
+	`, agentID, runtimeID, chatSessionID)
+	dbfx.Exec(t, `
+		UPDATE agent_task_queue
+		SET session_rollout_missing = TRUE
+		WHERE chat_session_id = $1 AND channel_context_revision = 2
+	`, chatSessionID)
+
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":               runtimeID,
+		"chat_session_id":          chatSessionID,
+		"priority":                 1000,
+		"channel_context_revision": int64(1),
+	})
+	dbfx.Exec(t, `UPDATE agent_task_queue SET chat_input_task_id = id WHERE id = $1`, taskID)
+	dbfx.Insert(t, "chat_message", testutil.Cols{
+		"chat_session_id":          chatSessionID,
+		"role":                     "user",
+		"content":                  "delayed old-generation message",
+		"task_id":                  taskID,
+		"channel_context_revision": int64(1),
+	})
+
+	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+	if task.PriorSessionID != "old-generation-session" {
+		t.Fatalf("prior session = %q, want old-generation-session", task.PriorSessionID)
+	}
+	if task.PriorWorkDir != "/tmp/old-generation-workdir" {
+		t.Fatalf("prior workdir = %q, want /tmp/old-generation-workdir", task.PriorWorkDir)
+	}
+	if task.PriorSessionResumeUnavailable {
+		t.Fatal("new-generation continuity gap leaked into old-generation claim")
+	}
+}
+
 // TestClaimTask_ChatDeliversAllUnansweredUserMessages pins the fix for the
 // regression the MUL-2968 debounce exposed: when several user messages are
 // debounced into a single run, the agent must receive ALL of them, not just

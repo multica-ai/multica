@@ -2602,7 +2602,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					resp.Repos = repos
 				}
 			}
-			if !task.ForceFreshSession {
+			if !task.ForceFreshSession && !task.ChannelContextRevision.Valid {
 				// Resume chat sessions only when the stored pointer was produced
 				// by the same runtime as the claiming task. When the chat_session
 				// pointer is missing (legacy NULL runtime_id), stale (last task
@@ -2661,13 +2661,23 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// reads belong after it: a task that cannot load its input is preserved
 			// for redelivery and must not spend two more queries before returning.
 			if !task.ForceFreshSession {
+				contextRevision := pgtype.Int8{}
+				if task.ChannelContextRevision.Valid {
+					contextRevision = task.ChannelContextRevision
+				}
 				// GetLastChatTaskSession currently has exactly two consumers: the
 				// prior session and prior workdir fields. Keep this guard coupled to
 				// both so adding a third consumer cannot silently skip its fallback.
-				if chatSessionResumeFallbackNeeded(resp.PriorSessionID, resp.PriorWorkDir) {
+				// Context-scoped channel tasks always resolve both fields from task
+				// rows in their own generation; the Chat-wide pointer may belong to a
+				// different generation when independent debounce timers race.
+				if task.ChannelContextRevision.Valid || chatSessionResumeFallbackNeeded(resp.PriorSessionID, resp.PriorWorkDir) {
 					h.Metrics.RecordChatClaimSessionFallbackNeeded()
 					started := time.Now()
-					prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID)
+					prior, err := h.Queries.GetLastChatTaskSession(r.Context(), db.GetLastChatTaskSessionParams{
+						ChatSessionID:          cs.ID,
+						ChannelContextRevision: contextRevision,
+					})
 					h.Metrics.ObserveChatClaimLastSessionQuery(time.Since(started).Seconds())
 					switch {
 					case err == nil && prior.SessionID.Valid:
@@ -2693,7 +2703,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				// either pointer field needed fallback, so this query stays
 				// unconditional for non-force-fresh chat claims.
 				started := time.Now()
-				missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), cs.ID)
+				missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), db.GetLatestChatTaskRolloutMissingParams{
+					ChatSessionID:          cs.ID,
+					ChannelContextRevision: contextRevision,
+				})
 				h.Metrics.ObserveChatClaimRolloutMissingQuery(time.Since(started).Seconds())
 				if err == nil && missing {
 					resp.PriorSessionResumeUnavailable = true

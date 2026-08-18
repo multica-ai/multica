@@ -149,6 +149,57 @@ func TestChannelOverview(t *testing.T) {
 	}
 }
 
+func TestChannelOverviewScopesAndSanitizesFreshGeneration(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
+		msg("U1", "new reply", "104.000000"),
+		msg("U1", "/new current question", "103.000000"),
+		msg("U1", "old context", "102.000000"),
+	}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{
+		After: "103.000000", Until: "105.000000",
+	})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if fc.lastHistory.Oldest != "103.000000" || fc.lastHistory.Latest != "105.000000" || !fc.lastHistory.Inclusive {
+		t.Fatalf("Slack bounds = oldest %q latest %q inclusive %t", fc.lastHistory.Oldest, fc.lastHistory.Latest, fc.lastHistory.Inclusive)
+	}
+	if len(page.Messages) != 2 || page.Messages[0].Text != "current question" || page.Messages[1].Text != "new reply" {
+		t.Fatalf("scoped messages = %+v", page.Messages)
+	}
+}
+
+func TestChannelOverviewPendingFreshBoundaryReturnsEmpty(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{msg("U1", "old context", "102.000000")}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{BoundaryPending: true})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if fc.historyCalls != 0 || len(page.Messages) != 0 {
+		t.Fatalf("pending boundary read calls=%d messages=%+v", fc.historyCalls, page.Messages)
+	}
+}
+
+func TestThreadPendingFreshBoundaryReturnsEmptyWithThreadID(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{repliesMsgs: []slack.Message{msg("U1", "old context", "52.000000")}}
+	h := newTestHistory(q, fc)
+	page, err := h.Thread(context.Background(), uid(9), "", channel.HistoryOptions{BoundaryPending: true})
+	if err != nil {
+		t.Fatalf("Thread: %v", err)
+	}
+	if fc.repliesCalls != 0 || fc.historyCalls != 0 || len(page.Messages) != 0 {
+		t.Fatalf("pending boundary read calls=%d/%d messages=%+v", fc.repliesCalls, fc.historyCalls, page.Messages)
+	}
+	if page.ChannelType != "slack" || page.ThreadID != "50.000000" {
+		t.Fatalf("pending boundary target = %q/%q, want slack/50.000000", page.ChannelType, page.ThreadID)
+	}
+}
+
 // TestThreadCurrent reads the session's own thread via conversations.replies.
 func TestThreadCurrent(t *testing.T) {
 	q := &fakeHistoryQueries{binding: groupBinding("50.000000"), inst: activeSlackInstall()}

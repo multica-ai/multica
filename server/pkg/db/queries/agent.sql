@@ -590,7 +590,7 @@ INSERT INTO agent_task_queue (
     originator_source, delegated_from_task_id, rule_version_id,
     trigger_evidence_kind, trigger_evidence_ref_id, retry_of_task_id,
     chat_input_task_id, fire_at,
-    id
+    channel_context_revision, id
 )
 SELECT
     p.agent_id, p.runtime_id, p.issue_id, p.chat_session_id, p.autopilot_run_id,
@@ -610,6 +610,7 @@ SELECT
     p.originator_source, p.delegated_from_task_id, p.rule_version_id,
     p.trigger_evidence_kind, p.trigger_evidence_ref_id, p.id,
     p.chat_input_task_id, sqlc.narg(fire_at),
+    p.channel_context_revision,
     -- Named new_task_id, not id: $1 above is the PARENT task's id.
     COALESCE(sqlc.narg('new_task_id')::uuid, gen_random_uuid())
 FROM agent_task_queue p
@@ -1126,7 +1127,11 @@ LIMIT 1;
 -- session because the rollout was missing. When true the next chat claim resumed
 -- an older session (or none), so it must disclose the continuity gap.
 SELECT COALESCE(session_rollout_missing, FALSE) FROM agent_task_queue
-WHERE chat_session_id = $1
+WHERE chat_session_id = sqlc.arg('chat_session_id')
+  AND (
+    sqlc.narg('channel_context_revision')::bigint IS NULL
+    OR COALESCE(channel_context_revision, 1) = sqlc.narg('channel_context_revision')::bigint
+  )
   AND status IN ('completed', 'failed')
   AND started_at IS NOT NULL
 ORDER BY COALESCE(completed_at, started_at, dispatched_at, created_at) DESC

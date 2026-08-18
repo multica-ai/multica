@@ -17,6 +17,7 @@ type dingtalkRouteCleanupOwner struct {
 	agentID        string
 	installationID string
 	routeID        string
+	chatSessionID  string
 	appID          string
 }
 
@@ -46,6 +47,8 @@ func seedDingTalkRouteCleanupOwner(
 		t.Fatalf("seed cleanup runtime: %v", err)
 	}
 	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_context_generation WHERE chat_session_id = $1`, owner.chatSessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, owner.chatSessionID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_group_route WHERE workspace_id = $1`, owner.workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE workspace_id = $1`, owner.workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, owner.workspaceID)
@@ -65,6 +68,7 @@ func seedDingTalkRouteCleanupAgent(
 	owner.agentID = uuid.NewString()
 	owner.installationID = uuid.NewString()
 	owner.routeID = uuid.NewString()
+	owner.chatSessionID = uuid.NewString()
 	owner.appID = "dingtalk-route-cleanup-" + uuid.NewString()
 	systemKey := ""
 	if kind == "system" {
@@ -93,6 +97,19 @@ func seedDingTalkRouteCleanupAgent(
 	`, owner.routeID, owner.workspaceID, owner.installationID, "cid-"+owner.routeID, owner.agentID); err != nil {
 		t.Fatalf("seed cleanup group route: %v", err)
 	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_chat_session_binding (
+			chat_session_id, installation_id, channel_type, channel_chat_id, chat_type
+		) VALUES ($1, $2, 'dingtalk', $3, 'group')
+	`, owner.chatSessionID, owner.installationID, "cleanup-"+owner.routeID); err != nil {
+		t.Fatalf("seed cleanup chat binding: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+		VALUES ($1, 1)
+	`, owner.chatSessionID); err != nil {
+		t.Fatalf("seed cleanup chat context: %v", err)
+	}
 	return owner
 }
 
@@ -102,22 +119,33 @@ func assertDingTalkRouteCleanupState(
 	pool *pgxpool.Pool,
 	owner dingtalkRouteCleanupOwner,
 	want int,
+	wantContexts int,
 ) {
 	t.Helper()
-	var routes, installations int
+	var routes, installations, bindings, contexts int
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM dingtalk_group_route WHERE id = $1`, owner.routeID).Scan(&routes); err != nil {
 		t.Fatalf("count cleanup routes: %v", err)
 	}
 	if err := pool.QueryRow(ctx, `SELECT count(*) FROM channel_installation WHERE id = $1`, owner.installationID).Scan(&installations); err != nil {
 		t.Fatalf("count cleanup installations: %v", err)
 	}
-	if routes != want || installations != want {
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM channel_chat_session_binding WHERE chat_session_id = $1`, owner.chatSessionID).Scan(&bindings); err != nil {
+		t.Fatalf("count cleanup chat bindings: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM channel_chat_context_generation WHERE chat_session_id = $1`, owner.chatSessionID).Scan(&contexts); err != nil {
+		t.Fatalf("count cleanup chat contexts: %v", err)
+	}
+	if routes != want || installations != want || bindings != want || contexts != wantContexts {
 		t.Fatalf(
-			"cleanup owner route/installation rows = %d/%d, want %d/%d",
+			"cleanup owner route/installation/binding/context rows = %d/%d/%d/%d, want %d/%d/%d/%d",
 			routes,
 			installations,
+			bindings,
+			contexts,
 			want,
 			want,
+			want,
+			wantContexts,
 		)
 	}
 }
@@ -162,8 +190,8 @@ func TestDeleteDingTalkInstallationForReplacementCleansOnlyTargetRoutes(t *testi
 		t.Fatalf("DeleteDingTalkInstallationForReplacement: %v", err)
 	}
 
-	assertDingTalkRouteCleanupState(t, ctx, pool, target, 0)
-	assertDingTalkRouteCleanupState(t, ctx, pool, unrelated, 1)
+	assertDingTalkRouteCleanupState(t, ctx, pool, target, 0, 1)
+	assertDingTalkRouteCleanupState(t, ctx, pool, unrelated, 1, 1)
 }
 
 func TestReclaimDeadChannelInstallationByAppIDCleansOnlyDeadRoutes(t *testing.T) {
@@ -182,8 +210,8 @@ func TestReclaimDeadChannelInstallationByAppIDCleansOnlyDeadRoutes(t *testing.T)
 		t.Fatalf("ReclaimDeadChannelInstallationByAppID: %v", err)
 	}
 
-	assertDingTalkRouteCleanupState(t, ctx, pool, dead, 0)
-	assertDingTalkRouteCleanupState(t, ctx, pool, live, 1)
+	assertDingTalkRouteCleanupState(t, ctx, pool, dead, 0, 0)
+	assertDingTalkRouteCleanupState(t, ctx, pool, live, 1, 1)
 }
 
 func TestDeleteChannelInstallationsBySystemRuntimeAgentsCleansOnlySystemRoutes(t *testing.T) {
@@ -200,8 +228,42 @@ func TestDeleteChannelInstallationsBySystemRuntimeAgentsCleansOnlySystemRoutes(t
 		t.Fatalf("DeleteChannelInstallationsBySystemRuntimeAgents: %v", err)
 	}
 
-	assertDingTalkRouteCleanupState(t, ctx, pool, systemOwner, 0)
-	assertDingTalkRouteCleanupState(t, ctx, pool, userOwner, 1)
+	assertDingTalkRouteCleanupState(t, ctx, pool, systemOwner, 0, 0)
+	assertDingTalkRouteCleanupState(t, ctx, pool, userOwner, 1, 1)
+}
+
+func TestDeleteChannelInstallationsBySystemRuntimeAgentsCleansRetiredChatContexts(t *testing.T) {
+	pool := dingtalkInstallTestDB(t)
+	requireDingTalkRouteCleanupSchema(t, pool)
+	ctx := context.Background()
+	systemOwner := seedDingTalkRouteCleanupOwner(t, ctx, pool, "system", "active")
+	userOwner := seedDingTalkRouteCleanupAgent(t, ctx, pool, systemOwner, "user", "active")
+
+	var creatorID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM "user" ORDER BY created_at LIMIT 1`).Scan(&creatorID); err != nil {
+		t.Fatalf("load chat creator: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO chat_session (id, workspace_id, agent_id, creator_id, title)
+		VALUES ($1, $2, $3, $4, 'retired system channel chat')
+	`, systemOwner.chatSessionID, systemOwner.workspaceID, systemOwner.agentID, creatorID); err != nil {
+		t.Fatalf("seed retired system channel chat: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1
+	`, systemOwner.chatSessionID); err != nil {
+		t.Fatalf("retire system channel binding: %v", err)
+	}
+
+	if err := db.New(pool).DeleteChannelInstallationsBySystemRuntimeAgents(
+		ctx,
+		util.MustParseUUID(systemOwner.runtimeID),
+	); err != nil {
+		t.Fatalf("DeleteChannelInstallationsBySystemRuntimeAgents: %v", err)
+	}
+
+	assertDingTalkRouteCleanupState(t, ctx, pool, systemOwner, 0, 0)
+	assertDingTalkRouteCleanupState(t, ctx, pool, userOwner, 1, 1)
 }
 
 func TestDeleteWorkspaceCleansOnlyWorkspaceDingTalkRoutes(t *testing.T) {
@@ -215,8 +277,39 @@ func TestDeleteWorkspaceCleansOnlyWorkspaceDingTalkRoutes(t *testing.T) {
 		t.Fatalf("DeleteWorkspace: %v", err)
 	}
 
-	assertDingTalkRouteCleanupState(t, ctx, pool, target, 0)
-	assertDingTalkRouteCleanupState(t, ctx, pool, unrelated, 1)
+	assertDingTalkRouteCleanupState(t, ctx, pool, target, 0, 0)
+	assertDingTalkRouteCleanupState(t, ctx, pool, unrelated, 1, 1)
+}
+
+func TestDeleteWorkspaceCleansRetiredChatContexts(t *testing.T) {
+	pool := dingtalkInstallTestDB(t)
+	requireDingTalkRouteCleanupSchema(t, pool)
+	ctx := context.Background()
+	target := seedDingTalkRouteCleanupOwner(t, ctx, pool, "user", "active")
+	unrelated := seedDingTalkRouteCleanupOwner(t, ctx, pool, "user", "active")
+
+	var creatorID string
+	if err := pool.QueryRow(ctx, `SELECT id FROM "user" ORDER BY created_at LIMIT 1`).Scan(&creatorID); err != nil {
+		t.Fatalf("load chat creator: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO chat_session (id, workspace_id, agent_id, creator_id, title)
+		VALUES ($1, $2, $3, $4, 'retired channel chat')
+	`, target.chatSessionID, target.workspaceID, target.agentID, creatorID); err != nil {
+		t.Fatalf("seed retired channel chat: %v", err)
+	}
+	if _, err := pool.Exec(ctx, `
+		DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1
+	`, target.chatSessionID); err != nil {
+		t.Fatalf("retire channel binding: %v", err)
+	}
+
+	if err := db.New(pool).DeleteWorkspace(ctx, util.MustParseUUID(target.workspaceID)); err != nil {
+		t.Fatalf("DeleteWorkspace: %v", err)
+	}
+
+	assertDingTalkRouteCleanupState(t, ctx, pool, target, 0, 0)
+	assertDingTalkRouteCleanupState(t, ctx, pool, unrelated, 1, 1)
 }
 
 func TestDeleteWorkspaceLeafDataCleansOnlyWorkspaceDingTalkRoutes(t *testing.T) {
@@ -234,5 +327,5 @@ func TestDeleteWorkspaceLeafDataCleansOnlyWorkspaceDingTalkRoutes(t *testing.T) 
 	// deliberately removed by later teardown steps, so only the target route is
 	// expected to be gone at this point.
 	assertDingTalkRouteCount(t, ctx, pool, target, 0)
-	assertDingTalkRouteCleanupState(t, ctx, pool, unrelated, 1)
+	assertDingTalkRouteCleanupState(t, ctx, pool, unrelated, 1, 1)
 }

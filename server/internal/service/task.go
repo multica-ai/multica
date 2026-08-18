@@ -1615,10 +1615,20 @@ var ErrChatSessionArchived = errors.New("chat task: session archived")
 // latest message in the silence window. Stored on the task so the daemon brief
 // can attribute the run to the right person. See MUL-2645.
 //
-// forceFreshSession applies only to the task created by this call. The daemon
-// uses it to skip prior chat-session resume for this dispatch without clearing
-// the chat session's stored resume pointer for future normal messages.
+// forceFreshSession applies only to the task created by this call. Channel
+// callers additionally use EnqueueChannelChatTask to snapshot the durable
+// context revision; its batch seal and history reads cannot cross that boundary.
+// The daemon skips prior provider-session resume for a fresh dispatch without
+// clearing the Chat's stored resume pointer for later generations.
 func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+	return s.enqueueChatTask(ctx, chatSession, initiatorUserID, forceFreshSession, 0)
+}
+
+func (s *TaskService) EnqueueChannelChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64) (db.AgentTaskQueue, error) {
+	return s.enqueueChatTask(ctx, chatSession, initiatorUserID, forceFreshSession, contextRevision)
+}
+
+func (s *TaskService) enqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, contextRevision int64) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -1686,14 +1696,35 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	// Lock the channel binding only after the chat_session lock above. The
 	// append path touches chat_session before binding as well, so this order
 	// avoids an ABBA edge while keeping pending fresh in the enqueue transaction.
-	pendingFresh, err := qtx.LockChannelChatSessionPendingFresh(ctx, chatSession.ID)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return db.AgentTaskQueue{}, fmt.Errorf("lock channel pending fresh: %w", err)
+	var pendingFresh bool
+	if err := qtx.EnsureChannelChatContextGeneration(ctx, chatSession.ID); err != nil {
+		return db.AgentTaskQueue{}, fmt.Errorf("ensure channel context generation: %w", err)
 	}
-	if err == nil && pendingFresh {
+	if contextRevision > 0 {
+		generation, err := qtx.LockChannelChatContextGenerationByRevision(ctx, db.LockChannelChatContextGenerationByRevisionParams{
+			ChatSessionID: chatSession.ID, Revision: contextRevision,
+		})
+		if err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("lock channel context generation: %w", err)
+		}
+		pendingFresh = generation.PendingFresh
+	} else {
+		state, err := qtx.LockChannelChatContextGeneration(ctx, chatSession.ID)
+		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+			return db.AgentTaskQueue{}, fmt.Errorf("lock channel context generation: %w", err)
+		}
+		if err == nil {
+			contextRevision = state.ContextRevision
+			pendingFresh = state.GenerationPendingFresh || state.PendingFresh
+		}
+	}
+	if pendingFresh {
 		forceFreshSession = true
 	}
-	mediaPendingUntil, err := qtx.GetChannelMediaPendingUntil(ctx, chatSession.ID)
+	mediaPendingUntil, err := qtx.GetChannelMediaPendingUntil(ctx, db.GetChannelMediaPendingUntilParams{
+		ChatSessionID:          chatSession.ID,
+		ChannelContextRevision: pgtype.Int8{Int64: contextRevision, Valid: contextRevision > 0},
+	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("load channel media pending deadline: %w", err)
@@ -1715,11 +1746,12 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 			Bool:  forceFreshSession,
 			Valid: true,
 		},
-		RuntimeMcpOverlay:    runtimeMCPOverlay.Overlay,
-		RuntimeConnectedApps: runtimeMCPOverlay.ConnectedApps,
-		OriginatorSource:     attrSource,
-		TriggerEvidenceKind:  attrEvidenceKind,
-		TriggerEvidenceRefID: attrEvidenceRef,
+		RuntimeMcpOverlay:      runtimeMCPOverlay.Overlay,
+		RuntimeConnectedApps:   runtimeMCPOverlay.ConnectedApps,
+		OriginatorSource:       attrSource,
+		TriggerEvidenceKind:    attrEvidenceKind,
+		TriggerEvidenceRefID:   attrEvidenceRef,
+		ChannelContextRevision: pgtype.Int8{Int64: contextRevision, Valid: contextRevision > 0},
 	})
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -1746,7 +1778,14 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		return db.AgentTaskQueue{}, fmt.Errorf("defer chat task for sealed pending media: %w", err)
 	}
 	if pendingFresh {
-		if err := qtx.ClearChannelChatSessionPendingFresh(ctx, chatSession.ID); err != nil {
+		if err := qtx.ClearChannelChatContextPendingFresh(ctx, db.ClearChannelChatContextPendingFreshParams{
+			ChatSessionID: chatSession.ID, Revision: contextRevision,
+		}); err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("clear channel context pending fresh: %w", err)
+		}
+		if err := qtx.ClearChannelChatSessionPendingFreshForRevision(ctx, db.ClearChannelChatSessionPendingFreshForRevisionParams{
+			ChatSessionID: chatSession.ID, Revision: contextRevision,
+		}); err != nil {
 			return db.AgentTaskQueue{}, fmt.Errorf("clear channel pending fresh: %w", err)
 		}
 	}

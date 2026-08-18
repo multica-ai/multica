@@ -49,6 +49,7 @@ type SessionQueries interface {
 	CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
 	LockChatSessionForAppend(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
+	ListUnownedChannelChatContextRevisions(ctx context.Context, chatSessionID pgtype.UUID) ([]int64, error)
 	ClearChatMessageChannelMediaPending(ctx context.Context, arg db.ClearChatMessageChannelMediaPendingParams) error
 	LockIssueForChannelMediaBind(ctx context.Context, arg db.LockIssueForChannelMediaBindParams) (pgtype.UUID, error)
 	UpdateChatMessageContentForChannelMedia(ctx context.Context, arg db.UpdateChatMessageContentForChannelMediaParams) (int64, error)
@@ -57,7 +58,10 @@ type SessionQueries interface {
 	LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error)
 	ClaimChannelMediaPendingObjectsForBind(ctx context.Context, arg db.ClaimChannelMediaPendingObjectsForBindParams) ([]string, error)
 	TouchChatSession(ctx context.Context, id pgtype.UUID) error
-	MarkChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error)
+	LockChannelChatContextGeneration(ctx context.Context, chatSessionID pgtype.UUID) (db.LockChannelChatContextGenerationRow, error)
+	EnsureChannelChatContextGeneration(ctx context.Context, chatSessionID pgtype.UUID) error
+	AdvanceChannelChatContextGeneration(ctx context.Context, arg db.AdvanceChannelChatContextGenerationParams) (db.AdvanceChannelChatContextGenerationRow, error)
+	ResolveChannelChatContextHistoryStart(ctx context.Context, arg db.ResolveChannelChatContextHistoryStartParams) error
 	UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error
 	MarkChannelInboundDedupProcessed(ctx context.Context, arg db.MarkChannelInboundDedupProcessedParams) (int64, error)
 }
@@ -80,13 +84,22 @@ func (a dbSessionQueries) CreateChatSession(ctx context.Context, arg db.CreateCh
 	return a.q.CreateChatSession(ctx, arg)
 }
 func (a dbSessionQueries) CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error) {
-	return a.q.CreateChannelChatSessionBinding(ctx, arg)
+	row, err := a.q.CreateChannelChatSessionBinding(ctx, arg)
+	return db.ChannelChatSessionBinding{
+		ID: row.ID, ChatSessionID: row.ChatSessionID, InstallationID: row.InstallationID,
+		ChannelType: row.ChannelType, ChannelChatID: row.ChannelChatID, ChatType: row.ChatType,
+		LastMessageID: row.LastMessageID, LastThreadID: row.LastThreadID, Config: row.Config,
+		CreatedAt: row.CreatedAt, PendingFresh: row.PendingFresh, ContextRevision: row.ContextRevision,
+	}, err
 }
 func (a dbSessionQueries) LockChatSessionForAppend(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	return a.q.LockChatSessionForAppend(ctx, id)
 }
 func (a dbSessionQueries) CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	return a.q.CreateChatMessage(ctx, arg)
+}
+func (a dbSessionQueries) ListUnownedChannelChatContextRevisions(ctx context.Context, chatSessionID pgtype.UUID) ([]int64, error) {
+	return a.q.ListUnownedChannelChatContextRevisions(ctx, chatSessionID)
 }
 func (a dbSessionQueries) ClearChatMessageChannelMediaPending(ctx context.Context, arg db.ClearChatMessageChannelMediaPendingParams) error {
 	return a.q.ClearChatMessageChannelMediaPending(ctx, arg)
@@ -113,8 +126,17 @@ func (a dbSessionQueries) ClaimChannelMediaPendingObjectsForBind(ctx context.Con
 func (a dbSessionQueries) TouchChatSession(ctx context.Context, id pgtype.UUID) error {
 	return a.q.TouchChatSession(ctx, id)
 }
-func (a dbSessionQueries) MarkChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
-	return a.q.MarkChannelChatSessionPendingFresh(ctx, chatSessionID)
+func (a dbSessionQueries) LockChannelChatContextGeneration(ctx context.Context, chatSessionID pgtype.UUID) (db.LockChannelChatContextGenerationRow, error) {
+	return a.q.LockChannelChatContextGeneration(ctx, chatSessionID)
+}
+func (a dbSessionQueries) EnsureChannelChatContextGeneration(ctx context.Context, chatSessionID pgtype.UUID) error {
+	return a.q.EnsureChannelChatContextGeneration(ctx, chatSessionID)
+}
+func (a dbSessionQueries) AdvanceChannelChatContextGeneration(ctx context.Context, arg db.AdvanceChannelChatContextGenerationParams) (db.AdvanceChannelChatContextGenerationRow, error) {
+	return a.q.AdvanceChannelChatContextGeneration(ctx, arg)
+}
+func (a dbSessionQueries) ResolveChannelChatContextHistoryStart(ctx context.Context, arg db.ResolveChannelChatContextHistoryStartParams) error {
+	return a.q.ResolveChannelChatContextHistoryStart(ctx, arg)
 }
 func (a dbSessionQueries) UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error {
 	return a.q.UpdateChannelChatSessionBindingReplyTarget(ctx, arg)
@@ -344,6 +366,36 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 			return AppendResult{}, err
 		}
 	}
+	if err := qtx.EnsureChannelChatContextGeneration(ctx, in.SessionID); err != nil {
+		return AppendResult{}, fmt.Errorf("ensure channel chat context: %w", err)
+	}
+	contextState, err := qtx.LockChannelChatContextGeneration(ctx, in.SessionID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return AppendResult{}, fmt.Errorf("lock channel chat context: %w", err)
+	}
+	contextRevision := int64(0)
+	if err == nil {
+		contextRevision = contextState.ContextRevision
+	}
+	if in.ForceFresh && err != nil {
+		return AppendResult{}, fmt.Errorf("advance channel chat context: %w", err)
+	}
+	if err == nil && (in.ForceFresh || (contextState.PendingFresh && !contextState.GenerationPendingFresh)) {
+		advanced, err := qtx.AdvanceChannelChatContextGeneration(ctx, db.AdvanceChannelChatContextGenerationParams{
+			ChatSessionID: in.SessionID, CurrentRevision: contextRevision,
+			HistoryBoundaryMessageID: textOrNull(in.MessageID), HasMessageBody: true,
+		})
+		if err != nil {
+			return AppendResult{}, fmt.Errorf("advance channel chat context: %w", err)
+		}
+		contextRevision = advanced.Revision
+	} else if err == nil && contextState.HistoryBoundaryPending && in.MessageID != "" {
+		if err := qtx.ResolveChannelChatContextHistoryStart(ctx, db.ResolveChannelChatContextHistoryStartParams{
+			HistoryStartMessageID: textOrNull(in.MessageID), ChatSessionID: in.SessionID, Revision: contextRevision,
+		}); err != nil {
+			return AppendResult{}, fmt.Errorf("resolve channel chat history boundary: %w", err)
+		}
+	}
 
 	commandSource := in.CommandText
 	if commandSource == "" {
@@ -362,17 +414,17 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 		MessageKind:             textOrNullIf(cmd != nil, channelCommandMessageKind),
 		ChannelMediaPendingSecs: pgtype.Float8{Float64: in.MediaPendingSeconds, Valid: in.MediaPendingSeconds > 0},
 		ChannelIngested:         pgtype.Bool{Bool: true, Valid: true},
+		ChannelContextRevision:  pgtype.Int8{Int64: contextRevision, Valid: contextRevision > 0},
 	})
 	if err != nil {
 		return AppendResult{}, fmt.Errorf("create chat message: %w", err)
 	}
+	pendingContextRevisions, err := qtx.ListUnownedChannelChatContextRevisions(ctx, in.SessionID)
+	if err != nil {
+		return AppendResult{}, fmt.Errorf("list pending channel contexts: %w", err)
+	}
 	if err := qtx.TouchChatSession(ctx, in.SessionID); err != nil {
 		return AppendResult{}, fmt.Errorf("touch chat session: %w", err)
-	}
-	if in.ForceFresh {
-		if _, err := qtx.MarkChannelChatSessionPendingFresh(ctx, in.SessionID); err != nil {
-			return AppendResult{}, fmt.Errorf("mark pending fresh: %w", err)
-		}
 	}
 
 	// Record the latest trigger so the decoupled outbound patcher can thread
@@ -408,14 +460,42 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	if err := tx.Commit(ctx); err != nil {
 		return AppendResult{}, fmt.Errorf("commit: %w", err)
 	}
-	return AppendResult{MessageID: msg.ID, IssueCommand: cmd, DedupMarked: markedInTx}, nil
+	return AppendResult{
+		MessageID:               msg.ID,
+		IssueCommand:            cmd,
+		DedupMarked:             markedInTx,
+		ContextRevision:         contextRevision,
+		PendingContextRevisions: pendingContextRevisions,
+	}, nil
 }
 
 // MarkPendingFresh persists a bare `/new` command. Non-bare `/new` messages
 // mark the same flag inside AppendUserMessage's transaction instead.
-func (s *ChatSession) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
-	if _, err := s.q.MarkChannelChatSessionPendingFresh(ctx, sessionID); err != nil {
-		return fmt.Errorf("mark pending fresh: %w", err)
+func (s *ChatSession) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error {
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin fresh context tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.q.WithTx(tx)
+	if _, err := qtx.LockChatSessionForAppend(ctx, sessionID); err != nil {
+		return fmt.Errorf("lock chat session for fresh context: %w", err)
+	}
+	if err := qtx.EnsureChannelChatContextGeneration(ctx, sessionID); err != nil {
+		return fmt.Errorf("ensure channel chat context: %w", err)
+	}
+	state, err := qtx.LockChannelChatContextGeneration(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("lock channel chat context: %w", err)
+	}
+	if _, err := qtx.AdvanceChannelChatContextGeneration(ctx, db.AdvanceChannelChatContextGenerationParams{
+		ChatSessionID: sessionID, CurrentRevision: state.ContextRevision,
+		HistoryBoundaryMessageID: textOrNull(messageID), HasMessageBody: false,
+	}); err != nil {
+		return fmt.Errorf("advance channel chat context: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit fresh context: %w", err)
 	}
 	return nil
 }

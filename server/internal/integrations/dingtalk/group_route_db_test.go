@@ -13,6 +13,19 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+func assertDingTalkContextGenerationCount(t *testing.T, ctx context.Context, pool interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, sessionID string, want int) {
+	t.Helper()
+	var got int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM channel_chat_context_generation WHERE chat_session_id = $1`, sessionID).Scan(&got); err != nil {
+		t.Fatalf("count DingTalk chat context generations: %v", err)
+	}
+	if got != want {
+		t.Fatalf("DingTalk chat context generations = %d, want %d", got, want)
+	}
+}
+
 func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T) {
 	pool := dingtalkInstallTestDB(t)
 	ctx := context.Background()
@@ -41,6 +54,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 
 	clean := func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_outbound_card_message WHERE chat_session_id IN ($1, $2)`, chatSessionID, chatSessionB)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_context_generation WHERE chat_session_id IN ($1, $2)`, chatSessionID, chatSessionB)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id IN ($1, $2)`, chatSessionID, chatSessionB)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_group_route WHERE installation_id = $1`, installation)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_inbound_message_dedup WHERE installation_id = $1`, installation)
@@ -154,6 +168,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	// stamp. They must survive when the effective route still equals the
 	// installation's default agent.
 	exec(`INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, config) VALUES ($1, $2, 'dingtalk', $3, 'group', '{}'::jsonb)`, chatSessionID, installation, conversation)
+	exec(`INSERT INTO channel_chat_context_generation (chat_session_id, revision) VALUES ($1, 1)`, chatSessionID)
 	exec(`INSERT INTO channel_outbound_card_message (chat_session_id, channel_type, channel_chat_id, channel_card_message_id) VALUES ($1, 'dingtalk', $2, 'old-agent-reply')`, chatSessionID, conversation)
 	preserved, err := queries.DeleteDingTalkStaleGroupChatBinding(ctx, db.DeleteDingTalkStaleGroupChatBindingParams{
 		InstallationID: util.MustParseUUID(installation), ConversationID: conversation, AgentID: util.MustParseUUID(defaultAgent),
@@ -181,6 +196,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("old group binding survived reassignment: %v", err)
 	}
+	assertDingTalkContextGenerationCount(t, ctx, pool, chatSessionID, 1)
 
 	// Simulate an old-agent inbound turn that resolved just before the update
 	// and created its binding just after it. The next routed turn must retire it.
@@ -199,6 +215,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("late old-agent binding survived guard: %v", err)
 	}
+	assertDingTalkContextGenerationCount(t, ctx, pool, chatSessionID, 1)
 
 	resolved, err = queries.DiscoverDingTalkGroupRoute(ctx, db.DiscoverDingTalkGroupRouteParams{
 		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
@@ -212,6 +229,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	// A -> B -> A. Returning to A must remove B's active binding rather than
 	// resuming A's earlier binding/transcript.
 	exec(`INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, config) VALUES ($1, $2, 'dingtalk', $3, 'group', jsonb_build_object('agent_id', $4::text))`, chatSessionB, installation, conversation, routedAgent)
+	exec(`INSERT INTO channel_chat_context_generation (chat_session_id, revision) VALUES ($1, 1)`, chatSessionB)
 	returnedToDefault, err := queries.ReassignDingTalkGroupRoute(ctx, db.ReassignDingTalkGroupRouteParams{
 		ID: routes[0].ID, WorkspaceID: util.MustParseUUID(workspaceID), AgentID: util.MustParseUUID(defaultAgent),
 	})
@@ -223,6 +241,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	}); !errors.Is(err, pgx.ErrNoRows) {
 		t.Fatalf("B binding survived route return to A: %v", err)
 	}
+	assertDingTalkContextGenerationCount(t, ctx, pool, chatSessionB, 1)
 	routes, err = queries.ListDingTalkGroupRoutesByWorkspace(ctx, util.MustParseUUID(workspaceID))
 	if err != nil || len(routes) != 1 || routes[0].ID != returnedToDefault.ID {
 		t.Fatalf("A -> B -> A changed stable route identity: routes=%+v err=%v", routes, err)

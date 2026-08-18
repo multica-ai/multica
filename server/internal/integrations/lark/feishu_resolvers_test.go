@@ -31,7 +31,7 @@ func (f *fakeChatSession) EnsureSession(_ context.Context, in engine.EnsureSessi
 	return binderUUID(42), nil
 }
 
-func (f *fakeChatSession) MarkPendingFresh(context.Context, pgtype.UUID) error { return nil }
+func (f *fakeChatSession) MarkPendingFresh(context.Context, pgtype.UUID, string) error { return nil }
 
 func (f *fakeChatSession) AppendUserMessage(_ context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	f.appendIn = in

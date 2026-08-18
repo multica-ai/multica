@@ -15,6 +15,7 @@ import (
 	"github.com/slack-go/slack"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -130,17 +131,23 @@ func (h *History) ChannelOverview(ctx context.Context, chatSessionID pgtype.UUID
 	if err != nil {
 		return channel.HistoryPage{}, err
 	}
+	if opts.BoundaryPending || historyCursorReachedStart(opts.Before, opts.After) {
+		return channel.HistoryPage{ChannelType: string(TypeSlack)}, nil
+	}
 	limit := clampHistoryLimit(opts.Limit)
+	latest, oldest, inclusive := historyWindow(opts)
 	resp, err := t.client.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
 		ChannelID: t.channelID,
-		Latest:    opts.Before,
-		Inclusive: false,
+		Latest:    latest,
+		Oldest:    oldest,
+		Inclusive: inclusive,
 		Limit:     limit,
 	})
 	if err != nil {
 		return channel.HistoryPage{}, fmt.Errorf("read slack channel: %w", err)
 	}
-	page := normalizePage(ctx, t.client, h.logger, resp.Messages, t.botUserID, limit, true)
+	raw := filterHistoryWindow(resp.Messages, opts, t.botUserID)
+	page := normalizePage(ctx, t.client, h.logger, raw, t.botUserID, limit, true)
 	page.ChannelType = string(TypeSlack)
 	return page, nil
 }
@@ -159,15 +166,23 @@ func (h *History) Thread(ctx context.Context, chatSessionID pgtype.UUID, threadI
 	if ts == "" {
 		ts = t.threadRoot // the session's own thread
 	}
+	if opts.BoundaryPending {
+		return channel.HistoryPage{ChannelType: string(TypeSlack), ThreadID: ts}, nil
+	}
 
 	var raw []slack.Message
 	if ts == "" {
 		// No thread to read (a DM, or a group whose root could not be recovered):
 		// fall back to the channel's linear conversation.
+		if historyCursorReachedStart(opts.Before, opts.After) {
+			return channel.HistoryPage{ChannelType: string(TypeSlack), ThreadID: ts}, nil
+		}
+		latest, oldest, inclusive := historyWindow(opts)
 		resp, herr := t.client.GetConversationHistoryContext(ctx, &slack.GetConversationHistoryParameters{
 			ChannelID: t.channelID,
-			Latest:    opts.Before,
-			Inclusive: false,
+			Latest:    latest,
+			Oldest:    oldest,
+			Inclusive: inclusive,
 			Limit:     limit,
 		})
 		if herr != nil {
@@ -175,11 +190,16 @@ func (h *History) Thread(ctx context.Context, chatSessionID pgtype.UUID, threadI
 		}
 		raw = resp.Messages
 	} else {
+		if historyCursorReachedStart(opts.Before, opts.After) {
+			return channel.HistoryPage{ChannelType: string(TypeSlack), ThreadID: ts}, nil
+		}
+		latest, oldest, inclusive := historyWindow(opts)
 		msgs, _, _, rerr := t.client.GetConversationRepliesContext(ctx, &slack.GetConversationRepliesParameters{
 			ChannelID: t.channelID,
 			Timestamp: ts,
-			Latest:    opts.Before,
-			Inclusive: false,
+			Latest:    latest,
+			Oldest:    oldest,
+			Inclusive: inclusive,
 			Limit:     limit,
 		})
 		if rerr != nil {
@@ -187,10 +207,49 @@ func (h *History) Thread(ctx context.Context, chatSessionID pgtype.UUID, threadI
 		}
 		raw = msgs
 	}
+	raw = filterHistoryWindow(raw, opts, t.botUserID)
 	page := normalizePage(ctx, t.client, h.logger, raw, t.botUserID, limit, false)
 	page.ChannelType = string(TypeSlack)
 	page.ThreadID = ts
 	return page, nil
+}
+
+func historyWindow(opts channel.HistoryOptions) (latest, oldest string, inclusive bool) {
+	latest = opts.Before
+	if opts.Until != "" && (latest == "" || slackTSLess(opts.Until, latest)) {
+		latest = opts.Until
+	}
+	if opts.Before == "" {
+		return latest, opts.After, opts.After != "" || opts.Until != ""
+	}
+	return latest, "", false
+}
+
+func historyCursorReachedStart(before, start string) bool {
+	return before != "" && start != "" && !slackTSLess(start, before)
+}
+
+func filterHistoryWindow(raw []slack.Message, opts channel.HistoryOptions, botUserID string) []slack.Message {
+	out := raw[:0]
+	for _, message := range raw {
+		if opts.After != "" && slackTSLess(message.Timestamp, opts.After) {
+			continue
+		}
+		if opts.Until != "" && !slackTSLess(message.Timestamp, opts.Until) {
+			continue
+		}
+		if message.Timestamp == opts.After {
+			text := strings.TrimSpace(strings.ReplaceAll(message.Text, "<@"+botUserID+">", ""))
+			if body, ok := engine.ParseFreshSessionCommand(text); ok {
+				if body == "" {
+					continue
+				}
+				message.Text = body
+			}
+		}
+		out = append(out, message)
+	}
+	return out
 }
 
 func clampHistoryLimit(n int) int {

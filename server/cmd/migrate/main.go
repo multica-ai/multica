@@ -238,6 +238,7 @@ var concurrentIndexCleanups = map[string]string{
 	"361_issue_last_activity_index":                             "idx_issue_workspace_last_activity",
 	"363_plugin_invocation_installation_index":                  "idx_plugin_invocation_installation_created",
 	"364_plugin_invocation_created_at_index":                    "idx_plugin_invocation_created_at",
+	"378_channel_chat_context_generation_key":                   "channel_chat_context_generation_session_revision_idx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

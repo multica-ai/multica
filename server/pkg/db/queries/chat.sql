@@ -450,7 +450,8 @@ WHERE id = $1;
 -- 'no_response' to mark a visible turn with no text output (MUL-4351).
 INSERT INTO chat_message (
     chat_session_id, role, content, task_id, failure_reason, elapsed_ms,
-    message_kind, quick_actions, channel_media_pending_until, channel_ingested, id
+    message_kind, quick_actions, channel_media_pending_until, channel_ingested,
+    channel_context_revision, id
 )
 VALUES (
     $1, $2, $3, sqlc.narg(task_id), sqlc.narg(failure_reason), sqlc.narg(elapsed_ms),
@@ -465,6 +466,7 @@ VALUES (
     CASE WHEN sqlc.narg(channel_media_pending_secs)::float8 IS NULL THEN NULL
          ELSE now() + make_interval(secs => sqlc.narg(channel_media_pending_secs)::float8) END,
     COALESCE(sqlc.narg(channel_ingested)::boolean, FALSE),
+    sqlc.narg(channel_context_revision),
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 )
 RETURNING *;
@@ -498,6 +500,14 @@ FROM chat_message
 WHERE chat_session_id = $1
   AND role = 'user'
   AND message_kind != 'channel_command'
+  AND (
+      sqlc.narg('channel_context_revision')::bigint IS NULL
+      OR channel_context_revision = sqlc.narg('channel_context_revision')::bigint
+      OR (
+          sqlc.narg('channel_context_revision')::bigint = 1
+          AND channel_context_revision IS NULL
+      )
+  )
   AND channel_media_pending_until > now()
 ORDER BY channel_media_pending_until DESC
 LIMIT 1;
@@ -550,10 +560,20 @@ WHERE id = $1 AND role = 'user';
 -- pre-ownership rows of a legacy session are never swept into a new batch.
 UPDATE chat_message AS message
 SET task_id = @task_id
+FROM agent_task_queue AS task
 WHERE message.chat_session_id = @chat_session_id
+  AND task.id = @task_id
   AND message.role = 'user'
   AND message.task_id IS NULL
   AND message.message_kind != 'channel_command'
+  AND (
+      task.channel_context_revision IS NULL
+      OR message.channel_context_revision = task.channel_context_revision
+      OR (
+          task.channel_context_revision = 1
+          AND message.channel_context_revision IS NULL
+      )
+  )
   AND NOT EXISTS (
       SELECT 1
       FROM chat_message AS prior
@@ -566,6 +586,19 @@ WHERE message.chat_session_id = @chat_session_id
         AND (prior.created_at, prior.id) > (message.created_at, message.id)
         AND (prior_batch.id IS NULL OR prior_batch.created_at > message.created_at)
   );
+
+-- name: ListUnownedChannelChatContextRevisions :many
+-- Returns every durable context generation that still has channel input without
+-- a task owner. A process crash drops in-memory debounce timers; the next normal
+-- inbound message uses this list to re-arm older generations instead of only
+-- recovering the current one. Legacy NULL revisions are generation 1.
+SELECT DISTINCT COALESCE(channel_context_revision, 1)::bigint AS context_revision
+FROM chat_message
+WHERE chat_session_id = $1
+  AND role = 'user'
+  AND task_id IS NULL
+  AND message_kind != 'channel_command'
+ORDER BY context_revision;
 
 -- name: DeferChatTaskForSealedPendingMedia :one
 -- Closes the enqueue-vs-append race: under READ COMMITTED a media message can
@@ -738,6 +771,40 @@ ORDER BY message.created_at ASC, message.id ASC;
 SELECT * FROM chat_message
 WHERE task_id = $1 AND role = 'user'
 ORDER BY created_at ASC, id ASC;
+
+-- name: ListChatMessagesPageForChannelContext :many
+-- Agent-only transcript projection. UI readers continue using the unfiltered
+-- ListChatMessagesPage query, while a channel task can see only the context
+-- generation snapshotted on that task. Assistant rows inherit their generation
+-- from their owning task, so retries and late completions stay in their turn.
+SELECT message.*
+FROM chat_message AS message
+LEFT JOIN agent_task_queue AS owner ON owner.id = message.task_id
+WHERE message.chat_session_id = @chat_session_id
+  AND message.message_kind != 'channel_command'
+  AND (
+      (
+          message.role = 'user'
+          AND (
+              message.channel_context_revision = @channel_context_revision
+              OR (@channel_context_revision = 1 AND message.channel_context_revision IS NULL)
+          )
+      )
+      OR
+      (
+          message.role != 'user'
+          AND (
+              owner.channel_context_revision = @channel_context_revision
+              OR (@channel_context_revision = 1 AND owner.channel_context_revision IS NULL)
+          )
+      )
+  )
+  AND (
+    sqlc.narg('before_created_at')::timestamptz IS NULL
+    OR (message.created_at, message.id) < (sqlc.narg('before_created_at')::timestamptz, sqlc.narg('before_id')::uuid)
+  )
+ORDER BY message.created_at DESC, message.id DESC
+LIMIT @page_limit;
 
 -- name: ReanchorClaimedDirectChatInput :exec
 -- An idle direct send is visible while it is the positional queue head. A
@@ -927,7 +994,7 @@ INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
-    fire_at, id
+    fire_at, channel_context_revision, id
 )
 SELECT
     $1, $2, NULL,
@@ -942,6 +1009,7 @@ SELECT
     sqlc.narg(trigger_evidence_kind),
     sqlc.narg(trigger_evidence_ref_id),
     sqlc.narg('fire_at')::timestamptz,
+    sqlc.narg('channel_context_revision')::bigint,
     COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
@@ -963,9 +1031,8 @@ WHERE task.chat_session_id = @chat_session_id
   AND NOT EXISTS (
       SELECT 1
       FROM chat_message AS message
-      WHERE message.chat_session_id = @chat_session_id
+      WHERE message.task_id = task.id
         AND message.role = 'user'
-        AND message.message_kind != 'channel_command'
         AND message.channel_media_pending_until > now()
   )
 RETURNING task.*;
@@ -988,7 +1055,8 @@ RETURNING *;
 -- session_id. Includes completed, failed AND cancelled tasks: each of them may
 -- have established a real agent session, and we'd rather resume there than
 -- start over and lose conversation memory. Used as a fallback when
--- chat_session.session_id is NULL. Resume-unsafe failures are excluded because
+-- chat_session.session_id is NULL, and as the authoritative generation-scoped
+-- source for channel tasks. Resume-unsafe failures are excluded because
 -- replaying those sessions deterministically reproduces the same terminal
 -- state. Keep this list in sync with resumeUnsafeFailureReason and
 -- GetLastTaskSession.
@@ -1026,7 +1094,11 @@ RETURNING *;
 WITH retired_sessions AS (
     SELECT DISTINCT r.retired_session_id AS session_id
     FROM agent_task_queue r
-    WHERE r.chat_session_id = $1
+    WHERE r.chat_session_id = sqlc.arg('chat_session_id')
+      AND (
+        sqlc.narg('channel_context_revision')::bigint IS NULL
+        OR COALESCE(r.channel_context_revision, 1) = sqlc.narg('channel_context_revision')::bigint
+      )
       AND r.retired_session_id IS NOT NULL
 ), resume_overflow_at AS (
     -- completed_at alone, where the issue-side twin coalesces four columns:
@@ -1035,7 +1107,11 @@ WITH retired_sessions AS (
     -- compared against. Change both halves together if that ever moves.
     SELECT MAX(t.completed_at) AS at
     FROM agent_task_queue t
-    WHERE t.chat_session_id = $1
+    WHERE t.chat_session_id = sqlc.arg('chat_session_id')
+      AND (
+        sqlc.narg('channel_context_revision')::bigint IS NULL
+        OR COALESCE(t.channel_context_revision, 1) = sqlc.narg('channel_context_revision')::bigint
+      )
       AND t.status = 'failed'
       AND (
         COALESCE(t.failure_reason, '') = 'codex_resume_oversized'
@@ -1045,7 +1121,11 @@ WITH retired_sessions AS (
     SELECT DISTINCT ON (t.session_id)
         t.session_id, t.work_dir, t.runtime_id, t.status, t.failure_reason, t.error, t.completed_at
     FROM agent_task_queue t
-    WHERE t.chat_session_id = $1
+    WHERE t.chat_session_id = sqlc.arg('chat_session_id')
+      AND (
+        sqlc.narg('channel_context_revision')::bigint IS NULL
+        OR COALESCE(t.channel_context_revision, 1) = sqlc.narg('channel_context_revision')::bigint
+      )
       AND t.session_id IS NOT NULL
       AND t.status IN ('completed', 'failed', 'cancelled')
     ORDER BY t.session_id, t.completed_at DESC
@@ -1074,9 +1154,10 @@ WHERE session_id NOT IN (SELECT session_id FROM retired_sessions)
   )
   -- MUL-5722, mirroring GetLastTaskSession: an overflowed resume records no
   -- session, so exclude by time instead of by matching the failed row. Note
-  -- this only guards the FALLBACK — the claim handler reads
-  -- chat_session.session_id first, so a pointer still naming the oversized
-  -- thread has to be cleared at fail time (see FailTask) to be covered.
+  -- this only guards the FALLBACK for legacy tasks — the claim handler reads
+  -- chat_session.session_id first for them, so a pointer still naming the
+  -- oversized thread has to be cleared at fail time (see FailTask) to be
+  -- covered. Context-scoped channel tasks resolve directly from this query.
   AND (
     (SELECT at FROM resume_overflow_at) IS NULL
     OR completed_at > (SELECT at FROM resume_overflow_at)

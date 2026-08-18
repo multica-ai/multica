@@ -96,7 +96,7 @@ func (c *captureChatSession) EnsureSession(_ context.Context, in engine.EnsureSe
 	c.ensureCalls++
 	return pgtype.UUID{}, c.ensureErr
 }
-func (c *captureChatSession) MarkPendingFresh(context.Context, pgtype.UUID) error { return nil }
+func (c *captureChatSession) MarkPendingFresh(context.Context, pgtype.UUID, string) error { return nil }
 func (c *captureChatSession) AppendUserMessage(ctx context.Context, in engine.AppendInput) (engine.AppendResult, error) {
 	c.append = in
 	c.appendCalls++

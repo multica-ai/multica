@@ -209,6 +209,17 @@ cleared_chat_sessions AS (
     WHERE installation_id IN (SELECT id FROM dead)
     RETURNING chat_session_id
 ),
+cleared_chat_contexts AS (
+    -- A revoked installation can still own preserved Chat history and an
+    -- in-flight task snapshot. Remove only generations whose Chat was already
+    -- cascade-deleted by an earlier orphan teardown.
+    DELETE FROM channel_chat_context_generation AS generation
+    WHERE generation.chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+      AND NOT EXISTS (
+          SELECT 1 FROM chat_session AS session
+          WHERE session.id = generation.chat_session_id
+      )
+),
 cleared_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route
     WHERE installation_id IN (SELECT id FROM dead)
@@ -254,15 +265,26 @@ SELECT id FROM dead;
 -- Scoped to kind = 'system' since MUL-5559: a user agent now survives its
 -- runtime's deletion as an unbound agent, so tearing down its installations
 -- here would take a working bot away from an agent that is still there.
-WITH doomed AS (
+WITH system_agents AS (
+    SELECT system_agent.id FROM agent AS system_agent
+    WHERE system_agent.runtime_id = sqlc.arg('runtime_id') AND system_agent.kind = 'system'
+),
+doomed_sessions AS (
+    SELECT id FROM chat_session
+    WHERE agent_id IN (SELECT id FROM system_agents)
+),
+doomed AS (
     SELECT id FROM channel_installation
-    WHERE agent_id IN (
-        SELECT id FROM agent WHERE runtime_id = sqlc.arg('runtime_id') AND kind = 'system'
-    )
+    WHERE agent_id IN (SELECT id FROM system_agents)
 ),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
     RETURNING chat_session_id
+),
+cleared_chat_contexts AS (
+    DELETE FROM channel_chat_context_generation
+    WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
+       OR chat_session_id IN (SELECT id FROM doomed_sessions)
 ),
 cleared_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM doomed)
@@ -491,12 +513,18 @@ WHERE installation_id = $1;
 -- is its own session. config carries any platform-specific outbound routing the
 -- key alone does not (e.g. Slack's real channel_id when the key is composite);
 -- it is opaque to the shared session service.
+WITH binding AS (
 INSERT INTO channel_chat_session_binding (
     chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, config
 ) VALUES (
     $1, $2, $3, $4, $5, $6
 )
-RETURNING *;
+RETURNING *
+), generation AS (
+    INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+    SELECT chat_session_id, context_revision FROM binding
+)
+SELECT * FROM binding;
 
 -- name: GetChannelChatSessionBinding :one
 -- Lookup-by-channel-chat: the inbound dispatcher finds the existing
@@ -553,11 +581,102 @@ UPDATE channel_chat_session_binding
 SET pending_fresh = FALSE
 WHERE chat_session_id = $1;
 
+-- name: ClearChannelChatSessionPendingFreshForRevision :exec
+UPDATE channel_chat_session_binding
+SET pending_fresh = FALSE
+WHERE chat_session_id = @chat_session_id
+  AND context_revision = @revision;
+
+-- name: LockChannelChatContextGeneration :one
+-- Serializes append, /new and task enqueue for one durable context generation.
+-- The binding lock is acquired after the chat_session lock everywhere.
+SELECT binding.*, generation.history_start_message_id,
+       generation.history_end_message_id,
+       generation.history_boundary_pending,
+       generation.pending_fresh AS generation_pending_fresh
+FROM channel_chat_session_binding AS binding
+JOIN channel_chat_context_generation AS generation
+  ON generation.chat_session_id = binding.chat_session_id
+ AND generation.revision = binding.context_revision
+WHERE binding.chat_session_id = $1
+FOR UPDATE OF binding, generation;
+
+-- name: EnsureChannelChatContextGeneration :exec
+-- Rolling-deploy repair: an older server can create a binding after the schema
+-- migration but before every process is upgraded. Materialize its generation
+-- lazily before a new server attempts to lock it.
+INSERT INTO channel_chat_context_generation (
+    chat_session_id, revision
+)
+SELECT binding.chat_session_id, binding.context_revision
+FROM channel_chat_session_binding AS binding
+WHERE binding.chat_session_id = $1
+ON CONFLICT (chat_session_id, revision) DO NOTHING;
+
+-- name: AdvanceChannelChatContextGeneration :one
+-- Opens a new agent-visible context while retaining the same Multica Chat.
+-- The triggering platform message is the exclusive end of the old generation
+-- and, when it has a body, the inclusive start of the new one.
+WITH closed AS (
+    UPDATE channel_chat_context_generation AS generation
+    SET history_end_message_id = sqlc.narg('history_boundary_message_id')
+    WHERE generation.chat_session_id = @chat_session_id
+      AND generation.revision = @current_revision
+), advanced AS (
+    UPDATE channel_chat_session_binding AS binding
+    SET context_revision = binding.context_revision + 1,
+        pending_fresh = TRUE
+    WHERE binding.chat_session_id = @chat_session_id
+      AND binding.context_revision = @current_revision
+    RETURNING binding.*
+), opened AS (
+    INSERT INTO channel_chat_context_generation (
+        chat_session_id, revision, history_start_message_id,
+        history_boundary_pending, pending_fresh
+    )
+    SELECT chat_session_id, context_revision,
+           CASE WHEN @has_message_body::boolean THEN sqlc.narg('history_boundary_message_id') END,
+           NOT @has_message_body::boolean,
+           TRUE
+    FROM advanced
+    RETURNING *
+)
+SELECT * FROM opened;
+
+-- name: LockChannelChatContextGenerationByRevision :one
+SELECT * FROM channel_chat_context_generation
+WHERE chat_session_id = @chat_session_id
+  AND revision = @revision
+FOR UPDATE;
+
+-- name: ResolveChannelChatContextHistoryStart :exec
+UPDATE channel_chat_context_generation
+SET history_start_message_id = @history_start_message_id,
+    history_boundary_pending = FALSE
+WHERE chat_session_id = @chat_session_id
+  AND revision = @revision
+  AND history_boundary_pending;
+
+-- name: ClearChannelChatContextPendingFresh :exec
+UPDATE channel_chat_context_generation
+SET pending_fresh = FALSE
+WHERE chat_session_id = @chat_session_id
+  AND revision = @revision;
+
+-- name: GetChannelChatContextGeneration :one
+SELECT * FROM channel_chat_context_generation
+WHERE chat_session_id = @chat_session_id
+  AND revision = @revision;
+
 -- name: DeleteChannelChatSessionBindingBySession :exec
 -- Application-layer integrity (replaces the old chat_session-FK ON DELETE
 -- CASCADE): drop the binding when its chat_session is deleted.
-DELETE FROM channel_chat_session_binding
-WHERE chat_session_id = $1;
+WITH deleted_binding AS (
+    DELETE FROM channel_chat_session_binding AS binding
+    WHERE binding.chat_session_id = sqlc.arg('chat_session_id')
+)
+DELETE FROM channel_chat_context_generation AS generation
+WHERE generation.chat_session_id = sqlc.arg('chat_session_id');
 
 -- name: DeleteChannelChatSessionBindingsByInstallation :exec
 -- Retire every chat-session binding for an installation. Used when an
@@ -566,9 +685,12 @@ WHERE chat_session_id = $1;
 -- so reusing it would keep routing the conversation to the OLD agent. Dropping
 -- the bindings forces the next inbound message to create a fresh session under
 -- the new agent. The chat_session rows are preserved for history; only the
--- channel binding is removed.
-DELETE FROM channel_chat_session_binding
-WHERE installation_id = $1 AND channel_type = $2;
+-- channel binding is removed. Context generations belong to the preserved Chat,
+-- not to the retired binding: in-flight task history snapshots may still read
+-- them after this statement commits.
+DELETE FROM channel_chat_session_binding AS binding
+WHERE binding.installation_id = sqlc.arg('installation_id')
+  AND binding.channel_type = sqlc.arg('channel_type');
 
 -- =====================
 -- channel_inbound_message_dedup
