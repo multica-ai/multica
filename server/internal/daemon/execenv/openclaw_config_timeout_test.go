@@ -49,9 +49,11 @@ func TestResolveOpenclawCLITimeout(t *testing.T) {
 		{name: "duration string", env: "45s", want: 45 * time.Second},
 		{name: "bare seconds", env: "45", want: 45 * time.Second},
 		{name: "minutes past the ceiling are clamped", env: "1m30s", want: openclawCLIMaxTimeout},
-		// Guards the bare-seconds path against an overflow that used to turn a
-		// huge value into a negative duration instead of a clamp.
-		{name: "absurd bare seconds are clamped", env: "99999999999999999999", want: openclawCLITimeout},
+		{name: "large bare seconds are clamped", env: "3600", want: openclawCLIMaxTimeout},
+		// Past time.Duration's range there is nothing to clamp: parsing fails
+		// and the default applies. Worth pinning because the old Atoi path
+		// silently produced a negative duration here instead of failing.
+		{name: "bare seconds beyond time.Duration fall back", env: "99999999999999999999", want: openclawCLITimeout},
 		// A typo must degrade to the default rather than disabling the
 		// deadline or failing task preparation outright.
 		{name: "unparseable falls back", env: "soon", want: openclawCLITimeout},
