@@ -1306,6 +1306,20 @@ func (h *Handler) DeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 			run:  func() error { return qtx.DeleteWorkspaceAdministration(ctx, requester.WorkspaceID) },
 		},
 		{
+			// The stable VIBES workspace identifier is reusable after a local
+			// Multica workspace is deleted, so remove its mirror in the same
+			// teardown transaction. User mirrors are global identity records and
+			// intentionally survive deletion of any one workspace.
+			name: "delete VIBES workspace mirror",
+			run: func() error {
+				_, err := tx.Exec(ctx,
+					"DELETE FROM vibes_workspace_mirror WHERE multica_workspace_id = $1",
+					requester.WorkspaceID,
+				)
+				return err
+			},
+		},
+		{
 			// At this point workspaceMember has resolved → workspaceID is a
 			// valid UUID, so reuse the resolved value. The existing final
 			// statement also sweeps any expand-phase compatibility leftovers.

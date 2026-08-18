@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY vibes_workspace_mirror_vibes_id_uidx ON vibes_workspace_mirror(vibes_workspace_id);

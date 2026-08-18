@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS vibes_user_mirror_multica_id_uidx;

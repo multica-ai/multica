@@ -123,6 +123,8 @@ var workspaceDeletionManifest = map[string]workspaceDeleteAction{
 	"vcs_connection":                    workspaceDelete,
 	"vcs_pull_request":                  workspaceDelete,
 	"verification_code":                 workspaceDeleteKeep,
+	"vibes_user_mirror":                 workspaceDeleteKeep,
+	"vibes_workspace_mirror":            workspaceDelete,
 	"webhook_delivery":                  workspaceDelete,
 	"workspace":                         workspaceDelete,
 	"workspace_invitation":              workspaceDelete,

@@ -12,15 +12,17 @@ source, replace the Go API, or establish a permanent fork.
 - React: the Multica workspace catalog (`19.2.3` at this baseline)
 - Reusable Multica package changes: none
 - Host-only seams: `/tag` router base, client-only Chat route, navigation
-  adapter, existing-session provider, and a Workspace gate that selects the
+  adapter, cookie-session provider, and a Workspace gate that selects the
   slug/id before child queries or realtime code mount
 - Explicit browser bases: `/api/tag` and `<same-origin>/ws/tag`
 
-The direct package build succeeds without compatibility patches. The main
-known sync cost is the large unoptimized Chat client chunk in this diagnostic
-host; bundle shaping is outside Ticket #258. Identity federation, VIBES-owned
-workspace authority, and Production topology are also intentionally outside
-this tracer bullet.
+The direct package build succeeds without compatibility patches. Ticket #259
+adds the local Go-side `POST /api/auth/vibes-handoff` exchange and stable mirror
+tables without changing Core, Views, UI, Chat, Task, Agent, or realtime code.
+The browser reaches that exchange through `/api/tag`; the Go service consumes
+the opaque code from the configured loopback-only VIBES endpoint, then sets the
+normal Multica cookies. The service secret stays in ignored local environment
+state. Production topology remains intentionally outside this tracer bullet.
 
 ## Local commands
 

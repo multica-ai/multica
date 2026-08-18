@@ -129,6 +129,10 @@ type Config struct {
 	// Surfaced through /api/config so self-hosted operators can confirm which
 	// server build is deployed. Empty in dev builds.
 	ServerVersion string
+	// VIBESHandoff* configures the local-only server-to-server identity exchange.
+	// The URL is required to be an HTTP loopback address by the client itself.
+	VIBESHandoffConsumeURL    string
+	VIBESHandoffServiceSecret string
 }
 
 type cloudRuntimeProxy interface {

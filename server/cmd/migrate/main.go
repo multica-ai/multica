@@ -194,6 +194,10 @@ var concurrentIndexCleanups = map[string]string{
 	"333_issue_status_pkey_index":                               "issue_status_pkey_uidx",
 	"335_issue_status_workspace_key_index":                      "idx_issue_status_workspace_key",
 	"336_issue_status_workspace_name_index":                     "idx_issue_status_workspace_name_active",
+	"343_vibes_user_id_index":                                   "vibes_user_mirror_vibes_id_uidx",
+	"344_vibes_multica_user_index":                              "vibes_user_mirror_multica_id_uidx",
+	"346_vibes_workspace_id_index":                              "vibes_workspace_mirror_vibes_id_uidx",
+	"347_vibes_multica_workspace_index":                         "vibes_workspace_mirror_multica_id_uidx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
