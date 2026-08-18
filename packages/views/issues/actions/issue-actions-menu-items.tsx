@@ -19,9 +19,12 @@ import {
   Unlink,
   UserMinus,
 } from "lucide-react";
-import type { AgentTask, Issue } from "@multica/core/types";
+import type { Issue } from "@multica/core/types";
+import { resolveWorkdirCopyPath } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
 import { api } from "@multica/core/api";
+import { projectResourcesOptions } from "@multica/core/projects";
+import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import {
   PRIORITY_DISPLAY_ORDER,
   PRIORITY_CONFIG,
@@ -49,6 +52,7 @@ import {
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
 import { useT } from "../../i18n";
+import { useLocalDaemonStatus } from "../../platform";
 
 // Both Dropdown and Context menu wrappers expose an API-compatible surface
 // (variant, inset, onClick, etc.). We bundle the primitives we need into a
@@ -105,6 +109,7 @@ export function IssueActionsMenuItems({
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const localDaemon = useLocalDaemonStatus();
   const { options: statusOptions } = useStatusOptions(wsId);
   const { categoryOf, entryOf } = useIssueStatuses(wsId);
   const {
@@ -133,6 +138,22 @@ export function IssueActionsMenuItems({
     queryFn: () => api.listTasksByIssue(issue.id),
     staleTime: 30_000,
   });
+  const shouldResolveLocalDirectory = Boolean(
+    localDaemon.daemonId && issue.project_id,
+  );
+  const runtimesQuery = useQuery({
+    ...runtimeListOptions(wsId),
+    enabled: shouldResolveLocalDirectory,
+  });
+  const projectResourcesQuery = useQuery({
+    ...projectResourcesOptions(wsId, issue.project_id ?? ""),
+    enabled: shouldResolveLocalDirectory,
+  });
+  const localContextReady =
+    !shouldResolveLocalDirectory ||
+    (runtimesQuery.isSuccess && projectResourcesQuery.isSuccess) ||
+    runtimesQuery.isError ||
+    projectResourcesQuery.isError;
 
   // Synchronous click handler — the awaited fetch in the previous version
   // dropped the browser's transient user activation, which made
@@ -140,7 +161,13 @@ export function IssueActionsMenuItems({
   // was cold. We now read straight from the cached query result and write
   // to the clipboard inside the same task as the click.
   const handleCopyWorkdirPath = useCallback(() => {
-    const latestWorkDir = pickLatestWorkDir(tasks);
+    const latestWorkDir = localContextReady
+      ? resolveWorkdirCopyPath(tasks, {
+          localDaemonId: localDaemon.daemonId,
+          runtimes: runtimesQuery.data,
+          projectResources: projectResourcesQuery.data,
+        })
+      : undefined;
     if (!latestWorkDir) {
       toast.error(t(($) => $.detail.workdir_path_unavailable));
       return;
@@ -149,7 +176,14 @@ export function IssueActionsMenuItems({
       if (ok) toast.success(t(($) => $.detail.workdir_path_copied));
       else toast.error(t(($) => $.detail.workdir_path_copy_failed));
     });
-  }, [tasks, t]);
+  }, [
+    localContextReady,
+    localDaemon.daemonId,
+    projectResourcesQuery.data,
+    runtimesQuery.data,
+    tasks,
+    t,
+  ]);
 
   return (
     <>
@@ -347,16 +381,4 @@ export function IssueActionsMenuItems({
       </P.Item>
     </>
   );
-}
-
-function pickLatestWorkDir(tasks: AgentTask[] | undefined): string | undefined {
-  if (!tasks?.length) return undefined;
-  let latest: AgentTask | undefined;
-  for (const task of tasks) {
-    if (!task.work_dir) continue;
-    if (!latest || task.created_at > latest.created_at) {
-      latest = task;
-    }
-  }
-  return latest?.work_dir;
 }
