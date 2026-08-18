@@ -6,8 +6,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const state = vi.hoisted(() => ({ isOpen: false, toggle: vi.fn() }));
 
 vi.mock("@multica/core/chat", () => ({
-  useChatStore: (selector: (value: { isOpen: boolean; toggle: () => void }) => unknown) =>
-    selector({ isOpen: state.isOpen, toggle: state.toggle }),
+  useChatStore: Object.assign(
+    (selector: (value: { isOpen: boolean; toggle: () => void }) => unknown) =>
+      selector({ isOpen: state.isOpen, toggle: state.toggle }),
+    { getState: () => ({ isOpen: state.isOpen, toggle: state.toggle }) },
+  ),
 }));
 
 vi.mock("@multica/core/chat/queries", () => ({

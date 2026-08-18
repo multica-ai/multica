@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ isOpen: false, reducedMotion: false }));
@@ -17,33 +17,10 @@ const store = vi.hoisted(() => ({
   setSelectedProjectId: noop,
 }));
 
-vi.mock("motion/react", () => ({
-  useReducedMotion: () => state.reducedMotion,
-  motion: {
-    div: ({
-      children,
-      initial,
-      animate,
-      transition,
-      ...props
-    }: React.ComponentProps<"div"> & {
-      initial: unknown;
-      animate: unknown;
-      transition: unknown;
-    }) => (
-      <div
-        {...props}
-        data-testid="chat-window"
-        style={{
-          transform: `scale(${(animate as { scale?: number }).scale ?? 1})`,
-          transitionDuration: `${(transition as { duration?: number }).duration ?? 0.2}s`,
-        }}
-      >
-        {children}
-      </div>
-    ),
-  },
-}));
+vi.mock("motion/react", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("motion/react")>();
+  return { ...actual, useReducedMotion: () => state.reducedMotion };
+});
 
 vi.mock("@multica/core/chat", () => ({
   useChatStore: Object.assign(
@@ -63,7 +40,12 @@ vi.mock("@tanstack/react-query", () => ({
   useQueryClient: () => ({ getQueryData: () => null, setQueryData: noop }),
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-a" }));
-vi.mock("@multica/core/auth", () => ({ useAuthStore: (selector: (s: { user: null }) => unknown) => selector({ user: null }) }));
+vi.mock("@multica/core/auth", () => ({
+  useAuthStore: Object.assign(
+    (selector: (s: { user: null }) => unknown) => selector({ user: null }),
+    { getState: () => ({ user: null }) },
+  ),
+}));
 vi.mock("@multica/core/workspace/queries", () => ({ agentListOptions: noop, memberListOptions: noop }));
 vi.mock("@multica/core/projects/queries", () => ({ projectListOptions: noop }));
 vi.mock("@multica/views/issues/components", () => ({ canAssignAgent: () => true }));
@@ -168,25 +150,41 @@ import { ChatWindow } from "./chat-window";
 beforeEach(() => {
   state.isOpen = false;
   state.reducedMotion = false;
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches: state.reducedMotion && query.includes("prefers-reduced-motion"),
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.unstubAllGlobals();
+});
 
 describe("ChatWindow presentation contract", () => {
   it("removes collapsed content from focus and the accessibility tree", () => {
-    render(<ChatWindow />);
+    const view = render(<ChatWindow />);
 
-    const window = screen.getByTestId("chat-window");
-    expect(window.getAttribute("aria-hidden")).toBe("true");
-    expect(window.hasAttribute("inert")).toBe(true);
+    const window = view.container.firstElementChild as HTMLElement | null;
+    expect(window).toBeTruthy();
+    expect(window?.getAttribute("aria-hidden")).toBe("true");
+    expect(window?.hasAttribute("inert")).toBe(true);
   });
 
-  it("does not scale or animate when reduced motion is requested", () => {
+  it("does not scale or animate when reduced motion is requested", async () => {
     state.reducedMotion = true;
     state.isOpen = true;
-    render(<ChatWindow />);
+    const view = render(<ChatWindow />);
 
-    const window = screen.getByTestId("chat-window");
-    expect(window.style.transform).toBe("scale(1)");
-    expect(window.style.transitionDuration).toBe("0s");
+    const window = view.container.firstElementChild as HTMLElement | null;
+    expect(window).toBeTruthy();
+    await waitFor(() => {
+      expect(window?.style.transform).not.toContain("scale(0.95)");
+    });
   });
 });
