@@ -137,7 +137,7 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe('TagWorkspaceShell', () => {
-  it('mounts the original Floating Chat once inside the Workspace Shell', () => {
+  it('provides exactly one Floating Chat mount point inside the Workspace Shell', () => {
     render(<TagWorkspaceShell><div>Workspace content</div></TagWorkspaceShell>);
 
     expect(screen.getAllByTestId('floating-chat')).toHaveLength(1);

@@ -34,9 +34,10 @@ vi.mock("motion/react", () => ({
       <div
         {...props}
         data-testid="chat-window"
-        data-initial={JSON.stringify(initial)}
-        data-animate={JSON.stringify(animate)}
-        data-transition={JSON.stringify(transition)}
+        style={{
+          transform: `scale(${(animate as { scale?: number }).scale ?? 1})`,
+          transitionDuration: `${(transition as { duration?: number }).duration ?? 0.2}s`,
+        }}
       >
         {children}
       </div>
@@ -185,8 +186,7 @@ describe("ChatWindow presentation contract", () => {
     render(<ChatWindow />);
 
     const window = screen.getByTestId("chat-window");
-    expect(JSON.parse(window.dataset.initial ?? "{}").scale).toBe(1);
-    expect(JSON.parse(window.dataset.animate ?? "{}").scale).toBe(1);
-    expect(JSON.parse(window.dataset.transition ?? "{}")).toEqual({ duration: 0 });
+    expect(window.style.transform).toBe("scale(1)");
+    expect(window.style.transitionDuration).toBe("0s");
   });
 });

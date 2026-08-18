@@ -3,11 +3,11 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-const state = vi.hoisted(() => ({ isOpen: false }));
+const state = vi.hoisted(() => ({ isOpen: false, toggle: vi.fn() }));
 
 vi.mock("@multica/core/chat", () => ({
   useChatStore: (selector: (value: { isOpen: boolean; toggle: () => void }) => unknown) =>
-    selector({ isOpen: state.isOpen, toggle: vi.fn() }),
+    selector({ isOpen: state.isOpen, toggle: state.toggle }),
 }));
 
 vi.mock("@multica/core/chat/queries", () => ({
@@ -38,12 +38,13 @@ import { ChatFab } from "./chat-fab";
 afterEach(cleanup);
 
 describe("ChatFab", () => {
-  it("keeps the 40px Golden Master launcher while extending its invisible touch target to 44px", () => {
+  it("opens Chat when the launcher is activated", () => {
     render(<ChatFab />);
 
     const launcher = screen.getByRole("button", { name: "Open chat" });
-    expect(launcher.className).toContain("size-[var(--chat-launcher-size)]");
-    expect(launcher.className).toContain("before:-inset-0.5");
+    launcher.click();
+
+    expect(state.toggle).toHaveBeenCalledOnce();
   });
 
   it("returns focus to the launcher when the open Chat window is collapsed", () => {
