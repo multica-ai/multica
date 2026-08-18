@@ -102,6 +102,27 @@ if ! grep -Fq "zz-cycle-b.tsx" "$out"; then
 fi
 rm -f "$pair_a" "$pair_b"
 
+# 6. A commented-out import is not an edge. This is the state a component
+#    passes through the moment its last real importer is deleted, so a text
+#    scan would keep vouching for it exactly when it stops being used.
+comment_probe="$ui_dir/zz-comment-probe.tsx"
+mention="$root_dir/packages/views/zz-probe-mention.ts"
+track "$comment_probe"
+track "$mention"
+cat >"$comment_probe" <<'EOF'
+export function CommentProbe() {
+  return null
+}
+EOF
+cat >"$mention" <<'EOF'
+// import { CommentProbe } from "@multica/ui/components/ui/zz-comment-probe";
+const note = 'import { CommentProbe } from "@multica/ui/components/ui/zz-comment-probe"';
+export const probeNote = note;
+EOF
+expect_fail_naming "zz-comment-probe.tsx" \
+  "a commented-out or stringified import must not count as a real edge"
+rm -f "$comment_probe" "$mention"
+
 expect_pass "check should pass again once every probe is removed"
 
-echo "PASS: check-ui-wildcard-exports resolves real paths, survives name collisions and dead cycles"
+echo "PASS: check-ui-wildcard-exports parses real imports, survives name collisions, dead cycles, and commented-out imports"

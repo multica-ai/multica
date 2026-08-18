@@ -32,11 +32,19 @@
  * file outside the guarded directories and follows imports inward, so a pair
  * of dead components importing only each other stays dead.
  *
+ * Edges come from real syntax nodes via the TypeScript parser, not from a
+ * regex over source text. Text matching counts a commented-out import as a
+ * live edge, which is precisely the state a file passes through when its last
+ * real importer is removed. 52 specifiers in this repo appear only in comments
+ * or prose today; none currently point into packages/ui, but that is a
+ * coincidence rather than a property.
+ *
  * Run: node scripts/check-ui-wildcard-exports.mjs
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
+import ts from "typescript";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const uiRoot = join(repoRoot, "packages", "ui");
@@ -45,8 +53,47 @@ const pkgName = "@multica/ui";
 const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", ".turbo", "out", "dist", "build"]);
 
-// `from "x"`, `import "x"`, `import("x")`, `require("x")`, `export ... from "x"`.
-const SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*|\brequire\s*\(\s*|\bimport\s*\(\s*)["']([^"']+)["']/g;
+/**
+ * Module specifiers this file really depends on: static import/export,
+ * `import()`, `require()`, and `import("x")` type nodes. A bare string that
+ * happens to sit next to the word `from` is not one of them.
+ *
+ * `vi.mock("...")` is deliberately excluded. It names a module without
+ * importing it, so a component whose only remaining mention is a test mock is
+ * dead — counting it would let a component outlive its last real use.
+ */
+function importedSpecifiers(sourceText, filePath) {
+  const source = ts.createSourceFile(filePath, sourceText, ts.ScriptTarget.Latest, true);
+  const specifiers = new Set();
+
+  const visit = (node) => {
+    if (
+      (ts.isImportDeclaration(node) || ts.isExportDeclaration(node)) &&
+      node.moduleSpecifier &&
+      ts.isStringLiteral(node.moduleSpecifier)
+    ) {
+      specifiers.add(node.moduleSpecifier.text);
+    } else if (
+      ts.isCallExpression(node) &&
+      (node.expression.kind === ts.SyntaxKind.ImportKeyword ||
+        (ts.isIdentifier(node.expression) && node.expression.text === "require")) &&
+      node.arguments.length > 0 &&
+      ts.isStringLiteral(node.arguments[0])
+    ) {
+      specifiers.add(node.arguments[0].text);
+    } else if (
+      ts.isImportTypeNode(node) &&
+      ts.isLiteralTypeNode(node.argument) &&
+      ts.isStringLiteral(node.argument.literal)
+    ) {
+      specifiers.add(node.argument.literal.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+
+  visit(source);
+  return specifiers;
+}
 
 function walk(dir, out = []) {
   for (const dirent of readdirSync(dir, { withFileTypes: true })) {
@@ -138,7 +185,7 @@ function resolveSpecifier(specifier, importer) {
 const imports = new Map();
 for (const file of sourceFiles) {
   const found = new Set();
-  for (const [, specifier] of readFileSync(file, "utf8").matchAll(SPECIFIER_RE)) {
+  for (const specifier of importedSpecifiers(readFileSync(file, "utf8"), file)) {
     const target = resolveSpecifier(specifier, file);
     if (target !== null) found.add(target);
   }
