@@ -899,6 +899,9 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 	opts := service.IssueCreateOpts{
 		AssignedAgentRunFireAt: assignedRunFireAt,
 		BroadcastPayload: func(issue db.Issue, _ []db.Attachment, _ []db.IssueLabel) map[string]any {
+			// Plain IssueToMap is authoritative here: this path always creates
+			// with the built-in "todo" above, and a built-in status IS its own
+			// category, so no catalog read is possible or needed. (MUL-6243)
 			return map[string]any{"issue": service.IssueToMap(issue, issuePrefix)}
 		},
 	}

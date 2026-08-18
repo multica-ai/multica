@@ -142,7 +142,7 @@ func TestRemoteMCPProxyRechecksCredentialBeforeUpstreamCall(t *testing.T) {
 }
 
 func TestRemoteMCPProviderMatrixAndConfigMerge(t *testing.T) {
-	for _, provider := range []string{"codex", "claude", "hermes", "qoder"} {
+	for _, provider := range []string{"codex", "claude", "hermes", "qoder", "mcode"} {
 		if !providerSupportsRemoteMCPBroker(provider) {
 			t.Fatalf("provider %s must support Remote MCP", provider)
 		}

@@ -1242,6 +1242,22 @@ func TestBuildCommentPromptCoalescedCrossThread(t *testing.T) {
 	}
 }
 
+func TestBuildCommentPromptLabelsDelegatedFailureSignalAsPlatform(t *testing.T) {
+	task := Task{
+		IssueID:               "issue-recovery-1",
+		TriggerCommentID:      "recovery-comment-1",
+		TriggerCommentContent: "Delegated task failed; resume coordination.",
+		TriggerAuthorType:     "system",
+	}
+	out := BuildPrompt(task, "codex")
+	if !strings.Contains(out, "[NEW COMMENT] The platform just left a new comment") {
+		t.Fatalf("system recovery comment was mislabeled in prompt:\n%s", out)
+	}
+	if strings.Contains(out, "[NEW COMMENT] A user just left a new comment") {
+		t.Fatalf("system recovery comment must not be labeled as a user:\n%s", out)
+	}
+}
+
 // TestBuildCommentPromptCoalescedIDsOnlyFallback pins the old-server fallback:
 // when only coalesced ids are shipped (no embedded detail), the prompt must
 // still NOT assume a shared thread, and must reach the ids through a BOUNDED

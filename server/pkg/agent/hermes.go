@@ -377,10 +377,11 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
-		cfg:          b.cfg,
-		stdin:        stdin,
-		pending:      make(map[int]*pendingRPC),
-		pendingTools: make(map[string]*pendingToolCall),
+		cfg:                        b.cfg,
+		stdin:                      stdin,
+		pending:                    make(map[int]*pendingRPC),
+		pendingTools:               make(map[string]*pendingToolCall),
+		toolStartCarriesFinalInput: b.cfg.BuiltinRuntime,
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
 		},
@@ -892,6 +893,26 @@ type hermesClient struct {
 	// acceptNotification can drop ACP session updates before dispatching to
 	// handlers that mutate client state such as usage or pending tool calls.
 	acceptNotification func(updateType string) bool
+	// toolStartCarriesFinalInput marks a dialect whose tool_call start frame is
+	// the only place a call's input ever appears, so MessageToolUse can be
+	// emitted as soon as the call starts instead of being held until it
+	// completes. Waiting cannot yield more input for such a dialect, and only
+	// costs the run its in-flight visibility.
+	//
+	// It is a vendor-verified compatibility exception, so the hermes backend
+	// scopes it to Config.BuiltinRuntime the same way
+	// acpToleratesOmittedMcpCapabilities does: `protocol_family: hermes` with
+	// `command_name: jcode` reaches this backend as "hermes" while being an
+	// unrelated implementation, and only the real Hermes Agent binary is known
+	// to behave this way — acp_adapter/tools.py's build_tool_call passes
+	// `raw_input=None if tool_name in _POLISHED_TOOLS else arguments`, and
+	// build_tool_complete passes none at all. Unset means deferring, so a
+	// custom hermes-family runtime that supplies rawInput on a later update
+	// still has it recorded.
+	//
+	// Other backends leave it false too — Kimi streams its args across updates,
+	// so for it the start frame is genuinely incomplete.
+	toolStartCarriesFinalInput bool
 
 	// pendingTools buffers the args for tool calls whose input streams in
 	// across multiple ACP tool_call_update messages (kimi does this —
@@ -1562,15 +1583,73 @@ func (c *hermesClient) handleToolCallStart(data json.RawMessage) {
 		return
 	}
 
+	// No rawInput: whatever the start frame carries is in the content blocks.
+	argsText := extractACPToolCallText(msg.Content)
+
+	// Emitting at the start frame is what makes an in-flight tool visible at
+	// all: nothing is otherwise emitted until tool_call_update completes, so a
+	// tool that stalls renders as a blank run with no visible tool call — the
+	// symptom in GH#6583 — and, because the daemon's in-flight tool counter
+	// only advances on MessageToolUse, such a call never gets charged to
+	// AgentToolWatchdog and is judged by the much shorter AgentIdleWatchdog
+	// instead, so a legitimately long tool call is force-stopped early.
+	//
+	// Only a dialect that will never send input later can do this without
+	// losing the input — see toolStartCarriesFinalInput.
+	if c.toolStartCarriesFinalInput {
+		// The content blocks are display output, not input, so they are used as
+		// Input only for the one shape that demonstrably IS the invocation.
+		// Everything else reports no input rather than passing a rendering
+		// ("Preparing write to <path>") off as the call's arguments.
+		var input map[string]any
+		if acpToolCallStartCarriesInvocation(toolName, argsText) {
+			input = parseToolArgsJSON(argsText)
+		}
+		c.trackTool(msg.ToolCallID, &pendingToolCall{
+			toolName: toolName,
+			argsText: argsText,
+			input:    input,
+			emitted:  true,
+		})
+		if c.onMessage != nil {
+			c.onMessage(Message{
+				Type:   MessageToolUse,
+				Tool:   toolName,
+				CallID: msg.ToolCallID,
+				Input:  input,
+			})
+		}
+		return
+	}
+
 	// Kimi streams args token-by-token across tool_call_update messages;
 	// the initial tool_call often carries an empty content block. Buffer
 	// the tool and defer MessageToolUse emission to avoid the UI seeing
 	// a command with `{""` as its input.
 	c.trackTool(msg.ToolCallID, &pendingToolCall{
 		toolName: toolName,
-		argsText: extractACPToolCallText(msg.Content),
+		argsText: argsText,
 		emitted:  false,
 	})
+}
+
+// acpToolCallStartCarriesInvocation reports whether a tool_call start frame's
+// content can be reported as the call's input rather than as display output.
+//
+// It deliberately recognises exactly one shape: a `terminal` call whose content
+// is the `$ <command>` line. In ACP, `content` is display output produced by the
+// tool call and `rawInput` is the input, so treating arbitrary content as input
+// mis-records the invocation. Hermes suppresses rawInput for its whole
+// "polished" tool set and renders each one differently: `terminal` renders
+// `$ <command>` (the invocation), but `write_file` and `patch` render prose like
+// "Preparing write to <path>", and the browser/web/media tools render their own
+// summaries. Only the terminal rendering is the command itself; the rest report
+// no input at all.
+func acpToolCallStartCarriesInvocation(toolName, argsText string) bool {
+	if toolName != "terminal" {
+		return false
+	}
+	return strings.HasPrefix(strings.TrimSpace(argsText), "$ ")
 }
 
 func (c *hermesClient) handleToolCallUpdate(data json.RawMessage) {
@@ -1700,7 +1779,16 @@ func (c *hermesClient) emitDeferredToolUse(
 		input = p.input
 	case p != nil:
 		toolName = p.toolName
-		input = parseToolArgsJSON(p.argsText)
+		// A rawInput on the update is the call's actual input, so it wins over
+		// whatever the start frame rendered into content. ACP lets a start
+		// frame carry only display text ("Preparing write to <path>") and
+		// supply rawInput later; without this the display text would be
+		// recorded as the invocation and the real input silently dropped.
+		if updateRawInput != nil {
+			input = updateRawInput
+		} else {
+			input = parseToolArgsJSON(p.argsText)
+		}
 	default:
 		// No record of the start frame — fall back to the update's own
 		// title/kind/rawInput so the UI at least sees the tool name.

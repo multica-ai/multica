@@ -617,8 +617,11 @@
       "value_placeholder": "値を入力…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
+      "actor_search_placeholder": "メンバーを検索…",
       "open_link": "リンクを開く",
-      "archived_hint": "アーカイブ済みプロパティ — 値は読み取り専用です"
+      "archived_hint": "アーカイブ済みプロパティ — 値は読み取り専用です",
+      "unknown_value": "表示できません",
+      "unknown_value_hint": "この値は新しいバージョンの Multica で設定されており、ここでは編集できません。アプリを更新するか、値をクリアしてください"
     },
     "filter_options_aria": "フィルターオプション",
     "no_results": "結果なし",

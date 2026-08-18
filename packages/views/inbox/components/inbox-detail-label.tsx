@@ -1,5 +1,6 @@
 "use client";
 
+import { statusCategoryOfKey } from "@multica/core/issues";
 import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly } from "@multica/core/issues/date";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -51,7 +52,7 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
   switch (item.type) {
     case "status_changed": {
       if (!details.to) return <span>{typeLabels[item.type]}</span>;
-      const label = STATUS_CONFIG[details.to as IssueStatus]?.label ?? details.to;
+      const label = STATUS_CONFIG[statusCategoryOfKey(details.to)]?.label ?? details.to;
       return (
         <span className="inline-flex items-center gap-1">
           {t(($) => $.labels.set_status_to)}

@@ -366,7 +366,10 @@ function WhenChart({
   );
 
   const metricToggleVisible = !showHeatmap;
-  const legendIncludesCacheRead = !showHeatmap && chartMetric === "tokens";
+  // Both metrics carry a cache-read segment now: the token stack always did,
+  // and the cost stack gained one when it stopped dropping cache-read spend
+  // from its total (MUL-6334).
+  const legendIncludesCacheRead = !showHeatmap;
 
   return (
     <div className="rounded-lg border bg-card p-4">
@@ -608,15 +611,15 @@ function CustomPricingBar({ usage }: { usage: RuntimeUsage[] }) {
 }
 
 // ---------------------------------------------------------------------------
-// Chart legend — three coloured dots + labels, rendered in WhenChart's
-// header so the chart body keeps its full vertical real estate.
+// Chart legend — one coloured dot + label per stack segment, rendered in
+// WhenChart's header so the chart body keeps its full vertical real estate.
 // ---------------------------------------------------------------------------
 
 function ChartLegend({ includeCacheRead = false }: { includeCacheRead?: boolean }) {
   const { t } = useT("runtimes");
-  // Token-stack mode adds a cache-read pip between output and cache-write to
-  // match the four-segment stack of DailyTokensChart. The cost chart drops
-  // cache-read because at typical pricing it'd be ~0 px tall in the stack.
+  // The cache-read pip sits between output and cache-write, matching the
+  // segment order both the token and the cost stacks draw. Only the heatmap,
+  // which has no stack at all, leaves it out.
   const items = [
     { label: t(($) => $.usage.legend_input), color: "var(--color-chart-1)" },
     { label: t(($) => $.usage.legend_output), color: "var(--color-chart-2)" },

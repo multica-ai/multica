@@ -246,7 +246,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `subscriber list/add/remove <issue-id>` | Manage subscribers | `--user`, `--user-id` (defaults to the current user) |
 | | `label list/add/remove <issue-id>` | Manage labels on an issue | |
 | | `metadata list/get/set/delete <issue-id>` | Manage issue-level key-value metadata | |
-| | `property list/set/unset <issue-id>` | Set custom property values | `set`: `--name`, `--value` |
+| | `property list/set/unset <issue-id>` | Set custom property values | `set`: `--name`, `--value` (`actor` / `multi_actor` accept a member name, email, or id) |
 | | `runs <issue-id>` | View run history | `--full-id` |
 | | `run-messages <task-id>` | View the messages of a single run | `--since`, `--issue` |
 | | `usage <issue-id>` | View aggregated token usage | |
@@ -256,7 +256,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `status <id> <status>` | Change project status | |
 | | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | |
-| `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type`, `--option` (repeatable); `list`: `--include-archived`; the type cannot be changed after creation |
+| `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
 | | `tasks <id>` | View an agent's tasks | |

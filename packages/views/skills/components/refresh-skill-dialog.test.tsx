@@ -73,23 +73,14 @@ describe("RefreshSkillDialog source URL", () => {
     expect((link.textContent ?? "").length).toBeLessThanOrEqual(60);
   });
 
-  it("renders no link when the origin has no source_url", () => {
-    renderDialog({ type: "manual" });
-    expect(screen.queryByRole("link")).toBeNull();
-  });
-
-  // config.origin is persisted verbatim through the skill update API, so an
-  // injected source_url must never surface as a live anchor in the dialog.
-  it("renders no link when a non-import origin carries an injected source_url", () => {
+  // Which source_urls are linkable is originSourceUrl's contract, and its full
+  // matrix — host mismatch, lookalike hosts, non-http schemes, malformed and
+  // missing values, non-import origins — lives in ../lib/origin.test.ts. This
+  // case pins the wiring instead: when the helper refuses, the dialog renders
+  // no anchor at all. config.origin is persisted verbatim through the skill
+  // update API, so an injected source_url is the rejection that matters most.
+  it("renders no link when the helper refuses the source_url", () => {
     renderDialog({ type: "manual", source_url: SOURCE_URL });
-    expect(screen.queryByRole("link")).toBeNull();
-  });
-
-  it("renders no link when the source_url host does not match the origin type", () => {
-    renderDialog({
-      type: "github",
-      source_url: "https://evil.example/anthropics/skills",
-    });
     expect(screen.queryByRole("link")).toBeNull();
   });
 });

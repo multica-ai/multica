@@ -616,8 +616,11 @@
       "value_placeholder": "输入值…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
+      "actor_search_placeholder": "搜索成员…",
       "open_link": "打开链接",
       "archived_hint": "已归档属性——值为只读",
+      "unknown_value": "无法显示",
+      "unknown_value_hint": "该值由更新版本的 Multica 设置，当前版本无法编辑——请更新应用，或清除该值",
       "none": "无值"
     },
     "filter_options_aria": "筛选选项",

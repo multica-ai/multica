@@ -246,9 +246,9 @@ GROUP BY a.id`, compiled.where)
 		}
 		propertyKey := "'" + util.UUIDToString(property.ID) + "'"
 		switch property.Type {
-		case "select":
+		case "select", "actor":
 			query = fmt.Sprintf(`SELECT i.properties ->> %s, COUNT(*)::bigint FROM issue i WHERE %s AND jsonb_typeof(i.properties -> %s) = 'string' GROUP BY 1`, propertyKey, compiled.where, propertyKey)
-		case "multi_select":
+		case "multi_select", "multi_actor":
 			query = fmt.Sprintf(`SELECT property_value.value, COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS property_value(value) ON TRUE WHERE %s GROUP BY property_value.value`, propertyKey, propertyKey, compiled.where)
 		case "checkbox":
 			query = fmt.Sprintf(`SELECT i.properties ->> %s, COUNT(*)::bigint FROM issue i WHERE %s AND jsonb_typeof(i.properties -> %s) = 'boolean' GROUP BY 1`, propertyKey, compiled.where, propertyKey)

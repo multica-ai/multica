@@ -294,6 +294,46 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.29",
+        date: "2026-08-18",
+        title: "MiniMax Code, cleaner run transcripts, and Hermes agent fixes",
+        changes: [],
+        features: [
+          "You can now run agents with MiniMax Code.",
+          "Press Cmd/Ctrl+, to open Settings in a new desktop tab.",
+        ],
+        improvements: [
+          "Hermes agent runs now show tools while they are working.",
+          "Agent transcripts are easier to scan without repeated names.",
+        ],
+        fixes: [
+          "Tasks keep running through brief runtime connection drops.",
+          "Daily and weekly cost charts now include cache-read costs.",
+          "Files and audio sent directly in Feishu now reach your agent.",
+          "Failed delegated work now returns to the coordinating agent.",
+          "Downloads now show the newest complete release.",
+        ],
+      },
+      {
+        version: "0.4.28",
+        date: "2026-08-17",
+        title:
+          "Member custom fields, bulk skill updates, and a clearer desktop update prompt",
+        changes: [],
+        features: [
+          "You can now put workspace members in a custom field, one or several.",
+          "Selected skills can now be updated from their source all at once.",
+        ],
+        improvements: [
+          "The desktop update prompt now links to what changed in that version.",
+          "The command line now accepts a member's email wherever an assignee is expected.",
+        ],
+        fixes: [
+          "Opening a new tab in the desktop app no longer loses your workspace.",
+          "Member filters now show names and avatars instead of a bare count.",
+        ],
+      },
+      {
         version: "0.4.27",
         date: "2026-08-17",
         title:

@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Outlet, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
@@ -15,6 +15,19 @@ import { WorkspacePresencePrefetch } from "@multica/views/layout";
 import { SourceBackfillModal } from "@multica/views/onboarding";
 import { useTabStore } from "@/stores/tab-store";
 import { useWindowOverlayStore } from "@/stores/window-overlay-store";
+
+/**
+ * Which mounted layout instance currently owns the platform workspace
+ * singleton. Claimed during render (next to the setCurrentWorkspace write it
+ * guards) and read by the unmount cleanup, which must not release a singleton
+ * a successor has already taken over (MUL-6303 / #7086).
+ *
+ * Module scope rather than context: the two instances that have to agree here
+ * never share a React tree. Desktop mounts exactly one tab at a time and keys
+ * the host on the active tab id (tab-content.tsx), so switching or opening a
+ * tab tears the whole router subtree down and builds a new one beside it.
+ */
+let singletonOwner: symbol | null = null;
 
 /**
  * Desktop equivalent of apps/web/app/[workspaceSlug]/layout.tsx.
@@ -35,6 +48,11 @@ import { useWindowOverlayStore } from "@/stores/window-overlay-store";
  */
 export function WorkspaceRouteLayout() {
   const { workspaceSlug } = useParams<{ workspaceSlug: string }>();
+  // Identity for this mounted instance. A Symbol so two layouts can never
+  // compare equal — including the incoming and outgoing layout of a
+  // same-workspace tab swap, which carry the same slug and workspace id and
+  // are therefore indistinguishable by value.
+  const [instanceId] = useState(() => Symbol("workspace-route-layout"));
   const user = useAuthStore((s) => s.user);
   const isAuthLoading = useAuthStore((s) => s.isLoading);
   // While a WindowOverlay is open (onboarding, accept-invite, new-workspace),
@@ -81,7 +99,13 @@ export function WorkspaceRouteLayout() {
   // while the deleted workspace is STILL in the list cache (the invalidation
   // refetch is a network round-trip). Without the guard we write the dead slug
   // straight back over the cleanup.
+  //
+  // Claiming ownership here — in the same render pass, before any cleanup can
+  // run — is what makes the unmount release below safe. React renders the
+  // incoming tree before it runs the outgoing tree's effect cleanups, so by
+  // the time the old layout tries to release, the new one already owns.
   if (workspace && workspaceSlug && !isWorkspaceDeletePending(workspace.id)) {
+    singletonOwner = instanceId;
     setCurrentWorkspace(workspaceSlug, workspace.id);
   }
 
@@ -121,12 +145,29 @@ export function WorkspaceRouteLayout() {
     setCurrentWorkspace(null, null);
   }, [listReady, workspace, workspaceSlug]);
 
+  // The ownership check is what keeps a same-workspace tab swap from wiping
+  // the workspace context (MUL-6303 / #7086). The slug check alone cannot see
+  // that swap: the "+" button opens /<slug>/issues in the ACTIVE workspace
+  // (tab-bar.tsx), so the incoming layout carries the SAME slug, its render
+  // write dedupes to a no-op inside setCurrentWorkspace, and the outgoing
+  // cleanup then found getCurrentSlug() still equal to its own slug and
+  // cleared it. Every workspace-scoped request the new tab fired went out
+  // without X-Workspace-Slug and came back 400, and the shell — which gates
+  // its chrome on the same singleton — dropped the sidebar with it. Nothing
+  // re-ran the render write afterwards, so it stayed broken until relaunch.
+  //
+  // Both checks still earn their place: ownership covers a successor that
+  // shares this slug, and the slug check covers this same instance being
+  // re-run for a new slug (the effect's own dependency change), where the
+  // singleton has already moved on and must not be clobbered.
   useEffect(() => {
     return () => {
+      if (singletonOwner !== instanceId) return;
       if (getCurrentSlug() !== workspaceSlug) return;
+      singletonOwner = null;
       setCurrentWorkspace(null, null);
     };
-  }, [workspaceSlug]);
+  }, [workspaceSlug, instanceId]);
 
   if (isAuthLoading) return null;
   if (!user) return null;

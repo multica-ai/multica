@@ -11,12 +11,12 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Decides whether the (heavy, ~6min) frontend job has anything to do.
-  # The frontend job validates the web/desktop apps, the shared packages,
+  # Decides whether the heavy frontend validation jobs have anything to do.
+  # The frontend jobs validate the web/desktop apps, the shared packages,
   # the install graph, and the selfhost / reserved-slugs scripts it runs;
   # a pure backend-only or docs-only PR touches none of those and gains
   # nothing from a full web build. This job emits a single `frontend`
-  # output consumed by the frontend job below.
+  # output consumed by the frontend jobs below.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -85,18 +85,14 @@ jobs:
             echo "frontend=false" >> "$GITHUB_OUTPUT"
           fi
 
-  # The frontend validation is split across two runners on purpose. Both
-  # `@multica/web:build` (a webpack production build) and `@multica/views:test`
-  # (259 jsdom files) are CPU-saturating, and a standard runner only has
-  # 4 vCPUs. Running them in one job made them starve each other: the views
-  # suite needs ~104s wall when it owns 4 cores but took ~500s sharing them,
-  # and the identical webpack compile went from ~26s to ~342s. Splitting buys
-  # a second 4-vCPU box rather than reducing the work; total runner-minutes go
-  # up slightly, wall-clock feedback time goes down.
-  #
-  # The split is weighted, not even: the test group is by far the heavier half
-  # (~575 CPU-seconds vs ~250 for build + typecheck + lint), so it gets a
-  # runner to itself and everything else shares the other one.
+  # The frontend validation is split across four runners on purpose. A prior
+  # split isolated build/typecheck/lint from the test suites; on a full test
+  # cache miss, however, web/core/desktop/views still competed for the four
+  # vCPUs on the test runner and stretched the job to ~8 minutes. Giving views
+  # its own runner only reduced that to 7m23s because the suite itself remained
+  # the long pole, so two Vitest shards now split it across two runners while
+  # the remaining suites continue in parallel on another. The extra setup
+  # increases total runner-minutes but reduces wall-clock feedback time.
   frontend-build:
     needs: changes
     runs-on: ubuntu-latest
@@ -135,8 +131,8 @@ jobs:
 
       # Cache entries are immutable, so the key carries the commit SHA to make
       # every run publish a fresh one and `restore-keys` falls back to the most
-      # recent prefix match. The two frontend jobs run disjoint task sets, so
-      # they get their own prefixes rather than racing to save one key.
+      # recent prefix match. Each frontend worker runs a disjoint task set, so
+      # it gets its own prefix rather than racing to save one key.
       # GitHub scopes caches by branch: a PR reads main's entries (so unchanged
       # tasks hit on the first push) and writes its own (so re-pushes hit too).
       - name: Restore turbo cache
@@ -218,22 +214,80 @@ jobs:
           restore-keys: |
             turbo-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
 
-      - name: Test
+      - name: Test web, core, and desktop
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         # Same filter rationale as frontend-build. Type errors are not this
         # job's responsibility -- frontend-build owns the `typecheck` task.
         # `test` reaches dependency sources through the hash-only
         # `^cache-inputs` edge (see turbo.json), so no `tsc` runs here.
-        run: pnpm exec turbo test --filter='!@multica/docs' --filter='!@multica/mobile'
+        run: pnpm exec turbo test --filter='!@multica/docs' --filter='!@multica/mobile' --filter='!@multica/views'
+
+  # Split views across two runners. GitHub reports the matrix job's combined
+  # result, so the aggregate gate can continue depending on this one job ID.
+  frontend-views-test:
+    name: frontend-views-test (${{ matrix.index }}/${{ matrix.total }})
+    needs: changes
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - index: 1
+            total: 2
+          - index: 2
+            total: 2
+    runs-on: ubuntu-latest
+    env:
+      TURBO_CACHE_DIR: .turbo/cache
+    steps:
+      - name: Checkout
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: pnpm install
+
+      - name: Resolve runtime for cache key
+        id: runtime
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+
+      # Each shard has its own prefix so concurrent jobs never race to save the
+      # same immutable cache key. Turbo also includes the passthrough `--shard`
+      # argument in the task hash, while dependency sources still flow through
+      # turbo.json's hash-only `^cache-inputs` edge.
+      - name: Restore turbo cache
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: turbo-views-test-${{ matrix.index }}-of-${{ matrix.total }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-${{ github.sha }}
+          restore-keys: |
+            turbo-views-test-${{ matrix.index }}-of-${{ matrix.total }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
+
+      - name: Test views shard ${{ matrix.index }}/${{ matrix.total }}
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: pnpm exec turbo test --filter='@multica/views' -- --shard=${{ matrix.index }}/${{ matrix.total }}
 
   # Aggregate gate. `frontend` is the status-check name the repository's
   # branch rules refer to, so it has to survive the split above: this job
-  # keeps reporting under that name and simply fails when either half fails.
+  # keeps reporting under that name and simply fails when any worker fails.
   # It also inherits the old contract that the check goes green (rather than
-  # staying pending) on PRs the path filter excluded — both halves succeed
+  # staying pending) on PRs the path filter excluded — all workers succeed
   # trivially in that case because every step is gated off.
   frontend:
-    needs: [frontend-build, frontend-test]
+    needs: [frontend-build, frontend-test, frontend-views-test]
     # `!cancelled()` rather than `always()`: a run superseded by a newer push
     # is cancelled by the concurrency group above, and there is no reason to
     # spend a runner reporting a verdict nobody will read.
@@ -244,10 +298,12 @@ jobs:
         env:
           BUILD_RESULT: ${{ needs.frontend-build.result }}
           TEST_RESULT: ${{ needs.frontend-test.result }}
+          VIEWS_TEST_RESULT: ${{ needs.frontend-views-test.result }}
         run: |
           echo "frontend-build: $BUILD_RESULT"
           echo "frontend-test:  $TEST_RESULT"
-          if [ "$BUILD_RESULT" != "success" ] || [ "$TEST_RESULT" != "success" ]; then
+          echo "frontend-views-test: $VIEWS_TEST_RESULT"
+          if [ "$BUILD_RESULT" != "success" ] || [ "$TEST_RESULT" != "success" ] || [ "$VIEWS_TEST_RESULT" != "success" ]; then
             echo "::error::frontend validation failed"
             exit 1
           fi

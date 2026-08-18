@@ -21,6 +21,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		// Platform-side.
 		{ReasonQueuedExpired, "queued_expired"},
 		{ReasonRuntimeOffline, "runtime_offline"},
+		{ReasonRuntimeReconnectTimeout, "runtime_reconnect_timeout"},
 		{ReasonRuntimeRecovery, "runtime_recovery"},
 		{ReasonTimeout, "timeout"},
 		{ReasonIterationLimit, "iteration_limit"},
@@ -44,7 +45,7 @@ func TestReasonStringWireValues(t *testing.T) {
 		{ReasonAgentUnknown, "agent_error.unknown"},
 	}
 
-	if got, want := len(cases), 22; got != want {
+	if got, want := len(cases), 23; got != want {
 		t.Fatalf("constant count = %d, want %d (canonical taxonomy size)", got, want)
 	}
 
@@ -66,6 +67,7 @@ func TestIsAgentError(t *testing.T) {
 	platformSide := []Reason{
 		ReasonQueuedExpired,
 		ReasonRuntimeOffline,
+		ReasonRuntimeReconnectTimeout,
 		ReasonRuntimeRecovery,
 		ReasonTimeout,
 		ReasonIterationLimit,
@@ -112,8 +114,8 @@ func TestAllReasonsContents(t *testing.T) {
 	t.Parallel()
 
 	got := AllReasons()
-	if len(got) != 22 {
-		t.Fatalf("AllReasons() returned %d entries, want 22", len(got))
+	if len(got) != 23 {
+		t.Fatalf("AllReasons() returned %d entries, want 23", len(got))
 	}
 
 	seen := make(map[Reason]bool, len(got))
@@ -130,8 +132,8 @@ func TestAllReasonsContents(t *testing.T) {
 		}
 	}
 
-	if platformCount != 8 {
-		t.Errorf("AllReasons(): platform-side count = %d, want 8", platformCount)
+	if platformCount != 9 {
+		t.Errorf("AllReasons(): platform-side count = %d, want 9", platformCount)
 	}
 	if agentCount != 14 {
 		t.Errorf("AllReasons(): agent-side count = %d, want 14", agentCount)
@@ -142,7 +144,8 @@ func TestAllReasonsContents(t *testing.T) {
 	// someone adds a constant but forgets to register it in the
 	// allReasons slice.
 	required := []Reason{
-		ReasonQueuedExpired, ReasonRuntimeOffline, ReasonRuntimeRecovery,
+		ReasonQueuedExpired, ReasonRuntimeOffline, ReasonRuntimeReconnectTimeout,
+		ReasonRuntimeRecovery,
 		ReasonTimeout, ReasonIterationLimit, ReasonAgentBlocked,
 		ReasonAPIInvalidRequest, ReasonSkillBundleUnavailable,
 		ReasonAgentProviderAuthOrAccess, ReasonAgentProviderQuotaLimit,

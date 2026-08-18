@@ -1,5 +1,6 @@
 "use client";
 
+import { statusCategoryOfKey } from "@multica/core/issues";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { childIssueProgressOptions, issueDetailOptions } from "@multica/core/issues/queries";
@@ -180,7 +181,7 @@ function IssueHoverCardBody({
         )}
         <span
           role="img"
-          aria-label={t(($) => $.status[issue.status])}
+          aria-label={t(($) => $.status[statusCategoryOfKey(issue.status)])}
           className="flex shrink-0"
         >
           <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />

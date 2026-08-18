@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"sort"
 	"strings"
 	"testing"
 
@@ -579,4 +580,427 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 	if got := listIssues("?limit=5&sort=property:" + uuid.NewString()); len(got) == 0 {
 		t.Fatalf("unknown-definition sort should fall back to position order, got empty")
 	}
+}
+
+// ---------------------------------------------------------------------------
+// Actor property types (MUL-6286)
+// ---------------------------------------------------------------------------
+
+// decodePropertiesBag reads the `{"properties": {...}}` envelope the value
+// endpoints return. A fresh struct per call matters: json.Decode merges into a
+// pre-populated map, so reusing one would keep keys from an earlier response.
+func decodePropertiesBag(t *testing.T, w *httptest.ResponseRecorder) map[string]any {
+	t.Helper()
+	var resp struct {
+		Properties map[string]any `json:"properties"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode properties bag: %v", err)
+	}
+	return resp.Properties
+}
+
+func TestParseActorRefUnit(t *testing.T) {
+	memberID := uuid.NewString()
+	ref, err := parseActorRef("member:" + memberID)
+	if err != nil {
+		t.Fatalf("member reference rejected: %v", err)
+	}
+	if ref.Kind != "member" || ref.ID != memberID {
+		t.Fatalf("unexpected parse: %+v", ref)
+	}
+	// String() is the canonical storage form, so it must round-trip exactly.
+	if ref.String() != "member:"+memberID {
+		t.Fatalf("String() round-trip broken: %q", ref.String())
+	}
+
+	// uuid.Parse also accepts uppercase, braces and the urn: form. Every
+	// consumer compares reference strings exactly, so anything not stored in
+	// canonical form would render as Unknown and never match a filter.
+	canonical := "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+	for _, variant := range []string{
+		strings.ToUpper(canonical),
+		"{" + canonical + "}",
+		"urn:uuid:" + canonical,
+		strings.ReplaceAll(canonical, "-", ""),
+	} {
+		got, err := parseActorRef("member:" + variant)
+		if err != nil {
+			t.Fatalf("uuid variant %q rejected: %v", variant, err)
+		}
+		if got.String() != "member:"+canonical {
+			t.Fatalf("uuid variant %q not canonicalized: %q", variant, got.String())
+		}
+	}
+
+	cases := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{"no colon", uuid.NewString(), `"<kind>:<uuid>"`},
+		{"empty string", "", `"<kind>:<uuid>"`},
+		// "agent" and "squad" are assignee kinds deliberately left out of the
+		// V1 value range; both must read as unknown, not silently accepted.
+		{"agent kind", "agent:" + uuid.NewString(), "unknown actor kind"},
+		{"squad kind", "squad:" + uuid.NewString(), "unknown actor kind"},
+		{"user kind", "user:" + uuid.NewString(), "unknown actor kind"},
+		{"empty kind", ":" + uuid.NewString(), "unknown actor kind"},
+		{"kind is case-sensitive", "Member:" + uuid.NewString(), "unknown actor kind"},
+		{"non-uuid id", "member:not-a-uuid", "must be a UUID"},
+		{"empty id", "member:", "must be a UUID"},
+		{"nested kind", "member:agent:" + uuid.NewString(), "must be a UUID"},
+	}
+	for _, tc := range cases {
+		_, err := parseActorRef(tc.value)
+		if err == nil || !strings.Contains(err.Error(), tc.want) {
+			t.Fatalf("%s: expected error containing %q, got %v", tc.name, tc.want, err)
+		}
+	}
+}
+
+// TestParseActorRefListUnit pins the multi_actor list contract, including the
+// one place it deliberately differs from multi_select: the caller's order
+// survives instead of being canonicalized.
+func TestParseActorRefListUnit(t *testing.T) {
+	// Fixed ids so the insertion order below is neither ascending nor
+	// descending — any sort applied to the result would reorder it.
+	first := "member:11111111-1111-4111-8111-111111111111"
+	second := "member:22222222-2222-4222-8222-222222222222"
+	third := "member:00000000-0000-4000-8000-000000000000"
+
+	if _, err := parseActorRefList(nil); err == nil {
+		t.Fatalf("nil list accepted")
+	}
+	if _, err := parseActorRefList([]any{}); err == nil {
+		t.Fatalf("empty array accepted")
+	}
+
+	refs, err := parseActorRefList([]any{first, second, third, second})
+	if err != nil {
+		t.Fatalf("valid list rejected: %v", err)
+	}
+	got := make([]string, len(refs))
+	for i, ref := range refs {
+		got[i] = ref.String()
+	}
+	if len(got) != 3 {
+		t.Fatalf("duplicate not dropped: %v", got)
+	}
+	if got[0] != first || got[1] != second || got[2] != third {
+		t.Fatalf("insertion order not preserved: %v", got)
+	}
+	// Explicit: unlike multi_select there is no canonical order to sort to.
+	if sort.StringsAreSorted(got) {
+		t.Fatalf("list was canonicalized to sorted order: %v", got)
+	}
+
+	over := make([]any, 0, maxPropertyActorValues+1)
+	for i := 0; i < maxPropertyActorValues+1; i++ {
+		over = append(over, "member:"+uuid.NewString())
+	}
+	_, err = parseActorRefList(over)
+	if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("more than %d", maxPropertyActorValues)) {
+		t.Fatalf("over-cap list: expected cap error, got %v", err)
+	}
+	if refs, err := parseActorRefList(over[:maxPropertyActorValues]); err != nil || len(refs) != maxPropertyActorValues {
+		t.Fatalf("list at the cap rejected: %d refs, %v", len(refs), err)
+	}
+
+	if _, err := parseActorRefList([]any{first, 42}); err == nil {
+		t.Fatalf("non-string element accepted")
+	}
+	if _, err := parseActorRefList([]any{first, "squad:" + uuid.NewString()}); err == nil {
+		t.Fatalf("unknown kind inside a list accepted")
+	}
+}
+
+func TestValidatePropertyValueActorUnit(t *testing.T) {
+	actorDef := makePropertyDef("actor", nil)
+	multiDef := makePropertyDef("multi_actor", nil)
+	// Fixed ids: memberRef sorts AFTER secondRef, so the insertion order
+	// asserted below is proof that no canonicalizing sort ran.
+	memberRef := "member:99999999-9999-4999-8999-999999999999"
+	secondRef := "member:00000000-0000-4000-8000-000000000000"
+
+	stored, err := validatePropertyValue(actorDef, json.RawMessage(`"`+memberRef+`"`))
+	if err != nil {
+		t.Fatalf("actor value rejected: %v", err)
+	}
+	if string(stored) != `"`+memberRef+`"` {
+		t.Fatalf("actor value not stored as a plain string: %s", stored)
+	}
+
+	// actor is a single reference: no array, no number, no object, no bare id.
+	for _, raw := range []string{
+		`["` + memberRef + `"]`,
+		`3`,
+		`true`,
+		`{"kind":"member","id":"` + uuid.NewString() + `"}`,
+		`null`,
+		`"` + uuid.NewString() + `"`,
+		`"agent:` + uuid.NewString() + `"`,
+		`"squad:` + uuid.NewString() + `"`,
+	} {
+		if _, err := validatePropertyValue(actorDef, json.RawMessage(raw)); err == nil {
+			t.Fatalf("actor accepted %s", raw)
+		}
+	}
+
+	// multi_actor is always an array, even for a single reference.
+	for _, raw := range []string{
+		`"` + memberRef + `"`,
+		`[]`,
+		`3`,
+		`[3]`,
+		`null`,
+	} {
+		if _, err := validatePropertyValue(multiDef, json.RawMessage(raw)); err == nil {
+			t.Fatalf("multi_actor accepted %s", raw)
+		}
+	}
+
+	// Duplicates collapse and the caller's order survives.
+	stored, err = validatePropertyValue(multiDef, json.RawMessage(
+		`["`+memberRef+`","`+secondRef+`","`+memberRef+`"]`))
+	if err != nil {
+		t.Fatalf("multi_actor value rejected: %v", err)
+	}
+	if string(stored) != `["`+memberRef+`","`+secondRef+`"]` {
+		t.Fatalf("multi_actor not deduped in insertion order: %s", stored)
+	}
+}
+
+// TestPropertyActorDefinitionRejectsOptions: actor types are resolved against
+// the workspace, not against a config option list, so a definition carrying
+// options is a modelling mistake and must be refused.
+func TestPropertyActorDefinitionRejectsOptions(t *testing.T) {
+	for _, propType := range []string{"actor", "multi_actor"} {
+		_, err := validatePropertyConfig(propType, &PropertyConfig{
+			Options: []PropertyOption{{Name: "Anyone", Color: "#ef4444"}},
+		})
+		if err == nil || !strings.Contains(err.Error(), "does not accept options") {
+			t.Fatalf("%s definition with options: expected rejection, got %v", propType, err)
+		}
+		cfg, err := validatePropertyConfig(propType, nil)
+		if err != nil || string(cfg) != `{}` {
+			t.Fatalf("%s definition without config: expected {}, got %s (%v)", propType, cfg, err)
+		}
+	}
+
+	w := httptest.NewRecorder()
+	testHandler.CreateProperty(w, newRequest("POST", "/api/properties", map[string]any{
+		"name": "Owner" + uuid.NewString()[:8],
+		"type": "actor",
+		"config": map[string]any{"options": []map[string]any{
+			{"name": "Anyone", "color": "#ef4444"},
+		}},
+	}))
+	if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "does not accept options") {
+		t.Fatalf("CreateProperty actor+options: expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestIssueActorPropertyValues drives the actor / multi_actor pair through the
+// real endpoints: a reference must resolve to something that exists in this
+// workspace, and the stored bag keeps the prefixed "<kind>:<uuid>" form.
+func TestIssueActorPropertyValues(t *testing.T) {
+	owner := createTestProperty(t, map[string]any{
+		"name": "Owner" + uuid.NewString()[:8], "type": "actor", "icon": "user-round",
+	})
+	if owner.Type != "actor" || len(owner.Config.Options) != 0 {
+		t.Fatalf("unexpected actor definition: %+v", owner)
+	}
+	reviewers := createTestProperty(t, map[string]any{
+		"name": "Reviewers" + uuid.NewString()[:8], "type": "multi_actor",
+	})
+
+	memberRef := "member:" + testUserID
+	secondRef := "member:" + createPropertyTestMember(t)
+
+	issueID := createPropertyTestIssue(t, "actor property values")
+
+	// A real workspace member round-trips as "member:<user_id>".
+	w := setIssuePropertyRaw(t, issueID, owner.ID, memberRef)
+	if w.Code != http.StatusOK {
+		t.Fatalf("actor set member: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := decodePropertiesBag(t, w)[owner.ID]; got != memberRef {
+		t.Fatalf("actor value not stored as %q: %v", memberRef, got)
+	}
+	// Read back through the issue endpoint, not just the write response.
+	wget := httptest.NewRecorder()
+	getReq := newRequest("GET", "/api/issues/"+issueID, nil)
+	getReq = withURLParam(getReq, "id", issueID)
+	testHandler.GetIssue(wget, getReq)
+	if wget.Code != http.StatusOK {
+		t.Fatalf("GetIssue: expected 200, got %d: %s", wget.Code, wget.Body.String())
+	}
+	var fetched IssueResponse
+	if err := json.NewDecoder(wget.Body).Decode(&fetched); err != nil {
+		t.Fatalf("decode issue: %v", err)
+	}
+	if fetched.Properties[owner.ID] != memberRef {
+		t.Fatalf("actor value missing from the issue bag: %v", fetched.Properties)
+	}
+
+	// An uppercase id resolves to the same member and must land in the bag in
+	// canonical form — otherwise it renders as Unknown and the "= me" filter,
+	// which matches the reference string exactly, silently misses it.
+	upper := "member:" + strings.ToUpper(testUserID)
+	w = setIssuePropertyRaw(t, issueID, owner.ID, upper)
+	if w.Code != http.StatusOK {
+		t.Fatalf("actor set uppercase member: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := decodePropertiesBag(t, w)[owner.ID]; got != memberRef {
+		t.Fatalf("uppercase actor id not canonicalized on write: %v", got)
+	}
+
+	// Shape is valid but the referent is not in this workspace → 400.
+	rejections := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"unknown member", "member:" + uuid.NewString(), "does not refer to a member"},
+		// Agents and squads are assignable but not referenceable in V1: both
+		// must be refused at the kind check, before any workspace lookup.
+		{"agent kind", "agent:" + uuid.NewString(), "unknown actor kind"},
+		{"squad kind", "squad:" + uuid.NewString(), "unknown actor kind"},
+		// writeJSON HTML-escapes the angle brackets, so match the prose part.
+		{"bare uuid", uuid.NewString(), "value must look like"},
+		{"array into actor", []string{memberRef}, "actor reference string"},
+		{"number into actor", 7, "actor reference string"},
+	}
+	for _, tc := range rejections {
+		w := setIssuePropertyRaw(t, issueID, owner.ID, tc.value)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
+			t.Fatalf("actor %s: expected 400 containing %q, got %d: %s", tc.name, tc.want, w.Code, w.Body.String())
+		}
+	}
+	// multi_actor: duplicates dropped, insertion order kept.
+	w = setIssuePropertyRaw(t, issueID, reviewers.ID, []string{memberRef, secondRef, memberRef})
+	if w.Code != http.StatusOK {
+		t.Fatalf("multi_actor set: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	stored, ok := decodePropertiesBag(t, w)[reviewers.ID].([]any)
+	if !ok || len(stored) != 2 {
+		t.Fatalf("multi_actor not stored as a 2-element array: %v", stored)
+	}
+	if stored[0] != memberRef || stored[1] != secondRef {
+		t.Fatalf("multi_actor lost insertion order: %v", stored)
+	}
+
+	multiRejections := []struct {
+		name  string
+		value any
+		want  string
+	}{
+		{"bare string", memberRef, "array of actor reference strings"},
+		{"empty array", []string{}, "non-empty array"},
+		{"unknown member inside", []string{memberRef, "member:" + uuid.NewString()}, "does not refer to a member"},
+	}
+	for _, tc := range multiRejections {
+		w := setIssuePropertyRaw(t, issueID, reviewers.ID, tc.value)
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), tc.want) {
+			t.Fatalf("multi_actor %s: expected 400 containing %q, got %d: %s", tc.name, tc.want, w.Code, w.Body.String())
+		}
+	}
+	// The cap is enforced on the raw array, before any workspace resolution.
+	over := make([]string, 0, maxPropertyActorValues+1)
+	for i := 0; i < maxPropertyActorValues+1; i++ {
+		over = append(over, "member:"+uuid.NewString())
+	}
+	if w := setIssuePropertyRaw(t, issueID, reviewers.ID, over); w.Code != http.StatusBadRequest ||
+		!strings.Contains(w.Body.String(), fmt.Sprintf("more than %d", maxPropertyActorValues)) {
+		t.Fatalf("multi_actor over cap: expected 400 cap error, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestIssueActorPropertyFacets: actor and multi_actor values aggregate into
+// table facets, which is what backs the "= me" filter in the header. Members
+// are the only referenceable kind, and workspace membership is visible to
+// every member, so there is no visibility gate to apply here — a plain member
+// sees the same keys the owner does.
+func TestIssueActorPropertyFacets(t *testing.T) {
+	_, _, plainMemberID := privateAgentTestFixture(t)
+	property := createTestProperty(t, map[string]any{
+		"name": "Facet Owner" + uuid.NewString()[:8], "type": "actor",
+	})
+	memberRef := "member:" + testUserID
+	otherRef := "member:" + plainMemberID
+
+	firstIssueID := createPropertyTestIssue(t, "actor facet first")
+	secondIssueID := createPropertyTestIssue(t, "actor facet second")
+
+	if w := setIssuePropertyRaw(t, firstIssueID, property.ID, memberRef); w.Code != http.StatusOK {
+		t.Fatalf("set first actor value: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	if w := setIssuePropertyRaw(t, secondIssueID, property.ID, otherRef); w.Code != http.StatusOK {
+		t.Fatalf("set second actor value: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	facetKeys := func(userID string) map[string]int64 {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequestAs(userID, http.MethodPost, "/api/issues/table/facets", map[string]any{
+			"query": map[string]any{
+				"scope":   map[string]any{"kind": "workspace"},
+				"filters": map[string]any{},
+				"sort":    map[string]any{"field": "position", "direction": "asc"},
+			},
+			"facets":        []map[string]any{{"kind": "property", "property_id": property.ID}},
+			"include_total": false,
+		})
+		testHandler.ListIssueTableFacets(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("ListIssueTableFacets: expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+		var resp issueTableFacetsResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode facets: %v", err)
+		}
+		counts := map[string]int64{}
+		for _, facet := range resp.Facets {
+			for _, value := range facet.Values {
+				counts[value.Key] = value.Count
+			}
+		}
+		return counts
+	}
+
+	// Only these two issues carry this brand-new definition, so the counts are
+	// exact regardless of what else lives in the shared fixture workspace.
+	ownerCounts := facetKeys(testUserID)
+	if ownerCounts[memberRef] != 1 || ownerCounts[otherRef] != 1 {
+		t.Fatalf("owner facet counts wrong: %v", ownerCounts)
+	}
+	memberCounts := facetKeys(plainMemberID)
+	if memberCounts[memberRef] != 1 || memberCounts[otherRef] != 1 {
+		t.Fatalf("plain member sees different facet keys than the owner: %v", memberCounts)
+	}
+}
+
+// createPropertyTestMember adds a second real member to the fixture workspace
+// so multi_actor ordering can be asserted with two resolvable references.
+func createPropertyTestMember(t *testing.T) string {
+	t.Helper()
+	ctx := context.Background()
+	email := "actor-second-" + uuid.NewString()[:8] + "@multica.test"
+	var userID string
+	if err := testPool.QueryRow(ctx,
+		`INSERT INTO "user" (name, email) VALUES ('Actor Second Member', $1) RETURNING id`, email,
+	).Scan(&userID); err != nil {
+		t.Fatalf("create second member user: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE email = $1`, email)
+	})
+	if _, err := testPool.Exec(ctx,
+		`INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')`,
+		testWorkspaceID, userID,
+	); err != nil {
+		t.Fatalf("add second member: %v", err)
+	}
+	return userID
 }

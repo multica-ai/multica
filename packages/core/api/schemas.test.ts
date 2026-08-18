@@ -55,6 +55,12 @@ import {
   EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema } from "./schemas";
+import {
+  ListIssueStatusesResponseSchema,
+  IssueStatusEntrySchema,
+  EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+  EMPTY_ISSUE_STATUS_ENTRY,
+} from "./schemas";
 import { parseWithFallback } from "./schema";
 
 const baseIssue = {
@@ -1445,5 +1451,81 @@ describe("Plugin catalog schemas", () => {
     });
     expect(parsed).toEqual(EMPTY_PLUGIN_CATALOG);
     expect(parsed.supported).toBe(false);
+  });
+});
+
+// Issue status catalog (MUL-6243). The catalog drives how every status renders,
+// so a drifting or malformed response must degrade to the built-ins rather than
+// leaving the UI with no statuses at all.
+describe("issue status catalog schemas", () => {
+  const baseStatus = {
+    id: "status-1",
+    workspace_id: "ws-1",
+    key: "human_review",
+    name: "Human Review",
+    description: "Waiting on a person",
+    category: "in_review",
+    color: "#22c55e",
+    is_system: false,
+    position: 1,
+    archived_at: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("parses a full catalog response", () => {
+    const parsed = ListIssueStatusesResponseSchema.parse({
+      statuses: [baseStatus],
+      categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+      total: 1,
+    });
+    expect(parsed.statuses[0]?.key).toBe("human_review");
+    expect(parsed.statuses[0]?.category).toBe("in_review");
+    expect(parsed.categories).toHaveLength(7);
+  });
+
+  it("falls back to the built-in categories on a malformed response", () => {
+    const parsed = parseWithFallback(
+      { statuses: "not-an-array", categories: 7 },
+      ListIssueStatusesResponseSchema,
+      EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+      { endpoint: "GET /api/issue-statuses" },
+    );
+    expect(parsed).toEqual(EMPTY_LIST_ISSUE_STATUSES_RESPONSE);
+    // The fallback still names all 7 categories, so a client talking to a
+    // server that predates this endpoint can still render every built-in.
+    expect(parsed.categories).toHaveLength(7);
+    expect(parsed.statuses).toEqual([]);
+  });
+
+  it("defaults the optional presentation fields the server may omit", () => {
+    const { color: _c, is_system: _s, position: _p, description: _d, archived_at: _a, ...minimal } = baseStatus;
+    const parsed = IssueStatusEntrySchema.parse(minimal);
+    expect(parsed.color).toBe("#6b7280");
+    expect(parsed.is_system).toBe(false);
+    expect(parsed.position).toBe(0);
+    expect(parsed.archived_at).toBeNull();
+  });
+
+  it("keeps an unknown category as a string instead of failing the whole catalog", () => {
+    // A newer server could report a category this build does not know. Dropping
+    // the entry (or throwing) would leave the board unable to render issues
+    // already sitting on it, so the value is carried through verbatim.
+    const parsed = ListIssueStatusesResponseSchema.parse({
+      statuses: [{ ...baseStatus, category: "started" }],
+      categories: ["started"],
+      total: 1,
+    });
+    expect(parsed.statuses[0]?.category).toBe("started");
+  });
+
+  it("falls back to an empty entry on a malformed single status", () => {
+    const parsed = parseWithFallback(
+      { id: 12345 },
+      IssueStatusEntrySchema,
+      EMPTY_ISSUE_STATUS_ENTRY,
+      { endpoint: "POST /api/issue-statuses" },
+    );
+    expect(parsed).toEqual(EMPTY_ISSUE_STATUS_ENTRY);
   });
 });
