@@ -94,6 +94,215 @@ SELECT * FROM plugin_contribution
 WHERE release_id = $1
 ORDER BY ordinal, id;
 
+-- name: GetInstallationRemoteMCPContribution :one
+SELECT contribution.*, release.manifest
+FROM plugin_installation installation
+JOIN plugin_release release
+  ON release.id = installation.desired_release_id
+ AND release.plugin_id = installation.plugin_id
+ AND release.revocation_status = 'active'
+JOIN plugin_contribution contribution
+  ON contribution.release_id = release.id
+ AND contribution.type = 'tool.remote-mcp.v1'
+WHERE installation.id = @installation_id
+  AND installation.workspace_id = @workspace_id
+  AND installation.uninstalled_at IS NULL
+  AND contribution.contribution_key = @contribution_key;
+
+-- name: GetInstallationRemoteMCPContributionByID :one
+SELECT contribution.*, release.manifest
+FROM plugin_installation installation
+JOIN plugin_release release
+  ON release.id = installation.desired_release_id
+ AND release.plugin_id = installation.plugin_id
+ AND release.revocation_status = 'active'
+JOIN plugin_contribution contribution
+  ON contribution.release_id = release.id
+ AND contribution.type = 'tool.remote-mcp.v1'
+WHERE installation.id = @installation_id
+  AND installation.workspace_id = @workspace_id
+  AND installation.uninstalled_at IS NULL
+  AND contribution.id = @contribution_id;
+
+-- name: LockPluginRemoteMCPInstallation :one
+SELECT installation.id
+FROM plugin_installation installation
+JOIN plugin_release release
+  ON release.id = installation.desired_release_id
+ AND release.plugin_id = installation.plugin_id
+ AND release.revocation_status = 'active'
+JOIN plugin_contribution contribution
+  ON contribution.release_id = release.id
+ AND contribution.id = @contribution_id
+ AND contribution.type = 'tool.remote-mcp.v1'
+WHERE installation.id = @installation_id
+  AND installation.workspace_id = @workspace_id
+  AND installation.uninstalled_at IS NULL
+FOR UPDATE OF installation;
+
+-- name: CreatePluginRemoteMCPSecret :one
+WITH parent AS MATERIALIZED (
+    SELECT installation.id, contribution.id AS contribution_id
+    FROM plugin_installation installation
+    JOIN plugin_release release
+      ON release.id = installation.desired_release_id
+     AND release.plugin_id = installation.plugin_id
+     AND release.revocation_status = 'active'
+    JOIN plugin_contribution contribution
+      ON contribution.release_id = release.id
+     AND contribution.id = @contribution_id
+     AND contribution.type = 'tool.remote-mcp.v1'
+    WHERE installation.id = @installation_id
+      AND installation.workspace_id = @workspace_id
+      AND installation.uninstalled_at IS NULL
+    FOR UPDATE OF installation
+    FOR KEY SHARE OF release, contribution
+), next_version AS (
+    SELECT COALESCE(MAX(version), 0) + 1 AS version
+    FROM plugin_remote_mcp_secret
+    WHERE installation_id = @installation_id
+      AND contribution_id = @contribution_id
+)
+INSERT INTO plugin_remote_mcp_secret (
+    workspace_id, installation_id, contribution_id, version,
+    ciphertext, hint, created_by
+)
+SELECT
+    @workspace_id, parent.id, parent.contribution_id, next_version.version,
+    @ciphertext, @hint, sqlc.narg('created_by')
+FROM parent, next_version
+RETURNING *;
+
+-- name: GetActivePluginRemoteMCPSecret :one
+SELECT * FROM plugin_remote_mcp_secret
+WHERE id = @id
+  AND workspace_id = @workspace_id
+  AND installation_id = @installation_id
+  AND contribution_id = @contribution_id
+  AND status = 'active';
+
+-- name: GetActivePluginRemoteMCPSecretForUpdate :one
+SELECT * FROM plugin_remote_mcp_secret
+WHERE id = @id
+  AND workspace_id = @workspace_id
+  AND installation_id = @installation_id
+  AND contribution_id = @contribution_id
+  AND status = 'active'
+FOR UPDATE;
+
+-- name: RevokePluginRemoteMCPSecrets :many
+UPDATE plugin_remote_mcp_secret
+SET status = 'revoked', revoked_at = now()
+WHERE workspace_id = @workspace_id
+  AND installation_id = @installation_id
+  AND contribution_id = @contribution_id
+  AND status = 'active'
+RETURNING *;
+
+-- name: UpdateActivePluginRemoteMCPSecret :one
+UPDATE plugin_remote_mcp_secret
+SET ciphertext = @ciphertext,
+    hint = @hint
+WHERE id = @id
+  AND workspace_id = @workspace_id
+  AND installation_id = @installation_id
+  AND contribution_id = @contribution_id
+  AND status = 'active'
+RETURNING *;
+
+-- name: CreatePluginRemoteMCPOAuthState :one
+INSERT INTO plugin_remote_mcp_oauth_state (
+    state_hash, workspace_id, installation_id, contribution_id, actor_id,
+    endpoint, public_config, failure_policy,
+    authorization_endpoint, token_endpoint, client_id, scope,
+    redirect_uri, return_to, secret_ciphertext, expires_at
+) VALUES (
+    @state_hash, @workspace_id, @installation_id, @contribution_id, @actor_id,
+    @endpoint, @public_config, @failure_policy,
+    @authorization_endpoint, @token_endpoint, @client_id, @scope,
+    @redirect_uri, @return_to, @secret_ciphertext, @expires_at
+)
+RETURNING *;
+
+-- name: ClaimPluginRemoteMCPOAuthState :one
+UPDATE plugin_remote_mcp_oauth_state
+SET consumed_at = now()
+WHERE state_hash = @state_hash
+  AND consumed_at IS NULL
+  AND expires_at > now()
+RETURNING *;
+
+-- name: DeleteExpiredPluginRemoteMCPOAuthStates :execrows
+DELETE FROM plugin_remote_mcp_oauth_state
+WHERE expires_at <= now() OR consumed_at < now() - interval '1 hour';
+
+-- name: CreatePluginInstallationConfig :one
+WITH parent AS MATERIALIZED (
+    SELECT installation.id, contribution.id AS contribution_id
+    FROM plugin_installation installation
+    JOIN plugin_release release
+      ON release.id = installation.desired_release_id
+     AND release.plugin_id = installation.plugin_id
+     AND release.revocation_status = 'active'
+    JOIN plugin_contribution contribution
+      ON contribution.release_id = release.id
+     AND contribution.id = @contribution_id
+     AND contribution.type = 'tool.remote-mcp.v1'
+    WHERE installation.id = @installation_id
+      AND installation.workspace_id = @workspace_id
+      AND installation.uninstalled_at IS NULL
+      AND (
+        (@auth_type::text = 'none' AND sqlc.narg('secret_ref')::uuid IS NULL)
+        OR EXISTS (
+            SELECT 1 FROM plugin_remote_mcp_secret secret
+            WHERE secret.id = sqlc.narg('secret_ref')::uuid
+              AND secret.workspace_id = @workspace_id
+              AND secret.installation_id = installation.id
+              AND secret.contribution_id = contribution.id
+              AND secret.status = 'active'
+        )
+      )
+    FOR UPDATE OF installation
+    FOR KEY SHARE OF release, contribution
+), next_revision AS (
+    SELECT COALESCE(MAX(revision), 0) + 1 AS revision
+    FROM plugin_installation_config
+    WHERE installation_id = @installation_id
+      AND contribution_id = @contribution_id
+)
+INSERT INTO plugin_installation_config (
+    workspace_id, installation_id, contribution_id, revision,
+    endpoint, public_config, auth_type, auth_header, secret_ref,
+    discovered_tools, discovered_schema_digest,
+    approved_tools, schema_digest, failure_policy,
+    reviewed_by, reviewed_at, created_by
+)
+SELECT
+    @workspace_id, parent.id, parent.contribution_id, next_revision.revision,
+    @endpoint, @public_config, @auth_type, @auth_header, sqlc.narg('secret_ref'),
+    @discovered_tools, sqlc.narg('discovered_schema_digest'),
+    @approved_tools, sqlc.narg('schema_digest'), @failure_policy,
+    sqlc.narg('reviewed_by'),
+    CASE WHEN sqlc.narg('reviewed_by')::uuid IS NULL THEN NULL ELSE now() END,
+    sqlc.narg('created_by')
+FROM parent, next_revision
+RETURNING *;
+
+-- name: GetLatestPluginInstallationConfig :one
+SELECT * FROM plugin_installation_config
+WHERE workspace_id = @workspace_id
+  AND installation_id = @installation_id
+  AND contribution_id = @contribution_id
+ORDER BY revision DESC
+LIMIT 1;
+
+-- name: ListLatestPluginInstallationConfigs :many
+SELECT DISTINCT ON (config.contribution_id) config.*
+FROM plugin_installation_config config
+WHERE config.workspace_id = @workspace_id
+  AND config.installation_id = @installation_id
+ORDER BY config.contribution_id, config.revision DESC;
+
 -- name: ListPluginReleasesByPlugin :many
 SELECT * FROM plugin_release
 WHERE plugin_id = $1 AND revocation_status = 'active'
@@ -337,6 +546,16 @@ WHERE release_id = $1 AND path = $2;
 SELECT * FROM plugin_artifact_file
 WHERE id = $1;
 
+-- name: ListPluginArtifactFilesByRelease :many
+SELECT * FROM plugin_artifact_file
+WHERE release_id = $1
+ORDER BY path, id;
+
+-- name: ListPluginArtifactFilesByIDs :many
+SELECT * FROM plugin_artifact_file
+WHERE id = ANY(@ids::uuid[])
+ORDER BY path, id;
+
 -- name: GetLatestPluginRelease :one
 SELECT release.*
 FROM plugin_release release
@@ -393,6 +612,12 @@ latest_bindings AS (
         installation_id, scope_type, scope_id, enabled, binding_revision
     FROM plugin_binding
     ORDER BY installation_id, scope_type, scope_id, binding_revision DESC
+),
+latest_configs AS (
+    SELECT DISTINCT ON (installation_id, contribution_id) *
+    FROM plugin_installation_config
+    WHERE workspace_id = @workspace_id
+    ORDER BY installation_id, contribution_id, revision DESC
 )
 SELECT
     installation.id AS installation_id,
@@ -421,7 +646,18 @@ SELECT
     binding.scope_id,
     binding.enabled AS binding_enabled,
     binding.binding_revision,
-    grant_row.grant_revision
+    grant_row.grant_revision,
+    config.id AS config_id,
+    config.revision AS config_revision,
+    config.endpoint,
+    config.public_config,
+    config.auth_type,
+    config.auth_header,
+    config.secret_ref,
+    config.approved_tools,
+    config.schema_digest,
+    config.failure_policy,
+    config.reviewed_at
 FROM plugin_installation installation
 JOIN plugin_identity identity
   ON identity.id = installation.plugin_id
@@ -436,13 +672,27 @@ JOIN plugin_artifact_file artifact
  AND artifact.path = contribution.entry_path
 JOIN latest_grants grant_row
   ON grant_row.installation_id = installation.id
- AND grant_row.capability = 'agent.skill.contribute'
+ AND grant_row.capability = CASE contribution.type
+       WHEN 'agent.skill.v1' THEN 'agent.skill.contribute'
+       WHEN 'tool.remote-mcp.v1' THEN 'tool.remote-mcp.connect'
+     END
  AND grant_row.decision = 'granted'
+LEFT JOIN latest_configs config
+  ON config.installation_id = installation.id
+ AND config.contribution_id = contribution.id
 LEFT JOIN latest_bindings binding
   ON binding.installation_id = installation.id
 WHERE installation.workspace_id = @workspace_id
   AND installation.uninstalled_at IS NULL
   AND installation.enabled = TRUE
+  AND (
+    contribution.type = 'agent.skill.v1'
+    OR (
+      contribution.type = 'tool.remote-mcp.v1'
+      AND config.reviewed_at IS NOT NULL
+      AND jsonb_array_length(config.approved_tools) > 0
+    )
+  )
 ORDER BY identity.plugin_key, contribution.ordinal,
          contribution.contribution_key,
          binding.scope_type NULLS FIRST, binding.scope_id NULLS FIRST;

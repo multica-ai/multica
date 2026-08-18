@@ -163,6 +163,28 @@
       "start_date": "开始日期"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "本工作区的 MCP 服务库。在这里添加不会分配给任何智能体——由智能体的负责人在该智能体自己的 MCP 页里分配，并可按智能体单独开关。",
+    "servers_title": "共享服务",
+    "write_only_note": "已保存的配置是只写的——URL、命令、请求头和环境变量不会再次展示，因此编辑一个服务等于整条替换它的配置。改名是安全的：已分配的智能体不受影响。",
+    "add_server": "添加服务",
+    "edit_server": "编辑服务",
+    "remove_server": "移除服务",
+    "empty_title": "还没有共享的 MCP 服务",
+    "empty_description": "先在这里添加服务，再到需要用它的智能体的 MCP 页里分配。",
+    "disabled_badge": "已禁用",
+    "admin_only_note": "只有工作区 owner 和 admin 可以修改共享的 MCP 服务。",
+    "delete_title": "移除共享服务？",
+    "delete_description": "{{name}} 将从服务库以及所有已分配的智能体上移除，在它们的下一个任务起生效。",
+    "delete_confirm": "移除",
+    "cancel": "取消",
+    "added_toast": "已添加共享 MCP 服务",
+    "updated_toast": "已更新共享 MCP 服务",
+    "removed_toast": "已移除共享 MCP 服务",
+    "save_failed_toast": "共享 MCP 服务保存失败",
+    "remove_failed_toast": "共享 MCP 服务移除失败"
+  },
   "page": {
     "title": "设置",
     "my_account": "我的账号",
@@ -185,6 +207,7 @@
       "properties": "属性",
       "quick_actions": "快捷操作",
     "plugins": "Plugins",
+    "mcp": "MCP",
     "billing": "账单与套餐"
     }
   },
@@ -250,6 +273,66 @@
       "host_api": "Host API",
       "publisher": "发布者与签名身份",
       "none": "无"
+    },
+    "remote_mcp": {
+      "title": "Remote MCP 连接",
+      "endpoint": "HTTPS 端点",
+      "endpoint_placeholder": "https://mcp.example.com/mcp",
+      "auth": "身份验证",
+      "auth_types": {
+        "none": "无",
+        "oauth": "OAuth（推荐）",
+        "bearer": "Bearer 令牌",
+        "header": "自定义请求头"
+      },
+      "header_name": "请求头名称",
+      "credential": "凭证（加密存储）",
+      "connect": "连接",
+      "connected": "已连接",
+      "ready_to_connect": "可以连接",
+      "complete_before_enabling": "请先连接 MCP 并批准至少一个工具，再启用作用范围。",
+      "advanced": "高级配置",
+      "oauth_scope": "OAuth scopes（留空自动获取）",
+      "oauth_client_id": "OAuth client ID（留空自动注册）",
+      "oauth_client_secret": "OAuth client secret",
+      "oauth_authorization_endpoint": "Authorization endpoint 覆盖值",
+      "oauth_token_endpoint": "Token endpoint 覆盖值",
+      "oauth_token_auth_method": "Token endpoint 认证方式",
+      "oauth_token_auth_methods": {
+        "none": "公开客户端（PKCE）",
+        "client_secret_basic": "Client secret（HTTP Basic）",
+        "client_secret_post": "Client secret（请求体）"
+      },
+      "public_config": "公开配置（JSON 对象）",
+      "invalid_public_config": "公开配置必须是有效的 JSON 对象",
+      "failure_policy": "失败策略",
+      "failure_policies": {
+        "required": "必需 — 停止任务",
+        "optional": "可选 — 不使用工具并继续"
+      },
+      "configure_and_discover": "保存并发现工具",
+      "test": "测试连接",
+      "approve": "批准所选工具",
+      "revoke": "吊销凭证",
+      "credential_states": {
+        "configured": "已配置凭证",
+        "revoked": "凭证已吊销",
+        "missing": "缺少凭证",
+        "not_required": "无需凭证"
+      },
+      "reviewed": "工具已批准",
+      "pending_review": "需要批准",
+      "approved_tools": "已批准的工具",
+      "no_tools": "服务器未公布任何工具。",
+      "discovery": "已发现的工具 — 请明确审核访问权限",
+      "read": "读取",
+      "write": "写入",
+      "configured_success": "连接已保存；请审核已发现的工具",
+      "oauth_connected_success": "OAuth 连接已完成；请审核已发现的工具",
+      "oauth_connect_failed": "OAuth 连接未能完成，请重试。",
+      "test_success": "连接测试成功",
+      "approved_success": "工具访问权限已批准",
+      "revoked_success": "凭证已吊销，Plugin 已禁用"
     }
   },
   "properties": {
@@ -959,6 +1042,26 @@
         "label": "成员",
         "description": "创建并处理任务"
       }
-    }
+    },
+    "share_links_title": "分享链接",
+    "role_field": "角色：",
+    "expiry_field": "有效期：",
+    "share_links_create_title": "创建分享链接",
+    "share_links_create_button": "生成",
+    "share_links_creating": "生成中...",
+    "share_link_uses": "已用 {{used}} / {{max}} 次",
+    "share_link_expires": "过期：{{date}}",
+    "share_link_copy_tooltip": "复制链接",
+    "share_link_revoke_tooltip": "撤销链接",
+    "toast_share_link_created": "分享链接已创建",
+    "toast_share_link_failed": "创建分享链接失败",
+    "toast_share_link_revoked": "分享链接已撤销",
+    "toast_share_link_revoke_failed": "撤销分享链接失败",
+    "toast_share_link_copied": "链接已复制",
+    "toast_share_link_copy_failed": "复制链接失败",
+    "expiry_24h": "24 小时",
+    "expiry_7d": "7 天",
+    "expiry_30d": "30 天",
+    "expiry_never": "永久有效"
   }
 }

@@ -10,6 +10,11 @@
     "task_list": "체크리스트",
     "quote": "인용",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "링크 적용",
+      "remove": "링크 제거",
+      "close": "링크 편집기 닫기"
+    },
     "heading_dropdown": {
       "text": "텍스트",
       "normal_text": "일반 텍스트",

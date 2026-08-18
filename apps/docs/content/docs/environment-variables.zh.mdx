@@ -142,16 +142,19 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 | 变量 | 默认值 | 说明 |
 |---|---|---|
-| `REDIS_URL` | 空 | 用于认证限流、实时事件和 token cache；未设置时实时事件回退到进程内存，认证限流不生效 |
+| `REDIS_URL` | 空 | 用于共享限流、实时事件和 token cache；未设置时实时事件和邀请限流回退到进程内存，认证限流不生效 |
 | `REDIS_DISABLE_CLIENT_NAME` | `false` | 托管 Redis 禁止 `CLIENT SETNAME` 时设为 `true` |
 | `RATE_LIMIT_AUTH` | `5` | 单 IP 每分钟发送验证码或发起 Google 登录的次数 |
 | `RATE_LIMIT_AUTH_VERIFY` | `20` | 单 IP 每分钟验证验证码的次数 |
+| `RATE_LIMIT_INVITATION_ACTOR_10M` | `10` | 每位邀请人在 10 分钟滑动窗口内可创建的工作区邀请数；设为 `0` 可关闭此项限流 |
+| `RATE_LIMIT_INVITATION_WORKSPACE_24H` | `50` | 同一工作区内所有管理员在 24 小时滑动窗口内可创建的邀请总数；设为 `0` 可关闭此项限流 |
+| `RATE_LIMIT_INVITATION_RECIPIENT_24H` | `6` | 同一规范化收件邮箱跨工作区在 24 小时滑动窗口内可收到的邀请数；设为 `0` 可关闭此项限流 |
 | `RATE_LIMIT_TRUSTED_PROXIES` | 空 | 允许提供 `X-Forwarded-For` 的代理 CIDR，逗号分隔 |
 | `MULTICA_TRUSTED_PROXIES` | 空 | 自动化 webhook 与实时连接使用的可信代理 CIDR |
 
 反向代理后的部署需要填写真实代理网段。不要直接信任所有来源，否则客户端可以伪造转发 IP。
 
-上面的 `RATE_LIMIT_*` 只有在设置了 `REDIS_URL` 后才生效；未设置时启动日志会提示 rate limiting disabled。Redis 临时不可用时限流选择放行请求，不会阻断正常登录。
+认证限流需要配置 `REDIS_URL`；未配置时，启动日志会提示认证限流已关闭。邀请限流在没有 Redis 时仍使用进程内存，配置 Redis 后则在多个副本间共享额度。如果已配置的 Redis 临时不可用，认证限流仍选择放行，而邀请创建会返回可重试的 `503`，不会在失去防护时发送邮件。
 
 ## 外部集成
 

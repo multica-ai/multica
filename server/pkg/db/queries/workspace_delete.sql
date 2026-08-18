@@ -603,6 +603,18 @@ deleted_workspace_state AS (
     DELETE FROM plugin_workspace_capability_state
     WHERE workspace_id = $1
 ),
+deleted_remote_mcp_oauth_states AS (
+    DELETE FROM plugin_remote_mcp_oauth_state
+    WHERE workspace_id = $1
+),
+deleted_remote_mcp_configs AS (
+    DELETE FROM plugin_installation_config
+    WHERE workspace_id = $1
+),
+deleted_remote_mcp_secrets AS (
+    DELETE FROM plugin_remote_mcp_secret
+    WHERE workspace_id = $1
+),
 deleted_bindings AS (
     DELETE FROM plugin_binding
     WHERE installation_id IN (SELECT id FROM installations)
@@ -662,6 +674,10 @@ detached_client_usage AS (
     UPDATE client_usage_daily
     SET workspace_id = NULL
     WHERE client_usage_daily.workspace_id = $1
+),
+deleted_share_links AS (
+    DELETE FROM workspace_share_link
+    WHERE workspace_share_link.workspace_id = $1
 )
 DELETE FROM workspace_invitation
 WHERE workspace_invitation.workspace_id = $1;

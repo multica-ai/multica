@@ -88,3 +88,20 @@ func TestValidateReleaseCandidateAllowsUnsignedPrivateDev(t *testing.T) {
 		t.Fatalf("validated private-dev release = %#v", validated)
 	}
 }
+
+func TestValidateReleaseCandidateCompilesRemoteMCPAdapter(t *testing.T) {
+	archive := buildArchive(t, []zipFixtureFile{{name: ManifestFilename, content: manifestJSON(t, validRemoteMCPManifest())}})
+	validated, err := ValidateReleaseCandidate(ReleaseCandidate{
+		Archive: archive, SourceKind: SourcePrivateDev, SourceRef: "private://fixture",
+	}, nil)
+	if err != nil {
+		t.Fatalf("ValidateReleaseCandidate: %v", err)
+	}
+	if len(validated.Contributions) != 1 {
+		t.Fatalf("contributions = %d, want 1", len(validated.Contributions))
+	}
+	got := validated.Contributions[0]
+	if got.Type != ContributionRemoteMCPV1 || got.EntryPath != ManifestFilename || got.EntryDigest != validated.ManifestDigest {
+		t.Fatalf("remote MCP contribution = %#v", got)
+	}
+}

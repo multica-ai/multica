@@ -162,8 +162,8 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if err != nil {
 			return IssueRunTrigger{}, false
 		}
-		ready, _, err := AgentReadiness(ctx, s.Queries, leader)
-		if err != nil || !ready {
+		verdict, err := AgentReadiness(ctx, s.Queries, leader)
+		if err != nil || !verdict.Ready() {
 			return IssueRunTrigger{}, false
 		}
 		if !canAccess(leader) {

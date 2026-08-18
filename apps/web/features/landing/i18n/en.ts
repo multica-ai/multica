@@ -294,6 +294,44 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.27",
+        date: "2026-08-17",
+        title:
+          "Workspace MCP servers, share-link invites, and a rebuilt transcript",
+        changes: [],
+        features: [
+          "You can now set up MCP servers once for a workspace and hand them to individual agents.",
+          "You can now create a share link that lets someone join your workspace directly.",
+          "The transcript now reads as steps, with a two-lane timeline and an outcome summary.",
+          "Files sent in Slack now arrive in the conversation as attachments.",
+          "You can now add Multica to your phone's home screen and open it like an app.",
+          "Browser tabs are now named after the workspace page you have open.",
+          "Imported skills now show where they came from.",
+          "A mention of the Issue you are reading now reads as \"This issue\".",
+        ],
+        improvements: [
+          "An agent whose CLI cannot run now goes offline and tells you the command that fixes it.",
+          "Typing an Issue identifier now brings up the mention far faster.",
+          "Channel messages no longer duplicate or drop out across multiple servers.",
+          "Workspace invitations can no longer be sent in floods.",
+          "The editor's floating toolbar is now readable by screen readers.",
+        ],
+        fixes: [
+          "Reopening the desktop app after a failed start no longer makes you sign in again.",
+          "Deleting your last workspace no longer leaves the desktop app blank.",
+          "A Pi task that ends its turn on an error now fails instead of hanging.",
+          "The Antigravity model list now loads.",
+          "HTML attachments now return to where you were reading after a tab switch.",
+          "Custom runtimes now receive their fixed arguments in the order you wrote them.",
+          "Cancelling a drag mid-way no longer locks the board.",
+          "Quick capture now works on mobile web.",
+          "Page headers no longer show a second sidebar toggle.",
+          "Creating an agent no longer flashes an error.",
+          "Hovering a bar in the run timeline no longer makes it shake.",
+          "A self-hosted upgrade that gets interrupted now carries on safely when you run it again.",
+        ],
+      },
+      {
         version: "0.4.26",
         date: "2026-08-14",
         title:

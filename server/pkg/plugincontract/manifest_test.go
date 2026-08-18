@@ -102,3 +102,92 @@ func TestManifestRejectsDuplicateContributionIdentity(t *testing.T) {
 		t.Fatalf("Validate duplicate contribution error = %v", err)
 	}
 }
+
+func validRemoteMCPManifest() Manifest {
+	manifest := validManifest()
+	manifest.Metadata.Key = "dev.local.fixture-mcp"
+	manifest.Metadata.Name = "Fixture MCP"
+	manifest.Contributes.AgentSkills = nil
+	manifest.Contributes.RemoteMCP = []RemoteMCPContribution{{
+		Key:              "fixture-tools",
+		Name:             "Fixture Tools",
+		Description:      "Deterministic fixture tools.",
+		Transport:        "streamable-http",
+		ProtocolVersions: []string{"2025-03-26", "2024-11-05"},
+		EndpointPolicy: RemoteMCPEndpointPolicy{
+			DefaultEndpoint: "https://mcp.example.test/mcp", AllowedHosts: []string{"mcp.example.test"},
+		},
+		Authentication: RemoteMCPAuthentication{Preferred: "oauth", Supported: []string{"oauth"}},
+		ToolIntent: []RemoteMCPToolIntent{
+			{Name: "fixture.read", Description: "Read fixture state.", Risk: "read"},
+			{Name: "fixture.write", Description: "Mutate fixture state.", Risk: "write"},
+		},
+		ConfigurationSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
+	}}
+	manifest.RequestedCapabilities = []string{CapabilityRemoteMCPConnect}
+	manifest.Compatibility.RequiredDaemonFeatures = []string{
+		DaemonFeatureExecutionManifestV1,
+		DaemonFeatureRemoteMCPV1,
+	}
+	return manifest
+}
+
+func TestManifestAcceptsRemoteMCPOnlyAndMixedContributions(t *testing.T) {
+	remoteOnly := validRemoteMCPManifest()
+	if err := remoteOnly.Validate(); err != nil {
+		t.Fatalf("Validate remote-only manifest: %v", err)
+	}
+
+	mixed := remoteOnly
+	mixed.Contributes.AgentSkills = validManifest().Contributes.AgentSkills
+	mixed.RequestedCapabilities = []string{CapabilityAgentSkillContribute, CapabilityRemoteMCPConnect}
+	mixed.Compatibility.RequiredDaemonFeatures = append(mixed.Compatibility.RequiredDaemonFeatures, DaemonFeatureAgentSkillV1)
+	if err := mixed.Validate(); err != nil {
+		t.Fatalf("Validate mixed manifest: %v", err)
+	}
+}
+
+func TestManifestAcceptsReviewedWildcardRemoteMCPToolIntent(t *testing.T) {
+	manifest := validRemoteMCPManifest()
+	manifest.Contributes.RemoteMCP[0].ToolIntent = []RemoteMCPToolIntent{{
+		Name: RemoteMCPAnyToolIntent, Description: "Discover tools for explicit administrator review.", Risk: "write",
+	}}
+	if err := manifest.Validate(); err != nil {
+		t.Fatalf("Validate wildcard Remote MCP tool intent: %v", err)
+	}
+}
+
+func TestManifestRemoteMCPFailsClosed(t *testing.T) {
+	tests := []struct {
+		name string
+		edit func(*Manifest)
+		want string
+	}{
+		{name: "stdio transport", edit: func(m *Manifest) { m.Contributes.RemoteMCP[0].Transport = "stdio" }, want: "streamable-http"},
+		{name: "unsupported protocol", edit: func(m *Manifest) { m.Contributes.RemoteMCP[0].ProtocolVersions = []string{"2026-01-01"} }, want: "unsupported version"},
+		{name: "secret-looking endpoint", edit: func(m *Manifest) {
+			m.Contributes.RemoteMCP[0].EndpointPolicy.AllowedHosts = []string{"https://token@mcp.example"}
+		}, want: "invalid host"},
+		{name: "default endpoint outside allowlist", edit: func(m *Manifest) {
+			m.Contributes.RemoteMCP[0].EndpointPolicy.DefaultEndpoint = "https://other.example/mcp"
+		}, want: "covered by allowed_hosts"},
+		{name: "preferred auth not supported", edit: func(m *Manifest) {
+			m.Contributes.RemoteMCP[0].Authentication.Preferred = "bearer"
+		}, want: "must appear in supported"},
+		{name: "invalid risk", edit: func(m *Manifest) { m.Contributes.RemoteMCP[0].ToolIntent[0].Risk = "admin" }, want: "read or write"},
+		{name: "wildcard understates risk", edit: func(m *Manifest) {
+			m.Contributes.RemoteMCP[0].ToolIntent = []RemoteMCPToolIntent{{Name: RemoteMCPAnyToolIntent, Risk: "read"}}
+		}, want: "must be write for wildcard"},
+		{name: "missing capability", edit: func(m *Manifest) { m.RequestedCapabilities = nil }, want: "requested_capabilities"},
+		{name: "missing daemon feature", edit: func(m *Manifest) { m.Compatibility.RequiredDaemonFeatures = []string{DaemonFeatureExecutionManifestV1} }, want: DaemonFeatureRemoteMCPV1},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manifest := validRemoteMCPManifest()
+			test.edit(&manifest)
+			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("Validate error = %v, want containing %q", err, test.want)
+			}
+		})
+	}
+}

@@ -1339,6 +1339,16 @@ function SwimLaneViewImpl({
     ],
   );
 
+  // An aborted drag (pointercancel, window resize, tab hide, Escape) fires
+  // onDragCancel instead of onDragEnd. Releasing the drag lock here keeps
+  // localCells resyncing with the cache afterwards — see the same handler in
+  // list-view for the touch path that makes this routine (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setLocalCells(cells);
+  }, [cells]);
+
   const computeLaneKey = (_index: number, lane: LaneGroup) => lane.key;
   const renderLane = (index: number, lane: LaneGroup) => (
     <div className={index === 0 ? undefined : "pt-4"}>
@@ -1368,6 +1378,7 @@ function SwimLaneViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div ref={attachScroller} data-tab-scroll-root="swimlane" className="flex flex-1 min-h-0 gap-4 overflow-auto p-4">
         <div className="flex shrink-0 flex-col" style={{ width: `${trackWidth}px` }}>

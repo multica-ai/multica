@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { readFileSync } from "node:fs";
-import { cleanup, fireEvent, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ButtonHTMLAttributes, ReactNode } from "react";
@@ -147,53 +147,6 @@ vi.mock("../../rich-content", () => ({
   ),
 }));
 
-vi.mock("@multica/ui/components/ui/collapsible", async () => {
-  const React = await import("react");
-  const Context = React.createContext<{
-    open: boolean;
-    onOpenChange?: (open: boolean) => void;
-  }>({ open: false });
-
-  return {
-    Collapsible: ({
-      open,
-      onOpenChange,
-      children,
-    }: {
-      open: boolean;
-      onOpenChange?: (open: boolean) => void;
-      children: ReactNode;
-    }) => (
-      <Context.Provider value={{ open, onOpenChange }}>{children}</Context.Provider>
-    ),
-    CollapsibleTrigger: ({
-      disabled,
-      children,
-      className: _className,
-      ...props
-    }: ButtonHTMLAttributes<HTMLButtonElement>) => {
-      const ctx = React.useContext(Context);
-      return (
-        <button
-          type="button"
-          disabled={disabled}
-          aria-expanded={ctx.open}
-          onClick={() => {
-            if (!disabled) ctx.onOpenChange?.(!ctx.open);
-          }}
-          {...props}
-        >
-          {children}
-        </button>
-      );
-    },
-    CollapsibleContent: ({ children }: { children: ReactNode }) => {
-      const ctx = React.useContext(Context);
-      return ctx.open ? <div>{children}</div> : null;
-    },
-  };
-});
-
 const baseTask: AgentTask = {
   id: "task-1",
   agent_id: "",
@@ -278,9 +231,6 @@ beforeEach(() => {
   useTranscriptViewStore.setState({
     sortDirection: "chronological",
     selectedFilterKeys: [],
-    // Legacy row assertions below expect one-line summaries; smart density is
-    // exercised by its own tests.
-    density: "collapsed",
   });
 });
 
@@ -318,14 +268,14 @@ describe("AgentTranscriptDialog", () => {
 
     fireEvent.click(screen.getByRole("menuitemcheckbox", { name: "Thinking" }));
 
-    expect(screen.queryByText("Agent summary")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
     expect(screen.getByText(/Thinking summary/)).toBeInTheDocument();
     expect(useTranscriptViewStore.getState().selectedFilterKeys).toEqual(["thinking"]);
 
     first.unmount();
     renderDialog();
 
-    expect(screen.queryByText("Agent summary")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
     expect(screen.getByText(/Thinking summary/)).toBeInTheDocument();
   });
 
@@ -342,57 +292,116 @@ describe("AgentTranscriptDialog", () => {
       },
     ]);
 
-    expect(screen.getByText("Only agent summary")).toBeInTheDocument();
+    expect(screen.getByTestId("rich-content")).toHaveTextContent("Only agent summary");
     expect(screen.queryByText("No execution data recorded.")).not.toBeInTheDocument();
   });
 
-  it("switches wholesale between expand-all and collapse-all via the density menu", () => {
+  it("reads agent prose in place and keeps tool detail one click away", () => {
     renderDialog();
 
-    expect(screen.queryByText(/Agent hidden detail/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Expand all/ }));
-
-    expect(screen.getByText(/Agent hidden detail/)).toBeInTheDocument();
-    expect(screen.getByText(/Thinking hidden detail/)).toBeInTheDocument();
-    expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole("menuitemradio", { name: /Collapse all/ }));
-
-    expect(screen.queryByText(/Agent hidden detail/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
-  });
-
-  it("smart density opens agent text in place and keeps process noise folded", () => {
-    useTranscriptViewStore.setState({ density: "smart" });
-
-    renderDialog();
-
-    // Agent body reads without a click (through RichContent), tools stay folded.
+    // The report is the narrative and renders whole; a tool call is a line
+    // whose body waits in the inspector. This inversion is the redesign.
     expect(screen.getByTestId("rich-content")).toHaveTextContent("Agent hidden detail");
-    expect(screen.queryByText(/Thinking hidden detail/)).not.toBeInTheDocument();
     expect(screen.queryByText(/"command": "pnpm test"/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /pnpm test/ }));
+
+    expect(screen.getByText(/"command": "pnpm test"/)).toBeInTheDocument();
   });
 
-  it("row-level toggles override the density default until the mode changes", () => {
-    useTranscriptViewStore.setState({ density: "smart" });
+  it("folds a call and its result into one step instead of two rows", () => {
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "Bash", input: { command: "ls" } },
+      { seq: 2, type: "tool_result", tool: "Bash", output: "total 0" },
+    ]);
 
+    // One row for the call, and the result body is not in the list at all.
+    expect(screen.getAllByRole("button", { name: /^Bash/ })).toHaveLength(1);
+    expect(screen.queryByText("total 0")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
+    expect(screen.getByText("total 0")).toBeInTheDocument();
+  });
+
+  it("keeps a screenshot out of the list and renders it as an image", () => {
+    const output = JSON.stringify([
+      { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } },
+    ]);
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "Bash", input: { command: "screenshot" } },
+      { seq: 2, type: "tool_result", tool: "Bash", output },
+    ]);
+
+    // The old surface printed the whole base64 payload into the row.
+    expect(screen.queryByText(/iVBORw0KGgo/)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: /screenshot/ }));
+
+    expect(screen.getByRole("img", { name: "Image" })).toHaveAttribute(
+      "src",
+      "data:image/png;base64,iVBORw0KGgo=",
+    );
+  });
+
+  it("folds consecutive same-tool calls into one group that expands", () => {
+    renderDialog([
+      { seq: 1, type: "tool_use", tool: "Read", input: { file_path: "/a.ts" } },
+      { seq: 2, type: "tool_result", tool: "Read", output: "a" },
+      { seq: 3, type: "tool_use", tool: "Read", input: { file_path: "/b.ts" } },
+      { seq: 4, type: "tool_result", tool: "Read", output: "b" },
+      { seq: 5, type: "tool_use", tool: "Read", input: { file_path: "/c.ts" } },
+      { seq: 6, type: "tool_result", tool: "Read", output: "c" },
+    ]);
+
+    // The folded row still names what it touched first — "Read · 3 calls"
+    // alone would hide the only detail that makes a group scannable.
+    const group = screen.getByRole("button", { name: /\/a\.ts.*3 calls/ });
+    expect(screen.queryByText("/c.ts")).not.toBeInTheDocument();
+
+    fireEvent.click(group);
+
+    expect(screen.getByText("/c.ts")).toBeInTheDocument();
+  });
+
+  it("narrows the list to steps matching the search", () => {
     renderDialog();
 
-    // Fold the default-open agent body back to one line. The `expanded`
-    // filter distinguishes the collapse trigger from the timeline segment,
-    // which also carries the "Agent" accessible name via its title.
-    fireEvent.click(screen.getByRole("button", { name: "Agent", expanded: true }));
-    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
-    expect(screen.getByText("Agent summary")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Search this run…"), {
+      target: { value: "pnpm" },
+    });
 
-    // Open a default-folded thinking row.
-    fireEvent.click(screen.getByRole("button", { name: /Thinking summary/ }));
-    expect(screen.getByText(/Thinking hidden detail/)).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /pnpm test/ })).toBeInTheDocument();
+    expect(screen.queryByTestId("rich-content")).not.toBeInTheDocument();
+    expect(screen.getByText("1 of 3 steps")).toBeInTheDocument();
   });
 
-  it("copies RFC 3339 timestamps before event labels", () => {
+  it("hides the timeline for a run too short for it to say anything", () => {
+    renderDialog();
+
+    expect(screen.queryByText("Model")).not.toBeInTheDocument();
+    expect(screen.queryByText("Tools")).not.toBeInTheDocument();
+  });
+
+  it("shows model and tool lanes once a run is long enough to have spent time", () => {
+    const at = (seconds: number) =>
+      new Date(Date.parse("2026-06-08T08:00:00Z") + seconds * 1000).toISOString();
+    const longRun: TimelineItem[] = [];
+    for (let i = 0; i < 8; i++) {
+      longRun.push(
+        { seq: i * 2 + 1, type: "tool_use", tool: "Bash", input: { command: `step ${i}` }, created_at: at(i * 40) },
+        { seq: i * 2 + 2, type: "tool_result", tool: "Bash", output: "ok", created_at: at(i * 40 + 20) },
+      );
+    }
+
+    renderDialog(longRun, {
+      task: { ...baseTask, started_at: at(0), completed_at: at(320) },
+    });
+
+    expect(screen.getByText("Model")).toBeInTheDocument();
+    expect(screen.getByText("Tools")).toBeInTheDocument();
+  });
+
+  it("copies RFC 3339 timestamps before event labels", async () => {
     renderDialog([
       {
         seq: 1,
@@ -408,7 +417,9 @@ describe("AgentTranscriptDialog", () => {
       },
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    });
 
     // Full body (not the truncated summary) with the RFC 3339 prefix, events
     // separated by a blank line.
@@ -420,7 +431,7 @@ describe("AgentTranscriptDialog", () => {
     );
   });
 
-  it("keeps older events without a valid timestamp copyable", () => {
+  it("keeps older events without a valid timestamp copyable", async () => {
     renderDialog([
       {
         seq: 1,
@@ -435,14 +446,36 @@ describe("AgentTranscriptDialog", () => {
       },
     ]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+    });
 
     expect(copyTextMock).toHaveBeenCalledWith(
       ["[Agent] Missing timestamp", "[Error] Invalid timestamp"].join("\n\n"),
     );
   });
+
+  it("cancels copy feedback timers when the dialog unmounts", async () => {
+    vi.useFakeTimers();
+    try {
+      const { unmount } = renderDialog();
+
+      await act(async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Copy all" }));
+        await Promise.resolve();
+      });
+      expect(vi.getTimerCount()).toBeGreaterThan(0);
+
+      unmount();
+
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
   it("renders a file edit as a diff instead of escaped JSON strings", () => {
-    useTranscriptViewStore.setState({ density: "expanded" });
     const { container } = renderDialog([
       {
         seq: 1,
@@ -455,6 +488,8 @@ describe("AgentTranscriptDialog", () => {
         },
       },
     ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
 
     // Changed lines read as diff rows. Text is asserted on the row, not on a
     // leaf node: syntax highlighting splits a line across `hljs-*` spans.
@@ -470,7 +505,6 @@ describe("AgentTranscriptDialog", () => {
   });
 
   it("highlights diff rows using the grammar for the file extension", () => {
-    useTranscriptViewStore.setState({ density: "expanded" });
     const { container } = renderDialog([
       {
         seq: 1,
@@ -484,6 +518,8 @@ describe("AgentTranscriptDialog", () => {
       },
     ]);
 
+    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
+
     // `let` is a Rust keyword, so the highlighter must have marked it up.
     expect(container.querySelector(".hljs-keyword")?.textContent).toBe("let");
   });
@@ -491,7 +527,6 @@ describe("AgentTranscriptDialog", () => {
   it("carries the scope class the hljs palette is defined under", () => {
     // The palette lives in editor/styles/code.css, scoped to the editor surface
     // and this class. Without it the spans render but stay uncoloured.
-    useTranscriptViewStore.setState({ density: "expanded" });
     const { container } = renderDialog([
       {
         seq: 1,
@@ -501,13 +536,14 @@ describe("AgentTranscriptDialog", () => {
       },
     ]);
 
+    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
+
     expect(container.querySelector("pre")?.className).toContain("transcript-code");
     const css = readFileSync("editor/styles/code.css", "utf8");
     expect(css).toContain(".transcript-code");
   });
 
   it("leaves an unknown extension unhighlighted rather than guessing", () => {
-    useTranscriptViewStore.setState({ density: "expanded" });
     const { container } = renderDialog([
       {
         seq: 1,
@@ -517,12 +553,13 @@ describe("AgentTranscriptDialog", () => {
       },
     ]);
 
+    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
+
     expect(container.querySelector(".hljs-keyword")).toBeNull();
     expect(container.textContent).toContain("let b = 2;");
   });
 
   it("unwraps a JSON-encoded tool result so it reads as terminal output", () => {
-    useTranscriptViewStore.setState({ density: "expanded" });
     renderDialog([
       {
         seq: 1,
@@ -531,6 +568,8 @@ describe("AgentTranscriptDialog", () => {
         output: '"total 0\\ndrwxr-xr-x  2 user  staff"',
       },
     ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /^Bash/ }));
 
     expect(
       screen.getByText("total 0\ndrwxr-xr-x  2 user  staff", {
@@ -541,7 +580,6 @@ describe("AgentTranscriptDialog", () => {
     ).toBeInTheDocument();
   });
   it("shows a whole-file write as plain content with a line count", () => {
-    useTranscriptViewStore.setState({ density: "expanded" });
     const { container } = renderDialog([
       {
         seq: 1,
@@ -551,7 +589,10 @@ describe("AgentTranscriptDialog", () => {
       },
     ]);
 
-    expect(screen.getByText("+2")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /Write/ }));
+
+    // The outcome row reports "+2" as well, so scope this to the inspector.
+    expect(within(screen.getByRole("complementary")).getByText("+2")).toBeInTheDocument();
     // Plain content: no per-line + gutter and no diff tinting.
     const pre = container.querySelector("pre");
     expect(pre?.textContent).toBe("alpha\nbeta");
@@ -559,11 +600,12 @@ describe("AgentTranscriptDialog", () => {
   });
 
   it("clamps a long body behind the show-all affordance", () => {
-    useTranscriptViewStore.setState({ density: "expanded" });
     const content = Array.from({ length: 40 }, (_, i) => `line ${i}`).join("\n");
     const { container } = renderDialog([
       { seq: 1, type: "tool_use", tool: "Write", input: { file_path: "/f.rs", content } },
     ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Write/ }));
 
     const pre = container.querySelector("pre");
     expect(pre?.className).toContain("max-h-52");
@@ -575,7 +617,6 @@ describe("AgentTranscriptDialog", () => {
   });
 
   it("does not clamp a short diff", () => {
-    useTranscriptViewStore.setState({ density: "expanded" });
     renderDialog([
       {
         seq: 1,
@@ -584,6 +625,8 @@ describe("AgentTranscriptDialog", () => {
         input: { file_path: "/f.rs", old_string: "a", new_string: "b" },
       },
     ]);
+
+    fireEvent.click(screen.getByRole("button", { name: /Edit/ }));
 
     expect(screen.queryByRole("button", { name: "Show all" })).not.toBeInTheDocument();
   });
@@ -622,7 +665,8 @@ describe("AgentTranscriptDialog — delivered branch", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Run details" }));
 
-    expect(screen.getByText("agent/j/abc12345")).toBeInTheDocument();
+    // Also shown as a produced artifact in the outcome row, hence getAllByText.
+    expect(screen.getAllByText("agent/j/abc12345").length).toBeGreaterThan(0);
 
     await userEvent.click(screen.getByTitle("Copy branch name"));
     expect(copyTextMock).toHaveBeenCalledWith("agent/j/abc12345");

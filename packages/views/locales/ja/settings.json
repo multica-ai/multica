@@ -163,6 +163,28 @@
       "start_date": "開始日"
     }
   },
+  "mcp": {
+    "title": "MCP",
+    "description": "このワークスペースの MCP サーバーライブラリ。ここに追加してもどのエージェントにも割り当てられません。エージェントの所有者が各エージェントの MCP タブで割り当て、エージェントごとにオン/オフを切り替えます。",
+    "servers_title": "共有サーバー",
+    "write_only_note": "保存された設定は書き込み専用です — url、コマンド、ヘッダー、環境変数は二度と表示されないため、サーバーの編集は設定の置き換えになります。名前の変更は安全です。割り当ては維持されます。",
+    "add_server": "サーバーを追加",
+    "edit_server": "サーバーを編集",
+    "remove_server": "サーバーを削除",
+    "empty_title": "共有 MCP サーバーはありません",
+    "empty_description": "まずここにサーバーを追加し、使用するエージェントの MCP タブから割り当ててください。",
+    "disabled_badge": "無効",
+    "admin_only_note": "共有 MCP サーバーを変更できるのはワークスペースの owner と admin のみです。",
+    "delete_title": "共有サーバーを削除しますか？",
+    "delete_description": "{{name}} はライブラリからも、割り当てられている全エージェントからも削除され、各エージェントの次のタスクから反映されます。",
+    "delete_confirm": "削除",
+    "cancel": "キャンセル",
+    "added_toast": "共有 MCP サーバーを追加しました",
+    "updated_toast": "共有 MCP サーバーを更新しました",
+    "removed_toast": "共有 MCP サーバーを削除しました",
+    "save_failed_toast": "共有 MCP サーバーを保存できませんでした",
+    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした"
+  },
   "page": {
     "title": "設定",
     "my_account": "マイアカウント",
@@ -185,6 +207,7 @@
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
     "plugins": "Plugins",
+    "mcp": "MCP",
     "billing": "請求とプラン"
     }
   },
@@ -250,6 +273,66 @@
       "host_api": "Host API",
       "publisher": "発行元と署名 ID",
       "none": "なし"
+    },
+    "remote_mcp": {
+      "title": "Remote MCP 接続",
+      "endpoint": "HTTPS エンドポイント",
+      "endpoint_placeholder": "https://mcp.example.com/mcp",
+      "auth": "認証",
+      "auth_types": {
+        "none": "なし",
+        "oauth": "OAuth（推奨）",
+        "bearer": "Bearer トークン",
+        "header": "カスタムヘッダー"
+      },
+      "header_name": "ヘッダー名",
+      "credential": "認証情報（暗号化して保存）",
+      "connect": "接続",
+      "connected": "接続済み",
+      "ready_to_connect": "接続できます",
+      "complete_before_enabling": "スコープを有効にする前に MCP に接続し、少なくとも 1 つのツールを承認してください。",
+      "advanced": "詳細設定",
+      "oauth_scope": "OAuth スコープ（空欄は自動）",
+      "oauth_client_id": "OAuth クライアント ID（空欄は自動）",
+      "oauth_client_secret": "OAuth クライアントシークレット",
+      "oauth_authorization_endpoint": "認可エンドポイントの上書き",
+      "oauth_token_endpoint": "トークンエンドポイントの上書き",
+      "oauth_token_auth_method": "トークンエンドポイント認証",
+      "oauth_token_auth_methods": {
+        "none": "パブリッククライアント（PKCE）",
+        "client_secret_basic": "クライアントシークレット（HTTP Basic）",
+        "client_secret_post": "クライアントシークレット（リクエスト本文）"
+      },
+      "public_config": "公開設定（JSON オブジェクト）",
+      "invalid_public_config": "公開設定には有効な JSON オブジェクトを指定してください",
+      "failure_policy": "障害ポリシー",
+      "failure_policies": {
+        "required": "必須 — タスクを停止",
+        "optional": "任意 — ツールなしで続行"
+      },
+      "configure_and_discover": "保存してツールを検出",
+      "test": "接続をテスト",
+      "approve": "選択したツールを承認",
+      "revoke": "認証情報を失効",
+      "credential_states": {
+        "configured": "認証情報を設定済み",
+        "revoked": "認証情報を失効済み",
+        "missing": "認証情報がありません",
+        "not_required": "認証情報は不要"
+      },
+      "reviewed": "ツールを承認済み",
+      "pending_review": "承認が必要",
+      "approved_tools": "承認済みツール",
+      "no_tools": "サーバーからツールが通知されませんでした。",
+      "discovery": "検出されたツール — アクセスを明示的に確認してください",
+      "read": "読み取り",
+      "write": "書き込み",
+      "configured_success": "接続を保存しました。検出されたツールを確認してください",
+      "oauth_connected_success": "OAuth 接続が完了しました。検出されたツールを確認してください",
+      "oauth_connect_failed": "OAuth 接続を完了できませんでした。もう一度お試しください。",
+      "test_success": "接続テストに成功しました",
+      "approved_success": "ツールへのアクセスを承認しました",
+      "revoked_success": "認証情報を失効し、Plugin を無効にしました"
     }
   },
   "properties": {
@@ -959,6 +1042,26 @@
         "label": "メンバー",
         "description": "タスクの作成と作業"
       }
-    }
+    },
+    "share_links_title": "共有リンク",
+    "role_field": "ロール：",
+    "expiry_field": "有効期限：",
+    "share_links_create_title": "共有リンクを作成",
+    "share_links_create_button": "生成",
+    "share_links_creating": "生成中...",
+    "share_link_uses": "{{used}} / {{max}} 回使用",
+    "share_link_expires": "有効期限 {{date}}",
+    "share_link_copy_tooltip": "リンクをコピー",
+    "share_link_revoke_tooltip": "リンクを取り消す",
+    "toast_share_link_created": "共有リンクを作成しました",
+    "toast_share_link_failed": "共有リンクの作成に失敗しました",
+    "toast_share_link_revoked": "共有リンクを取り消しました",
+    "toast_share_link_revoke_failed": "共有リンクの取り消しに失敗しました",
+    "toast_share_link_copied": "リンクをコピーしました",
+    "toast_share_link_copy_failed": "リンクのコピーに失敗しました",
+    "expiry_24h": "24時間",
+    "expiry_7d": "7日",
+    "expiry_30d": "30日",
+    "expiry_never": "無期限"
   }
 }

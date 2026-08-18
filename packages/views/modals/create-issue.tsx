@@ -771,7 +771,7 @@ export function ManualCreatePanel({
       // would otherwise stay a fully lit, pressable-looking primary button.
       // Deliberately no `pointer-events-none`: this control still has to hover
       // its tooltip and take the click that focuses the title.
-      className="aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
+      className="justify-self-end aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
     >
       {submitState === "submitting" ? (
         t(($) => $.create_issue.submitting)
@@ -781,12 +781,14 @@ export function ManualCreatePanel({
         <>
           {t(($) => $.create_issue.submit)}
           {/* Decorative: the accessible name must stay "Create Issue", not
-              "Create Issue Command Enter". Absent when `send` is unbound. */}
+              "Create Issue Command Enter". Absent when `send` is unbound.
+              Hidden on phones — no ⌘ key there, and the footer row is at its
+              tightest. */}
           {sendShortcut ? (
             <ShortcutKeycaps
               shortcut={sendShortcut}
               decorative
-              className="ml-1"
+              className="ml-1 max-sm:hidden"
               keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
@@ -1248,49 +1250,51 @@ export function ManualCreatePanel({
               }}
             />
 
-            {/* Footer */}
-            <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-h-7 items-center gap-2">
+            {/* Footer — same 2x2-grid-on-phones / single-row-from-`sm` shape
+                as the agent panel; see the note on AgentCreatePanel's footer
+                for why (MUL-6236). TooltipProvider/Tooltip render no DOM and
+                TooltipContent is portaled, so the Create button stays a direct
+                grid child in both branches below. */}
+            <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+              <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
                 <FileUploadButton
                   multiple
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={switchToAgent}
-                  disabled={gate.uploading}
-                  aria-disabled={gate.uploading || undefined}
-                  aria-busy={gate.uploading || undefined}
-                  title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
-                  {t(($) => $.create_issue.switch_to_agent)}
-                </button>
-                <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
-                  <Switch
-                    size="sm"
-                    checked={keepOpen}
-                    onCheckedChange={setKeepOpen}
-                  />
-                  {t(($) => $.create_issue.create_another)}
-                </label>
-                {submitState === "missing_title" ? (
-                  <TooltipProvider delay={200}>
-                    <Tooltip>
-                      {/* No `<span>` wrapper needed now: aria-disabled leaves the
-                          button focusable and hoverable, so it can anchor its own
-                          tooltip. */}
-                      <TooltipTrigger render={createButton} />
-                      <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ) : (
-                  createButton
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={switchToAgent}
+                disabled={gate.uploading}
+                aria-disabled={gate.uploading || undefined}
+                aria-busy={gate.uploading || undefined}
+                title={t(($) => $.create_issue.switch_to_agent_tooltip)}
+                className="border-beam group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
+                {t(($) => $.create_issue.switch_to_agent)}
+              </button>
+              <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+                <Switch
+                  size="sm"
+                  checked={keepOpen}
+                  onCheckedChange={setKeepOpen}
+                />
+                {t(($) => $.create_issue.create_another)}
+              </label>
+              {submitState === "missing_title" ? (
+                <TooltipProvider delay={200}>
+                  <Tooltip>
+                    {/* No `<span>` wrapper needed now: aria-disabled leaves the
+                        button focusable and hoverable, so it can anchor its own
+                        tooltip. */}
+                    <TooltipTrigger render={createButton} />
+                    <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                createButton
+              )}
             </div>
     </>
   );
@@ -1304,9 +1308,15 @@ export function manualDialogContentClass(isExpanded: boolean) {
     "p-0 gap-0 flex flex-col overflow-hidden",
     "!top-1/2 !left-1/2 !-translate-x-1/2",
     "!transition-all !duration-300 !ease-out",
+    // Phone gutter — see the matching note in create-issue-dialog.tsx: the
+    // `!important` widths below also override DialogContent's
+    // `max-w-[calc(100%-2rem)]`, leaving the card edge to edge on a phone
+    // (MUL-6236). `!h-96` stays a hard height; it already fits the shortest
+    // phone we support.
+    "!w-full !max-w-[calc(100vw-1.5rem)]",
     isExpanded
-      ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-      : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
+      ? "!h-5/6 !-translate-y-1/2 sm:!max-w-4xl"
+      : "!h-96 !-translate-y-1/2 sm:!max-w-2xl",
   );
 }
 

@@ -27,7 +27,7 @@
 # of server/. Bump procedure and per-tool details: README.md alongside.
 
 ARG NODE_VERSION=22
-ARG GO_VERSION=1.26.1
+ARG GO_VERSION=1.26.6
 ARG UV_VERSION=latest
 
 # ----------------------------------------------------------------------------

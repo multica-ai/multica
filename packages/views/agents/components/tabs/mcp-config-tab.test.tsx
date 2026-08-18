@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { Agent, AgentRuntime } from "@multica/core/types";
@@ -14,6 +14,47 @@ import { McpConfigTab } from "./mcp-config-tab";
 const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 
 const mockRuntimeCapabilities = vi.hoisted(() => vi.fn());
+const mockAddServer = vi.hoisted(() => vi.fn());
+const mockSetEnabled = vi.hoisted(() => vi.fn());
+const mockRemoveServer = vi.hoisted(() => vi.fn());
+
+const workspaceMcp = vi.hoisted(() => ({
+  // Servers ASSIGNED to this agent, and the workspace library to pick from.
+  assigned: [] as Array<Record<string, unknown>>,
+  library: [] as Array<Record<string, unknown>>,
+}));
+
+// The workspace section reads the agent's assignments plus the library.
+// Stubbing the query options keeps this a pure render test — the real ones
+// would hit fetch.
+vi.mock("@multica/core/workspace/queries", () => ({
+  agentMcpServersOptions: (agentId: string) => ({
+    queryKey: ["agents", agentId, "mcp-servers"],
+    queryFn: () => Promise.resolve(workspaceMcp.assigned),
+    enabled: agentId !== "",
+  }),
+  workspaceMcpServersOptions: (wsId: string) => ({
+    queryKey: ["workspaces", wsId, "mcp-servers"],
+    queryFn: () => Promise.resolve(workspaceMcp.library),
+    enabled: wsId !== "",
+  }),
+}));
+
+vi.mock("@multica/core/workspace/mutations", () => ({
+  useAddAgentMcpServer: () => ({ mutateAsync: mockAddServer, isPending: false }),
+  useSetAgentMcpServerEnabled: () => ({ mutateAsync: mockSetEnabled, isPending: false }),
+  useRemoveAgentMcpServer: () => ({ mutateAsync: mockRemoveServer, isPending: false }),
+}));
+
+const wsServer = (over: Record<string, unknown>) => ({
+  id: "srv-1",
+  workspace_id: "ws-1",
+  name: "shared-linear",
+  transport: "http",
+  created_at: "2026-08-14T00:00:00Z",
+  updated_at: "2026-08-14T00:00:00Z",
+  ...over,
+});
 
 // The tab reads discovery through runtimeCapabilitiesOptions; existing tests
 // render with runtime={null} so the query stays disabled and never fires.
@@ -112,7 +153,14 @@ const onlineRuntime: AgentRuntime = {
 };
 
 describe("McpConfigTab", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workspaceMcp.assigned = [];
+    workspaceMcp.library = [];
+    mockAddServer.mockResolvedValue([]);
+    mockSetEnabled.mockResolvedValue([]);
+    mockRemoveServer.mockResolvedValue([]);
+  });
 
   it("renders redacted managed MCP without exposing add or edit controls", () => {
     renderTab({ mcp_config: null, mcp_config_redacted: true });
@@ -296,5 +344,221 @@ describe("McpConfigTab", () => {
         "Couldn't discover runtime MCP servers. Try again.",
       ),
     ).toBeInTheDocument();
+  });
+});
+
+// The workspace layer (GH #6062) reaches an agent only when someone assigns
+// it, so the tab has to show what is assigned, let an owner assign more, and
+// never imply an unassigned library entry is in play.
+describe("McpConfigTab workspace servers", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workspaceMcp.assigned = [];
+    workspaceMcp.library = [];
+    mockAddServer.mockResolvedValue([]);
+    mockSetEnabled.mockResolvedValue([]);
+    mockRemoveServer.mockResolvedValue([]);
+  });
+
+  it("lists the workspace servers assigned to this agent", async () => {
+    workspaceMcp.assigned = [wsServer({ enabled: true })];
+    renderTab({ mcp_config: null });
+
+    expect(await screen.findByText("shared-linear")).toBeInTheDocument();
+    expect(screen.getByText(/From the workspace library/)).toBeInTheDocument();
+  });
+
+  // The defining property of this model: a library entry nobody assigned must
+  // not appear as if the agent had it.
+  it("does not show unassigned library servers as the agent's", async () => {
+    workspaceMcp.library = [wsServer({ name: "not-assigned" })];
+    renderTab({ mcp_config: null });
+
+    expect(
+      await screen.findByText(/No workspace MCP servers assigned/),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("not-assigned")).toBeNull();
+  });
+
+  it("assigns a library server through the picker", async () => {
+    const user = userEvent.setup();
+    workspaceMcp.library = [wsServer({ id: "srv-9", name: "pickable" })];
+    renderTab({ mcp_config: null });
+
+    await user.click(await screen.findByRole("button", { name: /Add from workspace/ }));
+    await user.click(await screen.findByRole("menuitem", { name: /pickable/ }));
+
+    await waitFor(() => expect(mockAddServer).toHaveBeenCalledWith("srv-9"));
+  });
+
+  // A workspace can accumulate a lot of shared servers, and the picker is a
+  // menu anchored to a small button: it has to stay inside a bounded, scrolling
+  // box and keep the trigger's width instead of growing down the page.
+  it("keeps the picker bounded, scrollable, and anchored when the library is long", async () => {
+    const user = userEvent.setup();
+    workspaceMcp.library = Array.from({ length: 40 }, (_, i) =>
+      wsServer({ id: `srv-${i}`, name: `shared-server-${i}` }),
+    );
+    renderTab({ mcp_config: null });
+
+    await user.click(
+      await screen.findByRole("button", { name: /Add from workspace/ }),
+    );
+
+    const items = await screen.findAllByRole("menuitem");
+    expect(items).toHaveLength(40);
+    const menu = items[0]!.closest("[data-slot='dropdown-menu-content']");
+    expect(menu?.className).toMatch(/\bmax-h-72\b/);
+    expect(menu?.className).toMatch(/\boverflow-y-auto\b/);
+    expect(menu?.className).toMatch(/min-w-\(--anchor-width\)/);
+  });
+
+  it("toggles an assignment off without dropping it", async () => {
+    const user = userEvent.setup();
+    workspaceMcp.assigned = [wsServer({ enabled: true })];
+    renderTab({ mcp_config: null });
+
+    await user.click(
+      await screen.findByRole("switch", { name: /Enable shared-linear/i }),
+    );
+
+    await waitFor(() =>
+      expect(mockSetEnabled).toHaveBeenCalledWith({ serverId: "srv-1", enabled: false }),
+    );
+    expect(mockRemoveServer).not.toHaveBeenCalled();
+  });
+
+  it("removes an assignment", async () => {
+    const user = userEvent.setup();
+    workspaceMcp.assigned = [wsServer({ enabled: true })];
+    renderTab({ mcp_config: null });
+
+    await user.click(
+      await screen.findByRole("button", { name: /Remove shared-linear/i }),
+    );
+
+    await waitFor(() => expect(mockRemoveServer).toHaveBeenCalledWith("srv-1"));
+  });
+
+  it("marks an assigned server the agent overrides by name", async () => {
+    workspaceMcp.assigned = [wsServer({ name: "linear", enabled: true })];
+    renderTab({
+      mcp_config: { mcpServers: { linear: { url: "https://agent.example" } } },
+    });
+
+    expect(await screen.findByText("Overridden")).toBeInTheDocument();
+  });
+
+  // A member without edit rights can still read what the agent runs with —
+  // the inventory carries no credential material — but every write affordance
+  // is hidden rather than left to 403 on click.
+  it("hides the assignment controls from a viewer who cannot edit", async () => {
+    workspaceMcp.assigned = [wsServer({ enabled: true })];
+    workspaceMcp.library = [wsServer({ id: "srv-9", name: "pickable" })];
+    render(
+      <TestShell>
+        <McpConfigTab
+          agent={baseAgent}
+          runtime={null}
+          canEdit={false}
+          onSave={vi.fn()}
+        />
+      </TestShell>,
+    );
+
+    expect(await screen.findByText("shared-linear")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Add from workspace/ })).toBeNull();
+    expect(screen.queryByRole("switch")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Remove shared-linear/i })).toBeNull();
+  });
+
+  it("points at workspace Settings when the library is empty", async () => {
+    renderTab({ mcp_config: null });
+
+    expect(
+      await screen.findByText(/no MCP servers to assign yet/i),
+    ).toBeInTheDocument();
+  });
+});
+
+// The runtime section's Overridden badge has to reflect the REAL precedence:
+// runtime < (assigned workspace servers + the agent's own).
+describe("McpConfigTab effective set", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    workspaceMcp.assigned = [];
+    workspaceMcp.library = [];
+  });
+
+  it("marks a runtime server shadowed by an assigned server as overridden", async () => {
+    workspaceMcp.assigned = [wsServer({ name: "fetch", enabled: true })];
+    mockRuntimeCapabilities.mockResolvedValue({
+      mcpSupported: true,
+      mcpServers: [{ name: "fetch", transport: "stdio", enabled: true, source: "runtime" }],
+    });
+    renderTab({ mcp_config: null }, vi.fn(), onlineRuntime);
+
+    expect(
+      await screen.findByText("Overridden by Multica"),
+    ).toBeInTheDocument();
+  });
+
+  // A switched-off assignment is not sent, so it shadows nothing.
+  it("does not mark a runtime server overridden by a disabled assignment", async () => {
+    workspaceMcp.assigned = [wsServer({ name: "fetch", enabled: false })];
+    mockRuntimeCapabilities.mockResolvedValue({
+      mcpSupported: true,
+      mcpServers: [{ name: "fetch", transport: "stdio", enabled: true, source: "runtime" }],
+    });
+    renderTab({ mcp_config: null }, vi.fn(), onlineRuntime);
+
+    // "fetch" renders twice — once as the (disabled) assignment, once as the
+    // runtime's own server — which is exactly the state under test.
+    await waitFor(() => expect(screen.getAllByText("fetch")).toHaveLength(2));
+    expect(screen.queryByText("Overridden by Multica")).toBeNull();
+  });
+
+  // Same transport hazard as before, reached through the SAVED config: the
+  // form emits `type: "http"`, so neither entry may be editable through it.
+  // `websocket` is the one that catches using mcpTransport() for this.
+  it.each([
+    ["sse", { type: "sse", url: "https://sse.example" }],
+    ["websocket", { type: "websocket", url: "wss://example.test" }],
+  ])("edits an agent's %s server through JSON, not the form", async (_label, entry) => {
+    const user = userEvent.setup();
+    renderTab({ mcp_config: { mcpServers: { streamy: entry } } });
+
+    await user.click(
+      screen.getByRole("button", { name: /edit mcp server streamy/i }),
+    );
+
+    expect(screen.getByRole("tab", { name: "JSON" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByRole("tab", { name: "Form" })).toHaveAttribute(
+      "aria-disabled",
+      "true",
+    );
+  });
+
+  // The common shapes must stay on the form — this guard is about entries the
+  // form would CHANGE, not a general retreat to the JSON editor.
+  it.each([
+    ["stdio", { command: "uvx" }],
+    ["typed http", { type: "http", url: "https://mcp.example" }],
+    ["untyped url", { url: "https://mcp.example" }],
+  ])("keeps editing a %s server on the form", async (_label, entry) => {
+    const user = userEvent.setup();
+    renderTab({ mcp_config: { mcpServers: { normal: entry } } });
+
+    await user.click(
+      screen.getByRole("button", { name: /edit mcp server normal/i }),
+    );
+
+    expect(screen.getByRole("tab", { name: "Form" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 });

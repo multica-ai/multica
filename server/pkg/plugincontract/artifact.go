@@ -20,6 +20,8 @@ const (
 	MaxFileSize      = 1 << 20
 	MaxSkillSize     = 8 << 20
 	MaxSkillFiles    = 256
+
+	ThirdPartyLicensesRoot = "THIRD_PARTY_LICENSES/"
 )
 
 type Artifact struct {
@@ -39,8 +41,9 @@ type ArtifactFile struct {
 }
 
 // ValidateArtifact verifies an uploaded ZIP without extracting it to disk. It
-// accepts only regular UTF-8 text files under declared contribution roots and
-// returns content-addressed metadata suitable for immutable release storage.
+// accepts only regular UTF-8 text files under declared contribution roots or
+// the non-executable third-party license root and returns content-addressed
+// metadata suitable for immutable release storage.
 func ValidateArtifact(archive []byte) (Artifact, error) {
 	if len(archive) == 0 {
 		return Artifact{}, fmt.Errorf("plugin archive is empty")
@@ -135,9 +138,15 @@ func ValidateArtifact(archive []byte) (Artifact, error) {
 		if name == ManifestFilename {
 			continue
 		}
+		if isThirdPartyLicensePath(name) {
+			continue
+		}
 		root := contributionRoot(name, allowedRoots)
 		if root == "" {
 			return Artifact{}, fmt.Errorf("plugin archive path %q is outside a declared contribution", name)
+		}
+		if name != allowedRoots[root].Entry && skillCompanionCollidesWithEntry(name, root) {
+			return Artifact{}, fmt.Errorf("plugin archive path %q collides with reserved primary Skill content", name)
 		}
 		counts[root]++
 		sizes[root] += file.SizeBytes
@@ -163,6 +172,20 @@ func ValidateArtifact(archive []byte) (Artifact, error) {
 		SizeBytes:         totalSize,
 		Files:             ordered,
 	}, nil
+}
+
+func skillCompanionCollidesWithEntry(name, root string) bool {
+	relative := strings.TrimPrefix(name, root)
+	firstSegment := relative
+	if separator := strings.IndexByte(relative, '/'); separator >= 0 {
+		firstSegment = relative[:separator]
+	}
+	return strings.EqualFold(firstSegment, "SKILL.md")
+}
+
+func isThirdPartyLicensePath(name string) bool {
+	relative := strings.TrimPrefix(name, ThirdPartyLicensesRoot)
+	return relative != name && relative != ""
 }
 
 func isInstallHookPath(name string) bool {

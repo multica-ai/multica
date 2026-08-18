@@ -252,7 +252,7 @@ jobs:
             exit 1
           fi
 
-  backend:
+  backend-tests:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -291,7 +291,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.1"
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # CI follows the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
           cache-dependency-path: server/go.sum
 
       - name: Setup Helm
@@ -312,6 +315,46 @@ jobs:
       - name: Test
         run: bash scripts/test-go.sh --race
 
+  # Keep the live vulnerability database from hiding build and test results.
+  # The aggregate backend job below still treats both jobs as one merge gate.
+  go-vulnerability-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # CI follows the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Scan Go vulnerabilities
+        working-directory: server
+        run: go tool govulncheck ./...
+
+  # Preserve the existing required-check name while allowing tests and the
+  # vulnerability scan to run independently and report both outcomes.
+  backend:
+    needs: [backend-tests, go-vulnerability-scan]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check backend job results
+        env:
+          TEST_RESULT: ${{ needs.backend-tests.result }}
+          VULNERABILITY_RESULT: ${{ needs.go-vulnerability-scan.result }}
+        run: |
+          echo "backend-tests:        $TEST_RESULT"
+          echo "go-vulnerability-scan: $VULNERABILITY_RESULT"
+          if [ "$TEST_RESULT" != "success" ] || [ "$VULNERABILITY_RESULT" != "success" ]; then
+            echo "::error::backend validation failed"
+            exit 1
+          fi
+
   windows-execenv:
     # The environment-preparation deadline owns a process tree, not just a Go
     # process. This Windows runtime test verifies Job Object cancellation kills
@@ -324,7 +367,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.1"
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # CI follows the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
           cache-dependency-path: server/go.sum
 
       - name: Test Windows execution-environment isolation

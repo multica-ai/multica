@@ -553,6 +553,16 @@ function BoardViewImpl({
     [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
   );
 
+  // An aborted drag (pointercancel, window resize, tab hide, Escape) fires
+  // onDragCancel instead of onDragEnd. Releasing the drag lock here keeps the
+  // column mirror resyncing with the cache afterwards — see the same handler in
+  // list-view for the touch path that makes this routine (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
+  }, [groupedIssues, groups, grouping, groupingOptionIds, setColumns, isDraggingRef]);
+
   return (
     <DndContext
       sensors={sensors}
@@ -560,6 +570,7 @@ function BoardViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div
         ref={pan.ref}

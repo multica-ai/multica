@@ -524,6 +524,132 @@ func TestRunMigrationsRepairsInvalidTerminalCompletedAtIndex(t *testing.T) {
 	}
 }
 
+// TestRunMigrationsRepairsShareLinkIndexesBeforeRetry covers the MUL-6288 batch
+// (migrations 327–331) against the real migration files and the real registered
+// hooks, run inside a private schema so the unqualified index names in
+// production resolve through search_path.
+//
+// Two retry windows matter here, and the share-link chain is where both bite:
+//
+//  1. Interrupted build. 328 backs workspace_share_link's primary key, so an
+//     INVALID leftover does not just cost a lookup — 329 cannot attach the
+//     constraint at all, and the migrator stops on a half-created table.
+//  2. Build committed, version never recorded. Before this batch got
+//     IF NOT EXISTS, the retry failed on "already exists" every single time,
+//     which wedges the release rather than degrading it.
+func TestRunMigrationsRepairsShareLinkIndexesBeforeRetry(t *testing.T) {
+	adminPool := openTestPool(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+
+	suffix := fmt.Sprintf("%d_%d", time.Now().UnixNano(), rand.Uint32())
+	schema := "migrate_share_link_" + suffix
+	schemaIdent := pgx.Identifier{schema}.Sanitize()
+	if _, err := adminPool.Exec(ctx, "CREATE SCHEMA "+schemaIdent); err != nil {
+		t.Fatalf("create schema: %v", err)
+	}
+	t.Cleanup(func() {
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
+		if _, err := adminPool.Exec(cleanupCtx, "DROP SCHEMA IF EXISTS "+schemaIdent+" CASCADE"); err != nil {
+			t.Logf("drop schema %s: %v", schema, err)
+		}
+	})
+
+	pool := openTestPoolWithSearchPath(t, schema)
+	migrationsTable := pgx.Identifier{schema, "schema_migrations"}.Sanitize()
+	opts := runOptions{
+		Direction:             "up",
+		SchemaMigrationsTable: schema + ".schema_migrations",
+		AdvisoryLockKey:       int64(rand.Uint64()&0x7fffffffffffffff) | 1,
+		// The production hook map, not a test-local one: this is the
+		// registration the batch was missing.
+		Hooks: hooksForDirection("up"),
+	}
+
+	opts.Files = realMigrationFiles(t, []string{"327_workspace_share_link"}, "up")
+	if err := runMigrations(ctx, pool, opts); err != nil {
+		t.Fatalf("create share link table: %v", err)
+	}
+
+	// Duplicate ids make the concurrent UNIQUE build fail after Postgres has
+	// registered the relation — the same INVALID leftover an interrupted
+	// production build leaves behind.
+	if _, err := pool.Exec(ctx, `INSERT INTO workspace_share_link (id, workspace_id, code, created_by) VALUES
+		('00000000-0000-0000-0000-0000000000a1', gen_random_uuid(), 'code-1', gen_random_uuid()),
+		('00000000-0000-0000-0000-0000000000a1', gen_random_uuid(), 'code-2', gen_random_uuid())`); err != nil {
+		t.Fatalf("seed duplicate share links: %v", err)
+	}
+	if _, err := pool.Exec(ctx, "CREATE UNIQUE INDEX CONCURRENTLY workspace_share_link_pkey_uidx ON workspace_share_link (id)"); err == nil {
+		t.Fatal("failure injection unexpectedly built the primary key index")
+	}
+	assertIndexReadyAndValid(t, adminPool, schema, "workspace_share_link_pkey_uidx", false)
+	if _, err := pool.Exec(ctx, "DELETE FROM workspace_share_link WHERE ctid = (SELECT max(ctid) FROM workspace_share_link)"); err != nil {
+		t.Fatalf("remove duplicate share link before retry: %v", err)
+	}
+
+	// The hook has to drop the leftover before 328 retries, otherwise 329 has
+	// no usable index to promote.
+	opts.Files = realMigrationFiles(t, []string{
+		"328_workspace_share_link_id_uidx",
+		"329_workspace_share_link_primary_key",
+	}, "up")
+	if err := runMigrations(ctx, pool, opts); err != nil {
+		t.Fatalf("retry share link primary key with invalid-index cleanup: %v", err)
+	}
+	// ADD CONSTRAINT ... USING INDEX renames the backing index to the
+	// constraint name, so the promoted index is what must be valid now.
+	assertIndexReadyAndValid(t, adminPool, schema, "workspace_share_link_pkey", true)
+	var hasPrimaryKey bool
+	if err := adminPool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM pg_constraint c
+			JOIN pg_class t ON t.oid = c.conrelid
+			JOIN pg_namespace n ON n.oid = t.relnamespace
+			WHERE n.nspname = $1 AND t.relname = 'workspace_share_link' AND c.contype = 'p'
+		)
+	`, schema).Scan(&hasPrimaryKey); err != nil {
+		t.Fatalf("check share link primary key: %v", err)
+	}
+	if !hasPrimaryKey {
+		t.Fatal("migration 329 did not attach the primary key")
+	}
+
+	// Second window: 330 and 331 build successfully, then the runner dies
+	// before recording them. The next run must be a clean no-op, not a wedge.
+	versions := []string{
+		"330_workspace_share_link_active_ws_uidx",
+		"331_workspace_share_link_code_uidx",
+	}
+	opts.Files = realMigrationFiles(t, versions, "up")
+	if err := runMigrations(ctx, pool, opts); err != nil {
+		t.Fatalf("apply share link unique indexes: %v", err)
+	}
+	assertIndexReadyAndValid(t, adminPool, schema, "workspace_share_link_active_ws_uidx", true)
+	assertIndexReadyAndValid(t, adminPool, schema, "workspace_share_link_code_uidx", true)
+
+	if _, err := adminPool.Exec(ctx, "DELETE FROM "+migrationsTable+" WHERE version = ANY($1)", versions); err != nil {
+		t.Fatalf("simulate missing migration records: %v", err)
+	}
+	if err := runMigrations(ctx, pool, opts); err != nil {
+		t.Fatalf("retry share link unique indexes with valid indexes present: %v", err)
+	}
+	assertIndexReadyAndValid(t, adminPool, schema, "workspace_share_link_active_ws_uidx", true)
+	assertIndexReadyAndValid(t, adminPool, schema, "workspace_share_link_code_uidx", true)
+	for _, version := range versions {
+		var recorded bool
+		if err := adminPool.QueryRow(ctx,
+			"SELECT EXISTS (SELECT 1 FROM "+migrationsTable+" WHERE version = $1)",
+			version,
+		).Scan(&recorded); err != nil {
+			t.Fatalf("read retried migration version: %v", err)
+		}
+		if !recorded {
+			t.Fatalf("%s was not recorded on retry", version)
+		}
+	}
+}
+
 func assertIndexValidity(t *testing.T, pool interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }, schema, index string, want bool) {

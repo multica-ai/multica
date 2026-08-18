@@ -83,9 +83,10 @@ type Config struct {
 	VCSIntegrationEnabled bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://multica.ai").
-	// Used only to build webhook_url responses for autopilot webhook triggers
-	// — never for auth, routing, or workspace resolution. Empty when unset,
-	// in which case clients fall back to webhook_path + their own origin.
+	// Used to build webhook_url responses and the fixed Remote MCP OAuth
+	// callback URI — never to decide request identity, routing, or workspace
+	// scope. Empty when unset; webhook clients can fall back to their own origin,
+	// while OAuth Connect fails closed because providers require an exact URI.
 	// Reading the public host from request headers (Host / X-Forwarded-Host)
 	// is intentionally avoided so a misconfigured reverse proxy cannot trick
 	// the server into minting webhook URLs pointing at an attacker-controlled
@@ -197,6 +198,7 @@ type Handler struct {
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
+	InvitationRateLimiters       InvitationRateLimiters
 	WebhookDeliveryWorker        *WebhookDeliveryWorker
 	CloudRuntime                 cloudRuntimeProxy
 	// Lark integration. All three are nil when the Lark master key
@@ -228,9 +230,10 @@ type Handler struct {
 	// ChannelSupervisor owns the per-installation supervisor goroutines
 	// that hold the §4.4 WS lease and drive each channel.Channel
 	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic
-	// engine). The router constructs it UNCONDITIONALLY — it drives any
-	// channel type, not just Feishu, so it does not depend on the Lark
-	// master key; each platform registers its Factory only when configured
+	// engine). The router constructs it independently of platform secrets — it
+	// drives any channel type, not just Feishu. It remains nil when lease
+	// configuration is unsafe or a selected Redis backend fails its startup
+	// readiness check; each platform registers its Factory only when configured
 	// (Feishu when MULTICA_LARK_SECRET_KEY is set). The router does NOT
 	// call Run; the process owner (main.go) starts it under a long-running
 	// context and joins via WaitWithTimeout (bounded, fenced by
@@ -402,6 +405,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
+		InvitationRateLimiters:       NewMemoryInvitationRateLimiters(DefaultInvitationRateLimits()),
 		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,

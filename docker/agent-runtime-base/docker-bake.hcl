@@ -30,13 +30,13 @@ variable "IMG_SHA" {
 // Pin args. Defaults match what's in the Dockerfile so a bare
 // `docker buildx bake` works locally; override in CI per release.
 variable "NODE_VERSION"        { default = "22" }
-variable "GO_VERSION"          { default = "1.26.1" }
+variable "GO_VERSION"          { default = "1.26.6" }
 // Concrete semver (not "dev"): the daemon tags its registration with this, and
 // the quick-create gate (server/pkg/agent/version.go) rejects anything that
 // doesn't parse as semver ≥ 0.2.21 — "dev" surfaces to users as "daemon doesn't
 // report a CLI version". 0.4.12 matches the latest agentfarm fork tag. CI does
 // not override this, so the default is what ships.
-variable "MULTICA_VERSION"     { default = "0.4.26" }
+variable "MULTICA_VERSION"     { default = "0.4.27" }
 variable "MULTICA_COMMIT"      { default = "unknown" }
 variable "CLAUDE_CODE_VERSION" { default = "latest" }
 variable "CODEX_VERSION"       { default = "latest" }

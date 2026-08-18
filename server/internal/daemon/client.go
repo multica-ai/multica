@@ -8,11 +8,13 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"runtime"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -189,6 +191,7 @@ func daemonClientCapabilities() string {
 		protocol.DaemonCapabilityCoalescedCommentsV1,
 		protocol.DaemonCapabilityExecutionManifestV1,
 		protocol.DaemonCapabilityAgentSkillV1,
+		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilityRPCV1,
 	}, ",")
@@ -212,6 +215,22 @@ func (c *Client) ClaimTask(ctx context.Context, runtimeID string) (*Task, error)
 		return nil, err
 	}
 	return resp.Task, nil
+}
+
+func (c *Client) ResolveRemoteMCPCredential(ctx context.Context, daemonToken, taskID, contributionID string) (http.Header, error) {
+	var response struct {
+		CredentialHeader string `json:"credential_header"`
+		Credential       string `json:"credential"`
+	}
+	path := fmt.Sprintf("/api/daemon/tasks/%s/remote-mcp/%s/credential", url.PathEscape(taskID), url.PathEscape(contributionID))
+	if err := c.getJSONWithToken(ctx, path, daemonToken, &response); err != nil {
+		return nil, err
+	}
+	headers := make(http.Header)
+	if response.CredentialHeader != "" {
+		headers.Set(response.CredentialHeader, response.Credential)
+	}
+	return headers, nil
 }
 
 // batchClaimRequestTimeout is the short, request-scoped deadline for the
@@ -789,10 +808,32 @@ func (c *Client) GetTaskGCCheck(ctx context.Context, taskID string) (*TaskGCStat
 	return &resp, nil
 }
 
-func (c *Client) Deregister(ctx context.Context, runtimeIDs []string) error {
-	return c.postJSON(ctx, "/api/daemon/deregister", map[string]any{
-		"runtime_ids": runtimeIDs,
-	}, nil)
+// RuntimeOfflineCodeNotExecutable marks a runtime taken offline because the OS
+// refuses to execute its agent CLI. It is the one deregistration cause that no
+// amount of waiting fixes, which is what the server needs to know: work for an
+// offline machine may queue until the machine returns, but work for this one
+// must be refused with an explanation (MUL-6164).
+const RuntimeOfflineCodeNotExecutable = "not_executable"
+
+// RuntimeOfflineReason is why a runtime went offline, in the form clients can
+// act on: a stable code they switch on and localize, and the command that
+// repairs the install. Prose stays in Detail for logs — never as the thing a
+// client parses.
+type RuntimeOfflineReason struct {
+	Code   string                  `json:"code"`
+	Detail string                  `json:"detail,omitempty"`
+	Repair *agent.ExecFormatRepair `json:"repair,omitempty"`
+}
+
+// Deregister takes runtimes offline. reasons is optional and keyed by runtime
+// id: a daemon shutting down has nothing to explain, while one that condemned a
+// broken CLI does.
+func (c *Client) Deregister(ctx context.Context, runtimeIDs []string, reasons map[string]RuntimeOfflineReason) error {
+	body := map[string]any{"runtime_ids": runtimeIDs}
+	if len(reasons) > 0 {
+		body["offline_reasons"] = reasons
+	}
+	return c.postJSON(ctx, "/api/daemon/deregister", body, nil)
 }
 
 // RegisterResponse holds the server's response to a daemon registration.
@@ -1022,12 +1063,19 @@ func (c *Client) postJSONVia(ctx context.Context, httpClient *http.Client, path 
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, respBody any) error {
+	return c.getJSONWithToken(ctx, path, c.token, respBody)
+}
+
+// getJSONWithToken performs one GET with an explicit credential. It is used by
+// the Remote MCP broker so its short-lived daemon token cannot replace or race
+// the client's long-lived PAT used by concurrent control-plane requests.
+func (c *Client) getJSONWithToken(ctx context.Context, path, token string, respBody any) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return err
 	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.token)
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	c.setIdentityHeaders(req)
 

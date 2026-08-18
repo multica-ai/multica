@@ -65,6 +65,33 @@ func TestValidateArtifactAcceptsReferencePlugin(t *testing.T) {
 	}
 }
 
+func TestValidateArtifactAcceptsRemoteMCPOnlyPlugin(t *testing.T) {
+	archive := buildArchive(t, []zipFixtureFile{{
+		name: ManifestFilename, content: manifestJSON(t, validRemoteMCPManifest()),
+	}})
+	artifact, err := ValidateArtifact(archive)
+	if err != nil {
+		t.Fatalf("ValidateArtifact: %v", err)
+	}
+	if len(artifact.Files) != 1 || len(artifact.Manifest.Contributes.RemoteMCP) != 1 {
+		t.Fatalf("remote-only artifact files = %d, contributions = %d", len(artifact.Files), len(artifact.Manifest.Contributes.RemoteMCP))
+	}
+}
+
+func TestValidateArtifactAcceptsThirdPartyLicenseFiles(t *testing.T) {
+	files := append(referenceArchiveFiles(t), zipFixtureFile{
+		name:    ThirdPartyLicensesRoot + "dependency-MIT.txt",
+		content: []byte("MIT License\n\nCopyright dependency author\n"),
+	})
+	artifact, err := ValidateArtifact(buildArchive(t, files))
+	if err != nil {
+		t.Fatalf("ValidateArtifact: %v", err)
+	}
+	if len(artifact.Files) != 4 {
+		t.Fatalf("files = %d, want 4", len(artifact.Files))
+	}
+}
+
 func TestArtifactDigestIgnoresZipEntryOrder(t *testing.T) {
 	files := referenceArchiveFiles(t)
 	reversed := []zipFixtureFile{files[2], files[1], files[0]}
@@ -94,6 +121,7 @@ func TestValidateArtifactRejectsUnsafeOrUnownedFiles(t *testing.T) {
 		{name: "traversal", file: zipFixtureFile{name: "../escape.md", content: []byte("no")}, wantErr: "unsafe"},
 		{name: "backslash", file: zipFixtureFile{name: `skills\escape.md`, content: []byte("no")}, wantErr: "unsafe"},
 		{name: "unowned", file: zipFixtureFile{name: "README.md", content: []byte("no")}, wantErr: "outside a declared contribution"},
+		{name: "primary content descendant", file: zipFixtureFile{name: "skills/review-readiness/SKILL.md/hidden.txt", content: []byte("no")}, wantErr: "reserved primary Skill content"},
 		{name: "executable", file: zipFixtureFile{name: "skills/review-readiness/run.sh", content: []byte("echo no"), mode: 0o700}, wantErr: "executable"},
 		{name: "symlink", file: zipFixtureFile{name: "skills/review-readiness/link", content: []byte("target"), mode: fs.ModeSymlink | 0o777}, wantErr: "not a regular file"},
 		{name: "binary", file: zipFixtureFile{name: "skills/review-readiness/binary", content: []byte{0xff, 0xfe}}, wantErr: "not UTF-8 text"},

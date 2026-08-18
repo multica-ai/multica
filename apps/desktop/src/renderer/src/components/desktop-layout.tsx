@@ -1,6 +1,7 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
+import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
 import {
   useNavigationInputBindings,
@@ -16,6 +17,7 @@ import { AppSidebar, GlobalShortcuts } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
 import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
+import { workspaceListOptions } from "@multica/core/workspace";
 import {
   useNavigation,
   type LinkClickIntent,
@@ -220,10 +222,35 @@ export function DesktopShell() {
   useNavigationInputBindings();
 
   // Reactive read of current workspace slug from the platform singleton.
-  // On first mount, slug is null until WorkspaceRouteLayout (inside the tab
+  // On first mount, it is null until WorkspaceRouteLayout (inside the tab
   // router) sets it. Once set, the sidebar and other shell-level components
   // can resolve workspace-scoped paths via useWorkspacePaths().
-  const slug = useSyncExternalStore(subscribeToCurrentSlug, getCurrentSlug, () => null);
+  const currentSlug = useSyncExternalStore(
+    subscribeToCurrentSlug,
+    getCurrentSlug,
+    () => null,
+  );
+  // Chrome gates on "the slug still resolves to a workspace", NOT on "the
+  // singleton is non-null" (MUL-6231 / #7021). The singleton is mutable
+  // process state that no single owner keeps in lockstep with the workspace
+  // list, so after the active workspace is deleted it can still hold the dead
+  // slug for a beat. Everything below mounts workspace-scoped components —
+  // SearchCommand calls useWorkspaceId(), which THROWS when the workspace is
+  // gone from the list. Nothing above this in the desktop tree is an error
+  // boundary, so that throw used to unmount the whole renderer and leave a
+  // blank, unresponsive window.
+  //
+  // Deriving from the list cache makes this the same gate web uses
+  // (DashboardGuard's `!workspace` check in packages/views/layout), so both
+  // shells drop workspace-scoped chrome on exactly the same signal instead of
+  // diverging. TabContent stays outside the gate: it must always render so
+  // the tab router can mount WorkspaceRouteLayout, which is what populates
+  // the singleton in the first place.
+  const { data: workspaces = [] } = useQuery(workspaceListOptions());
+  const slug =
+    currentSlug && workspaces.some((w) => w.slug === currentSlug)
+      ? currentSlug
+      : null;
 
   return (
     <DesktopNavigationProvider>
@@ -231,10 +258,11 @@ export function DesktopShell() {
           use useWorkspaceSlug() (nullable) or useRequiredWorkspaceSlug()
           (throws). TabContent MUST always render so the tab router can
           mount WorkspaceRouteLayout, which calls setCurrentWorkspace()
-          to populate the slug. The sidebar gates on slug being present
-          to avoid the useRequiredWorkspaceSlug throw. Zero-workspace
-          users see the window-level overlay (new-workspace flow)
-          triggered by IndexRedirect, not a route. */}
+          to populate the slug. The sidebar gates on the resolved slug
+          (see above) to avoid the useRequiredWorkspaceSlug and
+          useWorkspaceId throws. Zero-workspace users see the
+          window-level overlay (new-workspace flow) triggered by
+          IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
         <div className="flex h-screen bg-app-shell">
@@ -243,7 +271,16 @@ export function DesktopShell() {
               inset half of both. Anything that has to paint an opaque layer
               over this wrapper (the tab flares) reads the variable rather than
               re-deriving which of the two is in play. */}
-          <SidebarProvider className="flex-1 bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]">
+          {/* hasExternalTrigger: WindowToolbar below parks a SidebarTrigger
+              beside the traffic lights, where it is always reachable. Page
+              headers inside the canvas must not add their own fallback one on
+              top of it — desktop windows sit below `xl`, exactly where that
+              fallback renders, so every page showed a second identical icon
+              50px under this one (MUL-6218). */}
+          <SidebarProvider
+            hasExternalTrigger
+            className="flex-1 bg-app-shell [--sidebar-wrapper-fill:var(--app-shell)]"
+          >
             {slug && <GlobalShortcuts />}
             {slug && <WindowToolbar />}
             {slug && <AppSidebar topSlot={<SidebarTopSpacer />} searchSlot={<SearchTrigger />} />}

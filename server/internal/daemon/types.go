@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
+	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 )
 
 // AgentEntry describes a single available agent CLI.
@@ -70,12 +71,16 @@ type ActiveSiblingRunData struct {
 // Task represents a claimed task from the server.
 // Agent data (name, skills) is populated by the claim endpoint.
 type Task struct {
-	ID                      string                       `json:"id"`
-	AgentID                 string                       `json:"agent_id"`
-	RuntimeID               string                       `json:"runtime_id"`
-	IssueID                 string                       `json:"issue_id"`
-	WorkspaceID             string                       `json:"workspace_id"`
-	PluginExecutionManifest *PluginExecutionManifestData `json:"plugin_execution_manifest,omitempty"`
+	ID                      string                              `json:"id"`
+	AgentID                 string                              `json:"agent_id"`
+	RuntimeID               string                              `json:"runtime_id"`
+	IssueID                 string                              `json:"issue_id"`
+	WorkspaceID             string                              `json:"workspace_id"`
+	PluginExecutionManifest *PluginExecutionManifestData        `json:"plugin_execution_manifest,omitempty"`
+	RemoteMCPConnections    []pluginruntime.RemoteMCPConnection `json:"remote_mcp_connections,omitempty"`
+	// RemoteMCPDaemonToken stays inside the daemon and authenticates the local
+	// broker's credential-resolution calls. It must never enter agent env/config.
+	RemoteMCPDaemonToken string `json:"remote_mcp_daemon_token,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
 	// prompt set in Settings → General). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
@@ -172,6 +177,7 @@ type PluginExecutionManifestData struct {
 	ComposerVersion      string          `json:"composer_version"`
 	SchemaVersion        int32           `json:"schema_version"`
 	OrderedContributions json.RawMessage `json:"ordered_contributions"`
+	Diagnostics          []string        `json:"diagnostics,omitempty"`
 }
 
 // ChatAttachmentMeta is the structured attachment metadata the daemon

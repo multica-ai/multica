@@ -162,6 +162,20 @@ cleared_issue_properties AS (
 cleared_quick_actions AS (
     DELETE FROM quick_action WHERE workspace_id = $1
 ),
+ws_mcp_servers AS (
+    SELECT id FROM workspace_mcp_server WHERE workspace_id = $1
+),
+cleared_agent_mcp_bindings AS (
+    -- agent_mcp_server carries no FK in either direction, so sweep it from
+    -- both sides: the workspace's own servers, and any binding held by an
+    -- agent that is about to be removed with the workspace.
+    DELETE FROM agent_mcp_server
+    WHERE server_id IN (SELECT id FROM ws_mcp_servers)
+       OR agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_workspace_mcp_servers AS (
+    DELETE FROM workspace_mcp_server WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),

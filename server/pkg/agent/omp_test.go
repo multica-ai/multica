@@ -391,7 +391,7 @@ func TestDiscoverOmpModelsNonZeroExit(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	models, err := discoverOmpModels(ctx, fakePath)
+	models, err := discoverOmpModels(ctx, Command{Path: fakePath})
 	if err != nil {
 		t.Fatalf("discoverOmpModels: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestDiscoverOmpModelsNonZeroExit(t *testing.T) {
 func TestDiscoverOmpModelsMissingBinary(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	models, err := discoverOmpModels(ctx, "/nonexistent/omp-binary")
+	models, err := discoverOmpModels(ctx, Command{Path: "/nonexistent/omp-binary"})
 	if err != nil {
 		t.Fatalf("discoverOmpModels: %v", err)
 	}

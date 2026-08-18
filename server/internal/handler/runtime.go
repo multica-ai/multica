@@ -421,6 +421,16 @@ func parseExactSinceParamInTZ(r *http.Request, defaultDays int, tzName string) p
 // parseDaysCutoff is the shared body of the two cutoff parsers. `trimDays`
 // pulls the cutoff forward, so 0 keeps the N+1 headroom and 1 closes the
 // window to exactly N calendar days.
+// dayWindowNow is the clock every `days=N` cutoff reads.
+//
+// A variable so a test can pin it. Without one, a fixture and the cutoff that
+// has to contain it read the wall clock at two different moments — the fixture
+// when it is built, the cutoff when the request is handled, with inserts and a
+// rollup in between. A suite that crosses midnight in that gap builds its run
+// in one day and then asks for the next day's window, and the row it just
+// wrote is excluded. Production always reads the real clock.
+var dayWindowNow = time.Now
+
 func parseDaysCutoff(
 	r *http.Request,
 	defaultDays int,
@@ -441,7 +451,7 @@ func parseDaysCutoff(
 	// window by one would put the cutoff at start-of-today+0 — still correct
 	// ("today only"), which is exactly what days=1 means.
 	return pgtype.Timestamptz{
-		Time:  sinceFromDays(time.Now(), days-trimDays, loc),
+		Time:  sinceFromDays(dayWindowNow(), days-trimDays, loc),
 		Valid: true,
 	}
 }

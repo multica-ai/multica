@@ -3138,10 +3138,11 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 	return claimed, nil
 }
 
-// FinalizeTaskClaim atomically persists the task-scoped token and, for a
+// FinalizeTaskClaim atomically persists the task-scoped agent token, an
+// optional short-lived daemon token used by the Remote MCP broker, and, for a
 // comment-backed task, the exact comment ids embedded in the response. The
 // handler must call this only after the full payload has been built and before
-// writing any response bytes. A failure rolls both writes back so the claim can
+// writing any response bytes. A failure rolls every write back so the claim can
 // be safely returned to the queue.
 func (s *TaskService) FinalizeTaskClaim(
 	ctx context.Context,
@@ -3149,11 +3150,25 @@ func (s *TaskService) FinalizeTaskClaim(
 	token db.CreateTaskTokenParams,
 	deliveredCommentIDs []pgtype.UUID,
 	recordCommentReceipt bool,
+	daemonTokens ...db.CreateDaemonTokenParams,
 ) ([]pgtype.UUID, error) {
+	if len(daemonTokens) > 1 {
+		return nil, fmt.Errorf("finalize task claim: expected at most one daemon token, got %d", len(daemonTokens))
+	}
 	receipt := task.DeliveredCommentIds
 	err := s.runInTx(ctx, func(qtx *db.Queries) error {
 		if _, err := qtx.CreateTaskToken(ctx, token); err != nil {
 			return fmt.Errorf("create task token: %w", err)
+		}
+		if len(daemonTokens) == 1 {
+			// Opportunistic bounded cleanup keeps short-lived per-task daemon
+			// credentials from accumulating without adding another sweeper.
+			if err := qtx.DeleteExpiredDaemonTokens(ctx); err != nil {
+				return fmt.Errorf("delete expired daemon tokens: %w", err)
+			}
+			if _, err := qtx.CreateDaemonToken(ctx, daemonTokens[0]); err != nil {
+				return fmt.Errorf("create remote MCP daemon token: %w", err)
+			}
 		}
 		if !recordCommentReceipt {
 			return nil
@@ -4902,6 +4917,7 @@ type PluginExecutionManifestData struct {
 	ComposerVersion      string                        `json:"composer_version"`
 	SchemaVersion        int32                         `json:"schema_version"`
 	OrderedContributions []pluginruntime.CompiledEntry `json:"ordered_contributions"`
+	Diagnostics          []string                      `json:"diagnostics,omitempty"`
 }
 
 // LoadTaskPluginSkillBundles resolves only the immutable artifact files named
@@ -4932,35 +4948,62 @@ func (s *TaskService) LoadTaskPluginSkillBundles(ctx context.Context, taskID pgt
 	if len(entries) == 0 {
 		return nil, nil, data, nil
 	}
+	artifactFileIDs := make([]pgtype.UUID, 0)
+	seenArtifactFileIDs := make(map[string]struct{})
+	for _, entry := range entries {
+		if entry.ContributionType != plugincontract.ContributionAgentSkillV1 {
+			continue
+		}
+		ids := make([]string, 0, len(entry.SkillFiles)+1)
+		ids = append(ids, entry.ArtifactFileID)
+		for _, file := range entry.SkillFiles {
+			ids = append(ids, file.ArtifactFileID)
+		}
+		for _, id := range ids {
+			if _, exists := seenArtifactFileIDs[id]; exists {
+				continue
+			}
+			parsed, parseErr := util.ParseUUID(id)
+			if parseErr != nil {
+				return nil, nil, nil, fmt.Errorf("execution manifest contains invalid artifact file id")
+			}
+			seenArtifactFileIDs[id] = struct{}{}
+			artifactFileIDs = append(artifactFileIDs, parsed)
+		}
+	}
+	artifactFilesByID := make(map[string]db.PluginArtifactFile, len(artifactFileIDs))
+	if len(artifactFileIDs) > 0 {
+		artifactFiles, listErr := s.Queries.ListPluginArtifactFilesByIDs(ctx, artifactFileIDs)
+		if listErr != nil {
+			return nil, nil, nil, fmt.Errorf("load pinned plugin Skill artifacts: %w", listErr)
+		}
+		for _, file := range artifactFiles {
+			artifactFilesByID[util.UUIDToString(file.ID)] = file
+		}
+	}
 
 	skills := make([]AgentSkillData, 0, len(entries))
+	skillEntries := make([]pluginruntime.CompiledEntry, 0, len(entries))
 	for _, entry := range entries {
+		if entry.ContributionType == plugincontract.ContributionRemoteMCPV1 {
+			if entry.ConfigID == "" || entry.ConfigRevision <= 0 || entry.Endpoint == "" || len(entry.ApprovedTools) == 0 || entry.ToolSchemaDigest == "" {
+				return nil, nil, nil, fmt.Errorf("execution manifest contains invalid remote MCP contribution")
+			}
+			continue
+		}
 		if entry.ContributionType != plugincontract.ContributionAgentSkillV1 || entry.ArtifactFileID == "" {
 			return nil, nil, nil, fmt.Errorf("execution manifest contains unsupported plugin contribution")
 		}
-		artifactFileID, parseErr := util.ParseUUID(entry.ArtifactFileID)
-		if parseErr != nil {
-			return nil, nil, nil, fmt.Errorf("execution manifest contains invalid artifact file id")
+		skill, materializeErr := materializePinnedPluginSkill(entry, artifactFilesByID)
+		if materializeErr != nil {
+			return nil, nil, nil, materializeErr
 		}
-		artifact, getErr := s.Queries.GetPluginArtifactFile(ctx, artifactFileID)
-		if getErr != nil {
-			return nil, nil, nil, fmt.Errorf("load pinned plugin artifact: %w", getErr)
-		}
-		releaseID, parseErr := util.ParseUUID(entry.ReleaseID)
-		if parseErr != nil || artifact.ReleaseID != releaseID || artifact.Path != entry.EntryPath || artifact.Digest != entry.EntryDigest || plugincontract.DigestBytes([]byte(artifact.Content)) != entry.EntryDigest {
-			return nil, nil, nil, fmt.Errorf("pinned plugin artifact failed digest validation")
-		}
-		skills = append(skills, AgentSkillData{
-			ID:          "plugin:" + entry.ContributionID,
-			Source:      skillbundle.SourcePlugin,
-			Name:        entry.ContributionKey,
-			Description: entry.Description,
-			Content:     artifact.Content,
-		})
+		skills = append(skills, skill)
+		skillEntries = append(skillEntries, entry)
 	}
 	bundles, refs := BuildAgentSkillBundles(skills)
 	for i := range refs {
-		if refs[i].Hash != entries[i].SkillBundleHash || refs[i].SizeBytes != entries[i].SkillSizeBytes || refs[i].FileCount != entries[i].SkillFileCount {
+		if refs[i].Hash != skillEntries[i].SkillBundleHash || refs[i].SizeBytes != skillEntries[i].SkillSizeBytes || refs[i].FileCount != skillEntries[i].SkillFileCount {
 			return nil, nil, nil, fmt.Errorf("pinned plugin skill bundle failed manifest validation")
 		}
 	}

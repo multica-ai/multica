@@ -4,7 +4,22 @@ import (
 	"io/fs"
 	"testing"
 	"testing/fstest"
+
+	"github.com/multica-ai/multica/server/pkg/plugincontract"
 )
+
+func TestV1HostSupportsRemoteMCPDaemonFeature(t *testing.T) {
+	manifest := plugincontract.Manifest{Compatibility: plugincontract.Compatibility{
+		HostAPI: ">=1.0.0 <2.0.0",
+		RequiredDaemonFeatures: []string{
+			plugincontract.DaemonFeatureExecutionManifestV1,
+			plugincontract.DaemonFeatureRemoteMCPV1,
+		},
+	}}
+	if compatible, why := CompatibleWithV1Host(manifest); !compatible {
+		t.Fatalf("Remote MCP V1 compatibility = false, %s", why)
+	}
+}
 
 func TestBundledCatalogLoadsSignedOfficialReleases(t *testing.T) {
 	catalog := Load()
