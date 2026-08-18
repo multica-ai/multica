@@ -1,6 +1,6 @@
--- Add Huawei Cloud CodeArts Agent as a first-party protocol family. NOT VALID
--- preserves historical-row tolerance while enforcing the expanded whitelist
--- for new rows.
+-- Restore the pre-348 whitelist. Existing CodeArts rows remain valid because
+-- the replacement constraint is NOT VALID, but new CodeArts profiles are
+-- blocked.
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
 
 ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
@@ -10,7 +10,6 @@ ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
         'codex',
         'copilot',
         'opencode',
-        'codearts',
         'openclaw',
         'hermes',
         'pi',
@@ -26,5 +25,6 @@ ALTER TABLE runtime_profile ADD CONSTRAINT runtime_profile_protocol_family_check
         'deveco',
         'grok',
         'qwen',
-        'qwenpaw'
+        'qwenpaw',
+        'mcode'
     )) NOT VALID;

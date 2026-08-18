@@ -109,7 +109,8 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// extension is too long" (#6538). Keeping the prompt off argv also stops it
 	// from being echoed into the "agent command" log line below.
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	runtimeCmd := b.cfg.commandAt(execPath)
+	cmd := runtimeCmd.exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	// Run codearts in its own process group so cancellation can reach the
 	// whole tree (codearts plus any tool subprocess it spawns), not just the
@@ -123,7 +124,7 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// signalled. Returning nil here keeps os/exec from racing us with its own
 	// kill; WaitDelay remains the hard backstop.
 	cmd.Cancel = func() error { return nil }
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args, "prompt_bytes", len(prompt))
+	b.cfg.Logger.Info("agent command", "exec", execPath, "args", runtimeCmd.Argv(args...), "prompt_bytes", len(prompt))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -171,7 +172,7 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	closeStdin := func() { closeStdinOnce.Do(func() { _ = stdin.Close() }) }
 	cmd.Stderr = newLogWriter(b.cfg.Logger, "[codearts:stderr] ")
 
-	if err := cmd.Start(); err != nil {
+	if err := startOwnedProcessTree(cmd, b.cfg.Logger); err != nil {
 		closeStdin()
 		cancel()
 		return nil, fmt.Errorf("start codearts: %w", err)
@@ -240,6 +241,7 @@ func (b *codeartsBackend) Execute(ctx context.Context, prompt string, opts ExecO
 		// Wait for process exit, then release the cancellation handler.
 		exitErr := cmd.Wait()
 		close(procDone)
+		releaseProcessGroup(cmd)
 		duration := time.Since(startTime)
 
 		// Wait closes the process pipes, so a prompt write still blocked when
@@ -734,7 +736,6 @@ func buildCodeArtsEnv(extra map[string]string) []string {
 		"OPENCODE_CONFIG_FILE":           "codearts_cli.json,codearts_cli.jsonc",
 		"OPENCODE_MODE":                  "tui",
 		"PLUGIN_ENV":                     "hc",
-		"NODE_TLS_REJECT_UNAUTHORIZED":   "0",
 		"OPENCODE_DISABLE_MODELS_FETCH":  "1",
 		"OPENCODE_DISABLE_AUTOUPDATE":    "true",
 		"OPENCODE_ALWAYS_NOTIFY_UPDATE":  "false",
@@ -760,24 +761,25 @@ func buildCodeArtsMCPConfigContent(raw json.RawMessage) (string, error) {
 
 // discoverCodeArtsModels uses the model catalog command exposed by CodeArts.
 // CodeArts does not expose OpenCode variants, so variant metadata is removed.
-func discoverCodeArtsModels(ctx context.Context, executablePath string) ([]Model, error) {
-	if executablePath == "" {
-		executablePath = "codearts"
+func discoverCodeArtsModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	if runtimeCmd.Path == "" {
+		runtimeCmd.Path = "codearts"
 	}
-	resolved, err := exec.LookPath(executablePath)
+	resolved, err := exec.LookPath(runtimeCmd.Path)
 	if err != nil {
 		return []Model{}, nil
 	}
+	runtimeCmd.Path = resolved
 	if runtime.GOOS == "windows" {
-		if native := resolveCodeArtsNativeFromShim(resolved, os.Stat); native != "" {
-			resolved = native
+		if native := resolveCodeArtsNativeFromShim(runtimeCmd.Path, os.Stat); native != "" {
+			runtimeCmd.Path = native
 		}
 	}
 
 	runCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	run := func(args ...string) []Model {
-		cmd := exec.CommandContext(runCtx, resolved, args...)
+		cmd := runtimeCmd.exec(runCtx, args...)
 		hideAgentWindow(cmd)
 		cmd.Env = buildCodeArtsEnv(nil)
 		out, _ := cmd.Output()
