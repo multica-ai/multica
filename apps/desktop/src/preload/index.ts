@@ -189,6 +189,11 @@ const desktopAPI = {
       issueKey: string;
     }) => void,
   ) => subscribeToMainRendererChannel("inbox:open", callback),
+  /** Listen for issue destinations delivered via deep link
+   *  (multica://<slug>/issues/<id>) */
+  onIssueOpen: (
+    callback: (payload: { slug: string; issueId: string }) => void,
+  ) => subscribeToMainRendererChannel("issue:open", callback),
   /** Listen for native macOS back/forward swipe gestures. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, gesture: unknown) => {

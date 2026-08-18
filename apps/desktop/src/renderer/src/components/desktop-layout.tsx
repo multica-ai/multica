@@ -30,6 +30,7 @@ import {
 } from "@/platform/navigation";
 import { TabBar } from "./tab-bar";
 import { TabContent } from "./tab-content";
+import { IssueDeepLinkBridge } from "./issue-deep-link-bridge";
 import { WindowOverlay } from "./window-overlay";
 
 const TOP_BAR_HEIGHT_CLASS = "h-12";
@@ -265,6 +266,7 @@ export function DesktopShell() {
           IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
         <DesktopInboxBridge />
+        <IssueDeepLinkBridge />
         <div className="flex h-screen bg-app-shell">
           {/* bg-app-shell is the wrapper's non-inset fill, so it also owns the
               non-inset half of --sidebar-wrapper-fill. sidebar.tsx supplies the

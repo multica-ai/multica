@@ -59,6 +59,7 @@ import {
   NotificationGate,
   parseNativeNotificationPayload,
 } from "./notification-gate";
+import { parseDeepLink, PROTOCOL } from "./deep-link";
 
 // Guards against registering the will-download handler more than once on the
 // same session. window.webContents.session is shared, and createWindow() can
@@ -116,7 +117,6 @@ if (process.platform !== "win32") {
   process.env.PATH = `${fallbackPaths.join(":")}:${process.env.PATH ?? ""}`;
 }
 
-const PROTOCOL = "multica";
 const devLog = is.dev ? createBestEffortDevLog() : undefined;
 
 // Where the main process parks a freeze/crash breadcrumb until the next
@@ -181,28 +181,32 @@ function dispatchToMainRenderer(
 }
 
 function handleDeepLink(url: string): void {
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== `${PROTOCOL}:`) return;
+  const link = parseDeepLink(url);
+  if (!link) return;
 
+  switch (link.kind) {
     // multica://auth/callback?token=<jwt>
-    if (parsed.hostname === "auth" && parsed.pathname === "/callback") {
-      const token = parsed.searchParams.get("token");
-      if (token) dispatchToMainRenderer("auth:token", token);
+    case "auth-token":
+      dispatchToMainRenderer("auth:token", link.token);
       return;
-    }
-
     // multica://invite/<invitationId>
     // Dispatched from the web invite page when the user chooses "Open in
     // desktop app". The renderer opens the invite overlay — no tab, no
     // route persistence, so deep-linking the same invite twice stays safe.
-    if (parsed.hostname === "invite") {
-      const id = parsed.pathname.replace(/^\//, "");
-      if (id) dispatchToMainRenderer("invite:open", decodeURIComponent(id));
+    case "invite":
+      dispatchToMainRenderer("invite:open", link.invitationId);
       return;
-    }
-  } catch {
-    // Ignore malformed URLs
+    // multica://<slug>/issues/<id>
+    // The workspace is carried by the link, not read from the running app, so
+    // a link for workspace A opens A even when B is the active workspace. Main
+    // forwards identifiers only; the renderer builds the route and performs
+    // the workspace switch.
+    case "issue":
+      dispatchToMainRenderer("issue:open", {
+        slug: link.slug,
+        issueId: link.issueId,
+      });
+      return;
   }
 }
 
@@ -767,10 +771,17 @@ if (!gotTheLock) {
       if (!sourceWindow || userId === undefined) return;
 
       if (sourceWindow === mainWindow) {
+        // Distinguishes a real logout / account switch from the boot-time
+        // "nobody is signed in yet" report, which also invalidates.
+        const hadSession = authSessionCoordinator.hasActiveMainSession();
         const accountInvalidated = authSessionCoordinator.reportMain(userId);
         if (accountInvalidated) {
           authSessionGeneration += 1;
           mainRendererMessages.clear("inbox:open");
+          // A queued issue deep link must survive the login it triggered — a
+          // cold-start link lands while the app is still on the login screen —
+          // but must not follow the user into a different account.
+          if (hadSession) mainRendererMessages.clear("issue:open");
         }
         return;
       }
