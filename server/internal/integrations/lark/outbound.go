@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -151,6 +152,13 @@ type PatcherQueries interface {
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
+
+	// Used by the inbox:new push (inbox_push.go) to find the bound member
+	// to deliver to, build a readable link, and backfill the issue
+	// description into body-less assignment notifications.
+	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
+	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+	GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error)
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
@@ -212,6 +220,12 @@ type Patcher struct {
 	client          APIClient
 	typingIndicator *TypingIndicatorManager
 	cfg             PatcherConfig
+
+	// inboxDigests tracks the live inbox card per (recipient, issue) so a
+	// burst of activity patches one card instead of stacking new ones.
+	// See inbox_digest.go.
+	inboxMu      sync.Mutex
+	inboxDigests map[string]*inboxDigest
 }
 
 // NewPatcher constructs a Patcher bound to its dependencies. The
@@ -285,6 +299,9 @@ func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
 	bus.Subscribe(protocol.EventTaskCancelled, p.handleEvent)
+	// Inbox notifications delivered to a member's Lark DM when they have
+	// bound their account; a no-op for everyone else. See inbox_push.go.
+	bus.Subscribe(protocol.EventInboxNew, p.handleInboxNew)
 }
 
 func (p *Patcher) handleEvent(e events.Event) {
