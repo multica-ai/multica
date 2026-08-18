@@ -79,11 +79,13 @@ export function SkillAddDialog({
     if (selectedIds.size === 0) return;
     setSaving(true);
     try {
-      const newIds = [
-        ...agent.skills.map((s) => s.id),
-        ...selectedIds,
-      ];
-      await api.setAgentSkills(agent.id, { skill_ids: newIds });
+      // Incremental add, never replace-all. `setAgentSkills` (PUT) drops
+      // every existing agent_skill row and reinserts it, so any binding the
+      // user had switched off comes back at the column default (enabled) —
+      // adding one skill silently re-enabled the others (MUL-5358).
+      // `addAgentSkills` (POST /skills/add) only inserts the picked ids and
+      // leaves existing bindings, including their enabled state, untouched.
+      await api.addAgentSkills(agent.id, { skill_ids: [...selectedIds] });
       qc.invalidateQueries({ queryKey: workspaceKeys.agents(wsId) });
       handleOpenChange(false);
     } catch (e) {

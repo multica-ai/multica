@@ -2265,8 +2265,11 @@ func TestAddAgentSkillsPreservesExistingAssignments(t *testing.T) {
 	existingSkillID := insertHandlerTestSkill(t, "add-preserve-existing", "existing body")
 	newSkillID := insertHandlerTestSkill(t, "add-preserve-new", "new body")
 
+	// MUL-5358: the existing assignment is deliberately switched off. Adding
+	// another skill must not resurrect it — the replace-all PUT path did,
+	// because reinserted rows fall back to the `enabled` column default.
 	if _, err := testPool.Exec(context.Background(),
-		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
+		`INSERT INTO agent_skill (agent_id, skill_id, enabled) VALUES ($1, $2, false)`,
 		agentID, existingSkillID,
 	); err != nil {
 		t.Fatalf("seed existing skill assignment: %v", err)
@@ -2288,6 +2291,40 @@ func TestAddAgentSkillsPreservesExistingAssignments(t *testing.T) {
 	}
 	assertSkillIDsPresent(t, resp, existingSkillID, newSkillID)
 	assertAgentSkillRowCount(t, agentID, 2)
+	assertAgentSkillEnabled(t, agentID, existingSkillID, false)
+	assertAgentSkillEnabled(t, agentID, newSkillID, true)
+	assertSkillSummaryEnabled(t, resp, existingSkillID, false)
+	assertSkillSummaryEnabled(t, resp, newSkillID, true)
+}
+
+// TestSetAgentSkillsResetsEnabledState pins the semantics that make the
+// replace-all endpoint the wrong tool for "add a skill": PUT rebuilds the
+// whole binding set, so a disabled assignment comes back enabled. Callers
+// that only mean to attach new skills must use AddAgentSkills (MUL-5358).
+func TestSetAgentSkillsResetsEnabledState(t *testing.T) {
+	agentID := createHandlerTestAgent(t, "Handler Set Skills Resets Enabled", nil)
+	existingSkillID := insertHandlerTestSkill(t, "set-reset-existing", "existing body")
+	newSkillID := insertHandlerTestSkill(t, "set-reset-new", "new body")
+
+	if _, err := testPool.Exec(context.Background(),
+		`INSERT INTO agent_skill (agent_id, skill_id, enabled) VALUES ($1, $2, false)`,
+		agentID, existingSkillID,
+	); err != nil {
+		t.Fatalf("seed existing skill assignment: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/agents/"+agentID+"/skills", map[string]any{
+		"skill_ids": []string{existingSkillID, newSkillID},
+	})
+	req = withURLParam(req, "id", agentID)
+	testHandler.SetAgentSkills(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("SetAgentSkills: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	assertAgentSkillRowCount(t, agentID, 2)
+	assertAgentSkillEnabled(t, agentID, existingSkillID, true)
 }
 
 func TestAddAgentSkillsAddsMultipleAndIsIdempotent(t *testing.T) {
@@ -2382,6 +2419,37 @@ func assertSkillIDsPresent(t *testing.T, skills []SkillSummaryResponse, wantIDs 
 		if !got[want] {
 			t.Fatalf("response missing skill %s; got %+v", want, skills)
 		}
+	}
+}
+
+func assertSkillSummaryEnabled(t *testing.T, skills []SkillSummaryResponse, skillID string, want bool) {
+	t.Helper()
+	for _, s := range skills {
+		if s.ID != skillID {
+			continue
+		}
+		if s.Enabled == nil {
+			t.Fatalf("skill %s: enabled is nil, want %t", skillID, want)
+		}
+		if *s.Enabled != want {
+			t.Fatalf("skill %s: enabled=%t, want %t", skillID, *s.Enabled, want)
+		}
+		return
+	}
+	t.Fatalf("response missing skill %s; got %+v", skillID, skills)
+}
+
+func assertAgentSkillEnabled(t *testing.T, agentID, skillID string, want bool) {
+	t.Helper()
+	var got bool
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT enabled FROM agent_skill WHERE agent_id = $1 AND skill_id = $2`,
+		agentID, skillID,
+	).Scan(&got); err != nil {
+		t.Fatalf("read agent_skill.enabled for skill %s: %v", skillID, err)
+	}
+	if got != want {
+		t.Fatalf("agent_skill.enabled for skill %s: got %t, want %t", skillID, got, want)
 	}
 }
 
