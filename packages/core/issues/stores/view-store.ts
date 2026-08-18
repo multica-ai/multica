@@ -1,12 +1,10 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { create } from "zustand";
-import { createStore, type StoreApi } from "zustand/vanilla";
-import { createJSONStorage, persist } from "zustand/middleware";
+import type { StoreApi } from "zustand/vanilla";
+import { createJSONStorage } from "zustand/middleware";
 import type { IssueStatus, IssuePriority } from "../../types";
 import { ALL_STATUSES } from "../config";
-import { createWorkspaceAwareStorage, registerForWorkspaceRehydration } from "../../platform/workspace-storage";
+import { createWorkspaceAwareStorage } from "../../platform/workspace-storage";
 import { defaultStorage } from "../../platform/storage";
 
 export type ViewMode = "board" | "list" | "table" | "gantt" | "swimlane";
@@ -626,41 +624,4 @@ export function mergeViewStatePersisted<T extends IssueViewState>(
       ? p.tableCollapsedParents
       : current.tableCollapsedParents,
   };
-}
-
-/** Factory: creates a vanilla StoreApi for use with React Context. */
-export function createIssueViewStore(persistKey: string): StoreApi<IssueViewState> {
-  const store = createStore<IssueViewState>()(
-    persist(viewStoreSlice, viewStorePersistOptions(persistKey))
-  );
-  registerForWorkspaceRehydration(() => store.persist.rehydrate());
-  return store;
-}
-
-/** Global singleton for the /issues page. */
-export const useIssueViewStore = create<IssueViewState>()(
-  persist(viewStoreSlice, viewStorePersistOptions("multica_issues_view"))
-);
-
-registerForWorkspaceRehydration(() => useIssueViewStore.persist.rehydrate());
-
-/**
- * Clears the given view store's filters whenever the workspace id changes.
- *
- * URL-driven: wsId arrives from `useWorkspaceId()` (Context fed by the
- * `[workspaceSlug]` route). We track the previous id via ref so the first
- * render doesn't wipe persisted filters — clearing only fires on transitions
- * from one defined workspace to another.
- */
-export function useClearFiltersOnWorkspaceChange(
-  store: StoreApi<IssueViewState> | { getState: () => IssueViewState },
-  wsId: string | undefined,
-) {
-  const prevIdRef = useRef<string | undefined>(undefined);
-  useEffect(() => {
-    if (prevIdRef.current && wsId && wsId !== prevIdRef.current) {
-      store.getState().clearFilters();
-    }
-    prevIdRef.current = wsId;
-  }, [wsId, store]);
 }

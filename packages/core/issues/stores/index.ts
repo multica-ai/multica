@@ -39,11 +39,8 @@ export {
   type ActorIssuesScope,
 } from "./actor-issues-view-store";
 export {
-  useIssueViewStore,
-  createIssueViewStore,
   viewStoreSlice,
   viewStorePersistOptions,
-  useClearFiltersOnWorkspaceChange,
   SORT_OPTIONS,
   CARD_PROPERTY_OPTIONS,
   TABLE_SYSTEM_COLUMNS,

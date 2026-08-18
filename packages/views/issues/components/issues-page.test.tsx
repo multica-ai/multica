@@ -340,22 +340,12 @@ const mockViewState = {
 };
 
 vi.mock("@multica/core/issues/stores/view-store", () => ({
-  useClearFiltersOnWorkspaceChange: () => {},
   PROPERTY_VIEW_PREFIX: "property:",
   propertyIdFromViewKey: (key: string) =>
     key.startsWith("property:") ? key.slice("property:".length) : null,
   viewStorePersistOptions: () => ({ name: "test", storage: undefined, partialize: (s: any) => s }),
   mergeViewStatePersisted: (_p: unknown, c: any) => c,
   viewStoreSlice: vi.fn(),
-  useIssueViewStore: Object.assign(
-    (selector?: any) => (selector ? selector(mockViewState) : mockViewState),
-    { getState: () => mockViewState, setState: vi.fn() },
-  ),
-  createIssueViewStore: () => ({
-    getState: () => mockViewState,
-    setState: vi.fn(),
-    subscribe: vi.fn(),
-  }),
   SORT_OPTIONS: [
     { value: "position", label: "Manual" },
     { value: "priority", label: "Priority" },
