@@ -116,6 +116,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { useStatusOptions } from "../utils/status-options";
+import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
@@ -704,26 +705,38 @@ function PropertyFilterOptions({
       }));
   }, [actorProperty, actorMembers, currentUserId]);
 
-  const options = actorProperty
-    ? actorOptions.map((option) => ({
-        id: option.id,
-        name: option.name,
-        color: undefined as string | undefined,
-        actorType: option.actorType as string | undefined,
-        actorId: option.actorId as string | undefined,
-      }))
-    : property.type === "checkbox"
-      ? [
-          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined, actorType: undefined, actorId: undefined },
-          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined, actorType: undefined, actorId: undefined },
-        ]
-      : (property.config.options ?? []).map((option) => ({
+  // "No value" is offered for every property type: it selects issues where the
+  // property is unset, the inverse of picking one of the options below.
+  const noValueOption = {
+    id: NO_PROPERTY_VALUE,
+    name: t(($) => $.pickers.custom_property.no_value_label),
+    color: undefined as string | undefined,
+    actorType: undefined as string | undefined,
+    actorId: undefined as string | undefined,
+  };
+  const options = [
+    ...(actorProperty
+      ? actorOptions.map((option) => ({
           id: option.id,
           name: option.name,
-          color: option.color as string | undefined,
-          actorType: undefined as string | undefined,
-          actorId: undefined as string | undefined,
-        }));
+          color: undefined as string | undefined,
+          actorType: option.actorType as string | undefined,
+          actorId: option.actorId as string | undefined,
+        }))
+      : property.type === "checkbox"
+        ? [
+            { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined, actorType: undefined, actorId: undefined },
+            { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined, actorType: undefined, actorId: undefined },
+          ]
+        : (property.config.options ?? []).map((option) => ({
+            id: option.id,
+            name: option.name,
+            color: option.color as string | undefined,
+            actorType: undefined as string | undefined,
+            actorId: undefined as string | undefined,
+          }))),
+    noValueOption,
+  ];
 
   return (
     <>

@@ -619,6 +619,7 @@
       "empty": "空",
       "true_label": "是",
       "false_label": "否",
+      "no_value_label": "未设置",
       "value_placeholder": "输入值…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",

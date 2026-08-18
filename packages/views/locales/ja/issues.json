@@ -620,6 +620,7 @@
       "none": "値なし",
       "true_label": "はい",
       "false_label": "いいえ",
+      "no_value_label": "値なし",
       "value_placeholder": "値を入力…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",

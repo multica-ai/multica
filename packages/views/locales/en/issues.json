@@ -650,6 +650,7 @@
       "none": "No value",
       "true_label": "Yes",
       "false_label": "No",
+      "no_value_label": "No value",
       "value_placeholder": "Enter value…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",

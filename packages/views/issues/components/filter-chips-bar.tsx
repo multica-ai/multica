@@ -2,6 +2,7 @@
 
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useStatusLabel } from "../utils/status-label";
+import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { useMemo, type ReactNode } from "react";
 import {
   CalendarDays,
@@ -457,6 +458,9 @@ function useFilterChips(
     const actorProperty = isActorPropertyType(definition.type);
     const actorValues = actorProperty ? actorFilterValues(selected) : [];
     const optionName = (optionId: string): string | undefined => {
+      if (optionId === NO_PROPERTY_VALUE) {
+        return t(($) => $.pickers.custom_property.no_value_label);
+      }
       if (actorProperty) {
         const ref = parseActorRef(optionId);
         return ref ? actorName({ type: ref.kind, id: ref.id }) : undefined;
