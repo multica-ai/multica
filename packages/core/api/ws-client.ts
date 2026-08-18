@@ -2,6 +2,11 @@ import type { WSMessage, WSEventType } from "../types/events";
 import { type Logger, noopLogger } from "../logger";
 
 type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
+export type WSConnectionState =
+  | "idle"
+  | "connecting"
+  | "connected"
+  | "reconnecting";
 
 // Cap how much of an unparseable frame we put into the log. A malformed or
 // rogue server can stream arbitrarily large garbage, and the warn handler may
@@ -49,6 +54,10 @@ export class WSClient {
   private badFrameLogged = false;
   private onReconnectCallbacks = new Set<() => void>();
   private anyHandlers = new Set<(msg: WSMessage) => void>();
+  private connectionState: WSConnectionState = "idle";
+  private connectionStateHandlers = new Set<
+    (state: WSConnectionState) => void
+  >();
   private logger: Logger;
 
   constructor(
@@ -71,6 +80,7 @@ export class WSClient {
   }
 
   connect() {
+    this.publishConnectionState("connecting");
     this.badFrameLogged = false;
     const url = new URL(this.baseUrl);
     // Token is never sent as a URL query parameter — it would be logged by
@@ -158,9 +168,10 @@ export class WSClient {
   /**
    * Schedule a reconnection attempt with exponential backoff and jitter.
    * Retries indefinitely with a capped delay because the web/desktop UI
-   * does not yet expose a visible disconnected state or manual retry action.
+   * keeps trying while providers expose the current connection state to UI.
    */
   private scheduleReconnect() {
+    this.publishConnectionState("reconnecting");
     const base = Math.min(
       RECONNECT_BASE_DELAY_MS * 2 ** this.reconnectAttempt,
       RECONNECT_MAX_DELAY_MS,
@@ -180,6 +191,7 @@ export class WSClient {
   }
 
   private onAuthenticated() {
+    this.publishConnectionState("connected");
     this.logger.info("connected");
     const recoveredConnection = this.hasConnectedBefore || this.reconnectAttempt > 0;
     this.reconnectAttempt = 0;
@@ -212,6 +224,7 @@ export class WSClient {
     this.handlers.clear();
     this.anyHandlers.clear();
     this.onReconnectCallbacks.clear();
+    this.publishConnectionState("idle");
   }
 
   on(event: WSEventType, handler: EventHandler) {
@@ -236,6 +249,19 @@ export class WSClient {
     return () => {
       this.onReconnectCallbacks.delete(callback);
     };
+  }
+
+  onConnectionState(callback: (state: WSConnectionState) => void) {
+    this.connectionStateHandlers.add(callback);
+    return () => {
+      this.connectionStateHandlers.delete(callback);
+    };
+  }
+
+  private publishConnectionState(state: WSConnectionState) {
+    if (this.connectionState === state) return;
+    this.connectionState = state;
+    for (const handler of this.connectionStateHandlers) handler(state);
   }
 
   send(message: WSMessage) {

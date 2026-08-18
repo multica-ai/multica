@@ -10,6 +10,7 @@ import {
   type ReactNode,
 } from "react";
 import { WSClient } from "../api/ws-client";
+import type { WSConnectionState } from "../api/ws-client";
 import type { WSEventType, StorageAdapter } from "../types";
 import type { ClientIdentity } from "../platform/types";
 import type { StoreApi, UseBoundStore } from "zustand";
@@ -26,6 +27,7 @@ type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => 
 interface WSContextValue {
   subscribe: (event: WSEventType, handler: EventHandler) => () => void;
   onReconnect: (callback: () => void) => () => void;
+  connectionState: WSConnectionState;
 }
 
 const WSContext = createContext<WSContextValue | null>(null);
@@ -67,6 +69,8 @@ export function WSProvider({
     () => null,
   );
   const [wsClient, setWsClient] = useState<WSClient | null>(null);
+  const [connectionState, setConnectionState] =
+    useState<WSConnectionState>("idle");
 
   // Depend on identity primitives instead of the object reference so a parent
   // re-render that passes a new `{ platform, version, os }` literal does not
@@ -97,12 +101,17 @@ export function WSProvider({
           : undefined,
     });
     ws.setAuth(token, wsSlug);
+    const unsubscribeConnectionState = ws.onConnectionState(
+      setConnectionState,
+    );
     setWsClient(ws);
     ws.connect();
 
     return () => {
+      unsubscribeConnectionState();
       ws.disconnect();
       setWsClient(null);
+      setConnectionState("idle");
     };
   }, [
     user,
@@ -137,7 +146,9 @@ export function WSProvider({
   );
 
   return (
-    <WSContext.Provider value={{ subscribe, onReconnect: onReconnectCb }}>
+    <WSContext.Provider
+      value={{ subscribe, onReconnect: onReconnectCb, connectionState }}
+    >
       {children}
     </WSContext.Provider>
   );

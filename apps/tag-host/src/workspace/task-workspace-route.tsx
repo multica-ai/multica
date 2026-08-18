@@ -1,8 +1,5 @@
 import type { ReactNode } from 'react';
-import { ErrorBoundary } from '@multica/ui/components/common/error-boundary';
-import { ModalRegistry } from '@multica/views/modals/registry';
-import { TagHostProviders } from '@/platform/tag-host-providers';
-import { WorkspaceGate } from './workspace-gate';
+import { TagWorkspaceRoute } from './tag-workspace-route';
 
 export function TaskWorkspaceRoute({
   workspaceSlug,
@@ -14,15 +11,10 @@ export function TaskWorkspaceRoute({
   children: ReactNode;
 }) {
   return (
-    <TagHostProviders>
-      <WorkspaceGate workspaceSlug={workspaceSlug}>
-        <ErrorBoundary resetKeys={resetKeys}>
-          <main className="relative flex h-svh min-h-0 flex-col bg-background text-foreground">
-            {children}
-          </main>
-          <ModalRegistry />
-        </ErrorBoundary>
-      </WorkspaceGate>
-    </TagHostProviders>
+    <TagWorkspaceRoute workspaceSlug={workspaceSlug} resetKeys={resetKeys}>
+      <main className="relative flex h-full min-h-0 flex-col bg-background text-foreground">
+        {children}
+      </main>
+    </TagWorkspaceRoute>
   );
 }

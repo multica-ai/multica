@@ -1,7 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { ChatPage } from '@multica/views/chat';
-import { TagHostProviders } from '@/platform/tag-host-providers';
-import { WorkspaceGate } from '@/workspace/workspace-gate';
+import { TagWorkspaceRoute } from '@/workspace/tag-workspace-route';
 
 export const Route = createFileRoute('/$workspaceSlug/chat')({
   ssr: false,
@@ -11,10 +10,10 @@ export const Route = createFileRoute('/$workspaceSlug/chat')({
 function TagWorkspaceChatRoute() {
   const { workspaceSlug } = Route.useParams();
   return (
-    <TagHostProviders>
-      <WorkspaceGate workspaceSlug={workspaceSlug}>
+    <TagWorkspaceRoute workspaceSlug={workspaceSlug}>
+      <main className="flex h-full min-h-0 flex-col bg-background text-foreground">
         <ChatPage />
-      </WorkspaceGate>
-    </TagHostProviders>
+      </main>
+    </TagWorkspaceRoute>
   );
 }

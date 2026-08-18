@@ -208,6 +208,31 @@ describe("WSClient", () => {
     );
   });
 
+  it("publishes connecting, disconnected, recovered, and idle states", () => {
+    vi.useFakeTimers();
+    const ws = new WSClient("ws://example.test/ws", { cookieAuth: true });
+    ws.setAuth(null, "acme");
+    const states: string[] = [];
+    ws.onConnectionState((state) => states.push(state));
+
+    ws.connect();
+    FakeWebSocket.lastInstance!.onopen?.();
+    FakeWebSocket.lastInstance!.onclose?.();
+    vi.runOnlyPendingTimers();
+    FakeWebSocket.lastInstance!.onopen?.();
+    ws.disconnect();
+
+    expect(states).toEqual([
+      "connecting",
+      "connected",
+      "reconnecting",
+      "connecting",
+      "connected",
+      "idle",
+    ]);
+    vi.useRealTimers();
+  });
+
   // ── Reconnect backoff tests ────────────────────────────────────────
 
   describe("reconnect backoff", () => {

@@ -18,6 +18,7 @@ const socketState = vi.hoisted(() => ({
     on: (event: unknown, handler: unknown) => () => void;
     onAny: (handler: unknown) => () => void;
     onReconnect: (callback: unknown) => () => void;
+    onConnectionState: (callback: unknown) => () => void;
   }>,
   order: 0,
 }));
@@ -36,6 +37,7 @@ vi.mock("../api/ws-client", () => ({
         on: () => () => {},
         onAny: () => () => {},
         onReconnect: () => () => {},
+        onConnectionState: () => () => {},
       };
       socketState.clients.push(this.record);
     }
@@ -62,6 +64,10 @@ vi.mock("../api/ws-client", () => ({
 
     onReconnect(callback: unknown) {
       return this.record.onReconnect(callback);
+    }
+
+    onConnectionState(callback: unknown) {
+      return this.record.onConnectionState(callback);
     }
   },
 }));

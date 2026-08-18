@@ -1,14 +1,15 @@
 // @vitest-environment jsdom
 
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   user: { id: 'user-1' } as { id: string } | null,
   isLoading: false,
   currentSlug: null as string | null,
   currentWorkspaceId: null as string | null,
+  workspaceFailure: false,
 }));
 
 vi.mock('@multica/core/auth', () => ({
@@ -32,7 +33,10 @@ vi.mock('@multica/core/platform', () => ({
 vi.mock('@multica/core/workspace', () => ({
   workspaceBySlugOptions: (slug: string) => ({
     queryKey: ['workspace-by-slug', slug],
-    queryFn: async () => null,
+    queryFn: async () => {
+      if (state.workspaceFailure) throw new Error('workspace service offline');
+      return null;
+    },
   }),
 }));
 
@@ -57,7 +61,10 @@ beforeEach(() => {
   state.isLoading = false;
   state.currentSlug = null;
   state.currentWorkspaceId = null;
+  state.workspaceFailure = false;
 });
+
+afterEach(cleanup);
 
 describe('WorkspaceGate', () => {
   it('does not mount child queries before the workspace resolves', () => {
@@ -99,5 +106,45 @@ describe('WorkspaceGate', () => {
       'design-lab'
     );
     expect(state.currentWorkspaceId).toBe('workspace-1');
+  });
+
+  it('shows an explicit retry state when Workspace resolution fails', async () => {
+    state.workspaceFailure = true;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    renderGate(queryClient);
+
+    expect(await screen.findByText('Could not load workspace')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeTruthy();
+    expect(screen.queryByTestId('child-workspace')).toBeNull();
+  });
+
+  it('leaves a 44px return to VIBES action when the session is unavailable', () => {
+    state.user = null;
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    renderGate(queryClient);
+
+    const returnLink = screen.getByRole('link', { name: 'Return to VIBES' });
+    expect(returnLink.getAttribute('href')).toBe('/');
+    expect(returnLink.className).toContain('min-h-11');
+    expect(returnLink.className).toContain('min-w-11');
+  });
+
+  it('names the no-access possibility without exposing workspace existence', async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    renderGate(queryClient);
+
+    expect(
+      await screen.findByText('Workspace unavailable or access denied')
+    ).toBeTruthy();
+    expect(screen.queryByTestId('child-workspace')).toBeNull();
   });
 });
