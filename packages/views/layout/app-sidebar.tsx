@@ -16,7 +16,7 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import {
+import { Layers,
   ChevronDown,
   ChevronRight,
   LogOut,
@@ -45,6 +45,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import {
   DropdownMenu,
@@ -56,6 +57,11 @@ import {
   DropdownMenuTrigger,
 } from "@multica/ui/components/ui/dropdown-menu";
 import { useAuthStore } from "@multica/core/auth";
+import { issueViewDetailOptions } from "@multica/core/issue-views/queries";
+import {
+  issueViewContainerKey,
+  useActiveIssueViewStore,
+} from "@multica/core/issue-views/active-view-store";
 import { useCurrentWorkspace, useWorkspacePaths, paths } from "@multica/core/paths";
 import { workspaceListOptions, myInvitationListOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -65,7 +71,6 @@ import { chatSessionsOptions } from "@multica/core/chat/queries";
 import { countUnreadChatMessages } from "@multica/core/chat/unread";
 import { useChatStore } from "@multica/core/chat";
 import { api, ApiError } from "@multica/core/api";
-import { useModalStore } from "@multica/core/modals";
 import { useConfigStore } from "@multica/core/config";
 import { pinListOptions } from "@multica/core/pins/queries";
 import { useDeletePin, useReorderPins } from "@multica/core/pins/mutations";
@@ -177,6 +182,8 @@ function SortablePinItem({
   onUnpin,
   label,
   iconNode,
+  onNavigate,
+  isActiveOverride,
 }: {
   pin: PinnedItem;
   href: string;
@@ -184,6 +191,10 @@ function SortablePinItem({
   onUnpin: () => void;
   label: string;
   iconNode: React.ReactNode;
+  /** Runs on a real click (not a drag-release) before navigation. */
+  onNavigate?: () => void;
+  /** Overrides the plain path comparison (view pins carry extra state). */
+  isActiveOverride?: boolean;
 }) {
   const { t } = useT("layout");
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: pin.id });
@@ -194,7 +205,7 @@ function SortablePinItem({
   }, [isDragging]);
 
   const style = { transform: CSS.Transform.toString(transform), transition };
-  const isActive = pathname === href;
+  const isActive = isActiveOverride ?? pathname === href;
 
   return (
     <SidebarMenuItem
@@ -207,13 +218,14 @@ function SortablePinItem({
       <SidebarMenuButton
         size="sm"
         isActive={isActive}
-        render={<AppLink href={href} draggable={false} />}
+        render={<AppLink href={href} newTabTitle={label} draggable={false} />}
         onClick={(event) => {
           if (wasDragged.current) {
             wasDragged.current = false;
             event.preventDefault();
             return;
           }
+          onNavigate?.();
         }}
         className={cn(
           "text-muted-foreground hover:not-data-active:bg-sidebar-accent/70 data-active:bg-sidebar-accent data-active:text-sidebar-accent-foreground",
@@ -271,23 +283,80 @@ function PinRow({
   wsId: string;
 }) {
   const isIssue = pin.item_type === "issue";
+  const isView = pin.item_type === "view";
+  const p = useWorkspacePaths();
+  const setActiveView = useActiveIssueViewStore((s) => s.setActive);
   const issueQuery = useQuery({
     ...issueDetailOptions(wsId, pin.item_id),
     enabled: isIssue,
   });
   const projectQuery = useQuery({
     ...projectDetailOptions(wsId, pin.item_id),
-    enabled: !isIssue,
+    enabled: pin.item_type === "project",
+  });
+  const viewQuery = useQuery({
+    ...issueViewDetailOptions(wsId, pin.item_id),
+    enabled: isView,
   });
 
   const triggeredRef = useRef(false);
   useEffect(() => {
+    // Views are exempt from 404-auto-unpin: an installed desktop client
+    // talking to an older backend without the view endpoints sees 404 for
+    // every view pin — auto-unpinning would permanently delete them all.
+    // A deleted view's row simply hides instead.
+    if (isView) return;
     const err = isIssue ? issueQuery.error : projectQuery.error;
     if (err instanceof ApiError && err.status === 404 && !triggeredRef.current) {
       triggeredRef.current = true;
       onUnpin();
     }
-  }, [isIssue, issueQuery.error, onUnpin, projectQuery.error]);
+  }, [isIssue, isView, issueQuery.error, onUnpin, projectQuery.error]);
+
+  const activeViewByContainer = useActiveIssueViewStore((s) => s.active);
+  if (isView) {
+    if (viewQuery.isPending) return <PinSkeleton />;
+    if (viewQuery.isError || !viewQuery.data) return null;
+    const view = viewQuery.data;
+    // One resolved scope drives the path AND the container key so an
+    // unrecognised scope_type from a newer backend degrades coherently.
+    const scopeType: "workspace" | "my" | "project" =
+      view.scope_type === "my"
+        ? "my"
+        : view.scope_type === "project" && view.scope_id
+          ? "project"
+          : "workspace";
+    const viewPath =
+      scopeType === "my"
+        ? p.myIssues()
+        : scopeType === "project"
+          ? p.projectDetail(view.scope_id!)
+          : p.issues();
+    const containerKey = issueViewContainerKey(wsId, {
+      scope_type: scopeType,
+      scope_id: scopeType === "project" ? view.scope_id : null,
+    });
+    return (
+      <SortablePinItem
+        pin={pin}
+        // ?view= keeps a web reload on the view for the surfaces that mount
+        // the URL-sync hook (/issues, /my-issues). Project pages don't sync
+        // yet — there the query is inert and reload falls back to the plain
+        // page; click-through activation still works everywhere.
+        href={`${viewPath}?view=${view.id}`}
+        pathname={pathname}
+        onUnpin={onUnpin}
+        label={view.name}
+        iconNode={<Layers className="!size-3.5 shrink-0" />}
+        // Active only when this exact view is open on its surface — the
+        // path alone also matches the plain tab.
+        isActiveOverride={
+          pathname === viewPath && activeViewByContainer[containerKey] === view.id
+        }
+        onNavigate={() => setActiveView(containerKey, view.id)}
+      />
+    );
+  }
 
   if (isIssue) {
     if (issueQuery.isPending) return <PinSkeleton />;
@@ -360,6 +429,18 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const { data: myInvitations = EMPTY_INVITATIONS } = useQuery(myInvitationListOptions());
   const workspaceCreationDisabled = useConfigStore((s) => s.workspaceCreationDisabled);
 
+  // On a phone the sidebar is a Sheet covering the page, so navigating out of
+  // it has to dismiss it — otherwise the destination renders underneath and the
+  // tap reads as "nothing happened". Closing on `pathname` rather than on each
+  // link's onClick covers every route out of here at once: the nav groups, the
+  // pinned items, the workspace switcher's programmatic push, and anything
+  // added later. `setOpenMobile` is a no-op on desktop, where the sheet is not
+  // the sidebar's rendering at all.
+  const { setOpenMobile } = useSidebar();
+  useEffect(() => {
+    setOpenMobile(false);
+  }, [pathname, setOpenMobile]);
+
   const wsId = workspace?.id;
   const { data: inboxItems = EMPTY_INBOX } = useQuery({
     queryKey: wsId ? inboxKeys.list(wsId) : ["inbox", "disabled"],
@@ -423,7 +504,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
   const sidebarScrollRef = useRef<HTMLDivElement>(null);
   const sidebarFadeStyle = useScrollFade(sidebarScrollRef, 24);
   const getPinHref = useCallback(
-    (pin: PinnedItem) => (pin.item_type === "issue" ? p.issueDetail(pin.item_id) : p.projectDetail(pin.item_id)),
+    (pin: PinnedItem) =>
+      pin.item_type === "issue"
+        ? p.issueDetail(pin.item_id)
+        : pin.item_type === "project"
+          ? p.projectDetail(pin.item_id)
+          // Views know their target only after their detail loads — the row
+          // resolves its own href; this placeholder never renders as a link.
+          : "",
     [p],
   );
 
@@ -443,6 +531,9 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
     setLocalPinnedWsId(wsId ?? null);
   }, [wsId]);
   const visiblePinned = localPinnedWsId === (wsId ?? null) ? localPinned : EMPTY_PINS;
+  // View pins are absent here (their href resolves async): while a view
+  // pin is active the plain nav row for its surface stays highlighted too.
+  // Accepted — suppressing it would need every view detail lifted up here.
   const isActivePinnedRoute = visiblePinned.some((pin) => pathname === getPinHref(pin));
 
   const handleDragStart = useCallback(() => {
@@ -537,17 +628,17 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                       size="lg"
                     />
                     <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium leading-tight">
+                      <p className="truncate text-body font-medium leading-tight">
                         {user?.name}
                       </p>
-                      <p className="truncate text-xs text-muted-foreground leading-tight">
+                      <p className="truncate text-caption text-muted-foreground leading-tight">
                         {user?.email}
                       </p>
                     </div>
                   </div>
                   <DropdownMenuSeparator />
                   <DropdownMenuGroup>
-                    <DropdownMenuLabel className="text-xs text-muted-foreground">
+                    <DropdownMenuLabel className="text-caption text-muted-foreground">
                       {t(($) => $.sidebar.workspaces_label)}
                     </DropdownMenuLabel>
                     {workspaces.map((ws) => (
@@ -574,9 +665,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     ))}
                     {!workspaceCreationDisabled && (
                       <DropdownMenuItem
-                        onClick={() =>
-                          useModalStore.getState().open("create-workspace")
-                        }
+                        onClick={() => push(paths.newWorkspace())}
                       >
                         <Plus className="h-3.5 w-3.5" />
                         {t(($) => $.sidebar.create_workspace)}
@@ -587,16 +676,16 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                     <>
                       <DropdownMenuSeparator />
                       <DropdownMenuGroup>
-                        <DropdownMenuLabel className="text-xs text-muted-foreground">
+                        <DropdownMenuLabel className="text-caption text-muted-foreground">
                           {t(($) => $.sidebar.pending_invitations_label)}
                         </DropdownMenuLabel>
                         {myInvitations.map((inv) => (
                           <div key={inv.id} className="flex items-center gap-2 px-2 py-1.5">
                             <WorkspaceAvatar name={inv.workspace_name ?? "W"} size="sm" />
-                            <span className="flex-1 truncate text-sm">{inv.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback)}</span>
+                            <span className="flex-1 truncate text-body">{inv.workspace_name ?? t(($) => $.sidebar.invitation_workspace_fallback)}</span>
                             <button
                               type="button"
-                              className="text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
                               disabled={acceptInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -607,7 +696,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                             </button>
                             <button
                               type="button"
-                              className="text-xs px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
+                              className="text-caption px-2 py-0.5 rounded bg-muted text-muted-foreground hover:bg-muted/80 disabled:opacity-50"
                               disabled={declineInvitationMut.isPending}
                               onClick={(e) => {
                                 e.stopPropagation();
@@ -678,14 +767,14 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                           <CappedNumberFlow
                             value={unreadCount}
                             animated={false}
-                            className="ml-auto text-xs"
+                            className="ml-auto text-caption"
                           />
                         )}
                         {item.key === "chat" && chatUnreadCount > 0 && (
                           <CappedNumberFlow
                             value={chatUnreadCount}
                             animated={false}
-                            className="ml-auto text-xs"
+                            className="ml-auto text-caption"
                           />
                         )}
                       </SidebarMenuButton>
@@ -705,7 +794,7 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
                 >
                   <span>{t(($) => $.sidebar.pinned_label)}</span>
                   <ChevronRight className="!size-3 ml-1 stroke-[2.5] transition-transform duration-200 group-data-[panel-open]/trigger:rotate-90" />
-                  <span className="ml-auto text-[10px] text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{visiblePinned.length}</span>
+                  <span className="ml-auto text-micro text-muted-foreground opacity-0 transition-opacity group-hover/pinned:opacity-100">{visiblePinned.length}</span>
                 </SidebarGroupLabel>
                 <CollapsibleContent>
                   <SidebarGroupContent>
@@ -783,8 +872,11 @@ export function AppSidebar({ topSlot, searchSlot, headerClassName, headerStyle }
         </SidebarContent>
 
         <SidebarFooter className="p-2">
-          <JoinDiscordCard />
-          <div className="flex justify-end">
+          {/* One utility strip: the Discord link takes the leading space the
+              help trigger was leaving empty. `justify-end` keeps the trigger
+              right-aligned once the Discord link is dismissed. */}
+          <div className="flex items-center justify-end gap-1">
+            <JoinDiscordCard />
             <HelpLauncher />
           </div>
         </SidebarFooter>

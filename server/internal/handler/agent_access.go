@@ -362,6 +362,65 @@ func (h *Handler) accessibleAgentIDs(ctx context.Context, workspaceID, actorType
 	return allowed, true
 }
 
+// restrictedAgentIDs returns the ids of agents that EXIST in the workspace but
+// must not be named to this actor. Aggregation endpoints that cannot simply drop
+// a row (the dashboard rollups, whose per-agent totals have to keep reconciling
+// with the workspace-level series rendered beside them) use it to fold those
+// agents onto a single sentinel instead.
+//
+// Two populations land in the set, for two different reasons:
+//
+//  1. Every `kind != "user"` agent — the hidden execution carriers behind agent
+//     builder sessions. These are restricted for EVERYONE, owner and admin
+//     included: no list endpoint returns them (ListAgents / ListAllAgents filter
+//     on kind), so no client can ever resolve one to a name, yet they run real
+//     tasks and book real usage that the rollups aggregate all the same. Left
+//     alone they surface as a bare UUID whose spend and failure profile belong
+//     to whoever opened that builder session.
+//  2. For a plain member only, the user agents they may not view.
+//
+// Hard-deleted agents are deliberately NOT in the set: they are already absent
+// from the agent table, have no visibility left to protect, and the dashboard
+// renders them as their own "deleted agents" bucket — folding them in here
+// would relabel a real deletion as a permission boundary.
+//
+// Because of (1) this always reads the agent table, but the per-agent
+// invocation-target lookup is skipped for actors who see every user agent
+// (agent actors, workspace owner/admin) since nothing there can change their
+// answer.
+func (h *Handler) restrictedAgentIDs(ctx context.Context, workspaceID, actorType, actorID, role string) (map[string]struct{}, bool) {
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return nil, false
+	}
+	agents, err := h.Queries.ListAllAgentsAnyKind(ctx, wsUUID)
+	if err != nil {
+		return nil, false
+	}
+
+	// Whether per-agent visibility can restrict anything for this actor at all.
+	judgeUserAgents := actorType == "member" && !roleAllowed(role, "owner", "admin")
+	var targetsByAgent map[string][]db.AgentInvocationTarget
+	if judgeUserAgents {
+		var ok bool
+		if targetsByAgent, ok = h.loadInvocationTargetsByAgent(ctx, agents); !ok {
+			return nil, false
+		}
+	}
+
+	restricted := make(map[string]struct{})
+	for _, a := range agents {
+		if a.Kind == "user" {
+			if !judgeUserAgents ||
+				memberAllowedToViewAgent(a, targetsByAgent[uuidToString(a.ID)], actorID, role) {
+				continue
+			}
+		}
+		restricted[uuidToString(a.ID)] = struct{}{}
+	}
+	return restricted, true
+}
+
 // loadInvocationTargetsByAgent batch-loads invocation targets for a set of
 // agents and buckets them by agent id string. Avoids the per-agent query the
 // list / aggregation paths would otherwise incur.

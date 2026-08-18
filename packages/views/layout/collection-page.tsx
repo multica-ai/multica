@@ -41,20 +41,20 @@ export function CollectionPageHeader({
   className,
 }: CollectionPageHeaderProps) {
   return (
-    <PageHeader className={cn("justify-between gap-3 px-5", className)}>
-      <div className="flex min-w-0 items-center gap-2">
+    <PageHeader className={className}>
+      <div className="flex min-w-0 flex-1 items-center gap-2">
         <Icon
           aria-hidden="true"
           className="size-4 shrink-0 text-muted-foreground"
         />
-        <h1 className="truncate text-sm font-medium">{title}</h1>
+        <h1 className="truncate text-body font-medium">{title}</h1>
         {typeof count === "number" && count > 0 ? (
-          <span className="shrink-0 font-mono text-xs tabular-nums text-muted-foreground/70">
+          <span className="shrink-0 font-mono text-caption tabular-nums text-muted-foreground">
             {count}
           </span>
         ) : null}
         {description ? (
-          <p className="ml-2 hidden min-w-0 truncate text-xs text-muted-foreground md:block">
+          <p className="ml-2 hidden min-w-0 truncate text-caption text-muted-foreground md:block">
             {description}
             {learnMore ? (
               <>

@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,19 +29,40 @@ const openclawConfigFile = "openclaw-config.json"
 // at 0o600 next to the wrapper.
 const openclawUserSnapshotFile = "openclaw-user-snapshot.json"
 
-// openclawCLITimeout caps each `openclaw config ...` invocation during task
-// setup. The CLI is fast (<200ms normal); 5s leaves headroom for a cold
-// node start without letting a hung CLI stall task dispatch indefinitely.
+// openclawCLITimeout is the context deadline set on each `openclaw config ...`
+// invocation during task setup. The CLI is fast (<200ms normal); 5s leaves
+// headroom for a cold node start.
+//
+// It is a deadline, not a guaranteed cap — see the gap below.
+//
+// Known gap (deliberately not fixed here): this deadline does not actually
+// bound the call when the CLI leaves a descendant holding stdout.
+// CommandContext kills only the direct child, and cmd.Output() blocks in
+// Wait() until the stdout pipe closes, so the call runs for the descendant's
+// lifetime. Measured on linux/dash: a shim whose backgrounded child slept 6s
+// took 6.01s against a 150ms deadline. An npm shim is that shape on Windows
+// (cmd.exe → node).
+//
+// A cmd.WaitDelay backstop bounds the call but leaves the descendant running
+// (measured: returns in 2.17s with the grandchild still in state S), trading a
+// hang for a process leak — and on Unix nothing reaps it, because
+// preparationProcessController.finish() is a no-op there. Closing this properly
+// needs process-tree ownership (Unix process group, Windows Job Object) so the
+// deadline can terminate the whole tree, which is its own change with its own
+// risk surface. Tracked in MUL-5467; this file intentionally keeps the existing
+// behaviour rather than shipping half of it.
 const openclawCLITimeout = 5 * time.Second
 
 // OpenclawConfigPrep is the input to prepareOpenclawConfig. Only OpenclawBin
 // is meaningful in production — Timeout is here for tests that need a tight
-// cap to assert error paths.
+// deadline to assert error paths.
 type OpenclawConfigPrep struct {
 	// OpenclawBin is the openclaw CLI binary to invoke for config introspection.
 	// Empty means resolve "openclaw" from PATH at exec time.
 	OpenclawBin string
-	// Timeout caps each CLI invocation. Zero falls back to openclawCLITimeout.
+	// Timeout sets the context deadline for each CLI invocation — not a
+	// guaranteed cap on how long the call takes; see openclawCLITimeout. Zero
+	// falls back to openclawCLITimeout.
 	Timeout time.Duration
 	// McpConfig is the agent's saved `mcp_config` JSON (Claude-style
 	// `{"mcpServers": {"<name>": {...}}}`). When non-null the wrapper pins
@@ -56,6 +78,12 @@ type OpenclawConfigPrep struct {
 	// — which is the right default when the user already has a working
 	// gateway set up locally. See issue #3260.
 	Gateway OpenclawGatewayPin
+	// Logger records the config-discovery outcome. Optional; nil disables
+	// logging. Discovery used to be entirely silent, which is why #6630 —
+	// a wrapper written without `$include` — could only be diagnosed by
+	// reading the generated file and reverse-engineering the daemon. Paths
+	// and booleans are logged; config contents never are.
+	Logger *slog.Logger
 }
 
 // OpenclawGatewayPin describes the Gateway endpoint a per-task openclaw
@@ -189,6 +217,15 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	if err != nil {
 		return OpenclawConfigResult{}, fmt.Errorf("locate openclaw active config: %w", err)
 	}
+	if !exists && opts.Logger != nil {
+		// Not an error — a genuine fresh install lands here legitimately.
+		// But it is also where a failed discovery lands, and the two are
+		// indistinguishable from the outside, so say so loudly: every task
+		// prepared from this point runs without the user's model providers
+		// and auth profiles.
+		opts.Logger.Warn("execenv: openclaw active config not found; task wrapper will omit $include so the user's models and auth profiles will NOT be visible to this task",
+			"reported_path", activePath)
+	}
 
 	var resolvedList []any
 	var agentsFromRegistry bool
@@ -264,14 +301,26 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 		return OpenclawConfigResult{}, fmt.Errorf("write openclaw config: %w", err)
 	}
 	result := OpenclawConfigResult{ConfigPath: outPath}
+	includeTarget := "none"
 	if snapshotPath != "" {
 		// Sanitized snapshot lives in envRoot alongside the wrapper, so the
 		// $include never crosses directories — daemon does not need to grant
 		// an extra OPENCLAW_INCLUDE_ROOTS entry.
+		includeTarget = "sanitized-snapshot"
 	} else if exists {
 		// Live user config is in its own directory; tell the daemon to grant
 		// it so OpenClaw's include-confinement check passes.
 		result.IncludeRoot = filepath.Dir(activePath)
+		includeTarget = "user-config"
+	}
+	if opts.Logger != nil {
+		opts.Logger.Info("execenv: prepared openclaw config",
+			"active_config", activePath,
+			"active_config_exists", exists,
+			"include_target", includeTarget,
+			"include_root", result.IncludeRoot,
+			"agents_from_registry", agentsFromRegistry,
+			"managed_mcp", hasManagedMcp)
 	}
 	return result, nil
 }
@@ -580,16 +629,47 @@ func appendOpenclawConfigFileCandidates(candidates []string, dir string) []strin
 	return candidates
 }
 
+// openclawTildeRest splits a `~`-shortened path into the part after the home
+// prefix, reporting whether the path was tilde-shortened at all.
+//
+// The separator after `~` is whatever the CLI's host OS uses: OpenClaw
+// prints `~/.openclaw/openclaw.json` on Unix and `~\.openclaw\openclaw.json`
+// on Windows. Matching only the forward-slash form left the Windows tilde
+// unexpanded, and since `~\...` is not absolute the path then got joined
+// onto the daemon's working directory, producing a path that can never
+// exist. The stat miss was indistinguishable from a fresh install, so the
+// wrapper silently dropped the user's `$include` and every task booted
+// without their model providers or auth profiles (issue #6630).
+//
+// Both separators are accepted regardless of runtime.GOOS, deliberately, and
+// not via os.IsPathSeparator (which rejects `\` on Unix). The daemon and the
+// CLI share a host, so only the host's own form arises in production — but
+// keying on the character rather than the host OS lets the Windows shape be
+// exercised from the normal Linux/macOS test job instead of only on a Windows
+// runner, the same trade isOpenclawShimPath makes above.
+func openclawTildeRest(path string) (string, bool) {
+	if path == "~" {
+		return "", true
+	}
+	if len(path) > 1 && path[0] == '~' && (path[1] == '/' || path[1] == '\\') {
+		return path[2:], true
+	}
+	return "", false
+}
+
 func expandOpenclawPath(path string) (string, error) {
-	if path == "~" || strings.HasPrefix(path, "~/") {
+	if rest, isTilde := openclawTildeRest(path); isTilde {
 		home, herr := os.UserHomeDir()
 		if herr != nil {
 			return "", fmt.Errorf("expand `~` in openclaw config path: %w", herr)
 		}
-		if path == "~" {
+		if rest == "" {
 			path = home
 		} else {
-			path = filepath.Join(home, strings.TrimPrefix(path, "~/"))
+			// The remainder still carries the CLI's separators. filepath.Join
+			// normalizes them to the host's on the OS that matters here
+			// (Windows accepts both), and the result is what we stat.
+			path = filepath.Join(home, rest)
 		}
 	}
 	if !filepath.IsAbs(path) {
@@ -760,6 +840,23 @@ var openclawExec = execOpenclawCLI
 // stderr is captured separately and appended to error messages — failures
 // here surface up to the daemon log, and a `openclaw doctor` hint there is
 // more useful than just an exit code.
+//
+// When the CLI is a batch shim that exits non-zero and says nothing at all,
+// openclawShimDiagnostic adds the interpreter-resolution detail that a bare
+// `exit status 1` hides (MUL-5422 / #6061). Real stderr always wins — the
+// diagnostic is a fallback for the silent case, not a replacement.
+//
+// Attribution order matters. openclawCLITimeout kills the child via
+// CommandContext, and a killed process surfaces as *exec.ExitError
+// ("signal: killed") — indistinguishable by type from a genuine exit 1. So the
+// context is checked FIRST; otherwise a timeout gets reported as "node is not
+// on PATH, install Node.js", sending the user to fix something that was never
+// broken.
+//
+// In that branch the CONTEXT error is what gets %w-wrapped, not the process
+// error, so errors.Is(err, context.DeadlineExceeded) holds for callers that
+// check cancellation the standard way. The process error is still printed for
+// diagnosis, just not as the wrapped cause.
 func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = os.Environ()
@@ -768,8 +865,17 @@ func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, e
 	raw, err := cmd.Output()
 	if err != nil {
 		stderrMsg := strings.TrimSpace(stderr.String())
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			if stderrMsg != "" {
+				return "", fmt.Errorf("openclaw %s: %w (process: %v; stderr: %s)", strings.Join(args, " "), ctxErr, err, stderrMsg)
+			}
+			return "", fmt.Errorf("openclaw %s: %w (process: %v)", strings.Join(args, " "), ctxErr, err)
+		}
 		if stderrMsg != "" {
 			return "", fmt.Errorf("openclaw %s: %w (stderr: %s)", strings.Join(args, " "), err, stderrMsg)
+		}
+		if diag := openclawShimDiagnostic(bin, err); diag != "" {
+			return "", fmt.Errorf("openclaw %s: %w (%s)", strings.Join(args, " "), err, diag)
 		}
 		return "", fmt.Errorf("openclaw %s: %w", strings.Join(args, " "), err)
 	}

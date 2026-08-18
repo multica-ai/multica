@@ -215,6 +215,8 @@ func (q *Queries) GetRuntimeProfileForWorkspace(ctx context.Context, arg GetRunt
 const listAgentRuntimeIDsByProfile = `-- name: ListAgentRuntimeIDsByProfile :many
 SELECT id FROM agent_runtime
 WHERE profile_id = $1 AND workspace_id = $2
+ORDER BY id
+FOR UPDATE
 `
 
 type ListAgentRuntimeIDsByProfileParams struct {
@@ -325,6 +327,74 @@ func (q *Queries) ListRuntimeProfiles(ctx context.Context, workspaceID pgtype.UU
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockRuntimeProfileForDelete = `-- name: LockRuntimeProfileForDelete :one
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockRuntimeProfileForDeleteParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// See LockRuntimeProfileForRegistration. The stronger lock prevents a daemon
+// from registering another instance between the delete plan and commit.
+func (q *Queries) LockRuntimeProfileForDelete(ctx context.Context, arg LockRuntimeProfileForDeleteParams) (RuntimeProfile, error) {
+	row := q.db.QueryRow(ctx, lockRuntimeProfileForDelete, arg.ID, arg.WorkspaceID)
+	var i RuntimeProfile
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DisplayName,
+		&i.ProtocolFamily,
+		&i.CommandName,
+		&i.Description,
+		&i.FixedArgs,
+		&i.Visibility,
+		&i.CreatedBy,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockRuntimeProfileForRegistration = `-- name: LockRuntimeProfileForRegistration :one
+SELECT id, workspace_id, display_name, protocol_family, command_name, description, fixed_args, visibility, created_by, enabled, created_at, updated_at FROM runtime_profile
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE
+`
+
+type LockRuntimeProfileForRegistrationParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Serializes daemon registration with profile deletion. Registration holds a
+// KEY SHARE lock until its runtime row is committed; profile deletion takes an
+// UPDATE lock, then locks the profile's runtime rows. Whichever starts first
+// wins, so deletion cannot miss a runtime inserted from a stale profile read.
+func (q *Queries) LockRuntimeProfileForRegistration(ctx context.Context, arg LockRuntimeProfileForRegistrationParams) (RuntimeProfile, error) {
+	row := q.db.QueryRow(ctx, lockRuntimeProfileForRegistration, arg.ID, arg.WorkspaceID)
+	var i RuntimeProfile
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.DisplayName,
+		&i.ProtocolFamily,
+		&i.CommandName,
+		&i.Description,
+		&i.FixedArgs,
+		&i.Visibility,
+		&i.CreatedBy,
+		&i.Enabled,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const updateRuntimeProfile = `-- name: UpdateRuntimeProfile :one

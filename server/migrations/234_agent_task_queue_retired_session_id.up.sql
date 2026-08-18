@@ -1,0 +1,16 @@
+-- retired_session_id records an agent session this task proved unresumable and
+-- that must never be handed to a later run, on ANY path.
+--
+-- The daemon already knew this and had no way to say it. A terminal report
+-- carries one session_id, and an empty one meant both "no session to report"
+-- and "forget the old session" — so after a fresh-session retry recovered a
+-- turn, the poisoned id it retried away from stayed selectable: an older
+-- completed row on the issue still pointed at it, and the chat_session pointer
+-- still held it. The next run resumed the same dead transcript (GH #6066).
+--
+-- Nullable and write-once per row: set only when a run abandons a session it
+-- was told to resume. NULL — the overwhelming majority of rows — means nothing
+-- was retired. No index: every reader already scopes by (agent_id, issue_id)
+-- or chat_session_id, both of which are indexed, and the retired set within a
+-- scope is tiny.
+ALTER TABLE agent_task_queue ADD COLUMN IF NOT EXISTS retired_session_id TEXT;

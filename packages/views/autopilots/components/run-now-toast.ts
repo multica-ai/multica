@@ -32,6 +32,7 @@ export function runNowToastKind(status: string | undefined): RunNowToastKind {
 export type RunNowBlockedKey =
   | "run_blocked_invocation_not_allowed"
   | "run_blocked_runtime_offline"
+  | "run_blocked_agent_runtime_required"
   | "run_blocked_target_unavailable"
   | "run_blocked_attribution"
   | "run_blocked_already_active"
@@ -43,6 +44,10 @@ export function runNowBlockedKey(reasonCode: string | undefined): RunNowBlockedK
       return "run_blocked_invocation_not_allowed";
     case "runtime_offline":
       return "run_blocked_runtime_offline";
+    // Unbound, not offline: nothing will claim the run until the agent is bound
+    // to a runtime (MUL-5559).
+    case "agent_runtime_required":
+      return "run_blocked_agent_runtime_required";
     case "target_unavailable":
       return "run_blocked_target_unavailable";
     case "attribution_blocked":

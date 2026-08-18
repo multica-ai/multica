@@ -75,14 +75,20 @@ export function StagePicker({
         )
       }
     >
+      {/* "No stage" — always the first row, matching every other picker. Keeps
+          the value rows' icon column so the labels line up. */}
       <PickerItem
+        emptyValue
         selected={stage == null}
         onClick={() => {
           onUpdate({ stage: null });
           setOpen(false);
         }}
       >
-        <span className="truncate text-xs text-muted-foreground">{t(($) => $.stage.none)}</span>
+        <span className="inline-flex items-center gap-1.5 text-caption text-muted-foreground">
+          <Milestone className="h-3 w-3 shrink-0" />
+          <span className="truncate">{t(($) => $.stage.none)}</span>
+        </span>
       </PickerItem>
       {options.map((s) => (
         <PickerItem
@@ -93,7 +99,7 @@ export function StagePicker({
             setOpen(false);
           }}
         >
-          <span className="inline-flex items-center gap-1.5 text-xs">
+          <span className="inline-flex items-center gap-1.5 text-caption">
             <Milestone className="h-3 w-3 shrink-0 text-muted-foreground" />
             {t(($) => $.stage.value, { n: s })}
           </span>

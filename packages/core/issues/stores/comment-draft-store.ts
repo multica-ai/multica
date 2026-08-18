@@ -26,7 +26,7 @@ import type { Attachment } from "../../types";
  * text. Each upload is a {@link DraftUpload} that carries its status — an
  * in-flight placeholder (owned by the upload coordinator) becomes the full
  * attachment once it settles, and a placeholder still `uploading` at load time
- * is coerced to `interrupted` because the bytes were never persisted.
+ * is dropped because the bytes were never persisted.
  *
  * Keys are issue-scoped because createWorkspaceAwareStorage only partitions
  * by workspace, not by issue. Without issueId in the key, two issues with
@@ -142,8 +142,8 @@ function pruneStaleDrafts(drafts: Record<string, CommentDraft>): Record<string, 
   const out: Record<string, CommentDraft> = {};
   for (const [k, v] of Object.entries(drafts)) {
     // Normalize every persisted draft: legacy `Attachment[]` becomes uploaded
-    // placeholders, and any placeholder still `uploading` becomes `interrupted`
-    // (the bytes were never persisted, so the upload cannot resume).
+    // placeholders, and any placeholder still `uploading` is dropped (the bytes
+    // were never persisted, so the upload cannot resume).
     const uploads = normalizeStoredUploads(v.attachments);
     if (v.updatedAt >= cutoff && isMeaningful(v.content, uploads)) {
       out[k] = { ...v, attachments: uploads };

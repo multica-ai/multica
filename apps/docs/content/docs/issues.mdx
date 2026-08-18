@@ -1,79 +1,93 @@
 ---
-title: Issues and projects
-description: Multica's core unit of work — assignable to a person or to an agent.
+title: Issues
+description: An issue holds one piece of work's context, assignee, status, and execution history.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-An issue is a self-contained unit of work in Multica — a bug, a new feature, a thing that needs doing. Every issue has a **title**, a **description** (Markdown supported), a **status**, a **priority**, an **assignee**, and optionally belongs to a **project**. If you've used Linear or Jira, this is the same shape.
+An issue is Multica's basic unit for organizing work: a feature, a bug, an investigation — anything a member or an agent should own and drive forward. The discussion around it, its status changes, and every run stay in one place, so there is no need to reassemble context from chat logs or terminal output.
 
-**Multica's defining trait is that an issue's assignee can be a person or an [agent](/agents)** — which is where we'll start.
+## Parts of an issue
 
-## Assigning an issue to an agent
+| Part | Purpose |
+|---|---|
+| **Title and description** | Goal, background, requirements, and acceptance criteria. |
+| **Status and priority** | Where the work stands and what to handle first. |
+| **Assignee** | A workspace member, an agent, or a squad. |
+| **Dates, labels, and custom properties** | Planning, categorization, and your team's own fields. |
+| **Project and parent-child relationships** | Fits into a larger body of work, or splits into sub-issues. |
+| **Activity and execution log** | Comments, status changes, tasks, and results returned by agents. |
 
-[Assigning](/assigning-issues) an issue to an agent hands that work over to it. The agent **starts automatically** — Multica enqueues a `task` within seconds, the agent reports progress in comments, and during the run it is expected to update the issue status (typically `todo` → `in_progress` → `in_review`). The only difference from handing work to a teammate is that an agent doesn't go offline, doesn't need reminders, and is available 24/7.
+![Issue detail: description, discussion, properties on the right, and the execution log](/images/docs/quickstart-run-result.png)
 
-<Callout type="info">
-For agent identity, configuration, and where they run, see [Agents](/agents).
-</Callout>
+## Create an issue
 
-Private agents can only be assigned to issues by workspace owners and admins. For role permissions, see [Members and roles](/members-roles).
+Create one from the **Issues** page or inside a project — a title is enough, and every other property can be filled in later.
+
+Each issue has a number, such as `MUL-123`. The digits increment within the workspace; after an admin changes the workspace's issue prefix, numbers display with the new prefix. See [Workspaces](/workspaces#create-a-workspace).
+
+## Choose an assignee
+
+| Assignee | Effect |
+|---|---|
+| **Member** | That member owns the follow-up; no task is created. |
+| **Agent** | A task is created for that agent. |
+| **Squad** | The squad leader receives it and decides who handles it. |
+
+When assigned to an agent or a squad, the issue enqueues immediately unless it is in `backlog`; if the runtime is offline, the task waits in the queue. Archived agents and squads cannot be assigned.
+
+Assignment does not bypass an agent's Access; when assigning to a squad, the leader's Access is what gets checked. See [Assign issues to agents](/assigning-issues).
 
 ## Status
 
-Multica has seven statuses. **Any status can move directly to any other** — Multica doesn't impose a workflow, and won't stop you from jumping from `backlog` straight to `done`.
-
 | Status | Meaning |
 |---|---|
-| `backlog` | Not scheduled yet |
-| `todo` | Scheduled, ready to start |
-| `in_progress` | Being worked on |
-| `in_review` | Awaiting review |
-| `done` | Completed |
-| `blocked` | Stuck on an external factor |
-| `cancelled` | Cancelled |
+| `backlog` | Not starting yet. An issue assigned to an agent only creates a task after it leaves `backlog`. |
+| `todo` | Scoped and waiting to start. |
+| `in_progress` | Being worked on. |
+| `in_review` | Has a result waiting for review. |
+| `done` | Finished. |
+| `blocked` | Cannot continue for now. |
+| `cancelled` | No longer pursued; the record stays. |
 
-Once an issue is assigned to an agent, the agent is expected to move the status from `backlog` / `todo` to `in_progress` when it starts, then to `in_review` when it has delivered the work. Status updates are made by the agent through the Multica CLI during the run — the server does **not** flip issue status when a `task` starts or completes. `done` is usually a human confirmation or an integration (for example a PR with close intent that merges). You can also change status manually at any time.
+There is no fixed flow between statuses — members and agents can change them directly.
 
-## Priority
+Once an issue is assigned to an agent, the agent is expected to move the status from `backlog` / `todo` to `in_progress` when it starts, then to `in_review` when it has delivered. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a task starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or an integration such as a PR with close intent that merges.
 
-Priority has five levels, used to order the default issue list:
+<Callout type="info">
+Two changes are made by the system:
 
-| Priority | Use |
-|---|---|
-| `No priority` | Not decided yet (default) |
-| `Urgent` | Urgent |
-| `High` | High |
-| `Medium` | Medium |
-| `Low` | Low |
-
-## Issue numbers
-
-Every issue has a workspace-unique number in the format `<prefix>-<digits>` — for example `MUL-123`. The number is assigned by the system at creation time and **never changes**. See [Workspaces → Issue numbers](/workspaces#issue-numbers).
-
-## Comments
-
-The comment thread under an issue is where collaboration happens — reply to a comment, `@` a person or agent, add a reaction.
-
-`@` an agent in a comment and **it triggers automatically** — this is the second way to start an agent, alongside "assign to." See [Comments and mentions](/comments) and [Mentioning agents in comments](/mentioning-agents).
-
-## Deleting an issue
-
-<Callout type="warning">
-Deleting an issue **immediately** clears every comment, reaction, and attachment under it, along with any queued agent tasks (running tasks are cancelled). **It cannot be undone.**
-
-If you just want the issue out of sight, **changing the status to `cancelled` is safer than deleting** — the data stays, and you can pull it back later.
+- When a run fails, the issue has no other runs, and no retry is triggered, `in_progress` rolls back to `todo`.
+- When a linked GitHub PR merges with close intent and no other linked PR is still open or draft, the issue becomes `done`.
 </Callout>
 
-## Projects
+## Issues and tasks
 
-A project is a container that groups multiple issues together. An issue belongs to at most one project, or to no project at all.
+An issue is the persistent record of a piece of work; a [task](/tasks) is one concrete run by an agent. One issue can produce several tasks over time — a first implementation, follow-up changes, another check. A completed task only means that run ended; whether the issue is finished is determined by the issue's status.
 
-Projects have their own **lead** — **just like an issue's assignee, a lead can be a person or an agent**.
+## Projects and sub-issues
 
-Deleting a project **does not delete the issues inside it**: those issues simply detach from the project and remain in the workspace.
+An issue belongs to at most one [project](/projects); the project provides shared instructions and resources for runs inside it. Moving an issue to another project does not create a copy.
 
-## Next
+Larger work can be split into sub-issues: the parent issue keeps the overall goal while sub-issues progress independently. Parent and child statuses do not affect each other.
 
-- [Comments and mentions](/comments) — collaborating under an issue
-- [Agents](/agents) — understand how "assign to an agent" actually works
+Sub-issues can be given a **stage** to advance in batches — 1, 2, 3. When every sub-issue in the earliest unfinished stage reaches `done` or `cancelled`, the parent issue receives a "sub-issues completed" notification; when the parent's assignee is an agent, it wakes up and decides whether to start the next stage. Sub-issues without a stage count as one batch and notify once when they all finish.
+
+## Switch views
+
+The Issues page offers five views — list, board, table, Gantt, and swimlane — filterable and sortable by status, assignee, project, and other properties. They all show the same issues.
+
+## Delete an issue
+
+Any workspace member can delete an issue.
+
+<Callout type="warning">
+Deletion cannot be undone: the issue with its comments, attachments, and linked records is permanently removed, and unfinished tasks are cancelled. When the work is simply no longer pursued, set the status to `cancelled` instead — the discussion and results stay available.
+</Callout>
+
+## Next steps
+
+- [Projects](/projects) — organize work that takes multiple issues to finish.
+- [Comments](/comments) — discuss, reply, and @mention around an issue.
+- [Assign issues to agents](/assigning-issues) — hand work to an agent and start the first run.
+- [Tasks](/tasks) — learn about queuing, running, retries, and cancellation.

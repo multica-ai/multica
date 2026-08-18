@@ -50,6 +50,31 @@ func TestMemoryWebhookRateLimiter_WindowExpiry(t *testing.T) {
 	}
 }
 
+func TestMemorySlidingWindowRateLimiter_PrunesExpiredKeys(t *testing.T) {
+	limiter := NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1, Window: 10 * time.Millisecond})
+	memoryLimiter, ok := limiter.(*memoryWebhookRateLimiter)
+	if !ok {
+		t.Fatalf("limiter type = %T, want *memoryWebhookRateLimiter", limiter)
+	}
+	ctx := context.Background()
+	if !limiter.Allow(ctx, "expired") {
+		t.Fatal("first key should be allowed")
+	}
+	time.Sleep(20 * time.Millisecond)
+	if !limiter.Allow(ctx, "current") {
+		t.Fatal("current key should be allowed")
+	}
+
+	memoryLimiter.mu.Lock()
+	defer memoryLimiter.mu.Unlock()
+	if _, ok := memoryLimiter.hit["expired"]; ok {
+		t.Fatal("expired key was not removed by the opportunistic sweep")
+	}
+	if _, ok := memoryLimiter.hit["current"]; !ok {
+		t.Fatal("current key was removed by the opportunistic sweep")
+	}
+}
+
 func TestMemoryWebhookRateLimiter_ZeroLimitDisabled(t *testing.T) {
 	l := NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 0, Window: time.Minute})
 	ctx := context.Background()
@@ -63,16 +88,16 @@ func TestMemoryWebhookRateLimiter_ZeroLimitDisabled(t *testing.T) {
 func TestMemoryWebhookRateLimiter_CheckDoesNotConsumeBudget(t *testing.T) {
 	l := NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1, Window: time.Minute})
 	ctx := context.Background()
-	if !webhookLimiterCheck(ctx, l, "shared-ip") || !webhookLimiterCheck(ctx, l, "shared-ip") {
+	if !slidingWindowLimiterCheck(ctx, l, "shared-ip") || !slidingWindowLimiterCheck(ctx, l, "shared-ip") {
 		t.Fatal("non-consuming checks should remain allowed before bad debt is charged")
 	}
 	if !l.Allow(ctx, "shared-ip") {
 		t.Fatal("check unexpectedly consumed the only budget slot")
 	}
-	if webhookLimiterCheck(ctx, l, "shared-ip") {
+	if slidingWindowLimiterCheck(ctx, l, "shared-ip") {
 		t.Fatal("check should reject after bad debt reaches the limit")
 	}
-	if retry := webhookLimiterRetryAfter(ctx, l, "shared-ip"); retry <= 0 || retry > time.Minute {
+	if retry := slidingWindowLimiterRetryAfter(ctx, l, "shared-ip"); retry <= 0 || retry > time.Minute {
 		t.Fatalf("unexpected retry interval: %v", retry)
 	}
 }
@@ -149,5 +174,56 @@ func TestRedisWebhookIPRateLimiter_HasSeparateBudgetFromTokenLimiter(t *testing.
 	}
 	if ip.Allow(ctx, "alice") {
 		t.Fatal("IP limiter third request should be rejected")
+	}
+}
+
+func TestRedisSlidingWindowRateLimiter_SeparatesInvitationNamespaces(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	limits := InvitationRateLimits{
+		Actor:     SlidingWindowRateLimit{Limit: 1, Window: time.Minute},
+		Workspace: SlidingWindowRateLimit{Limit: 1, Window: time.Minute},
+		Recipient: SlidingWindowRateLimit{Limit: 1, Window: time.Minute},
+	}
+	limiters := NewRedisInvitationRateLimiters(rdb, limits)
+	ctx := context.Background()
+
+	if !limiters.Actor.Allow(ctx, "same-key") || limiters.Actor.Allow(ctx, "same-key") {
+		t.Fatal("actor limiter did not enforce its independent one-request budget")
+	}
+	if !limiters.Workspace.Allow(ctx, "same-key") {
+		t.Fatal("workspace limiter shared the actor Redis namespace")
+	}
+	if !limiters.Recipient.Allow(ctx, "same-key") {
+		t.Fatal("recipient limiter shared another invitation Redis namespace")
+	}
+}
+
+func TestRedisSlidingWindowRateLimiter_PreservesWebhookFailOpenAndExposesErrors(t *testing.T) {
+	rdb := newRedisTestClient(t)
+	limiter := NewRedisWebhookRateLimiter(rdb, WebhookRateLimit{Limit: 1, Window: time.Minute})
+	if err := rdb.Close(); err != nil {
+		t.Fatalf("close Redis client: %v", err)
+	}
+
+	ctx := context.Background()
+	if !limiter.Allow(ctx, "webhook") {
+		t.Fatal("legacy webhook Allow must fail open when Redis is unavailable")
+	}
+	if !slidingWindowLimiterCheck(ctx, limiter, "webhook") {
+		t.Fatal("legacy webhook check must fail open when Redis is unavailable")
+	}
+	allowed, err := slidingWindowLimiterAllow(ctx, limiter, "invitation")
+	if err == nil {
+		t.Fatal("explicit sliding-window admission must expose the Redis error")
+	}
+	if allowed {
+		t.Fatal("explicit sliding-window admission must not report allowed on Redis error")
+	}
+	allowed, err = slidingWindowLimiterCheckWithError(ctx, limiter, "invitation")
+	if err == nil {
+		t.Fatal("explicit sliding-window check must expose the Redis error")
+	}
+	if allowed {
+		t.Fatal("explicit sliding-window check must not report allowed on Redis error")
 	}
 }

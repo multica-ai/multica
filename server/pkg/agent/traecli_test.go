@@ -67,7 +67,11 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","name":"Shell","status":"pending","parameters":{"command":"echo hi"}}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","name":"Shell","output":"hi\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"pong"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":17,"outputTokens":5,"cachedReadTokens":3,"cachedWriteTokens":2,"costUsdTicks":900}}}\n' "$id"
+      if [ -n "$TRAECLI_LATE_CHUNK" ]; then
+        sleep 0.05
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" tail"}}}}\n'
+      fi
       exit 0
       ;;
   esac
@@ -110,6 +114,9 @@ func TestTraecliBackendStreamsAndCompletes(t *testing.T) {
 	}
 	if result.SessionID != "ses_new" {
 		t.Fatalf("session id = %q, want ses_new", result.SessionID)
+	}
+	if usage := result.Usage["unknown"]; usage != (TokenUsage{InputTokens: 17, OutputTokens: 5, CacheReadTokens: 3, CacheWriteTokens: 2, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 	// The agent_message_chunk must surface as MessageText; the tool_call must
 	// surface as a MessageToolUse normalized to a canonical tool name.
@@ -285,5 +292,44 @@ func TestTraecliUsesSessionLoadForResume(t *testing.T) {
 	}
 	if strings.Contains(requests, `"method":"session/resume"`) {
 		t.Fatalf("traecli must use session/load (loadSession:true), not session/resume:\n%s", requests)
+	}
+}
+
+// TestTraecliDrainsNotificationsAfterPromptResponse pins the trailing-notification
+// drain. traecli ACP can emit a final session update just after the
+// session/prompt response returns; closing stdin and cancelling the context at
+// that boundary raced the stdout reader and silently truncated the last chunk.
+// The same defect was fixed for the sibling ACP backends in #5440 (grok) and
+// #5675 (hermes).
+func TestTraecliDrainsNotificationsAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "trae")
+	writeTestExecutable(t, fakePath, []byte(fakeTraecliACPScript()))
+
+	backend, err := New("traecli", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"TRAECLI_LATE_CHUNK": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new traecli backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "pong tail") {
+		t.Fatalf("late output was truncated: %q", result.Output)
 	}
 }

@@ -7,9 +7,14 @@
     "highlight": "高亮",
     "link": "链接",
     "list": "列表",
-    "task_list": "任务列表",
+    "task_list": "待办列表",
     "quote": "引用",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "应用链接",
+      "remove": "移除链接",
+      "close": "关闭链接编辑器"
+    },
     "heading_dropdown": {
       "text": "正文",
       "normal_text": "正文",
@@ -20,12 +25,12 @@
     "list_dropdown": {
       "bullet_list": "无序列表",
       "ordered_list": "有序列表",
-      "task_list": "任务列表"
+      "task_list": "待办列表"
     },
     "sub_issue": {
-      "tooltip": "用选中内容创建子 issue",
+      "tooltip": "用选中内容创建子任务",
       "created": "已创建 {{identifier}}",
-      "create_failed": "创建子 issue 失败"
+      "create_failed": "创建子任务失败"
     }
   },
   "image": {
@@ -35,7 +40,11 @@
     "delete": "删除",
     "link_copied": "已复制链接",
     "copy_link_failed": "复制链接失败",
-    "canvas_label": "图片画布,拖动可平移,滚动可缩放,双击可切换实际大小。"
+    "canvas_label": "图片画布,拖动可平移,滚动可缩放,双击可切换实际大小。",
+    "previous": "上一张",
+    "next": "下一张",
+    "sequence_position": "第 {{index}} / {{total}} 张",
+    "unavailable": "这张图片已失效,已跳过。"
   },
   "canvas": {
     "zoom_in": "放大",
@@ -62,19 +71,20 @@
   },
   "mention": {
     "group_users": "用户",
-    "group_issues": "Issues",
+    "group_issues": "任务",
     "all_members": "所有成员",
     "searching": "搜索中...",
     "no_results": "无结果",
     "group_current": "当前页面",
     "group_recent": "最近浏览",
-    "group_search": "搜索结果"
+    "group_search": "搜索结果",
+    "group_cancelled": "已取消"
   },
   "slash_command": {
     "no_skills_configured": "暂无配置的技能",
     "no_results": "没有匹配的技能",
     "commands": {
-      "note": "添加备注 — 不触发任何 Agent"
+      "note": "添加备注——不触发任何 Agent"
     }
   },
   "code_block": {

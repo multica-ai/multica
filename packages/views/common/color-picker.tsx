@@ -257,7 +257,7 @@ export function ColorPickerPanel({
           value={hexDraft ?? currentHex.toUpperCase()}
           aria-label={t(($) => $.color_picker.hex)}
           spellCheck={false}
-          className="h-8 font-mono text-xs"
+          className="h-8 font-mono text-caption"
           onChange={(event) => {
             setHexDraft(event.target.value);
             const normalized = normalizeHex(event.target.value);
@@ -272,12 +272,12 @@ export function ColorPickerPanel({
 
       {/* Default palette + random */}
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted-foreground">
+        <span className="text-caption font-medium text-muted-foreground">
           {t(($) => $.color_picker.presets)}
         </span>
         <button
           type="button"
-          className="flex items-center gap-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          className="flex items-center gap-1 text-caption text-muted-foreground transition-colors hover:text-foreground"
           onClick={() => {
             setHexDraft(null);
             onChange(randomOptionColor(value));

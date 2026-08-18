@@ -100,13 +100,13 @@ export function ModelDropdown({
     return (
       <div className="flex flex-col min-w-0">
         <div className="flex h-6 items-center">
-          <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
+          <Label className="text-caption text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
         </div>
-        <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-sm text-muted-foreground">
+        <div className="mt-1.5 flex items-start gap-2 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2.5 text-body text-muted-foreground">
           <Info className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="min-w-0">
             <div>{t(($) => $.model_dropdown.managed_by_runtime_title)}</div>
-            <div className="mt-0.5 text-xs">
+            <div className="mt-0.5 text-caption">
               {t(($) => $.model_dropdown.managed_by_runtime_hint)}
             </div>
           </div>
@@ -118,15 +118,15 @@ export function ModelDropdown({
   return (
     <div className="flex flex-col min-w-0">
       <div className="flex h-6 items-center justify-between">
-        <Label className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
+        <Label className="text-caption text-muted-foreground">{t(($) => $.model_dropdown.label)}</Label>
         {modelsQuery.isError && (
-          <span className="text-xs text-muted-foreground">{t(($) => $.model_dropdown.discovery_failed)}</span>
+          <span className="text-caption text-muted-foreground">{t(($) => $.model_dropdown.discovery_failed)}</span>
         )}
       </div>
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           disabled={disabled}
-          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-sm transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+          className="flex w-full min-w-0 items-center gap-3 rounded-lg border border-border bg-background px-3 py-2.5 mt-1.5 text-left text-body transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
         >
           <Cpu className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0 flex-1">
@@ -137,7 +137,7 @@ export function ModelDropdown({
               <span className="truncate font-medium">{triggerLabel}</span>
             </div>
             {value && (
-              <div className="truncate text-xs text-muted-foreground">
+              <div className="truncate text-caption text-muted-foreground">
                 {modelLabel(models, value)}
               </div>
             )}
@@ -161,7 +161,7 @@ export function ModelDropdown({
           </div>
           <div className="max-h-72 overflow-y-auto p-1">
             {modelsQuery.isLoading && (
-              <div className="flex items-center gap-2 px-3 py-6 text-sm text-muted-foreground">
+              <div className="flex items-center gap-2 px-3 py-6 text-body text-muted-foreground">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 {t(($) => $.pickers.model_discovering)}
               </div>
@@ -171,7 +171,7 @@ export function ModelDropdown({
               Object.entries(filtered).map(([provider, list]) => (
                 <div key={provider} className="mb-1">
                   {provider && (
-                    <div className="px-2 pt-1.5 pb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                    <div className="px-2 pt-1.5 pb-0.5 text-caption font-medium uppercase tracking-wide text-muted-foreground">
                       {provider}
                     </div>
                   )}
@@ -180,14 +180,14 @@ export function ModelDropdown({
                       type="button"
                       key={m.id}
                       onClick={() => select(m.id)}
-                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm transition-colors ${
+                      className={`flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body transition-colors ${
                         m.id === value ? "bg-accent" : "hover:bg-accent/50"
                       }`}
                     >
                       <div className="min-w-0 flex-1">
                         <div className="truncate font-medium">{m.label}</div>
                         {m.label !== m.id && (
-                          <div className="truncate text-xs text-muted-foreground">
+                          <div className="truncate text-caption text-muted-foreground">
                             {m.id}
                           </div>
                         )}
@@ -203,7 +203,7 @@ export function ModelDropdown({
             {!modelsQuery.isLoading &&
               Object.keys(filtered).length === 0 &&
               !canCreate && (
-                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                <div className="px-3 py-6 text-center text-body text-muted-foreground">
                   {t(($) => $.pickers.model_empty_with_dot)}
                 </div>
               )}
@@ -212,7 +212,7 @@ export function ModelDropdown({
               <button
                 type="button"
                 onClick={() => select(trimmedSearch)}
-                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-sm text-primary transition-colors hover:bg-accent/50"
+                className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left text-body text-primary transition-colors hover:bg-accent/50"
               >
                 <Plus className="h-4 w-4 shrink-0" />
                 <span className="truncate">
@@ -225,7 +225,7 @@ export function ModelDropdown({
               <button
                 type="button"
                 onClick={() => select("")}
-                className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent/50"
+                className="mt-1 flex w-full items-center gap-2 border-t border-border px-3 py-2 text-left text-caption text-muted-foreground transition-colors hover:bg-accent/50"
               >
                 {t(($) => $.model_dropdown.clear_full)}
               </button>

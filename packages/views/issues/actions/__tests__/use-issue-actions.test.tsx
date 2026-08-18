@@ -188,8 +188,23 @@ describe("useIssueActions", () => {
     expect(mockOpenModal).not.toHaveBeenCalled();
   });
 
-  it("copyLink writes the issue's shareable URL to the clipboard", async () => {
+  it("copyLink writes the issue's human-readable shareable URL to the clipboard", async () => {
     const { result } = renderHook(() => useIssueActions(mockIssue), { wrapper });
+
+    await act(async () => {
+      await result.current.copyLink();
+    });
+
+    expect(navigator.clipboard.writeText).toHaveBeenCalledWith(
+      "https://app.multica.com/test/issues/TES-1",
+    );
+  });
+
+  it("copyLink falls back to the UUID when the issue has no identifier", async () => {
+    const { result } = renderHook(
+      () => useIssueActions({ ...mockIssue, identifier: "" } as Issue),
+      { wrapper },
+    );
 
     await act(async () => {
       await result.current.copyLink();
@@ -232,6 +247,48 @@ describe("useIssueActions", () => {
       issueId: "issue-1",
       identifier: "TES-1",
       onDeletedFallbackPath: "/test/issues",
+    });
+  });
+
+  it("openCreateSubIssue seeds the parent's project and assignee so the sub-issue inherits them", () => {
+    const parentIssue = {
+      ...mockIssue,
+      project_id: "project-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(parentIssue), { wrapper });
+
+    act(() => {
+      result.current.openCreateSubIssue();
+    });
+
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", {
+      parent_issue_id: "issue-1",
+      parent_issue_identifier: "TES-1",
+      project_id: "project-1",
+      assignee_type: "agent",
+      assignee_id: "agent-1",
+    });
+  });
+
+  it("openCreateSubIssue omits assignee when the parent has none", () => {
+    const parentIssue = {
+      ...mockIssue,
+      project_id: "project-1",
+      assignee_type: null,
+      assignee_id: null,
+    } as Issue;
+    const { result } = renderHook(() => useIssueActions(parentIssue), { wrapper });
+
+    act(() => {
+      result.current.openCreateSubIssue();
+    });
+
+    expect(mockOpenModal).toHaveBeenLastCalledWith("create-issue", {
+      parent_issue_id: "issue-1",
+      parent_issue_identifier: "TES-1",
+      project_id: "project-1",
     });
   });
 

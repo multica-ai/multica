@@ -19,10 +19,12 @@ Multica is an AI-native task management platform for small teams, with agents as
 - `apps/web/`: Next.js App Router.
 - `apps/desktop/`: Electron desktop app.
 - `apps/mobile/`: Expo / React Native iOS app. Read `apps/mobile/CLAUDE.md` before touching it.
+- `apps/docs/`: Fumadocs documentation site.
 - `packages/core/`: headless business logic, API client, React Query hooks, Zustand stores.
 - `packages/ui/`: atomic UI components only.
 - `packages/views/`: shared business pages/components for web and desktop.
 - `packages/tsconfig/`: shared TypeScript config.
+- `packages/eslint-config/`: shared ESLint config.
 
 Shared packages export raw `.ts` / `.tsx` and are compiled by consuming apps. Dependency direction is `views -> core + ui`; `core` and `ui` must stay independent.
 
@@ -77,6 +79,8 @@ Use the repo scripts as the source of truth. Common commands:
 make dev              # auto-setup and start the app
 make start            # start backend + frontend
 make stop             # stop app processes for this checkout
+make db-drop          # permanently drop this checkout's local database
+make remove-worktree WORKTREE=../path  # drop a linked worktree DB, then remove it
 make server           # run Go server only
 make daemon           # run local daemon
 make test             # Go tests
@@ -94,7 +98,7 @@ pnpm ui:add badge     # shadcn/Base UI component into packages/ui
 
 Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. `pnpm dev:desktop` additionally self-isolates per worktree (its own renderer port + app name) automatically, independent of `.env.worktree`.
 
-CI runs Node 22, Go 1.26.1, and a `pgvector/pgvector:pg17` PostgreSQL service.
+CI runs Node 22, the latest Go 1.26 patch, and a `pgvector/pgvector:pg17` PostgreSQL service.
 
 ## Database and Migration Rules
 
@@ -181,9 +185,12 @@ Root-level reminders:
 ## UI Rules
 
 - Prefer shadcn/Base UI components over custom implementations. Add them with `pnpm ui:add <component>` from the repo root.
-- Use design tokens and semantic classes; avoid hardcoded colors.
+- The Pro `@reui` registry is configured in `packages/ui/components.json`; add items with `pnpm ui:add @reui/<name>` and answer `n` to every overwrite prompt so local component customizations survive. It reads `REUI_LICENSE_KEY` from the environment — agents get it from their Multica agent environment, humans export it in their own shell. Never write the key into a repo file.
+- ReUI ships source, not a dependency: route the vendored output to our layout (new primitives to `packages/ui/components/ui/`, compositions to `packages/views/<domain>/`) and rewrite it to our conventions before committing.
+- Use design tokens and semantic classes; avoid hardcoded colors. Font sizes come from the role-named `--text-*` scale in `packages/ui/styles/tokens.css` (`text-caption`, `text-body`, `text-title`, …), which is the authoritative list — not Tailwind's default `text-sm` / `text-base` ramp.
+- An active/selected state must stay identifiable while hovered. Express it on a dimension hover does not touch (weight, text color), or define the `data-active:hover:` compound explicitly — otherwise hovering a selected row visually downgrades it to plain hover.
 - Do not introduce extra local state unless the design requires it.
-- Handle overflow, long text, scrolling, alignment, and spacing deliberately.
+- Handle overflow, long text, scrolling, alignment, and spacing deliberately. Prefer more spacing over adding a divider.
 - If a component is identical between web and desktop, it belongs in a shared package.
 
 ## Testing
@@ -201,6 +208,8 @@ Tests follow the code:
 Rules:
 
 - Never test shared component behavior in an app test file.
+- Give each product behavior ONE canonical layer. Pure parsing, state transitions and boundary matrices belong in a `.test.ts` beside the helper; the component suite keeps the happy path, the wiring, accessibility and named regressions, and points at the canonical file in a comment. Do not re-run a helper's matrix through a DOM mount.
+- A `.test.ts` that needs no DOM must start with `// @vitest-environment node`. jsdom costs ~0.8s of setup per file and buys such a suite nothing. Do not add it to a test whose code under test branches on `typeof window`/`document` — under node it would silently take the SSR path and still pass.
 - `packages/views/` tests must not mock `next/*` or `react-router-dom`.
 - Mock `@multica/core` stores with the Zustand callable-store shape (`selectorFn` plus `getState`).
 - Mock `@multica/core/api` for API calls.

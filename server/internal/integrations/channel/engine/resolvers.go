@@ -26,6 +26,8 @@ const (
 	OutcomeDropped       Outcome = "dropped"
 	OutcomeNeedsBinding  Outcome = "needs_binding"
 	OutcomeIngested      Outcome = "ingested"
+	OutcomeFreshPending  Outcome = "fresh_pending"
+	OutcomeIssueUsage    Outcome = "issue_usage"
 	OutcomeAgentOffline  Outcome = "agent_offline"
 	OutcomeAgentArchived Outcome = "agent_archived"
 )
@@ -58,6 +60,17 @@ type Result struct {
 	IssueNumber     int32
 	IssueIdentifier string
 	IssueTitle      string
+	// IssueDuplicate marks an /issue command that did not create a new issue
+	// because the shared duplicate guard found the active IssueID above.
+	// Repliers render this as a business conflict, never as an internal error.
+	IssueDuplicate bool
+	// IssueUsageHadMedia marks a title-less /issue whose current inbound
+	// message also carried downloadable media. Repliers use it to tell the
+	// sender to include that media again with the corrected command.
+	IssueUsageHadMedia bool
+	// runScheduled reports whether this ingest scheduled a normal chat run.
+	// It is Router-internal state: repliers must continue to use Outcome.
+	runScheduled bool
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router
@@ -65,9 +78,12 @@ type Result struct {
 // opaquely so the set's other ports (binder, replier, typing) reuse it without
 // a re-fetch; the Router never reads Platform.
 type ResolvedInstallation struct {
-	ID              pgtype.UUID
-	WorkspaceID     pgtype.UUID
-	AgentID         pgtype.UUID
+	ID          pgtype.UUID
+	WorkspaceID pgtype.UUID
+	AgentID     pgtype.UUID
+	// RouteRevision is an adapter-owned optimistic fence for platforms that
+	// route one installation to multiple agents. Zero means no such fence.
+	RouteRevision   int64
 	InstallerUserID pgtype.UUID
 	Active          bool
 	Platform        any
@@ -97,6 +113,8 @@ type AppendParams struct {
 	SessionID           pgtype.UUID
 	Sender              pgtype.UUID
 	InstallationID      pgtype.UUID
+	AgentID             pgtype.UUID
+	RouteRevision       int64
 	Message             channel.InboundMessage
 	ClaimToken          pgtype.UUID
 	MediaPendingSeconds float64
@@ -116,14 +134,22 @@ type AppendResult struct {
 }
 
 // BindMediaParams carries stored media references to the post-append
-// attachment transaction. MessageID is the durable chat_message created by
-// AppendMessage; media downloads must never run inside this transaction.
+// attachment transaction. MessageID is the durable chat_message whose pending
+// marker the binder clears. IssueID selects issue ownership for an /issue turn;
+// otherwise the references bind to MessageID. IssueDescriptionBase is valid
+// only for an issue created by this turn and lets the binder replace inline
+// placeholders iff nobody edited the description first. Media downloads must
+// never run inside this transaction.
 type BindMediaParams struct {
-	MessageID   pgtype.UUID
-	SessionID   pgtype.UUID
-	WorkspaceID pgtype.UUID
-	Sender      pgtype.UUID
-	MediaRefs   []channel.MediaRef
+	MessageID            pgtype.UUID
+	SessionID            pgtype.UUID
+	WorkspaceID          pgtype.UUID
+	Sender               pgtype.UUID
+	IssueID              pgtype.UUID
+	IssueDescriptionBase pgtype.Text
+	IssueCommandText     string
+	Body                 string
+	MediaRefs            []channel.MediaRef
 }
 
 // IssueCommand is the parsed /issue command.
@@ -143,6 +169,15 @@ var (
 	// ErrSenderNotMember: the sender is bound but not a workspace member →
 	// non_workspace_member drop.
 	ErrSenderNotMember = errors.New("engine: sender not a workspace member")
+	// ErrTargetAgentArchived: a platform-specific route resolves to an archived
+	// agent. The route remains intact so restoring the agent restores delivery;
+	// the Router returns the normal archived-agent product outcome without
+	// creating a session or enqueueing work while the target is unavailable.
+	ErrTargetAgentArchived = errors.New("engine: routed agent is archived")
+	// ErrRouteChanged asks the Router to resolve the platform route again and
+	// retry the same claimed message. The durable append must return this before
+	// writing when an administrator changed the route revision concurrently.
+	ErrRouteChanged = errors.New("engine: route changed")
 	// ErrDuplicate: Claim found the message already processed / in flight →
 	// duplicate drop.
 	ErrDuplicate = errors.New("engine: duplicate message")
@@ -166,6 +201,15 @@ type IdentityResolver interface {
 	ResolveSender(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage) (ResolvedIdentity, error)
 }
 
+// ValidatedInboundResolver runs only after the group-addressing and sender
+// identity/membership gates have passed. Platforms use this optional seam for
+// durable discovery that must never be triggered by rejected callbacks. It may
+// also finalize routing fields on the installation returned to the remaining
+// pipeline.
+type ValidatedInboundResolver interface {
+	ResolveValidatedInbound(ctx context.Context, inst ResolvedInstallation, identity ResolvedIdentity, msg channel.InboundMessage) (ResolvedInstallation, error)
+}
+
 // Deduper is the two-phase idempotency seam. Claim mints an owner-fence token
 // (ErrDuplicate when already processed / in flight); Mark/Release are fenced on
 // the token (a no-op on token mismatch is not an error).
@@ -180,6 +224,7 @@ type Deduper interface {
 // rotated mid-flight.
 type SessionBinder interface {
 	EnsureSession(ctx context.Context, p EnsureSessionParams) (pgtype.UUID, error)
+	MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error
 	AppendMessage(ctx context.Context, p AppendParams) (AppendResult, error)
 	BindMedia(ctx context.Context, p BindMediaParams) error
 }
@@ -201,8 +246,9 @@ type MediaResolver interface {
 	// plain ingest path: no marker, no deferred run, no semaphore slot.
 	HasMedia(msg channel.InboundMessage) bool
 	// ResolveMedia downloads the platform media and uploads it to object
-	// storage. chatMessageID is the durable chat_message the refs will bind
-	// to; the intent ledger keys the reconciler's reference check on it.
+	// storage. chatMessageID is the durable chat_message that owns the pending
+	// intent; the Router decides whether the resulting refs belong to that
+	// message or to an issue created from the same turn.
 	ResolveMedia(ctx context.Context, inst ResolvedInstallation, sender ResolvedIdentity, sessionID, chatMessageID pgtype.UUID, msg channel.InboundMessage) channel.InboundMessage
 }
 
@@ -292,6 +338,7 @@ type TypingNotifier interface {
 type ResolverSet struct {
 	Installation InstallationResolver
 	Identity     IdentityResolver
+	Validated    ValidatedInboundResolver
 	Dedup        Deduper
 	Session      SessionBinder
 	Media        MediaResolver
@@ -305,6 +352,7 @@ type ResolverSet struct {
 // for the /issue command. Shared across platforms.
 type IssueCreator interface {
 	Create(ctx context.Context, p service.IssueCreateParams, opts service.IssueCreateOpts) (service.IssueCreateResult, error)
+	PublishAttachmentsChanged(ctx context.Context, issue db.Issue, actorID pgtype.UUID)
 }
 
 // TaskEnqueuer is the narrow subset of service.TaskService the Router needs to
@@ -312,6 +360,7 @@ type IssueCreator interface {
 type TaskEnqueuer interface {
 	EnqueueChatTask(ctx context.Context, session db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error)
 	PromoteChannelChatTasksIfMediaReady(ctx context.Context, sessionID pgtype.UUID) error
+	PromoteDeferredChannelIssueTask(ctx context.Context, taskID pgtype.UUID) error
 }
 
 // SessionReader reads the rows the debounced flush + /issue identifier need.

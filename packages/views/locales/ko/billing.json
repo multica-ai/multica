@@ -66,10 +66,133 @@
     "row_meta": "{{date}} · stripe: {{checkout}}",
     "stripe_empty": "—"
   },
+  "workspace": {
+    "title": "결제 및 요금제",
+    "description": "이 워크스페이스의 요금제, 한도, 사용자 좌석 및 Stripe 결제를 관리합니다.",
+    "loading": "워크스페이스 결제 정보 불러오는 중",
+    "plan": {
+      "free": "Free",
+      "pro": "Pro",
+      "unknown": "알 수 없는 요금제"
+    },
+    "status": {
+      "inactive": "비활성",
+      "active": "활성",
+      "trialing": "체험 중",
+      "past_due": "결제 연체",
+      "canceled": "취소됨",
+      "unknown": "알 수 없는 상태"
+    },
+    "load_failed": {
+      "title": "결제 서비스를 일시적으로 사용할 수 없습니다",
+      "description": "신뢰할 수 있는 구독 정보를 불러오지 못했습니다. 요금제는 변경되지 않았습니다."
+    },
+    "actions": {
+      "retry": "다시 시도",
+      "upgrade": "Pro로 업그레이드",
+      "manage": "결제 관리",
+      "refresh_seats": "좌석 새로고침",
+      "cancel": "취소",
+      "continue_to_stripe": "Stripe로 이동"
+    },
+    "errors": {
+      "action_title": "결제 작업 실패",
+      "temporarily_unavailable": "결제 서비스를 일시적으로 사용할 수 없습니다. 잠시 후 다시 시도하세요.",
+      "permission_changed": "현재 워크스페이스 역할로는 이 작업을 수행할 수 없습니다. 페이지를 새로고침해 현재 권한을 확인하세요.",
+      "checkout_response": "서버 응답을 읽을 수 없어 Checkout을 열지 못했습니다. 선택한 결제 주기를 유지하고 다시 시도하세요.",
+      "already_subscribed": "이 워크스페이스에는 이미 구독이 있습니다. 현재 요금제를 새로고침했습니다.",
+      "checkout_failed": "Checkout을 만들지 못했습니다. 잠시 후 다시 시도하세요.",
+      "portal_response": "서버 응답을 읽을 수 없어 Billing Portal을 열지 못했습니다.",
+      "portal_unavailable": "이 워크스페이스에서는 Billing Portal을 사용할 수 없습니다. 현재 요금제를 새로고침했습니다.",
+      "portal_failed": "Billing Portal을 열지 못했습니다. 잠시 후 다시 시도하세요.",
+      "reconcile_response": "좌석은 새로고침되었지만 결과를 읽지 못했습니다. 페이지를 다시 불러와 현재 수를 확인하세요.",
+      "reconcile_failed": "좌석을 새로고침하지 못했습니다. 멤버 변경은 저장되었으며 정기 조정이 계속 재시도됩니다."
+    },
+    "return": {
+      "cancel_title": "Checkout 취소됨",
+      "cancel_description": "요금제는 변경되지 않았습니다.",
+      "portal_title": "결제 정보 새로고침됨",
+      "portal_description": "아래에 최신 구독 정보를 표시합니다.",
+      "syncing_title": "구독 활성화 중",
+      "syncing_description": "결제가 완료되었습니다. Stripe의 요금제 변경 확인을 기다리고 있습니다.",
+      "timeout_description": "결제는 접수되었지만 구독이 아직 동기화 중입니다. 잠시 후 페이지를 새로고침하세요.",
+      "active_title": "Pro 활성화됨",
+      "active_description": "이 워크스페이스에서 이제 Pro를 사용할 수 있습니다."
+    },
+    "past_due": {
+      "title": "결제 정보를 확인해야 합니다",
+      "description": "Pro 이용을 유지하려면 Billing Portal에서 결제 수단을 업데이트하세요."
+    },
+    "read_only": {
+      "title": "결제 정보 읽기 전용",
+      "description": "워크스페이스 요금제와 한도를 볼 수 있습니다. 구독 구매와 관리는 owner와 admin만 할 수 있습니다."
+    },
+    "current": {
+      "title": "현재 요금제",
+      "plan": "워크스페이스 요금제",
+      "plan_description": "이 워크스페이스에 현재 적용되는 entitlement입니다.",
+      "members": "사용자 좌석",
+      "members_description": "에이전트와 대기 중인 초대는 좌석에 포함되지 않습니다.",
+      "member_count_other": "멤버 {{count}}명",
+      "period_end": "현재 결제 기간 종료일",
+      "period_end_description": "현재 구독 정보에 보고된 날짜입니다."
+    },
+    "upgrade": {
+      "title": "Pro로 업그레이드",
+      "description": "결제 주기를 선택한 다음 Stripe Checkout에서 현재 좌석과 최종 금액을 확인하세요.",
+      "interval_label": "결제 주기",
+      "monthly": "월간",
+      "yearly": "연간",
+      "pro_for_team_other": "사용자 좌석 {{count}}개에 Pro 적용",
+      "price_loading": "구독 가격을 불러오는 중",
+      "unit_price": "사용자 좌석당 {{price}}",
+      "estimated_monthly_total": "예상 월간 합계: {{price}}",
+      "estimated_yearly_total": "예상 연간 합계: {{price}}",
+      "price_at_checkout": "구매 전에 서버가 사용자 멤버를 다시 계산합니다. 결제 전 Stripe Checkout에서 공식 좌석당 가격과 총액을 확인할 수 있습니다."
+    },
+    "management": {
+      "title": "구독 관리",
+      "description": "결제 수단, 청구서 및 구독 취소는 Stripe에서 안전하게 관리됩니다.",
+      "portal": "Stripe Billing Portal",
+      "portal_description": "Stripe에서 이 워크스페이스의 구독을 관리합니다.",
+      "portal_unavailable": "이 워크스페이스에서 사용할 수 있는 Stripe Billing Portal이 없습니다."
+    },
+    "limits": {
+      "title": "사용량 및 한도",
+      "description": "서버가 아직 제공하지 않는 사용량을 0으로 표시하지 않고 현재 한도만 보여 줍니다.",
+      "issues": "최근 태스크",
+      "issues_description": "Free에서는 최근 활성 태스크를 이용할 수 있습니다. Pro에는 범위 제한이 없습니다.",
+      "autopilots": "성공한 자동화",
+      "autopilots_description": "Free 한도는 UTC 기준 매월 초기화됩니다. Pro는 무제한입니다.",
+      "unlimited": "무제한",
+      "per_month": "월 {{count}}회"
+    },
+    "seats": {
+      "title": "좌석",
+      "description": "현재 사용자 멤버 한 명당 Pro 좌석 하나로 계산됩니다. 에이전트와 대기 중인 초대는 포함되지 않습니다.",
+      "human_members": "현재 사용자 멤버",
+      "human_members_description": "멤버 변경 후 새로고침하면 Cloud Billing이 Stripe quantity를 조정합니다.",
+      "updated": "좌석 새로고침됨",
+      "reconciled": "현재 멤버: {{actual}} · 결제 좌석: {{billed}}"
+    },
+    "confirm": {
+      "title": "Stripe Checkout으로 이동할까요?",
+      "description": "결제 주기: {{interval}}. 현재 사용자 멤버: {{count}}. Stripe가 좌석을 다시 계산하고 결제 전에 최종 금액을 표시합니다."
+    }
+  },
   "shared": {
     "request_failed": "요청 실패",
     "refresh": "새로고침",
     "paging": "{{page}} / {{totalPages}} 페이지 · 총 {{total}}개",
     "date_dash": "—"
+  },
+  "return_page": {
+    "redirecting": "워크스페이스 결제 페이지로 돌아갑니다…",
+    "load_failed_title": "워크스페이스 결제 페이지를 열 수 없습니다",
+    "load_failed_description": "Stripe에서 돌아왔지만 워크스페이스 목록을 불러오지 못해 해당 결제 페이지를 열 수 없었습니다. 워크스페이스 설정 → 결제에서 현재 상태를 확인해 주세요.",
+    "workspace_missing_title": "워크스페이스를 찾을 수 없습니다",
+    "workspace_missing_description": "Stripe에서 돌아왔지만 이 워크스페이스를 사용할 수 없습니다. 삭제되었거나 접근 권한이 변경되었을 수 있습니다. 원하는 워크스페이스의 결제 페이지에서 현재 상태를 확인해 주세요.",
+    "retry": "다시 시도",
+    "go_to_app": "Multica로 이동"
   }
 }

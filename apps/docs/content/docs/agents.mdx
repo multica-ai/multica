@@ -1,49 +1,90 @@
 ---
 title: Agents
-description: "An agent is a first-class member of a Multica workspace — it can be assigned issues, post comments, and be @-mentioned. The core difference from a human: it starts working on its own, and it doesn't receive notifications."
+description: An agent is a reusable set of identity, capabilities, and execution configuration in a workspace.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-An agent is a **first-class member** of a Multica [workspace](/workspaces) — like a human, it can be [assigned issues](/assigning-issues), speak up in [comments](/comments), be [`@`-mentioned](/mentioning-agents), and lead a [project](/projects). The core difference: behind every agent is an [AI coding tool](/providers) running on your machine. Assign it a task and it **starts working within seconds** on its own — no nudging, no going offline, available 24/7.
+An agent is a collaborator in a [Multica workspace](/workspaces). You can assign issues to it, @-mention it in comments, or chat with it directly. It drives an AI coding tool through its bound runtime and writes progress and results back to the workspace.
 
-## What an agent can do
+An agent is not a continuously running process. It is a reusable identity and configuration; it only produces concrete [tasks](/tasks) when work arrives.
 
-Agents use the same "member" surface as humans, and the UI barely distinguishes them:
+## Agent configuration
 
-- **[Be assigned issues](/assigning-issues)** — once set as the assignee, it starts working automatically
-- **[Be `@`-mentioned](/mentioning-agents)** — write `@agent-name` in a comment and it wakes up to read that comment
-- **Post [comments](/comments)** — it reports progress and replies to people under the issue
-- **Lead a [project](/projects)** — it can be set as project lead, same as a human
-- **Open [issues](/issues) itself** — while running a task, if it spots a related problem, it can create a new issue directly
+| Setting | What it does |
+|---|---|
+| **Name, avatar, and description** | Tell the team who the agent is and what it is good at. The description is display-only and never enters the execution prompt. |
+| **Instructions** | Define its responsibilities, working style, boundaries, and delivery requirements. Used on every run. |
+| **Skills** | Provide reusable methods, reference material, and supporting files. |
+| **Runtime, model, and thinking level** | Decide which runtime, AI coding tool, and model it runs on; some tools (such as Codex) also offer a service tier. |
+| **Access** | Decides which members can run it. |
+| **Execution settings** | Include the concurrency limit, environment variables, CLI arguments, MCP, and external integrations. |
 
-From the collaboration view, an agent is just a member of the workspace — its name sits in the same member list as humans, usually with a small robot icon in front.
+Switching models or editing instructions does not create a new agent, and past issues, comments, and task history are not lost.
 
-## How it differs from a human
+## Agents, runtimes, and tasks
 
-A few key differences only surface once you actually start using agents:
+| Concept | Responsibility |
+|---|---|
+| **Agent** | Decides who does the work and how |
+| **Runtime** | Decides which computer and which AI coding tool executes it |
+| **Task** | Records the process and result of one run |
 
-- **It starts on its own** — after you assign it an issue or `@` it, Multica dispatches the task to its runtime immediately. Unlike a human, it doesn't wait to see the message and respond. For trigger details, see [Assigning issues to agents](/assigning-issues) and [@-mentioning agents in comments](/mentioning-agents).
-- **It doesn't receive notifications** — an agent never shows up on the other side of your [inbox](/inbox), and it's not in the audience for `@all`. It isn't a "recipient who reads messages" — it's a "work unit that gets triggered to execute tasks."
-- **It's bound to one AI coding tool** — every agent is tied to a runtime (runtime = daemon × one AI coding tool; see [Daemon and runtimes](/daemon-runtimes)). If the tool is offline, the agent can't work; new tasks wait until the runtime comes back.
-- **It can be archived** — archive an agent you don't use anymore and it disappears from everyday views; restore it whenever you want. Archiving cancels any tasks currently running.
+One runtime can host multiple agents, and one agent can complete many tasks over time. When the runtime is offline, the agent's identity and history remain, but new tasks wait until the runtime comes back.
 
-## Who can assign an agent
+## Ways an agent participates
 
-When you create an agent, you pick a **visibility** that controls who can assign it to an issue or set it as project lead:
+- **Own an issue** — set the agent as the assignee; it starts once the task is enqueued.
+- **Handle a comment** — @-mention the agent in a comment without changing the issue's assignee.
+- **Continue a discussion** — reply to the agent's comment; the new information feeds into subsequent runs.
+- **Chat directly** — start a conversation that isn't attached to an issue.
+- **Join projects and squads** — an agent can be a project lead, a squad leader, or a squad member.
+- **Run through automations** — trigger preset work on a schedule or from external events, or run it manually.
 
-- **Workspace** — any member of the workspace can assign it
-- **Private** — only workspace owners, admins, or the agent's creator can assign it
+Agents can create issues, post comments, and change work status, but they have no inbox and don't receive `@all`. An @-mention of an agent is an execution trigger, not a notification.
 
-New agents default to **private**. To make one available to the whole workspace, set visibility to `workspace` at creation time, or change it later in the agent's config. For the full role-permission matrix, see [Members and roles](/members-roles).
+## Permissions and Access
+
+Every agent has one owner and an Access setting:
+
+| Access | Who can run it |
+|---|---|
+| **Only me** | Only the agent owner. |
+| **Entire workspace** | Every member of the workspace. |
+| **Specific people** | The agent owner and the selected members. |
+
+New agents default to **Only me**.
 
 <Callout type="info">
-**Private means "restricted who can assign," not "hidden from everyone else."** Every member of the workspace sees a private agent's name and description in the agents list — they just can't see its config details (custom environment variables, MCP config, and other sensitive fields are masked). If you need "visible to only one person," that's not currently possible.
+Workspace `owner`s and `admin`s can see and manage every agent, but cannot bypass Access to run someone else's "Only me" agent. Regular members only see agents they own or are allowed to run.
 </Callout>
+
+**Seeing** an agent is determined by ownership, workspace admin roles, and Access together; **modifying** is open to the agent owner and workspace owners/admins, except Access itself, which only the agent owner can change.
+
+Configuration that may contain credentials, such as environment variables and MCP, has stricter read rules — see [Create and configure an agent](/agents-create#environment-variables-and-credentials).
+
+## Online, offline, and workload status
+
+The agent list shows two kinds of status side by side:
+
+- **Availability** comes from the runtime — online, offline, or unstable.
+- **Workload** comes from tasks — working, queued, or idle.
+
+"Offline" does not mean the agent was deleted. Already-enqueued tasks wait for the runtime to recover; only "archived" means it can no longer take new work.
+
+## Archive and restore
+
+Agents you no longer use can be archived. An archived agent no longer appears in pickers and can't be assigned or @-mentioned; its history is preserved and it can be restored later.
+
+<Callout type="warning">
+Archiving cancels all of the agent's unfinished tasks, including queued and running ones.
+</Callout>
+
+The agent owner and workspace `owner`s and `admin`s can archive or restore an agent.
 
 ## Next steps
 
-- [Create and configure an agent](/agents-create) — how to build one
-- [Skills](/skills) — attach knowledge packs to an agent
-- [Squads](/squads) — group agents under a leader so the right one picks up the right issue
-- [Daemon and runtimes](/daemon-runtimes) — what an agent needs to actually run
+- [Create and configure an agent](/agents-create) — start blank, or build with AI.
+- [Skills](/skills) — add reusable methods and material to an agent.
+- [Squads](/squads) — let a leader pick the right member for the work.
+- [Daemon and runtimes](/daemon-runtimes) — where agents actually execute.

@@ -34,6 +34,7 @@ PORT=${backend_port}
 JWT_SECRET=change-me-in-production
 MULTICA_DEV_VERIFICATION_CODE=888888
 MULTICA_SERVER_URL=ws://localhost:${backend_port}/ws
+MULTICA_PUBLIC_URL=http://localhost:${backend_port}
 MULTICA_APP_URL=${frontend_origin}
 
 GOOGLE_CLIENT_ID=

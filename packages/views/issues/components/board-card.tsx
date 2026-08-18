@@ -10,6 +10,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { propertyListOptions } from "@multica/core/properties";
 import { CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
+import { descriptionPreview } from "./description-preview";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { CalendarClock, CalendarDays } from "lucide-react";
 import { ActorAvatar } from "../../common/actor-avatar";
@@ -31,17 +32,6 @@ import { useT } from "../../i18n";
 
 function formatDate(date: string): string {
   return formatDateOnly(date, { month: "short", day: "numeric" }, "en-US");
-}
-
-function descriptionPreview(markdown: string): string {
-  return markdown
-    .replace(/!file\[[^\]]*\]\([^)]*\)/g, "")
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, "")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/[*_`~]+/g, "")
-    .replace(/^[\s>#]+/gm, "")
-    .replace(/\s+/g, " ")
-    .trim();
 }
 
 /** Stops event from bubbling to Link/drag handlers */
@@ -113,7 +103,7 @@ export const BoardCardContent = memo(function BoardCardContent({
   const priorityLabel = t(($) => $.priority[issue.priority]);
   const priorityIconNode = showPriority ? (
     canEdit ? (
-      <PickerWrapper>
+      <PickerWrapper className="flex">
         <PriorityPicker
           priority={issue.priority}
           onUpdate={handleUpdate}
@@ -121,7 +111,7 @@ export const BoardCardContent = memo(function BoardCardContent({
             <button
               type="button"
               aria-label={priorityLabel}
-              className="inline-flex items-center justify-center rounded hover:bg-muted/60"
+              className="inline-flex size-5 shrink-0 items-center justify-center rounded hover:bg-muted/60"
             >
               <PriorityIcon priority={issue.priority} />
             </button>
@@ -129,7 +119,10 @@ export const BoardCardContent = memo(function BoardCardContent({
         />
       </PickerWrapper>
     ) : (
-      <span aria-label={priorityLabel} className="inline-flex items-center justify-center">
+      <span
+        aria-label={priorityLabel}
+        className="inline-flex size-5 shrink-0 items-center justify-center"
+      >
         <PriorityIcon priority={issue.priority} />
       </span>
     )
@@ -148,14 +141,15 @@ export const BoardCardContent = memo(function BoardCardContent({
         actorId={issue.assignee_id!}
         size="sm"
         enableHoverCard
+        profileLink={false}
         className="shrink-0"
       />
       {assigneeName && (
-        <span className="min-w-0 truncate text-xs text-foreground">{assigneeName}</span>
+        <span className="min-w-0 truncate text-caption text-foreground">{assigneeName}</span>
       )}
     </span>
   ) : (
-    <span className="text-xs text-muted-foreground">{t(($) => $.pickers.assignee.trigger_unassigned)}</span>
+    <span className="text-caption text-muted-foreground">{t(($) => $.pickers.assignee.trigger_unassigned)}</span>
   );
 
   const assigneeNode = showAssigneeSection ? (
@@ -182,13 +176,13 @@ export const BoardCardContent = memo(function BoardCardContent({
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1.5 min-w-0">
           {priorityIconNode}
-          <p className="text-xs text-muted-foreground truncate">{issue.identifier}</p>
+          <p className="text-caption text-muted-foreground truncate">{issue.identifier}</p>
         </div>
         <IssueAgentActivityIndicator issueId={issue.id} />
       </div>
 
       {/* Row 2: Title */}
-      <p className="mt-1 text-sm font-medium leading-snug line-clamp-2">
+      <p className="mt-1 text-body font-medium leading-snug line-clamp-2">
         {issue.title}
       </p>
 
@@ -196,7 +190,7 @@ export const BoardCardContent = memo(function BoardCardContent({
         const preview = descriptionPreview(issue.description!);
         if (!preview) return null;
         return (
-          <p className="mt-1 text-xs text-muted-foreground line-clamp-1">
+          <p className="mt-1 text-caption text-muted-foreground line-clamp-1">
             {preview}
           </p>
         );
@@ -206,7 +200,7 @@ export const BoardCardContent = memo(function BoardCardContent({
       {(showProject || showLabels || cardCustomProperties.length > 0) && (
         <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
           {showProject && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground max-w-[160px]">
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground max-w-[160px]">
               <ProjectIcon project={project} size="sm" />
               <span className="truncate">{project!.title}</span>
             </span>
@@ -217,9 +211,9 @@ export const BoardCardContent = memo(function BoardCardContent({
           {cardCustomProperties.map((property) => (
             <span
               key={property.id}
-              className="inline-flex max-w-[160px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              className="inline-flex max-w-[160px] items-center gap-1 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground"
             >
-              <PropertyIcon property={property} className="size-3 text-[11px]" />
+              <PropertyIcon property={property} className="size-3 text-micro" />
               <CustomPropertyValueDisplay property={property} value={issue.properties?.[property.id]} />
             </span>
           ))}
@@ -238,12 +232,12 @@ export const BoardCardContent = memo(function BoardCardContent({
             <div className="ml-auto flex shrink-0 items-center gap-2">
               {showStartDate && (
                 canEdit ? (
-                  <PickerWrapper className="shrink-0">
+                  <PickerWrapper className="flex shrink-0">
                     <StartDatePicker
                       startDate={issue.start_date}
                       onUpdate={handleUpdate}
                       trigger={
-                        <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        <span className="flex items-center gap-1 text-caption text-muted-foreground">
                           <CalendarClock className="size-3" />
                           {formatDate(issue.start_date!)}
                         </span>
@@ -251,7 +245,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                     />
                   </PickerWrapper>
                 ) : (
-                  <span className="flex shrink-0 items-center gap-1 text-xs text-muted-foreground">
+                  <span className="flex shrink-0 items-center gap-1 text-caption text-muted-foreground">
                     <CalendarClock className="size-3" />
                     {formatDate(issue.start_date!)}
                   </span>
@@ -259,13 +253,13 @@ export const BoardCardContent = memo(function BoardCardContent({
               )}
               {showDueDate && (
                 canEdit ? (
-                  <PickerWrapper className="shrink-0">
+                  <PickerWrapper className="flex shrink-0">
                     <DueDatePicker
                       dueDate={issue.due_date}
                       onUpdate={handleUpdate}
                       trigger={
                         <span
-                          className={`flex items-center gap-1 text-xs ${
+                          className={`flex items-center gap-1 text-caption ${
                             isPastDateOnly(issue.due_date)
                               ? "text-destructive"
                               : "text-muted-foreground"
@@ -279,7 +273,7 @@ export const BoardCardContent = memo(function BoardCardContent({
                   </PickerWrapper>
                 ) : (
                   <span
-                    className={`flex shrink-0 items-center gap-1 text-xs ${
+                    className={`flex shrink-0 items-center gap-1 text-caption ${
                       isPastDateOnly(issue.due_date)
                         ? "text-destructive"
                         : "text-muted-foreground"
@@ -293,13 +287,13 @@ export const BoardCardContent = memo(function BoardCardContent({
               {showChildProgress && (
                 <div className="inline-flex shrink-0 items-center gap-1">
                   <ProgressRing done={childProgress!.done} total={childProgress!.total} size={14} />
-                  <span className="text-[11px] text-muted-foreground tabular-nums font-medium">
+                  <span className="text-micro text-muted-foreground tabular-nums font-medium">
                     {childProgress!.done}/{childProgress!.total}
                   </span>
                 </div>
               )}
               {showUpdatedHint && (
-                <span className="shrink-0 text-xs text-muted-foreground">
+                <span className="shrink-0 text-caption text-muted-foreground">
                   {t(($) => $.card.updated_ago, { time: timeAgo(issue.updated_at) })}
                 </span>
               )}
@@ -353,12 +347,14 @@ export const DraggableBoardCard = memo(function DraggableBoardCard({
       <div
         ref={setNodeRef}
         style={style}
+        data-board-card=""
         {...attributes}
         {...listeners}
         className={`group/card ${isDragging ? "opacity-30" : ""}`}
       >
         <AppLink
           href={p.issueDetail(issue.id)}
+          newTabTitle={issue.identifier}
           className={`group block transition-colors ${isDragging ? "pointer-events-none" : ""}`}
         >
           <BoardCardContent

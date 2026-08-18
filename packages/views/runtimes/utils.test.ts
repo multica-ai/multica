@@ -10,9 +10,12 @@ import {
   computeCostInWindow,
   estimateCost,
   estimateCostBreakdown,
+  formatTokens,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
+  summarizeTaskUsage,
+  summarizeTaskUsageAcross,
   todayIso,
   weekStartIso,
 } from "./utils";
@@ -1305,5 +1308,107 @@ describe("computeCostInWindow", () => {
   it("returns 0 for an empty row set", () => {
     vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
     expect(computeCostInWindow([], 7, "UTC")).toBe(0);
+  });
+});
+
+describe("summarizeTaskUsage", () => {
+  // claude-opus-5: 5 / 25 / 0.50 / 6.25 per million.
+  const opus = {
+    provider: "anthropic",
+    model: "claude-opus-5",
+    input_tokens: 96_000,
+    output_tokens: 34_000,
+    cache_read_tokens: 712_000,
+    cache_write_tokens: 50_000,
+  };
+  // gpt-5.6-terra: 2.50 / 15 / 0.25 / 3.125 per million.
+  const terra = {
+    provider: "openai",
+    model: "gpt-5.6-terra",
+    input_tokens: 31_000,
+    output_tokens: 12_000,
+    cache_read_tokens: 158_000,
+    cache_write_tokens: 11_000,
+  };
+
+  it("sums every token bucket into the headline figure", () => {
+    const s = summarizeTaskUsage([opus]);
+    expect(s?.tokens).toBe(96_000 + 34_000 + 712_000 + 50_000);
+    expect(s?.input).toBe(96_000);
+    expect(s?.cacheWrite).toBe(50_000);
+    expect(s?.models).toEqual(["claude-opus-5"]);
+  });
+
+  it("prices each model slice at its own rate, not the combined total", () => {
+    // Priced separately: 1.9985 (opus) + 0.331375 (terra).
+    // Priced as one blob at either rate, the answer would be wrong.
+    const s = summarizeTaskUsage([opus, terra]);
+    expect(s?.cost).toBeCloseTo(1.9985 + 0.331375, 5);
+    expect(s?.models).toEqual(["claude-opus-5", "gpt-5.6-terra"]);
+  });
+
+  it("prefers the provider's own cost over the rate table", () => {
+    // 3e10 ticks = $3.00, well above what the rate table would charge, so a
+    // rate-table result would be visibly different.
+    const s = summarizeTaskUsage([{ ...opus, cost_usd_ticks: 30_000_000_000 }]);
+    expect(s?.cost).toBeCloseTo(3, 5);
+  });
+
+  it("returns null for no usage rather than a zeroed summary", () => {
+    // Both must be null: a run with no recorded usage was not free, and a
+    // 0 here would render as "$0.00" and assert that it was.
+    expect(summarizeTaskUsage(undefined)).toBeNull();
+    expect(summarizeTaskUsage([])).toBeNull();
+  });
+
+  it("counts tokens for an unpriced model but leaves its cost at 0", () => {
+    const s = summarizeTaskUsage([{ ...opus, model: "totally-made-up-model" }]);
+    expect(s?.tokens).toBe(892_000);
+    expect(s?.cost).toBe(0);
+  });
+
+  it("reports cache savings against full input pricing", () => {
+    // 712K cache reads at opus: would have cost 5/M, actually cost 0.50/M.
+    const s = summarizeTaskUsage([opus]);
+    expect(s?.cacheSavings).toBeCloseTo((712_000 * (5 - 0.5)) / 1_000_000, 5);
+  });
+});
+
+describe("summarizeTaskUsageAcross", () => {
+  const slice = {
+    model: "claude-opus-5",
+    input_tokens: 1_000_000,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  };
+
+  it("skips runs with no usage instead of nulling the whole total", () => {
+    const total = summarizeTaskUsageAcross([[slice], undefined, [], [slice]]);
+    expect(total?.tokens).toBe(2_000_000);
+    expect(total?.cost).toBeCloseTo(10, 5);
+  });
+
+  it("is null only when no run has any usage", () => {
+    expect(summarizeTaskUsageAcross([undefined, [], undefined])).toBeNull();
+    expect(summarizeTaskUsageAcross([])).toBeNull();
+  });
+});
+
+describe("formatTokens", () => {
+  it("uses a compact unit ladder for large token counts", () => {
+    expect(formatTokens(999)).toBe("999");
+    expect(formatTokens(1_000)).toBe("1K");
+    expect(formatTokens(1_050)).toBe("1.1K");
+    expect(formatTokens(1_000_000)).toBe("1M");
+    expect(formatTokens(2_200_000_000)).toBe("2.2B");
+    expect(formatTokens(29_513_100_000)).toBe("29.5B");
+    expect(formatTokens(1_000_000_000_000)).toBe("1T");
+  });
+
+  it("promotes values that round across a unit boundary", () => {
+    expect(formatTokens(999_949)).toBe("999.9K");
+    expect(formatTokens(999_950)).toBe("1M");
+    expect(formatTokens(999_999_999)).toBe("1B");
   });
 });

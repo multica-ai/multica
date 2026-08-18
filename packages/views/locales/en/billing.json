@@ -66,10 +66,135 @@
     "row_meta": "{{date}} · stripe: {{checkout}}",
     "stripe_empty": "—"
   },
+  "workspace": {
+    "title": "Billing",
+    "description": "Manage this workspace's plan, limits, human seats, and Stripe billing.",
+    "loading": "Loading workspace billing",
+    "plan": {
+      "free": "Free",
+      "pro": "Pro",
+      "unknown": "Unknown plan"
+    },
+    "status": {
+      "inactive": "Inactive",
+      "active": "Active",
+      "trialing": "Trialing",
+      "past_due": "Past due",
+      "canceled": "Canceled",
+      "unknown": "Unknown status"
+    },
+    "load_failed": {
+      "title": "Billing is temporarily unavailable",
+      "description": "We couldn't read a trustworthy subscription snapshot. Your plan has not been changed."
+    },
+    "actions": {
+      "retry": "Retry",
+      "upgrade": "Upgrade to Pro",
+      "manage": "Manage billing",
+      "refresh_seats": "Refresh seats",
+      "cancel": "Cancel",
+      "continue_to_stripe": "Continue to Stripe"
+    },
+    "errors": {
+      "action_title": "Billing action failed",
+      "temporarily_unavailable": "Billing is temporarily unavailable. Retry in a moment.",
+      "permission_changed": "Your workspace role no longer allows this action. Refresh the page to see your current access.",
+      "checkout_response": "Checkout could not open because the server response was unreadable. Retry without changing your selected interval.",
+      "already_subscribed": "This workspace already has a subscription. The current plan has been refreshed.",
+      "checkout_failed": "Checkout could not be created. Retry in a moment.",
+      "portal_response": "The Billing Portal could not open because the server response was unreadable.",
+      "portal_unavailable": "The Billing Portal is not available for this workspace. The current plan has been refreshed.",
+      "portal_failed": "The Billing Portal could not be opened. Retry in a moment.",
+      "reconcile_response": "Seats were refreshed, but the result could not be read. Reload the page to confirm the current count.",
+      "reconcile_failed": "Seats could not be refreshed. Member changes are still saved and periodic reconciliation will retry."
+    },
+    "return": {
+      "cancel_title": "Checkout canceled",
+      "cancel_description": "No plan change was made.",
+      "portal_title": "Billing details refreshed",
+      "portal_description": "The latest subscription snapshot is shown below.",
+      "syncing_title": "Activating your subscription",
+      "syncing_description": "Payment is complete. We're waiting for Stripe to confirm the plan change.",
+      "timeout_description": "Payment was received, but the subscription is still syncing. Refresh this page in a moment.",
+      "active_title": "Pro is active",
+      "active_description": "This workspace now has Pro access."
+    },
+    "past_due": {
+      "title": "Payment needs attention",
+      "description": "Open the Billing Portal to update your payment method and keep Pro access."
+    },
+    "read_only": {
+      "title": "Read-only billing access",
+      "description": "You can view the workspace plan and limits. Only owners and admins can purchase or manage a subscription."
+    },
+    "current": {
+      "title": "Current plan",
+      "plan": "Workspace plan",
+      "plan_description": "The entitlement currently enforced for this workspace.",
+      "members": "Human members",
+      "members_description": "Agents and pending invitations are not counted as seats.",
+      "member_count_one": "{{count}} member",
+      "member_count_other": "{{count}} members",
+      "period_end": "Current period ends",
+      "period_end_description": "The date reported by the current subscription snapshot."
+    },
+    "upgrade": {
+      "title": "Upgrade to Pro",
+      "description": "Choose a billing interval, then confirm the current seats and final amount in Stripe Checkout.",
+      "interval_label": "Billing interval",
+      "monthly": "Monthly",
+      "yearly": "Yearly",
+      "pro_for_team_one": "Pro for {{count}} human seat",
+      "pro_for_team_other": "Pro for {{count}} human seats",
+      "price_loading": "Loading subscription prices",
+      "unit_price": "{{price}} per human seat",
+      "estimated_monthly_total": "Estimated monthly total: {{price}}",
+      "estimated_yearly_total": "Estimated yearly total: {{price}}",
+      "price_at_checkout": "The server re-counts human members before purchase. Stripe Checkout shows the authoritative per-seat price and total before you pay."
+    },
+    "management": {
+      "title": "Subscription management",
+      "description": "Stripe securely manages payment methods, invoices, and cancellation.",
+      "portal": "Stripe Billing Portal",
+      "portal_description": "Open Stripe to manage this workspace's subscription.",
+      "portal_unavailable": "No Stripe Billing Portal is available for this workspace."
+    },
+    "limits": {
+      "title": "Usage and limits",
+      "description": "Current limits are shown without inventing usage totals the server does not provide yet.",
+      "issues": "Recent tasks",
+      "issues_description": "Free keeps the most recently active tasks available. Pro has no window limit.",
+      "autopilots": "Successful automations",
+      "autopilots_description": "The Free allowance resets each UTC calendar month. Pro is unlimited.",
+      "unlimited": "Unlimited",
+      "per_month": "{{count}} / month"
+    },
+    "seats": {
+      "title": "Seats",
+      "description": "Every current human member counts as a Pro seat. Agents and pending invitations do not.",
+      "human_members": "Current human members",
+      "human_members_description": "Refresh after membership changes to ask cloud billing to reconcile Stripe quantity.",
+      "updated": "Seats refreshed",
+      "reconciled": "Current members: {{actual}} · billed seats: {{billed}}"
+    },
+    "confirm": {
+      "title": "Continue to Stripe Checkout?",
+      "description": "Billing interval: {{interval}}. Current human members: {{count}}. Stripe will re-count seats and show the final amount before payment."
+    }
+  },
   "shared": {
     "request_failed": "Request failed",
     "refresh": "Refresh",
     "paging": "page {{page}} / {{totalPages}} · {{total}} total",
     "date_dash": "—"
+  },
+  "return_page": {
+    "redirecting": "Returning you to workspace billing…",
+    "load_failed_title": "Could not open workspace billing",
+    "load_failed_description": "You came back from Stripe, but we could not load your workspace list to open the right billing page. Open Workspace settings → Billing to check the current state.",
+    "workspace_missing_title": "Could not find that workspace",
+    "workspace_missing_description": "You came back from Stripe, but this workspace is no longer available to you — it may have been removed, or your access changed. Open Billing in the workspace you expected to check the current state.",
+    "retry": "Try again",
+    "go_to_app": "Go to Multica"
   }
 }

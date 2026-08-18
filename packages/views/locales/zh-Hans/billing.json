@@ -66,10 +66,133 @@
     "row_meta": "{{date}} · stripe: {{checkout}}",
     "stripe_empty": "—"
   },
+  "workspace": {
+    "title": "账单与套餐",
+    "description": "管理这个工作区的套餐、限额、成员席位和 Stripe 账单。",
+    "loading": "正在加载工作区账单",
+    "plan": {
+      "free": "Free",
+      "pro": "Pro",
+      "unknown": "未知套餐"
+    },
+    "status": {
+      "inactive": "未启用",
+      "active": "活跃",
+      "trialing": "试用中",
+      "past_due": "付款逾期",
+      "canceled": "已取消",
+      "unknown": "未知状态"
+    },
+    "load_failed": {
+      "title": "账单服务暂时不可用",
+      "description": "暂时无法读取可信的订阅快照。你的套餐没有发生变化。"
+    },
+    "actions": {
+      "retry": "重试",
+      "upgrade": "升级到 Pro",
+      "manage": "管理账单",
+      "refresh_seats": "刷新席位",
+      "cancel": "取消",
+      "continue_to_stripe": "前往 Stripe"
+    },
+    "errors": {
+      "action_title": "账单操作失败",
+      "temporarily_unavailable": "账单服务暂时不可用，请稍后重试。",
+      "permission_changed": "你的工作区角色已不允许执行此操作。刷新页面可查看当前权限。",
+      "checkout_response": "服务端响应无法读取，无法打开 Checkout。请保留当前周期并重试。",
+      "already_subscribed": "这个工作区已经有订阅，当前套餐已刷新。",
+      "checkout_failed": "无法创建 Checkout，请稍后重试。",
+      "portal_response": "服务端响应无法读取，无法打开 Billing Portal。",
+      "portal_unavailable": "这个工作区暂时无法使用 Billing Portal，当前套餐已刷新。",
+      "portal_failed": "无法打开 Billing Portal，请稍后重试。",
+      "reconcile_response": "席位已刷新，但无法读取结果。请重新加载页面确认当前数量。",
+      "reconcile_failed": "无法刷新席位。成员变更已保存，定期对账仍会继续重试。"
+    },
+    "return": {
+      "cancel_title": "已取消 Checkout",
+      "cancel_description": "套餐没有发生变化。",
+      "portal_title": "账单信息已刷新",
+      "portal_description": "下方显示最新的订阅快照。",
+      "syncing_title": "正在启用订阅",
+      "syncing_description": "付款已完成，正在等待 Stripe 确认套餐变化。",
+      "timeout_description": "付款已收到，但订阅仍在同步。请稍后刷新页面。",
+      "active_title": "Pro 已启用",
+      "active_description": "这个工作区现在可以使用 Pro。"
+    },
+    "past_due": {
+      "title": "付款信息需要处理",
+      "description": "打开 Billing Portal 更新付款方式，以继续使用 Pro。"
+    },
+    "read_only": {
+      "title": "账单只读权限",
+      "description": "你可以查看工作区套餐和限额。只有 owner 和 admin 可以购买或管理订阅。"
+    },
+    "current": {
+      "title": "当前套餐",
+      "plan": "工作区套餐",
+      "plan_description": "这个工作区当前生效的 entitlement。",
+      "members": "成员席位",
+      "members_description": "智能体和待接受的邀请不计入席位。",
+      "member_count_other": "{{count}} 位成员",
+      "period_end": "当前周期结束时间",
+      "period_end_description": "当前订阅快照报告的日期。"
+    },
+    "upgrade": {
+      "title": "升级到 Pro",
+      "description": "选择付款周期，然后在 Stripe Checkout 确认当前席位和最终金额。",
+      "interval_label": "付款周期",
+      "monthly": "月付",
+      "yearly": "年付",
+      "pro_for_team_other": "为 {{count}} 个成员席位升级 Pro",
+      "price_loading": "正在加载订阅价格",
+      "unit_price": "每个成员席位 {{price}}",
+      "estimated_monthly_total": "预计月付总额：{{price}}",
+      "estimated_yearly_total": "预计年付总额：{{price}}",
+      "price_at_checkout": "购买前，服务端会重新统计成员。付款前，Stripe Checkout 会显示权威的单席位价格和总额。"
+    },
+    "management": {
+      "title": "订阅管理",
+      "description": "Stripe 会安全地管理付款方式、发票和取消订阅。",
+      "portal": "Stripe Billing Portal",
+      "portal_description": "前往 Stripe 管理这个工作区的订阅。",
+      "portal_unavailable": "这个工作区暂时没有可用的 Stripe Billing Portal。"
+    },
+    "limits": {
+      "title": "用量与限额",
+      "description": "这里仅显示当前套餐限额，不会把服务端尚未提供的已用量伪装成 0。",
+      "issues": "最近活跃的任务",
+      "issues_description": "Free 可访问最近活跃的任务；Pro 没有窗口限制。",
+      "autopilots": "成功的自动化执行",
+      "autopilots_description": "Free 限额按 UTC 自然月重置；Pro 不限次数。",
+      "unlimited": "不限",
+      "per_month": "每月 {{count}} 次"
+    },
+    "seats": {
+      "title": "席位",
+      "description": "每位当前成员都会计为一个 Pro 席位，智能体和待接受的邀请不计。",
+      "human_members": "当前成员",
+      "human_members_description": "成员变化后刷新，通知 Cloud Billing 对账 Stripe quantity。",
+      "updated": "席位已刷新",
+      "reconciled": "当前成员：{{actual}} · 计费席位：{{billed}}"
+    },
+    "confirm": {
+      "title": "前往 Stripe Checkout？",
+      "description": "付款周期：{{interval}}。当前成员：{{count}}。Stripe 会重新统计席位，并在付款前显示最终金额。"
+    }
+  },
   "shared": {
     "request_failed": "请求失败",
     "refresh": "刷新",
     "paging": "第 {{page}} / {{totalPages}} 页 · 共 {{total}} 条",
     "date_dash": "—"
+  },
+  "return_page": {
+    "redirecting": "正在返回工作区账单页…",
+    "load_failed_title": "无法打开工作区账单页",
+    "load_failed_description": "你已从 Stripe 返回，但我们无法加载工作区列表来打开对应的账单页。请到「工作区设置 → 账单」确认当前状态。",
+    "workspace_missing_title": "找不到该工作区",
+    "workspace_missing_description": "你已从 Stripe 返回，但该工作区对你已不可用——可能已被删除，或你的访问权限发生了变化。请到你预期的那个工作区的账单页确认当前状态。",
+    "retry": "重试",
+    "go_to_app": "前往 Multica"
   }
 }

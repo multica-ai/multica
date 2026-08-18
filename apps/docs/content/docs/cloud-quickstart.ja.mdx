@@ -1,119 +1,95 @@
 ---
-title: Cloud クイックスタート
-description: サインアップからエージェントへの最初のタスク割り当てまで 5 分で。
+title: クイックスタート
+description: コンピュータを接続し、最初のエージェントを作成して、最初のタスクを完了させます。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-このページは Multica Cloud を最初から最後まで案内します — **サインアップ → [CLI](/cli) のインストール → [デーモン](/daemon-runtimes)の起動 → [エージェント](/agents)の作成 → 最初の[タスク](/tasks)の割り当て**。約 5 分かかります。
-
-前提条件は 1 つだけです: ローカルに [AI コーディングツール](/providers)（[Antigravity](/providers#antigravity)、[Claude Code](/providers#claude-code)、[CodeBuddy](/providers#codebuddy)、[Codex](/providers#codex)、[Cursor](/providers#cursor)、[Copilot](/providers#copilot)、[Hermes](/providers#hermes)、[Kimi](/providers#kimi)、[Kiro CLI](/providers#kiro-cli)、[OpenCode](/providers#opencode)、[OpenClaw](/providers#openclaw)、[Pi](/providers#pi)、[Qoder](/providers#qoder)、[Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code) のいずれか）を少なくとも 1 つ、すでにインストールしておくこと。デーモンは起動時にこれらを自動検出し、1 つもなければ起動を拒否します。
-
-## 1. アカウントを作成する
-
-[multica.ai](https://multica.ai) でサインアップしてください。メール（6 桁の確認コード）または Google でログインできます。
-
-サインアップ後は（アカウント名から生成された）デフォルトのワークスペースに自動的に配置されます。後で名前を変更したり、新しいワークスペースを作成したりできます。
-
-## 2. Multica CLI をインストールする
-
-**macOS / Linux（Homebrew 推奨）**:
-
-```bash
-brew install multica-ai/tap/multica
-```
-
-**macOS / Linux（Homebrew なし）**:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
-```
-
-**Windows（PowerShell）**:
-
-```powershell
-irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
-```
-
-インストールを確認します。
-
-```bash
-multica version
-```
-
-## 3. ログイン + デーモンの起動
-
-コマンド 1 つでログインとデーモンの起動を処理します。
-
-```bash
-multica setup
-```
-
-`multica setup` は次を実行します。
-
-1. CLI が Multica Cloud に接続するよう構成します
-2. ログインのためにブラウザを開きます（Web と同じメール確認コード / Google OAuth）
-3. 生成された PAT を `~/.multica/config.json` に保存します
-4. **デーモンを自動的に起動します** — 3 秒ごとにタスクをポーリングし、15 秒ごとにハートビートを送信し始めます
-
 <Callout type="info">
-**デスクトップアプリを使用していますか？** デスクトップアプリは起動時に**デーモンを自動的に起動します** — `multica setup` を手動で実行する必要はありません。[デスクトップアプリ](/desktop-app)を参照してください。
+エージェントが実行するには、実行するコンピュータに Claude Code、Codex、Cursor などの[サポートされている AI コーディングツール](/providers)が少なくとも 1 つインストールされ、ログイン済みである必要があります。Multica にこれらのツールは同梱されていません。
 </Callout>
 
-デーモンが実行中かどうかを確認します。
+## 1. ログインしてワークスペースに入る
 
-```bash
-multica daemon status
-```
+Web（[multica.ai](https://multica.ai)）または [Multica Desktop](https://multica.ai/download) でログインします。メール認証コードと Google に対応しています。
 
-`online` はサーバーに登録されたことを意味します。
+- **Desktop**：このコンピュータを自動で接続できます。
+- **Web**：次のステップでコマンドラインから接続します。
 
-## 4. ランタイムがオンラインか確認する
+## 2. コンピュータを接続する
 
-Web UI で **Settings → Runtimes** に移動します。先ほど起動したデーモンが、1 つ以上のアクティブなランタイムとして表示されるはずです — ローカルにインストールされた AI コーディングツールごとに 1 つです。
+エージェントは接続されたコンピュータ上で作業を実行します。サイドバー下部の **設定 → ランタイム** を開きます。
 
-オフラインと表示されても慌てないでください — [トラブルシューティング → デーモンがサーバーに接続できない](/troubleshooting#daemon-cant-connect-to-the-server)を参照してください。
+- **Desktop の場合**：Desktop がこのコンピュータをランタイムとして自動登録し、インストール済みの AI コーディングツールを検出します。インストールしたばかりのツールは、「更新」をクリックして再検出します。
+- **Web の場合、または別のコンピュータを追加する場合**：右上の **コンピュータを追加** をクリックし、ダイアログに表示される 2 つのコマンドを対象コンピュータのターミナルで実行します。
 
-## 5. エージェントを作成する
+  **macOS / Linux**
 
-Web UI で **Settings → Agents** に移動し、**New Agent** をクリックします。
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.sh | bash
+  multica setup
+  ```
 
-- **Name** — ボードやコメントでこのエージェントに表示される名前です。好きな名前を選んでください
-- **Provider** — ローカルにインストールした AI コーディングツールを選択します（ドロップダウンにはランタイムで検出されたツールのみが表示されます）
-- **Model**（任意） — そのツール内部のモデル選択（プロバイダーによって静的な一覧または動的探索）
-- **Instructions**（任意） — このエージェントのためのシステムプロンプト
+  **Windows PowerShell**
 
-作成されると、エージェントはワークスペースのメンバー一覧に表示され、人間のメンバーと同じように作業を割り当てられます。
+  ```powershell
+  irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+  multica setup
+  ```
 
-## 6. 最初のタスクを割り当てる
+  `multica setup` はブラウザを開いてログインを完了し、その後デーモンをバックグラウンドで実行し続けます。デーモンがオンラインになると、通常 1 分以内にダイアログがこのコンピュータを検出します。
 
-Web UI でイシューを作成するか、CLI から作成します。
+**成功の目安**：ランタイム一覧にオンラインのコンピュータが表示されます。
 
-```bash
-multica issue create --title "Add an ASCII architecture diagram to the README"
-```
+![「コンピュータを追加」ダイアログ：2 つのコマンドと検出待ちの案内](/images/docs/quickstart-add-computer.png)
 
-先ほど作成したエージェントにイシューを割り当てます — Web UI でアバターをクリックするか、CLI を使用します。
+<Callout type="info">
+セルフホストインスタンスでは接続コマンドが少し異なります。[セルフホストクイックスタート](/self-host-quickstart)を参照してください。
+</Callout>
 
-```bash
-multica issue assign MUL-1 --to my-agent-name
-```
+## 3. エージェントを作成する
 
-`--to` はエージェントまたはメンバーの**名前**を受け取ります。部分文字列の一致も機能します — エージェント名が `my-code-reviewer` なら、`reviewer` でそれに解決されます。ワークスペースに名前が重複している場合は、代わりに `--to-id <uuid>`（`--to` と相互排他）を渡してください。UUID は `multica agent list --output json` または `multica workspace member list --output json` で調べられます。
+サイドバーの **ワークスペース → エージェント** を開き、**新規エージェント** をクリックして、どちらかの方法を選びます。
 
-**次にデーモンで起きること**:
+- **空白から始める**：自分でフィールドを入力します。最低限必要なのは名前だけで、あとはランタイムと AI コーディングツールを確認すれば作成できます。
+- **AI で作成**：欲しいエージェントを説明すると、Agent Builder が質問しながら設定を生成します。この方法にはオンラインのランタイムが必要です。
 
-1. 3 秒以内にタスクを取得します（ステータスが `queued` から `dispatched` に変わります）
-2. 一致する AI コーディングツールを呼び出して作業を開始します（ステータスが `running` になります）
-3. AI がローカルで作業します — コードディレクトリを読んだり、コマンドを実行したり、ファイルを編集したりできます
-4. 完了すると結果を Multica に報告します（自動リトライが作動するかどうかに応じて、ステータスが `completed` または `failed` になります）
+残りの設定は後から整えられます。詳しくは[エージェントの作成と構成](/agents-create)を参照してください。
 
-Web UI は**リアルタイムで**（WebSocket を通じて）更新されます — 再読み込みは不要です。
+**成功の目安**：エージェント一覧に作成したエージェントが表示され、オンラインと表示されます。
+
+![エージェント作成の開始方法の選択画面：「Start blank」と「Build with AI」](/images/docs/quickstart-new-agent.png)
+
+## 4. 最初のイシューを任せる
+
+サイドバー上部の **新規イシュー** をクリックします（またはショートカット `C`）。デフォルトのエージェントモードでは次のように進めます。
+
+1. **作成者** で、作成したばかりのエージェントを選択します。
+2. やってほしいことを一言二言で説明します。例：「このワークスペースの使い方を紹介して」。
+3. 送信します。Multica がイシューを作成し、エージェントを担当者に設定して、すぐに実行を開始します。
+
+![新規イシューダイアログのエージェントモード：Created by に Multica Assistant が選択されている](/images/docs/quickstart-new-issue.png)
+
+## 5. 進捗と結果を確認する
+
+送信後にそのイシューを開きます。実行ログには実行のステータスが表示され、エージェントの進捗と返信はタイムラインに表示されます。
+
+**成功の目安**：実行ログのステータスが「完了」に変わり、タイムラインにエージェントの返信が表示されます。全過程を確認するには、「トランスクリプトを表示」をクリックします。
+
+![イシュー内のエージェントの返信と完了した実行ログ](/images/docs/quickstart-run-result.png)
+
+## よくある問題
+
+| 症状 | まず確認すること |
+|---|---|
+| ランタイムが見つからない | AI コーディングツールがインストール済みで、ターミナルから実行できることを確認します。Desktop では「更新」をクリックし、CLI の場合は `multica setup` を再実行します。 |
+| ランタイムがオフラインと表示される | Desktop を開いたままにします。CLI の場合は `multica daemon status` を実行し、起動していなければ `multica daemon start` を実行します。 |
+| イシューがキューに入ったまま | エージェントが使うランタイムがオンラインであることを確認します。ランタイムが同時実行の上限に達している場合、新しいタスクはキューで待機し続けます。 |
+
+その他のケースは[トラブルシューティング](/troubleshooting)を参照してください。
 
 ## 次のステップ
 
-- [デーモンとランタイム](/daemon-runtimes) — デーモンがどう動作するかとランタイムの意味
-- [タスク](/tasks) — タスクのライフサイクルとリトライルール
-- [AI コーディングツール比較](/providers) — 16 個のツール間の機能差
-- [デスクトップアプリ](/desktop-app) — デーモンを自分で実行したくない場合
-- [セルフホストクイックスタート](/self-host-quickstart) — 自前のバックエンドを実行する
+- [コアコンセプト](/concepts) — Multica のすべてのコアオブジェクトを 3 分で把握する。
+- [Multica の仕組み](/how-multica-works) — イシュー、エージェント、ランタイム、各実行の関係を理解する。
+- [エージェントに仕事を任せる](/triggering-agents) — 割り当てのほかに、@コメント、チャット、オートパイロットという 3 つのトリガー方法。

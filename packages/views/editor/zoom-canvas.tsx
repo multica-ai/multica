@@ -93,7 +93,7 @@ export function ZoomControls({
         </ToolbarButton>
         {/* Fixed width so the toolbar doesn't jitter as digits change. */}
         <span
-          className="w-12 select-none text-center text-xs tabular-nums text-muted-foreground"
+          className="w-12 select-none text-center text-caption tabular-nums text-muted-foreground"
           aria-live="polite"
         >
           {canvas.zoomPercent}%

@@ -80,6 +80,7 @@ dist-electron
 /.gitattributes
 /.gitignore
 /LICENSE
+/NOTICE
 
 *.app
 *.dmg

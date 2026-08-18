@@ -78,7 +78,7 @@
 .rich-text-editor .mermaid-diagram-loading,
 .rich-text-editor .mermaid-diagram-error p {
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
+  font-size: var(--text-label);
   margin: 0;
 }
 
@@ -107,7 +107,7 @@
 
 .rich-text-editor .mermaid-diagram-error-detail {
   font-family: var(--font-mono, monospace);
-  font-size: 0.75rem;
+  font-size: var(--text-caption);
   margin: 0.375rem 0 0;
   white-space: pre-wrap;
   word-break: break-word;

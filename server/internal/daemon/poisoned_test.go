@@ -4,7 +4,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/pkg/agent"
+	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
 func TestClassifyPoisonedOutput(t *testing.T) {
@@ -70,6 +72,37 @@ on long outputs.`,
 		{
 			name:   "marker buried inside a long agent conclusion",
 			output: strings.Repeat("All checks passed and the bug is fixed. ", 10) + "i reached the iteration limit while debugging earlier.",
+			wantOK: false,
+		},
+		{
+			// GH #6402: the provider's context-exhaustion notice arriving as
+			// the run's successful answer. Same poisoning shape as the markers
+			// above — a session already over the limit cannot compact its way
+			// back under, so every resume reproduces it — and the reason has to
+			// be the one the resume blacklist covers.
+			name:       "context exhaustion with the provider's full wording",
+			output:     "Prompt is too long · the request is ~274931 tokens (limit 200000) but this conversation is only ~1597 tokens — the rest is system prompt, tool definitions, and attachment content. A single-exchange conversation cannot be compacted; reduce attached files/tools or start with less context.",
+			wantOK:     true,
+			wantReason: string(taskfailure.ReasonAgentContextOverflow),
+		},
+		{
+			name:       "compaction exhausted",
+			output:     "Compaction failed · conversation could not be reduced below the context limit",
+			wantOK:     true,
+			wantReason: string(taskfailure.ReasonAgentContextOverflow),
+		},
+		{
+			name:   "an agent discussing /compact is a real answer",
+			output: "The session is getting long; run /compact before the next batch.",
+			wantOK: false,
+		},
+		{
+			// The CLI's bare sentence is not matched on the success path: an
+			// agent asked about prompt length can answer exactly this, and the
+			// real provider frame always carries is_error, so it reaches the
+			// failure path where Classify already handles it.
+			name:   "bare provider sentence is left to the failure path",
+			output: "Prompt is too long",
 			wantOK: false,
 		},
 	}
@@ -158,6 +191,34 @@ func TestClassifyPoisonedError(t *testing.T) {
 			wantOK: false,
 		},
 		{
+			// GH #6066: a run killed mid-reply left an empty assistant
+			// message in the transcript. The provider refuses to replay it
+			// and words the refusal with neither "invalid_request_error"
+			// nor a bare "400", so before taskfailure.UnresumableHistory
+			// this landed in agent_error.unknown — resume-safe by omission
+			// — and every later task on the issue resumed the dead session.
+			name:       "gh6066 empty assistant message in history",
+			errMsg:     "Invalid request: the message at position 37 with role 'assistant' must not be empty",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// GH #5760: the same defect on Kimi/ACP. Has a "400" but no
+			// "invalid_request_error", so the Anthropic clause missed it too.
+			name:       "gh5760 kimi empty assistant message",
+			errMsg:     "kimi provider error: provider.api_error: 400 the message at position 43 with role 'assistant' must not be empty",
+			wantOK:     true,
+			wantReason: FailureReasonAPIInvalidRequest,
+		},
+		{
+			// The narrowness guard: an emptiness complaint with no locator
+			// into the message history is some tool's validation error, and
+			// discarding a healthy session over it would lose real context.
+			name:   "tool validation emptiness is not poisoning",
+			errMsg: "validation error: field must not be empty",
+			wantOK: false,
+		},
+		{
 			// GH #5975: a Kiro resume rejected because the session
 			// history replays an image over the provider's max pixel
 			// dimensions. The conversation is unresumable, so it must be
@@ -195,6 +256,82 @@ func TestClassifyPoisonedError(t *testing.T) {
 				t.Fatalf("classifyPoisonedError(%q) reason=%q, want %q", tc.errMsg, reason, tc.wantReason)
 			}
 		})
+	}
+}
+
+func TestClassifyResumeUnsafeTransport(t *testing.T) {
+	// The exact string the codex backend produces: startOrResumeThread's
+	// "codex thread/resume failed: %w" wrapping the reader goroutine's
+	// errCodexProcessExited + bufio.ErrTooLong.
+	const overflowErr = "codex thread/resume failed: codex process exited: bufio.Scanner: token too long"
+
+	cases := []struct {
+		name       string
+		provider   string
+		errMsg     string
+		wantOK     bool
+		wantReason string
+	}{
+		{
+			name:       "codex resume overflow",
+			provider:   "codex",
+			errMsg:     overflowErr,
+			wantOK:     true,
+			wantReason: FailureReasonCodexResumeOversized,
+		},
+		{
+			// Overflow on a different RPC says nothing about the session:
+			// dropping the resume pointer would discard a healthy thread.
+			name:     "overflow outside a resume stays resumable",
+			provider: "codex",
+			errMsg:   "codex thread/start failed: codex process exited: bufio.Scanner: token too long",
+			wantOK:   false,
+		},
+		{
+			// An ordinary resume rejection is already handled by the fresh
+			// -session fallback and must not be retired through this path.
+			name:     "plain resume failure stays resumable",
+			provider: "codex",
+			errMsg:   "codex thread/resume failed: thread not found",
+			wantOK:   false,
+		},
+		{
+			// Only codex replays its whole history through one line.
+			name:     "other provider same text is not classified",
+			provider: "claude",
+			errMsg:   overflowErr,
+			wantOK:   false,
+		},
+		{
+			name:     "empty error",
+			provider: "codex",
+			errMsg:   "",
+			wantOK:   false,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reason, ok := classifyResumeUnsafeTransport(tc.provider, tc.errMsg)
+			if ok != tc.wantOK {
+				t.Fatalf("classifyResumeUnsafeTransport(%q, %q) ok=%v, want %v", tc.provider, tc.errMsg, ok, tc.wantOK)
+			}
+			if ok && reason != tc.wantReason {
+				t.Fatalf("classifyResumeUnsafeTransport(%q, %q) reason=%q, want %q", tc.provider, tc.errMsg, reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+// TestCodexResumeOversizedIsResumeUnsafe pins the cross-package contract that
+// makes the classifier above worth anything: classifying the failure only helps
+// if the resume lookup actually treats the reason as unsafe. The service-side
+// list and the two SQL blacklists are edited by hand in three places, so this
+// asserts the Go half rather than trusting that all three stayed in sync.
+func TestCodexResumeOversizedIsResumeUnsafe(t *testing.T) {
+	if !service.ResumeUnsafeFailure(FailureReasonCodexResumeOversized, "") {
+		t.Fatalf("ResumeUnsafeFailure(%q) = false, want true — the reason is classified but the session would still be resumed",
+			FailureReasonCodexResumeOversized)
 	}
 }
 

@@ -46,6 +46,11 @@ export const agentRunCountsKeys = {
 // workspace; all agent dots / hover cards / list rows derive presence from
 // this cache with zero additional network traffic.
 //
+// Presence itself is derived from the active tasks only (see derive-presence.ts
+// and #1823). The one terminal row per agent is used solely for the Squad hover
+// card's "last activity" line; MUL-5436 tracks moving it to a dedicated lazy
+// endpoint so this hot query stops carrying history at all.
+//
 // The 30s staleTime is a safety net only; the primary freshness signal is
 // WS task events, which invalidate this query immediately. Without WS,
 // presence still updates within 30s on focus / mount.
@@ -132,29 +137,22 @@ export function agentTasksOptions(wsId: string, agentId: string) {
   });
 }
 
-// Agent templates are workspace-independent: a static catalog served from
-// the server's embedded JSON. Cache effectively forever — the only way the
-// list / detail change is a server deploy, and a hard reload picks that up.
-export const agentTemplateKeys = {
-  all: () => ["agent-templates"] as const,
-  list: () => [...agentTemplateKeys.all(), "list"] as const,
-  detail: (slug: string) => [...agentTemplateKeys.all(), "detail", slug] as const,
+/** Unfinished agent-creation conversations, scoped to the caller. */
+export const agentBuilderSessionKeys = {
+  all: (wsId: string) => ["workspace", wsId, "agent-builder-sessions"] as const,
+  list: (wsId: string) => [...agentBuilderSessionKeys.all(wsId), "list"] as const,
 };
 
-export function agentTemplateListOptions() {
+export function agentBuilderSessionListOptions(wsId: string) {
   return queryOptions({
-    queryKey: agentTemplateKeys.list(),
-    queryFn: () => api.listAgentTemplates(),
-    staleTime: Infinity,
-    gcTime: 30 * 60 * 1000,
-  });
-}
-
-export function agentTemplateDetailOptions(slug: string) {
-  return queryOptions({
-    queryKey: agentTemplateKeys.detail(slug),
-    queryFn: () => api.getAgentTemplate(slug),
-    staleTime: Infinity,
-    gcTime: 30 * 60 * 1000,
+    queryKey: agentBuilderSessionKeys.list(wsId),
+    queryFn: () => api.listAgentBuilderSessions(),
+    enabled: wsId.length > 0,
+    // Overrides the client-wide `staleTime: Infinity`. This list changes
+    // through work done on another screen — starting a conversation, sending a
+    // turn, an agent finally being created — and the surfaces that render it
+    // mount on demand. Cached forever it would show the state of the first
+    // visit: a user who just held a conversation comes back to "no drafts".
+    staleTime: 0,
   });
 }

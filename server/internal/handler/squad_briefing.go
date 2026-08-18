@@ -74,13 +74,15 @@ Your responsibilities, in order:
 // leader was woken on is assigned to THIS squad. Only then does the leader own
 // the parent's status arc.
 //
-// The "even when no comment asked you to" clause is load-bearing: the comment
-// workflow's default rule is "do not change status unless the comment asks",
-// and a member's delivery comment never asks. Without an explicit standing
-// grant here, the @mention-dispatch squad shape (no child issues, so no
-// child-done system comment carrying an explicit ask) would leave the parent
-// stuck in in_progress forever. The comment workflow defers to this section by
-// name — keep the heading text in sync with writeWorkflowComment.
+// This grant is what the reply-mode leader bullet routes on, by section name:
+// present → the leader owns the parent's arc, absent → no status writes at
+// all (MUL-6300). The ordinary assignee-scoped arc never applies to a leader,
+// because the parent is assigned to the squad, not to the leader agent — so
+// without this section a leader could never wrap the parent up, and the
+// @mention-dispatch shape (no child issues, so no child-done system comment)
+// would leave it stuck in in_progress forever. The "even when no comment
+// asked you to" clause makes the standing nature explicit — keep the heading
+// text in sync with writeWorkflowIssue.
 const squadParentStatusOwned = `6. **Own the parent issue status.** This issue is assigned to your squad,
    so its status is yours to manage (unless Agent Identity forbids status
    changes). On the first assignment turn, move the parent to

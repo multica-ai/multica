@@ -81,7 +81,7 @@ export function WebhookPayloadPreview({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs hover:bg-accent/30 transition-colors"
+        className="flex w-full items-center gap-2 px-3 py-2 text-left text-caption hover:bg-accent/30 transition-colors"
       >
         <Webhook className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
         <span className="font-medium">
@@ -91,7 +91,7 @@ export function WebhookPayloadPreview({
           {event ?? t(($) => $.webhook_payload.unknown_event)}
         </code>
         {receivedAt && (
-          <span className="ml-auto shrink-0 text-muted-foreground/70">
+          <span className="ml-auto shrink-0 text-muted-foreground">
             {receivedAt}
           </span>
         )}
@@ -103,7 +103,7 @@ export function WebhookPayloadPreview({
       </button>
       {open && (
         <div className="border-t">
-          <div className="flex items-center justify-between px-3 py-1.5 text-[11px] text-muted-foreground">
+          <div className="flex items-center justify-between px-3 py-1.5 text-micro text-muted-foreground">
             <span>
               {contentType
                 ? t(($) => $.webhook_payload.content_type, { type: contentType })
@@ -126,10 +126,10 @@ export function WebhookPayloadPreview({
                 : t(($) => $.webhook_payload.copy)}
             </button>
           </div>
-          <pre className="max-h-64 overflow-auto bg-muted/40 px-3 py-2 text-xs font-mono leading-relaxed">
+          <pre className="max-h-64 overflow-auto bg-muted/40 px-3 py-2 text-caption font-mono leading-relaxed">
             {displayJSON}
             {isTruncated && (
-              <span className="block pt-2 text-muted-foreground/70">
+              <span className="block pt-2 text-muted-foreground">
                 {t(($) => $.webhook_payload.truncated_marker)}
               </span>
             )}

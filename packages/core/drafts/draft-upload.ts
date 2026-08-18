@@ -31,8 +31,10 @@ interface DraftUploadBase {
  * A placeholder whose bytes are not (or no longer) resolvable to an attachment:
  *  - `uploading`: request in flight (owned by the coordinator).
  *  - `failed`: the request errored; keep it so the user sees the failure.
- *  - `interrupted`: was `uploading` when the app was reloaded/restarted; the
- *    bytes were never persisted so the request cannot be resumed.
+ *  - `interrupted`: LEGACY, no longer produced. Builds before MUL-5391 coerced
+ *    a reload-surviving `uploading` record into this; that record is now
+ *    dropped instead. Still accepted, rendered, and dismissable so blobs those
+ *    builds persisted keep working.
  */
 export interface PendingDraftUpload extends DraftUploadBase {
   status: "uploading" | "failed" | "interrupted";
@@ -75,12 +77,13 @@ export function attachmentToDraftUpload(attachment: Attachment): UploadedDraftUp
     filename: attachment.filename,
     size: attachment.size_bytes,
     contentType: attachment.content_type || undefined,
-    // `download_url` is minted for the current API response and may be a
-    // short-lived signed URL; draft uploads survive dialog closes and app
-    // restarts, so it is stripped here. `url`/`markdown_url` stay as the
-    // durable render/download paths, and content-editor's session merge
-    // backfills an empty download_url from the live upload result.
-    attachment: { ...attachment, download_url: "" },
+    // `download_url` and `attachment_download_url` are minted for the current API
+    // response and may be short-lived signed URLs; draft uploads survive dialog
+    // closes and app restarts, so both are stripped here. `url`/`markdown_url`
+    // stay as the durable render/download paths, and content-editor's session
+    // merge backfills an empty download_url from the live upload result (the
+    // download flow re-fetches attachment_download_url fresh via getAttachment).
+    attachment: { ...attachment, download_url: "", attachment_download_url: "" },
   };
 }
 
@@ -106,7 +109,8 @@ function isDraftUploadShape(value: unknown): value is DraftUpload {
 /**
  * Normalize a raw persisted array into `DraftUpload[]`:
  *  - already-`DraftUpload` entries are kept, EXCEPT any still in `uploading`,
- *    which become `interrupted` — a reload/restart cannot resume the bytes.
+ *    which are DROPPED — a reload/restart cannot resume the bytes, and no
+ *    placeholder node survives in the body either (see the branch below).
  *  - bare `Attachment` rows (persisted by pre-L2 builds that stored only
  *    completed attachments) are wrapped as `uploaded`.
  *  - anything else is dropped.

@@ -44,10 +44,9 @@ export interface StartUploadArgs {
   ctx?: UploadCoordinatorContext;
   /**
    * Settled outcome. NOT called on abort — an aborted upload leaves its
-   * placeholder in `uploading`, which the store coerces to `interrupted` only
-   * on the next load (aborts happen on logout, where the placeholder is cleared
-   * anyway). The caller MUST re-check its draft still tracks `clientUploadId`
-   * before writing the result.
+   * placeholder in `uploading`, which the store drops on the next load (aborts
+   * happen on logout, where the placeholder is cleared anyway). The caller MUST
+   * re-check its draft still tracks `clientUploadId` before writing the result.
    */
   onSettled: (outcome: UploadOutcome) => void;
 }
@@ -83,8 +82,9 @@ export function startUpload({
       );
       onSettled({ clientUploadId, status: "uploaded", attachment });
     } catch (err) {
-      // An abort is not a failure: leave the placeholder untouched so it reads
-      // as "interrupted" on the next load. Every other error surfaces.
+      // An abort is not a failure: leave the placeholder untouched. It stays
+      // `uploading` for the rest of the session and is dropped on the next
+      // load. Every other error surfaces.
       if (controller.signal.aborted || (err instanceof Error && err.name === "AbortError")) {
         logger.info("upload aborted", { clientUploadId });
         return;

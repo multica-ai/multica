@@ -19,6 +19,7 @@ import {
   IssueDisplayControls,
   ViewRefreshIndicator,
 } from "../issues/components/issues-header";
+import { FilterChipsBar } from "../issues/components/filter-chips-bar";
 import { IssueSurface } from "../issues/surface/issue-surface";
 import { useT } from "../i18n";
 
@@ -50,6 +51,7 @@ function ActorIssuesHeader({
   const { t } = useT("issues");
 
   return (
+    <>
     <div className="flex h-12 shrink-0 items-center justify-between gap-3 border-b px-4">
       <div className="flex items-center gap-3">
         <div className="relative">
@@ -58,7 +60,7 @@ function ActorIssuesHeader({
             value={search}
             onChange={(e) => onSearchChange(e.target.value)}
             placeholder={t(($) => $.actor_issues.search_placeholder)}
-            className="h-8 w-64 pl-8 text-sm"
+            className="h-8 w-64 pl-8 text-body"
           />
         </div>
         <div className="flex items-center gap-1">
@@ -98,6 +100,8 @@ function ActorIssuesHeader({
         <ViewRefreshIndicator active={isRefreshing} />
       </div>
     </div>
+    <FilterChipsBar />
+    </>
   );
 }
 
@@ -146,18 +150,18 @@ export function ActorIssuesPanel({
       renderEmpty={() =>
         search.trim() === "" ? (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-            <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm">
+            <ListTodo className="h-10 w-10 text-faint-foreground" />
+            <p className="text-body">
               {t(($) => $.actor_issues.empty[scope].title)}
             </p>
-            <p className="text-xs">
+            <p className="text-caption">
               {t(($) => $.actor_issues.empty[scope].description)}
             </p>
           </div>
         ) : (
           <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-            <Search className="h-10 w-10 text-muted-foreground/40" />
-            <p className="text-sm">{t(($) => $.actor_issues.search_empty)}</p>
+            <Search className="h-10 w-10 text-faint-foreground" />
+            <p className="text-body">{t(($) => $.actor_issues.search_empty)}</p>
           </div>
         )
       }

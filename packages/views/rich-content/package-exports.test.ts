@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Package export-target guard.
  *

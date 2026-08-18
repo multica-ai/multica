@@ -1,3 +1,4 @@
+import { issueStatusCategory } from "./status-category";
 import type { QueryClient } from "@tanstack/react-query";
 import { issueKeys } from "./queries";
 import { labelKeys } from "../labels/queries";
@@ -117,8 +118,18 @@ export function onIssueCreated(
   wsId: string,
   issue: Issue,
 ) {
+  // A custom status this client cannot resolve to a category has no bucket to
+  // go in. Inserting nowhere would silently hide an issue that exists on the
+  // server, so invalidate the list instead and let the refetch place it.
+  // (MUL-6243)
+  const bucketable = issueStatusCategory(issue) !== null;
   for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: issueKeys.list(wsId) })) {
-    if (data) qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
+    if (!data) continue;
+    if (bucketable) {
+      qc.setQueryData<ListIssuesCache>(key, addIssueToBuckets(data, issue));
+    } else {
+      qc.invalidateQueries({ queryKey: key });
+    }
   }
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   qc.invalidateQueries({ queryKey: issueKeys.flatAll(wsId) });

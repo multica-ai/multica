@@ -29,7 +29,7 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
-import { useNavigation } from "../../navigation";
+import { AppLink } from "../../navigation";
 import { useT } from "../../i18n";
 
 /**
@@ -52,7 +52,6 @@ export function ChatSessionHeader({
 }) {
   const { t } = useT("chat");
   const wsPaths = useWorkspacePaths();
-  const { push } = useNavigation();
   const updateSession = useUpdateChatSession();
   const deleteSession = useDeleteChatSession();
   const setArchived = useSetChatSessionArchived();
@@ -84,10 +83,6 @@ export function ChatSessionHeader({
     const trimmed = draft.trim();
     if (!trimmed || trimmed === session.title) return;
     updateSession.mutate({ sessionId: session.id, title: trimmed });
-  };
-
-  const viewProfile = () => {
-    if (agent) push(wsPaths.agentDetail(agent.id));
   };
 
   const doDelete = () => {
@@ -128,20 +123,20 @@ export function ChatSessionHeader({
                 setEditing(false);
               }
             }}
-            className="w-full rounded-sm bg-background px-1 py-0.5 text-sm font-semibold outline-none ring-1 ring-border focus-visible:ring-brand"
+            className="w-full rounded-sm bg-background px-1 py-0.5 text-body font-semibold outline-none ring-1 ring-border focus-visible:ring-brand"
           />
         ) : (
           <button
             type="button"
             onClick={startRename}
             title={t(($) => $.header.rename)}
-            className="block max-w-full truncate text-left text-sm font-semibold text-foreground outline-none hover:text-foreground/80 focus-visible:text-foreground/80"
+            className="block max-w-full truncate text-left text-body font-semibold text-foreground outline-none hover:text-foreground/80 focus-visible:text-foreground/80"
           >
             {title}
           </button>
         )}
         {agent && (
-          <div className="truncate text-xs text-muted-foreground">
+          <div className="truncate text-caption text-muted-foreground">
             {agent.name}
             {agent.description ? ` · ${agent.description}` : ""}
           </div>
@@ -160,7 +155,9 @@ export function ChatSessionHeader({
             {t(($) => $.header.rename)}
           </DropdownMenuItem>
           {agent && (
-            <DropdownMenuItem onClick={viewProfile}>
+            <DropdownMenuItem
+              render={<AppLink href={wsPaths.agentDetail(agent.id)} />}
+            >
               <UserRound className="h-4 w-4" />
               {t(($) => $.header.view_profile)}
             </DropdownMenuItem>

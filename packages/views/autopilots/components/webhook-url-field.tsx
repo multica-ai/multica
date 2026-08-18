@@ -13,7 +13,7 @@ const SIZES = {
   // Trigger row on the detail page — compact, sits inline with the row actions.
   sm: {
     row: "items-center",
-    value: "rounded bg-muted px-2 py-1 text-xs",
+    value: "rounded bg-muted px-2 py-1 text-caption",
     button: "h-7 w-7",
     buttonVariant: "ghost",
     icon: "h-3.5 w-3.5",
@@ -21,7 +21,7 @@ const SIZES = {
   // Post-create panel — larger standalone field.
   md: {
     row: "items-stretch",
-    value: "rounded-md border bg-muted px-3 py-2 text-xs",
+    value: "rounded-md border bg-muted px-3 py-2 text-caption",
     button: "h-9 w-9",
     buttonVariant: "outline",
     icon: "size-4",

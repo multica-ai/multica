@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -144,6 +145,61 @@ func TestAgentCopySameRuntimeCopiesPortableFields(t *testing.T) {
 		if _, ok := gotBody[k]; ok {
 			t.Errorf("body must not contain %q, got %v", k, gotBody[k])
 		}
+	}
+}
+
+func TestAgentCopyOmitsInvalidHistoricalConcurrency(t *testing.T) {
+	for _, value := range []any{0, -1, 51} {
+		t.Run(fmt.Sprint(value), func(t *testing.T) {
+			source := fullSourceAgent()
+			source["max_concurrent_tasks"] = value
+
+			var gotBody map[string]any
+			srv := copyMockServer(t, source, &gotBody)
+			defer srv.Close()
+			setCopyTestEnv(t, srv.URL)
+
+			cmd := newAgentCopyTestCmd()
+			if err := runAgentCopy(cmd, []string{"agent-src"}); err != nil {
+				t.Fatalf("runAgentCopy: %v", err)
+			}
+			if _, ok := gotBody["max_concurrent_tasks"]; ok {
+				t.Errorf("invalid historical max_concurrent_tasks must be omitted, got %v", gotBody["max_concurrent_tasks"])
+			}
+		})
+	}
+}
+
+func TestAgentCopyValidConcurrencyOverrideRepairsInvalidSource(t *testing.T) {
+	source := fullSourceAgent()
+	source["max_concurrent_tasks"] = 0
+
+	var gotBody map[string]any
+	srv := copyMockServer(t, source, &gotBody)
+	defer srv.Close()
+	setCopyTestEnv(t, srv.URL)
+
+	cmd := newAgentCopyTestCmd()
+	_ = cmd.Flags().Set("max-concurrent-tasks", "12")
+
+	if err := runAgentCopy(cmd, []string{"agent-src"}); err != nil {
+		t.Fatalf("runAgentCopy: %v", err)
+	}
+	if gotBody["max_concurrent_tasks"] != float64(12) {
+		t.Errorf("max_concurrent_tasks = %v, want 12", gotBody["max_concurrent_tasks"])
+	}
+}
+
+func TestAgentCopyRejectsInvalidConcurrencyOverrideBeforeRequest(t *testing.T) {
+	cmd := newAgentCopyTestCmd()
+	_ = cmd.Flags().Set("max-concurrent-tasks", "51")
+
+	err := runAgentCopy(cmd, []string{"agent-src"})
+	if err == nil {
+		t.Fatal("expected invalid --max-concurrent-tasks error")
+	}
+	if !strings.Contains(err.Error(), "between 1 and 50") {
+		t.Fatalf("error = %q, want 1-50 range", err.Error())
 	}
 }
 

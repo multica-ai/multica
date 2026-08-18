@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { useWorkspacePresenceMap } from "@multica/core/agents";
 import { api } from "@multica/core/api";
 import { pendingChatTasksOptions, chatKeys, sortChatSessions } from "@multica/core/chat/queries";
@@ -27,6 +28,12 @@ import {
 import { useChatStore } from "@multica/core/chat";
 import type { Agent, ChatSession, PendingChatTasksResponse } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
+import {
+  RowActionsMenu,
+  handleRowActivationKey,
+  type RowActionItem,
+} from "../../common/row-actions-menu";
+import { resolveClickIntent, useOptionalNavigation } from "../../navigation";
 import { createLogger } from "@multica/core/logger";
 import { removeChatMessageFromCaches } from "@multica/core/realtime";
 import { useT } from "../../i18n";
@@ -88,6 +95,17 @@ export function ChatThreadList({
 }) {
   const { t } = useT("chat");
   const wsId = useWorkspaceId();
+  // Null-safe slug (not useWorkspacePaths, which throws): the list renders in
+  // tests outside a workspace route; without a slug the web modifier-click
+  // affordance simply stays off.
+  const slug = useWorkspaceSlug();
+  const sessionHref = (sessionId: string) =>
+    slug ? `${paths.workspace(slug).chat()}?session=${sessionId}` : null;
+  // Optional: the list renders bare in tests; without an adapter the web
+  // modifier-click affordance stays off (desktop keeps selection anyway).
+  const navigation = useOptionalNavigation();
+  const openInNewTab = navigation?.openInNewTab;
+  const getShareableUrl = navigation?.getShareableUrl;
   const agentById = useMemo(() => new Map(agents.map((a) => [a.id, a])), [agents]);
 
   // Split the flat cache locally: active chats fill the default history view,
@@ -233,29 +251,106 @@ export function ChatThreadList({
       );
     } else if (last) {
       previewNode = (
-        <span className={cn("block truncate", unread > 0 ? "text-foreground/80" : "text-muted-foreground")}>
+        <span className={cn("block truncate", unread > 0 ? "text-foreground" : "text-muted-foreground")}>
           {last.role === "user" ? t(($) => $.list.you_prefix) : ""}
           {toPreview(last.content)}
         </span>
       );
     } else {
-      previewNode = <span className="block truncate text-muted-foreground/60">{t(($) => $.list.no_messages)}</span>;
+      previewNode = <span className="block truncate text-muted-foreground">{t(($) => $.list.no_messages)}</span>;
     }
+
+    // One list drives both action surfaces — the compact menu without hover
+    // and the hover strip with it — so they cannot drift. The archived view
+    // is the only place hard-delete lives; the history view offers the
+    // reversible archive instead.
+    const rowActions: RowActionItem[] =
+      view === "archived"
+        ? [
+            {
+              key: "unarchive",
+              icon: <ArchiveRestore className="size-3.5" />,
+              label: t(($) => $.list.unarchive),
+              onSelect: () =>
+                setArchived.mutate({ sessionId: session.id, archived: false }),
+            },
+            {
+              key: "delete",
+              icon: <Trash2 className="size-3.5" />,
+              label: t(($) => $.session_history.row_delete_aria),
+              danger: true,
+              onSelect: () => setConfirmingDeleteId(session.id),
+            },
+          ]
+        : [
+            {
+              key: "pin",
+              icon: session.pinned ? (
+                <PinOff className="size-3.5" />
+              ) : (
+                <Pin className="size-3.5 -rotate-45" />
+              ),
+              label: session.pinned
+                ? t(($) => $.list.unpin)
+                : t(($) => $.list.pin),
+              onSelect: () =>
+                setPinned.mutate({ sessionId: session.id, pinned: !session.pinned }),
+            },
+            isRunning
+              ? {
+                  key: "stop",
+                  icon: <Square className="size-3 fill-current" />,
+                  label: t(($) => $.session_history.row_stop_aria),
+                  danger: true,
+                  onSelect: () => setConfirmingStopId(session.id),
+                }
+              : {
+                  key: "archive",
+                  icon: <Archive className="size-3.5" />,
+                  label: t(($) => $.list.archive),
+                  onSelect: () => onArchive(session),
+                },
+          ];
 
     return (
       <div
         key={session.id}
         aria-current={isCurrent ? "true" : undefined}
         tabIndex={0}
-        onClick={() => {
-          if (isConfirmingAction) return;
+        onClick={(e) => {
+          if (isConfirmingAction || e.defaultPrevented) return;
+          // Plain click keeps the master-detail selection. On web, a modifier
+          // click opens the session as its own browser tab. Desktop tabs
+          // dedupe chat by pathname (a session is view state, not a subject —
+          // see tab-store resourceKey), so a second chat tab cannot exist
+          // there; modifier clicks keep the selection behavior instead.
+          const href = sessionHref(session.id);
+          if (
+            href &&
+            getShareableUrl &&
+            !openInNewTab &&
+            resolveClickIntent(e) !== "push"
+          ) {
+            window.open(
+              getShareableUrl(href),
+              "_blank",
+              "noopener,noreferrer",
+            );
+            return;
+          }
           onSelectSession(session);
+        }}
+        onAuxClick={(e) => {
+          if (isConfirmingAction || e.defaultPrevented || e.button !== 1) return;
+          if (openInNewTab) return; // desktop: no second chat tab exists
+          const href = sessionHref(session.id);
+          if (!href || !getShareableUrl) return;
+          e.preventDefault();
+          window.open(getShareableUrl(href), "_blank", "noopener,noreferrer");
         }}
         onKeyDown={(e) => {
           if (isConfirmingAction) return;
-          if (e.key !== "Enter" && e.key !== " ") return;
-          e.preventDefault();
-          onSelectSession(session);
+          handleRowActivationKey(e, () => onSelectSession(session));
         }}
         className={cn(
           // Fixed height so nothing (hover actions, confirm prompts) can change
@@ -282,10 +377,10 @@ export function ChatThreadList({
                 className="size-3 shrink-0 -rotate-45 fill-current text-muted-foreground"
               />
             )}
-            <span className={cn("min-w-0 flex-1 truncate text-sm", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
+            <span className={cn("min-w-0 flex-1 truncate text-body", unread > 0 ? "font-semibold text-foreground" : "font-medium")}>
               {titleText}
             </span>
-            <span className="ml-auto shrink-0 text-[11px] text-muted-foreground">{timeText}</span>
+            <span className="ml-auto shrink-0 text-micro text-muted-foreground">{timeText}</span>
           </div>
 
           {/* Line 2: preview + unread badge, or an inline confirm prompt */}
@@ -318,13 +413,13 @@ export function ChatThreadList({
                 />
               ) : (
                 <>
-                  <div className="min-w-0 flex-1 overflow-hidden text-xs">{previewNode}</div>
+                  <div className="min-w-0 flex-1 overflow-hidden text-caption">{previewNode}</div>
                   {unread > 0 && (
                     <span
                       aria-label={t(($) => $.session_history.row_subtitle.new_reply)}
                       // Softer, warmer red than the vivid `destructive` token —
                       // an IM unread badge, not an error.
-                      className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[oklch(0.62_0.14_18)] px-1 text-[10.5px] font-semibold text-white"
+                      className="inline-flex h-[18px] min-w-[18px] shrink-0 items-center justify-center rounded-full bg-[oklch(0.62_0.14_18)] px-1 text-micro font-semibold text-white"
                     >
                       {unread > 99 ? "99+" : unread}
                     </span>
@@ -334,49 +429,31 @@ export function ChatThreadList({
             </div>
         </div>
 
-        {/* Hover actions — absolutely positioned so showing/hiding them never
-            changes the row height (which was making the list jump). The archived
-            view is the only place hard-delete lives; the history view offers the
-            reversible archive instead. */}
+        {/* Compact action menu — the touch equivalent of the hover strip
+            below, which a pointer without hover can never reach. It takes real
+            layout space (rather than overlaying the preview) and gives way to
+            the hover strip on a hover-capable pointer. */}
         {!isConfirmingAction && (
-          <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 group-hover/row:flex">
-            {view === "archived" ? (
-              <>
-                <RowAction
-                  icon={<ArchiveRestore className="size-3.5" />}
-                  label={t(($) => $.list.unarchive)}
-                  onClick={() => setArchived.mutate({ sessionId: session.id, archived: false })}
-                />
-                <RowAction
-                  icon={<Trash2 className="size-3.5" />}
-                  label={t(($) => $.session_history.row_delete_aria)}
-                  danger
-                  onClick={() => setConfirmingDeleteId(session.id)}
-                />
-              </>
-            ) : (
-              <>
-                <RowAction
-                  icon={session.pinned ? <PinOff className="size-3.5" /> : <Pin className="size-3.5 -rotate-45" />}
-                  label={session.pinned ? t(($) => $.list.unpin) : t(($) => $.list.pin)}
-                  onClick={() => setPinned.mutate({ sessionId: session.id, pinned: !session.pinned })}
-                />
-                {isRunning ? (
-                  <RowAction
-                    icon={<Square className="size-3 fill-current" />}
-                    label={t(($) => $.session_history.row_stop_aria)}
-                    danger
-                    onClick={() => setConfirmingStopId(session.id)}
-                  />
-                ) : (
-                  <RowAction
-                    icon={<Archive className="size-3.5" />}
-                    label={t(($) => $.list.archive)}
-                    onClick={() => onArchive(session)}
-                  />
-                )}
-              </>
-            )}
+          <RowActionsMenu
+            label={t(($) => $.list.row_actions_aria)}
+            groups={[rowActions]}
+          />
+        )}
+
+        {/* Hover actions — absolutely positioned so showing/hiding them never
+            changes the row height (which was making the list jump). Keyboard
+            focus reveals them too, so they are reachable without a mouse. */}
+        {!isConfirmingAction && (
+          <div className="absolute inset-y-0 right-1 hidden items-center gap-0.5 rounded-md bg-gradient-to-l from-accent from-40% to-transparent pl-10 pr-1 [@media(hover:hover)]:group-hover/row:flex [@media(hover:hover)]:group-focus-within/row:flex">
+            {rowActions.map((action) => (
+              <RowAction
+                key={action.key}
+                icon={action.icon}
+                label={action.label}
+                danger={action.danger}
+                onClick={action.onSelect}
+              />
+            ))}
           </div>
         )}
       </div>
@@ -391,11 +468,11 @@ export function ChatThreadList({
         <button
           type="button"
           onClick={() => setView("history")}
-          className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-left text-xs font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+          className="flex w-full items-center gap-1.5 rounded-md px-2 py-2 text-left text-caption font-medium text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
         >
           <ChevronLeft className="size-4 shrink-0" />
           <span className="truncate">{t(($) => $.list.archived_title)}</span>
-          <span className="ml-auto shrink-0 tabular-nums text-muted-foreground/70">
+          <span className="ml-auto shrink-0 tabular-nums text-muted-foreground">
             {archivedSessions.length}
           </span>
         </button>
@@ -409,21 +486,21 @@ export function ChatThreadList({
     <button
       type="button"
       onClick={() => setView("archived")}
-      className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-xs text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
+      className="mt-1 flex h-10 w-full items-center gap-2 rounded-md px-2 text-left text-caption text-muted-foreground outline-none transition-colors hover:bg-accent/50 hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring"
     >
       <span className="flex size-9 shrink-0 items-center justify-center">
         <Archive className="size-4" />
       </span>
       <span className="min-w-0 flex-1 truncate font-medium">{t(($) => $.list.archived_title)}</span>
-      <span className="shrink-0 tabular-nums text-muted-foreground/70">{archivedSessions.length}</span>
-      <ChevronRight className="size-4 shrink-0 text-muted-foreground/50" />
+      <span className="shrink-0 tabular-nums text-muted-foreground">{archivedSessions.length}</span>
+      <ChevronRight className="size-4 shrink-0 text-faint-foreground" />
     </button>
   );
 
   if (historySessions.length === 0) {
     return (
       <>
-        <div className="px-2 py-1.5 text-xs text-muted-foreground">
+        <div className="px-2 py-1.5 text-caption text-muted-foreground">
           {t(($) => $.window.no_previous)}
         </div>
         {archivedEntry}
@@ -493,7 +570,7 @@ function ConfirmRow({
 }) {
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2">
-      <span className="min-w-0 flex-1 truncate text-xs font-medium text-destructive">{label}</span>
+      <span className="min-w-0 flex-1 truncate text-caption font-medium text-destructive">{label}</span>
       <div className="flex shrink-0 items-center gap-1">
         <button
           type="button"
@@ -507,7 +584,7 @@ function ConfirmRow({
             onCancel();
           }}
           disabled={pending}
-          className="inline-flex h-6 items-center rounded px-2 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
+          className="inline-flex h-6 items-center rounded px-2 text-micro font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-50"
         >
           {cancelText}
         </button>
@@ -523,7 +600,7 @@ function ConfirmRow({
             onConfirm();
           }}
           disabled={pending}
-          className="inline-flex h-6 items-center rounded px-2 text-[11px] font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
+          className="inline-flex h-6 items-center rounded px-2 text-micro font-medium text-destructive transition-colors hover:bg-destructive/10 disabled:opacity-50"
         >
           {confirmText}
         </button>

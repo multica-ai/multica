@@ -30,7 +30,8 @@ func TestClaudeHandleAssistantText(t *testing.T) {
 		}),
 	}
 
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
 	if output != "Hello world" {
 		t.Fatalf("expected output 'Hello world', got %q", output)
@@ -69,7 +70,8 @@ func TestClaudeHandleAssistantToolUse(t *testing.T) {
 		}),
 	}
 
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
 	if output != "" {
 		t.Fatalf("tool_use should not add to output, got %q", output)
@@ -279,7 +281,8 @@ func TestClaudeHandleAssistantInvalidJSON(t *testing.T) {
 	}
 
 	// Should not panic
-	output, tools := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	turn := b.handleAssistant(msg, ch, make(map[string]TokenUsage))
+	output, tools := turn.text, turn.toolUses
 
 	if output != "" {
 		t.Fatalf("expected empty output for invalid JSON, got %q", output)
@@ -343,6 +346,23 @@ func TestBuildClaudeArgsUsesStrictMCPForManagedConfig(t *testing.T) {
 	args := buildClaudeArgs(ExecOptions{McpConfig: json.RawMessage(`{}`)}, slog.Default())
 	if !slices.Contains(args, "--strict-mcp-config") {
 		t.Fatalf("managed MCP config must enable strict mode, got %v", args)
+	}
+}
+
+// Claude Code reads the per-task CLAUDE.md the daemon writes into the workdir,
+// so the daemon never populates SystemPrompt for it (see
+// providerNeedsInlineSystemPrompt). Forwarding it as --append-system-prompt
+// would duplicate the whole runtime brief on every turn.
+func TestBuildClaudeArgsIgnoresSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	const brief = "the entire multica runtime brief"
+	args := buildClaudeArgs(ExecOptions{SystemPrompt: brief}, slog.Default())
+	if slices.Contains(args, "--append-system-prompt") {
+		t.Fatalf("unexpected --append-system-prompt in args: %v", args)
+	}
+	if slices.Contains(args, brief) {
+		t.Fatalf("SystemPrompt leaked into args: %v", args)
 	}
 }
 

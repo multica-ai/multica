@@ -68,6 +68,10 @@ const REASON_CLASS: Record<string, FailureClass> = {
 
   // The agent process itself produced the failure.
   "agent_error.process_failure": "agent",
+  // Codex could not hand its stored thread back within our transport limits.
+  // "agent" rather than "runtime": the daemon is healthy and the provider is
+  // fine — it is this backend's own resume path that could not complete.
+  codex_resume_oversized: "agent",
   "agent_error.empty_or_unparseable_output": "agent",
   "agent_error.context_overflow": "agent",
   iteration_limit: "agent",

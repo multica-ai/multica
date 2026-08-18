@@ -80,6 +80,50 @@ WHERE workspace_id = sqlc.arg('workspace_id')
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockIssueForChannelMediaBind :one
+-- Channel media resolves after /issue creation. Hold a key-share lock while
+-- the attachment row is written so a concurrent issue delete cannot land
+-- between the workspace-scoped validation and the attachment insert.
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE;
+
+-- name: LockIssueForDescriptionUpdate :one
+-- Serialize user description saves with detached channel-media appends. The
+-- handler merges channel media that landed after the editor's submitted base
+-- while holding this lock, then performs UpdateIssue in the same transaction.
+SELECT * FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
+-- name: MaterializeIssueChannelMediaMarkdown :one
+-- Detached channel media resolves after /issue creation. When the description
+-- still equals the exact creation-time base, replace its inline placeholders
+-- with the fully composed Markdown so rich-text ordering survives. If a user
+-- edited concurrently (or the adapter has no inline layout), append instead;
+-- preserving user-authored bytes takes precedence over layout fidelity.
+UPDATE issue
+SET description = CASE
+        WHEN sqlc.narg('base_description')::text IS NOT NULL
+             AND COALESCE(description, '') = sqlc.narg('base_description')::text
+            THEN sqlc.arg('description')::text
+        WHEN description IS NULL OR description = '' THEN sqlc.arg(markdown)
+        ELSE description || E'\n\n' || sqlc.arg(markdown)
+    END,
+    updated_at = now()
+WHERE id = sqlc.arg(id)
+  AND workspace_id = sqlc.arg(workspace_id)
+RETURNING *;
+
+-- name: LockIssueForDelete :one
+-- Issue deletion must collect every attachment URL after it has won the same
+-- row-lock race used by channel media binding. FOR UPDATE conflicts with the
+-- binder's FOR KEY SHARE: either bind commits first and its URL is collected,
+-- or delete commits first and the binder leaves its durable intent for cleanup.
+SELECT id FROM issue
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: CreateIssue :one
 INSERT INTO issue (
     workspace_id, title, description, status, priority,
@@ -138,7 +182,7 @@ SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0));
 -- name: FindActiveDuplicateIssue :one
 SELECT * FROM issue
 WHERE workspace_id = $1
-  AND status NOT IN ('done', 'cancelled')
+  AND issue_effective_status(workspace_id, status) NOT IN ('done', 'cancelled')
   AND project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
   AND parent_issue_id IS NOT DISTINCT FROM sqlc.arg('parent_issue_id')::uuid
   AND lower(btrim(regexp_replace(title, '[[:space:]]+', ' ', 'g'))) = sqlc.arg('normalized_title')
@@ -148,7 +192,7 @@ LIMIT 1;
 -- name: FindRecentAutopilotDuplicateIssue :one
 SELECT i.* FROM issue i
 WHERE i.workspace_id = $1
-  AND i.status NOT IN ('done', 'cancelled')
+  AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')
   AND i.origin_type = 'autopilot'
   AND i.origin_id = $2
   AND i.project_id IS NOT DISTINCT FROM sqlc.arg('project_id')::uuid
@@ -197,7 +241,7 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
 FROM issue i
 WHERE i.workspace_id = $1
-  AND i.status NOT IN ('done', 'cancelled')
+  AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')
   AND (sqlc.narg('priority')::text IS NULL OR i.priority = sqlc.narg('priority'))
   AND (sqlc.narg('assignee_id')::uuid IS NULL OR i.assignee_id = sqlc.narg('assignee_id'))
   AND (sqlc.narg('assignee_ids')::uuid[] IS NULL OR i.assignee_id = ANY(sqlc.narg('assignee_ids')::uuid[]))
@@ -353,7 +397,7 @@ GROUP BY assignee_type, assignee_id;
 -- name: ChildIssueProgress :many
 SELECT parent_issue_id,
        COUNT(*)::bigint AS total,
-       COUNT(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done
+       COUNT(*) FILTER (WHERE issue_effective_status(workspace_id, status) IN ('done', 'cancelled'))::bigint AS done
 FROM issue
 WHERE workspace_id = $1
   AND parent_issue_id IS NOT NULL

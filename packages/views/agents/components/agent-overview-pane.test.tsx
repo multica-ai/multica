@@ -122,7 +122,10 @@ function makeRuntime(provider: string): AgentRuntime {
   };
 }
 
-function renderPane(runtimes: AgentRuntime[]) {
+function renderPane(
+  runtimes: AgentRuntime[],
+  { canEdit = true }: { canEdit?: boolean } = {},
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -145,7 +148,7 @@ function renderPane(runtimes: AgentRuntime[]) {
             runtimes={runtimes}
             members={[]}
             onUpdate={vi.fn().mockResolvedValue(undefined)}
-            canEdit
+            canEdit={canEdit}
           />
         </QueryClientProvider>
       </NavigationProvider>
@@ -239,5 +242,26 @@ describe("AgentOverviewPane Settings navigation", () => {
     renderPane([makeRuntime("claude")]);
     openSettings();
     expect(screen.getByRole("tab", { name: /^Access$/i })).toBeInTheDocument();
+  });
+});
+
+describe("AgentOverviewPane Environment tab visibility", () => {
+  it("shows the Environment tab to someone who can manage the agent", () => {
+    renderPane([makeRuntime("claude")]);
+    openSettings();
+    expect(
+      screen.getByRole("tab", { name: /^Environment$/i }),
+    ).toBeInTheDocument();
+  });
+
+  it("hides the Environment tab from users who cannot manage the agent", () => {
+    // The env endpoints admit the agent owner or a workspace owner/admin
+    // (MUL-5438) — the rule `canEdit` already encodes. Anyone else who opens
+    // the tab hits a guaranteed 403 on "Reveal & edit".
+    renderPane([makeRuntime("claude")], { canEdit: false });
+    openSettings();
+    expect(
+      screen.queryByRole("tab", { name: /^Environment$/i }),
+    ).not.toBeInTheDocument();
   });
 });

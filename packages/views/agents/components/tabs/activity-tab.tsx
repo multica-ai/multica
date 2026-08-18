@@ -35,7 +35,7 @@ import { AppLink } from "../../../navigation";
 import { TranscriptButton } from "../../../common/task-transcript";
 import { AttributionBadge } from "../../../issues/components/attribution-badge";
 import { taskStatusConfig } from "../../config";
-import { failureReasonLabel } from "./task-failure";
+import { cancelReasonLabel, failureReasonLabel } from "./task-failure";
 import { Sparkline } from "../sparkline";
 import { useT, useTimeAgo } from "../../../i18n";
 
@@ -217,11 +217,11 @@ export function AgentPerformanceSummary({ agent }: { agent: Agent }) {
 
   return (
     <section className="mt-5 border-t pt-5">
-      <h2 className="text-sm font-medium">
+      <h2 className="text-body font-medium">
         {t(($) => $.tab_body.activity.section_last_30d)}
       </h2>
       {summary.totalRuns === 0 ? (
-        <p className="mt-3 text-xs text-muted-foreground">
+        <p className="mt-3 text-caption text-muted-foreground">
           {t(($) => $.tab_body.activity.empty_30d)}
         </p>
       ) : (
@@ -271,13 +271,13 @@ function Metric({
   return (
     <div className="min-w-0">
       <div
-        className={`text-lg font-semibold tabular-nums ${
+        className={`text-title font-semibold tabular-nums ${
           destructive ? "text-destructive" : "text-foreground"
         }`}
       >
         {value}
       </div>
-      <div className="truncate text-[11px] text-muted-foreground">{label}</div>
+      <div className="truncate text-micro text-muted-foreground">{label}</div>
     </div>
   );
 }
@@ -344,13 +344,13 @@ function Last30dSection({
                 locales={locales}
                 format={{ maximumFractionDigits: 0 }}
                 aria-label={String(totalRuns)}
-                className="text-3xl font-bold leading-none"
+                className="text-display font-bold leading-none"
               />
-              <span className="text-sm text-muted-foreground">
+              <span className="text-body text-muted-foreground">
                 {t(($) => $.tab_body.activity.runs, { count: totalRuns })}
               </span>
             </div>
-            <div className="text-xs text-muted-foreground">
+            <div className="text-caption text-muted-foreground">
               {t(($) => $.tab_body.activity.success_pct, { percent: successPct })}
               {avgDurationMs > 0 && (
                 <>
@@ -429,7 +429,7 @@ function RecentWorkSection({
             <button
               type="button"
               onClick={onShowMore}
-              className="mt-2 self-start rounded text-xs text-muted-foreground transition-colors hover:text-foreground"
+              className="mt-2 self-start rounded text-caption text-muted-foreground transition-colors hover:text-foreground"
             >
               {t(($) => $.tab_body.activity.show_more)}
             </button>
@@ -586,9 +586,14 @@ function TaskRow({
   // Failure reason. The back-end emits "" on non-failed tasks (omitempty
   // strips it on the wire) so the truthy guard is the right shape.
   // failureReasonLabel takes the raw open string — the taxonomy has 21
-  // values and grows, so there is no enum to cast to.
+  // values and grows, so there is no enum to cast to. Cancelled rows get a
+  // label only when the SERVER cancelled them for a persisted reason
+  // (worktree claim gate, preserved-work delivery); a user's own cancel
+  // stays a plain "Cancelled".
   const failureLabel =
-    task.status === "failed" ? failureReasonLabel(task.failure_reason) : null;
+    task.status === "failed"
+      ? failureReasonLabel(task.failure_reason)
+      : cancelReasonLabel(task);
 
   // Only show duration for terminal rows. An active row's duration is
   // inferred from the timeText already ("Started 2m ago") and adding a
@@ -619,11 +624,11 @@ function TaskRow({
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-1.5">
           <SourceIcon
-            className="h-3 w-3 shrink-0 text-muted-foreground/70"
+            className="h-3 w-3 shrink-0 text-faint-foreground"
             aria-label={sourceLabel}
           />
           {issue && (
-            <span className="shrink-0 font-mono text-xs text-muted-foreground">
+            <span className="shrink-0 font-mono text-caption text-muted-foreground">
               {issue.identifier}
             </span>
           )}
@@ -636,7 +641,7 @@ function TaskRow({
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <span className="truncate text-sm">
+                  <span className="truncate text-body">
                     {issue?.title ??
                       (hasIssue
                         ? t(($) => $.tab_body.activity.issue_short_fallback, { prefix: task.issue_id.slice(0, 8) })
@@ -645,16 +650,16 @@ function TaskRow({
                 }
               />
               <TooltipContent className="max-w-md">
-                <div className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground/80">
+                <div className="text-micro font-medium uppercase tracking-wider text-muted-foreground">
                   {t(($) => $.tab_body.activity.triggered_by)}
                 </div>
-                <div className="mt-0.5 whitespace-pre-wrap text-xs">
+                <div className="mt-0.5 whitespace-pre-wrap text-caption">
                   {task.trigger_summary}
                 </div>
               </TooltipContent>
             </Tooltip>
           ) : (
-            <span className="truncate text-sm">
+            <span className="truncate text-body">
               {issue?.title ??
                 (hasIssue
                   ? t(($) => $.tab_body.activity.issue_short_fallback, { prefix: task.issue_id.slice(0, 8) })
@@ -662,7 +667,7 @@ function TaskRow({
             </span>
           )}
         </div>
-        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+        <div className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-caption text-muted-foreground">
           <span className={cfg.color}>
             {taskStatusLabel(task.status, t)}
           </span>
@@ -677,7 +682,11 @@ function TaskRow({
           {failureLabel && (
             <>
               <Sep />
-              <span className="text-destructive">{failureLabel}</span>
+              {/* Hover reveals the actionable text ("upgrade the daemon on
+                  that machine", "work preserved at …"), not just the bucket. */}
+              <span className="text-destructive" title={task.error ?? undefined}>
+                {failureLabel}
+              </span>
             </>
           )}
           {/* Accountable member (MUL-4302 §9): whose behalf this run is on.
@@ -760,10 +769,10 @@ function Section({
   return (
     <section className="flex flex-col gap-3 border-b pb-6 last:border-b-0 last:pb-0">
       <div className="flex items-baseline gap-2">
-        <h2 className="text-sm font-semibold text-foreground">
+        <h2 className="text-body font-semibold text-foreground">
           {title}
         </h2>
-        <span className="text-[11px] text-muted-foreground/70">{subtitle}</span>
+        <span className="text-micro text-muted-foreground">{subtitle}</span>
       </div>
       {children}
     </section>
@@ -771,14 +780,14 @@ function Section({
 }
 
 function EmptyText({ children }: { children: ReactNode }) {
-  return <p className="text-xs italic text-muted-foreground/60">{children}</p>;
+  return <p className="text-caption italic text-muted-foreground">{children}</p>;
 }
 
 function Sep() {
   // mx-1 puts visible whitespace around the dot; without it inline JSX
   // collapses neighbouring tokens to "100% success·avg 30s" which reads
   // as "successdotavg" at a glance.
-  return <span className="mx-1 text-muted-foreground/40">·</span>;
+  return <span className="mx-1 text-faint-foreground">·</span>;
 }
 
 type AgentsT = ReturnType<typeof useT<"agents">>["t"];

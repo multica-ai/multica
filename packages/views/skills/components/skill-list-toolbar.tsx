@@ -48,6 +48,7 @@ import {
 } from "@multica/core/skills/stores";
 import { useT } from "../../i18n";
 import type { SkillRow } from "./skills-page";
+import { PAGE_TOOLBAR } from "../../layout/page-header";
 
 export type OriginType = SkillOriginType;
 
@@ -172,11 +173,11 @@ export function SkillListToolbar({
   const sortLabel = SORT_LABELS[sortField];
 
   const countBadge = (n: number) => (
-    <span className="ml-auto pl-3 text-xs text-muted-foreground">{n}</span>
+    <span className="ml-auto pl-3 text-caption text-muted-foreground">{n}</span>
   );
 
   return (
-    <div className="flex h-12 shrink-0 items-center justify-between gap-2 px-5">
+    <div className={PAGE_TOOLBAR}>
       {/* Left: name search + result count. The count only appears while
           search/filters narrow the list — in the idle state it would just
           duplicate the total already shown in the page header. Below md the
@@ -190,13 +191,13 @@ export function SkillListToolbar({
             onChange={(e) => onSearchChange(e.target.value)}
             aria-label={t(($) => $.page.search_placeholder)}
             placeholder={t(($) => $.page.search_placeholder)}
-            className="h-8 w-64 pl-8 text-sm"
+            className="h-8 w-64 pl-8 text-body"
           />
         </div>
         {(hasActiveFilters || search.trim().length > 0) && (
           <span
             title={t(($) => $.toolbar.result_count_title)}
-            className="hidden shrink-0 text-xs tabular-nums text-muted-foreground md:inline"
+            className="hidden shrink-0 text-caption tabular-nums text-muted-foreground md:inline"
           >
             {visibleCount} / {allRows.length}
           </span>
@@ -261,7 +262,7 @@ export function SkillListToolbar({
                   {t(($) => $.toolbar.section_usage)}
                 </span>
                 {filters.usage.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.usage.length}
                   </span>
                 )}
@@ -289,7 +290,7 @@ export function SkillListToolbar({
               <DropdownMenuSubTrigger>
                 <span className="flex-1">{t(($) => $.table.source)}</span>
                 {filters.origins.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.origins.length}
                   </span>
                 )}
@@ -318,7 +319,7 @@ export function SkillListToolbar({
               <DropdownMenuSubTrigger>
                 <span className="flex-1">{t(($) => $.table.used_by)}</span>
                 {filters.agents.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.agents.length}
                   </span>
                 )}
@@ -351,7 +352,7 @@ export function SkillListToolbar({
               <DropdownMenuSubTrigger>
                 <span className="flex-1">{t(($) => $.table.created_by)}</span>
                 {filters.creators.length > 0 && (
-                  <span className="text-xs font-medium text-primary">
+                  <span className="text-caption font-medium text-primary">
                     {filters.creators.length}
                   </span>
                 )}
@@ -417,7 +418,7 @@ export function SkillListToolbar({
           </Tooltip>
           <PopoverContent align="end" className="w-64 p-0">
             <div className="border-b px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.sort_by)}
               </span>
               <div className="mt-2 flex items-center gap-1.5">
@@ -427,7 +428,7 @@ export function SkillListToolbar({
                       <Button
                         variant="outline"
                         size="sm"
-                        className="flex-1 justify-between text-xs"
+                        className="flex-1 justify-between text-caption"
                       >
                         {sortLabel}
                         <ChevronDown className="size-3 text-muted-foreground" />
@@ -473,7 +474,7 @@ export function SkillListToolbar({
             </div>
 
             <div className="px-3 py-2.5">
-              <span className="text-xs font-medium text-muted-foreground">
+              <span className="text-caption font-medium text-muted-foreground">
                 {t(($) => $.toolbar.section_columns)}
               </span>
               <div className="mt-2 space-y-2">
@@ -482,7 +483,7 @@ export function SkillListToolbar({
                     key={key}
                     className="flex cursor-pointer items-center justify-between"
                   >
-                    <span className="text-sm">{COLUMN_LABELS[key]}</span>
+                    <span className="text-body">{COLUMN_LABELS[key]}</span>
                     <Switch
                       size="sm"
                       checked={!hiddenColumns.includes(key)}

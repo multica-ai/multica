@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -135,6 +134,97 @@ func hermesInsideMcpAdd(args []string, index int) bool {
 	return false
 }
 
+// hermesACPSubcommand is the subcommand the backend always launches with. It
+// sits between the runtime's launch prefix and the agent's custom args, and it
+// is an ordinary argv token to Hermes' own parser — which is why the daemon
+// cannot reason about a profile selection without it.
+const hermesACPSubcommand = "acp"
+
+// hermesCLIArgsFrom assembles the argv the backend passes after the executable
+// and its launch prefix, from custom args that are already filtered.
+func hermesCLIArgsFrom(filteredCustomArgs []string) []string {
+	args := make([]string, 0, 1+len(filteredCustomArgs))
+	args = append(args, hermesACPSubcommand)
+	return append(args, filteredCustomArgs...)
+}
+
+// hermesCLIArgs is what hermesBackend.Execute passes to the launch boundary.
+func hermesCLIArgs(customArgs []string, logger *slog.Logger) []string {
+	return hermesCLIArgsFrom(filterCustomArgs(customArgs, hermesBlockedArgs, logger))
+}
+
+// HermesLaunchArgv returns the exact argv Hermes will parse: the runtime's
+// launch prefix, then `acp`, then the agent's custom args after the same
+// blocked-flag filtering the backend applies.
+//
+// The daemon resolves the profile selection from this rather than from a
+// hand-assembled approximation. Concatenating prefix and custom args alone
+// silently disagrees with the real command line, because the `acp` token
+// participates in Hermes' scan: with fixed_args `--model` and custom_args
+// `-p research`, the approximation reads `-p` as `--model`'s value and finds
+// no selection, while the real `--model acp -p research` skips `--model acp`
+// and selects `research`. The overlay would then be seeded from the default
+// home while the process runs under a different profile's config.
+func HermesLaunchArgv(launchPrefix, customArgs []string, logger *slog.Logger) []string {
+	return Command{Prefix: launchPrefix}.Argv(hermesCLIArgs(customArgs, logger)...)
+}
+
+// StripHermesProfileSelectors removes every profile selection from the argv
+// Hermes will parse and hands each surviving token back to the region it came
+// from — launch prefix or custom args.
+//
+// The daemon calls this only when it built the per-task overlay, where the
+// overlay's HERMES_HOME is authoritative and nothing on the command line may
+// re-point out of it.
+//
+// It works on the assembled argv rather than on each region separately for two
+// reasons, both of which leave a live selector behind if ignored:
+//
+//   - A selection can straddle the boundary. A launch prefix ending in a bare
+//     `-p` takes the backend's own `acp` token as its value, and neither region
+//     contains a complete selection to strip.
+//   - Removing one selection promotes the next. Hermes honours the first and
+//     ignores the rest, so a single pass can hand the job to a later
+//     occurrence — and with the prefix and custom args configured separately,
+//     two selections is ordinary configuration rather than a user mistake.
+//
+// Tokens Hermes itself discards — an invalid profile value, which makes
+// ParseHermesProfileArgs report nothing found — are left alone: they redirect
+// nothing. The `acp` token is never removed, because the backend re-adds it at
+// launch; dropping the flag that captured it is what breaks the selection.
+func StripHermesProfileSelectors(launchPrefix, customArgs []string, logger *slog.Logger) ([]string, []string) {
+	prefix := append([]string(nil), launchPrefix...)
+	custom := append([]string(nil), filterCustomArgs(customArgs, hermesBlockedArgs, logger)...)
+	for {
+		sel := ParseHermesProfileArgs(Command{Prefix: prefix}.Argv(hermesCLIArgsFrom(custom)...))
+		if !sel.Found {
+			return prefix, custom
+		}
+		acpIndex := len(prefix)
+		removed := false
+		// Walk back to front so earlier indices stay valid as tokens go.
+		for i := sel.ArgFrom + sel.ArgLen - 1; i >= sel.ArgFrom; i-- {
+			switch {
+			case i < acpIndex:
+				prefix = append(prefix[:i], prefix[i+1:]...)
+				removed = true
+			case i == acpIndex:
+				// Backend-owned; re-added at launch.
+			default:
+				if j := i - acpIndex - 1; j < len(custom) {
+					custom = append(custom[:j], custom[j+1:]...)
+					removed = true
+				}
+			}
+		}
+		if !removed {
+			// Defensive: a selection always contains a flag from one of the two
+			// regions, so this cannot loop forever. Bail rather than spin.
+			return prefix, custom
+		}
+	}
+}
+
 // StripHermesProfileArgs removes exactly the argv occurrence ParseHermesProfileArgs
 // selected. The daemon calls this only when it built the per-task overlay, so
 // Hermes uses the overlay's HERMES_HOME instead of re-resolving the profile —
@@ -157,6 +247,12 @@ func StripHermesProfileArgs(args []string, sel HermesProfileSelection) []string 
 // via the ACP (Agent Communication Protocol) JSON-RPC 2.0 over stdin/stdout.
 // This is the same pattern as Codex but with the ACP protocol instead of
 // the Codex-specific JSON-RPC methods.
+//
+// opts.ThinkingLevel is applied through applyACPEffortOption below, driven by
+// whatever effort option the session advertises. This provider covers two
+// unrelated binaries — Hermes Agent and jcode — with opposite capabilities
+// here, so the catalog is the only honest discriminator; see
+// acpCatalogThinkingProviders in thinking.go for which is which.
 type hermesBackend struct {
 	cfg Config
 }
@@ -187,8 +283,10 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)
 
-	hermesArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, hermesBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, hermesArgs...)
+	// Same assembly HermesLaunchArgv reproduces for the daemon, so the profile
+	// the overlay is seeded from is the one this argv actually selects.
+	hermesArgs := hermesCLIArgs(opts.CustomArgs, b.cfg.Logger)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, hermesArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", hermesArgs)
 	agentsMDPresent := false
@@ -259,14 +357,21 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Hermes streams interim narration and the final answer as the same
+	// agent_message_chunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	// streamingCurrentTurn gates all session updates so that history
 	// replay (Hermes sends full prior-turn transcripts on session/resume,
 	// and may flush queued chunks before our session/prompt response
 	// streams) is dropped instead of duplicating the previous answer
 	// into output. We flip it to true only after session/prompt is sent.
 	var streamingCurrentTurn atomic.Bool
+	// turnActivity counts the session updates accepted for the current turn.
+	// Zero means the agent produced nothing at all — no text, no thought, no
+	// tool call — which is what separates a dead-session refusal from a model
+	// that genuinely refused the request. See hermesResumeSessionLost.
+	var turnActivity atomic.Int64
 
 	promptDone := make(chan hermesPromptResult, 1)
 	activity := make(chan struct{}, 1)
@@ -289,11 +394,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			if !streamingCurrentTurn.Load() {
 				return
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
-			}
+			turnActivity.Add(1)
+			deliverable.observe(msg)
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -311,8 +413,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -345,6 +446,17 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// resume. Only that is curable by starting a fresh session, so
 		// handshake/network failures below must leave it false.
 		var resumeRejected bool
+		// True only when session/resume actually landed on the session we
+		// asked for. Hermes answers a resume of a session its state.db no
+		// longer holds by silently creating a fresh one (acp_adapter/server.py
+		// resume_session: "not found, creating new"), so this is what decides
+		// whether the turn must carry a continuity notice — see the prompt
+		// assembly below.
+		var resumeLanded bool
+		// The stop reason session/prompt reported, when it answered at all.
+		// Read once the turn has fully settled — see the resumed-session check
+		// after the provider-error promotion below.
+		var promptStopReason string
 		effectiveModel := strings.TrimSpace(opts.Model)
 		// The model id the runtime reports as current right after
 		// session/new or session/resume. Used to skip a redundant
@@ -373,13 +485,18 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// agentCapabilities.mcpCapabilities; sending an http/sse entry to
 		// a runtime that says it only supports stdio reliably rejects the
 		// whole session/new request.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "hermes", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "hermes", b.cfg)
 
 		// 2. Create or resume a session.
 		cwd := opts.Cwd
 		if cwd == "" {
 			cwd = "."
 		}
+
+		// sessionResult is whichever of session/new or session/resume produced
+		// this session. It carries the configOptions the effort step below
+		// reads, so both branches have to keep hold of it.
+		var sessionResult json.RawMessage
 
 		if opts.ResumeSessionID != "" {
 			// Per ACP Session Setup, session/resume accepts mcpServers and
@@ -397,9 +514,9 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
-			var changed bool
-			sessionID, changed = resolveResumedSessionID(opts.ResumeSessionID, result)
-			if changed {
+			sessionResult = result
+			sessionID, resumeLanded = resolveHermesResumedSessionID(opts.ResumeSessionID, result)
+			if !resumeLanded {
 				b.cfg.Logger.Warn("agent returned a different session id on resume — original was likely lost; continuing with the new id",
 					"backend", "hermes",
 					"requested", opts.ResumeSessionID,
@@ -418,6 +535,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 				resCh <- Result{Status: finalStatus, Error: finalError, DurationMs: time.Since(startTime).Milliseconds()}
 				return
 			}
+			sessionResult = result
 			sessionID = extractACPSessionID(result)
 			if sessionID == "" {
 				finalStatus = "failed"
@@ -433,6 +551,8 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 
 		c.sessionID = sessionID
 		b.cfg.Logger.Info("hermes session created", "session_id", sessionID)
+		// Mid-flight pin: daemon PinTaskSession keys off MessageStatus+SessionID.
+		trySend(msgCh, Message{Type: MessageStatus, Status: "running", SessionID: sessionID})
 
 		// 3. If the caller picked a model (via agent.model from the
 		// UI dropdown), ask hermes to switch the session to it
@@ -489,6 +609,19 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			b.cfg.Logger.Info("hermes session model set", "model", opts.Model)
 		}
 
+		// 3b. Apply a persisted thinking override through whichever effort
+		// option this session advertises. Which binary answered decides
+		// whether anything happens: jcode advertises `reasoning_effort` and
+		// threads it into the provider request, while Hermes Agent advertises
+		// no configOptions at all and the helper no-ops. Unlike set_model
+		// above this must NOT fail the task — an effort we could not apply
+		// still runs the prompt at the runtime's own default.
+		//
+		// sessionResult stops describing the live session once set_model runs,
+		// because an ACP effort option may depend on the current model.
+		applyACPEffortOption(runCtx, c.request, "hermes", b.cfg.Logger,
+			sessionID, sessionResult, opts.ThinkingLevel, opts.Model == "")
+
 		// 4. Send the prompt and wait for PromptResponse.
 		//
 		// Do NOT prepend opts.SystemPrompt here. Hermes ACP loads project/context
@@ -503,7 +636,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		_, err = c.request(runCtx, "session/prompt", map[string]any{
 			"sessionId": sessionID,
 			"prompt": []map[string]any{
-				{"type": "text", "text": prompt},
+				{"type": "text", "text": hermesTurnText(prompt, opts.ResumeExpected, resumeLanded, opts.ResumeContinuityNotice)},
 			},
 		})
 		if err != nil {
@@ -542,16 +675,12 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			// from the response parsing.
 			select {
 			case pr := <-promptDone:
+				promptStopReason = pr.stopReason
 				if pr.stopReason == "cancelled" {
 					finalStatus = "aborted"
 					finalError = "hermes cancelled the prompt"
 				}
-				// Merge usage from the PromptResponse.
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 			}
 			waitForHermesNotificationQuiescence(runCtx, activity, readerDone)
@@ -586,9 +715,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		}
 		streamingCurrentTurn.Store(false)
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Hermes reports stopReason=end_turn even when the upstream
 		// LLM call ultimately fails (HTTP 429 rate-limit, expired
@@ -598,15 +725,46 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		// warning), the agent text stream contains the synthetic
 		// "API call failed after N retries..." turn the adapter
 		// injects on give-up, or there's no output to fall back on.
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// It reads the full text stream, not the deliverable, so a
+		// give-up turn that lands before a tool call stays visible.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
+
+		// A resumed session Hermes could not rebuild.
+		//
+		// Evaluated HERE, not at the quiescence boundary above: the quiet
+		// window closing does not end the turn. stdin EOF and the pipe drain
+		// do, and Hermes legitimately delivers a turn's final chunk in that
+		// gap — TestHermesBackendDrainsLateFinalNotificationAfterPromptResponse
+		// exists because of it. Deciding earlier would freeze
+		// turnActivity == 0 while a real answer was still in flight and
+		// discard a healthy session (plus re-run the turn) for a runtime that
+		// merely answered slowly. By this point streamingCurrentTurn is off
+		// and every accepted update has been counted, so the reading is final.
+		//
+		// Runs after the promotion above on purpose: when the sniffer captured
+		// why the rebuild failed (e.g. the provider identity the session
+		// persisted no longer resolves), that message is far more useful to the
+		// user than the generic one here, so we only supply a reason when
+		// nothing else did. Without this, such a turn reports "completed" with
+		// empty output — a task that silently did nothing at all.
+		if hermesResumeSessionLost(opts.ResumeSessionID, promptStopReason, turnActivity.Load()) {
+			b.cfg.Logger.Warn("resumed session refused with no agent activity; treating it as gone and clearing the session id so the daemon retries fresh",
+				"backend", "hermes",
+				"session_id", sessionID,
+			)
+			if finalStatus == "completed" {
+				finalStatus = "failed"
+				finalError = hermesResumeLostError
+			}
+			sessionID = ""
+			resumeRejected = true
+		}
 
 		// Build usage map.
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"
@@ -633,26 +791,45 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 // may deliver the final agent_message_chunk after the response; closing stdin
 // or cancelling immediately at that boundary loses the user-visible answer.
 func waitForHermesNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
-	quiet := time.NewTimer(hermesNotificationQuietTime)
-	defer quiet.Stop()
-	hard := time.NewTimer(hermesReaderDrainGrace)
-	defer hard.Stop()
+	waitForACPNotificationQuiescence(ctx, activity, readerDone, hermesNotificationQuietTime, hermesReaderDrainGrace)
+}
+
+// acpNotificationQuietTime is the default lull the shared drain waits out
+// before concluding an ACP agent has stopped emitting notifications. It is a
+// protocol-level heuristic rather than a per-backend trait, so backends that
+// have no reason to differ share it; the hard bound stays per-backend.
+const acpNotificationQuietTime = 250 * time.Millisecond
+
+// waitForACPNotificationQuiescence gives the shared ACP stdout reader a
+// bounded chance to consume notifications a backend may emit just after its
+// session/prompt response returns. Closing stdin and cancelling the context at
+// the response boundary otherwise races the reader and silently truncates the
+// final text or usage update.
+//
+// It returns as soon as any of these happens, so an agent that holds stdout
+// open forever cannot stall the turn: no notification arrived for quiet, the
+// reader finished, hard elapsed, or ctx was cancelled.
+func waitForACPNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}, quiet, hard time.Duration) {
+	quietTimer := time.NewTimer(quiet)
+	defer quietTimer.Stop()
+	hardTimer := time.NewTimer(hard)
+	defer hardTimer.Stop()
 
 	for {
 		select {
 		case <-activity:
-			if !quiet.Stop() {
+			if !quietTimer.Stop() {
 				select {
-				case <-quiet.C:
+				case <-quietTimer.C:
 				default:
 				}
 			}
-			quiet.Reset(hermesNotificationQuietTime)
-		case <-quiet.C:
+			quietTimer.Reset(quiet)
+		case <-quietTimer.C:
 			return
 		case <-readerDone:
 			return
-		case <-hard.C:
+		case <-hardTimer.C:
 			return
 		case <-ctx.Done():
 			return
@@ -681,7 +858,7 @@ func waitForHermesPipeDrain(readerDone, stderrDone <-chan struct{}, timeout time
 
 type hermesPromptResult struct {
 	stopReason string
-	usage      TokenUsage
+	usage      acpUsageSnapshot
 	// modelID is the model the agent actually billed this turn against, as
 	// reported on `result._meta.modelId`. Empty for agents that don't report
 	// it. Backends use it to attribute usage when the session handshake
@@ -699,6 +876,15 @@ type hermesClient struct {
 	sessionID    string
 	onMessage    func(Message)
 	onPromptDone func(hermesPromptResult)
+	// selectPermission lets an ACP dialect narrow the generic headless
+	// permission policy. Reasonix uses this to reject user questions and
+	// fresh-human approvals that also happen to carry allow_once options.
+	// Nil preserves the shared ACP policy for existing backends.
+	selectPermission func(json.RawMessage) (optionID string, grant bool, ok bool)
+	// onNotification observes vendor notifications that are not session/update.
+	// Existing backends leave it nil; the callback must do its own method and
+	// lifecycle filtering.
+	onNotification func(method string, params json.RawMessage)
 	// onActivity observes accepted ACP session updates. Hermes and Grok use it
 	// to retain a short post-response drain window; other ACP backends leave it
 	// nil and keep their existing lifecycle behavior.
@@ -717,7 +903,7 @@ type hermesClient struct {
 	pendingTools map[string]*pendingToolCall
 
 	usageMu sync.Mutex
-	usage   TokenUsage
+	usage   acpUsageAccumulator
 }
 
 // pendingToolCall buffers state for a tool call while its arguments
@@ -854,7 +1040,11 @@ func (c *hermesClient) handleAgentRequest(raw map[string]json.RawMessage) {
 	var resp map[string]any
 	switch method {
 	case "session/request_permission":
-		optionID, grant, ok := selectACPPermissionOption(raw["params"])
+		selector := c.selectPermission
+		if selector == nil {
+			selector = selectACPPermissionOption
+		}
+		optionID, grant, ok := selector(raw["params"])
 		if ok {
 			// Select an offered option — either a safe grant (approve) or,
 			// when no safe grant exists, an offered reject_once (deny THIS
@@ -1039,8 +1229,9 @@ func (e *acpRPCError) Error() string {
 // (Internal error), Kiro puts "No session found with id ..." in
 // `data` under -32603, and kimi-cli raises invalid_params (-32602)
 // with {"session_id": "Session not found"} in `data` for every
-// unknown-session path (src/kimi_cli/acp/server.py) — so neither the
-// code nor the text alone is discriminating and both are matched.
+// unknown-session path (src/kimi_cli/acp/server.py), while Reasonix says
+// "session/resume: unknown session <id>" under -32602 — so neither the
+// code nor one runtime's exact wording is discriminating and both are matched.
 func isACPSessionNotFound(err error) bool {
 	var rpcErr *acpRPCError
 	if !errors.As(err, &rpcErr) {
@@ -1051,7 +1242,41 @@ func isACPSessionNotFound(err error) bool {
 	}
 	text := strings.ToLower(rpcErr.Message + " " + rpcErr.Data)
 	return strings.Contains(text, "session not found") ||
-		strings.Contains(text, "no session found")
+		strings.Contains(text, "no session found") ||
+		strings.Contains(text, "unknown session")
+}
+
+// hermesResumeLostError is the fallback reason for a resumed session Hermes
+// could not rebuild, used only when nothing more specific was captured.
+const hermesResumeLostError = "hermes could not restore the resumed session; it refused the turn without running the agent"
+
+// hermesResumeSessionLost reports whether a *successful* session/prompt
+// response means the session we resumed is gone on the agent side.
+//
+// isACPSessionNotFound cannot answer this, because Hermes never reports an
+// unknown session as a JSON-RPC error. Its ACP adapter answers
+// `session/prompt` for a session it cannot load with an ordinary success
+// frame carrying stopReason=refusal (acp_adapter/server.py, the one place it
+// emits that reason), and `session/resume` returns an ordinary success frame
+// whatever happened — the ACP ResumeSessionResponse schema has no sessionId
+// field at all, unlike NewSessionResponse. Nothing in the exchange is an
+// error, which is why the isACPSessionNotFound branches at set_model and
+// prompt time never fire for this runtime and every later dispatch on the same
+// (agent, issue) pair loops on the dead session (GH #6150).
+//
+// This stays necessary alongside resolveHermesResumedSessionID, which reads
+// `_meta.hermes.sessionProvenance` to catch the rebind at resume time: that
+// covers the runtime answering with a DIFFERENT session, while this covers it
+// answering with the one we asked for and then refusing to run it.
+//
+// Both conditions are required. stopReason=refusal alone is a legitimate
+// model refusal, and refusing a resumed turn after real work is not a lost
+// session — only a refusal with no agent activity whatsoever (no text, no
+// thought, no tool call) is Hermes telling us it never had the session. The
+// fresh-session retry this unlocks is itself gated on tools == 0 in
+// shouldRetryWithFreshSession, so a turn that acted is never re-run.
+func hermesResumeSessionLost(resumeSessionID, stopReason string, turnActivity int64) bool {
+	return resumeSessionID != "" && stopReason == "refusal" && turnActivity == 0
 }
 
 func (c *hermesClient) handleResponse(raw map[string]json.RawMessage) {
@@ -1122,19 +1347,15 @@ func (c *hermesClient) extractPromptResult(data json.RawMessage) {
 		stopReason: resp.StopReason,
 		modelID:    parseACPModelIDFromMeta(resp.Meta),
 	}
+	var usage acpUsageSnapshot
 	if len(resp.Usage) > 0 && string(resp.Usage) != "null" {
-		pr.usage = parseACPTokenUsage(resp.Usage)
+		usage = parseACPTokenUsageSnapshot(resp.Usage)
 	}
-	// Prefer the standard top-level ACP `usage` field when present. Some
-	// agents (notably xAI Grok Build) put per-turn metering only under
-	// result._meta — either as `_meta.usage` or as flat token counters on
-	// `_meta` itself. Without this fallback, tasks complete with an empty
-	// usage map and Multica's Usage/cost dashboards stay at zero.
-	if !acpTokenUsagePresent(pr.usage) {
-		if metaUsage := parseACPTokenUsageFromMeta(resp.Meta); acpTokenUsagePresent(metaUsage) {
-			pr.usage = metaUsage
-		}
-	}
+	// Some agents (notably xAI Grok Build) put per-turn metering under
+	// result._meta instead of, or in addition to, the standard top-level
+	// usage field. Reconcile both shapes so partial mirrors cannot drop a
+	// cache bucket or provider-reported cost.
+	pr.usage = usage.withFallback(parseACPTokenUsageSnapshotFromMeta(resp.Meta))
 
 	if c.onPromptDone != nil {
 		c.onPromptDone(pr)
@@ -1146,28 +1367,8 @@ func acpTokenUsagePresent(u TokenUsage) bool {
 	return u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0
 }
 
-// parseACPTokenUsageFromMeta extracts token usage from an ACP result `_meta`
-// object. Grok Build returns shapes like:
-//
-//	{"inputTokens":…,"outputTokens":…,"cachedReadTokens":…,"usage":{…}}
-//
-// Prefer the nested `usage` object when it carries counters; otherwise parse
-// the flat `_meta` fields with the same alias rules as top-level usage.
-func parseACPTokenUsageFromMeta(meta json.RawMessage) TokenUsage {
-	if len(meta) == 0 || string(meta) == "null" {
-		return TokenUsage{}
-	}
-	var envelope struct {
-		Usage json.RawMessage `json:"usage"`
-	}
-	if err := json.Unmarshal(meta, &envelope); err == nil {
-		if len(envelope.Usage) > 0 && string(envelope.Usage) != "null" {
-			if u := parseACPTokenUsage(envelope.Usage); acpTokenUsagePresent(u) {
-				return u
-			}
-		}
-	}
-	return parseACPTokenUsage(meta)
+func acpUsagePresent(u TokenUsage) bool {
+	return acpTokenUsagePresent(u) || u.CostUSDTicks > 0
 }
 
 // parseACPModelIDFromMeta pulls the model id off an ACP result `_meta`
@@ -1195,6 +1396,9 @@ func parseACPModelIDFromMeta(meta json.RawMessage) string {
 func (c *hermesClient) handleNotification(raw map[string]json.RawMessage) {
 	var method string
 	_ = json.Unmarshal(raw["method"], &method)
+	if c.onNotification != nil {
+		c.onNotification(method, raw["params"])
+	}
 
 	if method != "session/update" && method != "session/notification" {
 		return
@@ -1650,115 +1854,19 @@ func (c *hermesClient) handleUsageUpdate(data json.RawMessage) {
 	if err := json.Unmarshal(data, &msg); err != nil {
 		return
 	}
-	usage := parseACPTokenUsage(msg.Usage)
+	c.mergeUsage(parseACPTokenUsageSnapshot(msg.Usage))
+}
 
+func (c *hermesClient) mergeUsage(usage acpUsageSnapshot) {
 	c.usageMu.Lock()
-	// Usage updates from ACP are cumulative snapshots, so take the latest.
-	if usage.InputTokens > c.usage.InputTokens {
-		c.usage.InputTokens = usage.InputTokens
-	}
-	if usage.OutputTokens > c.usage.OutputTokens {
-		c.usage.OutputTokens = usage.OutputTokens
-	}
-	if usage.CacheReadTokens > c.usage.CacheReadTokens {
-		c.usage.CacheReadTokens = usage.CacheReadTokens
-	}
-	if usage.CacheWriteTokens > c.usage.CacheWriteTokens {
-		c.usage.CacheWriteTokens = usage.CacheWriteTokens
-	}
-	if usage.CostUSDTicks > c.usage.CostUSDTicks {
-		c.usage.CostUSDTicks = usage.CostUSDTicks
-	}
+	c.usage.merge(usage)
 	c.usageMu.Unlock()
 }
 
-func parseACPTokenUsage(data json.RawMessage) TokenUsage {
-	if len(data) == 0 || string(data) == "null" {
-		return TokenUsage{}
-	}
-	var fields map[string]json.RawMessage
-	if err := json.Unmarshal(data, &fields); err != nil {
-		return TokenUsage{}
-	}
-	usage := TokenUsage{
-		InputTokens:  acpUsageInt64(fields, "inputTokens", "input_tokens"),
-		OutputTokens: acpUsageInt64(fields, "outputTokens", "output_tokens"),
-		CacheReadTokens: acpUsageInt64(fields,
-			"cachedReadTokens",
-			"cacheReadTokens",
-			"cached_input_tokens",
-			"cache_read_tokens",
-			"cache_read_input_tokens",
-		),
-		CacheWriteTokens: acpUsageInt64(fields,
-			"cachedWriteTokens",
-			"cacheWriteTokens",
-			"cache_write_tokens",
-			"cache_creation_input_tokens",
-		),
-		// The provider's own price for this turn, already inclusive of
-		// request-level pricing rules we cannot reconstruct from token
-		// counts (see TokenUsage.CostUSDTicks).
-		CostUSDTicks: acpUsageInt64(fields, "costUsdTicks", "cost_usd_ticks"),
-	}
-	return excludeACPCachedInput(usage, acpUsageInt64(fields, "totalTokens", "total_tokens"))
-}
-
-// excludeACPCachedInput re-buckets a usage record whose `inputTokens` already
-// contains `cachedReadTokens`, so the persisted buckets stay mutually
-// exclusive and dashboard cost math does not charge the cached prefix twice
-// (same normalization codex.go applies via codexUncachedInputTokens).
-//
-// ACP does not specify whether cached reads are counted inside inputTokens.
-// Grok Build counts them inside: a real `grok 0.2.106` turn reports
-// inputTokens=12929, cachedReadTokens=10880, outputTokens=29,
-// totalTokens=12958 — i.e. total == input + output, so the cached prefix is
-// counted once, within input. The same payload's costUsdTicks=75360000
-// ($0.007536) matches exactly (12929-10880) uncached input + 10880 cached
-// read + 29 output at xAI's published grok-4.5 rates, confirming how xAI
-// bills it. Kept raw, that turn is priced as if 12929 tokens were uncached —
-// ~4x the real spend on a cache-heavy turn.
-//
-// `totalTokens` is the only self-describing signal available, so the
-// re-bucketing only happens when it is present and equals input + output.
-// Agents that report exclusive buckets (total == input + cached + output) or
-// omit totalTokens keep their counters untouched.
-func excludeACPCachedInput(usage TokenUsage, totalTokens int64) TokenUsage {
-	if totalTokens <= 0 || usage.CacheReadTokens <= 0 || usage.CacheReadTokens > usage.InputTokens {
-		return usage
-	}
-	if totalTokens != usage.InputTokens+usage.OutputTokens {
-		return usage
-	}
-	usage.InputTokens -= usage.CacheReadTokens
-	return usage
-}
-
-func acpUsageInt64(fields map[string]json.RawMessage, names ...string) int64 {
-	for _, name := range names {
-		raw, ok := fields[name]
-		if !ok {
-			continue
-		}
-		var n json.Number
-		dec := json.NewDecoder(bytes.NewReader(raw))
-		dec.UseNumber()
-		if err := dec.Decode(&n); err == nil {
-			if v, err := n.Int64(); err == nil {
-				return v
-			}
-			if f, err := n.Float64(); err == nil {
-				return int64(f)
-			}
-		}
-		var s string
-		if err := json.Unmarshal(raw, &s); err == nil {
-			if v, err := strconv.ParseInt(strings.TrimSpace(s), 10, 64); err == nil {
-				return v
-			}
-		}
-	}
-	return 0
+func (c *hermesClient) accumulatedUsage() TokenUsage {
+	c.usageMu.Lock()
+	defer c.usageMu.Unlock()
+	return c.usage.TokenUsage
 }
 
 // ── Helpers ──
@@ -1849,6 +1957,75 @@ func resolveResumedSessionID(requested string, response json.RawMessage) (string
 	return got, got != requested
 }
 
+// resolveHermesResumedSessionID is the Hermes-specific reading of a
+// session/resume response: it returns the live session id and whether the
+// resume actually LANDED on the session we asked for.
+//
+// The shared resolver above is not enough here because ACP's
+// ResumeSessionResponse has no sessionId field at all (acp/schema.py
+// ResumeSessionResponse), unlike NewSessionResponse. Hermes answers a resume
+// of a session its state.db no longer holds by silently creating a fresh one
+// (acp_adapter/server.py resume_session: "not found, creating new") and
+// replies with an ordinary success frame, so the rebind used to be
+// indistinguishable from a real resume: the daemon re-sent the same dead id
+// every turn and the user got a conversation that restarted from zero with no
+// error anywhere (GH #6806).
+//
+// Hermes does report the session it actually served the request with on
+// `_meta.hermes.sessionProvenance`, which is the only signal available. A
+// response carrying neither shape falls back to the requested id and reports
+// landed=true, so a runtime that reports nothing keeps its previous behaviour
+// rather than declaring every turn's history lost.
+//
+// That residual blind spot is bounded on the daemon side: the resume gate only
+// hands a session id to a run whose session store actually holds a transcript
+// (sessionHomeReachable), so a silent runtime can misreport a stale session but
+// never an absent one.
+func resolveHermesResumedSessionID(requested string, response json.RawMessage) (string, bool) {
+	got := extractACPSessionID(response)
+	if got == "" {
+		got = extractACPProvenanceSessionID(response)
+	}
+	if got == "" {
+		return requested, true
+	}
+	return got, got == requested
+}
+
+// extractACPProvenanceSessionID pulls the session id Hermes reports on
+// `_meta.hermes.sessionProvenance.acpSessionId` — the ACP-facing id of the
+// session the server actually served the request with. `currentHermesSessionId`
+// is the agent-internal id of the same session and is deliberately not read:
+// the two diverge when Hermes compresses a session into a successor, and only
+// the ACP id is the one we address later prompts to.
+func extractACPProvenanceSessionID(result json.RawMessage) string {
+	var r struct {
+		Meta struct {
+			Hermes struct {
+				SessionProvenance struct {
+					ACPSessionID string `json:"acpSessionId"`
+				} `json:"sessionProvenance"`
+			} `json:"hermes"`
+		} `json:"_meta"`
+	}
+	if err := json.Unmarshal(result, &r); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(r.Meta.Hermes.SessionProvenance.ACPSessionID)
+}
+
+// hermesTurnText prepends the caller's continuity notice when this task meant
+// to continue a conversation but the resume landed on a fresh session. Same
+// contract as the codex backend's codexTurnInput: the notice is empty whenever
+// the daemon's own prompt already carries it, so a turn can never pay for the
+// paragraph twice.
+func hermesTurnText(prompt string, resumeExpected, resumeLanded bool, notice string) string {
+	if resumeExpected && !resumeLanded {
+		return notice + prompt
+	}
+	return prompt
+}
+
 // buildHermesSessionParams constructs the params map for the ACP `session/new`
 // request. The `model` field is only included when non-empty so Hermes falls
 // back to its default only when no explicit model was configured.
@@ -1905,6 +2082,7 @@ func buildACPMcpServers(raw json.RawMessage, logger *slog.Logger) ([]any, error)
 		return nil, fmt.Errorf("parse mcp_config json: %w", err)
 	}
 	if len(parsed.McpServers) == 0 {
+		warnNonCanonicalMcpConfigKey(trimmed, logger)
 		return []any{}, nil
 	}
 
@@ -1926,6 +2104,50 @@ func buildACPMcpServers(raw json.RawMessage, logger *slog.Logger) ([]any, error)
 		out = append(out, entry)
 	}
 	return out, nil
+}
+
+// acpAltMcpConfigKeys are top-level keys that runtime-native MCP config
+// files use instead of Multica's canonical `mcpServers`: jcode and Kiro
+// nest under `servers`, OpenCode under `mcp`, Codex's TOML under
+// `mcp_servers`.
+var acpAltMcpConfigKeys = []string{"servers", "mcp", "mcp_servers"}
+
+// warnNonCanonicalMcpConfigKey logs when an mcp_config carries no
+// `mcpServers` key but does hold servers under a runtime-native one.
+//
+// mcp_config is stored as opaque JSON, so pasting a runtime's own config
+// file in is both easy and — until this warning — completely silent: the
+// config saves, the daemon forwards an empty array, and the agent runs
+// with no MCP tools and nothing logged anywhere (#6540). We only warn
+// rather than adopt the entries, because the surrounding entry shapes are
+// not guaranteed to match ACP's and guessing risks forwarding a
+// half-understood config.
+func warnNonCanonicalMcpConfigKey(raw json.RawMessage, logger *slog.Logger) {
+	if logger == nil {
+		return
+	}
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &top); err != nil {
+		return
+	}
+	if _, ok := top["mcpServers"]; ok {
+		return
+	}
+	for _, key := range acpAltMcpConfigKeys {
+		nested, ok := top[key]
+		if !ok {
+			continue
+		}
+		var entries map[string]json.RawMessage
+		if err := json.Unmarshal(nested, &entries); err != nil || len(entries) == 0 {
+			continue
+		}
+		logger.Warn("mcp_config has no \"mcpServers\" key, so no MCP servers will be sent to the runtime",
+			"found_key", key,
+			"server_count", len(entries),
+			"hint", `mcp_config must be shaped {"mcpServers": {"<name>": {...}}}; a runtime's own config file is not accepted verbatim`)
+		return
+	}
 }
 
 // convertACPMcpServer converts a single Claude-style entry into the ACP
@@ -2011,55 +2233,161 @@ func sortedStringMapKeys(m map[string]string) []string {
 // runtime advertised in its `initialize` response. Stdio is always
 // supported (it's the baseline transport and the spec does not gate it),
 // so it's not represented here.
+// acpMcpCapabilityDeclaration classifies what an ACP `initialize` response
+// told us about remote MCP transports. All three states filter identically
+// under ACP v1 — an undeclared transport is unsupported — but the
+// omitted-capabilities exception may only key off genuine silence, so
+// "the runtime said nothing" has to stay distinguishable from "we could not
+// read what the runtime said".
+type acpMcpCapabilityDeclaration int
+
+const (
+	// acpMcpCapabilitiesInvalid is the zero value on purpose: a response we
+	// could not parse, a non-object block, or one whose fields have the
+	// wrong types. Anything that reaches this state fails closed, so an
+	// accidental zero value can never widen access.
+	acpMcpCapabilitiesInvalid acpMcpCapabilityDeclaration = iota
+	// acpMcpCapabilitiesOmitted is a well-formed response that carries no
+	// mcpCapabilities block at all — the only state the exception accepts.
+	acpMcpCapabilitiesOmitted
+	// acpMcpCapabilitiesDeclared is a usable block, whose HTTP/SSE fields
+	// are authoritative (including when both are false).
+	acpMcpCapabilitiesDeclared
+)
+
 type acpMcpTransportCapabilities struct {
-	HTTP bool
-	SSE  bool
+	Declaration acpMcpCapabilityDeclaration
+	HTTP        bool
+	SSE         bool
 }
 
 // extractACPMcpCapabilities reads `agentCapabilities.mcpCapabilities.http`
-// and `.sse` out of an ACP `initialize` response. Missing or false fields
-// stay false, matching the spec default: the runtime must opt-in to
-// remote MCP transports. Unparseable responses degrade to "neither
-// supported" so we fail closed on remote entries.
+// and `.sse` out of an ACP `initialize` response.
 //
-// See https://agentclientprotocol.com/protocol/initialization — clients
-// MUST NOT send `mcpServers` entries with a type the agent did not
-// advertise support for.
+// Per ACP v1 capability negotiation, "Clients and Agents MUST treat all
+// capabilities omitted in the initialize request as UNSUPPORTED", and
+// `http` / `sse` have no default beyond false. Every state therefore
+// resolves to "neither transport supported"; the classification only
+// decides whether the omitted-capabilities exception may apply.
+//
+// Each level is decoded as raw JSON rather than straight into the target
+// struct, because encoding/json leaves a non-pointer destination untouched
+// and reports no error when it decodes `null`. A single Unmarshal would
+// therefore read `null`, `{"agentCapabilities":null}` and a genuinely
+// silent response as the same thing, letting an unreadable response take
+// the exception. ACP's InitializeResponse is an object and
+// `agentCapabilities` is not nullable, so those two are malformed, not
+// silent.
+//
+// See https://agentclientprotocol.com/protocol/v1/initialization#capabilities
+// and https://pkg.go.dev/encoding/json#Unmarshal for the null rule.
 func extractACPMcpCapabilities(result json.RawMessage) acpMcpTransportCapabilities {
-	var r struct {
-		AgentCapabilities struct {
-			McpCapabilities struct {
-				HTTP bool `json:"http"`
-				SSE  bool `json:"sse"`
-			} `json:"mcpCapabilities"`
-		} `json:"agentCapabilities"`
+	invalid := acpMcpTransportCapabilities{Declaration: acpMcpCapabilitiesInvalid}
+	omitted := acpMcpTransportCapabilities{Declaration: acpMcpCapabilitiesOmitted}
+
+	var top map[string]json.RawMessage
+	if err := json.Unmarshal(result, &top); err != nil || top == nil {
+		return invalid
 	}
-	if err := json.Unmarshal(result, &r); err != nil {
-		return acpMcpTransportCapabilities{}
+	rawAgentCaps, ok := top["agentCapabilities"]
+	if !ok {
+		// A well-formed response that declares no capabilities at all.
+		return omitted
+	}
+	var agentCaps map[string]json.RawMessage
+	if err := json.Unmarshal(rawAgentCaps, &agentCaps); err != nil || agentCaps == nil {
+		return invalid
+	}
+	rawMcp, ok := agentCaps["mcpCapabilities"]
+	if !ok {
+		// The real hermes 0.18.2 shape: capabilities declared, this block
+		// genuinely absent. Only this state can reach the exception.
+		return omitted
+	}
+	rawMcp = bytes.TrimSpace(rawMcp)
+	if bytes.Equal(rawMcp, []byte("null")) {
+		return invalid
+	}
+	var caps struct {
+		HTTP bool `json:"http"`
+		SSE  bool `json:"sse"`
+	}
+	// A malformed block (wrong field types, non-object) is unusable. An
+	// unusable declaration is not silence, so it must not reach the
+	// omitted-capabilities exception — it fails closed instead.
+	if err := json.Unmarshal(rawMcp, &caps); err != nil {
+		return invalid
 	}
 	return acpMcpTransportCapabilities{
-		HTTP: r.AgentCapabilities.McpCapabilities.HTTP,
-		SSE:  r.AgentCapabilities.McpCapabilities.SSE,
+		Declaration: acpMcpCapabilitiesDeclared,
+		HTTP:        caps.HTTP,
+		SSE:         caps.SSE,
 	}
 }
 
+// acpRuntimesToleratingOmittedMcpCapabilities lists the ACP providers whose
+// own shipped binary was verified to accept http/sse McpServer entries on
+// session/new even though its initialize response carries no
+// mcpCapabilities block.
+//
+// ACP v1 requires an omitted capability to be read as unsupported, so this
+// is a deliberate, narrow exception to the spec default rather than a
+// replacement for it. hermes 0.18.2 declares no mcpCapabilities yet accepts
+// both remote transports, so applying the default there silently discarded
+// every remote MCP server its users configured, with the drop visible only
+// in the daemon log (#6540).
+//
+// Only add a provider here with evidence from its real binary — an ACP
+// implementation that omits capabilities *and* rejects remote entries would
+// turn a missing tool into a failed session, so the fail-closed default has
+// to stay the rule for everything unverified.
+var acpRuntimesToleratingOmittedMcpCapabilities = map[string]bool{
+	"hermes": true,
+}
+
+// acpToleratesOmittedMcpCapabilities reports whether this launch may fall
+// back to the omitted-capabilities exception.
+//
+// The provider name alone is not enough to answer that. A custom runtime
+// profile keeps its protocol family as the provider and only swaps in its
+// own command, so `protocol_family: hermes` with `command_name: jcode`
+// reaches this backend as "hermes" while being a binary nobody verified —
+// exactly the unverified implementation the allowlist exists to exclude.
+// Config.BuiltinRuntime is the daemon's report of which case this is, and
+// it defaults to false so any caller that doesn't set it fails closed.
+func acpToleratesOmittedMcpCapabilities(backend string, cfg Config) bool {
+	return cfg.BuiltinRuntime && acpRuntimesToleratingOmittedMcpCapabilities[backend]
+}
+
 // filterACPMcpServersByCapability drops remote MCP entries whose transport
-// the runtime didn't advertise in its initialize response. Stdio entries
+// the runtime did not advertise in its initialize response. Stdio entries
 // (no `type` field) always pass through.
 //
 // Sending an http/sse entry to a runtime that doesn't support it is a
-// protocol violation per the ACP spec, and Hermes / Kimi observed in
-// practice reject the whole session/new request with a JSON-RPC error.
-// Dropping the offending entries with a warning lets the rest of the
-// session start and surfaces the problem in the daemon log instead of
-// tanking every task on that agent.
+// protocol violation per the ACP spec and can reject the whole session/new
+// request with a JSON-RPC error. Dropping the offending entries lets the
+// rest of the session start instead of tanking every task on that agent.
+//
+// The single exception is a launch that acpToleratesOmittedMcpCapabilities
+// accepts whose response declared no capabilities at all; see there and
+// acpRuntimesToleratingOmittedMcpCapabilities for why that case is carved
+// out and why it stays narrow. A response we could not read is not silence
+// and never qualifies.
 func filterACPMcpServersByCapability(
 	servers []any,
 	caps acpMcpTransportCapabilities,
 	backend string,
-	logger *slog.Logger,
+	cfg Config,
 ) []any {
+	logger := cfg.Logger
 	if len(servers) == 0 {
+		return servers
+	}
+	if caps.Declaration == acpMcpCapabilitiesOmitted && acpToleratesOmittedMcpCapabilities(backend, cfg) {
+		if logger != nil && acpHasRemoteMcpEntry(servers) {
+			logger.Info("runtime declared no mcpCapabilities; forwarding remote MCP servers under this runtime's verified exception",
+				"backend", backend)
+		}
 		return servers
 	}
 	filtered := make([]any, 0, len(servers))
@@ -2091,6 +2419,21 @@ func filterACPMcpServersByCapability(
 		filtered = append(filtered, entry)
 	}
 	return filtered
+}
+
+// acpHasRemoteMcpEntry reports whether any entry uses a remote transport,
+// i.e. whether the capability question is relevant at all for this config.
+func acpHasRemoteMcpEntry(servers []any) bool {
+	for _, raw := range servers {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		if transport, _ := entry["type"].(string); transport == "http" || transport == "sse" {
+			return true
+		}
+	}
+	return false
 }
 
 // hermesToolNameFromTitle extracts a tool name from the ACP tool call title.

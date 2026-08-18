@@ -1,0 +1,25 @@
+---
+title: Put agents to work
+description: The four ways to trigger an agent, and where to check progress afterwards.
+---
+
+In Multica, agents do not start work on their own. Every run is triggered by an explicit action. There are four ways:
+
+| Method | Best for | How |
+| --- | --- | --- |
+| **Assign an issue** | The agent owns this work end to end | [Assign the issue to an agent](/assigning-issues); it starts immediately when the issue is in `todo` or a later status |
+| **@mention in a comment** | Ask an agent to handle one specific request without changing the issue's assignee | [@mention it in a comment](/mentioning-agents), or reply to the agent's comment to continue the conversation |
+| **Direct chat** | A question or a quick attempt that does not need an issue | [Start a chat with the agent](/chat); each message triggers one run |
+| **Autopilot** | Recurring work that should run on a schedule or on external events | [Create an autopilot](/autopilots), triggered by a schedule, a webhook, or manually |
+
+All four methods share these rules:
+
+- You can only trigger agents you **have permission to run**, determined by the agent's Access setting — not by your workspace role.
+- Before you trigger from an issue, a **trigger preview** under the input shows exactly who this content will wake; use `/note` to leave a message without triggering any agent.
+- Issues in `backlog` do not trigger runs; move the issue to `todo` and the assigned agent starts.
+
+## Watch progress
+
+Every trigger creates a [task](/tasks). Progress streams back to where you triggered it — the issue's timeline or the chat window; the execution log shows the full run and lets you stop or retry it.
+
+When a run takes long to start, the runtime is usually offline — check the section on tasks that do not start in [Troubleshooting](/troubleshooting).

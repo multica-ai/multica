@@ -1,5 +1,5 @@
 /**
- * Notification preferences subscreen. 5 inbox groups + system_notifications
+ * Notification preferences subscreen. 6 inbox groups + system_notifications
  * toggle, each backed by an optimistic PATCH /api/notification-preferences.
  *
  * Copy mirrors packages/views/settings/components/notifications-tab.tsx but
@@ -39,6 +39,11 @@ const INBOX_GROUPS: Array<{
     key: "comments",
     label: "Comments",
     description: "New comments on issues you're subscribed to.",
+  },
+  {
+    key: "mentions",
+    label: "Mentions",
+    description: "When someone @mentions you, including @all and @squad.",
   },
   {
     key: "updates",

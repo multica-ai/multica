@@ -1,0 +1,54 @@
+package dingtalk
+
+import (
+	"testing"
+
+	"github.com/multica-ai/multica/server/internal/events"
+	"github.com/multica-ai/multica/server/pkg/protocol"
+)
+
+func TestEventContent(t *testing.T) {
+	cases := []struct {
+		name  string
+		event events.Event
+		want  string
+	}{
+		{"chat done typed", events.Event{Type: protocol.EventChatDone, Payload: protocol.ChatDonePayload{Content: "reply"}}, "reply"},
+		{"map round trip", events.Event{Type: protocol.EventChatDone, Payload: map[string]any{"content": "from map"}}, "from map"},
+		{"empty map", events.Event{Type: protocol.EventChatDone, Payload: map[string]any{}}, ""},
+		{"nil", events.Event{Type: protocol.EventChatDone}, ""},
+		{
+			"task failed with error",
+			events.Event{Type: protocol.EventTaskFailed, Payload: map[string]any{"error": "task timed out", "retry_pending": false}},
+			"⚠️ task timed out",
+		},
+		{
+			// Retry-pending failures stay silent even if a mixed-version
+			// publisher accidentally includes an error string.
+			"task failed with retry pending",
+			events.Event{Type: protocol.EventTaskFailed, Payload: map[string]any{"error": "task timed out", "failure_reason": "timeout", "retry_pending": true}},
+			"",
+		},
+		{
+			// Failure broadcasts without an error text have nothing safe to
+			// deliver and stay silent.
+			"task failed without error",
+			events.Event{Type: protocol.EventTaskFailed, Payload: map[string]any{"failure_reason": "timeout", "retry_pending": false}},
+			"",
+		},
+		{
+			// task:failed payloads never carry "content"; it must not leak
+			// through the chat-done branch.
+			"task failed ignores content key",
+			events.Event{Type: protocol.EventTaskFailed, Payload: map[string]any{"content": "not for delivery"}},
+			"",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := eventContent(tc.event); got != tc.want {
+				t.Fatalf("got %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

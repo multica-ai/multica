@@ -262,6 +262,46 @@ func TestListComments_RootsOnlyReturnsThreadStats(t *testing.T) {
 	}
 }
 
+// TestListComments_RootAndThreadViewsPreserveAttributionFields guards explicit
+// SQL projections from drifting behind the comment table. Both fields affect
+// UI rendering and task lineage, so silently zeroing them changes behavior.
+func TestListComments_RootAndThreadViewsPreserveAttributionFields(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fx := newCommentListFixture(t)
+
+	sourceTaskID := "11111111-2222-3333-4444-555555555555"
+	quickActionID := "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee"
+	for _, commentID := range []string{fx.Root1, fx.R1a} {
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE comment
+			SET source_task_id = $1, quick_action_id = $2
+			WHERE id = $3
+		`, sourceTaskID, quickActionID, commentID); err != nil {
+			t.Fatalf("stamp attribution fields on %s: %v", commentID, err)
+		}
+	}
+
+	assertFields := func(label string, row CommentResponse) {
+		t.Helper()
+		if row.SourceTaskID == nil || *row.SourceTaskID != sourceTaskID {
+			t.Errorf("%s source_task_id = %v, want %s", label, row.SourceTaskID, sourceTaskID)
+		}
+		if row.QuickActionID == nil || *row.QuickActionID != quickActionID {
+			t.Errorf("%s quick_action_id = %v, want %s", label, row.QuickActionID, quickActionID)
+		}
+	}
+
+	_, roots := listComments(t, fx.IssueID, "roots_only=true")
+	assertFields("roots-only root", byID(roots)[fx.Root1])
+
+	_, thread := listComments(t, fx.IssueID, "thread="+fx.R1a)
+	threadByID := byID(thread)
+	assertFields("thread root", threadByID[fx.Root1])
+	assertFields("thread reply", threadByID[fx.R1a])
+}
+
 func assertRootStat(t *testing.T, c CommentResponse, label string, wantReplies int, wantLastActivity time.Time) {
 	t.Helper()
 	if c.ReplyCount == nil {
@@ -488,6 +528,29 @@ func TestListComments_ThreadAnchorErrors(t *testing.T) {
 			t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
 		}
 	})
+}
+
+// TestListComments_ThreadRootWalkFailsClosedAcrossIssueBoundary constructs the
+// anomalous shape the schema permits: a local reply whose parent belongs to
+// another issue. Every recursive root-walk level must keep the issue predicate,
+// so the foreign root is neither returned nor used to open a thread.
+func TestListComments_ThreadRootWalkFailsClosedAcrossIssueBoundary(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	foreignIssueID := createIssueForTimeline(t, "foreign thread root issue")
+	issueID := createIssueForTimeline(t, "local thread reply issue")
+	base := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)
+	foreignRootID := seedCommentRow(t, foreignIssueID, base, "foreign root", nil, nil)
+	localReplyID := seedCommentRow(t, issueID, base.Add(time.Second), "local anomalous reply", &foreignRootID, nil)
+
+	w, rows := listComments(t, issueID, "thread="+localReplyID)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("cross-issue root walk status = %d, want 404: %s", w.Code, w.Body.String())
+	}
+	if rows != nil {
+		t.Fatalf("cross-issue root walk returned rows: %v", ids(rows))
+	}
 }
 
 // TestListComments_RecentReturnsMostRecentlyActiveThreads pins the

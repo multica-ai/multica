@@ -1,11 +1,62 @@
 -- name: ListCommentsForIssue :many
--- All comments for an issue in chronological order, capped at $3 (DB safety
--- net). Issue p99 is ~30 comments, max ever observed in prod is ~1.1k, so
--- the handler-side cap of 2000 is purely defensive.
+-- The NEWEST $3 comments for an issue, returned in chronological order.
+--
+-- Same shape and same reason as ListActivitiesForIssue: the inner query takes
+-- the window with the keyset ordering so the cap discards the OLDEST rows, and
+-- the outer query restores the ascending contract callers rely on. The ordering
+-- of the inner window is satisfied by idx_comment_issue_keyset (migration 068);
+-- the outer query sorts that bounded window back into chronological order.
+--
+-- A newest-N window is a suffix of the timeline, and unlike a prefix it is NOT
+-- closed under "parent of": a reply is always newer than its parent, so an old
+-- thread root can fall outside the window while a fresh reply to it stays
+-- inside. Callers that render threads must close the parent chains afterwards —
+-- see completeCommentThreads (MUL-5492).
+--
+-- The cap is still purely defensive here — issue p99 is ~30 comments and the max
+-- ever observed in prod is ~1.1k — but "defensive" is not a reason to drop the
+-- newest rows when it does fire (MUL-5492).
+SELECT * FROM (
+    SELECT * FROM comment
+    WHERE issue_id = $1 AND workspace_id = $2
+    ORDER BY created_at DESC, id DESC
+    LIMIT $3
+) AS recent
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListCommentsByIDsForIssue :many
+-- The subset of @ids that exists within this issue and workspace.
+--
+-- Used to walk parent chains one level at a time (see completeCommentThreads).
+-- Deliberately NOT a recursive CTE: an earlier revision walked parent_id upward
+-- in SQL, which had no depth bound — a deep chain could pull tens of thousands of
+-- ancestors back and defeat the whole point of the row cap — and its recursive
+-- branch matched on parent_id alone, so a stray cross-workspace parent reference
+-- would have dragged another tenant's comments into the response. Both tenant
+-- columns are required here on every level, and the caller owns the budget.
 SELECT * FROM comment
-WHERE issue_id = $1 AND workspace_id = $2
-ORDER BY created_at ASC, id ASC
-LIMIT $3;
+WHERE id = ANY(@ids::uuid[])
+  AND issue_id = @issue_id
+  AND workspace_id = @workspace_id
+ORDER BY created_at ASC, id ASC;
+
+-- name: ListChildCommentsForParents :many
+-- Fetch one descendant level for a bounded set of parent comments. Each parent
+-- maps back to its thread root in the Go breadth-first walk, avoiding one query
+-- per root.
+--
+-- Both tenant predicates apply at every level. row_limit is always a probe
+-- limit owned by completeCommentThreads; it prevents a wide level from defeating
+-- the response budget. through_at/through_id pin the walk to the newest row in
+-- the original window, so replies created concurrently are left to realtime
+-- delivery instead of making the multi-query snapshot internally inconsistent.
+SELECT * FROM comment
+WHERE parent_id = ANY(@parent_ids::uuid[])
+  AND issue_id = @issue_id
+  AND workspace_id = @workspace_id
+  AND (created_at, id) <= (@through_at::timestamptz, @through_id::uuid)
+ORDER BY parent_id ASC, created_at ASC, id ASC
+LIMIT @row_limit;
 
 -- name: ListCommentsSinceForIssue :many
 -- Comments created strictly after $3 in chronological order, capped at $4.
@@ -23,20 +74,18 @@ LIMIT $4;
 -- discussion but also triage which thread to drill into (biggest / most
 -- recently active) before fetching any specific reply thread.
 --
--- `selected_roots` picks the roots we will actually return first (the chrono
--- page of size @row_limit), so the recursive `membership` walk only expands
--- those threads' subtrees instead of every thread in the issue. membership
--- labels each comment with its thread root by walking down from the selected
--- roots, so the counts stay correct even if the schema ever allows
--- reply-of-reply (the write path collapses to root today, but does not enforce
--- it). Mirrors ListRecentThreadCommentsForIssue's stats CTE.
+-- `selected_roots` takes the newest @row_limit roots. The final SELECT restores
+-- chronological order, so the defensive cap drops the oldest roots without
+-- changing the wire order. The recursive `membership` walk only expands those
+-- selected threads rather than every thread in the issue, and labels every
+-- descendant with its root so the stats stay correct at any reply depth.
 WITH RECURSIVE selected_roots AS (
     SELECT c.id, c.created_at
     FROM comment c
     WHERE c.issue_id = @issue_id
       AND c.workspace_id = @workspace_id
       AND c.parent_id IS NULL
-    ORDER BY c.created_at ASC, c.id ASC
+    ORDER BY c.created_at DESC, c.id DESC
     LIMIT @row_limit
 ),
 membership(id, root_id, comment_created_at) AS (
@@ -59,6 +108,7 @@ thread_stats AS (
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       c.source_task_id, c.quick_action_id,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
 FROM selected_roots sr
@@ -104,6 +154,7 @@ thread_stats AS (
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       c.source_task_id, c.quick_action_id,
        ts.reply_count AS reply_count,
        ts.last_activity_at AS last_activity_at
 FROM selected_roots sr
@@ -111,51 +162,9 @@ JOIN comment c ON c.id = sr.id
 JOIN thread_stats ts ON ts.root_id = sr.id
 ORDER BY c.created_at ASC, c.id ASC;
 
--- name: ListThreadCommentsForIssue :many
--- Returns the root of the thread containing @anchor_id plus every descendant
--- (recursive — supports real reply-to-reply nesting). @anchor_id may itself be
--- a root or any reply in the thread. Output is chronological so it can be fed
--- straight to the agent.
-WITH RECURSIVE root_of AS (
-    -- Walk up from the anchor until parent_id IS NULL.
-    SELECT c.id, c.parent_id
-    FROM comment c
-    WHERE c.id = @anchor_id AND c.issue_id = @issue_id AND c.workspace_id = @workspace_id
-    UNION ALL
-    SELECT p.id, p.parent_id
-    FROM comment p
-    JOIN root_of r ON p.id = r.parent_id
-),
-thread_root AS (
-    SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
-),
-descendants AS (
-    -- Start from the root, then keep adding any comment whose parent is
-    -- already in the set. Cycle-safe under PK constraint (a comment cannot
-    -- be its own ancestor).
-    SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
-           c.created_at, c.updated_at, c.parent_id, c.workspace_id,
-           c.resolved_at, c.resolved_by_type, c.resolved_by_id
-    FROM comment c
-    JOIN thread_root tr ON c.id = tr.id
-    UNION
-    SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
-           c.created_at, c.updated_at, c.parent_id, c.workspace_id,
-           c.resolved_at, c.resolved_by_type, c.resolved_by_id
-    FROM comment c
-    JOIN descendants d ON c.parent_id = d.id
-    WHERE c.issue_id = @issue_id AND c.workspace_id = @workspace_id
-)
-SELECT id, issue_id, author_type, author_id, content, type,
-       created_at, updated_at, parent_id, workspace_id,
-       resolved_at, resolved_by_type, resolved_by_id
-FROM descendants
-ORDER BY created_at ASC, id ASC
-LIMIT @row_limit;
-
 -- name: ListThreadCommentsForIssuePaged :many
--- Same root-walk + descendants expansion as ListThreadCommentsForIssue, but
--- returns root + only the @reply_limit most recent replies (per the
+-- Resolves @anchor_id to its thread root, recursively expands every descendant,
+-- and returns the root + only the @reply_limit most recent replies (per the
 -- (created_at, id) composite key). When @has_cursor=TRUE only replies with
 -- (created_at, id) < (@before_at, @before_id) are eligible — that is the
 -- cursor for scrolling *within* a thread.
@@ -177,6 +186,7 @@ WITH RECURSIVE root_of AS (
     SELECT p.id, p.parent_id
     FROM comment p
     JOIN root_of r ON p.id = r.parent_id
+    WHERE p.issue_id = @issue_id AND p.workspace_id = @workspace_id
 ),
 thread_root AS (
     SELECT id FROM root_of WHERE parent_id IS NULL LIMIT 1
@@ -184,13 +194,15 @@ thread_root AS (
 descendants AS (
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
-           c.resolved_at, c.resolved_by_type, c.resolved_by_id
+           c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+           c.source_task_id, c.quick_action_id
     FROM comment c
     JOIN thread_root tr ON c.id = tr.id
     UNION
     SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
            c.created_at, c.updated_at, c.parent_id, c.workspace_id,
-           c.resolved_at, c.resolved_by_type, c.resolved_by_id
+           c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+           c.source_task_id, c.quick_action_id
     FROM comment c
     JOIN descendants d ON c.parent_id = d.id
     WHERE c.issue_id = @issue_id AND c.workspace_id = @workspace_id
@@ -198,7 +210,8 @@ descendants AS (
 reply_page AS (
     SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
            d.created_at, d.updated_at, d.parent_id, d.workspace_id,
-           d.resolved_at, d.resolved_by_type, d.resolved_by_id
+           d.resolved_at, d.resolved_by_type, d.resolved_by_id,
+           d.source_task_id, d.quick_action_id
     FROM descendants d
     WHERE d.id NOT IN (SELECT id FROM thread_root)
       AND (
@@ -210,17 +223,20 @@ reply_page AS (
 )
 SELECT id, issue_id, author_type, author_id, content, type,
        created_at, updated_at, parent_id, workspace_id,
-       resolved_at, resolved_by_type, resolved_by_id
+       resolved_at, resolved_by_type, resolved_by_id,
+       source_task_id, quick_action_id
 FROM (
     SELECT d.id, d.issue_id, d.author_type, d.author_id, d.content, d.type,
            d.created_at, d.updated_at, d.parent_id, d.workspace_id,
-           d.resolved_at, d.resolved_by_type, d.resolved_by_id
+           d.resolved_at, d.resolved_by_type, d.resolved_by_id,
+           d.source_task_id, d.quick_action_id
     FROM descendants d
     JOIN thread_root tr ON d.id = tr.id
     UNION ALL
     SELECT id, issue_id, author_type, author_id, content, type,
            created_at, updated_at, parent_id, workspace_id,
-           resolved_at, resolved_by_type, resolved_by_id
+           resolved_at, resolved_by_type, resolved_by_id,
+           source_task_id, quick_action_id
     FROM reply_page
 ) combined
 ORDER BY created_at ASC, id ASC;
@@ -285,6 +301,7 @@ picked AS (
 SELECT c.id, c.issue_id, c.author_type, c.author_id, c.content, c.type,
        c.created_at, c.updated_at, c.parent_id, c.workspace_id,
        c.resolved_at, c.resolved_by_type, c.resolved_by_id,
+       c.source_task_id, c.quick_action_id,
        p.root_id AS thread_root_id,
        p.last_activity_at AS thread_last_activity_at
 FROM picked p
@@ -413,8 +430,8 @@ WITH touched_issue AS (
     WHERE issue.id = sqlc.arg(issue_id) AND issue.workspace_id = sqlc.arg(workspace_id)
     RETURNING issue.id, issue.workspace_id
 )
-INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id)
-SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id)
+INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id)
+SELECT ti.id, ti.workspace_id, sqlc.arg(author_type), sqlc.arg(author_id), sqlc.arg(content), sqlc.arg(type), sqlc.narg(parent_id), sqlc.narg(source_task_id), sqlc.narg(quick_action_id)
 FROM touched_issue ti
 RETURNING *;
 

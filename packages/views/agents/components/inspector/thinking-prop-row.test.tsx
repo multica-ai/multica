@@ -211,6 +211,13 @@ describe("ThinkingPropRow", () => {
     expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
   });
 
+  it("inherits the base Claude model catalog for a context-tagged model", async () => {
+    renderRow({ model: "claude-sonnet-4-6[1m]", value: "" });
+
+    await screen.findByText("Thinking");
+    expect((await screen.findAllByText("Follow CLI config")).length).toBeGreaterThan(0);
+  });
+
   it("hides the picker for an empty codex model — it must not borrow the Default's catalog (MUL-4347)", async () => {
     // Empty model on codex follows config.toml, which can resolve to any
     // installed model. Previewing gpt-5.6-sol's levels (the flagged Default,

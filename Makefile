@@ -1,4 +1,4 @@
-.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree db-up db-down db-reset selfhost selfhost-build selfhost-stop
+.PHONY: help makehelp dev server daemon cli multica build test migrate-up migrate-down sqlc seed clean setup start stop check worktree-env setup-main start-main stop-main check-main setup-worktree start-worktree stop-worktree check-worktree remove-worktree db-up db-down db-drop db-reset selfhost selfhost-build selfhost-stop
 
 MAIN_ENV_FILE ?= .env
 WORKTREE_ENV_FILE ?= .env.worktree
@@ -13,6 +13,9 @@ POSTGRES_USER ?= multica
 POSTGRES_PASSWORD ?= multica
 POSTGRES_PORT ?= 5432
 PORT := $(or $(BACKEND_PORT),$(API_PORT),$(SERVER_PORT),$(PORT),8080)
+ifeq ($(origin MULTICA_PUBLIC_URL), undefined)
+MULTICA_PUBLIC_URL := http://localhost:$(PORT)
+endif
 FRONTEND_PORT ?= 3000
 FRONTEND_ORIGIN ?= http://localhost:$(FRONTEND_PORT)
 MULTICA_APP_URL ?= $(FRONTEND_ORIGIN)
@@ -107,33 +110,7 @@ selfhost: ## Create .env if needed, then pull and start the official self-hosted
 	fi
 	@echo "==> Starting Multica via Docker Compose..."
 	$(COMPOSE) -f docker-compose.selfhost.yml up -d
-	@echo "==> Waiting for backend to be ready..."
-	@for i in $$(seq 1 30); do \
-		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
-			break; \
-		fi; \
-		sleep 2; \
-	done
-	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
-		echo ""; \
-		echo "✓ Multica is running!"; \
-		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
-		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
-		echo ""; \
-		echo "Images: $${MULTICA_BACKEND_IMAGE:-ghcr.io/multica-ai/multica-backend}:$${MULTICA_IMAGE_TAG:-latest}"; \
-		echo "        $${MULTICA_WEB_IMAGE:-ghcr.io/multica-ai/multica-web}:$${MULTICA_IMAGE_TAG:-latest}"; \
-		echo ""; \
-		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
-		echo "        or read the generated code from backend logs when Resend is unset."; \
-		echo ""; \
-		echo "Next — install the CLI and connect your machine:"; \
-		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup self-host"; \
-	else \
-		echo ""; \
-		echo "Services are still starting. Check logs:"; \
-		echo "  $(COMPOSE) -f docker-compose.selfhost.yml logs"; \
-	fi
+	@bash scripts/selfhost-wait.sh official
 
 selfhost-build: ## Build backend/web from the current checkout and start the self-hosted stack
 	$(REQUIRE_COMPOSE)
@@ -158,33 +135,7 @@ selfhost-build: ## Build backend/web from the current checkout and start the sel
 	fi
 	@echo "==> Building Multica from the current checkout..."
 	$(COMPOSE) -f docker-compose.selfhost.yml -f docker-compose.selfhost.build.yml up -d --build
-	@echo "==> Waiting for backend to be ready..."
-	@for i in $$(seq 1 30); do \
-		if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
-			break; \
-		fi; \
-		sleep 2; \
-	done
-	@if curl -sf http://localhost:$${PORT:-8080}/health > /dev/null 2>&1; then \
-		echo ""; \
-		echo "✓ Multica is running!"; \
-		echo "  Frontend: http://localhost:$${FRONTEND_PORT:-3000}"; \
-		echo "  Backend:  http://localhost:$${PORT:-8080}"; \
-		echo ""; \
-		echo "Log in: configure RESEND_API_KEY in .env for email codes,"; \
-		echo "        or read the generated code from backend logs when Resend is unset."; \
-		echo ""; \
-		echo "Built images locally via docker-compose.selfhost.build.yml."; \
-		echo "Local tags: multica-backend:dev and multica-web:dev."; \
-		echo ""; \
-		echo "Next — install the CLI and connect your machine:"; \
-		echo "  brew install multica-ai/tap/multica"; \
-		echo "  multica setup self-host"; \
-	else \
-		echo ""; \
-		echo "Services are still starting. Check logs:"; \
-		echo "  $(COMPOSE) -f docker-compose.selfhost.yml logs"; \
-	fi
+	@bash scripts/selfhost-wait.sh build
 
 selfhost-stop: ## Stop the self-hosted Docker Compose stack
 	$(REQUIRE_COMPOSE)
@@ -242,6 +193,12 @@ db-up: ## Start the shared PostgreSQL container used by main and worktrees
 db-down: ## Stop the shared PostgreSQL container without removing its Docker volume
 	@$(COMPOSE) down
 
+db-drop: ## Permanently drop the current env's local database after confirmation
+	$(REQUIRE_ENV)
+	@status=0; bash scripts/drop-database.sh "$(ENV_FILE)" || status=$$?; \
+		if [ "$$status" -eq 2 ]; then exit 0; fi; \
+		exit "$$status"
+
 # Drop + recreate the current env's database, then run all migrations.
 # Use for a clean slate in local dev. Only affects the DB named in
 # ENV_FILE (POSTGRES_DB); the shared postgres container and other
@@ -294,6 +251,9 @@ stop-worktree: ## Stop this worktree's backend and frontend processes
 
 check-worktree: ## Run the full verification pipeline for this worktree
 	@ENV_FILE=$(WORKTREE_ENV_FILE) bash scripts/check.sh
+
+remove-worktree: ## Drop a linked worktree's database, then remove it (WORKTREE=path)
+	@bash scripts/remove-worktree.sh "$(WORKTREE)"
 
 # ---------- Individual commands ----------
 ##@ Individual commands

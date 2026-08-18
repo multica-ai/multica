@@ -1,54 +1,48 @@
 ---
 title: How Multica works
-description: How the three core components (server / daemon / AI coding tool) coordinate to run an agent's work.
+description: Multica records and coordinates the work; connected computers execute it.
 ---
 
-import { ArchitectureDiagram } from "@/components/architecture-diagram";
+import { Callout } from "fumadocs-ui/components/callout";
 
-Multica is a **distributed** platform. The web interface you see is just the front of house — the real work is done by three components: the **Multica server** owns the data ([workspaces](/workspaces), [issues](/issues), [members](/members-roles), the [task](/tasks) queue, and so on); the **[daemon](/daemon-runtimes)** runs on your own machine, picks up tasks, and drives the AI coding tool; and the **[AI coding tool](/providers)** (Claude Code, Codex, and other local CLIs) is the component that actually writes code. This is the biggest difference between Multica and Linear or Jira — **[agents](/agents) don't run on our servers, they run on your machine**.
+When you assign an issue to an agent, Multica creates a task that a runtime on a connected computer claims. The runtime invokes a local AI coding tool and writes progress and results back to the original issue.
 
-## The three core components
+## The full path of a run
 
-<ArchitectureDiagram />
+![Diagram of a run: on the left, the Multica area records and schedules — an issue triggers the creation of a task; on the right, in the "your computer" area, the daemon claims the task, launches the AI coding tool, and reads and writes the working directory; progress messages stream back to the execution log in real time, and the daemon writes the final result back to the issue](/images/docs/how-a-run-works.png)
 
-- **Multica server** — the workspaces, issue lists, and comment threads you see all live in its database. It's also a WebSocket hub that pushes real-time updates between you and your teammates. It does **not** execute any agent tasks.
-- **Daemon** — part of the Multica CLI, running on your own machine. On start it detects which AI coding tools are installed locally, registers with the server, and begins polling for tasks every 3 seconds and sending heartbeats every 15 seconds.
-- **AI coding tools** — one of the seventeen (or several in parallel): [Antigravity](/providers#antigravity), [Claude Code](/providers#claude-code), [CodeBuddy](/providers#codebuddy), [Codex](/providers#codex), [Cursor](/providers#cursor), [Copilot](/providers#copilot), [Hermes](/providers#hermes), [Kimi](/providers#kimi), [Kiro CLI](/providers#kiro-cli), [OpenCode](/providers#opencode), [OpenClaw](/providers#openclaw), [Pi](/providers#pi), [Qoder](/providers#qoder), [Trae CLI](/providers#trae), [DevEco Code](/providers#deveco-code), [Grok](/providers#grok), [Qwen Code](/providers#qwen-code). Once the daemon has picked up a task, it uses these tools to actually do the work.
+1. **The issue provides the context.** The issue holds the work description, the discussion, and the assignee. When it is assigned to an agent, the system uses that agent's instructions, model, skills, and runtime configuration.
+2. **Multica creates a task.** The task enters the queue; if no runtime is online, it waits there.
+3. **A runtime claims the task.** An online runtime on a connected computer claims the task and invokes the AI coding tool the agent is configured to use.
+4. **The AI coding tool executes locally.** The tool reads the working directory, runs commands, and produces results.
+5. **Results are written back to the issue.** Progress, comments, and results appear in the issue's timeline and execution log.
 
-Because the toolchain stays local, **your API keys, code directories, and authorized tools** are only ever used on your machine — the Multica server never sees any of them. This holds whether you self-host or use Cloud.
+For the full list of issues, agents, tasks, and runtimes and how they relate, see [Core concepts](/concepts).
 
-## The lifecycle of a task
+## The data and execution boundary
 
-Take the most common scenario — you assign an issue to an agent:
+| Multica | Connected computer |
+|---|---|
+| Workspaces, issues, comments, and statuses | AI coding tools and their credentials |
+| Agent configuration and skills | Code directories and local files |
+| Task status, run records, and results | Actual file changes and command execution |
 
-1. You click assign in the web UI. The browser sends an HTTP request to the Multica server.
-2. The server sets the assignee on that issue to the agent and, at the same time, creates an execution task in the task queue with status `queued`.
-3. The daemon on your machine picks up the task on its next poll (within 3 seconds). Task status becomes `dispatched`.
-4. The daemon creates an isolated working directory locally and invokes the corresponding AI coding tool. Task status becomes `running`.
-5. The AI writes code locally, runs tests, and posts comments back to the server.
-6. Execution ends. The daemon reports the result (success / failure) to the server, and task status becomes `completed` or `failed`. You see the progress update in real time in the web UI (via WebSocket).
+This boundary is the same on Multica Cloud and in self-hosted deployments.
 
-For the detailed mechanics, see [Daemon and runtimes](/daemon-runtimes) and [Tasks](/tasks).
+<Callout type="warning">
+One exception: anything saved to an agent's `custom_env` is stored on the Multica server and passed to the runtime at execution time. Do not put secrets in `custom_env` that must never leave your computer.
+</Callout>
 
-## Four ways to get an agent working
+## How agents are triggered
 
-It's not only "assign an issue" — Multica has 4 triggers, one per collaboration style:
+Agents never start work on their own — every run is triggered by an explicit action: assigning an issue, @-mentioning the agent in a comment, chatting with it directly, or an Autopilot. For how to choose between the four and the rules they share, see [Put agents to work](/triggering-agents).
 
-| How | Typical scenario | Docs |
-|---|---|---|
-| **Assign an issue** | The most common. Assign an issue to an agent and it starts on its own | [Assigning issues](/assigning-issues) |
-| **@mention an agent in a comment** | "Take a look at this one for me" — don't change the assignee or status, just fire off a comment | [Mentioning agents](/mentioning-agents) |
-| **Direct chat** | Standalone conversation, not tied to an issue — ask questions, have it draft an issue | [Chat](/chat) |
-| **Autopilots (scheduled)** | Standing instructions — "do a standup summary every Monday morning" and the like | [Autopilots](/autopilots) |
+## Run completion and issue completion
 
-## Runtimes: where it runs, and how many tools
-
-A **runtime** is the pairing of "daemon × one AI coding tool." If the daemon on one machine has both Claude Code and Codex installed and is joined to two workspaces, Multica registers 4 independent runtimes (2 workspaces × 2 tools).
-
-Only the **local daemon** runtime model is supported today. Cloud runtimes (where you don't need your own machine running) are **coming soon**, currently waitlist-only — sign up on the [Downloads](https://multica.ai/download) page.
+When the execution log shows Completed, it only means that one run has ended. The issue can still take further discussion, added requirements, or another agent trigger. Whether the issue is done depends on the actual progress of the work and its status.
 
 ## Next steps
 
-- [Cloud Quickstart](/cloud-quickstart) — connect to Multica Cloud in 5 minutes
-- [Self-Host Quickstart](/self-host-quickstart) — run your own backend
-- [Daemon and runtimes](/daemon-runtimes) — a deep dive into the component the architecture rests on
+- [Daemon and runtimes](/daemon-runtimes) — how computers connect to Multica, and what happens when runtimes go online or offline.
+- [Tasks](/tasks) — task statuses, retries, and cancellation rules.
+- [Assign issues to agents](/assigning-issues) — the most common way to collaborate.

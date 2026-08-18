@@ -1,49 +1,71 @@
 ---
 title: Projects
-description: Group related issues and track them as one unit — with priority, status, progress, and an owner.
+description: Organize related issues with projects and give them a shared goal, plan, and execution context.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-A **project** in Multica is a container for related [issues](/issues). Use it when a body of work is bigger than one issue but smaller than a full workspace — a launch, a migration, a feature with multiple parts, an investigation that branches into several threads.
+Projects organize work that takes multiple [issues](/issues) to finish — a product launch, a migration, or a feature delivered in stages.
 
-Each project has a name, an icon, a description, a **lead** (a member or an [agent](/agents)), a **status** (`planned` / `in_progress` / `paused` / `completed` / `cancelled`), a **priority** (`urgent` / `high` / `medium` / `low` / `none`), and a **progress** percentage that's auto-derived from the status of its linked issues.
+Work that a single issue can describe does not need a project. Projects fit a group of work that shares a goal, needs its progress tracked together, or needs shared repositories and working directories.
 
-## How projects relate to issues
+## Parts of a project
 
-Projects and issues are independent objects with a many-to-one relationship: an issue can belong to **at most one** project; a project holds **any number of** issues. Linking and unlinking is reversible at any time — drag in the board view, or use the project picker on the issue's right-side properties panel.
+| Part | Purpose |
+|---|---|
+| **Name, icon, and description** | Goal, scope, and long-lived requirements; the description enters the execution context of agents working inside the project. |
+| **Status** | `planned`, `in_progress`, `paused`, `completed`, or `cancelled`. |
+| **Priority** | `urgent`, `high`, `medium`, `low`, or `none`. |
+| **Lead** | A member or an agent — who coordinates the project. |
+| **Start and target dates** | The project's planned time range. |
+| **Issues and progress** | The work in the project and how much of it is finished. |
+| **Resources** | Linked GitHub repositories or local directories on specific computers. |
 
-The progress bar on a project is computed from its linked issues — the more issues hit `done`, the further it fills. Issues that are `cancelled` are excluded from the count; issues in `backlog` count toward the denominator but not the numerator.
+![Project detail: issues grouped by status, progress, and the project description](/images/docs/project-detail.png)
 
-## Pinning to the sidebar
+## Projects and issues
 
-Click the pin icon in a project's top-right corner to add it to your sidebar's pinned list. Pinned projects stay one click away no matter where you are in the workspace; everyone on the team can pin independently — pins are personal.
+A project can contain any number of issues; an issue belongs to at most one project. Create issues directly inside the project, or pick or change the project from the issue's properties.
 
-The sidebar **Workspace → Projects** link always shows every project in the workspace; pinning is a personal shortcut on top of that.
+Project progress is computed automatically from linked issues:
 
-## Attaching resources
+```text
+progress = issues in done or cancelled ÷ all issues in the project
+```
 
-Each project has a **Resources** section where you attach GitHub repositories. Once attached, any [agent](/agents) assigned to issues in this project can read and write to those repos when executing tasks — Multica passes the repo URLs as context to the [daemon](/daemon-runtimes).
+`cancelled` means that work has been closed out of the project's scope, so it counts toward progress. Project status and issue status are independent: finishing every issue does not automatically set the project to `completed`, and changing the project's status does not bulk-change its issues.
 
-Resources are per-project; if multiple projects share a repo, attach it to each one.
+## Project description and execution context
 
-## Deleting a project
+When an agent runs an issue inside a project, the project's name and description are added to that run's context. The description is the place for information every related task needs: the goal, technical boundaries, delivery conventions. Requirements that apply to only one issue belong in that issue.
 
-Deleting a project **does not delete its issues**. The linked issues are simply unlinked and revert to the workspace's flat issue list. This is intentional — work that was scoped to a project is rarely throwaway, even when the framing of the project changes.
+## Add resources
 
-<Callout type="info">
-If you want to delete the work too, archive or delete the issues first, then delete the project.
-</Callout>
+Project resources tell agents which code and working directories to use:
+
+- **GitHub repositories**: provide a repo the runtime can check out, with an optional ref.
+- **Local directories**: let the runtime on a specific computer work in an existing directory, whose contents the agent modifies directly.
+
+See [Project resources](/project-resources) for how to choose and for the safety boundaries.
 
 ## Project lead
 
-The lead is the person — or agent — accountable for the project. It's a soft signal, not an access control: any workspace member can edit a project regardless of who's lead. A project's lead can be:
+The lead can be a member or an agent, and marks who coordinates the project. It is not a permission setting: it does not auto-assign the project's issues, and making an agent the lead does not automatically run it. Starting a run still takes an issue assignment, an @mention, or an automation trigger.
 
-- A workspace member (human teammate)
-- An [agent](/agents) — useful when the project's work is mostly delegated to an agent (e.g., "Weekly bug triage" led by a triage agent)
+## Pin to the sidebar
 
-## Next
+A pinned project appears in your sidebar. Pinning is a personal preference and does not affect other members.
 
-- [Issues](/issues) — the unit of work that lives inside projects
-- [Agents as project lead](/agents) — when an agent is the right owner
-- [How Multica works](/how-multica-works) — the broader picture
+## Create, edit, and delete
+
+Any workspace member can create and edit projects; only `owner` and `admin` can delete them.
+
+<Callout type="warning">
+Deleting a project does not delete its issues: they detach and stay in the workspace. The project's description, status, and resources are permanently deleted.
+</Callout>
+
+## Next steps
+
+- [Project resources](/project-resources) — link GitHub repositories or local directories.
+- [Issues](/issues) — create and organize the concrete work in a project.
+- [Agents](/agents) — learn about agent identity, configuration, and Access.

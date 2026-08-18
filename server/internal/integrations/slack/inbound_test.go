@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
@@ -58,6 +59,9 @@ func TestInboundFromMessage_DM(t *testing.T) {
 	if msg.Text != "hello bot" {
 		t.Errorf("Text = %q", msg.Text)
 	}
+	if msg.CommandText != "hello bot" {
+		t.Errorf("CommandText = %q, want normalized original text", msg.CommandText)
+	}
 	// team_id must be in Raw so the installation resolver can route.
 	var raw slackRawEvent
 	if err := json.Unmarshal(msg.Raw, &raw); err != nil {
@@ -87,6 +91,9 @@ func TestInboundFromMessage_ChannelMention(t *testing.T) {
 	}
 	if msg.Text != "create an issue" {
 		t.Errorf("Text = %q, want mention stripped", msg.Text)
+	}
+	if msg.CommandText != "create an issue" {
+		t.Errorf("CommandText = %q, want the same pre-rewrite text", msg.CommandText)
 	}
 }
 
@@ -166,6 +173,115 @@ func TestInboundFromAppMention(t *testing.T) {
 	// The bot's own app_mention echo (BotID set) must be skipped.
 	if _, ok := translateAppMention("UBOT", eventsAPI(nil), &slackevents.AppMentionEvent{User: "UBOT", Channel: "C1", TimeStamp: "1.9"}); ok {
 		t.Error("bot's own mention should be skipped")
+	}
+}
+
+// Files are read off the normalized Msg, which slack-go's custom unmarshaller
+// populates from the top-level payload for brand-new messages. That behaviour
+// is the whole feature's foundation, so this drives the real decoder rather
+// than hand-building MessageEvent.Message — a struct literal would keep
+// passing if slack-go ever stopped normalizing.
+func TestInboundFromMessage_FileShare(t *testing.T) {
+	payload := `{
+	  "token": "z", "team_id": "T1", "api_app_id": "A1", "type": "event_callback", "event_id": "Ev1",
+	  "event": {
+	    "type": "message", "subtype": "file_share",
+	    "channel": "D123", "channel_type": "im",
+	    "user": "UALICE", "text": "here is the doc", "ts": "1700000000.000800",
+	    "files": [
+	      {"id": "F1", "name": "report.pdf", "mimetype": "application/pdf", "size": 42,
+	       "url_private": "https://files.slack.com/files-pri/T1-F1/report.pdf",
+	       "url_private_download": "https://files.slack.com/files-pri/T1-F1/download/report.pdf"},
+	      {"id": "F2", "name": "shot.png", "mimetype": "image/png",
+	       "url_private": "https://files.slack.com/files-pri/T1-F2/shot.png"},
+	      {"id": "F3", "name": "external.doc"},
+	      {"id": "F4", "name": "spec.gdoc", "mode": "external",
+	       "url_private": "https://docs.google.com/document/d/abc/edit"}
+	    ]
+	  }
+	}`
+	e, err := slackevents.ParseEvent(json.RawMessage(payload), slackevents.OptionNoVerifyToken())
+	if err != nil {
+		t.Fatalf("parse event: %v", err)
+	}
+	inner, isMessage := e.InnerEvent.Data.(*slackevents.MessageEvent)
+	if !isMessage {
+		t.Fatalf("inner event = %T, want *slackevents.MessageEvent", e.InnerEvent.Data)
+	}
+	msg, ok := translateMessage("UBOT", e, inner)
+	if !ok {
+		t.Fatal("file_share message should be ingestable")
+	}
+	var raw slackRawEvent
+	if err := json.Unmarshal(msg.Raw, &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if len(raw.Files) != 2 {
+		t.Fatalf("raw files = %+v, want only F1 and F2 (no URL, and off-Slack, are dropped)", raw.Files)
+	}
+	if raw.Files[0].ID != "F1" || raw.Files[0].Name != "report.pdf" || raw.Files[0].Mimetype != "application/pdf" || raw.Files[0].Size != 42 {
+		t.Errorf("file[0] = %+v", raw.Files[0])
+	}
+	if raw.Files[0].DownloadURL != "https://files.slack.com/files-pri/T1-F1/download/report.pdf" {
+		t.Errorf("file[0] url = %q, want url_private_download", raw.Files[0].DownloadURL)
+	}
+	if raw.Files[1].ID != "F2" || raw.Files[1].DownloadURL != "https://files.slack.com/files-pri/T1-F2/shot.png" {
+		t.Errorf("file[1] = %+v, want url_private fallback", raw.Files[1])
+	}
+}
+
+// A message whose only file lives off Slack must not claim media at all: the
+// resolver could never fetch it, and pretending otherwise defers the run and
+// reserves a storage key for a download that always fails.
+func TestInboundFromMessage_ExternalFilesCarryNoMedia(t *testing.T) {
+	msg, ok := translateMessage("UBOT", eventsAPI(nil), &slackevents.MessageEvent{
+		User:        "UALICE",
+		Text:        "shared a doc",
+		SubType:     "file_share",
+		Channel:     "D123",
+		ChannelType: "im",
+		TimeStamp:   "1700000000.001000",
+		Message: &slack.Msg{
+			Files: []slack.File{
+				{ID: "F1", Name: "spec.gdoc", Mode: "external", URLPrivate: "https://docs.google.com/document/d/abc/edit"},
+			},
+		},
+	})
+	if !ok {
+		t.Fatal("the message itself is still ingestable as text")
+	}
+	var raw slackRawEvent
+	if err := json.Unmarshal(msg.Raw, &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if len(raw.Files) != 0 {
+		t.Errorf("raw files = %+v, want none for an off-Slack file", raw.Files)
+	}
+	resolver := NewMediaResolver(nil, newFakeMediaStorage(), &fakeMediaLedger{}, nil)
+	if resolver.HasMedia(msg) {
+		t.Error("HasMedia = true for a message whose only file is unfetchable")
+	}
+}
+
+func TestInboundFromAppMention_Files(t *testing.T) {
+	msg, ok := translateAppMention("UBOT", eventsAPI(nil), &slackevents.AppMentionEvent{
+		User:      "UALICE",
+		Text:      "<@UBOT> look at this",
+		Channel:   "C123",
+		TimeStamp: "1700000000.000900",
+		Files: []slack.File{
+			{ID: "F9", Name: "log.txt", Mimetype: "text/plain", URLPrivateDownload: "https://files.slack.com/files-pri/T1-F9/download/log.txt"},
+		},
+	})
+	if !ok {
+		t.Fatal("app_mention with files should be ingestable")
+	}
+	var raw slackRawEvent
+	if err := json.Unmarshal(msg.Raw, &raw); err != nil {
+		t.Fatalf("decode raw: %v", err)
+	}
+	if len(raw.Files) != 1 || raw.Files[0].ID != "F9" {
+		t.Errorf("raw files = %+v, want the mention's file", raw.Files)
 	}
 }
 

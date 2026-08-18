@@ -120,7 +120,8 @@ function readDraftAttachments(storage: StorageAdapter, key: string): Record<stri
       if (!Array.isArray(value)) continue;
       // Normalize on every load (MUL-5181 L2): bare Attachment rows persisted
       // by pre-L2 builds become `uploaded` placeholders, and an upload still
-      // `uploading` at load time is coerced to `interrupted` (bytes are gone).
+      // `uploading` at load time is dropped (bytes are gone, and nothing in the
+      // body references it).
       const uploads = normalizeStoredUploads(value);
       if (uploads.length > 0) out[draftKey] = uploads;
     }

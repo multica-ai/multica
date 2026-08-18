@@ -313,6 +313,21 @@ function ListViewImpl({
     [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
   );
 
+  // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
+  // aborted: pointercancel, window resize, tab hide, or Escape. Touch browsers
+  // hit that path constantly, because a scroll gesture that starts on a row
+  // moves past the 5px activation distance and *then* the browser takes the
+  // gesture over for native scrolling and cancels the pointer. Without this
+  // handler `isDraggingRef` stayed true for the rest of the session, which
+  // froze the column mirror against cache updates and — because the accordion's
+  // onValueChange is guarded by the same ref — made tapping a status header a
+  // no-op, so groups could no longer be collapsed at all (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setColumns(buildColumns(issues, groups, "status"));
+  }, [issues, groups, setColumns, isDraggingRef]);
+
   // The single scroll container is shared by every status panel's Virtuoso as
   // its customScrollParent, so a callback ref hands the element to the panels
   // once it mounts. Keeping one scroller (rather than one per panel) preserves
@@ -385,6 +400,7 @@ function ListViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div ref={attachScroller} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
@@ -393,8 +409,8 @@ function ListViewImpl({
       <DragOverlay dropAnimation={null}>
         {activeIssue ? (
           <div className="max-w-2xl rotate-1 cursor-grabbing opacity-90 shadow-lg shadow-black/10 rounded-md border border-border bg-card px-4 py-2">
-            <span className="text-xs text-muted-foreground mr-2">{activeIssue.identifier}</span>
-            <span className="text-sm">{activeIssue.title}</span>
+            <span className="text-caption text-muted-foreground mr-2">{activeIssue.identifier}</span>
+            <span className="text-body">{activeIssue.title}</span>
           </div>
         ) : null}
       </DragOverlay>
@@ -593,7 +609,7 @@ function StatusAccordionItem({
             rows
           )
         ) : (
-          <p className="py-6 text-center text-xs text-muted-foreground">
+          <p className="py-6 text-center text-caption text-muted-foreground">
             {t(($) => $.list.empty_status)}
           </p>
         )}

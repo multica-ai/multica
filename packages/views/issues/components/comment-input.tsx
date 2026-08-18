@@ -7,11 +7,13 @@ import { FileUploadButton } from "@multica/ui/components/common/file-upload-butt
 import { SubmitButton } from "@multica/ui/components/common/submit-button";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { formatShortcut, useShortcut } from "@multica/core/shortcuts";
-import { useCommentComposerStore, useCommentDraftStore } from "@multica/core/issues/stores";
+import { useCommentDraftStore } from "@multica/core/issues/stores";
 import { useT } from "../../i18n";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
 import { useCommentUploads } from "./use-comment-uploads";
+import { useQuickActionMenu } from "../hooks/use-quick-action-menu";
+import { useStickyComposer } from "../hooks/use-sticky-composer";
 
 interface CommentInputProps {
   issueId: string;
@@ -33,6 +35,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
   // `defaultValue` at mount time, so this snapshot drives both the editor's
   // initial content and the submit-button enable state — without this the
   // button would be disabled even though the editor visibly contains text.
+  // Quick actions in the `/` menu: picking one inserts the server-rendered
+  // body so the user can edit before sending, instead of firing immediately.
+  const quickActionMenu = useQuickActionMenu(issueId);
   const draftKey = `new:${issueId}` as const;
   const [initialDraft] = useState(() =>
     useCommentDraftStore.getState().getDraft(draftKey),
@@ -66,8 +71,9 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
     onDrop: lazy.uploadOrQueue,
   });
   // Sticky preference (Settings → Preferences): issue-detail pins this
-  // composer to the bottom of the scroll viewport when enabled.
-  const sticky = useCommentComposerStore((s) => s.sticky);
+  // composer to the bottom of the scroll viewport when enabled. Shared with
+  // the host so the height cap below can never outlive the pinning.
+  const sticky = useStickyComposer();
 
   // Draft persistence. Hydrate from store on mount via `defaultValue` above
   // (ContentEditorRef has no setContent, so this is the only injection point).
@@ -225,6 +231,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           attachments={pendingAttachments}
           enableSlashCommands
           slashCommandMode="command"
+          quickActionMenu={quickActionMenu}
         />
       </div>
       )}
@@ -249,7 +256,7 @@ function CommentInput({ issueId, onSubmit }: CommentInputProps) {
           {/* rich-text-editor + <p>: the shell line inherits the editor's
               exact type metrics (line-height 1.625 from prose.css), so the
               shell→editor swap doesn't shift layout. */}
-          <div className="rich-text-editor text-sm">
+          <div className="rich-text-editor text-body">
             <p className="text-muted-foreground">{t(($) => $.comment.leave_comment_placeholder)}</p>
           </div>
         </div>

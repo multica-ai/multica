@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -112,7 +111,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		[]string{"acp", "serve", "--yolo"},
 		filterCustomArgs(opts.CustomArgs, traecliBlockedArgs, b.cfg.Logger)...,
 	)
-	cmd := exec.CommandContext(runCtx, execPath, traecliArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, traecliArgs...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", traecliArgs)
 	if opts.Cwd != "" {
@@ -158,11 +157,14 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	msgStream := newTraecliMessageStream(256)
 	resCh := make(chan Result, 1)
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Traecli streams interim narration and the final answer as the same
+	// agent_message_chunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -172,6 +174,12 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
 		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
+		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
 				return
@@ -179,11 +187,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			if msg.Type == MessageToolUse {
 				msg.Tool = kimiToolNameFromTitle(msg.Tool)
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
-			}
+			deliverable.observe(msg)
 			msgStream.send(msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -200,8 +204,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -249,7 +252,7 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		// Drop MCP entries whose remote transport the runtime didn't advertise
 		// (traecli advertises mcpCapabilities {http, sse}). See hermes.go for
 		// why sending an unsupported transport tanks the whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "traecli", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "traecli", b.cfg)
 
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -374,13 +377,10 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 					finalStatus = "aborted"
 					finalError = "traecli cancelled the prompt"
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 			}
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, traecliReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)
@@ -410,21 +410,18 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 		// late send is dropped instead of panicking.
 		streamingCurrentTurn.Store(false)
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Promote completed→failed when stderr or the agent text stream show a
 		// terminal upstream-LLM failure (HTTP 4xx / rate-limit / expired token).
-		// Mirrors hermes/kimi/kiro/qoder.
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// Mirrors hermes/kimi/kiro/qoder, and reads the full text stream so a
+		// give-up turn that lands before a tool call stays visible.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"

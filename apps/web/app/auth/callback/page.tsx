@@ -148,7 +148,7 @@ function CallbackContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Opening Multica</CardTitle>
+            <CardTitle className="text-display-sm">Opening Multica</CardTitle>
             <CardDescription>
               You should see a prompt to open the Multica desktop app. If
               nothing happens, click the button below.
@@ -174,7 +174,7 @@ function CallbackContent() {
       <div className="flex min-h-screen items-center justify-center">
         <Card className="w-full max-w-sm">
           <CardHeader className="text-center">
-            <CardTitle className="text-2xl">Login Failed</CardTitle>
+            <CardTitle className="text-display-sm">Login Failed</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
@@ -191,7 +191,7 @@ function CallbackContent() {
     <div className="flex min-h-screen items-center justify-center">
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
-          <CardTitle className="text-2xl">Signing in...</CardTitle>
+          <CardTitle className="text-display-sm">Signing in...</CardTitle>
           <CardDescription>Please wait while we complete your login</CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">

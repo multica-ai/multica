@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import { createElectronReloadPrompt, installRendererRecoveryHandlers } from "./renderer-recovery";
 
@@ -208,7 +209,7 @@ describe("freeze/crash breadcrumb state machine", () => {
     expect(clearBreadcrumb).not.toHaveBeenCalled();
   });
 
-  it("recovering after a written breadcrumb clears it (no double-count, no false recovered:false)", async () => {
+  it("recovering after a written breadcrumb clears it, so the in-thread watchdog is the only reporter", async () => {
     vi.useFakeTimers();
     const fixture = makeWindow();
     const { persistBreadcrumb, clearBreadcrumb } = install(fixture);
@@ -267,91 +268,5 @@ describe("freeze/crash breadcrumb state machine", () => {
     fixture.webContentsHandlers.get("render-process-gone")?.({}, { reason: "clean-exit" });
 
     expect(persistBreadcrumb).not.toHaveBeenCalled();
-  });
-});
-
-// The stack is the only field that names the code that blocked the thread, and
-// it can only be read while the thread is still stuck — so it is captured
-// before the breadcrumb is written, and a capture that fails must still leave
-// a reportable hang behind.
-describe("hang stack capture", () => {
-  beforeEach(() => vi.clearAllMocks());
-  afterEach(() => vi.useRealTimers());
-
-  function installWithCapture(
-    fixture: ReturnType<typeof makeWindow>,
-    captureStack: () => Promise<unknown>,
-  ) {
-    const persistBreadcrumb = vi.fn();
-    installRendererRecoveryHandlers(fixture.window, {
-      isDev: false,
-      showReloadPrompt: vi.fn(async () => "dismiss" as const),
-      persistBreadcrumb,
-      captureStack,
-      unresponsivePromptDelayMs: 100,
-    });
-    return { persistBreadcrumb };
-  }
-
-  const stack = [
-    { functionName: "parseMarkdownChunked", url: "assets/index-abc.js", lineNumber: 412, columnNumber: 17 },
-  ];
-
-  it("folds the captured stack into the hang report", async () => {
-    vi.useFakeTimers();
-    const fixture = makeWindow();
-    const { persistBreadcrumb } = installWithCapture(fixture, async () => stack);
-
-    fixture.windowHandlers.get("unresponsive")?.();
-    await vi.advanceTimersByTimeAsync(100);
-
-    expect(persistBreadcrumb).toHaveBeenCalledWith(
-      expect.objectContaining({
-        kind: "unresponsive",
-        context: expect.objectContaining({ stack }),
-      }),
-    );
-  });
-
-  it("still reports the hang when no stack could be captured", async () => {
-    vi.useFakeTimers();
-    const fixture = makeWindow();
-    const { persistBreadcrumb } = installWithCapture(fixture, async () => null);
-
-    fixture.windowHandlers.get("unresponsive")?.();
-    await vi.advanceTimersByTimeAsync(100);
-
-    expect(persistBreadcrumb).toHaveBeenCalledTimes(1);
-    const payload = persistBreadcrumb.mock.calls[0]?.[0] as {
-      context: Record<string, unknown>;
-    };
-    expect(payload.context).not.toHaveProperty("stack");
-  });
-
-  it("still reports the hang when the capture throws", async () => {
-    vi.useFakeTimers();
-    const fixture = makeWindow();
-    const { persistBreadcrumb } = installWithCapture(fixture, async () => {
-      throw new Error("debugger detached");
-    });
-
-    fixture.windowHandlers.get("unresponsive")?.();
-    await vi.advanceTimersByTimeAsync(100);
-
-    expect(persistBreadcrumb).toHaveBeenCalledTimes(1);
-  });
-
-  it("does not capture when the window recovers before the prompt delay", async () => {
-    vi.useFakeTimers();
-    const fixture = makeWindow();
-    const captureStack = vi.fn(async () => stack);
-    installWithCapture(fixture, captureStack);
-
-    fixture.windowHandlers.get("unresponsive")?.();
-    await vi.advanceTimersByTimeAsync(50);
-    fixture.windowHandlers.get("responsive")?.();
-    await vi.advanceTimersByTimeAsync(100);
-
-    expect(captureStack).not.toHaveBeenCalled();
   });
 });

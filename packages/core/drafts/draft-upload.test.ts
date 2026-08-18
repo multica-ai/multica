@@ -73,6 +73,9 @@ describe("draft-upload helpers", () => {
     expect(normalizeStoredUploads([pending("a")])).toEqual([]);
   });
 
+  // `interrupted` is legacy: no code path produces it any more (builds before
+  // MUL-5391 coerced a reload-surviving `uploading` record into it). It stays
+  // accepted here so a blob one of those builds persisted still renders.
   it("keeps failed/interrupted/uploaded placeholders across load", () => {
     const stored: DraftUpload[] = [
       { clientUploadId: "f", status: "failed", filename: "f", size: 1 },

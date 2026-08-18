@@ -16,6 +16,7 @@ var MinVersions = map[string]string{
 	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
 	"grok":    "0.2.89",  // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
 	"qwen":    "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
+	"mcode":   "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
 }
 
 // MinQuickCreateCLIVersion gates the agent-create (quick-create) flow against
@@ -33,6 +34,22 @@ const MinQuickCreateCLIVersion = "0.2.21"
 // into the generated issue-create prompt. Basic quick-create remains on the
 // older floor above; only requests using these optional fields need this gate.
 const MinQuickCreateFieldsCLIVersion = "0.4.3"
+
+// MinLocalWorktreeCLIVersion is the release that first shipped
+// execution_mode=worktree for local_directory resources (MUL-5707).
+//
+// NOTHING GATES ON THIS. It is a display value: the number shown in the 422
+// payload and the UI hint so a user knows roughly which release to update to.
+// The gates themselves read protocol.DaemonCapabilityLocalWorktreeV1, which
+// the daemon advertises only when it actually implements the mode.
+//
+// It stopped being a gate because it could not be one. A daemon without the
+// implementation does not lose a field — it runs the task IN PLACE, editing the
+// working copy the user asked to isolate. Version strings cannot answer that:
+// CheckMinCLIVersionFor exempts git-describe dev builds so `make daemon` stays
+// unblocked, and a v0.4.23-era daemon reporting "v0.4.21-24-gcd3c0bb89" sailed
+// through the floor and ran two tasks in the user's own directory.
+const MinLocalWorktreeCLIVersion = "0.4.24"
 
 // MinHandoffCLIVersion is the lowest multica CLI version whose daemon renders
 // the assignment handoff note into the run's opening prompt + issue_context.md
@@ -151,8 +168,26 @@ func (v semver) lessThan(other semver) bool {
 	return v.Patch < other.Patch
 }
 
+// BelowMinimumError reports a version that parsed successfully and is below
+// the configured minimum. It is a distinct type so callers can tell a
+// CONFIRMED too-old verdict apart from "could not parse the version": only
+// the former is evidence strong enough to act on (taking a runtime offline),
+// while an unreadable version must be treated like any other failed
+// detection and leave working runtimes alone.
+type BelowMinimumError struct {
+	AgentType string
+	Detected  string
+	Minimum   string
+}
+
+func (e *BelowMinimumError) Error() string {
+	return fmt.Sprintf("%s version %s is below minimum required %s — please upgrade", e.AgentType, e.Detected, e.Minimum)
+}
+
 // CheckMinVersion validates that detectedVersion meets the minimum for agentType.
-// Returns nil if the version is acceptable or no minimum is defined.
+// Returns nil if the version is acceptable or no minimum is defined, a
+// *BelowMinimumError when the version parsed and is confirmed too old, and a
+// plain error when the version could not be parsed at all.
 func CheckMinVersion(agentType, detectedVersion string) error {
 	minRaw, ok := MinVersions[agentType]
 	if !ok {
@@ -167,7 +202,7 @@ func CheckMinVersion(agentType, detectedVersion string) error {
 		return fmt.Errorf("cannot parse detected %s version %q: %w", agentType, detectedVersion, err)
 	}
 	if detected.lessThan(min) {
-		return fmt.Errorf("%s version %s is below minimum required %s — please upgrade", agentType, detectedVersion, minRaw)
+		return &BelowMinimumError{AgentType: agentType, Detected: detectedVersion, Minimum: minRaw}
 	}
 	return nil
 }

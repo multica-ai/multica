@@ -12,8 +12,59 @@ export interface ChatPinnedAgent {
  * server or a future kind never breaks rendering.
  * - "message"     — an ordinary user/assistant message.
  * - "no_response" — a completed direct-chat turn that produced no text reply.
+ * - "onboarding_kickoff" — a product-authored opening input that is sent to
+ *   Mika but never rendered as a member message.
+ * - "onboarding_opening" — Mika's reply to the kickoff; chat renders the
+ *   onboarding starter cards under it instead of quick-action chips.
  */
-export type ChatMessageKind = "message" | "no_response";
+export type ChatMessageKind =
+  | "message"
+  | "no_response"
+  | "onboarding_kickoff"
+  | "onboarding_opening";
+
+/**
+ * A concise follow-up offered by an assistant reply. `label` is rendered in
+ * the UI while `prompt` is the full text sent back to the agent. At most one
+ * action should be primary; clients still render safely if an older or future
+ * server sends more than one.
+ */
+export interface ChatQuickAction {
+  label: string;
+  prompt: string;
+  primary?: boolean;
+}
+
+/**
+ * Client-only marker (never persisted, never fetched) that the identified
+ * turn's quick-actions supplement is still in flight — drives the pill
+ * skeleton between chat:done and chat:quick_actions.
+ */
+export interface ChatQuickActionsPendingState {
+  message_id: string;
+  task_id: string;
+  /**
+   * Absolute epoch-ms deadline after which a client gives up waiting for the
+   * chat:quick_actions supplement and clears this marker. Stored on the marker
+   * (not as a component timer) so switching chat surfaces — which unmounts and
+   * remounts the timeout hook — resumes the SAME deadline instead of re-arming
+   * a fresh window each time (MUL-5149 review).
+   */
+  expires_at: number;
+}
+
+/**
+ * Client-only signal (never persisted, never fetched) that an explicit refresh's
+ * background regeneration FAILED — the daemon suggestion pass never completed, so
+ * the turn's pills are unchanged. Set by the realtime layer off a failed
+ * chat:quick_actions and consumed once by a view to toast "couldn't refresh"
+ * before clearing itself. `at` is a per-event nonce so a second failure re-fires
+ * even when the message_id repeats (MUL-5149 review).
+ */
+export interface ChatQuickActionsFailureState {
+  message_id: string;
+  at: number;
+}
 
 /** Preview of a session's most recent message, for the IM-style list. */
 export interface ChatLastMessage {
@@ -108,6 +159,8 @@ export interface ChatMessage {
    * servers and on user messages; treat a missing value as "message".
    */
   message_kind?: ChatMessageKind;
+  /** Up to three server-validated follow-ups generated with this reply. */
+  quick_actions?: ChatQuickAction[];
 }
 
 export interface ChatMessagesCursor {
@@ -125,6 +178,13 @@ export interface ChatMessagesPage {
 export interface SendChatMessageResponse {
   message_id: string;
   task_id: string;
+  /** True when the server supports queued follow-up sends. */
+  supports_queue?: boolean;
+  /**
+   * True only when this task was accepted behind another in-flight task in
+   * the same chat session. Optional for compatibility with older servers.
+   */
+  queued?: boolean;
   /**
    * Server-authoritative task creation time. Optimistic StatusPill seed
    * uses this as its anchor so the timer starts from the real `0s` —
@@ -139,6 +199,18 @@ export interface SendChatMessageResponse {
    * compat with servers that predate the field.
    */
   attachment_ids?: string[];
+}
+
+export interface StartMikaOnboardingResponse {
+  /** True only for the request that wrote the opening. */
+  started: boolean;
+  /**
+   * The opening message, already persisted and final. No agent runs to
+   * produce it, so there is no task to await — a `started` response means the
+   * member's first message from Mika is in the transcript right now.
+   */
+  message_id?: string;
+  created_at?: string;
 }
 
 export interface CancelledChatMessage {
@@ -192,8 +264,29 @@ export interface ChatDraftRestoresResponse {
  * task_id/status only, then this query catches up with the real created_at
  * so the timer survives refresh / reopen without "resetting to 0s".
  */
+export interface ChatQueuedTask {
+  task_id: string;
+  status: string;
+  created_at: string;
+  message_id?: string;
+  content?: string;
+}
+
+export interface PrioritizeQueuedChatTaskResponse {
+  task_id: string;
+  /** Server-authoritative task to stop after the selected task is prioritized. */
+  active_task_id?: string;
+}
+
 export interface ChatPendingTask {
   task_id?: string;
   status?: string;
   created_at?: string;
+  /** Explicit capability gate; absent on servers predating follow-up queues. */
+  supports_queue?: boolean;
+  /**
+   * Ordered follow-ups behind the root task. The root may itself still have
+   * database status `queued` before claim, but is never duplicated here.
+   */
+  queued_tasks?: ChatQueuedTask[];
 }

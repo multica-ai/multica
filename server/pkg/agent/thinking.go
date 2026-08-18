@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"os/exec"
 	"regexp"
 	"strings"
 	"sync"
@@ -11,8 +10,9 @@ import (
 )
 
 // thinking.go discovers per-model reasoning/effort catalogs for the
-// claude, codex, and opencode backends so the daemon can advertise them to the
-// UI without hard-coding (and getting wrong) what's installed locally.
+// claude, codex, opencode, pi, and kimi backends so the daemon can advertise
+// them to the UI without hard-coding (and getting wrong) what's installed
+// locally.
 //
 // MUL-2339: we deliberately do not flatten Claude's `low|medium|high|
 // xhigh|max` and Codex's `none|minimal|low|medium|high|xhigh|max|ultra`
@@ -23,15 +23,19 @@ import (
 
 // ── Cache ────────────────────────────────────────────────────────────
 //
-// Discovery is keyed on (provider, executablePath, cliVersion). Bumping
+// Discovery is keyed on (provider, command, cliVersion). Bumping
 // the local CLI invalidates entries that referenced the older version's
 // help/`debug models` output, which is exactly the failure mode we hit
 // when Anthropic / OpenAI add or remove a level (Elon's review note).
+//
+// command is Command.cacheKey(), not a bare path: two custom runtime
+// profiles can wrap one binary behind different launch prefixes and get
+// different answers out of it.
 
 type thinkingCacheKey struct {
-	provider       string
-	executablePath string
-	cliVersion     string
+	provider   string
+	command    string
+	cliVersion string
 }
 
 type thinkingCacheEntry struct {
@@ -130,8 +134,8 @@ var claudeStaticEffortFullSuperset = []string{"low", "medium", "high", "xhigh", 
 // through claudeModelEffortAllow. Errors are silently absorbed so a
 // missing CLI doesn't break model listing — the UI just hides the
 // picker for that model.
-func annotateClaudeThinking(ctx context.Context, models []Model, executablePath string) {
-	mapping := loadClaudeThinkingByModel(ctx, executablePath)
+func annotateClaudeThinking(ctx context.Context, models []Model, cmd Command) {
+	mapping := loadClaudeThinkingByModel(ctx, cmd)
 	for i := range models {
 		if t, ok := mapping[models[i].ID]; ok && t != nil {
 			models[i].Thinking = t
@@ -139,17 +143,17 @@ func annotateClaudeThinking(ctx context.Context, models []Model, executablePath 
 	}
 }
 
-func loadClaudeThinkingByModel(ctx context.Context, executablePath string) map[string]*ModelThinking {
-	if executablePath == "" {
-		executablePath = "claude"
+func loadClaudeThinkingByModel(ctx context.Context, cmd Command) map[string]*ModelThinking {
+	if cmd.Path == "" {
+		cmd.Path = "claude"
 	}
-	version, _ := DetectVersion(ctx, executablePath)
-	key := thinkingCacheKey{provider: "claude", executablePath: executablePath, cliVersion: version}
+	version, _ := DetectVersion(ctx, cmd)
+	key := thinkingCacheKey{provider: "claude", command: cmd.cacheKey(), cliVersion: version}
 	if cached, ok := thinkingCacheGet(key); ok {
 		return cached
 	}
 
-	superset := claudeEffortSuperset(ctx, executablePath)
+	superset := claudeEffortSuperset(ctx, cmd)
 	result := map[string]*ModelThinking{}
 	for _, m := range claudeStaticModels() {
 		allow := claudeModelEffortAllow[m.ID]
@@ -170,8 +174,8 @@ func loadClaudeThinkingByModel(ctx context.Context, executablePath string) map[s
 // the help output can't be captured at all it returns the static
 // fallback rather than nothing so callers can still render a usable
 // picker.
-func claudeEffortSuperset(ctx context.Context, executablePath string) []string {
-	cmd := exec.CommandContext(ctx, executablePath, "--help")
+func claudeEffortSuperset(ctx context.Context, runtimeCmd Command) []string {
+	cmd := runtimeCmd.exec(ctx, "--help")
 	hideAgentWindow(cmd)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -311,16 +315,16 @@ type codexDebugServiceTier struct {
 // catalog, including reasoning metadata. Version detection happens before the
 // debug command so old binaries do not log a predictable "unknown command"
 // failure on every cache refresh.
-func discoverCodexModels(ctx context.Context, executablePath string) []Model {
-	if executablePath == "" {
-		executablePath = "codex"
+func discoverCodexModels(ctx context.Context, cmd Command) []Model {
+	if cmd.Path == "" {
+		cmd.Path = "codex"
 	}
-	version, err := DetectVersion(ctx, executablePath)
+	version, err := DetectVersion(ctx, cmd)
 	if err != nil || !codexSupportsDebugModels(version) {
 		return codexStaticModels()
 	}
 
-	raw, err := runCodexDebugModels(ctx, executablePath)
+	raw, err := runCodexDebugModels(ctx, cmd)
 	if err != nil {
 		return codexStaticModels()
 	}
@@ -351,8 +355,8 @@ func codexSupportsDebugModels(version string) bool {
 // in thinking_test.go.
 var codexDebugModelsArgs = []string{"debug", "models", "--bundled"}
 
-func runCodexDebugModels(ctx context.Context, executablePath string) ([]byte, error) {
-	cmd := exec.CommandContext(ctx, executablePath, codexDebugModelsArgs...)
+func runCodexDebugModels(ctx context.Context, runtimeCmd Command) ([]byte, error) {
+	cmd := runtimeCmd.exec(ctx, codexDebugModelsArgs...)
 	hideAgentWindow(cmd)
 	return cmd.Output()
 }
@@ -374,6 +378,7 @@ func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 		if label == "" {
 			label = m.Slug
 		}
+		label = normalizeCodexModelLabel(m.Slug, label)
 		models = append(models, Model{
 			ID:           m.Slug,
 			Label:        label,
@@ -386,6 +391,19 @@ func parseCodexModelCatalog(raw []byte) ([]Model, error) {
 		models[0].Default = true
 	}
 	return models, nil
+}
+
+func normalizeCodexModelLabel(id, label string) string {
+	switch id {
+	case "gpt-5.6-sol":
+		return "GPT-5.6 Sol"
+	case "gpt-5.6-terra":
+		return "GPT-5.6 Terra"
+	case "gpt-5.6-luna":
+		return "GPT-5.6 Luna"
+	default:
+		return label
+	}
 }
 
 func codexServiceTiersFromDebugModel(m codexDebugModel) []ModelServiceTier {
@@ -437,83 +455,32 @@ func codexThinkingFromDebugModel(m codexDebugModel) *ModelThinking {
 
 // ── CodeBuddy ────────────────────────────────────────────────────────
 //
-// CodeBuddy uses the same `--effort <level>` flag as Claude but with a
-// different level set (no `max`). Discovery parses `--help` identically
-// to the claude approach. All models get the same effort levels since
-// CodeBuddy doesn't document per-model restrictions.
-
-var codebuddyEffortRe = regexp.MustCompile(`--effort\s*(?:<[^>]+>)?\s*[^(]*\(([^)]+)\)`)
+// CodeBuddy uses the same `--effort <level>` flag as Claude. The level set is
+// discovered from the `thought_level` config option in the ACP session/new
+// response — the same handshake that yields the model catalog — so no extra
+// process is spawned for it. All models share one effort catalog because
+// CodeBuddy advertises it per session, not per model.
 
 var codebuddyEffortLabel = map[string]string{
-	"low":    "Low",
-	"medium": "Medium",
-	"high":   "High",
-	"xhigh":  "Extra high",
+	"minimal": "Minimal",
+	"low":     "Low",
+	"medium":  "Medium",
+	"high":    "High",
+	"xhigh":   "Extra high",
+	"max":     "Max",
 }
 
-var codebuddyStaticEffortFallback = []string{"low", "medium", "high", "xhigh"}
+// codebuddyStaticEffortFallback is used when discovery cannot reach the CLI.
+// It lists every level `--effort` accepts (confirmed against CodeBuddy 2.130.0,
+// which advertises minimal/low/medium/high/xhigh/max) — the previous value
+// omitted `minimal` and `max`, so a working install still lost two real levels
+// whenever discovery degraded.
+var codebuddyStaticEffortFallback = []string{"minimal", "low", "medium", "high", "xhigh", "max"}
 
-// codebuddyHelpCache caches the raw --help output so both model discovery
-// (models.go) and effort discovery avoid redundant slow CLI invocations.
-// CodeBuddy's --help takes ~30s; calling it twice on cold start wastes ~30s.
-var (
-	codebuddyHelpMu    sync.Mutex
-	codebuddyHelpStore = map[string]codebuddyHelpEntry{}
-)
-
-const codebuddyHelpTTL = 60 * time.Second
-
-type codebuddyHelpEntry struct {
-	output    string
-	expiresAt time.Time
-}
-
-// codebuddyHelpOutput runs `codebuddy --help` (cached for codebuddyHelpTTL).
-// Both discoverCodebuddyModels and codebuddyEffortSuperset call this so a
-// single cold invocation feeds both.
-func codebuddyHelpOutput(ctx context.Context, executablePath string) string {
-	if executablePath == "" {
-		executablePath = "codebuddy"
-	}
-	key := executablePath
-	codebuddyHelpMu.Lock()
-	if entry, ok := codebuddyHelpStore[key]; ok && time.Now().Before(entry.expiresAt) {
-		codebuddyHelpMu.Unlock()
-		return entry.output
-	}
-	codebuddyHelpMu.Unlock()
-
-	runCtx, cancel := context.WithTimeout(ctx, 35*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(runCtx, executablePath, "--help")
-	hideAgentWindow(cmd)
-	out, _ := cmd.CombinedOutput()
-	result := string(out)
-
-	if result != "" {
-		codebuddyHelpMu.Lock()
-		codebuddyHelpStore[key] = codebuddyHelpEntry{output: result, expiresAt: time.Now().Add(codebuddyHelpTTL)}
-		codebuddyHelpMu.Unlock()
-	}
-	return result
-}
-
-func annotateCodebuddyThinking(ctx context.Context, models []Model, executablePath string) {
-	if executablePath == "" {
-		executablePath = "codebuddy"
-	}
-	version, _ := DetectVersion(ctx, executablePath)
-	key := thinkingCacheKey{provider: "codebuddy", executablePath: executablePath, cliVersion: version}
-	if cached, ok := thinkingCacheGet(key); ok {
-		for i := range models {
-			if t, ok := cached[models[i].ID]; ok && t != nil {
-				models[i].Thinking = t
-			}
-		}
-		return
-	}
-
-	levels := codebuddyEffortSuperset(ctx, executablePath)
+// codebuddyThinkingByModel maps every model onto the shared effort catalog
+// built from levels. CodeBuddy advertises one `--effort` set for the whole CLI,
+// not per model, so every entry gets the same ModelThinking pointer.
+func codebuddyThinkingByModel(models []Model, levels []string) map[string]*ModelThinking {
 	thinkingLevels := make([]ThinkingLevel, 0, len(levels))
 	for _, value := range levels {
 		label, ok := codebuddyEffortLabel[value]
@@ -533,8 +500,14 @@ func annotateCodebuddyThinking(ctx context.Context, models []Model, executablePa
 			result[m.ID] = thinking
 		}
 	}
-	thinkingCachePut(key, result)
+	return result
+}
 
+// applyCodebuddyStaticThinking annotates models with the static effort fallback.
+// Used when discovery could not reach the CLI, or reached it but got no
+// recognisable thought_level option back.
+func applyCodebuddyStaticThinking(models []Model) {
+	result := codebuddyThinkingByModel(models, codebuddyStaticEffortFallback)
 	for i := range models {
 		if t, ok := result[models[i].ID]; ok && t != nil {
 			models[i].Thinking = t
@@ -542,32 +515,76 @@ func annotateCodebuddyThinking(ctx context.Context, models []Model, executablePa
 	}
 }
 
-func codebuddyEffortSuperset(ctx context.Context, executablePath string) []string {
-	helpOut := codebuddyHelpOutput(ctx, executablePath)
-	if helpOut == "" {
-		return append([]string(nil), codebuddyStaticEffortFallback...)
-	}
-	parsed := parseCodebuddyEffortHelp(helpOut)
-	if len(parsed) == 0 {
-		return append([]string(nil), codebuddyStaticEffortFallback...)
-	}
-	return parsed
+// codebuddyFlagEffortValues are the tokens `codebuddy --effort <level>` accepts.
+//
+// The ACP `thought_level` option advertises one extra choice, `enabled`
+// ("On (default)"), which is a session-level toggle rather than a flag argument.
+// The daemon passes the selected level straight through to `--effort`
+// (codebuddy.go), so surfacing `enabled` in the picker would let a user build a
+// command line CodeBuddy rejects. Filter against this set instead of trusting
+// the advertised list wholesale.
+var codebuddyFlagEffortValues = map[string]bool{
+	"minimal": true,
+	"low":     true,
+	"medium":  true,
+	"high":    true,
+	"xhigh":   true,
+	"max":     true,
 }
 
-func parseCodebuddyEffortHelp(helpText string) []string {
-	match := codebuddyEffortRe.FindStringSubmatch(helpText)
-	if len(match) < 2 {
-		return nil
+// annotateCodebuddyThinkingFromACP fills in each model's effort catalog from the
+// `thought_level` config option carried by the SAME `session/new` response the
+// models came from — so the effort catalog costs no extra process at all. It
+// replaces a second regex pass over `codebuddy --help` (MUL-5549).
+//
+// CodeBuddy advertises one effort set for the whole CLI rather than per model,
+// so every entry shares it. Levels the `--effort` flag would reject are dropped,
+// and a currentValue outside the flag set (the default `enabled`) becomes an
+// empty DefaultLevel, which the UI renders as a generic "Default" instead of
+// inventing a level we cannot pass through.
+func annotateCodebuddyThinkingFromACP(models []Model, sessionResult json.RawMessage) {
+	levels, defaultLevel := parseACPCodebuddyEffort(sessionResult)
+	if len(levels) == 0 {
+		applyCodebuddyStaticThinking(models)
+		return
 	}
-	var out []string
-	for _, raw := range strings.Split(match[1], ",") {
-		token := strings.TrimSpace(raw)
-		if token == "" {
+	result := codebuddyThinkingByModel(models, levels)
+	for _, thinking := range result {
+		thinking.DefaultLevel = defaultLevel
+	}
+	for i := range models {
+		if t, ok := result[models[i].ID]; ok && t != nil {
+			models[i].Thinking = t
+		}
+	}
+}
+
+// parseACPCodebuddyEffort extracts the effort levels and the advertised default
+// from an ACP session/new result. Returns no levels when the response carries no
+// recognisable effort option, which makes the caller fall back to the static
+// set rather than hiding the thinking picker entirely.
+//
+// This is the shared parser (parseACPEffortOption) plus CodeBuddy's flag
+// overlay. The overlay stays CodeBuddy-specific on purpose: it exists because
+// this backend applies the level through `--effort` rather than over ACP, so
+// its usable vocabulary is narrower than what its session advertises. Every
+// other runtime takes the advertised list verbatim.
+func parseACPCodebuddyEffort(raw json.RawMessage) (levels []string, defaultLevel string) {
+	option, ok := parseACPEffortOption(raw)
+	if !ok {
+		return nil, ""
+	}
+	for _, choice := range option.Choices {
+		if !codebuddyFlagEffortValues[choice.Value] {
 			continue
 		}
-		out = append(out, token)
+		levels = append(levels, choice.Value)
 	}
-	return out
+	// Only echo a default we could actually pass to --effort.
+	if codebuddyFlagEffortValues[option.CurrentValue] {
+		defaultLevel = option.CurrentValue
+	}
+	return levels, defaultLevel
 }
 
 // ── Shared validation ────────────────────────────────────────────────
@@ -602,7 +619,7 @@ func parseCodebuddyEffortHelp(helpText string) []string {
 // map. The function is intentionally pure of HTTP concerns so the
 // daemon's pre-execution guard and the server's UpdateAgent gate can
 // share the same source of truth.
-func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, model, value string) (bool, error) {
+func ValidateThinkingLevel(ctx context.Context, providerType string, cmd Command, model, value string) (bool, error) {
 	if value == "" {
 		return true, nil
 	}
@@ -613,11 +630,12 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 	if model == "" && providerType == "codex" {
 		return false, nil
 	}
-	models, err := ListModels(ctx, providerType, executablePath)
+	catalog, err := ListModels(ctx, providerType, cmd)
 	if err != nil {
 		return false, err
 	}
-	target := model
+	models := catalog.Models
+	target := modelIDForCapabilityLookup(providerType, model)
 	if target == "" {
 		// Default model = the entry the catalog marks as Default. If no
 		// entry is flagged, fall through to the no-match return; that
@@ -657,18 +675,18 @@ func ValidateThinkingLevel(ctx context.Context, providerType, executablePath, mo
 // Codex catalog for the explicit model. An empty value is always valid and
 // means "inherit runtime configuration". An empty Codex model fails closed:
 // its effective model comes from config.toml and may not support the tier.
-func ValidateServiceTier(ctx context.Context, providerType, executablePath, model, value string) (bool, error) {
+func ValidateServiceTier(ctx context.Context, providerType string, cmd Command, model, value string) (bool, error) {
 	if value == "" {
 		return true, nil
 	}
 	if providerType != "codex" || model == "" {
 		return false, nil
 	}
-	models, err := ListModels(ctx, providerType, executablePath)
+	catalog, err := ListModels(ctx, providerType, cmd)
 	if err != nil {
 		return false, err
 	}
-	for _, m := range models {
+	for _, m := range catalog.Models {
 		if m.ID != model {
 			continue
 		}
@@ -717,11 +735,16 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"xhigh":  true,
 		"max":    true,
 	},
+	// Confirmed against CodeBuddy 2.130.0's advertised thought_level catalog.
+	// `minimal` and `max` were missing here, so the server rejected two levels
+	// the CLI genuinely accepts.
 	"codebuddy": {
-		"low":    true,
-		"medium": true,
-		"high":   true,
-		"xhigh":  true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
 	},
 	// Grok 4.5's documented --effort levels. It cannot disable reasoning and
 	// does not accept none, minimal, or xhigh.
@@ -730,22 +753,140 @@ var providerThinkingEnums = map[string]map[string]bool{
 		"medium": true,
 		"high":   true,
 	},
+	// Pi owns a fixed CLI vocabulary; RPC discovery narrows this universe to
+	// the exact subset supported by each model before execution.
+	"pi": {
+		"off":     true,
+		"minimal": true,
+		"low":     true,
+		"medium":  true,
+		"high":    true,
+		"xhigh":   true,
+		"max":     true,
+	},
+}
+
+// thinkingDynamicCatalogProviders are the runtimes whose effort vocabulary is
+// owned by a daemon-local model catalog instead of a fixed enum above. The
+// server accepts any well-formed token for them and lets the daemon's
+// per-model check decide before execution.
+var thinkingDynamicCatalogProviders = map[string]bool{
+	"codex":    true,
+	"dsh":      true,
+	"opencode": true,
+	"kimi":     true,
+}
+
+// acpCatalogThinkingProviders are the ACP runtimes that discover their effort
+// catalog from `session/new` and apply it with `session/set_config_option`.
+// They behave like the dynamic-catalog providers above — the server accepts a
+// well-formed token and the daemon checks it against the discovered catalog —
+// but they are listed separately because membership means something stricter:
+// the runtime's Execute must actually call applyACPEffortOption.
+//
+// Do NOT add a runtime here just because it speaks ACP. Two things have to be
+// true, and neither is implied by the protocol:
+//
+//   - Its Execute wires up applyACPEffortOption. Copilot is the counterexample
+//     — its discovery runs over ACP but it executes through its own CLI
+//     surface (`--acp` is blocked in copilot.go), so a catalog here would
+//     render a picker with nothing behind it.
+//   - Someone has confirmed the runtime actually threads the setting into its
+//     provider request, from its source or a real run. Advertising is not
+//     evidence — Hermes accepts set_config_option and ignores it, Kimi ≤0.28.1
+//     confirms "on" after being set to "max" — and neither is the read-back in
+//     applyACPEffortOption, which only proves the session reports the new
+//     value. This list is where that offline verification is recorded; the
+//     read-back is runtime diagnostics on top of it.
+var acpCatalogThinkingProviders = map[string]bool{
+	// reasonix v1.21.5: session/new advertises option id `effort` (category
+	// `thought_level`), set_config_option returns the refreshed options, and
+	// the effort reaches the session controller rather than stopping at the
+	// config surface. Its catalog is per model — see
+	// annotateACPThinkingForSessionModel.
+	"reasonix": true,
+	// hermes covers two unrelated binaries, and membership here is safe only
+	// because the catalog decides per session which one answered:
+	//
+	//   - jcode advertises option id `reasoning_effort` (category
+	//     `thought_level`) and genuinely applies it — set_config_option waits
+	//     for an `effort_changed` ack, and the provider request carries
+	//     `reasoning.effort` upstream. Confirmed against jcode v0.71.1 and
+	//     v0.73.0 (GitHub #6720). Its catalog is per model too: jcode
+	//     revalidates the effort against the new model's advertised list on a
+	//     model switch.
+	//   - Hermes Agent advertises no configOptions at all, so it gets an empty
+	//     catalog, no picker, and no set_config_option call. Re-verified
+	//     against v0.20.0 on 2026-08-11: session/new still returns only
+	//     `_meta`, `models`, `modes`, `sessionId` — unchanged from the v0.18.2
+	//     finding in MUL-5770.
+	//
+	// That split is why this feature is catalog-driven rather than gated on a
+	// version string: one provider, two binaries, and the session answers the
+	// capability question directly.
+	"hermes": true,
+}
+
+// usesDynamicThinkingCatalog reports whether a provider's effort vocabulary is
+// owned by a daemon-local catalog rather than a fixed server-side enum.
+func usesDynamicThinkingCatalog(providerType string) bool {
+	return thinkingDynamicCatalogProviders[providerType] || acpCatalogThinkingProviders[providerType]
+}
+
+// UsesACPCatalogThinking reports whether a provider's effort support is decided
+// per session by what its ACP handshake advertises, rather than by the provider
+// name alone.
+//
+// Callers that can reach a discovered catalog should use it to answer the
+// capability question for a specific runtime: `hermes` covers both jcode (which
+// advertises and applies an effort) and Hermes Agent (which advertises none), so
+// the provider name is not a sufficient answer for either. See
+// acpCatalogThinkingProviders.
+func UsesACPCatalogThinking(providerType string) bool {
+	return acpCatalogThinkingProviders[providerType]
+}
+
+// ThinkingControlSupported reports whether Multica can deliver a per-agent
+// reasoning effort to this runtime at all. False means the answer to any
+// thinking_level is "no", regardless of the token: the runtime exposes no
+// effort dial on the surface the daemon speaks to it over, so there is nothing
+// to inject and nothing a different spelling would fix.
+//
+// Copilot is the instructive case. It speaks ACP for model discovery but
+// executes through its own CLI surface (`--acp` is blocked in copilot.go), so
+// there is no live ACP session to carry an effort onto — a picker there would
+// be inert no matter what discovery advertised.
+//
+// True at provider granularity only. The `hermes` provider covers two
+// unrelated binaries whose answers differ — jcode applies an advertised
+// effort, Hermes Agent has no effort surface on ACP at all — so it reports
+// true here and the per-session catalog decides whether a picker actually
+// appears. See acpCatalogThinkingProviders for the evidence on each.
+func ThinkingControlSupported(providerType string) bool {
+	if usesDynamicThinkingCatalog(providerType) {
+		return true
+	}
+	_, ok := providerThinkingEnums[providerType]
+	return ok
 }
 
 // IsKnownThinkingValue reports whether `value` is a recognised effort
 // token for the given provider. Empty string is always accepted (means
-// "use runtime default"). Unknown providers (no thinking concept) accept
-// only empty; Codex and OpenCode accept well-formed tokens here because their
-// daemon-local catalogs perform the exact per-model check before execution.
+// "use runtime default"). Providers with no reasoning control accept
+// only empty; Codex, OpenCode, Kimi, and the ACP catalog runtimes accept
+// well-formed tokens here because their daemon-local catalogs perform the
+// exact per-model check before execution.
 //
 // This is the cheap synchronous gate the server uses on CreateAgent /
 // UpdateAgent. Unlike ValidateThinkingLevel it does NOT consult the live
-// catalog or per-model subset.
+// catalog or per-model subset. Callers that surface a rejection to a user
+// should ask ThinkingControlSupported first so the message says "this runtime
+// has no reasoning control" instead of implying a bad token.
 func IsKnownThinkingValue(providerType, value string) bool {
 	if value == "" {
 		return true
 	}
-	if providerType == "codex" || providerType == "opencode" {
+	if usesDynamicThinkingCatalog(providerType) {
 		return isValidDynamicThinkingValue(value)
 	}
 	enum, ok := providerThinkingEnums[providerType]

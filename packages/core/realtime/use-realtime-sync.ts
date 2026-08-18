@@ -26,6 +26,8 @@ import {
 import { githubKeys } from "../github/queries";
 import { larkKeys } from "../lark/queries";
 import { slackKeys } from "../slack/queries";
+import { dingtalkKeys } from "../dingtalk/queries";
+import { wecomKeys } from "../wecom/queries";
 import {
   onIssueCreated,
   onIssueUpdated,
@@ -48,8 +50,18 @@ import {
   type SystemNotificationPayload,
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
-import { chatKeys, mergeTaskMessagesBySeq, sortChatSessions } from "../chat/queries";
+import {
+  chatKeys,
+  mergeTaskMessagesBySeq,
+  sortChatSessions,
+  QUICK_ACTIONS_PENDING_TIMEOUT_MS,
+} from "../chat/queries";
 import { useChatStore } from "../chat";
+import { upsertChatMessageToCaches } from "../chat/message-cache";
+import {
+  promotePendingChatTask,
+  removePendingChatTask,
+} from "../chat/pending";
 import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
 import type {
   MemberAddedPayload,
@@ -59,6 +71,7 @@ import type {
   IssueUpdatedPayload,
   IssueCreatedPayload,
   IssueDeletedPayload,
+  IssueAttachmentsChangedPayload,
   IssueLabelsChangedPayload,
   IssueMetadataChangedPayload,
   IssuePropertiesChangedPayload,
@@ -86,8 +99,12 @@ import type {
   TaskFailedPayload,
   TaskCancelledPayload,
   ChatDonePayload,
+  ChatQuickActionsPayload,
+  ChatQuickActionsPendingState,
+  ChatQuickActionsFailureState,
   ChatCancelFinalizedPayload,
   ChatMessage,
+  ChatMessageEventPayload,
   ChatPendingTask,
   ChatMessagesPage,
   ChatSession,
@@ -127,6 +144,46 @@ export function refetchPendingChatAggregate(
   qc.invalidateQueries({ queryKey: chatKeys.pendingTasks(wsId) });
 }
 
+/**
+ * Apply a chat:message event: write the turn's USER message into the message
+ * caches, then reconcile authoritatively (MUL-5711).
+ *
+ * The payload has always carried the whole message; this handler used to read
+ * `chat_session_id` off it and drop the rest, which made a human's own prompt
+ * the one row that reached the transcript ONLY through the refetch below. Any
+ * client that did not write it locally — a second window or device, a send
+ * whose HTTP response failed after the server committed, a surface mounting
+ * mid-flight — lost it whenever that refetch was dropped, most reliably to the
+ * chat:quick_actions cancel. Both caches are staleTime: Infinity, so nothing
+ * re-fetched afterwards and the prompt stayed missing until a remount.
+ *
+ * Only `role: "user"` is written. SendChatMessage is the event's one producer,
+ * and an assistant row fabricated from this payload would carry no elapsed_ms /
+ * message_kind / quick_actions while still claiming the id that
+ * applyChatDoneToCache is about to write properly.
+ *
+ * The invalidate stays: this payload has no `attachments`, so the reconciling
+ * refetch is what fills them in for clients that did not send the message.
+ */
+export function applyChatMessageToCache(
+  qc: QueryClient,
+  payload: ChatMessageEventPayload,
+) {
+  const sessionId = payload.chat_session_id;
+  if (payload.role === "user" && payload.message_id) {
+    upsertChatMessageToCaches(qc, sessionId, {
+      id: payload.message_id,
+      chat_session_id: sessionId,
+      role: "user",
+      content: payload.content ?? "",
+      task_id: payload.task_id ?? null,
+      created_at: payload.created_at ?? new Date().toISOString(),
+    });
+  }
+  invalidateChatMessageQueries(qc, sessionId);
+  qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
+}
+
 export function applyChatDoneToCache(
   qc: QueryClient,
   payload: ChatDonePayload,
@@ -135,12 +192,12 @@ export function applyChatDoneToCache(
   const taskId = payload.task_id;
   const messageId = payload.message_id;
   const content = payload.content;
-  if (messageId && content !== undefined) {
+  if (messageId && (content !== undefined || (payload.quick_actions?.length ?? 0) > 0)) {
     const assistant: ChatMessage = {
       id: messageId,
       chat_session_id: sessionId,
       role: "assistant",
-      content,
+      content: content ?? "",
       task_id: taskId,
       created_at: payload.created_at ?? new Date().toISOString(),
       elapsed_ms: payload.elapsed_ms ?? null,
@@ -148,46 +205,118 @@ export function applyChatDoneToCache(
       // without waiting for the reconciling refetch (MUL-4351). Missing →
       // "message" for older servers.
       message_kind: payload.message_kind ?? "message",
+      ...(payload.quick_actions !== undefined
+        ? { quick_actions: payload.quick_actions }
+        : {}),
     };
-    qc.setQueryData<ChatMessage[] | undefined>(
-      chatKeys.messages(sessionId),
-      (old) => {
-        if (!old) return old; // first fetch will pick it up
-        // Idempotent against reconnect replay.
-        if (old.some((m) => m.id === messageId)) return old;
-        return [...old, assistant];
-      },
-    );
-    qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
-      chatKeys.messagesPage(sessionId),
-      (old) => patchLatestChatMessagePage(old, assistant),
-    );
+    // Idempotent against reconnect replay and against a refetch that already
+    // landed this row.
+    upsertChatMessageToCaches(qc, sessionId, assistant);
   }
-  // Replacement is in the messages list now; safe to drop pending.
-  qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+  // Replacement is in the messages list now; remove only this task. If a
+  // follow-up is queued, it becomes the next head in the same render tick.
+  qc.setQueryData<ChatPendingTask>(
+    chatKeys.pendingTask(sessionId),
+    (old) => removePendingChatTask(old, taskId),
+  );
+  // Raise/clear the quick-actions placeholder marker. Kept OUTSIDE the
+  // message caches deliberately: the authoritative refetch below replaces
+  // those, and a flag stored on the message would vanish with it. Explicit
+  // `=== true` — older servers omit the field entirely.
+  qc.setQueryData<ChatQuickActionsPendingState | null>(
+    chatKeys.quickActionsPending(sessionId),
+    payload.quick_actions_pending === true && messageId
+      ? {
+          message_id: messageId,
+          task_id: taskId,
+          expires_at: Date.now() + QUICK_ACTIONS_PENDING_TIMEOUT_MS,
+        }
+      : null,
+  );
   // Authoritative refetch reconciles redaction / migrations / clients
   // that took the fallback branch above.
   invalidateChatMessageQueries(qc, sessionId);
   qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
 }
 
-function patchLatestChatMessagePage(
-  old: InfiniteData<ChatMessagesPage> | undefined,
-  message: ChatMessage,
-): InfiniteData<ChatMessagesPage> | undefined {
-  if (!old?.pages.length) return old;
-  const seen = old.pages.some((page) => page.messages.some((m) => m.id === message.id));
-  if (seen) return old;
-  return {
-    ...old,
-    pages: old.pages.map((page, index) => {
-      if (index !== 0) return page;
-      return {
-        ...page,
-        messages: [...page.messages, message],
-      };
-    }),
-  };
+/**
+ * Apply a chat:quick_actions supplement: patch the identified assistant
+ * message's quick_actions in both message caches and resolve the pending
+ * placeholder. An empty/missing list is terminal ("no suggestions this
+ * turn") — the placeholder still resolves.
+ *
+ * `payload.failed` marks a resolution whose regeneration failed: the carried
+ * actions are the turn's UNCHANGED prior pills, so the patch is a no-op, but a
+ * failure signal is raised for a view to toast — otherwise an explicit refresh
+ * that failed would look identical to one that succeeded with the same
+ * suggestions (MUL-5149 review).
+ */
+export async function applyChatQuickActionsToCache(
+  qc: QueryClient,
+  payload: ChatQuickActionsPayload,
+) {
+  const sessionId = payload.chat_session_id;
+  const actions = payload.quick_actions ?? [];
+  const patch = (m: ChatMessage): ChatMessage =>
+    m.id === payload.message_id ? { ...m, quick_actions: actions } : m;
+  if (actions.length > 0) {
+    // chat:done's invalidate may still have a messages refetch in flight that
+    // read the assistant row BEFORE the daemon persisted these actions. Cancel
+    // it first so its actions-less response can't land after — and overwrite —
+    // the patch below. Both message caches are staleTime: Infinity, so such an
+    // overwrite would never self-heal (MUL-5149 stale-refetch race). Cancelling
+    // before setQueryData is required: cancelQueries reverts to the pre-fetch
+    // state, so patching first would be undone by the revert.
+    await Promise.all([
+      qc.cancelQueries({ queryKey: chatKeys.messages(sessionId) }),
+      qc.cancelQueries({ queryKey: chatKeys.messagesPage(sessionId) }),
+    ]);
+    qc.setQueryData<ChatMessage[] | undefined>(
+      chatKeys.messages(sessionId),
+      (old) => old?.map(patch),
+    );
+    qc.setQueryData<InfiniteData<ChatMessagesPage> | undefined>(
+      chatKeys.messagesPage(sessionId),
+      (old) =>
+        old
+          ? {
+              ...old,
+              pages: old.pages.map((page) => ({
+                ...page,
+                messages: page.messages.map(patch),
+              })),
+            }
+          : old,
+    );
+    // Settle the cancel (MUL-5711). cancelQueries defaults to `revert: true`,
+    // so the line above does more than ignore the in-flight response — it rolls
+    // the cache back to the snapshot taken when that fetch STARTED, dropping
+    // rows only that response carried (a peer's user message, anything that
+    // landed while this surface was unmounted). With staleTime: Infinity and no
+    // further trigger, the hole survived until a remount. Re-invalidating costs
+    // one request per supplement and cannot lose the pills: the server persists
+    // the actions BEFORE broadcasting this event (SupplementChatQuickActions),
+    // so the refetch this schedules reads them back.
+    invalidateChatMessageQueries(qc, sessionId);
+  }
+  // Resolve the marker only when it belongs to THIS message: a late
+  // supplement for turn N must not clear the marker turn N+1's chat:done
+  // just raised (near-unreachable — the daemon cancels stale passes — but
+  // the guard costs one comparison).
+  qc.setQueryData<ChatQuickActionsPendingState | null>(
+    chatKeys.quickActionsPending(sessionId),
+    (current) =>
+      current && current.message_id !== payload.message_id ? current : null,
+  );
+  // Raise a one-shot failure signal on an explicit refresh whose regeneration
+  // failed. A view consumes it to toast and clears it; the `at` nonce keeps a
+  // repeat failure on the same turn from being deduped away.
+  if (payload.failed === true) {
+    qc.setQueryData<ChatQuickActionsFailureState | null>(
+      chatKeys.quickActionsFailure(sessionId),
+      { message_id: payload.message_id, at: Date.now() },
+    );
+  }
 }
 
 type ChatSessionUpdatedPayload = {
@@ -317,8 +446,14 @@ export function applyChatCancelFinalizedToCache(
     if (payload.message_id) {
       removeChatMessageFromCaches(qc, sessionId, payload.message_id);
     }
-    qc.setQueryData(chatKeys.pendingTask(sessionId), {});
+    // Deferred finalization can arrive after a queued successor was promoted.
+    // Remove only the cancelled task so a late restore cannot hide newer work.
+    qc.setQueryData<ChatPendingTask>(
+      chatKeys.pendingTask(sessionId),
+      (old) => removePendingChatTask(old, payload.task_id),
+    );
     invalidateChatMessageQueries(qc, sessionId);
+    qc.invalidateQueries({ queryKey: chatKeys.pendingTask(sessionId) });
     const isInitiator =
       !!payload.initiator_user_id &&
       !!currentUserId &&
@@ -686,9 +821,21 @@ export function useRealtimeSync(
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: slackKeys.installations(wsId) });
       },
+      dingtalk_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: dingtalkKeys.installations(wsId) });
+      },
+      dingtalk_group_route: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: dingtalkKeys.groupRoutes(wsId) });
+      },
       vcs_connection: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: ["vcs", wsId] });
+      },
+      wecom_installation: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: wecomKeys.installations(wsId) });
       },
       pull_request: () => {
         // PR list is keyed by issue id, not workspace, so we invalidate all
@@ -769,7 +916,7 @@ export function useRealtimeSync(
     // Event types handled by specific handlers below -- skip generic refresh
     const specificEvents = new Set([
       "workspace:updated",
-      "issue:updated", "issue:created", "issue:deleted", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
+      "issue:updated", "issue:created", "issue:deleted", "issue_attachments:changed", "issue_labels:changed", "issue_metadata:changed", "issue_properties:changed", "property:created", "property:updated", "inbox:new",
       "comment:created", "comment:updated", "comment:deleted",
       "comment:resolved", "comment:unresolved",
       "activity:created",
@@ -778,7 +925,7 @@ export function useRealtimeSync(
       "subscriber:added", "subscriber:removed",
       "daemon:heartbeat",
       // Chat events are handled explicitly below; do not double-invalidate.
-      "chat:message", "chat:done", "chat:cancel_finalized", "chat:session_read",
+      "chat:message", "chat:done", "chat:quick_actions", "chat:cancel_finalized", "chat:session_read",
       "chat:session_deleted", "chat:session_updated",
       // task:message stays out of the prefix path because it fires per
       // streamed message during a long run — invalidating the snapshot on
@@ -843,6 +990,12 @@ export function useRealtimeSync(
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
+    });
+
+    const unsubIssueAttachmentsChanged = ws.on("issue_attachments:changed", (p) => {
+      const { issue_id } = p as IssueAttachmentsChangedPayload;
+      if (!issue_id) return;
+      qc.invalidateQueries({ queryKey: issueKeys.attachments(issue_id) });
     });
 
     const unsubIssueMetadataChanged = ws.on("issue_metadata:changed", (p) => {
@@ -1142,10 +1295,14 @@ export function useRealtimeSync(
     };
 
     const unsubChatMessage = ws.on("chat:message", (p) => {
-      const payload = p as { chat_session_id: string };
-      chatWsLogger.info("chat:message (global)", { chat_session_id: payload.chat_session_id });
-      invalidateChatMessageQueries(qc, payload.chat_session_id);
-      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
+      const payload = p as ChatMessageEventPayload;
+      chatWsLogger.info("chat:message (global)", {
+        chat_session_id: payload.chat_session_id,
+        role: payload.role,
+      });
+      // Write the user turn before invalidating so the prompt does not depend
+      // on the refetch surviving (MUL-5711) — same shape as chat:done.
+      applyChatMessageToCache(qc, payload);
       // NOTE: intentionally does NOT touch the pending aggregate. chat:message
       // fires per streamed message with no status; the aggregate is maintained
       // by the task lifecycle handlers below (MUL-4159).
@@ -1179,6 +1336,19 @@ export function useRealtimeSync(
       invalidateSessionLists();
     });
 
+    // Late quick-actions supplement from the daemon's background suggestion
+    // pass — patches the finished turn's message in place; no invalidate
+    // needed (the payload is authoritative and tiny).
+    const unsubChatQuickActions = ws.on("chat:quick_actions", (p) => {
+      const payload = p as ChatQuickActionsPayload;
+      chatWsLogger.info("chat:quick_actions (global)", {
+        task_id: payload.task_id,
+        chat_session_id: payload.chat_session_id,
+        count: payload.quick_actions?.length ?? 0,
+      });
+      void applyChatQuickActionsToCache(qc, payload);
+    });
+
     // Deferred cancellation outcome (#5219): the server settles the
     // empty/non-empty judgment only after the daemon's transcript flush, so
     // this event arrives seconds after the cancel HTTP response — nothing
@@ -1197,27 +1367,13 @@ export function useRealtimeSync(
       }
     });
 
-    // Chat task lifecycle writethrough: keep `chatKeys.pendingTask(sessionId)`
-    // synchronized with the server state machine via setQueryData rather than
-    // invalidate-refetch. Same pattern as task:message — the WS payload
-    // carries everything we need, and an HTTP roundtrip just to read what we
-    // already know would add latency to every stage transition.
-    //
-    // task:queued is emitted by EnqueueChatTask. The optimistic seed in
-    // chat-window.tsx may have already populated the cache with a temporary
-    // id; this handler upgrades it to the real task_id (and reaffirms status
-    // when reconnect replays the event for an already-running task).
+    // Lifecycle events are invalidation hints. They intentionally omit queue
+    // previews and message ids, so only the pending-task endpoint can author
+    // the complete queue shape.
     const unsubTaskQueued = ws.on("task:queued", (p) => {
       const payload = p as TaskQueuedPayload;
       if (!payload.chat_session_id) return;
-      qc.setQueryData<ChatPendingTask>(
-        chatKeys.pendingTask(payload.chat_session_id),
-        (old) => ({
-          ...(old ?? {}),
-          task_id: payload.task_id,
-          status: "queued",
-        }),
-      );
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 
@@ -1232,11 +1388,10 @@ export function useRealtimeSync(
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
-        (old) => {
-          if (!old || old.task_id !== payload.task_id) return old;
-          return { ...old, status: "running" };
-        },
+        (old) => promotePendingChatTask(old, payload.task_id, "running"),
       );
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 
@@ -1250,11 +1405,10 @@ export function useRealtimeSync(
       if (!payload.chat_session_id) return;
       qc.setQueryData<ChatPendingTask>(
         chatKeys.pendingTask(payload.chat_session_id),
-        (old) => {
-          if (!old || old.task_id !== payload.task_id) return old;
-          return { ...old, status: "running" };
-        },
+        (old) => promotePendingChatTask(old, payload.task_id, "running"),
       );
+      invalidateChatMessageQueries(qc, payload.chat_session_id);
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 
@@ -1270,11 +1424,15 @@ export function useRealtimeSync(
         if (!payload.chat_session_id) return;
         qc.setQueryData<ChatPendingTask>(
           chatKeys.pendingTask(payload.chat_session_id),
-          (old) => {
-            if (!old || old.task_id !== payload.task_id) return old;
-            return { ...old, status: "waiting_local_directory" };
-          },
+          (old) =>
+            promotePendingChatTask(
+              old,
+              payload.task_id,
+              "waiting_local_directory",
+            ),
         );
+        invalidateChatMessageQueries(qc, payload.chat_session_id);
+        qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
         invalidatePendingAggregate();
       },
     );
@@ -1294,9 +1452,14 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => removePendingChatTask(old, payload.task_id),
+      );
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       invalidatePendingAggregate();
+      invalidateSessionLists();
     });
 
     const unsubTaskCompleted = ws.on("task:completed", (p) => {
@@ -1306,12 +1469,11 @@ export function useRealtimeSync(
         task_id: payload.task_id,
         chat_session_id: payload.chat_session_id,
       });
-      // `chat:done` (broadcast immediately before this event in CompleteTask)
-      // already wrote the assistant message into the messages cache and
-      // cleared `chatKeys.pendingTask`. This event is now only responsible
-      // for refreshing the per-user cross-session aggregate that drives the
-      // FAB indicator — `chat:done` is per-session and doesn't carry that
-      // information.
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => removePendingChatTask(old, payload.task_id),
+      );
+      qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
     });
 
@@ -1328,7 +1490,10 @@ export function useRealtimeSync(
       // failure bubble shows up without requiring a page refresh. Pre-#1823
       // this branch only flipped pending — the comment "No new message"
       // was true then, but FailTask now persists a row.
-      qc.setQueryData(chatKeys.pendingTask(payload.chat_session_id), {});
+      qc.setQueryData<ChatPendingTask>(
+        chatKeys.pendingTask(payload.chat_session_id),
+        (old) => removePendingChatTask(old, payload.task_id),
+      );
       invalidateChatMessageQueries(qc, payload.chat_session_id);
       qc.invalidateQueries({ queryKey: chatKeys.pendingTask(payload.chat_session_id) });
       invalidatePendingAggregate();
@@ -1386,6 +1551,7 @@ export function useRealtimeSync(
       unsubIssueUpdated();
       unsubIssueCreated();
       unsubIssueDeleted();
+      unsubIssueAttachmentsChanged();
       unsubIssueLabelsChanged();
       unsubIssueMetadataChanged();
       unsubIssuePropertiesChanged();
@@ -1414,6 +1580,7 @@ export function useRealtimeSync(
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();
+      unsubChatQuickActions();
       unsubChatCancelFinalized();
       unsubTaskQueued();
       unsubTaskDispatch();

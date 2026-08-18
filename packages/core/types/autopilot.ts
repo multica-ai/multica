@@ -32,6 +32,9 @@ export interface Autopilot {
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   status: AutopilotStatus;
+  // Additive machine-readable explanation for a system pause. Null for manual
+  // pauses and older servers.
+  pause_reason?: string | null;
   execution_mode: AutopilotExecutionMode;
   issue_title_template: string | null;
   created_by_type: string;

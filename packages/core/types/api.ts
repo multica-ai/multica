@@ -1,4 +1,4 @@
-import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
+import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -25,6 +25,9 @@ export interface CreateIssueRequest {
 export interface UpdateIssueRequest {
   title?: string;
   description?: string;
+  /** Authoritative description the editor had adopted before producing this
+   * update. The server uses it to merge channel media that landed meanwhile. */
+  description_base?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
@@ -103,6 +106,15 @@ export interface ListIssuesParams {
   status?: IssueStatus;
   /** Multi-value table facet. OR within the field. */
   statuses?: IssueStatus[];
+  /**
+   * Filter by status CATEGORY rather than by exact key, so one bucket holds a
+   * category's canonical status plus every custom status that inherits it.
+   * This is what keeps the board's fan-out fixed at 7 requests however many
+   * custom statuses a workspace defines. (MUL-6243)
+   */
+  status_category?: IssueStatusCategory;
+  /** Multi-value form of `status_category`. OR within the field. */
+  status_categories?: IssueStatusCategory[];
   priority?: IssuePriority;
   /** Multi-value table facet. OR within the field. */
   priorities?: IssuePriority[];
@@ -242,7 +254,7 @@ export interface GroupedIssuesResponse {
 // state such as collapsed groups/parents.
 export type IssueTableScope =
   | { kind: "workspace"; assignee_types?: IssueAssigneeType[] }
-  | { kind: "project"; project_id: string }
+  | { kind: "project"; project_id: string; assignee_types?: IssueAssigneeType[] }
   | { kind: "assignee"; actor: IssueActorRef }
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
@@ -397,7 +409,11 @@ export type IssueTableFacetSpec =
   | { kind: "creator" }
   | { kind: "project" }
   | { kind: "label" }
-  | { kind: "property"; property_id: string };
+  | { kind: "property"; property_id: string }
+  /** Agents running issue work inside this surface. `key` is the agent id,
+   *  `count` its running-task count. Evaluated against the surface's own scope
+   *  and filters, so the header chip counts the same rows the list shows. */
+  | { kind: "working_agents" };
 
 export interface IssueTableFacetsRequest {
   query: IssueTableQuerySpec;
@@ -423,6 +439,15 @@ export interface IssueTableFacetsResponse {
   facets: IssueTableFacet[];
 }
 
+/** One agent running issue work inside a single issue surface. Projected from
+ *  the `working_agents` facet, so the count is already narrowed by that
+ *  surface's scope and every active filter. Name/avatar are resolved from the
+ *  workspace agent directory, not carried here. */
+export interface WorkingAgentSummary {
+  id: string;
+  running_task_count: number;
+}
+
 /** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */
 export interface IssueStatusBucket {
   issues: Issue[];
@@ -435,7 +460,8 @@ export interface IssueStatusBucket {
  * `api.listIssues` responses by the query functions in `issues/queries.ts`.
  */
 export interface ListIssuesCache {
-  byStatus: Partial<Record<IssueStatus, IssueStatusBucket>>;
+  /** Bucketed by status CATEGORY — see PAGINATED_CATEGORIES. (MUL-6243) */
+  byStatus: Partial<Record<IssueStatusCategory, IssueStatusBucket>>;
 }
 
 export interface SearchIssueResult extends Issue {

@@ -35,6 +35,10 @@ while IFS= read -r line; do
     *'"method":"session/prompt"'*)
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_fake","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"ok"}}}}\n'
       printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":1,"outputTokens":2}}}\n' "$id"
+      if [ -n "$QODER_LATE_CHUNK" ]; then
+        sleep 0.05
+        printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_fake","update":{"type":"AgentMessageChunk","content":{"type":"text","text":" tail"}}}}\n'
+      fi
       exit 0
       ;;
   esac
@@ -123,6 +127,24 @@ while IFS= read -r line; do
   esac
 done
 `
+}
+
+func TestQoderCNBackendMissingExecutableNamesQoderCNBinary(t *testing.T) {
+	t.Parallel()
+
+	missingPath := missingAgentExecutable(t, "qoderclicn")
+	backend, err := New("qoderclicn", Config{ExecutablePath: missingPath})
+	if err != nil {
+		t.Fatalf("new Qoder CN backend: %v", err)
+	}
+
+	_, err = backend.Execute(context.Background(), "hello", ExecOptions{})
+	if err == nil {
+		t.Fatal("Execute() error = nil, want missing executable error")
+	}
+	if !strings.Contains(err.Error(), "qoderclicn executable not found") {
+		t.Fatalf("Execute() error = %q, want qoderclicn executable label", err)
+	}
 }
 
 func fakeQoderACPScriptWithLeakedStdout() string {
@@ -240,7 +262,7 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_model","models":{"currentModelId":"qoder:auto","availableModels":[{"modelId":"qoder:auto","name":"Qoder Auto"}]}}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":17,"outputTokens":5,"cachedReadTokens":3}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":17,"outputTokens":5,"cachedReadTokens":3,"cachedWriteTokens":2,"costUsdTicks":900}}}\n' "$id"
       exit 0
       ;;
   esac
@@ -737,6 +759,9 @@ func TestQoderForwardsMcpAuthHeaderToSessionNew(t *testing.T) {
 	}
 }
 
+// Qoder is not on the omitted-capabilities exception list, so it keeps the
+// ACP v1 default: capabilities the runtime never advertised are unsupported
+// and remote entries are filtered out of session/new.
 func TestQoderFiltersRemoteMcpWhenInitializeDoesNotAdvertiseCapability(t *testing.T) {
 	t.Parallel()
 
@@ -877,8 +902,8 @@ func TestQoderBackendAttributesUsageToACPDefaultModel(t *testing.T) {
 		if !ok {
 			t.Fatalf("expected usage under Qoder current model, got %+v", result.Usage)
 		}
-		if usage.InputTokens != 17 || usage.OutputTokens != 5 || usage.CacheReadTokens != 3 {
-			t.Fatalf("usage = %+v, want input=17 output=5 cache_read=3", usage)
+		if usage != (TokenUsage{InputTokens: 17, OutputTokens: 5, CacheReadTokens: 3, CacheWriteTokens: 2, CostUSDTicks: 900}) {
+			t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
@@ -973,5 +998,44 @@ func TestQoderBackendClearsSessionIDWhenResumedSessionNotFoundAtSetModel(t *test
 		}
 	case <-time.After(10 * time.Second):
 		t.Fatal("timeout waiting for result")
+	}
+}
+
+// TestQoderDrainsNotificationsAfterPromptResponse pins the trailing-notification
+// drain. qoder ACP can emit a final session update just after the
+// session/prompt response returns; closing stdin and cancelling the context at
+// that boundary raced the stdout reader and silently truncated the last chunk.
+// The same defect was fixed for the sibling ACP backends in #5440 (grok) and
+// #5675 (hermes).
+func TestQoderDrainsNotificationsAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "qoder")
+	writeTestExecutable(t, fakePath, []byte(fakeQoderACPScript()))
+
+	backend, err := New("qoder", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"QODER_LATE_CHUNK": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new qoder backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "ok tail") {
+		t.Fatalf("late output was truncated: %q", result.Output)
 	}
 }

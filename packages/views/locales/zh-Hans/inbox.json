@@ -9,6 +9,13 @@
     "archive_all_read": "归档全部已读",
     "archive_completed": "归档已完成"
   },
+  "context_menu": {
+    "mark_read": "标为已读",
+    "mark_unread": "标为未读",
+    "archive": "归档",
+    "unarchive": "取消归档",
+    "open_in_new_tab": "在新标签页打开"
+  },
   "list": {
     "empty": "暂无通知",
     "mark_done_tooltip": "标为已完成",
@@ -21,7 +28,8 @@
     },
     "archived_title": "已归档",
     "archived_empty": "暂无已归档通知",
-    "unarchive_tooltip": "取消归档"
+    "unarchive_tooltip": "取消归档",
+    "actions_aria": "通知操作"
   },
   "detail": {
     "select_prompt": "选择一条通知查看详情",
@@ -65,8 +73,13 @@
     "created_with_agent": "通过智能体创建：{{identifier}}",
     "failed_with_detail": "失败：{{detail}}"
   },
+  "toasts": {
+    "archived": "已归档通知",
+    "unarchived": "已恢复通知"
+  },
   "errors": {
     "mark_read_failed": "标为已读失败",
+    "mark_unread_failed": "标为未读失败",
     "archive_failed": "归档失败",
     "mark_done_failed": "标为已完成失败",
     "mark_all_read_failed": "全部标为已读失败",

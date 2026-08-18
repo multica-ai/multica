@@ -4,7 +4,7 @@ package agent
 
 import (
 	"errors"
-	"os"
+	"log/slog"
 	"os/exec"
 	"syscall"
 	"time"
@@ -26,28 +26,38 @@ func configureProcessGroup(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setpgid = true
 }
 
+// startOwnedProcessTree is a plain Start on non-Windows platforms:
+// configureProcessGroup already put the child in its own process group before
+// it existed, so there is nothing left to claim once it is running. The logger
+// is unused here; Windows needs it to report degraded ownership.
+func startOwnedProcessTree(cmd *exec.Cmd, _ *slog.Logger) error { return cmd.Start() }
+
+// releaseProcessGroup is a no-op on non-Windows platforms: a process group needs
+// no handle and is gone once its members are.
+func releaseProcessGroup(cmd *exec.Cmd) {}
+
 func codexInitializeRetrySupported() bool { return true }
 
-// signalProcessGroup sends sig to the whole process group led by p (when the
-// command was started with configureProcessGroup), falling back to the single
+// signalProcessGroup sends sig to the whole process group led by the command
+// (when it was started with configureProcessGroup), falling back to the single
 // process if the group send fails. Targeting the group (negative pid) reaches
 // the descendants the agent spawned, not just the leader.
-func signalProcessGroup(p *os.Process, sig syscall.Signal) {
-	if p == nil {
+func signalProcessGroup(cmd *exec.Cmd, sig syscall.Signal) {
+	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	if err := syscall.Kill(-p.Pid, sig); err != nil {
-		_ = p.Signal(sig)
+	if err := syscall.Kill(-cmd.Process.Pid, sig); err != nil {
+		_ = cmd.Process.Signal(sig)
 	}
 }
 
-func waitProcessGroupGone(p *os.Process, timeout time.Duration) bool {
-	if p == nil {
+func waitProcessGroupGone(cmd *exec.Cmd, timeout time.Duration) bool {
+	if cmd == nil || cmd.Process == nil {
 		return false
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		err := syscall.Kill(-p.Pid, 0)
+		err := syscall.Kill(-cmd.Process.Pid, 0)
 		if errors.Is(err, syscall.ESRCH) {
 			return true
 		}

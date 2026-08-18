@@ -132,10 +132,13 @@ func assertInstallationIntact(t *testing.T, ctx context.Context, pool *pgxpool.P
 	}
 }
 
-// TestDeleteChannelInstallationsByArchivedRuntimeAgents: runtime teardown hard-
-// deletes archived agents; this cleanup must sweep exactly those agents'
-// installations (and dependents), leaving live agents on the runtime untouched.
-func TestDeleteChannelInstallationsByArchivedRuntimeAgents(t *testing.T) {
+// TestDeleteChannelInstallationsBySystemRuntimeAgents: runtime teardown hard-
+// deletes only the SYSTEM agents on the runtime (user agents are unbound and
+// keep everything since MUL-5559), so this cleanup must sweep exactly those
+// agents' installations and dependents. The archived user agent in the fixture
+// is the regression: sweeping it would take a working bot away from an agent
+// that is still there.
+func TestDeleteChannelInstallationsBySystemRuntimeAgents(t *testing.T) {
 	pool := channelScopeTestDB(t)
 	ctx := context.Background()
 	q := db.New(pool)
@@ -161,19 +164,19 @@ func TestDeleteChannelInstallationsByArchivedRuntimeAgents(t *testing.T) {
 	exec(`INSERT INTO workspace (id, name, slug, description) VALUES ($1, 'cc ws', 'cc-ws', '')`, ccWS)
 	exec(`INSERT INTO agent_runtime (id, workspace_id, name, runtime_mode, provider)
 VALUES ($1, $2, 'cc runtime', 'local', 'multica_daemon')`, ccRuntime, ccWS)
-	exec(`INSERT INTO agent (id, workspace_id, name, runtime_mode, runtime_id, archived_at)
-VALUES ($1, $2, 'cc archived agent', 'local', $3, now())`, ccAgentArch, ccWS, ccRuntime)
+	exec(`INSERT INTO agent (id, workspace_id, name, runtime_mode, runtime_id, kind, system_key)
+VALUES ($1, $2, 'cc system agent', 'local', $3, 'system', 'cc_probe')`, ccAgentArch, ccWS, ccRuntime)
 	exec(`INSERT INTO agent (id, workspace_id, name, runtime_mode, runtime_id)
 VALUES ($1, $2, 'cc live agent', 'local', $3)`, ccAgentLive, ccWS, ccRuntime)
 
-	archivedID := seedFullInstallation(t, ctx, pool, ccWS, ccAgentArch, ccAppArchive, ccChatArch, ccTokenArch, ccAuditArch)
+	systemID := seedFullInstallation(t, ctx, pool, ccWS, ccAgentArch, ccAppArchive, ccChatArch, ccTokenArch, ccAuditArch)
 	liveID := seedFullInstallation(t, ctx, pool, ccWS, ccAgentLive, ccAppLive, ccChatLive, ccTokenLive, ccAuditLive)
 
-	if err := q.DeleteChannelInstallationsByArchivedRuntimeAgents(ctx, util.MustParseUUID(ccRuntime)); err != nil {
-		t.Fatalf("DeleteChannelInstallationsByArchivedRuntimeAgents: %v", err)
+	if err := q.DeleteChannelInstallationsBySystemRuntimeAgents(ctx, util.MustParseUUID(ccRuntime)); err != nil {
+		t.Fatalf("DeleteChannelInstallationsBySystemRuntimeAgents: %v", err)
 	}
 
-	assertInstallationSwept(t, ctx, pool, archivedID, ccChatArch, ccAuditArch)
+	assertInstallationSwept(t, ctx, pool, systemID, ccChatArch, ccAuditArch)
 	assertInstallationIntact(t, ctx, pool, liveID, ccChatLive, ccAuditLive)
 }
 

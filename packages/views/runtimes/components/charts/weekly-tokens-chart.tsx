@@ -42,7 +42,7 @@ export function WeeklyTokensChart({ data }: { data: WeeklyTokenData[] }) {
           axisLine={false}
           tickMargin={8}
           tickFormatter={(v: number) => formatTokens(v)}
-          width={50}
+          width="auto"
         />
         <ChartTooltip
           content={

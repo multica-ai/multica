@@ -26,58 +26,73 @@ import (
 //   - cancelled rows are NEVER returned, even when they are temporally newer
 //     than a failure — this is what keeps the failed signal sticky after the
 //     user cancels their queued retry
+//   - when two outcomes tie on completed_at AND created_at, exactly one row
+//     comes back and the pick is deterministic (id DESC) — the old
+//     completed_at-only ordering returned an arbitrary row here
 func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
 
 	ctx := context.Background()
-	// Three agents so we can verify per-agent semantics independently.
+	// Four agents so we can verify per-agent semantics independently.
 	agentA := createHandlerTestAgent(t, "snapshot-agent-a", []byte(`{}`))
 	agentB := createHandlerTestAgent(t, "snapshot-agent-b", []byte(`{}`))
 	agentC := createHandlerTestAgent(t, "snapshot-agent-c", []byte(`{}`))
+	agentD := createHandlerTestAgent(t, "snapshot-agent-d", []byte(`{}`))
 
 	type taskFixture struct {
 		agentID     string
 		status      string
 		completedAt string // SQL expression; "" for NULL
+		createdAt   string // SQL expression; "" for the column default
 		label       string
 	}
 	fixtures := []taskFixture{
 		// Agent A — actives + a newer completed supersedes an older failed.
-		{agentA, "queued", "", "A.queued"},
-		{agentA, "dispatched", "", "A.dispatched"},
-		{agentA, "running", "", "A.running"},
-		{agentA, "failed", "now() - interval '10 minutes'", "A.old_failed"},
-		{agentA, "completed", "now() - interval '30 seconds'", "A.latest_completed"},
+		{agentA, "queued", "", "", "A.queued"},
+		{agentA, "dispatched", "", "", "A.dispatched"},
+		{agentA, "running", "", "", "A.running"},
+		{agentA, "failed", "now() - interval '10 minutes'", "", "A.old_failed"},
+		{agentA, "completed", "now() - interval '30 seconds'", "", "A.latest_completed"},
 
 		// Agent B — old failure with no later outcome stays visible (no
 		// time window).
-		{agentB, "failed", "now() - interval '5 minutes'", "B.stale_failed_kept"},
+		{agentB, "failed", "now() - interval '5 minutes'", "", "B.stale_failed_kept"},
 
 		// Agent C — failure followed by a NEWER cancelled. The cancelled
 		// must be skipped by the SQL filter so the failure remains visible.
 		// This is the scenario where a user fails, then cancels their
 		// queued retry to debug.
-		{agentC, "failed", "now() - interval '5 minutes'", "C.failure"},
-		{agentC, "cancelled", "now() - interval '30 seconds'", "C.newer_cancelled_must_be_ignored"},
+		{agentC, "failed", "now() - interval '5 minutes'", "", "C.failure"},
+		{agentC, "cancelled", "now() - interval '30 seconds'", "", "C.newer_cancelled_must_be_ignored"},
+
+		// Agent D — two outcomes that tie on BOTH completed_at and
+		// created_at. Ordering by completed_at alone leaves the winner up
+		// to the plan; the (created_at, id) tie-break makes it id DESC.
+		{agentD, "completed", "timestamptz '2026-05-14 10:00:00+00'", "timestamptz '2026-05-14 09:00:00+00'", "D.tie_one"},
+		{agentD, "failed", "timestamptz '2026-05-14 10:00:00+00'", "timestamptz '2026-05-14 09:00:00+00'", "D.tie_two"},
 	}
 
 	insertedIDs := make([]string, 0, len(fixtures))
+	idByLabel := make(map[string]string, len(fixtures))
 	for _, f := range fixtures {
 		var id string
-		var query string
-		if f.completedAt == "" {
-			query = `INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority)
-			         VALUES ($1, $2, $3, 0) RETURNING id`
-		} else {
-			query = `INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, completed_at)
-			         VALUES ($1, $2, $3, 0, ` + f.completedAt + `) RETURNING id`
+		completedExpr := "NULL"
+		if f.completedAt != "" {
+			completedExpr = f.completedAt
 		}
+		createdExpr := "DEFAULT"
+		if f.createdAt != "" {
+			createdExpr = f.createdAt
+		}
+		query := `INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, completed_at, created_at)
+		          VALUES ($1, $2, $3, 0, ` + completedExpr + `, ` + createdExpr + `) RETURNING id`
 		if err := testPool.QueryRow(ctx, query, f.agentID, testRuntimeID, f.status).Scan(&id); err != nil {
 			t.Fatalf("insert %s: %v", f.label, err)
 		}
 		insertedIDs = append(insertedIDs, id)
+		idByLabel[f.label] = id
 	}
 	t.Cleanup(func() {
 		for _, id := range insertedIDs {
@@ -101,16 +116,21 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 	// don't pollute the assertions.
 	type key struct{ agent, status string }
 	counts := map[key]int{}
+	returnedForD := make([]string, 0, 2)
 	for _, task := range tasks {
-		if task.AgentID != agentA && task.AgentID != agentB && task.AgentID != agentC {
+		if task.AgentID != agentA && task.AgentID != agentB &&
+			task.AgentID != agentC && task.AgentID != agentD {
 			continue
 		}
 		counts[key{task.AgentID, task.Status}]++
+		if task.AgentID == agentD {
+			returnedForD = append(returnedForD, task.ID)
+		}
 	}
 
 	wantCounts := map[key]int{
 		// Agent A: 3 actives + the latest outcome (completed). The older
-		// failed must be excluded by DISTINCT ON.
+		// failed must be excluded by the per-agent Top-1 lookup.
 		{agentA, "queued"}:     1,
 		{agentA, "dispatched"}: 1,
 		{agentA, "running"}:    1,
@@ -133,10 +153,26 @@ func TestListWorkspaceAgentTaskSnapshot(t *testing.T) {
 		t.Errorf("agent A old failed must be superseded by newer completed; got %d", counts[key{agentA, "failed"}])
 	}
 
+	// Agent D's two outcomes tie on completed_at and created_at, so the
+	// snapshot must still return exactly one row, and it must be the higher
+	// id — the last tie-break in the query's ORDER BY. Without that
+	// tie-break the winner depends on the plan, which made this endpoint's
+	// output non-deterministic for same-timestamp outcomes.
+	if len(returnedForD) != 1 {
+		t.Fatalf("agent D: expected exactly 1 outcome row on a full tie, got %d (%v)", len(returnedForD), returnedForD)
+	}
+	wantD := idByLabel["D.tie_one"]
+	if idByLabel["D.tie_two"] > wantD {
+		wantD = idByLabel["D.tie_two"]
+	}
+	if returnedForD[0] != wantD {
+		t.Errorf("agent D: expected the higher id %s to win the tie, got %s", wantD, returnedForD[0])
+	}
+
 	// No cancelled row may ever appear in the snapshot — they're filtered at
 	// SQL level so the front-end's "cancel doesn't mask failure" rule lands
 	// without any front-end logic.
-	for _, agentID := range []string{agentA, agentB, agentC} {
+	for _, agentID := range []string{agentA, agentB, agentC, agentD} {
 		if counts[key{agentID, "cancelled"}] != 0 {
 			t.Errorf("agent %s: cancelled rows must be excluded from snapshot; got %d",
 				agentID, counts[key{agentID, "cancelled"}])

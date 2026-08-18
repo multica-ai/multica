@@ -13,11 +13,10 @@ import (
 // TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellFile is the core
 // Windows test: when LookPath resolves pi to the npm-installed .cmd
 // launcher and a sibling pi.ps1 exists, we should invoke PowerShell with
-// -File <ps1> and forward every original arg unchanged — including the
-// multi-line positional prompt that would otherwise be mangled by the
-// cmd.exe %* re-expansion inside pi.cmd. This is the regression test for
-// #3306: daemon argv carried the full prompt, but Pi's session JSONL only
-// recorded the first line.
+// -File <ps1> and forward every original arg unchanged — including a synthetic
+// multi-line value that cmd.exe %* would otherwise mangle. The task prompt now
+// travels on stdin (#6457), but this preserves the #3306 launcher guarantee for
+// custom option values and keeps the historical failure mode covered.
 func TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellFile(t *testing.T) {
 	dir := t.TempDir()
 	cmdPath := filepath.Join(dir, "pi.cmd")

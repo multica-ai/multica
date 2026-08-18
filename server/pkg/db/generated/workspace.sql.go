@@ -72,6 +72,9 @@ cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id
 ),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
+),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
     -- chat_session rows cascade away with the workspace, so reach the cards through
@@ -113,6 +116,23 @@ cleared_installations AS (
 cleared_issue_properties AS (
     DELETE FROM issue_property WHERE workspace_id = $1
 ),
+cleared_quick_actions AS (
+    DELETE FROM quick_action WHERE workspace_id = $1
+),
+ws_mcp_servers AS (
+    SELECT id FROM workspace_mcp_server WHERE workspace_id = $1
+),
+cleared_agent_mcp_bindings AS (
+    -- agent_mcp_server carries no FK in either direction, so sweep it from
+    -- both sides: the workspace's own servers, and any binding held by an
+    -- agent that is about to be removed with the workspace.
+    DELETE FROM agent_mcp_server
+    WHERE server_id IN (SELECT id FROM ws_mcp_servers)
+       OR agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_workspace_mcp_servers AS (
+    DELETE FROM workspace_mcp_server WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
 ),
@@ -151,8 +171,8 @@ cleared_client_usage_workspace AS (
 DELETE FROM workspace WHERE workspace.id = $1
 `
 
-// The channel_* tables (MUL-3515 §4), resource-label junctions, and custom issue
-// property definitions carry NO FK to workspace, so — unlike the CASCADE-backed
+// The channel_* tables (MUL-3515 §4), resource-label junctions, custom issue
+// property definitions, and quick actions carry NO FK to workspace, so — unlike the CASCADE-backed
 // tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
 // their workspace-owned rows here so they commit or roll back atomically with
 // the workspace row.

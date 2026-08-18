@@ -7,9 +7,14 @@
     "highlight": "ハイライト",
     "link": "リンク",
     "list": "リスト",
-    "task_list": "タスクリスト",
+    "task_list": "チェックリスト",
     "quote": "引用",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "リンクを適用",
+      "remove": "リンクを削除",
+      "close": "リンク編集を閉じる"
+    },
     "heading_dropdown": {
       "text": "テキスト",
       "normal_text": "標準テキスト",
@@ -20,12 +25,12 @@
     "list_dropdown": {
       "bullet_list": "箇条書きリスト",
       "ordered_list": "番号付きリスト",
-      "task_list": "タスクリスト"
+      "task_list": "チェックリスト"
     },
     "sub_issue": {
-      "tooltip": "選択範囲からサブイシューを作成",
+      "tooltip": "選択範囲からサブタスクを作成",
       "created": "{{identifier}} を作成しました",
-      "create_failed": "サブイシューを作成できませんでした"
+      "create_failed": "サブタスクを作成できませんでした"
     }
   },
   "image": {
@@ -35,7 +40,11 @@
     "delete": "削除",
     "link_copied": "リンクをコピーしました",
     "copy_link_failed": "リンクをコピーできませんでした",
-    "canvas_label": "画像キャンバス。ドラッグで移動、スクロールで拡大縮小、ダブルクリックで実際のサイズに切り替えできます。"
+    "canvas_label": "画像キャンバス。ドラッグで移動、スクロールで拡大縮小、ダブルクリックで実際のサイズに切り替えできます。",
+    "previous": "前の画像",
+    "next": "次の画像",
+    "sequence_position": "{{index}} / {{total}}",
+    "unavailable": "この画像は表示できないためスキップしました。"
   },
   "canvas": {
     "zoom_in": "拡大",
@@ -62,13 +71,14 @@
   },
   "mention": {
     "group_users": "ユーザー",
-    "group_issues": "イシュー",
+    "group_issues": "タスク",
     "all_members": "すべてのメンバー",
     "searching": "検索中...",
     "no_results": "結果なし",
     "group_current": "現在のページ",
     "group_recent": "最近見た項目",
-    "group_search": "検索結果"
+    "group_search": "検索結果",
+    "group_cancelled": "キャンセル済み"
   },
   "code_block": {
     "copy_code": "コードをコピー",

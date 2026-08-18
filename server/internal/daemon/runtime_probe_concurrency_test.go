@@ -5,6 +5,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // TestDetectBuiltinRuntimes_ProbesRunConcurrently proves the registration
@@ -22,7 +24,7 @@ func TestDetectBuiltinRuntimes_ProbesRunConcurrently(t *testing.T) {
 
 	const probeBlock = 100 * time.Millisecond
 	var inFlight, maxInFlight int32
-	detectAgentVersion = func(_ context.Context, _ string) (string, error) {
+	detectAgentVersion = func(_ context.Context, _ agent.Command) (string, error) {
 		cur := atomic.AddInt32(&inFlight, 1)
 		for {
 			prev := atomic.LoadInt32(&maxInFlight)
@@ -47,7 +49,7 @@ func TestDetectBuiltinRuntimes_ProbesRunConcurrently(t *testing.T) {
 	}
 
 	start := time.Now()
-	runtimes := d.detectBuiltinRuntimes(context.Background())
+	runtimes, _, _ := d.detectBuiltinRuntimes(context.Background())
 	elapsed := time.Since(start)
 
 	if len(runtimes) != len(d.cfg.Agents) {
@@ -83,7 +85,8 @@ func TestDetectBuiltinRuntimes_SkipsFailedProbes(t *testing.T) {
 		checkAgentMinVersion = origCheck
 	})
 
-	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		path := runtimeCmd.Path
 		if path == "/broken" {
 			return "", context.DeadlineExceeded
 		}
@@ -104,7 +107,7 @@ func TestDetectBuiltinRuntimes_SkipsFailedProbes(t *testing.T) {
 		"tooold": {Path: "/usr/bin/true"},
 	}
 
-	runtimes := d.detectBuiltinRuntimes(context.Background())
+	runtimes, _, _ := d.detectBuiltinRuntimes(context.Background())
 	got := map[string]bool{}
 	for _, rt := range runtimes {
 		got[rt["type"]] = true

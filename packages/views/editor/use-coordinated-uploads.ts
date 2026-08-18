@@ -9,7 +9,8 @@
  * surface's draft IMMEDIATELY (through the {@link UploadDraftBinding}), then
  * hands the file to the coordinator. Closing or scrolling the composer away no
  * longer aborts the upload; logout aborts every tracked request; a placeholder
- * still `uploading` at load time is coerced to `interrupted` by the store.
+ * still `uploading` at load time is DROPPED by the store — the bytes were never
+ * persisted, so it can neither resume nor be retried.
  *
  * `onSettled` is generation-guarded: it re-reads the draft and only writes if
  * the placeholder is still tracked (the draft may have been submitted or
@@ -205,8 +206,17 @@ export interface CoordinatedUploads {
   /** Completed attachment rows — the editor preview set; submit binds the
    *  subset whose link the body still references. */
   attachments: Attachment[];
-  /** Wire to `<ContentEditor onUploadFile={...} />`. */
-  handleUpload: (file: File) => Promise<UploadResult | null>;
+  /**
+   * Wire to `<ContentEditor onUploadFile={...} />`.
+   *
+   * The editor mints `uploadId` when it draws the placeholder node and hands it
+   * in here, so the document node and the draft record share ONE id — that is
+   * what lets a settle reaching a mount which did not start the upload find the
+   * node again. Keep this second parameter in the type: a mock or a hand-rolled
+   * caller that drops it silently mints a second id and breaks that link.
+   * Optional only for a caller with no editor placeholder to match.
+   */
+  handleUpload: (file: File, uploadId?: string) => Promise<UploadResult | null>;
   /** Drop a placeholder (dismiss a failure / interrupted). */
   removeUpload: (clientUploadId: string) => void;
   /**
@@ -444,9 +454,9 @@ export function useCoordinatedUploads(
               // `isMeaningful` counts it, so a single flaky request keeps an
               // otherwise-empty draft alive for the full 30-day TTL.
               //
-              // `interrupted` is the opposite case and still gets a chip: it
-              // is discovered a session later, when the user no longer
-              // remembers attaching anything.
+              // Legacy `interrupted` records still get a chip for the reason
+              // this one does not: they are discovered a session later, when
+              // the user no longer remembers attaching anything.
               if (target) {
                 if (target.getUploads().some((u) => u.clientUploadId === clientUploadId)) {
                   target.removeUpload(clientUploadId);

@@ -242,8 +242,14 @@ func simulateCopilotEventLoop(t *testing.T, lines []string) ([]Message, string, 
 
 func simulateCopilotEventLoopWithModel(t *testing.T, lines []string, seedModel string) ([]Message, string, string, map[string]TokenUsage) {
 	t.Helper()
+	msgs, st := runCopilotEventLoop(t, lines, seedModel, false)
+	return msgs, st.sessionID, st.finalStatus, st.resolveUsage()
+}
+
+func runCopilotEventLoop(t *testing.T, lines []string, seedModel string, resumed bool) ([]Message, *copilotEventState) {
+	t.Helper()
 	var msgs []Message
-	st := newCopilotEventState(seedModel)
+	st := newCopilotEventState(seedModel, resumed)
 
 	for _, line := range lines {
 		var evt copilotEvent
@@ -252,7 +258,7 @@ func simulateCopilotEventLoopWithModel(t *testing.T, lines []string, seedModel s
 		}
 		msgs = append(msgs, handleCopilotEvent(evt, st)...)
 	}
-	return msgs, st.sessionID, st.finalStatus, st.usage
+	return msgs, st
 }
 
 func TestCopilotEventLoopSimpleMessage(t *testing.T) {
@@ -440,7 +446,7 @@ func TestCopilotEventLoopNonZeroExit(t *testing.T) {
 
 func TestCopilotEventLoopSessionErrorSurvivesNonZeroResult(t *testing.T) {
 	t.Parallel()
-	st := newCopilotEventState("copilot")
+	st := newCopilotEventState("copilot", false)
 
 	for _, line := range []string{fixtureSessionError, fixtureResultNonZero} {
 		var evt copilotEvent
@@ -517,6 +523,209 @@ func TestCopilotEventLoopMultiTurnUsage(t *testing.T) {
 	}
 	if u := usage["claude-opus-4.6"]; u.OutputTokens != 106 {
 		t.Fatalf("expected 106 tokens under 'claude-opus-4.6', got %d", u.OutputTokens)
+	}
+}
+
+// ── Token accounting (MUL-5712) ──
+
+const fixtureAssistantUsage = `{"type":"assistant.usage","data":{"model":"claude-sonnet-4.5","inputTokens":12000,"outputTokens":250,"cacheReadTokens":9000,"cacheWriteTokens":1500,"reasoningTokens":80,"duration":1400},"id":"u-1","timestamp":"2026-08-04T08:00:01.000Z","parentId":"p-1","ephemeral":true}`
+
+const fixtureShutdown = `{"type":"session.shutdown","data":{"shutdownType":"routine","totalPremiumRequests":3,"modelMetrics":{"claude-sonnet-4.5":{"requests":{"count":3,"cost":3},"usage":{"inputTokens":30000,"outputTokens":900,"cacheReadTokens":24000,"cacheWriteTokens":2000,"reasoningTokens":100}}}},"id":"sd-1","timestamp":"2026-08-04T08:00:09.000Z","parentId":"p-1"}`
+
+func TestCopilotAssistantUsageIsAuthoritative(t *testing.T) {
+	t.Parallel()
+	// assistant.usage carries the full breakdown; assistant.message.outputTokens
+	// describes the SAME tokens, so the two must never be summed.
+	lines := []string{
+		fixtureSessionStart,
+		fixtureTurnStart,
+		fixtureAssistantUsage,
+		fixtureAssistantMessage, // 5 outputTokens — superseded
+		fixtureResult,
+	}
+
+	_, _, _, usage := simulateCopilotEventLoop(t, lines)
+
+	if len(usage) != 1 {
+		t.Fatalf("expected exactly one model entry, got %#v", usage)
+	}
+	u, ok := usage["claude-sonnet-4.5"]
+	if !ok {
+		t.Fatalf("expected usage under 'claude-sonnet-4.5', got %#v", usage)
+	}
+	// inputTokens includes the cached tiers, so uncached input is 12000-9000-1500.
+	if u.InputTokens != 1500 {
+		t.Fatalf("expected 1500 uncached input tokens, got %d", u.InputTokens)
+	}
+	if u.OutputTokens != 250 {
+		t.Fatalf("expected 250 output tokens (not 255 — message tokens must not be added), got %d", u.OutputTokens)
+	}
+	if u.CacheReadTokens != 9000 || u.CacheWriteTokens != 1500 {
+		t.Fatalf("expected cache 9000/1500, got %d/%d", u.CacheReadTokens, u.CacheWriteTokens)
+	}
+}
+
+func TestCopilotAssistantUsageNeverGoesNegative(t *testing.T) {
+	t.Parallel()
+	// Defensive: a CLI that reports inputTokens EXCLUDING cache would otherwise
+	// drive uncached input negative.
+	lines := []string{
+		`{"type":"assistant.usage","data":{"model":"m","inputTokens":100,"outputTokens":10,"cacheReadTokens":9000,"cacheWriteTokens":0},"id":"u","timestamp":"2026-08-04T08:00:01.000Z"}`,
+	}
+
+	_, _, _, usage := simulateCopilotEventLoop(t, lines)
+
+	if u := usage["m"]; u.InputTokens != 0 {
+		t.Fatalf("expected input tokens clamped to 0, got %d", u.InputTokens)
+	}
+}
+
+func TestCopilotShutdownUsageFallback(t *testing.T) {
+	t.Parallel()
+	// No assistant.usage and no outputTokens: the session totals are all we have.
+	lines := []string{fixtureSessionStart, fixtureTurnStart, fixtureShutdown, fixtureResult}
+
+	_, _, _, usage := simulateCopilotEventLoop(t, lines)
+
+	u, ok := usage["claude-sonnet-4.5"]
+	if !ok {
+		t.Fatalf("expected session.shutdown totals to be used, got %#v", usage)
+	}
+	if u.InputTokens != 4000 || u.OutputTokens != 900 {
+		t.Fatalf("expected 4000/900 input/output, got %d/%d", u.InputTokens, u.OutputTokens)
+	}
+}
+
+func TestCopilotShutdownBeatsMessageOnFreshRun(t *testing.T) {
+	t.Parallel()
+	// A CLI that still populates assistant.message.outputTokens AND emits the
+	// session totals: the totals win, because outputTokens describes only part
+	// of the same tokens and taking it would drop input and cache entirely.
+	lines := []string{
+		fixtureSessionStart,
+		fixtureTurnStart,
+		fixtureAssistantMessage, // 5 outputTokens, no input/cache
+		fixtureShutdown,
+		fixtureResult,
+	}
+
+	_, _, _, usage := simulateCopilotEventLoop(t, lines)
+
+	u, ok := usage["claude-sonnet-4.5"]
+	if !ok {
+		t.Fatalf("expected the session totals to win over message outputTokens, got %#v", usage)
+	}
+	if u.InputTokens != 4000 || u.OutputTokens != 900 {
+		t.Fatalf("expected 4000/900 input/output from session.shutdown, got %d/%d", u.InputTokens, u.OutputTokens)
+	}
+	if u.CacheReadTokens != 24000 || u.CacheWriteTokens != 2000 {
+		t.Fatalf("expected cache 24000/2000, got %d/%d", u.CacheReadTokens, u.CacheWriteTokens)
+	}
+}
+
+func TestCopilotTokenlessUsageEventDoesNotShadow(t *testing.T) {
+	t.Parallel()
+	// Every token field on assistant.usage is optional upstream. A usage event
+	// that names only a model must not mark that source populated and shadow
+	// the sources that do carry numbers.
+	tokenless := `{"type":"assistant.usage","data":{"model":"claude-sonnet-4.5","duration":900},"id":"u-0","timestamp":"2026-08-04T08:00:01.000Z","ephemeral":true}`
+
+	t.Run("falls through to session totals", func(t *testing.T) {
+		t.Parallel()
+		lines := []string{fixtureSessionStart, fixtureTurnStart, tokenless, fixtureShutdown, fixtureResult}
+
+		_, _, _, usage := simulateCopilotEventLoop(t, lines)
+
+		if u := usage["claude-sonnet-4.5"]; u.OutputTokens != 900 {
+			t.Fatalf("expected session totals to survive a tokenless usage event, got %#v", usage)
+		}
+	})
+
+	t.Run("falls through to message tokens on resume", func(t *testing.T) {
+		t.Parallel()
+		// Resumed, so the session totals are off the table and the legacy
+		// message tokens are the only thing left.
+		lines := []string{fixtureSessionStart, fixtureTurnStart, tokenless, fixtureAssistantMessage, fixtureShutdown, fixtureResult}
+
+		_, st := runCopilotEventLoop(t, lines, "copilot", true)
+
+		usage := st.resolveUsage()
+		if u := usage["claude-sonnet-4.5"]; u.OutputTokens != 5 {
+			t.Fatalf("expected the 5 message outputTokens to survive, got %#v", usage)
+		}
+	})
+}
+
+func TestCopilotShutdownUsageSkippedOnResume(t *testing.T) {
+	t.Parallel()
+	// session.shutdown totals span the WHOLE session, and the CLI restores its
+	// accumulators on resume — reporting them on a follow-up turn would bill
+	// every earlier turn again. Reporting nothing is the lesser error.
+	lines := []string{fixtureSessionStart, fixtureTurnStart, fixtureShutdown, fixtureResult}
+
+	_, st := runCopilotEventLoop(t, lines, "copilot", true)
+
+	if usage := st.resolveUsage(); len(usage) != 0 {
+		t.Fatalf("expected no usage on a resumed run, got %#v", usage)
+	}
+}
+
+func TestCopilotResumeStillReportsPerCallUsage(t *testing.T) {
+	t.Parallel()
+	// assistant.usage is per model call, so a resumed run reports it normally.
+	lines := []string{fixtureSessionStart, fixtureTurnStart, fixtureAssistantUsage, fixtureShutdown, fixtureResult}
+
+	_, st := runCopilotEventLoop(t, lines, "copilot", true)
+
+	usage := st.resolveUsage()
+	if len(usage) != 1 {
+		t.Fatalf("expected per-call usage on a resumed run, got %#v", usage)
+	}
+	if u := usage["claude-sonnet-4.5"]; u.OutputTokens != 250 {
+		t.Fatalf("expected the per-call figure (250), not the session total (900), got %d", u.OutputTokens)
+	}
+}
+
+func TestCopilotAssistantMessageModelAttribution(t *testing.T) {
+	t.Parallel()
+	// assistant.message names its own model. Before this the first turn's tokens
+	// landed under the seed model — the unpriceable literal "copilot".
+	lines := []string{
+		fixtureTurnStart,
+		`{"type":"assistant.message","data":{"messageId":"m1","model":"claude-opus-4.6","content":"hi","toolRequests":[],"outputTokens":42},"id":"e1","timestamp":"2026-08-04T08:00:02.000Z"}`,
+		fixtureResult,
+	}
+
+	_, _, _, usage := simulateCopilotEventLoop(t, lines)
+
+	if _, ok := usage["copilot"]; ok {
+		t.Fatalf("tokens must not be filed under the seed model when the message names one: %#v", usage)
+	}
+	if u := usage["claude-opus-4.6"]; u.OutputTokens != 42 {
+		t.Fatalf("expected 42 output tokens under 'claude-opus-4.6', got %#v", usage)
+	}
+}
+
+func TestCopilotModernStreamReportsNoUsage(t *testing.T) {
+	t.Parallel()
+	// Copilot CLI 1.0.77 shape: assistant.message without outputTokens or model,
+	// tool.execution_complete without model, and no assistant.usage /
+	// session.shutdown (the CLI filters both off stdout). Nothing to report —
+	// this documents the upstream gap so a future CLI change shows up as a
+	// failing test rather than a silent one.
+	lines := []string{
+		`{"type":"session.start","data":{"sessionId":"s1","version":1,"producer":"copilot-agent"},"id":"e1","timestamp":"2026-08-04T08:00:00.000Z"}`,
+		`{"type":"assistant.turn_start","data":{"turnId":"t1"},"id":"e2","timestamp":"2026-08-04T08:00:01.000Z"}`,
+		`{"type":"assistant.message","data":{"messageId":"m1","content":"","toolRequests":[{"toolCallId":"c1","name":"bash","arguments":{"command":"ls"}}]},"id":"e3","timestamp":"2026-08-04T08:00:02.000Z"}`,
+		`{"type":"tool.execution_complete","data":{"toolCallId":"c1","success":true,"turnId":"t1","result":{"content":"a.go\n"}},"id":"e4","timestamp":"2026-08-04T08:00:03.000Z"}`,
+		`{"type":"assistant.message","data":{"messageId":"m2","content":"Done."},"id":"e5","timestamp":"2026-08-04T08:00:04.000Z"}`,
+		fixtureResult,
+	}
+
+	_, _, _, usage := simulateCopilotEventLoop(t, lines)
+
+	if len(usage) != 0 {
+		t.Fatalf("expected no usage from a 1.0.77-shaped stream, got %#v", usage)
 	}
 }
 
@@ -640,7 +849,7 @@ func TestCopilotEventLoopDeltaFallbackOutput(t *testing.T) {
 		`{"type":"assistant.message_delta","data":{"messageId":"m1","deltaContent":"world"},"id":"d2","timestamp":"2026-04-16T08:43:38.100Z","parentId":"p1","ephemeral":true}`,
 	}
 
-	st := newCopilotEventState("copilot")
+	st := newCopilotEventState("copilot", false)
 	for _, line := range lines {
 		var evt copilotEvent
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {
@@ -669,7 +878,7 @@ func TestCopilotEventLoopDeliversFinalTurnOnly(t *testing.T) {
 		`{"type":"assistant.message","data":{"messageId":"m2","content":"The retry loop is the cause."},"id":"a2","timestamp":"2026-04-16T08:43:40.100Z","parentId":"p1"}`,
 	}
 
-	st := newCopilotEventState("copilot")
+	st := newCopilotEventState("copilot", false)
 	var streamed []string
 	for _, line := range lines {
 		var evt copilotEvent
@@ -708,7 +917,7 @@ func TestCopilotEventLoopToolOnlyTurnClearsPendingDelta(t *testing.T) {
 		`{"type":"assistant.message_delta","data":{"messageId":"m2","deltaContent":"The retry loop"},"id":"d2","timestamp":"2026-04-16T08:43:40.000Z","parentId":"p1","ephemeral":true}`,
 	}
 
-	st := newCopilotEventState("copilot")
+	st := newCopilotEventState("copilot", false)
 	for _, line := range lines {
 		var evt copilotEvent
 		if err := json.Unmarshal([]byte(line), &evt); err != nil {

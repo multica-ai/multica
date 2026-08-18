@@ -13,11 +13,16 @@ const MCP_SUPPORTED_PROVIDERS = new Set([
   "grok",
   "hermes",
   "kimi",
+  "reasonix",
+  "dsh",
   "kiro",
   "opencode",
   "openclaw",
   "qoder",
+  "qoderclicn",
   "qwen",
+  "qwenpaw",
+  "mcode",
   "traecli",
 ]);
 

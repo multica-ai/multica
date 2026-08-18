@@ -51,6 +51,13 @@ func redisClientName(existing, suffix string) string {
 	return "multica-api:" + suffix
 }
 
+func channelLeaseRedisURLFromEnv() string {
+	if dedicated := strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_REDIS_URL")); dedicated != "" {
+		return dedicated
+	}
+	return strings.TrimSpace(os.Getenv("REDIS_URL"))
+}
+
 func closeRedisClient(label string, client *redis.Client) {
 	if client == nil {
 		return
@@ -92,6 +99,19 @@ func envPositiveInt(name string, def int) int {
 	}
 	v, err := strconv.Atoi(raw)
 	if err != nil || v <= 0 {
+		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", def, "error", err)
+		return def
+	}
+	return v
+}
+
+func envNonNegativeInt(name string, def int) int {
+	raw := os.Getenv(name)
+	if raw == "" {
+		return def
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil || v < 0 {
 		slog.Warn("invalid env var, using default", "name", name, "value", raw, "default", def, "error", err)
 		return def
 	}
@@ -172,6 +192,10 @@ func envBool(name string, def bool) bool {
 	return v
 }
 
+func backgroundServices(h *handler.Handler) (*service.TaskService, *service.AutopilotService) {
+	return h.TaskService, h.AutopilotService
+}
+
 func main() {
 	logger.Init()
 
@@ -198,7 +222,7 @@ func main() {
 
 	// Feature flags: loaded once at startup from MULTICA_FEATURE_FLAGS_FILE
 	// (a YAML rule set) with FF_<KEY> env overrides layered on top.
-	// See docs/feature-flags.md for the schema and lifecycle rules.
+	// See server/pkg/featureflag for the schema and lifecycle rules.
 	//
 	// Booting the server without any flag config is intentional: when the
 	// env var is unset, every IsEnabled call falls through to the caller's
@@ -211,7 +235,7 @@ func main() {
 		slog.Error("feature flag configuration failed to load", "error", err)
 		os.Exit(1)
 	}
-	_ = flags // adopted by the router (opts.FeatureFlags) and server-side toggle points; see docs/feature-flags.md
+	_ = flags // adopted by the router (opts.FeatureFlags) and server-side toggle points; see server/pkg/featureflag
 
 	dbURL := os.Getenv("DATABASE_URL")
 	if dbURL == "" {
@@ -245,10 +269,12 @@ func main() {
 	// is the sole broadcaster and the server stays single-node (legacy).
 	// Runtime local-skill stores and realtime relay traffic use separate Redis
 	// clients so blocking stream consumers cannot starve request-path Redis
-	// operations.
+	// operations. Channel leases are initialized separately below so production
+	// can point them at a dedicated no-eviction Redis instance.
 	relayCtx, relayCancel := context.WithCancel(context.Background())
 	var broadcaster realtime.Broadcaster = hub
 	var storeRedis *redis.Client
+	var channelLeaseRedis *redis.Client
 	var relayWriteRedis *redis.Client
 	var relayReadRedis *redis.Client
 	var shardedReadRedis *redis.Client
@@ -266,6 +292,7 @@ func main() {
 		closeRedisClient("realtime-read-sharded", shardedReadRedis)
 		closeRedisClient("realtime-read", relayReadRedis)
 		closeRedisClient("realtime-write", relayWriteRedis)
+		closeRedisClient("channel-lease", channelLeaseRedis)
 		closeRedisClient("store", storeRedis)
 	}()
 	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
@@ -319,6 +346,16 @@ func main() {
 	} else {
 		slog.Info("realtime: REDIS_URL not set — using in-memory hub (single-node mode)")
 	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_BACKEND")), "redis") {
+		leaseRedisURL := channelLeaseRedisURLFromEnv()
+		if leaseRedisURL == "" {
+			slog.Error("channel leases: CHANNEL_WS_LEASE_REDIS_URL and REDIS_URL are unset")
+		} else if opts, err := redis.ParseURL(leaseRedisURL); err != nil {
+			slog.Error("channel leases: invalid Redis URL; supervisor will fail closed", "error", err)
+		} else {
+			channelLeaseRedis = newNamedRedisClient(opts, "channel-lease")
+		}
+	}
 	registerListeners(bus, broadcaster)
 
 	analyticsClient := analytics.NewFromEnv()
@@ -329,7 +366,7 @@ func main() {
 	// Order matters: subscriber listeners must register BEFORE notification listeners.
 	// The notification listener queries the subscriber table to determine recipients,
 	// so subscribers must be written first within the same synchronous event dispatch.
-	registerSubscriberListeners(bus, queries)
+	registerSubscriberListeners(bus, pool)
 	registerActivityListeners(bus, queries)
 	registerNotificationListeners(bus, queries)
 
@@ -339,6 +376,8 @@ func main() {
 	var businessMetrics *obsmetrics.BusinessMetrics
 	var samplerPool *pgxpool.Pool
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
+	var channelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
+	var wecomMetrics *obsmetrics.WecomMetrics
 	if metricsConfig.Enabled() {
 		// Build a dedicated tiny pool for the BusinessSamplerCollector
 		// so a stalled scrape can never starve business traffic. If the
@@ -367,6 +406,8 @@ func main() {
 		httpMetrics = metricsRegistry.HTTP
 		businessMetrics = metricsRegistry.Business
 		channelMediaMetrics = metricsRegistry.ChannelMedia
+		channelLeaseMetrics = metricsRegistry.ChannelLease
+		wecomMetrics = metricsRegistry.Wecom
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
 		if daemonHub != nil {
@@ -391,12 +432,15 @@ func main() {
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
-		HTTPMetrics:        httpMetrics,
-		BusinessMetrics:    businessMetrics,
-		DaemonHub:          daemonHub,
-		DaemonWakeup:       daemonWakeup,
-		FeatureFlags:       flags,
-		HeartbeatScheduler: heartbeatScheduler,
+		HTTPMetrics:         httpMetrics,
+		BusinessMetrics:     businessMetrics,
+		ChannelLeaseMetrics: channelLeaseMetrics,
+		ChannelLeaseRedis:   channelLeaseRedis,
+		WecomMetrics:        wecomMetrics,
+		DaemonHub:           daemonHub,
+		DaemonWakeup:        daemonWakeup,
+		FeatureFlags:        flags,
+		HeartbeatScheduler:  heartbeatScheduler,
 	})
 
 	srv := &http.Server{
@@ -407,10 +451,12 @@ func main() {
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
 	autopilotCtx, autopilotCancel := context.WithCancel(context.Background())
-	taskSvc := service.NewTaskService(queries, pool, hub, bus, daemonWakeup)
-	taskSvc.Analytics = analyticsClient
-	taskSvc.Metrics = businessMetrics
-	autopilotSvc := service.NewAutopilotService(queries, pool, bus, taskSvc)
+	// Reuse the router's services here. In particular, the router wires the
+	// EmptyClaim cache into TaskService; constructing a second TaskService for
+	// scheduled Autopilot dispatch would send the daemon wakeup without bumping
+	// that cache's version, so an idle runtime could keep returning an empty
+	// claim until the cache TTL expires.
+	taskSvc, autopilotSvc := backgroundServices(h)
 	registerAutopilotListeners(bus, autopilotSvc)
 
 	// Construct a LivenessStore that mirrors the one wired into the HTTP
@@ -423,7 +469,7 @@ func main() {
 	}
 
 	// Start background sweeper to mark stale runtimes as offline.
-	go runRuntimeSweeper(sweepCtx, queries, liveness, taskSvc, bus)
+	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	go runDBStatsLogger(sweepCtx, pool)
@@ -435,10 +481,10 @@ func main() {
 	h.PRRefresh.Start(sweepCtx)
 
 	// Channel inbound supervisor (MUL-3620): holds the §4.4 WS lease per
-	// installation and drives each channel.Channel. It is built
-	// unconditionally (it is channel-agnostic, not Lark-specific), so it
-	// always exists here; with no platform registered or no installation
-	// rows it simply idles. Lifecycle is bound to sweepCtx so it winds down
+	// installation and drives each channel.Channel. It is channel-agnostic,
+	// not Lark-specific, but remains nil when lease startup validation fails
+	// (notably Redis fail-closed readiness). With no platform registered or no
+	// installation rows it simply idles. Lifecycle is bound to sweepCtx so it winds down
 	// alongside the other long-running workers, AFTER the HTTP server has
 	// drained.
 	if h.ChannelSupervisor != nil {

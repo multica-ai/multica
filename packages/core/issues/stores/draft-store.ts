@@ -40,7 +40,7 @@ export interface IssueCreateShared {
    *  image survives a mode switch from either side; each submit path sends
    *  only the ids its own content references. Coordinator-owned (MUL-5181 L2):
    *  a placeholder written at pick time survives dialog close, and one still
-   *  `uploading` at load time is coerced to `interrupted` on rehydrate. */
+   *  `uploading` at load time is dropped on rehydrate. */
   attachments: DraftUpload[];
 }
 
@@ -135,7 +135,7 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
         priority: (d.priority as IssuePriority) ?? "none",
         dueDate: (d.dueDate as string | null) ?? null,
         // Legacy builds persisted bare Attachment rows; normalize wraps them
-        // as `uploaded` placeholders (and coerces stale `uploading` ones).
+        // as `uploaded` placeholders (and drops stale `uploading` ones).
         attachments: normalizeStoredUploads(d.attachments),
       },
       manual: {
@@ -163,7 +163,7 @@ function migrateDraft(raw: unknown): IssueCreateDraft {
       ...emptyShared(),
       ...sharedRaw,
       // Pre-L2 nested drafts stored bare Attachment rows; every load also
-      // coerces `uploading` placeholders to `interrupted` (bytes are gone).
+      // drops `uploading` placeholders (bytes are gone).
       attachments: normalizeStoredUploads(sharedRaw.attachments),
     },
     manual: { ...emptyManual(), ...((d.manual as Partial<IssueCreateManual>) ?? {}) },

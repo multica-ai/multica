@@ -76,6 +76,41 @@ func TestBuildMetaSkillContentBriefContent(t *testing.T) {
 	}
 }
 
+// TestBuildMetaSkillContentIssueBodyFormatting pins the shared issue-body
+// hierarchy rule across every task kind that can author an issue.
+func TestBuildMetaSkillContentIssueBodyFormatting(t *testing.T) {
+	t.Parallel()
+
+	fixtures := map[string]TaskContextForEnv{
+		"issue":        {IssueID: "i-1"},
+		"autopilot":    {AutopilotRunID: "r-1"},
+		"quick-create": {QuickCreatePrompt: "create an issue"},
+		"chat":         {ChatSessionID: "c-1"},
+	}
+
+	for name, ctx := range fixtures {
+		name, ctx := name, ctx
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			out := buildMetaSkillContent("codex", ctx)
+			for _, want := range []string{
+				"## Issue Body Formatting",
+				"An issue title already serves as its H1.",
+				// The rule covers BOTH surfaces: `description` is the CLI/API
+				// field name, `body` the UI term — the alias is a cross-surface
+				// mapping, not prose (MUL-5442 stage-1 review).
+				"do not add a Markdown H1 (`# ...`) to an issue body or description",
+				"start with prose or `##` subheadings",
+				"Only add an H1 when the user specifically requests one",
+			} {
+				if !strings.Contains(out, want) {
+					t.Errorf("brief is missing issue-body formatting guidance %q\n---\n%s", want, out)
+				}
+			}
+		})
+	}
+}
+
 // TestBuildMetaSkillContentSlimKindMatrix locks in which sections the
 // slim brief emits per task kind, machine-checking the matrix documented
 // on `buildMetaSkillContentSlim`. Heading is matched as a discrete line
@@ -100,6 +135,7 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Background Task Safety", allKinds},
 		{"## Agent Identity", allKinds},
 		{"## Available Commands", allKinds},
+		{"## Issue Body Formatting", allKinds},
 		{"### Workflow", allKinds},
 		{"## Important: Always Use the `multica` CLI", allKinds},
 		{"## Output", allKinds},
@@ -110,9 +146,9 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 		{"## Issue Metadata", issueKinds},
 		{"## Instruction Precedence", issueKinds},
 		{"## Sub-issue Creation", issueKinds},
-		{"## Skills", map[taskKind]bool{
-			kindIssue: true, kindAutopilotRunOnly: true, kindChat: true,
-		}},
+		// Quick-create included: it used to be skipped here and carry its own
+		// copy in issue_context.md, which nothing read. One index, one place.
+		{"## Skills", allKinds},
 		{"## Mentions", issueKinds},
 		{"## Attachments", issueKinds},
 	}
@@ -142,6 +178,38 @@ func TestBuildMetaSkillContentSlimKindMatrix(t *testing.T) {
 				t.Errorf("kind=%d: heading %q should NOT be in slim brief (matrix gating regression)", kind, c.heading)
 			}
 		}
+	}
+}
+
+// TestBriefDueDateTeachesCalendarDayFormat pins the --due-date synopsis to
+// the calendar-day format the server canonically accepts
+// (util.ParseCalendarDate: YYYY-MM-DD; an RFC3339 value passes only at exact
+// UTC midnight). MUL-5696 found the brief teaching `<RFC3339>` while the CLI
+// help and the projects skill say YYYY-MM-DD, steering agents that computed a
+// natural timestamp into 400s.
+func TestBriefDueDateTeachesCalendarDayFormat(t *testing.T) {
+	for name, ctx := range map[string]TaskContextForEnv{
+		"issue":        {IssueID: "issue-1"},
+		"quick-create": {QuickCreatePrompt: "create an issue"},
+	} {
+		out := buildMetaSkillContent("claude", ctx)
+		if !strings.Contains(out, "--due-date <YYYY-MM-DD>") {
+			t.Errorf("%s brief missing the calendar-day --due-date synopsis", name)
+		}
+		if strings.Contains(out, "--due-date <RFC3339>") {
+			t.Errorf("%s brief still teaches --due-date <RFC3339>, which the server rejects except at UTC midnight (MUL-5696)", name)
+		}
+	}
+}
+
+// TestBriefOwnsAutopilotIssueCommandsGuard pins the guard's single emission
+// point: the autopilot brief carries AutopilotIssueCommandsGuard, and the
+// per-turn prompt defers to it (daemon.TestBuildPromptAutopilotRunOnly pins
+// the deferral side). MUL-5696.
+func TestBriefOwnsAutopilotIssueCommandsGuard(t *testing.T) {
+	out := buildMetaSkillContent("claude", TaskContextForEnv{AutopilotRunID: "run-1"})
+	if !strings.Contains(out, AutopilotIssueCommandsGuard) {
+		t.Errorf("autopilot brief missing AutopilotIssueCommandsGuard — the per-turn prompt defers to this single emission point")
 	}
 }
 
@@ -201,41 +269,45 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 
 	for _, want := range []string{
 		"## Background Task Safety",
-		"Do NOT end your turn while background tasks",
-		"wait for a future notification/reminder",
-		"run the work synchronously instead",
+		// MUL-5442 judgment rewrite (owner-authorized pin renegotiation): the
+		// section now states the one platform fact, the external-systems/CI
+		// boundary with its single exception, and the review-locked
+		// persistent-service contract. Enforcement-detail pins that only
+		// restated derivations of the platform fact were retired with the
+		// prose. What stays pinned: the fact, each boundary, each exception,
+		// and the handoff triple — the things an agent cannot infer.
+		"any run-owned work still active is orphaned",
+		"no background-completion wakeup",
+		"whatever a tool response promises",
 		"Never background-and-yield",
-		"foreground tool call that blocks",
-		// MUL-5274: an explicitly requested persistent local service is a
-		// completed handoff, not unfinished run-owned work. Pin the narrow
-		// exception and its readiness / cleanup / honesty requirements.
-		"persistent service handoff",
-		"running service itself is the requested deliverable",
-		"stdio redirected to durable logs",
-		"PID/profile",
-		"verify readiness before replying",
-		"survival as best-effort, not guaranteed",
-		"does not cover tests, builds, CI polling",
-		"are not agent-owned background tasks",
+		"foreground tool calls that block",
+		"run unobservable work synchronously",
+		"standing by",
+		"are not run-owned: do not wait",
+		// The full compound ban, not its first item — MUL-5223 made this a
+		// non-derivable boundary, so no member may be silently dropped.
+		"do not run `gh pr checks --watch`, `gh run watch`, or sleep/retry polls",
 		"GitHub Actions after a successful push",
-		"Do not wait for them by default",
-		// MUL-5223 pins: named tool-shape bans, merge requirements
-		// denied as acceptance criteria, replacement hand-off phrasing,
-		// and the scoped escape hatch that keeps an explicitly requested
-		// CI result both permitted and executable.
-		"do NOT run `gh pr checks --watch`",
-		"any sleep / retry loop that polls check status",
 		"NOT your delivery acceptance criteria",
 		"CI running: <PR link>",
-		"unless the explicit exception below applies",
 		"The one exception",
 		"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
-		"running in the background so you can keep working",
-		"standing by",
+		"persistent service handoff",
+		"running service itself is the requested deliverable",
+		"durable logs",
+		"cleanup handle such as PID/profile",
+		"verify readiness",
+		"URL, logs, and stop instructions",
+		"survival as best-effort, not guaranteed",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("slim Background Task Safety missing hardened pin %q\n---\n%s", want, out)
 		}
+	}
+	// Exactly one exception (see the execenv provider-agnostic test for
+	// the incident this guards).
+	if got := strings.Count(out, "The one exception"); got != 1 {
+		t.Errorf("slim brief must state the CI exception exactly once, got %d\n---\n%s", got, out)
 	}
 	// `gh run watch` may only appear as a banned command, never as the
 	// section's example of how to wait properly.

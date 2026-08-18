@@ -35,8 +35,9 @@ Multica のコードを書く、翻訳を変更する、あるいは中国語の
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
 | `apps/web/platform/` | `next/*` | 他のアプリ |
 | `apps/desktop/.../platform/` | `react-router-dom`, electron | 他のアプリ |
+| `apps/mobile/` | `@multica/core` の型と純粋関数 | Web/Desktop の React ページ、store、プラットフォーム実装 |
 
-両方のアプリに同じロジックが現れる場合は、必ず共有パッケージに抽出しなければなりません。「ささいな」重複という例外はありません。
+両方のアプリに同じロジックが現れる場合は、必ず共有パッケージに抽出しなければなりません。「ささいな」重複という例外はありません。Mobile は独自の UI、データ層、リリースフローを持ち、型と純粋関数だけを共有します。
 
 ### ファイルとコンポーネント
 
@@ -53,6 +54,8 @@ Multica のコードを書く、翻訳を変更する、あるいは中国語の
 - 外部キー: `<table>_id`
 - ブール値: `is_<state>` または `<state>_at`（状態変更にはタイムスタンプ形式を推奨）
 - マイグレーションファイル: `NNN_descriptive_name.up.sql` + `.down.sql` — 常に双方向を提供する
+- データベースの foreign key、cascade delete、cascade update は作成せず、関係の検証とクリーンアップをアプリケーション層で行う
+- すべてのインデックスで `CREATE INDEX CONCURRENTLY` または `CREATE UNIQUE INDEX CONCURRENTLY` を使用し、各 concurrent index を 1 文だけの migration ファイルに分ける
 
 ### Go
 
@@ -67,6 +70,13 @@ Multica のコードを書く、翻訳を変更する、あるいは中国語の
 - 型: `PascalCase`（`Issue`, `AgentRuntime`）；`IPrefix` は禁止、`_t` サフィックスも禁止。
 - 列挙: string literal union を推奨し、ランタイムで反復処理が必要な場合にのみ `enum` を使用。
 - TanStack Query のキー: `<feature>/queries.ts` 内のファクトリ関数、例: `issueKeys.detail(id)`。
+
+### API 境界
+
+- ネットワークレスポンスは `packages/core/api/schema.ts` の `parseWithFallback` と zod schema で解析し、`as T` で直接キャストしない
+- endpoint を追加または変更するときは schema も更新し、フィールド欠落や形式不正をテストで網羅する
+- 下流 UI は任意フィールドにデフォルト値を用意し、サーバー enum の `switch` には必ず `default` 分岐を設ける
+- インストール済みの Desktop がより新しい backend に接続する場合があるため、フロントエンドとバックエンドが常に同じバージョンだと仮定しない
 
 ### イシューキー
 

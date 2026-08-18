@@ -10,6 +10,8 @@
  *      (CloudFront, no auth on the client side) or a new authenticated proxy.
  */
 
+import { isImageAttachment } from "@multica/core/attachments/image-sequence";
+
 export type PreviewKind =
   | "image"
   | "pdf"
@@ -134,9 +136,9 @@ const VIDEO_EXTS = new Set<string>([
 const AUDIO_EXTS = new Set<string>([
   "mp3", "wav", "m4a", "ogg", "oga", "flac", "aac", "opus",
 ]);
-const IMAGE_EXTS = new Set<string>([
-  "png", "jpg", "jpeg", "gif", "webp", "avif", "bmp", "ico", "svg",
-]);
+// Image detection lives in @multica/core/attachments/image-sequence — the
+// gallery sequence builder needs the same answer and is shared with mobile,
+// which cannot import from packages/views.
 
 function extOf(filename: string): string {
   const base = filename.toLowerCase().split(/[\\/]/).pop() ?? "";
@@ -182,7 +184,7 @@ export function getPreviewKind(
   // Image — must come BEFORE the html/text branches because svg is
   // text-like (XML), and image/* content-types include text/svg variants
   // that isTextLike would otherwise catch.
-  if (ct.startsWith("image/") || (ext && IMAGE_EXTS.has(ext))) return "image";
+  if (isImageAttachment(contentType, filename)) return "image";
 
   // Markdown — covers both the well-typed case and the common
   // server-side sniffer fallback (text/plain for .md).

@@ -1,19 +1,30 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  WecomInstallationSchema,
+  ListWecomInstallationsResponseSchema,
+  RedeemWecomBindingTokenResponseSchema,
+  EMPTY_WECOM_INSTALLATION,
+  EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
   AgentTaskListSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   CommentTriggerPreviewSchema,
   DashboardAgentRunTimeListSchema,
+  DashboardRunTimeDailyListSchema,
   DashboardFailureByAgentListSchema,
   DashboardFailureDailyListSchema,
   DashboardUsageByAgentListSchema,
   DashboardUsageDailyListSchema,
   ChatDraftRestoresResponseSchema,
+  ChatPendingTaskSchema,
+  PrioritizeQueuedChatTaskResponseSchema,
   CreateFeedbackResponseSchema,
   DuplicateIssueErrorBodySchema,
   EMPTY_CHAT_DRAFT_RESTORES,
+  EMPTY_CHAT_PENDING_TASK,
+  EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
   EMPTY_CREATE_FEEDBACK_RESPONSE,
   EMPTY_INBOX_ITEMS,
   EMPTY_INBOX_UNREAD_SUMMARY,
@@ -24,15 +35,31 @@ import {
   IssueTriggerPreviewSchema,
   ListIssuesResponseSchema,
   ListPropertiesResponseSchema,
+  MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+  RuntimeModelListRequestSchema,
   SearchProjectsResponseSchema,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
   RuntimeUsageListSchema,
+  SendChatMessageResponseSchema,
   SquadListSchema,
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
+  EMPTY_PLUGIN_CATALOG,
+  PluginCatalogResponseSchema,
+  PluginInstallationSchema,
+  RemoteMCPDiscoveryResponseSchema,
+  RemoteMCPOAuthStartResponseSchema,
+  EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
+} from "./schemas";
+import { IssueViewSchema, IssueViewListSchema } from "./schemas";
+import {
+  ListIssueStatusesResponseSchema,
+  IssueStatusEntrySchema,
+  EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+  EMPTY_ISSUE_STATUS_ENTRY,
 } from "./schemas";
 import { parseWithFallback } from "./schema";
 
@@ -408,6 +435,113 @@ describe("ChatDraftRestoresResponseSchema", () => {
   });
 });
 
+describe("ChatPendingTaskSchema", () => {
+  const ENDPOINT = { endpoint: "GET /api/chat/sessions/:id/pending-task" };
+
+  it("keeps legacy responses compatible when queued_tasks is absent", () => {
+    const parsed = parseWithFallback(
+      {
+        task_id: "task-active",
+        status: "running",
+        created_at: "2026-07-01T00:00:00Z",
+      },
+      ChatPendingTaskSchema,
+      EMPTY_CHAT_PENDING_TASK,
+      ENDPOINT,
+    );
+
+    expect(parsed).toMatchObject({
+      task_id: "task-active",
+      status: "running",
+    });
+    expect(parsed.queued_tasks).toBeUndefined();
+  });
+
+  it("parses queued task summaries", () => {
+    const parsed = ChatPendingTaskSchema.parse({
+      task_id: "task-active",
+      status: "running",
+      queued_tasks: [
+        {
+          task_id: "task-queued",
+          status: "queued",
+          content: "Follow up after the current task",
+          created_at: "2026-07-01T00:01:00Z",
+        },
+      ],
+    });
+
+    expect(parsed.queued_tasks).toEqual([
+      expect.objectContaining({
+        task_id: "task-queued",
+        content: "Follow up after the current task",
+      }),
+    ]);
+  });
+
+  it("keeps a valid head and ignores only malformed queued rows", () => {
+    const parsed = parseWithFallback(
+      {
+        task_id: "task-active",
+        queued_tasks: [{ task_id: 42, status: "queued" }],
+      },
+      ChatPendingTaskSchema,
+      EMPTY_CHAT_PENDING_TASK,
+      ENDPOINT,
+    );
+
+    expect(parsed).toEqual({
+      task_id: "task-active",
+      queued_tasks: [],
+    });
+  });
+});
+
+describe("SendChatMessageResponseSchema", () => {
+  const base = {
+    message_id: "message-1",
+    task_id: "task-1",
+    created_at: "2026-08-05T00:00:00Z",
+  };
+
+  it("parses the server-authoritative queue position", () => {
+    expect(SendChatMessageResponseSchema.parse({ ...base, queued: false }).queued).toBe(false);
+  });
+
+  it("ignores a malformed additive queue position without losing the accepted send", () => {
+    expect(SendChatMessageResponseSchema.parse({ ...base, queued: "no" }).queued).toBeUndefined();
+  });
+});
+
+describe("PrioritizeQueuedChatTaskResponseSchema", () => {
+  const ENDPOINT = {
+    endpoint: "POST /api/chat/sessions/:id/queued-tasks/:taskId/prioritize",
+  };
+
+  it("parses the prioritized task id", () => {
+    expect(
+      PrioritizeQueuedChatTaskResponseSchema.parse({
+        task_id: "task-queued",
+        active_task_id: "task-active",
+      }),
+    ).toEqual({
+      task_id: "task-queued",
+      active_task_id: "task-active",
+    });
+  });
+
+  it("falls back when task_id is malformed", () => {
+    expect(
+      parseWithFallback(
+        { task_id: 42 },
+        PrioritizeQueuedChatTaskResponseSchema,
+        EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
+        ENDPOINT,
+      ),
+    ).toBe(EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE);
+  });
+});
+
 describe("CreateFeedbackResponseSchema", () => {
   const ENDPOINT = { endpoint: "POST /api/feedback" };
 
@@ -608,6 +742,23 @@ describe("dashboard + runtime usage schema drift", () => {
     ]);
     expect(parsed).toHaveLength(1);
     expect(parsed[0]?.agent_id).toBe("");
+  });
+
+  it("defaults a missing cancelled_count to 0 so a pre-cancelled-count server still renders", () => {
+    // cancelled_count was added when the run-time rollups started counting
+    // runs the user stopped mid-flight. A backend predating it omits the
+    // field; the row must survive with a 0 segment rather than drop the
+    // whole series (installed desktop clients hit older backends).
+    expect(
+      DashboardAgentRunTimeListSchema.parse([
+        { agent_id: "a", total_seconds: 42, task_count: 3, failed_count: 0 },
+      ])[0]?.cancelled_count,
+    ).toBe(0);
+    expect(
+      DashboardRunTimeDailyListSchema.parse([
+        { date: "2026-05-19", total_seconds: 42, task_count: 3, failed_count: 0 },
+      ])[0]?.cancelled_count,
+    ).toBe(0);
   });
 
   it("coerces a missing agent_id key to \"\" for the usage-by-agent panel", () => {
@@ -987,5 +1138,394 @@ describe("CommentTriggerPreviewSchema.blocked", () => {
       ],
     });
     expect(parsed.blocked.map((b) => b.target_id)).toEqual(["s1", "a1"]);
+  });
+});
+
+describe("RuntimeModelListRequestSchema", () => {
+  const completed = {
+    id: "req-1",
+    runtime_id: "rt-1",
+    status: "completed",
+    supported: true,
+    created_at: "2026-07-29T00:00:00Z",
+    updated_at: "2026-07-29T00:00:01Z",
+    models: [
+      {
+        id: "gpt-5.6-sol",
+        label: "GPT-5.6-Sol",
+        provider: "openai",
+        default: true,
+        thinking: {
+          supported_levels: [{ value: "high", label: "High" }],
+          default_level: "low",
+        },
+        service_tiers: [{ id: "fast", name: "Fast" }],
+      },
+    ],
+  };
+
+  it("parses a live completed discovery, keeping the fields the UI branches on", () => {
+    const parsed = parseWithFallback(
+      completed,
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.status).toBe("completed");
+    expect(parsed.supported).toBe(true);
+    expect(parsed.models?.[0]?.default).toBe(true);
+    expect(parsed.models?.[0]?.thinking?.supported_levels).toEqual([
+      { value: "high", label: "High" },
+    ]);
+    expect(parsed.models?.[0]?.service_tiers).toEqual([{ id: "fast", name: "Fast" }]);
+    expect(parsed.cached).toBeUndefined();
+  });
+
+  it("keeps the additive cache markers when the server serves a snapshot", () => {
+    const parsed = parseWithFallback(
+      { ...completed, cached: true, cached_at: "2026-07-29T00:00:00Z" },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.cached).toBe(true);
+    expect(parsed.cached_at).toBe("2026-07-29T00:00:00Z");
+  });
+
+  // A backend that predates MUL-5444 sends neither marker; an even older one
+  // may omit `supported`. Both must stay usable rather than reading as
+  // "runtime manages the model itself" off an undefined.
+  it("defaults supported to true on an older backend that omits it", () => {
+    const { supported: _omitted, ...withoutSupported } = completed;
+    const parsed = parseWithFallback(
+      withoutSupported,
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.supported).toBe(true);
+    expect(parsed.cached).toBeUndefined();
+  });
+
+  it("passes an unknown status through instead of failing the whole response", () => {
+    const parsed = parseWithFallback(
+      { ...completed, status: "superseded" },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect(parsed.status).toBe("superseded");
+  });
+
+  // Malformed bodies must land on the "failed" fallback: `completed` would
+  // fabricate an empty catalog and `pending` would spin the picker until the
+  // client-side poll timeout.
+  it("falls back to an explicit failure on a malformed body", () => {
+    for (const malformed of [
+      null,
+      "nope",
+      42,
+      {},
+      { status: 7 },
+      { ...completed, status: undefined },
+      { ...completed, supported: "yes" },
+      { ...completed, models: "nope" },
+      { ...completed, models: [{ label: "no id" }] },
+    ]) {
+      const parsed = parseWithFallback(
+        malformed,
+        RuntimeModelListRequestSchema,
+        MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+        { endpoint: "test" },
+      );
+      expect(parsed.status).toBe("failed");
+      expect(parsed.supported).toBe(true);
+      expect(parsed.error).toBe("invalid model discovery response");
+    }
+  });
+
+  it("keeps unknown server fields instead of stripping them", () => {
+    const parsed = parseWithFallback(
+      { ...completed, future_field: "keep me" },
+      RuntimeModelListRequestSchema,
+      MALFORMED_RUNTIME_MODEL_LIST_REQUEST,
+      { endpoint: "test" },
+    );
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe(
+      "keep me",
+    );
+  });
+});
+
+describe("IssueViewSchema", () => {
+  const valid = {
+    id: "v1",
+    workspace_id: "ws1",
+    owner_id: "u1",
+    name: "Needs review",
+    scope_type: "workspace",
+    scope_id: null,
+    scope_variant: null,
+    visibility: "workspace",
+    definition_version: 1,
+    query: { statusFilters: ["in_review"] },
+    display: { viewMode: "board" },
+    revision: 3,
+    created_at: "2026-08-06T00:00:00Z",
+    updated_at: "2026-08-06T00:00:00Z",
+  };
+
+  it("parses a well-formed view and keeps unknown future fields", () => {
+    const parsed = IssueViewSchema.parse({ ...valid, future_field: "keep me" });
+    expect(parsed.name).toBe("Needs review");
+    expect(parsed.query).toEqual({ statusFilters: ["in_review"] });
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe("keep me");
+  });
+
+  it("defaults missing definition blobs instead of failing", () => {
+    const parsed = IssueViewSchema.parse({ id: "v2" });
+    expect(parsed.query).toEqual({});
+    expect(parsed.display).toEqual({});
+    expect(parsed.revision).toBe(1);
+  });
+
+  it("degrades a malformed list response to [] via parseWithFallback", () => {
+    expect(
+      parseWithFallback({ nonsense: true }, IssueViewListSchema, [], {
+        endpoint: "GET /api/issue-views",
+      }),
+    ).toEqual([]);
+    expect(
+      parseWithFallback(null, IssueViewListSchema, [], {
+        endpoint: "GET /api/issue-views",
+      }),
+    ).toEqual([]);
+  });
+
+  it("degrades a malformed detail response to null — NOT an error", () => {
+    // The sidebar's pinned view rows hinge on this distinction: a parse
+    // fallback (null, no error) hides the row, while only a REAL 404
+    // error may ever unpin. A malformed body must never destroy a pin.
+    expect(
+      parseWithFallback({ nonsense: true }, IssueViewSchema.nullable(), null, {
+        endpoint: "GET /api/issue-views/{id}",
+      }),
+    ).toBeNull();
+  });
+});
+
+// WeCom smart-bot installation schemas. These gate UI affordances (the Connect
+// dialog, the "ask your operator" state, the revoked-vs-active badge), so a
+// malformed response must degrade to the safe state rather than a broken one.
+describe("WeCom installation schemas", () => {
+  it("parses a well-formed installation", () => {
+    const parsed = WecomInstallationSchema.parse({
+      id: "i1",
+      workspace_id: "w1",
+      agent_id: "a1",
+      bot_id: "aibot_xyz",
+      installer_user_id: "u1",
+      status: "active",
+    });
+    expect(parsed.bot_id).toBe("aibot_xyz");
+    expect(parsed.status).toBe("active");
+  });
+
+  it("defaults a missing status to 'revoked', never 'active'", () => {
+    // A broken read must not render a bot as connected when it may not be.
+    const parsed = WecomInstallationSchema.parse({ id: "i1" });
+    expect(parsed.status).toBe("revoked");
+    expect(parsed.bot_id).toBe("");
+  });
+
+  it("keeps unknown forward-compat fields (loose) instead of failing the parse", () => {
+    const parsed = WecomInstallationSchema.parse({ id: "i1", future_field: "keep" });
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe("keep");
+  });
+
+  it("defaults 'configured' to false so a malformed list renders the operator state", () => {
+    const parsed = ListWecomInstallationsResponseSchema.parse({});
+    expect(parsed.configured).toBe(false);
+    expect(parsed.installations).toEqual([]);
+  });
+
+  it("falls back to the empty list when the response is not an object", () => {
+    const parsed = parseWithFallback(
+      "not json",
+      ListWecomInstallationsResponseSchema,
+      EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/wecom/installations" },
+    );
+    expect(parsed).toEqual(EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE);
+    expect(parsed.configured).toBe(false);
+  });
+
+  it("falls back on a malformed installation and redeem response", () => {
+    const inst = parseWithFallback(42, WecomInstallationSchema, EMPTY_WECOM_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/wecom/install/byo",
+    });
+    expect(inst).toEqual(EMPTY_WECOM_INSTALLATION);
+
+    const redeem = parseWithFallback(
+      null,
+      RedeemWecomBindingTokenResponseSchema,
+      EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+      { endpoint: "POST /api/wecom/binding/redeem" },
+    );
+    expect(redeem).toEqual(EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE);
+  });
+});
+
+describe("Plugin catalog schemas", () => {
+  it("defaults optional release fields without granting trust or compatibility", () => {
+    const parsed = PluginCatalogResponseSchema.parse({
+      releases: [{ plugin_key: "ai.multica.software-delivery", version: "1.0.0" }],
+    });
+    expect(parsed.supported).toBe(true);
+    expect(parsed.releases[0]?.compatible).toBe(false);
+    expect(parsed.releases[0]?.signature_verified).toBe(false);
+    expect(parsed.releases[0]?.contributions).toEqual([]);
+  });
+
+  it("defaults missing lifecycle and binding fields to a disabled error state", () => {
+    const parsed = PluginInstallationSchema.parse({ id: "installation-1" });
+    expect(parsed.enabled).toBe(false);
+    expect(parsed.lifecycle_status).toBe("error");
+    expect(parsed.bindings).toEqual([]);
+    expect(parsed.trust_tier).toBe("");
+    expect(parsed.signature_verified).toBe(false);
+    expect(parsed.contribution_details).toEqual([]);
+    expect(parsed.remote_mcp).toEqual([]);
+  });
+
+  it("parses Remote MCP status without accepting secret-shaped response fields", () => {
+    const parsed = PluginInstallationSchema.parse({
+      id: "installation-1",
+      remote_mcp: [{
+        contribution_key: "search",
+        credential_state: "configured",
+        credential_hint: "••••1234",
+        credential: "must-not-be-modeled",
+        approved_tools: [{
+          name: "search.read",
+          input_schema: { type: "object" },
+          schema_digest: "sha256:fixture",
+          risk: "read",
+        }],
+        reviewed: true,
+        ready: true,
+      }],
+    });
+    expect(parsed.remote_mcp[0]?.credential_state).toBe("configured");
+    expect(parsed.remote_mcp[0]?.approved_tools[0]?.name).toBe("search.read");
+    expect(parsed.remote_mcp[0]?.ready).toBe(true);
+    expect(parsed.remote_mcp[0]).not.toHaveProperty("credential");
+  });
+
+  it("defaults a malformed Remote MCP discovery response without inventing tools", () => {
+    const fallback = { config_revision: 0, discovered_tools: [], discovered_schema_digest: "" };
+    const parsed = parseWithFallback(
+      { config_revision: "bad", discovered_tools: { name: "search" } },
+      RemoteMCPDiscoveryResponseSchema,
+      fallback,
+      { endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{key}/test" },
+    );
+    expect(parsed).toEqual(fallback);
+  });
+
+  it("rejects a malformed Remote MCP OAuth start response", () => {
+    expect(parseWithFallback(
+      { authorization_url: undefined },
+      RemoteMCPOAuthStartResponseSchema,
+      EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
+      { endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{key}/oauth/start" },
+    )).toEqual(EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE);
+    expect(RemoteMCPOAuthStartResponseSchema.parse({
+      authorization_url: "https://auth.example.test/authorize?state=opaque",
+    }).authorization_url).toContain("auth.example.test");
+  });
+
+  it("degrades a malformed catalog response to unsupported and empty", () => {
+    const parsed = parseWithFallback("not-json", PluginCatalogResponseSchema, EMPTY_PLUGIN_CATALOG, {
+      endpoint: "GET /api/workspaces/{id}/plugins/catalog",
+    });
+    expect(parsed).toEqual(EMPTY_PLUGIN_CATALOG);
+    expect(parsed.supported).toBe(false);
+  });
+});
+
+// Issue status catalog (MUL-6243). The catalog drives how every status renders,
+// so a drifting or malformed response must degrade to the built-ins rather than
+// leaving the UI with no statuses at all.
+describe("issue status catalog schemas", () => {
+  const baseStatus = {
+    id: "status-1",
+    workspace_id: "ws-1",
+    key: "human_review",
+    name: "Human Review",
+    description: "Waiting on a person",
+    category: "in_review",
+    color: "#22c55e",
+    is_system: false,
+    position: 1,
+    archived_at: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("parses a full catalog response", () => {
+    const parsed = ListIssueStatusesResponseSchema.parse({
+      statuses: [baseStatus],
+      categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+      total: 1,
+    });
+    expect(parsed.statuses[0]?.key).toBe("human_review");
+    expect(parsed.statuses[0]?.category).toBe("in_review");
+    expect(parsed.categories).toHaveLength(7);
+  });
+
+  it("falls back to the built-in categories on a malformed response", () => {
+    const parsed = parseWithFallback(
+      { statuses: "not-an-array", categories: 7 },
+      ListIssueStatusesResponseSchema,
+      EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+      { endpoint: "GET /api/issue-statuses" },
+    );
+    expect(parsed).toEqual(EMPTY_LIST_ISSUE_STATUSES_RESPONSE);
+    // The fallback still names all 7 categories, so a client talking to a
+    // server that predates this endpoint can still render every built-in.
+    expect(parsed.categories).toHaveLength(7);
+    expect(parsed.statuses).toEqual([]);
+  });
+
+  it("defaults the optional presentation fields the server may omit", () => {
+    const { color: _c, is_system: _s, position: _p, description: _d, archived_at: _a, ...minimal } = baseStatus;
+    const parsed = IssueStatusEntrySchema.parse(minimal);
+    expect(parsed.color).toBe("#6b7280");
+    expect(parsed.is_system).toBe(false);
+    expect(parsed.position).toBe(0);
+    expect(parsed.archived_at).toBeNull();
+  });
+
+  it("keeps an unknown category as a string instead of failing the whole catalog", () => {
+    // A newer server could report a category this build does not know. Dropping
+    // the entry (or throwing) would leave the board unable to render issues
+    // already sitting on it, so the value is carried through verbatim.
+    const parsed = ListIssueStatusesResponseSchema.parse({
+      statuses: [{ ...baseStatus, category: "started" }],
+      categories: ["started"],
+      total: 1,
+    });
+    expect(parsed.statuses[0]?.category).toBe("started");
+  });
+
+  it("falls back to an empty entry on a malformed single status", () => {
+    const parsed = parseWithFallback(
+      { id: 12345 },
+      IssueStatusEntrySchema,
+      EMPTY_ISSUE_STATUS_ENTRY,
+      { endpoint: "POST /api/issue-statuses" },
+    );
+    expect(parsed).toEqual(EMPTY_ISSUE_STATUS_ENTRY);
   });
 });

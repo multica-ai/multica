@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -42,10 +41,38 @@ func buildCodebuddyArgs(opts ExecOptions, logger *slog.Logger) []string {
 		"--output-format", "stream-json",
 		"--input-format", "stream-json",
 		"--verbose",
-		"--strict-mcp-config",
 		"--permission-mode", "bypassPermissions",
-		"--disallowedTools", "AskUserQuestion",
+		// CodeBuddy's interactive tools have no UI to render in under the
+		// daemon's headless stream-json transport. AskUserQuestion and
+		// ExitPlanMode are both exempted from CodeBuddy's permission-mode
+		// finalization, so --permission-mode bypassPermissions does NOT
+		// auto-approve them — they always reach the permission bridge and
+		// stall the turn waiting for a confirmation nobody can give
+		// (GitHub #6012). EnterPlanMode is denied alongside them: leaving it
+		// enabled would let the model enter a plan mode it then has no tool
+		// to leave. Plan-shaped work still happens — the plan is written as
+		// ordinary assistant output instead of behind an approval gate.
+		//
+		// Pass one value per tool: --disallowedTools is variadic and
+		// CodeBuddy compares each entry against the tool name exactly
+		// (PermissionUtils.matchPermissionRules), so a comma-joined string
+		// would match nothing despite what the CLI's own help text claims.
+		"--disallowedTools", "AskUserQuestion", "EnterPlanMode", "ExitPlanMode",
 	}
+	// NOTE: --strict-mcp-config is deliberately never passed. It means "only
+	// use servers from --mcp-config", which drops CodeBuddy's user, project
+	// AND local scopes. Measured against CodeBuddy 2.x with one real MCP
+	// server registered per scope, using process spawns as the oracle:
+	//
+	//	--mcp-config only ....... managed + user + local  <- what we want
+	//	--mcp-config + strict ... managed only
+	//	strict only ............. nothing at all
+	//
+	// The union is also what mergeRuntimeAndAgentMcpConfig promises: adding
+	// one managed server must not disable the user's own. CodeBuddy applies
+	// it natively, and a managed entry already wins a same-name collision
+	// (verified), so the daemon does not pre-merge — see the codebuddy note
+	// in loadRuntimeMcpServerConfigs.
 	if opts.Model != "" {
 		args = append(args, "--model", opts.Model)
 	}
@@ -80,11 +107,18 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 
 	args := buildCodebuddyArgs(opts, b.cfg.Logger)
 
-	// If the caller provided an MCP config, write it to a temp file and pass
-	// --mcp-config <path> so the agent uses a controlled set of MCP servers.
+	// A managed agent config is written to a temp file and added with
+	// --mcp-config, which ADDS to whatever CodeBuddy loads from its own user,
+	// project and local scopes — buildCodebuddyArgs never passes
+	// --strict-mcp-config, so those stay on. A managed entry wins a same-name
+	// collision natively.
+	//
+	// Three-state, as everywhere else: a JSON `null` means "inherit the runtime
+	// configuration" and skips the flag entirely, while an explicitly empty
+	// object is a managed set that happens to contain no servers.
 	var mcpConfigPath string
 	var mcpFileCleanup func()
-	if len(opts.McpConfig) > 0 {
+	if hasManagedMcpConfig(opts.McpConfig) {
 		path, err := writeMcpConfigToTemp(opts.McpConfig)
 		if err != nil {
 			cancel()
@@ -101,7 +135,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		}
 	}()
 
-	cmd := exec.CommandContext(runCtx, execPath, args...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
 	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args)
 	cmd.WaitDelay = 10 * time.Second
@@ -173,6 +207,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 		invalidEventCount := 0
 		assistantEventCount := 0
 		toolUseCount := 0
+		unreadableAssistantCount := 0
 
 		// Close stdout when the context is cancelled so scanner.Scan() unblocks.
 		go func() {
@@ -181,8 +216,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			_ = stdout.Close()
 		}()
 
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
@@ -200,15 +234,12 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			switch msg.Type {
 			case "assistant":
 				assistantEventCount++
-				assistantText, tools := b.handleAssistant(msg, msgCh, usage)
-				toolUseCount += tools
-				if tools == 0 {
-					lastAssistantText = assistantText
-				} else {
-					// A turn that invokes a tool is intermediate even when it also
-					// contains narration. Do not use it as an empty-result fallback.
-					lastAssistantText = ""
+				turn := b.handleAssistant(msg, msgCh, usage)
+				toolUseCount += turn.toolUses
+				if !turn.understood {
+					unreadableAssistantCount++
 				}
+				lastAssistantText = turn.resolveFallback(lastAssistantText)
 			case "user":
 				b.handleUser(msg, msgCh)
 			case "system":
@@ -288,6 +319,7 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 			resultBytes:                len(finalResultText),
 			lastAssistantBytes:         len(lastAssistantText),
 			scannerError:               scanErr != nil,
+			unreadableAssistantCount:   unreadableAssistantCount,
 			anthropicBaseURLConfigured: strings.TrimSpace(b.cfg.Env["ANTHROPIC_BASE_URL"]) != "",
 		})
 
@@ -316,11 +348,14 @@ func (b *codebuddyBackend) Execute(ctx context.Context, prompt string, opts Exec
 	return &Session{Messages: msgCh, Result: resCh}, nil
 }
 
-func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Message, usage map[string]TokenUsage) (string, int) {
+func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Message, usage map[string]TokenUsage) assistantTurn {
 	var content codebuddyMessageContent
 	if err := json.Unmarshal(msg.Message, &content); err != nil {
-		return "", 0
+		// Unreadable body: understood stays false so the caller drops any
+		// fallback rather than let an older turn stand in for this one.
+		return assistantTurn{}
 	}
+	turn := assistantTurn{understood: true}
 	var assistantText strings.Builder
 	toolUseCount := 0
 
@@ -357,9 +392,17 @@ func (b *codebuddyBackend) handleAssistant(msg codebuddySDKMessage, ch chan<- Me
 				CallID: block.ID,
 				Input:  input,
 			})
+		default:
+			// A block type we do not render may be carrying the model's answer
+			// in a shape we cannot read, so we must not claim this turn was
+			// silent. Recognising a new no-text block is a deliberate one-line
+			// addition here, not an accident of falling through.
+			turn.understood = false
 		}
 	}
-	return assistantText.String(), toolUseCount
+	turn.text = assistantText.String()
+	turn.toolUses = toolUseCount
+	return turn
 }
 
 func (b *codebuddyBackend) handleUser(msg codebuddySDKMessage, ch chan<- Message) {
@@ -404,6 +447,11 @@ func (b *codebuddyBackend) handleControlRequest(msg codebuddySDKMessage, stdin i
 			"subtype":    "success",
 			"request_id": msg.RequestID,
 			"response": map[string]any{
+				// CodeBuddy's SdkPermissionClient reads `allowed` and treats a
+				// missing key as a denial; `behavior` is Claude Code's spelling,
+				// which the fork still honours on its other permission paths.
+				// Send both so an approval is never read as a silent reject.
+				"allowed":      true,
 				"behavior":     "allow",
 				"updatedInput": inputMap,
 			},

@@ -176,15 +176,7 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 func allocateCollisionFreeSkillDir(skillsParent, baseSlug string) (slug, dir string, err error) {
 	const maxAttempts = 64
 	for i := 0; i < maxAttempts; i++ {
-		var candidate string
-		switch {
-		case i == 0:
-			candidate = baseSlug
-		case i == 1:
-			candidate = baseSlug + "-multica"
-		default:
-			candidate = fmt.Sprintf("%s-multica-%d", baseSlug, i)
-		}
+		candidate := skillSlugCandidate(baseSlug, i)
 		path := filepath.Join(skillsParent, candidate)
 		if _, statErr := os.Lstat(path); statErr != nil {
 			if errors.Is(statErr, fs.ErrNotExist) {
@@ -196,13 +188,35 @@ func allocateCollisionFreeSkillDir(skillsParent, baseSlug string) (slug, dir str
 	return "", "", fmt.Errorf("allocate collision-free skill dir under %s: exhausted %d attempts for base %q", skillsParent, maxAttempts, baseSlug)
 }
 
+// skillSlugCandidate is the nth name to try for a skill whose natural slug is
+// baseSlug: the bare slug first, then `-multica`, then numbered variants.
+//
+// Two callers must agree on this sequence — allocateCollisionFreeSkillDir,
+// which probes the filesystem, and resolveSkillSlugs, which deduplicates a
+// batch in memory before anything is written. If they disagreed, a skill would
+// be listed under one name and written under another.
+func skillSlugCandidate(baseSlug string, attempt int) string {
+	switch {
+	case attempt <= 0:
+		return baseSlug
+	case attempt == 1:
+		return baseSlug + "-multica"
+	default:
+		return fmt.Sprintf("%s-multica-%d", baseSlug, attempt)
+	}
+}
+
 // writeSidecarManifest persists m to {envRoot}/{sidecarManifestFile}.
 // Empty manifests are still written so a later Cleanup that finds the
 // file knows tracking was attempted (vs. an old build that predates this
-// mechanism, where the file is absent and Cleanup must no-op). Failures
-// are returned to the caller; the caller treats them as non-fatal because
-// a missed manifest only degrades local_directory cleanup, not task
-// execution.
+// mechanism, where the file is absent and Cleanup must no-op).
+//
+// Failures are returned to the caller, and how much they matter depends on
+// where the sidecars landed. For a cloud envRoot the manifest is a convenience
+// the GC can do without, so Prepare logs and continues. For an in-place
+// local_directory run it is the only record of what was written into the user's
+// own repository, so Prepare treats the failure as fatal and rolls back while
+// it still holds the in-memory manifest (MUL-6132).
 func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 	if envRoot == "" {
 		return nil
@@ -254,7 +268,7 @@ func writeSidecarManifest(envRoot string, m *sidecarManifest) error {
 // AGENTS.md, this one handles the sidecar tree
 // (.agent_context/, .multica/, .claude/skills/, .github/skills/,
 // .opencode/skills/, skills/, .pi/skills/, .cursor/skills/,
-// .kimi/skills/, .kiro/skills/, .agents/skills/, fallback
+// .kimi/skills/, .reasonix/skills/, .kiro/skills/, .agents/skills/, fallback
 // .agent_context/skills/). The two together restore the workdir to
 // byte-exact pre-task state.
 func CleanupSidecars(envRoot string) error {
@@ -274,6 +288,20 @@ func CleanupSidecars(envRoot string) error {
 		return fmt.Errorf("parse sidecar manifest %s: %w", manifestPath, err)
 	}
 
+	return rollBackManifest(m, manifestPath)
+}
+
+// rollBackManifest removes everything m records, then removes manifestPath
+// itself when it is non-empty. It is the shared body of CleanupSidecars (which
+// reads m back from disk after the task ran) and rollBackPreparedSidecars
+// (which passes the in-memory manifest of a Prepare that never finished, and
+// has no manifest file to delete because Prepare failed before writing one).
+//
+// Splitting it this way is what lets the failed-Prepare path reuse the exact
+// deletion semantics documented on CleanupSidecars — ENOENT and non-empty
+// directories tolerated, real I/O errors surfaced — instead of growing a second,
+// subtly different rollback that would drift from it.
+func rollBackManifest(m sidecarManifest, manifestPath string) error {
 	var firstErr error
 	captureErr := func(err error) {
 		if firstErr == nil {
@@ -324,11 +352,31 @@ func CleanupSidecars(envRoot string) error {
 		}
 	}
 
-	if err := os.Remove(manifestPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
-		captureErr(fmt.Errorf("remove manifest %s: %w", manifestPath, err))
+	if manifestPath != "" {
+		if err := os.Remove(manifestPath); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			captureErr(fmt.Errorf("remove manifest %s: %w", manifestPath, err))
+		}
 	}
 
 	return firstErr
+}
+
+// rollBackPreparedSidecars undoes the sidecar writes of a Prepare that failed
+// before it could persist the manifest, using the in-memory manifest Prepare
+// was still filling in.
+//
+// This is the only rollback available on that path. Prepare writes the daemon
+// task marker and the rest of the sidecar tree into the workdir early, but only
+// persists the manifest at the very end; every error return in between leaves
+// that tree on disk with no on-disk record of it, and the caller never receives
+// an Environment, so no teardown defer downstream knows there is anything to
+// clean (MUL-6132). For a local_directory task the workdir is the user's own
+// repository, so "left on disk" means a marker that disables every multica
+// command in that directory tree until someone deletes it by hand.
+//
+// There is no manifest file to remove, so manifestPath is empty.
+func rollBackPreparedSidecars(m sidecarManifest) error {
+	return rollBackManifest(m, "")
 }
 
 // removeReusedManagedSkillDirs force-removes the skill directories the prior
