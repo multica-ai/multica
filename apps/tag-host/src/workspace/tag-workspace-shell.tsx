@@ -52,6 +52,8 @@ import {
   DropdownMenuTrigger,
 } from '@multica/ui/components/ui/dropdown-menu';
 import { WorkspaceAvatar } from '@multica/views/workspace/workspace-avatar';
+import { FloatingChat } from '@multica/views/chat';
+import { GlobalShortcuts } from '@multica/views/layout';
 import { AppLink, useNavigation } from '@multica/views/navigation';
 import {
   TAG_WORKSPACE_SECTIONS,
@@ -82,6 +84,7 @@ export function TagWorkspaceShell({ children }: { children: ReactNode }) {
       hasExternalTrigger
       className="h-svh overflow-hidden bg-app-shell"
     >
+      <GlobalShortcuts />
       <TagWorkspaceSidebar />
       <SidebarInset className="min-w-0 overflow-hidden">
         <MobileWorkspaceHeader />
@@ -89,6 +92,7 @@ export function TagWorkspaceShell({ children }: { children: ReactNode }) {
         <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {children}
         </div>
+        <FloatingChat />
       </SidebarInset>
     </SidebarProvider>
   );

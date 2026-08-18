@@ -1,5 +1,8 @@
 import { useMemo, type ReactNode } from 'react';
 import { CoreProvider } from '@multica/core/platform';
+import { pickLocale } from '@multica/core/i18n';
+import { createBrowserCookieLocaleAdapter } from '@multica/core/i18n/browser';
+import { ThemeProvider } from '@multica/ui/components/common/theme-provider';
 import { RESOURCES } from '@multica/views/locales';
 import { resolveTagRuntimeUrls } from './paths';
 import { TagNavigationProvider } from './tag-navigation-provider';
@@ -11,24 +14,35 @@ export function TagHostProviders({ children }: { children: ReactNode }) {
     []
   );
   const resources = useMemo(
-    () => ({ en: createTagTaskResources(RESOURCES.en) }),
+    () =>
+      Object.fromEntries(
+        Object.entries(RESOURCES).map(([locale, localeResources]) => [
+          locale,
+          createTagTaskResources(localeResources),
+        ])
+      ) as typeof RESOURCES,
     []
   );
+  const localeAdapter = useMemo(createBrowserCookieLocaleAdapter, []);
+  const locale = useMemo(() => pickLocale(localeAdapter), [localeAdapter]);
   const identity = useMemo(
     () => ({ platform: 'vibes-tag-host', version: 'tracer-258' }),
     []
   );
 
   return (
-    <CoreProvider
-      apiBaseUrl={runtime.apiBaseUrl}
-      wsUrl={runtime.wsUrl}
-      cookieAuth
-      identity={identity}
-      locale="en"
-      resources={resources}
-    >
-      <TagNavigationProvider>{children}</TagNavigationProvider>
-    </CoreProvider>
+    <ThemeProvider>
+      <CoreProvider
+        apiBaseUrl={runtime.apiBaseUrl}
+        wsUrl={runtime.wsUrl}
+        cookieAuth
+        identity={identity}
+        locale={locale}
+        resources={resources}
+        localeAdapter={localeAdapter}
+      >
+        <TagNavigationProvider>{children}</TagNavigationProvider>
+      </CoreProvider>
+    </ThemeProvider>
   );
 }

@@ -9,10 +9,26 @@ const state = vi.hoisted(() => ({
   pushed: [] as string[],
   closeMobile: vi.fn(),
   openCreateTask: vi.fn(),
+  floatingChatMounts: 0,
+  globalShortcutMounts: 0,
   workspaces: [
     { id: 'workspace-a', slug: 'studio-a', name: 'Studio A' },
     { id: 'workspace-b', slug: 'studio-b', name: 'Studio B' },
   ],
+}));
+
+vi.mock('@multica/views/chat', () => ({
+  FloatingChat: () => {
+    state.floatingChatMounts += 1;
+    return <div data-testid="floating-chat" />;
+  },
+}));
+
+vi.mock('@multica/views/layout', () => ({
+  GlobalShortcuts: () => {
+    state.globalShortcutMounts += 1;
+    return null;
+  },
 }));
 
 vi.mock('@multica/core/paths', () => ({
@@ -114,11 +130,21 @@ beforeEach(() => {
   state.connectionState = 'connected';
   state.closeMobile.mockClear();
   state.openCreateTask.mockClear();
+  state.floatingChatMounts = 0;
+  state.globalShortcutMounts = 0;
 });
 
 afterEach(cleanup);
 
 describe('TagWorkspaceShell', () => {
+  it('mounts the original Floating Chat once inside the Workspace Shell', () => {
+    render(<TagWorkspaceShell><div>Workspace content</div></TagWorkspaceShell>);
+
+    expect(screen.getAllByTestId('floating-chat')).toHaveLength(1);
+    expect(state.floatingChatMounts).toBe(1);
+    expect(state.globalShortcutMounts).toBe(1);
+  });
+
   it('shows one complete module map without links for migrating modules', () => {
     render(<TagWorkspaceShell><div>Chat content</div></TagWorkspaceShell>);
 

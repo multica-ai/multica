@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
 import { Minus, Maximize2, Minimize2, ChevronDown, Plus, Check, Archive, Pencil, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
@@ -714,6 +714,7 @@ export function ChatWindow() {
   const hasMessages = messages.length > 0 || !!pendingTaskId;
 
   const isVisible = isOpen && (isExpanded || boundsReady);
+  const shouldReduceMotion = useReducedMotion() ?? false;
 
   // Small screens drop the floating-card form entirely — a 90%-of-375px
   // "window" is all chrome and no content, so the panel goes full-screen
@@ -783,18 +784,24 @@ export function ChatWindow() {
       ref={windowRef}
       className={containerClass}
       style={containerStyle}
-      initial={{ opacity: 0, scale: 0.95, ...motionSize }}
+      aria-hidden={!isOpen}
+      inert={!isOpen ? true : undefined}
+      initial={{ opacity: 0, scale: shouldReduceMotion ? 1 : 0.95, ...motionSize }}
       animate={{
         opacity: isVisible ? 1 : 0,
-        scale: isVisible ? 1 : 0.95,
+        scale: shouldReduceMotion || isVisible ? 1 : 0.95,
         ...motionSize,
       }}
-      transition={{
-        width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
-        height: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
-        opacity: { duration: 0.15 },
-        scale: { type: "spring", duration: 0.2, bounce: 0 },
-      }}
+      transition={
+        shouldReduceMotion
+          ? { duration: 0 }
+          : {
+              width: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
+              height: isDragging ? { duration: 0 } : { type: "spring", duration: 0.3, bounce: 0 },
+              opacity: { duration: 0.15 },
+              scale: { type: "spring", duration: 0.2, bounce: 0 },
+            }
+      }
     >
       {!isMobile && <ChatResizeHandles onDragStart={startDrag} />}
       {/* Header — ⊕ new + session dropdown | window tools */}

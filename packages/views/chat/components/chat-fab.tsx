@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useRef } from "react";
 import { MessageCircle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@multica/ui/lib/utils";
@@ -40,6 +41,14 @@ export function ChatFab() {
     ...hasPendingChatTasksOptions(wsId),
     enabled: !isOpen,
   });
+  const launcherRef = useRef<HTMLButtonElement>(null);
+  const wasOpenRef = useRef(isOpen);
+
+  useEffect(() => {
+    const wasOpen = wasOpenRef.current;
+    wasOpenRef.current = isOpen;
+    if (wasOpen && !isOpen) launcherRef.current?.focus();
+  }, [isOpen]);
 
   if (isOpen) return null;
 
@@ -62,12 +71,13 @@ export function ChatFab() {
   return (
     <Tooltip>
       <TooltipTrigger
+        ref={launcherRef}
         onClick={handleClick}
         aria-label={tooltip}
         className={cn(
           // Geometry comes from the shared tokens so the clearance pages
           // reserve for this corner is derived from the same numbers.
-          "absolute bottom-[var(--chat-launcher-inset)] right-[var(--chat-launcher-inset)] z-50 flex size-[var(--chat-launcher-size)] touch-manipulation items-center justify-center rounded-full bg-surface-raised text-muted-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border transition-[background-color,color,box-shadow] hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas active:bg-surface-hover",
+          "absolute bottom-[var(--chat-launcher-inset)] right-[var(--chat-launcher-inset)] z-50 flex size-[var(--chat-launcher-size)] touch-manipulation items-center justify-center rounded-full bg-surface-raised text-muted-foreground shadow-[var(--floating-shadow)] ring-1 ring-surface-border transition-[background-color,color,box-shadow] before:absolute before:-inset-0.5 before:rounded-full before:content-[''] hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-page-canvas active:bg-surface-hover",
           // Impulse the button itself while a chat task is running — no
           // outer ring to keep things calm.
           isRunning && "animate-chat-impulse",
