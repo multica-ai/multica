@@ -1,5 +1,6 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
 import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
@@ -60,6 +61,7 @@ import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-previe
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
@@ -296,6 +298,7 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const { categoryOf: draftStatusCategory } = useIssueStatuses(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
@@ -581,7 +584,11 @@ export function ManualCreatePanel({
               <span className="text-body font-medium">{t(($) => $.create_issue.toast_created)}</span>
             </div>
             <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
-              <StatusIcon status={issue.status} className="size-3.5 shrink-0" />
+              <StatusIcon
+                status={issue.status}
+                category={issueStatusCategory(issue) ?? undefined}
+                className="size-3.5 shrink-0"
+              />
               <span className="truncate">{issue.identifier} – {issue.title}</span>
             </div>
             {/* Not an AppLink: sonner renders toast content under <Toaster />,
@@ -1099,7 +1106,11 @@ export function ManualCreatePanel({
                       the picker inline (mounting the pill as its anchor). */}
                   {!showField.status && (
                     <DropdownMenuItem onClick={() => setFieldPickerOpen("status")}>
-                      <StatusIcon status={status} className="h-3.5 w-3.5" />
+                      <StatusIcon
+                        status={status}
+                        category={draftStatusCategory(status)}
+                        className="h-3.5 w-3.5"
+                      />
                       {t(($) => $.create_issue.set_status)}
                     </DropdownMenuItem>
                   )}

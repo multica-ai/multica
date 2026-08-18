@@ -370,3 +370,34 @@ func ExpandCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID, c
 	}
 	return out, nil
 }
+
+// CustomKeyCategories returns the workspace's CUSTOM status keys mapped to the
+// category each belongs to. Built-ins are deliberately absent: a built-in key IS
+// its own category, so a caller mapping key -> category only needs the
+// exceptions.
+//
+// Callers use this to build a static `CASE i.status WHEN ... ELSE i.status END`
+// scalar expression for GROUP BY. That keeps category grouping a plain column
+// rewrite rather than a per-row function call or a join, and for a workspace
+// with no custom statuses the map is empty and the CASE collapses to `i.status`
+// — byte-for-byte the expression that ran before this feature.
+//
+// Archived statuses are included, for the same reason ExpandCategories includes
+// them: issues left on one must still group into their category.
+func CustomKeyCategories(ctx context.Context, q Querier, workspaceID pgtype.UUID) (map[string]string, error) {
+	entries, err := q.ListIssueStatusEntries(ctx, db.ListIssueStatusEntriesParams{
+		WorkspaceID:     workspaceID,
+		IncludeArchived: true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]string, len(entries))
+	for _, e := range entries {
+		if IsBuiltIn(e.Key) || !IsCategory(e.Category) {
+			continue
+		}
+		out[e.Key] = e.Category
+	}
+	return out, nil
+}

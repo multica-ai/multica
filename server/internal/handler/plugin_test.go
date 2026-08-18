@@ -4,52 +4,39 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"errors"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/jackc/pgx/v5"
-	"github.com/multica-ai/multica/server/internal/testutil/plugintest"
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 )
 
-type failPluginDetailQueryDB struct {
-	db.DBTX
-	queryFragment       string
-	queryRowFragment    string
-	failQueryRowAtMatch int
-	queryRowMatches     int
-}
-
-func (database *failPluginDetailQueryDB) Query(ctx context.Context, query string, args ...any) (pgx.Rows, error) {
-	if database.queryFragment != "" && strings.Contains(query, database.queryFragment) {
-		return nil, errors.New("forced Plugin detail query failure")
-	}
-	return database.DBTX.Query(ctx, query, args...)
-}
-
-type pluginDetailErrorRow struct{}
-
-func (pluginDetailErrorRow) Scan(...any) error {
-	return errors.New("forced Plugin detail query failure")
-}
-
-func (database *failPluginDetailQueryDB) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
-	if database.queryRowFragment != "" && strings.Contains(query, database.queryRowFragment) {
-		database.queryRowMatches++
-		if database.queryRowMatches == database.failQueryRowAtMatch {
-			return pluginDetailErrorRow{}
-		}
-	}
-	return database.DBTX.QueryRow(ctx, query, args...)
-}
+// The reference manifest for handler tests declares only capabilities this
+// build ships. Contribution kinds that are still gated are covered by the
+// capability matrix in pkg/plugincontract; repeating them here would just
+// re-run that matrix through HTTP.
+const handlerTestManifest = `{
+  "manifest_version": 1,
+  "key": "com.example.hello",
+  "name": "Hello Panel",
+  "version": "1.0.0",
+  "author": { "name": "example" },
+  "scopes": ["issues:read", "comments:write", "storage:user"],
+  "config": {
+    "repo": { "type": "string", "label": "Repo", "required": true },
+    "token": { "type": "secret", "label": "Token" }
+  },
+  "contributes": {
+    "surfaces": [{ "key": "hello", "type": "issue_panel", "name": "Hello", "entry": "ui/main.js" }]
+  }
+}`
 
 func pluginHandlerRequest(method, path string, body []byte, params map[string]string) *http.Request {
 	request := httptest.NewRequest(method, path, bytes.NewReader(body))
@@ -62,385 +49,406 @@ func pluginHandlerRequest(method, path string, body []byte, params map[string]st
 	return request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
 }
 
-func TestRemoteMCPConfigResponseReady(t *testing.T) {
-	ready := pluginRemoteMCPConfigResponse{
-		ConfigRevision: 1, CredentialState: "configured", Reviewed: true,
-		ApprovedTools: []pluginruntime.RemoteMCPTool{{Name: "search"}}, SchemaDigest: "sha256:test",
+func writeLocalPluginManifest(t *testing.T, root, manifest string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(root, "hello"), 0o755); err != nil {
+		t.Fatalf("create local plugin dir: %v", err)
 	}
-	if !remoteMCPConfigResponseReady(ready) {
-		t.Fatal("complete Remote MCP configuration was not ready")
+	if err := os.WriteFile(filepath.Join(root, "hello", plugincontract.ManifestFilename), []byte(manifest), 0o644); err != nil {
+		t.Fatalf("write local manifest: %v", err)
 	}
-	for name, edit := range map[string]func(*pluginRemoteMCPConfigResponse){
-		"missing config":     func(config *pluginRemoteMCPConfigResponse) { config.ConfigRevision = 0 },
-		"missing credential": func(config *pluginRemoteMCPConfigResponse) { config.CredentialState = "missing" },
-		"unreviewed":         func(config *pluginRemoteMCPConfigResponse) { config.Reviewed = false },
-		"no approved tools":  func(config *pluginRemoteMCPConfigResponse) { config.ApprovedTools = nil },
-		"missing digest":     func(config *pluginRemoteMCPConfigResponse) { config.SchemaDigest = "" },
+}
+
+// withLocalPluginSource points the service at a temp MULTICA_PLUGIN_DIR and
+// enables every capability, so these tests exercise the HTTP surface rather
+// than the staged-rollout gate.
+func withLocalPluginSource(t *testing.T, manifest string) string {
+	t.Helper()
+	return withLocalPluginSourceIn(t, t.TempDir(), manifest)
+}
+
+// withLocalPluginSourceIn takes the root explicitly so an upgrade test can
+// rewrite the manifest in place and install again from the same source URL.
+func withLocalPluginSourceIn(t *testing.T, root string, manifest string) string {
+	t.Helper()
+	writeLocalPluginManifest(t, root, manifest)
+
+	previousDir := testHandler.PluginService.LocalDir
+	previousHost := testHandler.PluginService.Host
+	previousSecrets := testHandler.PluginService.Secrets
+	testHandler.PluginService.LocalDir = root
+	testHandler.PluginService.Host = plugincontract.Capabilities{
+		SurfaceTypes:  map[string]bool{plugincontract.SurfaceIssuePanel: true, plugincontract.SurfaceSidebarPanel: true, plugincontract.SurfaceModal: true},
+		HookTriggers:  map[string]bool{plugincontract.TriggerUI: true, plugincontract.TriggerManual: true, plugincontract.TriggerAgent: true, plugincontract.TriggerEvent: true},
+		HookTransport: map[string]bool{plugincontract.TransportHTTP: true, plugincontract.TransportMCP: true},
+		ResourceTypes: map[string]bool{plugincontract.ResourceSkill: true},
+	}
+	box, err := secretbox.New(bytes.Repeat([]byte{7}, 32))
+	if err != nil {
+		t.Fatalf("secretbox.New: %v", err)
+	}
+	testHandler.PluginService.Secrets = box
+	t.Cleanup(func() {
+		testHandler.PluginService.LocalDir = previousDir
+		testHandler.PluginService.Host = previousHost
+		testHandler.PluginService.Secrets = previousSecrets
+	})
+	return service.LocalSourcePrefix + "hello"
+}
+
+func cleanupPluginInstallations(t *testing.T) {
+	t.Helper()
+	remove := func() {
+		ctx := context.Background()
+		testPool.Exec(ctx, `DELETE FROM plugin_storage WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_secret WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM plugin_installation WHERE workspace_id = $1`, testWorkspaceID)
+	}
+	remove()
+	t.Cleanup(remove)
+}
+
+func TestPluginManagementRequiresPluginsV1(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, false)
+	for name, handler := range map[string]http.HandlerFunc{
+		"list":      testHandler.ListPlugins,
+		"preview":   testHandler.PreviewPlugin,
+		"install":   testHandler.InstallPlugin,
+		"configure": testHandler.ConfigurePlugin,
+		"enable":    testHandler.EnablePlugin,
+		"disable":   testHandler.DisablePlugin,
+		"uninstall": testHandler.UninstallPlugin,
 	} {
 		t.Run(name, func(t *testing.T) {
-			config := ready
-			edit(&config)
-			if remoteMCPConfigResponseReady(config) {
-				t.Fatal("incomplete Remote MCP configuration was ready")
+			recorder := httptest.NewRecorder()
+			handler(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", []byte(`{}`), map[string]string{"id": testWorkspaceID}))
+			if recorder.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 			}
 		})
 	}
 }
 
-func TestPluginHTTPLifecycleForInstalledReferenceRelease(t *testing.T) {
+func TestPluginPreviewShowsScopesWithoutInstalling(t *testing.T) {
 	withPluginsV1Flag(t, testHandler, true)
-	cleanup := func() {
-		ctx := context.Background()
-		testPool.Exec(ctx, `DELETE FROM plugin_health WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_capability_snapshot WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_workspace_capability_state WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_binding WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_grant WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE workspace_id = $1 AND action = 'plugin_uninstalled'`, testWorkspaceID)
-	}
-	cleanup()
-	t.Cleanup(cleanup)
+	cleanupPluginInstallations(t)
+	source := withLocalPluginSource(t, handlerTestManifest)
 
 	recorder := httptest.NewRecorder()
-	testHandler.ListPluginCatalog(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/catalog", nil, map[string]string{"id": testWorkspaceID}))
-	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte(`"signature_verified":true`)) || !bytes.Contains(recorder.Body.Bytes(), []byte(plugintest.ReviewReadinessPluginKey)) {
-		t.Fatalf("catalog status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	var catalogPayload struct {
-		Diagnostics json.RawMessage `json:"diagnostics"`
-	}
-	if err := json.Unmarshal(recorder.Body.Bytes(), &catalogPayload); err != nil {
-		t.Fatalf("decode catalog: %v", err)
-	}
-	if !bytes.Equal(catalogPayload.Diagnostics, []byte(`[]`)) {
-		t.Fatalf("empty catalog diagnostics must be an array, got %s", catalogPayload.Diagnostics)
+	body, _ := json.Marshal(map[string]string{"source_url": source})
+	testHandler.PreviewPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/preview", body, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("preview status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
+	var preview service.PluginPreview
+	if err := json.Unmarshal(recorder.Body.Bytes(), &preview); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if len(preview.Scopes) != 3 || preview.Installed {
+		t.Fatalf("unexpected preview: %+v", preview)
+	}
+	if len(preview.ConfigSchema) != 2 || preview.ConfigSchema[0].Key != "repo" || preview.ConfigSchema[1].Type != plugincontract.ConfigSecret {
+		t.Fatalf("unexpected config schema: %+v", preview.ConfigSchema)
+	}
+
+	// Preview must be side-effect free: the consent screen has to be able to
+	// show scopes before anything exists to revoke.
+	listRecorder := httptest.NewRecorder()
+	testHandler.ListPlugins(listRecorder, pluginHandlerRequest(http.MethodGet, "/plugins", nil, map[string]string{"id": testWorkspaceID}))
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", listRecorder.Code, listRecorder.Body.String())
+	}
+	var list struct {
+		Plugins []map[string]any `json:"plugins"`
+	}
+	if err := json.Unmarshal(listRecorder.Body.Bytes(), &list); err != nil {
+		t.Fatalf("decode list: %v", err)
+	}
+	if len(list.Plugins) != 0 {
+		t.Fatalf("preview created an installation: %v", list.Plugins)
+	}
+}
+
+func TestPluginInstallRequiresExactConsent(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	source := withLocalPluginSource(t, handlerTestManifest)
+
+	partial, _ := json.Marshal(map[string]any{"source_url": source, "granted_scopes": []string{"issues:read"}})
+	recorder := httptest.NewRecorder()
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", partial, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("partial consent status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	extra, _ := json.Marshal(map[string]any{
+		"source_url":     source,
+		"granted_scopes": []string{"issues:read", "comments:write", "storage:user", "issues:write"},
+	})
 	recorder = httptest.NewRecorder()
-	testHandler.InstallPlugin(recorder, pluginHandlerRequest(
-		http.MethodPost,
-		"/plugins/install",
-		[]byte(`{"plugin_key":"ai.multica.software-delivery","version":"1.0.0"}`),
-		map[string]string{"id": testWorkspaceID},
-	))
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", extra, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("over-consent status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPluginInstallConfigureAndUninstall(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	source := withLocalPluginSource(t, handlerTestManifest)
+
+	install, _ := json.Marshal(map[string]any{
+		"source_url":     source,
+		"granted_scopes": []string{"issues:read", "comments:write", "storage:user"},
+	})
+	recorder := httptest.NewRecorder()
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", install, map[string]string{"id": testWorkspaceID}))
 	if recorder.Code != http.StatusCreated {
 		t.Fatalf("install status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	var installed pluginInstallationResponse
+	var installed struct {
+		ID                string         `json:"id"`
+		PluginKey         string         `json:"plugin_key"`
+		Enabled           bool           `json:"enabled"`
+		Config            map[string]any `json:"config"`
+		ConfiguredSecrets []string       `json:"configured_secrets"`
+	}
 	if err := json.Unmarshal(recorder.Body.Bytes(), &installed); err != nil {
 		t.Fatalf("decode installation: %v", err)
 	}
-	if installed.Enabled || installed.LifecycleStatus != "installed" {
-		t.Fatalf("install must remain disabled: %+v", installed)
+	if installed.ID == "" || installed.PluginKey != "com.example.hello" || !installed.Enabled {
+		t.Fatalf("unexpected installation: %+v", installed)
 	}
 
 	params := map[string]string{"id": testWorkspaceID, "installationId": installed.ID}
+	configure, _ := json.Marshal(map[string]any{"values": map[string]any{"repo": "multica-ai/multica", "token": "sk-super-secret"}})
 	recorder = httptest.NewRecorder()
-	testHandler.EnablePlugin(recorder, pluginHandlerRequest(
-		http.MethodPost,
-		"/plugins/enable",
-		[]byte(`{"scope_type":"workspace","scope_id":"00000000-0000-0000-0000-000000000001"}`),
-		params,
-	))
-	if recorder.Code != http.StatusNotFound || bytes.Contains(recorder.Body.Bytes(), []byte("no rows")) {
-		t.Fatalf("cross-workspace binding status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-
-	recorder = httptest.NewRecorder()
-	testHandler.EnablePlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/enable", nil, params))
+	testHandler.ConfigurePlugin(recorder, pluginHandlerRequest(http.MethodPut, "/plugins/config", configure, params))
 	if recorder.Code != http.StatusOK {
-		t.Fatalf("enable status=%d body=%s", recorder.Code, recorder.Body.String())
+		t.Fatalf("configure status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	// The secret must not come back in any form: not in `config`, not masked,
+	// not anywhere else in the payload.
+	if strings.Contains(recorder.Body.String(), "sk-super-secret") {
+		t.Fatalf("configure response leaked the secret value: %s", recorder.Body.String())
+	}
+	var configured struct {
+		Config            map[string]any `json:"config"`
+		ConfiguredSecrets []string       `json:"configured_secrets"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &configured); err != nil {
+		t.Fatalf("decode configured installation: %v", err)
+	}
+	if configured.Config["repo"] != "multica-ai/multica" {
+		t.Fatalf("plain config value was not stored: %v", configured.Config)
+	}
+	if _, present := configured.Config["token"]; present {
+		t.Fatalf("secret value was stored in config: %v", configured.Config)
+	}
+	if len(configured.ConfiguredSecrets) != 1 || configured.ConfiguredSecrets[0] != "token" {
+		t.Fatalf("configured secrets = %v, want [token]", configured.ConfiguredSecrets)
 	}
 
 	recorder = httptest.NewRecorder()
 	testHandler.ListPlugins(recorder, pluginHandlerRequest(http.MethodGet, "/plugins", nil, map[string]string{"id": testWorkspaceID}))
-	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte(plugintest.ReviewReadinessPluginKey)) {
-		t.Fatalf("list status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	for _, test := range []struct {
-		name                string
-		queryFragment       string
-		queryRowFragment    string
-		failQueryRowAtMatch int
-	}{
-		{name: "contributions", queryFragment: "FROM plugin_contribution"},
-		{name: "bindings", queryFragment: "FROM plugin_binding"},
-		{name: "available releases", queryFragment: "FROM plugin_release release"},
-		{name: "active release", queryRowFragment: "FROM plugin_release\nWHERE id = $1", failQueryRowAtMatch: 2},
-	} {
-		t.Run("list fails closed when "+test.name+" cannot be read", func(t *testing.T) {
-			failingHandler := *testHandler
-			failingHandler.Queries = db.New(&failPluginDetailQueryDB{
-				DBTX:                testPool,
-				queryFragment:       test.queryFragment,
-				queryRowFragment:    test.queryRowFragment,
-				failQueryRowAtMatch: test.failQueryRowAtMatch,
-			})
-			recorder := httptest.NewRecorder()
-			failingHandler.ListPlugins(recorder, pluginHandlerRequest(http.MethodGet, "/plugins", nil, map[string]string{"id": testWorkspaceID}))
-			if recorder.Code != http.StatusInternalServerError {
-				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
-			}
-		})
+	if recorder.Code != http.StatusOK || strings.Contains(recorder.Body.String(), "sk-super-secret") {
+		t.Fatalf("list leaked the secret or failed: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
+	unknown, _ := json.Marshal(map[string]any{"values": map[string]any{"nope": "x"}})
 	recorder = httptest.NewRecorder()
-	testHandler.UpgradePlugin(recorder, pluginHandlerRequest(
-		http.MethodPost,
-		"/plugins/upgrade",
-		[]byte(`{"plugin_key":"ai.multica.software-delivery","version":"1.1.0"}`),
-		params,
-	))
-	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte(`"desired_version":"1.1.0"`)) {
-		t.Fatalf("upgrade status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-
-	recorder = httptest.NewRecorder()
-	testHandler.UpgradePlugin(recorder, pluginHandlerRequest(
-		http.MethodPost,
-		"/plugins/upgrade",
-		[]byte(`{"plugin_key":"ai.multica.software-delivery","version":"1.0.0"}`),
-		params,
-	))
-	if recorder.Code != http.StatusConflict || !bytes.Contains(recorder.Body.Bytes(), []byte("not newer")) {
-		t.Fatalf("downgrade through upgrade status=%d body=%s", recorder.Code, recorder.Body.String())
+	testHandler.ConfigurePlugin(recorder, pluginHandlerRequest(http.MethodPut, "/plugins/config", unknown, params))
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("unknown config field status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
 	recorder = httptest.NewRecorder()
 	testHandler.DisablePlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/disable", nil, params))
-	if recorder.Code != http.StatusOK {
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"enabled":false`) {
 		t.Fatalf("disable status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
 	recorder = httptest.NewRecorder()
-	testHandler.RollbackPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/rollback", []byte(`{"version":"1.0.0"}`), params))
-	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte(`"desired_version":"1.0.0"`)) {
-		t.Fatalf("rollback status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-
-	recorder = httptest.NewRecorder()
-	testHandler.RollbackPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/rollback", []byte(`{"version":"9.9.9"}`), params))
-	if recorder.Code != http.StatusNotFound || bytes.Contains(recorder.Body.Bytes(), []byte("no rows")) {
-		t.Fatalf("safe missing rollback status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-
-	recorder = httptest.NewRecorder()
-	testHandler.UninstallPlugin(recorder, pluginHandlerRequest(http.MethodDelete, "/plugins/"+installed.ID, nil, params))
+	testHandler.UninstallPlugin(recorder, pluginHandlerRequest(http.MethodDelete, "/plugins", nil, params))
 	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("official uninstall status=%d body=%s", recorder.Code, recorder.Body.String())
+		t.Fatalf("uninstall status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	var uninstallAuditCount int
-	if err := testPool.QueryRow(context.Background(), `
-		SELECT count(*) FROM activity_log
-		WHERE workspace_id = $1 AND action = 'plugin_uninstalled'
-	`, testWorkspaceID).Scan(&uninstallAuditCount); err != nil || uninstallAuditCount != 1 {
-		t.Fatalf("official uninstall audit count=%d err=%v", uninstallAuditCount, err)
+
+	// Uninstall must take the plugin's own state with it, or a reinstall would
+	// silently inherit rows nobody can audit.
+	var remaining int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT (SELECT COUNT(*) FROM plugin_secret WHERE installation_id = $1)
+		      + (SELECT COUNT(*) FROM plugin_storage WHERE installation_id = $1)`,
+		installed.ID).Scan(&remaining); err != nil {
+		t.Fatalf("count leftover plugin rows: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("uninstall left %d plugin-owned rows behind", remaining)
 	}
 }
 
-func TestPluginManagementUnavailableWhenFlagDisabled(t *testing.T) {
-	h := &Handler{}
-	request := func() *http.Request {
-		return pluginHandlerRequest(http.MethodGet, "/plugins", nil, map[string]string{
-			"id":             testWorkspaceID,
-			"installationId": "00000000-0000-0000-0000-000000000001",
-			"pluginKey":      plugintest.ReviewReadinessPluginKey,
-			"pluginRef":      plugintest.ReviewReadinessPluginKey,
-		})
-	}
-
-	for name, handler := range map[string]http.HandlerFunc{
-		"list installed":        h.ListPlugins,
-		"list catalog":          h.ListPluginCatalog,
-		"catalog detail":        h.GetPluginCatalogRelease,
-		"install":               h.InstallPlugin,
-		"upgrade":               h.UpgradePlugin,
-		"enable":                h.EnablePlugin,
-		"disable":               h.DisablePlugin,
-		"rollback":              h.RollbackPlugin,
-		"private list":          h.ListPrivatePlugins,
-		"private status":        h.GetPrivatePluginStatus,
-		"private install":       h.InstallPrivatePlugin,
-		"uninstall":             h.UninstallPlugin,
-		"remote oauth start":    h.StartPluginRemoteMCPOAuth,
-		"remote oauth callback": h.CompletePluginRemoteMCPOAuth,
-		"remote configure":      h.ConfigurePluginRemoteMCP,
-		"remote test":           h.TestPluginRemoteMCP,
-		"remote review":         h.ReviewPluginRemoteMCPTools,
-		"remote revoke":         h.RevokePluginRemoteMCPCredential,
-	} {
-		t.Run(name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			handler(recorder, request())
-			if recorder.Code != http.StatusServiceUnavailable {
-				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
-			}
-			if bytes.Contains(recorder.Body.Bytes(), []byte(plugintest.ReviewReadinessPluginKey)) {
-				t.Fatalf("disabled response leaked catalog data: %s", recorder.Body.String())
-			}
-		})
-	}
-}
-
-func TestPrivatePluginManagementRequiresPluginsV1(t *testing.T) {
-	h := &Handler{}
-	withPluginsV1Flag(t, h, false)
-	for name, handler := range map[string]http.HandlerFunc{
-		"list":    h.ListPrivatePlugins,
-		"status":  h.GetPrivatePluginStatus,
-		"install": h.InstallPrivatePlugin,
-	} {
-		t.Run(name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			handler(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/private", nil, map[string]string{"id": testWorkspaceID}))
-			if recorder.Code != http.StatusServiceUnavailable {
-				t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
-			}
-		})
-	}
-}
-
-func TestPrivatePluginHTTPUploadListAndUninstall(t *testing.T) {
+func TestPluginInstallRejectsMalformedManifest(t *testing.T) {
 	withPluginsV1Flag(t, testHandler, true)
-	cleanup := func() {
-		ctx := context.Background()
-		testPool.Exec(ctx, `DELETE FROM plugin_health WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_capability_snapshot WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_workspace_capability_state WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_binding WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_grant WHERE installation_id IN (SELECT id FROM plugin_installation WHERE workspace_id = $1)`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_installation WHERE workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_contribution WHERE release_id IN (SELECT id FROM plugin_release WHERE plugin_id IN (SELECT id FROM plugin_identity WHERE owner_workspace_id = $1))`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_artifact_file WHERE release_id IN (SELECT id FROM plugin_release WHERE plugin_id IN (SELECT id FROM plugin_identity WHERE owner_workspace_id = $1))`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_release WHERE plugin_id IN (SELECT id FROM plugin_identity WHERE owner_workspace_id = $1)`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM plugin_identity WHERE owner_workspace_id = $1`, testWorkspaceID)
-		testPool.Exec(ctx, `DELETE FROM activity_log WHERE workspace_id = $1 AND action LIKE 'plugin_private_%'`, testWorkspaceID)
-	}
-	cleanup()
-	t.Cleanup(cleanup)
+	cleanupPluginInstallations(t)
+	source := withLocalPluginSource(t, `{"manifest_version":1,"key":"com.example.hello","surprise":true}`)
 
-	archive, _, err := plugincontract.PackDirectory(filepath.Join("..", "..", "..", "examples", "plugins", "incident-triage"))
-	if err != nil {
-		t.Fatalf("pack example private Plugin: %v", err)
-	}
-	var body bytes.Buffer
-	writer := multipart.NewWriter(&body)
-	part, err := writer.CreateFormFile("artifact", "incident-triage.zip")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := part.Write(archive); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	request := pluginHandlerRequest(http.MethodPost, "/plugins/private/install", body.Bytes(), map[string]string{"id": testWorkspaceID})
-	request.Header.Set("Content-Type", writer.FormDataContentType())
+	body, _ := json.Marshal(map[string]any{"source_url": source, "granted_scopes": []string{}})
 	recorder := httptest.NewRecorder()
-	testHandler.InstallPrivatePlugin(recorder, request)
-	if recorder.Code != http.StatusCreated || !bytes.Contains(recorder.Body.Bytes(), []byte(`"trust_tier":"private_dev"`)) || !bytes.Contains(recorder.Body.Bytes(), []byte(`"signature_verified":false`)) {
-		t.Fatalf("private install status=%d body=%s", recorder.Code, recorder.Body.String())
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", body, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("malformed manifest status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	var installed pluginInstallationResponse
-	if err := json.Unmarshal(recorder.Body.Bytes(), &installed); err != nil {
-		t.Fatal(err)
+	if !strings.Contains(recorder.Body.String(), "manifest") {
+		t.Fatalf("malformed manifest error is not actionable: %s", recorder.Body.String())
 	}
+}
 
-	recorder = httptest.NewRecorder()
-	testHandler.ListPrivatePlugins(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/private", nil, map[string]string{"id": testWorkspaceID}))
-	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte("dev.multica.incident-triage")) {
-		t.Fatalf("private list status=%d body=%s", recorder.Code, recorder.Body.String())
+func TestPluginInstallRejectsUnshippedCapabilities(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	source := withLocalPluginSource(t, handlerTestManifest)
+	// A declared-but-unshipped contribution must fail the install outright: a
+	// silently dropped surface would look installed and never render.
+	testHandler.PluginService.Host = plugincontract.HostCapabilities()
+
+	body, _ := json.Marshal(map[string]any{
+		"source_url":     source,
+		"granted_scopes": []string{"issues:read", "comments:write", "storage:user"},
+	})
+	recorder := httptest.NewRecorder()
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", body, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unshipped capability status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	recorder = httptest.NewRecorder()
-	testHandler.GetPrivatePluginStatus(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/private/dev.multica.incident-triage", nil, map[string]string{
-		"id": testWorkspaceID, "pluginRef": "dev.multica.incident-triage",
+	if !strings.Contains(recorder.Body.String(), "issue_panel") {
+		t.Fatalf("error does not name the missing capability: %s", recorder.Body.String())
+	}
+}
+
+func TestPluginInstallationFromAnotherWorkspaceIsNotFound(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	recorder := httptest.NewRecorder()
+	testHandler.EnablePlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/enable", nil, map[string]string{
+		"id":             testWorkspaceID,
+		"installationId": "11111111-1111-1111-1111-111111111111",
 	}))
-	if recorder.Code != http.StatusOK || !bytes.Contains(recorder.Body.Bytes(), []byte(`"desired_version":"0.1.0"`)) {
-		t.Fatalf("private status=%d body=%s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
+}
+
+func TestPluginUpgradePrunesSecretsTheNewManifestDropped(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	root := t.TempDir()
+	source := withLocalPluginSourceIn(t, root, handlerTestManifest)
+
+	install, _ := json.Marshal(map[string]any{
+		"source_url":     source,
+		"granted_scopes": []string{"issues:read", "comments:write", "storage:user"},
+	})
+	recorder := httptest.NewRecorder()
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", install, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("install status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var installed struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(recorder.Body.Bytes(), &installed)
 
 	params := map[string]string{"id": testWorkspaceID, "installationId": installed.ID}
+	configure, _ := json.Marshal(map[string]any{"values": map[string]any{"token": "sk-old-secret"}})
 	recorder = httptest.NewRecorder()
-	testHandler.EnablePlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/enable", nil, params))
-	if recorder.Code != http.StatusOK {
-		t.Fatalf("private enable status=%d body=%s", recorder.Code, recorder.Body.String())
+	testHandler.ConfigurePlugin(recorder, pluginHandlerRequest(http.MethodPut, "/plugins/config", configure, params))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"configured_secrets":["token"]`) {
+		t.Fatalf("configure status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 
-	withPluginsV1Flag(t, testHandler, false)
+	// v2 drops the `token` secret field entirely. Its ciphertext must go with
+	// it: nothing can reach a secret whose field no longer exists, and leaving
+	// it means an uninstall is the only thing that ever removes it.
+	upgraded := strings.Replace(handlerTestManifest, `"version": "1.0.0"`, `"version": "2.0.0"`, 1)
+	upgraded = strings.Replace(upgraded, `,
+    "token": { "type": "secret", "label": "Token" }`, "", 1)
+	writeLocalPluginManifest(t, root, upgraded)
+
 	recorder = httptest.NewRecorder()
-	testHandler.ListPlugins(recorder, pluginHandlerRequest(http.MethodGet, "/plugins", nil, map[string]string{"id": testWorkspaceID}))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("Plugin list with plugins_v1 off status=%d body=%s", recorder.Code, recorder.Body.String())
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", install, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("upgrade status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
-	recorder = httptest.NewRecorder()
-	testHandler.EnablePlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/enable", nil, params))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("Plugin enable with plugins_v1 off status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	recorder = httptest.NewRecorder()
-	testHandler.DisablePlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins/disable", nil, params))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("Plugin disable with plugins_v1 off status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	recorder = httptest.NewRecorder()
-	testHandler.UninstallPlugin(recorder, pluginHandlerRequest(http.MethodDelete, "/plugins/"+installed.ID, nil, map[string]string{
-		"id": testWorkspaceID, "installationId": installed.ID,
-	}))
-	if recorder.Code != http.StatusServiceUnavailable {
-		t.Fatalf("Plugin uninstall with plugins_v1 off status=%d body=%s", recorder.Code, recorder.Body.String())
+	if !strings.Contains(recorder.Body.String(), `"configured_secrets":[]`) {
+		t.Fatalf("upgrade left an unreachable secret: %s", recorder.Body.String())
 	}
 
-	withPluginsV1Flag(t, testHandler, true)
-	recorder = httptest.NewRecorder()
-	testHandler.UninstallPlugin(recorder, pluginHandlerRequest(http.MethodDelete, "/plugins/"+installed.ID, nil, map[string]string{
-		"id": testWorkspaceID, "installationId": installed.ID,
-	}))
-	if recorder.Code != http.StatusNoContent {
-		t.Fatalf("private uninstall status=%d body=%s", recorder.Code, recorder.Body.String())
+	var remaining int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM plugin_secret WHERE installation_id = $1`, installed.ID).Scan(&remaining); err != nil {
+		t.Fatalf("count secrets: %v", err)
 	}
-	recorder = httptest.NewRecorder()
-	testHandler.GetPrivatePluginStatus(recorder, pluginHandlerRequest(http.MethodGet, "/plugins/private/dev.multica.incident-triage", nil, map[string]string{
-		"id": testWorkspaceID, "pluginRef": "dev.multica.incident-triage",
-	}))
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("uninstalled private status=%d body=%s", recorder.Code, recorder.Body.String())
+	if remaining != 0 {
+		t.Fatalf("upgrade left %d secret rows behind", remaining)
 	}
 }
 
-func TestResolveTaskRemoteMCPCredentialRejectsNonDaemonAuth(t *testing.T) {
-	h := &Handler{}
-	recorder := httptest.NewRecorder()
-	request := pluginHandlerRequest(http.MethodGet, "/api/daemon/tasks/task-id/remote-mcp/contribution-id/credential", nil, map[string]string{
-		"taskId":         "task-id",
-		"contributionId": "contribution-id",
+// TestPluginRoutesRequireWorkspaceAdmin pins the gate that actually protects
+// these endpoints. Every other handler test calls the handler directly, which
+// bypasses middleware entirely — so without this, "install/configure/uninstall
+// are admin-only" rests on where the routes sit in router.go and nothing would
+// fail if one moved into the member group.
+func TestPluginRoutesRequireWorkspaceAdmin(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	memberID := createTestUserAndMember(t, "member")
+
+	router := chi.NewRouter()
+	router.Route("/api/workspaces/{id}", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+			r.Post("/plugins/preview", testHandler.PreviewPlugin)
+			r.Post("/plugins", testHandler.InstallPlugin)
+			r.Put("/plugins/{installationId}/config", testHandler.ConfigurePlugin)
+			r.Post("/plugins/{installationId}/enable", testHandler.EnablePlugin)
+			r.Post("/plugins/{installationId}/disable", testHandler.DisablePlugin)
+			r.Delete("/plugins/{installationId}", testHandler.UninstallPlugin)
+		})
+		// Listing is member-visible on purpose: a member should be able to see
+		// what is mounted in their workspace and which scopes it holds.
+		r.Get("/plugins", testHandler.ListPlugins)
 	})
 
-	h.ResolveTaskRemoteMCPCredential(recorder, request)
-
-	if recorder.Code != http.StatusForbidden {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	base := "/api/workspaces/" + testWorkspaceID
+	adminOnly := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, base + "/plugins/preview"},
+		{http.MethodPost, base + "/plugins"},
+		{http.MethodPut, base + "/plugins/11111111-1111-1111-1111-111111111111/config"},
+		{http.MethodPost, base + "/plugins/11111111-1111-1111-1111-111111111111/enable"},
+		{http.MethodPost, base + "/plugins/11111111-1111-1111-1111-111111111111/disable"},
+		{http.MethodDelete, base + "/plugins/11111111-1111-1111-1111-111111111111"},
 	}
-}
-
-func TestResolveTaskRemoteMCPCredentialRejectsDifferentDaemonInWorkspace(t *testing.T) {
-	if testHandler == nil || testPool == nil {
-		t.Skip("database not available")
+	for _, route := range adminOnly {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			request := newRequest(route.method, route.path, map[string]any{})
+			request.Header.Set("X-User-ID", memberID)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("plain member reached an admin route: status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
 	}
-	fixture := createCommentDeliveryFixture(t, "Remote MCP daemon isolation")
-	request := newDaemonTokenRequest(http.MethodGet,
-		"/api/daemon/tasks/"+fixture.taskID+"/remote-mcp/contribution-id/credential",
-		nil, testWorkspaceID, "different-daemon")
-	routeCtx := chi.NewRouteContext()
-	routeCtx.URLParams.Add("taskId", fixture.taskID)
-	routeCtx.URLParams.Add("contributionId", "contribution-id")
-	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeCtx))
 
+	request := newRequest(http.MethodGet, base+"/plugins", nil)
+	request.Header.Set("X-User-ID", memberID)
 	recorder := httptest.NewRecorder()
-	testHandler.ResolveTaskRemoteMCPCredential(recorder, request)
-
-	if recorder.Code != http.StatusNotFound {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("plain member could not list Plugins: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

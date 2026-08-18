@@ -21,8 +21,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
@@ -127,7 +127,7 @@ func TestRemoteMCPDaemonTokenForClaim(t *testing.T) {
 		DaemonID:    strToText("daemon-remote-mcp"),
 	}
 	raw, params, err := remoteMCPDaemonTokenForClaim(AgentTaskResponse{
-		RemoteMCPConnections: []pluginruntime.RemoteMCPConnection{{ContributionKey: "mobbin"}},
+		RemoteMCPConnections: []remotemcp.Connection{{ContributionKey: "mobbin"}},
 	}, runtime)
 	if err != nil {
 		t.Fatalf("remoteMCPDaemonTokenForClaim: %v", err)
@@ -976,6 +976,7 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 			},
 		},
 	}, testWorkspaceID, "test-daemon-profile-failure")
+	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityLocalWorktreeV1)
 
 	testHandler.DaemonRegister(w, req)
 	if w.Code != http.StatusOK {
@@ -1005,6 +1006,21 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	}
 	if meta["runtime_profile_failure_reason"] != "command not found on PATH: missing-codex" {
 		t.Fatalf("failure reason metadata = %#v", meta["runtime_profile_failure_reason"])
+	}
+	// This row is written AFTER the successful runtimes of the same request, so
+	// its last_seen_at is the newest for the daemon until the first heartbeat —
+	// and the worktree gates read the newest row. A failed profile must not make
+	// a capable daemon look incapable for that window, nor (on the UI side) make
+	// this server look too old to record capabilities at all.
+	caps, _ := meta["capabilities"].([]any)
+	found := false
+	for _, c := range caps {
+		if c == protocol.DaemonCapabilityLocalWorktreeV1 {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("advertised capabilities missing from failure row: %#v", meta["capabilities"])
 	}
 }
 

@@ -11,12 +11,13 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Decides whether the heavy frontend validation jobs have anything to do.
+  # Decides whether the heavy frontend validation jobs and sqlc verification
+  # have anything to do.
   # The frontend jobs validate the web/desktop apps, the shared packages,
   # the install graph, and the selfhost / reserved-slugs scripts it runs;
   # a pure backend-only or docs-only PR touches none of those and gains
-  # nothing from a full web build. This job emits a single `frontend`
-  # output consumed by the frontend jobs below.
+  # nothing from a full web build. The outputs are consumed by the focused
+  # jobs below.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -24,6 +25,7 @@ jobs:
       pull-requests: read
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
+      sqlc: ${{ steps.decide.outputs.sqlc }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -66,6 +68,13 @@ jobs:
               - 'docker-compose.selfhost.yml'
               - 'docker-compose.selfhost.build.yml'
               - 'Makefile'
+            sqlc:
+              - 'server/pkg/db/queries/**'
+              - 'server/pkg/db/generated/**'
+              - 'server/migrations/**'
+              - 'server/sqlc.yaml'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
 
       - name: Decide
         id: decide
@@ -78,11 +87,44 @@ jobs:
         env:
           EVENT_NAME: ${{ github.event_name }}
           FRONTEND_CHANGED: ${{ steps.filter.outputs.frontend }}
+          SQLC_CHANGED: ${{ steps.filter.outputs.sqlc }}
         run: |
           if [ "$EVENT_NAME" != "pull_request" ] || [ "$FRONTEND_CHANGED" = "true" ]; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
           else
             echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$SQLC_CHANGED" = "true" ]; then
+            echo "sqlc=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sqlc=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  sqlc-check:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        if: ${{ needs.changes.outputs.sqlc == 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        if: ${{ needs.changes.outputs.sqlc == 'true' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Verify generated SQL is up to date
+        if: ${{ needs.changes.outputs.sqlc == 'true' }}
+        run: |
+          make sqlc
+          git diff --exit-code -- server/pkg/db/generated
+          untracked="$(git ls-files --others --exclude-standard -- server/pkg/db/generated)"
+          if [ -n "$untracked" ]; then
+            printf 'Untracked generated SQL files:\n%s\n' "$untracked"
+            exit 1
           fi
 
   # The frontend validation is split across four runners on purpose. A prior
@@ -392,21 +434,23 @@ jobs:
         working-directory: server
         run: go tool govulncheck ./...
 
-  # Preserve the existing required-check name while allowing tests and the
-  # vulnerability scan to run independently and report both outcomes.
+  # Preserve the existing required-check name while allowing tests, generated
+  # SQL verification, and the vulnerability scan to run independently.
   backend:
-    needs: [backend-tests, go-vulnerability-scan]
+    needs: [backend-tests, sqlc-check, go-vulnerability-scan]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     steps:
       - name: Check backend job results
         env:
           TEST_RESULT: ${{ needs.backend-tests.result }}
+          SQLC_RESULT: ${{ needs.sqlc-check.result }}
           VULNERABILITY_RESULT: ${{ needs.go-vulnerability-scan.result }}
         run: |
           echo "backend-tests:        $TEST_RESULT"
+          echo "sqlc-check:           $SQLC_RESULT"
           echo "go-vulnerability-scan: $VULNERABILITY_RESULT"
-          if [ "$TEST_RESULT" != "success" ] || [ "$VULNERABILITY_RESULT" != "success" ]; then
+          if [ "$TEST_RESULT" != "success" ] || [ "$SQLC_RESULT" != "success" ] || [ "$VULNERABILITY_RESULT" != "success" ]; then
             echo "::error::backend validation failed"
             exit 1
           fi

@@ -480,6 +480,7 @@ func TestIssueTableCompoundCellKeyResolvesPrimaryAndStatus(t *testing.T) {
 	key := compoundCellGroupKey(
 		"parent:00000000-0000-4000-8000-000000000001",
 		"todo",
+		false,
 	)
 	args := make([]any, 0, 2)
 	predicate, ok := compound.predicate(

@@ -1,5 +1,7 @@
 import type { Issue, IssueStatusCategory } from "../types";
 import { isIssueStatusCategory } from "../issue-statuses";
+import type { IssueStatusCatalog } from "../issue-statuses";
+import { ALL_STATUSES } from "./config";
 
 /**
  * The category an issue's status belongs to — the bucket it occupies on the
@@ -61,4 +63,81 @@ export function normalizeStatusPatch(patch: Partial<Issue>): Partial<Issue> {
   // Undefined rather than the inherited value: an unresolvable status must not
   // silently keep the previous category.
   return { ...patch, status_category: category ?? undefined };
+}
+
+/**
+ * How an exact status-key filter resolves to board/list COLUMNS (MUL-6243).
+ *
+ * Three states, not two. Built-in keys resolve with no catalog at all, because
+ * a built-in key IS its own category. A CUSTOM key does not — and `categoryOf`
+ * answers `todo` for anything it has not loaded, which is indistinguishable
+ * from a real `todo`. Routing on that guess paged the todo column for a saved
+ * `qa` filter while the query still restricted `status=qa`.
+ *
+ * Returning an empty column set for that case is equally wrong: the caller
+ * cannot tell "narrow to nothing" from "cannot answer yet", so it fetched no
+ * branches and rendered an empty board with no spinner and no error. Hence the
+ * explicit state:
+ *
+ * - `resolved` — every key answered; `columns` is authoritative.
+ * - `pending`  — a custom key needs a catalog that is still in flight. Hold the
+ *                surface's loading state; do not fetch and do not render empty.
+ * - `error`    — the catalog request failed. Show a retryable error; a custom
+ *                filter cannot be honoured without it.
+ */
+export type StatusFilterColumnsResult =
+  | { state: "resolved"; columns: Set<IssueStatusCategory> }
+  | { state: "pending" }
+  | { state: "error" };
+
+export function statusFilterColumns(
+  statusFilters: readonly string[],
+  catalog: Pick<IssueStatusCatalog, "entryOf" | "isLoaded" | "isPending" | "isError">,
+): StatusFilterColumnsResult {
+  const columns = new Set<IssueStatusCategory>();
+  for (const key of statusFilters) {
+    if (isIssueStatusCategory(key)) {
+      columns.add(key);
+      continue;
+    }
+    // A custom key. Without an authoritative catalog there is no honest answer.
+    if (catalog.isError) return { state: "error" };
+    if (!catalog.isLoaded) return { state: "pending" };
+    const category = catalog.entryOf(key)?.category;
+    // A LOADED catalog that does not know the key is authoritative too: the
+    // status was deleted, or belongs to another workspace. Contributing no
+    // column is the resolved answer, not a pending one.
+    if (category && ALL_STATUSES.includes(category)) columns.add(category);
+  }
+  return { state: "resolved", columns };
+}
+
+/**
+ * Whether an issue BEHAVES as a given category (MUL-6243).
+ *
+ * The one question every status-coupled product rule actually asks. Comparing
+ * `issue.status` to a built-in key answers it only for a workspace with no
+ * custom statuses: a custom status in the `done` category is done, and code
+ * that checks `status === "done"` silently disagrees.
+ *
+ * An unresolved custom key answers `false`, and that direction is deliberate —
+ * every caller of this fails safe that way. "Is it done/cancelled?" false keeps
+ * a row VISIBLE rather than hiding it; "is it backlog?" false keeps the
+ * agent-run confirmation rather than skipping it. Guessing the other way would
+ * hide work or start an agent without asking.
+ */
+export function issueBehavesAs(
+  issue: Pick<Issue, "status" | "status_category">,
+  category: IssueStatusCategory,
+): boolean {
+  return issueStatusCategory(issue) === category;
+}
+
+/** True when the issue behaves as any of the given categories. */
+export function issueBehavesAsAny(
+  issue: Pick<Issue, "status" | "status_category">,
+  categories: readonly IssueStatusCategory[],
+): boolean {
+  const resolved = issueStatusCategory(issue);
+  return resolved !== null && categories.includes(resolved);
 }

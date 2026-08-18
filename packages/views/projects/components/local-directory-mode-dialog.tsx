@@ -15,14 +15,23 @@ import {
 import { useT } from "../../i18n/use-t";
 
 /**
- * Why the worktree option may be unavailable. The two cases need different
- * copy and different remedies, so they are distinct rather than one boolean:
- * `not_git` is fixed by choosing a different folder, `daemon_outdated` by
- * updating the app on that machine.
+ * Why the worktree option may be unavailable.
+ *
+ * Two reasons, and neither is a guess about the machine. `not_git` the client
+ * establishes by itself — the folder either has a repository to branch from or
+ * it does not, and the desktop picker checked. `server_outdated` is what the
+ * SERVER says about itself: whether it understands `execution_mode` at all.
+ *
+ * Whether the MACHINE can run the mode is deliberately absent. That is the
+ * server's question, asked on every save, and a rejection comes back as
+ * `errorMessage` rather than as a disabled option guessed at up front (#7113).
+ * But deferring to the server is only safe once the server has said it will
+ * actually check: older ones drop the field and answer 201, and the task then
+ * edits the directory the user asked to isolate.
  *
  * `undefined` means available.
  */
-export type WorktreeUnavailableReason = "not_git" | "daemon_outdated";
+export type WorktreeUnavailableReason = "not_git" | "server_outdated";
 
 interface LocalDirectoryModeDialogProps {
   open: boolean;
@@ -33,9 +42,6 @@ interface LocalDirectoryModeDialogProps {
   value: LocalDirectoryExecutionMode;
   /** Set when worktree cannot be chosen; the option renders disabled with a reason. */
   unavailableReason?: WorktreeUnavailableReason;
-  /** Daemon version strings for the outdated message. */
-  currentVersion?: string;
-  minVersion?: string;
   /** Server-side rejection to show inline (e.g. a 422 that only the API can detect). */
   errorMessage?: string;
   saving?: boolean;
@@ -59,8 +65,6 @@ export function LocalDirectoryModeDialog({
   path,
   value,
   unavailableReason,
-  currentVersion,
-  minVersion,
   errorMessage,
   saving = false,
   confirmLabel,
@@ -93,8 +97,6 @@ export function LocalDirectoryModeDialog({
           value={selected}
           onChange={setSelected}
           unavailableReason={unavailableReason}
-          currentVersion={currentVersion}
-          minVersion={minVersion}
         />
 
         {errorMessage && (
@@ -125,8 +127,6 @@ interface LocalDirectoryModeOptionsProps {
   value: LocalDirectoryExecutionMode;
   onChange: (mode: LocalDirectoryExecutionMode) => void;
   unavailableReason?: WorktreeUnavailableReason;
-  currentVersion?: string;
-  minVersion?: string;
 }
 
 /**
@@ -140,8 +140,6 @@ export function LocalDirectoryModeOptions({
   value,
   onChange,
   unavailableReason,
-  currentVersion,
-  minVersion,
 }: LocalDirectoryModeOptionsProps) {
   const { t } = useT("projects");
   const worktreeDisabled = unavailableReason !== undefined;
@@ -166,14 +164,8 @@ export function LocalDirectoryModeOptions({
         disabledReason={
           unavailableReason === "not_git"
             ? t(($) => $.resources.mode_worktree_needs_git)
-            : unavailableReason === "daemon_outdated"
-              ? t(($) => $.resources.mode_worktree_needs_upgrade, {
-                  current:
-                    currentVersion && currentVersion.length > 0
-                      ? currentVersion
-                      : t(($) => $.resources.mode_version_unknown),
-                  min: minVersion ?? "",
-                })
+            : unavailableReason === "server_outdated"
+              ? t(($) => $.resources.mode_worktree_needs_server_upgrade)
               : undefined
         }
         onSelect={() => onChange("worktree")}

@@ -413,8 +413,14 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		return "$" + strconv.Itoa(len(args))
 	}
 
+	// Any non-empty status KEY, not just the 7 built-ins. A status filter names
+	// the exact statuses the user picked, and since MUL-6243 those can be custom
+	// — rejecting them here 400'd the entire request, so filtering a board by a
+	// custom status errored the surface instead of narrowing it. The predicate
+	// below is a parameterized `status = ANY(...)`, so an unknown key simply
+	// matches nothing; length-bounded so an arbitrary blob cannot ride in.
 	for _, status := range spec.Filters.Statuses {
-		if !issueTableContainsString(validIssueStatuses, status) {
+		if status == "" || len(status) > 64 {
 			writeError(w, http.StatusBadRequest, "invalid filters.statuses")
 			return issueTableSQL{}, false
 		}

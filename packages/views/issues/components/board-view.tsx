@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import type {
   Issue,
   IssueAssigneeType,
-  IssueStatus,
+  IssueStatusCategory,
   Project,
   IssueProperty,
 } from "@multica/core/types";
@@ -62,13 +62,13 @@ import {
 
 function isStatusGroup(
   group: BoardColumnGroup,
-): group is BoardColumnGroup & { status: IssueStatus } {
+): group is BoardColumnGroup & { status: IssueStatusCategory } {
   return group.status !== undefined;
 }
 
 function buildGroups(
   issues: Issue[],
-  visibleStatuses: IssueStatus[],
+  visibleStatuses: IssueStatusCategory[],
   grouping: IssueGrouping,
   getActorName: (type: string, id: string) => string,
   noAssigneeLabel: string,
@@ -168,8 +168,8 @@ function BoardViewImpl({
   groupBranches,
 }: {
   issues: Issue[];
-  visibleStatuses: IssueStatus[];
-  hiddenStatuses: IssueStatus[];
+  visibleStatuses: IssueStatusCategory[];
+  hiddenStatuses: IssueStatusCategory[];
   onMoveIssue: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
@@ -731,7 +731,7 @@ function BoardHiddenColumnsPanel({
   hiddenStatuses,
   statusPagination,
 }: {
-  hiddenStatuses: IssueStatus[];
+  hiddenStatuses: IssueStatusCategory[];
   statusPagination?: IssueStatusPagination;
 }) {
   return (

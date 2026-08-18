@@ -1,6 +1,6 @@
 "use client";
 
-import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -57,7 +57,6 @@ import {
 } from "@multica/ui/components/ui/select";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import {
-  ALL_STATUSES,
   PRIORITY_DISPLAY_ORDER,
 } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon } from ".";
@@ -116,6 +115,7 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
+import { useStatusOptions } from "../utils/status-options";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
@@ -1212,6 +1212,7 @@ export function IssueFilterMenu({
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
   const wsId = useWorkspaceId();
+  const { groups: statusGroups, hasCustom: showStatusGroupLabels } = useStatusOptions(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const filterableProperties = useMemo(
     () =>
@@ -1306,30 +1307,50 @@ export function IssueFilterMenu({
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-48">
-                {ALL_STATUSES.map((s) => {
-                  const checked = statusFilters.includes(s);
-                  const count = counts.status.get(s) ?? 0;
-                  const fixed = viewBaseline?.status.has(s) === true;
-                  return (
-                    <DropdownMenuCheckboxItem
-                      key={s}
-                      checked={checked}
-                      disabled={fixed}
-                      title={fixed ? fixedTitle : undefined}
-                      onCheckedChange={() => act.toggleStatusFilter(s)}
-                      className={FILTER_ITEM_CLASS}
-                    >
-                      <HoverCheck checked={checked} />
-                      <StatusIcon status={s} className="h-3.5 w-3.5" />
-                      {t(($) => $.status[s])}
-                      {count > 0 && (
-                        <span className="ml-auto text-caption text-muted-foreground">
-                          {t(($) => $.filters.issue_count, { count })}
-                        </span>
-                      )}
-                    </DropdownMenuCheckboxItem>
-                  );
-                })}
+                {/* Options come from the workspace catalog, so a custom status
+                    is filterable — otherwise an issue moved onto one could not
+                    be narrowed to. Grouped by category, and headings appear
+                    only once a category holds more than one status, so a
+                    workspace that never customized anything sees the same flat
+                    7-row list. (MUL-6243) */}
+                {statusGroups.map((group) => (
+                  <Fragment key={group.category}>
+                    {showStatusGroupLabels && (
+                      <DropdownMenuLabel className="text-caption text-muted-foreground">
+                        {t(($) => $.status[group.category])}
+                      </DropdownMenuLabel>
+                    )}
+                    {group.options.map((option) => {
+                      const checked = statusFilters.includes(option.key);
+                      const count = counts.status.get(option.key) ?? 0;
+                      const fixed = viewBaseline?.status.has(option.key) === true;
+                      return (
+                        <DropdownMenuCheckboxItem
+                          key={option.key}
+                          checked={checked}
+                          disabled={fixed}
+                          title={fixed ? fixedTitle : undefined}
+                          onCheckedChange={() => act.toggleStatusFilter(option.key)}
+                          className={FILTER_ITEM_CLASS}
+                        >
+                          <HoverCheck checked={checked} />
+                          <StatusIcon
+                            status={option.key}
+                            category={group.category}
+                            color={option.color}
+                            className="h-3.5 w-3.5"
+                          />
+                          {option.label}
+                          {count > 0 && (
+                            <span className="ml-auto text-caption text-muted-foreground">
+                              {t(($) => $.filters.issue_count, { count })}
+                            </span>
+                          )}
+                        </DropdownMenuCheckboxItem>
+                      );
+                    })}
+                  </Fragment>
+                ))}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 

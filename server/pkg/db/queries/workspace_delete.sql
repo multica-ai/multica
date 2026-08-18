@@ -568,74 +568,23 @@ WITH deleted_squads AS (
 DELETE FROM skill WHERE skill.workspace_id = $1;
 
 -- name: DeleteWorkspacePluginData :exec
--- Plugin relationships have no foreign keys or cascades. Delete the append-only
--- grant/binding history first, then installation rows. Global identity, release,
--- contribution, and artifact rows survive. Workspace-owned private registry
--- rows are removed after their execution manifests have been removed.
+-- Plugin relationships have no foreign keys or cascades. Storage and secrets
+-- hang off the installation, so both leaf tables are cleared through the
+-- workspace's installation ids before the installations themselves.
 WITH installations AS MATERIALIZED (
     SELECT plugin_installation.id
     FROM plugin_installation
     WHERE plugin_installation.workspace_id = $1
 ),
-private_identities AS MATERIALIZED (
-    SELECT plugin_identity.id
-    FROM plugin_identity
-    WHERE plugin_identity.owner_workspace_id = $1
-),
-private_releases AS MATERIALIZED (
-    SELECT plugin_release.id
-    FROM plugin_release
-    WHERE plugin_release.plugin_id IN (SELECT id FROM private_identities)
-),
-deleted_health AS (
-    DELETE FROM plugin_health
-    WHERE workspace_id = $1
-),
-deleted_execution_manifests AS (
-    DELETE FROM plugin_execution_manifest
-    WHERE workspace_id = $1
-),
-deleted_snapshots AS (
-    DELETE FROM plugin_capability_snapshot
-    WHERE workspace_id = $1
-),
-deleted_workspace_state AS (
-    DELETE FROM plugin_workspace_capability_state
-    WHERE workspace_id = $1
-),
-deleted_remote_mcp_oauth_states AS (
-    DELETE FROM plugin_remote_mcp_oauth_state
-    WHERE workspace_id = $1
-),
-deleted_remote_mcp_configs AS (
-    DELETE FROM plugin_installation_config
-    WHERE workspace_id = $1
-),
-deleted_remote_mcp_secrets AS (
-    DELETE FROM plugin_remote_mcp_secret
-    WHERE workspace_id = $1
-),
-deleted_bindings AS (
-    DELETE FROM plugin_binding
+deleted_storage AS (
+    DELETE FROM plugin_storage
     WHERE installation_id IN (SELECT id FROM installations)
 ),
-deleted_grants AS (
-    DELETE FROM plugin_grant
+deleted_secrets AS (
+    DELETE FROM plugin_secret
     WHERE installation_id IN (SELECT id FROM installations)
-),
-deleted_installations AS (
-    DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations)
-),
-deleted_private_artifacts AS (
-    DELETE FROM plugin_artifact_file WHERE release_id IN (SELECT id FROM private_releases)
-),
-deleted_private_contributions AS (
-    DELETE FROM plugin_contribution WHERE release_id IN (SELECT id FROM private_releases)
-),
-deleted_private_releases AS (
-    DELETE FROM plugin_release WHERE id IN (SELECT id FROM private_releases)
 )
-DELETE FROM plugin_identity WHERE id IN (SELECT id FROM private_identities);
+DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);
 
 -- name: DeleteWorkspaceAgents :exec
 DELETE FROM agent WHERE agent.workspace_id = $1;

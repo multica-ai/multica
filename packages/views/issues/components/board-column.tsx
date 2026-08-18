@@ -1,6 +1,5 @@
 "use client";
 
-import { statusCategoryOfKey } from "@multica/core/issues";
 import { memo, useCallback, useMemo, useState, type ReactNode } from "react";
 import { Virtuoso } from "react-virtuoso";
 import { EyeOff, MoreHorizontal, Plus, UserMinus } from "lucide-react";
@@ -9,7 +8,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import type {
   Issue,
   IssueAssigneeType,
-  IssueStatus,
+  IssueStatusCategory,
   Project,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -75,7 +74,8 @@ const EMPTY_VIRTUOSO_COMPONENTS = {};
 export interface BoardColumnGroup {
   id: string;
   title: string;
-  status?: IssueStatus;
+  /** Board columns are CATEGORIES, never raw status keys. (MUL-6243) */
+  status?: IssueStatusCategory;
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   /** Set when the board is grouped by a select-type custom property. */
@@ -112,7 +112,7 @@ export const BoardColumn = memo(function BoardColumn({
   sortLabel?: string | null;
 }) {
   const status = group.status;
-  const cfg = status ? STATUS_CONFIG[statusCategoryOfKey(status)] : null;
+  const cfg = status ? STATUS_CONFIG[status] : null;
   const { setNodeRef, isOver } = useDroppable({ id: group.id });
   const viewStoreApi = useViewStoreApi();
   // A status fixed by the open saved view cannot be hidden from the board —

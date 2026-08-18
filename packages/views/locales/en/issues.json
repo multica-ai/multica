@@ -1,4 +1,9 @@
 {
+  "status_catalog_error": {
+    "title": "Couldn't load the status list",
+    "hint": "Issues are hidden until it loads, because a status filter can't be applied without it.",
+    "retry": "Try again"
+  },
   "page": {
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "Workspace",
@@ -37,6 +42,7 @@
   "filters": {
     "tooltip": "Filter",
     "placeholder": "Filter...",
+    "search_status": "Search status...",
     "no_results": "No results",
     "no_labels": "No labels yet",
     "no_assignee": "No assignee",

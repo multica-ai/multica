@@ -1,4 +1,0 @@
-interface:
-  display_name: "Mobbin Design Research"
-  short_description: "Research proven UI patterns with Mobbin"
-  default_prompt: "Use $mobbin-design-research to research proven product patterns for this interface."

@@ -19,16 +19,16 @@ export type IssueStatusCategory =
   | "cancelled";
 
 /**
- * A status KEY as stored on the issue.
+ * A status KEY as stored on the issue: one of the 7 built-ins, or a custom key
+ * an admin defined for this workspace.
  *
- * STILL the closed 7-value union. Widening it to `string` — so a workspace's
- * CUSTOM statuses are representable — is the first task of the follow-up PR,
- * because it forces every `Record<IssueStatus, …>` presentation lookup in
- * `packages/views` to resolve a key to its category first. The catalog module
- * and the category type below exist so that change is mechanical rather than
- * exploratory. (MUL-6243)
+ * OPEN by design. `(string & {})` keeps editor autocomplete for the 7 built-ins
+ * while accepting any catalog key, which is what the server has always been
+ * able to send. Anything that needs presentation (label, colour, board column)
+ * must resolve the key to its CATEGORY first — `useIssueStatuses(wsId)` in a
+ * component, `statusCategoryOfKey` in a pure path. (MUL-6243)
  */
-export type IssueStatus = IssueStatusCategory;
+export type IssueStatus = IssueStatusCategory | (string & {});
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 

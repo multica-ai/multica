@@ -223,6 +223,7 @@ func TestDirectChat_ClaimKeepsQueuedTurnsPairedWithReplies(t *testing.T) {
 		RuntimeID:         parseUUID(runtimeID),
 		ClaimRecoverySecs: 0,
 		PrepareLeaseSecs:  60,
+		RuntimeStaleSecs:  service.RuntimeClaimFreshnessSeconds,
 	})
 	if err != nil {
 		t.Fatalf("reclaim B dispatch: %v", err)
@@ -467,8 +468,9 @@ func TestCompleteTask_ChatCallbackIdempotent(t *testing.T) {
 
 // TestFailTask_ChatRetryInheritsInputOwnerAndPriority: a transient failure of a
 // task-owned direct task creates a retry child that reuses the SAME input owner
-// (so it reads the same user messages) and is queued at a bumped priority so it
-// is claimed ahead of fresh chat tasks.
+// (so it reads the same user messages) and keeps a bumped priority. A
+// runtime_offline retry remains deferred until the runtime is healthy, then is
+// claimed ahead of fresh chat tasks.
 func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -498,8 +500,8 @@ func TestFailTask_ChatRetryInheritsInputOwnerAndPriority(t *testing.T) {
 	if childPriority < 3 {
 		t.Fatalf("chat retry must be bumped above fresh chat priority (2); got %d", childPriority)
 	}
-	if childStatus != "queued" {
-		t.Fatalf("retry child must be queued, got %q", childStatus)
+	if childStatus != "deferred" {
+		t.Fatalf("runtime_offline retry child must be deferred, got %q", childStatus)
 	}
 	// The root direct task starts at attempt 1, so its first retry is attempt 2.
 	var rootAttempt int

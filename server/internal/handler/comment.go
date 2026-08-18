@@ -3507,6 +3507,20 @@ func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.
 		if isNoteComment(comment.Content) {
 			continue
 		}
+		// Platform recovery comments bypass generic member/agent routing. If
+		// editing or deleting another comment cancelled the queued batch that
+		// carried one, replay it through the durable delegated-failure path so
+		// the cancelled, undelivered task cannot swallow the obligation.
+		if service.IsDelegatedFailureRecoveryComment(comment) {
+			if err := h.TaskService.DispatchDelegatedFailureRecoveryComment(ctx, comment, pgtype.UUID{}); err != nil {
+				slog.Warn("retrigger cancelled comment batch: delegated failure recovery replay failed",
+					"issue_id", uuidToString(issue.ID),
+					"comment_id", uuidToString(comment.ID),
+					"error", err,
+				)
+			}
+			continue
+		}
 		var parentComment *db.Comment
 		if comment.ParentID.Valid {
 			if parent, err := h.Queries.GetComment(ctx, comment.ParentID); err == nil {

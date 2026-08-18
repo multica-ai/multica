@@ -1,4 +1,9 @@
 {
+  "status_catalog_error": {
+    "title": "状态列表加载失败",
+    "hint": "没有它就无法应用状态筛选，因此暂时不显示议题。",
+    "retry": "重试"
+  },
   "page": {
     "breadcrumb_title": "任务",
     "breadcrumb_workspace_fallback": "工作区",
@@ -37,6 +42,7 @@
   "filters": {
     "tooltip": "筛选",
     "placeholder": "筛选...",
+    "search_status": "搜索状态...",
     "no_results": "无结果",
     "no_labels": "还没有标签",
     "no_assignee": "无负责人",

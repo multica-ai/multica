@@ -294,6 +294,27 @@ export function createZhDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.29",
+        date: "2026-08-18",
+        title: "MiniMax Code、运行记录优化、Hermes 智能体行为修复",
+        changes: [],
+        features: [
+          "现在可以用 MiniMax Code 运行智能体。",
+          "按 Cmd/Ctrl+, 就能在桌面端新标签页打开设置。",
+        ],
+        improvements: [
+          "Hermes 智能体调用工具时，运行记录会立即显示。",
+          "运行记录去掉了重复的智能体名称，更容易浏览。",
+        ],
+        fixes: [
+          "短暂断线后，智能体任务会继续运行。",
+          "日度和周度费用图现在计入缓存读取费用。",
+          "在飞书里直接发的文件和音频现在会传给智能体。",
+          "委派任务失败后，会回到原来的协调智能体。",
+          "下载页面现在只会显示最新的完整版本。",
+        ],
+      },
+      {
         version: "0.4.28",
         date: "2026-08-17",
         title: "成员自定义字段、技能批量更新、更清楚的桌面端更新提示",

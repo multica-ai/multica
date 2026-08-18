@@ -305,17 +305,30 @@ export interface IssueTableQuerySpec {
 export type IssueTableGroupSpec =
   | { kind: "none" }
   | { kind: "status" }
+  /**
+   * Group by the CATEGORY a status behaves as, not by the status key.
+   *
+   * Board columns, list sections and swimlane cells are categories, so a custom
+   * status folds into the column it behaves as instead of getting one of its
+   * own — which is what keeps the surface's fan-out pinned at 7 no matter how
+   * many statuses a workspace defines. The descriptor still reports
+   * `value.kind === "status"` because a category's value IS its canonical
+   * status key; the group KEY is what distinguishes the two contracts.
+   * (MUL-6243)
+   */
+  | { kind: "status_category" }
   | { kind: "assignee" }
   | { kind: "project" }
   | { kind: "parent" }
   | {
       kind: "compound";
       primary: "assignee" | "project" | "parent";
-      secondary: "status";
+      /** `status_category` folds custom statuses into their category's cell. */
+      secondary: "status" | "status_category";
       /** Optional visible secondary buckets. When present, the server pages
        * only primary groups that contain at least one matching card and
        * returns `total` for that complete visible result set. */
-      secondary_values?: IssueStatus[];
+      secondary_values?: IssueStatus[] | IssueStatusCategory[];
     }
   | { kind: "property"; property_id: string; include_empty?: boolean };
 

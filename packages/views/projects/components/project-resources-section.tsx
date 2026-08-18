@@ -28,11 +28,10 @@ import type {
   ProjectResource,
 } from "@multica/core/types";
 import {
-  MIN_LOCAL_WORKTREE_CLI_VERSION,
-  daemonSupportsLocalWorktree,
-  readRuntimeCliVersion,
+  runtimeAdvertisesLocalWorktree,
   runtimeListOptions,
 } from "@multica/core/runtimes";
+import { useConfigStore } from "@multica/core/config";
 import { Badge } from "@multica/ui/components/ui/badge";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -56,6 +55,7 @@ import {
   LocalDirectoryModeDialog,
   type WorktreeUnavailableReason,
 } from "./local-directory-mode-dialog";
+import { localDirectoryLabel } from "./local-directory-label";
 import { useT } from "../../i18n";
 import { githubShortLabel } from "../../common/github-url";
 
@@ -129,31 +129,26 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
   const desktopMode = isDesktopShell();
   const localDaemonId = daemonStatus.daemonId;
 
-  // Worktree mode needs a daemon new enough to implement it. An older daemon
-  // does not know the field exists and would run the task in place — editing
-  // the working copy the user asked to isolate — so the server refuses the
-  // save. Checking here too turns that 422 into a disabled option with a
-  // reason, at the moment the user is choosing.
+  // Only ever used to decide what to PRESELECT. Whether the machine can run
+  // worktree mode is the server's call — it knows its own version, the client
+  // would have to infer it from data the server wrote, and that inference is
+  // what told a user on the newest release to upgrade it (#7113). The save is
+  // gated server-side and surfaced here as an inline error instead.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  // The one thing the client must still check up front: whether this server
+  // performs that gate at all. One declared boolean, no inference — servers
+  // that predate it drop execution_mode and answer 201.
+  const serverValidatesWorktree = useConfigStore((state) => state.localWorktreeSupported);
   // Keyed on the resource's OWN daemon, not the machine the browser happens to
   // be on: a resource is pinned to one machine, and its mode can legitimately
   // be changed from the web app or from a different device. Using the local
   // daemon here would report "too old" for every resource whenever the viewer
   // is not on that machine.
   // Capability, not version, and judged by the daemon's newest runtime row —
-  // see daemonSupportsLocalWorktree for why an any-match would keep saying yes
-  // after a downgrade.
-  const daemonSupportsWorktree = (daemonId: string | null): boolean =>
-    daemonSupportsLocalWorktree(runtimes, daemonId);
-  const cliVersionForDaemon = (daemonId: string | null): string => {
-    if (!daemonId) return "";
-    return (
-      runtimes
-        .filter((rt) => rt.daemon_id === daemonId)
-        .map((rt) => readRuntimeCliVersion(rt.metadata))
-        .find((v) => v && v.length > 0) ?? ""
-    );
-  };
+  // see runtimeAdvertisesLocalWorktree for why an any-match would keep saying
+  // yes after a downgrade.
+  const advertisesWorktree = (daemonId: string | null) =>
+    runtimeAdvertisesLocalWorktree(runtimes, daemonId);
 
   const attachedUrls = new Set(
     resources.filter(isGithubRef).map((r) => r.resource_ref.url),
@@ -249,7 +244,8 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
         // user still confirms, and existing resources keep whatever they have.
         mode:
           validation.is_git_repo === true &&
-          daemonSupportsWorktree(localDaemonId)
+          serverValidatesWorktree &&
+          advertisesWorktree(localDaemonId)
             ? "worktree"
             : "in_place",
         isGitRepo: validation.is_git_repo,
@@ -333,17 +329,21 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
     nextLabel: string,
   ) => {
     const trimmed = nextLabel.trim();
-    const previous = resource.resource_ref.label ?? resource.label ?? "";
-    if (trimmed === previous.trim()) return;
+    if (trimmed === localDirectoryLabel(resource)) return;
     try {
+      // Top-level label ONLY — renaming must not resend resource_ref.
+      //
+      // The server replaces the ref wholesale with whatever it can parse, so a
+      // server that predates a ref field drops it and answers 200. On a backend
+      // rolled back below v0.4.25 (documented as supported while the runtimes
+      // stay current) that turned "rename this folder" into "silently forget
+      // this folder was isolated", and the next task edited the working copy
+      // (#7113). Omitting the ref keeps the stored one untouched on every
+      // server version — the same reason it must not be resent for any other
+      // unrelated edit either.
       await updateResource.mutateAsync({
         resourceId: resource.id,
-        data: {
-          resource_ref: {
-            ...resource.resource_ref,
-            label: trimmed,
-          },
-        },
+        data: { label: trimmed },
       });
       toast.success(t(($) => $.resources.toast_local_renamed));
     } catch (err) {
@@ -536,10 +536,8 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
           value={modeDialog.mode}
           unavailableReason={worktreeUnavailableReason(
             modeDialog.isGitRepo,
-            daemonSupportsWorktree(modeDialog.daemonId),
+            serverValidatesWorktree,
           )}
-          currentVersion={cliVersionForDaemon(modeDialog.daemonId)}
-          minVersion={MIN_LOCAL_WORKTREE_CLI_VERSION}
           errorMessage={modeError ?? undefined}
           saving={modeSaving}
           confirmLabel={
@@ -561,15 +559,19 @@ export function ProjectResourcesSection({ projectId }: { projectId: string }) {
  * folder. `undefined` means we could not check (an older desktop build, or an
  * existing row whose path was validated at pick time), and is deliberately
  * permissive: the daemon re-checks authoritatively, so guessing "not a repo"
- * here would block a perfectly valid setup. The daemon-version gate is checked
- * second because upgrading is the more actionable of the two.
+ * here would block a perfectly valid setup.
+ *
+ * Daemon capability is deliberately absent. It is the server's question, asked
+ * on save; predicting it here is what produced an unfixable blocker for a user
+ * already on the newest release (#7113). Deferring to the server does require
+ * knowing it will answer, though — `serverValidates` is the server saying so.
  */
 function worktreeUnavailableReason(
   isGitRepo: boolean | undefined,
-  daemonSupportsWorktree: boolean,
+  serverValidates: boolean,
 ): WorktreeUnavailableReason | undefined {
   if (isGitRepo === false) return "not_git";
-  if (!daemonSupportsWorktree) return "daemon_outdated";
+  if (!serverValidates) return "server_outdated";
   return undefined;
 }
 
@@ -685,8 +687,7 @@ function LocalDirectoryRow({
   const { t } = useT("projects");
   const ref = resource.resource_ref;
   const mode = executionModeOf(ref);
-  const display = (ref.label || resource.label || ref.local_path).trim() ||
-    ref.local_path;
+  const display = localDirectoryLabel(resource);
   const isForeignDaemon =
     localDaemonId !== null && ref.daemon_id !== localDaemonId;
   const isLocalUnknown = localDaemonId === null;

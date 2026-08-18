@@ -117,7 +117,9 @@ const mockListIssueTableRows = vi.hoisted(() =>
         next_cursor: null,
       };
     }
-    const status = request.group_key?.replace(/^status:/, "");
+    // Board / list surfaces page by CATEGORY since MUL-6243. This fixture
+    // holds only built-in statuses, where a key IS its own category.
+    const status = request.group_key?.replace(/^status(_category)?:/, "");
     const response = await mockListIssues({
       status,
       limit: 50,
@@ -318,6 +320,7 @@ const mockViewState = {
     { key: "labels", width: 220 },
   ],
   listCollapsedStatuses: [] as string[],
+  hiddenStatusCategories: [] as string[],
   setViewMode: vi.fn(),
   setGrouping: vi.fn(),
   toggleStatusFilter: vi.fn(),

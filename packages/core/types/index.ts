@@ -85,21 +85,20 @@ export type {
 export { RUNTIME_PROFILE_PROTOCOL_FAMILIES } from "./agent";
 export type { Workspace, WorkspaceRepo, WorkspaceMcpServer, Member, MemberRole, User, MemberWithUser, Invitation, ShareLink, ShareLinkInfo } from "./workspace";
 export type {
-  PluginBinding,
   PluginInstallation,
-  PluginCatalogContribution,
-  PluginCatalogRelease,
-  PluginCatalogDiagnostic,
-  PluginCatalogResponse,
+  PluginConfigField,
+  PluginConfigFieldType,
+  PluginSurface,
+  PluginSurfaceType,
+  PluginHook,
+  PluginHookTrigger,
+  PluginResource,
   PluginInstallationListResponse,
-  PluginReleaseRequest,
-  PluginBindingRequest,
-  PluginRemoteMCPConfig,
-  RemoteMCPConfigRequest,
-  RemoteMCPDiscoveryResponse,
-  RemoteMCPOAuthStartRequest,
-  RemoteMCPOAuthStartResponse,
-  RemoteMCPTool,
+  PluginManifestSummary,
+  PluginPreview,
+  PluginPreviewRequest,
+  PluginInstallRequest,
+  PluginConfigRequest,
 } from "./plugin";
 export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";

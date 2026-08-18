@@ -176,6 +176,7 @@ type BackendOverrides struct {
 //
 //	BinaryPath: MULTICA_OPENCLAW_PATH (env)  > backends.openclaw.binary_path > PATH lookup
 //	StateDir:   OPENCLAW_STATE_DIR (env)     > backends.openclaw.state_dir   > OpenClaw's built-in default (~/.openclaw)
+//	CLITimeout: MULTICA_OPENCLAW_CLI_TIMEOUT (env) > backends.openclaw.cli_timeout > built-in default
 //
 // The StateDir env var here is OpenClaw's own OPENCLAW_STATE_DIR — NOT a new
 // MULTICA_OPENCLAW_STATE_DIR. Rationale: OpenClaw already honors its own env
@@ -199,6 +200,17 @@ type BackendOverrides struct {
 type OpenClawOverride struct {
 	BinaryPath string `json:"binary_path,omitempty"`
 	StateDir   string `json:"state_dir,omitempty"`
+	// CLITimeout raises (or lowers) the per-invocation deadline the daemon
+	// applies to `openclaw config ...` during task preparation. Accepts a Go
+	// duration ("45s") or bare seconds ("45"); out-of-range values are clamped
+	// and unparseable ones ignored by the daemon. Empty keeps the built-in
+	// default, which fits every host measured so far — this exists for the
+	// slow-CLI tail (#7112), where discovery legitimately needs longer than the
+	// default and the user previously had no way to say so.
+	//
+	// Resolution mirrors the fields above: MULTICA_OPENCLAW_CLI_TIMEOUT (env) >
+	// backends.openclaw.cli_timeout > built-in default.
+	CLITimeout string `json:"cli_timeout,omitempty"`
 }
 
 // CLIConfigPath returns the default path for the CLI config file.

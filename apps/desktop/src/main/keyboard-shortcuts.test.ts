@@ -164,6 +164,51 @@ describe("handleAppShortcut — unrelated keys pass through", () => {
   });
 });
 
+describe("handleAppShortcut — open settings (Cmd/Ctrl+,)", () => {
+  it('returns "open-settings" on Cmd+, (macOS)', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key(",", { meta: true }), wc, "darwin")).toBe(
+      "open-settings",
+    );
+  });
+
+  it('returns "open-settings" on Ctrl+, (Linux/Windows)', () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key(",", { control: true }), wc, "linux")).toBe(
+      "open-settings",
+    );
+    expect(handleAppShortcut(key(",", { control: true }), wc, "win32")).toBe(
+      "open-settings",
+    );
+  });
+
+  it("does not trigger without Cmd/Ctrl modifier", () => {
+    const wc = makeWc();
+    expect(handleAppShortcut(key(","), wc, "darwin")).toBe(false);
+  });
+
+  it("does not trigger with extra modifiers", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(key(",", { meta: true, alt: true }), wc, "darwin"),
+    ).toBe(false);
+    expect(
+      handleAppShortcut(key(",", { meta: true, shift: true }), wc, "darwin"),
+    ).toBe(false);
+  });
+
+  it("swallows auto-repeat without queuing another request", () => {
+    const wc = makeWc();
+    expect(
+      handleAppShortcut(
+        { ...key(",", { meta: true }), isAutoRepeat: true },
+        wc,
+        "darwin",
+      ),
+    ).toBe(true);
+  });
+});
+
 describe("handleAppShortcut — close tab (Cmd/Ctrl+W)", () => {
   it('returns "close-tab" on Cmd+W (macOS)', () => {
     const wc = makeWc();

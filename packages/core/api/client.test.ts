@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY } from "./client";
+import { EMPTY_PLUGIN_PREVIEW } from "./schemas";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -69,24 +70,22 @@ describe("ApiClient pull-request response schema", () => {
   });
 });
 
-describe("ApiClient Remote MCP OAuth response schema", () => {
-  it("degrades a malformed start response without inventing a navigation URL", async () => {
+describe("ApiClient Plugin preview response schema", () => {
+  it("degrades a malformed preview so a blank scope list is never shown as approval", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ authorization_url: 42 }), {
+        new Response(JSON.stringify({ scopes: "issues:read" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
       ),
     );
 
-    await expect(new ApiClient("https://api.example.test").startPluginRemoteMCPOAuth(
+    await expect(new ApiClient("https://api.example.test").previewPlugin(
       "workspace-1",
-      "installation-1",
-      "search",
-      { public_config: {}, failure_policy: "required" },
-    )).resolves.toEqual({ authorization_url: "" });
+      { source_url: "https://example.test/multica.plugin.json" },
+    )).resolves.toEqual(EMPTY_PLUGIN_PREVIEW);
   });
 });
 

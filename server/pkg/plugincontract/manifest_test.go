@@ -6,188 +6,417 @@ import (
 	"testing"
 )
 
-func validManifest() Manifest {
-	return Manifest{
-		APIVersion: APIVersionV1,
-		Kind:       KindPlugin,
-		Metadata: Metadata{
-			Key:       "ai.multica.software-delivery",
-			Name:      "Software Delivery Skill Pack",
-			Version:   "1.0.0",
-			Publisher: "multica",
-		},
-		Compatibility: Compatibility{
-			HostAPI: ">=1.0.0 <2.0.0",
-			RequiredDaemonFeatures: []string{
-				DaemonFeatureExecutionManifestV1,
-				DaemonFeatureAgentSkillV1,
-			},
-		},
-		RequestedCapabilities: []string{CapabilityAgentSkillContribute},
-		Contributes: ManifestContributions{
-			AgentSkills: []AgentSkillContribution{
-				{
-					Key:         "review-readiness",
-					Name:        "Review Readiness",
-					Description: "Prepare an evidence-based review handoff.",
-					Entry:       "skills/review-readiness/SKILL.md",
-				},
-			},
-		},
-	}
-}
+// validManifest is the reference document every negative case mutates. Keeping
+// one source avoids a test that passes because it drifted from the real shape.
+const validManifest = `{
+  "manifest_version": 1,
+  "key": "com.example.hello",
+  "name": "Hello Panel",
+  "description": "A greeting panel.",
+  "version": "1.0.0",
+  "author": { "name": "example", "url": "https://example.com" },
+  "icon": "icon.svg",
+  "scopes": ["issues:read", "comments:write", "storage:user", "net:example.com"],
+  "config": {
+    "repo": { "type": "string", "label": "GitHub Repo", "required": true },
+    "token": { "type": "secret", "label": "Access Token", "required": true },
+    "mode": { "type": "enum", "label": "Mode", "options": ["fast", "thorough"] }
+  },
+  "contributes": {
+    "surfaces": [{
+      "key": "hello", "type": "issue_panel", "name": "Hello",
+      "entry": "ui/main.js", "platforms": ["web", "desktop"]
+    }],
+    "hooks": [{
+      "key": "summarize_thread",
+      "name": "Summarize",
+      "description": "Compress the issue discussion into bullet points.",
+      "input_schema": { "type": "object", "properties": { "issue_id": { "type": "string" } } },
+      "triggers": ["ui", "manual", "agent"],
+      "transport": { "type": "http", "url": "https://example.com/hooks/summarize" },
+      "timeout_ms": 10000
+    }],
+    "resources": [
+      { "type": "skill", "key": "pr-review", "entry": "skills/pr-review/SKILL.md" }
+    ]
+  }
+}`
 
-func manifestJSON(t *testing.T, manifest Manifest) []byte {
+func mutate(t *testing.T, edit func(doc map[string]any)) []byte {
 	t.Helper()
-	content, err := json.Marshal(manifest)
-	if err != nil {
-		t.Fatalf("marshal manifest: %v", err)
+	var doc map[string]any
+	if err := json.Unmarshal([]byte(validManifest), &doc); err != nil {
+		t.Fatalf("decode reference manifest: %v", err)
 	}
-	return content
+	edit(doc)
+	raw, err := json.Marshal(doc)
+	if err != nil {
+		t.Fatalf("encode mutated manifest: %v", err)
+	}
+	return raw
 }
 
-func TestParseManifestAcceptsReferenceContract(t *testing.T) {
-	manifest, canonical, err := ParseManifest(manifestJSON(t, validManifest()))
+func TestParseManifestAcceptsReferenceDocument(t *testing.T) {
+	manifest, canonical, err := ParseManifest([]byte(validManifest))
 	if err != nil {
 		t.Fatalf("ParseManifest: %v", err)
 	}
-	if manifest.Metadata.Key != "ai.multica.software-delivery" {
-		t.Fatalf("plugin key = %q", manifest.Metadata.Key)
+	if manifest.Key != "com.example.hello" || manifest.Version != "1.0.0" {
+		t.Fatalf("unexpected identity: %+v", manifest)
 	}
-	if len(canonical) == 0 || canonical[len(canonical)-1] == '\n' {
-		t.Fatalf("canonical manifest is not compact JSON: %q", canonical)
+	if len(manifest.Contributes.Surfaces) != 1 || len(manifest.Contributes.Hooks) != 1 || len(manifest.Contributes.Resources) != 1 {
+		t.Fatalf("unexpected contributions: %+v", manifest.Contributes)
 	}
-}
-
-func TestParseManifestRejectsUnknownExecutableContract(t *testing.T) {
-	raw := strings.TrimSuffix(string(manifestJSON(t, validManifest())), "}") + `,"scripts":{"postinstall":"./install.sh"}}`
-	if _, _, err := ParseManifest([]byte(raw)); err == nil || !strings.Contains(err.Error(), "unknown field") {
-		t.Fatalf("ParseManifest unknown scripts error = %v", err)
+	if len(canonical) == 0 {
+		t.Fatal("canonical manifest is empty")
 	}
-}
-
-func TestManifestRejectsMissingHostCapabilities(t *testing.T) {
-	manifest := validManifest()
-	manifest.RequestedCapabilities = nil
-	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), CapabilityAgentSkillContribute) {
-		t.Fatalf("Validate missing capability error = %v", err)
-	}
-
-	manifest = validManifest()
-	manifest.Compatibility.RequiredDaemonFeatures = []string{DaemonFeatureAgentSkillV1}
-	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), DaemonFeatureExecutionManifestV1) {
-		t.Fatalf("Validate missing daemon feature error = %v", err)
+	// The canonical form must reparse: it is what an installation stores and
+	// later reads back as the consented snapshot.
+	if _, _, err := ParseManifest(canonical); err != nil {
+		t.Fatalf("canonical manifest does not reparse: %v", err)
 	}
 }
 
-func TestManifestRejectsReservedAndNonNamespacedKeys(t *testing.T) {
-	manifest := validManifest()
-	manifest.Metadata.Key = "review"
-	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "reverse-DNS") {
-		t.Fatalf("Validate non-namespaced plugin key error = %v", err)
+func TestConfigSchemaPreservesDeclarationOrder(t *testing.T) {
+	manifest, canonical, err := ParseManifest([]byte(validManifest))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
 	}
-
-	manifest = validManifest()
-	manifest.Contributes.AgentSkills[0].Key = "multica-policy"
-	manifest.Contributes.AgentSkills[0].Entry = "skills/multica-policy/SKILL.md"
-	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "reserved") {
-		t.Fatalf("Validate reserved contribution key error = %v", err)
+	want := []string{"repo", "token", "mode"}
+	if len(manifest.Config.Fields) != len(want) {
+		t.Fatalf("config fields = %d, want %d", len(manifest.Config.Fields), len(want))
 	}
-}
-
-func TestManifestRejectsDuplicateContributionIdentity(t *testing.T) {
-	manifest := validManifest()
-	manifest.Contributes.AgentSkills = append(manifest.Contributes.AgentSkills, manifest.Contributes.AgentSkills[0])
-	if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), "duplicate contribution key") {
-		t.Fatalf("Validate duplicate contribution error = %v", err)
+	for i, key := range want {
+		if manifest.Config.Fields[i].Key != key {
+			t.Fatalf("config field %d = %q, want %q", i, manifest.Config.Fields[i].Key, key)
+		}
 	}
-}
-
-func validRemoteMCPManifest() Manifest {
-	manifest := validManifest()
-	manifest.Metadata.Key = "dev.local.fixture-mcp"
-	manifest.Metadata.Name = "Fixture MCP"
-	manifest.Contributes.AgentSkills = nil
-	manifest.Contributes.RemoteMCP = []RemoteMCPContribution{{
-		Key:              "fixture-tools",
-		Name:             "Fixture Tools",
-		Description:      "Deterministic fixture tools.",
-		Transport:        "streamable-http",
-		ProtocolVersions: []string{"2025-03-26", "2024-11-05"},
-		EndpointPolicy: RemoteMCPEndpointPolicy{
-			DefaultEndpoint: "https://mcp.example.test/mcp", AllowedHosts: []string{"mcp.example.test"},
-		},
-		Authentication: RemoteMCPAuthentication{Preferred: "oauth", Supported: []string{"oauth"}},
-		ToolIntent: []RemoteMCPToolIntent{
-			{Name: "fixture.read", Description: "Read fixture state.", Risk: "read"},
-			{Name: "fixture.write", Description: "Mutate fixture state.", Risk: "write"},
-		},
-		ConfigurationSchema: json.RawMessage(`{"type":"object","additionalProperties":false}`),
-	}}
-	manifest.RequestedCapabilities = []string{CapabilityRemoteMCPConnect}
-	manifest.Compatibility.RequiredDaemonFeatures = []string{
-		DaemonFeatureExecutionManifestV1,
-		DaemonFeatureRemoteMCPV1,
+	// The generated form order must survive the snapshot round trip, otherwise
+	// the same plugin renders its fields differently after an upgrade.
+	if repo, token := strings.Index(string(canonical), `"repo"`), strings.Index(string(canonical), `"token"`); repo > token {
+		t.Fatalf("canonical config lost declaration order: %s", canonical)
 	}
-	return manifest
-}
-
-func TestManifestAcceptsRemoteMCPOnlyAndMixedContributions(t *testing.T) {
-	remoteOnly := validRemoteMCPManifest()
-	if err := remoteOnly.Validate(); err != nil {
-		t.Fatalf("Validate remote-only manifest: %v", err)
-	}
-
-	mixed := remoteOnly
-	mixed.Contributes.AgentSkills = validManifest().Contributes.AgentSkills
-	mixed.RequestedCapabilities = []string{CapabilityAgentSkillContribute, CapabilityRemoteMCPConnect}
-	mixed.Compatibility.RequiredDaemonFeatures = append(mixed.Compatibility.RequiredDaemonFeatures, DaemonFeatureAgentSkillV1)
-	if err := mixed.Validate(); err != nil {
-		t.Fatalf("Validate mixed manifest: %v", err)
+	field, ok := manifest.Config.Field("mode")
+	if !ok || field.Type != ConfigEnum || len(field.Options) != 2 {
+		t.Fatalf("enum field not preserved: %+v", field)
 	}
 }
 
-func TestManifestAcceptsReviewedWildcardRemoteMCPToolIntent(t *testing.T) {
-	manifest := validRemoteMCPManifest()
-	manifest.Contributes.RemoteMCP[0].ToolIntent = []RemoteMCPToolIntent{{
-		Name: RemoteMCPAnyToolIntent, Description: "Discover tools for explicit administrator review.", Risk: "write",
-	}}
-	if err := manifest.Validate(); err != nil {
-		t.Fatalf("Validate wildcard Remote MCP tool intent: %v", err)
-	}
-}
-
-func TestManifestRemoteMCPFailsClosed(t *testing.T) {
-	tests := []struct {
+func TestParseManifestRejectsMalformedDocuments(t *testing.T) {
+	cases := []struct {
 		name string
-		edit func(*Manifest)
+		raw  []byte
 		want string
 	}{
-		{name: "stdio transport", edit: func(m *Manifest) { m.Contributes.RemoteMCP[0].Transport = "stdio" }, want: "streamable-http"},
-		{name: "unsupported protocol", edit: func(m *Manifest) { m.Contributes.RemoteMCP[0].ProtocolVersions = []string{"2026-01-01"} }, want: "unsupported version"},
-		{name: "secret-looking endpoint", edit: func(m *Manifest) {
-			m.Contributes.RemoteMCP[0].EndpointPolicy.AllowedHosts = []string{"https://token@mcp.example"}
-		}, want: "invalid host"},
-		{name: "default endpoint outside allowlist", edit: func(m *Manifest) {
-			m.Contributes.RemoteMCP[0].EndpointPolicy.DefaultEndpoint = "https://other.example/mcp"
-		}, want: "covered by allowed_hosts"},
-		{name: "preferred auth not supported", edit: func(m *Manifest) {
-			m.Contributes.RemoteMCP[0].Authentication.Preferred = "bearer"
-		}, want: "must appear in supported"},
-		{name: "invalid risk", edit: func(m *Manifest) { m.Contributes.RemoteMCP[0].ToolIntent[0].Risk = "admin" }, want: "read or write"},
-		{name: "wildcard understates risk", edit: func(m *Manifest) {
-			m.Contributes.RemoteMCP[0].ToolIntent = []RemoteMCPToolIntent{{Name: RemoteMCPAnyToolIntent, Risk: "read"}}
-		}, want: "must be write for wildcard"},
-		{name: "missing capability", edit: func(m *Manifest) { m.RequestedCapabilities = nil }, want: "requested_capabilities"},
-		{name: "missing daemon feature", edit: func(m *Manifest) { m.Compatibility.RequiredDaemonFeatures = []string{DaemonFeatureExecutionManifestV1} }, want: DaemonFeatureRemoteMCPV1},
+		{"empty", []byte(""), "empty"},
+		{"unknown top-level field", []byte(`{"manifest_version":1,"surprise":true}`), "unknown field"},
+		{"trailing JSON", append([]byte(validManifest), []byte(`{"extra":1}`)...), "trailing"},
+		{
+			"unknown config field property",
+			mutate(t, func(doc map[string]any) {
+				doc["config"] = map[string]any{"a": map[string]any{"type": "string", "label": "A", "secret": true}}
+			}),
+			"unknown field",
+		},
+		{
+			"wrong manifest version",
+			mutate(t, func(doc map[string]any) { doc["manifest_version"] = 2 }),
+			"manifest_version",
+		},
+		{
+			"non reverse-DNS key",
+			mutate(t, func(doc map[string]any) { doc["key"] = "hello" }),
+			"reverse-DNS",
+		},
+		{
+			"non semver version",
+			mutate(t, func(doc map[string]any) { doc["version"] = "1.0" }),
+			"semantic versioning",
+		},
+		{
+			"overlong name",
+			mutate(t, func(doc map[string]any) { doc["name"] = strings.Repeat("n", 161) }),
+			"exceeds",
+		},
+		{
+			"unknown scope",
+			mutate(t, func(doc map[string]any) { doc["scopes"] = []any{"issues:read", "billing:write"} }),
+			"unsupported scope",
+		},
+		{
+			"malformed net scope",
+			mutate(t, func(doc map[string]any) { doc["scopes"] = []any{"net:https://example.com"} }),
+			"invalid domain",
+		},
+		{
+			"duplicate scope",
+			mutate(t, func(doc map[string]any) { doc["scopes"] = []any{"issues:read", "issues:read"} }),
+			"duplicate",
+		},
+		{
+			"empty scopes",
+			mutate(t, func(doc map[string]any) { doc["scopes"] = []any{} }),
+			"must not be empty",
+		},
+		{
+			"unsupported config type",
+			mutate(t, func(doc map[string]any) {
+				doc["config"] = map[string]any{"a": map[string]any{"type": "json", "label": "A"}}
+			}),
+			"unsupported",
+		},
+		{
+			"enum without options",
+			mutate(t, func(doc map[string]any) {
+				doc["config"] = map[string]any{"a": map[string]any{"type": "enum", "label": "A"}}
+			}),
+			"options must not be empty",
+		},
+		{
+			"no contributions",
+			mutate(t, func(doc map[string]any) { doc["contributes"] = map[string]any{} }),
+			"at least one",
+		},
+		{
+			"unsupported surface type",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				surfaces := contributes["surfaces"].([]any)
+				surfaces[0].(map[string]any)["type"] = "fullscreen"
+			}),
+			"unsupported",
+		},
+		{
+			"surface entry escapes the package",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				surfaces := contributes["surfaces"].([]any)
+				surfaces[0].(map[string]any)["entry"] = "../../etc/passwd"
+			}),
+			"path traversal",
+		},
+		{
+			"version over the column bound",
+			mutate(t, func(doc map[string]any) {
+				// A legal semver whose build metadata pushes it past the
+				// plugin_installation.version cap.
+				doc["version"] = "1.0.0+" + strings.Repeat("b", 64)
+			}),
+			"version exceeds",
+		},
+		{
+			"surface entry is an HTML document",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				surfaces := contributes["surfaces"].([]any)
+				surfaces[0].(map[string]any)["entry"] = "ui/index.html"
+			}),
+			"must be a .js or .mjs script",
+		},
+		{
+			"hook transport on a subdomain of a net: scope",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hooks := contributes["hooks"].([]any)
+				hooks[0].(map[string]any)["transport"] = map[string]any{"type": "http", "url": "https://api.example.com/hooks/summarize"}
+			}),
+			"not covered by a net: scope",
+		},
+		{
+			"surface entry is an absolute URL",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				surfaces := contributes["surfaces"].([]any)
+				surfaces[0].(map[string]any)["entry"] = "https://evil.test/index.html"
+			}),
+			"relative path",
+		},
+		{
+			"unsupported trigger",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hooks := contributes["hooks"].([]any)
+				hooks[0].(map[string]any)["triggers"] = []any{"cron"}
+			}),
+			"unsupported trigger",
+		},
+		{
+			"event trigger without events",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hooks := contributes["hooks"].([]any)
+				hooks[0].(map[string]any)["triggers"] = []any{"event"}
+			}),
+			"events must not be empty",
+		},
+		{
+			"events without the event trigger",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hooks := contributes["hooks"].([]any)
+				hooks[0].(map[string]any)["events"] = []any{"issue.created"}
+			}),
+			"requires the event trigger",
+		},
+		{
+			"unknown event",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hooks := contributes["hooks"].([]any)
+				hooks[0].(map[string]any)["triggers"] = []any{"event"}
+				hooks[0].(map[string]any)["events"] = []any{"issue.exploded"}
+			}),
+			"unsupported event",
+		},
+		{
+			"hook transport outside the granted net scope",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hooks := contributes["hooks"].([]any)
+				hooks[0].(map[string]any)["transport"] = map[string]any{"type": "http", "url": "https://evil.test/hook"}
+			}),
+			"not covered by a net: scope",
+		},
+		{
+			"plaintext hook transport",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hooks := contributes["hooks"].([]any)
+				hooks[0].(map[string]any)["transport"] = map[string]any{"type": "http", "url": "http://example.com/hook"}
+			}),
+			"HTTPS",
+		},
+		{
+			"duplicate hook key",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hooks := contributes["hooks"].([]any)
+				clone := map[string]any{}
+				for k, v := range hooks[0].(map[string]any) {
+					clone[k] = v
+				}
+				contributes["hooks"] = []any{hooks[0], clone}
+			}),
+			"duplicate hook key",
+		},
+		{
+			"unsupported resource type",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				contributes["resources"] = []any{map[string]any{"type": "font", "key": "a", "entry": "a"}}
+			}),
+			"unsupported",
+		},
+		{
+			"resource entry does not match its key",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				contributes["resources"] = []any{map[string]any{"type": "skill", "key": "review", "entry": "skills/other/SKILL.md"}}
+			}),
+			"must be",
+		},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			manifest := validRemoteMCPManifest()
-			test.edit(&manifest)
-			if err := manifest.Validate(); err == nil || !strings.Contains(err.Error(), test.want) {
-				t.Fatalf("Validate error = %v, want containing %q", err, test.want)
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, err := ParseManifest(tc.raw)
+			if err == nil {
+				t.Fatalf("ParseManifest accepted %s", tc.name)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("error = %q, want it to mention %q", err.Error(), tc.want)
 			}
 		})
 	}
+}
+
+func TestParseManifestRejectsOversizedDocument(t *testing.T) {
+	oversized := make([]byte, MaxManifestSize+1)
+	for i := range oversized {
+		oversized[i] = ' '
+	}
+	if _, _, err := ParseManifest(oversized); err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("oversized manifest error = %v", err)
+	}
+}
+
+func TestValidateScope(t *testing.T) {
+	valid := []string{
+		ScopeIssuesRead, ScopeIssuesWrite, ScopeCommentsRead, ScopeCommentsWrite,
+		ScopeTasksRead, ScopeTasksWrite, ScopeAgentsRead, ScopeMembersRead,
+		ScopeStorageUser, ScopeStorageWorkspace,
+		"net:example.com", "net:api.example.co.uk",
+	}
+	for _, scope := range valid {
+		if err := ValidateScope(scope); err != nil {
+			t.Fatalf("ValidateScope(%q) = %v", scope, err)
+		}
+	}
+	invalid := []string{
+		"", "issues", "issues:delete", "storage:global", "net:", "net:localhost",
+		"net:EXAMPLE.com", "net:example.com/path", "net:*.example.com", "NET:example.com",
+	}
+	for _, scope := range invalid {
+		if err := ValidateScope(scope); err == nil {
+			t.Fatalf("ValidateScope(%q) accepted an invalid scope", scope)
+		}
+	}
+}
+
+func TestNetDomainsOnlyReturnsNetScopes(t *testing.T) {
+	domains := NetDomains([]string{ScopeIssuesRead, "net:example.com", ScopeStorageUser, "net:api.example.com"})
+	if len(domains) != 2 || domains[0] != "example.com" || domains[1] != "api.example.com" {
+		t.Fatalf("NetDomains = %v", domains)
+	}
+}
+
+func TestCheckCapabilitiesReportsEveryUnavailableContribution(t *testing.T) {
+	manifest, _, err := ParseManifest([]byte(validManifest))
+	if err != nil {
+		t.Fatalf("ParseManifest: %v", err)
+	}
+
+	// The shipped host set is what gates a staged rollout: a manifest naming a
+	// capability this build cannot run must fail loudly, never install
+	// half-working.
+	err = manifest.CheckCapabilities(HostCapabilities())
+	if err == nil {
+		t.Fatal("CheckCapabilities accepted contributions the host cannot run")
+	}
+	var unavailable *ErrCapabilityUnavailable
+	if !asCapabilityError(err, &unavailable) {
+		t.Fatalf("error type = %T, want *ErrCapabilityUnavailable", err)
+	}
+	for _, want := range []string{"surface issue_panel", "hook trigger ui", "hook transport http", "resource skill"} {
+		if !containsString(unavailable.Missing, want) {
+			t.Fatalf("missing = %v, want it to include %q", unavailable.Missing, want)
+		}
+	}
+
+	full := Capabilities{
+		SurfaceTypes:  map[string]bool{SurfaceIssuePanel: true, SurfaceSidebarPanel: true, SurfaceModal: true},
+		HookTriggers:  map[string]bool{TriggerUI: true, TriggerManual: true, TriggerAgent: true, TriggerEvent: true},
+		HookTransport: map[string]bool{TransportHTTP: true, TransportMCP: true},
+		ResourceTypes: map[string]bool{ResourceSkill: true},
+	}
+	if err := manifest.CheckCapabilities(full); err != nil {
+		t.Fatalf("CheckCapabilities with full host support: %v", err)
+	}
+}
+
+func asCapabilityError(err error, target **ErrCapabilityUnavailable) bool {
+	candidate, ok := err.(*ErrCapabilityUnavailable)
+	if ok {
+		*target = candidate
+	}
+	return ok
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }

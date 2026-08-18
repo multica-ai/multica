@@ -1,5 +1,6 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
 import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { issueListOptions, issueDetailOptions } from "@multica/core/issues/queries";
@@ -84,7 +85,11 @@ export function IssueChip({
 
   return (
     <span className={cls}>
-      <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+      <StatusIcon
+        status={issue.status}
+        category={issueStatusCategory(issue) ?? undefined}
+        className="h-3.5 w-3.5 shrink-0"
+      />
       <span className="font-medium text-muted-foreground shrink-0">
         {issue.identifier}
       </span>

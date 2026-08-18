@@ -10,43 +10,6 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-func TestNormalizeTaskFailureDiagnostic(t *testing.T) {
-	tests := []struct {
-		name       string
-		diagnostic string
-		want       string
-	}{
-		{
-			name:       "valid UTF-8 is unchanged",
-			diagnostic: "worker 失败：诊断详情",
-			want:       "worker 失败：诊断详情",
-		},
-		{
-			name:       "embedded NUL is removed",
-			diagnostic: "worker failed\x00 diagnostic details",
-			want:       "worker failed diagnostic details",
-		},
-		{
-			name:       "invalid UTF-8 is replaced",
-			diagnostic: string([]byte{'b', 'a', 'd', 0xff, 't', 'e', 'x', 't'}),
-			want:       "bad\uFFFDtext",
-		},
-		{
-			name:       "only NUL becomes empty",
-			diagnostic: "\x00\x00",
-			want:       "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if got := normalizeTaskFailureDiagnostic(tt.diagnostic); got != tt.want {
-				t.Fatalf("normalizeTaskFailureDiagnostic() = %q, want %q", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestFailTaskSanitizesNULDiagnostic(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()

@@ -42,8 +42,10 @@ const ZOOM_MAX = 4.5;
  * - `false`: not handled, let Electron continue
  * - `true`: handled (preventDefault), no further action
  * - `"close-tab"`: Cmd/Ctrl+W intercepted — caller should send IPC to renderer
+ * - `"open-settings"`: Cmd/Ctrl+, intercepted — caller should route the
+ *   request to the tabbed main window
  */
-export type ShortcutResult = boolean | "close-tab";
+export type ShortcutResult = boolean | "close-tab" | "open-settings";
 
 export function handleAppShortcut(
   input: ShortcutInput,
@@ -87,6 +89,17 @@ export function handleAppShortcut(
   if (input.key === "0" && !input.shift) {
     webContents.setZoomLevel(0);
     return true;
+  }
+
+  // Cmd/Ctrl + "," → open Settings, the macOS Preferences convention (and
+  // what editors bind on every platform). Handled here rather than in the
+  // renderer so the chord fires from any window and any focus context —
+  // including while the caret sits in a text field, where a document-level
+  // listener would have to make an exception for itself.
+  if (input.key === "," && !input.shift) {
+    // Holding the chord must not queue one request per repeat.
+    if (input.isAutoRepeat) return true;
+    return "open-settings";
   }
 
   // Cmd/Ctrl + W → close active tab (or window if last tab).

@@ -3,15 +3,25 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "@multica/core/i18n/react";
+import { WORKSPACE_PAGES } from "@multica/core/paths";
 import { SearchCommand } from "./search-command";
 import { useSearchStore } from "./search-store";
 import enCommon from "../locales/en/common.json";
 import enAuth from "../locales/en/auth.json";
 import enSettings from "../locales/en/settings.json";
 import enSearch from "../locales/en/search.json";
+// The palette labels its Pages group from the sidebar's own nav strings, so
+// the layout namespace is part of its contract, not incidental setup.
+import enLayout from "../locales/en/layout.json";
 
 const TEST_RESOURCES = {
-  en: { common: enCommon, auth: enAuth, settings: enSettings, search: enSearch },
+  en: {
+    common: enCommon,
+    auth: enAuth,
+    settings: enSettings,
+    search: enSearch,
+    layout: enLayout,
+  },
 };
 
 function I18nWrapper({ children }: { children: ReactNode }) {
@@ -166,10 +176,14 @@ vi.mock("@multica/core/paths", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@multica/core/paths")>()),
   useWorkspacePaths: () => ({
     inbox: () => "/ws-test/inbox",
+    chat: () => "/ws-test/chat",
     myIssues: () => "/ws-test/my-issues",
     issues: () => "/ws-test/issues",
     projects: () => "/ws-test/projects",
+    autopilots: () => "/ws-test/autopilots",
     agents: () => "/ws-test/agents",
+    squads: () => "/ws-test/squads",
+    usage: () => "/ws-test/usage",
     runtimes: () => "/ws-test/runtimes",
     skills: () => "/ws-test/skills",
     settings: () => "/ws-test/settings",
@@ -336,6 +350,60 @@ describe("SearchCommand", () => {
       expect(screen.getByText((_, el) => el?.textContent === "Settings" && el?.tagName === "SPAN")).toBeInTheDocument();
     });
     expect(screen.queryByText("Inbox")).not.toBeInTheDocument();
+  });
+
+  it("offers every workspace nav page, not a hand-maintained subset", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+    const input = screen.getByPlaceholderText("Type a command or search...");
+
+    // The Pages group is generated from WORKSPACE_PAGES — the same registry
+    // the sidebar and the desktop tab bar read — so searching a page by the
+    // exact name the sidebar shows must always reach it. The hand-written
+    // list this replaced had gone stale by four pages (MUL-6272).
+    for (const page of Object.values(WORKSPACE_PAGES)) {
+      const label = enLayout.nav[page.navKey];
+      await user.clear(input);
+      await user.type(input, label);
+      expect(
+        await screen.findByText(
+          (_, el) => el?.textContent === label && el?.tagName === "SPAN",
+        ),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it("does not surface a page on an incidental substring of a hidden keyword", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "s");
+
+    // Inbox carries the hidden keyword "notifications". Matching keywords by
+    // substring made a bare "s" pull Inbox into the list with nothing on the
+    // row to explain why; keywords match by prefix instead.
+    await waitFor(() => {
+      expect(
+        screen.getByText((_, el) => el?.textContent === "Settings" && el?.tagName === "SPAN"),
+      ).toBeInTheDocument();
+    });
+    expect(screen.queryByText("Inbox")).not.toBeInTheDocument();
+  });
+
+  it("navigates to a page whose label differs from its route segment", async () => {
+    const user = userEvent.setup();
+    renderSearch();
+
+    // Analytics lives at /usage: proof the row resolves its destination from
+    // the page key rather than from the words on screen.
+    const input = screen.getByPlaceholderText("Type a command or search...");
+    await user.type(input, "analytics");
+
+    await user.click(await screen.findByText("Analytics"));
+
+    expect(mockPush).toHaveBeenCalledWith("/ws-test/usage");
+    expect(useSearchStore.getState().open).toBe(false);
   });
 
   it("navigates to page on selection", async () => {
@@ -1091,6 +1159,95 @@ describe("SearchCommand", () => {
         { timeout: 2000 },
       );
       expect(renderedHeadings()).not.toContain("Cancelled");
+    });
+  });
+
+  // Rows from the previous query stay on screen while the next request is in
+  // flight (that is what keeps the list from strobing on every keystroke), so
+  // they have to stop being *reachable*. cmdk re-selects the first valid item
+  // on every input change, so a live stale row means Enter opens a result the
+  // user is no longer searching for.
+  describe("stale results while the next query is in flight", () => {
+    const alphaIssue = {
+      id: "issue-alpha",
+      workspace_id: "ws-test",
+      number: 100,
+      identifier: "MUL-100",
+      title: "Alpha result",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:00Z",
+      match_source: "title",
+    };
+
+    /** HighlightText splits the title into <mark> + text, so match the span. */
+    const alphaRowTitle = () =>
+      screen.getByText(
+        (_, el) => el?.textContent === "Alpha result" && el?.tagName === "SPAN",
+      );
+
+    /** Resolve the first query; hang on everything after it. */
+    const answerOnlyAlpha = () => {
+      mockSearchIssues.mockImplementation(({ q }: { q: string }) =>
+        q === "alpha"
+          ? Promise.resolve({ issues: [alphaIssue], total: 1 })
+          : new Promise(() => {}),
+      );
+      mockSearchProjects.mockImplementation(({ q }: { q: string }) =>
+        q === "alpha"
+          ? Promise.resolve({ projects: [], total: 0 })
+          : new Promise(() => {}),
+      );
+    };
+
+    const typeAlphaThenChange = async (
+      user: ReturnType<typeof userEvent.setup>,
+    ) => {
+      answerOnlyAlpha();
+      renderSearch();
+      const input = screen.getByPlaceholderText("Type a command or search...");
+      await user.type(input, "alpha");
+      await waitFor(
+        () => {
+          expect(alphaRowTitle()).toBeInTheDocument();
+        },
+        { timeout: 2000 },
+      );
+      // Query changes; the response for it never arrives.
+      await user.type(input, "zzz");
+      return input;
+    };
+
+    it("does not open the previous query's result on Enter", async () => {
+      const user = userEvent.setup();
+      const input = await typeAlphaThenChange(user);
+
+      fireEvent.keyDown(input, { key: "Enter" });
+
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(useSearchStore.getState().open).toBe(true);
+    });
+
+    it("does not open the previous query's result on click", async () => {
+      const user = userEvent.setup();
+      await typeAlphaThenChange(user);
+
+      // Still painted (that is the point), but inert.
+      fireEvent.click(alphaRowTitle());
+
+      expect(mockPush).not.toHaveBeenCalled();
+      expect(useSearchStore.getState().open).toBe(true);
     });
   });
 });

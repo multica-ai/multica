@@ -1,5 +1,6 @@
 "use client";
 
+import { statusCategoryOfKey } from "@multica/core/issues";
 import { useState } from "react";
 import { ArrowRight, Download, Loader2 } from "lucide-react";
 import { Button, buttonVariants } from "@multica/ui/components/ui/button";
@@ -364,7 +365,7 @@ function StatusFooter({
   status: IssueStatus;
   timestamp?: string;
 }) {
-  const cfg = STATUS_CONFIG[status];
+  const cfg = STATUS_CONFIG[statusCategoryOfKey(status)];
   return (
     <div className="mt-3 flex items-center gap-2 text-caption">
       <span

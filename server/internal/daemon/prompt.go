@@ -294,7 +294,9 @@ func buildCommentPrompt(task Task, provider string) string {
 	b.WriteString(turnModeReply)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
-		if task.TriggerAuthorType == "agent" {
+		if task.TriggerAuthorType == "system" {
+			authorLabel = "The platform"
+		} else if task.TriggerAuthorType == "agent" {
 			name := task.TriggerAuthorName
 			if name == "" {
 				name = "another agent"
@@ -315,7 +317,9 @@ func buildCommentPrompt(task Task, provider string) string {
 			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above. They may be in different threads, so each is reproduced here with its own thread:\n\n", len(task.CoalescedComments))
 			for _, cc := range task.CoalescedComments {
 				authorLabel := "A user"
-				if cc.AuthorType == "agent" {
+				if cc.AuthorType == "system" {
+					authorLabel = "The platform"
+				} else if cc.AuthorType == "agent" {
 					name := cc.AuthorName
 					if name == "" {
 						name = "another agent"
