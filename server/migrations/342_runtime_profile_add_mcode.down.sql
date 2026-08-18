@@ -1,4 +1,4 @@
--- Restore the pre-327 whitelist. Existing MCode rows remain valid because the
+-- Restore the pre-MCode whitelist. Existing MCode rows remain valid because the
 -- replacement constraint is NOT VALID, but new MCode profiles are blocked.
 ALTER TABLE runtime_profile DROP CONSTRAINT IF EXISTS runtime_profile_protocol_family_check;
 
