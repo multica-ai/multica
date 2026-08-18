@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Reports files in packages/ui that no other file imports.
+ * Reports files in packages/ui that nothing reaches.
  *
  * This exists because knip structurally cannot see them. knip derives entry
  * points from a workspace's package.json `exports` (graph/build.js calls
@@ -22,43 +22,64 @@
  * That blind spot is exactly where the 16 dead components removed in MUL-6353
  * lived, so without this check the cleanup has no regression guard at all.
  *
+ * Specifiers are resolved against the importing file's own directory, never
+ * matched by basename. 17 of the 59 files guarded here share a basename with
+ * some other file in the repo (`button`, `card`, `input`, `label`, …), so
+ * basename matching would silently pass a dead file whenever any unrelated
+ * module imported a same-named sibling.
+ *
+ * Liveness is reachability, not a reference count: the walk starts from every
+ * file outside the guarded directories and follows imports inward, so a pair
+ * of dead components importing only each other stays dead.
+ *
  * Run: node scripts/check-ui-wildcard-exports.mjs
  */
 
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 
 const repoRoot = resolve(import.meta.dirname, "..");
 const uiRoot = join(repoRoot, "packages", "ui");
 const pkgName = "@multica/ui";
 
-const SOURCE_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"]);
+const SOURCE_EXTENSIONS = [".ts", ".tsx", ".mts", ".cts", ".js", ".jsx", ".mjs", ".cjs"];
 const SKIP_DIRS = new Set(["node_modules", ".git", ".next", ".turbo", "out", "dist", "build"]);
+
+// `from "x"`, `import "x"`, `import("x")`, `require("x")`, `export ... from "x"`.
+const SPECIFIER_RE = /(?:\bfrom\s*|\bimport\s*|\brequire\s*\(\s*|\bimport\s*\(\s*)["']([^"']+)["']/g;
 
 function walk(dir, out = []) {
   for (const dirent of readdirSync(dir, { withFileTypes: true })) {
-    if (dirent.name.startsWith(".") && dirent.name !== ".github") continue;
+    if (dirent.name.startsWith(".")) continue;
     const full = join(dir, dirent.name);
     if (dirent.isDirectory()) {
-      if (SKIP_DIRS.has(dirent.name)) continue;
-      walk(full, out);
-    } else if (SOURCE_EXTENSIONS.has(dirent.name.slice(dirent.name.lastIndexOf(".")))) {
+      if (!SKIP_DIRS.has(dirent.name)) walk(full, out);
+    } else if (SOURCE_EXTENSIONS.some((ext) => dirent.name.endsWith(ext))) {
       out.push(full);
     }
   }
   return out;
 }
 
-// Derived from the manifest rather than hard-coded: if someone narrows a
-// wildcard export, this check narrows with it instead of going quietly stale.
+/** Every on-disk path a specifier could mean, extensionless forms included. */
+function resolutionCandidates(base) {
+  return [base, ...SOURCE_EXTENSIONS.flatMap((ext) => [`${base}${ext}`, join(base, `index${ext}`)])];
+}
+
 const manifest = JSON.parse(readFileSync(join(uiRoot, "package.json"), "utf8"));
-const wildcards = Object.entries(manifest.exports ?? {})
+const exportEntries = Object.entries(manifest.exports ?? {});
+
+// Derived from the manifest rather than hard-coded: narrow a wildcard export
+// and this check narrows with it instead of going quietly stale.
+const wildcards = exportEntries
   .filter(([subpath, target]) => subpath.includes("*") && String(target).includes("*"))
   .map(([subpath, target]) => {
     const targetPath = String(target).replace(/^\.\//, "");
-    const dir = targetPath.slice(0, targetPath.lastIndexOf("/"));
-    const extension = targetPath.slice(targetPath.lastIndexOf("*") + 1);
-    return { subpath, dir, extension };
+    return {
+      dir: targetPath.slice(0, targetPath.lastIndexOf("/")),
+      extension: targetPath.slice(targetPath.lastIndexOf("*") + 1),
+      prefix: subpath.replace(/^\.\//, "").replace("*", ""),
+    };
   });
 
 if (wildcards.length === 0) {
@@ -66,46 +87,83 @@ if (wildcards.length === 0) {
   process.exit(0);
 }
 
-const sourceFiles = walk(repoRoot);
-// One read of every source file, reused across candidates. Reading per
-// candidate would re-read the tree ~90 times.
-const contents = new Map(sourceFiles.map((file) => [file, readFileSync(file, "utf8")]));
+// A file named by a non-wildcard export is an entry point in its own right, so
+// it is exempt. This is what makes the remedy the failure message suggests
+// actually work.
+const exactExportTargets = new Set(
+  exportEntries
+    .filter(([subpath, target]) => !subpath.includes("*") && !String(target).includes("*"))
+    .map(([, target]) => join(uiRoot, String(target).replace(/^\.\//, ""))),
+);
 
-const dead = [];
-
+const guarded = new Set();
 for (const { dir, extension } of wildcards) {
-  const absoluteDir = join(uiRoot, dir);
   let entries;
   try {
-    entries = readdirSync(absoluteDir);
+    entries = readdirSync(join(uiRoot, dir));
   } catch {
     continue; // Exported directory does not exist yet.
   }
-
   for (const entry of entries) {
     if (!entry.endsWith(extension)) continue;
-    const file = join(absoluteDir, entry);
-    if (!statSync(file).isFile()) continue;
-
-    const name = entry.slice(0, -extension.length);
-    // The public specifier, plus the relative forms a sibling inside
-    // packages/ui would use. Anchored on a path boundary so `button` does not
-    // match `button-group`.
-    const specifier = `${pkgName}/${dir}/${name}`;
-    const pattern = new RegExp(
-      `["'](?:${escape(specifier)}|(?:\\.{1,2}/)+(?:[\\w./-]*/)?${escape(name)})["']`,
-    );
-
-    const referenced = sourceFiles.some(
-      (candidate) => candidate !== file && pattern.test(contents.get(candidate)),
-    );
-    if (!referenced) dead.push(relative(repoRoot, file).split(sep).join("/"));
+    const file = join(uiRoot, dir, entry);
+    if (statSync(file).isFile() && !exactExportTargets.has(file)) guarded.add(file);
   }
 }
 
+const sourceFiles = walk(repoRoot);
+const known = new Set(sourceFiles);
+
+/** Resolve one specifier from one importer to a guarded file, or null. */
+function resolveSpecifier(specifier, importer) {
+  let base;
+  if (specifier.startsWith(".")) {
+    base = resolve(dirname(importer), specifier);
+  } else if (specifier === pkgName || specifier.startsWith(`${pkgName}/`)) {
+    const subpath = specifier.slice(pkgName.length + 1);
+    const wildcard = wildcards.find((w) => subpath.startsWith(w.prefix) && w.prefix !== "");
+    if (!wildcard) return null;
+    base = join(uiRoot, wildcard.dir, subpath.slice(wildcard.prefix.length));
+  } else {
+    return null; // A bare external package.
+  }
+  for (const candidate of resolutionCandidates(base)) {
+    if (known.has(candidate)) return candidate;
+  }
+  return null;
+}
+
+// Reachability: roots are everything outside the guarded set, so a guarded file
+// counts as live only when the walk actually arrives at it.
+const imports = new Map();
+for (const file of sourceFiles) {
+  const found = new Set();
+  for (const [, specifier] of readFileSync(file, "utf8").matchAll(SPECIFIER_RE)) {
+    const target = resolveSpecifier(specifier, file);
+    if (target !== null) found.add(target);
+  }
+  imports.set(file, found);
+}
+
+const reached = new Set();
+const queue = sourceFiles.filter((file) => !guarded.has(file));
+while (queue.length > 0) {
+  for (const target of imports.get(queue.pop()) ?? []) {
+    if (!reached.has(target)) {
+      reached.add(target);
+      queue.push(target);
+    }
+  }
+}
+
+const dead = [...guarded]
+  .filter((file) => !reached.has(file))
+  .map((file) => relative(repoRoot, file).split(sep).join("/"))
+  .sort();
+
 if (dead.length > 0) {
   console.error(`Unused files in packages/ui wildcard exports (${dead.length})`);
-  for (const file of dead.sort()) console.error(`  ${file}`);
+  for (const file of dead) console.error(`  ${file}`);
   console.error(
     "\nNothing imports these. Delete them — shadcn components come back with" +
       "\n`pnpm ui:add <name>`. If a file is genuinely entry-like, give it a" +
@@ -115,9 +173,6 @@ if (dead.length > 0) {
 }
 
 console.log(
-  `packages/ui wildcard exports clean (${wildcards.map((w) => w.dir).join(", ")}).`,
+  `packages/ui wildcard exports clean (${guarded.size} files under ` +
+    `${wildcards.map((w) => w.dir).join(", ")}).`,
 );
-
-function escape(value) {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
