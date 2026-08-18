@@ -27,8 +27,6 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
-	"github.com/multica-ai/multica/server/pkg/plugincontract"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
@@ -5585,107 +5583,6 @@ func (s *TaskService) LoadAgentSkillBundles(ctx context.Context, agentID pgtype.
 	skills := s.LoadAgentSkills(ctx, agentID)
 	skills = append(skills, s.BuiltinSkills()...)
 	return BuildAgentSkillBundles(skills)
-}
-
-type PluginExecutionManifestData struct {
-	ID                   string                        `json:"id"`
-	SnapshotID           string                        `json:"snapshot_id,omitempty"`
-	SnapshotRevision     int64                         `json:"snapshot_revision"`
-	SnapshotDigest       string                        `json:"snapshot_digest,omitempty"`
-	ComposerVersion      string                        `json:"composer_version"`
-	SchemaVersion        int32                         `json:"schema_version"`
-	OrderedContributions []pluginruntime.CompiledEntry `json:"ordered_contributions"`
-	Diagnostics          []string                      `json:"diagnostics,omitempty"`
-}
-
-// LoadTaskPluginSkillBundles resolves only the immutable artifact files named
-// by the task's enqueue-time execution manifest. It deliberately does not read
-// current installation state, so disable/upgrade cannot mutate an in-flight or
-// retried run's inputs.
-func (s *TaskService) LoadTaskPluginSkillBundles(ctx context.Context, taskID pgtype.UUID) ([]AgentSkillData, []AgentSkillRefData, *PluginExecutionManifestData, error) {
-	manifest, err := s.Queries.GetPluginExecutionManifestByTask(ctx, taskID)
-	if errors.Is(err, pgx.ErrNoRows) {
-		return nil, nil, nil, nil
-	}
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("load plugin execution manifest: %w", err)
-	}
-	entries, err := pluginruntime.ParseEntries(manifest.OrderedContributions)
-	if err != nil {
-		return nil, nil, nil, err
-	}
-	data := &PluginExecutionManifestData{
-		ID:                   util.UUIDToString(manifest.ID),
-		SnapshotID:           util.UUIDToString(manifest.SnapshotID),
-		SnapshotRevision:     manifest.SnapshotRevision,
-		SnapshotDigest:       manifest.SnapshotDigest.String,
-		ComposerVersion:      manifest.ComposerVersion,
-		SchemaVersion:        manifest.SchemaVersion,
-		OrderedContributions: entries,
-	}
-	if len(entries) == 0 {
-		return nil, nil, data, nil
-	}
-	artifactFileIDs := make([]pgtype.UUID, 0)
-	seenArtifactFileIDs := make(map[string]struct{})
-	for _, entry := range entries {
-		if entry.ContributionType != plugincontract.ContributionAgentSkillV1 {
-			continue
-		}
-		ids := make([]string, 0, len(entry.SkillFiles)+1)
-		ids = append(ids, entry.ArtifactFileID)
-		for _, file := range entry.SkillFiles {
-			ids = append(ids, file.ArtifactFileID)
-		}
-		for _, id := range ids {
-			if _, exists := seenArtifactFileIDs[id]; exists {
-				continue
-			}
-			parsed, parseErr := util.ParseUUID(id)
-			if parseErr != nil {
-				return nil, nil, nil, fmt.Errorf("execution manifest contains invalid artifact file id")
-			}
-			seenArtifactFileIDs[id] = struct{}{}
-			artifactFileIDs = append(artifactFileIDs, parsed)
-		}
-	}
-	artifactFilesByID := make(map[string]db.PluginArtifactFile, len(artifactFileIDs))
-	if len(artifactFileIDs) > 0 {
-		artifactFiles, listErr := s.Queries.ListPluginArtifactFilesByIDs(ctx, artifactFileIDs)
-		if listErr != nil {
-			return nil, nil, nil, fmt.Errorf("load pinned plugin Skill artifacts: %w", listErr)
-		}
-		for _, file := range artifactFiles {
-			artifactFilesByID[util.UUIDToString(file.ID)] = file
-		}
-	}
-
-	skills := make([]AgentSkillData, 0, len(entries))
-	skillEntries := make([]pluginruntime.CompiledEntry, 0, len(entries))
-	for _, entry := range entries {
-		if entry.ContributionType == plugincontract.ContributionRemoteMCPV1 {
-			if entry.ConfigID == "" || entry.ConfigRevision <= 0 || entry.Endpoint == "" || len(entry.ApprovedTools) == 0 || entry.ToolSchemaDigest == "" {
-				return nil, nil, nil, fmt.Errorf("execution manifest contains invalid remote MCP contribution")
-			}
-			continue
-		}
-		if entry.ContributionType != plugincontract.ContributionAgentSkillV1 || entry.ArtifactFileID == "" {
-			return nil, nil, nil, fmt.Errorf("execution manifest contains unsupported plugin contribution")
-		}
-		skill, materializeErr := materializePinnedPluginSkill(entry, artifactFilesByID)
-		if materializeErr != nil {
-			return nil, nil, nil, materializeErr
-		}
-		skills = append(skills, skill)
-		skillEntries = append(skillEntries, entry)
-	}
-	bundles, refs := BuildAgentSkillBundles(skills)
-	for i := range refs {
-		if refs[i].Hash != skillEntries[i].SkillBundleHash || refs[i].SizeBytes != skillEntries[i].SkillSizeBytes || refs[i].FileCount != skillEntries[i].SkillFileCount {
-			return nil, nil, nil, fmt.Errorf("pinned plugin skill bundle failed manifest validation")
-		}
-	}
-	return bundles, refs, data, nil
 }
 
 func BuildAgentSkillBundles(skills []AgentSkillData) ([]AgentSkillData, []AgentSkillRefData) {

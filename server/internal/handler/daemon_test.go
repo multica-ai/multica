@@ -21,8 +21,8 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 	"github.com/multica-ai/multica/server/pkg/protocol"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
 func TestLogClaimEndpointSlowIncludesPayloadFields(t *testing.T) {
@@ -127,7 +127,7 @@ func TestRemoteMCPDaemonTokenForClaim(t *testing.T) {
 		DaemonID:    strToText("daemon-remote-mcp"),
 	}
 	raw, params, err := remoteMCPDaemonTokenForClaim(AgentTaskResponse{
-		RemoteMCPConnections: []pluginruntime.RemoteMCPConnection{{ContributionKey: "mobbin"}},
+		RemoteMCPConnections: []remotemcp.Connection{{ContributionKey: "mobbin"}},
 	}, runtime)
 	if err != nil {
 		t.Fatalf("remoteMCPDaemonTokenForClaim: %v", err)

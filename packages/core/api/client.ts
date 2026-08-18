@@ -146,15 +146,12 @@ import type {
   WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
-  PluginBindingRequest,
-  PluginCatalogResponse,
   PluginInstallation,
   PluginInstallationListResponse,
-  PluginReleaseRequest,
-  RemoteMCPConfigRequest,
-  RemoteMCPDiscoveryResponse,
-  RemoteMCPOAuthStartRequest,
-  RemoteMCPOAuthStartResponse,
+  PluginPreview,
+  PluginPreviewRequest,
+  PluginInstallRequest,
+  PluginConfigRequest,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
@@ -385,16 +382,13 @@ import {
   IssueViewListSchema,
   IssueViewPreferenceSchema,
   EMPTY_ISSUE_VIEW_PREFERENCE,
-  EMPTY_PLUGIN_CATALOG,
   EMPTY_PLUGIN_INSTALLATION,
   EMPTY_WORKSPACE_MCP_SERVER,
   EMPTY_PLUGIN_INSTALLATION_LIST,
-  PluginCatalogResponseSchema,
+  EMPTY_PLUGIN_PREVIEW,
   PluginInstallationListResponseSchema,
   PluginInstallationSchema,
-  RemoteMCPDiscoveryResponseSchema,
-  RemoteMCPOAuthStartResponseSchema,
-  EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
+  PluginPreviewSchema,
   WorkspaceMcpServerListSchema,
   WorkspaceMcpServerSchema,
   ShareLinkSchema,
@@ -2317,19 +2311,6 @@ export class ApiClient {
     });
   }
 
-  async listPluginCatalog(workspaceId: string): Promise<PluginCatalogResponse> {
-    let raw: unknown;
-    try {
-      raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/catalog`);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) return EMPTY_PLUGIN_CATALOG;
-      throw error;
-    }
-    return parseWithFallback(raw, PluginCatalogResponseSchema, EMPTY_PLUGIN_CATALOG, {
-      endpoint: "GET /api/workspaces/{id}/plugins/catalog",
-    });
-  }
-
   async listPluginInstallations(workspaceId: string): Promise<PluginInstallationListResponse> {
     let raw: unknown;
     try {
@@ -2445,97 +2426,52 @@ export class ApiClient {
     });
   }
 
-  async installPlugin(workspaceId: string, request: PluginReleaseRequest): Promise<PluginInstallation> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/install`, {
+  /**
+   * Step one of the two-step install. Nothing is written: the response is what
+   * the consent screen shows before an installation exists.
+   */
+  async previewPlugin(workspaceId: string, request: PluginPreviewRequest): Promise<PluginPreview> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/preview`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    return parseWithFallback(raw, PluginPreviewSchema, EMPTY_PLUGIN_PREVIEW, {
+      endpoint: "POST /api/workspaces/{id}/plugins/preview",
+    });
+  }
+
+  async installPlugin(workspaceId: string, request: PluginInstallRequest): Promise<PluginInstallation> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins`, {
       method: "POST",
       body: JSON.stringify(request),
     });
     return parseWithFallback(raw, PluginInstallationSchema, EMPTY_PLUGIN_INSTALLATION, {
-      endpoint: "POST /api/workspaces/{id}/plugins/install",
+      endpoint: "POST /api/workspaces/{id}/plugins",
     });
   }
 
-  async upgradePlugin(workspaceId: string, installationId: string, request: PluginReleaseRequest): Promise<PluginInstallation> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/upgrade`, {
-      method: "POST",
+  async configurePlugin(workspaceId: string, installationId: string, request: PluginConfigRequest): Promise<PluginInstallation> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/config`, {
+      method: "PUT",
       body: JSON.stringify(request),
     });
     return parseWithFallback(raw, PluginInstallationSchema, EMPTY_PLUGIN_INSTALLATION, {
-      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/upgrade",
+      endpoint: "PUT /api/workspaces/{id}/plugins/{installationId}/config",
     });
   }
 
-  async setPluginEnabled(
-    workspaceId: string,
-    installationId: string,
-    enabled: boolean,
-    binding: PluginBindingRequest,
-  ): Promise<PluginInstallation> {
+  async setPluginEnabled(workspaceId: string, installationId: string, enabled: boolean): Promise<PluginInstallation> {
     const action = enabled ? "enable" : "disable";
     const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/${action}`, {
       method: "POST",
-      body: JSON.stringify(binding),
     });
     return parseWithFallback(raw, PluginInstallationSchema, EMPTY_PLUGIN_INSTALLATION, {
       endpoint: `POST /api/workspaces/{id}/plugins/{installationId}/${action}`,
     });
   }
 
-  async rollbackPlugin(workspaceId: string, installationId: string, version: string): Promise<PluginInstallation> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/rollback`, {
-      method: "POST",
-      body: JSON.stringify({ version }),
-    });
-    return parseWithFallback(raw, PluginInstallationSchema, EMPTY_PLUGIN_INSTALLATION, {
-      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/rollback",
-    });
-  }
-
   async uninstallPlugin(workspaceId: string, installationId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/plugins/${installationId}`, {
-      method: "DELETE",
-    });
-  }
-
-  async configurePluginRemoteMCP(workspaceId: string, installationId: string, contributionKey: string, request: RemoteMCPConfigRequest): Promise<RemoteMCPDiscoveryResponse> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/config`, {
-      method: "PUT",
-      body: JSON.stringify(request),
-    });
-    return parseWithFallback(raw, RemoteMCPDiscoveryResponseSchema, { config_revision: 0, discovered_tools: [], discovered_schema_digest: "" }, {
-      endpoint: "PUT /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{contributionKey}/config",
-    });
-  }
-
-  async testPluginRemoteMCP(workspaceId: string, installationId: string, contributionKey: string): Promise<RemoteMCPDiscoveryResponse> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/test`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    return parseWithFallback(raw, RemoteMCPDiscoveryResponseSchema, { config_revision: 0, discovered_tools: [], discovered_schema_digest: "" }, {
-      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{contributionKey}/test",
-    });
-  }
-
-  async startPluginRemoteMCPOAuth(workspaceId: string, installationId: string, contributionKey: string, request: RemoteMCPOAuthStartRequest): Promise<RemoteMCPOAuthStartResponse> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/oauth/start`, {
-      method: "POST",
-      body: JSON.stringify(request),
-    });
-    return parseWithFallback(raw, RemoteMCPOAuthStartResponseSchema, EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE, {
-      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{contributionKey}/oauth/start",
-    });
-  }
-
-  async approvePluginRemoteMCPTools(workspaceId: string, installationId: string, contributionKey: string, tools: string[]): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/approve`, {
-      method: "POST",
-      body: JSON.stringify({ tools }),
-    });
-  }
-
-  async revokePluginRemoteMCPCredential(workspaceId: string, installationId: string, contributionKey: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/credential`, {
       method: "DELETE",
     });
   }

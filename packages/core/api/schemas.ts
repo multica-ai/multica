@@ -61,9 +61,9 @@ import type {
   IssueStatusEntry,
   ListIssueStatusesResponse,
   NotificationPreferenceResponse,
-  PluginCatalogResponse,
   PluginInstallation,
   PluginInstallationListResponse,
+  PluginPreview,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
   SearchIssuesResponse,
@@ -80,122 +80,74 @@ import type {
 import type { CloudRuntimeNode } from "../runtimes/cloud-runtime";
 import type { CreateFeedbackResponse } from "../feedback/types";
 
-export const PluginBindingSchema = z.object({
-  scope_type: z.string().default("workspace"),
-  scope_id: z.string().default(""),
-  enabled: z.boolean().default(false),
-  revision: z.number().default(0),
+export const PluginConfigFieldSchema = z.object({
+  key: z.string(),
+  type: z.string().default("string"),
+  label: z.string().default(""),
+  description: z.string().optional(),
+  required: z.boolean().default(false),
+  options: z.array(z.string()).default([]),
+  placeholder: z.string().optional(),
 }).loose();
 
-export const RemoteMCPToolSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  input_schema: z.record(z.string(), z.unknown()).default({}),
-  schema_digest: z.string().default(""),
-  risk: z.string().optional(),
-});
+export const PluginSurfaceSchema = z.object({
+  key: z.string(),
+  type: z.string().default(""),
+  name: z.string().default(""),
+  entry: z.string().default(""),
+  platforms: z.array(z.string()).default([]),
+}).loose();
 
-export const PluginRemoteMCPConfigSchema = z.object({
-  contribution_key: z.string(),
-  default_endpoint: z.string().optional(),
-  preferred_auth: z.string().optional(),
-  supported_auth: z.array(z.string()).default([]),
-  config_revision: z.number().optional(),
-  endpoint: z.string().optional(),
-  endpoint_domain: z.string().optional(),
-  auth_type: z.string().optional(),
-  auth_header: z.string().optional(),
-  public_config: z.record(z.string(), z.unknown()).optional(),
-  connection_scope: z.string().optional(),
-  connected_by: z.string().optional(),
-  credential_state: z.string().default("missing"),
-  credential_hint: z.string().optional(),
-  failure_policy: z.string().optional(),
-  approved_tools: z.array(RemoteMCPToolSchema).default([]),
-  discovered_tools: z.array(RemoteMCPToolSchema).default([]),
-  discovered_schema_digest: z.string().optional(),
-  schema_digest: z.string().optional(),
-  reviewed: z.boolean().default(false),
-  ready: z.boolean().default(false),
-});
+export const PluginHookSchema = z.object({
+  key: z.string(),
+  name: z.string().default(""),
+  description: z.string().default(""),
+  triggers: z.array(z.string()).default([]),
+  events: z.array(z.string()).default([]),
+  transport: z.string().default(""),
+}).loose();
 
-export const RemoteMCPDiscoveryResponseSchema = z.object({
-  ok: z.boolean().optional(),
-  config_revision: z.number().default(0),
-  credential_state: z.string().optional(),
-  reviewed: z.boolean().optional(),
-  discovered_tools: z.array(RemoteMCPToolSchema).default([]),
-  discovered_schema_digest: z.string().default(""),
-});
-
-export const RemoteMCPOAuthStartResponseSchema = z.object({
-  authorization_url: z.string().url(),
-});
-
-export const EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE = { authorization_url: "" };
+export const PluginResourceSchema = z.object({
+  type: z.string().default(""),
+  key: z.string(),
+  entry: z.string().default(""),
+}).loose();
 
 export const PluginInstallationSchema = z.object({
   id: z.string(),
   plugin_key: z.string().default(""),
-  display_name: z.string().default(""),
-  desired_version: z.string().default(""),
-  active_version: z.string().optional(),
-  enabled: z.boolean().default(false),
-  desired_generation: z.number().default(0),
-  active_generation: z.number().default(0),
-  lifecycle_status: z.string().default("error"),
-  health_state: z.string().optional(),
-  health_reason: z.string().optional(),
+  name: z.string().default(""),
   description: z.string().optional(),
-  publisher: z.string().default(""),
-  publisher_type: z.string().default(""),
-  trust_tier: z.string().default(""),
-  source_kind: z.string().default("bundled"),
-  source_ref: z.string().default(""),
-  uploader_id: z.string().optional(),
-  manifest_digest: z.string().default(""),
-  archive_digest: z.string().default(""),
-  artifact_digest: z.string().default(""),
-  signature_verified: z.boolean().default(false),
-  requested_capabilities: z.array(z.string()).default([]),
-  available_versions: z.array(z.string()).default([]),
-  contributions: z.array(z.string()).default([]),
-  contribution_details: z.array(z.object({
-    key: z.string(),
-    type: z.string().default(""),
-    name: z.string().default(""),
-    description: z.string().default(""),
-    entry_path: z.string().default(""),
-    entry_digest: z.string().default(""),
-  }).loose()).default([]),
-  bindings: z.array(PluginBindingSchema).default([]),
-  remote_mcp: z.array(PluginRemoteMCPConfigSchema).default([]),
+  version: z.string().default(""),
+  source_url: z.string().default(""),
+  enabled: z.boolean().default(false),
+  granted_scopes: z.array(z.string()).default([]),
+  config_schema: z.array(PluginConfigFieldSchema).default([]),
+  config: z.record(z.string(), z.unknown()).default({}),
+  configured_secrets: z.array(z.string()).default([]),
+  surfaces: z.array(PluginSurfaceSchema).default([]),
+  hooks: z.array(PluginHookSchema).default([]),
+  resources: z.array(PluginResourceSchema).default([]),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
 }).loose();
 
 export const EMPTY_PLUGIN_INSTALLATION: PluginInstallation = {
   id: "",
   plugin_key: "",
-  display_name: "",
-  desired_version: "",
+  name: "",
+  version: "",
+  source_url: "",
   enabled: false,
-  desired_generation: 0,
-  active_generation: 0,
-  lifecycle_status: "error",
-  publisher: "",
-  publisher_type: "",
-  trust_tier: "",
-  source_kind: "bundled",
-  source_ref: "",
-  manifest_digest: "",
-  archive_digest: "",
-  artifact_digest: "",
-  signature_verified: false,
-  requested_capabilities: [],
-  available_versions: [],
-  contributions: [],
-  contribution_details: [],
-  bindings: [],
-  remote_mcp: [],
+  granted_scopes: [],
+  config_schema: [],
+  config: {},
+  configured_secrets: [],
+  surfaces: [],
+  hooks: [],
+  resources: [],
+  created_at: "",
+  updated_at: "",
 };
 
 export const PluginInstallationListResponseSchema = z.object({
@@ -206,53 +158,32 @@ export const EMPTY_PLUGIN_INSTALLATION_LIST: PluginInstallationListResponse = {
   plugins: [],
 };
 
-export const PluginCatalogContributionSchema = z.object({
-  key: z.string(),
-  type: z.string().default(""),
+export const PluginManifestSummarySchema = z.object({
+  key: z.string().default(""),
   name: z.string().default(""),
-  description: z.string().default(""),
-  entry_path: z.string().default(""),
-  entry_digest: z.string().default(""),
+  description: z.string().optional(),
+  version: z.string().default(""),
+  author: z.object({
+    name: z.string().default(""),
+    url: z.string().optional(),
+  }).loose().default({ name: "" }),
 }).loose();
 
-export const PluginCatalogReleaseSchema = z.object({
-  plugin_key: z.string(),
-  name: z.string().default(""),
-  description: z.string().default(""),
-  version: z.string(),
-  publisher: z.string().default(""),
-  publisher_type: z.string().default(""),
-  trust_tier: z.string().default(""),
-  source_kind: z.string().default("bundled"),
-  source_ref: z.string().default(""),
-  requested_capabilities: z.array(z.string()).default([]),
-  host_api: z.string().default(""),
-  required_daemon_features: z.array(z.string()).default([]),
-  signature_key_id: z.string().default(""),
-  signature_verified: z.boolean().default(false),
-  manifest_digest: z.string().default(""),
-  archive_digest: z.string().default(""),
-  artifact_digest: z.string().default(""),
-  compatible: z.boolean().default(false),
-  compatibility_reason: z.string().optional(),
-  contributions: z.array(PluginCatalogContributionSchema).default([]),
-  installation: PluginInstallationSchema.optional(),
+export const PluginPreviewSchema = z.object({
+  manifest: PluginManifestSummarySchema,
+  scopes: z.array(z.string()).default([]),
+  config_schema: z.array(PluginConfigFieldSchema).default([]),
+  installed: z.boolean().default(false),
+  installed_version: z.string().optional(),
+  added_scopes: z.array(z.string()).default([]),
 }).loose();
 
-export const PluginCatalogResponseSchema = z.object({
-  releases: z.array(PluginCatalogReleaseSchema).default([]),
-  diagnostics: z.array(z.object({
-    source_ref: z.string().default(""),
-    code: z.string().default("unknown"),
-    message: z.string().default(""),
-  }).loose()).default([]),
-  supported: z.boolean().optional().default(true),
-}).loose();
-
-export const EMPTY_PLUGIN_CATALOG: PluginCatalogResponse = {
-  releases: [],
-  diagnostics: [],
-  supported: false,
+export const EMPTY_PLUGIN_PREVIEW: PluginPreview = {
+  manifest: { key: "", name: "", version: "", author: { name: "" } },
+  scopes: [],
+  config_schema: [],
+  installed: false,
+  added_scopes: [],
 };
 
 export const GitHubInstallationSchema = z.object({
