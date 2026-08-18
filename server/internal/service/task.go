@@ -3945,6 +3945,10 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 	)
 }
 
+func normalizeTaskFailureDiagnostic(errMsg string) string {
+	return strings.ReplaceAll(strings.ToValidUTF8(errMsg, "\uFFFD"), "\x00", "")
+}
+
 // FailTask marks a task as failed.
 // Issue status is NOT changed here — the agent manages it via the CLI.
 //
@@ -3962,6 +3966,8 @@ func (s *TaskService) observeChatOutputLocalPath(task db.AgentTaskQueue, body st
 // (via classifyPoisonedError, the timeout / runtime classifier, etc.)
 // will have their value preserved untouched.
 func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, sessionID, workDir, branchName, failureReason string, sessionRolloutMissing bool, retiredSessionID string) (*db.AgentTaskQueue, error) {
+	errMsg = normalizeTaskFailureDiagnostic(errMsg)
+
 	// MUL-2946: synthesise a refined reason from the error text whenever the
 	// caller didn't supply one. This is the last write-path guard against
 	// "agent_error" coarse rows ending up in agent_task_queue.failure_reason
