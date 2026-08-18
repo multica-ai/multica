@@ -62,6 +62,48 @@ func TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellFile(t *testing.T) 
 	}
 }
 
+// TestPlatformPiInvocation_RPCRoutesThroughPowerShellCommand pins the model
+// discovery path. Pi RPC keeps stdin open for bidirectional JSON-RPC, while the
+// npm pi.ps1 -File wrapper can wait for EOF before forwarding stdin. Use
+// -Command with @args only for RPC so ordinary task execution keeps the
+// established -File launcher behaviour above.
+func TestPlatformPiInvocation_RPCRoutesThroughPowerShellCommand(t *testing.T) {
+	dir := t.TempDir()
+	cmdPath := filepath.Join(dir, "pi.cmd")
+	ps1Path := filepath.Join(dir, "pi.ps1")
+	writeFile(t, cmdPath, "@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -File \"%~dp0pi.ps1\" %*\r\n")
+	writeFile(t, ps1Path, "# fake pi.ps1\r\n")
+
+	fakePS := filepath.Join(dir, "powershell.exe")
+	writeFile(t, fakePS, "")
+	stubPowerShell(t, fakePS, true)
+
+	args := []string{"--mode", "rpc", "--no-session", "--no-skills"}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	gotExec, gotArgs, ok := platformPiInvocation(cmdPath, args, logger)
+	if !ok {
+		t.Fatalf("expected platform rewrite to be applied, got ok=false")
+	}
+	if gotExec != fakePS {
+		t.Errorf("argv0: got %q want %q", gotExec, fakePS)
+	}
+
+	wantArgs := append([]string{
+		"-NoProfile",
+		"-ExecutionPolicy", "Bypass",
+		"-Command", "& '" + ps1Path + "' @args",
+	}, args...)
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Errorf("argv mismatch:\n got  %#v\n want %#v", gotArgs, wantArgs)
+	}
+	for _, arg := range gotArgs {
+		if arg == "-File" {
+			t.Fatalf("RPC model discovery must not use powershell -File: %#v", gotArgs)
+		}
+	}
+}
+
 // TestPlatformPiInvocation_SkipsWhenNotCmdOrBat ensures we leave argv alone
 // when the user explicitly resolved pi to something that isn't a batch
 // launcher (e.g. a real binary or a node script via shebang shim).
