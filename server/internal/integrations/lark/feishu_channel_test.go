@@ -257,7 +257,7 @@ func TestFeishuMediaResolver_HasMedia(t *testing.T) {
 		{"text", InboundMessage{MessageID: "om_t", MessageType: "text", Body: "hello", Content: `{"text":"hello"}`}, false},
 		{"image", InboundMessage{MessageID: "om_i", MessageType: "image", Body: "[Image]", Content: `{"image_key":"img_k"}`}, true},
 		{"video", InboundMessage{MessageID: "om_v", MessageType: "media", Body: "[Video]", Content: `{"file_key":"file_k"}`}, true},
-		{"file", InboundMessage{MessageID: "om_f", MessageType: "file", Body: "[File: spec.html]", Content: `{"file_key":"file_k","file_name":"spec.html"}`}, true},
+		{"file", InboundMessage{MessageID: "om_f", MessageType: "file", Body: "[File]", Content: `{"file_key":"file_k","file_name":"spec.html"}`}, true},
 		{"audio", InboundMessage{MessageID: "om_a", MessageType: "audio", Body: "[Audio]", Content: `{"file_key":"audio_k"}`}, true},
 		{"post with image", InboundMessage{MessageID: "om_p", MessageType: "post",
 			Content: `{"content":[[{"tag":"img","image_key":"img_post"}]]}`}, true},
@@ -276,44 +276,63 @@ func TestFeishuMediaResolver_HasMedia(t *testing.T) {
 
 func TestFeishuMediaResolver_AttachesStandaloneFileAndAudioMediaRefs(t *testing.T) {
 	tests := []struct {
-		name        string
-		messageType string
-		body        string
-		content     string
-		contentType string
-		filename    string
-		wantType    channel.MsgType
-		wantKey     string
+		name             string
+		messageType      string
+		body             string
+		content          string
+		contentType      string
+		downloadFilename string
+		wantFilename     string
+		wantContentType  string
+		wantType         channel.MsgType
+		wantKey          string
 	}{
 		{
-			name:        "html file",
-			messageType: "file",
-			body:        "[File: integration.html]",
-			content:     `{"file_key":"file_standalone","file_name":"integration.html","mime_type":"text/html"}`,
-			contentType: "text/html",
-			filename:    "integration.html",
-			wantType:    channel.MsgTypeFile,
-			wantKey:     "file_standalone",
+			name:             "html file",
+			messageType:      "file",
+			body:             "[File]",
+			content:          `{"file_key":"file_standalone","file_name":"integration.html"}`,
+			contentType:      "text/html",
+			downloadFilename: "integration.html",
+			wantFilename:     "integration.html",
+			wantContentType:  "text/html",
+			wantType:         channel.MsgTypeFile,
+			wantKey:          "file_standalone",
 		},
 		{
-			name:        "zip file",
-			messageType: "file",
-			body:        "[File: integration.zip]",
-			content:     `{"file_key":"zip_standalone","file_name":"integration.zip","mime_type":"application/zip"}`,
-			contentType: "application/zip",
-			filename:    "integration.zip",
-			wantType:    channel.MsgTypeFile,
-			wantKey:     "zip_standalone",
+			name:             "zip file",
+			messageType:      "file",
+			body:             "[File]",
+			content:          `{"file_key":"zip_standalone","file_name":"integration.zip"}`,
+			contentType:      "application/zip",
+			downloadFilename: "integration.zip",
+			wantFilename:     "integration.zip",
+			wantContentType:  "application/zip",
+			wantType:         channel.MsgTypeFile,
+			wantKey:          "zip_standalone",
 		},
 		{
-			name:        "audio",
-			messageType: "audio",
-			body:        "[Audio]",
-			content:     `{"file_key":"audio_standalone"}`,
-			contentType: "audio/ogg",
-			filename:    "voice.ogg",
-			wantType:    channel.MsgTypeAudio,
-			wantKey:     "audio_standalone",
+			name:            "audio without response filename",
+			messageType:     "audio",
+			body:            "[Audio]",
+			content:         `{"file_key":"audio_standalone"}`,
+			contentType:     "audio/opus",
+			wantFilename:    "feishu-audio-om_audio_without_response_filename.opus",
+			wantContentType: "audio/opus",
+			wantType:        channel.MsgTypeAudio,
+			wantKey:         "audio_standalone",
+		},
+		{
+			name:             "audio with extensionless response filename",
+			messageType:      "audio",
+			body:             "[Audio]",
+			content:          `{"file_key":"audio_extensionless"}`,
+			contentType:      "audio/octet-stream",
+			downloadFilename: "3CET6CGRY9",
+			wantFilename:     "3CET6CGRY9.opus",
+			wantContentType:  "audio/opus",
+			wantType:         channel.MsgTypeAudio,
+			wantKey:          "audio_extensionless",
 		},
 	}
 
@@ -322,7 +341,7 @@ func TestFeishuMediaResolver_AttachesStandaloneFileAndAudioMediaRefs(t *testing.
 			sender := &fakeSender{downloaded: DownloadedResource{
 				Data:        []byte("payload"),
 				ContentType: tc.contentType,
-				Filename:    tc.filename,
+				Filename:    tc.downloadFilename,
 				SizeBytes:   7,
 			}}
 			storage := &fakeMediaStorage{}
@@ -351,8 +370,11 @@ func TestFeishuMediaResolver_AttachesStandaloneFileAndAudioMediaRefs(t *testing.
 				t.Fatalf("media refs = %+v, want 1", got.MediaRefs)
 			}
 			ref := got.MediaRefs[0]
-			if ref.Type != tc.wantType || ref.Filename != tc.filename || ref.MimeType != tc.contentType || ref.SizeBytes != 7 {
+			if ref.Type != tc.wantType || ref.Filename != tc.wantFilename || ref.MimeType != tc.wantContentType || ref.SizeBytes != 7 {
 				t.Fatalf("media ref wrong: %+v", ref)
+			}
+			if upload := storage.uploads[0]; upload.filename != tc.wantFilename || upload.contentType != tc.wantContentType {
+				t.Fatalf("upload metadata wrong: %+v", upload)
 			}
 		})
 	}
