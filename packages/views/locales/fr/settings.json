@@ -136,6 +136,7 @@
     "fixed": {
       "title": "Raccourcis système fixes",
       "description": "Les raccourcis de fenêtre et d'accessibilité restent fixes pour rester fiables. Les commandes de zoom et d'onglets concernent l'application de bureau.",
+      "open_settings": "Ouvrir les paramètres",
       "close_tab": "Fermer l'onglet actif",
       "zoom_in": "Zoom avant",
       "zoom_out": "Zoom arrière",

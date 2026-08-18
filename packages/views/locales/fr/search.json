@@ -11,16 +11,6 @@
     "cancelled": "Annulés",
     "recent": "Récents"
   },
-  "pages": {
-    "inbox": "Boîte de réception",
-    "my_issues": "Mes tickets",
-    "issues": "Tickets",
-    "projects": "Projets",
-    "agents": "Agents",
-    "runtimes": "Runtimes",
-    "skills": "Skills",
-    "settings": "Paramètres"
-  },
   "commands": {
     "current_theme_aria": "Thème actuel",
     "new_issue": "Nouveau ticket",
