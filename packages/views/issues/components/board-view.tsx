@@ -21,6 +21,7 @@ import type {
   Project,
   IssueProperty,
 } from "@multica/core/types";
+import { EndpointUnavailableError } from "@multica/core/api";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions, useSetIssueProperty, useUnsetIssueProperty } from "@multica/core/properties";
@@ -303,6 +304,7 @@ function BoardViewImpl({
           isLoading: pages.some((page) => page.isLoading),
           isFetching: pages.some((page) => page.isFetching),
           isError: pages.some((page) => page.isError),
+          error: pages.find((page) => page.error)?.error ?? null,
           loadMore: () => {
             for (const page of pages) {
               if (page.hasMore) page.loadMore();
@@ -588,7 +590,9 @@ function BoardViewImpl({
               className="flex min-w-full flex-1 items-center justify-center text-body text-destructive hover:underline"
               onClick={groupBranches.retryGroups}
             >
-              {t(($) => $.table.load_more_failed_retry)}
+              {groupBranches.error instanceof EndpointUnavailableError
+                ? t(($) => $.table.endpoint_unavailable_retry)
+                : t(($) => $.table.load_more_failed_retry)}
             </button>
           ) : (
             <div className="flex min-w-full flex-1 items-center justify-center text-body text-muted-foreground">
@@ -707,6 +711,7 @@ const ServerPaginatedBoardColumn = memo(function ServerPaginatedBoardColumn({
       total={page.total}
       onLoadMore={page.loadMore}
       isError={page.isError}
+      error={page.error}
       onRetry={page.retry}
     />
   ) : undefined;

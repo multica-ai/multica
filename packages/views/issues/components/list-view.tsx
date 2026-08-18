@@ -484,6 +484,7 @@ function StatusAccordionItem({
           total={page.total}
           onLoadMore={page.loadMore}
           isError={page.isError}
+          error={page.error}
           onRetry={page.retry}
         />
       ),
