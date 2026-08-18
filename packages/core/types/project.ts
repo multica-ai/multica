@@ -1,3 +1,5 @@
+import type { Attachment } from "./attachment";
+
 export type ProjectStatus = "planned" | "in_progress" | "paused" | "completed" | "cancelled";
 
 export type ProjectPriority = "urgent" | "high" | "medium" | "low" | "none";
@@ -129,5 +131,18 @@ export interface UpdateProjectResourceRequest {
 
 export interface ListProjectResourcesResponse {
   resources: ProjectResource[];
+  total: number;
+}
+
+// ProjectFile is an attachment surfaced in the project panel's "files" section.
+// It carries the viewer-specific hidden flag on top of the standard attachment
+// shape — hiding is a personal view preference, so the same file may be hidden
+// for one member and visible to another.
+export interface ProjectFile extends Attachment {
+  hidden: boolean;
+}
+
+export interface ListProjectFilesResponse {
+  files: ProjectFile[];
   total: number;
 }

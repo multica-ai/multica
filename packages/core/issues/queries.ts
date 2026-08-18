@@ -171,6 +171,9 @@ export const issueKeys = {
    *  click time. */
   attachments: (issueId: string) =>
     [...issueKeys.attachmentsAll(), issueId] as const,
+  /** Full "files in this task" list (issue + comment attachments). */
+  filesAll: () => ["issues", "files"] as const,
+  files: (issueId: string) => [...issueKeys.filesAll(), issueId] as const,
   /** Prefix-match key for invalidating tasks across all issues — used by
    *  the global WS task: prefix path so any task lifecycle event refreshes
    *  every per-issue list, regardless of which issue is currently mounted. */
@@ -597,5 +600,14 @@ export function issueAttachmentsOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.attachments(issueId),
     queryFn: () => api.listAttachments(issueId),
+  });
+}
+
+/** Full "files in this task" list — issue + comment attachments. */
+export function issueFilesOptions(issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.files(issueId),
+    queryFn: () => api.listIssueFiles(issueId),
+    select: (data) => data.files,
   });
 }

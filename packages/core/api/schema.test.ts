@@ -129,6 +129,44 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("listProjectFiles", () => {
+    it("falls back to an empty list when the response is malformed", async () => {
+      // `files` having the wrong type triggers the fallback (same wrong-type
+      // trick as listIssues: a body of only unexpected keys would parse).
+      stubFetchJson({ files: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listProjectFiles("project-1");
+      expect(res).toEqual({ files: [], total: 0 });
+    });
+
+    it("defaults a missing hidden flag to false so an older server still renders files", async () => {
+      stubFetchJson({
+        files: [
+          {
+            id: "att-1",
+            url: "https://cdn.example/att-1",
+            download_url: "/api/attachments/att-1/download",
+            filename: "report.pdf",
+          },
+        ],
+        total: 1,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listProjectFiles("project-1");
+      expect(res.files).toHaveLength(1);
+      expect(res.files[0]?.hidden).toBe(false);
+    });
+  });
+
+  describe("listIssueFiles", () => {
+    it("falls back to an empty list when the response is malformed", async () => {
+      stubFetchJson({ files: "not-an-array", total: 0 });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listIssueFiles("issue-1");
+      expect(res).toEqual({ files: [], total: 0 });
+    });
+  });
+
   describe("getIssue", () => {
     // Unlike a list, a single issue has no safe-empty shape, and the bare
     // identifier autolink caches this result for 5 minutes. A malformed 2xx

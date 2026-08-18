@@ -56,7 +56,9 @@ import type {
   ListIssuesResponse,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
+  ListIssueFilesResponse,
   ListLabelsResponse,
+  ListProjectFilesResponse,
   ListWebhookDeliveriesResponse,
   IssueStatusEntry,
   ListIssueStatusesResponse,
@@ -790,6 +792,36 @@ export const EMPTY_ATTACHMENT: Attachment = {
   content_type: "",
   size_bytes: 0,
   created_at: "",
+};
+
+// A project file is an attachment plus the viewer-specific hidden flag.
+// `hidden` is lenient (optional, default false) so a server response that
+// predates the field still renders every file visible rather than blanking
+// the list via parseWithFallback.
+export const ProjectFileSchema = AttachmentResponseSchema.extend({
+  hidden: z.boolean().optional().default(false),
+});
+
+export const ListProjectFilesResponseSchema = z.object({
+  files: z.array(ProjectFileSchema),
+  total: z.number(),
+});
+
+export const EMPTY_LIST_PROJECT_FILES_RESPONSE: ListProjectFilesResponse = {
+  files: [],
+  total: 0,
+};
+
+// Issue files reuse the attachment schema (no per-viewer hidden flag — hide is
+// a project-level preference, not an issue-level one).
+export const ListIssueFilesResponseSchema = z.object({
+  files: z.array(AttachmentResponseSchema),
+  total: z.number(),
+});
+
+export const EMPTY_LIST_ISSUE_FILES_RESPONSE: ListIssueFilesResponse = {
+  files: [],
+  total: 0,
 };
 
 // All object schemas use `.loose()` so unknown server-side fields pass

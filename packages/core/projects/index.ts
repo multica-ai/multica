@@ -19,3 +19,9 @@ export {
   useUpdateProjectResource,
   useDeleteProjectResource,
 } from "./resource-queries";
+export {
+  projectFileKeys,
+  projectFilesOptions,
+  useHideProjectFile,
+  useUnhideProjectFile,
+} from "./file-queries";

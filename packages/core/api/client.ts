@@ -102,6 +102,8 @@ import type {
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
+  ListProjectFilesResponse,
+  ListIssueFilesResponse,
   Label,
   IssueProperty,
   IssuePropertyValue,
@@ -285,6 +287,10 @@ import {
   CreateIssueResponseSchema,
   IssueSchema,
   ListWebhookDeliveriesResponseSchema,
+  ListProjectFilesResponseSchema,
+  EMPTY_LIST_PROJECT_FILES_RESPONSE,
+  ListIssueFilesResponseSchema,
+  EMPTY_LIST_ISSUE_FILES_RESPONSE,
   RuntimeHourlyActivityListSchema,
   RuntimeUsageByAgentListSchema,
   RuntimeUsageByHourListSchema,
@@ -3079,6 +3085,18 @@ export class ApiClient {
     return this.fetch(`/api/issues/${issueId}/attachments`);
   }
 
+  // Full "files in this task" list — the issue's own attachments plus its
+  // comments' attachments, aggregated by GET /api/issues/{id}/files.
+  async listIssueFiles(issueId: string): Promise<ListIssueFilesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issues/${issueId}/files`);
+    return parseWithFallback(
+      raw,
+      ListIssueFilesResponseSchema,
+      EMPTY_LIST_ISSUE_FILES_RESPONSE,
+      { endpoint: "GET /api/issues/{id}/files" },
+    );
+  }
+
   // Fetches a fresh attachment metadata record. The server re-signs
   // `download_url` on every call (30 min expiry), so the click-time
   // download flow uses this endpoint to avoid handing the user a stale
@@ -3211,6 +3229,32 @@ export class ApiClient {
     resourceId: string,
   ): Promise<void> {
     await this.fetch(`/api/projects/${projectId}/resources/${resourceId}`, {
+      method: "DELETE",
+    });
+  }
+
+  // Project files (artifacts produced/uploaded by members and agents).
+  async listProjectFiles(projectId: string): Promise<ListProjectFilesResponse> {
+    const raw = await this.fetch<unknown>(`/api/projects/${projectId}/files`);
+    return parseWithFallback(
+      raw,
+      ListProjectFilesResponseSchema,
+      EMPTY_LIST_PROJECT_FILES_RESPONSE,
+      { endpoint: "GET /api/projects/{id}/files" },
+    );
+  }
+
+  async hideProjectFile(projectId: string, attachmentId: string): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/files/${attachmentId}/hide`, {
+      method: "POST",
+    });
+  }
+
+  async unhideProjectFile(
+    projectId: string,
+    attachmentId: string,
+  ): Promise<void> {
+    await this.fetch(`/api/projects/${projectId}/files/${attachmentId}/hide`, {
       method: "DELETE",
     });
   }

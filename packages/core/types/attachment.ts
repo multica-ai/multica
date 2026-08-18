@@ -47,3 +47,10 @@ export interface Attachment {
   size_bytes: number;
   created_at: string;
 }
+
+// The full "files in this task" surface — an issue's own attachments plus the
+// attachments on its comments, aggregated by GET /api/issues/{id}/files.
+export interface ListIssueFilesResponse {
+  files: Attachment[];
+  total: number;
+}

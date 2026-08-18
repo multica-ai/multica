@@ -128,7 +128,7 @@ export type {
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
-export type { Attachment } from "./attachment";
+export type { Attachment, ListIssueFilesResponse } from "./attachment";
 export {
   attachmentDownloadPath,
   attachmentIdFromDownloadURL,
@@ -174,6 +174,8 @@ export type {
   CreateProjectResourceRequest,
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
+  ProjectFile,
+  ListProjectFilesResponse,
 } from "./project";
 export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
 export type {
