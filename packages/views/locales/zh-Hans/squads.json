@@ -13,7 +13,8 @@
     },
     "no_matches": "没有匹配的小队",
     "row_menu": "小队操作",
-    "archive_action": "归档"
+    "archive_action": "归档",
+    "extension_badge": "Extension"
   },
   "inspector": {
     "details_section": "详情",
@@ -57,6 +58,7 @@
     "create_agent_button": "创建智能体",
     "leader_chip": "队长",
     "view_agent_tooltip": "打开智能体详情",
+    "view_internal_agent_tooltip": "查看内部智能体详情",
     "make_leader_tooltip": "设为小队负责人",
     "remove_member_tooltip": "从小队移除",
     "status_working": "工作中",
@@ -67,6 +69,17 @@
     "issue_status_blocked": "已阻塞",
     "active_issue_more": "还有 {{count}} 个",
     "last_active_label": "最近活动 {{time}}"
+  },
+  "internal_agent_drawer": {
+    "leader_description": "该 Extension 小队的内部负责人智能体。",
+    "member_description": "该 Extension 小队的内部智能体。",
+    "description_label": "说明",
+    "runtime_label": "运行时",
+    "runtime_unavailable": "暂无可用运行时。",
+    "skills_label": "Skills",
+    "skills_empty": "未配置 Skills。",
+    "instructions_label": "指令",
+    "instructions_empty": "未提供指令。"
   },
   "profile_card": {
     "unavailable": "小队不可用",

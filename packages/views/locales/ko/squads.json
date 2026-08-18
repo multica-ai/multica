@@ -13,7 +13,8 @@
     },
     "no_matches": "일치하는 스쿼드가 없습니다",
     "row_menu": "스쿼드 작업",
-    "archive_action": "보관"
+    "archive_action": "보관",
+    "extension_badge": "Extension"
   },
   "inspector": {
     "details_section": "세부 정보",
@@ -57,6 +58,7 @@
     "create_agent_button": "에이전트 만들기",
     "leader_chip": "리더",
     "view_agent_tooltip": "에이전트 상세 열기",
+    "view_internal_agent_tooltip": "내부 에이전트 세부 정보 보기",
     "make_leader_tooltip": "스쿼드 리더로 지정",
     "remove_member_tooltip": "스쿼드에서 제거",
     "status_working": "작업 중",
@@ -67,6 +69,17 @@
     "issue_status_blocked": "막힘",
     "active_issue_more": "외 {{count}}개",
     "last_active_label": "마지막 활동 {{time}}"
+  },
+  "internal_agent_drawer": {
+    "leader_description": "이 Extension 스쿼드의 내부 리더 에이전트입니다.",
+    "member_description": "이 Extension 스쿼드의 내부 에이전트입니다.",
+    "description_label": "설명",
+    "runtime_label": "런타임",
+    "runtime_unavailable": "사용 가능한 런타임이 없습니다.",
+    "skills_label": "스킬",
+    "skills_empty": "구성된 스킬이 없습니다.",
+    "instructions_label": "지침",
+    "instructions_empty": "제공된 지침이 없습니다."
   },
   "profile_card": {
     "unavailable": "스쿼드를 사용할 수 없습니다",

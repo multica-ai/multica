@@ -32,6 +32,7 @@ export const PlatformExtensionRuntimeSchema = z.object({
 export const PlatformExtensionSquadSchema = z.object({
   id: UUIDSchema,
   name: z.string().min(1),
+  archived: z.boolean().default(false),
 });
 
 export const PlatformExtensionAgentMappingSchema = z.object({
@@ -39,6 +40,7 @@ export const PlatformExtensionAgentMappingSchema = z.object({
   id: UUIDSchema,
   name: z.string().min(1),
   leader: z.boolean(),
+  runtime: PlatformExtensionRuntimeSchema.nullable(),
 });
 
 export const PlatformExtensionSkillMappingSchema = z.object({
@@ -49,7 +51,7 @@ export const PlatformExtensionSkillMappingSchema = z.object({
 
 export const PlatformExtensionMappingSchema = z.object({
   release: PlatformExtensionReleaseSchema,
-  runtime: PlatformExtensionRuntimeSchema,
+  runtime: PlatformExtensionRuntimeSchema.nullable(),
   squad: PlatformExtensionSquadSchema,
   agents: z.array(PlatformExtensionAgentMappingSchema),
   skills: z.array(PlatformExtensionSkillMappingSchema),
@@ -58,8 +60,63 @@ export const PlatformExtensionMappingSchema = z.object({
 export const PlatformExtensionImportResultSchema =
   PlatformExtensionMappingSchema.extend({ idempotent: z.boolean() });
 
+const PlatformExtensionManifestCommandSchema = z.object({
+  name: z.string().min(1),
+  description: z.string().optional(),
+  content: z.string().optional(),
+  metadata: z.record(z.string(), JSONValueSchema).optional(),
+}).loose();
+
+const PlatformExtensionManifestAgentSchema = z.object({
+  key: z.string().optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  prompt: z.string().optional(),
+}).loose();
+
+const PlatformExtensionManifestSkillFileSchema = z.object({
+  path: z.string().min(1),
+  content: z.string().optional(),
+  encoding: z.literal("base64").optional(),
+}).loose();
+
+const PlatformExtensionManifestSkillSchema = z.object({
+  key: z.string().optional(),
+  name: z.string().min(1),
+  description: z.string().optional(),
+  files: z.array(PlatformExtensionManifestSkillFileSchema).optional(),
+}).loose();
+
+export const PlatformExtensionManifestSchema = z.object({
+  extension: z.object({
+    key: z.string().optional(),
+    name: z.string().optional(),
+    version: z.string().optional(),
+    description: z.string().optional(),
+  }).loose().optional(),
+  leader: z.string().optional(),
+  agents: z.array(PlatformExtensionManifestAgentSchema).optional(),
+  skills: z.array(PlatformExtensionManifestSkillSchema).optional(),
+  flow_commands: z.array(PlatformExtensionManifestCommandSchema).optional(),
+  runtime_commands: z.array(PlatformExtensionManifestCommandSchema).optional(),
+}).loose();
+
+export const PlatformExtensionPreviewSchema = z.object({
+  release: PlatformExtensionReleaseSchema.omit({ id: true }),
+  squad_base_name: z.string().min(1),
+  agents: z.array(z.object({
+    source_key: z.string().min(1),
+    name: z.string().min(1),
+    leader: z.boolean(),
+    runtime_id: z.union([UUIDSchema, z.literal("")]),
+  })),
+  runtimes: z.array(PlatformExtensionRuntimeSchema),
+  manifest: PlatformExtensionManifestSchema,
+});
+
 export const PlatformExtensionDetailSchema = PlatformExtensionMappingSchema.extend({
-  manifest: z.record(z.string(), JSONValueSchema),
+  manifest: PlatformExtensionManifestSchema,
+  available_runtimes: z.array(PlatformExtensionRuntimeSchema).default([]),
 });
 
 export const PlatformExtensionListSchema = z.array(PlatformExtensionMappingSchema);

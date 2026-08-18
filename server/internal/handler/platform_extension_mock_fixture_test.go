@@ -7,16 +7,12 @@ import (
 )
 
 func TestRuntimePoolDemoExtensionFixtureCompiles(t *testing.T) {
-	data, err := os.ReadFile(filepath.Join("../../../testdata/extensions", "runtime-pool-demo.source.json"))
+	data, err := os.ReadFile(filepath.Join("../../../testdata/extensions", "runtime-pool-demo.zip"))
 	if err != nil {
 		t.Fatalf("read mock extension fixture: %v", err)
 	}
 
-	source, err := DecodePlatformExtensionSource(data)
-	if err != nil {
-		t.Fatalf("decode mock extension fixture: %v", err)
-	}
-	bundle, err := CompilePlatformExtension(source)
+	bundle, _, err := decodePlatformExtensionArchiveImport(data, DefaultPlatformExtensionV1Policy())
 	if err != nil {
 		t.Fatalf("compile mock extension fixture: %v", err)
 	}

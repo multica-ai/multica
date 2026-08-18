@@ -31,6 +31,9 @@ export
 MULTICA_ARGS ?= $(ARGS)
 
 COMPOSE := docker compose
+LOCAL_GO_BIN := $(CURDIR)/.tools/go/bin/go
+GO_BIN ?= $(if $(wildcard $(LOCAL_GO_BIN)),$(LOCAL_GO_BIN),go)
+export MULTICA_GO_BIN := $(GO_BIN)
 
 define REQUIRE_ENV
 	@if [ ! -f "$(ENV_FILE)" ]; then \
@@ -153,7 +156,7 @@ setup: ## Prepare the current checkout from its env file: install deps, ensure D
 	pnpm install
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	@echo "==> Running migrations..."
-	cd server && go run ./cmd/migrate up
+	cd server && $(GO_BIN) run ./cmd/migrate up
 	@echo ""
 	@echo "✓ Setup complete! Run 'make start' to launch the app."
 
@@ -164,10 +167,10 @@ start: ## Start backend and frontend for the current checkout and run migrations
 	@echo "Frontend: http://localhost:$(FRONTEND_PORT)"
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
 	@echo "Running migrations..."
-	cd server && go run ./cmd/migrate up
+	cd server && $(GO_BIN) run ./cmd/migrate up
 	@echo "Starting backend and frontend..."
 	@trap 'kill 0' EXIT; \
-		(cd server && go run ./cmd/server) & \
+		(cd server && $(GO_BIN) run ./cmd/server) & \
 		pnpm dev:web & \
 		wait
 
@@ -209,7 +212,7 @@ db-reset: ## Drop and recreate the current env's database, then re-run all migra
 		-c "DROP DATABASE IF EXISTS \"$(POSTGRES_DB)\" WITH (FORCE);" \
 		-c "CREATE DATABASE \"$(POSTGRES_DB)\";"
 	@echo "==> Running migrations..."
-	cd server && go run ./cmd/migrate up
+	cd server && $(GO_BIN) run ./cmd/migrate up
 	@echo ""
 	@echo "✓ Database '$(POSTGRES_DB)' reset. Run 'make start' to launch the app."
 
@@ -255,7 +258,7 @@ dev: ## Bootstrap this checkout end-to-end: create env if needed, ensure DB, mig
 server: ## Run only the Go server for the current checkout
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd server && go run ./cmd/server
+	cd server && $(GO_BIN) run ./cmd/server
 
 daemon: ## Restart the local agent daemon using the CLI's stored auth/session
 	@$(MAKE) multica MULTICA_ARGS="daemon restart --profile local"
@@ -264,21 +267,21 @@ cli: ## Run the multica CLI with ARGS or MULTICA_ARGS from source
 	@$(MAKE) multica MULTICA_ARGS="$(MULTICA_ARGS)"
 
 multica: ## Run the multica CLI entrypoint directly from the Go source tree
-	cd server && go run -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" ./cmd/multica $(MULTICA_ARGS)
+	cd server && $(GO_BIN) run -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" ./cmd/multica $(MULTICA_ARGS)
 
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 
 build: ## Build the server, CLI, and migrate binaries into server/bin
-	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server ./cmd/server
-	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
-	cd server && go build -o bin/migrate ./cmd/migrate
+	cd server && $(GO_BIN) build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server ./cmd/server
+	cd server && $(GO_BIN) build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
+	cd server && $(GO_BIN) build -o bin/migrate ./cmd/migrate
 
 test: ## Run Go tests after ensuring the target DB exists and migrations are applied
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd server && go run ./cmd/migrate up
+	cd server && $(GO_BIN) run ./cmd/migrate up
 	bash scripts/test-go.sh --race
 
 # Database
@@ -287,12 +290,12 @@ test: ## Run Go tests after ensuring the target DB exists and migrations are app
 migrate-up: ## Create the target DB if needed, then apply database migrations
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd server && go run ./cmd/migrate up
+	cd server && $(GO_BIN) run ./cmd/migrate up
 
 migrate-down: ## Create the target DB if needed, then roll back database migrations
 	$(REQUIRE_ENV)
 	@bash scripts/ensure-postgres.sh "$(ENV_FILE)"
-	cd server && go run ./cmd/migrate down
+	cd server && $(GO_BIN) run ./cmd/migrate down
 
 sqlc: ## Regenerate sqlc code
 	cd server && sqlc generate

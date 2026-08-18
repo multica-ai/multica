@@ -217,6 +217,7 @@ type SkillData struct {
 type SkillFileData struct {
 	Path      string `json:"path"`
 	Content   string `json:"content"`
+	Encoding  string `json:"encoding,omitempty"`
 	SHA256    string `json:"sha256,omitempty"`
 	SizeBytes int64  `json:"size_bytes,omitempty"`
 }

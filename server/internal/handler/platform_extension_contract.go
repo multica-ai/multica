@@ -3,6 +3,7 @@ package handler
 import (
 	"bytes"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -19,13 +20,16 @@ import (
 const (
 	PlatformExtensionSourceSchemaVersion = "platform.extension/v1"
 	PlatformExtensionBundleSchemaVersion = "multica.extension-bundle/v1"
+	PlatformExtensionFlowCommandSuffix   = "-e2e"
 
 	PlatformExtensionMaxAgents         = 32
 	PlatformExtensionMaxSkills         = 32
 	PlatformExtensionMaxCommands       = 128
 	PlatformExtensionMaxSkillFiles     = 32
-	PlatformExtensionMaxSkillFileBytes = 256 * 1024
+	PlatformExtensionMaxSkillFileBytes = 4 * 1024 * 1024
 )
+
+const platformExtensionSkillFileEncodingsConfigKey = "multica_file_encodings"
 
 var platformExtensionWindowsDeviceName = regexp.MustCompile(`(?i)^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\..*)?$`)
 
@@ -93,6 +97,10 @@ type PlatformExtensionSkill struct {
 type PlatformExtensionSkillFile struct {
 	Path    string `json:"path"`
 	Content string `json:"content"`
+	// Encoding is omitted for normal UTF-8 text. Binary archive entries are
+	// persisted as base64 so PostgreSQL text storage and the task wire format
+	// remain portable; the daemon restores their original bytes at execution.
+	Encoding string `json:"encoding,omitempty"`
 }
 
 // PlatformExtensionCommand holds only the platform's standard command
@@ -235,6 +243,7 @@ func CompilePlatformExtensionWithPolicy(source PlatformExtensionSource, policy P
 	if err := validatePlatformExtensionSource(source); err != nil {
 		return PlatformExtensionBundle{}, err
 	}
+	normalizePlatformExtensionSkillFileEncodings(source.Skills)
 
 	commands := make([]PlatformExtensionCommand, len(source.Commands))
 	for i, command := range source.Commands {
@@ -401,7 +410,11 @@ func validatePlatformExtensionSkillFiles(files []PlatformExtensionSkillFile) err
 	paths := make(map[string]struct{}, len(files))
 	portablePaths := make(map[string]struct{}, len(files))
 	for _, file := range files {
-		if len(file.Content) > PlatformExtensionMaxSkillFileBytes {
+		fileBytes, err := platformExtensionSkillFileBytes(file)
+		if err != nil {
+			return err
+		}
+		if len(fileBytes) > PlatformExtensionMaxSkillFileBytes {
 			return platformExtensionCode("SKILL_FILE_SIZE_EXCEEDED", fmt.Sprintf("maximum is %d bytes", PlatformExtensionMaxSkillFileBytes))
 		}
 		if platformExtensionDuplicate(paths, file.Path) {
@@ -420,6 +433,9 @@ func validatePlatformExtensionSkillFiles(files []PlatformExtensionSkillFile) err
 			return platformExtensionCode("DUPLICATE_SKILL_FILE_PATH", file.Path)
 		}
 		if file.Path == "SKILL.md" {
+			if strings.EqualFold(strings.TrimSpace(file.Encoding), "base64") || strings.EqualFold(strings.TrimSpace(file.Encoding), "binary") {
+				return platformExtensionCode("SKILL_ROOT_INVALID", "SKILL.md must be UTF-8 text")
+			}
 			rootFiles++
 		}
 	}
@@ -427,6 +443,21 @@ func validatePlatformExtensionSkillFiles(files []PlatformExtensionSkillFile) err
 		return platformExtensionCode("SKILL_ROOT_INVALID", "each skill must contain exactly one root SKILL.md")
 	}
 	return nil
+}
+
+func platformExtensionSkillFileBytes(file PlatformExtensionSkillFile) ([]byte, error) {
+	switch strings.ToLower(strings.TrimSpace(file.Encoding)) {
+	case "", "text":
+		return []byte(file.Content), nil
+	case "base64", "binary":
+		decoded, err := base64.StdEncoding.DecodeString(file.Content)
+		if err != nil {
+			return nil, platformExtensionCode("SKILL_FILE_ENCODING_INVALID", file.Path)
+		}
+		return decoded, nil
+	default:
+		return nil, platformExtensionCode("SKILL_FILE_ENCODING_INVALID", file.Path)
+	}
 }
 
 func portablePlatformExtensionSkillPathKey(value string) string {
@@ -492,13 +523,47 @@ func classifyPlatformExtensionCommands(commands []PlatformExtensionCommand, suff
 		if platformExtensionMatchesSuffix(command.Name, suffixes.Tool) {
 			return nil, nil, platformExtensionCode("TOOL_COMMAND_UNSUPPORTED", command.Name)
 		}
-		if platformExtensionMatchesSuffix(command.Name, suffixes.Flow) {
+		if platformExtensionMatchesFlowCommand(command.Name, suffixes.Flow) {
 			flowCommands = append(flowCommands, command)
 			continue
 		}
 		runtimeCommands = append(runtimeCommands, command)
 	}
 	return flowCommands, runtimeCommands, nil
+}
+
+func platformExtensionMatchesFlowCommand(name string, configuredSuffixes []string) bool {
+	return strings.HasSuffix(name, PlatformExtensionFlowCommandSuffix) || platformExtensionMatchesSuffix(name, configuredSuffixes)
+}
+
+// validatePlatformExtensionImportE2ECommand is intentionally narrower than
+// the legacy compiler classification. Older documents may still decode with
+// their declared .flow suffixes, but an importable Extension package has one
+// unambiguous command that owns the versioned Squad instructions.
+func validatePlatformExtensionImportE2ECommand(bundle PlatformExtensionBundle) error {
+	matching := 0
+	for _, command := range bundle.FlowCommands {
+		if strings.HasSuffix(command.Name, PlatformExtensionFlowCommandSuffix) {
+			matching++
+		}
+	}
+	if matching != 1 {
+		return platformExtensionCode("E2E_COMMAND_INVALID", "extension must contain exactly one Command ending in -e2e")
+	}
+	return nil
+}
+
+func platformExtensionDefaultSquadBaseName(bundle PlatformExtensionBundle) (string, error) {
+	for _, command := range bundle.FlowCommands {
+		if strings.HasSuffix(command.Name, PlatformExtensionFlowCommandSuffix) {
+			baseName := strings.TrimSpace(strings.TrimSuffix(command.Name, PlatformExtensionFlowCommandSuffix))
+			if baseName == "" {
+				return "", platformExtensionCode("E2E_COMMAND_INVALID", "the -e2e Command must have a name prefix")
+			}
+			return baseName, nil
+		}
+	}
+	return "", platformExtensionCode("E2E_COMMAND_INVALID", "extension must contain exactly one Command ending in -e2e")
 }
 
 func validatePlatformExtensionBundleStructure(bundle PlatformExtensionBundle, trustedSuffixes PlatformExtensionCommandSuffixes) error {
@@ -520,7 +585,7 @@ func validatePlatformExtensionBundleStructure(bundle PlatformExtensionBundle, tr
 		if platformExtensionMatchesSuffix(command.Name, trustedSuffixes.Tool) {
 			return platformExtensionCode("TOOL_COMMAND_UNSUPPORTED", command.Name)
 		}
-		if !platformExtensionMatchesSuffix(command.Name, trustedSuffixes.Flow) {
+		if !platformExtensionMatchesFlowCommand(command.Name, trustedSuffixes.Flow) {
 			return platformExtensionCode("FLOW_COMMAND_CLASSIFICATION_INVALID", command.Name)
 		}
 	}
@@ -528,7 +593,7 @@ func validatePlatformExtensionBundleStructure(bundle PlatformExtensionBundle, tr
 		if platformExtensionMatchesSuffix(command.Name, trustedSuffixes.Tool) {
 			return platformExtensionCode("TOOL_COMMAND_UNSUPPORTED", command.Name)
 		}
-		if platformExtensionMatchesSuffix(command.Name, trustedSuffixes.Flow) {
+		if platformExtensionMatchesFlowCommand(command.Name, trustedSuffixes.Flow) {
 			return platformExtensionCode("RUNTIME_COMMAND_CLASSIFICATION_INVALID", command.Name)
 		}
 	}
@@ -588,7 +653,22 @@ func canonicalizePlatformExtensionBundleMetadata(bundle PlatformExtensionBundle)
 	if err != nil {
 		return PlatformExtensionBundle{}, err
 	}
+	normalizePlatformExtensionSkillFileEncodings(bundle.Skills)
 	return bundle, nil
+}
+
+func normalizePlatformExtensionSkillFileEncodings(skills []PlatformExtensionSkill) {
+	for skillIndex := range skills {
+		for fileIndex := range skills[skillIndex].Files {
+			file := &skills[skillIndex].Files[fileIndex]
+			switch strings.ToLower(strings.TrimSpace(file.Encoding)) {
+			case "", "text":
+				file.Encoding = ""
+			case "base64", "binary":
+				file.Encoding = "base64"
+			}
+		}
+	}
 }
 
 func normalizePlatformExtensionCommands(commands []PlatformExtensionCommand) ([]PlatformExtensionCommand, error) {

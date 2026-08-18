@@ -4,6 +4,7 @@ import { join } from "path";
 import { pathToFileURL } from "url";
 import { electronApp, optimizer, is } from "@electron-toolkit/utils";
 import fixPath from "fix-path";
+import { applyFixPath } from "./fix-path";
 import { setupAutoUpdater } from "./updater";
 import { setupDaemonManager } from "./daemon-manager";
 import { setupLocalDirectory } from "./local-directory";
@@ -104,7 +105,7 @@ const BUNDLED_ICON_PATH = join(__dirname, "../../resources/icon.png").replace(
 // ES module imports are hoisted, so this block executes before createWindow
 // or any daemon-manager spawn.
 if (process.platform !== "win32") {
-  fixPath();
+  applyFixPath(fixPath);
   // Fallback: prepend common install locations in case fix-path came up
   // short (broken shell rc, non-interactive $SHELL, missing entries). Safe
   // to duplicate — PATH lookups short-circuit on first match.

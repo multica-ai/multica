@@ -51,12 +51,12 @@ type AgentResponse struct {
 	// RuntimeRoutable is the invocation gate exposed to clients. Pool Agents
 	// are routable before a concrete Runtime is assigned; fixed Agents remain
 	// routable only while bound.
-	RuntimeRoutable     bool            `json:"runtime_routable"`
-	RuntimeBindingMode  string          `json:"runtime_binding_mode"`
+	RuntimeRoutable      bool            `json:"runtime_routable"`
+	RuntimeBindingMode   string          `json:"runtime_binding_mode"`
 	RuntimeRequirements  json.RawMessage `json:"runtime_requirements"`
 	CommentMentionPolicy string          `json:"comment_mention_policy"`
-	Name                string          `json:"name"`
-	Description         string          `json:"description"`
+	Name                 string          `json:"name"`
+	Description          string          `json:"description"`
 	// Instructions is what this agent's owner wrote. For a system agent it
 	// holds only the workspace's own notes — the product half lives in
 	// SystemInstructions and is never stored on the row.
@@ -1014,19 +1014,19 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type CreateAgentRequest struct {
-	Name                string            `json:"name"`
-	Description         string            `json:"description"`
-	Instructions        string            `json:"instructions"`
-	AvatarURL           *string           `json:"avatar_url"`
-	RuntimeID           string            `json:"runtime_id"`
-	RuntimeBindingMode  string            `json:"runtime_binding_mode"`
-	RuntimeRequirements json.RawMessage   `json:"runtime_requirements"`
+	Name                 string            `json:"name"`
+	Description          string            `json:"description"`
+	Instructions         string            `json:"instructions"`
+	AvatarURL            *string           `json:"avatar_url"`
+	RuntimeID            string            `json:"runtime_id"`
+	RuntimeBindingMode   string            `json:"runtime_binding_mode"`
+	RuntimeRequirements  json.RawMessage   `json:"runtime_requirements"`
 	CommentMentionPolicy string            `json:"comment_mention_policy"`
-	RuntimeConfig       any               `json:"runtime_config"`
-	CustomEnv           map[string]string `json:"custom_env"`
-	CustomArgs          []string          `json:"custom_args"`
-	McpConfig           json.RawMessage   `json:"mcp_config"`
-	Visibility          string            `json:"visibility"`
+	RuntimeConfig        any               `json:"runtime_config"`
+	CustomEnv            map[string]string `json:"custom_env"`
+	CustomArgs           []string          `json:"custom_args"`
+	McpConfig            json.RawMessage   `json:"mcp_config"`
+	Visibility           string            `json:"visibility"`
 	// PermissionMode + InvocationTargets are the new invocation-permission
 	// inputs (MUL-3963). When permission_mode is present it is authoritative
 	// and Visibility is ignored; when absent, legacy Visibility is mapped
@@ -1260,10 +1260,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, skillID := range skillUUIDs {
-		if _, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
+		skill, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
 			ID:          skillID,
 			WorkspaceID: wsUUID,
-		}); err != nil {
+		})
+		if err != nil || isPlatformExtensionInternalSkill(skill.Config) {
 			writeError(w, http.StatusBadRequest, "skill does not belong to this workspace")
 			return
 		}
@@ -1370,11 +1371,11 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateAgentRequest struct {
-	Name          *string `json:"name"`
-	Description   *string `json:"description"`
-	Instructions  *string `json:"instructions"`
-	AvatarURL     *string `json:"avatar_url"`
-	RuntimeID     *string `json:"runtime_id"`
+	Name                 *string `json:"name"`
+	Description          *string `json:"description"`
+	Instructions         *string `json:"instructions"`
+	AvatarURL            *string `json:"avatar_url"`
+	RuntimeID            *string `json:"runtime_id"`
 	RuntimeConfig        any     `json:"runtime_config"`
 	CommentMentionPolicy *string `json:"comment_mention_policy"`
 	// custom_env is intentionally NOT updatable through this endpoint.

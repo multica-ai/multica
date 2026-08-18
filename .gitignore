@@ -41,6 +41,7 @@ dist-electron
 coverage
 
 # Go
+.tools/
 server/bin/
 server/tmp/
 server/migrate

@@ -172,6 +172,7 @@ import type {
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
+  SquadInternalAgent,
   BillingBalance,
   BillingTransactionsPage,
   BillingBatchesPage,
@@ -185,18 +186,21 @@ import type {
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
   PlatformExtensionDetail,
+  PlatformExtensionImportConfiguration,
   PlatformExtensionImportResult,
   PlatformExtensionMapping,
+  PlatformExtensionPreview,
 } from "../extensions/types";
 import {
   PLATFORM_EXTENSION_MAX_IMPORT_BYTES,
-  PlatformExtensionDocumentEncodingError,
   PlatformExtensionDocumentTooLargeError,
 } from "../extensions/types";
 import {
   PlatformExtensionDetailSchema,
   PlatformExtensionImportResultSchema,
   PlatformExtensionListSchema,
+  PlatformExtensionMappingSchema,
+  PlatformExtensionPreviewSchema,
 } from "../extensions/schemas";
 import type { CreateFeedbackResponse, FeedbackKind } from "../feedback/types";
 import type {
@@ -286,6 +290,7 @@ import {
   SearchProjectsResponseSchema,
   SquadSchema,
   SquadListSchema,
+  SquadInternalAgentSchema,
   SquadMemberStatusListResponseSchema,
   SubscribersListSchema,
   TimelineEntriesSchema,
@@ -660,6 +665,7 @@ export class ApiClient {
 
   async importPlatformExtension(
     document: Uint8Array | ArrayBuffer,
+    configuration?: PlatformExtensionImportConfiguration,
   ): Promise<PlatformExtensionImportResult | null> {
     const bytes = document instanceof Uint8Array
       ? Uint8Array.from(document)
@@ -667,17 +673,62 @@ export class ApiClient {
     if (bytes.byteLength > PLATFORM_EXTENSION_MAX_IMPORT_BYTES) {
       throw new PlatformExtensionDocumentTooLargeError();
     }
-    try {
-      new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      throw new PlatformExtensionDocumentEncodingError();
-    }
-    const raw = await this.fetch<unknown>("/api/extensions/import", {
+    const res = await this.fetchRaw("/api/extensions/import", {
       method: "POST",
       body: bytes,
+      extraHeaders: {
+        "Content-Type": "application/zip",
+        ...(configuration
+          ? { "X-Multica-Extension-Import-Config": JSON.stringify(configuration) }
+          : {}),
+      },
     });
+    const raw = await res.json() as unknown;
     return parseWithFallback(raw, PlatformExtensionImportResultSchema, null, {
       endpoint: "POST /api/extensions/import",
+    });
+  }
+
+  async updatePlatformExtension(
+    id: string,
+    configuration: PlatformExtensionImportConfiguration,
+  ): Promise<PlatformExtensionMapping | null> {
+    const raw = await this.fetch<unknown>(`/api/extensions/${encodeURIComponent(id)}`, {
+      method: "PATCH",
+      body: JSON.stringify(configuration),
+    });
+    return parseWithFallback(raw, PlatformExtensionMappingSchema, null, {
+      endpoint: "PATCH /api/extensions/{id}",
+    });
+  }
+
+  async archivePlatformExtension(id: string): Promise<PlatformExtensionMapping | null> {
+    const raw = await this.fetch<unknown>(
+      `/api/extensions/${encodeURIComponent(id)}/archive`,
+      { method: "POST" },
+    );
+    return parseWithFallback(raw, PlatformExtensionMappingSchema, null, {
+      endpoint: "POST /api/extensions/{id}/archive",
+    });
+  }
+
+  async previewPlatformExtension(
+    document: Uint8Array | ArrayBuffer,
+  ): Promise<PlatformExtensionPreview | null> {
+    const bytes = document instanceof Uint8Array
+      ? Uint8Array.from(document)
+      : new Uint8Array(document.slice(0));
+    if (bytes.byteLength > PLATFORM_EXTENSION_MAX_IMPORT_BYTES) {
+      throw new PlatformExtensionDocumentTooLargeError();
+    }
+    const res = await this.fetchRaw("/api/extensions/preview", {
+      method: "POST",
+      body: bytes,
+      extraHeaders: { "Content-Type": "application/zip" },
+    });
+    const raw = await res.json() as unknown;
+    return parseWithFallback(raw, PlatformExtensionPreviewSchema, null, {
+      endpoint: "POST /api/extensions/preview",
     });
   }
 
@@ -3104,6 +3155,24 @@ export class ApiClient {
     return parseWithFallback(raw, SquadSchema, EMPTY_SQUAD, {
       endpoint: "GET /api/squads/:id",
     }) as Squad;
+  }
+
+  async getSquadInternalAgent(squadId: string, agentId: string): Promise<SquadInternalAgent> {
+    const raw = await this.fetch<unknown>(
+      `/api/squads/${encodeURIComponent(squadId)}/internal-agents/${encodeURIComponent(agentId)}`,
+    );
+    return parseWithFallback(raw, SquadInternalAgentSchema, {
+      id: "",
+      name: "",
+      description: "",
+      instructions: "",
+      role: "member",
+      leader: false,
+      runtime: null,
+      skills: [],
+    }, {
+      endpoint: "GET /api/squads/:id/internal-agents/:agentId",
+    }) as SquadInternalAgent;
   }
 
   async createSquad(data: { name: string; description?: string; leader_id: string; avatar_url?: string }): Promise<Squad> {

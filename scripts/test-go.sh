@@ -5,6 +5,9 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 GUARD_SCRIPT="$SCRIPT_DIR/go-test-with-agent-cli-guard.sh"
 
+# shellcheck disable=SC1091
+. "$SCRIPT_DIR/project-go-env.sh"
+
 usage() {
   echo "usage: $0 [--race]" >&2
 }

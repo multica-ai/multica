@@ -265,6 +265,19 @@ SET runtime_id = @runtime_id,
 WHERE id = @id AND kind = 'system' AND system_key LIKE 'agent_builder:%'
 RETURNING *;
 
+-- name: UpdatePlatformExtensionInternalAgentRuntime :one
+-- Extension-generated Agents are system rows and are not editable through the
+-- public Agent endpoint. This narrow mutation is used only by the Extension
+-- mapping editor; NULL deliberately means "awaiting runtime configuration".
+UPDATE agent
+SET runtime_id = sqlc.narg('runtime_id'),
+    updated_at = now()
+WHERE id = @id
+  AND workspace_id = @workspace_id
+  AND kind = 'system'
+  AND system_key = @system_key
+RETURNING *;
+
 -- name: UpdateAgent :one
 -- composio_toolkit_allowlist is set wholesale: the API layer is responsible
 -- for normalising the request payload to either (a) the new slug list — sent

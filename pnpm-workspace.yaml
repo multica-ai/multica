@@ -2,6 +2,17 @@ packages:
   - "apps/*"
   - "packages/*"
 
+allowBuilds:
+  core-js: false
+  electron: true
+  electron-winstaller: false
+  esbuild: true
+  msw: false
+  protobufjs: false
+  sharp: false
+  unicode-animations: false
+  unrs-resolver: false
+
 catalog:
   # Core React
   react: "19.2.3"

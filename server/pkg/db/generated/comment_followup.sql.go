@@ -147,7 +147,7 @@ func (q *Queries) ListCommentFollowupObligations(ctx context.Context, arg ListCo
 }
 
 const lockAgentForCommentFollowup = `-- name: LockAgentForCommentFollowup :one
-SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, runtime_binding_mode, runtime_requirements
+SELECT id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier, runtime_binding_mode, runtime_requirements, comment_mention_policy
 FROM agent
 WHERE id = $1::uuid
 FOR UPDATE
@@ -187,6 +187,7 @@ func (q *Queries) LockAgentForCommentFollowup(ctx context.Context, agentID pgtyp
 		&i.ServiceTier,
 		&i.RuntimeBindingMode,
 		&i.RuntimeRequirements,
+		&i.CommentMentionPolicy,
 	)
 	return i, err
 }

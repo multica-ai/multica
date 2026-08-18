@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -35,6 +36,29 @@ type SquadResponse struct {
 	ArchivedBy    *string                      `json:"archived_by"`
 	MemberCount   int                          `json:"member_count"`
 	MemberPreview []SquadMemberPreviewResponse `json:"member_preview"`
+	// Extension is set only when platform_extension_release.squad_id owns this
+	// Squad. It is the canonical managed-Squad marker for every client surface.
+	Extension *ExtensionManagedSquadResponse `json:"extension,omitempty"`
+}
+
+type ExtensionManagedSquadResponse struct {
+	ReleaseID    string `json:"release_id"`
+	ExtensionKey string `json:"extension_key"`
+	Version      string `json:"version"`
+}
+
+// ExtensionManagedSquadInternalAgentResponse is deliberately narrower than
+// AgentResponse. Extension internal Agents are visible only from their owning
+// Squad, never promoted into the global Agent detail experience.
+type ExtensionManagedSquadInternalAgentResponse struct {
+	ID           string                            `json:"id"`
+	Name         string                            `json:"name"`
+	Description  string                            `json:"description"`
+	Instructions string                            `json:"instructions"`
+	Role         string                            `json:"role"`
+	Leader       bool                              `json:"leader"`
+	Runtime      *PlatformExtensionRuntimeResponse `json:"runtime"`
+	Skills       []AgentSkillSummary               `json:"skills"`
 }
 
 type SquadMemberPreviewResponse struct {
@@ -106,6 +130,54 @@ func applySquadMemberSummary(resp *SquadResponse, summary *squadMemberSummary) {
 	}
 	resp.MemberCount = summary.count
 	resp.MemberPreview = summary.preview
+}
+
+func (h *Handler) platformExtensionSquadBindings(
+	ctx context.Context,
+	workspaceID pgtype.UUID,
+) (map[string]ExtensionManagedSquadResponse, error) {
+	rows, err := h.Queries.ListPlatformExtensionSquadBindings(ctx, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	bindings := make(map[string]ExtensionManagedSquadResponse, len(rows))
+	for _, row := range rows {
+		bindings[uuidToString(row.SquadID)] = ExtensionManagedSquadResponse{
+			ReleaseID:    uuidToString(row.ReleaseID),
+			ExtensionKey: row.ExtensionKey,
+			Version:      row.Version,
+		}
+	}
+	return bindings, nil
+}
+
+func applyExtensionManagedSquad(resp *SquadResponse, bindings map[string]ExtensionManagedSquadResponse) {
+	if binding, ok := bindings[resp.ID]; ok {
+		bindingCopy := binding
+		resp.Extension = &bindingCopy
+	}
+}
+
+func (h *Handler) rejectExtensionManagedSquadCompositionWrite(
+	w http.ResponseWriter,
+	r *http.Request,
+	squad db.Squad,
+) bool {
+	bindings, err := h.platformExtensionSquadBindings(r.Context(), squad.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load Extension Squad ownership")
+		return true
+	}
+	if _, managed := bindings[uuidToString(squad.ID)]; !managed {
+		return false
+	}
+	writePlatformExtensionError(
+		w,
+		http.StatusConflict,
+		"EXTENSION_MANAGED_SQUAD",
+		"Extension-managed Squad composition cannot be changed",
+	)
+	return true
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────────────
@@ -198,6 +270,11 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list squads")
 		return
 	}
+	bindings, err := h.platformExtensionSquadBindings(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load Extension Squad ownership")
+		return
+	}
 
 	previewRows, err := h.Queries.ListSquadMemberPreviewRows(r.Context(), wsUUID)
 	if err != nil {
@@ -219,6 +296,7 @@ func (h *Handler) ListSquads(w http.ResponseWriter, r *http.Request) {
 	for i, s := range squads {
 		resp[i] = h.squadToResponse(s)
 		applySquadMemberSummary(&resp[i], summaries[uuidToString(s.ID)])
+		applyExtensionManagedSquad(&resp[i], bindings)
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -332,6 +410,12 @@ func (h *Handler) GetSquad(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to load squad member preview")
 		return
 	}
+	bindings, err := h.platformExtensionSquadBindings(r.Context(), squad.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load Extension Squad ownership")
+		return
+	}
+	applyExtensionManagedSquad(&resp, bindings)
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -364,6 +448,9 @@ func (h *Handler) UpdateSquad(w http.ResponseWriter, r *http.Request) {
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.LeaderID != nil && h.rejectExtensionManagedSquadCompositionWrite(w, r, squad) {
 		return
 	}
 
@@ -556,6 +643,87 @@ func (h *Handler) ListSquadMembers(w http.ResponseWriter, r *http.Request) {
 		resp[i] = squadMemberToResponse(m)
 	}
 	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetExtensionManagedSquadInternalAgent exposes an Extension-created system
+// Agent only through its owning Squad. This intentionally avoids the global
+// Agent endpoint and its editable inspector.
+func (h *Handler) GetExtensionManagedSquadInternalAgent(w http.ResponseWriter, r *http.Request) {
+	squad, _, ok := h.loadSquadInWorkspace(w, r)
+	if !ok {
+		return
+	}
+	bindings, err := h.platformExtensionSquadBindings(r.Context(), squad.WorkspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load Extension Squad ownership")
+		return
+	}
+	binding, managed := bindings[uuidToString(squad.ID)]
+	if !managed {
+		writeError(w, http.StatusNotFound, "internal Agent not found")
+		return
+	}
+
+	agentID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "agentId"), "agent id")
+	if !ok {
+		return
+	}
+	members, err := h.Queries.ListSquadMembers(r.Context(), squad.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load Squad members")
+		return
+	}
+	role := ""
+	for _, member := range members {
+		if member.MemberType == "agent" && member.MemberID == agentID {
+			role = member.Role
+			break
+		}
+	}
+	if role == "" {
+		writeError(w, http.StatusNotFound, "internal Agent not found")
+		return
+	}
+
+	agent, err := h.Queries.GetAgent(r.Context(), agentID)
+	if err != nil || agent.WorkspaceID != squad.WorkspaceID || agent.Kind != "system" ||
+		!strings.HasPrefix(agent.SystemKey.String, "platform_extension:"+binding.ReleaseID+":") {
+		writeError(w, http.StatusNotFound, "internal Agent not found")
+		return
+	}
+
+	response := ExtensionManagedSquadInternalAgentResponse{
+		ID:           uuidToString(agent.ID),
+		Name:         agent.Name,
+		Description:  agent.Description,
+		Instructions: agent.Instructions,
+		Role:         role,
+		Leader:       agent.ID == squad.LeaderID,
+		Skills:       []AgentSkillSummary{},
+	}
+	if agent.RuntimeID.Valid {
+		runtime, runtimeErr := h.Queries.GetAgentRuntimeForWorkspace(r.Context(), db.GetAgentRuntimeForWorkspaceParams{
+			ID: agent.RuntimeID, WorkspaceID: squad.WorkspaceID,
+		})
+		if runtimeErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to load internal Agent runtime")
+			return
+		}
+		response.Runtime = &PlatformExtensionRuntimeResponse{
+			ID: uuidToString(runtime.ID), Provider: runtime.Provider, Name: runtime.Name,
+		}
+	}
+	skills, err := h.Queries.ListAgentSkillSummaries(r.Context(), agent.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load internal Agent Skills")
+		return
+	}
+	for _, skill := range skills {
+		response.Skills = append(response.Skills, AgentSkillSummary{
+			ID: uuidToString(skill.ID), Name: skill.Name, Description: skill.Description, Enabled: skill.Enabled,
+		})
+	}
+	writeJSON(w, http.StatusOK, response)
 }
 
 // ── Squad Member Status ────────────────────────────────────────────────────
@@ -762,6 +930,9 @@ func (h *Handler) AddSquadMember(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if h.rejectExtensionManagedSquadCompositionWrite(w, r, squad) {
+		return
+	}
 	if !canManageSquad(member, squad) {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return
@@ -851,6 +1022,9 @@ func (h *Handler) RemoveSquadMember(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	if h.rejectExtensionManagedSquadCompositionWrite(w, r, squad) {
+		return
+	}
 	if !canManageSquad(member, squad) {
 		writeError(w, http.StatusForbidden, "insufficient permissions")
 		return
@@ -905,6 +1079,9 @@ func (h *Handler) UpdateSquadMemberRole(w http.ResponseWriter, r *http.Request) 
 
 	squad, _, ok := h.loadSquadInWorkspace(w, r)
 	if !ok {
+		return
+	}
+	if h.rejectExtensionManagedSquadCompositionWrite(w, r, squad) {
 		return
 	}
 	if !canManageSquad(member, squad) {

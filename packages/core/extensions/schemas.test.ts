@@ -27,6 +27,11 @@ const mapping = {
       id: "44444444-4444-4444-8444-444444444444",
       name: "Research Team v1.0.0 / Leader",
       leader: true,
+      runtime: {
+        id: "22222222-2222-4222-8222-222222222222",
+        provider: "platform-agent-cli",
+        name: "Platform Agent CLI",
+      },
     },
   ],
   skills: [
@@ -53,6 +58,35 @@ describe("platform Extension response schemas", () => {
         idempotent: true,
       }).idempotent,
     ).toBe(true);
+  });
+
+  it("parses an imported Squad whose internal Agents are awaiting runtime configuration", () => {
+    const unbound = {
+      ...mapping,
+      runtime: null,
+      agents: [{ ...mapping.agents[0], runtime: null }],
+    };
+    expect(PlatformExtensionListSchema.parse([unbound]).at(0)?.runtime).toBeNull();
+  });
+
+  it("preserves Agent prompts and Skill files in the canonical manifest", () => {
+    const parsed = PlatformExtensionDetailSchema.parse({
+      ...mapping,
+      manifest: {
+        agents: [{ key: "lead", name: "Lead", prompt: "# Lead\n\nCoordinate." }],
+        skills: [{
+          key: "evidence",
+          name: "Evidence",
+          files: [
+            { path: "SKILL.md", content: "# Evidence" },
+            { path: "assets/logo.bin", content: "AP8=", encoding: "base64" },
+          ],
+        }],
+      },
+    });
+
+    expect(parsed.manifest.agents?.[0]?.prompt).toBe("# Lead\n\nCoordinate.");
+    expect(parsed.manifest.skills?.[0]?.files?.[1]?.encoding).toBe("base64");
   });
 
   it("rejects malformed nested mappings", () => {

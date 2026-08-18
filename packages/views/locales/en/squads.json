@@ -13,7 +13,8 @@
     },
     "no_matches": "No squads match",
     "row_menu": "Squad actions",
-    "archive_action": "Archive"
+    "archive_action": "Archive",
+    "extension_badge": "Extension"
   },
   "inspector": {
     "details_section": "Details",
@@ -58,6 +59,7 @@
     "create_agent_button": "Create Agent",
     "leader_chip": "Leader",
     "view_agent_tooltip": "Open agent detail",
+    "view_internal_agent_tooltip": "View internal agent details",
     "make_leader_tooltip": "Make squad leader",
     "remove_member_tooltip": "Remove from squad",
     "status_working": "Working",
@@ -68,6 +70,17 @@
     "issue_status_blocked": "blocked",
     "active_issue_more": "and {{count}} more",
     "last_active_label": "last active {{time}}"
+  },
+  "internal_agent_drawer": {
+    "leader_description": "Internal leader agent for this Extension Squad.",
+    "member_description": "Internal agent for this Extension Squad.",
+    "description_label": "Description",
+    "runtime_label": "Runtime",
+    "runtime_unavailable": "No runtime is configured.",
+    "skills_label": "Skills",
+    "skills_empty": "No skills are configured.",
+    "instructions_label": "Instructions",
+    "instructions_empty": "No instructions provided."
   },
   "profile_card": {
     "unavailable": "Squad unavailable",

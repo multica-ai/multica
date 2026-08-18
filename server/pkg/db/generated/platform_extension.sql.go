@@ -11,6 +11,45 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const archivePlatformExtensionSquad = `-- name: ArchivePlatformExtensionSquad :one
+UPDATE squad
+SET archived_at = now(),
+    archived_by = $1,
+    updated_at = now()
+WHERE id = $2
+  AND workspace_id = $3
+  AND archived_at IS NULL
+RETURNING id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions
+`
+
+type ArchivePlatformExtensionSquadParams struct {
+	ArchivedBy  pgtype.UUID `json:"archived_by"`
+	SquadID     pgtype.UUID `json:"squad_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Archive just this release's versioned Squad. Its internal resources remain
+// intact for audit/history, but the Squad is no longer normally selectable.
+func (q *Queries) ArchivePlatformExtensionSquad(ctx context.Context, arg ArchivePlatformExtensionSquadParams) (Squad, error) {
+	row := q.db.QueryRow(ctx, archivePlatformExtensionSquad, arg.ArchivedBy, arg.SquadID, arg.WorkspaceID)
+	var i Squad
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.LeaderID,
+		&i.CreatorID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.AvatarUrl,
+		&i.Instructions,
+	)
+	return i, err
+}
+
 const completePlatformExtensionRelease = `-- name: CompletePlatformExtensionRelease :one
 UPDATE platform_extension_release
 SET runtime_id = $1,
@@ -296,6 +335,48 @@ func (q *Queries) ListPlatformExtensionRuntimeCandidates(ctx context.Context, wo
 	return items, nil
 }
 
+const listPlatformExtensionSquadBindings = `-- name: ListPlatformExtensionSquadBindings :many
+SELECT id AS release_id, squad_id, extension_key, version
+FROM platform_extension_release
+WHERE workspace_id = $1
+  AND squad_id IS NOT NULL
+`
+
+type ListPlatformExtensionSquadBindingsRow struct {
+	ReleaseID    pgtype.UUID `json:"release_id"`
+	SquadID      pgtype.UUID `json:"squad_id"`
+	ExtensionKey string      `json:"extension_key"`
+	Version      string      `json:"version"`
+}
+
+// The Extension release is the sole authority for identifying a managed
+// Squad. UI consumers must not infer this relationship from names or Agent
+// system keys.
+func (q *Queries) ListPlatformExtensionSquadBindings(ctx context.Context, workspaceID pgtype.UUID) ([]ListPlatformExtensionSquadBindingsRow, error) {
+	rows, err := q.db.Query(ctx, listPlatformExtensionSquadBindings, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPlatformExtensionSquadBindingsRow{}
+	for rows.Next() {
+		var i ListPlatformExtensionSquadBindingsRow
+		if err := rows.Scan(
+			&i.ReleaseID,
+			&i.SquadID,
+			&i.ExtensionKey,
+			&i.Version,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockIdlePlatformExtensionRuntime = `-- name: LockIdlePlatformExtensionRuntime :one
 WITH active_agent_counts AS (
     SELECT runtime_id, count(*) AS agent_count
@@ -369,6 +450,126 @@ func (q *Queries) LockIdlePlatformExtensionRuntime(ctx context.Context, arg Lock
 		&i.ProfileID,
 		&i.CustomName,
 		&i.Capabilities,
+	)
+	return i, err
+}
+
+const lockPlatformExtensionReleaseInWorkspace = `-- name: LockPlatformExtensionReleaseInWorkspace :one
+SELECT id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at, runtime_binding_mode, runtime_requirements FROM platform_extension_release
+WHERE id = $1
+  AND workspace_id = $2
+FOR UPDATE
+`
+
+type LockPlatformExtensionReleaseInWorkspaceParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// The editable mapping belongs to one immutable Extension release. Lock it
+// before changing its Squad name, internal Agent bindings, and audit mapping
+// so concurrent saves cannot publish a mixed version.
+func (q *Queries) LockPlatformExtensionReleaseInWorkspace(ctx context.Context, arg LockPlatformExtensionReleaseInWorkspaceParams) (PlatformExtensionRelease, error) {
+	row := q.db.QueryRow(ctx, lockPlatformExtensionReleaseInWorkspace, arg.ID, arg.WorkspaceID)
+	var i PlatformExtensionRelease
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ExtensionKey,
+		&i.Name,
+		&i.Version,
+		&i.Digest,
+		&i.Manifest,
+		&i.RuntimeID,
+		&i.SquadID,
+		&i.Resources,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+	)
+	return i, err
+}
+
+const updatePlatformExtensionReleaseMapping = `-- name: UpdatePlatformExtensionReleaseMapping :one
+UPDATE platform_extension_release
+SET runtime_id = $1,
+    resources = $2
+WHERE id = $3
+  AND workspace_id = $4
+RETURNING id, workspace_id, extension_key, name, version, digest, manifest, runtime_id, squad_id, resources, created_by, created_at, runtime_binding_mode, runtime_requirements
+`
+
+type UpdatePlatformExtensionReleaseMappingParams struct {
+	RuntimeID   pgtype.UUID `json:"runtime_id"`
+	Resources   []byte      `json:"resources"`
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// A release's manifest/version stay immutable. Only its versioned Squad
+// display name and per-Agent fixed-runtime bindings are editable.
+func (q *Queries) UpdatePlatformExtensionReleaseMapping(ctx context.Context, arg UpdatePlatformExtensionReleaseMappingParams) (PlatformExtensionRelease, error) {
+	row := q.db.QueryRow(ctx, updatePlatformExtensionReleaseMapping,
+		arg.RuntimeID,
+		arg.Resources,
+		arg.ID,
+		arg.WorkspaceID,
+	)
+	var i PlatformExtensionRelease
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.ExtensionKey,
+		&i.Name,
+		&i.Version,
+		&i.Digest,
+		&i.Manifest,
+		&i.RuntimeID,
+		&i.SquadID,
+		&i.Resources,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.RuntimeBindingMode,
+		&i.RuntimeRequirements,
+	)
+	return i, err
+}
+
+const updatePlatformExtensionSquadName = `-- name: UpdatePlatformExtensionSquadName :one
+UPDATE squad
+SET name = $1,
+    updated_at = now()
+WHERE id = $2
+  AND workspace_id = $3
+  AND archived_at IS NULL
+RETURNING id, workspace_id, name, description, leader_id, creator_id, created_at, updated_at, archived_at, archived_by, avatar_url, instructions
+`
+
+type UpdatePlatformExtensionSquadNameParams struct {
+	Name        string      `json:"name"`
+	SquadID     pgtype.UUID `json:"squad_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Keep a release-owned Squad inside its own workspace. The editable base name
+// is always rendered with the immutable Extension version by the handler.
+func (q *Queries) UpdatePlatformExtensionSquadName(ctx context.Context, arg UpdatePlatformExtensionSquadNameParams) (Squad, error) {
+	row := q.db.QueryRow(ctx, updatePlatformExtensionSquadName, arg.Name, arg.SquadID, arg.WorkspaceID)
+	var i Squad
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.LeaderID,
+		&i.CreatorID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.ArchivedAt,
+		&i.ArchivedBy,
+		&i.AvatarUrl,
+		&i.Instructions,
 	)
 	return i, err
 }

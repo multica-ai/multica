@@ -44,14 +44,91 @@ func TestImportPlatformExtensionCreatesNativeSquadAtomically(t *testing.T) {
 	if response.Runtime.ID != runtimeID || response.Runtime.Provider != "platform-agent-cli" {
 		t.Fatalf("runtime response = %+v, want %s/platform-agent-cli", response.Runtime, runtimeID)
 	}
-	if response.Squad.Name != source.Extension.Name+" v"+source.Extension.Version {
+	if response.Squad.Name != platformExtensionSquadName("delegate", source.Extension.Version) {
 		t.Fatalf("squad name = %q", response.Squad.Name)
 	}
-	if len(response.Agents) != 2 || len(response.Skills) != 2 {
+	if len(response.Agents) != 2 || len(response.Skills) != 3 {
 		t.Fatalf("response mappings = agents:%+v skills:%+v", response.Agents, response.Skills)
 	}
 
 	assertPlatformExtensionNativeResources(t, workspaceID, runtimeID, source, response)
+}
+
+func TestPreviewPlatformExtensionDoesNotMaterializeResources(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID := createPlatformExtensionTestWorkspace(t, "owner")
+	runtimeID := createPlatformExtensionTestRuntime(t, workspaceID, platformExtensionRuntimeSeed{
+		Provider: "platform-agent-cli", Status: "online", LastSeenAt: time.Now(), Visibility: "private", OwnerID: testUserID,
+	})
+	_, raw := twoByTwoPlatformExtensionSource(t, "preview")
+	h := platformExtensionHandlerWithLiveness(platformExtensionFakeLiveness{alive: map[string]bool{runtimeID: true}, ok: true})
+
+	recorder := httptest.NewRecorder()
+	req := platformExtensionRequest(http.MethodPost, "/api/extensions/preview", workspaceID, testUserID, raw)
+	h.PreviewPlatformExtension(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("preview status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		SquadBaseName string `json:"squad_base_name"`
+		Agents        []struct {
+			SourceKey string `json:"source_key"`
+			RuntimeID string `json:"runtime_id"`
+		} `json:"agents"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if response.SquadBaseName != "delegate" {
+		t.Fatalf("squad_base_name = %q, want delegate", response.SquadBaseName)
+	}
+	if len(response.Agents) != 2 {
+		t.Fatalf("preview agents = %d, want 2", len(response.Agents))
+	}
+	for _, agent := range response.Agents {
+		if agent.RuntimeID != runtimeID {
+			t.Fatalf("preview runtime for %s = %s, want %s", agent.SourceKey, agent.RuntimeID, runtimeID)
+		}
+	}
+	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 0, 0, 0, 0, 0)
+}
+
+func TestPreviewPlatformExtensionAllowsNoAvailableRuntime(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID := createPlatformExtensionTestWorkspace(t, "owner")
+	_, raw := twoByTwoPlatformExtensionSource(t, "preview-no-runtime")
+	h := platformExtensionHandlerWithLiveness(NewNoopLivenessStore())
+
+	recorder := httptest.NewRecorder()
+	req := platformExtensionRequest(http.MethodPost, "/api/extensions/preview", workspaceID, testUserID, raw)
+	h.PreviewPlatformExtension(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("preview without runtime status = %d, want 200: %s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Runtimes []PlatformExtensionRuntimeResponse `json:"runtimes"`
+		Agents   []struct {
+			RuntimeID string `json:"runtime_id"`
+		} `json:"agents"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode preview: %v", err)
+	}
+	if len(response.Runtimes) != 0 {
+		t.Fatalf("preview runtime choices = %+v, want none", response.Runtimes)
+	}
+	for _, agent := range response.Agents {
+		if agent.RuntimeID != "" {
+			t.Fatalf("preview agent runtime = %q, want unbound", agent.RuntimeID)
+		}
+	}
+	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 0, 0, 0, 0, 0)
 }
 
 func TestImportPlatformExtensionIsIdempotentAndVersionImmutable(t *testing.T) {
@@ -83,7 +160,7 @@ func TestImportPlatformExtensionIsIdempotentAndVersionImmutable(t *testing.T) {
 	if first.Release.ID != second.Release.ID || first.Squad.ID != second.Squad.ID || first.Runtime.ID != second.Runtime.ID {
 		t.Fatalf("repeat mapping changed:\nfirst=%+v\nsecond=%+v", first, second)
 	}
-	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 1, 2, 2, 4, 1)
+	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 1, 2, 3, 6, 1)
 
 	changedSource, err := DecodePlatformExtensionSource(raw)
 	if err != nil {
@@ -96,7 +173,7 @@ func TestImportPlatformExtensionIsIdempotentAndVersionImmutable(t *testing.T) {
 	}
 	conflict := importPlatformExtensionForTest(t, h, workspaceID, testUserID, changedRaw)
 	assertPlatformExtensionHTTPError(t, conflict, http.StatusConflict, "EXTENSION_VERSION_IMMUTABLE")
-	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 1, 2, 2, 4, 1)
+	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 1, 2, 3, 6, 1)
 }
 
 func TestConcurrentPlatformExtensionImportsHaveOneWinnerAndOneIdempotentLoser(t *testing.T) {
@@ -138,10 +215,10 @@ func TestConcurrentPlatformExtensionImportsHaveOneWinnerAndOneIdempotentLoser(t 
 	if first.Idempotent == second.Idempotent {
 		t.Fatalf("idempotent flags = %v/%v, want one winner and one loser", first.Idempotent, second.Idempotent)
 	}
-	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 1, 2, 2, 4, 1)
+	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 1, 2, 3, 6, 1)
 }
 
-func TestImportPlatformExtensionReturnsRuntimeUnavailableWithoutReservationOrResources(t *testing.T) {
+func TestImportPlatformExtensionCreatesUnboundInternalResourcesWithoutRuntime(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -151,8 +228,186 @@ func TestImportPlatformExtensionReturnsRuntimeUnavailableWithoutReservationOrRes
 	h := platformExtensionHandlerWithLiveness(NewNoopLivenessStore())
 
 	recorder := importPlatformExtensionForTest(t, h, workspaceID, testUserID, raw)
-	assertPlatformExtensionHTTPError(t, recorder, http.StatusConflict, "PLATFORM_RUNTIME_UNAVAILABLE")
-	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 0, 0, 0, 0, 0)
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("import without runtime status = %d, want 201: %s", recorder.Code, recorder.Body.String())
+	}
+	response := decodePlatformExtensionImportResponse(t, recorder.Body.Bytes())
+	if response.Runtime.ID != "" {
+		t.Fatalf("release runtime = %q, want unbound", response.Runtime.ID)
+	}
+	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 1, 2, 3, 6, 1)
+
+	var unboundAgents int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent WHERE workspace_id = $1 AND runtime_id IS NULL
+	`, workspaceID).Scan(&unboundAgents); err != nil {
+		t.Fatalf("count unbound internal agents: %v", err)
+	}
+	if unboundAgents != 2 {
+		t.Fatalf("unbound internal agents = %d, want 2", unboundAgents)
+	}
+	var releaseRuntimeBound, releaseSquadBound bool
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT runtime_id IS NOT NULL, squad_id IS NOT NULL
+		FROM platform_extension_release WHERE id = $1
+	`, response.Release.ID).Scan(&releaseRuntimeBound, &releaseSquadBound); err != nil {
+		t.Fatalf("load imported release: %v", err)
+	}
+	if releaseRuntimeBound || !releaseSquadBound {
+		t.Fatalf("release binding = runtime:%t squad:%t, want runtime:false squad:true", releaseRuntimeBound, releaseSquadBound)
+	}
+}
+
+func TestUpdatePlatformExtensionPersistsSquadAndPerAgentRuntimeMapping(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID := createPlatformExtensionTestWorkspace(t, "owner")
+	runtimeA := createPlatformExtensionTestRuntime(t, workspaceID, platformExtensionRuntimeSeed{
+		Provider: "platform-agent-cli", Status: "online", LastSeenAt: time.Now(), Visibility: "private", OwnerID: testUserID,
+	})
+	runtimeB := createPlatformExtensionTestRuntime(t, workspaceID, platformExtensionRuntimeSeed{
+		Provider: "platform-agent-cli", Status: "online", LastSeenAt: time.Now(), Visibility: "private", OwnerID: testUserID,
+	})
+	_, raw := twoByTwoPlatformExtensionSource(t, "update-mapping")
+	h := platformExtensionHandlerWithLiveness(platformExtensionFakeLiveness{
+		alive: map[string]bool{runtimeA: true, runtimeB: true}, ok: true,
+	})
+
+	importReq := platformExtensionRequest(http.MethodPost, "/api/extensions/import", workspaceID, testUserID, raw)
+	importReq.Header.Set(platformExtensionImportConfigHeader, fmt.Sprintf(`{"squad_base_name":"delegate","agent_runtime_ids":{"leader":%q,"analyst":%q}}`, runtimeA, runtimeA))
+	importRecorder := httptest.NewRecorder()
+	h.ImportPlatformExtension(importRecorder, importReq)
+	if importRecorder.Code != http.StatusCreated {
+		t.Fatalf("initial import = %d: %s", importRecorder.Code, importRecorder.Body.String())
+	}
+	imported := decodePlatformExtensionImportResponse(t, importRecorder.Body.Bytes())
+
+	updateBody, err := json.Marshal(map[string]any{
+		"squad_base_name": "research-delegate",
+		"agent_runtime_ids": map[string]string{
+			"leader":  runtimeB,
+			"analyst": "",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateRecorder := httptest.NewRecorder()
+	updateReq := withURLParam(
+		platformExtensionRequest(http.MethodPatch, "/api/extensions/"+imported.Release.ID, workspaceID, testUserID, updateBody),
+		"id", imported.Release.ID,
+	)
+	h.UpdatePlatformExtension(updateRecorder, updateReq)
+	if updateRecorder.Code != http.StatusOK {
+		t.Fatalf("update = %d: %s", updateRecorder.Code, updateRecorder.Body.String())
+	}
+	updated := decodePlatformExtensionImportResponse(t, updateRecorder.Body.Bytes())
+	if updated.Squad.Name != "research-delegate · v"+imported.Release.Version {
+		t.Fatalf("updated squad name = %q", updated.Squad.Name)
+	}
+	if updated.Runtime.ID != runtimeB {
+		t.Fatalf("updated leader runtime = %q, want %q", updated.Runtime.ID, runtimeB)
+	}
+
+	agentIDs := map[string]string{}
+	for _, agent := range imported.Agents {
+		agentIDs[agent.SourceKey] = agent.ID
+	}
+	for sourceKey, wantRuntimeID := range map[string]string{"leader": runtimeB, "analyst": ""} {
+		var gotRuntimeID *string
+		if err := testPool.QueryRow(context.Background(), `SELECT runtime_id::text FROM agent WHERE id = $1`, agentIDs[sourceKey]).Scan(&gotRuntimeID); err != nil {
+			t.Fatalf("load %s runtime: %v", sourceKey, err)
+		}
+		if got := ""; gotRuntimeID != nil {
+			got = *gotRuntimeID
+			if got != wantRuntimeID {
+				t.Fatalf("%s runtime = %q, want %q", sourceKey, got, wantRuntimeID)
+			}
+		} else if wantRuntimeID != "" {
+			t.Fatalf("%s runtime = NULL, want %q", sourceKey, wantRuntimeID)
+		}
+	}
+}
+
+func TestArchivePlatformExtensionArchivesOnlyItsVersionedSquad(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID := createPlatformExtensionTestWorkspace(t, "owner")
+	runtimeID := createPlatformExtensionTestRuntime(t, workspaceID, platformExtensionRuntimeSeed{
+		Provider: "platform-agent-cli", Status: "online", LastSeenAt: time.Now(), Visibility: "private", OwnerID: testUserID,
+	})
+	_, raw := twoByTwoPlatformExtensionSource(t, "archive-release")
+	h := platformExtensionHandlerWithLiveness(platformExtensionFakeLiveness{alive: map[string]bool{runtimeID: true}, ok: true})
+
+	imported := decodePlatformExtensionImportResponse(t, importPlatformExtensionForTest(t, h, workspaceID, testUserID, raw).Body.Bytes())
+	recorder := httptest.NewRecorder()
+	req := withURLParam(platformExtensionRequest(http.MethodPost, "/api/extensions/"+imported.Release.ID+"/archive", workspaceID, testUserID, nil), "id", imported.Release.ID)
+	h.ArchivePlatformExtension(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("archive = %d: %s", recorder.Code, recorder.Body.String())
+	}
+	archived := decodePlatformExtensionImportResponse(t, recorder.Body.Bytes())
+	if !archived.Squad.Archived {
+		t.Fatal("archive response did not mark the versioned Squad archived")
+	}
+	var archivedAt *time.Time
+	if err := testPool.QueryRow(context.Background(), `SELECT archived_at FROM squad WHERE id = $1`, imported.Squad.ID).Scan(&archivedAt); err != nil {
+		t.Fatalf("load archived squad: %v", err)
+	}
+	if archivedAt == nil {
+		t.Fatal("versioned Squad was not archived")
+	}
+}
+
+func TestArchivedPlatformExtensionRemainsVisibleAndRejectsSameVersionImport(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	workspaceID := createPlatformExtensionTestWorkspace(t, "owner")
+	runtimeID := createPlatformExtensionTestRuntime(t, workspaceID, platformExtensionRuntimeSeed{
+		Provider: "platform-agent-cli", Status: "online", LastSeenAt: time.Now(), Visibility: "private", OwnerID: testUserID,
+	})
+	_, raw := twoByTwoPlatformExtensionSource(t, "archived-release-repeat")
+	h := platformExtensionHandlerWithLiveness(platformExtensionFakeLiveness{alive: map[string]bool{runtimeID: true}, ok: true})
+
+	imported := decodePlatformExtensionImportResponse(t, importPlatformExtensionForTest(t, h, workspaceID, testUserID, raw).Body.Bytes())
+	if _, err := testPool.Exec(context.Background(), `UPDATE squad SET archived_at = now(), archived_by = $1 WHERE id = $2`, testUserID, imported.Squad.ID); err != nil {
+		t.Fatalf("archive Extension Squad through the Squad lifecycle: %v", err)
+	}
+
+	listRecorder := httptest.NewRecorder()
+	h.ListPlatformExtensions(listRecorder, platformExtensionRequest(http.MethodGet, "/api/extensions", workspaceID, testUserID, nil))
+	if listRecorder.Code != http.StatusOK {
+		t.Fatalf("list archived Extension = %d: %s", listRecorder.Code, listRecorder.Body.String())
+	}
+	var listed []platformExtensionImportTestResponse
+	if err := json.NewDecoder(listRecorder.Body).Decode(&listed); err != nil {
+		t.Fatalf("decode archived Extension list: %v", err)
+	}
+	if len(listed) != 1 || !listed[0].Squad.Archived {
+		t.Fatalf("listed archived Extension = %+v, want one archived mapping", listed)
+	}
+	detailRecorder := httptest.NewRecorder()
+	detailRequest := withURLParam(
+		platformExtensionRequest(http.MethodGet, "/api/extensions/"+imported.Release.ID, workspaceID, testUserID, nil),
+		"id",
+		imported.Release.ID,
+	)
+	h.GetPlatformExtension(detailRecorder, detailRequest)
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("load archived Extension detail = %d: %s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	if detail := decodePlatformExtensionDetailResponse(t, detailRecorder.Body.Bytes()); !detail.Squad.Archived {
+		t.Fatalf("archived Extension detail = %+v, want archived Squad", detail.Squad)
+	}
+
+	retry := importPlatformExtensionForTest(t, h, workspaceID, testUserID, raw)
+	assertPlatformExtensionHTTPError(t, retry, http.StatusConflict, "EXTENSION_VERSION_ARCHIVED")
 }
 
 func TestImportPlatformExtensionRollsBackReservationWhenRuntimeIsLocked(t *testing.T) {
@@ -330,7 +585,7 @@ func TestListAndGetPlatformExtensionsAreWorkspaceScopedOrderedAndDanglingToleran
 		t.Fatalf("detail = %d: %s", detailRecorder.Code, detailRecorder.Body.String())
 	}
 	detail := decodePlatformExtensionDetailResponse(t, detailRecorder.Body.Bytes())
-	if detail.Release.ID != first.Release.ID || detail.Manifest.Extension.Key != source1.Extension.Key || len(detail.Agents) != 2 || len(detail.Skills) != 2 {
+	if detail.Release.ID != first.Release.ID || detail.Manifest.Extension.Key != source1.Extension.Key || len(detail.Agents) != 2 || len(detail.Skills) != 3 {
 		t.Fatalf("detail response = %+v", detail)
 	}
 
@@ -343,7 +598,7 @@ func TestListAndGetPlatformExtensionsAreWorkspaceScopedOrderedAndDanglingToleran
 		t.Fatalf("dangling detail = %d: %s", danglingRecorder.Code, danglingRecorder.Body.String())
 	}
 	dangling := decodePlatformExtensionDetailResponse(t, danglingRecorder.Body.Bytes())
-	if dangling.Runtime.ID != first.Runtime.ID || dangling.Squad.ID != first.Squad.ID || len(dangling.Agents) != 2 || len(dangling.Skills) != 2 {
+	if dangling.Runtime.ID != first.Runtime.ID || dangling.Squad.ID != first.Squad.ID || len(dangling.Agents) != 2 || len(dangling.Skills) != 3 {
 		t.Fatalf("dangling audit mapping was lost: %+v", dangling)
 	}
 
@@ -532,8 +787,9 @@ type platformExtensionRuntimeResponse struct {
 }
 
 type platformExtensionSquadResponse struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Archived bool   `json:"archived"`
 }
 
 type platformExtensionAgentMappingResponse struct {
@@ -570,6 +826,7 @@ type platformExtensionDetailTestResponse struct {
 func twoByTwoPlatformExtensionSource(t *testing.T, suffix string) (PlatformExtensionSource, []byte) {
 	t.Helper()
 	source := readPlatformExtensionSource(t)
+	source.Commands[0].Name = "delegate-e2e"
 	unique := suffix + "-" + randomID()[:8]
 	source.Extension.Key = "research-team-" + unique
 	source.Extension.Name = "Research Team " + unique
@@ -778,7 +1035,7 @@ func assertPlatformExtensionNativeResources(
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 1, 2, 2, 4, 1)
+	assertPlatformExtensionWorkspaceResourceCounts(t, workspaceID, 1, 2, 3, 6, 1)
 
 	type agentRow struct {
 		ID, Name, Description, Instructions, RuntimeID, RuntimeMode string
@@ -875,6 +1132,16 @@ func assertPlatformExtensionNativeResources(
 			t.Fatalf("skill %q supporting files = %d, want %d", name, supportingFiles, len(sourceSkill.Files)-1)
 		}
 	}
+	for _, command := range bundle.RuntimeCommands {
+		name := wantPlatformExtensionNativeResourceName(source.Extension, command.Name)
+		var content string
+		if err := testPool.QueryRow(context.Background(), `SELECT content FROM skill WHERE workspace_id = $1 AND name = $2`, workspaceID, name).Scan(&content); err != nil {
+			t.Fatalf("load generated skill %q: %v", name, err)
+		}
+		if content != command.Content {
+			t.Fatalf("generated skill %q content = %q, want %q", name, content, command.Content)
+		}
+	}
 
 	var squadName, squadDescription, squadLeaderID, squadInstructions string
 	if err := testPool.QueryRow(context.Background(), `
@@ -882,7 +1149,7 @@ func assertPlatformExtensionNativeResources(
 	`, response.Squad.ID, workspaceID).Scan(&squadName, &squadDescription, &squadLeaderID, &squadInstructions); err != nil {
 		t.Fatalf("load imported squad: %v", err)
 	}
-	if squadName != source.Extension.Name+" v"+source.Extension.Version || squadDescription != source.Extension.Description || squadInstructions != bundle.SquadInstructions {
+	if squadName != platformExtensionSquadName("delegate", source.Extension.Version) || squadDescription != source.Extension.Description || squadInstructions != bundle.SquadInstructions {
 		t.Fatalf("squad fields = name:%q description:%q instructions:%q", squadName, squadDescription, squadInstructions)
 	}
 	if strings.Contains(squadInstructions, "Summary command.") || strings.Contains(squadInstructions, "\n- summarize\n") {
@@ -922,7 +1189,7 @@ func assertPlatformExtensionNativeResources(
 	if err := json.Unmarshal(resources, &audit); err != nil {
 		t.Fatalf("decode release resources: %v\n%s", err, resources)
 	}
-	if audit.Runtime.ID != response.Runtime.ID || audit.Squad.ID != response.Squad.ID || len(audit.Agents) != 2 || len(audit.Skills) != 2 {
+	if audit.Runtime.ID != response.Runtime.ID || audit.Squad.ID != response.Squad.ID || len(audit.Agents) != 2 || len(audit.Skills) != 3 {
 		t.Fatalf("release audit mapping = %+v", audit)
 	}
 }

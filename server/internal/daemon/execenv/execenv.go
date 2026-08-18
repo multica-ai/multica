@@ -185,8 +185,9 @@ type SkillContextForEnv struct {
 
 // SkillFileContextForEnv represents a supporting file within a skill.
 type SkillFileContextForEnv struct {
-	Path    string
-	Content string
+	Path     string
+	Content  string
+	Encoding string
 }
 
 // Environment represents a prepared, isolated execution environment.

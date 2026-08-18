@@ -11,6 +11,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 func TestCompilePlatformExtension_RejectsUntrustedCommandSuffixDeclarations(t *testing.T) {
@@ -32,6 +34,59 @@ func TestCompilePlatformExtension_RejectsUntrustedCommandSuffixDeclarations(t *t
 			assertPlatformExtensionCode(t, err, "COMMAND_SUFFIX_POLICY_MISMATCH")
 		})
 	}
+}
+
+func TestCompilePlatformExtension_TreatsE2ECommandNameAsFlow(t *testing.T) {
+	source := readPlatformExtensionSource(t)
+	source.Commands[0].Name = "delegate-e2e"
+
+	bundle, err := CompilePlatformExtension(source)
+	if err != nil {
+		t.Fatalf("CompilePlatformExtension() error = %v", err)
+	}
+	if got := platformExtensionCommandNames(bundle.FlowCommands); !reflect.DeepEqual(got, []string{"delegate-e2e"}) {
+		t.Fatalf("flow commands = %#v, want delegate-e2e", got)
+	}
+	if got := platformExtensionCommandNames(bundle.RuntimeCommands); !reflect.DeepEqual(got, []string{"summarize"}) {
+		t.Fatalf("runtime commands = %#v, want summarize", got)
+	}
+	if err := ValidatePlatformExtensionBundle(bundle); err != nil {
+		t.Fatalf("ValidatePlatformExtensionBundle() rejected -e2e flow command: %v", err)
+	}
+}
+
+func TestPlatformExtensionImportConfigurationDefaultsAndValidatesAgentRuntimeBindings(t *testing.T) {
+	source := readPlatformExtensionSource(t)
+	source.Commands[0].Name = "delegate-e2e"
+	bundle, err := CompilePlatformExtension(source)
+	if err != nil {
+		t.Fatalf("CompilePlatformExtension() error = %v", err)
+	}
+	firstRuntimeID := "11111111-1111-4111-8111-111111111111"
+	secondRuntimeID := "22222222-2222-4222-8222-222222222222"
+	runtimes := []db.AgentRuntime{
+		{ID: parseUUID(firstRuntimeID)},
+		{ID: parseUUID(secondRuntimeID)},
+	}
+
+	config, err := platformExtensionImportConfigurationForBundle(bundle, runtimes, "")
+	if err != nil {
+		t.Fatalf("default configuration error = %v", err)
+	}
+	if config.SquadBaseName != "delegate" || config.AgentRuntimeIDs["lead-researcher"] != firstRuntimeID {
+		t.Fatalf("default configuration = %+v", config)
+	}
+
+	config, err = platformExtensionImportConfigurationForBundle(bundle, runtimes, `{"squad_base_name":"review","agent_runtime_ids":{"lead-researcher":"22222222-2222-4222-8222-222222222222"}}`)
+	if err != nil {
+		t.Fatalf("custom configuration error = %v", err)
+	}
+	if config.SquadBaseName != "review" || config.AgentRuntimeIDs["lead-researcher"] != secondRuntimeID {
+		t.Fatalf("custom configuration = %+v", config)
+	}
+
+	_, err = platformExtensionImportConfigurationForBundle(bundle, runtimes, `{"agent_runtime_ids":{"lead-researcher":"33333333-3333-4333-8333-333333333333"}}`)
+	assertPlatformExtensionCode(t, err, "EXTENSION_IMPORT_CONFIG_INVALID")
 }
 
 func TestCompilePlatformExtensionWithPolicy_UsesExplicitTrustedSuffixes(t *testing.T) {

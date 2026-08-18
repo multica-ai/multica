@@ -7443,8 +7443,9 @@ func convertSkillsForEnv(skills []SkillData) []execenv.SkillContextForEnv {
 		}
 		for _, f := range s.Files {
 			result[i].Files = append(result[i].Files, execenv.SkillFileContextForEnv{
-				Path:    f.Path,
-				Content: f.Content,
+				Path:     f.Path,
+				Content:  f.Content,
+				Encoding: f.Encoding,
 			})
 		}
 	}

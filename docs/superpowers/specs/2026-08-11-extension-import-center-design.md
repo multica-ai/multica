@@ -6,15 +6,15 @@ Make the Extension page explain what was imported and how each Extension primiti
 
 ## Page structure
 
-The page has three persistent regions:
+The page keeps one persistent workspace rather than a separate import or confirmation page:
 
-1. **Import history** — a selectable list of imported Extension releases, showing name, version, import time, resource counts, and current/previous status.
-2. **Extension details** — the selected release, with an atomic mapping view and compact tabs for resource inventory and import metadata.
-3. **Current import status** — release state, Runtime readiness, resource creation checks, and the next verification action.
+1. **Import history** on the left — a selectable list of imported Extension releases, grouped by Extension name and version.
+2. **Selected release** on the right — three compact tabs: **原子能力映射**, **资源清单**, and **导入信息**.
+3. The existing top-right **导入 Extension** button opens a small ZIP-file picker dialog only. Choosing a valid package closes the dialog, selects the new release in history, and opens its conversion tab.
 
-The selected history row points visually to the details panel. The mapping view uses only one relationship arrow per row: `source primitive → generated Multica resource`.
+There is no separate configuration panel, second confirmation page, or standalone pipeline screen. The selected history row points visually to the detail panel. The mapping view uses only one relationship arrow per row: `source primitive → generated Multica resource`.
 
-## Atomic mapping
+## 原子能力映射
 
 The details view groups the imported document into these mappings:
 
@@ -24,6 +24,31 @@ The details view groups the imported document into these mappings:
 - a source Skill → a Skill resource.
 
 The UI must not show intermediate workflow labels such as “挂载”, “等待任务”, or “绑定” in the mapping rows.
+
+Every mapping row has a leading confirmation check. A green check means the current mapping has been persisted and is effective. A neutral check means that row is pending confirmation:
+
+- all rows of a newly imported release start neutral, including a release with the same Extension name;
+- editing the Squad name makes only the Flow Command → Squad Instructions row neutral;
+- editing an Agent runtime makes only that Agent → internal Agent row neutral;
+- unrelated, already-persisted rows retain their green checks.
+
+Clicking **确认导入** or **确认更新** confirms only the pending rows in row order and restores their green checks. The tab then shows a compact in-place completion status. It does not navigate away or replace the mapping view.
+
+## 资源清单
+
+The resource-inventory tab makes the selected Extension release → versioned Squad mapping explicit. It groups the Squad's internal Agents and internal Skills. Each Agent row also displays the independent workspace Runtime bound to that Agent, so the execution binding is visible without making Runtime a Squad-owned resource or rendering it as a standalone card. Agents and Skills in this inventory are effective only inside the Squad: they are not exposed in public Agent/Skills lists and cannot be selected through ordinary task-assignment entry points. Runtimes remain separately managed in the workspace Runtime area.
+
+The conversion tab is also the only edit surface:
+
+- The `-e2e` Command → Squad Instructions target identifies a version-free Squad name. An Extension release version is never appended to a Squad that is being updated in place.
+- Each Agent → internal Agent target contains an editable fixed-runtime selector.
+- All Command, Skill, and internal-resource names remain read-only.
+
+Every Extension release creates its own versioned Squad template. The editable field contains only the Squad base name (for example `delegate`); the UI directly appends a read-only release suffix (for example `· v2.0.0`) to form the complete Squad name. No release overwrites another release's Squad, and users cannot edit the version suffix. Each internal Agent's fixed runtime remains editable, but the release → Squad mapping remains one-to-one and traceable.
+
+The pending ZIP release shows **确认导入**. Previously imported releases retain green checks; editing their Squad name or runtime makes only the affected mapping neutral and reveals **保存更改**. These edits change the selected version's template configuration only. They never rewrite a newer or older release.
+
+Using a versioned Squad creates a member-owned copy that records its source version. Importing a later Extension version never changes existing copies. Historical templates may be **归档** to remove them from new selection while retaining their mapping history and existing member copies. Re-importing the same version with identical content is idempotent; reusing a version with changed content is rejected and requires a version bump.
 
 ## Command classification
 
@@ -37,8 +62,10 @@ Flow classification uses `strings.HasSuffix(command.Name, PlatformExtensionFlowC
 
 ## Import interaction
 
-- The existing Import button and JSON validation remain unchanged.
-- Import success inserts the selected release into the history list and selects it.
+- The existing top-right Import button opens a ZIP picker dialog. It does not open a full import wizard.
+- The picker validates that the package contains exactly one Command ending with `-e2e`; validation failure remains inside the picker.
+- Import success inserts the selected release into the history list, selects it, and opens the conversion tab with the editable mapping rows.
+- The primary action is rendered inside the conversion tab: **确认导入** for a new release and **确认更新** for an existing release.
 - Re-importing the same key/version keeps the existing idempotent behavior.
 - Import/runtime errors remain inline and do not replace the history list.
 - The page remains responsive: history and detail panels collapse to a single column on narrow screens.
@@ -46,7 +73,7 @@ Flow classification uses `strings.HasSuffix(command.Name, PlatformExtensionFlowC
 ## Scope boundaries
 
 - No change to Runtime Pool allocation behavior.
-- No ZIP/binary Skill support in this redesign.
+- ZIP extension packages are supported: `extension.json` declares the atomic resources and lists each Skill file, while `skills/<skill-key>/...` holds the text or binary assets. Binary files are stored base64-tagged and restored to their original bytes by the daemon.
 - No new import endpoint; the current list/import/detail APIs remain the data source.
 - The implementation may extend the canonical manifest/native mapping so Generated Skills are visible and persisted, but it must not change fixed-agent behavior.
 

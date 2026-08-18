@@ -21,6 +21,9 @@ set +a
 # shellcheck disable=SC1091
 . scripts/local-env.sh
 
+# shellcheck disable=SC1091
+. scripts/project-go-env.sh
+
 BACKEND_PID=""
 FRONTEND_PID=""
 STARTED_BACKEND=false

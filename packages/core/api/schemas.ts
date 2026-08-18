@@ -1552,6 +1552,36 @@ const SquadMemberPreviewSchema = z.object({
   role: z.string().default(""),
 }).loose();
 
+export const ExtensionManagedSquadSchema = z.object({
+  release_id: z.string(),
+  extension_key: z.string(),
+  version: z.string(),
+}).loose();
+
+export const SquadInternalAgentRuntimeSchema = z.object({
+  id: z.string(),
+  provider: z.string(),
+  name: z.string(),
+}).loose();
+
+export const SquadInternalAgentSkillSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  enabled: z.boolean().optional(),
+}).loose();
+
+export const SquadInternalAgentSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().default(""),
+  instructions: z.string().default(""),
+  role: z.string().default("member"),
+  leader: z.boolean().default(false),
+  runtime: SquadInternalAgentRuntimeSchema.nullable().optional().transform((value) => value ?? null),
+  skills: z.array(SquadInternalAgentSkillSchema).default([]),
+}).loose();
+
 export const SquadSchema = z.object({
   id: z.string(),
   workspace_id: z.string(),
@@ -1569,6 +1599,7 @@ export const SquadSchema = z.object({
   archived_by: z.string().nullable().optional().transform((v) => v ?? null),
   member_count: z.number().default(0),
   member_preview: z.array(SquadMemberPreviewSchema).default([]),
+  extension: ExtensionManagedSquadSchema.nullable().optional().transform((value) => value ?? null),
 }).loose();
 
 export const SquadListSchema = z.array(SquadSchema);

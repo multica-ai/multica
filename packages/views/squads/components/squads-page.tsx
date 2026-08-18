@@ -170,12 +170,18 @@ function SquadAvatar({ squad }: { squad: Squad }) {
 
 // Two-line identity cell — same form as the agents list.
 function NameCell({ squad }: { squad: Squad }) {
+  const { t } = useT("squads");
   return (
     <ListGridCell className="gap-3">
       <SquadAvatar squad={squad} />
       <div className="min-w-0 flex-1">
-        <span className="block min-w-0 truncate text-body font-medium">
-          {squad.name}
+        <span className="flex min-w-0 items-center gap-1.5 text-body font-medium">
+          <span className="min-w-0 truncate">{squad.name}</span>
+          {squad.extension ? (
+            <span className="shrink-0 rounded border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-micro font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
+              {t(($) => $.page.extension_badge)}
+            </span>
+          ) : null}
         </span>
         {squad.description ? (
           <span className="block min-w-0 truncate text-caption text-muted-foreground">

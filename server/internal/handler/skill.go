@@ -279,6 +279,10 @@ func (h *Handler) loadSkillForUser(w http.ResponseWriter, r *http.Request, id st
 		writeError(w, http.StatusNotFound, "skill not found")
 		return skill, false
 	}
+	if isPlatformExtensionInternalSkill(skill.Config) {
+		writeError(w, http.StatusNotFound, "skill not found")
+		return db.Skill{}, false
+	}
 	return skill, true
 }
 
@@ -293,12 +297,15 @@ func (h *Handler) ListSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	resp := make([]SkillSummaryResponse, len(skills))
-	for i, s := range skills {
-		resp[i] = skillSummaryToResponse(
+	resp := make([]SkillSummaryResponse, 0, len(skills))
+	for _, s := range skills {
+		if isPlatformExtensionInternalSkill(s.Config) {
+			continue
+		}
+		resp = append(resp, skillSummaryToResponse(
 			s.ID, s.WorkspaceID, s.Name, s.Description, s.Config,
 			s.CreatedBy, s.CreatedAt, s.UpdatedAt,
-		)
+		))
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -2606,10 +2613,11 @@ func (h *Handler) validateAgentSkillIDsInWorkspace(w http.ResponseWriter, r *htt
 			continue
 		}
 		seen[key] = struct{}{}
-		if _, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
+		skill, err := h.Queries.GetSkillInWorkspace(r.Context(), db.GetSkillInWorkspaceParams{
 			ID:          skillID,
 			WorkspaceID: agent.WorkspaceID,
-		}); err != nil {
+		})
+		if err != nil || isPlatformExtensionInternalSkill(skill.Config) {
 			writeError(w, http.StatusNotFound, "skill not found")
 			return false
 		}

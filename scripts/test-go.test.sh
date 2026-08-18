@@ -42,7 +42,7 @@ esac
 EOF
 chmod 755 "$BIN_DIR/go"
 
-PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --race
+MULTICA_GO_BIN="$BIN_DIR/go" PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --race
 
 expected_calls='test -race github.com/multica-ai/multica/server github.com/multica-ai/multica/server/internal/daemon
 test -race -p 2 -parallel 2 ./pkg/agent/...'
@@ -55,7 +55,7 @@ fi
 
 : >"$CALLS_FILE"
 set +e
-PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --unknown >"$OUTPUT_FILE" 2>&1
+MULTICA_GO_BIN="$BIN_DIR/go" PATH="$BIN_DIR:$PATH" bash "$SCRIPT_DIR/test-go.sh" --unknown >"$OUTPUT_FILE" 2>&1
 status=$?
 set -e
 

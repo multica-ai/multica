@@ -717,6 +717,23 @@ describe("SquadListSchema member preview drift", () => {
     expect(parsed[0]?.member_preview).toHaveLength(2);
     expect(parsed[0]?.member_preview?.[0]?.role).toBe("leader");
   });
+
+  it("preserves Extension ownership for imported Squads", () => {
+    const parsed = SquadSchema.parse({
+      ...baseSquad,
+      extension: {
+        release_id: "release-1",
+        extension_key: "runtime-pool-demo",
+        version: "1.0.0",
+      },
+    });
+
+    expect(parsed.extension).toEqual({
+      release_id: "release-1",
+      extension_key: "runtime-pool-demo",
+      version: "1.0.0",
+    });
+  });
 });
 
 // The workspace dashboard and runtime-detail pages were re-pointed at the

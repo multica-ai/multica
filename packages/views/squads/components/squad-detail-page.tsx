@@ -21,6 +21,13 @@ import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@multica/ui/components/ui/sheet";
+import {
   Popover,
   PopoverContent,
   PopoverTrigger,
@@ -59,7 +66,7 @@ import {
 } from "../../issues/components/pickers/property-picker";
 import { ChevronDown, UserPlus } from "lucide-react";
 import { toast } from "sonner";
-import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, MemberWithUser } from "@multica/core/types";
+import type { Squad, SquadInternalAgent, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
@@ -100,6 +107,23 @@ export function SquadDetailPage() {
 
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const { data: wsMembers = [] } = useQuery(memberListOptions(wsId));
+  const extensionAgentIDs = useMemo(
+    () => squad?.extension
+      ? members.filter((member) => member.member_type === "agent").map((member) => member.member_id)
+      : [],
+    [members, squad?.extension],
+  );
+  const { data: extensionInternalAgents = [] } = useQuery<SquadInternalAgent[]>({
+    queryKey: [...workspaceKeys.squads(wsId), squadId, "internal-agents", extensionAgentIDs],
+    queryFn: () => Promise.all(
+      extensionAgentIDs.map((agentId) => api.getSquadInternalAgent(squadId, agentId)),
+    ),
+    enabled: !!workspace?.id && !!squad?.extension && extensionAgentIDs.length > 0,
+  });
+  const extensionInternalAgentsByID = useMemo(
+    () => new Map(extensionInternalAgents.map((agent) => [agent.id, agent])),
+    [extensionInternalAgents],
+  );
 
   const currentUser = useAuthStore((s) => s.user);
   const myRole = useMemo(() => {
@@ -117,6 +141,7 @@ export function SquadDetailPage() {
 
   const [showAddMember, setShowAddMember] = useState(false);
   const [confirmArchive, setConfirmArchive] = useState(false);
+  const [selectedInternalAgentID, setSelectedInternalAgentID] = useState<string | null>(null);
 
   const updateSquadMut = useMutation({
     mutationFn: (data: { name?: string; description?: string; instructions?: string; avatar_url?: string; leader_id?: string }) => api.updateSquad(squadId, data),
@@ -178,7 +203,12 @@ export function SquadDetailPage() {
   });
 
   const getEntityName = (type: string, id: string) => {
-    if (type === "agent") return agents.find((a: Agent) => a.id === id)?.name ?? id.slice(0, 8);
+    if (type === "agent") {
+      const extensionAgent = extensionInternalAgentsByID.get(id);
+      return extensionAgent
+        ? displayExtensionInternalAgentName(extensionAgent.name)
+        : agents.find((a: Agent) => a.id === id)?.name ?? id.slice(0, 8);
+    }
     return wsMembers.find((m) => m.user_id === id)?.name ?? id.slice(0, 8);
   };
 
@@ -191,6 +221,10 @@ export function SquadDetailPage() {
   const isLeader = (m: SquadMember) => m.member_type === "agent" && squad.leader_id === m.member_id;
   const isArchived = (m: SquadMember) =>
     m.member_type === "agent" && !!agents.find((a: Agent) => a.id === m.member_id)?.archived_at;
+  const isExtensionManaged = !!squad.extension;
+  const selectedInternalAgent = selectedInternalAgentID
+    ? extensionInternalAgentsByID.get(selectedInternalAgentID)
+    : undefined;
 
   const initials = squad.name
     .split(" ")
@@ -239,11 +273,13 @@ export function SquadDetailPage() {
           members={members}
           memberStatusById={memberStatusById}
           canManage={canManage}
+          extensionManaged={isExtensionManaged}
           isLeader={isLeader}
           isArchived={isArchived}
           getEntityName={getEntityName}
           onAddMemberClick={() => setShowAddMember(true)}
           onCreateAgentClick={canManage ? () => push(`${p.newAgent()}?squad=${encodeURIComponent(squadId)}`) : undefined}
+          onViewInternalAgent={setSelectedInternalAgentID}
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
@@ -251,6 +287,12 @@ export function SquadDetailPage() {
           setLeaderPending={setLeaderMut.isPending}
         />
       </div>
+
+      <ExtensionInternalAgentSheet
+        agent={selectedInternalAgent}
+        open={selectedInternalAgentID !== null}
+        onOpenChange={(open) => { if (!open) setSelectedInternalAgentID(null); }}
+      />
 
       {showAddMember && (
         <AddMemberDialog
@@ -943,11 +985,13 @@ function SquadOverviewPane({
   members,
   memberStatusById,
   canManage,
+  extensionManaged,
   isLeader,
   isArchived,
   getEntityName,
   onAddMemberClick,
   onCreateAgentClick,
+  onViewInternalAgent,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -961,6 +1005,7 @@ function SquadOverviewPane({
   // false the tabs render read-only (no add/remove/leader/role edits, no
   // Save). See canManageSquad in server/internal/handler/squad.go.
   canManage: boolean;
+  extensionManaged: boolean;
   isLeader: (m: SquadMember) => boolean;
   isArchived: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
@@ -969,6 +1014,7 @@ function SquadOverviewPane({
   // (workspace owner/admin or the creator). Hidden otherwise so viewers
   // don't see a button they can't action.
   onCreateAgentClick?: () => void;
+  onViewInternalAgent: (agentId: string) => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -1021,11 +1067,13 @@ function SquadOverviewPane({
               members={members}
               memberStatusById={memberStatusById}
               canManage={canManage}
+              extensionManaged={extensionManaged}
               isLeader={isLeader}
               isArchived={isArchived}
               getEntityName={getEntityName}
               onAddMemberClick={onAddMemberClick}
               onCreateAgentClick={onCreateAgentClick}
+              onViewInternalAgent={onViewInternalAgent}
               onSetLeader={onSetLeader}
               onRemoveMember={onRemoveMember}
               onUpdateRole={onUpdateRole}
@@ -1086,11 +1134,13 @@ function SquadMembersTab({
   members,
   memberStatusById,
   canManage,
+  extensionManaged,
   isLeader,
   isArchived,
   getEntityName,
   onAddMemberClick,
   onCreateAgentClick,
+  onViewInternalAgent,
   onSetLeader,
   onRemoveMember,
   onUpdateRole,
@@ -1101,12 +1151,14 @@ function SquadMembersTab({
   // When false, add/create/leader/remove controls and role editing are hidden;
   // the roster stays visible and read-only.
   canManage: boolean;
+  extensionManaged: boolean;
   isLeader: (m: SquadMember) => boolean;
   isArchived: (m: SquadMember) => boolean;
   getEntityName: (type: string, id: string) => string;
   onAddMemberClick: () => void;
   // Hidden for viewers who can't manage — see SquadOverviewPane.
   onCreateAgentClick?: () => void;
+  onViewInternalAgent: (agentId: string) => void;
   onSetLeader: (agentId: string) => void;
   onRemoveMember: (m: SquadMember) => void;
   onUpdateRole: (m: SquadMember, role: string) => Promise<void>;
@@ -1124,7 +1176,7 @@ function SquadMembersTab({
             {t(($) => $.members_tab.section_count, { count: members.length })}
           </p>
         </div>
-        {canManage && (
+        {canManage && !extensionManaged && (
           <div className="flex items-center gap-2">
             {onCreateAgentClick && (
               <Button size="sm" variant="outline" onClick={onCreateAgentClick}>
@@ -1170,7 +1222,7 @@ function SquadMembersTab({
                 actorId={m.member_id}
                 size="lg"
                 showStatusDot
-                enableHoverCard={m.member_type === "agent"}
+                enableHoverCard={m.member_type === "agent" && !extensionManaged}
                 hoverCardVariant="live"
               />
               <div className="flex-1 min-w-0">
@@ -1190,7 +1242,7 @@ function SquadMembersTab({
                     </span>
                   )}
                 </div>
-                {canManage ? (
+                {canManage && !extensionManaged ? (
                   <RoleEditor
                     value={m.role ?? ""}
                     onSave={async (next) => { await onUpdateRole(m, next); }}
@@ -1232,21 +1284,35 @@ function SquadMembersTab({
                 <Tooltip>
                   <TooltipTrigger
                     render={
-                      <AppLink
-                        href={p.agentDetail(m.member_id)}
-                        className="inline-flex items-center justify-center h-8 w-8 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-                        aria-label={t(($) => $.members_tab.view_agent_tooltip)}
-                      >
-                        <ArrowUpRight className="size-3.5" />
-                      </AppLink>
+                      extensionManaged ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-8 w-8 p-0 text-muted-foreground hover:bg-accent hover:text-foreground"
+                          onClick={() => onViewInternalAgent(m.member_id)}
+                          aria-label={t(($) => $.members_tab.view_internal_agent_tooltip)}
+                        >
+                          <ArrowUpRight className="size-3.5" />
+                        </Button>
+                      ) : (
+                        <AppLink
+                          href={p.agentDetail(m.member_id)}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                          aria-label={t(($) => $.members_tab.view_agent_tooltip)}
+                        >
+                          <ArrowUpRight className="size-3.5" />
+                        </AppLink>
+                      )
                     }
                   />
                   <TooltipContent>
-                    {t(($) => $.members_tab.view_agent_tooltip)}
+                    {extensionManaged
+                      ? t(($) => $.members_tab.view_internal_agent_tooltip)
+                      : t(($) => $.members_tab.view_agent_tooltip)}
                   </TooltipContent>
                 </Tooltip>
               )}
-              {canManage && m.member_type === "agent" && !isLeader(m) && !isArchived(m) && (
+              {canManage && !extensionManaged && m.member_type === "agent" && !isLeader(m) && !isArchived(m) && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1267,7 +1333,7 @@ function SquadMembersTab({
                   </TooltipContent>
                 </Tooltip>
               )}
-              {canManage && !isLeader(m) && (
+              {canManage && !extensionManaged && !isLeader(m) && (
                 <Tooltip>
                   <TooltipTrigger
                     render={
@@ -1294,6 +1360,99 @@ function SquadMembersTab({
       </div>
     </div>
   );
+}
+
+function ExtensionInternalAgentSheet({
+  agent,
+  open,
+  onOpenChange,
+}: {
+  agent: SquadInternalAgent | undefined;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+}) {
+  const { t } = useT("squads");
+  return (
+    <Sheet open={open} onOpenChange={onOpenChange}>
+      <SheetContent side="right" className="w-full gap-0 overflow-y-auto sm:max-w-md">
+        {agent ? (
+          <>
+            <SheetHeader className="border-b pr-12">
+              <SheetTitle>{displayExtensionInternalAgentName(agent.name)}</SheetTitle>
+              <SheetDescription>
+                {agent.leader
+                  ? t(($) => $.internal_agent_drawer.leader_description)
+                  : t(($) => $.internal_agent_drawer.member_description)}
+              </SheetDescription>
+            </SheetHeader>
+            <div className="space-y-6 p-4">
+              {agent.description ? (
+                <section className="space-y-1.5">
+                  <h3 className="text-caption font-medium text-muted-foreground">
+                    {t(($) => $.internal_agent_drawer.description_label)}
+                  </h3>
+                  <p className="text-body leading-relaxed">{agent.description}</p>
+                </section>
+              ) : null}
+              <section className="space-y-1.5">
+                <h3 className="text-caption font-medium text-muted-foreground">
+                  {t(($) => $.internal_agent_drawer.runtime_label)}
+                </h3>
+                {agent.runtime ? (
+                  <div className="rounded-md border bg-muted/30 px-3 py-2">
+                    <div className="text-body font-medium">{agent.runtime.name}</div>
+                    <div className="mt-0.5 text-caption text-muted-foreground">{agent.runtime.provider}</div>
+                  </div>
+                ) : (
+                  <p className="text-body text-muted-foreground">
+                    {t(($) => $.internal_agent_drawer.runtime_unavailable)}
+                  </p>
+                )}
+              </section>
+              <section className="space-y-2">
+                <h3 className="text-caption font-medium text-muted-foreground">
+                  {t(($) => $.internal_agent_drawer.skills_label)}
+                </h3>
+                {agent.skills.length > 0 ? (
+                  <div className="flex flex-wrap gap-2">
+                    {agent.skills.map((skill) => (
+                      <span key={skill.id} className="rounded-md border bg-muted/30 px-2 py-1 text-caption">
+                        {skill.name}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-body text-muted-foreground">
+                    {t(($) => $.internal_agent_drawer.skills_empty)}
+                  </p>
+                )}
+              </section>
+              <section className="space-y-1.5">
+                <h3 className="text-caption font-medium text-muted-foreground">
+                  {t(($) => $.internal_agent_drawer.instructions_label)}
+                </h3>
+                <p className="whitespace-pre-wrap rounded-md border bg-muted/20 px-3 py-2 text-body leading-relaxed">
+                  {agent.instructions || t(($) => $.internal_agent_drawer.instructions_empty)}
+                </p>
+              </section>
+            </div>
+          </>
+        ) : (
+          <div className="space-y-4 p-4">
+            <Skeleton className="h-6 w-40" />
+            <Skeleton className="h-20 w-full" />
+            <Skeleton className="h-20 w-full" />
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  );
+}
+
+export function displayExtensionInternalAgentName(name: string): string {
+  const separator = " / ";
+  const index = name.lastIndexOf(separator);
+  return index >= 0 ? name.slice(index + separator.length) : name;
 }
 
 // Instructions tab body — mirrors agent's InstructionsTab. ContentEditor +

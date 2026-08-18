@@ -1284,8 +1284,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Platform Extension releases and atomic native-resource import.
 			r.Route("/api/extensions", func(r chi.Router) {
 				r.Get("/", h.ListPlatformExtensions)
+				r.Post("/preview", h.PreviewPlatformExtension)
 				r.Post("/import", h.ImportPlatformExtension)
-				r.Get("/{id}", h.GetPlatformExtension)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Get("/", h.GetPlatformExtension)
+					r.Patch("/", h.UpdatePlatformExtension)
+					r.Post("/archive", h.ArchivePlatformExtension)
+				})
 			})
 
 			// Assignee frequency
@@ -1404,9 +1409,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetSquad)
 					r.Put("/", h.UpdateSquad)
 					r.Delete("/", h.DeleteSquad)
-					r.Get("/members", h.ListSquadMembers)
-					r.Get("/members/status", h.ListSquadMemberStatus)
-					r.Post("/members", h.AddSquadMember)
+				r.Get("/members", h.ListSquadMembers)
+				r.Get("/members/status", h.ListSquadMemberStatus)
+				r.Get("/internal-agents/{agentId}", h.GetExtensionManagedSquadInternalAgent)
+				r.Post("/members", h.AddSquadMember)
 					r.Delete("/members", h.RemoveSquadMember)
 					r.Patch("/members/role", h.UpdateSquadMemberRole)
 				})

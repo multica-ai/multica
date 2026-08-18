@@ -45,10 +45,61 @@ SELECT * FROM platform_extension_release
 WHERE id = @id
   AND workspace_id = @workspace_id;
 
+-- name: LockPlatformExtensionReleaseInWorkspace :one
+-- The editable mapping belongs to one immutable Extension release. Lock it
+-- before changing its Squad name, internal Agent bindings, and audit mapping
+-- so concurrent saves cannot publish a mixed version.
+SELECT * FROM platform_extension_release
+WHERE id = @id
+  AND workspace_id = @workspace_id
+FOR UPDATE;
+
+-- name: UpdatePlatformExtensionReleaseMapping :one
+-- A release's manifest/version stay immutable. Only its versioned Squad
+-- display name and per-Agent fixed-runtime bindings are editable.
+UPDATE platform_extension_release
+SET runtime_id = @runtime_id,
+    resources = @resources
+WHERE id = @id
+  AND workspace_id = @workspace_id
+RETURNING *;
+
+-- name: UpdatePlatformExtensionSquadName :one
+-- Keep a release-owned Squad inside its own workspace. The editable base name
+-- is always rendered with the immutable Extension version by the handler.
+UPDATE squad
+SET name = @name,
+    updated_at = now()
+WHERE id = @squad_id
+  AND workspace_id = @workspace_id
+  AND archived_at IS NULL
+RETURNING *;
+
+-- name: ArchivePlatformExtensionSquad :one
+-- Archive just this release's versioned Squad. Its internal resources remain
+-- intact for audit/history, but the Squad is no longer normally selectable.
+UPDATE squad
+SET archived_at = now(),
+    archived_by = @archived_by,
+    updated_at = now()
+WHERE id = @squad_id
+  AND workspace_id = @workspace_id
+  AND archived_at IS NULL
+RETURNING *;
+
 -- name: ListPlatformExtensionReleasesInWorkspace :many
 SELECT * FROM platform_extension_release
 WHERE workspace_id = $1
 ORDER BY created_at DESC, id DESC;
+
+-- name: ListPlatformExtensionSquadBindings :many
+-- The Extension release is the sole authority for identifying a managed
+-- Squad. UI consumers must not infer this relationship from names or Agent
+-- system keys.
+SELECT id AS release_id, squad_id, extension_key, version
+FROM platform_extension_release
+WHERE workspace_id = $1
+  AND squad_id IS NOT NULL;
 
 -- name: DeletePlatformExtensionReleasesByWorkspace :exec
 -- platform_extension_release deliberately has no workspace foreign key, so

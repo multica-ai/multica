@@ -1,6 +1,7 @@
 package execenv
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -983,13 +984,28 @@ func writeSkillFiles(skillsDir string, skills []SkillContextForEnv, manifest *si
 			if err := recordMkdirAll(filepath.Dir(fpath), 0o755, manifest); err != nil {
 				return err
 			}
-			if err := recordWriteFile(fpath, []byte(f.Content), 0o644, manifest); err != nil {
+			content, err := skillFileBytes(f)
+			if err != nil {
+				return fmt.Errorf("decode supporting skill file %q: %w", f.Path, err)
+			}
+			if err := recordWriteFile(fpath, content, 0o644, manifest); err != nil {
 				return err
 			}
 		}
 	}
 
 	return nil
+}
+
+func skillFileBytes(file SkillFileContextForEnv) ([]byte, error) {
+	switch file.Encoding {
+	case "", "text":
+		return []byte(file.Content), nil
+	case "base64":
+		return base64.StdEncoding.DecodeString(file.Content)
+	default:
+		return nil, fmt.Errorf("unsupported encoding %q", file.Encoding)
+	}
 }
 
 // renderIssueContext builds the markdown content for issue_context.md.

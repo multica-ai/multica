@@ -1,3 +1,5 @@
+import type { AgentSkillSummary } from "./agent";
+
 export type SquadMemberType = "agent" | "member";
 
 export type SquadActivityOutcome = "action" | "no_action" | "failed";
@@ -6,6 +8,32 @@ export interface SquadMemberPreview {
   member_type: SquadMemberType;
   member_id: string;
   role: string;
+}
+
+/** Identifies a Squad whose membership is generated from an Extension release. */
+export interface ExtensionManagedSquad {
+  release_id: string;
+  extension_key: string;
+  version: string;
+}
+
+/** Runtime binding displayed for an Extension-managed internal Agent. */
+export interface SquadInternalAgentRuntime {
+  id: string;
+  provider: string;
+  name: string;
+}
+
+/** Read-only detail exposed inside an Extension-managed Squad. */
+export interface SquadInternalAgent {
+  id: string;
+  name: string;
+  description: string;
+  instructions: string;
+  role: string;
+  leader: boolean;
+  runtime: SquadInternalAgentRuntime | null;
+  skills: AgentSkillSummary[];
 }
 
 export interface Squad {
@@ -23,6 +51,7 @@ export interface Squad {
   archived_by: string | null;
   member_count?: number;
   member_preview?: SquadMemberPreview[];
+  extension?: ExtensionManagedSquad | null;
 }
 
 export interface SquadMember {

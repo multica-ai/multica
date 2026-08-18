@@ -5707,8 +5707,9 @@ func (s *TaskService) LoadAgentSkills(ctx context.Context, agentID pgtype.UUID) 
 			Content:     sk.Content,
 		}
 		files, _ := s.Queries.ListSkillFiles(ctx, sk.ID)
+		encodings := skillFileEncodings(sk.Config)
 		for _, f := range files {
-			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content})
+			data.Files = append(data.Files, AgentSkillFileData{Path: f.Path, Content: f.Content, Encoding: encodings[f.Path]})
 		}
 		result = append(result, data)
 	}
@@ -5806,8 +5807,19 @@ type AgentSkillData struct {
 type AgentSkillFileData struct {
 	Path      string `json:"path"`
 	Content   string `json:"content"`
+	Encoding  string `json:"encoding,omitempty"`
 	SHA256    string `json:"sha256,omitempty"`
 	SizeBytes int64  `json:"size_bytes,omitempty"`
+}
+
+func skillFileEncodings(config []byte) map[string]string {
+	var decoded struct {
+		Encodings map[string]string `json:"multica_file_encodings"`
+	}
+	if err := json.Unmarshal(config, &decoded); err != nil {
+		return nil
+	}
+	return decoded.Encodings
 }
 
 type AgentSkillRefData struct {
