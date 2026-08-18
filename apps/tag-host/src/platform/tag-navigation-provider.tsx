@@ -43,6 +43,7 @@ export function createTagNavigationAdapter({
     searchParams: multicaLocation.searchParams,
     openInNewTab: (path) => open(toTagHostPath(path)),
     getShareableUrl: (path) => toTagShareUrl(origin, path),
+    resolveHref: toTagHostPath,
   };
 }
 

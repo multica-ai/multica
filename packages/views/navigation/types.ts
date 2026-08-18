@@ -21,6 +21,13 @@ export interface NavigationAdapter {
   /** Return a shareable URL for a path. Web: origin + path. Desktop: public web URL of the connected environment. */
   getShareableUrl: (path: string) => string;
   /**
+   * Optional platform rendering hook for the anchor href. Navigation methods
+   * still receive the platform-neutral path; this only keeps native browser
+   * behaviours (copy link, open in a new window, status bar) on the host's
+   * mounted base path.
+   */
+  resolveHref?: (path: string) => string;
+  /**
    * Optional: warm up route assets / RSC payload for a path. Web wires this
    * to `router.prefetch`; desktop leaves it undefined because react-router
    * already loads the whole SPA. Callers must invoke via `prefetch?.(href)`.

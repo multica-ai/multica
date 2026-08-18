@@ -28,6 +28,21 @@ function renderLink(
 }
 
 describe("AppLink", () => {
+  it("renders the host-resolved href while keeping navigation platform-neutral", () => {
+    const push = vi.fn();
+    const adapter = makeAdapter({
+      push,
+      resolveHref: (path) => `/tag${path}`,
+    });
+
+    renderLink(adapter, { href: "/design-lab/issues/issue-1" });
+    const link = screen.getByText("go");
+    expect(link).toHaveAttribute("href", "/tag/design-lab/issues/issue-1");
+
+    fireEvent.click(link);
+    expect(push).toHaveBeenCalledWith("/design-lab/issues/issue-1");
+  });
+
   it("calls caller onClick BEFORE push so synchronous side effects (close menu, etc) commit before the transition starts", () => {
     const order: string[] = [];
     const adapter = makeAdapter({

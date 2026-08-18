@@ -29,7 +29,8 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     },
     ref,
   ) {
-    const { push, openInNewTab, prefetch } = useNavigation();
+    const { push, openInNewTab, prefetch, resolveHref } = useNavigation();
+    const renderedHref = resolveHref?.(href) ?? href;
 
     const handleClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
       // Caller's onClick runs BEFORE any navigation, on every path, so:
@@ -119,7 +120,7 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     return (
       <a
         ref={ref}
-        href={href}
+        href={renderedHref}
         target={target}
         // Referrer is same-origin noise here and noopener hygiene applies
         // even though the destination is our own app.

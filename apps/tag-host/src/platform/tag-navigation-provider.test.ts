@@ -28,6 +28,9 @@ describe('TagNavigationProvider adapter contract', () => {
     expect(adapter.getShareableUrl('/design-lab/chat?session=session-1')).toBe(
       'http://localhost:3000/tag/design-lab/chat?session=session-1'
     );
+    expect(adapter.resolveHref?.('/design-lab/issues/issue-1')).toBe(
+      '/tag/design-lab/issues/issue-1'
+    );
 
     adapter.push('/design-lab/issues');
     adapter.replace('/design-lab/chat?session=session-2');
