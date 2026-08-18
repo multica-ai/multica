@@ -48,6 +48,13 @@ type dshMCPServer struct {
 	ToolCallTimeoutMS int               `json:"tool_call_timeout_ms,omitempty"`
 }
 
+type dshTaskContract struct {
+	Goal           string   `json:"goal"`
+	Acceptance     []string `json:"acceptance,omitempty"`
+	StateFile      string   `json:"state_file,omitempty"`
+	RequiredChecks []string `json:"required_checks,omitempty"`
+}
+
 type dshExecuteCommand struct {
 	Version         int                `json:"v"`
 	Type            string             `json:"type"`
@@ -55,9 +62,11 @@ type dshExecuteCommand struct {
 	Cwd             string             `json:"cwd"`
 	Prompt          string             `json:"prompt"`
 	ResumeSessionID string             `json:"resume_session_id,omitempty"`
+	IssueID         string             `json:"issue_id,omitempty"`
 	Model           *dshModelSelection `json:"model,omitempty"`
 	ReasoningEffort string             `json:"reasoning_effort,omitempty"`
 	MCPServers      []dshMCPServer     `json:"mcp_servers"`
+	TaskContract    *dshTaskContract   `json:"task_contract,omitempty"`
 }
 
 type dshCancelCommand struct {
@@ -69,6 +78,20 @@ type dshCancelCommand struct {
 type dshWireError struct {
 	Code    string `json:"code"`
 	Message string `json:"message"`
+}
+
+type dshAcceptanceCheck struct {
+	Command   string        `json:"command"`
+	ExitCode  int           `json:"exit_code"`
+	Passed    bool          `json:"passed"`
+	Output    string        `json:"output,omitempty"`
+	Truncated bool          `json:"truncated,omitempty"`
+	Error     *dshWireError `json:"error,omitempty"`
+}
+
+type dshAcceptance struct {
+	Passed bool                 `json:"passed"`
+	Checks []dshAcceptanceCheck `json:"checks"`
 }
 
 type dshFrame struct {
@@ -97,6 +120,9 @@ type dshFrame struct {
 	Error            *dshWireError   `json:"error,omitempty"`
 	Code             string          `json:"code,omitempty"`
 	Message          string          `json:"message,omitempty"`
+	Phase            string          `json:"phase,omitempty"`
+	Data             map[string]any  `json:"data,omitempty"`
+	Acceptance       *dshAcceptance  `json:"acceptance,omitempty"`
 	Models           []dshModelFrame `json:"models,omitempty"`
 }
 
@@ -115,6 +141,10 @@ type dshModelFrame struct {
 
 func dshLaunchArgs() []string {
 	return []string{"--profile", dshProfile, "--stdio"}
+}
+
+func hasTaskContract(contract TaskContractInput) bool {
+	return contract.Goal != "" || len(contract.Acceptance) > 0 || contract.StateFile != "" || len(contract.RequiredChecks) > 0
 }
 
 func parseDshModelID(value string) (*dshModelSelection, error) {
@@ -254,7 +284,16 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	command := dshExecuteCommand{
 		Version: dshProtocolVersion, Type: "execute", RequestID: requestID,
 		Cwd: opts.Cwd, Prompt: prompt, ResumeSessionID: opts.ResumeSessionID,
-		Model: model, ReasoningEffort: opts.ThinkingLevel, MCPServers: mcpServers,
+		IssueID: opts.IssueID, Model: model, ReasoningEffort: opts.ThinkingLevel,
+		MCPServers: mcpServers,
+	}
+	if hasTaskContract(opts.TaskContract) {
+		command.TaskContract = &dshTaskContract{
+			Goal:           opts.TaskContract.Goal,
+			Acceptance:     opts.TaskContract.Acceptance,
+			StateFile:      opts.TaskContract.StateFile,
+			RequiredChecks: opts.TaskContract.RequiredChecks,
+		}
 	}
 	var writeMu sync.Mutex
 	encoder := json.NewEncoder(stdin)
@@ -366,6 +405,8 @@ type dshRunState struct {
 	frameCount    int
 	invalidFrames int
 	usage         map[string]TokenUsage
+	progress      []ProgressEvent
+	acceptance    *AcceptanceResult
 	result        *Result
 }
 
@@ -414,19 +455,49 @@ func handleDshFrame(frame dshFrame, requestID string, ch chan<- Message, state *
 		}
 	case "protocol_error":
 		state.protocolError = strings.TrimSpace(frame.Code + ": " + frame.Message)
+	case "progress":
+		event := ProgressEvent{Phase: frame.Phase, Message: frame.Message}
+		if frame.Data != nil {
+			event.Data = frame.Data
+		}
+		state.progress = append(state.progress, event)
 	case "result":
 		errorText := ""
 		if frame.Error != nil {
 			errorText = strings.TrimSpace(frame.Error.Code + ": " + frame.Error.Message)
 		}
+		state.acceptance = acceptanceFromWire(frame.Acceptance)
 		state.result = &Result{
 			Status: frame.Status, Output: frame.Output, Error: errorText,
 			SessionID: frame.SessionID, Usage: state.usage, ResumeRejected: frame.ResumeRejected,
+			Progress: state.progress, Acceptance: state.acceptance,
 		}
 		if state.result.SessionID == "" {
 			state.result.SessionID = state.sessionID
 		}
 	}
+}
+
+func acceptanceFromWire(wire *dshAcceptance) *AcceptanceResult {
+	if wire == nil {
+		return nil
+	}
+	checks := make([]AcceptanceCheckResult, 0, len(wire.Checks))
+	for _, check := range wire.Checks {
+		item := AcceptanceCheckResult{
+			Command:   check.Command,
+			ExitCode:  check.ExitCode,
+			Passed:    check.Passed,
+			Output:    check.Output,
+			Truncated: check.Truncated,
+		}
+		if check.Error != nil {
+			item.ErrorCode = check.Error.Code
+			item.ErrorMessage = check.Error.Message
+		}
+		checks = append(checks, item)
+	}
+	return &AcceptanceResult{Passed: wire.Passed, Checks: checks}
 }
 
 func discoverDshModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {

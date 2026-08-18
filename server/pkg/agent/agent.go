@@ -22,6 +22,18 @@ type Backend interface {
 	Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error)
 }
 
+// TaskContractInput carries a task's deterministic contract — the goal,
+// natural-language acceptance criteria, optional state file path, and ordered
+// verification commands. Protocols that expose a structured channel forward it
+// verbatim (currently dsh); every other backend ignores it because the daemon
+// already injects the same contract into the prompt.
+type TaskContractInput struct {
+	Goal           string   `json:"goal"`
+	Acceptance     []string `json:"acceptance,omitempty"`
+	StateFile      string   `json:"state_file,omitempty"`
+	RequiredChecks []string `json:"required_checks,omitempty"`
+}
+
 // ExecOptions configures a single execution.
 type ExecOptions struct {
 	Cwd   string
@@ -118,6 +130,13 @@ type ExecOptions struct {
 	// through Claude Code's --settings flag. It currently carries restrictive
 	// runtime-skill overrides only; other providers ignore it.
 	ClaudeSettingsPath string
+	// IssueID is the Multica issue this run is executing on, when the task is
+	// issue-backed. Protocols that accept it (dsh) forward it so the runtime
+	// can expose MULTICA_ISSUE_ID to the agent.
+	IssueID string
+	// TaskContract carries the deterministic task contract described above.
+	// Backends without a structured contract channel ignore it.
+	TaskContract TaskContractInput
 }
 
 // runContext derives the execution context for an agent subprocess from the
@@ -191,6 +210,33 @@ type TokenUsage struct {
 // int64 all the way to the database instead of drifting through float64.
 const CostUSDTicksPerUSD = 10_000_000_000
 
+// ProgressEvent is a structured progress update emitted by a backend whose
+// protocol has explicit phases. `Data` carries phase-specific fields and must
+// be treated as an arbitrary JSON object.
+type ProgressEvent struct {
+	Phase   string         `json:"phase"`
+	Message string         `json:"message,omitempty"`
+	Data    map[string]any `json:"data,omitempty"`
+}
+
+// AcceptanceCheckResult is the outcome of one deterministic acceptance
+// command. It mirrors the runtime's per-check result shape.
+type AcceptanceCheckResult struct {
+	Command      string `json:"command"`
+	ExitCode     int    `json:"exit_code"`
+	Passed       bool   `json:"passed"`
+	Output       string `json:"output,omitempty"`
+	Truncated    bool   `json:"truncated,omitempty"`
+	ErrorCode    string `json:"error_code,omitempty"`
+	ErrorMessage string `json:"error_message,omitempty"`
+}
+
+// AcceptanceResult summarizes a run's deterministic acceptance gate.
+type AcceptanceResult struct {
+	Passed bool                    `json:"passed"`
+	Checks []AcceptanceCheckResult `json:"checks"`
+}
+
 // Result is the final outcome after an agent session completes.
 type Result struct {
 	Status     string // "completed", "failed", "aborted", "timeout", "cancelled"
@@ -199,6 +245,12 @@ type Result struct {
 	DurationMs int64
 	SessionID  string
 	Usage      map[string]TokenUsage // keyed by model name
+	// Progress carries the backend's structured progress events, if its
+	// protocol reports explicit phases (currently dsh).
+	Progress []ProgressEvent
+	// Acceptance carries the run's deterministic acceptance-gate result, if the
+	// backend supports one and the run had required checks configured.
+	Acceptance *AcceptanceResult
 	// ResumeRejected is positive evidence that this run's requested resume
 	// was itself refused — the transcript is gone, the session belongs to
 	// another provider account, OR the session still exists but its history
