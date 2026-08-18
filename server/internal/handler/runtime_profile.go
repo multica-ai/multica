@@ -39,6 +39,7 @@ type RuntimeProfileResponse struct {
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
 	Visibility     string   `json:"visibility"`
+	ActivationMode string   `json:"activation_mode"`
 	CreatedBy      *string  `json:"created_by"`
 	Enabled        bool     `json:"enabled"`
 	CreatedAt      string   `json:"created_at"`
@@ -62,6 +63,7 @@ func runtimeProfileToResponse(p db.RuntimeProfile) RuntimeProfileResponse {
 		Description:    textToPtr(p.Description),
 		FixedArgs:      args,
 		Visibility:     p.Visibility,
+		ActivationMode: p.ActivationMode,
 		CreatedBy:      uuidToPtr(p.CreatedBy),
 		Enabled:        p.Enabled,
 		CreatedAt:      timestampToString(p.CreatedAt),
@@ -78,6 +80,31 @@ func runtimeProfileToResponse(p db.RuntimeProfile) RuntimeProfileResponse {
 // visibility control only once those read paths enforce creator visibility.
 // Follow-up: MUL-3308.
 const runtimeProfileDefaultVisibility = "workspace"
+
+const (
+	runtimeProfileActivationWorkspace = "workspace"
+	runtimeProfileActivationLocal     = "local"
+)
+
+func runtimeProfileCapabilities() map[string]any {
+	return map[string]any{
+		"activation_modes": []string{
+			runtimeProfileActivationWorkspace,
+			runtimeProfileActivationLocal,
+		},
+	}
+}
+
+func normalizeRuntimeProfileActivationMode(value string) (string, error) {
+	mode := strings.TrimSpace(value)
+	if mode == "" {
+		return runtimeProfileActivationWorkspace, nil
+	}
+	if mode != runtimeProfileActivationWorkspace && mode != runtimeProfileActivationLocal {
+		return "", errors.New("activation_mode must be workspace or local")
+	}
+	return mode, nil
+}
 
 // marshalFixedArgs validates and JSON-encodes the fixed_args list. Each entry
 // must be a non-empty string; the column defaults to an empty array.
@@ -119,6 +146,7 @@ type createRuntimeProfileRequest struct {
 	CommandName    string   `json:"command_name"`
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
+	ActivationMode string   `json:"activation_mode"`
 	Enabled        *bool    `json:"enabled"`
 }
 
@@ -166,6 +194,11 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
+	activationMode, err := normalizeRuntimeProfileActivationMode(req.ActivationMode)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -179,6 +212,7 @@ func (h *Handler) CreateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 		Description:    ptrToText(req.Description),
 		FixedArgs:      fixedArgs,
 		Visibility:     runtimeProfileDefaultVisibility,
+		ActivationMode: activationMode,
 		CreatedBy:      member.UserID,
 		Enabled:        enabled,
 	})
@@ -222,7 +256,10 @@ func (h *Handler) ListRuntimeProfiles(w http.ResponseWriter, r *http.Request) {
 	for i, p := range profiles {
 		resp[i] = runtimeProfileToResponse(p)
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"runtime_profiles": resp})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"runtime_profiles": resp,
+		"capabilities":     runtimeProfileCapabilities(),
+	})
 }
 
 // GetRuntimeProfile returns one runtime profile. Member-gated by the router.
@@ -252,11 +289,12 @@ func (h *Handler) GetRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 type updateRuntimeProfileRequest struct {
-	DisplayName *string   `json:"display_name"`
-	CommandName *string   `json:"command_name"`
-	Description *string   `json:"description"`
-	FixedArgs   *[]string `json:"fixed_args"`
-	Enabled     *bool     `json:"enabled"`
+	DisplayName    *string   `json:"display_name"`
+	CommandName    *string   `json:"command_name"`
+	Description    *string   `json:"description"`
+	FixedArgs      *[]string `json:"fixed_args"`
+	ActivationMode *string   `json:"activation_mode"`
+	Enabled        *bool     `json:"enabled"`
 }
 
 // UpdateRuntimeProfile applies a partial update. protocol_family is immutable
@@ -310,6 +348,14 @@ func (h *Handler) UpdateRuntimeProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		params.FixedArgs = fixedArgs
+	}
+	if req.ActivationMode != nil {
+		mode, err := normalizeRuntimeProfileActivationMode(*req.ActivationMode)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		params.ActivationMode = strToText(mode)
 	}
 	if req.Enabled != nil {
 		params.Enabled = pgtype.Bool{Bool: *req.Enabled, Valid: true}

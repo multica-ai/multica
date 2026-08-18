@@ -194,6 +194,7 @@ var concurrentIndexCleanups = map[string]string{
 	"333_issue_status_pkey_index":                               "issue_status_pkey_uidx",
 	"335_issue_status_workspace_key_index":                      "idx_issue_status_workspace_key",
 	"336_issue_status_workspace_name_index":                     "idx_issue_status_workspace_name_active",
+	"342_runtime_profile_enabled_name_unique_index":             "runtime_profile_workspace_enabled_display_name_key",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -212,6 +213,7 @@ var concurrentDownIndexCleanups = map[string]string{
 	"302_drop_redundant_channel_chat_session_binding_index": "idx_channel_chat_session_binding_session",
 	"303_drop_redundant_lark_chat_session_binding_index":    "idx_lark_chat_session_binding_session",
 	"312_drop_global_plugin_identity_key_index":             "idx_plugin_identity_key",
+	"343_drop_runtime_profile_display_name_constraint":      "runtime_profile_workspace_display_name_rollback_uidx",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {

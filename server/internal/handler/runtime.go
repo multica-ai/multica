@@ -670,20 +670,29 @@ func canEditRuntime(member db.Member, rt db.AgentRuntime) bool {
 	return rt.OwnerID.Valid && uuidToString(rt.OwnerID) == uuidToString(member.UserID)
 }
 
-func (h *Handler) runtimeHasLiveProfile(ctx context.Context, rt db.AgentRuntime) (bool, error) {
+func runtimeProfileAllowsInstanceDelete(activationMode string) bool {
+	return activationMode == runtimeProfileActivationLocal
+}
+
+func (h *Handler) runtimeProfileBlocksInstanceDelete(ctx context.Context, rt db.AgentRuntime) (bool, error) {
 	if !rt.ProfileID.Valid {
 		return false, nil
 	}
-	if _, err := h.Queries.GetRuntimeProfileForWorkspace(ctx, db.GetRuntimeProfileForWorkspaceParams{
+	profile, err := h.Queries.GetRuntimeProfileForWorkspace(ctx, db.GetRuntimeProfileForWorkspaceParams{
 		ID:          rt.ProfileID,
 		WorkspaceID: rt.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return false, nil
 		}
 		return false, err
 	}
-	return true, nil
+	// Workspace activation owns one shared profile definition and its whole
+	// runtime set, so instances remain profile-deletion-only. Local activation
+	// uses set-path as a per-daemon binding; deleting that one instance is the
+	// normal disconnect operation and must leave the shared profile intact.
+	return !runtimeProfileAllowsInstanceDelete(profile.ActivationMode), nil
 }
 
 // canUseRuntimeForAgent reports whether a workspace member is allowed to
@@ -938,12 +947,12 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := uuidToString(member.UserID)
 
-	hasLiveProfile, err := h.runtimeHasLiveProfile(r.Context(), rt)
+	profileBlocksDelete, err := h.runtimeProfileBlocksInstanceDelete(r.Context(), rt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime profile")
 		return
 	}
-	if hasLiveProfile {
+	if profileBlocksDelete {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
 			"code":  "runtime_profile_instance_delete_unsupported",
@@ -951,7 +960,7 @@ func (h *Handler) DeleteAgentRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if rt.ProfileID.Valid {
-		slog.Warn("deleting orphaned profile-backed runtime instance",
+		slog.Info("deleting independently removable profile runtime instance",
 			"runtime_id", uuidToString(rt.ID),
 			"profile_id", uuidToString(rt.ProfileID),
 			"workspace_id", wsID,
@@ -1148,12 +1157,12 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 	}
 	userID := uuidToString(member.UserID)
 
-	hasLiveProfile, err := h.runtimeHasLiveProfile(r.Context(), rt)
+	profileBlocksDelete, err := h.runtimeProfileBlocksInstanceDelete(r.Context(), rt)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to check runtime profile")
 		return
 	}
-	if hasLiveProfile {
+	if profileBlocksDelete {
 		writeJSON(w, http.StatusConflict, map[string]any{
 			"error": "cannot delete a custom runtime instance directly; delete its runtime profile instead.",
 			"code":  "runtime_profile_instance_delete_unsupported",
@@ -1161,7 +1170,7 @@ func (h *Handler) UnbindAgentsAndDeleteRuntime(w http.ResponseWriter, r *http.Re
 		return
 	}
 	if rt.ProfileID.Valid {
-		slog.Warn("deleting orphaned profile-backed runtime instance via cascade",
+		slog.Info("deleting independently removable profile runtime instance via cascade",
 			"runtime_id", uuidToString(rt.ID),
 			"profile_id", uuidToString(rt.ProfileID),
 			"workspace_id", wsID,

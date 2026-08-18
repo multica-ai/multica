@@ -38,6 +38,7 @@ func newProfileCreateTestCmd() *cobra.Command {
 	cmd.Flags().String("command-name", "", "")
 	cmd.Flags().String("display-name", "", "")
 	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("activation-mode", "workspace", "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
 }
@@ -48,6 +49,7 @@ func newProfileUpdateTestCmd() *cobra.Command {
 	cmd.Flags().String("display-name", "", "")
 	cmd.Flags().String("command-name", "", "")
 	cmd.Flags().String("description", "", "")
+	cmd.Flags().String("activation-mode", "", "")
 	cmd.Flags().Bool("enabled", true, "")
 	cmd.Flags().String("output", "json", "")
 	return cmd
@@ -70,6 +72,15 @@ func newProfileUnsetPathTestCmd() *cobra.Command {
 	cmd := &cobra.Command{Use: "unset-path"}
 	addCommonProfileFlags(cmd)
 	return cmd
+}
+
+func profileCapabilitiesResponse(modes ...string) map[string]any {
+	return map[string]any{
+		"runtime_profiles": []map[string]any{},
+		"capabilities": map[string]any{
+			"activation_modes": modes,
+		},
+	}
 }
 
 // TestRuntimeProfileCommandsRegistered verifies the subcommands are wired
@@ -157,6 +168,9 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	if gotBody["protocol_family"] != "codex" || gotBody["command_name"] != "company-codex" || gotBody["display_name"] != "Company Codex" {
 		t.Errorf("unexpected body: %#v", gotBody)
 	}
+	if gotBody["activation_mode"] != "workspace" {
+		t.Errorf("activation_mode = %v, want workspace", gotBody["activation_mode"])
+	}
 	// fixed_args is intentionally NOT exposed by the CLI create path yet; the
 	// UI owns command-line parsing until this CLI grows an argv-aware parser.
 	if _, present := gotBody["fixed_args"]; present {
@@ -169,6 +183,69 @@ func TestRunRuntimeProfileCreate(t *testing.T) {
 	}
 }
 
+func TestRunRuntimeProfileCreateLocalActivation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-123")
+	var gotBody map[string]any
+	var methods []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(profileCapabilitiesResponse("workspace", "local"))
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"id": "prof-local"})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := newProfileCreateTestCmd()
+	_ = cmd.Flags().Set("protocol-family", "reasonix")
+	_ = cmd.Flags().Set("command-name", "north-studio-multica")
+	_ = cmd.Flags().Set("display-name", "North Studio")
+	_ = cmd.Flags().Set("activation-mode", "local")
+	if err := runRuntimeProfileCreate(cmd, nil); err != nil {
+		t.Fatalf("runRuntimeProfileCreate: %v", err)
+	}
+	if gotBody["activation_mode"] != "local" {
+		t.Fatalf("activation_mode = %v, want local", gotBody["activation_mode"])
+	}
+	if strings.Join(methods, ",") != "GET,POST" {
+		t.Fatalf("request order = %v, want capability preflight before mutation", methods)
+	}
+}
+
+func TestRunRuntimeProfileCreateLocalActivationRejectsOldServerBeforeMutation(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "ws-123")
+	mutations := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			mutations++
+		}
+		_ = json.NewEncoder(w).Encode(profileCapabilitiesResponse("workspace"))
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := newProfileCreateTestCmd()
+	_ = cmd.Flags().Set("protocol-family", "reasonix")
+	_ = cmd.Flags().Set("command-name", "north-studio-multica")
+	_ = cmd.Flags().Set("display-name", "North Studio")
+	_ = cmd.Flags().Set("activation-mode", "local")
+	err := runRuntimeProfileCreate(cmd, nil)
+	if err == nil || !strings.Contains(err.Error(), "upgrade the server") {
+		t.Fatalf("old-server capability error = %v", err)
+	}
+	if mutations != 0 {
+		t.Fatalf("old server received %d mutation(s) before capability failure", mutations)
+	}
+}
+
 func TestRunRuntimeProfileCreateRejectsBadFamily(t *testing.T) {
 	cmd := newProfileCreateTestCmd()
 	_ = cmd.Flags().Set("protocol-family", "not-a-real-backend")
@@ -177,6 +254,17 @@ func TestRunRuntimeProfileCreateRejectsBadFamily(t *testing.T) {
 	// No server should ever be contacted; this must fail client-side.
 	if err := runRuntimeProfileCreate(cmd, nil); err == nil {
 		t.Fatal("expected invalid --protocol-family error")
+	}
+}
+
+func TestRunRuntimeProfileCreateRejectsBadActivationMode(t *testing.T) {
+	cmd := newProfileCreateTestCmd()
+	_ = cmd.Flags().Set("protocol-family", "reasonix")
+	_ = cmd.Flags().Set("command-name", "north-studio-multica")
+	_ = cmd.Flags().Set("display-name", "North Studio")
+	_ = cmd.Flags().Set("activation-mode", "everywhere-ish")
+	if err := runRuntimeProfileCreate(cmd, nil); err == nil || !strings.Contains(err.Error(), "--activation-mode") {
+		t.Fatalf("activation mode error = %v", err)
 	}
 }
 
@@ -194,7 +282,13 @@ func TestRunRuntimeProfileUpdateOnlySendsChangedFlags(t *testing.T) {
 
 	var gotMethod, gotPath string
 	var gotBody map[string]any
+	var methods []string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		methods = append(methods, r.Method)
+		if r.Method == http.MethodGet {
+			_ = json.NewEncoder(w).Encode(profileCapabilitiesResponse("workspace", "local"))
+			return
+		}
 		gotMethod = r.Method
 		gotPath = r.URL.Path
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
@@ -206,6 +300,7 @@ func TestRunRuntimeProfileUpdateOnlySendsChangedFlags(t *testing.T) {
 
 	cmd := newProfileUpdateTestCmd()
 	_ = cmd.Flags().Set("command-name", "new-codex")
+	_ = cmd.Flags().Set("activation-mode", "local")
 	_ = cmd.Flags().Set("enabled", "false")
 
 	if err := runRuntimeProfileUpdate(cmd, []string{"prof-1"}); err != nil {
@@ -217,18 +312,24 @@ func TestRunRuntimeProfileUpdateOnlySendsChangedFlags(t *testing.T) {
 	if gotPath != "/api/workspaces/ws-123/runtime-profiles/prof-1" {
 		t.Errorf("path = %q, want .../runtime-profiles/prof-1", gotPath)
 	}
-	// Only the two changed flags must be present.
+	// Only the three changed flags must be present.
 	if gotBody["command_name"] != "new-codex" {
 		t.Errorf("command_name = %v, want new-codex", gotBody["command_name"])
 	}
 	if gotBody["enabled"] != false {
 		t.Errorf("enabled = %v, want false", gotBody["enabled"])
 	}
+	if gotBody["activation_mode"] != "local" {
+		t.Errorf("activation_mode = %v, want local", gotBody["activation_mode"])
+	}
 	if _, ok := gotBody["display_name"]; ok {
 		t.Errorf("display_name should not be sent when unchanged: %#v", gotBody)
 	}
 	if _, ok := gotBody["visibility"]; ok {
 		t.Errorf("visibility should not be sent when unchanged: %#v", gotBody)
+	}
+	if strings.Join(methods, ",") != "GET,PATCH" {
+		t.Fatalf("request order = %v, want capability preflight before mutation", methods)
 	}
 }
 

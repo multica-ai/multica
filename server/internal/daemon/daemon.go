@@ -237,6 +237,9 @@ var (
 	// resolve custom runtime-profile commands without manipulating the
 	// process PATH. Mirrors the detectAgentVersion hook above.
 	lookPath = exec.LookPath
+	// Reloaded on runtime-profile change notifications so `set-path` can take
+	// effect without restarting the daemon. Indirected for hermetic tests.
+	loadCLIConfigForProfile = cli.LoadCLIConfigForProfile
 
 	// profilePathExecutable reports whether path points at an existing,
 	// non-directory file with at least one executable bit set. It is the
@@ -355,8 +358,14 @@ type Daemon struct {
 	// command resolves; read by runTask to launch the custom command for a
 	// claimed task. Guarded by mu.
 	profileLaunchSpecs map[string]profileLaunchSpec
-	reloading          sync.Mutex         // prevents concurrent workspace syncs
-	runtimeSet         *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
+	// Guards the per-machine set-path snapshot. Profile refresh reloads and
+	// swaps the whole map so registration never races a config-file update.
+	profileOverridesMu sync.RWMutex
+	// Test seam for config reload; production falls back to the profile-aware
+	// loader shared with startup configuration.
+	profileOverrideLoader func(string) (map[string]string, error)
+	reloading             sync.Mutex         // prevents concurrent workspace syncs
+	runtimeSet            *runtimeSetWatcher // multi-subscriber pub/sub for runtime-set changes
 
 	versionsMu    sync.RWMutex      // guards agentVersions
 	agentVersions map[string]string // provider -> detected CLI version (set during registration)
@@ -2040,7 +2049,7 @@ func (d *Daemon) deregisterRuntimes() {
 
 // resolveAuth loads the auth token from the CLI config for the active profile.
 func (d *Daemon) resolveAuth() error {
-	cfg, err := cli.LoadCLIConfigForProfile(d.cfg.Profile)
+	cfg, err := loadCLIConfigForProfile(d.cfg.Profile)
 	if err != nil {
 		return fmt.Errorf("load CLI config: %w", err)
 	}
@@ -2714,6 +2723,28 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 // that as "unknown, do not overwrite a previously-stored signature" (otherwise
 // a transient 5xx would silently flip the daemon into thinking the workspace
 // has zero profiles).
+type profileActivationState uint8
+
+const (
+	profileActivationWorkspace profileActivationState = iota
+	profileActivationLocalUnbound
+	profileActivationLocalBound
+	profileActivationLocalBroken
+)
+
+func classifyProfileActivation(profile RuntimeProfile, override string) profileActivationState {
+	if profile.ActivationMode != "local" {
+		return profileActivationWorkspace
+	}
+	if override == "" {
+		return profileActivationLocalUnbound
+	}
+	if profilePathExecutable(override) {
+		return profileActivationLocalBound
+	}
+	return profileActivationLocalBroken
+}
+
 func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, runtimes *[]map[string]string, failedProfiles *[]map[string]string) string {
 	resp, err := d.client.GetRuntimeProfiles(ctx, workspaceID)
 	if err != nil {
@@ -2727,7 +2758,7 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		// Empty payload — same shape as "server has zero profiles". Return
 		// the digest of an empty list so the sync loop can still detect a
 		// later transition (zero → first profile added).
-		return profileSetSignature(nil)
+		return d.effectiveProfileSetSignature(nil)
 	}
 	for _, profile := range resp.RuntimeProfiles {
 		if profile.CommandName == "" || profile.ProtocolFamily == "" {
@@ -2759,16 +2790,40 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 		// behavior).
 		var resolved string
 		var failureReason string
-		if override := strings.TrimSpace(d.cfg.ProfileCommandOverrides[profile.ID]); override != "" {
-			if profilePathExecutable(override) {
-				resolved = override
-				d.logger.Info("custom runtime profile: using per-machine command path override",
-					"workspace_id", workspaceID, "profile_id", profile.ID, "command_path", resolved)
-			} else {
-				failureReason = "Configured path override is not executable: " + override
-				d.logger.Warn("custom runtime profile: command path override not executable; falling back to PATH",
-					"workspace_id", workspaceID, "profile_id", profile.ID,
-					"override_path", override, "command_name", profile.CommandName)
+		override := d.profileCommandOverride(profile.ID)
+		switch classifyProfileActivation(profile, override) {
+		case profileActivationLocalUnbound:
+			d.logger.Info("skip local custom runtime profile: this daemon has no set-path binding",
+				"workspace_id", workspaceID, "profile_id", profile.ID,
+				"command_name", profile.CommandName)
+			continue
+		case profileActivationLocalBroken:
+			failureReason = "Configured path override is not executable: " + override
+			d.logger.Warn("local custom runtime profile: set-path binding is not executable",
+				"workspace_id", workspaceID, "profile_id", profile.ID,
+				"override_path", override, "command_name", profile.CommandName)
+			*failedProfiles = append(*failedProfiles, map[string]string{
+				"profile_id":   profile.ID,
+				"command_name": profile.CommandName,
+				"reason":       failureReason,
+			})
+			continue
+		case profileActivationLocalBound:
+			resolved = override
+			d.logger.Info("local custom runtime profile: using set-path binding",
+				"workspace_id", workspaceID, "profile_id", profile.ID, "command_path", resolved)
+		case profileActivationWorkspace:
+			if override != "" {
+				if profilePathExecutable(override) {
+					resolved = override
+					d.logger.Info("custom runtime profile: using per-machine command path override",
+						"workspace_id", workspaceID, "profile_id", profile.ID, "command_path", resolved)
+				} else {
+					failureReason = "Configured path override is not executable: " + override
+					d.logger.Warn("custom runtime profile: command path override not executable; falling back to PATH",
+						"workspace_id", workspaceID, "profile_id", profile.ID,
+						"override_path", override, "command_name", profile.CommandName)
+				}
 			}
 		}
 		if resolved == "" {
@@ -2821,7 +2876,53 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 			"profile_id": profile.ID,
 		})
 	}
-	return profileSetSignature(resp.RuntimeProfiles)
+	return d.effectiveProfileSetSignature(resp.RuntimeProfiles)
+}
+
+func (d *Daemon) profileCommandOverride(profileID string) string {
+	d.profileOverridesMu.RLock()
+	defer d.profileOverridesMu.RUnlock()
+	return strings.TrimSpace(d.cfg.ProfileCommandOverrides[profileID])
+}
+
+func (d *Daemon) reloadProfileCommandOverrides() error {
+	loader := d.profileOverrideLoader
+	if loader == nil {
+		loader = loadProfileCommandOverrides
+	}
+	next, err := loader(d.cfg.Profile)
+	if err != nil {
+		return err
+	}
+	d.profileOverridesMu.Lock()
+	if len(next) == 0 {
+		d.cfg.ProfileCommandOverrides = nil
+	} else {
+		d.cfg.ProfileCommandOverrides = next
+	}
+	d.profileOverridesMu.Unlock()
+	return nil
+}
+
+func (d *Daemon) effectiveProfileSetSignature(profiles []RuntimeProfile) string {
+	base := profileSetSignature(profiles)
+	d.profileOverridesMu.RLock()
+	if len(d.cfg.ProfileCommandOverrides) == 0 {
+		d.profileOverridesMu.RUnlock()
+		return base
+	}
+	h := fnv.New64a()
+	_, _ = fmt.Fprint(h, base, "\x1d")
+	ids := make([]string, 0, len(d.cfg.ProfileCommandOverrides))
+	for id := range d.cfg.ProfileCommandOverrides {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	for _, id := range ids {
+		_, _ = fmt.Fprintf(h, "%s\x1f%s\x1e", id, d.cfg.ProfileCommandOverrides[id])
+	}
+	d.profileOverridesMu.RUnlock()
+	return strconv.FormatUint(h.Sum64(), 16)
 }
 
 // profileSetSignature is a stable content hash of the workspace's custom
@@ -2834,7 +2935,8 @@ func (d *Daemon) appendProfileRuntimes(ctx context.Context, workspaceID string, 
 // daemon sends in a Register call: ID, Enabled, ProtocolFamily, CommandName,
 // FixedArgs (the launch args every agent on this runtime inherits) and
 // Visibility (so a hypothetical future per-creator filter still triggers
-// drift). Profiles are sorted by ID first so the digest is order-independent
+// drift), plus ActivationMode because switching workspace/local changes this
+// daemon's eligibility. Profiles are sorted by ID first so the digest is order-independent
 // (the server is allowed to return them in any order).
 func profileSetSignature(profiles []RuntimeProfile) string {
 	if len(profiles) == 0 {
@@ -2846,12 +2948,13 @@ func profileSetSignature(profiles []RuntimeProfile) string {
 	// Field separator chosen to never appear in a UUID, slug, or arg.
 	const sep = "\x1f"
 	for _, p := range sorted {
-		fmt.Fprintf(h, "%s%s%t%s%s%s%s%s%s%s",
+		fmt.Fprintf(h, "%s%s%t%s%s%s%s%s%s%s%s%s",
 			p.ID, sep,
 			p.Enabled, sep,
 			p.ProtocolFamily, sep,
 			p.CommandName, sep,
 			p.Visibility, sep,
+			p.ActivationMode, sep,
 		)
 		for _, a := range p.FixedArgs {
 			fmt.Fprintf(h, "%s%s", a, sep)
@@ -3181,6 +3284,10 @@ func (d *Daemon) refreshWorkspaceRepos(ctx context.Context, workspaceID string) 
 // The workspaceState pointer is never replaced (matches the invariant
 // documented on syncWorkspacesFromAPI and reregisterWorkspaceAfterRuntimeGone).
 func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceID string) error {
+	if err := d.reloadProfileCommandOverrides(); err != nil {
+		d.logger.Warn("could not reload custom runtime path overrides; keeping current snapshot",
+			"profile", d.cfg.Profile, "error", err)
+	}
 	refreshCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -3194,7 +3301,7 @@ func (d *Daemon) refreshWorkspaceRuntimeProfiles(ctx context.Context, workspaceI
 	if resp != nil {
 		profiles = resp.RuntimeProfiles
 	}
-	live := profileSetSignature(profiles)
+	live := d.effectiveProfileSetSignature(profiles)
 
 	d.mu.Lock()
 	ws, ok := d.workspaces[workspaceID]

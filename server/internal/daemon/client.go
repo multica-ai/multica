@@ -881,6 +881,7 @@ type RuntimeProfile struct {
 	Description    *string  `json:"description"`
 	FixedArgs      []string `json:"fixed_args"`
 	Visibility     string   `json:"visibility"`
+	ActivationMode string   `json:"activation_mode"`
 	Enabled        bool     `json:"enabled"`
 }
 
