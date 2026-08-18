@@ -89,10 +89,13 @@ const nextConfig: NextConfig = {
   },
 };
 
-// fumadocs-mdx@12 is incompatible with Next 16's Turbopack: its loader fails to
-// dynamic-import `.source/source.config.mjs` under the Turbopack Node evaluator
-// (see fumadocs#2658). `dev`/`build` scripts pass `--webpack` to opt out.
-// Drop the flag once fumadocs-mdx ships a Turbopack-compatible loader.
+// fumadocs-mdx@12 was historically incompatible with Next 16's Turbopack: its
+// loader failed to dynamic-import `.source/source.config.mjs` under the
+// Turbopack Node evaluator (fumadocs#2658), so `dev`/`build` passed `--webpack`
+// to opt out. Verified fixed against the current lockfile pair (next 16.2.6 +
+// fumadocs-mdx 12.0.3): both `next dev` and `next build` run on Turbopack and
+// the MDX use-case pages compile. Turbopack is now the default, so the flag is
+// dropped.
 const withMDX = createMDX() as (config: NextConfig) => NextConfig;
 
 export default withMDX(nextConfig);
