@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 )
 
 func TestResolveAgentExecutablePath_PreservesDispatchShimName(t *testing.T) {
@@ -1453,4 +1454,42 @@ func agentKeys(m map[string]AgentEntry) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// TestApplyOpenclawOverride_CLITimeout covers the #7112 knob on the same
+// precedence contract as binary_path / state_dir: the config file supplies it
+// when the environment does not, and an environment value the user exported
+// upstream always wins.
+func TestApplyOpenclawOverride_CLITimeout(t *testing.T) {
+	t.Run("config file supplies the value", func(t *testing.T) {
+		os.Unsetenv(execenv.OpenclawCLITimeoutEnv)
+		t.Cleanup(func() { os.Unsetenv(execenv.OpenclawCLITimeoutEnv) })
+
+		applyOpenclawOverride(&cli.OpenClawOverride{CLITimeout: "45s"})
+
+		if got := os.Getenv(execenv.OpenclawCLITimeoutEnv); got != "45s" {
+			t.Errorf("%s: got %q, want 45s", execenv.OpenclawCLITimeoutEnv, got)
+		}
+	})
+
+	t.Run("env wins over config", func(t *testing.T) {
+		t.Setenv(execenv.OpenclawCLITimeoutEnv, "20s")
+
+		applyOpenclawOverride(&cli.OpenClawOverride{CLITimeout: "45s"})
+
+		if got := os.Getenv(execenv.OpenclawCLITimeoutEnv); got != "20s" {
+			t.Errorf("%s: env should win, got %q want 20s", execenv.OpenclawCLITimeoutEnv, got)
+		}
+	})
+
+	t.Run("unset field leaves the env alone", func(t *testing.T) {
+		os.Unsetenv(execenv.OpenclawCLITimeoutEnv)
+		t.Cleanup(func() { os.Unsetenv(execenv.OpenclawCLITimeoutEnv) })
+
+		applyOpenclawOverride(&cli.OpenClawOverride{StateDir: "/from/config/state"})
+
+		if _, set := os.LookupEnv(execenv.OpenclawCLITimeoutEnv); set {
+			t.Errorf("%s must not be set when the field is empty", execenv.OpenclawCLITimeoutEnv)
+		}
+	})
 }

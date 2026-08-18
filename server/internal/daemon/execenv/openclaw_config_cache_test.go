@@ -361,3 +361,56 @@ func TestOpenclawDiscoveryCacheDisabledWithoutDir(t *testing.T) {
 		t.Errorf("second preparation made %d CLI calls, want 2 (caching must stay off)", got)
 	}
 }
+
+// TestOpenclawDiscoveryCacheStoresEmptyAgentsList covers Elon's must-fix 2.
+// openclawResolvedAgentsList returns (nil, false, nil) for two legitimate
+// successes — a config whose agents.list is null, and an empty 2026.6+
+// registry. Treating a nil list as "incomplete, do not cache" left exactly
+// those users paying full discovery on every message, which is the cost this
+// change exists to remove.
+func TestOpenclawDiscoveryCacheStoresEmptyAgentsList(t *testing.T) {
+	cases := map[string]map[string]openclawResponse{
+		"config agents.list is null": {
+			"config get agents.list --json": {stdout: "null"},
+		},
+		"registry is empty": {
+			"config get agents.list --json": {err: errors.New("Config path not found: agents.list")},
+			"agents list --json":            {stdout: "[]"},
+		},
+	}
+	for name, responses := range cases {
+		t.Run(name, func(t *testing.T) {
+			f := newOpenclawCacheFixture(t)
+			for args, resp := range responses {
+				f.stub.responses[args] = resp
+			}
+
+			cold := f.run(t)
+			if cold == 0 {
+				t.Fatalf("cold preparation made no CLI calls, want a live discovery")
+			}
+			if got := f.run(t); got != 0 {
+				t.Errorf("warm preparation made %d CLI calls, want 0: an agent-less host must be cacheable too", got)
+			}
+		})
+	}
+}
+
+// TestOpenclawDiscoveryCacheInvalidatesOnLegacyEnvChange covers must-fix 3.
+// openclawFallbackConfigCandidates still honours the CLAWDBOT_* names, so a
+// user who repoints those and restarts the daemon must not keep getting the
+// pre-switch config served out of a cache that never looked at them.
+func TestOpenclawDiscoveryCacheInvalidatesOnLegacyEnvChange(t *testing.T) {
+	for _, envVar := range []string{"CLAWDBOT_CONFIG_PATH", "CLAWDBOT_STATE_DIR"} {
+		t.Run(envVar, func(t *testing.T) {
+			f := newOpenclawCacheFixture(t)
+			f.run(t)
+
+			t.Setenv(envVar, filepath.Join(t.TempDir(), "legacy"))
+
+			if got := f.run(t); got != 2 {
+				t.Errorf("preparation after %s changed made %d CLI calls, want 2 (cache must be invalid)", envVar, got)
+			}
+		})
+	}
+}

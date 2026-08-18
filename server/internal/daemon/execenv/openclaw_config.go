@@ -11,7 +11,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 )
@@ -41,10 +40,11 @@ const openclawUserSnapshotFile = "openclaw-user-snapshot.json"
 // the same commands take 0.7s / 0.3s on an M-series Mac, i.e. the real spread
 // across supported hardware is wider than the old margin.
 //
-// 30s is ~3x the slowest measured call, and three serial calls at that budget
-// still fit inside the outer 5-minute task preparation deadline, so a
-// genuinely hung CLI fails with this specific, actionable reason instead of
-// the generic prepare timeout. Hosts outside that envelope can override with
+// 30s is ~3x the slowest measured call, and even the worst case
+// (openclawMaxCLICallsPerPreparation serial calls at that budget) fits inside
+// the outer 5-minute task preparation deadline, so a genuinely hung CLI fails
+// with this specific, actionable reason instead of the generic prepare
+// timeout. Hosts outside that envelope can override with
 // MULTICA_OPENCLAW_CLI_TIMEOUT (or backends.openclaw.cli_timeout in the CLI
 // config, which the daemon translates into the same env var).
 //
@@ -80,13 +80,32 @@ const (
 	// CLI can answer; 1s is already below every measured healthy host.
 	openclawCLIMinTimeout = time.Second
 	// openclawCLIMaxTimeout keeps config discovery inside the outer task
-	// preparation budget (defaultTaskPrepareTimeout, 5 minutes). Preparation
-	// can make three serial CLI calls, so the ceiling is set so that even the
-	// worst case (3 x 90s = 4m30s) still fails as a specific CLI timeout with
-	// an actionable message, instead of colliding with the outer deadline and
-	// collapsing into the generic prepare-timeout reason.
-	openclawCLIMaxTimeout = 90 * time.Second
+	// preparation budget (daemon.defaultTaskPrepareTimeout, 5 minutes). The
+	// worst case is openclawMaxCLICallsPerPreparation serial calls, so the
+	// ceiling is set so that even then (4 x 60s = 4m) the failure surfaces as a
+	// specific, actionable CLI timeout with room to spare, instead of colliding
+	// with the outer deadline and collapsing into the generic — and retryable —
+	// prepare-timeout reason.
+	openclawCLIMaxTimeout = 60 * time.Second
 )
+
+// openclawMaxCLICallsPerPreparation is how many serial `openclaw ...`
+// invocations one task preparation can make in the worst case. Each one gets
+// its own deadline, so this is the multiplier that decides whether
+// openclawCLIMaxTimeout still fits inside the outer preparation budget.
+//
+// The four call sites, in the order they can fire:
+//
+//  1. `config file`                     — locate the active config
+//  2. `config get agents.list --json`   — pre-2026.6 agents schema
+//  3. `agents list --json`              — 2026.6+ registry fallback, only
+//     reached when (2) reports the config path is missing
+//  4. `config get --json`               — full resolved config, only for an
+//     agent with a managed mcp_config
+//
+// Adding a fifth call means re-deriving the ceiling; the budget test fails
+// loudly if this constant and the real call graph drift apart.
+const openclawMaxCLICallsPerPreparation = 4
 
 // ErrOpenclawCLITimeout marks a task preparation that failed because the local
 // openclaw CLI did not answer within the deadline. It is a sentinel rather
@@ -126,8 +145,11 @@ func resolveOpenclawCLITimeout(explicit time.Duration, logger *slog.Logger) time
 	}
 	parsed, err := time.ParseDuration(raw)
 	if err != nil {
-		if secs, secErr := strconv.Atoi(raw); secErr == nil {
-			parsed, err = time.Duration(secs)*time.Second, nil
+		// Bare number means seconds. Parsed as a duration string rather than
+		// Atoi * time.Second, which overflows into a negative (or absurdly
+		// large) duration for big inputs instead of failing cleanly.
+		if secondsParsed, secErr := time.ParseDuration(raw + "s"); secErr == nil {
+			parsed, err = secondsParsed, nil
 		}
 	}
 	if err != nil || parsed <= 0 {

@@ -434,3 +434,39 @@ func TestCLIConfig_TaskRootMustBeAbsolute(t *testing.T) {
 		t.Fatalf("CLIConfigPath error = %v, want absolute path validation", err)
 	}
 }
+
+// TestCLIConfig_OpenClawCLITimeout_RoundTrip covers the knob added for #7112:
+// a host whose openclaw CLI is slower than the built-in default needs to
+// record that in the config file, not just in a shell export the GUI-launched
+// daemon never sees.
+func TestCLIConfig_OpenClawCLITimeout_RoundTrip(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("HOME", tmp)
+
+	original := CLIConfig{
+		ServerURL: "https://api.multica.ai",
+		Token:     "mul_xyz",
+		Backends: &BackendOverrides{
+			OpenClaw: &OpenClawOverride{CLITimeout: "45s"},
+		},
+	}
+	if err := SaveCLIConfig(original); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := LoadCLIConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Backends == nil || loaded.Backends.OpenClaw == nil {
+		t.Fatalf("Backends.OpenClaw should be non-nil after round-trip, got %+v", loaded.Backends)
+	}
+	if got := loaded.Backends.OpenClaw.CLITimeout; got != "45s" {
+		t.Errorf("CLITimeout round-trip: got %q, want %q", got, "45s")
+	}
+	// The other fields stay omitted so they keep falling through to env /
+	// discovery instead of being pinned to an empty string.
+	if got := loaded.Backends.OpenClaw.BinaryPath; got != "" {
+		t.Errorf("BinaryPath should stay empty, got %q", got)
+	}
+}

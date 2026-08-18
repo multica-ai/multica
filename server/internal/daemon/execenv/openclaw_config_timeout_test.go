@@ -3,8 +3,11 @@ package execenv
 import (
 	"context"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -45,7 +48,10 @@ func TestResolveOpenclawCLITimeout(t *testing.T) {
 		{name: "explicit wins over env", explicit: 3 * time.Second, env: "90s", want: 3 * time.Second},
 		{name: "duration string", env: "45s", want: 45 * time.Second},
 		{name: "bare seconds", env: "45", want: 45 * time.Second},
-		{name: "minutes", env: "1m30s", want: 90 * time.Second},
+		{name: "minutes past the ceiling are clamped", env: "1m30s", want: openclawCLIMaxTimeout},
+		// Guards the bare-seconds path against an overflow that used to turn a
+		// huge value into a negative duration instead of a clamp.
+		{name: "absurd bare seconds are clamped", env: "99999999999999999999", want: openclawCLITimeout},
 		// A typo must degrade to the default rather than disabling the
 		// deadline or failing task preparation outright.
 		{name: "unparseable falls back", env: "soon", want: openclawCLITimeout},
@@ -152,5 +158,75 @@ func TestExecOpenclawCLICancellationIsNotATimeout(t *testing.T) {
 	}
 	if !errors.Is(err, context.Canceled) {
 		t.Errorf("cancellation must keep the wrapped context cause\ngot: %s", err)
+	}
+}
+
+// TestOpenclawCLIMaxTimeoutFitsPreparationBudget is the arithmetic the
+// override ceiling rests on. Each CLI call gets its own deadline, so the
+// budget that matters is worst-case-calls x ceiling, and it has to stay under
+// the daemon's 5-minute task preparation deadline with room for the rest of
+// Prepare (repo checkout, skills, context files). Otherwise a user who raises
+// the timeout turns a specific, non-retryable CLI timeout back into the
+// generic — and retryable — prepare timeout, which is the failure mode this
+// change set out to remove.
+func TestOpenclawCLIMaxTimeoutFitsPreparationBudget(t *testing.T) {
+	// Mirrors daemon.defaultTaskPrepareTimeout, which execenv cannot import
+	// (the daemon imports this package, not the other way round).
+	const taskPrepareBudget = 5 * time.Minute
+	// Everything Prepare does besides openclaw config discovery.
+	const nonOpenclawPrepareSlack = time.Minute
+
+	worst := openclawMaxCLICallsPerPreparation * openclawCLIMaxTimeout
+	if worst+nonOpenclawPrepareSlack > taskPrepareBudget {
+		t.Errorf("worst-case openclaw discovery %v (%d calls x %v) leaves less than %v under the %v preparation budget",
+			worst, openclawMaxCLICallsPerPreparation, openclawCLIMaxTimeout, nonOpenclawPrepareSlack, taskPrepareBudget)
+	}
+	if openclawCLITimeout > openclawCLIMaxTimeout {
+		t.Errorf("default %v exceeds the override ceiling %v", openclawCLITimeout, openclawCLIMaxTimeout)
+	}
+}
+
+// TestPrepareOpenclawConfigWorstCaseCLICallCount pins the multiplier the
+// budget above depends on. The worst case is not the common two calls: a
+// 2026.6+ host falls back to the registry subcommand, and an agent with a
+// managed mcp_config additionally reads the full resolved config. Adding a
+// fifth call site without re-deriving the ceiling would silently push the
+// worst case past the preparation budget, so this fails instead.
+func TestPrepareOpenclawConfigWorstCaseCLICallCount(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+	userConfigPath := filepath.Join(t.TempDir(), "openclaw.json")
+	if err := os.WriteFile(userConfigPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		// 1. locate the active config
+		"config file": {stdout: userConfigPath},
+		// 2. pre-2026.6 schema read, which this host does not have
+		"config get agents.list --json": {err: errors.New("Config path not found: agents.list")},
+		// 3. registry fallback
+		"agents list --json": {stdout: `[{"id":"scout"}]`},
+		// 4. full resolved config, reached only via a managed mcp_config
+		"config get --json": {stdout: `{"agents":{"list":[{"id":"scout"}]}}`},
+	})
+
+	if _, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+		OpenclawBin: stub.bin,
+		McpConfig:   []byte(`{"mcpServers":{"fs":{"command":"fs-server"}}}`),
+	}); err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+
+	if got := len(stub.calls); got != openclawMaxCLICallsPerPreparation {
+		var args []string
+		for _, call := range stub.calls {
+			args = append(args, strings.Join(call.args, " "))
+		}
+		t.Errorf("worst-case preparation made %d CLI calls, but openclawMaxCLICallsPerPreparation is %d\ncalls: %v",
+			got, openclawMaxCLICallsPerPreparation, args)
 	}
 }

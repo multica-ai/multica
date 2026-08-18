@@ -15,11 +15,13 @@ import (
 )
 
 // OpenClaw config discovery costs two serial CLI round-trips per task
-// preparation (`config file`, then `config get agents.list --json`). On a fast
-// host that is ~1s total; on the Intel Mac in #7112 it is ~12.7s, and it is
-// paid again for every task — including every chat message, because Reuse runs
-// the same preparation path as Prepare. Raising the deadline alone would turn
-// a hard failure into a per-message stall, so the discovery result is cached.
+// preparation in the common case (`config file`, then
+// `config get agents.list --json`; see openclawMaxCLICallsPerPreparation for
+// the worst case). On a fast host that is ~1s total; on the Intel Mac in #7112
+// it is ~12.7s, and it is paid again for every task — including every chat
+// message, because Reuse runs the same preparation path as Prepare. Raising
+// the deadline alone would turn a hard failure into a per-message stall, so
+// the discovery result is cached.
 //
 // The cache lives on disk rather than in package memory on purpose:
 // Prepare/Reuse run inside a one-shot preparation helper process
@@ -84,11 +86,16 @@ type openclawDiscoveryCacheEntry struct {
 
 // openclawDiscoveryEnvVars are the environment variables that change which
 // config OpenClaw considers active. HOME / USERPROFILE are included because
-// every default candidate path is derived from them.
+// every default candidate path is derived from them, and the CLAWDBOT_* pair
+// because openclawFallbackConfigCandidates still honours those legacy names —
+// a cache that ignored them could keep serving the pre-switch config for a
+// full TTL after the user pointed the daemon somewhere else.
 var openclawDiscoveryEnvVars = []string{
 	"OPENCLAW_CONFIG_PATH",
 	"OPENCLAW_HOME",
 	"OPENCLAW_STATE_DIR",
+	"CLAWDBOT_CONFIG_PATH",
+	"CLAWDBOT_STATE_DIR",
 	"HOME",
 	"USERPROFILE",
 }
@@ -191,6 +198,9 @@ func loadOpenclawDiscoveryCache(cachePath, bin string, now time.Time) (openclawD
 	if entry.Fingerprint.Version != openclawDiscoveryCacheVersion {
 		return openclawDiscoveryCacheEntry{}, false
 	}
+	// len 0 means the field was absent or empty — a truncated write, not a
+	// stored result. A discovery with no agents is stored as the four bytes
+	// "null" and is a legitimate hit.
 	if entry.ActiveConfigPath == "" || len(entry.AgentsList) == 0 {
 		return openclawDiscoveryCacheEntry{}, false
 	}
@@ -219,6 +229,12 @@ func loadOpenclawDiscoveryCache(cachePath, bin string, now time.Time) (openclawD
 // and a timeout all skip the write, so a transient failure can never be
 // replayed from cache for the rest of the TTL.
 //
+// A nil agentsList is a success, not an omission: openclawResolvedAgentsList
+// returns (nil, false, nil) for a config whose agents.list is null and for an
+// empty 2026.6+ registry. Treating that as "incomplete" would leave exactly
+// those users paying full discovery on every message, so it is stored as JSON
+// null and decodes back to nil.
+//
 // The write is atomic (temp file + rename) so a concurrently reading task sees
 // either the old entry or the new one, never a half-written file. Two tasks
 // racing to store simply leave the later winner in place — both entries are
@@ -227,7 +243,7 @@ func storeOpenclawDiscoveryCache(cachePath, bin, activeConfigPath string, agents
 	if cachePath == "" {
 		return nil
 	}
-	if activeConfigPath == "" || agentsList == nil {
+	if activeConfigPath == "" {
 		return nil
 	}
 	fingerprint, err := buildOpenclawDiscoveryFingerprint(bin, activeConfigPath)
@@ -283,6 +299,9 @@ func storeOpenclawDiscoveryCache(cachePath, bin, activeConfigPath string, agents
 
 // decodeOpenclawCachedAgentsList converts a cached agents.list payload back
 // into the []any shape prepareOpenclawConfig works with.
+// A stored JSON null decodes to a nil slice, which is exactly the shape
+// openclawResolvedAgentsList produces for "no agents", so a hit and a live run
+// build the same wrapper.
 func decodeOpenclawCachedAgentsList(raw json.RawMessage) ([]any, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("empty cached agents list")
