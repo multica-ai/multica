@@ -387,7 +387,11 @@ describe("ApiClient schema fallback", () => {
 
     it("parses the new-server group-routing capability", async () => {
       stubFetchJson({
-        installations: [{ id: "dt-1", status: "active" }],
+        installations: [{
+          id: "dt-1",
+          status: "active",
+          bound_dingtalk_user_ids: ["staff-1001"],
+        }],
         configured: true,
         install_supported: true,
         group_routing_supported: true,
@@ -395,6 +399,21 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listDingTalkInstallations("ws-1");
       expect(res.group_routing_supported).toBe(true);
+      expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual(["staff-1001"]);
+    });
+
+    it("defaults missing or malformed linked-identity IDs to an empty list", async () => {
+      stubFetchJson({
+        installations: [
+          { id: "dt-old", status: "active" },
+          { id: "dt-broken", status: "active", bound_dingtalk_user_ids: "staff-1001" },
+        ],
+        configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual([]);
+      expect(res.installations[1]?.bound_dingtalk_user_ids).toEqual([]);
     });
   });
 

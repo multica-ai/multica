@@ -258,14 +258,52 @@ describe("DingTalkTab", () => {
 
   it("lists a connected installation with its agent name and a disconnect control", () => {
     installationsRef.current = {
-      installations: [{ id: "i1", agent_id: "agent-7", status: "active" }],
+      installations: [{
+        id: "i1",
+        agent_id: "agent-7",
+        status: "active",
+        bound_dingtalk_user_ids: ["staff-1001", "staff-1002"],
+      }],
       configured: true,
       install_supported: true,
       group_routing_supported: true,
     };
     renderUI(<DingTalkTab />);
     expect(screen.getByText("Agent agent-7")).toBeTruthy();
+    expect(
+      screen.getByText(/Linked DingTalk identity: staff-1001, staff-1002 · Installed/),
+    ).toBeTruthy();
     expect(screen.getByText(/Disconnect/i)).toBeTruthy();
+  });
+
+  it("does not render a linked identity when this member has no DingTalk binding", () => {
+    installationsRef.current = {
+      installations: [{ id: "i1", agent_id: "agent-7", status: "active" }],
+      configured: true,
+      install_supported: true,
+      group_routing_supported: true,
+    };
+    renderUI(<DingTalkTab />);
+    expect(screen.queryByText(/Linked DingTalk identity:/i)).toBeNull();
+  });
+
+  it("hides linked DingTalk identities from a regular workspace member", () => {
+    membersRef.current = [{ user_id: "user-1", role: "member" }];
+    installationsRef.current = {
+      installations: [{
+        id: "i1",
+        agent_id: "agent-7",
+        status: "active",
+        bound_dingtalk_user_ids: ["staff-must-stay-private"],
+      }],
+      configured: true,
+      install_supported: true,
+      group_routing_supported: true,
+    };
+    renderUI(<DingTalkTab />);
+    expect(screen.getByText("Agent agent-7")).toBeTruthy();
+    expect(screen.queryByText(/staff-must-stay-private/)).toBeNull();
+    expect(screen.queryByText(/Linked DingTalk identity:/i)).toBeNull();
   });
 
   it("shows a placeholder instead of 'Invalid Date' when installed_at is missing or malformed", () => {
