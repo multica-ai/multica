@@ -9,38 +9,75 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WorkspaceSlugIssuesRouteImport } from './routes/$workspaceSlug.issues'
 import { Route as WorkspaceSlugChatRouteImport } from './routes/$workspaceSlug.chat'
+import { Route as WorkspaceSlugIssuesIssueIdRouteImport } from './routes/$workspaceSlug.issues.$issueId'
 
+const WorkspaceSlugIssuesRoute = WorkspaceSlugIssuesRouteImport.update({
+  id: '/$workspaceSlug/issues',
+  path: '/$workspaceSlug/issues',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkspaceSlugChatRoute = WorkspaceSlugChatRouteImport.update({
   id: '/$workspaceSlug/chat',
   path: '/$workspaceSlug/chat',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkspaceSlugIssuesIssueIdRoute =
+  WorkspaceSlugIssuesIssueIdRouteImport.update({
+    id: '/$issueId',
+    path: '/$issueId',
+    getParentRoute: () => WorkspaceSlugIssuesRoute,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/$workspaceSlug/chat': typeof WorkspaceSlugChatRoute
+  '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRouteWithChildren
+  '/$workspaceSlug/issues/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
 }
 export interface FileRoutesByTo {
   '/$workspaceSlug/chat': typeof WorkspaceSlugChatRoute
+  '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRouteWithChildren
+  '/$workspaceSlug/issues/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/$workspaceSlug/chat': typeof WorkspaceSlugChatRoute
+  '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRouteWithChildren
+  '/$workspaceSlug/issues/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/$workspaceSlug/chat'
+  fullPaths:
+    | '/$workspaceSlug/chat'
+    | '/$workspaceSlug/issues'
+    | '/$workspaceSlug/issues/$issueId'
   fileRoutesByTo: FileRoutesByTo
-  to: '/$workspaceSlug/chat'
-  id: '__root__' | '/$workspaceSlug/chat'
+  to:
+    | '/$workspaceSlug/chat'
+    | '/$workspaceSlug/issues'
+    | '/$workspaceSlug/issues/$issueId'
+  id:
+    | '__root__'
+    | '/$workspaceSlug/chat'
+    | '/$workspaceSlug/issues'
+    | '/$workspaceSlug/issues/$issueId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   WorkspaceSlugChatRoute: typeof WorkspaceSlugChatRoute
+  WorkspaceSlugIssuesRoute: typeof WorkspaceSlugIssuesRouteWithChildren
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/$workspaceSlug/issues': {
+      id: '/$workspaceSlug/issues'
+      path: '/$workspaceSlug/issues'
+      fullPath: '/$workspaceSlug/issues'
+      preLoaderRoute: typeof WorkspaceSlugIssuesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$workspaceSlug/chat': {
       id: '/$workspaceSlug/chat'
       path: '/$workspaceSlug/chat'
@@ -48,11 +85,30 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceSlugChatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$workspaceSlug/issues/$issueId': {
+      id: '/$workspaceSlug/issues/$issueId'
+      path: '/$issueId'
+      fullPath: '/$workspaceSlug/issues/$issueId'
+      preLoaderRoute: typeof WorkspaceSlugIssuesIssueIdRouteImport
+      parentRoute: typeof WorkspaceSlugIssuesRoute
+    }
   }
 }
 
+interface WorkspaceSlugIssuesRouteChildren {
+  WorkspaceSlugIssuesIssueIdRoute: typeof WorkspaceSlugIssuesIssueIdRoute
+}
+
+const WorkspaceSlugIssuesRouteChildren: WorkspaceSlugIssuesRouteChildren = {
+  WorkspaceSlugIssuesIssueIdRoute: WorkspaceSlugIssuesIssueIdRoute,
+}
+
+const WorkspaceSlugIssuesRouteWithChildren =
+  WorkspaceSlugIssuesRoute._addFileChildren(WorkspaceSlugIssuesRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   WorkspaceSlugChatRoute: WorkspaceSlugChatRoute,
+  WorkspaceSlugIssuesRoute: WorkspaceSlugIssuesRouteWithChildren,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
