@@ -1,0 +1,34 @@
+{
+  "create_form": {
+    "name_label": "Nom de l'espace de travail",
+    "name_placeholder": "Mon espace de travail",
+    "url_label": "URL de l'espace de travail",
+    "url_placeholder": "mon-espace-de-travail",
+    "submit": "Créer l'espace de travail",
+    "submitting": "Création...",
+    "errors": {
+      "slug_format": "Uniquement des lettres minuscules, des chiffres et des traits d'union",
+      "slug_taken": "Cette URL d'espace de travail est déjà prise.",
+      "slug_reserved": "Cette URL d'espace de travail est réservée et ne peut pas être utilisée.",
+      "slug_conflict_toast": "Choisissez une autre URL d'espace de travail",
+      "create_failed": "Échec de la création de l'espace de travail"
+    }
+  },
+  "new_page": {
+    "back": "Retour",
+    "log_out": "Se déconnecter",
+    "title": "Bienvenue sur Multica",
+    "description": "Un espace de travail unique où vos coéquipiers IA et vous travaillez côte à côte — ils prennent des tickets, laissent des commentaires et partagent le même contexte.",
+    "invite_hint": "Vous pourrez inviter des coéquipiers une fois votre espace de travail prêt."
+  },
+  "creation_disabled": {
+    "title": "La création d'espaces de travail est désactivée",
+    "description": "Cette instance Multica n'autorise pas la création de nouveaux espaces de travail. Demandez à votre administrateur une invitation à un espace de travail existant."
+  },
+  "no_access": {
+    "title": "Espace de travail indisponible",
+    "description": "Cet espace de travail n'existe pas ou vous n'y avez pas accès.",
+    "go_to_workspaces": "Accéder à mes espaces de travail",
+    "sign_in_different": "Se connecter avec un autre compte"
+  }
+}

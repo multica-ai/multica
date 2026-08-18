@@ -1,0 +1,112 @@
+{
+  "avatar_upload": {
+    "change": "Changer d'avatar",
+    "remove": "Supprimer",
+    "select_image": "Veuillez choisir un fichier image.",
+    "updated": "Avatar mis à jour",
+    "failed": "Échec de l'envoi de l'avatar",
+    "upload_image": "Envoyer une image",
+    "emoji_label": "Emoji",
+    "more_emojis": "Plus d'emojis…",
+    "emoji_loading": "Chargement…"
+  },
+  "avatar_crop": {
+    "title": "Modifier l'avatar",
+    "zoom": "Zoom",
+    "zoom_in": "Zoom avant",
+    "zoom_out": "Zoom arrière",
+    "rotate": "Pivoter",
+    "reset": "Réinitialiser",
+    "cancel": "Annuler",
+    "apply": "Enregistrer",
+    "uploading": "Envoi…",
+    "loading": "Chargement…",
+    "load_failed": "Impossible de charger l'image"
+  },
+  "color_picker": {
+    "saturation": "Saturation et luminosité",
+    "hue": "Teinte",
+    "hex": "Couleur hexadécimale",
+    "eyedropper": "Prélever une couleur à l'écran",
+    "presets": "Préréglages",
+    "random": "Aléatoire"
+  },
+  "save": "Enregistrer",
+  "cancel": "Annuler",
+  "delete": "Supprimer",
+  "confirm": "Confirmer",
+  "loading": "Chargement...",
+  "time": {
+    "just_now": "à l'instant",
+    "minutes_ago": "il y a {{count}} min",
+    "hours_ago": "il y a {{count}} h",
+    "days_ago": "il y a {{count}} j"
+  },
+  "lark_bind": {
+    "page_title": "Associer votre compte Lark",
+    "redeeming": "Validation du jeton d'association…",
+    "needs_auth_description": "Connectez-vous à Multica pour terminer l'association. Le jeton contenu dans le lien associe votre compte Lark à cet utilisateur Multica : vous devez donc être connecté au préalable.",
+    "sign_in": "Se connecter",
+    "done_title": "Association effectuée.",
+    "done_description": "Votre prochain message au bot dans Lark ira directement à l'agent. Vous pouvez fermer cet onglet.",
+    "error_title": "Impossible de terminer l'association",
+    "error_admin_hint": "Si le problème persiste, demandez à l'administrateur de l'espace de travail de renvoyer le lien d'association depuis Lark.",
+    "error_missing_token": "Le lien ne contient pas de jeton d'association. Demandez au bot d'en envoyer un nouveau dans Lark.",
+    "error_expired": "Ce lien d'association est invalide ou expiré (les liens sont valables 15 minutes). Demandez au bot d'en envoyer un nouveau.",
+    "error_already_bound": "Ce compte Lark est déjà associé à un autre utilisateur Multica. Tout transfert de compte exige une dissociation explicite au préalable.",
+    "error_not_member": "Vous êtes connecté avec un compte Multica qui n'est pas membre de cet espace de travail.",
+    "error_unknown": "Une erreur est survenue. Réessayez et, si le problème persiste, contactez l'administrateur de l'espace de travail."
+  },
+  "slack_bind": {
+    "page_title": "Associer votre compte Slack",
+    "redeeming": "Association de votre compte…",
+    "needs_auth_description": "Connectez-vous à Multica pour terminer l'association. Le jeton contenu dans le lien associe votre compte Slack à cet utilisateur Multica : vous devez donc être connecté au préalable.",
+    "sign_in": "Se connecter",
+    "done_title": "Association effectuée.",
+    "done_description": "Votre prochain message au bot dans Slack ira directement à l'agent. Vous pouvez fermer cet onglet.",
+    "error_title": "Impossible de terminer l'association",
+    "error_admin_hint": "Si le problème persiste, écrivez de nouveau au bot dans Slack pour obtenir un lien récent.",
+    "error_missing_token": "Le lien ne contient pas de jeton. Écrivez de nouveau au bot dans Slack pour en obtenir un nouveau.",
+    "error_expired": "Ce lien est invalide ou expiré (les liens sont valables 15 minutes). Écrivez de nouveau au bot pour en obtenir un nouveau.",
+    "error_already_bound": "Ce compte Slack est déjà associé à un autre utilisateur Multica. Tout transfert de compte exige une dissociation explicite au préalable.",
+    "error_not_member": "Vous êtes connecté avec un compte Multica qui n'est pas membre de cet espace de travail.",
+    "error_unknown": "Une erreur est survenue. Réessayez et, si le problème persiste, contactez l'administrateur de l'espace de travail."
+  },
+  "dingtalk_bind": {
+    "page_title": "Associer votre compte DingTalk",
+    "redeeming": "Association de votre compte…",
+    "needs_auth_description": "Connectez-vous à Multica pour terminer l'association. Le jeton contenu dans le lien associe votre compte DingTalk à cet utilisateur Multica : vous devez donc être connecté au préalable.",
+    "sign_in": "Se connecter",
+    "done_title": "Association effectuée.",
+    "done_description": "Votre prochain message au bot dans DingTalk ira directement à l'agent. Vous pouvez fermer cet onglet.",
+    "error_title": "Impossible de terminer l'association",
+    "error_admin_hint": "Si le problème persiste, écrivez de nouveau au bot dans DingTalk pour obtenir un lien récent.",
+    "error_missing_token": "Le lien ne contient pas de jeton. Écrivez de nouveau au bot dans DingTalk pour en obtenir un nouveau.",
+    "error_expired": "Ce lien est invalide ou expiré (les liens sont valables 15 minutes). Écrivez de nouveau au bot pour en obtenir un nouveau.",
+    "error_already_bound": "Ce compte DingTalk est déjà associé à un autre utilisateur Multica. Tout transfert de compte exige une dissociation explicite au préalable.",
+    "error_not_member": "Vous êtes connecté avec un compte Multica qui n'est pas membre de cet espace de travail.",
+    "error_unknown": "Une erreur est survenue. Réessayez et, si le problème persiste, contactez l'administrateur de l'espace de travail."
+  },
+  "expandable_description": {
+    "expand": "Afficher plus",
+    "collapse": "Afficher moins"
+  },
+  "wecom_bind": {
+    "page_title": "Associer votre compte Multica",
+    "redeeming": "Association de votre compte…",
+    "needs_auth_description": "Connectez-vous à Multica pour terminer l'association. Le jeton contenu dans le lien associe votre identité WeCom à cet utilisateur Multica : vous devez donc être connecté au préalable.",
+    "sign_in": "Se connecter",
+    "done_title": "Association effectuée.",
+    "done_description": "Votre prochain message au bot intelligent dans WeCom ira directement à l'agent. Vous pouvez fermer cet onglet.",
+    "error_title": "Impossible de terminer l'association",
+    "error_admin_hint": "Si le problème persiste, écrivez de nouveau au bot dans WeCom pour obtenir un lien récent.",
+    "error_missing_token": "Le lien ne contient pas de jeton. Écrivez de nouveau au bot dans WeCom pour en obtenir un nouveau.",
+    "error_expired": "Ce lien est invalide ou expiré (les liens sont valables 15 minutes). Écrivez de nouveau au bot pour en obtenir un nouveau.",
+    "error_already_bound": "Cette identité WeCom est déjà associée à un autre utilisateur Multica. Tout transfert de compte exige une dissociation explicite au préalable.",
+    "error_not_member": "Vous êtes connecté avec un compte Multica qui n'est pas membre de cet espace de travail.",
+    "error_unknown": "Une erreur est survenue. Réessayez et, si le problème persiste, contactez l'administrateur de l'espace de travail."
+  },
+  "navigation": {
+    "open_in_new_tab": "Ouvrir dans un nouvel onglet"
+  }
+}

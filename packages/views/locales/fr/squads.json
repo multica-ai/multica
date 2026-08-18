@@ -1,0 +1,103 @@
+{
+  "page": {
+    "title": "Squads",
+    "new_button": "Nouveau squad",
+    "empty_no_squads": "Aucun squad pour l'instant. Créez-en un pour commencer.",
+    "empty_no_match": "Aucun squad ne correspond à vos filtres.",
+    "table": {
+      "name": "Squad",
+      "leader": "Chef",
+      "members": "Membres",
+      "creator": "Créé par",
+      "created": "Création"
+    },
+    "no_matches": "Aucun squad correspondant",
+    "row_menu": "Actions du squad",
+    "archive_action": "Archiver"
+  },
+  "inspector": {
+    "details_section": "Détails",
+    "archive_button": "Archiver"
+  },
+  "archive_dialog": {
+    "title": "Archiver ce squad ?",
+    "description": "« {{name}} » sera archivé. Les tickets actuellement assignés à ce squad seront transférés à son chef. Cette action est irréversible — créez un nouveau squad si vous avez besoin de rétablir ce routage.",
+    "cancel": "Annuler",
+    "confirm": "Archiver",
+    "archiving": "Archivage…",
+    "success": "Squad archivé"
+  },
+  "name_editor": {
+    "cancel": "Annuler"
+  },
+  "add_member_dialog": {
+    "title": "Ajouter un membre",
+    "description": "Ajoutez un membre de l'espace de travail ou un agent à ce squad.",
+    "label_member": "Membre",
+    "label_role": "Rôle",
+    "label_optional": "(facultatif)",
+    "placeholder_role_inline": "Ajouter un rôle…",
+    "cancel": "Annuler"
+  },
+  "description_dialog": {
+    "title": "Modifier la description",
+    "placeholder_empty": "Ajouter une description",
+    "cancel": "Annuler"
+  },
+  "discard_changes_dialog": {
+    "title": "Abandonner les modifications non enregistrées ?",
+    "description": "Cet onglet contient des modifications non enregistrées. Changer d'onglet les abandonnera.",
+    "keep_editing": "Continuer à modifier",
+    "discard_button": "Abandonner"
+  },
+  "members_tab": {
+    "section_title": "Membres",
+    "section_count_one": "{{count}} membre dans ce squad",
+    "section_count_other": "{{count}} membres dans ce squad",
+    "add_member_button": "Ajouter un membre",
+    "create_agent_button": "Créer un agent",
+    "leader_chip": "Chef",
+    "view_agent_tooltip": "Ouvrir le détail de l'agent",
+    "make_leader_tooltip": "Nommer chef du squad",
+    "remove_member_tooltip": "Retirer du squad",
+    "status_working": "Au travail",
+    "status_idle": "Au repos",
+    "status_offline": "Hors ligne",
+    "status_unstable": "Instable",
+    "status_archived": "Archivé",
+    "issue_status_blocked": "bloqué",
+    "active_issue_more": "et {{count}} de plus",
+    "last_active_label": "dernière activité {{time}}"
+  },
+  "profile_card": {
+    "unavailable": "Squad indisponible",
+    "detail_link": "Détail →",
+    "archived": "Archivé",
+    "member_count_one": "{{count}} membre",
+    "member_count_other": "{{count}} membres",
+    "members_section": "Membres",
+    "more_members_one": "+{{count}} de plus",
+    "more_members_other": "+{{count}} de plus"
+  },
+  "instructions_tab": {
+    "description": "Les instructions du squad sont injectées dans l'invite de l'agent chef chaque fois qu'il travaille sur un ticket assigné à ce squad. Utilisez-les pour donner au chef des consignes valables pour tout le squad, des règles de travail communes, ou du contexte à suivre sur chaque tâche.",
+    "unsaved_changes": "Modifications non enregistrées",
+    "save_button": "Enregistrer"
+  },
+  "scope": {
+    "mine": "Les miens",
+    "all": "Tous"
+  },
+  "toolbar": {
+    "display": "Affichage",
+    "sort_by": "Trier par",
+    "direction_asc": "Croissant",
+    "direction_desc": "Décroissant",
+    "section_columns": "Colonnes",
+    "result_count_title": "Squads correspondants / tous les squads",
+    "filter_label": "Filtrer",
+    "filter_active_count_one": "{{count}} filtre",
+    "filter_active_count_other": "{{count}} filtres",
+    "clear_filters": "Effacer les filtres"
+  }
+}

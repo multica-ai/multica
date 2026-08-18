@@ -1,0 +1,125 @@
+{
+  "bubble_menu": {
+    "bold": "Gras",
+    "italic": "Italique",
+    "strikethrough": "Barré",
+    "code": "Code",
+    "highlight": "Surligner",
+    "link": "Lien",
+    "list": "Liste",
+    "task_list": "Liste de tâches",
+    "quote": "Citation",
+    "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "Appliquer le lien",
+      "remove": "Supprimer le lien",
+      "close": "Fermer l'éditeur de lien"
+    },
+    "heading_dropdown": {
+      "text": "Texte",
+      "normal_text": "Texte normal",
+      "heading_1": "Titre 1",
+      "heading_2": "Titre 2",
+      "heading_3": "Titre 3"
+    },
+    "list_dropdown": {
+      "bullet_list": "Liste à puces",
+      "ordered_list": "Liste numérotée",
+      "task_list": "Liste de tâches"
+    },
+    "sub_issue": {
+      "tooltip": "Créer un sous-ticket à partir de la sélection",
+      "created": "{{identifier}} créé",
+      "create_failed": "Échec de la création du sous-ticket"
+    }
+  },
+  "image": {
+    "view": "Voir l'image",
+    "download": "Télécharger",
+    "copy_link": "Copier le lien",
+    "delete": "Supprimer",
+    "link_copied": "Lien copié",
+    "copy_link_failed": "Échec de la copie du lien",
+    "canvas_label": "Zone d'image. Faites glisser pour déplacer, faites défiler pour zoomer, double-cliquez pour basculer en taille réelle.",
+    "previous": "Image précédente",
+    "next": "Image suivante",
+    "sequence_position": "{{index}} / {{total}}",
+    "unavailable": "Cette image n'est plus disponible — elle a été ignorée."
+  },
+  "canvas": {
+    "zoom_in": "Zoom avant",
+    "zoom_out": "Zoom arrière",
+    "zoom_fit": "Ajuster à la vue",
+    "zoom_actual": "Taille réelle"
+  },
+  "attachment": {
+    "download_failed": "Impossible d'obtenir un lien de téléchargement. Réessayez dans un instant.",
+    "preview": "Aperçu",
+    "preview_loading": "Chargement de l'aperçu…",
+    "preview_failed": "Impossible de charger l'aperçu",
+    "preview_too_large": "Le fichier est trop volumineux pour un aperçu. Veuillez le télécharger.",
+    "preview_unsupported": "Ce type de fichier ne peut pas être prévisualisé.",
+    "close": "Fermer",
+    "open_in_new_tab": "Ouvrir dans un nouvel onglet",
+    "remove": "Supprimer la pièce jointe"
+  },
+  "link_hover": {
+    "copy_link": "Copier le lien",
+    "open_link": "Ouvrir le lien",
+    "link_copied": "Lien copié",
+    "copy_failed": "Échec de la copie"
+  },
+  "mention": {
+    "group_users": "Utilisateurs",
+    "group_issues": "Tickets",
+    "all_members": "Tous les membres",
+    "searching": "Recherche...",
+    "no_results": "Aucun résultat",
+    "group_current": "Page actuelle",
+    "group_recent": "Consultés récemment",
+    "group_search": "Résultats de recherche",
+    "group_cancelled": "Annulés"
+  },
+  "slash_command": {
+    "no_skills_configured": "Aucun skill configuré",
+    "no_results": "Aucun skill correspondant",
+    "commands": {
+      "note": "Ajouter une note — ne déclenchera aucun agent"
+    }
+  },
+  "code_block": {
+    "copy_code": "Copier le code",
+    "show_preview": "Afficher l'aperçu",
+    "show_source": "Afficher la source",
+    "fullscreen": "Plein écran"
+  },
+  "file_card": {
+    "uploading": "Envoi de {{filename}}"
+  },
+  "upload": {
+    "failed": "Impossible d'envoyer {{filename}} : {{reason}}",
+    "in_progress": "Envoi…",
+    "interrupted": "Envoi interrompu — le fichier n'a pas été enregistré. Joignez-le de nouveau.",
+    "remove": "Supprimer",
+    "uploading_label": "Envoi de {{filename}}…",
+    "failed_label": "Impossible d'envoyer {{filename}}"
+  },
+  "title_editor": {
+    "title_aria_label": "Titre"
+  },
+  "mermaid": {
+    "render_error": "Impossible d'afficher le diagramme Mermaid.",
+    "rendering": "Rendu du diagramme…",
+    "viewer_title": "Diagramme",
+    "canvas_label": "Zone de diagramme. Faites glisser pour déplacer, faites défiler pour zoomer.",
+    "open_viewer": "Ouvrir la visionneuse de diagramme",
+    "close_viewer": "Fermer",
+    "copy_source": "Copier la source du diagramme",
+    "show_source": "Afficher la source",
+    "show_diagram": "Afficher le diagramme",
+    "export": "Exporter",
+    "export_png": "Télécharger en PNG",
+    "export_svg": "Télécharger en SVG",
+    "export_source": "Télécharger le .mmd"
+  }
+}

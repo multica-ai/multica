@@ -1,0 +1,233 @@
+{
+  "page": {
+    "title": "Discussion",
+    "select_prompt": "Choisissez une conversation, ou démarrez-en une nouvelle avec +",
+    "agent_link_no_access": "Vous n'avez pas accès à la discussion avec cet agent."
+  },
+  "fab": {
+    "running": "Multica travaille...",
+    "unread_one": "{{count}} discussion non lue",
+    "unread_other": "{{count}} discussions non lues",
+    "default": "Demander à Multica"
+  },
+  "input": {
+    "placeholder_no_agent": "Créez un agent pour commencer à discuter",
+    "placeholder_archived": "Cette session est archivée",
+    "placeholder_archived_agent": "Cet agent a été archivé",
+    "placeholder_runtime_required": "Associez un runtime pour continuer",
+    "placeholder_named": "Écrire à {{name}}…",
+    "placeholder_default": "Rédiger un message…",
+    "send_tooltip": "Envoyer",
+    "queue_send_tooltip": "Mettre le message en file d'attente",
+    "stop_tooltip": "Arrêter",
+    "send_failed_toast": "Échec de l'envoi du message",
+    "send_blocked_toast": "Message non envoyé — vous n'avez plus la permission d'utiliser cet agent",
+    "runtime_required_toast": "Message non envoyé — associez d'abord un runtime à cet agent",
+    "attachment_bind_failed_toast": "Message envoyé, mais les fichiers n'ont pas été joints. Veuillez réessayer dans un instant.",
+    "add_tooltip": "Ajouter",
+    "upload_file": "Image ou fichiers",
+    "project_context": "Contexte de projet",
+    "change_project_context": "Changer le contexte de projet",
+    "remove_project_context": "Retirer le contexte de projet",
+    "no_projects": "Aucun projet pour l'instant",
+    "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour"
+  },
+  "queue": {
+    "title_one": "{{count}} message en file d'attente",
+    "title_other": "{{count}} messages en file d'attente",
+    "clear": "Tout effacer",
+    "steer": "Réorienter",
+    "steer_unavailable": "La réorientation est possible une fois la réponse en cours démarrée",
+    "steer_unavailable_toast": "La réorientation est indisponible. Actualisation de la file d'attente.",
+    "edit": "Modifier le message en file d'attente",
+    "remove": "Retirer le message de la file d'attente",
+    "more": "Plus d'actions sur la file d'attente",
+    "fallback": "Message en file d'attente",
+    "action_failed_toast": "Impossible de mettre à jour le message en file d'attente"
+  },
+  "message_list": {
+    "show_details": "Afficher les détails",
+    "replied_in": "Réponse en {{elapsed}}",
+    "failed_after": "Échec après {{elapsed}}",
+    "finished_in": "Terminé en {{elapsed}}",
+    "no_response": "L'agent a terminé ce tour sans réponse textuelle.",
+    "failure": {
+      "agent_error": "L'agent a rencontré une erreur et n'a pas pu terminer sa réponse. Veuillez réessayer.",
+      "timeout": "L'agent a mis trop de temps et s'est arrêté avant de terminer. Réessayez, ou découpez votre demande en étapes plus courtes.",
+      "codex_semantic_inactivity": "L'agent est resté inactif et s'est arrêté avant de terminer. Veuillez réessayer.",
+      "runtime_offline": "L'agent est actuellement hors ligne et n'a donc pas pu répondre. Veuillez réessayer dès son retour en ligne.",
+      "runtime_recovery": "L'agent a redémarré avant d'avoir pu terminer. Veuillez réessayer.",
+      "manual": "Cette réponse a été annulée.",
+      "skill_bundle_unavailable": "Les skills de l'agent n'ont pas pu être téléchargés : il n'a donc jamais démarré. C'est généralement un problème de connexion — veuillez réessayer.",
+      "provider_network": "La connexion au fournisseur du modèle a été perdue avant la fin de la réponse. Vérifiez votre réseau et réessayez.",
+      "provider_auth_or_access": "Le compte de modèle de l'agent n'est plus connecté. Reconnectez-vous, puis réessayez.",
+      "provider_quota_limit": "Le compte de modèle de l'agent n'a plus de crédit. Rechargez-le ou changez de compte, puis réessayez.",
+      "provider_capacity_or_rate_limit": "Le fournisseur du modèle est saturé ou limite le débit de ce compte. Veuillez réessayer dans un instant.",
+      "context_overflow": "Cette conversation est devenue trop longue pour le modèle. Démarrez une nouvelle session, ou découpez votre demande en étapes plus courtes.",
+      "runtime_missing_executable": "Le CLI de l'agent n'a pas pu être exécuté sur cette machine. Vérifiez qu'il est correctement installé et présent dans le PATH, puis réessayez.",
+      "runtime_version_unsupported": "Le CLI de l'agent est trop ancien pour ce runtime. Mettez-le à jour, puis réessayez.",
+      "fallback": "Une erreur est survenue et l'agent n'a pas pu terminer sa réponse. Veuillez réessayer."
+    },
+    "tools_one": "{{count}} outil",
+    "tools_other": "{{count}} outils",
+    "tool_result_named": "Résultat de {{tool}} : ",
+    "tool_result_unnamed": "résultat : ",
+    "process_steps_one": "{{count}} étape",
+    "process_steps_other": "{{count}} étapes",
+    "copy_action": "Copier",
+    "copied_toast": "Copié",
+    "copy_failed_toast": "Échec de la copie",
+    "loading_older": "Chargement des messages plus anciens…",
+    "quick_actions_heading": "Questions de suivi",
+    "quick_actions_regenerate": "Régénérer les suggestions",
+    "quick_actions_regenerate_failed": "Impossible d'actualiser les suggestions. Veuillez réessayer."
+  },
+  "session_history": {
+    "untitled": "Sans titre",
+    "time": {
+      "just_now": "à l'instant",
+      "minutes": "il y a {{count}} min",
+      "hours": "il y a {{count}} h",
+      "days": "il y a {{count}} j"
+    },
+    "row_delete_aria": "Supprimer la session de discussion",
+    "row_rename_aria": "Renommer la session de discussion",
+    "row_stop_aria": "Arrêter l'exécution en cours",
+    "stop_action": "Arrêter",
+    "row_subtitle": {
+      "working": "Au travail",
+      "completed": "Terminé",
+      "new_reply": "Nouvelle réponse"
+    },
+    "stop_dialog": {
+      "title": "Arrêter cette exécution ?",
+      "description_with_title": "La tâche d'agent en cours dans « {{title}} » sera annulée. La sortie partielle restera dans la discussion.",
+      "description_default": "La tâche d'agent en cours sera annulée. La sortie partielle restera dans la discussion.",
+      "cancel": "Laisser tourner",
+      "confirm": "Arrêter l'exécution",
+      "confirming": "Arrêt..."
+    },
+    "delete_dialog": {
+      "title": "Supprimer la session de discussion",
+      "description_with_title": "« {{title}} » et ses messages seront définitivement supprimés. Cette action est irréversible.",
+      "description_default": "Cette session de discussion et ses messages seront définitivement supprimés. Cette action est irréversible.",
+      "cancel": "Annuler",
+      "confirm": "Supprimer",
+      "confirming": "Suppression..."
+    },
+    "row_actions_aria": "Actions de discussion"
+  },
+  "window": {
+    "new_chat_tooltip": "Nouvelle discussion",
+    "restore_tooltip": "Restaurer",
+    "expand_tooltip": "Développer",
+    "minimize_tooltip": "Réduire",
+    "another_running": "Une autre discussion est en cours",
+    "another_unread": "Une autre discussion a des réponses non lues",
+    "running": "En cours",
+    "unread": "Non lu",
+    "no_previous": "Aucune discussion précédente",
+    "untitled": "Nouvelle discussion",
+    "my_agents": "Mes agents",
+    "others": "Autres",
+    "no_agents": "Aucun agent",
+    "history_group": "Historique des discussions",
+    "agent_filter_placeholder": "Rechercher des agents...",
+    "agent_needs_runtime": "Runtime requis",
+    "agent_needs_runtime_hint": "Associez un runtime avant de démarrer une discussion avec cet agent"
+  },
+  "empty_state": {
+    "first_time_title": "Discutez avec vos agents",
+    "first_time_intro": "✨ Ils connaissent votre espace de travail —",
+    "first_time_pillars": "tickets, projets, skills",
+    "first_time_pillars_suffix": ".",
+    "first_time_actions": "Demandez un résumé, planifiez votre journée, ou confiez une tâche rapide.",
+    "returning_title_named": "Bonjour, je suis {{name}}",
+    "returning_title_default": "Bienvenue sur Multica",
+    "returning_subtitle": "Essayez de demander",
+    "chat_with_named": "Discuter avec {{name}}"
+  },
+  "starter_prompts": {
+    "list_open": "Liste mes tâches ouvertes par priorité",
+    "summarize_today": "Résume ce que j'ai fait aujourd'hui",
+    "plan_next": "Planifie la suite de mon travail"
+  },
+  "onboarding_cards": {
+    "aria_label": "Façons de démarrer",
+    "cta": "Démarrer",
+    "board": {
+      "title": "Montez un tableau en quelques minutes",
+      "desc": "Donnez-moi l'objectif — je crée le projet, découpe les tickets et fixe les priorités.",
+      "prompt": "Transforme nos objectifs actuels en tableau de projet"
+    },
+    "delegate": {
+      "title": "Confiez-moi une première chose",
+      "desc": "Une recherche rapide, par exemple — les résultats reviennent sous forme de ticket et de rapport.",
+      "prompt": "Enlève-moi une tâche des mains : mène une recherche rapide et renvoie les résultats sous forme de rapport"
+    },
+    "digest": {
+      "title": "Laissez le résumé quotidien s'écrire tout seul",
+      "desc": "Un résumé matinal de l'avancement de l'espace de travail, directement dans votre boîte de réception.",
+      "prompt": "Mets en place une automatisation quotidienne qui publie un résumé matinal de l'avancement de l'espace de travail"
+    },
+    "digest_badge": "Tous les jours à 9 h"
+  },
+  "no_agent_banner": "Vous avez besoin d'un agent pour commencer à discuter.",
+  "archived_agent_banner": "{{name}} a été archivé — cette conversation est en lecture seule.",
+  "runtime_required_banner": {
+    "fallback_name": "L'agent",
+    "message": "{{name}} a besoin d'un runtime pour pouvoir répondre.",
+    "action": "Associer un runtime"
+  },
+  "offline_banner": {
+    "fallback_name": "l'agent",
+    "unstable": "La connexion de {{name}} est instable — les réponses peuvent être retardées.",
+    "offline": "{{name}} est hors ligne — votre message sera remis à son retour."
+  },
+  "status_pill": {
+    "stages": {
+      "offline": "Hors ligne",
+      "reconnecting": "Reconnexion",
+      "retrying": "Nouvelle tentative",
+      "queued": "En file d'attente",
+      "waiting_local_directory": "En attente du répertoire local",
+      "starting_up": "Démarrage",
+      "thinking": "Réflexion",
+      "typing": "Rédaction"
+    },
+    "tools": {
+      "running_command": "Exécution d'une commande",
+      "reading_files": "Lecture de fichiers",
+      "searching_code": "Recherche dans le code",
+      "making_edits": "Modifications en cours",
+      "searching_web": "Recherche sur le web",
+      "fallback": "Au travail"
+    }
+  },
+  "list": {
+    "typing": "Rédaction…",
+    "failed": "Échec de l'envoi",
+    "you_prefix": "Vous : ",
+    "no_messages": "Aucun message pour l'instant",
+    "no_response_preview": "Aucune réponse textuelle",
+    "quick_agents": "Agents fréquents",
+    "add": "Ajouter",
+    "add_agent": "Ajouter un agent fréquent",
+    "unpin_agent": "Retirer des agents fréquents",
+    "waiting": "En attente de réponse",
+    "pin": "Épingler",
+    "unpin": "Détacher",
+    "pinned": "Épinglé",
+    "archive": "Archiver",
+    "unarchive": "Désarchiver",
+    "archived_title": "Archivées",
+    "row_actions_aria": "Actions de discussion"
+  },
+  "header": {
+    "view_profile": "Voir le profil de l'agent",
+    "rename": "Renommer la discussion",
+    "archive": "Archiver la discussion",
+    "unarchive": "Désarchiver la discussion",
+    "delete": "Supprimer la discussion"
+  }
+}
