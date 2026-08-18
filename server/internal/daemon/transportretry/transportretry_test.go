@@ -2,6 +2,7 @@ package transportretry_test
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 	"sync/atomic"
@@ -361,11 +362,48 @@ func (o *testObserver) RecordWallSeconds(_, _ string, _ float64) {}
 
 func TestResolveConfigAgentCustomEnvOverridesEnv(t *testing.T) {
 	t.Setenv("MULTICA_TRANSPORT_RETRY_CONFIG", `{"enabled":true}`)
-	cfg := transportretry.ResolveConfig(map[string]string{
-		"MULTICA_TRANSPORT_RETRY_CONFIG": `{"enabled":false}`,
+	cfg := transportretry.ResolveConfig(transportretry.ResolveOptions{
+		AgentCustomEnv: map[string]string{
+			"MULTICA_TRANSPORT_RETRY_CONFIG": `{"enabled":false}`,
+		},
 	})
 	if cfg.Enabled {
 		t.Fatal("agent custom_env should override process env")
+	}
+}
+
+func TestResolveConfigMetadataOverridesDefaults(t *testing.T) {
+	t.Parallel()
+	workspaceSettings := json.RawMessage(`{"transport_retry":{"enabled":false}}`)
+	cfg := transportretry.ResolveConfig(transportretry.ResolveOptions{
+		WorkspaceSettings: workspaceSettings,
+	})
+	if cfg.Enabled {
+		t.Fatal("workspace transport_retry should override built-in defaults")
+	}
+}
+
+func TestResolveConfigEnvOverridesMetadata(t *testing.T) {
+	workspaceSettings := json.RawMessage(`{"transport_retry":{"enabled":false}}`)
+	t.Setenv("MULTICA_TRANSPORT_RETRY_CONFIG", `{"enabled":true}`)
+	cfg := transportretry.ResolveConfig(transportretry.ResolveOptions{
+		WorkspaceSettings: workspaceSettings,
+	})
+	if !cfg.Enabled {
+		t.Fatal("process env should override workspace metadata")
+	}
+}
+
+func TestResolveConfigRuntimeMetadataOverridesWorkspace(t *testing.T) {
+	t.Parallel()
+	workspaceSettings := json.RawMessage(`{"transport_retry":{"enabled":true}}`)
+	runtimeMetadata := json.RawMessage(`{"transport_retry":{"enabled":false}}`)
+	cfg := transportretry.ResolveConfig(transportretry.ResolveOptions{
+		WorkspaceSettings: workspaceSettings,
+		RuntimeMetadata:   runtimeMetadata,
+	})
+	if cfg.Enabled {
+		t.Fatal("runtime metadata should override workspace settings")
 	}
 }
 

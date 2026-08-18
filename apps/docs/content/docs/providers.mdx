@@ -94,7 +94,35 @@ Safety gates:
 
 - Retries run only when **no tool** was observed in the failing attempt (`tools == 0`).
 - A configurable session ladder applies per policy — typically same-session resume first, then a single fresh-session attempt.
-- Disable globally with `MULTICA_TRANSPORT_RETRY_CONFIG` set to `{"enabled":false}`, or override individual policies in that JSON document. Per-agent overrides use the same variable in agent `custom_env` (wins over the daemon process env).
+
+Configuration is layered; later sources override earlier ones:
+
+1. Built-in defaults
+2. Workspace `settings.transport_retry` (delivered to the daemon on register / repo refresh)
+3. Runtime `metadata.transport_retry` (the `agent_runtime.metadata` blob for the bound runtime)
+4. Daemon process env `MULTICA_TRANSPORT_RETRY_CONFIG`
+5. Per-agent `custom_env.MULTICA_TRANSPORT_RETRY_CONFIG`
+
+Example workspace or runtime metadata block:
+
+```json
+{
+  "transport_retry": {
+    "enabled": true,
+    "policies": [
+      {
+        "id": "cursor_writable_iterable",
+        "enabled": true,
+        "max_extra_attempts": 2,
+        "delays_ms": [0, 0, 5000],
+        "session_strategy": ["same_session", "same_session", "fresh_session"]
+      }
+    ]
+  }
+}
+```
+
+Disable globally with `{"enabled":false}` in any layer, or override individual policies in that JSON document.
 
 Daemon task logs emit structured `transport_retry` lines and Prometheus counters under `multica_agent_transport_retry_*` for attempts, recoveries, cache-read tokens, and extra wall time.
 

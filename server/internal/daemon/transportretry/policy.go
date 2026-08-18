@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+// ResolveOptions carries layered transport-retry overrides. Later layers win.
+type ResolveOptions struct {
+	WorkspaceSettings json.RawMessage
+	RuntimeMetadata   json.RawMessage
+	AgentCustomEnv    map[string]string
+}
+
 // Policy describes a provider-agnostic transport-layer retry ladder.
 type Policy struct {
 	ID              string
@@ -127,16 +134,44 @@ func MergeConfigJSON(cfg Config, raw string) Config {
 	return cfg
 }
 
-// ResolveConfig layers daemon env defaults with an optional per-agent override
-// from custom_env (MULTICA_TRANSPORT_RETRY_CONFIG wins over the process env).
-func ResolveConfig(agentCustomEnv map[string]string) Config {
-	cfg := LoadConfig()
-	if agentCustomEnv != nil {
-		if raw := strings.TrimSpace(agentCustomEnv["MULTICA_TRANSPORT_RETRY_CONFIG"]); raw != "" {
+// ResolveConfig merges built-in defaults with workspace settings, runtime
+// metadata, process env, and per-agent custom_env. Later layers override
+// earlier ones: defaults < workspace < runtime < env < agent custom_env.
+func ResolveConfig(opts ResolveOptions) Config {
+	cfg := DefaultConfig()
+	if raw := extractTransportRetryBlock(opts.WorkspaceSettings); raw != "" {
+		cfg = MergeConfigJSON(cfg, raw)
+	}
+	if raw := extractTransportRetryBlock(opts.RuntimeMetadata); raw != "" {
+		cfg = MergeConfigJSON(cfg, raw)
+	}
+	if raw := strings.TrimSpace(os.Getenv("MULTICA_TRANSPORT_RETRY_CONFIG")); raw != "" {
+		cfg = MergeConfigJSON(cfg, raw)
+	}
+	if opts.AgentCustomEnv != nil {
+		if raw := strings.TrimSpace(opts.AgentCustomEnv["MULTICA_TRANSPORT_RETRY_CONFIG"]); raw != "" {
 			cfg = MergeConfigJSON(cfg, raw)
 		}
 	}
 	return cfg
+}
+
+func extractTransportRetryBlock(parent json.RawMessage) string {
+	parent = json.RawMessage(strings.TrimSpace(string(parent)))
+	if len(parent) == 0 {
+		return ""
+	}
+	var envelope struct {
+		TransportRetry json.RawMessage `json:"transport_retry"`
+	}
+	if err := json.Unmarshal(parent, &envelope); err != nil {
+		return ""
+	}
+	block := strings.TrimSpace(string(envelope.TransportRetry))
+	if block == "" || block == "null" {
+		return ""
+	}
+	return block
 }
 
 func applyPolicyOverrides(cfg *Config, overrides []PolicyOverride) {

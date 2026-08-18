@@ -32,6 +32,9 @@ type Runtime struct {
 	// command_name to the executable to launch. Built-in (provider-detected)
 	// runtimes leave this empty.
 	ProfileID string `json:"profile_id,omitempty"`
+	// Metadata is the server-side runtime metadata blob (agent_runtime.metadata).
+	// User-editable keys such as transport_retry are merged into daemon config.
+	Metadata json.RawMessage `json:"metadata,omitempty"`
 }
 
 // RepoData holds repository information from the workspace.

@@ -2695,6 +2695,26 @@ func (d *Daemon) workspaceCoAuthoredByEnabled(workspaceID string) bool {
 	return *s.CoAuthoredByEnabled
 }
 
+func (d *Daemon) workspaceSettings(workspaceID string) json.RawMessage {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	ws, ok := d.workspaces[workspaceID]
+	if !ok {
+		return nil
+	}
+	return ws.settings
+}
+
+func (d *Daemon) runtimeMetadata(runtimeID string) json.RawMessage {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	rt, ok := d.runtimeIndex[runtimeID]
+	if !ok {
+		return nil
+	}
+	return rt.Metadata
+}
+
 // registerTaskRepos merges task-scoped repos (e.g. project github_repo
 // resources lifted into resp.Repos by the claim handler) into the workspace's
 // allowlist and kicks off a cache sync for any URLs that aren't yet cached.
@@ -6419,7 +6439,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		}
 		return BuildPrompt(task, provider)
 	}
-	transportCfg := transportretry.ResolveConfig(agentCustomEnv)
+	transportCfg := transportretry.ResolveConfig(transportretry.ResolveOptions{
+		WorkspaceSettings: d.workspaceSettings(task.WorkspaceID),
+		RuntimeMetadata:   d.runtimeMetadata(task.RuntimeID),
+		AgentCustomEnv:    agentCustomEnv,
+	})
 	result, tools, transportStats, transportRetired, transportReceiptJSON, err := d.executeWithTransportRetry(
 		ctx, transportCfg, backend, prompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq,
 		provider, task.PriorSessionID, onTransportFreshSession,
