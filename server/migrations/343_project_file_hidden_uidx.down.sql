@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS project_file_hidden_project_attachment_user_uidx;

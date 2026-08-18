@@ -14,6 +14,23 @@ SELECT * FROM attachment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC;
 
+-- name: ListIssueFiles :many
+-- All artifacts produced for one issue: files attached directly to the issue
+-- plus files attached to any of its comments. Mirrors ListProjectFiles' scoping
+-- but for a single issue (chat attachments are deliberately out of scope — a
+-- chat session's files already surface in its own thread).
+SELECT sqlc.embed(a)
+FROM attachment a
+WHERE a.workspace_id = sqlc.arg(workspace_id)
+  AND (
+    a.issue_id = sqlc.arg(issue_id)
+    OR a.comment_id IN (
+      SELECT c.id FROM comment c
+      WHERE c.issue_id = sqlc.arg(issue_id) AND c.workspace_id = sqlc.arg(workspace_id)
+    )
+  )
+ORDER BY a.created_at DESC;
+
 -- name: ListAttachmentsByComment :many
 SELECT * FROM attachment
 WHERE comment_id = $1 AND workspace_id = $2

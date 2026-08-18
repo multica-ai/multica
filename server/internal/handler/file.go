@@ -626,6 +626,72 @@ func (h *Handler) ListAttachments(w http.ResponseWriter, r *http.Request) {
 }
 
 // ---------------------------------------------------------------------------
+// ListIssueFiles — GET /api/issues/{id}/files
+// ---------------------------------------------------------------------------
+
+// ListIssueFiles aggregates every artifact produced for one issue: files
+// attached directly to the issue plus files attached to any of its comments,
+// newest first. Unlike ListAttachments (issue-scoped only, used by the
+// description editor), this is the full "files in this task" surface.
+func (h *Handler) ListIssueFiles(w http.ResponseWriter, r *http.Request) {
+	issue, ok := h.loadIssueForUser(w, r, chi.URLParam(r, "id"))
+	if !ok {
+		return
+	}
+
+	rows, err := h.Queries.ListIssueFiles(r.Context(), db.ListIssueFilesParams{
+		IssueID:     issue.ID,
+		WorkspaceID: issue.WorkspaceID,
+	})
+	if err != nil {
+		slog.Error("failed to list issue files", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to list issue files")
+		return
+	}
+
+	atts := make([]db.Attachment, len(rows))
+	for i, row := range rows {
+		atts[i] = row.Attachment
+	}
+	atts = dedupeAttachments(atts)
+
+	mode := attachmentURLModeFromRequest(r)
+	resp := make([]AttachmentResponse, len(atts))
+	for i, a := range atts {
+		resp[i] = h.attachmentToResponse(a, mode)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"files": resp, "total": len(resp)})
+}
+
+// attachmentDedupeKey identifies a file by its filename + size. Two rows that
+// share both are treated as the same produced artifact: an agent can attach one
+// generated file to both the issue and a comment, which is two upload rows but
+// one artifact, and a files list must surface it once.
+func attachmentDedupeKey(a db.Attachment) string {
+	return a.Filename + "\x00" + strconv.FormatInt(a.SizeBytes, 10)
+}
+
+// dedupeAttachments collapses attachments sharing filename + size, keeping the
+// FIRST occurrence (callers order created_at DESC, so that is the newest row,
+// which also carries the most linkage context).
+func dedupeAttachments(atts []db.Attachment) []db.Attachment {
+	if len(atts) < 2 {
+		return atts
+	}
+	seen := make(map[string]struct{}, len(atts))
+	out := make([]db.Attachment, 0, len(atts))
+	for _, a := range atts {
+		key := attachmentDedupeKey(a)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, a)
+	}
+	return out
+}
+
+// ---------------------------------------------------------------------------
 // GetAttachmentByID — GET /api/attachments/{id}
 // ---------------------------------------------------------------------------
 
@@ -1420,6 +1486,14 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		slog.Error("failed to delete attachment", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete attachment")
 		return
+	}
+
+	// Reap this attachment's per-user "hidden project file" rows. Best-effort,
+	// like the S3 delete below: an orphaned hidden row is harmless — it can
+	// only ever reference an attachment that no longer exists, so it never
+	// surfaces in any list.
+	if err := h.Queries.DeleteProjectFileHiddenByAttachment(r.Context(), att.ID); err != nil {
+		slog.Error("failed to reap hidden project-file rows", "attachment_id", uuidToString(att.ID), "error", err)
 	}
 
 	h.deleteS3Object(r.Context(), att.Url)

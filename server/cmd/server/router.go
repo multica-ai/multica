@@ -1591,6 +1591,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/reactions", h.AddIssueReaction)
 					r.Delete("/reactions", h.RemoveIssueReaction)
 					r.Get("/attachments", h.ListAttachments)
+					r.Get("/files", h.ListIssueFiles)
 					r.Get("/children", h.ListChildIssues)
 					r.Get("/labels", h.ListLabelsForIssue)
 					r.Post("/labels", h.AttachLabel)
@@ -1664,6 +1665,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/resources", h.CreateProjectResource)
 					r.Put("/resources/{resourceId}", h.UpdateProjectResource)
 					r.Delete("/resources/{resourceId}", h.DeleteProjectResource)
+					r.Get("/files", h.ListProjectFiles)
+					r.Post("/files/{attachmentId}/hide", h.HideProjectFile)
+					r.Delete("/files/{attachmentId}/hide", h.UnhideProjectFile)
 				})
 			})
 

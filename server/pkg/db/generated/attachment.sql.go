@@ -685,6 +685,68 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 	return items, nil
 }
 
+const listIssueFiles = `-- name: ListIssueFiles :many
+SELECT a.id, a.workspace_id, a.issue_id, a.comment_id, a.uploader_type, a.uploader_id, a.filename, a.url, a.content_type, a.size_bytes, a.created_at, a.chat_session_id, a.chat_message_id, a.task_id
+FROM attachment a
+WHERE a.workspace_id = $1
+  AND (
+    a.issue_id = $2
+    OR a.comment_id IN (
+      SELECT c.id FROM comment c
+      WHERE c.issue_id = $2 AND c.workspace_id = $1
+    )
+  )
+ORDER BY a.created_at DESC
+`
+
+type ListIssueFilesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+}
+
+type ListIssueFilesRow struct {
+	Attachment Attachment `json:"attachment"`
+}
+
+// All artifacts produced for one issue: files attached directly to the issue
+// plus files attached to any of its comments. Mirrors ListProjectFiles' scoping
+// but for a single issue (chat attachments are deliberately out of scope — a
+// chat session's files already surface in its own thread).
+func (q *Queries) ListIssueFiles(ctx context.Context, arg ListIssueFilesParams) ([]ListIssueFilesRow, error) {
+	rows, err := q.db.Query(ctx, listIssueFiles, arg.WorkspaceID, arg.IssueID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListIssueFilesRow{}
+	for rows.Next() {
+		var i ListIssueFilesRow
+		if err := rows.Scan(
+			&i.Attachment.ID,
+			&i.Attachment.WorkspaceID,
+			&i.Attachment.IssueID,
+			&i.Attachment.CommentID,
+			&i.Attachment.UploaderType,
+			&i.Attachment.UploaderID,
+			&i.Attachment.Filename,
+			&i.Attachment.Url,
+			&i.Attachment.ContentType,
+			&i.Attachment.SizeBytes,
+			&i.Attachment.CreatedAt,
+			&i.Attachment.ChatSessionID,
+			&i.Attachment.ChatMessageID,
+			&i.Attachment.TaskID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const replaceCommentAttachments = `-- name: ReplaceCommentAttachments :exec
 UPDATE attachment
 SET comment_id = CASE
