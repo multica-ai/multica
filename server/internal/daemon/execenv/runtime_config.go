@@ -195,8 +195,11 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 // Cleanup in lockstep — both paths consult the same table so a new provider
 // added to one side cannot drift past the other.
 func runtimeConfigPath(workDir, provider string) string {
-	// Built-in runtime identities (e.g. "omp") inherit their config file from
-	// their protocol family.
+	// Built-in runtime identities (e.g. "omp") inherit their config file
+	// from their protocol family — resolve the family from the descriptor
+	// and delegate to the family's switch case. This avoids hardcoding
+	// "AGENTS.md" for every descriptor; a compatible runtime on Claude,
+	// CodeBuddy, or Qwen would otherwise write the wrong file.
 	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
 		return runtimeConfigPath(workDir, desc.ProtocolFamily)
 	}
