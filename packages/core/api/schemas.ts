@@ -41,6 +41,9 @@ import type {
   TelegramInstallation,
   ListTelegramInstallationsResponse,
   RedeemTelegramBindingTokenResponse,
+  ShareCRMInstallation,
+  ListShareCRMInstallationsResponse,
+  RedeemShareCRMBindingTokenResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   GitHubPullRequest,
@@ -2869,6 +2872,51 @@ export const EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE: RedeemTelegramBinding
   workspace_id: "",
   installation_id: "",
   telegram_user_id: "",
+};
+
+export const ShareCRMInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_SHARECRM_INSTALLATION: ShareCRMInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  installer_user_id: "",
+  status: "revoked",
+  installed_at: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListShareCRMInstallationsResponseSchema = z.object({
+  installations: z.array(ShareCRMInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_SHARECRM_INSTALLATIONS_RESPONSE: ListShareCRMInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
+
+export const RedeemShareCRMBindingTokenResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  installation_id: z.string().default(""),
+  sharecrm_user_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_REDEEM_SHARECRM_BINDING_TOKEN_RESPONSE: RedeemShareCRMBindingTokenResponse = {
+  workspace_id: "",
+  installation_id: "",
+  sharecrm_user_id: "",
 };
 
 // Skills. Introduced for `POST /api/skills/:id/refresh` (update a skill from
