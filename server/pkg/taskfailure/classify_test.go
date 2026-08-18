@@ -100,6 +100,8 @@ func TestClassifyRules(t *testing.T) {
 		{"stream disconnected", "stream disconnected before completion", ReasonAgentProviderNetwork},
 		{"connection closed mid-response", "API Error: Connection closed mid-response. The response above may be incomplete.", ReasonAgentProviderNetwork},
 		{"connection closed with exit status wins over process failure", "claude exited with error: exit status 1\nAPI Error: Connection closed mid-response.", ReasonAgentProviderNetwork},
+		{"cursor writableiterable with exit status wins over process failure", "cursor-agent exited with error: exit status 1 (result_seen=false, exit_code=1, scanner_error=false, event_count=319, invalid_event_count=0, last_event_type=thinking); actions completed before finalization may already have taken effect; cursor stderr: RetriableError: WritableIterable is closed\nError: command failed unexpectedly.", ReasonAgentProviderNetwork},
+		{"cursor writableiterable stderr alone", "RetriableError: WritableIterable is closed\nError: command failed unexpectedly.", ReasonAgentProviderNetwork},
 		{"error sending request", "error sending request for url (https://api.example.com/v1)", ReasonAgentProviderNetwork},
 		{"unable to connect", "unable to connect to provider", ReasonAgentProviderNetwork},
 		{"dial tcp", "dial tcp 1.2.3.4:443: connect: connection refused", ReasonAgentProviderNetwork},
@@ -416,6 +418,27 @@ func TestNormalizeDaemonReason(t *testing.T) {
 			reason: string(ReasonAgentUnknown),
 			raw:    "API Error: the model is overloaded",
 			want:   ReasonAgentUnknown,
+		},
+
+		// --- cursor-agent WritableIterable: an un-upgraded daemon classifies
+		// the trailing exit status as process_failure, which is not retryable.
+		{
+			name:   "old daemon process_failure on writableiterable is upgraded",
+			reason: string(ReasonAgentProcessFailure),
+			raw:    "cursor-agent exited with error: exit status 1 (result_seen=false, exit_code=1, scanner_error=false, event_count=319, invalid_event_count=0, last_event_type=thinking); cursor stderr: RetriableError: WritableIterable is closed\nError: command failed unexpectedly.",
+			want:   ReasonAgentProviderNetwork,
+		},
+		{
+			name:   "old daemon catchall on writableiterable is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    "RetriableError: WritableIterable is closed\nError: command failed unexpectedly.",
+			want:   ReasonAgentProviderNetwork,
+		},
+		{
+			name:   "current daemon provider_network reason passes through",
+			reason: string(ReasonAgentProviderNetwork),
+			raw:    "cursor-agent exited with error: exit status 1; cursor stderr: RetriableError: WritableIterable is closed",
+			want:   ReasonAgentProviderNetwork,
 		},
 	}
 

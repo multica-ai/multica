@@ -190,10 +190,16 @@ func Classify(rawError string) Reason {
 	//    matching rule 13 by accident) and agent_error.unknown respectively;
 	//    neither is on the retry allowlist, so a transient cut ended the task
 	//    outright and max_attempts never applied (#6522).
-	//    Mirror these substrings into the MUL-1949 offline backfill SQL.
+	//    "writableiterable is closed" is cursor-agent's RetriableError when its
+	//    stream-json thinking pipeline closes the async iterable while deltas
+	//    are still being written. The CLI labels it retriable and a manual
+	//    re-run usually succeeds; without this entry the trailing "exit status
+	//    1" lands in process_failure, which is not on the retry allowlist.
+	//    Mirror this substring into the MUL-1949 offline backfill SQL.
 	case containsAny(lower,
 		"stream disconnected",
 		opencodeStreamEndedPrefix,
+		cursorWritableIterableClosedWitness,
 		"connection closed",
 		"mid-response",
 		"error sending request",
@@ -339,6 +345,11 @@ var legacyContextOverflowReasons = map[string]bool{
 // its presence identifies the failure outright.
 const opencodeStreamEndedPrefix = "opencode stream ended"
 
+// cursorWritableIterableClosedWitness is the exact stderr phrase cursor-agent
+// emits when its stream-json serializer closes while thinking deltas are still
+// in flight. Matched case-insensitively like every other Classify substring.
+const cursorWritableIterableClosedWitness = "writableiterable is closed"
+
 // legacyOpencodeStreamEndedReasons are the buckets a daemon predating rule 7's
 // entry lands these errors in: process_failure for the two "terminal signal"
 // variants, whose word "signal" its rule 13 matches by accident, unknown for
@@ -351,6 +362,16 @@ const opencodeStreamEndedPrefix = "opencode stream ended"
 // old bucket cannot be describing some other, better-identified cause — it is
 // the same failure under a label that predates knowing what it was.
 var legacyOpencodeStreamEndedReasons = map[string]bool{
+	string(ReasonAgentProcessFailure): true,
+	string(ReasonAgentUnknown):        true,
+	"agent_error":                     true,
+}
+
+// legacyCursorWritableIterableReasons are the buckets a daemon predating rule
+// 7's cursor entry lands these errors in: process_failure from rule 13's
+// "exit status" match, unknown for anything its rules miss, and the pre-MUL-1949
+// coarse agent_error. The witness is cursor-agent's own RetriableError text.
+var legacyCursorWritableIterableReasons = map[string]bool{
 	string(ReasonAgentProcessFailure): true,
 	string(ReasonAgentUnknown):        true,
 	"agent_error":                     true,
@@ -398,6 +419,10 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	// deploys, without waiting on the daemon fleet.
 	if legacyOpencodeStreamEndedReasons[reason] &&
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawError)), opencodeStreamEndedPrefix) {
+		return ReasonAgentProviderNetwork
+	}
+	if legacyCursorWritableIterableReasons[reason] &&
+		strings.Contains(strings.ToLower(rawError), cursorWritableIterableClosedWitness) {
 		return ReasonAgentProviderNetwork
 	}
 	return Reason(reason)
