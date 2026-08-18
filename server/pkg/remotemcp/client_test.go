@@ -6,7 +6,6 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
-
 )
 
 type staticResolver map[string][]netip.Addr

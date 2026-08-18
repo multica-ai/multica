@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
@@ -303,6 +304,11 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 			InstalledBy:   userID,
 		})
 		if createErr != nil {
+			// Two admins installing the same plugin at once: one loses the
+			// unique index. That is a conflict to retry, not a broken backend.
+			if isUniqueViolation(createErr) {
+				return db.PluginInstallation{}, pluginErrf(PluginErrorConflict, "this plugin is already installed in this workspace")
+			}
 			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "install plugin", Err: createErr}
 		}
 		return installation, nil
@@ -311,10 +317,30 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "load existing installation", Err: err}
 	}
 
-	// Upgrade in place. Config values whose fields the new manifest dropped are
-	// pruned here rather than lingering as unreachable state.
+	// Upgrade in place. Values whose fields the new manifest dropped are pruned
+	// rather than left as state nothing can reach — and that applies to secrets
+	// too, which is the case where unreachable residue is ciphertext. The whole
+	// upgrade is one transaction so a snapshot can never land with the previous
+	// version's secrets still attached.
 	config := pruneConfig(existing.Config, manifest)
-	updated, err := s.Queries.UpdatePluginInstallationManifest(ctx, db.UpdatePluginInstallationManifestParams{
+	orphanedSecrets, err := s.orphanedSecretKeys(ctx, existing.ID, manifest)
+	if err != nil {
+		return db.PluginInstallation{}, err
+	}
+
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "begin upgrade", Err: err}
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	queries := s.Queries.WithTx(tx)
+
+	for _, key := range orphanedSecrets {
+		if _, err := queries.DeletePluginSecret(ctx, db.DeletePluginSecretParams{InstallationID: existing.ID, Key: key}); err != nil {
+			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "prune plugin secret", Err: err}
+		}
+	}
+	updated, err := queries.UpdatePluginInstallationManifest(ctx, db.UpdatePluginInstallationManifestParams{
 		ID:            existing.ID,
 		SourceUrl:     sourceURL,
 		Version:       manifest.Version,
@@ -325,7 +351,27 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 	if err != nil {
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "upgrade plugin", Err: err}
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "commit upgrade", Err: err}
+	}
 	return updated, nil
+}
+
+// orphanedSecretKeys returns stored secrets the new manifest no longer declares
+// as a secret field — including a field that changed type away from secret.
+func (s *PluginService) orphanedSecretKeys(ctx context.Context, installationID pgtype.UUID, manifest plugincontract.Manifest) ([]string, error) {
+	stored, err := s.Queries.ListPluginSecretKeys(ctx, installationID)
+	if err != nil {
+		return nil, &PluginError{Kind: PluginErrorUnavailable, Message: "list plugin secrets", Err: err}
+	}
+	orphaned := make([]string, 0)
+	for _, row := range stored {
+		field, ok := manifest.Config.Field(row.Key)
+		if !ok || field.Type != plugincontract.ConfigSecret {
+			orphaned = append(orphaned, row.Key)
+		}
+	}
+	return orphaned, nil
 }
 
 func requireExactScopes(manifestScopes, grantedScopes []string) error {
@@ -420,40 +466,58 @@ func (s *PluginService) SetConfig(ctx context.Context, installation db.PluginIns
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorInvalid, Message: "encode plugin config", Err: err}
 	}
 
-	if len(secrets) > 0 {
-		if s.Secrets == nil {
-			return db.PluginInstallation{}, pluginErrf(PluginErrorUnavailable, "plugin secrets are disabled: MULTICA_PLUGIN_SECRET_KEY is not configured")
+	if len(secrets) > 0 && s.Secrets == nil {
+		return db.PluginInstallation{}, pluginErrf(PluginErrorUnavailable, "plugin secrets are disabled: MULTICA_PLUGIN_SECRET_KEY is not configured")
+	}
+
+	// Secrets and plain values are two tables with no foreign key between them,
+	// so one transaction is what keeps a saved form from landing half-applied.
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "begin configure", Err: err}
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	queries := s.Queries.WithTx(tx)
+
+	for key, text := range secrets {
+		// An empty submission clears the secret rather than storing "".
+		if text == "" {
+			if _, err := queries.DeletePluginSecret(ctx, db.DeletePluginSecretParams{InstallationID: installation.ID, Key: key}); err != nil {
+				return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "clear plugin secret", Err: err}
+			}
+			continue
 		}
-		for key, text := range secrets {
-			// An empty submission clears the secret rather than storing "".
-			if text == "" {
-				if _, err := s.Queries.DeletePluginSecret(ctx, db.DeletePluginSecretParams{InstallationID: installation.ID, Key: key}); err != nil {
-					return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "clear plugin secret", Err: err}
-				}
-				continue
-			}
-			ciphertext, sealErr := s.Secrets.Seal([]byte(text))
-			if sealErr != nil {
-				return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "encrypt plugin secret", Err: sealErr}
-			}
-			if err := s.Queries.UpsertPluginSecret(ctx, db.UpsertPluginSecretParams{
-				InstallationID: installation.ID,
-				Key:            key,
-				Ciphertext:     ciphertext,
-			}); err != nil {
-				return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "store plugin secret", Err: err}
-			}
+		ciphertext, sealErr := s.Secrets.Seal([]byte(text))
+		if sealErr != nil {
+			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "encrypt plugin secret", Err: sealErr}
+		}
+		if err := queries.UpsertPluginSecret(ctx, db.UpsertPluginSecretParams{
+			InstallationID: installation.ID,
+			Key:            key,
+			Ciphertext:     ciphertext,
+		}); err != nil {
+			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "store plugin secret", Err: err}
 		}
 	}
 
-	updated, err := s.Queries.UpdatePluginInstallationConfig(ctx, db.UpdatePluginInstallationConfigParams{
+	updated, err := queries.UpdatePluginInstallationConfig(ctx, db.UpdatePluginInstallationConfigParams{
 		ID:     installation.ID,
 		Config: encoded,
 	})
 	if err != nil {
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "store plugin config", Err: err}
 	}
+	if err := tx.Commit(ctx); err != nil {
+		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "commit configure", Err: err}
+	}
 	return updated, nil
+}
+
+// isUniqueViolation reports a Postgres 23505, the only class of write conflict
+// the plugin surface can produce.
+func isUniqueViolation(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505"
 }
 
 // MaxPluginSecretBytes bounds one secret value before encryption.

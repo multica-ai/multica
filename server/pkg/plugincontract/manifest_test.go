@@ -25,7 +25,7 @@ const validManifest = `{
   "contributes": {
     "surfaces": [{
       "key": "hello", "type": "issue_panel", "name": "Hello",
-      "entry": "ui/index.html", "platforms": ["web", "desktop"]
+      "entry": "ui/main.js", "platforms": ["web", "desktop"]
     }],
     "hooks": [{
       "key": "summarize_thread",
@@ -194,6 +194,33 @@ func TestParseManifestRejectsMalformedDocuments(t *testing.T) {
 				surfaces[0].(map[string]any)["entry"] = "../../etc/passwd"
 			}),
 			"path traversal",
+		},
+		{
+			"version over the column bound",
+			mutate(t, func(doc map[string]any) {
+				// A legal semver whose build metadata pushes it past the
+				// plugin_installation.version cap.
+				doc["version"] = "1.0.0+" + strings.Repeat("b", 64)
+			}),
+			"version exceeds",
+		},
+		{
+			"surface entry is an HTML document",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				surfaces := contributes["surfaces"].([]any)
+				surfaces[0].(map[string]any)["entry"] = "ui/index.html"
+			}),
+			"must be a .js or .mjs script",
+		},
+		{
+			"hook transport on a subdomain of a net: scope",
+			mutate(t, func(doc map[string]any) {
+				contributes := doc["contributes"].(map[string]any)
+				hooks := contributes["hooks"].([]any)
+				hooks[0].(map[string]any)["transport"] = map[string]any{"type": "http", "url": "https://api.example.com/hooks/summarize"}
+			}),
+			"not covered by a net: scope",
 		},
 		{
 			"surface entry is an absolute URL",

@@ -29,7 +29,7 @@ const testManifestJSON = `{
     "token": { "type": "secret", "label": "Token" }
   },
   "contributes": {
-    "surfaces": [{ "key": "hello", "type": "issue_panel", "name": "Hello", "entry": "ui/index.html" }]
+    "surfaces": [{ "key": "hello", "type": "issue_panel", "name": "Hello", "entry": "ui/main.js" }]
   }
 }`
 
@@ -270,5 +270,96 @@ func TestCapabilityMessageNamesTheMissingCapabilities(t *testing.T) {
 	message := capabilityMessage(err)
 	if !strings.Contains(message, "surface issue_panel") {
 		t.Fatalf("capabilityMessage = %q, want it to name the missing capability", message)
+	}
+}
+
+func TestEnforceStorageQuota(t *testing.T) {
+	// Canonical layer for the three storage limits. SetStorageValue only wires
+	// the usage query to this function; plugin_storage_db_test.go covers the
+	// query's own semantics.
+	cases := []struct {
+		name       string
+		usage      db.GetPluginStorageUsageRow
+		valueBytes int
+		wantKind   PluginErrorKind
+	}{
+		{"empty scope", db.GetPluginStorageUsageRow{}, 10, ""},
+		{"value exactly at the cap", db.GetPluginStorageUsageRow{}, MaxPluginStorageValueBytes, ""},
+		{"value one byte over the cap", db.GetPluginStorageUsageRow{}, MaxPluginStorageValueBytes + 1, PluginErrorQuota},
+		{
+			"last free key slot",
+			db.GetPluginStorageUsageRow{KeyCount: MaxPluginStorageKeys - 1},
+			1, "",
+		},
+		{
+			"key slots exhausted",
+			db.GetPluginStorageUsageRow{KeyCount: MaxPluginStorageKeys},
+			1, PluginErrorQuota,
+		},
+		{
+			"total budget exactly filled",
+			db.GetPluginStorageUsageRow{KeyCount: 1, TotalBytes: MaxPluginStorageTotalBytes - 10},
+			10, "",
+		},
+		{
+			"total budget exceeded by one byte",
+			db.GetPluginStorageUsageRow{KeyCount: 1, TotalBytes: MaxPluginStorageTotalBytes - 10},
+			11, PluginErrorQuota,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := EnforceStorageQuota(tc.usage, tc.valueBytes)
+			if tc.wantKind == "" {
+				if err != nil {
+					t.Fatalf("EnforceStorageQuota = %v, want nil", err)
+				}
+				return
+			}
+			if err == nil {
+				t.Fatal("EnforceStorageQuota accepted a write over quota")
+			}
+			if kind := pluginErrKind(t, err); kind != tc.wantKind {
+				t.Fatalf("kind = %q, want %q", kind, tc.wantKind)
+			}
+		})
+	}
+}
+
+func TestEnforceStorageQuotaCountsBytesNotCharacters(t *testing.T) {
+	// A 4-byte emoji is one character. If any bound counted characters the
+	// effective budget would be up to 4x what the limit advertises.
+	emoji := "🙂"
+	if len(emoji) != 4 {
+		t.Fatalf("fixture is not 4 bytes: %d", len(emoji))
+	}
+	oversized := strings.Repeat(emoji, MaxPluginStorageValueBytes/4+1)
+	if err := EnforceStorageQuota(db.GetPluginStorageUsageRow{}, len(oversized)); err == nil {
+		t.Fatal("a value over the byte cap was accepted")
+	}
+	if len([]rune(oversized)) >= MaxPluginStorageValueBytes {
+		t.Fatal("fixture does not distinguish characters from bytes")
+	}
+}
+
+func TestOrphanedSecretFieldsAreDetectedByType(t *testing.T) {
+	// The pure half of upgrade-time secret pruning: which stored keys the new
+	// manifest no longer declares as a secret. A field that changed type away
+	// from secret counts as orphaned — its ciphertext is unreachable too.
+	manifest := testManifest(t)
+	for _, tc := range []struct {
+		key  string
+		want bool
+	}{
+		{"token", false},
+		{"repo", true},
+		{"removed_field", true},
+	} {
+		field, ok := manifest.Config.Field(tc.key)
+		orphaned := !ok || field.Type != plugincontract.ConfigSecret
+		if orphaned != tc.want {
+			t.Fatalf("%q orphaned = %v, want %v", tc.key, orphaned, tc.want)
+		}
 	}
 }

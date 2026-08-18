@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
@@ -33,7 +34,7 @@ const handlerTestManifest = `{
     "token": { "type": "secret", "label": "Token" }
   },
   "contributes": {
-    "surfaces": [{ "key": "hello", "type": "issue_panel", "name": "Hello", "entry": "ui/index.html" }]
+    "surfaces": [{ "key": "hello", "type": "issue_panel", "name": "Hello", "entry": "ui/main.js" }]
   }
 }`
 
@@ -48,18 +49,29 @@ func pluginHandlerRequest(method, path string, body []byte, params map[string]st
 	return request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
 }
 
-// withLocalPluginSource points the service at a temp MULTICA_PLUGIN_DIR and
-// enables every capability, so these tests exercise the HTTP surface rather
-// than the staged-rollout gate.
-func withLocalPluginSource(t *testing.T, manifest string) string {
+func writeLocalPluginManifest(t *testing.T, root, manifest string) {
 	t.Helper()
-	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "hello"), 0o755); err != nil {
 		t.Fatalf("create local plugin dir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(root, "hello", plugincontract.ManifestFilename), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write local manifest: %v", err)
 	}
+}
+
+// withLocalPluginSource points the service at a temp MULTICA_PLUGIN_DIR and
+// enables every capability, so these tests exercise the HTTP surface rather
+// than the staged-rollout gate.
+func withLocalPluginSource(t *testing.T, manifest string) string {
+	t.Helper()
+	return withLocalPluginSourceIn(t, t.TempDir(), manifest)
+}
+
+// withLocalPluginSourceIn takes the root explicitly so an upgrade test can
+// rewrite the manifest in place and install again from the same source URL.
+func withLocalPluginSourceIn(t *testing.T, root string, manifest string) string {
+	t.Helper()
+	writeLocalPluginManifest(t, root, manifest)
 
 	previousDir := testHandler.PluginService.LocalDir
 	previousHost := testHandler.PluginService.Host
@@ -324,5 +336,119 @@ func TestPluginInstallationFromAnotherWorkspaceIsNotFound(t *testing.T) {
 	}))
 	if recorder.Code != http.StatusNotFound {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestPluginUpgradePrunesSecretsTheNewManifestDropped(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	root := t.TempDir()
+	source := withLocalPluginSourceIn(t, root, handlerTestManifest)
+
+	install, _ := json.Marshal(map[string]any{
+		"source_url":     source,
+		"granted_scopes": []string{"issues:read", "comments:write", "storage:user"},
+	})
+	recorder := httptest.NewRecorder()
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", install, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("install status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var installed struct {
+		ID string `json:"id"`
+	}
+	json.Unmarshal(recorder.Body.Bytes(), &installed)
+
+	params := map[string]string{"id": testWorkspaceID, "installationId": installed.ID}
+	configure, _ := json.Marshal(map[string]any{"values": map[string]any{"token": "sk-old-secret"}})
+	recorder = httptest.NewRecorder()
+	testHandler.ConfigurePlugin(recorder, pluginHandlerRequest(http.MethodPut, "/plugins/config", configure, params))
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"configured_secrets":["token"]`) {
+		t.Fatalf("configure status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+
+	// v2 drops the `token` secret field entirely. Its ciphertext must go with
+	// it: nothing can reach a secret whose field no longer exists, and leaving
+	// it means an uninstall is the only thing that ever removes it.
+	upgraded := strings.Replace(handlerTestManifest, `"version": "1.0.0"`, `"version": "2.0.0"`, 1)
+	upgraded = strings.Replace(upgraded, `,
+    "token": { "type": "secret", "label": "Token" }`, "", 1)
+	writeLocalPluginManifest(t, root, upgraded)
+
+	recorder = httptest.NewRecorder()
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", install, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("upgrade status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	if !strings.Contains(recorder.Body.String(), `"configured_secrets":[]`) {
+		t.Fatalf("upgrade left an unreachable secret: %s", recorder.Body.String())
+	}
+
+	var remaining int
+	if err := testPool.QueryRow(context.Background(),
+		`SELECT COUNT(*) FROM plugin_secret WHERE installation_id = $1`, installed.ID).Scan(&remaining); err != nil {
+		t.Fatalf("count secrets: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("upgrade left %d secret rows behind", remaining)
+	}
+}
+
+// TestPluginRoutesRequireWorkspaceAdmin pins the gate that actually protects
+// these endpoints. Every other handler test calls the handler directly, which
+// bypasses middleware entirely — so without this, "install/configure/uninstall
+// are admin-only" rests on where the routes sit in router.go and nothing would
+// fail if one moved into the member group.
+func TestPluginRoutesRequireWorkspaceAdmin(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	memberID := createTestUserAndMember(t, "member")
+
+	router := chi.NewRouter()
+	router.Route("/api/workspaces/{id}", func(r chi.Router) {
+		r.Group(func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
+			r.Post("/plugins/preview", testHandler.PreviewPlugin)
+			r.Post("/plugins", testHandler.InstallPlugin)
+			r.Put("/plugins/{installationId}/config", testHandler.ConfigurePlugin)
+			r.Post("/plugins/{installationId}/enable", testHandler.EnablePlugin)
+			r.Post("/plugins/{installationId}/disable", testHandler.DisablePlugin)
+			r.Delete("/plugins/{installationId}", testHandler.UninstallPlugin)
+		})
+		// Listing is member-visible on purpose: a member should be able to see
+		// what is mounted in their workspace and which scopes it holds.
+		r.Get("/plugins", testHandler.ListPlugins)
+	})
+
+	base := "/api/workspaces/" + testWorkspaceID
+	adminOnly := []struct {
+		method string
+		path   string
+	}{
+		{http.MethodPost, base + "/plugins/preview"},
+		{http.MethodPost, base + "/plugins"},
+		{http.MethodPut, base + "/plugins/11111111-1111-1111-1111-111111111111/config"},
+		{http.MethodPost, base + "/plugins/11111111-1111-1111-1111-111111111111/enable"},
+		{http.MethodPost, base + "/plugins/11111111-1111-1111-1111-111111111111/disable"},
+		{http.MethodDelete, base + "/plugins/11111111-1111-1111-1111-111111111111"},
+	}
+	for _, route := range adminOnly {
+		t.Run(route.method+" "+route.path, func(t *testing.T) {
+			request := newRequest(route.method, route.path, map[string]any{})
+			request.Header.Set("X-User-ID", memberID)
+			recorder := httptest.NewRecorder()
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != http.StatusForbidden {
+				t.Fatalf("plain member reached an admin route: status=%d body=%s", recorder.Code, recorder.Body.String())
+			}
+		})
+	}
+
+	request := newRequest(http.MethodGet, base+"/plugins", nil)
+	request.Header.Set("X-User-ID", memberID)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("plain member could not list Plugins: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }

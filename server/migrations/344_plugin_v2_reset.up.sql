@@ -70,8 +70,10 @@ CREATE TABLE plugin_storage (
     installation_id UUID NOT NULL,
     scope_type TEXT NOT NULL CHECK (scope_type IN ('workspace', 'user')),
     scope_id UUID NOT NULL,
-    key TEXT NOT NULL CHECK (char_length(key) BETWEEN 1 AND 1024),
-    value TEXT NOT NULL CHECK (char_length(value) <= 102400),
+    -- Byte-counted, matching the service-side quota: key and value are
+    -- plugin-supplied and routinely non-ASCII.
+    key TEXT NOT NULL CHECK (octet_length(key) BETWEEN 1 AND 1024),
+    value TEXT NOT NULL CHECK (octet_length(value) <= 102400),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );

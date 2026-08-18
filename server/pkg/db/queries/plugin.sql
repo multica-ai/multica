@@ -63,7 +63,7 @@ SELECT * FROM plugin_storage
 WHERE installation_id = $1 AND scope_type = $2 AND scope_id = $3 AND key = $4;
 
 -- name: ListPluginStorageKeys :many
-SELECT key, char_length(value)::bigint AS size_bytes, updated_at
+SELECT key, octet_length(value)::bigint AS size_bytes, updated_at
 FROM plugin_storage
 WHERE installation_id = $1 AND scope_type = $2 AND scope_id = $3
 ORDER BY key ASC;
@@ -75,9 +75,10 @@ WHERE installation_id = $1 AND scope_type = $2 AND scope_id = $3 AND key = $4;
 -- name: GetPluginStorageUsage :one
 -- Quota accounting for one (installation, scope) pair. The candidate key is
 -- excluded so overwriting an existing key is measured as a replacement rather
--- than an addition.
+-- than an addition. octet_length, not char_length: the service compares these
+-- against byte budgets, and a UTF-8 character is up to 4 bytes.
 SELECT COUNT(*)::bigint AS key_count,
-       COALESCE(SUM(char_length(value)), 0)::bigint AS total_bytes
+       COALESCE(SUM(octet_length(value)), 0)::bigint AS total_bytes
 FROM plugin_storage
 WHERE installation_id = $1 AND scope_type = $2 AND scope_id = $3 AND key <> $4;
 

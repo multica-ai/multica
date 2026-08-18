@@ -31,6 +31,9 @@ const (
 
 	// MaxManifestSize bounds a fetched manifest before it is parsed.
 	MaxManifestSize = 1 << 20
+
+	// MaxVersionLength mirrors the plugin_installation.version column bound.
+	MaxVersionLength = 64
 )
 
 // Surface types. A surface is an iframe the host mounts at a fixed location.
@@ -357,6 +360,13 @@ func (m Manifest) Validate() error {
 	if strings.ContainsAny(m.Description, "\r") {
 		return fmt.Errorf("description must not contain carriage returns")
 	}
+	// Bounded before the regex result is trusted: semver permits unbounded
+	// build/prerelease segments, and plugin_installation.version is capped at
+	// 64. Rejecting here turns a constraint violation at INSERT time into a
+	// parse error that names the field.
+	if len(m.Version) > MaxVersionLength {
+		return fmt.Errorf("version exceeds %d bytes", MaxVersionLength)
+	}
 	if !semverPattern.MatchString(m.Version) {
 		return fmt.Errorf("version must be semantic versioning, got %q", m.Version)
 	}
@@ -505,6 +515,14 @@ func (m Manifest) validateContributions() error {
 		if err := validateRelativePath(field+".entry", surface.Entry); err != nil {
 			return err
 		}
+		// The host generates the surface's HTML document and loads this script
+		// into it. That is what lets the host attach the CSP derived from the
+		// manifest's net: scopes — a plugin-authored HTML document would carry
+		// whatever policy its own server sent, so net: would be a claim rather
+		// than a control.
+		if !strings.HasSuffix(surface.Entry, ".js") && !strings.HasSuffix(surface.Entry, ".mjs") {
+			return fmt.Errorf("%s.entry must be a .js or .mjs script; the host renders the surface document itself", field)
+		}
 		platformSeen := map[string]bool{}
 		for _, platform := range surface.Platforms {
 			if platform != "web" && platform != "desktop" {
@@ -623,9 +641,14 @@ func (m Manifest) validateHookTransport(field string, transport HookTransport) e
 	if err != nil {
 		return fmt.Errorf("%s.transport.url is invalid", field)
 	}
+	// Exact host, never a suffix match. The consent screen renders one line per
+	// scope ("send data to example.com"), and the same scope list becomes the
+	// iframe's CSP connect-src, which is exact-host. A suffix match here would
+	// make one scope string mean two different things in two places. A plugin
+	// that needs a subdomain declares it: net:api.example.com.
 	host := strings.ToLower(strings.TrimSuffix(endpoint.Hostname(), "."))
 	for _, domain := range NetDomains(m.Scopes) {
-		if host == domain || strings.HasSuffix(host, "."+domain) {
+		if host == domain {
 			return nil
 		}
 	}

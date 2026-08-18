@@ -63,7 +63,7 @@ const INSTALLATION = {
   ],
   config: { repo: "multica-ai/multica" },
   configured_secrets: ["token"],
-  surfaces: [{ key: "hello", type: "issue_panel", name: "Hello", entry: "ui/index.html", platforms: [] }],
+  surfaces: [{ key: "hello", type: "issue_panel", name: "Hello", entry: "ui/main.js", platforms: [] }],
   hooks: [],
   resources: [],
   created_at: "2026-08-18T00:00:00Z",

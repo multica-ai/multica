@@ -101,15 +101,35 @@ func (s *PluginService) ListStorageKeys(ctx context.Context, installationID pgty
 	return keys, nil
 }
 
+// EnforceStorageQuota decides whether one write fits, given the scope's usage
+// with the candidate key excluded. Kept pure and separate from the write so the
+// three limits have one canonical test, and so it is obvious that every bound
+// is compared in bytes — the usage query reports octet_length for the same
+// reason.
+//
+// Known bound: usage is read before the write without a lock, so concurrent
+// writers to the same scope can overshoot by their own sizes. Serializing every
+// plugin KV write to close that gap costs more than the overshoot is worth; the
+// limits exist to stop runaway growth, not to be exact to the byte.
+func EnforceStorageQuota(usage db.GetPluginStorageUsageRow, valueBytes int) error {
+	if valueBytes > MaxPluginStorageValueBytes {
+		return pluginErrf(PluginErrorQuota, "storage value exceeds %d bytes", MaxPluginStorageValueBytes)
+	}
+	if usage.KeyCount+1 > MaxPluginStorageKeys {
+		return pluginErrf(PluginErrorQuota, "storage scope already holds the maximum of %d keys", MaxPluginStorageKeys)
+	}
+	if usage.TotalBytes+int64(valueBytes) > MaxPluginStorageTotalBytes {
+		return pluginErrf(PluginErrorQuota, "storage scope exceeds its %d byte budget", MaxPluginStorageTotalBytes)
+	}
+	return nil
+}
+
 // SetStorageValue writes one value after checking every quota. The usage query
 // excludes the key being written, so replacing a value is measured as a
 // replacement and cannot fail a limit the existing row already occupies.
 func (s *PluginService) SetStorageValue(ctx context.Context, installationID pgtype.UUID, scopeType string, scopeID pgtype.UUID, key, value string) error {
 	if err := validateStorageKey(key); err != nil {
 		return err
-	}
-	if len(value) > MaxPluginStorageValueBytes {
-		return pluginErrf(PluginErrorQuota, "storage value exceeds %d bytes", MaxPluginStorageValueBytes)
 	}
 	usage, err := s.Queries.GetPluginStorageUsage(ctx, db.GetPluginStorageUsageParams{
 		InstallationID: installationID,
@@ -120,11 +140,8 @@ func (s *PluginService) SetStorageValue(ctx context.Context, installationID pgty
 	if err != nil {
 		return &PluginError{Kind: PluginErrorUnavailable, Message: "read plugin storage usage", Err: err}
 	}
-	if usage.KeyCount+1 > MaxPluginStorageKeys {
-		return pluginErrf(PluginErrorQuota, "storage scope already holds the maximum of %d keys", MaxPluginStorageKeys)
-	}
-	if usage.TotalBytes+int64(len(value)) > MaxPluginStorageTotalBytes {
-		return pluginErrf(PluginErrorQuota, "storage scope exceeds its %d byte budget", MaxPluginStorageTotalBytes)
+	if err := EnforceStorageQuota(usage, len(value)); err != nil {
+		return err
 	}
 	if _, err := s.Queries.UpsertPluginStorageValue(ctx, db.UpsertPluginStorageValueParams{
 		InstallationID: installationID,
