@@ -22,7 +22,9 @@ export const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 60 * 1000, // 1 minute
-      gcTime: 10 * 60 * 1000, // 10 minutes
+      // Must outlive the seven-day persisted cache window; a shorter gcTime
+      // would make TanStack discard hydrated data before its intended expiry.
+      gcTime: 7 * 24 * 60 * 60 * 1000,
       retry: 1,
       refetchOnWindowFocus: true, // honored via focusManager bridge below
     },

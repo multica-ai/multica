@@ -20,8 +20,11 @@
  * `useNewProjectDraftResetOnWorkspaceChange()`, the only caller.
  */
 import { useEffect, useRef } from "react";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type { ProjectPriority, ProjectStatus } from "@multica/core/types";
+import { draftStorageKey, readDraftPartition } from "./draft-persistence";
 
 interface NewProjectDraftState {
   status: ProjectStatus;
@@ -36,12 +39,28 @@ const INITIAL: Pick<NewProjectDraftState, "status" | "priority"> = {
   priority: "none",
 };
 
-export const useNewProjectDraftStore = create<NewProjectDraftState>((set) => ({
+export const useNewProjectDraftStore = create<NewProjectDraftState>()(persist((set) => ({
   ...INITIAL,
   setStatus: (next) => set({ status: next }),
   setPriority: (next) => set({ priority: next }),
   reset: () => set({ ...INITIAL }),
+}), {
+  name: "multica_draft:new-project:unscoped",
+  storage: createJSONStorage(() => AsyncStorage),
+  skipHydration: true,
+  partialize: (state) => ({ status: state.status, priority: state.priority }),
 }));
+
+export async function hydrateNewProjectDraft(userId: string, workspaceSlug: string) {
+  const name = draftStorageKey("new-project", userId, workspaceSlug);
+  const persisted = await readDraftPartition<
+    Pick<NewProjectDraftState, "status" | "priority">
+  >("new-project", userId, workspaceSlug);
+  useNewProjectDraftStore.persist.setOptions({
+    name,
+  });
+  useNewProjectDraftStore.setState({ ...INITIAL, ...persisted });
+}
 
 /**
  * Clears the new-project draft store whenever the active workspace id

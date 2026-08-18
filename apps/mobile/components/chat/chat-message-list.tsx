@@ -51,6 +51,7 @@ import type {
   ChatQuickAction,
   TaskMessagePayload,
 } from "@multica/core/types";
+import type { ChatOutboxItem } from "@/data/stores/chat-outbox";
 import type { AgentAvailability } from "@multica/core/agents";
 import { taskMessagesOptions } from "@/data/queries/chat";
 import { Text } from "@/components/ui/text";
@@ -99,6 +100,11 @@ interface Props {
   /** Resolved availability — drives the StatusPill's "Offline" /
    *  "Reconnecting" stages. Pass `undefined` while loading. */
   availability?: AgentAvailability;
+  /** Locally persisted sends that have not been confirmed by the server. */
+  outboxItems?: ChatOutboxItem[];
+  /** The queued item whose content is loaded into the bottom composer. */
+  editingOutboxClientId?: string | null;
+  onOutboxPress?: (item: ChatOutboxItem) => void;
 }
 
 export function ChatMessageList({
@@ -112,6 +118,9 @@ export function ChatMessageList({
   pendingTask,
   liveTaskMessages,
   availability,
+  outboxItems = [],
+  editingOutboxClientId,
+  onOutboxPress,
 }: Props) {
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
@@ -136,8 +145,22 @@ export function ChatMessageList({
       })),
     [messages],
   );
+  const listItems = useMemo(
+    () =>
+      [
+        ...messages.map((message) => ({ kind: "message" as const, message })),
+        ...outboxItems.map((item) => ({ kind: "outbox" as const, item })),
+      ].sort((a, b) => {
+        const aDate =
+          a.kind === "message" ? a.message.created_at : a.item.createdAt;
+        const bDate =
+          b.kind === "message" ? b.message.created_at : b.item.createdAt;
+        return aDate.localeCompare(bDate);
+      }),
+    [messages, outboxItems],
+  );
 
-  if (loading && messages.length === 0) {
+  if (loading && listItems.length === 0) {
     return (
       <View className="flex-1 items-center justify-center">
         <ActivityIndicator />
@@ -145,7 +168,7 @@ export function ChatMessageList({
     );
   }
 
-  if (messages.length === 0) {
+  if (listItems.length === 0) {
     // Empty new-chat state. Lives here (rather than the parent screen) so
     // the empty state and the rendered list share spacing/layout rules.
     return (
@@ -197,16 +220,32 @@ export function ChatMessageList({
         scroll position). Cheap because sessions are switched, not
         re-rendered every keystroke. */}
     <FlashList
-      key={messages[0]?.id ?? "empty"}
-      data={messages}
-      keyExtractor={(m) => m.id}
-      renderItem={({ item }) => (
-        <MessageRow
-          message={item}
-          onQuickAction={onQuickAction}
-          quickActionsDisabled={quickActionsDisabled}
-        />
-      )}
+      key={
+        listItems[0]?.kind === "message"
+          ? listItems[0].message.id
+          : (listItems[0]?.item.clientId ?? "empty")
+      }
+      data={listItems}
+      keyExtractor={(item) =>
+        item.kind === "message"
+          ? item.message.id
+          : `outbox-${item.item.clientId}`
+      }
+      renderItem={({ item }) =>
+        item.kind === "message" ? (
+          <MessageRow
+            message={item.message}
+            onQuickAction={onQuickAction}
+            quickActionsDisabled={quickActionsDisabled}
+          />
+        ) : (
+          <OutboxMessageRow
+            item={item.item}
+            editing={item.item.clientId === editingOutboxClientId}
+            onPress={onOutboxPress}
+          />
+        )
+      }
       ItemSeparatorComponent={MessageSeparator}
       ListFooterComponent={
         showLiveSection ? (
@@ -254,6 +293,56 @@ export function ChatMessageList({
     />
     </Pressable>
     </ImageSequenceProvider>
+  );
+}
+
+function OutboxMessageRow({
+  item,
+  editing,
+  onPress,
+}: {
+  item: ChatOutboxItem;
+  editing: boolean;
+  onPress?: (item: ChatOutboxItem) => void;
+}) {
+  const status =
+    editing
+      ? "Editing in composer"
+      : item.status === "sending"
+      ? "Sending…"
+      : item.status === "failed"
+        ? item.lastError ?? "Could not send"
+        : item.lastError ?? "Not sent · Tap to manage";
+  return (
+    <Pressable
+      onPress={() => onPress?.(item)}
+      disabled={!onPress}
+      accessibilityRole="button"
+      accessibilityLabel={`Unsent message: ${status}`}
+    >
+      <View className="self-end max-w-[80%] gap-1.5 rounded-2xl border border-dashed border-muted-foreground/40 bg-muted/60 px-3.5 py-2 opacity-80">
+        <Markdown content={item.content} attachments={[]} compact />
+        <View className="flex-row items-center gap-1">
+          <Ionicons
+            name={
+              editing
+                ? "create-outline"
+                : item.status === "failed"
+                ? "alert-circle-outline"
+                : "time-outline"
+            }
+            size={13}
+            color="#71717a"
+          />
+          <Text
+            className="flex-1 text-xs text-muted-foreground"
+            numberOfLines={2}
+          >
+            {status}
+          </Text>
+        </View>
+      </View>
+    </Pressable>
   );
 }
 

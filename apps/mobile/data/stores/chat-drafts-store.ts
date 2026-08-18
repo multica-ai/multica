@@ -1,15 +1,16 @@
 /**
- * Per-session chat drafts. In-memory only — drafts survive tab switches and
- * navigation, but are lost on app cold start. v1 doesn't persist (an
- * SecureStore-backed write on every keystroke would be wasteful; if user
- * feedback shows people lose work to backgrounding kills, persist via the
- * usual debounced flush pattern in v2).
+ * Per-session chat drafts, persisted in AsyncStorage per user + workspace.
+ * AsyncStorage is appropriate for the potentially long free-form text and
+ * avoids SecureStore's small per-value capacity.
  *
  * Key conventions:
  *   - Real session id (UUID) for any existing session
  *   - DRAFT_NEW_SESSION sentinel for the not-yet-created new-chat input
  */
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { create } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
+import { draftStorageKey, readDraftPartition } from "./draft-persistence";
 
 export const DRAFT_NEW_SESSION = "__new__";
 
@@ -22,7 +23,7 @@ interface ChatDraftsState {
   promoteNewDraft: (newSessionId: string) => void;
 }
 
-export const useChatDraftsStore = create<ChatDraftsState>((set, get) => ({
+export const useChatDraftsStore = create<ChatDraftsState>()(persist((set, get) => ({
   drafts: {},
   setDraft: (sessionId, text) => {
     const current = get().drafts;
@@ -54,4 +55,23 @@ export const useChatDraftsStore = create<ChatDraftsState>((set, get) => ({
     delete next[DRAFT_NEW_SESSION];
     set({ drafts: next });
   },
+}), {
+  name: "multica_draft:chat:unscoped",
+  storage: createJSONStorage(() => AsyncStorage),
+  skipHydration: true,
+  partialize: (state) => ({ drafts: state.drafts }),
 }));
+
+/** Hydrate this workspace's drafts before rendering its routes. */
+export async function hydrateChatDrafts(userId: string, workspaceSlug: string) {
+  const name = draftStorageKey("chat", userId, workspaceSlug);
+  const persisted = await readDraftPartition<Pick<ChatDraftsState, "drafts">>(
+    "chat",
+    userId,
+    workspaceSlug,
+  );
+  useChatDraftsStore.persist.setOptions({
+    name,
+  });
+  useChatDraftsStore.setState({ drafts: persisted?.drafts ?? {} });
+}

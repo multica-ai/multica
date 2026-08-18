@@ -1,9 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import type { ComponentProps } from "react";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useAuthStore } from "@/data/auth-store";
 import { RealtimeProvider } from "@/data/realtime/realtime-provider";
 import { useInboxRealtime } from "@/data/realtime/use-inbox-realtime";
 import { useIssuesRealtime } from "@/data/realtime/use-issues-realtime";
@@ -14,8 +15,10 @@ import { usePinsRealtime } from "@/data/realtime/use-pins-realtime";
 import { usePresenceRealtime } from "@/data/realtime/use-presence-realtime";
 import { useWorkspacePresencePrefetch } from "@/lib/use-workspace-presence-prefetch";
 import { ModalCloseButton } from "@/components/ui/modal-close-button";
-import { useNewIssueDraftResetOnWorkspaceChange } from "@/data/stores/new-issue-draft-store";
-import { useNewProjectDraftResetOnWorkspaceChange } from "@/data/stores/new-project-draft-store";
+import { hydrateNewIssueDraft } from "@/data/stores/new-issue-draft-store";
+import { hydrateNewProjectDraft } from "@/data/stores/new-project-draft-store";
+import { hydrateChatDrafts } from "@/data/stores/chat-drafts-store";
+import { hydrateChatOutbox } from "@/data/stores/chat-outbox-store";
 import { useChatSessionPickerResetOnWorkspaceChange } from "@/data/stores/chat-session-picker-store";
 
 /**
@@ -103,8 +106,13 @@ export default function WorkspaceLayout() {
   const { workspace: slug } = useLocalSearchParams<{ workspace: string }>();
   const { data: workspaces, isLoading } = useQuery(workspaceListOptions());
   const setCurrentWorkspace = useWorkspaceStore((s) => s.setCurrentWorkspace);
+  const user = useAuthStore((s) => s.user);
+  const userId = user?.id ?? null;
+  const [hydratedDraftScope, setHydratedDraftScope] = useState<string | null>(null);
 
   const matched = workspaces?.find((w) => w.slug === slug);
+  const matchedId = matched?.id ?? null;
+  const matchedSlug = matched?.slug ?? null;
 
   useEffect(() => {
     if (matched) {
@@ -112,18 +120,38 @@ export default function WorkspaceLayout() {
     }
   }, [matched, setCurrentWorkspace]);
 
-  // Wipe cross-route Zustand draft stores whenever the active workspace
-  // changes — a draft picked under workspace A (assignee id, draft
-  // session id, etc.) is invalid in workspace B and must not leak.
-  useNewIssueDraftResetOnWorkspaceChange(matched?.id ?? null);
-  useNewProjectDraftResetOnWorkspaceChange(matched?.id ?? null);
   useChatSessionPickerResetOnWorkspaceChange(matched?.id ?? null);
+
+  const draftScope = userId && matchedSlug ? `${userId}:${matchedSlug}` : null;
+  useEffect(() => {
+    let cancelled = false;
+    if (!userId || !matchedSlug || !matchedId) {
+      setHydratedDraftScope(null);
+      return () => { cancelled = true; };
+    }
+    void Promise.all([
+      hydrateChatDrafts(userId, matchedSlug),
+      hydrateChatOutbox(userId, matchedSlug),
+      hydrateNewIssueDraft(userId, matchedSlug),
+      hydrateNewProjectDraft(userId, matchedSlug),
+    ])
+      .catch((error) => {
+        // Draft persistence is a resilience enhancement; a local storage
+        // failure must not strand an otherwise valid workspace route.
+        console.warn("Failed to restore local drafts", error);
+      })
+      .finally(() => {
+        if (!cancelled) setHydratedDraftScope(`${userId}:${matchedSlug}`);
+      });
+    return () => { cancelled = true; };
+  }, [userId, matchedId, matchedSlug]);
 
   // Wait for the workspaces list before deciding membership — otherwise a
   // valid deep link would briefly redirect away on cold start.
   if (isLoading) return null;
 
   if (!matched) return <Redirect href="/select-workspace" />;
+  if (draftScope !== hydratedDraftScope) return null;
 
   // Tabs hide their own header; pushed screens (issue/[id]) get a native
   // iOS Stack header with the standard back button + swipe-to-dismiss.

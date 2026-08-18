@@ -32,6 +32,7 @@ import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { MessageComposer } from "@/components/composer/message-composer";
+import { Text } from "@/components/ui/text";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
@@ -57,6 +58,10 @@ interface Props {
   disabled?: boolean;
   /** When `disabled`, replaces the pill label with the reason. */
   disabledReason?: string;
+  /** The queued item currently being edited in the shared composer. */
+  editingOutboxClientId?: string | null;
+  /** Restore the draft that was present before editing the queued item. */
+  onCancelOutboxEdit?: () => void;
 }
 
 const IS_IOS = process.env.EXPO_OS === "ios";
@@ -70,6 +75,8 @@ export function ChatComposer({
   allowStop = true,
   disabled = false,
   disabledReason,
+  editingOutboxClientId = null,
+  onCancelOutboxEdit,
 }: Props) {
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
 
@@ -96,29 +103,56 @@ export function ChatComposer({
   }, [onStop]);
 
   return (
-    <MessageComposer
-      value={value}
-      onChangeText={onChangeText}
-      onSubmit={onSubmit}
-      mentionPickerPath={{
-        pathname: "/[workspace]/mention-picker",
-        params: { workspace: wsSlug ?? "", mode: "chat" },
-      }}
-      placeholder={sending ? "Agent is working…" : "Message…"}
-      pillLabel={
-        sending
-          ? "Agent is working…"
-          : disabled
-            ? (disabledReason ?? "Chat unavailable")
-            : "Message…"
-      }
-      pillIcon="chatbubble-ellipses-outline"
-      disabled={disabled}
-      disabledReason={disabledReason}
-      isSending={sending}
-      renderStop={allowStop ? () => <StopButton onPress={handleStop} /> : undefined}
-      manageKeyboard={false}
-    />
+    <View>
+      {editingOutboxClientId ? (
+        <View className="mx-3 mb-1 flex-row items-center gap-2 rounded-lg border border-primary/25 bg-primary/10 px-3 py-2">
+          <Ionicons name="create-outline" size={16} color="#2563eb" />
+          <Text className="flex-1 text-sm font-medium text-foreground">
+            Editing unsent message
+          </Text>
+          <Pressable
+            onPress={onCancelOutboxEdit}
+            accessibilityRole="button"
+            accessibilityLabel="Cancel editing unsent message"
+            className="rounded-md px-1 py-0.5 active:opacity-70"
+          >
+            <Text className="text-sm font-medium text-primary">Cancel</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      <MessageComposer
+        value={value}
+        onChangeText={onChangeText}
+        onSubmit={onSubmit}
+        mentionPickerPath={{
+          pathname: "/[workspace]/mention-picker",
+          params: { workspace: wsSlug ?? "", mode: "chat" },
+        }}
+        placeholder={
+          sending
+            ? "Agent is working…"
+            : editingOutboxClientId
+              ? "Edit unsent message…"
+              : "Message…"
+        }
+        pillLabel={
+          sending
+            ? "Agent is working…"
+            : disabled
+              ? (disabledReason ?? "Chat unavailable")
+              : editingOutboxClientId
+                ? "Edit unsent message…"
+                : "Message…"
+        }
+        pillIcon="chatbubble-ellipses-outline"
+        disabled={disabled}
+        disabledReason={disabledReason}
+        isSending={sending}
+        renderStop={allowStop ? () => <StopButton onPress={handleStop} /> : undefined}
+        expandTrigger={editingOutboxClientId}
+        manageKeyboard={false}
+      />
+    </View>
   );
 }
 
