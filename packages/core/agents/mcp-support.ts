@@ -1,3 +1,7 @@
+// This is a generated mirror of `server/pkg/agent/provider_capabilities.go`.
+// The Go provider-capability tests parse this list and fail on drift, because
+// the frontend package cannot import the server's Go table at runtime.
+//
 // The set of runtime providers whose backend reads `agent.mcp_config` and
 // forwards MCP servers to the underlying CLI. The MCP config tab is hidden
 // for every other provider so a user can't save a value the runtime will

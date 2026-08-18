@@ -84,6 +84,14 @@ Codex, Hermes, and OpenClaw are handled slightly differently:
 - Hermes uses a per-task `HERMES_HOME`. Existing local configuration is still readable, but bound skills and session data are isolated per task. This isolation kicks in only when the agent has skills bound; tasks without bound skills use the machine's original Hermes home.
 - OpenClaw uses `skills/` under the current task's working directory, and the per-run configuration sets that directory as the workspace.
 
+### OpenClaw compatibility
+
+Multica supports OpenClaw `2026.5.5` and newer. The daemon writes the runtime brief to the task workdir's `AGENTS.md`, pins the OpenClaw workspace to that workdir, and writes bound skills to `skills/<name>/SKILL.md`. Supported versions therefore use one file-based instruction path.
+
+Older OpenClaw releases keep the legacy inline instruction fallback because their workspace bootstrap is not reliable enough to guarantee that `AGENTS.md` is loaded. The fallback is explicitly version-gated and is not used for supported releases, preventing duplicate instructions and unnecessary prompt tokens.
+
+The executable source of truth for this contract, including MCP, sandbox/approval, skill/config paths, and compatibility metadata, is [`docs/provider-capabilities.md`](https://github.com/multica-ai/multica/blob/main/docs/provider-capabilities.md).
+
 For creating and binding skills, see [Skills](/skills).
 
 ## Next steps

@@ -27,7 +27,7 @@ const openclawNoParseableOutput = "openclaw returned no parseable output"
 // to silently produce no output. The check in Execute fails fast with
 // a hardcoded upgrade hint so users see an actionable message instead
 // of "openclaw returned no parseable output".
-const minOpenclawVersion = "2026.5.5"
+const minOpenclawVersion = OpenClawMinimumSupportedVersion
 
 // openclawVersionPattern extracts a three-segment dotted version from
 // arbitrary `openclaw --version` output (e.g. "openclaw 2026.5.5",

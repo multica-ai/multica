@@ -339,6 +339,14 @@ func skillsDirPath(workDir, provider string) string {
 	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
 		return filepath.Join(workDir, desc.SkillsDir)
 	}
+	if capability, ok := agent.ProviderCapabilityFor(provider); ok {
+		// Codex and Hermes are written into their isolated homes by Prepare,
+		// so this helper is not called for those providers. All other known
+		// providers use the matrix path and bypass the legacy fallback switch.
+		if path := capability.WorkspaceSkillPath; path != "" && path != "CODEX_HOME/skills" && path != "HERMES_HOME/skills" {
+			return filepath.Join(workDir, filepath.FromSlash(path))
+		}
+	}
 	switch provider {
 	case "claude":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.

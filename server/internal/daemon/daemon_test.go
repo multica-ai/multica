@@ -672,32 +672,36 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 	t.Parallel()
 
 	cases := []struct {
+		name     string
 		provider string
+		version  string
 		want     bool
 	}{
-		{provider: "openclaw", want: true},
+		{name: "openclaw_legacy", provider: "openclaw", version: "2026.5.4", want: true},
+		{name: "openclaw_supported_boundary", provider: "openclaw", version: agent.OpenClawMinimumSupportedVersion, want: false},
+		{name: "openclaw_supported_newer", provider: "openclaw", version: "2026.6.0", want: false},
 		// Hermes ACP starts in the task cwd and loads AGENTS.md / .agent_context
 		// directly. Inlining the full runtime brief duplicates that context and
 		// can trip upstream provider safety filters on otherwise harmless tasks.
-		{provider: "hermes", want: false},
+		{name: "hermes", provider: "hermes", want: false},
 		// Kiro CLI loads a root AGENTS.md in ACP sessions. Inlining the same
 		// runtime brief duplicates it at the start of every user turn.
-		{provider: "kiro", want: false},
-		{provider: "kimi", want: true},
+		{name: "kiro", provider: "kiro", want: false},
+		{name: "kimi", provider: "kimi", want: true},
 		// Reasonix loads AGENTS.md from the ACP session cwd.
-		{provider: "reasonix", want: false},
-		{provider: "traecli", want: true},
+		{name: "reasonix", provider: "reasonix", want: false},
+		{name: "traecli", provider: "traecli", want: true},
 		// Qwen Code loads the per-task QWEN.md file natively.
-		{provider: "qwen", want: false},
-		{provider: "codex", want: false},
-		{provider: "claude", want: false},
+		{name: "qwen", provider: "qwen", want: false},
+		{name: "codex", provider: "codex", want: false},
+		{name: "claude", provider: "claude", want: false},
 	}
 
 	for _, tc := range cases {
-		t.Run(tc.provider, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if got := providerNeedsInlineSystemPrompt(tc.provider); got != tc.want {
-				t.Fatalf("providerNeedsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
+			if got := providerNeedsInlineSystemPrompt(tc.provider, tc.version); got != tc.want {
+				t.Fatalf("providerNeedsInlineSystemPrompt(%q, %q) = %v, want %v", tc.provider, tc.version, got, tc.want)
 			}
 		})
 	}

@@ -5217,30 +5217,19 @@ func providerDisplayName(name string) string {
 }
 
 // providerNeedsInlineSystemPrompt reports whether the runtime brief must ride
-// along in the turn itself (agent.ExecOptions.SystemPrompt) because the CLI
-// will not pick up the per-task context file execenv writes into the workdir.
-// This is the ONLY place that decides it, and it is the reason every other
-// backend sees an empty SystemPrompt.
+// along in the turn itself. The matrix owns both the provider policy and the
+// OpenClaw compatibility boundary, so adding a provider does not require a
+// second daemon-only switch.
 //
-// Adding a provider here is a real fix only when that CLI genuinely ignores its
-// context file — traecli was added because it reads .trae/rules/ and not
-// AGENTS.md, so its agents were silently missing the workflow section and left
-// issues stuck in `todo` with no comment and no error. Adding one that DOES
-// read the file just duplicates the brief on every turn.
-//
-// Confirmed to load their context file, so deliberately absent here. MUL-5392
-// probed each one over its real launch path with a canary in the context file
-// and no inline delivery: claude 2.1.220 (CLAUDE.md), codex 0.144.6 driving the
-// app-server (AGENTS.md), opencode 1.17.7 (AGENTS.md), pi 0.67.2 (AGENTS.md),
-// hermes 0.18.2 over ACP (AGENTS.md). kiro was confirmed earlier by a kiro-cli
-// 2.13.0 ACP smoke — see the call site. Still unprobed: grok, qoder, codebuddy.
-func providerNeedsInlineSystemPrompt(provider string) bool {
-	switch provider {
-	case "openclaw", "kimi", "traecli", "qwenpaw":
-		return true
-	default:
-		return false
+// An omitted version preserves the legacy fallback for callers/tests that do
+// not have a detected CLI version. Production task execution passes the
+// version paired with the resolved executable path.
+func providerNeedsInlineSystemPrompt(provider string, versions ...string) bool {
+	version := ""
+	if len(versions) > 0 {
+		version = versions[0]
 	}
+	return agent.InstructionNeedsInline(provider, version)
 }
 
 // gateResumeToReusedWorkdir clears the task's prior session unless the task
@@ -6365,7 +6354,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	// as always included, and a real kiro-cli 2.13.0 ACP smoke confirms it.
 	// Prepending the full runtime brief into the ACP user prompt duplicates that
 	// context and bloats every turn.
-	if providerNeedsInlineSystemPrompt(provider) {
+	if providerNeedsInlineSystemPrompt(provider, resolvedVersion) {
 		execOpts.SystemPrompt = runtimeBrief
 	}
 
@@ -6448,7 +6437,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			taskLog.Warn("execenv: re-inject cold runtime config for fresh retry failed (non-fatal)", "error", briefErr)
 		} else {
 			runtimeBrief = freshBrief
-			if providerNeedsInlineSystemPrompt(provider) {
+			if providerNeedsInlineSystemPrompt(provider, resolvedVersion) {
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}

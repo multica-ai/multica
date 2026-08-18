@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"github.com/pelletier/go-toml/v2"
 )
 
@@ -244,6 +245,9 @@ func stripJSONC(raw []byte) ([]byte, error) {
 // logs; the public capabilities endpoint continues to use the redacted summary
 // type above.
 func loadRuntimeMcpServerConfigs(provider string) (map[string]any, bool, error) {
+	if !agent.ProviderSupportsMCPConfig(provider) {
+		return map[string]any{}, false, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)
@@ -369,6 +373,9 @@ func loadClaudePluginMcpServerConfigs(home string) map[string]any {
 }
 
 func listRuntimeLocalMcpServers(provider string) ([]runtimeLocalMcpServerSummary, bool, error) {
+	if !agent.ProviderSupportsMCPConfig(provider) {
+		return []runtimeLocalMcpServerSummary{}, false, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, false, fmt.Errorf("resolve user home: %w", err)

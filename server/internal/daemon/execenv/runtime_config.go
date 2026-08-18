@@ -193,31 +193,16 @@ func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (strin
 // Cleanup in lockstep — both paths consult the same table so a new provider
 // added to one side cannot drift past the other.
 func runtimeConfigPath(workDir, provider string) string {
-	// Built-in runtime identities (e.g. "omp") inherit their config file
-	// from their protocol family — resolve the family from the descriptor
-	// and delegate to the family's switch case. This avoids hardcoding
-	// "AGENTS.md" for every descriptor; a compatible runtime on Claude,
-	// CodeBuddy, or Qwen would otherwise write the wrong file.
+	// Built-in runtime identities inherit their protocol family's file contract
+	// unless the descriptor owns a distinct native path.
 	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
 		return runtimeConfigPath(workDir, desc.ProtocolFamily)
 	}
-	switch provider {
-	case "claude":
-		return filepath.Join(workDir, "CLAUDE.md")
-	case "codebuddy":
-		// CodeBuddy Code's native memory file is CODEBUDDY.md, not
-		// CLAUDE.md — see https://www.codebuddy.ai/docs/cli/codebuddy-dir
-		// ("CODEBUDDY.md / .codebuddy/CODEBUDDY.md — Project-level memory
-		// file"). CodeBuddy only reads CLAUDE.md if the user manually
-		// migrates/symlinks it in.
-		return filepath.Join(workDir, "CODEBUDDY.md")
-	case "qwen":
-		return filepath.Join(workDir, "QWEN.md")
-	case "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwenpaw":
-		return filepath.Join(workDir, "AGENTS.md")
-	default:
+	capability, ok := agent.ProviderCapabilityFor(provider)
+	if !ok || capability.RuntimeConfigFile == "" {
 		return ""
 	}
+	return filepath.Join(workDir, capability.RuntimeConfigFile)
 }
 
 // writeRuntimeConfigFile writes the Multica runtime brief to path without

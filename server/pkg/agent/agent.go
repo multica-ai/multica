@@ -271,28 +271,7 @@ type Config struct {
 // so the family picker rejected it (#4945). grok is the xAI Grok Build CLI
 // ACP backend (`grok agent --always-approve stdio`). qwen is Qwen Code's
 // native `qwen -p <prompt> --output-format stream-json` backend.
-var SupportedTypes = []string{
-	"claude",
-	"codebuddy",
-	"codex",
-	"copilot",
-	"opencode",
-	"deveco",
-	"openclaw",
-	"hermes",
-	"pi",
-	"cursor",
-	"kimi",
-	"reasonix",
-	"kiro",
-	"antigravity",
-	"qoder",
-	"qoderclicn",
-	"traecli",
-	"grok",
-	"qwen",
-	"qwenpaw",
-}
+var SupportedTypes = SupportedProviderTypes()
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
 // Used to validate a custom runtime profile's protocol_family before it is
