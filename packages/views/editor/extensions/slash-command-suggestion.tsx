@@ -164,6 +164,49 @@ export const SlashCommandList = forwardRef<
   );
 });
 
+const NO_MATCH = 4;
+
+/**
+ * Relevance tier for one skill, best first:
+ *
+ *   0 exact name → 1 name prefix → 2 name substring → 3 description only
+ *
+ * The name is what the user types after `/`; a description hit is a fallback
+ * for "I forget what it's called". Without the tiers, typing `/wa` left
+ * `wayfinder` behind every skill whose description happens to contain "wa"
+ * ("throwaway", "software"), because the list kept the agent's configured
+ * order.
+ */
+function skillMatchRank(
+  skill: { name: string; description?: string },
+  q: string,
+): number {
+  const name = skill.name.toLowerCase();
+  if (name === q) return 0;
+  if (name.startsWith(q)) return 1;
+  if (name.includes(q)) return 2;
+  if ((skill.description ?? "").toLowerCase().includes(q)) return 3;
+  return NO_MATCH;
+}
+
+/**
+ * Matching skills, best tier first. Ranking runs BEFORE the MAX_ITEMS
+ * truncation so a name match gives up neither its position nor its slot to a
+ * description hit. Sorting is stable, so the agent's configured order still
+ * decides ties within a tier.
+ */
+function rankSkillMatches<T extends { name: string; description?: string }>(
+  skills: T[],
+  q: string,
+): T[] {
+  if (!q) return skills;
+  return skills
+    .map((skill) => ({ skill, rank: skillMatchRank(skill, q) }))
+    .filter((entry) => entry.rank !== NO_MATCH)
+    .sort((a, b) => a.rank - b.rank)
+    .map((entry) => entry.skill);
+}
+
 function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
   const wsId = getCurrentWsId();
   if (!wsId) return [];
@@ -188,13 +231,7 @@ function buildItems(qc: QueryClient, query: string): SlashCommandItem[] {
     null;
 
   const q = query.toLowerCase();
-  return (activeAgent?.skills ?? [])
-    .filter(
-      (s) =>
-        !q ||
-        s.name.toLowerCase().includes(q) ||
-        (s.description ?? "").toLowerCase().includes(q),
-    )
+  return rankSkillMatches(activeAgent?.skills ?? [], q)
     .slice(0, MAX_ITEMS)
     .map((s) => ({ id: s.id, label: s.name, description: s.description ?? "" }));
 }
