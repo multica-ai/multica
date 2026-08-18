@@ -152,6 +152,13 @@ type PatcherQueries interface {
 	GetLarkOutboundCardByTask(ctx context.Context, taskID pgtype.UUID) (OutboundCardMessage, error)
 	CreateLarkOutboundCardMessage(ctx context.Context, arg CreateOutboundCardMessageParams) (OutboundCardMessage, error)
 	UpdateLarkOutboundCardStatus(ctx context.Context, arg UpdateOutboundCardStatusParams) error
+
+	// Used by the inbox:new push (inbox_push.go) to find the bound member
+	// to deliver to, build a readable link, and backfill the issue
+	// description into body-less assignment notifications.
+	FindChannelBindingForMember(ctx context.Context, arg db.FindChannelBindingForMemberParams) (db.ChannelUserBinding, error)
+	GetWorkspace(ctx context.Context, id pgtype.UUID) (db.Workspace, error)
+	GetIssue(ctx context.Context, id pgtype.UUID) (db.Issue, error)
 }
 
 // CredentialsResolver decrypts an installation's app_secret for the
@@ -286,6 +293,9 @@ func (p *Patcher) Register(bus *events.Bus) {
 	bus.Subscribe(protocol.EventTaskFailed, p.handleEvent)
 	bus.Subscribe(protocol.EventChatDone, p.handleEvent)
 	bus.Subscribe(protocol.EventTaskCancelled, p.handleEvent)
+	// Inbox notifications delivered to a member's Lark DM when they have
+	// bound their account; a no-op for everyone else. See inbox_push.go.
+	bus.Subscribe(protocol.EventInboxNew, p.handleInboxNew)
 }
 
 func (p *Patcher) handleEvent(e events.Event) {

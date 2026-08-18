@@ -296,7 +296,21 @@ type SendTextParams struct {
 	// ReplyTarget threads the text reply back into a Lark topic; see
 	// ReplyTarget. Empty keeps the chat-level send.
 	ReplyTarget ReplyTarget
+	// ReceiveIDType tells Lark how to read ChatID. Empty means chat_id —
+	// the historical chat-level send. ReceiveIDOpenID addresses a person
+	// instead, which is how the inbox push reaches a bound member without
+	// a pre-existing chat. Ignored when ReplyTarget is set, since a reply
+	// is addressed by message id.
+	ReceiveIDType ReceiveIDType
 }
+
+// ReceiveIDType is Lark's receive_id_type query parameter: it selects
+// which identifier namespace receive_id is read in.
+type ReceiveIDType string
+
+// ReceiveIDOpenID addresses a single user by their per-app open_id. The
+// bot opens (or reuses) a 1:1 conversation with that person.
+const ReceiveIDOpenID ReceiveIDType = "open_id"
 
 // SendMarkdownCardParams is the input shape for posting an agent
 // reply as a Lark interactive card with a markdown body element.
@@ -316,6 +330,10 @@ type SendMarkdownCardParams struct {
 	// ReplyTarget threads the card reply back into a Lark topic; see
 	// ReplyTarget. Empty keeps the chat-level send.
 	ReplyTarget ReplyTarget
+	// ReceiveIDType tells Lark how to read ChatID; see the field of the
+	// same name on SendTextParams. Empty means chat_id. Ignored when
+	// ReplyTarget is set.
+	ReceiveIDType ReceiveIDType
 }
 
 // BindingPromptParams carries the data needed to render and send the
