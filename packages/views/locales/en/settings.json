@@ -187,6 +187,8 @@
       "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
       "open_settings": "Open Settings",
       "close_tab": "Close active tab",
+      "previous_tab": "Previous tab",
+      "next_tab": "Next tab",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",
       "reset_zoom": "Reset zoom",
