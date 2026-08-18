@@ -7,7 +7,7 @@
     "move_failed": "Échec du déplacement du ticket"
   },
   "status": {
-    "backlog": "Backlog",
+    "backlog": "À planifier",
     "todo": "À faire",
     "in_progress": "En cours",
     "in_review": "En relecture",
@@ -705,9 +705,9 @@
     "delete_failed": "Échec de la suppression de l'étiquette"
   },
   "backlog_hint": {
-    "title": "L'agent est en pause dans le Backlog",
+    "title": "L'agent est en pause dans À planifier",
     "description": "Ce ticket est mis de côté : l'agent assigné attendra donc. Déplacez-le vers « À faire » quand vous voulez que l'agent démarre.",
-    "row_backlog_label": "Backlog",
+    "row_backlog_label": "À planifier",
     "row_backlog_hint": "laisse l'agent en pause",
     "row_todo_label": "À faire",
     "row_todo_hint": "démarre l'agent"

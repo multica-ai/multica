@@ -62,7 +62,7 @@
     "toast_failed": "Échec de l'action",
     "create_will_start": "{{name}} commencera à travailler juste après la création.",
     "create_will_start_squad": "Le chef de {{name}} l'examinera et commencera à répartir le travail juste après la création.",
-    "create_parked": "Assigné — ne démarrera pas tant que le ticket est dans le Backlog."
+    "create_parked": "Assigné — ne démarrera pas tant que le ticket est dans À planifier."
   },
   "create_squad": {
     "title": "Créer un squad",
