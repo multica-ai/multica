@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest';
+import path from 'node:path';
 import config from './vite.config';
 
 describe('Tag Host Vite contract', () => {
@@ -9,9 +10,13 @@ describe('Tag Host Vite contract', () => {
       base: '/tag/',
       server: {
         hmr: {
-          path: '/tag/',
+          path: '/',
         },
       },
     });
+
+    expect(path.posix.join(config.base ?? '/', config.server?.hmr?.path ?? '/')).toBe(
+      '/tag/',
+    );
   });
 });
