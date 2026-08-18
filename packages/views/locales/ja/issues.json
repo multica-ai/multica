@@ -372,6 +372,7 @@
     "due_date_removed": "期限を削除しました",
     "title_renamed": "このタスクのタイトルを \"{{from}}\" から \"{{to}}\" に変更しました",
     "description_updated": "説明を更新しました",
+    "task_no_response_other": "テキストの返信なしで作業を完了しました（{{count}} 回）",
     "task_completed_other": "作業を完了しました（{{count}} 回）",
     "task_failed_other": "作業が失敗しました（{{count}} 回）",
     "squad_leader_evaluated": "スクワッドのトリガーを評価しました",

@@ -3107,6 +3107,64 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 	if count != 0 {
 		t.Fatalf("expected no synthesized agent comment for trivial Done output, got %d", count)
 	}
+
+	var activityCount int
+	var activityTaskID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*), COALESCE(max(details->>'task_id'), '')
+		FROM activity_log
+		WHERE issue_id = $1
+		  AND actor_type = 'agent'
+		  AND actor_id = $2
+		  AND action = 'task_no_response'
+	`, issueID, agentID).Scan(&activityCount, &activityTaskID); err != nil {
+		t.Fatalf("query no-response activity: %v", err)
+	}
+	if activityCount != 1 {
+		t.Fatalf("no-response activity count = %d, want 1", activityCount)
+	}
+	if activityTaskID != taskID {
+		t.Fatalf("no-response activity task_id = %q, want %q", activityTaskID, taskID)
+	}
+
+	// The same visible outcome is required when the runtime returns no text at
+	// all, which is the production shape reported in #7071.
+	var emptyTaskID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, trigger_comment_id,
+			status, priority, started_at
+		)
+		VALUES ($1, $2, $3, $4, 'running', 0, now())
+		RETURNING id
+	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&emptyTaskID); err != nil {
+		t.Fatalf("setup: create empty-output task: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, emptyTaskID) })
+
+	w = httptest.NewRecorder()
+	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+emptyTaskID+"/complete",
+		map[string]any{"output": "   "}, testWorkspaceID, "legit-daemon")
+	rctx = chi.NewRouteContext()
+	rctx.URLParams.Add("taskId", emptyTaskID)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+	testHandler.CompleteTask(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("CompleteTask empty output: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM activity_log
+		WHERE issue_id = $1
+		  AND action = 'task_no_response'
+		  AND details->>'task_id' = $2
+	`, issueID, emptyTaskID).Scan(&activityCount); err != nil {
+		t.Fatalf("query empty-output no-response activity: %v", err)
+	}
+	if activityCount != 1 {
+		t.Fatalf("empty-output no-response activity count = %d, want 1", activityCount)
+	}
 }
 
 func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *testing.T) {

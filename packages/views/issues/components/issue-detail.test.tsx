@@ -1080,6 +1080,26 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByText("I can help with this")).toBeInTheDocument();
   });
 
+  it("renders an explicit activity when an issue task finishes without a text reply", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "activity-no-response",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        action: "task_no_response",
+        details: { outcome: "no_response", task_id: "task-1" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetail();
+
+    await waitFor(() => {
+      expect(screen.getByText("finished without a text reply")).toBeInTheDocument();
+    });
+  });
+
   it("reruns the source task from an agent failure comment", async () => {
     mockApiObj.listTimeline.mockResolvedValue([
       ...mockTimeline,

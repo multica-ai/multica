@@ -372,6 +372,7 @@
     "due_date_removed": "마감일을 제거했습니다",
     "title_renamed": "태스크 제목을 \"{{from}}\"에서 \"{{to}}\"로 바꿨습니다",
     "description_updated": "설명을 업데이트했습니다",
+    "task_no_response_other": "텍스트 답변 없이 작업을 완료했습니다({{count}}회)",
     "task_completed_other": "작업을 완료했습니다({{count}}회)",
     "task_failed_other": "작업이 실패했습니다({{count}}회)",
     "squad_leader_evaluated": "스쿼드 트리거를 평가했습니다",

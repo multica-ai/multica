@@ -3753,24 +3753,25 @@ func (s *TaskService) CompleteTask(ctx context.Context, taskID pgtype.UUID, resu
 		if !suppressNoActionComment && !agentCommented {
 			var payload protocol.TaskCompletedPayload
 			if err := json.Unmarshal(result, &payload); err == nil {
-				if payload.Output != "" {
-					// Match the CLI's --content / --description behavior: agents that
-					// emit literal `\n` 4-char sequences (Python/JSON-style) get them
-					// decoded into real newlines before the comment hits the DB. See
-					// util.UnescapeBackslashEscapes for the exact contract.
-					body := util.UnescapeBackslashEscapes(payload.Output)
-					if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
-						slog.Warn("suppressing trivial comment-trigger fallback output",
-							"task_id", util.UUIDToString(task.ID),
-							"issue_id", util.UUIDToString(task.IssueID),
-							"agent_id", util.UUIDToString(task.AgentID),
-						)
-					} else {
-						// Redact first, then bound: a runaway raw-stream Output (GH #5455)
-						// must never reach the issue thread, even as a clipped excerpt.
-						content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
-						s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID, task.ID)
-					}
+				// Match the CLI's --content / --description behavior: agents that
+				// emit literal `\n` 4-char sequences (Python/JSON-style) get them
+				// decoded into real newlines before the comment hits the DB. See
+				// util.UnescapeBackslashEscapes for the exact contract.
+				body := util.UnescapeBackslashEscapes(payload.Output)
+				if strings.TrimSpace(body) == "" {
+					s.createTaskNoResponseActivity(ctx, task)
+				} else if task.TriggerCommentID.Valid && isTrivialDoneOutput(body) {
+					slog.Warn("suppressing trivial comment-trigger fallback output",
+						"task_id", util.UUIDToString(task.ID),
+						"issue_id", util.UUIDToString(task.IssueID),
+						"agent_id", util.UUIDToString(task.AgentID),
+					)
+					s.createTaskNoResponseActivity(ctx, task)
+				} else {
+					// Redact first, then bound: a runaway raw-stream Output (GH #5455)
+					// must never reach the issue thread, even as a clipped excerpt.
+					content := truncateFallbackCommentBody(redact.Text(body), maxSynthesizedFallbackCommentRunes)
+					s.createAgentComment(ctx, task.IssueID, task.AgentID, content, "comment", task.TriggerCommentID, task.ID)
 				}
 			}
 		}
@@ -6095,6 +6096,61 @@ func (s *TaskService) getIssuePrefix(workspaceID pgtype.UUID) string {
 		return ""
 	}
 	return ws.IssuePrefix
+}
+
+// createTaskNoResponseActivity records the visible terminal outcome for an
+// issue task that completed without a comment or meaningful fallback text.
+// It stays an activity instead of impersonating an ordinary agent reply.
+func (s *TaskService) createTaskNoResponseActivity(ctx context.Context, task db.AgentTaskQueue) {
+	issue, err := s.Queries.GetIssue(ctx, task.IssueID)
+	if err != nil {
+		slog.Warn("loading issue for no-response activity failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+
+	details, _ := json.Marshal(map[string]string{
+		"outcome": "no_response",
+		"task_id": util.UUIDToString(task.ID),
+	})
+	activity, err := s.Queries.CreateActivity(ctx, db.CreateActivityParams{
+		WorkspaceID: issue.WorkspaceID,
+		IssueID:     issue.ID,
+		ActorType:   pgtype.Text{String: "agent", Valid: true},
+		ActorID:     task.AgentID,
+		Action:      "task_no_response",
+		Details:     details,
+	})
+	if err != nil {
+		slog.Warn("creating no-response activity failed",
+			"task_id", util.UUIDToString(task.ID),
+			"issue_id", util.UUIDToString(task.IssueID),
+			"error", err,
+		)
+		return
+	}
+
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventActivityCreated,
+		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+		ActorType:   "agent",
+		ActorID:     util.UUIDToString(task.AgentID),
+		Payload: map[string]any{
+			"issue_id": util.UUIDToString(issue.ID),
+			"entry": map[string]any{
+				"type":       "activity",
+				"id":         util.UUIDToString(activity.ID),
+				"actor_type": "agent",
+				"actor_id":   util.UUIDToString(task.AgentID),
+				"action":     activity.Action,
+				"details":    json.RawMessage(details),
+				"created_at": util.TimestampToString(activity.CreatedAt),
+			},
+		},
+	})
 }
 
 func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID pgtype.UUID, content, commentType string, parentID, sourceTaskID pgtype.UUID) {
