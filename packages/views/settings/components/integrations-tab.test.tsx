@@ -49,6 +49,10 @@ vi.mock("./dingtalk-tab", () => ({
   DingTalkTab: () => <div data-testid="dingtalk-tab" />,
 }));
 
+vi.mock("./sharecrm-tab", () => ({
+  ShareCRMTab: () => <div data-testid="sharecrm-tab" />,
+}));
+
 vi.mock("./vcs-tab", () => ({
   VCSTab: () => <div data-testid="vcs-tab" />,
 }));

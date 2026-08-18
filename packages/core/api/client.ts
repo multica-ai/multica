@@ -194,6 +194,10 @@ import type {
   ListTelegramInstallationsResponse,
   RegisterTelegramRequest,
   RedeemTelegramBindingTokenResponse,
+  ShareCRMInstallation,
+  ListShareCRMInstallationsResponse,
+  RegisterShareCRMBYORequest,
+  RedeemShareCRMBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -361,6 +365,12 @@ import {
   EMPTY_TELEGRAM_INSTALLATION,
   EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+  ShareCRMInstallationSchema,
+  ListShareCRMInstallationsResponseSchema,
+  RedeemShareCRMBindingTokenResponseSchema,
+  EMPTY_SHARECRM_INSTALLATION,
+  EMPTY_LIST_SHARECRM_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_SHARECRM_BINDING_TOKEN_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -4720,6 +4730,58 @@ export class ApiClient {
       RedeemTelegramBindingTokenResponseSchema,
       EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/telegram/binding/redeem" },
+    );
+  }
+
+  // ShareCRM (纷享销客) integration
+  async listShareCRMInstallations(
+    workspaceId: string,
+  ): Promise<ListShareCRMInstallationsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/sharecrm/installations`);
+    return parseWithFallback(
+      raw,
+      ListShareCRMInstallationsResponseSchema,
+      EMPTY_LIST_SHARECRM_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/sharecrm/installations" },
+    );
+  }
+
+  async registerShareCRMBYO(
+    workspaceId: string,
+    agentId: string,
+    body: RegisterShareCRMBYORequest,
+  ): Promise<ShareCRMInstallation> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/sharecrm/install/byo?${search.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    return parseWithFallback(raw, ShareCRMInstallationSchema, EMPTY_SHARECRM_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/sharecrm/install/byo",
+    });
+  }
+
+  async deleteShareCRMInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/sharecrm/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemShareCRMBindingToken(
+    token: string,
+  ): Promise<RedeemShareCRMBindingTokenResponse> {
+    const raw = await this.fetch<unknown>(`/api/sharecrm/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    return parseWithFallback(
+      raw,
+      RedeemShareCRMBindingTokenResponseSchema,
+      EMPTY_REDEEM_SHARECRM_BINDING_TOKEN_RESPONSE,
+      { endpoint: "POST /api/sharecrm/binding/redeem" },
     );
   }
 }
