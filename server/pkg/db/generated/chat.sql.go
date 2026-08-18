@@ -2083,24 +2083,6 @@ func (q *Queries) ListPendingChatTasksForSession(ctx context.Context, chatSessio
 	return items, nil
 }
 
-const lockChatSessionForAppend = `-- name: LockChatSessionForAppend :one
-SELECT id FROM chat_session
-WHERE id = $1
-FOR KEY SHARE
-`
-
-// The append transaction's first lock. FOR KEY SHARE conflicts with workspace
-// or session deletion but remains compatible with normal non-key session
-// updates and task enqueueing. DingTalk then acquires its route fence, matching
-// the workspace teardown order chat_session -> dingtalk_group_route and
-// preventing a route/session lock inversion.
-func (q *Queries) LockChatSessionForAppend(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
-	row := q.db.QueryRow(ctx, lockChatSessionForAppend, id)
-	var id_2 pgtype.UUID
-	err := row.Scan(&id_2)
-	return id_2, err
-}
-
 const lockChatSessionForDelete = `-- name: LockChatSessionForDelete :one
 SELECT id FROM chat_session
 WHERE id = $1

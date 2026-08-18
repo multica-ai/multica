@@ -176,13 +176,10 @@ import type {
   ListSlackInstallationsResponse,
   RegisterSlackBYORequest,
   RedeemSlackBindingTokenResponse,
-  DingTalkGroupRoute,
   DingTalkInstallation,
-  ListDingTalkGroupRoutesResponse,
   ListDingTalkInstallationsResponse,
   RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
-  UpdateDingTalkGroupRouteRequest,
   WecomInstallation,
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
@@ -321,13 +318,9 @@ import {
   WorkspaceSubscriptionSeatReconcileResultSchema,
   CreateWorkspaceSubscriptionPortalResponseSchema,
   DingTalkInstallationSchema,
-  DingTalkGroupRouteSchema,
-  ListDingTalkGroupRoutesResponseSchema,
   ListDingTalkInstallationsResponseSchema,
   RedeemDingTalkBindingTokenResponseSchema,
   EMPTY_DINGTALK_INSTALLATION,
-  EMPTY_DINGTALK_GROUP_ROUTE,
-  EMPTY_LIST_DINGTALK_GROUP_ROUTES_RESPONSE,
   EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE,
   WecomInstallationSchema,
@@ -4171,32 +4164,6 @@ export class ApiClient {
       EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE,
       { endpoint: "GET /api/workspaces/:id/dingtalk/installations" },
     );
-  }
-
-  async listDingTalkGroupRoutes(
-    workspaceId: string,
-  ): Promise<ListDingTalkGroupRoutesResponse> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/dingtalk/group-routes`);
-    return parseWithFallback(
-      raw,
-      ListDingTalkGroupRoutesResponseSchema,
-      EMPTY_LIST_DINGTALK_GROUP_ROUTES_RESPONSE,
-      { endpoint: "GET /api/workspaces/:id/dingtalk/group-routes" },
-    );
-  }
-
-  async updateDingTalkGroupRoute(
-    workspaceId: string,
-    routeId: string,
-    body: UpdateDingTalkGroupRouteRequest,
-  ): Promise<DingTalkGroupRoute> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/dingtalk/group-routes/${routeId}`,
-      { method: "PATCH", body: JSON.stringify(body) },
-    );
-    return parseWithFallback(raw, DingTalkGroupRouteSchema, EMPTY_DINGTALK_GROUP_ROUTE, {
-      endpoint: "PATCH /api/workspaces/:id/dingtalk/group-routes/:routeId",
-    });
   }
 
   // registerDingTalkBYO performs a bring-your-own-app install: the admin pastes

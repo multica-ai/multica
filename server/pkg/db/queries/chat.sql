@@ -332,16 +332,6 @@ SELECT id FROM chat_session
 WHERE id = $1
 FOR UPDATE;
 
--- name: LockChatSessionForAppend :one
--- The append transaction's first lock. FOR KEY SHARE conflicts with workspace
--- or session deletion but remains compatible with normal non-key session
--- updates and task enqueueing. DingTalk then acquires its route fence, matching
--- the workspace teardown order chat_session -> dingtalk_group_route and
--- preventing a route/session lock inversion.
-SELECT id FROM chat_session
-WHERE id = $1
-FOR KEY SHARE;
-
 -- name: LockChatSessionForRuntimeBind :one
 -- Acquires an exclusive (FOR UPDATE) row lock on chat_session(id), serialising
 -- "which runtime does this session execute on" against "enqueue the next task".

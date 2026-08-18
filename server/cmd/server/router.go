@@ -1574,13 +1574,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/dingtalk/installations", h.ListDingTalkInstallations)
-					r.Get("/dingtalk/group-routes", h.ListDingTalkGroupRoutes)
 				})
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
 					r.Delete("/dingtalk/installations/{installationId}", h.RevokeDingTalkInstallation)
 					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
-					r.Patch("/dingtalk/group-routes/{routeId}", h.UpdateDingTalkGroupRoute)
 				})
 
 				// Telegram integration. Same admin/member split as Slack:
