@@ -264,6 +264,11 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_DIM_PATH", "dim", "MULTICA_DIM_MODEL"); ok {
 		agents["dim"] = e
 	}
+	// MiniMax Code (`mcode`) exposes an ACP v1 server through `mcode acp`.
+	// Model selection is owned by the MCode runtime, so there is no model env.
+	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
+		agents["mcode"] = e
+	}
 	return agents
 }
 
