@@ -179,6 +179,8 @@ func TestCheckMinVersion(t *testing.T) {
 		{"dim", "0.3.11", false},
 		{"dim", "0.4.0", false},
 		{"dim", "0.3.9", true},
+		{"mcode", "0.1.2", false},
+		{"mcode", "mcode 0.1.1", true},
 		{"dim", "0.2.99", true},
 		{"dim", "invalid", true},
 		{"unknown", "1.0.0", false},
