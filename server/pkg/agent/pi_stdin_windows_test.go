@@ -96,8 +96,8 @@ func TestPiExecutePromptSurvivesPowerShellShim(t *testing.T) {
 	}
 }
 
-// TestPiRPCDiscoveryAnswersBeforeStdinEOF exercises the complete Windows model
-// discovery boundary:
+// TestPiExecutePromptSurvivesPowerShellShimRPCDiscoveryBeforeStdinEOF exercises
+// the complete Windows model discovery boundary:
 //
 //	Go -> powershell -Command pi.ps1 @args -> native child
 //
@@ -105,7 +105,7 @@ func TestPiExecutePromptSurvivesPowerShellShim(t *testing.T) {
 // -File entrypoint simulates the npm wrapper behaviour that waits for stdin EOF
 // before forwarding input; the test therefore fails against the old launcher
 // path by timing out and returning the fallback catalog with no Thinking data.
-func TestPiRPCDiscoveryAnswersBeforeStdinEOF(t *testing.T) {
+func TestPiExecutePromptSurvivesPowerShellShimRPCDiscoveryBeforeStdinEOF(t *testing.T) {
 	hosts := availablePowerShellHosts()
 	if len(hosts) == 0 {
 		t.Skip("no PowerShell host available")
@@ -113,12 +113,12 @@ func TestPiRPCDiscoveryAnswersBeforeStdinEOF(t *testing.T) {
 	for _, host := range hosts {
 		t.Run(filepath.Base(host), func(t *testing.T) {
 			stubPowerShell(t, host, true)
-			assertPiRPCDiscoveryAnswersBeforeStdinEOF(t)
+			assertPiRPCDiscoveryBeforeStdinEOF(t)
 		})
 	}
 }
 
-func assertPiRPCDiscoveryAnswersBeforeStdinEOF(t *testing.T) {
+func assertPiRPCDiscoveryBeforeStdinEOF(t *testing.T) {
 	t.Helper()
 
 	self, err := os.Executable()
