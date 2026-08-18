@@ -75,6 +75,7 @@ import type {
   IssueTableFacetsResponse,
   WorkingAgentSummary,
 } from "@multica/core/types";
+import { formatActorRef, isActorPropertyType } from "@multica/core/types";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { PropertyIcon } from "../../common/property-icon";
@@ -657,7 +658,10 @@ function LabelSubContent({
 /**
  * Option checkboxes for one custom property inside the Filter dropdown.
  * Select/multi_select list the definition's options (dot + name); checkbox
- * definitions expose the "true"/"false" pseudo-options with Yes/No labels.
+ * definitions expose the "true"/"false" pseudo-options with Yes/No labels;
+ * actor definitions have no config options at all, so their candidates come
+ * from the member directory instead, with the signed-in member first so
+ * "this property is me" stays one click away.
  */
 function PropertyFilterOptions({
   property,
@@ -675,16 +679,50 @@ function PropertyFilterOptions({
   fixedTitle?: string;
 }) {
   const { t } = useT("issues");
-  const options =
-    property.type === "checkbox"
+  const wsId = useWorkspaceId();
+  const currentUserId = useAuthStore((s) => s.user?.id);
+  const actorProperty = isActorPropertyType(property.type);
+  const { data: actorMembers = [] } = useQuery({
+    ...memberListOptions(wsId),
+    enabled: actorProperty,
+  });
+
+  const actorOptions = useMemo(() => {
+    if (!actorProperty) return [];
+    return actorMembers
+      .slice()
+      .sort((a, b) => {
+        if (a.user_id === currentUserId) return -1;
+        if (b.user_id === currentUserId) return 1;
+        return 0;
+      })
+      .map((m) => ({
+        id: formatActorRef("member", m.user_id),
+        name: m.name,
+        actorType: "member" as const,
+        actorId: m.user_id,
+      }));
+  }, [actorProperty, actorMembers, currentUserId]);
+
+  const options = actorProperty
+    ? actorOptions.map((option) => ({
+        id: option.id,
+        name: option.name,
+        color: undefined as string | undefined,
+        actorType: option.actorType as string | undefined,
+        actorId: option.actorId as string | undefined,
+      }))
+    : property.type === "checkbox"
       ? [
-          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined },
-          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined },
+          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined, actorType: undefined, actorId: undefined },
+          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined, actorType: undefined, actorId: undefined },
         ]
       : (property.config.options ?? []).map((option) => ({
           id: option.id,
           name: option.name,
           color: option.color as string | undefined,
+          actorType: undefined as string | undefined,
+          actorId: undefined as string | undefined,
         }));
 
   return (
@@ -702,6 +740,9 @@ function PropertyFilterOptions({
             className={FILTER_ITEM_CLASS}
           >
             <HoverCheck checked={checked} />
+            {option.actorType && option.actorId && (
+              <ActorAvatar actorType={option.actorType} actorId={option.actorId} size="sm" />
+            )}
             {option.color && (
               <span
                 className="size-2.5 shrink-0 rounded-full"
@@ -1174,8 +1215,12 @@ export function IssueFilterMenu({
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const filterableProperties = useMemo(
     () =>
-      workspaceProperties.filter((p) =>
-        p.type === "select" || p.type === "multi_select" || p.type === "checkbox",
+      workspaceProperties.filter(
+        (p) =>
+          p.type === "select" ||
+          p.type === "multi_select" ||
+          p.type === "checkbox" ||
+          isActorPropertyType(p.type),
       ),
     [workspaceProperties],
   );
@@ -1597,8 +1642,12 @@ export function IssueDisplayControls({
   );
   const filterableProperties = useMemo(
     () =>
-      workspaceProperties.filter((p) =>
-        p.type === "select" || p.type === "multi_select" || p.type === "checkbox",
+      workspaceProperties.filter(
+        (p) =>
+          p.type === "select" ||
+          p.type === "multi_select" ||
+          p.type === "checkbox" ||
+          isActorPropertyType(p.type),
       ),
     [workspaceProperties],
   );

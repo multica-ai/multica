@@ -142,15 +142,16 @@ Contracts:
   enqueue-time via `canEnqueueSquadLeader` (squad.go:1037);
 - archived squad / archived leader rejected at assign-time (issue.go:2622-2627);
 - pending task dedup is applied (squad.go:1042-1048);
-- parent status is agent-managed: assignment brief (`writeWorkflowAssignment` with
-  `IsSquadLeader`) requires `in_progress` on the first turn and forbids
+- parent status is agent-managed: the Ownership-mode block (`writeWorkflowIssue`
+  with `IsSquadLeader`) requires `in_progress` on the first turn and forbids
   unconditional `in_review` on that dispatch turn; Squad Operating Protocol
   (`squad_briefing.go`) owns the ongoing `in_progress` → later `in_review`
-  contract. `StartTask` / `CompleteTask` do not write issue status. On
-  comment-triggered leader turns `writeWorkflowComment` names that protocol
-  responsibility as the one exception to "do not change status unless the
-  comment asks" — without it the @mention-dispatch shape (no child issues, so
-  no child-done ask) would strand the parent in `in_progress`.
+  contract. `StartTask` / `CompleteTask` do not write issue status. On reply
+  turns the leader's status bullet routes on that protocol responsibility by
+  name: present (issue assigned to this squad) → wrap up with `in_review` when
+  the goal is met, absent (guest leader) → no status writes at all. Ordinary
+  agents get the assignee-scoped arc instead, which never fires for a squad
+  parent because the parent is assigned to the squad, not to the leader agent.
 
 ## Comment / Mention
 
@@ -231,9 +232,11 @@ Contracts:
   ungated path; any future invocation gate must be added to BOTH together.
 - parent status is not auto-advanced by the barrier: the system comment asks the
   leader to continue or — when the overall goal is met — run
-  `multica issue status <parent-id> in_review`. That explicit ask is what lets a
-  comment-triggered leader turn change status (the comment workflow otherwise
-  forbids status flips unless asked). `done` remains human / integration owned.
+  `multica issue status <parent-id> in_review`. The write is authorized by the
+  Squad Operating Protocol's standing "Own the parent issue status" grant
+  (present exactly when the issue is assigned to this squad); the system
+  comment marks the wrap-up moment, it is not the permission. `done` remains
+  human / integration owned.
 
 ## Private Leader Access
 

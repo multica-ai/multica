@@ -294,6 +294,25 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.28",
+        date: "2026-08-17",
+        title:
+          "Member custom fields, bulk skill updates, and a clearer desktop update prompt",
+        changes: [],
+        features: [
+          "You can now put workspace members in a custom field, one or several.",
+          "Selected skills can now be updated from their source all at once.",
+        ],
+        improvements: [
+          "The desktop update prompt now links to what changed in that version.",
+          "The command line now accepts a member's email wherever an assignee is expected.",
+        ],
+        fixes: [
+          "Opening a new tab in the desktop app no longer loses your workspace.",
+          "Member filters now show names and avatars instead of a bare count.",
+        ],
+      },
+      {
         version: "0.4.27",
         date: "2026-08-17",
         title:

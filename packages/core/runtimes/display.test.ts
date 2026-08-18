@@ -100,6 +100,13 @@ describe("runtimeDisplayLabel", () => {
         provider: "qwenpaw",
       }),
     ).toBe("box (QwenPaw)");
+    expect(
+      runtimeDisplayLabel({
+        name: "MiniMax Code (host)",
+        custom_name: "box",
+        provider: "mcode",
+      }),
+    ).toBe("box (MiniMax Code)");
   });
 
   it("first-letter-capitalizes non-overridden slugs, matching the daemon", () => {

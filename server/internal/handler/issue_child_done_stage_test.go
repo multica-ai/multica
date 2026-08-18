@@ -171,8 +171,9 @@ func TestStageAdvanceInstruction(t *testing.T) {
 		}
 		// It must make clear that finishing the stage != the whole issue is
 		// done, and hand both paths (wrap up / create the next stage) to the
-		// leader. When wrapping up, the explicit ask is in_review so the
-		// comment-triggered "only change status when asked" rule permits it.
+		// leader. The explicit in_review command marks the wrap-up moment;
+		// the write itself is authorized by the standing status-ownership
+		// grant (MUL-6300), not by this ask.
 		if !strings.Contains(got, "does not mean the whole issue is done") {
 			t.Fatalf("expected stage-done != issue-done framing, got %q", got)
 		}

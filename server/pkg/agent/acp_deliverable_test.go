@@ -170,6 +170,7 @@ var acpDeliverableCases = []acpDeliverableCase{
 	{backend: "dim", binary: "dim", notification: "session/update"},
 	{backend: "traecli", binary: "traecli", notification: "session/update"},
 	{backend: "grok", binary: "grok", notification: "session/update"},
+	{backend: "mcode", binary: "mcode", notification: "session/update"},
 	{backend: "kiro", binary: "kiro-cli", notification: "session/notification", camelUpdates: true},
 	{backend: "qoder", binary: "qodercli", notification: "session/notification", camelUpdates: true},
 	{backend: "qoderclicn", binary: "qoderclicn", notification: "session/notification", camelUpdates: true},

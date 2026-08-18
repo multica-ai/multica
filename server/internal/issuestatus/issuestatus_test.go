@@ -61,6 +61,23 @@ func (f *fakeQuerier) SeedIssueStatusEntries(_ context.Context, _ pgtype.UUID) e
 	return f.err
 }
 
+func (f *fakeQuerier) ListIssueStatusKeysByCategories(_ context.Context, arg db.ListIssueStatusKeysByCategoriesParams) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	wanted := map[string]bool{}
+	for _, c := range arg.Categories {
+		wanted[c] = true
+	}
+	var out []string
+	for _, e := range f.entries {
+		if wanted[e.Category] {
+			out = append(out, e.Key)
+		}
+	}
+	return out, nil
+}
+
 func custom(key, category string) db.IssueStatus {
 	return db.IssueStatus{Key: key, Category: category, WorkspaceID: testWorkspace}
 }
@@ -308,4 +325,42 @@ func TestResolverFailsSafeWhenTheCatalogReadFails(t *testing.T) {
 	if got := r.Effective(context.Background(), q, "human_review"); got != "human_review" {
 		t.Errorf("Effective on a failed catalog read = %q, want the key unchanged", got)
 	}
+}
+
+// ExpandCategories is what keeps the (workspace_id, status) index usable for a
+// category filter; wrapping the column in issue_effective_status() instead made
+// it a full workspace scan.
+func TestExpandCategories(t *testing.T) {
+	ctx := context.Background()
+
+	t.Run("no catalog rows still yields the canonical keys", func(t *testing.T) {
+		got, err := ExpandCategories(ctx, newFakeQuerier(), testWorkspace, []string{"blocked"})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		if len(got) != 1 || got[0] != "blocked" {
+			t.Errorf("expand(blocked) on an empty catalog = %v, want [blocked]", got)
+		}
+	})
+
+	t.Run("includes custom keys and never duplicates the canonical one", func(t *testing.T) {
+		q := newFakeQuerier(custom("in_review", InReview), custom("human_review", InReview))
+		got, err := ExpandCategories(ctx, q, testWorkspace, []string{"in_review"})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		if len(got) != 2 {
+			t.Fatalf("expand(in_review) = %v, want exactly 2 keys with no duplicate", got)
+		}
+	})
+
+	t.Run("ignores values that are not categories", func(t *testing.T) {
+		got, err := ExpandCategories(ctx, newFakeQuerier(), testWorkspace, []string{"not_a_category"})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		if got != nil {
+			t.Errorf("expand of a non-category = %v, want nil", got)
+		}
+	})
 }

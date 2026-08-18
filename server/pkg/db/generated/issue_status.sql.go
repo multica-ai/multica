@@ -28,8 +28,11 @@ type ArchiveIssueStatusEntryParams struct {
 }
 
 // Built-ins are excluded by is_system: archiving one would delete its
-// category's behavior definition. Callers must migrate issues off the status
-// first; CountIssuesUsingStatusKey is the guard.
+// category's behavior definition.
+//
+// Archiving retires a status from future use only. Issues already on it keep
+// it — Effective ignores archived_at, so their behavior is unchanged — while
+// Resolve rejects it, so nothing new can be assigned to it.
 func (q *Queries) ArchiveIssueStatusEntry(ctx context.Context, arg ArchiveIssueStatusEntryParams) (IssueStatus, error) {
 	row := q.db.QueryRow(ctx, archiveIssueStatusEntry, arg.ID, arg.WorkspaceID)
 	var i IssueStatus
@@ -61,6 +64,9 @@ type CountIssuesUsingStatusKeyParams struct {
 	Key         string      `json:"key"`
 }
 
+// Reported alongside a status so the UI can say how many issues still carry an
+// archived one. NOT an archive precondition: archiving never requires migrating
+// issues off the status.
 func (q *Queries) CountIssuesUsingStatusKey(ctx context.Context, arg CountIssuesUsingStatusKeyParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countIssuesUsingStatusKey, arg.WorkspaceID, arg.Key)
 	var column_1 int64
@@ -250,6 +256,45 @@ func (q *Queries) ListIssueStatusEntries(ctx context.Context, arg ListIssueStatu
 			return nil, err
 		}
 		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listIssueStatusKeysByCategories = `-- name: ListIssueStatusKeysByCategories :many
+SELECT key FROM issue_status
+WHERE workspace_id = $1::uuid
+  AND category = ANY($2::text[])
+`
+
+type ListIssueStatusKeysByCategoriesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	Categories  []string    `json:"categories"`
+}
+
+// Expands a set of categories to the status keys that belong to them, so a
+// category filter can be applied as an INDEXED `status = ANY(...)` predicate
+// instead of wrapping the column in issue_effective_status(), which makes
+// (workspace_id, status) unusable and forces a full workspace scan.
+//
+// ARCHIVED statuses are included on purpose: archiving retires a status from
+// future assignment but leaves existing issues on it, and those issues must
+// still appear in their category's column.
+func (q *Queries) ListIssueStatusKeysByCategories(ctx context.Context, arg ListIssueStatusKeysByCategoriesParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listIssueStatusKeysByCategories, arg.WorkspaceID, arg.Categories)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []string{}
+	for rows.Next() {
+		var key string
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		items = append(items, key)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err

@@ -1,4 +1,4 @@
-import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
+import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -106,6 +106,15 @@ export interface ListIssuesParams {
   status?: IssueStatus;
   /** Multi-value table facet. OR within the field. */
   statuses?: IssueStatus[];
+  /**
+   * Filter by status CATEGORY rather than by exact key, so one bucket holds a
+   * category's canonical status plus every custom status that inherits it.
+   * This is what keeps the board's fan-out fixed at 7 requests however many
+   * custom statuses a workspace defines. (MUL-6243)
+   */
+  status_category?: IssueStatusCategory;
+  /** Multi-value form of `status_category`. OR within the field. */
+  status_categories?: IssueStatusCategory[];
   priority?: IssuePriority;
   /** Multi-value table facet. OR within the field. */
   priorities?: IssuePriority[];
@@ -451,7 +460,8 @@ export interface IssueStatusBucket {
  * `api.listIssues` responses by the query functions in `issues/queries.ts`.
  */
 export interface ListIssuesCache {
-  byStatus: Partial<Record<IssueStatus, IssueStatusBucket>>;
+  /** Bucketed by status CATEGORY — see PAGINATED_CATEGORIES. (MUL-6243) */
+  byStatus: Partial<Record<IssueStatusCategory, IssueStatusBucket>>;
 }
 
 export interface SearchIssueResult extends Issue {

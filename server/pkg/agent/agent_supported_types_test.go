@@ -48,7 +48,7 @@ func TestSupportedTypesMatchesMigrationWhitelist(t *testing.T) {
 	}
 	for _, typ := range SupportedTypes {
 		if !want[typ] {
-			t.Errorf("SupportedTypes contains %q which is not in the migration 313 protocol_family CHECK", typ)
+			t.Errorf("SupportedTypes contains %q which is not in the latest protocol_family CHECK", typ)
 		}
 	}
 }

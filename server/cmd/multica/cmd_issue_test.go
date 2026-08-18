@@ -1166,11 +1166,14 @@ func TestRunIssueRunMessagesResolvesShortTaskPrefix(t *testing.T) {
 
 func TestResolveAssignee(t *testing.T) {
 	membersResp := []map[string]any{
-		{"user_id": "user-1111", "name": "Alice Smith"},
-		{"user_id": "user-2222", "name": "Bob Jones"},
+		{"user_id": "user-1111", "name": "Alice Smith", "email": "alice@example.com"},
+		{"user_id": "user-2222", "name": "Bob Jones", "email": "bob@example.com"},
 	}
 	agentsResp := []map[string]any{
 		{"id": "agent-3333", "name": "CodeBot"},
+		// Deliberate collision: this agent's NAME contains Alice's email, so
+		// the substring path would match it. Email must still win outright.
+		{"id": "agent-5555", "name": "Mailer for alice@example.com"},
 	}
 	squadsResp := []map[string]any{
 		{"id": "squad-4444", "name": "Super Human"},
@@ -1210,6 +1213,58 @@ func TestResolveAssignee(t *testing.T) {
 		}
 		if aType != "member" || aID != "user-2222" {
 			t.Errorf("got (%q, %q), want (member, user-2222)", aType, aID)
+		}
+	})
+
+	// MUL-6286: the CLI documents member email as a way to address an actor
+	// property value ("--value alice@example.com"), so email has to resolve.
+	t.Run("match member by email", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "alice@example.com", memberOnlyKinds)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "user-1111" {
+			t.Errorf("got (%q, %q), want (member, user-1111)", aType, aID)
+		}
+	})
+
+	t.Run("match member by email case-insensitively", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "BOB@EXAMPLE.COM", issueAssigneeKinds)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "user-2222" {
+			t.Errorf("got (%q, %q), want (member, user-2222)", aType, aID)
+		}
+	})
+
+	// An email beats a substring collision on someone else's name, because it
+	// is ranked with id matches rather than with name matches. agentsResp
+	// carries an agent whose name embeds this exact email, so without the
+	// ranking this resolves to that agent (or errors as ambiguous).
+	t.Run("email outranks a name substring match", func(t *testing.T) {
+		aType, aID, err := resolveAssignee(ctx, client, "alice@example.com", issueAssigneeKinds)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if aType != "member" || aID != "user-1111" {
+			t.Errorf("got (%q, %q), want (member, user-1111)", aType, aID)
+		}
+	})
+
+	t.Run("resolveActorPropertyRef renders a prefixed reference", func(t *testing.T) {
+		ref, err := resolveActorPropertyRef(ctx, client, "alice@example.com")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if ref != "member:user-1111" {
+			t.Errorf("got %q, want member:user-1111", ref)
+		}
+	})
+
+	t.Run("resolveActorPropertyRef rejects a non-member kind", func(t *testing.T) {
+		if _, err := resolveActorPropertyRef(ctx, client, "codebot"); err == nil {
+			t.Error("expected an agent name to be unresolvable for an actor property")
 		}
 	})
 

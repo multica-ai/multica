@@ -2996,7 +2996,7 @@ func TestFilterACPMcpServersByCapabilityOmittedForwardsOnListedRuntime(t *testin
 func TestFilterACPMcpServersByCapabilityOmittedStillDropsOnUnlistedRuntimes(t *testing.T) {
 	t.Parallel()
 	caps := acpMcpTransportCapabilities{Declaration: acpMcpCapabilitiesOmitted}
-	for _, backend := range []string{"kimi", "kiro", "grok", "qoder", "reasonix", "traecli", "qwenpaw"} {
+	for _, backend := range []string{"kimi", "kiro", "grok", "qoder", "reasonix", "traecli", "qwenpaw", "mcode"} {
 		assertOnlyStdioSurvives(t, backend,
 			filterACPMcpServersByCapability(mixedTransportACPServers(), caps, backend, builtinACPConfig()))
 	}

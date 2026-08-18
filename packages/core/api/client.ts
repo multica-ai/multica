@@ -3285,8 +3285,9 @@ export class ApiClient {
   }
 
   /**
-   * Archives a custom status. The server returns 409 while any issue still
-   * sits on it — move those issues first. Built-in statuses return 403.
+   * Archives a custom status, retiring it from future use. Issues already on it
+   * keep it and keep behaving as their category prescribes; only new
+   * assignments are refused. Built-in statuses return 403.
    */
   async archiveIssueStatus(id: string): Promise<IssueStatusEntry> {
     const raw = await this.fetch<unknown>(`/api/issue-statuses/${id}`, { method: "DELETE" });

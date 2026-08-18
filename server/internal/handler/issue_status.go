@@ -295,13 +295,17 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The census and the archive run in ONE transaction under the EXCLUSIVE
-	// catalog lock. Without it the two steps race: a concurrent issue write can
-	// pass its active-status check, this handler can then observe zero usage and
-	// archive, and the write lands afterwards — stranding an issue on an
-	// archived status. Issue writes that target a custom status take the shared
-	// side of this lock (runWithIssueStatusGuard), so they cannot interleave
-	// with the census. (MUL-6243)
+	// Archiving retires a status from FUTURE use and deliberately leaves issues
+	// already on it untouched: they keep their status, keep rendering, and keep
+	// resolving to their category's behavior (issuestatus.Effective ignores
+	// archived_at on purpose). Forcing a migration first would mean rewriting
+	// history to retire a label.
+	//
+	// The EXCLUSIVE catalog lock is still taken, and it is what makes "no NEW
+	// issue can be assigned an archived status" exact rather than approximate:
+	// an issue write targeting a custom status re-resolves it under the SHARED
+	// side of this lock (assertIssueStatusStillActive), so a write can never
+	// interleave between this archive and its own status check. (MUL-6243)
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		slog.Warn("ArchiveIssueStatus begin failed", append(logger.RequestAttrs(r), "error", err)...)
@@ -314,21 +318,6 @@ func (h *Handler) ArchiveIssueStatus(w http.ResponseWriter, r *http.Request) {
 	if err := qtx.LockIssueStatusCatalog(r.Context(), wsUUID); err != nil {
 		slog.Warn("ArchiveIssueStatus lock failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
-		return
-	}
-
-	inUse, err := qtx.CountIssuesUsingStatusKey(r.Context(), db.CountIssuesUsingStatusKeyParams{
-		WorkspaceID: wsUUID,
-		Key:         entry.Key,
-	})
-	if err != nil {
-		slog.Warn("ArchiveIssueStatus count failed", append(logger.RequestAttrs(r), "error", err)...)
-		writeError(w, http.StatusInternalServerError, "failed to archive issue status")
-		return
-	}
-	if inUse > 0 {
-		writeError(w, http.StatusConflict,
-			"move the issues still using this status to another status before archiving it")
 		return
 	}
 

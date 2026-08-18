@@ -393,16 +393,16 @@ func shareLinkListToResponse(row db.ListShareLinksByWorkspaceRow) ShareLinkRespo
 		maxUses = &row.MaxUses.Int32
 	}
 	return ShareLinkResponse{
-		ID:          uuidToString(row.ID),
-		WorkspaceID: uuidToString(row.WorkspaceID),
-		Code:        row.Code,
-		CreatedBy:   uuidToString(row.CreatedBy),
-		Role:        row.Role,
-		ExpiresAt:   expiresAt,
-		MaxUses:     maxUses,
-		UseCount:    row.UseCount,
-		IsActive:    row.IsActive,
-		CreatedAt:   timestampToString(row.CreatedAt),
+		ID:           uuidToString(row.ID),
+		WorkspaceID:  uuidToString(row.WorkspaceID),
+		Code:         row.Code,
+		CreatedBy:    uuidToString(row.CreatedBy),
+		Role:         row.Role,
+		ExpiresAt:    expiresAt,
+		MaxUses:      maxUses,
+		UseCount:     row.UseCount,
+		IsActive:     row.IsActive,
+		CreatedAt:    timestampToString(row.CreatedAt),
 		CreatorName:  row.CreatorName,
 		CreatorEmail: row.CreatorEmail,
 	}

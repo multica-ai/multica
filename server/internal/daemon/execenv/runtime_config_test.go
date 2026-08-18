@@ -139,13 +139,19 @@ func TestBriefHasNoParentNotificationGuidance(t *testing.T) {
 	}
 }
 
-// Comment-triggered briefs must NOT carry any unconditional status-flip
-// command targeting the current issue. Previous revisions had a
-// dedicated protocol step that wrote `multica issue status <this-issue-id> in_review`;
-// the comment-triggered workflow rule "Do NOT change the issue status
-// unless the comment explicitly asks for it" must remain the source of
-// truth (Elon's blocking review on PR #2918).
-func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
+// Reply mode owns the same status arc as Ownership mode, but only for turns
+// that carry work on this agent's own issue (MUL-6300). Two invariants from
+// the original prohibition (PR #205, reinforced by Elon's blocking review on
+// PR #2918) survive it and are pinned here:
+//
+//   - a purely conversational turn never writes status;
+//   - a turn on an issue not assigned to this agent never writes status
+//     (someone else's issue, or an unassigned one reached via @mention).
+//
+// The brief must also still carry no unconditional placeholder flip: a bare
+// `multica issue status <this-issue-id> in_review` command would fire on every
+// reply turn regardless of whether the turn delivered anything.
+func TestReplyModeStatusRuleIsScopedToOwnedWorkTurns(t *testing.T) {
 	t.Parallel()
 	ctx := TaskContextForEnv{
 		IssueID:          "55555555-6666-7777-8888-999999999999",
@@ -154,27 +160,38 @@ func TestCommentTriggeredProtocolDoesNotForceInReview(t *testing.T) {
 	out := buildMetaSkillContent("claude", ctx)
 
 	if strings.Contains(out, "`multica issue status <this-issue-id> in_review`") {
-		t.Errorf("comment-triggered brief must not contain a placeholder `<this-issue-id> in_review` flip — that conflicts with the comment-triggered \"do not change status unless asked\" rule")
+		t.Errorf("reply brief must not contain a placeholder `<this-issue-id> in_review` flip — the arc is conditional on the turn having delivered work")
 	}
 
-	const guardrail = "Do NOT change the issue status unless the comment explicitly asks for it"
-	if !strings.Contains(out, guardrail) {
-		t.Errorf("expected the comment-triggered workflow guardrail %q to be present", guardrail)
+	for _, want := range []string{
+		// The arc itself: both ends, and the ceiling that keeps `done` human.
+		"when this issue is assigned to you and this turn does substantive work on it",
+		"set `in_progress` when you start",
+		"delivered and awaiting acceptance = `in_review`; `done` stays human",
+		// Invariant 1: conversation does not move the board.
+		"Purely conversational turns (question, discussion, acknowledgement) never touch status",
+		// Invariant 2: no status writes on an issue not assigned to this agent —
+		// "not assigned to you" on purpose, so the unassigned @mention path is
+		// covered, not just issues owned by someone else.
+		"neither does any turn on an issue not assigned to you",
+	} {
+		if !strings.Contains(out, want) {
+			t.Errorf("reply-mode status rule missing %q\n---\n%s", want, out)
+		}
 	}
 
-	// For an ordinary agent the guardrail is absolute — the squad-leader
-	// carve-out below must not leak into this path.
+	// The squad-leader carve-out below must not leak into the ordinary path.
 	if strings.Contains(out, "Own the parent issue status") {
 		t.Errorf("ordinary-agent comment brief must not reference the squad status grant:\n%s", out)
 	}
 }
 
-// A squad leader on a comment-triggered turn gets the same guardrail plus a
-// named exception. Without it the guardrail and the Squad Operating Protocol's
-// "Own the parent issue status" responsibility contradict each other on the
-// @mention-dispatch shape, where the member's delivery comment never asks for
-// a status change and no child-done system comment exists to ask on its
-// behalf — so the parent would sit in in_progress forever.
+// A squad leader's authority over the parent's status is granted by the Squad
+// Operating Protocol, not by this brief: the server injects "Own the parent
+// issue status" only when the issue is assigned to THIS squad. The reply-mode
+// bullet therefore routes on that section by name, so the same text is correct
+// for an owning leader (dispatch, wait, then in_review) and for a guest leader
+// @squad-mentioned on someone else's issue (no status writes at all).
 func TestCommentTriggeredSquadLeaderDefersToStatusOwnershipGrant(t *testing.T) {
 	t.Parallel()
 	out := buildMetaSkillContent("claude", TaskContextForEnv{
@@ -184,21 +201,25 @@ func TestCommentTriggeredSquadLeaderDefersToStatusOwnershipGrant(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"Do NOT change the issue status unless the comment explicitly asks for it",
 		`Squad Operating Protocol's "Own the parent issue status"`,
 		"only appears when this issue is assigned to your squad",
 		"without waiting to be asked",
-		"When it is absent, the rule above is absolute.",
+		// Dispatch is not delivery: without this the leader would close out
+		// the parent on the turn it hands work to members.
+		"Dispatching members is not completion.",
+		// No grant → no status writes, the guest-leader path (MUL-3724).
+		"When absent, this issue is not yours: never run `multica issue status` on it.",
+		"Purely conversational turns (question, discussion, acknowledgement) never touch status",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("squad-leader comment brief missing %q\n---\n%s", want, out)
 		}
 	}
 
-	// The unqualified sentence must be gone: its presence alongside the grant
-	// is the contradiction this branch exists to remove.
-	if strings.Contains(out, "explicitly asks for it\n") {
-		t.Errorf("squad-leader comment brief still ends the guardrail unqualified\n---\n%s", out)
+	// The leader must NOT inherit the ordinary agent's arc: it keys off
+	// assignment to the agent itself, which is never true for a squad parent.
+	if strings.Contains(out, "when this issue is assigned to you and this turn does substantive work on it") {
+		t.Errorf("squad-leader comment brief must not carry the ordinary-agent status arc\n---\n%s", out)
 	}
 }
 

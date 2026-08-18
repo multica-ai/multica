@@ -2546,6 +2546,8 @@ type assigneeKinds struct {
 var (
 	issueAssigneeKinds = assigneeKinds{member: true, agent: true, squad: true}
 	memberOrAgentKinds = assigneeKinds{member: true, agent: true}
+	// Actor property values are members only (MUL-6286).
+	memberOnlyKinds = assigneeKinds{member: true}
 )
 
 var assigneeResolveRetrySleep = func(ctx context.Context, d time.Duration) bool {
@@ -2623,11 +2625,21 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	var errs []error
 	var fetchAttempts int
 
-	classify := func(entityType, id, displayName string) {
+	// exactAliases are additional unique identifiers that select a candidate
+	// outright, ranked with id matches rather than name matches — a member's
+	// email is as unambiguous as their id, and is what people actually have to
+	// hand. Without it, `--value bohan@example.com` fails to resolve.
+	classify := func(entityType, id, displayName string, exactAliases ...string) {
 		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
 		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
 			idMatches = append(idMatches, match)
 			return
+		}
+		for _, alias := range exactAliases {
+			if alias != "" && strings.EqualFold(alias, input) {
+				idMatches = append(idMatches, match)
+				return
+			}
 		}
 		if strings.EqualFold(displayName, input) {
 			exactMatches = append(exactMatches, match)
@@ -2646,7 +2658,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
 			for _, m := range members {
-				classify("member", strVal(m, "user_id"), strVal(m, "name"))
+				classify("member", strVal(m, "user_id"), strVal(m, "name"), strVal(m, "email"))
 			}
 		}
 	}

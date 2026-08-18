@@ -363,7 +363,9 @@
       "multi_select": "複数選択",
       "date": "日付",
       "checkbox": "チェックボックス",
-      "url": "URL"
+      "url": "URL",
+      "actor": "メンバー",
+      "multi_actor": "メンバー（複数選択）"
     },
     "actions": {
       "open": "{{name}} の操作",

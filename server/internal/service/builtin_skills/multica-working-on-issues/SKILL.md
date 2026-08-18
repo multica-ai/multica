@@ -151,9 +151,10 @@ string|number|bool` to force a type.
 ## Custom properties: typed workflow state
 
 Workspaces may define custom issue properties (Severity, Environment, QA
-Status, ...). Properties are the typed, user-visible sibling of metadata:
-values are validated against the definition (select options, date format,
-http(s) URL), visible in the issue sidebar, and addressed by name.
+Status, Reviewer, ...). Properties are the typed, user-visible sibling of
+metadata: values are validated against the definition (select options, date
+format, http(s) URL, member reference), visible in the issue sidebar, and
+addressed by name.
 
 - Read what exists before writing: `multica property list` shows the catalog;
   `multica issue property list <issue-id>` shows values set on the issue.
@@ -162,10 +163,15 @@ http(s) URL), visible in the issue sidebar, and addressed by name.
 ```bash
 multica issue property set <issue-id> --name Environment --value staging
 multica issue property set <issue-id> --name Platforms --value "iOS,Android"
+multica issue property set <issue-id> --name Reviewer --value Bohan
 multica issue property unset <issue-id> --name Environment
 ```
 
 - A validation error lists the legal options — fix the value and retry.
+- `actor` / `multi_actor` properties (Reviewer, Escalation contact, ...) hold
+  workspace members only. `--value` takes a member name, email, UUID, short id,
+  or an explicit `member:<uuid>`; `multi_actor` takes a comma-separated list
+  (duplicates dropped, order kept, max 20).
 - Definitions may include an optional catalog icon for visual identification;
   it does not change the property's type or value validation.
 - Agents cannot create or edit property definitions (owner/admin humans only).
@@ -182,10 +188,15 @@ on it. These are the contracts, not advice:
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.
-- **`in_progress` / `in_review` on assignment runs** are agent-managed CLI
-  mutations, not `StartTask` / `CompleteTask` side effects. The assignment
-  runtime brief asks ordinary agents for `todo`/`backlog` → `in_progress` then
-  `in_review` when they have delivered. Squad leaders share the opening
+- **`in_progress` / `in_review`** are agent-managed CLI mutations, not
+  `StartTask` / `CompleteTask` side effects. The runtime brief asks ordinary
+  agents for `todo`/`backlog` → `in_progress` then `in_review` when they have
+  delivered. Ownership turns open that arc unconditionally; reply turns own the
+  same arc, but only when the issue is assigned to you AND the turn does
+  substantive work — a question, a discussion, or an acknowledgement never
+  moves the status, and neither does a turn on an issue not assigned to you
+  (someone else's, or unassigned — you were pulled in by an @mention either
+  way). Squad leaders share the opening
   `in_progress` step on the first assignment turn, keep the parent there while
   members work, and only move to `in_review` when a later re-trigger confirms
   the overall goal is met.

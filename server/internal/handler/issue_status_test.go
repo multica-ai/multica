@@ -3,14 +3,19 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // Issue status catalog tests (MUL-6243).
@@ -282,48 +287,41 @@ func TestBuiltInStatusesAreImmutable(t *testing.T) {
 	})
 }
 
-// TestArchiveRefusesWhileIssuesStillUseTheStatus is the decision recorded on
-// the issue: migrate the issues first rather than silently rewriting them.
-func TestArchiveRefusesWhileIssuesStillUseTheStatus(t *testing.T) {
+// TestArchiveRetiresStatusWithoutTouchingExistingIssues pins the archive rule:
+// archiving retires a status from FUTURE use only. Issues already on it keep it
+// and keep behaving as their category prescribes — retiring a label must not
+// rewrite history.
+func TestArchiveRetiresStatusWithoutTouchingExistingIssues(t *testing.T) {
 	ctx := context.Background()
 	entry := createTestCustomStatus(t, "in_use_a", issuestatus.InProgress)
+	issueID := mustCreateIssue(t, "occupies the status", "in_use_a")
 
-	req := newRequest(http.MethodPost, "/api/issues", map[string]any{
-		"title":  "occupies the status",
-		"status": "in_use_a",
-	})
+	if code := archiveStatusVia(t, entry); code != http.StatusOK {
+		t.Fatalf("archiving an in-use status should succeed, got %d", code)
+	}
+
+	// The existing issue keeps the archived status verbatim.
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`, issueID).Scan(&status); err != nil {
+		t.Fatalf("read back: %v", err)
+	}
+	if status != "in_use_a" {
+		t.Errorf("existing issue status = %q, want it left on the archived status", status)
+	}
+
+	// And it still resolves to its category, so its platform behavior is
+	// unchanged — Effective deliberately ignores archived_at.
+	if got := issuestatus.Effective(ctx, testHandler.Queries, parseUUID(testWorkspaceID), "in_use_a"); got != issuestatus.InProgress {
+		t.Errorf("Effective on an archived status = %q, want %q", got, issuestatus.InProgress)
+	}
+
+	// But nothing NEW can be assigned to it.
 	rec := httptest.NewRecorder()
-	testHandler.CreateIssue(rec, req)
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("create issue: %d %s", rec.Code, rec.Body.String())
-	}
-	var created struct {
-		ID string `json:"id"`
-	}
-	json.Unmarshal(rec.Body.Bytes(), &created)
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parseUUID(created.ID))
-	})
-
-	archiveReq := withURLParam(
-		newRequest(http.MethodDelete, "/api/issue-statuses/"+uuidToString(entry.ID), nil),
-		"id", uuidToString(entry.ID))
-	archiveRec := httptest.NewRecorder()
-	testHandler.ArchiveIssueStatus(archiveRec, archiveReq)
-	if archiveRec.Code != http.StatusConflict {
-		t.Fatalf("expected 409 while the status is in use, got %d: %s", archiveRec.Code, archiveRec.Body.String())
-	}
-
-	// After moving the issue off it, archiving succeeds.
-	if _, err := testPool.Exec(ctx, `UPDATE issue SET status = 'todo' WHERE id = $1`, parseUUID(created.ID)); err != nil {
-		t.Fatalf("move issue: %v", err)
-	}
-	retryRec := httptest.NewRecorder()
-	testHandler.ArchiveIssueStatus(retryRec, withURLParam(
-		newRequest(http.MethodDelete, "/api/issue-statuses/"+uuidToString(entry.ID), nil),
-		"id", uuidToString(entry.ID)))
-	if retryRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 once the status is unused, got %d: %s", retryRec.Code, retryRec.Body.String())
+	testHandler.CreateIssue(rec, newRequest(http.MethodPost, "/api/issues", map[string]any{
+		"title": "should be refused", "status": "in_use_a",
+	}))
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 assigning an archived status to a new issue, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -638,11 +636,12 @@ func TestWritesRejectAnArchivedStatus(t *testing.T) {
 
 }
 
-// TestArchiveRefusesAfterACommittedWrite is the other ordering: once an issue is
-// committed on the status, the archive's census must see it and refuse.
-func TestArchiveRefusesAfterACommittedWrite(t *testing.T) {
+// TestArchiveSucceedsAfterACommittedWrite is the other ordering: an issue
+// committed on the status does not block archiving it, because archiving only
+// retires it from future use.
+func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
 	ctx := context.Background()
-	t.Run("writer wins: archive refuses with conflict", func(t *testing.T) {
+	t.Run("writer wins: archive still succeeds and leaves the issue alone", func(t *testing.T) {
 		entry := createTestCustomStatus(t, "race_b_writer", issuestatus.InProgress)
 
 		rec := httptest.NewRecorder()
@@ -658,8 +657,16 @@ func TestArchiveRefusesAfterACommittedWrite(t *testing.T) {
 		json.Unmarshal(rec.Body.Bytes(), &created)
 		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, parseUUID(created.ID)) })
 
-		if code := archiveStatusVia(t, entry); code != http.StatusConflict {
-			t.Fatalf("archive after a committed write = %d, want 409", code)
+		if code := archiveStatusVia(t, entry); code != http.StatusOK {
+			t.Fatalf("archive after a committed write = %d, want 200", code)
+		}
+		var status string
+		if err := testPool.QueryRow(ctx, `SELECT status FROM issue WHERE id = $1`,
+			parseUUID(created.ID)).Scan(&status); err != nil {
+			t.Fatalf("read back: %v", err)
+		}
+		if status != "race_b_writer" {
+			t.Errorf("issue status = %q, want it untouched by the archive", status)
 		}
 	})
 
@@ -953,5 +960,275 @@ func TestChildrenResponseCarriesStatusCategory(t *testing.T) {
 	}
 	if payload.Issues[0].StatusCategory != "done" {
 		t.Errorf("status_category = %q, want %q", payload.Issues[0].StatusCategory, "done")
+	}
+}
+
+// TestCategoryFilterExpandsToIndexedStatusKeys is the regression guard for the
+// performance fix: filtering by category must expand to concrete status keys so
+// `status = ANY(...)` can use the (workspace_id, status) index. Wrapping the
+// column in issue_effective_status() made that index unusable and turned a
+// two-page index read into a full workspace scan.
+func TestCategoryFilterExpandsToIndexedStatusKeys(t *testing.T) {
+	ctx := context.Background()
+	seedTestCatalog(t)
+	ws := parseUUID(testWorkspaceID)
+
+	t.Run("built-in category expands to exactly its own key", func(t *testing.T) {
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{"blocked"})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		if len(keys) != 1 || keys[0] != "blocked" {
+			t.Errorf("expand(blocked) = %v, want exactly [blocked] — a workspace with no "+
+				"custom statuses must produce the pre-feature query", keys)
+		}
+	})
+
+	t.Run("category includes its custom statuses", func(t *testing.T) {
+		createTestCustomStatus(t, "human_review_x", issuestatus.InReview)
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{"in_review"})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		if !slices.Contains(keys, "in_review") || !slices.Contains(keys, "human_review_x") {
+			t.Errorf("expand(in_review) = %v, want both the canonical and the custom key", keys)
+		}
+	})
+
+	// An issue left on an archived status still belongs in its category's
+	// column, so the expansion must keep archived keys.
+	t.Run("archived statuses stay in their category", func(t *testing.T) {
+		entry := createTestCustomStatus(t, "retired_x", issuestatus.Done)
+		if code := archiveStatusVia(t, entry); code != http.StatusOK {
+			t.Fatalf("archive: %d", code)
+		}
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{"done"})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		if !slices.Contains(keys, "retired_x") {
+			t.Errorf("expand(done) = %v, want the archived key included so issues on it "+
+				"still appear in the Done column", keys)
+		}
+	})
+
+	// A workspace whose seed has not landed must still filter correctly.
+	t.Run("unseeded workspace falls back to the canonical keys", func(t *testing.T) {
+		if _, err := testPool.Exec(ctx, `DELETE FROM issue_status WHERE workspace_id = $1`, ws); err != nil {
+			t.Fatalf("clear catalog: %v", err)
+		}
+		t.Cleanup(func() { seedTestCatalog(t) })
+		keys, err := issuestatus.ExpandCategories(ctx, testHandler.Queries, ws, []string{"todo", "done"})
+		if err != nil {
+			t.Fatalf("expand: %v", err)
+		}
+		if len(keys) != 2 || !slices.Contains(keys, "todo") || !slices.Contains(keys, "done") {
+			t.Errorf("expand on an unseeded workspace = %v, want [todo done]", keys)
+		}
+	})
+}
+
+// TestListFilterByCategoryReturnsCustomStatusIssues exercises the real endpoint.
+func TestListFilterByCategoryReturnsCustomStatusIssues(t *testing.T) {
+	ctx := context.Background()
+	createTestCustomStatus(t, "human_review_l", issuestatus.InReview)
+	customID := mustCreateIssue(t, "custom in review", "human_review_l")
+	builtinID := mustCreateIssue(t, "builtin in review", "in_review")
+	otherID := mustCreateIssue(t, "unrelated todo", "todo")
+	_ = ctx
+
+	rec := httptest.NewRecorder()
+	testHandler.ListIssues(rec, newRequest(http.MethodGet, "/api/issues?status_category=in_review&limit=100", nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Issues []struct {
+			ID             string `json:"id"`
+			Status         string `json:"status"`
+			StatusCategory string `json:"status_category"`
+		} `json:"issues"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	got := map[string]string{}
+	for _, i := range payload.Issues {
+		got[i.ID] = i.StatusCategory
+	}
+	if _, ok := got[uuidToString(customID)]; !ok {
+		t.Error("the in_review category must include issues on a custom in_review status")
+	}
+	if _, ok := got[uuidToString(builtinID)]; !ok {
+		t.Error("the in_review category must include issues on the built-in status")
+	}
+	if _, ok := got[uuidToString(otherID)]; ok {
+		t.Error("the in_review category must not include a todo issue")
+	}
+	// Every row carries an authoritative category, custom statuses included —
+	// this is what the client buckets and caches by.
+	if c := got[uuidToString(customID)]; c != "in_review" {
+		t.Errorf("custom-status row status_category = %q, want %q", c, "in_review")
+	}
+}
+
+// TestCreateEventCarriesCustomStatusCategory is the regression guard for the
+// websocket path: filling the category only on the HTTP response is too late
+// for other tabs, which receive the broadcast payload. Without it they cannot
+// bucket the new issue and must fall back to a full refetch.
+func TestCreateEventCarriesCustomStatusCategory(t *testing.T) {
+	createTestCustomStatus(t, "human_review_ev", issuestatus.InReview)
+
+	gotEvent := make(chan events.Event, 1)
+	testHandler.Bus.Subscribe(protocol.EventIssueCreated, func(e events.Event) {
+		select {
+		case gotEvent <- e:
+		default:
+		}
+	})
+
+	rec := httptest.NewRecorder()
+	testHandler.CreateIssue(rec, newRequest(http.MethodPost, "/api/issues", map[string]any{
+		"title": "custom status event", "status": "human_review_ev",
+	}))
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("create: %d %s", rec.Code, rec.Body.String())
+	}
+	var created struct {
+		ID             string `json:"id"`
+		StatusCategory string `json:"status_category"`
+	}
+	json.Unmarshal(rec.Body.Bytes(), &created)
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, parseUUID(created.ID))
+	})
+	if created.StatusCategory != "in_review" {
+		t.Errorf("HTTP response status_category = %q, want in_review", created.StatusCategory)
+	}
+
+	select {
+	case e := <-gotEvent:
+		payload, ok := e.Payload.(map[string]any)
+		if !ok {
+			t.Fatalf("event payload shape: %T", e.Payload)
+		}
+		issue, ok := payload["issue"].(IssueResponse)
+		if !ok {
+			t.Fatalf("event issue shape: %T", payload["issue"])
+		}
+		if issue.StatusCategory != "in_review" {
+			t.Errorf("event status_category = %q, want in_review — other tabs cannot "+
+				"bucket the new issue without it", issue.StatusCategory)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("no issue:created event")
+	}
+}
+
+// TestListEndpointsCarryStatusCategory covers the remaining payload exits: every
+// row a list or get returns must carry an authoritative category, custom
+// statuses included. It deliberately does NOT assert the per-request catalog
+// read count — see the note on the resolver subtest below for why.
+func TestListEndpointsCarryStatusCategory(t *testing.T) {
+	createTestCustomStatus(t, "human_review_n", issuestatus.InReview)
+	for i := range 3 {
+		mustCreateIssue(t, fmt.Sprintf("n+1 probe %d", i), "human_review_n")
+	}
+
+	t.Run("list carries category for every custom row", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		testHandler.ListIssues(rec, newRequest(http.MethodGet, "/api/issues?status_category=in_review&limit=100", nil))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list: %d %s", rec.Code, rec.Body.String())
+		}
+		var payload struct {
+			Issues []struct {
+				Status         string `json:"status"`
+				StatusCategory string `json:"status_category"`
+			} `json:"issues"`
+		}
+		json.Unmarshal(rec.Body.Bytes(), &payload)
+		seen := 0
+		for _, i := range payload.Issues {
+			if i.Status == "human_review_n" {
+				seen++
+				if i.StatusCategory != "in_review" {
+					t.Errorf("custom row status_category = %q, want in_review", i.StatusCategory)
+				}
+			}
+		}
+		if seen < 3 {
+			t.Errorf("expected the 3 custom-status rows in the in_review category, saw %d", seen)
+		}
+	})
+
+	// NOTE ON COVERAGE: there is deliberately no assertion here that the handler
+	// reads the catalog only once per page. pg_stat_user_tables counters lag
+	// behind the queries that produced them, so a delta around one request does
+	// not reliably distinguish one read from N — a threshold written against it
+	// passes even with a per-row filler, which would make this test claim more
+	// than it proves. Observing it properly needs a counting Querier injected
+	// into the handler, which it does not support today.
+	//
+	// What IS pinned: the Resolver amortizes reads (below), and every list site
+	// constructs its filler OUTSIDE the loop, which is what makes that
+	// amortization reach the handler.
+	t.Run("the resolver amortizes repeated lookups", func(t *testing.T) {
+		r := issuestatus.NewResolver(parseUUID(testWorkspaceID))
+		ctx := context.Background()
+		for range 10 {
+			if got := r.Effective(ctx, testHandler.Queries, "human_review_n"); got != "in_review" {
+				t.Fatalf("Effective = %q, want in_review", got)
+			}
+		}
+	})
+
+	t.Run("get carries category", func(t *testing.T) {
+		id := mustCreateIssue(t, "get carries category", "human_review_n")
+		rec := httptest.NewRecorder()
+		testHandler.GetIssue(rec, withURLParam(
+			newRequest(http.MethodGet, "/api/issues/"+uuidToString(id), nil), "id", uuidToString(id)))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("get: %d %s", rec.Code, rec.Body.String())
+		}
+		var got struct {
+			StatusCategory string `json:"status_category"`
+		}
+		json.Unmarshal(rec.Body.Bytes(), &got)
+		if got.StatusCategory != "in_review" {
+			t.Errorf("GetIssue status_category = %q, want in_review", got.StatusCategory)
+		}
+	})
+}
+
+// TestBackgroundEventCarriesCustomStatusCategory pins the background-event
+// payload. IssueToMap fills a category only for built-ins; the publishers that
+// can emit a CUSTOM status go through IssueToMapWithCategory so clients receive
+// an authoritative one instead of a blank they would have to refetch to resolve.
+func TestBackgroundEventCarriesCustomStatusCategory(t *testing.T) {
+	ctx := context.Background()
+	createTestCustomStatus(t, "human_review_bg", issuestatus.InReview)
+	id := mustCreateIssue(t, "background event category", "human_review_bg")
+
+	issue, err := testHandler.Queries.GetIssue(ctx, id)
+	if err != nil {
+		t.Fatalf("load issue: %v", err)
+	}
+
+	// Plain IssueToMap leaves a custom status uncategorized — that is why the
+	// publishers use the WithCategory form.
+	plain := service.IssueToMap(issue, "MUL")
+	if plain["status_category"] != "" {
+		t.Errorf("IssueToMap custom status_category = %v, want empty (no catalog access)",
+			plain["status_category"])
+	}
+
+	authoritative := service.IssueToMapWithCategory(ctx, testHandler.Queries, issue, "MUL")
+	if authoritative["status_category"] != "in_review" {
+		t.Errorf("IssueToMapWithCategory status_category = %v, want in_review",
+			authoritative["status_category"])
+	}
+	if authoritative["status"] != "human_review_bg" {
+		t.Errorf("status = %v, want the custom key verbatim", authoritative["status"])
 	}
 }

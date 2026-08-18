@@ -53,9 +53,11 @@ func backendResumeContinuityNotice(task Task) string {
 // emitted unconditionally from the same branches BuildPrompt uses to pick a
 // path, so the two can never disagree.
 //
-// Reply mode = respond to the triggering comment, do not touch issue status.
-// Ownership mode = an assignment/status change started this run; own the
-// status arc. Applying the wrong one silently changes issue status.
+// Reply mode = respond to the triggering comment; the status arc opens only
+// when the turn does substantive work on an issue assigned to this agent
+// (MUL-6300). Ownership mode = an assignment/status change started this run;
+// own the status arc unconditionally. Applying the wrong one changes when
+// issue status moves.
 const (
 	turnModeReply     = "**Turn mode: Reply.** Follow the Reply-mode block in your runtime workflow file for this turn; the Ownership-mode status steps do not apply.\n\n"
 	turnModeOwnership = "**Turn mode: Ownership.** Follow the Ownership-mode block in your runtime workflow file for this turn; the Reply-mode rules do not apply.\n\n"

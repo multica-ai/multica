@@ -363,7 +363,9 @@
       "multi_select": "多选",
       "date": "日期",
       "checkbox": "勾选",
-      "url": "链接"
+      "url": "链接",
+      "actor": "成员",
+      "multi_actor": "成员（多选）"
     },
     "actions": {
       "open": "{{name}} 的操作",

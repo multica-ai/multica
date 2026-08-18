@@ -129,6 +129,7 @@ export const RUNTIME_PROFILE_PROTOCOL_FAMILIES = [
   "grok",
   "qwen",
   "qwenpaw",
+  "mcode",
 ] as const;
 
 export type RuntimeProtocolFamily =

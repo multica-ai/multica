@@ -617,8 +617,11 @@
       "value_placeholder": "값 입력…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
+      "actor_search_placeholder": "멤버 검색…",
       "open_link": "링크 열기",
-      "archived_hint": "보관된 속성 — 값은 읽기 전용입니다"
+      "archived_hint": "보관된 속성 — 값은 읽기 전용입니다",
+      "unknown_value": "표시할 수 없음",
+      "unknown_value_hint": "이 값은 최신 버전의 Multica에서 설정되어 여기서는 편집할 수 없습니다. 앱을 업데이트하거나 값을 지우세요"
     },
     "filter_options_aria": "필터 옵션",
     "no_results": "결과 없음",

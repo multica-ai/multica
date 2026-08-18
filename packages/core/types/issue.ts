@@ -1,7 +1,15 @@
 import type { Label } from "./label";
 import type { IssuePropertyValues } from "./property";
 
-export type IssueStatus =
+/**
+ * A status CATEGORY — the behavior equivalence class an issue's status belongs
+ * to. There are exactly 7, and each is also the key of the built-in status that
+ * defines it, which is why this stayed a closed union while `Issue.status`
+ * became open. Board columns, filters and the presentation config are all keyed
+ * off categories, so their shape is fixed no matter how many custom statuses a
+ * workspace defines. (MUL-6243)
+ */
+export type IssueStatusCategory =
   | "backlog"
   | "todo"
   | "in_progress"
@@ -9,6 +17,18 @@ export type IssueStatus =
   | "done"
   | "blocked"
   | "cancelled";
+
+/**
+ * A status KEY as stored on the issue.
+ *
+ * STILL the closed 7-value union. Widening it to `string` — so a workspace's
+ * CUSTOM statuses are representable — is the first task of the follow-up PR,
+ * because it forces every `Record<IssueStatus, …>` presentation lookup in
+ * `packages/views` to resolve a key to its category first. The catalog module
+ * and the category type below exist so that change is mechanical rather than
+ * exploratory. (MUL-6243)
+ */
+export type IssueStatus = IssueStatusCategory;
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
@@ -41,6 +61,13 @@ export interface Issue {
   title: string;
   description: string | null;
   status: IssueStatus;
+  /**
+   * The category `status` belongs to, when the endpoint resolved it. Optional
+   * because a BUILT-IN status is its own category and needs no resolution —
+   * use `issueStatusCategory(issue)` rather than reading this directly.
+   * (MUL-6243)
+   */
+  status_category?: IssueStatusCategory;
   priority: IssuePriority;
   assignee_type: IssueAssigneeType | null;
   assignee_id: string | null;

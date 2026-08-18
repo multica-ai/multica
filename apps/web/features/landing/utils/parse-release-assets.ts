@@ -98,3 +98,36 @@ export function parseReleaseAssets(raw: GitHubAsset[]): DownloadAssets {
 export function hasAnyAsset(assets: DownloadAssets): boolean {
   return Object.values(assets).some((v) => typeof v === "string");
 }
+
+/**
+ * The twelve desktop artifacts a finished release carries: four Mac,
+ * two Windows, six Linux. Listed explicitly rather than counted, so
+ * adding an optional key to `DownloadAssets` later (a universal Mac
+ * build, say) can't silently redefine what "complete" means.
+ */
+const REQUIRED_ASSET_KEYS: (keyof DownloadAssets)[] = [
+  "macArm64Dmg",
+  "macArm64Zip",
+  "macX64Dmg",
+  "macX64Zip",
+  "winX64Exe",
+  "winArm64Exe",
+  "linuxAmd64AppImage",
+  "linuxAmd64Deb",
+  "linuxAmd64Rpm",
+  "linuxArm64AppImage",
+  "linuxArm64Deb",
+  "linuxArm64Rpm",
+];
+
+/**
+ * Whether every platform/arch/format the /download page offers resolved
+ * to a URL. A release that fails this is either mid-flight (CI has
+ * uploaded Linux + Windows but the manually notarized Mac builds haven't
+ * landed) or permanently broken (a packaging job failed and was never
+ * re-run) — both render dead buttons, so both are worth stepping back
+ * from. See `pickRelease` in `github-release.ts`.
+ */
+export function hasCompleteAssetSet(assets: DownloadAssets): boolean {
+  return REQUIRED_ASSET_KEYS.every((key) => typeof assets[key] === "string");
+}
