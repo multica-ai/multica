@@ -171,6 +171,21 @@ jobs:
         # exclude @multica/mobile.
         run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
 
+      # WARN PHASE — reports, never blocks. `shamefully-hoist=true` in .npmrc
+      # hides both halves of the drift this catches: an undeclared import still
+      # resolves, and an obsolete declaration still installs. Neither shows up
+      # in build, typecheck, or lint.
+      #
+      # TO PROMOTE TO BLOCKING: once this step has run green for a full cycle
+      # on main, drop `continue-on-error` and the `|| true`. The known findings
+      # it reports today are pre-existing dead code left out of the cleanup that
+      # introduced it (MUL-6353) — clear those first, or the flip turns them
+      # into a red main.
+      - name: Check for dead code and phantom dependencies (knip)
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        continue-on-error: true
+        run: pnpm knip || true
+
   frontend-test:
     needs: changes
     runs-on: ubuntu-latest
