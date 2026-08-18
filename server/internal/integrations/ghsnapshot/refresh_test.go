@@ -9,6 +9,18 @@ import (
 	"time"
 )
 
+type recordingSnapshotMetrics struct {
+	disabled   int
+	fetch      int
+	write      int
+	queueDrops int
+}
+
+func (m *recordingSnapshotMetrics) RecordSnapshotDisabledTrigger() { m.disabled++ }
+func (m *recordingSnapshotMetrics) RecordSnapshotFetchFailure()    { m.fetch++ }
+func (m *recordingSnapshotMetrics) RecordSnapshotWriteFailure()    { m.write++ }
+func (m *recordingSnapshotMetrics) RecordSnapshotQueueDrop()       { m.queueDrops++ }
+
 func enabledClient(t *testing.T) *Client {
 	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -22,16 +34,36 @@ func enabledClient(t *testing.T) *Client {
 // criterion 4): with no App key the manager touches nothing.
 func TestManagerDisabledNoOps(t *testing.T) {
 	m := NewManager(nil, nil, nil, nil)
+	metrics := &recordingSnapshotMetrics{}
+	m.SetMetrics(metrics)
 	if m.Enabled() {
 		t.Fatal("nil-client manager must be disabled")
 	}
 	m.Enqueue(1, "o", "r", 2)
 	m.MaybeEnqueueOnView(1, "o", "r", 2, time.Time{}, false)
+	if metrics.disabled != 2 {
+		t.Fatalf("disabled triggers = %d, want 2", metrics.disabled)
+	}
 	if len(m.queue) != 0 {
 		t.Fatalf("disabled manager enqueued %d items, want 0", len(m.queue))
 	}
 	// Start must be a safe no-op (no workers, no panic).
 	m.Start(context.Background())
+}
+
+func TestFetchFailureIsObservable(t *testing.T) {
+	m := NewManager(enabledClient(t), nil, nil, nil)
+	metrics := &recordingSnapshotMetrics{}
+	m.SetMetrics(metrics)
+	m.jitter = func() time.Duration { return 0 }
+	m.fetch = func(context.Context, *Client, int64, string, string, int32) (*PRSnapshot, error) {
+		return nil, errors.New("github unavailable")
+	}
+
+	m.process(context.Background(), address{InstallationID: 1, Owner: "o", Repo: "r", Number: 1})
+	if metrics.fetch != 1 {
+		t.Fatalf("fetch failures = %d, want 1", metrics.fetch)
+	}
 }
 
 // TestEnqueueCoalesces proves the dedup / single-in-flight key (acceptance

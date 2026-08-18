@@ -297,7 +297,8 @@ ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
         ELSE EXCLUDED.close_intent
     END,
     reference_only = CASE
-        WHEN $7 THEN issue_pull_request.reference_only
+        WHEN $7
+            THEN issue_pull_request.reference_only AND EXCLUDED.reference_only
         ELSE EXCLUDED.reference_only
     END
 `
@@ -322,9 +323,10 @@ type LinkIssueToPullRequestParams struct {
 // keeping the merge-time decision stable.
 //
 // reference_only marks a link justified ONLY by a bare body mention (no closing
-// keyword, no title/branch reference). It follows the same preserve gate as
-// close_intent so a post-terminal edit can't retroactively hide a PR that did
-// the work. The issue's PR list filters these out (see ListPullRequestsByIssue).
+// keyword, no title/branch reference). After the PR becomes terminal it may
+// still be promoted from hidden to visible by adding a title/branch identifier,
+// but it can never be demoted back to hidden. The issue's PR list filters these
+// out (see ListPullRequestsByIssue).
 func (q *Queries) LinkIssueToPullRequest(ctx context.Context, arg LinkIssueToPullRequestParams) error {
 	_, err := q.db.Exec(ctx, linkIssueToPullRequest,
 		arg.IssueID,

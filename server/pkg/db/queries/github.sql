@@ -259,9 +259,10 @@ WHERE ipr.issue_id = $1 AND NOT ipr.reference_only;
 -- keeping the merge-time decision stable.
 --
 -- reference_only marks a link justified ONLY by a bare body mention (no closing
--- keyword, no title/branch reference). It follows the same preserve gate as
--- close_intent so a post-terminal edit can't retroactively hide a PR that did
--- the work. The issue's PR list filters these out (see ListPullRequestsByIssue).
+-- keyword, no title/branch reference). After the PR becomes terminal it may
+-- still be promoted from hidden to visible by adding a title/branch identifier,
+-- but it can never be demoted back to hidden. The issue's PR list filters these
+-- out (see ListPullRequestsByIssue).
 INSERT INTO issue_pull_request (
     issue_id, pull_request_id, linked_by_type, linked_by_id, close_intent, reference_only
 ) VALUES (
@@ -273,7 +274,8 @@ ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
         ELSE EXCLUDED.close_intent
     END,
     reference_only = CASE
-        WHEN sqlc.arg('preserve_close_intent') THEN issue_pull_request.reference_only
+        WHEN sqlc.arg('preserve_close_intent')
+            THEN issue_pull_request.reference_only AND EXCLUDED.reference_only
         ELSE EXCLUDED.reference_only
     END;
 

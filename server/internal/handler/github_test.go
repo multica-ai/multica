@@ -1496,6 +1496,84 @@ func TestWebhook_BareBodyMentionHiddenFromPRList(t *testing.T) {
 	}
 }
 
+// TestWebhook_MergedBareBodyMentionCanBePromotedButNotHidden guards the
+// historical-backfill path: a PR that merged with only a bare body mention may
+// later gain a title/branch identifier and become a visible working link. Once
+// visible, post-terminal edits must not hide it again.
+func TestWebhook_MergedBareBodyMentionCanBePromotedButNotHidden(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("handler test fixture not initialized (no DB?)")
+	}
+	ctx := context.Background()
+	secret := "merged-reference-promotion-secret"
+	t.Setenv("GITHUB_WEBHOOK_SECRET", secret)
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":  "historical merged PR backfill",
+		"status": "in_progress",
+	})
+	testHandler.CreateIssue(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateIssue: %d %s", w.Code, w.Body.String())
+	}
+	var created IssueResponse
+	json.NewDecoder(w.Body).Decode(&created)
+
+	t.Cleanup(func() {
+		testPool.Exec(ctx, `DELETE FROM issue_pull_request WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM activity_log WHERE issue_id = $1`, created.ID)
+		testPool.Exec(ctx, `DELETE FROM github_pull_request WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM github_installation WHERE workspace_id = $1`, testWorkspaceID)
+		testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, created.ID)
+	})
+
+	const installationID int64 = 30264007
+	if _, err := testHandler.Queries.CreateGitHubInstallation(ctx, db.CreateGitHubInstallationParams{
+		WorkspaceID:    parseUUID(testWorkspaceID),
+		InstallationID: installationID,
+		AccountLogin:   "merged-reference-promotion-acct",
+		AccountType:    "User",
+	}); err != nil {
+		t.Fatalf("CreateGitHubInstallation: %v", err)
+	}
+
+	body := "Context for reviewers: see " + created.Identifier
+	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", body, "feat/cleanup", "opened")
+	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", body, "feat/cleanup", "merged")
+
+	listLen := func() int {
+		t.Helper()
+		rows, err := testHandler.Queries.ListPullRequestsByIssue(ctx, parseUUID(created.ID))
+		if err != nil {
+			t.Fatalf("ListPullRequestsByIssue: %v", err)
+		}
+		return len(rows)
+	}
+	if n := listLen(); n != 0 {
+		t.Fatalf("merged bare body mention should start hidden, got %d rows", n)
+	}
+
+	firePRWebhook(t, secret, installationID, 1, created.Identifier+": historical cleanup", body, "feat/cleanup", "edited_merged")
+	if n := listLen(); n != 1 {
+		t.Fatalf("post-merge title identifier should promote the link, got %d rows", n)
+	}
+	var closeIntent bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT close_intent FROM issue_pull_request WHERE issue_id = $1`,
+		created.ID).Scan(&closeIntent); err != nil {
+		t.Fatalf("select close_intent: %v", err)
+	}
+	if closeIntent {
+		t.Fatal("post-merge visibility promotion must not add close intent")
+	}
+
+	firePRWebhook(t, secret, installationID, 1, "Unrelated cleanup", body, "feat/cleanup", "edited_merged")
+	if n := listLen(); n != 1 {
+		t.Fatalf("post-terminal edit must not hide a promoted link, got %d rows", n)
+	}
+}
+
 // TestWebhook_HiddenBodyMentionDoesNotBlockAutoAdvance guards the P1 the code
 // review flagged on PR #4611: a reference_only link (a PR that only mentions the
 // issue in its body) is hidden from the PR list, so it must not silently gate

@@ -1646,7 +1646,17 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 				LinkedByType:        strToText("system"),
 				LinkedByID:          pgtype.UUID{},
 			}); err != nil {
-				slog.Warn("github: link failed", "err", err)
+				if h.GitHubPRMetrics != nil {
+					h.GitHubPRMetrics.RecordLinkWriteFailure()
+				}
+				slog.Warn("github: link failed",
+					"err", err,
+					"workspace_id", workspaceID,
+					"issue_id", uuidToString(issue.ID),
+					"repo_owner", p.Repository.Owner.Login,
+					"repo_name", p.Repository.Name,
+					"pr_number", p.PullRequest.Number,
+				)
 				continue
 			}
 			linkedIssueIDs = append(linkedIssueIDs, uuidToString(issue.ID))

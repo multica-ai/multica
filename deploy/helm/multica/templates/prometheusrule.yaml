@@ -40,4 +40,33 @@ spec:
           annotations:
             summary: "Business sampler query p95 is high"
             description: "Business sampler query {{ "{{ $labels.name }}" }} p95 is above 300ms, leaving little headroom before the 500ms statement_timeout."
+    - name: multica-github-pr
+      rules:
+        - alert: MulticaGitHubPRLinkWriteFailures
+          expr: increase(multica_github_pr_link_write_failures_total[10m]) > 0
+          for: {{ .Values.monitoring.prometheusRule.githubPRLinkFailuresFor | quote }}
+          labels:
+            severity: {{ .Values.monitoring.prometheusRule.severity | quote }}
+          annotations:
+            summary: "GitHub PR issue-link writes are failing"
+            description: "At least one GitHub PR could not be linked to its issue. Use the structured github: link failed log to identify the workspace, issue, repository, and PR."
+        - alert: MulticaGitHubPRSnapshotPipelineDisabled
+          expr: increase(multica_github_pr_snapshot_disabled_triggers_total[10m]) > 0
+          for: {{ .Values.monitoring.prometheusRule.githubPRSnapshotDisabledFor | quote }}
+          labels:
+            severity: {{ .Values.monitoring.prometheusRule.severity | quote }}
+          annotations:
+            summary: "GitHub PR snapshot refreshes are disabled"
+            description: "PR snapshot refresh triggers are being ignored because GITHUB_APP_ID or GITHUB_APP_PRIVATE_KEY is unavailable. PR links still work, but checks and API mergeability stay unavailable."
+        - alert: MulticaGitHubPRSnapshotRefreshFailures
+          expr: |
+            rate(multica_github_pr_snapshot_fetch_failures_total[10m])
+            + rate(multica_github_pr_snapshot_write_failures_total[10m])
+            + rate(multica_github_pr_snapshot_queue_drops_total[10m]) > 0
+          for: {{ .Values.monitoring.prometheusRule.githubPRSnapshotFailuresFor | quote }}
+          labels:
+            severity: {{ .Values.monitoring.prometheusRule.severity | quote }}
+          annotations:
+            summary: "GitHub PR snapshot refreshes are failing"
+            description: "GitHub API fetches, snapshot database writes, or refresh queue capacity are failing. Inspect ghsnapshot structured logs for the repository and PR."
 {{- end }}

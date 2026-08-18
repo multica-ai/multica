@@ -18,6 +18,15 @@ type TxBeginner interface {
 	Begin(ctx context.Context) (pgx.Tx, error)
 }
 
+// Metrics records bounded, operator-actionable failure classes without
+// importing the production metrics package into the integration.
+type Metrics interface {
+	RecordSnapshotDisabledTrigger()
+	RecordSnapshotFetchFailure()
+	RecordSnapshotWriteFailure()
+	RecordSnapshotQueueDrop()
+}
+
 // address is the refresh unit and the dedup / single-in-flight key
 // (acceptance criterion 3): one (installation, owner, repo, number) tuple, which
 // may fan out to multiple github_pull_request rows across workspaces.
@@ -53,6 +62,7 @@ type Manager struct {
 	queries   *db.Queries
 	pool      TxBeginner
 	onApplied func(ctx context.Context, prID pgtype.UUID)
+	metrics   Metrics
 
 	concurrency   int
 	viewTTL       time.Duration
@@ -115,6 +125,9 @@ func NewManager(client *Client, queries *db.Queries, pool TxBeginner, onApplied 
 // Enabled reports whether the pipeline will actually do anything.
 func (m *Manager) Enabled() bool { return m != nil && m.client.Enabled() }
 
+// SetMetrics installs the optional production metrics sink.
+func (m *Manager) SetMetrics(metrics Metrics) { m.metrics = metrics }
+
 // Start launches the worker pool and the TTL sweeper under ctx. No-op (and
 // safe) when the manager is disabled.
 func (m *Manager) Start(ctx context.Context) {
@@ -145,6 +158,7 @@ func (m *Manager) Start(ctx context.Context) {
 // retained. Never blocks the caller.
 func (m *Manager) Enqueue(installationID int64, owner, repo string, number int32) {
 	if !m.Enabled() {
+		m.recordDisabledTrigger()
 		return
 	}
 	addr := address{InstallationID: installationID, Owner: owner, Repo: repo, Number: number}
@@ -170,6 +184,7 @@ func (m *Manager) Enqueue(installationID int64, owner, repo string, number int32
 		delete(m.trailing, addr)
 		m.mu.Unlock()
 		slog.Warn("ghsnapshot: refresh queue full, dropping enqueue")
+		m.recordQueueDrop()
 	}
 }
 
@@ -178,6 +193,7 @@ func (m *Manager) Enqueue(installationID int64, owner, repo string, number int32
 // fresh data costs nothing.
 func (m *Manager) MaybeEnqueueOnView(installationID int64, owner, repo string, number int32, fetchedAt time.Time, hasFetched bool) {
 	if !m.Enabled() {
+		m.recordDisabledTrigger()
 		return
 	}
 	if hasFetched && m.now().Sub(fetchedAt) < m.viewTTL {
@@ -230,7 +246,8 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		// Transient/GitHub failure: keep the last-known snapshot (the row is
 		// untouched, so the card shows stale data, never wrong data). No secret
 		// is ever logged. The next trigger or the TTL sweep retries.
-		slog.Warn("ghsnapshot: fetch failed", "owner", addr.Owner, "repo", addr.Repo, "number", addr.Number, "err", err.Error())
+		slog.Warn("ghsnapshot: fetch failed", "installation_id", addr.InstallationID, "owner", addr.Owner, "repo", addr.Repo, "number", addr.Number, "err", err.Error())
+		m.recordFetchFailure()
 		return
 	}
 
@@ -241,7 +258,8 @@ func (m *Manager) process(ctx context.Context, addr address) {
 		PrNumber:       addr.Number,
 	})
 	if err != nil {
-		slog.Warn("ghsnapshot: list rows failed", "err", err.Error())
+		slog.Warn("ghsnapshot: list rows failed", "installation_id", addr.InstallationID, "owner", addr.Owner, "repo", addr.Repo, "number", addr.Number, "err", err.Error())
+		m.recordWriteFailure()
 		return
 	}
 
@@ -250,7 +268,8 @@ func (m *Manager) process(ctx context.Context, addr address) {
 	for _, row := range rows {
 		applied, err := m.applySnapshot(ctx, row.ID, snap)
 		if err != nil {
-			slog.Warn("ghsnapshot: apply snapshot failed", "err", err.Error())
+			slog.Warn("ghsnapshot: apply snapshot failed", "installation_id", addr.InstallationID, "owner", addr.Owner, "repo", addr.Repo, "number", addr.Number, "err", err.Error())
+			m.recordWriteFailure()
 			continue
 		}
 		if !applied {
@@ -316,6 +335,7 @@ func (m *Manager) deferActive(ctx context.Context, addr address, delay time.Dura
 		default:
 			m.release(addr)
 			slog.Warn("ghsnapshot: refresh queue full, dropping rate-limited enqueue")
+			m.recordQueueDrop()
 		}
 	})
 }
@@ -354,6 +374,31 @@ func (m *Manager) finish(addr address) {
 		delete(m.trailing, addr)
 		m.mu.Unlock()
 		slog.Warn("ghsnapshot: refresh queue full, dropping trailing enqueue")
+		m.recordQueueDrop()
+	}
+}
+
+func (m *Manager) recordDisabledTrigger() {
+	if m != nil && m.metrics != nil {
+		m.metrics.RecordSnapshotDisabledTrigger()
+	}
+}
+
+func (m *Manager) recordFetchFailure() {
+	if m.metrics != nil {
+		m.metrics.RecordSnapshotFetchFailure()
+	}
+}
+
+func (m *Manager) recordWriteFailure() {
+	if m.metrics != nil {
+		m.metrics.RecordSnapshotWriteFailure()
+	}
+}
+
+func (m *Manager) recordQueueDrop() {
+	if m.metrics != nil {
+		m.metrics.RecordSnapshotQueueDrop()
 	}
 }
 

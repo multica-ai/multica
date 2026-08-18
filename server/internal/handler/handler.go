@@ -333,7 +333,10 @@ type Handler struct {
 	// so the feature degrades cleanly on deployments without a private key.
 	// Wired in cmd/server/router.go after New.
 	PRRefresh *ghsnapshot.Manager
-	cfg       Config
+	// GitHubPRMetrics records PR-link and snapshot-pipeline failures. Nil when
+	// the metrics listener is disabled.
+	GitHubPRMetrics *obsmetrics.GitHubPRMetrics
+	cfg             Config
 }
 
 func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *events.Bus, emailService *service.EmailService, store storage.Storage, cfSigner *auth.CloudFrontSigner, analyticsClient analytics.Client, cfg Config, daemonHubs ...*daemonws.Hub) *Handler {

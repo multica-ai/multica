@@ -100,7 +100,7 @@ func checkRunCount(t *testing.T, pool *pgxpool.Pool, prID pgtype.UUID) int {
 
 func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T) {
 	pool := testDBPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 	q := db.New(pool)
 	ctx := context.Background()
 	now := time.Unix(1_700_010_000, 0)
@@ -201,7 +201,7 @@ func TestListStaleUndecidedGitHubPRsExcludesDecidedAndRotatesCursor(t *testing.T
 // response for an old head must never overwrite a newer head's snapshot.
 func TestApplySnapshotHeadSHAGuard(t *testing.T) {
 	pool := testDBPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 	q := db.New(pool)
 	ctx := context.Background()
 	now := time.Unix(1_700_000_100, 0)
@@ -277,7 +277,7 @@ func TestApplySnapshotHeadSHAGuard(t *testing.T) {
 // trailing edge must still fetch and apply B immediately.
 func TestInFlightOldHeadKeepsTrailingRefresh(t *testing.T) {
 	pool := testDBPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 	q := db.New(pool)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -368,7 +368,7 @@ func TestInFlightOldHeadKeepsTrailingRefresh(t *testing.T) {
 // replace, not an accumulation.
 func TestApplySnapshotReplacesRuns(t *testing.T) {
 	pool := testDBPool(t)
-	defer pool.Close()
+	t.Cleanup(pool.Close)
 	q := db.New(pool)
 	ctx := context.Background()
 	now := time.Unix(1_700_000_200, 0)

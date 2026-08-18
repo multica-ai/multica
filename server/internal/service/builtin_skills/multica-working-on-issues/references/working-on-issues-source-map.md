@@ -90,8 +90,12 @@ row is written with `reference_only = true`. Both `ListPullRequestsByIssue` and
 reference-only links are hidden from the CLI / UI PR list **and** excluded from
 the auto-advance gate (an open body-only mention must not silently block the
 issue from reaching `done` while invisible in the list). The row still exists for
-edit-time close-intent tracking. `reference_only` follows the same
-`preserve_close_intent` terminal gate as `close_intent`.
+edit-time close-intent tracking. At the terminal preserve gate, close intent
+stays frozen while reference-only visibility can move from hidden to visible but
+never back to hidden. The one-way expression lives in
+`server/pkg/db/queries/github.sql` (`LinkIssueToPullRequest`); migration
+`344_promote_terminal_pr_references` applies the same promotion to historical
+rows whose mirrored PR title or branch now contains the issue identifier.
 
 Drifted from the prior skill's `github.go:727` citation, which pointed at the old
 call-site location for the link logic.

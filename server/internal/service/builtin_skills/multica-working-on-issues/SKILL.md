@@ -64,6 +64,11 @@ Closes MUL-2759 in the body                        # links and shown
 Related to MUL-2759 in the body (no title/branch)  # links but reference_only → hidden
 ```
 
+For a merged or closed PR, a later edit that adds the issue key to the title or
+branch promotes an existing reference-only row into a visible working link.
+That promotion is one-way: later terminal edits cannot hide the link again, and
+they still cannot add close intent retroactively.
+
 ### Default for code-changing issue work
 
 When an issue run changes code in a checked-out GitHub repo, the default handoff

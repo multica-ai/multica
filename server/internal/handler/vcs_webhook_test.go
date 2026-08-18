@@ -223,6 +223,62 @@ func TestVCSWebhook_ReferenceOnlyExcludedAndNonBlocking(t *testing.T) {
 	}
 }
 
+func TestVCSWebhook_MergedBareBodyMentionCanBePromotedButNotHidden(t *testing.T) {
+	ctx := context.Background()
+	box := withVCSBox(t)
+	connID := seedVCSConnection(t, ctx, box, "forgejo", "https://forgejo.test")
+	issue := newVCSIssue(t, "Historical merged PR backfill")
+	t.Cleanup(func() { cleanupVCS(ctx, issue.ID) })
+
+	fire := func(action, title, updatedAt string) {
+		raw, _ := json.Marshal(map[string]any{
+			"action": action,
+			"pull_request": map[string]any{
+				"number": 17, "html_url": "https://forgejo.test/acme/widget/pulls/17",
+				"title": title, "body": "Related " + issue.Identifier,
+				"state": "closed", "merged": true,
+				"merged_at": "2026-04-29T00:00:00Z", "closed_at": "2026-04-29T00:00:00Z",
+				"created_at": "2026-04-28T00:00:00Z", "updated_at": updatedAt,
+				"head": map[string]any{"ref": "cleanup", "sha": "promote17"},
+				"user": map[string]any{"username": "octo"},
+			},
+			"repository": map[string]any{"name": "widget", "owner": map[string]any{"username": "acme"}},
+		})
+		w := httptest.NewRecorder()
+		testHandler.HandleVCSWebhook(w, vcsWebhookReq(connID, map[string]string{
+			"X-Gitea-Event": "pull_request", "X-Gitea-Signature": giteaSig(raw),
+		}, raw))
+		if w.Code != http.StatusAccepted {
+			t.Fatalf("%s event: %d %s", action, w.Code, w.Body.String())
+		}
+	}
+
+	link := func() (referenceOnly, closeIntent bool) {
+		t.Helper()
+		if err := testPool.QueryRow(ctx,
+			`SELECT reference_only, close_intent FROM issue_vcs_pull_request WHERE issue_id = $1`,
+			issue.ID).Scan(&referenceOnly, &closeIntent); err != nil {
+			t.Fatalf("select link: %v", err)
+		}
+		return referenceOnly, closeIntent
+	}
+
+	fire("closed", "Unrelated cleanup", "2026-04-29T00:00:00Z")
+	if referenceOnly, closeIntent := link(); !referenceOnly || closeIntent {
+		t.Fatalf("initial link = reference_only=%v close_intent=%v, want true/false", referenceOnly, closeIntent)
+	}
+
+	fire("edited", issue.Identifier+": historical cleanup", "2026-04-30T00:00:00Z")
+	if referenceOnly, closeIntent := link(); referenceOnly || closeIntent {
+		t.Fatalf("promoted link = reference_only=%v close_intent=%v, want false/false", referenceOnly, closeIntent)
+	}
+
+	fire("edited", "Unrelated cleanup", "2026-05-01T00:00:00Z")
+	if referenceOnly, closeIntent := link(); referenceOnly || closeIntent {
+		t.Fatalf("later edit rewrote link = reference_only=%v close_intent=%v, want false/false", referenceOnly, closeIntent)
+	}
+}
+
 // The close gate must span providers: an issue with an OPEN GitHub PR and a
 // MERGED close-intent VCS PR must report open_count > 0, so neither webhook
 // auto-advances it out from under the still-open GitHub work (and vice versa).

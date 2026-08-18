@@ -33,6 +33,7 @@ type Registry struct {
 	ChannelMedia *ChannelMediaReconcilerMetrics
 	ChannelLease *ChannelLeaseMetrics
 	Wecom        *WecomMetrics
+	GitHubPR     *GitHubPRMetrics
 	// Sampler is non-nil only when RegistryOptions.BusinessSampler was
 	// supplied with a valid Pool. Exposed so the cmd/server entrypoint
 	// can plumb the same instance into health checks if it ever wants to.
@@ -66,6 +67,9 @@ func NewRegistry(opts RegistryOptions) *Registry {
 	wecomMetrics := NewWecomMetrics()
 	reg.MustRegister(wecomMetrics.Collectors()...)
 
+	githubPRMetrics := NewGitHubPRMetrics()
+	reg.MustRegister(githubPRMetrics.Collectors()...)
+
 	if opts.Pool != nil {
 		reg.MustRegister(NewDBCollector(opts.Pool))
 	}
@@ -88,6 +92,7 @@ func NewRegistry(opts RegistryOptions) *Registry {
 		ChannelMedia: channelMedia,
 		ChannelLease: channelLease,
 		Wecom:        wecomMetrics,
+		GitHubPR:     githubPRMetrics,
 		Sampler:      sampler,
 	}
 }

@@ -208,4 +208,7 @@ monitoring:
     additionalLabels: {}
     samplerQueryErrorsFor: 5m
     samplerQueryLatencyFor: 10m
+    githubPRLinkFailuresFor: 5m
+    githubPRSnapshotDisabledFor: 5m
+    githubPRSnapshotFailuresFor: 5m
     severity: warning

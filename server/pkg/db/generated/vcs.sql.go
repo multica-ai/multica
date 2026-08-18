@@ -122,7 +122,8 @@ ON CONFLICT (issue_id, pull_request_id) DO UPDATE SET
         ELSE EXCLUDED.close_intent
     END,
     reference_only = CASE
-        WHEN $7 THEN issue_vcs_pull_request.reference_only
+        WHEN $7
+            THEN issue_vcs_pull_request.reference_only AND EXCLUDED.reference_only
         ELSE EXCLUDED.reference_only
     END
 `
@@ -142,8 +143,8 @@ type LinkIssueToVCSPullRequestParams struct {
 // =====================
 // reference_only marks a link justified ONLY by a bare body mention (no closing
 // keyword and no title/branch reference), mirroring the GitHub link upsert.
-// preserve_close_intent freezes both close_intent and reference_only once a
-// terminal merge/close event has been recorded.
+// preserve_close_intent freezes close_intent after a terminal event; visibility
+// may still be promoted from reference-only to working, but never demoted.
 func (q *Queries) LinkIssueToVCSPullRequest(ctx context.Context, arg LinkIssueToVCSPullRequestParams) error {
 	_, err := q.db.Exec(ctx, linkIssueToVCSPullRequest,
 		arg.IssueID,

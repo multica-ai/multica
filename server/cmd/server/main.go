@@ -378,6 +378,7 @@ func main() {
 	var channelMediaMetrics *obsmetrics.ChannelMediaReconcilerMetrics
 	var channelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
 	var wecomMetrics *obsmetrics.WecomMetrics
+	var githubPRMetrics *obsmetrics.GitHubPRMetrics
 	if metricsConfig.Enabled() {
 		// Build a dedicated tiny pool for the BusinessSamplerCollector
 		// so a stalled scrape can never starve business traffic. If the
@@ -408,6 +409,7 @@ func main() {
 		channelMediaMetrics = metricsRegistry.ChannelMedia
 		channelLeaseMetrics = metricsRegistry.ChannelLease
 		wecomMetrics = metricsRegistry.Wecom
+		githubPRMetrics = metricsRegistry.GitHubPR
 		// Forward inbound daemon WS frames into the per-kind counter so
 		// dashboards can split heartbeat / unknown / invalid traffic.
 		if daemonHub != nil {
@@ -437,6 +439,7 @@ func main() {
 		ChannelLeaseMetrics: channelLeaseMetrics,
 		ChannelLeaseRedis:   channelLeaseRedis,
 		WecomMetrics:        wecomMetrics,
+		GitHubPRMetrics:     githubPRMetrics,
 		DaemonHub:           daemonHub,
 		DaemonWakeup:        daemonWakeup,
 		FeatureFlags:        flags,

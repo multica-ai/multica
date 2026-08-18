@@ -183,9 +183,12 @@ type RouterOptions struct {
 	// WecomMetrics is the WeCom adapter's health sink. Nil discards every
 	// counter, which is what a deployment with /metrics turned off gets.
 	WecomMetrics *obsmetrics.WecomMetrics
-	DaemonHub    *daemonws.Hub
-	DaemonWakeup service.TaskWakeupNotifier
-	FeatureFlags *featureflag.Service
+	// GitHubPRMetrics receives PR-link and snapshot-pipeline failures. Nil when
+	// /metrics is disabled.
+	GitHubPRMetrics *obsmetrics.GitHubPRMetrics
+	DaemonHub       *daemonws.Hub
+	DaemonWakeup    service.TaskWakeupNotifier
+	FeatureFlags    *featureflag.Service
 	// HeartbeatScheduler, when non-nil, replaces the default synchronous
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
@@ -354,6 +357,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
+	h.GitHubPRMetrics = opts.GitHubPRMetrics
+	if opts.GitHubPRMetrics != nil {
+		h.PRRefresh.SetMetrics(opts.GitHubPRMetrics)
+	}
 	if opts.BusinessMetrics != nil {
 		// Wire the BusinessMetrics receiver into the cloud runtime client
 		// so every outbound Fleet/Gateway request feeds the
