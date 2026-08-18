@@ -22,12 +22,15 @@ type Metrics struct {
 // GlobalMetrics returns the process-wide transport-retry metrics registrar.
 func GlobalMetrics() *Metrics {
 	transportRetryMetricsOnce.Do(func() {
-		transportRetryMetrics = newMetrics()
+		transportRetryMetrics = newMetrics(prometheus.DefaultRegisterer)
 	})
 	return transportRetryMetrics
 }
 
-func newMetrics() *Metrics {
+func newMetrics(registerer prometheus.Registerer) *Metrics {
+	if registerer == nil {
+		registerer = prometheus.DefaultRegisterer
+	}
 	m := &Metrics{
 		attemptTotal: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Namespace: "multica",
@@ -55,13 +58,22 @@ func newMetrics() *Metrics {
 			Buckets:   []float64{1, 2, 5, 10, 30, 60, 120, 300, 600},
 		}, []string{"provider", "policy_id"}),
 	}
-	prometheus.MustRegister(
+	registerer.MustRegister(
 		m.attemptTotal,
 		m.recoveredTotal,
 		m.cacheReadTokens,
 		m.wallSeconds,
 	)
 	return m
+}
+
+// NewMetricsForTest returns an isolated Metrics instance registered on reg.
+// When reg is nil, a fresh registry is allocated for the test.
+func NewMetricsForTest(reg prometheus.Registerer) *Metrics {
+	if reg == nil {
+		reg = prometheus.NewRegistry()
+	}
+	return newMetrics(reg)
 }
 
 // Collectors returns registered collectors for tests.

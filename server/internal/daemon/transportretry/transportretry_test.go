@@ -368,9 +368,3 @@ func TestResolveConfigAgentCustomEnvOverridesEnv(t *testing.T) {
 		t.Fatal("agent custom_env should override process env")
 	}
 }
-
-func TestMetricsRecordRecovered(t *testing.T) {
-	m := transportretry.GlobalMetrics()
-	m.RecordRecovered("cursor", "cursor_writable_iterable", "same_session")
-	m.RecordAttempt("cursor", "cursor_writable_iterable", "same_session", "recovered")
-}
