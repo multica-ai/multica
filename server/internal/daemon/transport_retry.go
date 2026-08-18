@@ -121,7 +121,7 @@ func marshalTransportRetryReceipt(stats transportretry.Stats) json.RawMessage {
 		CacheReadTokensRecovered: stats.CacheReadTokensRecovered,
 		SurfacedToServer:         stats.SurfacedToServer,
 	}
-	b, err := json.Marshal(map[string]any{"transport_retry": receipt})
+	b, err := json.Marshal(receipt)
 	if err != nil {
 		return nil
 	}

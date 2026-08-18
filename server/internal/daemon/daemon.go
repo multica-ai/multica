@@ -6428,7 +6428,6 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, err
 	}
 	if len(transportReceiptJSON) > 0 {
-		taskResult.TransportRetryReceipt = transportReceiptJSON
 		taskLog.Info("transport_retry finished",
 			"policy", transportStats.PolicyID,
 			"attempts", transportStats.Attempts,
@@ -6436,6 +6435,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 			"surfaced_to_server", transportStats.SurfacedToServer,
 		)
 	}
+	// Terminal paths below return fresh TaskResult literals; mirror the
+	// RetiredSessionID defer so optional transport-retry receipt survives.
+	defer func() { taskResult.TransportRetryReceipt = transportReceiptJSON }()
 
 	// retiredSessionID is the session this run was told to resume and then
 	// abandoned. Captured before the retry clears task.PriorSessionID, and
