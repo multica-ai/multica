@@ -24,6 +24,8 @@ export function WorkspaceGate({
 
   if (workspace) {
     setCurrentWorkspace(workspaceSlug, workspace.id);
+  } else if (getCurrentSlug() !== null) {
+    setCurrentWorkspace(null, null);
   }
 
   useEffect(

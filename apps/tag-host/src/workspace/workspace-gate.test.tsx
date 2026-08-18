@@ -72,6 +72,20 @@ describe('WorkspaceGate', () => {
     expect(state.currentSlug).toBeNull();
   });
 
+  it('clears a stale workspace before a different slug resolves', () => {
+    state.currentSlug = 'previous-workspace';
+    state.currentWorkspaceId = 'workspace-previous';
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    renderGate(queryClient);
+
+    expect(screen.queryByTestId('child-workspace')).toBeNull();
+    expect(state.currentSlug).toBeNull();
+    expect(state.currentWorkspaceId).toBeNull();
+  });
+
   it('sets the correct workspace synchronously before mounting children', () => {
     const queryClient = new QueryClient();
     queryClient.setQueryData(['workspace-by-slug', 'design-lab'], {
