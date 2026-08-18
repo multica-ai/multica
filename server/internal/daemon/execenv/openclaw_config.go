@@ -837,9 +837,9 @@ var openclawExec = execOpenclawCLI
 // The daemon's environment is inherited so OPENCLAW_CONFIG_PATH /
 // OPENCLAW_STATE_DIR / OPENCLAW_HOME / OPENCLAW_INCLUDE_ROOTS pass through.
 //
-// stderr is captured separately and appended to error messages — failures
-// here surface up to the daemon log, and a `openclaw doctor` hint there is
-// more useful than just an exit code.
+// stderr is captured separately and appended to error messages. Some JSON
+// commands emit their failure payload on stdout instead, so failed stdout is
+// also preserved for error classification and diagnosis.
 //
 // When the CLI is a batch shim that exits non-zero and says nothing at all,
 // openclawShimDiagnostic adds the interpreter-resolution detail that a bare
@@ -865,14 +865,21 @@ func execOpenclawCLI(ctx context.Context, bin string, args ...string) (string, e
 	raw, err := cmd.Output()
 	if err != nil {
 		stderrMsg := strings.TrimSpace(stderr.String())
+		stdoutMsg := strings.TrimSpace(string(raw))
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			if stderrMsg != "" {
 				return "", fmt.Errorf("openclaw %s: %w (process: %v; stderr: %s)", strings.Join(args, " "), ctxErr, err, stderrMsg)
+			}
+			if stdoutMsg != "" {
+				return "", fmt.Errorf("openclaw %s: %w (process: %v; stdout: %s)", strings.Join(args, " "), ctxErr, err, stdoutMsg)
 			}
 			return "", fmt.Errorf("openclaw %s: %w (process: %v)", strings.Join(args, " "), ctxErr, err)
 		}
 		if stderrMsg != "" {
 			return "", fmt.Errorf("openclaw %s: %w (stderr: %s)", strings.Join(args, " "), err, stderrMsg)
+		}
+		if stdoutMsg != "" {
+			return "", fmt.Errorf("openclaw %s: %w (stdout: %s)", strings.Join(args, " "), err, stdoutMsg)
 		}
 		if diag := openclawShimDiagnostic(bin, err); diag != "" {
 			return "", fmt.Errorf("openclaw %s: %w (%s)", strings.Join(args, " "), err, diag)

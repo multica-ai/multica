@@ -419,6 +419,27 @@ func TestExecOpenclawCLIPrefersRealStderr(t *testing.T) {
 	}
 }
 
+// TestExecOpenclawCLIPreservesFailedStdout covers OpenClaw 2026.7.x, whose
+// JSON commands report errors on stdout while exiting non-zero. The caller
+// needs that payload to recognize a missing config path and use the registry.
+func TestExecOpenclawCLIPreservesFailedStdout(t *testing.T) {
+	shim := writeShim(t, t.TempDir(),
+		"#!/bin/sh\nprintf '%s\\n' '{\"error\":\"Config path not found: agents.list\"}'\nexit 1\n",
+		"@echo off\r\necho {\"error\":\"Config path not found: agents.list\"}\r\nexit /b 1\r\n",
+	)
+
+	_, err := execOpenclawCLI(context.Background(), shim, "config", "get", "agents.list", "--json")
+	if err == nil {
+		t.Fatal("expected the CLI failure to surface as an error")
+	}
+	if !strings.Contains(err.Error(), `stdout: {"error":"Config path not found: agents.list"}`) {
+		t.Fatalf("failed stdout must be preserved for error classification; got: %s", err)
+	}
+	if !isOpenclawKeyMissing(err) {
+		t.Fatalf("failed stdout should trigger the agents registry fallback; got: %s", err)
+	}
+}
+
 // TestExecOpenclawCLIMissingTempDoesNotChangeOutcome pins the root cause #6061
 // originally reported and then retracted. The reporter's own follow-up
 // experiment showed `{PATH, SystemRoot}` alone succeeds, so TEMP/TMP must not
