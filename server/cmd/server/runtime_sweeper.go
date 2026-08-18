@@ -198,6 +198,19 @@ func sweepStaleRuntimes(ctx context.Context, queries *db.Queries, liveness handl
 		taskSvc.HandleFailedTasks(ctx, failedTasks)
 	}
 
+	// Rebind still-queued (not-yet-dispatched) tasks off the just-offlined
+	// runtimes onto their agent's current runtime binding, when that binding is
+	// a different, online runtime. Without this, queued tasks stay pinned to the
+	// dead runtime until the queued-TTL sweep fails them ~2h later, even though
+	// the agent has already been switched to a live runtime. The target daemon
+	// picks these up on its next claim poll; no extra event is required.
+	reboundTasks, err := queries.RebindQueuedTasksToAgentCurrentRuntime(ctx)
+	if err != nil {
+		slog.Warn("runtime sweeper: failed to rebind queued tasks to current runtime", "error", err)
+	} else if len(reboundTasks) > 0 {
+		slog.Info("runtime sweeper: rebound queued tasks to agent current runtime", "count", len(reboundTasks))
+	}
+
 	// Notify frontend clients so they re-fetch runtime list.
 	for wsID := range workspaces {
 		bus.Publish(events.Event{

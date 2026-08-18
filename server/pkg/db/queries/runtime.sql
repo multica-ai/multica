@@ -255,6 +255,37 @@ WHERE status IN ('dispatched', 'running', 'waiting_local_directory')
   )
 RETURNING *;
 
+-- name: RebindQueuedTasksToAgentCurrentRuntime :many
+-- When a runtime goes offline, its still-queued (not-yet-dispatched) tasks stay
+-- pinned to the dead runtime until the queued-TTL sweep fails them ~2h later.
+-- That happens because the claim path (ListQueuedClaimCandidatesByRuntime) only
+-- ever returns candidates whose runtime_id matches the polling daemon's own
+-- online runtime: agent.runtime_id can change (e.g. the operator switches the
+-- agent to a different runtime), but agent_task_queue.runtime_id is NOT
+-- rewritten when it does — the same pinning gap documented on
+-- CancelAgentTasksByRuntimeOrAgent. The result is a queued task that no live
+-- daemon will ever claim.
+--
+-- This moves those orphaned queued tasks onto the agent's CURRENT runtime
+-- binding, but only when that binding is itself online, so the task becomes
+-- immediately claimable by the live daemon on its next poll. We never set
+-- runtime_id to NULL or to an offline runtime, so the
+-- agent_task_queue_active_requires_runtime invariant is preserved. Tasks whose
+-- agent has no current binding, or whose current binding is also offline, are
+-- left untouched for the queued-TTL sweep to handle.
+UPDATE agent_task_queue atq
+SET runtime_id = a.runtime_id
+FROM agent a, agent_runtime ar
+WHERE atq.agent_id = a.id
+  AND a.runtime_id = ar.id
+  AND ar.status = 'online'
+  AND atq.status = 'queued'
+  AND atq.runtime_id IS DISTINCT FROM a.runtime_id
+  AND atq.runtime_id IN (
+    SELECT id FROM agent_runtime WHERE status = 'offline'
+  )
+RETURNING atq.*;
+
 -- name: ListAgentRuntimesByOwner :many
 SELECT * FROM agent_runtime
 WHERE workspace_id = $1 AND owner_id = $2
