@@ -754,5 +754,11 @@
     "manage_hint": "排序与显隐只影响你自己",
     "visible_toggle": "在视图栏显示",
     "more_label": "更多视图"
+  },
+  "files": {
+    "section_header": "产物",
+    "empty": "这个任务还没有文件。",
+    "view_tooltip": "查看",
+    "download_tooltip": "下载"
   }
 }

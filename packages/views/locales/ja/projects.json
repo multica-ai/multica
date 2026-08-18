@@ -138,6 +138,17 @@
     "toast_local_mode_update_failed": "実行モードを更新できませんでした",
     "mode_badge_in_place": "直接"
   },
+  "files": {
+    "section_header": "ファイル",
+    "empty": "まだファイルがありません。",
+    "all_hidden": "すべてのファイルが非表示です。",
+    "show_hidden_count_other": "非表示のファイルを {{count}} 件表示",
+    "hide_hidden": "非表示のファイルを閉じる",
+    "view_tooltip": "表示",
+    "download_tooltip": "ダウンロード",
+    "hide_tooltip": "リストから非表示",
+    "unhide_tooltip": "リストに表示"
+  },
   "delete_dialog": {
     "title": "プロジェクトを削除",
     "description": "プロジェクトが削除されます。タスクは削除されませんが、リンクが解除されます。",

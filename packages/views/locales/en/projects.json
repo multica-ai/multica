@@ -139,6 +139,18 @@
     "toast_local_mode_update_failed": "Could not update the execution mode",
     "mode_badge_in_place": "Direct"
   },
+  "files": {
+    "section_header": "Files",
+    "empty": "No files yet.",
+    "all_hidden": "All files are hidden.",
+    "show_hidden_count_one": "Show {{count}} hidden file",
+    "show_hidden_count_other": "Show {{count}} hidden files",
+    "hide_hidden": "Hide hidden files",
+    "view_tooltip": "View",
+    "download_tooltip": "Download",
+    "hide_tooltip": "Hide from list",
+    "unhide_tooltip": "Show in list"
+  },
   "delete_dialog": {
     "title": "Delete project",
     "description": "This will delete the project. Issues will not be deleted but will be unlinked.",

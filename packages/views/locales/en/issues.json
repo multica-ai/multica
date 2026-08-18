@@ -784,5 +784,11 @@
     "manage_hint": "Order and visibility only affect you",
     "visible_toggle": "Show in view bar",
     "more_label": "More views"
+  },
+  "files": {
+    "section_header": "Files",
+    "empty": "No files in this task.",
+    "view_tooltip": "View",
+    "download_tooltip": "Download"
   }
 }

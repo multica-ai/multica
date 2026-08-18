@@ -138,6 +138,17 @@
     "toast_local_mode_update_failed": "실행 모드를 업데이트하지 못했습니다",
     "mode_badge_in_place": "직접"
   },
+  "files": {
+    "section_header": "파일",
+    "empty": "아직 파일이 없습니다.",
+    "all_hidden": "모든 파일이 숨겨져 있습니다.",
+    "show_hidden_count_other": "숨긴 파일 {{count}}개 표시",
+    "hide_hidden": "숨긴 파일 접기",
+    "view_tooltip": "보기",
+    "download_tooltip": "다운로드",
+    "hide_tooltip": "목록에서 숨기기",
+    "unhide_tooltip": "목록에 표시"
+  },
   "delete_dialog": {
     "title": "프로젝트 삭제",
     "description": "프로젝트가 삭제됩니다. 태스크는 삭제되지 않지만 프로젝트 연결은 해제됩니다.",

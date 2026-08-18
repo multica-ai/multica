@@ -754,5 +754,11 @@
     "manage_hint": "순서와 표시 설정은 본인에게만 적용됩니다",
     "visible_toggle": "뷰 바에 표시",
     "more_label": "더 많은 뷰"
+  },
+  "files": {
+    "section_header": "파일",
+    "empty": "이 태스크에 아직 파일이 없습니다.",
+    "view_tooltip": "보기",
+    "download_tooltip": "다운로드"
   }
 }

@@ -138,6 +138,17 @@
     "toast_local_mode_update_failed": "无法更新执行方式",
     "mode_badge_in_place": "原地"
   },
+  "files": {
+    "section_header": "产物",
+    "empty": "还没有文件。",
+    "all_hidden": "所有文件都已隐藏。",
+    "show_hidden_count_other": "显示 {{count}} 个已隐藏文件",
+    "hide_hidden": "收起已隐藏文件",
+    "view_tooltip": "查看",
+    "download_tooltip": "下载",
+    "hide_tooltip": "从列表隐藏",
+    "unhide_tooltip": "在列表中显示"
+  },
   "delete_dialog": {
     "title": "删除项目",
     "description": "将删除这个项目。任务不会被删除，只会从项目中解除关联。",

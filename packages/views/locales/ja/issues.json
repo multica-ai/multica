@@ -754,5 +754,11 @@
     "manage_hint": "並び順と表示設定は自分にのみ適用されます",
     "visible_toggle": "ビューバーに表示",
     "more_label": "その他のビュー"
+  },
+  "files": {
+    "section_header": "ファイル",
+    "empty": "このタスクにはまだファイルがありません。",
+    "view_tooltip": "表示",
+    "download_tooltip": "ダウンロード"
   }
 }
