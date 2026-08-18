@@ -9,6 +9,8 @@ const TASK_TERMS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\bissue\b/gu, 'task'],
 ];
 
+const TASK_RESOURCE_NAMESPACES = ['issues', 'modals'] as const;
+
 function adaptTaskTerms(value: unknown): unknown {
   if (typeof value === 'string') {
     return TASK_TERMS.reduce(
@@ -29,5 +31,14 @@ function adaptTaskTerms(value: unknown): unknown {
 export function createTagTaskResources(
   resources: LocaleResources
 ): LocaleResources {
-  return adaptTaskTerms(resources) as LocaleResources;
+  const taskResources: LocaleResources = { ...resources };
+
+  for (const namespace of TASK_RESOURCE_NAMESPACES) {
+    const copy = resources[namespace];
+    if (copy) {
+      taskResources[namespace] = adaptTaskTerms(copy) as Record<string, unknown>;
+    }
+  }
+
+  return taskResources;
 }

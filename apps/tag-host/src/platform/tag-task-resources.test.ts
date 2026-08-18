@@ -13,6 +13,8 @@ describe('VIBES Tag task vocabulary', () => {
         table: { quick_create_placeholder: string };
       };
       modals: { create_issue: { submit: string } };
+      runtimes: { machine: { metrics: { health_clear: string } } };
+      settings: { lark: { page_description: string } };
     };
     const multicaCopy = RESOURCES.en as {
       issues: { page: { breadcrumb_title: string } };
@@ -23,6 +25,8 @@ describe('VIBES Tag task vocabulary', () => {
       'Add a task…'
     );
     expect(taskCopy.modals.create_issue.submit).toBe('Create Task');
+    expect(taskCopy.runtimes.machine.metrics.health_clear).toBe('No issues');
+    expect(taskCopy.settings.lark.page_description).toContain('/issue');
     expect(multicaCopy.issues.page.breadcrumb_title).toBe('Issues');
   });
 });
