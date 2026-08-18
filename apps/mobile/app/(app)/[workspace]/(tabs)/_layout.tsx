@@ -43,6 +43,12 @@ const BADGE_STYLE = {
   backgroundColor: THEME.light.brand,
 };
 
+// Phone scenes keep their full available width. On iPad, capping the shared
+// tab scene preserves the existing single-column interaction model and keeps
+// prose, issue rows, and the chat timeline readable in landscape. This is a
+// layout-only constraint: each tab still owns the same navigation and data.
+const TABLET_CONTENT_MAX_WIDTH = 760;
+
 export default function TabsLayout() {
   const { colorScheme } = useColorScheme();
   const t = THEME[colorScheme];
@@ -72,6 +78,11 @@ export default function TabsLayout() {
           tabBarInactiveTintColor: t.mutedForeground,
           tabBarStyle: { backgroundColor: t.background },
           tabBarLabelStyle: { fontSize: 11 },
+          sceneStyle: {
+            width: "100%",
+            maxWidth: TABLET_CONTENT_MAX_WIDTH,
+            alignSelf: "center",
+          },
         }}
       >
         <Tabs.Screen
