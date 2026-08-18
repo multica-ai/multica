@@ -149,11 +149,6 @@ export function IssueActionsMenuItems({
     ...projectResourcesOptions(wsId, issue.project_id ?? ""),
     enabled: shouldResolveLocalDirectory,
   });
-  const localContextReady =
-    !shouldResolveLocalDirectory ||
-    (runtimesQuery.isSuccess && projectResourcesQuery.isSuccess) ||
-    runtimesQuery.isError ||
-    projectResourcesQuery.isError;
 
   // Synchronous click handler — the awaited fetch in the previous version
   // dropped the browser's transient user activation, which made
@@ -161,13 +156,11 @@ export function IssueActionsMenuItems({
   // was cold. We now read straight from the cached query result and write
   // to the clipboard inside the same task as the click.
   const handleCopyWorkdirPath = useCallback(() => {
-    const latestWorkDir = localContextReady
-      ? resolveWorkdirCopyPath(tasks, {
-          localDaemonId: localDaemon.daemonId,
-          runtimes: runtimesQuery.data,
-          projectResources: projectResourcesQuery.data,
-        })
-      : undefined;
+    const latestWorkDir = resolveWorkdirCopyPath(tasks, {
+      localDaemonId: localDaemon.daemonId,
+      runtimes: runtimesQuery.data,
+      projectResources: projectResourcesQuery.data,
+    });
     if (!latestWorkDir) {
       toast.error(t(($) => $.detail.workdir_path_unavailable));
       return;
@@ -177,7 +170,6 @@ export function IssueActionsMenuItems({
       else toast.error(t(($) => $.detail.workdir_path_copy_failed));
     });
   }, [
-    localContextReady,
     localDaemon.daemonId,
     projectResourcesQuery.data,
     runtimesQuery.data,
