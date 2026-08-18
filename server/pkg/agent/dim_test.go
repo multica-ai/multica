@@ -729,8 +729,8 @@ func TestDimSessionLoadRetryExhausted(t *testing.T) {
 	reqs := readDimRequests(t, requestsFile)
 	loadCount := strings.Count(reqs, "session/load")
 	// dimSessionLoadRetryAttempts=3, so 1 initial + 3 retries = 4 attempts
-	if loadCount > 4 {
-		t.Fatalf("expected at most 4 session/load attempts (1 + 3 retries), got %d", loadCount)
+	if loadCount != 4 {
+		t.Fatalf("expected exactly 4 session/load attempts (1 + 3 retries), got %d", loadCount)
 	}
 	if strings.Contains(reqs, "session/new") {
 		t.Fatal("backend must not fall through to session/new when retries are exhausted")
@@ -762,9 +762,18 @@ func TestDimSessionLoadRetryCancelled(t *testing.T) {
 		}
 	}()
 
-	// Cancel the context shortly after Execute starts — the retry delay is
-	// 2s per attempt, so cancelling at 1s interrupts the first retry.
-	time.Sleep(1 * time.Second)
+	// Wait for the first session/load request to appear, then cancel during
+	// the retry delay — this is deterministic rather than a fixed sleep.
+	deadline := time.Now().Add(10 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(requestsFile); err == nil {
+			data, _ := os.ReadFile(requestsFile)
+			if strings.Contains(string(data), "session/load") {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 	cancel()
 
 	result := <-session.Result

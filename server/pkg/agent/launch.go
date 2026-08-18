@@ -169,6 +169,7 @@ var launchPrefixBlockedArgs = map[string]map[string]blockedArgMode{
 	"qwenpaw":     qwenpawBlockedArgs,
 	"reasonix":    reasonixBlockedArgs,
 	"traecli":     traecliBlockedArgs,
+	"dim":         dimBlockedArgs,
 }
 
 // FilterLaunchPrefix is the exported form for callers outside this package —
