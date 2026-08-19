@@ -3,7 +3,7 @@ import { RuntimeSettingsPage } from '@multica/views/runtimes';
 import { RuntimeWorkspaceRoute } from '@/workspace/runtime-workspace-route';
 
 export const Route = createFileRoute(
-  '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId',
+  '/$workspaceSlug/runtimes_/$machineId_/runtime/$runtimeId',
 )({
   ssr: false,
   component: TagWorkspaceRuntimeSettingsRoute,

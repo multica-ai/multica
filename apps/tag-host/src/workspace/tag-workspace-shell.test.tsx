@@ -145,12 +145,17 @@ describe('TagWorkspaceShell', () => {
     expect(state.globalShortcutMounts).toBe(1);
   });
 
-  it('shows one complete module map without links for migrating modules', () => {
+  it('shows approved links and only deferred modules as migrating', () => {
     render(<TagWorkspaceShell><div>Chat content</div></TagWorkspaceShell>);
 
     expect(screen.getByRole('link', { name: 'Chat' }).getAttribute('href')).toBe('/studio-a/chat');
     expect(screen.getByRole('link', { name: 'Tasks' }).getAttribute('href')).toBe('/studio-a/issues');
+    expect(screen.getByRole('link', { name: 'Agents' }).getAttribute('href')).toBe('/studio-a/agents');
+    expect(screen.getByRole('link', { name: 'Runtimes' }).getAttribute('href')).toBe('/studio-a/runtimes');
     expect(screen.getByText('Projects').closest('button')?.disabled).toBe(true);
+    for (const removed of ['Inbox', 'My Tasks', 'Skills', 'Squads', 'Autopilots', 'Analytics']) {
+      expect(screen.queryByText(removed)).toBeNull();
+    }
     expect(screen.getAllByText('Migrating').length).toBeGreaterThan(0);
     expect(screen.getByText('Chat content')).toBeTruthy();
   });

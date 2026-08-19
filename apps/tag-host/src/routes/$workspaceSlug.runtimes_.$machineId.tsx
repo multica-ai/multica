@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { RuntimeDetailPage } from '@multica/views/runtimes';
 import { RuntimeWorkspaceRoute } from '@/workspace/runtime-workspace-route';
 
-export const Route = createFileRoute('/$workspaceSlug/runtimes/$machineId')({
+export const Route = createFileRoute('/$workspaceSlug/runtimes_/$machineId')({
   ssr: false,
   component: TagWorkspaceRuntimeDetailRoute,
 });

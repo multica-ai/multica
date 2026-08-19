@@ -11,22 +11,17 @@ import { workspaceListOptions } from '@multica/core/workspace';
 import { useWS } from '@multica/core/realtime';
 import { openCreateIssueWithPreference } from '@multica/core/issues/stores/create-mode-store';
 import {
-  Activity,
   ArrowLeft,
   Bell,
   Bot,
-  Boxes,
   FileText,
   FolderKanban,
   Gauge,
-  Inbox,
   MessageCircle,
   Search,
   Settings,
-  Sparkles,
   SquarePen,
   Users,
-  Wrench,
 } from 'lucide-react';
 import {
   Sidebar,
@@ -61,9 +56,7 @@ import {
 } from './workspace-shell-model';
 
 const NAV_ICONS: Record<string, ComponentType<{ className?: string }>> = {
-  inbox: Inbox,
   chat: MessageCircle,
-  'my-tasks': FileText,
   tasks: FileText,
   projects: FolderKanban,
   agents: Bot,
@@ -71,10 +64,6 @@ const NAV_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   members: Users,
   files: FileText,
   notifications: Bell,
-  skills: Wrench,
-  squads: Boxes,
-  autopilots: Sparkles,
-  analytics: Activity,
   settings: Settings,
 };
 

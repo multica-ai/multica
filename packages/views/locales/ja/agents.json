@@ -235,6 +235,11 @@
     "discovery_failed": "検出に失敗しました",
     "clear_full": "選択をクリア（プロバイダーのデフォルトを使用）"
   },
+  "role_center": {
+    "tasks_description": "タスクの割り当てと完全な実行履歴は Tasks にまとめられます。",
+    "team_membership": "チーム所属",
+    "no_team": "このエージェントはまだチームに参加していません。"
+  },
   "tabs": {
     "overview": "概要",
     "work": "作業",
@@ -509,6 +514,7 @@
       "assigned_title": "エージェントに割り当て済み",
       "assigned_hint": "ワークスペースのスキルはエージェントと一緒に移動します。削除せず一時的に無効化できます。",
       "runtime_title": "ランタイムから継承",
+      "runtime_description": "ローカル skill はこのエージェントが使用するランタイムから検出されます。ランタイムを変更せず、このエージェントだけ継承した skill を無効にできます。",
       "runtime_hint": "{{runtime}} から自動検出され、このエージェントがそこで実行されるときに利用できます。",
       "workspace_badge": "ワークスペース",
       "inherited_badge": "継承",

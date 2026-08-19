@@ -9,10 +9,23 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as WorkspaceSlugRuntimesRouteImport } from './routes/$workspaceSlug.runtimes'
 import { Route as WorkspaceSlugIssuesRouteImport } from './routes/$workspaceSlug.issues'
 import { Route as WorkspaceSlugChatRouteImport } from './routes/$workspaceSlug.chat'
-import { Route as WorkspaceSlugIssuesIssueIdRouteImport } from './routes/$workspaceSlug.issues.$issueId'
+import { Route as WorkspaceSlugAgentsRouteImport } from './routes/$workspaceSlug.agents'
+import { Route as WorkspaceSlugRuntimesMachineIdRouteImport } from './routes/$workspaceSlug.runtimes_.$machineId'
+import { Route as WorkspaceSlugIssuesIssueIdRouteImport } from './routes/$workspaceSlug.issues_.$issueId'
+import { Route as WorkspaceSlugAgentsTeamsRouteImport } from './routes/$workspaceSlug.agents_.teams'
+import { Route as WorkspaceSlugAgentsAgentIdRouteImport } from './routes/$workspaceSlug.agents_.$agentId'
+import { Route as WorkspaceSlugAgentsTeamsSquadIdRouteImport } from './routes/$workspaceSlug.agents_.teams_.$squadId'
+import { Route as WorkspaceSlugAgentsNewManualRouteImport } from './routes/$workspaceSlug.agents_.new.manual'
+import { Route as WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRouteImport } from './routes/$workspaceSlug.runtimes_.$machineId_.runtime.$runtimeId'
 
+const WorkspaceSlugRuntimesRoute = WorkspaceSlugRuntimesRouteImport.update({
+  id: '/$workspaceSlug/runtimes',
+  path: '/$workspaceSlug/runtimes',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkspaceSlugIssuesRoute = WorkspaceSlugIssuesRouteImport.update({
   id: '/$workspaceSlug/issues',
   path: '/$workspaceSlug/issues',
@@ -23,54 +36,159 @@ const WorkspaceSlugChatRoute = WorkspaceSlugChatRouteImport.update({
   path: '/$workspaceSlug/chat',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkspaceSlugAgentsRoute = WorkspaceSlugAgentsRouteImport.update({
+  id: '/$workspaceSlug/agents',
+  path: '/$workspaceSlug/agents',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspaceSlugRuntimesMachineIdRoute =
+  WorkspaceSlugRuntimesMachineIdRouteImport.update({
+    id: '/$workspaceSlug/runtimes_/$machineId',
+    path: '/$workspaceSlug/runtimes/$machineId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const WorkspaceSlugIssuesIssueIdRoute =
   WorkspaceSlugIssuesIssueIdRouteImport.update({
-    id: '/$issueId',
-    path: '/$issueId',
-    getParentRoute: () => WorkspaceSlugIssuesRoute,
+    id: '/$workspaceSlug/issues_/$issueId',
+    path: '/$workspaceSlug/issues/$issueId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const WorkspaceSlugAgentsTeamsRoute =
+  WorkspaceSlugAgentsTeamsRouteImport.update({
+    id: '/$workspaceSlug/agents_/teams',
+    path: '/$workspaceSlug/agents/teams',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const WorkspaceSlugAgentsAgentIdRoute =
+  WorkspaceSlugAgentsAgentIdRouteImport.update({
+    id: '/$workspaceSlug/agents_/$agentId',
+    path: '/$workspaceSlug/agents/$agentId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const WorkspaceSlugAgentsTeamsSquadIdRoute =
+  WorkspaceSlugAgentsTeamsSquadIdRouteImport.update({
+    id: '/$workspaceSlug/agents_/teams_/$squadId',
+    path: '/$workspaceSlug/agents/teams/$squadId',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const WorkspaceSlugAgentsNewManualRoute =
+  WorkspaceSlugAgentsNewManualRouteImport.update({
+    id: '/$workspaceSlug/agents_/new/manual',
+    path: '/$workspaceSlug/agents/new/manual',
+    getParentRoute: () => rootRouteImport,
+  } as any)
+const WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute =
+  WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRouteImport.update({
+    id: '/$workspaceSlug/runtimes_/$machineId_/runtime/$runtimeId',
+    path: '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId',
+    getParentRoute: () => rootRouteImport,
   } as any)
 
 export interface FileRoutesByFullPath {
+  '/$workspaceSlug/agents': typeof WorkspaceSlugAgentsRoute
   '/$workspaceSlug/chat': typeof WorkspaceSlugChatRoute
-  '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRouteWithChildren
+  '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRoute
+  '/$workspaceSlug/runtimes': typeof WorkspaceSlugRuntimesRoute
+  '/$workspaceSlug/agents/$agentId': typeof WorkspaceSlugAgentsAgentIdRoute
+  '/$workspaceSlug/agents/teams': typeof WorkspaceSlugAgentsTeamsRoute
   '/$workspaceSlug/issues/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
+  '/$workspaceSlug/runtimes/$machineId': typeof WorkspaceSlugRuntimesMachineIdRoute
+  '/$workspaceSlug/agents/new/manual': typeof WorkspaceSlugAgentsNewManualRoute
+  '/$workspaceSlug/agents/teams/$squadId': typeof WorkspaceSlugAgentsTeamsSquadIdRoute
+  '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId': typeof WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute
 }
 export interface FileRoutesByTo {
+  '/$workspaceSlug/agents': typeof WorkspaceSlugAgentsRoute
   '/$workspaceSlug/chat': typeof WorkspaceSlugChatRoute
-  '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRouteWithChildren
+  '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRoute
+  '/$workspaceSlug/runtimes': typeof WorkspaceSlugRuntimesRoute
+  '/$workspaceSlug/agents/$agentId': typeof WorkspaceSlugAgentsAgentIdRoute
+  '/$workspaceSlug/agents/teams': typeof WorkspaceSlugAgentsTeamsRoute
   '/$workspaceSlug/issues/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
+  '/$workspaceSlug/runtimes/$machineId': typeof WorkspaceSlugRuntimesMachineIdRoute
+  '/$workspaceSlug/agents/new/manual': typeof WorkspaceSlugAgentsNewManualRoute
+  '/$workspaceSlug/agents/teams/$squadId': typeof WorkspaceSlugAgentsTeamsSquadIdRoute
+  '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId': typeof WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/$workspaceSlug/agents': typeof WorkspaceSlugAgentsRoute
   '/$workspaceSlug/chat': typeof WorkspaceSlugChatRoute
-  '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRouteWithChildren
-  '/$workspaceSlug/issues/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
+  '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRoute
+  '/$workspaceSlug/runtimes': typeof WorkspaceSlugRuntimesRoute
+  '/$workspaceSlug/agents_/$agentId': typeof WorkspaceSlugAgentsAgentIdRoute
+  '/$workspaceSlug/agents_/teams': typeof WorkspaceSlugAgentsTeamsRoute
+  '/$workspaceSlug/issues_/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
+  '/$workspaceSlug/runtimes_/$machineId': typeof WorkspaceSlugRuntimesMachineIdRoute
+  '/$workspaceSlug/agents_/new/manual': typeof WorkspaceSlugAgentsNewManualRoute
+  '/$workspaceSlug/agents_/teams_/$squadId': typeof WorkspaceSlugAgentsTeamsSquadIdRoute
+  '/$workspaceSlug/runtimes_/$machineId_/runtime/$runtimeId': typeof WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/$workspaceSlug/agents'
     | '/$workspaceSlug/chat'
     | '/$workspaceSlug/issues'
+    | '/$workspaceSlug/runtimes'
+    | '/$workspaceSlug/agents/$agentId'
+    | '/$workspaceSlug/agents/teams'
     | '/$workspaceSlug/issues/$issueId'
+    | '/$workspaceSlug/runtimes/$machineId'
+    | '/$workspaceSlug/agents/new/manual'
+    | '/$workspaceSlug/agents/teams/$squadId'
+    | '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/$workspaceSlug/agents'
     | '/$workspaceSlug/chat'
     | '/$workspaceSlug/issues'
+    | '/$workspaceSlug/runtimes'
+    | '/$workspaceSlug/agents/$agentId'
+    | '/$workspaceSlug/agents/teams'
     | '/$workspaceSlug/issues/$issueId'
+    | '/$workspaceSlug/runtimes/$machineId'
+    | '/$workspaceSlug/agents/new/manual'
+    | '/$workspaceSlug/agents/teams/$squadId'
+    | '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId'
   id:
     | '__root__'
+    | '/$workspaceSlug/agents'
     | '/$workspaceSlug/chat'
     | '/$workspaceSlug/issues'
-    | '/$workspaceSlug/issues/$issueId'
+    | '/$workspaceSlug/runtimes'
+    | '/$workspaceSlug/agents_/$agentId'
+    | '/$workspaceSlug/agents_/teams'
+    | '/$workspaceSlug/issues_/$issueId'
+    | '/$workspaceSlug/runtimes_/$machineId'
+    | '/$workspaceSlug/agents_/new/manual'
+    | '/$workspaceSlug/agents_/teams_/$squadId'
+    | '/$workspaceSlug/runtimes_/$machineId_/runtime/$runtimeId'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  WorkspaceSlugAgentsRoute: typeof WorkspaceSlugAgentsRoute
   WorkspaceSlugChatRoute: typeof WorkspaceSlugChatRoute
-  WorkspaceSlugIssuesRoute: typeof WorkspaceSlugIssuesRouteWithChildren
+  WorkspaceSlugIssuesRoute: typeof WorkspaceSlugIssuesRoute
+  WorkspaceSlugRuntimesRoute: typeof WorkspaceSlugRuntimesRoute
+  WorkspaceSlugAgentsAgentIdRoute: typeof WorkspaceSlugAgentsAgentIdRoute
+  WorkspaceSlugAgentsTeamsRoute: typeof WorkspaceSlugAgentsTeamsRoute
+  WorkspaceSlugIssuesIssueIdRoute: typeof WorkspaceSlugIssuesIssueIdRoute
+  WorkspaceSlugRuntimesMachineIdRoute: typeof WorkspaceSlugRuntimesMachineIdRoute
+  WorkspaceSlugAgentsNewManualRoute: typeof WorkspaceSlugAgentsNewManualRoute
+  WorkspaceSlugAgentsTeamsSquadIdRoute: typeof WorkspaceSlugAgentsTeamsSquadIdRoute
+  WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute: typeof WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/$workspaceSlug/runtimes': {
+      id: '/$workspaceSlug/runtimes'
+      path: '/$workspaceSlug/runtimes'
+      fullPath: '/$workspaceSlug/runtimes'
+      preLoaderRoute: typeof WorkspaceSlugRuntimesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$workspaceSlug/issues': {
       id: '/$workspaceSlug/issues'
       path: '/$workspaceSlug/issues'
@@ -85,30 +203,78 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceSlugChatRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/$workspaceSlug/issues/$issueId': {
-      id: '/$workspaceSlug/issues/$issueId'
-      path: '/$issueId'
+    '/$workspaceSlug/agents': {
+      id: '/$workspaceSlug/agents'
+      path: '/$workspaceSlug/agents'
+      fullPath: '/$workspaceSlug/agents'
+      preLoaderRoute: typeof WorkspaceSlugAgentsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$workspaceSlug/runtimes_/$machineId': {
+      id: '/$workspaceSlug/runtimes_/$machineId'
+      path: '/$workspaceSlug/runtimes/$machineId'
+      fullPath: '/$workspaceSlug/runtimes/$machineId'
+      preLoaderRoute: typeof WorkspaceSlugRuntimesMachineIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$workspaceSlug/issues_/$issueId': {
+      id: '/$workspaceSlug/issues_/$issueId'
+      path: '/$workspaceSlug/issues/$issueId'
       fullPath: '/$workspaceSlug/issues/$issueId'
       preLoaderRoute: typeof WorkspaceSlugIssuesIssueIdRouteImport
-      parentRoute: typeof WorkspaceSlugIssuesRoute
+      parentRoute: typeof rootRouteImport
+    }
+    '/$workspaceSlug/agents_/teams': {
+      id: '/$workspaceSlug/agents_/teams'
+      path: '/$workspaceSlug/agents/teams'
+      fullPath: '/$workspaceSlug/agents/teams'
+      preLoaderRoute: typeof WorkspaceSlugAgentsTeamsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$workspaceSlug/agents_/$agentId': {
+      id: '/$workspaceSlug/agents_/$agentId'
+      path: '/$workspaceSlug/agents/$agentId'
+      fullPath: '/$workspaceSlug/agents/$agentId'
+      preLoaderRoute: typeof WorkspaceSlugAgentsAgentIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$workspaceSlug/agents_/teams_/$squadId': {
+      id: '/$workspaceSlug/agents_/teams_/$squadId'
+      path: '/$workspaceSlug/agents/teams/$squadId'
+      fullPath: '/$workspaceSlug/agents/teams/$squadId'
+      preLoaderRoute: typeof WorkspaceSlugAgentsTeamsSquadIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$workspaceSlug/agents_/new/manual': {
+      id: '/$workspaceSlug/agents_/new/manual'
+      path: '/$workspaceSlug/agents/new/manual'
+      fullPath: '/$workspaceSlug/agents/new/manual'
+      preLoaderRoute: typeof WorkspaceSlugAgentsNewManualRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$workspaceSlug/runtimes_/$machineId_/runtime/$runtimeId': {
+      id: '/$workspaceSlug/runtimes_/$machineId_/runtime/$runtimeId'
+      path: '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId'
+      fullPath: '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId'
+      preLoaderRoute: typeof WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRouteImport
+      parentRoute: typeof rootRouteImport
     }
   }
 }
 
-interface WorkspaceSlugIssuesRouteChildren {
-  WorkspaceSlugIssuesIssueIdRoute: typeof WorkspaceSlugIssuesIssueIdRoute
-}
-
-const WorkspaceSlugIssuesRouteChildren: WorkspaceSlugIssuesRouteChildren = {
-  WorkspaceSlugIssuesIssueIdRoute: WorkspaceSlugIssuesIssueIdRoute,
-}
-
-const WorkspaceSlugIssuesRouteWithChildren =
-  WorkspaceSlugIssuesRoute._addFileChildren(WorkspaceSlugIssuesRouteChildren)
-
 const rootRouteChildren: RootRouteChildren = {
+  WorkspaceSlugAgentsRoute: WorkspaceSlugAgentsRoute,
   WorkspaceSlugChatRoute: WorkspaceSlugChatRoute,
-  WorkspaceSlugIssuesRoute: WorkspaceSlugIssuesRouteWithChildren,
+  WorkspaceSlugIssuesRoute: WorkspaceSlugIssuesRoute,
+  WorkspaceSlugRuntimesRoute: WorkspaceSlugRuntimesRoute,
+  WorkspaceSlugAgentsAgentIdRoute: WorkspaceSlugAgentsAgentIdRoute,
+  WorkspaceSlugAgentsTeamsRoute: WorkspaceSlugAgentsTeamsRoute,
+  WorkspaceSlugIssuesIssueIdRoute: WorkspaceSlugIssuesIssueIdRoute,
+  WorkspaceSlugRuntimesMachineIdRoute: WorkspaceSlugRuntimesMachineIdRoute,
+  WorkspaceSlugAgentsNewManualRoute: WorkspaceSlugAgentsNewManualRoute,
+  WorkspaceSlugAgentsTeamsSquadIdRoute: WorkspaceSlugAgentsTeamsSquadIdRoute,
+  WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute:
+    WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

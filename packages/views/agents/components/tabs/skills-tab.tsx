@@ -95,9 +95,7 @@ export function SkillsTab({
   return (
     <div className="space-y-6">
       <p className="text-body leading-6 text-muted-foreground">
-        Local skills are discovered from the runtime this agent uses. You can
-        turn off an inherited skill for this agent without changing the
-        runtime.
+        {t(($) => $.tab_body.skills.runtime_description)}
       </p>
 
       <CapabilitySection

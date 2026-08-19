@@ -2,7 +2,7 @@ import { createFileRoute } from '@tanstack/react-router';
 import { IssueDetailRoute } from '@multica/views/issues/components';
 import { TaskWorkspaceRoute } from '@/workspace/task-workspace-route';
 
-export const Route = createFileRoute('/$workspaceSlug/issues/$issueId')({
+export const Route = createFileRoute('/$workspaceSlug/issues_/$issueId')({
   ssr: false,
   component: TagWorkspaceTaskDetailRoute,
 });

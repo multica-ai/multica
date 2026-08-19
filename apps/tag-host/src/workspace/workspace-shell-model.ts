@@ -1,7 +1,7 @@
 export interface TagWorkspaceNavItem {
   key: string;
   label: string;
-  path: 'chat' | 'issues' | null;
+  path: 'chat' | 'issues' | 'agents' | 'runtimes' | null;
   status: 'available' | 'migrating';
 }
 
@@ -13,24 +13,20 @@ export interface TagWorkspaceSection {
 export const TAG_WORKSPACE_SECTIONS: readonly TagWorkspaceSection[] = [
   {
     label: 'Personal',
-    items: [
-      { key: 'inbox', label: 'Inbox', path: null, status: 'migrating' },
-      { key: 'chat', label: 'Chat', path: 'chat', status: 'available' },
-      {
-        key: 'my-tasks',
-        label: 'My Tasks',
-        path: null,
-        status: 'migrating',
-      },
-    ],
+    items: [{ key: 'chat', label: 'Chat', path: 'chat', status: 'available' }],
   },
   {
     label: 'Workspace',
     items: [
       { key: 'tasks', label: 'Tasks', path: 'issues', status: 'available' },
       { key: 'projects', label: 'Projects', path: null, status: 'migrating' },
-      { key: 'agents', label: 'Agents', path: null, status: 'migrating' },
-      { key: 'runtimes', label: 'Runtimes', path: null, status: 'migrating' },
+      { key: 'agents', label: 'Agents', path: 'agents', status: 'available' },
+      {
+        key: 'runtimes',
+        label: 'Runtimes',
+        path: 'runtimes',
+        status: 'available',
+      },
       { key: 'members', label: 'Members', path: null, status: 'migrating' },
       { key: 'files', label: 'Files', path: null, status: 'migrating' },
       {
@@ -44,15 +40,6 @@ export const TAG_WORKSPACE_SECTIONS: readonly TagWorkspaceSection[] = [
   {
     label: 'Configure',
     items: [
-      { key: 'skills', label: 'Skills', path: null, status: 'migrating' },
-      { key: 'squads', label: 'Squads', path: null, status: 'migrating' },
-      {
-        key: 'autopilots',
-        label: 'Autopilots',
-        path: null,
-        status: 'migrating',
-      },
-      { key: 'analytics', label: 'Analytics', path: null, status: 'migrating' },
       { key: 'settings', label: 'Settings', path: null, status: 'migrating' },
     ],
   },
@@ -71,6 +58,12 @@ export function workspaceSwitchDestination(
   }
   if (modulePath === 'issues') {
     return `/${encodeURIComponent(targetSlug)}/issues`;
+  }
+  if (modulePath === 'agents') {
+    return `/${encodeURIComponent(targetSlug)}/agents`;
+  }
+  if (modulePath === 'runtimes') {
+    return `/${encodeURIComponent(targetSlug)}/runtimes`;
   }
   return `/${encodeURIComponent(targetSlug)}/chat`;
 }

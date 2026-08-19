@@ -1,17 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { AgentsPage } from '@multica/views/agents';
+import { ManualCreateAgentPage } from '@multica/views/agents';
 import { AgentWorkspaceRoute } from '@/workspace/agent-workspace-route';
 
-export const Route = createFileRoute('/$workspaceSlug/agents')({
+export const Route = createFileRoute('/$workspaceSlug/agents_/new/manual')({
   ssr: false,
-  component: TagWorkspaceAgentsRoute,
+  component: TagWorkspaceManualAgentCreateRoute,
 });
 
-function TagWorkspaceAgentsRoute() {
+function TagWorkspaceManualAgentCreateRoute() {
   const { workspaceSlug } = Route.useParams();
   return (
     <AgentWorkspaceRoute workspaceSlug={workspaceSlug}>
-      <AgentsPage />
+      <ManualCreateAgentPage />
     </AgentWorkspaceRoute>
   );
 }

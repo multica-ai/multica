@@ -243,6 +243,11 @@
     "discovery_failed": "검색 실패",
     "clear_full": "선택 지우기(제공자 기본값 사용)"
   },
+  "role_center": {
+    "tasks_description": "태스크 할당과 전체 실행 기록은 Tasks에 함께 보관됩니다.",
+    "team_membership": "팀 소속",
+    "no_team": "이 에이전트는 아직 팀에 속해 있지 않습니다."
+  },
   "tabs": {
     "overview": "개요",
     "work": "작업",
@@ -517,6 +522,7 @@
       "assigned_title": "에이전트에 할당됨",
       "assigned_hint": "워크스페이스 스킬은 에이전트와 함께 이동합니다. 제거하지 않고 일시적으로 끌 수 있습니다.",
       "runtime_title": "런타임에서 상속",
+      "runtime_description": "로컬 skill은 이 에이전트가 사용하는 런타임에서 검색됩니다. 런타임을 변경하지 않고 이 에이전트에서만 상속된 skill을 끌 수 있습니다.",
       "runtime_hint": "{{runtime}}에서 자동으로 탐색되며 이 에이전트가 해당 런타임에서 실행될 때 사용할 수 있습니다.",
       "workspace_badge": "워크스페이스",
       "inherited_badge": "상속됨",

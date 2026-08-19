@@ -7,13 +7,25 @@ import {
 } from './workspace-shell-model';
 
 describe('Tag Workspace Shell navigation model', () => {
-  it('keeps existing Chat and Tasks live while every later module stays visibly non-navigable', () => {
+  it('exposes approved surfaces and removes merged or deleted entries', () => {
     const items = TAG_WORKSPACE_SECTIONS.flatMap((section) => section.items);
 
     expect(items.filter((item) => item.status === 'available')).toEqual([
       expect.objectContaining({ key: 'chat', path: 'chat' }),
       expect.objectContaining({ key: 'tasks', path: 'issues' }),
+      expect.objectContaining({ key: 'agents', path: 'agents' }),
+      expect.objectContaining({ key: 'runtimes', path: 'runtimes' }),
     ]);
+    expect(items.map((item) => item.key)).not.toEqual(
+      expect.arrayContaining([
+        'inbox',
+        'my-tasks',
+        'skills',
+        'squads',
+        'autopilots',
+        'analytics',
+      ])
+    );
     expect(items.filter((item) => item.status === 'migrating')).not.toHaveLength(
       0
     );
@@ -34,5 +46,11 @@ describe('Tag Workspace Shell navigation model', () => {
     expect(
       workspaceSwitchDestination('studio-b', '/studio-a/projects')
     ).toBe('/studio-b/chat');
+    expect(
+      workspaceSwitchDestination('studio-b', '/studio-a/agents/agent-1')
+    ).toBe('/studio-b/agents');
+    expect(
+      workspaceSwitchDestination('studio-b', '/studio-a/runtimes/machine-1')
+    ).toBe('/studio-b/runtimes');
   });
 });

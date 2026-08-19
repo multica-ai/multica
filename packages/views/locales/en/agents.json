@@ -252,6 +252,11 @@
     "discovery_failed": "discovery failed",
     "clear_full": "Clear selection (use provider default)"
   },
+  "role_center": {
+    "tasks_description": "Task assignments and the full execution history stay together in Tasks.",
+    "team_membership": "Team membership",
+    "no_team": "This agent is not in a team yet."
+  },
   "tabs": {
     "overview": "Overview",
     "work": "Work",
@@ -628,6 +633,7 @@
       "assigned_title": "Assigned to agent",
       "assigned_hint": "Workspace skills travel with the agent. Turn one off temporarily without removing it.",
       "runtime_title": "Inherited from runtime",
+      "runtime_description": "Local skills are discovered from the runtime this agent uses. You can turn off an inherited skill for this agent without changing the runtime.",
       "runtime_hint": "Discovered automatically from {{runtime}} and available whenever this agent runs there.",
       "workspace_badge": "Workspace",
       "inherited_badge": "Inherited",

@@ -243,6 +243,11 @@
     "discovery_failed": "发现失败",
     "clear_full": "清除选择（使用提供方默认）"
   },
+  "role_center": {
+    "tasks_description": "任务分配和完整执行记录统一放在 Tasks 中。",
+    "team_membership": "团队归属",
+    "no_team": "该智能体尚未加入团队。"
+  },
   "tabs": {
     "overview": "概览",
     "work": "工作",
@@ -617,6 +622,7 @@
       "assigned_title": "分配给智能体",
       "assigned_hint": "工作区 skill 会跟随智能体。你可以临时关闭，而不必将其移除。",
       "runtime_title": "从运行时继承",
+      "runtime_description": "本地 skill 来自该智能体使用的运行时。你可以只为这个智能体关闭继承的 skill，而不修改运行时。",
       "runtime_hint": "自动从 {{runtime}} 发现；只要该智能体在这个运行时执行，就可以直接使用。",
       "workspace_badge": "工作区",
       "inherited_badge": "继承",

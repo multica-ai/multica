@@ -27,7 +27,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
-import { Button } from "@multica/ui/components/ui/button";
+import { buttonVariants } from "@multica/ui/components/ui/button";
 import { cn } from "@multica/ui/lib/utils";
 import {
   AGENT_ROLE_CENTER_TABS,
@@ -255,19 +255,16 @@ function RoleCenterOverview({
                 {t(($) => $.tabs.tasks)}
               </h2>
               <p className="mt-1 max-w-xl text-caption leading-5 text-muted-foreground">
-                Task assignments and the full execution history stay together
-                in Tasks.
+                {t(($) => $.role_center.tasks_description)}
               </p>
             </div>
-            <Button
-              variant="outline"
-              size="sm"
-              render={<AppLink href={paths.issues()} />}
-              nativeButton={false}
+            <AppLink
+              href={paths.issues()}
+              className={buttonVariants({ variant: "outline", size: "sm" })}
             >
               {t(($) => $.tabs.tasks)}
               <ArrowUpRight className="h-3.5 w-3.5" aria-hidden="true" />
-            </Button>
+            </AppLink>
           </div>
           <AgentTeamMemberships agentId={agent.id} />
         </section>
@@ -278,7 +275,9 @@ function RoleCenterOverview({
 }
 
 function AgentTeamMemberships({ agentId }: { agentId: string }) {
+  const { t } = useT("agents");
   const wsId = useWorkspaceId();
+  const paths = useWorkspacePaths();
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const activeSquads = useMemo(
     () => squads.filter((squad) => !squad.archived_at),
@@ -293,7 +292,7 @@ function AgentTeamMemberships({ agentId }: { agentId: string }) {
   });
   const teams = useMemo(
     () =>
-      activeSquads.filter((squad, index) =>
+      activeSquads.filter((_squad, index) =>
         (memberQueries[index]?.data as SquadMember[] | undefined)?.some(
           (member) =>
             member.member_type === "agent" && member.member_id === agentId,
@@ -306,22 +305,23 @@ function AgentTeamMemberships({ agentId }: { agentId: string }) {
     <div className="mt-6 border-t pt-5">
       <div className="flex items-center gap-2 text-body font-medium">
         <Users className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-        Team membership
+        {t(($) => $.role_center.team_membership)}
       </div>
       {teams.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {teams.map((team: Squad) => (
-            <span
+            <AppLink
               key={team.id}
+              href={paths.squadDetail(team.id)}
               className="rounded-md border border-surface-border bg-surface-hover px-2 py-1 text-caption text-foreground"
             >
               {team.name}
-            </span>
+            </AppLink>
           ))}
         </div>
       ) : (
         <p className="mt-2 text-caption text-muted-foreground">
-          This agent is not in a team yet.
+          {t(($) => $.role_center.no_team)}
         </p>
       )}
     </div>
