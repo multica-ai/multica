@@ -23,7 +23,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 さらにメールサービスを 1 つ選ぶ必要があります。選ばない場合、認証コードと招待はサーバーログに書き込まれるだけです。
 
 <Callout type="warning">
-プロダクションでデフォルトの `JWT_SECRET` を使わないでください。`MULTICA_DEV_VERIFICATION_CODE` も設定しないでください。
+`JWT_SECRET` は本番環境で必須です。`APP_ENV=production` の場合、値が空または既知のプレースホルダーだとバックエンドが起動を拒否します（`openssl rand -hex 32` で生成）。`MULTICA_DEV_VERIFICATION_CODE` も設定しないでください。
 </Callout>
 
 ## API とデータベース
@@ -34,7 +34,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_MAX_CONNS` | `25` | API プロセスあたりの最大データベース接続数 |
 | `DATABASE_MIN_CONNS` | `5` | API プロセスが保持する最小接続数 |
 | `PORT` | `8080` | API のリッスンポート |
-| `JWT_SECRET` | 開発用の固定値 | ログイン JWT と一部の署名フローに使うシークレット |
+| `JWT_SECRET` | 本番環境で必須 | ログイン JWT と一部の署名フローに使うシークレット。本番では空または既知のプレースホルダーだと起動を拒否 |
 | `APP_ENV` | 空 | プロダクションでは `production` を設定 |
 | `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます |
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |

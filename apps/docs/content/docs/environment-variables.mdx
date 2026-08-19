@@ -23,7 +23,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 You also need to pick an email service, otherwise verification codes and invitations are only written to the server log.
 
 <Callout type="warning">
-Do not use the default `JWT_SECRET` in production, and do not set `MULTICA_DEV_VERIFICATION_CODE`.
+`JWT_SECRET` is required in production: with `APP_ENV=production` the backend refuses to boot if it is empty or a known placeholder (generate one with `openssl rand -hex 32`). Do not set `MULTICA_DEV_VERIFICATION_CODE`.
 </Callout>
 
 ## API and database
@@ -34,7 +34,7 @@ Do not use the default `JWT_SECRET` in production, and do not set `MULTICA_DEV_V
 | `DATABASE_MAX_CONNS` | `25` | Maximum database connections per API process |
 | `DATABASE_MIN_CONNS` | `5` | Minimum connections each API process keeps |
 | `PORT` | `8080` | API listen port |
-| `JWT_SECRET` | fixed development value | Secret for sign-in JWTs and some signing flows |
+| `JWT_SECRET` | required in production | Secret for sign-in JWTs and some signing flows; production refuses to boot on empty or known placeholders |
 | `APP_ENV` | empty | Set to `production` in production |
 | `AUTH_TOKEN_TTL` | `720h` (30 days) | Lifetime of browser JWTs and cookies; accepts a Go duration or a positive integer of seconds |
 | `LOG_LEVEL` | application default | Log level |

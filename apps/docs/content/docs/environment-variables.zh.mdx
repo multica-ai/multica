@@ -23,7 +23,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 还需要选择一种邮件服务，否则验证码和邀请只会写入服务端日志。
 
 <Callout type="warning">
-不要在生产环境使用默认的 `JWT_SECRET`，也不要设置 `MULTICA_DEV_VERIFICATION_CODE`。
+`JWT_SECRET` 在生产环境为必填：当 `APP_ENV=production` 时，后端会在密钥为空或等于已知占位值时拒绝启动（用 `openssl rand -hex 32` 生成）。也不要在生产环境设置 `MULTICA_DEV_VERIFICATION_CODE`。
 </Callout>
 
 ## API 与数据库
@@ -34,7 +34,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_MAX_CONNS` | `25` | 单个 API 进程的最大数据库连接数 |
 | `DATABASE_MIN_CONNS` | `5` | 单个 API 进程保留的最小连接数 |
 | `PORT` | `8080` | API 监听端口 |
-| `JWT_SECRET` | 开发用固定值 | 登录 JWT、部分签名流程使用的密钥 |
+| `JWT_SECRET` | 生产环境必填 | 登录 JWT、部分签名流程使用的密钥；生产环境对空值或已知占位值拒绝启动 |
 | `APP_ENV` | 空 | 生产环境设为 `production` |
 | `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数 |
 | `LOG_LEVEL` | 应用默认 | 日志级别 |

@@ -23,7 +23,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 이메일 서비스도 하나 선택해야 합니다. 설정하지 않으면 인증 코드와 초대가 서버 로그에만 기록됩니다.
 
 <Callout type="warning">
-프로덕션 환경에서 기본 `JWT_SECRET`을 사용하거나 `MULTICA_DEV_VERIFICATION_CODE`를 설정하지 마세요.
+`JWT_SECRET`은 프로덕션에서 필수입니다. `APP_ENV=production`일 때 비어 있거나 알려진 자리표시자 값이면 백엔드가 부팅을 거부합니다(`openssl rand -hex 32`로 생성). `MULTICA_DEV_VERIFICATION_CODE`도 설정하지 마세요.
 </Callout>
 
 ## API와 데이터베이스
@@ -34,7 +34,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_MAX_CONNS` | `25` | API 프로세스 하나의 최대 데이터베이스 연결 수 |
 | `DATABASE_MIN_CONNS` | `5` | API 프로세스 하나가 유지하는 최소 연결 수 |
 | `PORT` | `8080` | API listen port |
-| `JWT_SECRET` | 개발용 고정값 | 로그인 JWT와 일부 서명 절차에서 사용하는 키 |
+| `JWT_SECRET` | 프로덕션에서 필수 | 로그인 JWT와 일부 서명 절차에서 사용하는 키. 프로덕션에서는 비어 있거나 알려진 자리표시자 값으로 부팅 거부 |
 | `APP_ENV` | 비어 있음 | 프로덕션 환경에서는 `production`으로 설정 |
 | `AUTH_TOKEN_TTL` | `720h`(30일) | 브라우저 JWT와 cookie 유효 기간. Go duration 또는 양의 정수 초 허용 |
 | `LOG_LEVEL` | 앱 기본값 | 로그 수준 |
