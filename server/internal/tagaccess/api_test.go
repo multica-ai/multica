@@ -9,6 +9,14 @@ import (
 )
 
 func TestAuthorizationMutationIsExposedOnlyByGate(t *testing.T) {
+	gate := tagaccess.New(tagaccess.NewMemoryStore(), tagaccess.SystemClock{}, tagaccess.NewFixtureDeliveryVerifier())
+	authenticated, err := tagaccess.NewAuthenticatedAccess(tagaccess.NewMemoryStore(), tagaccess.SystemClock{}, map[string][]byte{
+		"vibes-primary": []byte("vibes-authority-test-key-32-bytes-minimum"),
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ingress := authenticated.Ingress
 	tests := []struct {
 		name  string
 		value any
@@ -16,8 +24,18 @@ func TestAuthorizationMutationIsExposedOnlyByGate(t *testing.T) {
 	}{
 		{
 			name:  "Gate",
-			value: tagaccess.New(tagaccess.NewMemoryStore(), tagaccess.SystemClock{}, tagaccess.NewFixtureDeliveryVerifier()),
+			value: gate,
 			want:  []string{"ApplyAuthorityDelivery", "ApplyProjection", "Authorize", "GrantSession"},
+		},
+		{
+			name:  "authenticated authority ingress",
+			value: ingress,
+			want:  []string{"Deliver"},
+		},
+		{
+			name:  "authenticated identity restriction ingress",
+			value: authenticated.IdentityIngress,
+			want:  []string{"Deliver"},
 		},
 		{
 			name:  "Postgres adapter",

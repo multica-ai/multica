@@ -7,25 +7,22 @@ import (
 	"sync"
 )
 
-// FixtureDeliveryVerifier is an explicit test adapter. Production callers must
-// inject an ingress verifier that authenticates the VIBES authority envelope;
-// AccessGate has no permissive default.
-type FixtureDeliveryVerifier struct {
+type fixtureDeliveryVerifier struct {
 	mu      sync.RWMutex
 	trusted map[[32]byte]struct{}
 }
 
-func NewFixtureDeliveryVerifier() *FixtureDeliveryVerifier {
-	return &FixtureDeliveryVerifier{trusted: make(map[[32]byte]struct{})}
+func newFixtureDeliveryVerifier() *fixtureDeliveryVerifier {
+	return &fixtureDeliveryVerifier{trusted: make(map[[32]byte]struct{})}
 }
 
-func (v *FixtureDeliveryVerifier) Trust(delivery ProjectionDelivery) {
+func (v *fixtureDeliveryVerifier) Trust(delivery ProjectionDelivery) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.trusted[verificationDigest(delivery)] = struct{}{}
 }
 
-func (v *FixtureDeliveryVerifier) Verify(_ context.Context, delivery ProjectionDelivery) error {
+func (v *fixtureDeliveryVerifier) Verify(_ context.Context, delivery ProjectionDelivery) error {
 	if delivery.Kind == DeliveryIncremental {
 		return nil
 	}

@@ -20,10 +20,14 @@ type postgresStore struct {
 }
 
 // NewPostgresStore creates the opaque production adapter. Callers can pass it
-// to New but cannot bypass Gate by invoking persistence mutations directly.
+// to NewAuthenticatedAccess but cannot invoke persistence mutations directly.
 // Both pgxpool.Pool and pgx.Conn satisfy its private database interface.
 func NewPostgresStore(db postgresDB) *postgresStore {
 	return &postgresStore{db: db}
+}
+
+func (s *postgresStore) configured() bool {
+	return s != nil && configuredDependency(s.db)
 }
 
 func (s *postgresStore) applyProjection(ctx context.Context, delivery ProjectionDelivery, digest [32]byte) (ApplyResult, error) {
@@ -144,6 +148,23 @@ func (s *postgresStore) createGrant(ctx context.Context, grant SessionGrant, now
 		return err
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
+	if err := lockIdentity(ctx, tx, grant.VIBESUserID); err != nil {
+		return err
+	}
+	identity, identityExists, err := loadIdentityForUpdate(ctx, tx, grant.VIBESUserID)
+	if err != nil {
+		return err
+	}
+	if identityExists && (identity.integrity != integrityHealthy || grant.AccountEpoch < identity.accountEpoch || grant.AccountEpoch <= identity.revokedThrough) {
+		return ErrGrantDenied
+	}
+	revoked, err := identitySessionRevoked(ctx, tx, grant.VIBESUserID, grant.VIBESSessionID)
+	if err != nil {
+		return err
+	}
+	if revoked {
+		return ErrGrantDenied
+	}
 	if err := lockWorkspace(ctx, tx, grant.WorkspaceID); err != nil {
 		return err
 	}
@@ -182,11 +203,14 @@ func (s *postgresStore) loadAccess(ctx context.Context, request AccessRequest) (
 	row := s.db.QueryRow(ctx, `
 		SELECT p.role, p.status, p.account_epoch, p.membership_generation,
 		       p.authority_version, w.authority_version, w.observed_authority_version, w.integrity_state,
+		       i.identity_restriction_version, i.observed_identity_restriction_version,
+		       i.account_epoch, i.revoked_through_account_epoch, i.integrity_state,
 		       s.tag_session_id, s.vibes_session_id, s.vibes_user_id, s.account_epoch,
 		       s.expires_at, s.revoked_at,
 		       g.membership_generation, g.authority_version, g.expires_at, g.revoked_at
 		FROM tag_access_projection p
 		JOIN tag_access_workspace_state w ON w.vibes_workspace_id = p.vibes_workspace_id
+		LEFT JOIN tag_access_identity_restriction_state i ON i.vibes_user_id = p.vibes_user_id
 		LEFT JOIN tag_access_session s
 		  ON s.tag_session_id = $3 AND s.vibes_user_id = p.vibes_user_id
 		LEFT JOIN tag_session_workspace_grant g
@@ -196,12 +220,15 @@ func (s *postgresStore) loadAccess(ctx context.Context, request AccessRequest) (
 	var (
 		role, status, integrity                                              string
 		accountEpoch, generation, version, workspaceVersion, observedVersion int64
+		identityVersion, identityObserved, identityEpoch, identityRevoked    pgtype.Int8
+		identityIntegrity                                                    pgtype.Text
 		sessionID, vibesSessionID, sessionUserID                             pgtype.Text
 		sessionAccountEpoch, grantGeneration, grantVersion                   pgtype.Int8
 		sessionExpiresAt, grantExpiresAt, sessionRevokedAt, grantRevokedAt   pgtype.Timestamptz
 	)
 	if err := row.Scan(
 		&role, &status, &accountEpoch, &generation, &version, &workspaceVersion, &observedVersion, &integrity,
+		&identityVersion, &identityObserved, &identityEpoch, &identityRevoked, &identityIntegrity,
 		&sessionID, &vibesSessionID, &sessionUserID, &sessionAccountEpoch, &sessionExpiresAt, &sessionRevokedAt,
 		&grantGeneration, &grantVersion, &grantExpiresAt, &grantRevokedAt,
 	); err != nil {
@@ -217,7 +244,7 @@ func (s *postgresStore) loadAccess(ctx context.Context, request AccessRequest) (
 	if accountEpoch < 0 || generation < 0 || version < 0 || workspaceVersion < version || observedVersion < workspaceVersion || sessionAccountEpoch.Int64 < 0 || grantGeneration.Int64 < 0 || grantVersion.Int64 < 0 {
 		return accessState{}, errors.New("invalid persisted Tag access state")
 	}
-	return accessState{
+	state := accessState{
 		projection: ProjectionEvent{
 			VIBESUserID:          request.VIBESUserID,
 			WorkspaceID:          request.WorkspaceID,
@@ -239,12 +266,29 @@ func (s *postgresStore) loadAccess(ctx context.Context, request AccessRequest) (
 			SessionExpiresAt:     sessionExpiresAt.Time,
 			GrantExpiresAt:       grantExpiresAt.Time,
 		},
-	}, nil
+	}
+	if identityVersion.Valid || identityObserved.Valid || identityEpoch.Valid || identityRevoked.Valid || identityIntegrity.Valid {
+		if !identityVersion.Valid || !identityObserved.Valid || !identityEpoch.Valid || !identityRevoked.Valid || !identityIntegrity.Valid ||
+			identityVersion.Int64 < 0 || identityObserved.Int64 < identityVersion.Int64 || identityEpoch.Int64 < 0 || identityRevoked.Int64 < 0 {
+			return accessState{}, errors.New("invalid persisted Tag identity restriction state")
+		}
+		state.identityExists = true
+		state.identity = identityRecord{
+			userID: request.VIBESUserID, version: uint64(identityVersion.Int64), observedVersion: uint64(identityObserved.Int64),
+			accountEpoch: uint64(identityEpoch.Int64), revokedThrough: uint64(identityRevoked.Int64), integrity: projectionIntegrity(identityIntegrity.String),
+		}
+	}
+	return state, nil
 }
 
 func lockWorkspace(ctx context.Context, tx pgx.Tx, workspaceID string) error {
 	lockKey := "tag-access-workspace:" + workspaceID
 	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, lockKey)
+	return err
+}
+
+func lockIdentity(ctx context.Context, tx pgx.Tx, userID string) error {
+	_, err := tx.Exec(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`, "tag-access-identity:"+userID)
 	return err
 }
 

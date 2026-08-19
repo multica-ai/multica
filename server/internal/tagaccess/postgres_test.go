@@ -201,6 +201,107 @@ func TestPostgresStoreMatchesAccessGateContract(t *testing.T) {
 	}
 }
 
+func TestPostgresAuthorityIngressReceiptSurvivesAdapterRestart(t *testing.T) {
+	conn := openDisposableTagAccessDatabase(t)
+	key := []byte("vibes-authority-test-key-32-bytes-minimum")
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	envelope := tagaccess.AuthorityEnvelope{
+		SchemaVersion: 1, DeliveryID: "postgres-outbox-1", CorrelationID: "postgres-correlation-1",
+		Delivery: tagaccess.ProjectionDelivery{
+			Kind: tagaccess.DeliveryIncremental,
+			Projections: []tagaccess.ProjectionEvent{{
+				EventID: "postgres-outbox-1", VIBESUserID: "postgres-user-1", WorkspaceID: "postgres-workspace-1",
+				Role: tagaccess.RoleOwner, Status: tagaccess.StatusActive, AccountEpoch: 2,
+				MembershipGeneration: 3, AuthorityVersion: 1,
+			}},
+		},
+		Authentication: tagaccess.AuthorityEnvelopeAuthentication{KeyID: "vibes-primary"},
+	}
+	envelope.Authentication.MAC = signAuthorityEnvelope(t, key, envelope)
+	newIngress := func() *tagaccess.AuthorityIngress {
+		t.Helper()
+		access, err := tagaccess.NewAuthenticatedAccess(tagaccess.NewPostgresStore(conn), fixedClock{now: now}, map[string][]byte{"vibes-primary": key}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return access.Ingress
+	}
+	first, err := newIngress().Deliver(context.Background(), envelope)
+	if err != nil || first.Apply.Result != tagaccess.ApplyApplied {
+		t.Fatalf("first Deliver() = %#v, %v", first, err)
+	}
+	restarted, err := newIngress().Deliver(context.Background(), envelope)
+	if err != nil || restarted.Apply.Result != tagaccess.ApplyDuplicate || restarted.Apply.PayloadDigest != first.Apply.PayloadDigest {
+		t.Fatalf("restarted Deliver() = %#v, %v, want durable duplicate receipt", restarted, err)
+	}
+}
+
+func TestPostgresIdentityRestrictionReceiptSurvivesAdapterRestart(t *testing.T) {
+	conn := openDisposableTagAccessDatabase(t)
+	key := []byte("vibes-authority-test-key-32-bytes-minimum")
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	newAccess := func() *tagaccess.AuthenticatedAccess {
+		t.Helper()
+		access, err := tagaccess.NewAuthenticatedAccess(
+			tagaccess.NewPostgresStore(conn), fixedClock{now: now},
+			map[string][]byte{"vibes-primary": key}, nil,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return access
+	}
+	access := newAccess()
+	projectActiveMember(t, access, key, 7)
+	grantSession(t, access.Gate, now, "tag-session-a", "vibes-session-a", 7)
+	grantSession(t, access.Gate, now, "tag-session-b", "vibes-session-b", 7)
+	delivery := tagaccess.IdentityRestrictionDelivery{
+		Kind: tagaccess.IdentityRestrictionSessionLogout, EventID: "identity-event-1",
+		CorrelationID: "identity-correlation-1", IdempotencyKey: "identity-idempotency-1",
+		VIBESUserID: "user-1", VIBESSessionID: "vibes-session-a", AccountEpoch: 7,
+		IdentityRestrictionVersion: 1,
+		CloseTarget: tagaccess.ConnectionCloseTarget{
+			Scope: tagaccess.ConnectionCloseSession, VIBESUserID: "user-1", VIBESSessionID: "vibes-session-a",
+		},
+	}
+	first := deliverIdentity(t, access, key, delivery)
+	if first.Apply.Result != tagaccess.ApplyApplied {
+		t.Fatalf("first identity receipt = %#v", first)
+	}
+	restarted := deliverIdentity(t, newAccess(), key, delivery)
+	if restarted.Apply.Result != tagaccess.ApplyDuplicate || restarted.Apply.PayloadDigest != first.Apply.PayloadDigest {
+		t.Fatalf("restarted identity receipt = %#v", restarted)
+	}
+	if decision := newAccess().Gate.Authorize(context.Background(), tagaccess.AccessRequest{
+		TagSessionID: "tag-session-a", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+	}); decision.Allowed || decision.Reason != tagaccess.DenyMissingGrant {
+		t.Fatalf("revoked session decision = %#v", decision)
+	}
+	if decision := newAccess().Gate.Authorize(context.Background(), tagaccess.AccessRequest{
+		TagSessionID: "tag-session-b", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+	}); !decision.Allowed {
+		t.Fatalf("sibling session decision = %#v", decision)
+	}
+	ban := tagaccess.IdentityRestrictionDelivery{
+		Kind: tagaccess.IdentityRestrictionAccountBan, EventID: "identity-event-2",
+		CorrelationID: "identity-correlation-2", IdempotencyKey: "identity-idempotency-2",
+		VIBESUserID: "user-1", AccountEpoch: 8, IdentityRestrictionVersion: 2,
+		CloseTarget: tagaccess.ConnectionCloseTarget{Scope: tagaccess.ConnectionCloseAccount, VIBESUserID: "user-1"},
+	}
+	if receipt := deliverIdentity(t, newAccess(), key, ban); receipt.Apply.Result != tagaccess.ApplyApplied {
+		t.Fatalf("account ban receipt = %#v", receipt)
+	}
+	projectActiveMemberAt(t, newAccess(), key, 8, 2)
+	if err := newAccess().Gate.GrantSession(context.Background(), tagaccess.SessionGrant{
+		TagSessionID: "tag-session-after-ban", VIBESSessionID: "vibes-session-after-ban",
+		VIBESUserID: "user-1", WorkspaceID: "workspace-1", AccountEpoch: 8,
+		MembershipGeneration: 1, AuthorityVersion: 2,
+		SessionExpiresAt: now.Add(time.Hour), GrantExpiresAt: now.Add(30 * time.Minute),
+	}); err != tagaccess.ErrGrantDenied {
+		t.Fatalf("same banned epoch GrantSession() error = %v, want grant denied", err)
+	}
+}
+
 func openDisposableTagAccessDatabase(t *testing.T) *pgx.Conn {
 	t.Helper()
 	databaseURL, err := disposableTagAccessDatabaseURL()
@@ -242,6 +343,12 @@ func openDisposableTagAccessDatabase(t *testing.T) *pgx.Conn {
 		"355_tag_access_projection_delivery_identity_index.up.sql",
 		"356_tag_access_workspace_state.up.sql",
 		"357_tag_access_workspace_state_identity_index.up.sql",
+		"358_tag_access_identity_restriction.up.sql",
+		"359_tag_access_identity_state_index.up.sql",
+		"360_tag_access_identity_restriction_delivery.up.sql",
+		"361_tag_access_identity_delivery_key_index.up.sql",
+		"362_tag_access_identity_event_index.up.sql",
+		"363_tag_access_identity_idempotency_index.up.sql",
 	} {
 		body, err := os.ReadFile(filepath.Join(migrationsDir(t), migration))
 		if err != nil {

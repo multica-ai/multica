@@ -1,0 +1,1 @@
+DROP TABLE IF EXISTS tag_access_identity_restriction_state;

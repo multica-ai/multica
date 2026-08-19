@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS tag_access_identity_restriction_delivery_idempotency_uidx;

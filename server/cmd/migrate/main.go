@@ -203,6 +203,10 @@ var concurrentIndexCleanups = map[string]string{
 	"353_tag_session_workspace_grant_identity_index":            "tag_session_workspace_grant_identity_uidx",
 	"355_tag_access_projection_delivery_identity_index":         "tag_access_projection_delivery_identity_idx",
 	"357_tag_access_workspace_state_identity_index":             "tag_access_workspace_state_identity_idx",
+	"359_tag_access_identity_state_index":                       "tag_access_identity_restriction_state_uidx",
+	"361_tag_access_identity_delivery_key_index":                "tag_access_identity_restriction_delivery_key_uidx",
+	"362_tag_access_identity_event_index":                       "tag_access_identity_restriction_delivery_event_uidx",
+	"363_tag_access_identity_idempotency_index":                 "tag_access_identity_restriction_delivery_idempotency_uidx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

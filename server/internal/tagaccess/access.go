@@ -41,14 +41,14 @@ const (
 )
 
 type ProjectionEvent struct {
-	EventID              string
-	VIBESUserID          string
-	WorkspaceID          string
-	Role                 Role
-	Status               Status
-	AccountEpoch         uint64
-	MembershipGeneration uint64
-	AuthorityVersion     uint64
+	EventID              string `json:"eventId"`
+	VIBESUserID          string `json:"vibesUserId"`
+	WorkspaceID          string `json:"workspaceId"`
+	Role                 Role   `json:"role"`
+	Status               Status `json:"status"`
+	AccountEpoch         uint64 `json:"accountEpoch"`
+	MembershipGeneration uint64 `json:"membershipGeneration"`
+	AuthorityVersion     uint64 `json:"authorityVersion"`
 }
 
 type DeliveryKind string
@@ -64,13 +64,13 @@ const (
 // advance from BaselineAuthorityVersion. Snapshot and reconcile deliveries are
 // complete Workspace Membership snapshots covered by an authority assertion.
 type ProjectionDelivery struct {
-	Kind                     DeliveryKind
-	BaselineAuthorityVersion uint64
-	AuthorityAssertionID     string
-	Projections              []ProjectionEvent
+	Kind                     DeliveryKind      `json:"kind"`
+	BaselineAuthorityVersion uint64            `json:"baselineAuthorityVersion"`
+	AuthorityAssertionID     string            `json:"authorityAssertionId"`
+	Projections              []ProjectionEvent `json:"projections"`
 }
 
-type DeliveryVerifier interface {
+type deliveryVerifier interface {
 	// Verify returns nil only after authenticating the complete delivery,
 	// including kind, baseline, assertion identity, Workspace, version, and
 	// Membership payload. AuthorityAssertionID is correlation evidence, not a
@@ -105,16 +105,18 @@ type AccessRequest struct {
 type DenyReason string
 
 const (
-	DenyUnknownProjection  DenyReason = "unknown_projection"
-	DenyStoreUnavailable   DenyReason = "store_unavailable"
-	DenyProjectionGap      DenyReason = "projection_gap"
-	DenyProjectionConflict DenyReason = "projection_conflict"
-	DenyInactiveMembership DenyReason = "inactive_membership"
-	DenyMissingGrant       DenyReason = "missing_grant"
-	DenyExpiredGrant       DenyReason = "expired_grant"
-	DenyStaleAccountEpoch  DenyReason = "stale_account_epoch"
-	DenyStaleGeneration    DenyReason = "stale_membership_generation"
-	DenyStaleVersion       DenyReason = "stale_authority_version"
+	DenyUnknownProjection           DenyReason = "unknown_projection"
+	DenyStoreUnavailable            DenyReason = "store_unavailable"
+	DenyProjectionGap               DenyReason = "projection_gap"
+	DenyProjectionConflict          DenyReason = "projection_conflict"
+	DenyIdentityRestrictionGap      DenyReason = "identity_restriction_gap"
+	DenyIdentityRestrictionConflict DenyReason = "identity_restriction_conflict"
+	DenyInactiveMembership          DenyReason = "inactive_membership"
+	DenyMissingGrant                DenyReason = "missing_grant"
+	DenyExpiredGrant                DenyReason = "expired_grant"
+	DenyStaleAccountEpoch           DenyReason = "stale_account_epoch"
+	DenyStaleGeneration             DenyReason = "stale_membership_generation"
+	DenyStaleVersion                DenyReason = "stale_authority_version"
 )
 
 type Decision struct {
@@ -145,13 +147,16 @@ const (
 )
 
 type accessState struct {
-	projection ProjectionEvent
-	integrity  projectionIntegrity
-	session    SessionGrant
+	projection     ProjectionEvent
+	integrity      projectionIntegrity
+	identity       identityRecord
+	identityExists bool
+	session        SessionGrant
 }
 
 type store interface {
 	applyProjection(context.Context, ProjectionDelivery, [32]byte) (ApplyResult, error)
+	applyIdentityRestriction(context.Context, IdentityRestrictionDelivery, [32]byte) (ApplyResult, error)
 	createGrant(context.Context, SessionGrant, time.Time) error
 	loadAccess(context.Context, AccessRequest) (accessState, error)
 }
@@ -159,12 +164,10 @@ type store interface {
 type Gate struct {
 	store    store
 	clock    Clock
-	verifier DeliveryVerifier
+	verifier deliveryVerifier
 }
 
-// New constructs the shared Tag authorization seam over a durable or fixture
-// adapter. Callers should use SystemClock outside deterministic tests.
-func New(adapter store, clock Clock, verifier DeliveryVerifier) *Gate {
+func newGate(adapter store, clock Clock, verifier deliveryVerifier) *Gate {
 	return &Gate{store: adapter, clock: clock, verifier: verifier}
 }
 
@@ -204,7 +207,14 @@ func (g *Gate) applyDelivery(ctx context.Context, delivery ProjectionDelivery) (
 	if err != nil {
 		return "", ErrInvalidProjection
 	}
-	return g.store.applyProjection(ctx, normalized, sha256.Sum256(payload))
+	return g.applyVerifiedDelivery(ctx, normalized, sha256.Sum256(payload))
+}
+
+func (g *Gate) applyVerifiedDelivery(ctx context.Context, delivery ProjectionDelivery, digest [32]byte) (ApplyResult, error) {
+	if !validDelivery(delivery) {
+		return "", ErrInvalidProjection
+	}
+	return g.store.applyProjection(ctx, normalizedDelivery(delivery), digest)
 }
 
 // GrantSession records a VIBES-session-bound Tag session and its Workspace
@@ -245,6 +255,17 @@ func (g *Gate) Authorize(ctx context.Context, request AccessRequest) Decision {
 	case integrityHealthy:
 	default:
 		return Decision{Reason: DenyUnknownProjection}
+	}
+	if state.identityExists {
+		switch state.identity.integrity {
+		case integrityGap:
+			return Decision{Reason: DenyIdentityRestrictionGap}
+		case integrityConflict:
+			return Decision{Reason: DenyIdentityRestrictionConflict}
+		case integrityHealthy:
+		default:
+			return Decision{Reason: DenyUnknownProjection}
+		}
 	}
 	if state.projection.Status != StatusActive {
 		return Decision{Reason: DenyInactiveMembership}

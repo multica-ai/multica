@@ -7,13 +7,16 @@ import (
 )
 
 type MemoryStore struct {
-	mu          sync.RWMutex
-	projections map[projectionKey]ProjectionEvent
-	workspaces  map[string]workspaceRecord
-	deliveries  map[workspaceDeliveryKey][32]byte
-	sessions    map[string]memorySession
-	grants      map[workspaceGrantKey]memoryGrant
-	failure     error
+	mu                 sync.RWMutex
+	projections        map[projectionKey]ProjectionEvent
+	workspaces         map[string]workspaceRecord
+	deliveries         map[workspaceDeliveryKey][32]byte
+	identityStates     map[string]identityRecord
+	identityDeliveries map[identityDeliveryKey][32]byte
+	sessionRevocations map[identitySessionKey]struct{}
+	sessions           map[string]memorySession
+	grants             map[workspaceGrantKey]memoryGrant
+	failure            error
 }
 
 type projectionKey struct {
@@ -31,17 +34,29 @@ type workspaceGrantKey struct {
 	workspaceID  string
 }
 
+type identityDeliveryKey struct {
+	userID  string
+	version uint64
+}
+
+type identitySessionKey struct {
+	userID    string
+	sessionID string
+}
+
 type memorySession struct {
 	vibesSessionID string
 	vibesUserID    string
 	accountEpoch   uint64
 	expiresAt      time.Time
+	revoked        bool
 }
 
 type memoryGrant struct {
 	membershipGeneration uint64
 	authorityVersion     uint64
 	expiresAt            time.Time
+	revoked              bool
 }
 
 func (s *MemoryStore) SetFailure(err error) {
@@ -54,11 +69,59 @@ func (s *MemoryStore) SetFailure(err error) {
 // ordering and grant rules as the private PostgreSQL adapter.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		projections: make(map[projectionKey]ProjectionEvent),
-		workspaces:  make(map[string]workspaceRecord),
-		deliveries:  make(map[workspaceDeliveryKey][32]byte),
-		sessions:    make(map[string]memorySession),
-		grants:      make(map[workspaceGrantKey]memoryGrant),
+		projections:        make(map[projectionKey]ProjectionEvent),
+		workspaces:         make(map[string]workspaceRecord),
+		deliveries:         make(map[workspaceDeliveryKey][32]byte),
+		identityStates:     make(map[string]identityRecord),
+		identityDeliveries: make(map[identityDeliveryKey][32]byte),
+		sessionRevocations: make(map[identitySessionKey]struct{}),
+		sessions:           make(map[string]memorySession),
+		grants:             make(map[workspaceGrantKey]memoryGrant),
+	}
+}
+
+func (s *MemoryStore) applyIdentityRestriction(_ context.Context, delivery IdentityRestrictionDelivery, digest [32]byte) (ApplyResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failure != nil {
+		return "", s.failure
+	}
+	key := identityDeliveryKey{userID: delivery.VIBESUserID, version: delivery.IdentityRestrictionVersion}
+	observedDigest, observed := s.identityDeliveries[key]
+	current, exists := s.identityStates[delivery.VIBESUserID]
+	next, result, changed, apply := evolveIdentity(current, exists, delivery, digest, observedDigest, observed)
+	if !observed {
+		s.identityDeliveries[key] = digest
+	}
+	if changed {
+		s.identityStates[delivery.VIBESUserID] = next
+	}
+	if apply {
+		s.applyMemoryIdentityRevocation(delivery)
+	}
+	return result, nil
+}
+
+func (s *MemoryStore) applyMemoryIdentityRevocation(delivery IdentityRestrictionDelivery) {
+	if delivery.Kind == IdentityRestrictionSessionLogout {
+		s.sessionRevocations[identitySessionKey{userID: delivery.VIBESUserID, sessionID: delivery.VIBESSessionID}] = struct{}{}
+	}
+	for tagSessionID, session := range s.sessions {
+		matches := session.vibesUserID == delivery.VIBESUserID
+		if delivery.Kind == IdentityRestrictionSessionLogout {
+			matches = matches && session.vibesSessionID == delivery.VIBESSessionID
+		}
+		if !matches {
+			continue
+		}
+		session.revoked = true
+		s.sessions[tagSessionID] = session
+		for key, grant := range s.grants {
+			if key.tagSessionID == tagSessionID {
+				grant.revoked = true
+				s.grants[key] = grant
+			}
+		}
 	}
 }
 
@@ -132,8 +195,15 @@ func (s *MemoryStore) createGrant(_ context.Context, grant SessionGrant, now tim
 		return ErrGrantDenied
 	}
 	session, sessionExists := s.sessions[grant.TagSessionID]
+	if identity, exists := s.identityStates[grant.VIBESUserID]; exists &&
+		(identity.integrity != integrityHealthy || grant.AccountEpoch < identity.accountEpoch || grant.AccountEpoch <= identity.revokedThrough) {
+		return ErrGrantDenied
+	}
+	if _, revoked := s.sessionRevocations[identitySessionKey{userID: grant.VIBESUserID, sessionID: grant.VIBESSessionID}]; revoked {
+		return ErrGrantDenied
+	}
 	if sessionExists {
-		if session.vibesSessionID != grant.VIBESSessionID || session.vibesUserID != grant.VIBESUserID || session.accountEpoch != grant.AccountEpoch {
+		if session.revoked || session.vibesSessionID != grant.VIBESSessionID || session.vibesUserID != grant.VIBESUserID || session.accountEpoch != grant.AccountEpoch {
 			return ErrGrantDenied
 		}
 		if grant.SessionExpiresAt.Before(session.expiresAt) {
@@ -149,7 +219,7 @@ func (s *MemoryStore) createGrant(_ context.Context, grant SessionGrant, now tim
 	}
 	grantKey := workspaceGrantKey{tagSessionID: grant.TagSessionID, workspaceID: grant.WorkspaceID}
 	existingGrant, grantExists := s.grants[grantKey]
-	if grantExists && (existingGrant.membershipGeneration != grant.MembershipGeneration || existingGrant.authorityVersion > grant.AuthorityVersion) {
+	if grantExists && (existingGrant.revoked || existingGrant.membershipGeneration != grant.MembershipGeneration || existingGrant.authorityVersion > grant.AuthorityVersion) {
 		return ErrGrantDenied
 	}
 	grantExpiry := grant.GrantExpiresAt
@@ -180,16 +250,19 @@ func (s *MemoryStore) loadAccess(_ context.Context, request AccessRequest) (acce
 		return accessState{}, errAccessNotFound
 	}
 	session, ok := s.sessions[request.TagSessionID]
-	if !ok || session.vibesUserID != request.VIBESUserID {
+	if !ok || session.revoked || session.vibesUserID != request.VIBESUserID {
 		return accessState{}, errGrantNotFound
 	}
 	grant, ok := s.grants[workspaceGrantKey{tagSessionID: request.TagSessionID, workspaceID: request.WorkspaceID}]
-	if !ok {
+	if !ok || grant.revoked {
 		return accessState{}, errGrantNotFound
 	}
+	identity, identityExists := s.identityStates[request.VIBESUserID]
 	return accessState{
-		projection: projection,
-		integrity:  workspace.integrity,
+		projection:     projection,
+		integrity:      workspace.integrity,
+		identity:       identity,
+		identityExists: identityExists,
 		session: SessionGrant{
 			TagSessionID:         request.TagSessionID,
 			VIBESSessionID:       session.vibesSessionID,

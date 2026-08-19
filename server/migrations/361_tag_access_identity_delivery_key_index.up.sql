@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX CONCURRENTLY tag_access_identity_restriction_delivery_key_uidx
+    ON tag_access_identity_restriction_delivery (vibes_user_id, identity_restriction_version);
