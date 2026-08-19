@@ -266,6 +266,9 @@ type Handler struct {
 	// unless Slack is configured; GetChatChannelHistory then reports "no channel
 	// integration". A future platform satisfies the same reader interface.
 	SlackHistory ChatChannelHistoryReader
+	// SlackLists backs the agent-facing Slack Lists read/write endpoints.
+	// Nil unless Slack is configured; handlers then return 503.
+	SlackLists SlackListsAPI
 	// WecomStore is the read/write handle over channel_installation rows scoped
 	// to channel_type='wecom'. Nil disables the wecom Web-UI endpoints (they
 	// return 503) and prevents boot from wiring the smart-bot supervisor.

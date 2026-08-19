@@ -268,6 +268,42 @@ func TestRegisterBYO_AppConnectedToArchivedAgent_Rejected(t *testing.T) {
 	}
 }
 
+func TestRegisterBYO_PreservesListsAllowlistOnReconnect(t *testing.T) {
+	srv := authTestServer(t, true)
+	defer srv.Close()
+	existingID := mustUUID(t, "55555555-5555-5555-5555-555555555555")
+	allow := []string{"F0BR8PBUAQH", "F0BRAH9R068"}
+	cfg, _ := json.Marshal(map[string]any{
+		"app_id":          "A0OLD",
+		"lists_allowlist": allow,
+	})
+	q := &fakeInstallQueries{
+		rowID: existingID,
+		existing: &db.ChannelInstallation{
+			ID:          existingID,
+			WorkspaceID: mustUUID(t, "11111111-1111-1111-1111-111111111111"),
+			AgentID:     mustUUID(t, "22222222-2222-2222-2222-222222222222"),
+			Config:      cfg,
+		},
+	}
+	svc := newTestInstallService(t, q)
+	svc.apiURL = srv.URL + "/"
+
+	if _, err := svc.RegisterBYO(context.Background(), byoParams(
+		"11111111-1111-1111-1111-111111111111",
+		"22222222-2222-2222-2222-222222222222",
+	)); err != nil {
+		t.Fatalf("RegisterBYO: %v", err)
+	}
+	var stored installConfig
+	if err := json.Unmarshal(q.upsertParams.Config, &stored); err != nil {
+		t.Fatal(err)
+	}
+	if len(stored.ListsAllowlist) != 2 || stored.ListsAllowlist[0] != "F0BR8PBUAQH" {
+		t.Fatalf("re-paste dropped lists_allowlist: %#v", stored.ListsAllowlist)
+	}
+}
+
 func TestRegisterBYO_ReconnectSameAgent_UpdatesRowInPlace(t *testing.T) {
 	srv := authTestServer(t, true)
 	defer srv.Close()

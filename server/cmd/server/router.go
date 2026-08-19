@@ -553,6 +553,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// command (MUL-3871): pull the session's Slack conversation when the
 			// agent asks, instead of force-assembling it on every inbound.
 			h.SlackHistory = slack.NewHistory(queries, box.Open, slog.Default())
+			h.SlackLists = slack.NewListsService(queries, box.Open, slog.Default(), slack.LoadListsPolicy())
 
 			// `/issue` slash command (MUL-3908): a real Slack slash command,
 			// delivered over the same Socket Mode connection. It is a quick-create
@@ -1683,6 +1684,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// thread (?id for a specific one, else the thread the session is in).
 			r.Get("/api/chat/history", h.GetChatChannelHistory)
 			r.Get("/api/chat/thread", h.GetChatThread)
+
+			// Agent-facing Slack Lists (FLU-266). The caller's task-scoped
+			// token resolves to that agent's own Slack installation; list IDs
+			// must be on the installation allowlist.
+			r.Get("/api/slack/lists/{listId}/schema", h.GetSlackListsSchema)
+			r.Post("/api/slack/lists/{listId}/items", h.CreateSlackListsItem)
+			r.Patch("/api/slack/lists/{listId}/items/{itemId}", h.UpdateSlackListsItem)
 
 			// Inbox
 			r.Route("/api/inbox", func(r chi.Router) {

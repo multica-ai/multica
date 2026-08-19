@@ -103,6 +103,9 @@ func (f *fakeInstallQueries) UpsertChannelInstallation(_ context.Context, arg db
 }
 
 func (f *fakeInstallQueries) ListChannelInstallationsByWorkspace(_ context.Context, _ db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error) {
+	if f.existing != nil {
+		return []db.ChannelInstallation{*f.existing}, nil
+	}
 	return nil, nil
 }
 

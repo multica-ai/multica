@@ -42,6 +42,9 @@ type installConfig struct {
 	BotUserID         string `json:"bot_user_id,omitempty"`
 	BotTokenEncrypted string `json:"bot_token_encrypted"`
 	AppTokenEncrypted string `json:"app_token_encrypted,omitempty"`
+	// ListsAllowlist is the installation-scoped set of Slack List IDs this
+	// bot may read or write. Empty means no Lists capability (fail-closed).
+	ListsAllowlist []string `json:"lists_allowlist,omitempty"`
 }
 
 // credentials is the decoded, decrypted form the outbound sender runs on. The
@@ -125,6 +128,23 @@ func decryptToken(enc string, decrypt Decrypter) (string, error) {
 		return "", err
 	}
 	return string(plaintext), nil
+}
+
+// listsAllowlistFromConfig reads the installation-scoped Lists allowlist.
+// A missing or empty list is fail-closed: the installation has no Lists access.
+func listsAllowlistFromConfig(raw json.RawMessage) []string {
+	var cfg installConfig
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return nil
+	}
+	out := make([]string, 0, len(cfg.ListsAllowlist))
+	for _, id := range cfg.ListsAllowlist {
+		id = strings.TrimSpace(id)
+		if id != "" {
+			out = append(out, id)
+		}
+	}
+	return out
 }
 
 // stripWhitespace removes ASCII whitespace so a MIME-wrapped base64 string

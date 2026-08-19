@@ -111,6 +111,8 @@ func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (
 		BotUserID:         auth.UserID,
 		BotTokenEncrypted: base64.StdEncoding.EncodeToString(sealedBot),
 		AppTokenEncrypted: base64.StdEncoding.EncodeToString(sealedApp),
+		// Re-pasting tokens must not silently drop Lists access.
+		ListsAllowlist: s.existingListsAllowlist(ctx, p.WorkspaceID, p.AgentID),
 	})
 	if err != nil {
 		return db.ChannelInstallation{}, fmt.Errorf("encode slack installation config: %w", err)
@@ -178,6 +180,24 @@ func (s *InstallService) validateAppToken(ctx context.Context, appToken string) 
 // token format is `xapp-1-<APP_ID>-<gen>-<secret>` (e.g. xapp-1-A0BCXGVCS7R-…),
 // so the app id is the third dash-segment. It is the per-app storage / routing
 // key that lets multiple BYO apps coexist in one Slack workspace.
+// existingListsAllowlist copies lists_allowlist off the agent's current Slack
+// installation so a token re-paste does not wipe Lists access.
+func (s *InstallService) existingListsAllowlist(ctx context.Context, wsID, agentID pgtype.UUID) []string {
+	rows, err := s.q.ListChannelInstallationsByWorkspace(ctx, db.ListChannelInstallationsByWorkspaceParams{
+		WorkspaceID: wsID,
+		ChannelType: string(TypeSlack),
+	})
+	if err != nil {
+		return nil
+	}
+	for _, row := range rows {
+		if row.AgentID == agentID {
+			return listsAllowlistFromConfig(row.Config)
+		}
+	}
+	return nil
+}
+
 func parseSlackAppID(appToken string) (string, error) {
 	if !strings.HasPrefix(appToken, "xapp-") {
 		return "", ErrInvalidAppToken
