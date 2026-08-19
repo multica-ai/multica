@@ -44,7 +44,9 @@
       "@xmldom/xmldom": "^0.8.13",
       "postcss": "8.5.10",
       "uuid": "11.1.1",
-      "brace-expansion": "5.0.9"
+      "brace-expansion@1": "1.1.16",
+      "brace-expansion@2": "2.1.2",
+      "brace-expansion@5": "5.0.9"
     }
   },
   "devDependencies": {
