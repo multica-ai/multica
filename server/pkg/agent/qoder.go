@@ -103,7 +103,7 @@ func (b *qoderBackend) Execute(ctx context.Context, prompt string, opts ExecOpti
 	)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, qoderArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", qoderArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(qoderArgs))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

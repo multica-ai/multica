@@ -243,6 +243,7 @@ export type {
   AutopilotRun,
   AutopilotRunStatus,
   AutopilotRunSource,
+  AutopilotQuotaUsage,
   WebhookEventFilter,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,

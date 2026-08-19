@@ -64,6 +64,7 @@ vi.mock("@multica/views/platform", () => ({
 vi.mock("@multica/views/layout", () => ({
   AppSidebar: () => null,
   GlobalShortcuts: () => null,
+  NavigationProgress: () => null,
 }));
 
 vi.mock("@multica/views/modals/registry", () => ({ ModalRegistry: () => null }));

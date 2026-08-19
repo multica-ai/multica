@@ -43,7 +43,8 @@
       "@types/react-dom": "catalog:",
       "@xmldom/xmldom": "^0.8.13",
       "postcss": "8.5.10",
-      "uuid": "11.1.1"
+      "uuid": "11.1.1",
+      "shell-quote": "1.9.0"
     }
   },
   "devDependencies": {

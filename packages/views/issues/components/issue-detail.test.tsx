@@ -182,20 +182,36 @@ vi.mock("../../editor", async () => ({
     const valueRef = useRef(initialValue);
     const baseRef = useRef(initialValue);
     const [editorValue, setEditorValue] = useState(initialValue);
+    // Mirrors the real editor's dirty guard: once the user has typed, an
+    // external `value` change is refused so it cannot clobber unsaved bytes.
+    // Only the imperative adoptContent channel lands after that point.
+    const dirtyRef = useRef(false);
     useEffect(() => {
       contentEditorMounts.count += 1;
       onReady?.();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     useEffect(() => {
-      if (syncedValue === undefined) return;
+      if (syncedValue === undefined || dirtyRef.current) return;
       valueRef.current = syncedValue;
       baseRef.current = syncedValue;
       setEditorValue(syncedValue);
     }, [syncedValue]);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
-      clearContent: () => { valueRef.current = ""; setEditorValue(""); },
+      clearContent: () => {
+        valueRef.current = "";
+        dirtyRef.current = false;
+        setEditorValue("");
+      },
+      // The real handle applies content the `value` prop cannot land (a dirty
+      // editor refuses external syncs) and does so without emitting an update.
+      adoptContent: (markdown: string) => {
+        valueRef.current = markdown;
+        baseRef.current = markdown;
+        dirtyRef.current = false;
+        setEditorValue(markdown);
+      },
       focus: () => {},
       focusAtCoords: () => {},
       // The top-level composer blurs after a posted comment (afterAccepted).
@@ -214,6 +230,7 @@ vi.mock("../../editor", async () => ({
         value={editorValue}
         onChange={(e) => {
           valueRef.current = e.target.value;
+          dirtyRef.current = true;
           setEditorValue(e.target.value);
           onUpdate?.(e.target.value, baseRef.current);
         }}
@@ -1667,6 +1684,35 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("My local description")).toBeVisible();
   });
 
+  it("restores the server description when the user takes the latest version", async () => {
+    mockApiObj.updateIssue.mockRejectedValueOnce({
+      body: { code: "revision_conflict" },
+    });
+    renderIssueDetail();
+
+    const editor = await screen.findByDisplayValue("Add JWT auth to the backend");
+    fireEvent.focus(editor);
+    fireEvent.change(editor, { target: { value: "My local description" } });
+
+    expect(
+      await screen.findByText("The description was changed concurrently. Compare both versions."),
+    ).toBeVisible();
+    const callsBeforeDiscard = mockApiObj.updateIssue.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Use the latest version" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("The description was changed concurrently. Compare both versions."),
+      ).not.toBeInTheDocument(),
+    );
+    // A dirty editor ignores prop-driven content, so seeing the server text
+    // back in the editor proves the imperative adopt path ran.
+    expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeVisible();
+    // Taking the server version is local-only: the server already holds it.
+    expect(mockApiObj.updateIssue).toHaveBeenCalledTimes(callsBeforeDiscard);
+  });
+
   it("serializes description saves and rebases the queued draft on submitted content", async () => {
     let resolveFirst!: (issue: Issue) => void;
     const firstSave = new Promise<Issue>((resolve) => {
@@ -1815,6 +1861,36 @@ describe("IssueDetail (shared)", () => {
     ).toBeVisible();
     expect(screen.getAllByText("My local title").length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue("My local title")).toBeVisible();
+  });
+
+  it("restores the server title when the user takes the latest version", async () => {
+    mockApiObj.updateIssue.mockRejectedValueOnce({
+      body: { code: "revision_conflict" },
+    });
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Implement authentication" }));
+    const editor = await screen.findByTestId("title-editor");
+    fireEvent.change(editor, { target: { value: "My local title" } });
+    fireEvent.blur(editor);
+
+    expect(
+      await screen.findByText("The title was changed concurrently. Compare both versions."),
+    ).toBeVisible();
+    const callsBeforeDiscard = mockApiObj.updateIssue.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Use the latest version" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("The title was changed concurrently. Compare both versions."),
+      ).not.toBeInTheDocument(),
+    );
+    // TitleEditor takes its text at mount, so the remount is what puts the
+    // server title back — see titleResetToken.
+    expect(await screen.findByDisplayValue("Implement authentication")).toBeVisible();
+    // Taking the server version is local-only: the server already holds it.
+    expect(mockApiObj.updateIssue).toHaveBeenCalledTimes(callsBeforeDiscard);
   });
 
   describe("sub-issues list", () => {

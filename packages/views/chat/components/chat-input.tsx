@@ -99,6 +99,13 @@ interface ChatInputProps {
    *  as opposed to the session itself being archived — swaps the placeholder
    *  copy so the read-only reason reads accurately. */
   agentArchived?: boolean;
+  /** True when `disabled` is because the caller may no longer INVOKE the bound
+   *  agent (flipped to personal, ownership moved, dropped from the allow-list).
+   *  Distinct from `noAgent`: an agent IS bound and its transcript is readable,
+   *  the caller just cannot run it (MUL-6380). Takes precedence over `noAgent`
+   *  in the placeholder — when the only agent in the workspace is the revoked
+   *  one, both are true and "create an agent" would be the wrong instruction. */
+  agentAccessRevoked?: boolean;
   agentRuntimeRequired?: boolean;
   /** Name of the currently selected agent, used in the placeholder. */
   agentName?: string;
@@ -141,6 +148,7 @@ export function ChatInput({
   disabled,
   noAgent,
   agentArchived,
+  agentAccessRevoked,
   agentRuntimeRequired,
   agentName,
   leftAdornment,
@@ -532,7 +540,9 @@ export function ChatInput({
     },
   });
 
-  const placeholder = noAgent
+  const placeholder = agentAccessRevoked
+    ? t(($) => $.input.placeholder_access_revoked)
+    : noAgent
     ? t(($) => $.input.placeholder_no_agent)
     : disabled
       ? agentArchived

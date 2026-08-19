@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -195,6 +196,41 @@ func TestReportTaskMessagesCallbackWithNULSucceeds(t *testing.T) {
 	}
 	if storedInput.Result.Stdout != "ELFbinary" {
 		t.Fatalf("stored nested stdout = %q, want %q", storedInput.Result.Stdout, "ELFbinary")
+	}
+}
+
+func TestReportTaskMessagesCreatesUUIDv7(t *testing.T) {
+	ctx := context.Background()
+	_, taskID := seedNULTask(t, "uuidv7-messages-agent")
+
+	w := httptest.NewRecorder()
+	req := daemonTaskRequest(t, "/api/daemon/tasks/"+taskID+"/messages", taskID, map[string]any{
+		"messages": []any{
+			map[string]any{
+				"seq":     1,
+				"type":    "text",
+				"content": "UUIDv7 task message",
+			},
+		},
+	})
+
+	testHandler.ReportTaskMessages(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ReportTaskMessages returned %d, want 200: %s", w.Code, w.Body.String())
+	}
+
+	var rawID string
+	if err := testPool.QueryRow(ctx, `
+		SELECT id::text
+		FROM task_message WHERE task_id = $1 AND seq = 1`, taskID).Scan(&rawID); err != nil {
+		t.Fatalf("read persisted task message id: %v", err)
+	}
+	messageID, err := uuid.Parse(rawID)
+	if err != nil {
+		t.Fatalf("parse task message id %q: %v", rawID, err)
+	}
+	if got := messageID.Version(); got != 7 {
+		t.Fatalf("task message UUID version = %d, want 7", got)
 	}
 }
 

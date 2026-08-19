@@ -3339,6 +3339,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		updateParams.ExpectedRevision = pgtype.Int8{Int64: *req.ExpectedRevision, Valid: true}
 	}
 	var comment db.Comment
+	var issueRevision int64
 	transactionalEdit := replaceAttachments || (oldContent != req.Content && strictContentEdit)
 	if transactionalEdit {
 		// Strict body edits, attachment-set edits, and cancellation of tasks built
@@ -3353,7 +3354,12 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		defer tx.Rollback(r.Context())
 		qtx := h.Queries.WithTx(tx)
-		comment, err = qtx.UpdateComment(r.Context(), updateParams)
+		var updated db.UpdateCommentRow
+		updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		if err == nil {
+			comment = updated.Comment()
+			issueRevision = updated.IssueRevision
+		}
 		if err == nil && oldContent != req.Content && strictContentEdit {
 			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
 		}
@@ -3378,7 +3384,12 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			h.TaskService.BroadcastCancelledTasks(r.Context(), uuidToString(existing.WorkspaceID), cancelled)
 		}
 	} else {
-		comment, err = h.Queries.UpdateComment(r.Context(), updateParams)
+		var updated db.UpdateCommentRow
+		updated, err = h.Queries.UpdateComment(r.Context(), updateParams)
+		if err == nil {
+			comment = updated.Comment()
+			issueRevision = updated.IssueRevision
+		}
 	}
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
@@ -3431,8 +3442,13 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	cid := uuidToString(comment.ID)
 	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
+	resp.IssueRevision = issueRevision
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
-	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+	eventPayload := map[string]any{"comment": resp}
+	if issueRevision > 0 {
+		eventPayload["issue_revision"] = issueRevision
+	}
+	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, eventPayload)
 
 	// The broadcast above intentionally omits trigger_outcomes — it is the
 	// editor's private feedback, not shared timeline state (MUL-4525 §2).
@@ -3482,10 +3498,17 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
-	if err != nil {
+	hasIssue := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		slog.Warn("load issue for delete post-processing failed", "issue_id", uuidToString(comment.IssueID), "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load issue")
 		return
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The issue delete may have won the race after GetCommentInWorkspace.
+		// Continue so DeleteComment can report whether the comment itself still
+		// existed; touching issue activity is intentionally best effort.
+		slog.Info("comment parent issue no longer exists", "issue_id", uuidToString(comment.IssueID), "comment_id", commentId)
 	}
 
 	// Collect attachment URLs before CASCADE delete removes them.
@@ -3500,26 +3523,39 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", cancelErr, "comment_id", commentId)...)
 	}
 
-	if err := h.Queries.DeleteComment(r.Context(), db.DeleteCommentParams{
+	deleted, err := h.Queries.DeleteComment(r.Context(), db.DeleteCommentParams{
 		ID:          comment.ID,
 		WorkspaceID: comment.WorkspaceID,
-	}); err != nil {
-		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
-		// Cancellation already committed but deletion did not. The comment is
-		// still valid, so rebuild the complete cancelled batch (including this
-		// trigger) before returning the storage error.
-		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
-		writeError(w, http.StatusInternalServerError, "failed to delete comment")
+	})
+	if err != nil || !deleted.Changed {
+		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "changed", deleted.Changed, "comment_id", commentId)...)
+		// Cancellation already committed but deletion did not. If the parent
+		// issue still exists, rebuild the complete cancelled batch (including
+		// this trigger) before reporting the storage error or concurrent no-op.
+		if hasIssue {
+			h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete comment")
+		} else {
+			writeError(w, http.StatusNotFound, "comment not found")
+		}
 		return
 	}
 
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
-	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
+	eventPayload := map[string]any{
 		"comment_id": uuidToString(comment.ID),
 		"issue_id":   uuidToString(comment.IssueID),
-	})
-	h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, comment.ID)
+	}
+	if deleted.IssueRevision > 0 {
+		eventPayload["issue_revision"] = deleted.IssueRevision
+	}
+	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, eventPayload)
+	if hasIssue {
+		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, comment.ID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 

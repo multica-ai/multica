@@ -220,3 +220,102 @@ describe("issue realtime revision admission", () => {
     ).toBe(true);
   });
 });
+
+// MUL-6394: `getQueriesData` matches a key PREFIX, so a scan over `tableAll` /
+// `myAll` also sees sibling caches with a different shape. Reading `rows` /
+// `byStatus` off them threw "Cannot read properties of undefined (reading
+// 'some')" out of `useCreateComment`'s onSuccess — the comment was created,
+// the UI reported a failure.
+describe("auxiliary revision — sibling caches under a shared key prefix", () => {
+  const query = {
+    scope: { kind: "workspace" },
+    filters: {},
+    sort: { field: "position", direction: "asc" },
+  } as const;
+
+  const rowPageKey = [
+    ...issueKeys.tableRows(
+      "ws-1",
+      query,
+      { kind: "none" },
+      null,
+      false,
+      null,
+    ),
+    "page",
+    null,
+  ] as const;
+
+  function seedSiblingCaches(qc: QueryClient) {
+    // Grouped rows are an infinite cache, facets a plain object; neither has
+    // a `rows` array, and both sit under the `table-query` prefix.
+    qc.setQueryData(issueKeys.tableGroups("ws-1", query, { kind: "status" }), {
+      pages: [
+        {
+          query_fingerprint: "sha256:groups",
+          total: 1,
+          groups: [],
+          next_cursor: null,
+        },
+      ],
+      pageParams: [null],
+    });
+    qc.setQueryData(
+      issueKeys.tableFacets("ws-1", { query, facets: [{ kind: "status" }] }),
+      { query_fingerprint: "sha256:facets", total: 1, facets: [] },
+    );
+    // The assignee-grouped caches share the `my` prefix with the bucketed
+    // ones but carry no `byStatus`.
+    qc.setQueryData(issueKeys.myAssigneeGroups("ws-1", "assigned", {}), {
+      groups: [],
+    });
+  }
+
+  it("skips them instead of throwing, and still invalidates stale row pages", () => {
+    const qc = new QueryClient();
+    seedSiblingCaches(qc);
+    qc.setQueryData(rowPageKey, {
+      query_fingerprint: "sha256:rows",
+      group_key: null,
+      parent_id: null,
+      total: 1,
+      rows: [{ issue: issue(2, "stale row"), direct_child_count: 0 }],
+      branch_total: 1,
+      next_cursor: null,
+    });
+
+    expect(() =>
+      onIssueAuxiliaryRevision(qc, "ws-1", "issue-1", 3),
+    ).not.toThrow();
+
+    expect(qc.getQueryState(rowPageKey)?.isInvalidated).toBe(true);
+    expect(
+      qc.getQueryState(
+        issueKeys.tableGroups("ws-1", query, { kind: "status" }),
+      )?.isInvalidated,
+    ).toBe(false);
+    expect(
+      qc.getQueryState(
+        issueKeys.myAssigneeGroups("ws-1", "assigned", {}),
+      )?.isInvalidated,
+    ).toBe(false);
+  });
+
+  it("leaves an up-to-date row page alone", () => {
+    const qc = new QueryClient();
+    seedSiblingCaches(qc);
+    qc.setQueryData(rowPageKey, {
+      query_fingerprint: "sha256:rows",
+      group_key: null,
+      parent_id: null,
+      total: 1,
+      rows: [{ issue: issue(3, "current row"), direct_child_count: 0 }],
+      branch_total: 1,
+      next_cursor: null,
+    });
+
+    onIssueAuxiliaryRevision(qc, "ws-1", "issue-1", 3);
+
+    expect(qc.getQueryState(rowPageKey)?.isInvalidated).toBe(false);
+  });
+});

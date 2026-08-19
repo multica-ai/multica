@@ -11,8 +11,8 @@
     "compare_comment": "コメントが同時に変更されました。両方の内容を比較してください。",
     "server_version": "サーバー上の最新版",
     "local_version": "ローカル版",
-    "keep_local": "ローカル版を使用して保存",
-    "save_again": "両方の内容を確認した後、もう一度「保存」をクリックするとローカル版を使用できます。"
+    "keep_local": "自分の版を使用",
+    "use_server": "最新版を使用"
   },
   "page": {
     "breadcrumb_title": "タスク",

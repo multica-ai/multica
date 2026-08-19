@@ -36,8 +36,12 @@ import {
   onIssuePropertiesChanged,
   onIssueMetadataChanged,
   onIssueAuxiliaryRevision,
+  invalidateIssueOwnerProjections,
 } from "../issues/ws-updaters";
-import { invalidateUpdatedAtSortedIssueLists } from "../issues/cache-coordinator";
+import {
+  invalidateLastActivitySortedIssueLists,
+  invalidateUpdatedAtSortedIssueLists,
+} from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import {
@@ -1076,21 +1080,46 @@ export function useRealtimeSync(
       const wsId = getCurrentWsId();
       if (wsId) {
         invalidateUpdatedAtSortedIssueLists(qc, wsId);
+        invalidateLastActivitySortedIssueLists(qc, wsId);
         // A comment carries only the aggregate owner revision, not a full
         // Issue snapshot. Mark stale projections for an authoritative fetch
         // without making a later full snapshot look older than the cache.
-        onIssueAuxiliaryRevision(qc, wsId, comment.issue_id, issueRevision);
+        if (issueRevision) {
+          onIssueAuxiliaryRevision(qc, wsId, comment.issue_id, issueRevision);
+        } else {
+          invalidateIssueOwnerProjections(qc, wsId, comment.issue_id);
+        }
       }
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
-      const { comment } = p as CommentUpdatedPayload;
-      if (comment?.issue_id) invalidateTimeline(comment.issue_id);
+      const { comment, issue_revision } = p as CommentUpdatedPayload;
+      if (!comment?.issue_id) return;
+      invalidateTimeline(comment.issue_id);
+      const wsId = getCurrentWsId();
+      if (wsId) {
+        invalidateLastActivitySortedIssueLists(qc, wsId);
+        if (issue_revision) {
+          onIssueAuxiliaryRevision(qc, wsId, comment.issue_id, issue_revision);
+        } else {
+          invalidateIssueOwnerProjections(qc, wsId, comment.issue_id);
+        }
+      }
     });
 
     const unsubCommentDeleted = ws.on("comment:deleted", (p) => {
-      const { issue_id } = p as CommentDeletedPayload;
-      if (issue_id) invalidateTimeline(issue_id);
+      const { issue_id, issue_revision } = p as CommentDeletedPayload;
+      if (!issue_id) return;
+      invalidateTimeline(issue_id);
+      const wsId = getCurrentWsId();
+      if (wsId) {
+        invalidateLastActivitySortedIssueLists(qc, wsId);
+        if (issue_revision) {
+          onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
+        } else {
+          invalidateIssueOwnerProjections(qc, wsId, issue_id);
+        }
+      }
     });
 
     const unsubCommentResolved = ws.on("comment:resolved", (p) => {

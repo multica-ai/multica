@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"time"
@@ -105,6 +106,74 @@ type repoCheckoutRequest struct {
 	// RetryBusy is sent by clients that understand 503 + Retry-After. Older
 	// clients omit it and retain their historical unbounded lock-wait behavior.
 	RetryBusy bool `json:"retry_busy,omitempty"`
+}
+
+type activeRepoCheckoutTask struct {
+	WorkspaceID string
+	TaskID      string
+	AgentID     string
+	AgentName   string
+	WorkDir     string
+}
+
+// registerActiveRepoCheckoutTask binds checkout identity to the active task.
+// The token prevents unauthenticated localhost callers from choosing another
+// task's identity or workdir. It is not an OS-user isolation boundary: another
+// process that can steal the child's environment token can authenticate as
+// that task and already holds its API credential.
+func (d *Daemon) registerActiveRepoCheckoutTask(token string, task activeRepoCheckoutTask) {
+	d.repoCheckoutTasksMu.Lock()
+	defer d.repoCheckoutTasksMu.Unlock()
+	if d.repoCheckoutTasks == nil {
+		d.repoCheckoutTasks = make(map[string]activeRepoCheckoutTask)
+	}
+	d.repoCheckoutTasks[token] = task
+}
+
+func (d *Daemon) clearActiveRepoCheckoutTask(token string) {
+	d.repoCheckoutTasksMu.Lock()
+	delete(d.repoCheckoutTasks, token)
+	d.repoCheckoutTasksMu.Unlock()
+}
+
+func (d *Daemon) activeRepoCheckoutTask(r *http.Request) (activeRepoCheckoutTask, bool) {
+	const bearer = "Bearer "
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if !strings.HasPrefix(header, bearer) {
+		return activeRepoCheckoutTask{}, false
+	}
+	token := strings.TrimSpace(strings.TrimPrefix(header, bearer))
+	if token == "" {
+		return activeRepoCheckoutTask{}, false
+	}
+	d.repoCheckoutTasksMu.RLock()
+	task, ok := d.repoCheckoutTasks[token]
+	d.repoCheckoutTasksMu.RUnlock()
+	return task, ok
+}
+
+func authorizeRepoCheckoutWorkDir(activeRoot, requested string) (string, error) {
+	root, err := filepath.Abs(activeRoot)
+	if err != nil {
+		return "", err
+	}
+	root, err = filepath.EvalSymlinks(root)
+	if err != nil {
+		return "", err
+	}
+	workdir, err := filepath.Abs(requested)
+	if err != nil {
+		return "", err
+	}
+	workdir, err = filepath.EvalSymlinks(workdir)
+	if err != nil {
+		return "", err
+	}
+	rel, err := filepath.Rel(root, workdir)
+	if err != nil || !filepath.IsLocal(rel) {
+		return "", errors.New("workdir is outside the active task workdir")
+	}
+	return workdir, nil
 }
 
 const (
@@ -224,6 +293,11 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		activeTask, ok := d.activeRepoCheckoutTask(r)
+		if !ok {
+			http.Error(w, "repo checkout requires an active task credential", http.StatusUnauthorized)
+			return
+		}
 
 		var req repoCheckoutRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -247,6 +321,22 @@ func (d *Daemon) repoCheckoutHandler() http.HandlerFunc {
 			http.Error(w, "invalid checkout_mode", http.StatusBadRequest)
 			return
 		}
+		if req.WorkspaceID != activeTask.WorkspaceID || req.TaskID != activeTask.TaskID {
+			http.Error(w, "repo checkout task context does not match the active task", http.StatusForbidden)
+			return
+		}
+		authorizedWorkDir, authErr := authorizeRepoCheckoutWorkDir(activeTask.WorkDir, req.WorkDir)
+		if authErr != nil {
+			http.Error(w, "repo checkout workdir is not owned by the active task", http.StatusForbidden)
+			return
+		}
+		// Identity is derived from the token-bound active task. AgentName and the
+		// other caller-supplied fields are compatibility inputs only and never
+		// decide branch ownership.
+		req.WorkspaceID = activeTask.WorkspaceID
+		req.TaskID = activeTask.TaskID
+		req.AgentName = activeTask.AgentName
+		req.WorkDir = authorizedWorkDir
 
 		if d.repoCache == nil {
 			http.Error(w, "repo cache not initialized", http.StatusInternalServerError)

@@ -11,8 +11,8 @@
     "compare_comment": "댓글이 동시에 변경되었습니다. 두 버전을 비교하세요.",
     "server_version": "서버의 최신 버전",
     "local_version": "내 로컬 버전",
-    "keep_local": "로컬 버전으로 저장",
-    "save_again": "두 버전을 확인한 후 저장을 다시 클릭하면 로컬 버전을 사용할 수 있습니다."
+    "keep_local": "내 버전 유지",
+    "use_server": "최신 버전 사용"
   },
   "page": {
     "breadcrumb_title": "태스크",

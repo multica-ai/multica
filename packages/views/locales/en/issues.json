@@ -11,8 +11,8 @@
     "compare_comment": "The comment was changed concurrently. Compare both versions.",
     "server_version": "Latest server version",
     "local_version": "Your local version",
-    "keep_local": "Use local version and save",
-    "save_again": "After reviewing both versions, click Save again to use your local version."
+    "keep_local": "Keep my version",
+    "use_server": "Use the latest version"
   },
   "page": {
     "breadcrumb_title": "Issues",

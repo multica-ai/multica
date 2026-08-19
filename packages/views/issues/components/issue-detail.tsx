@@ -1973,6 +1973,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const titleBaseRef = useRef<string | undefined>(issue?.title);
   const [titleConflictDraft, setTitleConflictDraft] = useState<string | null>(null);
+  // Bumped when a conflicting title draft is discarded. TitleEditor reads its
+  // text from `defaultValue` at mount and exposes no imperative setter, so
+  // remounting is the only way to put the server's title back in the editor.
+  const [titleResetToken, setTitleResetToken] = useState(0);
   useEffect(() => {
     setTitleConflictDraft(null);
     setDescriptionConflictDraft(null);
@@ -2848,7 +2852,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
-                key={`title-${id}`}
+                key={`title-${id}-${titleResetToken}`}
                 ref={titleEditorRef}
                 defaultValue={titleConflictDraft ?? issue.title}
                 placeholder={t(($) => $.detail.title_placeholder)}
@@ -2908,26 +2912,43 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               serverValue={issue.title}
               localValue={titleConflictDraft}
               actions={(
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    const draft = titleConflictDraft.trim();
-                    if (!draft) return;
-                    handleUpdateField(
-                      { title: draft, title_base: issue.title },
-                      {
-                        onSuccess: (serverIssue) => {
-                          setTitleConflictDraft(null);
-                          titleBaseRef.current = serverIssue.title;
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const draft = titleConflictDraft.trim();
+                      if (!draft) return;
+                      handleUpdateField(
+                        { title: draft, title_base: issue.title },
+                        {
+                          onSuccess: (serverIssue) => {
+                            setTitleConflictDraft(null);
+                            titleBaseRef.current = serverIssue.title;
+                          },
                         },
-                      },
-                    );
-                  }}
-                >
-                  {t(($) => $.revision.keep_local)}
-                </Button>
+                      );
+                    }}
+                  >
+                    {t(($) => $.revision.keep_local)}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      // Local-only: the server already holds this title, so
+                      // discarding writes nothing. The remount is what puts it
+                      // back into the editor (see titleResetToken).
+                      setTitleConflictDraft(null);
+                      titleBaseRef.current = issue.title;
+                      setTitleResetToken((token) => token + 1);
+                    }}
+                  >
+                    {t(($) => $.revision.use_server)}
+                  </Button>
+                </div>
               )}
             />
           ) : null}
@@ -3026,30 +3047,51 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 serverValue={issue.description || ""}
                 localValue={descriptionConflictDraft}
                 actions={(
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      handleUpdateField(
-                        {
-                          description: descriptionConflictDraft,
-                          description_base: issue.description || "",
-                          attachment_ids:
-                            descriptionAttachmentIdsRef.current.length > 0
-                              ? descriptionAttachmentIdsRef.current
-                              : undefined,
-                        },
-                        {
-                          onSuccess: () => {
-                            setDescriptionConflictDraft(null);
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        handleUpdateField(
+                          {
+                            description: descriptionConflictDraft,
+                            description_base: issue.description || "",
+                            attachment_ids:
+                              descriptionAttachmentIdsRef.current.length > 0
+                                ? descriptionAttachmentIdsRef.current
+                                : undefined,
                           },
-                        },
-                      );
-                    }}
-                  >
-                    {t(($) => $.revision.keep_local)}
-                  </Button>
+                          {
+                            onSuccess: () => {
+                              setDescriptionConflictDraft(null);
+                            },
+                          },
+                        );
+                      }}
+                    >
+                      {t(($) => $.revision.keep_local)}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        // The editor is dirty — that is why this conflict
+                        // exists — so the `value` prop cannot land: ContentEditor
+                        // deliberately refuses to clobber unsaved bytes.
+                        // adoptContent is the explicit "take this content"
+                        // channel and applies without emitting an update, so
+                        // discarding never writes.
+                        descEditorRef.current?.adoptContent(issue.description || "");
+                        descriptionAttachmentIdsRef.current = [];
+                        pendingDescriptionSaveRef.current = null;
+                        setDescriptionConflictDraft(null);
+                      }}
+                    >
+                      {t(($) => $.revision.use_server)}
+                    </Button>
+                  </div>
                 )}
               />
             ) : null}

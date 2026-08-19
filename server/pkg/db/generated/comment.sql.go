@@ -199,7 +199,10 @@ func (q *Queries) CountNewCommentsSince(ctx context.Context, arg CountNewComment
 
 const createComment = `-- name: CreateComment :one
 WITH touched_issue AS (
-    UPDATE issue SET updated_at = now(), revision = revision + 1
+    UPDATE issue SET
+        updated_at = now(),
+        revision = revision + 1,
+        last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
     WHERE issue.id = $1 AND issue.workspace_id = $2
     RETURNING issue.id, issue.workspace_id, issue.revision
 ), inserted_comment AS (
@@ -248,7 +251,7 @@ type CreateCommentRow struct {
 }
 
 // A new comment counts as activity on its issue, so the same statement bumps
-// the parent issue's updated_at. The touch is a leading data-modifying CTE and
+// the parent issue's updated_at and last_activity_at. The touch is a leading data-modifying CTE and
 // the INSERT selects the issue/workspace back out of it, which makes the two
 // inseparable and gives two query-level guarantees:
 //   - atomicity — the insert and the timestamp bump commit or roll back
@@ -300,8 +303,38 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 	return i, err
 }
 
-const deleteComment = `-- name: DeleteComment :exec
-DELETE FROM comment WHERE id = $1 AND workspace_id = $2
+const deleteComment = `-- name: DeleteComment :one
+WITH locked_issue AS MATERIALIZED (
+    -- Lock the aggregate owner before its child so this cannot deadlock with
+    -- issue teardown (which takes the same issue -> comment order).
+    SELECT issue.id
+    FROM issue
+    JOIN comment ON comment.issue_id = issue.id
+                AND comment.workspace_id = issue.workspace_id
+    WHERE comment.id = $1 AND comment.workspace_id = $2
+    FOR UPDATE OF issue
+), issue_fence AS MATERIALIZED (
+    -- The consumed locked_count below is the ordering fence: the issue lock is
+    -- acquired before DELETE can lock the comment. MATERIALIZED only prevents
+    -- folding/re-evaluation and is not, by itself, a lock-order guarantee.
+    SELECT count(*) AS locked_count FROM locked_issue
+), deleted_comment AS (
+    DELETE FROM comment
+    USING issue_fence
+    WHERE comment.id = $1 AND comment.workspace_id = $2
+      AND issue_fence.locked_count >= 0
+    RETURNING issue_id, workspace_id
+), touched_issue AS (
+    UPDATE issue
+    SET revision = issue.revision + 1,
+        last_activity_at = GREATEST(COALESCE(issue.last_activity_at, issue.updated_at), now())
+    FROM deleted_comment
+    WHERE issue.id = deleted_comment.issue_id
+      AND issue.workspace_id = deleted_comment.workspace_id
+    RETURNING issue.id, issue.revision
+)
+SELECT EXISTS(SELECT 1 FROM deleted_comment) AS changed,
+       COALESCE((SELECT revision FROM touched_issue), 0)::bigint AS issue_revision
 `
 
 type DeleteCommentParams struct {
@@ -309,10 +342,17 @@ type DeleteCommentParams struct {
 	WorkspaceID pgtype.UUID `json:"workspace_id"`
 }
 
+type DeleteCommentRow struct {
+	Changed       bool  `json:"changed"`
+	IssueRevision int64 `json:"issue_revision"`
+}
+
 // Defense-in-depth: workspace_id is a SQL-layer tenant guard. See DeleteIssue.
-func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) error {
-	_, err := q.db.Exec(ctx, deleteComment, arg.ID, arg.WorkspaceID)
-	return err
+func (q *Queries) DeleteComment(ctx context.Context, arg DeleteCommentParams) (DeleteCommentRow, error) {
+	row := q.db.QueryRow(ctx, deleteComment, arg.ID, arg.WorkspaceID)
+	var i DeleteCommentRow
+	err := row.Scan(&i.Changed, &i.IssueRevision)
+	return i, err
 }
 
 const getComment = `-- name: GetComment :one
@@ -1589,19 +1629,70 @@ func (q *Queries) UnresolveComment(ctx context.Context, id pgtype.UUID) (Comment
 }
 
 const updateComment = `-- name: UpdateComment :one
-UPDATE comment SET
-    content = $2,
-    source_task_id = $3,
-    revision = revision + CASE WHEN ROW(content, source_task_id) IS DISTINCT FROM ROW($2, $3) THEN 1 ELSE 0 END,
-    updated_at = CASE WHEN ROW(content, source_task_id) IS DISTINCT FROM ROW($2, $3) THEN now() ELSE updated_at END
-WHERE id = $1
-  AND ($4::bigint IS NULL OR revision = $4::bigint)
-  AND (
-    $5::text IS NULL
-    OR content IS NOT DISTINCT FROM $5::text
-    OR content IS NOT DISTINCT FROM $2
-  )
-RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision
+WITH locked_issue AS MATERIALIZED (
+    -- Keep the global issue -> child lock order used by issue teardown. The
+    -- aggregate below still yields one row when the parent was concurrently
+    -- deleted, preserving best-effort edits of an orphaned comment.
+    SELECT issue.id
+    FROM issue
+    JOIN comment ON comment.issue_id = issue.id
+                AND comment.workspace_id = issue.workspace_id
+    WHERE comment.id = $1
+    FOR UPDATE OF issue
+), issue_fence AS MATERIALIZED (
+    -- The aggregate always emits one row. Consuming locked_count in target's
+    -- tautological predicate creates a real data dependency: locked_issue must
+    -- acquire the owner lock before target can lock the comment. MATERIALIZED
+    -- prevents folding/re-evaluation; it does not itself establish lock order.
+    SELECT count(*) AS locked_count FROM locked_issue
+), target AS MATERIALIZED (
+    SELECT comment.id, comment.issue_id, comment.author_type, comment.author_id, comment.content, comment.type, comment.created_at, comment.updated_at, comment.parent_id, comment.workspace_id, comment.resolved_at, comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id, comment.quick_action_id, comment.via_plugin_id, comment.revision,
+           ROW(comment.content, comment.source_task_id) IS DISTINCT FROM
+               ROW($2, $3::uuid) AS did_change
+    FROM comment
+    CROSS JOIN issue_fence
+    WHERE comment.id = $1
+      AND issue_fence.locked_count >= 0
+      AND ($4::bigint IS NULL OR revision = $4::bigint)
+      AND (
+        $5::text IS NULL
+        OR content IS NOT DISTINCT FROM $5::text
+        OR content IS NOT DISTINCT FROM $2
+      )
+    FOR UPDATE OF comment
+), updated_comment AS (
+    UPDATE comment SET
+        content = $2,
+        source_task_id = $3::uuid,
+        revision = comment.revision + CASE WHEN target.did_change THEN 1 ELSE 0 END,
+        updated_at = CASE WHEN target.did_change THEN now() ELSE comment.updated_at END
+    FROM target
+    WHERE comment.id = target.id
+    RETURNING comment.id, comment.issue_id, comment.author_type, comment.author_id,
+              comment.content, comment.type, comment.created_at, comment.updated_at,
+              comment.parent_id, comment.workspace_id, comment.resolved_at,
+              comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id,
+              comment.quick_action_id, comment.via_plugin_id, comment.revision,
+              target.did_change
+), touched_issue AS (
+    UPDATE issue
+    SET revision = issue.revision + 1,
+        last_activity_at = GREATEST(COALESCE(issue.last_activity_at, issue.updated_at), now())
+    FROM updated_comment
+    WHERE updated_comment.did_change
+      AND issue.id = updated_comment.issue_id
+      AND issue.workspace_id = updated_comment.workspace_id
+    RETURNING issue.id, issue.revision
+)
+SELECT updated_comment.id, updated_comment.issue_id, updated_comment.author_type,
+       updated_comment.author_id, updated_comment.content, updated_comment.type,
+       updated_comment.created_at, updated_comment.updated_at, updated_comment.parent_id,
+       updated_comment.workspace_id, updated_comment.resolved_at,
+       updated_comment.resolved_by_type, updated_comment.resolved_by_id,
+       updated_comment.source_task_id, updated_comment.quick_action_id,
+       updated_comment.via_plugin_id, updated_comment.revision,
+       COALESCE((SELECT revision FROM touched_issue), 0)::bigint AS issue_revision
+FROM updated_comment
 `
 
 type UpdateCommentParams struct {
@@ -1612,7 +1703,28 @@ type UpdateCommentParams struct {
 	ContentBase      pgtype.Text `json:"content_base"`
 }
 
-func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (Comment, error) {
+type UpdateCommentRow struct {
+	ID             pgtype.UUID        `json:"id"`
+	IssueID        pgtype.UUID        `json:"issue_id"`
+	AuthorType     string             `json:"author_type"`
+	AuthorID       pgtype.UUID        `json:"author_id"`
+	Content        string             `json:"content"`
+	Type           string             `json:"type"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ParentID       pgtype.UUID        `json:"parent_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	ResolvedAt     pgtype.Timestamptz `json:"resolved_at"`
+	ResolvedByType pgtype.Text        `json:"resolved_by_type"`
+	ResolvedByID   pgtype.UUID        `json:"resolved_by_id"`
+	SourceTaskID   pgtype.UUID        `json:"source_task_id"`
+	QuickActionID  pgtype.UUID        `json:"quick_action_id"`
+	ViaPluginID    pgtype.UUID        `json:"via_plugin_id"`
+	Revision       int64              `json:"revision"`
+	IssueRevision  int64              `json:"issue_revision"`
+}
+
+func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (UpdateCommentRow, error) {
 	row := q.db.QueryRow(ctx, updateComment,
 		arg.ID,
 		arg.Content,
@@ -1620,7 +1732,7 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		arg.ExpectedRevision,
 		arg.ContentBase,
 	)
-	var i Comment
+	var i UpdateCommentRow
 	err := row.Scan(
 		&i.ID,
 		&i.IssueID,
@@ -1639,6 +1751,7 @@ func (q *Queries) UpdateComment(ctx context.Context, arg UpdateCommentParams) (C
 		&i.QuickActionID,
 		&i.ViaPluginID,
 		&i.Revision,
+		&i.IssueRevision,
 	)
 	return i, err
 }

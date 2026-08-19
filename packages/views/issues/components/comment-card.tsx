@@ -402,6 +402,21 @@ function useEditAttachmentState(
     resetState();
   };
 
+  /**
+   * Discard the local draft and continue from the version the server holds.
+   * Local-only — the server already stores this content, so nothing is written.
+   * The editor is dirty (that is why the conflict exists), so `adoptContent` is
+   * the only channel that lands: a plain `defaultValue` change is mount-only.
+   */
+  const adoptServerVersion = () => {
+    const serverContent = entry.content ?? "";
+    editorRef.current?.adoptContent(serverContent);
+    setContent(serverContent);
+    setDraft(draftKey, serverContent);
+    setInitialContentBase(serverContent);
+    setRevisionConflict(false);
+  };
+
   // Await-then-render save (MUL-5181): shared submit contract, with the edit-
   // only concerns folded into onSubmit — the cancel-race guard, the no-op
   // short-circuit, and the failure toast. The hook owns the empty guard,
@@ -514,15 +529,22 @@ function useEditAttachmentState(
     cancelEdit,
     saveEdit,
     revisionConflict,
+    adoptServerVersion,
   };
 }
 
 function CommentRevisionConflict({
   serverContent,
   localContent,
+  onKeepLocal,
+  onUseServer,
+  saving,
 }: {
   serverContent: string;
   localContent: string;
+  onKeepLocal: () => void;
+  onUseServer: () => void;
+  saving?: boolean;
 }) {
   const { t } = useT("issues");
   return (
@@ -533,7 +555,22 @@ function CommentRevisionConflict({
       localLabel={t(($) => $.revision.local_version)}
       serverValue={serverContent}
       localValue={localContent}
-      footer={t(($) => $.revision.save_again)}
+      actions={(
+        <div className="flex flex-wrap items-center gap-2">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            disabled={saving}
+            onClick={onKeepLocal}
+          >
+            {t(($) => $.revision.keep_local)}
+          </Button>
+          <Button type="button" size="sm" variant="ghost" onClick={onUseServer}>
+            {t(($) => $.revision.use_server)}
+          </Button>
+        </div>
+      )}
     />
   );
 }
@@ -704,6 +741,9 @@ function CommentRow({
             <CommentRevisionConflict
               serverContent={entry.content ?? ""}
               localContent={edit.content}
+              onKeepLocal={() => void edit.saveEdit()}
+              onUseServer={edit.adoptServerVersion}
+              saving={edit.saving}
             />
           ) : null}
           {edit.standaloneEditAttachments.length > 0 && (
@@ -1027,6 +1067,9 @@ function CommentCardImpl({
                   <CommentRevisionConflict
                     serverContent={entry.content ?? ""}
                     localContent={edit.content}
+                    onKeepLocal={() => void edit.saveEdit()}
+                    onUseServer={edit.adoptServerVersion}
+                    saving={edit.saving}
                   />
                 ) : null}
                 <div className="flex items-center justify-between mt-2">

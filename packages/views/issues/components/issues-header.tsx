@@ -1,6 +1,6 @@
 "use client";
 
-import { cloneElement, Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { cloneElement, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -116,6 +116,7 @@ import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
 import { useStatusOptions } from "../utils/status-options";
+import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
@@ -704,26 +705,38 @@ function PropertyFilterOptions({
       }));
   }, [actorProperty, actorMembers, currentUserId]);
 
-  const options = actorProperty
-    ? actorOptions.map((option) => ({
-        id: option.id,
-        name: option.name,
-        color: undefined as string | undefined,
-        actorType: option.actorType as string | undefined,
-        actorId: option.actorId as string | undefined,
-      }))
-    : property.type === "checkbox"
-      ? [
-          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined, actorType: undefined, actorId: undefined },
-          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined, actorType: undefined, actorId: undefined },
-        ]
-      : (property.config.options ?? []).map((option) => ({
+  // "No value" is offered for every property type: it selects issues where the
+  // property is unset, the inverse of picking one of the options below.
+  const noValueOption = {
+    id: NO_PROPERTY_VALUE,
+    name: t(($) => $.pickers.custom_property.none),
+    color: undefined as string | undefined,
+    actorType: undefined as string | undefined,
+    actorId: undefined as string | undefined,
+  };
+  const options = [
+    ...(actorProperty
+      ? actorOptions.map((option) => ({
           id: option.id,
           name: option.name,
-          color: option.color as string | undefined,
-          actorType: undefined as string | undefined,
-          actorId: undefined as string | undefined,
-        }));
+          color: undefined as string | undefined,
+          actorType: option.actorType as string | undefined,
+          actorId: option.actorId as string | undefined,
+        }))
+      : property.type === "checkbox"
+        ? [
+            { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined, actorType: undefined, actorId: undefined },
+            { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined, actorType: undefined, actorId: undefined },
+          ]
+        : (property.config.options ?? []).map((option) => ({
+            id: option.id,
+            name: option.name,
+            color: option.color as string | undefined,
+            actorType: undefined as string | undefined,
+            actorId: undefined as string | undefined,
+          }))),
+    noValueOption,
+  ];
 
   return (
     <>
@@ -1212,7 +1225,7 @@ export function IssueFilterMenu({
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
   const wsId = useWorkspaceId();
-  const { groups: statusGroups, hasCustom: showStatusGroupLabels } = useStatusOptions(wsId);
+  const statusOptions = useStatusOptions(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const filterableProperties = useMemo(
     () =>
@@ -1309,48 +1322,39 @@ export function IssueFilterMenu({
               <DropdownMenuSubContent className="w-auto min-w-48">
                 {/* Options come from the workspace catalog, so a custom status
                     is filterable — otherwise an issue moved onto one could not
-                    be narrowed to. Grouped by category, and headings appear
-                    only once a category holds more than one status, so a
-                    workspace that never customized anything sees the same flat
-                    7-row list. (MUL-6243) */}
-                {statusGroups.map((group) => (
-                  <Fragment key={group.category}>
-                    {showStatusGroupLabels && (
-                      <DropdownMenuLabel className="text-caption text-muted-foreground">
-                        {t(($) => $.status[group.category])}
-                      </DropdownMenuLabel>
-                    )}
-                    {group.options.map((option) => {
-                      const checked = statusFilters.includes(option.key);
-                      const count = counts.status.get(option.key) ?? 0;
-                      const fixed = viewBaseline?.status.has(option.key) === true;
-                      return (
-                        <DropdownMenuCheckboxItem
-                          key={option.key}
-                          checked={checked}
-                          disabled={fixed}
-                          title={fixed ? fixedTitle : undefined}
-                          onCheckedChange={() => act.toggleStatusFilter(option.key)}
-                          className={FILTER_ITEM_CLASS}
-                        >
-                          <HoverCheck checked={checked} />
-                          <StatusIcon
-                            status={option.key}
-                            category={group.category}
-                            color={option.color}
-                            className="h-3.5 w-3.5"
-                          />
-                          {option.label}
-                          {count > 0 && (
-                            <span className="ml-auto text-caption text-muted-foreground">
-                              {t(($) => $.filters.issue_count, { count })}
-                            </span>
-                          )}
-                        </DropdownMenuCheckboxItem>
-                      );
-                    })}
-                  </Fragment>
-                ))}
+                    be narrowed to. One flat list in category order: the icon
+                    already carries the category, and a heading per category
+                    doubled the menu's height for no added information
+                    (MUL-6243, MUL-6399). */}
+                {statusOptions.map((option) => {
+                  const checked = statusFilters.includes(option.key);
+                  const count = counts.status.get(option.key) ?? 0;
+                  const fixed = viewBaseline?.status.has(option.key) === true;
+                  return (
+                    <DropdownMenuCheckboxItem
+                      key={option.key}
+                      checked={checked}
+                      disabled={fixed}
+                      title={fixed ? fixedTitle : undefined}
+                      onCheckedChange={() => act.toggleStatusFilter(option.key)}
+                      className={FILTER_ITEM_CLASS}
+                    >
+                      <HoverCheck checked={checked} />
+                      <StatusIcon
+                        status={option.key}
+                        category={option.category}
+                        color={option.color}
+                        className="h-3.5 w-3.5"
+                      />
+                      {option.label}
+                      {count > 0 && (
+                        <span className="ml-auto text-caption text-muted-foreground">
+                          {t(($) => $.filters.issue_count, { count })}
+                        </span>
+                      )}
+                    </DropdownMenuCheckboxItem>
+                  );
+                })}
               </DropdownMenuSubContent>
             </DropdownMenuSub>
 

@@ -207,11 +207,13 @@ export interface CommentCreatedPayload {
 
 export interface CommentUpdatedPayload {
   comment: Comment;
+  issue_revision?: number;
 }
 
 export interface CommentDeletedPayload {
   comment_id: string;
   issue_id: string;
+  issue_revision?: number;
 }
 
 export interface CommentResolvedPayload {

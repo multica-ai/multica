@@ -221,6 +221,31 @@ type AutopilotCollaborator struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type AutopilotQuotaPeriod struct {
+	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
+	PeriodStart   pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd     pgtype.Timestamptz `json:"period_end"`
+	UsedCount     int64              `json:"used_count"`
+	ReservedCount int64              `json:"reserved_count"`
+	BlockedCounts []byte             `json:"blocked_counts"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AutopilotQuotaReservation struct {
+	ID                  pgtype.UUID        `json:"id"`
+	WorkspaceID         pgtype.UUID        `json:"workspace_id"`
+	PeriodStart         pgtype.Timestamptz `json:"period_start"`
+	PeriodEnd           pgtype.Timestamptz `json:"period_end"`
+	PolicyRevision      int64              `json:"policy_revision"`
+	SubscriptionVersion int64              `json:"subscription_version"`
+	Source              string             `json:"source"`
+	IdempotencyKey      string             `json:"idempotency_key"`
+	State               string             `json:"state"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	FinalizedAt         pgtype.Timestamptz `json:"finalized_at"`
+}
+
 // Append-only snapshot of autopilot rule publishes (MUL-4302 §3.4). One row per substantive publish (create / enable / resume / trigger-condition / target / instructions change), recording the publisher + effective-config summary. Dispatch resolves the latest row for an autopilot as the run's rule_owner accountable human. No FK, no cascade.
 type AutopilotRuleVersion struct {
 	ID              pgtype.UUID        `json:"id"`
@@ -233,22 +258,24 @@ type AutopilotRuleVersion struct {
 }
 
 type AutopilotRun struct {
-	ID                pgtype.UUID        `json:"id"`
-	AutopilotID       pgtype.UUID        `json:"autopilot_id"`
-	TriggerID         pgtype.UUID        `json:"trigger_id"`
-	Source            string             `json:"source"`
-	Status            string             `json:"status"`
-	IssueID           pgtype.UUID        `json:"issue_id"`
-	TaskID            pgtype.UUID        `json:"task_id"`
-	TriggeredAt       pgtype.Timestamptz `json:"triggered_at"`
-	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
-	FailureReason     pgtype.Text        `json:"failure_reason"`
-	TriggerPayload    []byte             `json:"trigger_payload"`
-	Result            []byte             `json:"result"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	SquadID           pgtype.UUID        `json:"squad_id"`
-	PlannedAt         pgtype.Timestamptz `json:"planned_at"`
-	WebhookDeliveryID pgtype.UUID        `json:"webhook_delivery_id"`
+	ID                 pgtype.UUID        `json:"id"`
+	AutopilotID        pgtype.UUID        `json:"autopilot_id"`
+	TriggerID          pgtype.UUID        `json:"trigger_id"`
+	Source             string             `json:"source"`
+	Status             string             `json:"status"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	TaskID             pgtype.UUID        `json:"task_id"`
+	TriggeredAt        pgtype.Timestamptz `json:"triggered_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	FailureReason      pgtype.Text        `json:"failure_reason"`
+	TriggerPayload     []byte             `json:"trigger_payload"`
+	Result             []byte             `json:"result"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	SquadID            pgtype.UUID        `json:"squad_id"`
+	PlannedAt          pgtype.Timestamptz `json:"planned_at"`
+	WebhookDeliveryID  pgtype.UUID        `json:"webhook_delivery_id"`
+	QuotaReservationID pgtype.UUID        `json:"quota_reservation_id"`
+	ReasonCode         pgtype.Text        `json:"reason_code"`
 }
 
 type AutopilotSubscriber struct {
@@ -673,6 +700,7 @@ type Issue struct {
 	Stage              pgtype.Int4        `json:"stage"`
 	Properties         []byte             `json:"properties"`
 	Revision           int64              `json:"revision"`
+	LastActivityAt     pgtype.Timestamptz `json:"last_activity_at"`
 }
 
 type IssueDependency struct {
@@ -1283,6 +1311,8 @@ type WebhookDelivery struct {
 	LeaseToken             pgtype.UUID        `json:"lease_token"`
 	LeaseExpiresAt         pgtype.Timestamptz `json:"lease_expires_at"`
 	DispatchAttempts       int32              `json:"dispatch_attempts"`
+	ReasonCode             pgtype.Text        `json:"reason_code"`
+	ReplayIdempotencyKey   pgtype.Text        `json:"replay_idempotency_key"`
 }
 
 type Workspace struct {

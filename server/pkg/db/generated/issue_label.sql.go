@@ -58,7 +58,8 @@ WITH inserted AS (
     RETURNING issue_id
 ), bumped AS (
     UPDATE issue
-    SET revision = revision + 1
+    SET revision = revision + 1,
+        last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
     WHERE id IN (SELECT issue_id FROM inserted)
     RETURNING revision
 )
@@ -85,19 +86,27 @@ func (q *Queries) AttachLabelToIssue(ctx context.Context, arg AttachLabelToIssue
 }
 
 const attachLabelToIssueOnCreate = `-- name: AttachLabelToIssueOnCreate :exec
+WITH touched_issue AS (
+    UPDATE issue
+    SET last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
+    WHERE issue.id = $1::uuid
+      AND issue.workspace_id = $3::uuid
+      AND NOT EXISTS (
+          SELECT 1 FROM issue_to_label
+          WHERE issue_to_label.issue_id = $1::uuid
+            AND issue_to_label.label_id = $2::uuid
+      )
+      AND EXISTS (
+          SELECT 1 FROM issue_label
+          WHERE issue_label.id = $2::uuid
+            AND issue_label.workspace_id = $3::uuid
+            AND issue_label.resource_type = 'issue'
+      )
+    RETURNING issue.id
+)
 INSERT INTO issue_to_label (issue_id, label_id)
 SELECT $1::uuid, $2::uuid
-WHERE EXISTS (
-    SELECT 1 FROM issue i
-    WHERE i.id = $1::uuid
-      AND i.workspace_id = $3::uuid
-)
-AND EXISTS (
-    SELECT 1 FROM issue_label l
-    WHERE l.id = $2::uuid
-      AND l.workspace_id = $3::uuid
-      AND l.resource_type = 'issue'
-)
+WHERE EXISTS (SELECT 1 FROM touched_issue)
 ON CONFLICT DO NOTHING
 `
 
@@ -303,7 +312,8 @@ WITH deleted AS (
     RETURNING issue_id
 ), bumped AS (
     UPDATE issue
-    SET revision = revision + 1
+    SET revision = revision + 1,
+        last_activity_at = GREATEST(COALESCE(last_activity_at, updated_at), now())
     WHERE id IN (SELECT issue_id FROM deleted)
     RETURNING revision
 )

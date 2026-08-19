@@ -134,6 +134,7 @@ import type {
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
+  AutopilotQuotaUsage,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
   CreateAutopilotTriggerRequest,
@@ -214,7 +215,7 @@ import type {
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
 import { type Logger, noopLogger } from "../logger";
-import { createRequestId } from "../utils";
+import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
@@ -276,6 +277,7 @@ import {
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
+  AutopilotQuotaUsageSchema,
   FALLBACK_AUTOPILOT_RUN,
   CronPreviewResponseSchema,
   UNREADABLE_CRON_PREVIEW_RESPONSE,
@@ -3705,13 +3707,35 @@ export class ApiClient {
   }
 
   async triggerAutopilot(id: string): Promise<AutopilotRun> {
-    // Manual "run now" returns 200 even when admission blocks the run (status
-    // skipped/failed). The UI branches on status/reason_code to avoid a
-    // false-success toast (MUL-4525), so parse defensively rather than casting.
-    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/trigger`, { method: "POST" });
+    // Manual "run now" usually returns a run, including downstream admission
+    // failures. Quota rejection is the exception and returns 429. The UI
+    // handles both paths without presenting a false-success toast.
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/trigger`, {
+      method: "POST",
+      headers: { "Idempotency-Key": createSafeId() },
+    });
     return parseWithFallback(raw, AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, {
       endpoint: "POST /api/autopilots/:id/trigger",
     });
+  }
+
+  async getAutopilotQuotaUsage(): Promise<AutopilotQuotaUsage> {
+    const raw = await this.fetch<unknown>("/api/autopilots/usage");
+    return parseWithFallback(
+      raw,
+      AutopilotQuotaUsageSchema,
+      {
+        action: "off",
+        used: null,
+        reserved: null,
+        limit: null,
+        period_start: null,
+        period_end: null,
+        reset_at: null,
+        blocked_counts: null,
+      },
+      { endpoint: "GET /api/autopilots/usage" },
+    );
   }
 
   async listAutopilotRuns(id: string, params?: { limit?: number; offset?: number }): Promise<ListAutopilotRunsResponse> {
@@ -3817,7 +3841,7 @@ export class ApiClient {
   ): Promise<WebhookDelivery> {
     const raw = await this.fetch<unknown>(
       `/api/autopilots/${autopilotId}/deliveries/${deliveryId}/replay`,
-      { method: "POST" },
+      { method: "POST", headers: { "Idempotency-Key": createSafeId() } },
     );
     return parseWithFallback(
       raw,

@@ -5,9 +5,14 @@ import { labelKeys } from "../labels/queries";
 import { projectKeys } from "../projects/queries";
 import {
   applyIssueChange,
+  bucketedListEntries,
+  flatListEntries,
   invalidateIssueDerivatives,
+  invalidateLastActivitySortedIssueLists,
   invalidateStaleListKeys,
   invalidateUpdatedAtSortedIssueLists,
+  issueArrayEntries,
+  tableRowEntries,
   type IssueFlatCache,
 } from "./cache-coordinator";
 import {
@@ -127,10 +132,7 @@ function patchIssueInFlatCaches(
   patch: Partial<Issue>,
   orderRevision?: number,
 ) {
-  for (const [key, data] of qc.getQueriesData<IssueFlatCache>({
-    queryKey: issueKeys.flatAll(wsId),
-  })) {
-    if (!data?.pages) continue;
+  for (const [key, data] of flatListEntries(qc, wsId)) {
     qc.setQueryData<IssueFlatCache>(key, {
       ...data,
       pages: data.pages.map((page) => ({
@@ -153,10 +155,8 @@ function patchIssueInChildrenCaches(
   patch: Partial<Issue>,
   orderRevision?: number,
 ) {
-  for (const [key, data] of qc.getQueriesData<Issue[]>({
-    queryKey: issueKeys.childrenAll(wsId),
-  })) {
-    if (!data || !data.some((child) => child.id === issueId)) continue;
+  for (const [key, data] of issueArrayEntries(qc, issueKeys.childrenAll(wsId))) {
+    if (!data.some((child) => child.id === issueId)) continue;
     qc.setQueryData<Issue[]>(
       key,
       data.map((child) =>
@@ -175,17 +175,7 @@ function patchIssueInTableCaches(
   patch: Partial<Issue>,
   orderRevision?: number,
 ) {
-  for (const [key, data] of qc.getQueriesData<unknown>({
-    queryKey: issueKeys.tableAll(wsId),
-  })) {
-    if (
-      !data ||
-      typeof data !== "object" ||
-      !Array.isArray((data as IssueTableRowsResponse).rows)
-    ) {
-      continue;
-    }
-    const page = data as IssueTableRowsResponse;
+  for (const [key, page] of tableRowEntries(qc, wsId)) {
     if (!page.rows.some((row) => row.issue.id === issueId)) continue;
     qc.setQueryData<IssueTableRowsResponse>(key, {
       ...page,
@@ -208,18 +198,15 @@ function patchIssueSnapshot(
   patch: Partial<Issue>,
   orderRevision?: number,
 ) {
-  for (const prefix of [issueKeys.list(wsId), issueKeys.myAll(wsId)]) {
-    for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: prefix })) {
-      if (!data) continue;
-      const location = findIssueLocation(data, issueId);
-      if (
-        !location ||
-        mergeIssuePatch(location.issue, patch, orderRevision) === location.issue
-      ) {
-        continue;
-      }
-      qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, patch));
+  for (const [key, data] of bucketedListEntries(qc, wsId)) {
+    const location = findIssueLocation(data, issueId);
+    if (
+      !location ||
+      mergeIssuePatch(location.issue, patch, orderRevision) === location.issue
+    ) {
+      continue;
     }
+    qc.setQueryData<ListIssuesCache>(key, patchIssueInBuckets(data, issueId, patch));
   }
   patchIssueInFlatCaches(qc, wsId, issueId, patch, orderRevision);
   patchIssueInTableCaches(qc, wsId, issueId, patch, orderRevision);
@@ -227,10 +214,10 @@ function patchIssueSnapshot(
   qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (old) =>
     old ? mergeIssuePatch(old, patch, orderRevision) : old,
   );
-  for (const [key, data] of qc.getQueriesData<Issue[]>({
-    queryKey: issueKeys.projectGanttAll(wsId),
-  })) {
-    if (!data) continue;
+  for (const [key, data] of issueArrayEntries(
+    qc,
+    issueKeys.projectGanttAll(wsId),
+  )) {
     qc.setQueryData<Issue[]>(
       key,
       data.map((issue) =>
@@ -253,27 +240,20 @@ function freshestCachedIssueRevision(
       freshest = issue.revision;
     }
   };
-  for (const prefix of [issueKeys.list(wsId), issueKeys.myAll(wsId)]) {
-    for (const [, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: prefix })) {
-      consider(data ? findIssueLocation(data, issueId)?.issue : undefined);
-    }
+  for (const [, data] of bucketedListEntries(qc, wsId)) {
+    consider(findIssueLocation(data, issueId)?.issue);
   }
-  for (const [, data] of qc.getQueriesData<IssueFlatCache>({
-    queryKey: issueKeys.flatAll(wsId),
-  })) {
-    for (const page of data?.pages ?? []) {
+  for (const [, data] of flatListEntries(qc, wsId)) {
+    for (const page of data.pages) {
       consider(page.issues.find((issue) => issue.id === issueId));
     }
   }
-  for (const [, data] of qc.getQueriesData<IssueTableRowsResponse>({
-    queryKey: issueKeys.tableAll(wsId),
-  })) {
-    if (!data || !Array.isArray(data.rows)) continue;
+  for (const [, data] of tableRowEntries(qc, wsId)) {
     consider(data.rows.find((row) => row.issue.id === issueId)?.issue);
   }
   for (const prefix of [issueKeys.childrenAll(wsId), issueKeys.projectGanttAll(wsId)]) {
-    for (const [, data] of qc.getQueriesData<Issue[]>({ queryKey: prefix })) {
-      consider(data?.find((issue) => issue.id === issueId));
+    for (const [, data] of issueArrayEntries(qc, prefix)) {
+      consider(data.find((issue) => issue.id === issueId));
     }
   }
   return freshest;
@@ -293,50 +273,73 @@ function refetchForUnversionedIssueEvent(
   return true;
 }
 
+function invalidateIssueOwnerProjectionsWhere(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+  shouldInvalidate: (issue: Issue | undefined) => boolean,
+) {
+  const invalidateExact = (queryKey: readonly unknown[]) => {
+    qc.invalidateQueries({ queryKey, exact: true });
+  };
+
+  const detailKey = issueKeys.detail(wsId, issueId);
+  if (shouldInvalidate(qc.getQueryData<Issue>(detailKey))) invalidateExact(detailKey);
+
+  for (const [key, data] of bucketedListEntries(qc, wsId)) {
+    if (shouldInvalidate(findIssueLocation(data, issueId)?.issue)) {
+      invalidateExact(key);
+    }
+  }
+  for (const [key, data] of flatListEntries(qc, wsId)) {
+    if (data.pages.some((page) => shouldInvalidate(page.issues.find((issue) => issue.id === issueId)))) {
+      invalidateExact(key);
+    }
+  }
+  for (const [key, data] of tableRowEntries(qc, wsId)) {
+    if (data.rows.some((row) => row.issue.id === issueId && shouldInvalidate(row.issue))) {
+      invalidateExact(key);
+    }
+  }
+  for (const prefix of [issueKeys.childrenAll(wsId), issueKeys.projectGanttAll(wsId)]) {
+    for (const [key, data] of issueArrayEntries(qc, prefix)) {
+      if (data.some((issue) => issue.id === issueId && shouldInvalidate(issue))) {
+        invalidateExact(key);
+      }
+    }
+  }
+}
+
 function invalidateStaleIssueOwnerProjections(
   qc: QueryClient,
   wsId: string,
   issueId: string,
   revision: number,
 ) {
-  const isStale = (issue: Issue | undefined) =>
-    issue !== undefined &&
-    (issue.revision === undefined || issue.revision < revision);
-  const invalidateExact = (queryKey: readonly unknown[]) => {
-    qc.invalidateQueries({ queryKey, exact: true });
-  };
+  invalidateIssueOwnerProjectionsWhere(
+    qc,
+    wsId,
+    issueId,
+    (issue) =>
+      issue !== undefined &&
+      (issue.revision === undefined || issue.revision < revision),
+  );
+}
 
-  const detailKey = issueKeys.detail(wsId, issueId);
-  if (isStale(qc.getQueryData<Issue>(detailKey))) invalidateExact(detailKey);
-
-  for (const prefix of [issueKeys.list(wsId), issueKeys.myAll(wsId)]) {
-    for (const [key, data] of qc.getQueriesData<ListIssuesCache>({ queryKey: prefix })) {
-      if (isStale(data ? findIssueLocation(data, issueId)?.issue : undefined)) {
-        invalidateExact(key);
-      }
-    }
-  }
-  for (const [key, data] of qc.getQueriesData<IssueFlatCache>({
-    queryKey: issueKeys.flatAll(wsId),
-  })) {
-    if (data?.pages.some((page) => isStale(page.issues.find((issue) => issue.id === issueId)))) {
-      invalidateExact(key);
-    }
-  }
-  for (const [key, data] of qc.getQueriesData<IssueTableRowsResponse>({
-    queryKey: issueKeys.tableAll(wsId),
-  })) {
-    if (data?.rows.some((row) => row.issue.id === issueId && isStale(row.issue))) {
-      invalidateExact(key);
-    }
-  }
-  for (const prefix of [issueKeys.childrenAll(wsId), issueKeys.projectGanttAll(wsId)]) {
-    for (const [key, data] of qc.getQueriesData<Issue[]>({ queryKey: prefix })) {
-      if (data?.some((issue) => issue.id === issueId && isStale(issue))) {
-        invalidateExact(key);
-      }
-    }
-  }
+/** Fallback for successful auxiliary mutations whose HTTP response cannot
+ * carry an owner revision (notably 204 comment deletion). Only loaded
+ * projections containing the owner are invalidated. */
+export function invalidateIssueOwnerProjections(
+  qc: QueryClient,
+  wsId: string,
+  issueId: string,
+) {
+  invalidateIssueOwnerProjectionsWhere(
+    qc,
+    wsId,
+    issueId,
+    (issue) => issue !== undefined,
+  );
 }
 
 /**
@@ -364,10 +367,8 @@ function findIssueInFlatCaches(
   wsId: string,
   issueId: string,
 ) {
-  for (const [, data] of qc.getQueriesData<IssueFlatCache>({
-    queryKey: issueKeys.flatAll(wsId),
-  })) {
-    for (const page of data?.pages ?? []) {
+  for (const [, data] of flatListEntries(qc, wsId)) {
+    for (const page of data.pages) {
       const issue = page.issues.find((candidate) => candidate.id === issueId);
       if (issue) return issue;
     }
@@ -557,6 +558,7 @@ export function onIssueLabelsChanged(
   }
   patchIssueLabels(qc, wsId, issueId, labels, revision);
   invalidateIssueLabelDerivatives(qc, wsId);
+  invalidateLastActivitySortedIssueLists(qc, wsId);
 }
 
 /** Deterministic label snapshot patch used by optimistic mutation legs. */
@@ -650,6 +652,7 @@ export function onIssueMetadataChanged(
   }
   patchIssueSnapshot(qc, wsId, issueId, { metadata }, revision);
   onIssueAuxiliaryRevision(qc, wsId, issueId, revision, "metadata");
+  invalidateLastActivitySortedIssueLists(qc, wsId);
   qc.invalidateQueries({ queryKey: issueKeys.myAll(wsId) });
   // A metadata write bumps issue.updated_at server-side (SetIssueMetadataKey /
   // DeleteIssueMetadataKey), but the patches above keep each card's slot, so a
@@ -676,6 +679,7 @@ export function onIssuePropertiesChanged(
 ) {
   if (refetchForUnversionedIssueEvent(qc, wsId, issueId, revision)) return;
   patchIssueProperties(qc, wsId, issueId, properties, revision);
+  invalidateLastActivitySortedIssueLists(qc, wsId);
   // Per-parent rows are patched for immediate UI feedback, then all children
   // projections are marked stale so older fetches cannot win after commit.
   qc.invalidateQueries({ queryKey: issueKeys.childrenAll(wsId) });

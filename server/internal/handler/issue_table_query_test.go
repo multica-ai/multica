@@ -459,6 +459,42 @@ func TestIssueTablePositionCursorIncludesIndexableLowerBound(t *testing.T) {
 	}
 }
 
+func TestIssueTableLastActivityDefaultsToIndexedOrder(t *testing.T) {
+	w := httptest.NewRecorder()
+	sort, ok := testHandler.issueTableOrderBy(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		testWorkspaceID,
+		issueTableSortRequest{Field: "last_activity"},
+	)
+	if !ok {
+		t.Fatalf("last_activity sort rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if got, want := sort.orderBy(), "i.last_activity_at DESC NULLS LAST, i.id DESC"; got != want {
+		t.Fatalf("orderBy = %q, want %q", got, want)
+	}
+
+	sortValue := "2026-08-19T05:04:03.123456Z"
+	cursor := issueTableCursor{
+		SortValue: &sortValue,
+		RowID:     "00000000-0000-4000-8000-000000000001",
+	}
+	args := make([]any, 0, 2)
+	predicate, ok := sort.cursorPredicate(w, &cursor, func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	})
+	if !ok {
+		t.Fatalf("valid last_activity cursor rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(predicate, "created_at") {
+		t.Fatalf("last_activity cursor unexpectedly uses created_at tie-break: %s", predicate)
+	}
+	if !strings.Contains(predicate, "i.id < $1::uuid") {
+		t.Fatalf("last_activity cursor is missing id tie-break: %s", predicate)
+	}
+}
+
 func TestIssueTableGroupIdentityBindsIncludeEmpty(t *testing.T) {
 	withoutEmpty := issueTableGroupIdentity(issueTableGroupSpec{
 		Kind:       "property",

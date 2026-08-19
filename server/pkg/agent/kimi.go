@@ -67,7 +67,7 @@ func (b *kimiBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	kimiArgs := append([]string{"acp"}, filterCustomArgs(opts.CustomArgs, kimiBlockedArgs, b.cfg.Logger)...)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, kimiArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kimiArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(kimiArgs, trustAgentCommandPositional(0, "acp")))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

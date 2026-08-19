@@ -533,6 +533,14 @@ WHERE autopilot_id IN (
     SELECT id FROM autopilot WHERE autopilot.workspace_id = $1
 );
 
+-- name: DeleteWorkspaceAutopilotQuotaReservations :exec
+DELETE FROM autopilot_quota_reservation
+WHERE autopilot_quota_reservation.workspace_id = $1;
+
+-- name: DeleteWorkspaceAutopilotQuotaPeriods :exec
+DELETE FROM autopilot_quota_period
+WHERE autopilot_quota_period.workspace_id = $1;
+
 -- name: DeleteWorkspaceAutopilotChildren :exec
 WITH
 deleted_triggers AS (

@@ -968,6 +968,9 @@ export const IssueSchema = z.object({
   created_at: z.string(),
   updated_at: z.string(),
   revision: z.number().int().positive().optional(),
+  // Optional for compatibility with older self-hosted backends; a current
+  // backend emits null until its historical backfill reaches the issue.
+  last_activity_at: z.string().nullable().optional(),
 }).loose();
 
 export const ListIssuesResponseSchema = z.object({
@@ -1819,6 +1822,8 @@ const WebhookDeliverySchema = z.object({
   autopilot_run_id: z.string().nullable(),
   replayed_from_delivery_id: z.string().nullable(),
   error: z.string().nullable(),
+  reason_code: z.string().nullable().default(null),
+  replay_idempotency_key: z.string().nullable().default(null),
   received_at: z.string(),
   last_attempt_at: z.string(),
   created_at: z.string(),
@@ -1909,6 +1914,17 @@ export const AutopilotRunSchema = z.object({
   created_at: z.string().default(""),
 }).loose();
 
+export const AutopilotQuotaUsageSchema = z.object({
+  action: z.enum(["off", "observe", "enforce"]).default("off"),
+  used: z.number().nullable().default(null),
+  reserved: z.number().nullable().default(null),
+  limit: z.number().nullable().default(null),
+  period_start: z.string().nullable().default(null),
+  period_end: z.string().nullable().default(null),
+  reset_at: z.string().nullable().default(null),
+  blocked_counts: z.record(z.string(), z.number().int().nonnegative()).nullable().catch(null).default(null),
+}).loose();
+
 export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
   id: "",
   autopilot_id: "",
@@ -1956,6 +1972,8 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   autopilot_run_id: null,
   replayed_from_delivery_id: null,
   error: null,
+  reason_code: null,
+  replay_idempotency_key: null,
   received_at: "",
   last_attempt_at: "",
   created_at: "",

@@ -15,6 +15,7 @@
     "placeholder_archived": "This session is archived",
     "placeholder_archived_agent": "This agent has been archived",
     "placeholder_runtime_required": "Bind a runtime to continue",
+    "placeholder_access_revoked": "You no longer have permission to run this agent",
     "placeholder_named": "Message {{name}}…",
     "placeholder_default": "Start a message…",
     "send_tooltip": "Send",
@@ -38,6 +39,7 @@
     "clear": "Clear all",
     "steer": "Steer",
     "steer_unavailable": "Steer is available after the current reply starts",
+    "steer_no_permission": "You no longer have permission to run this agent",
     "steer_unavailable_toast": "Steer is unavailable. Refreshing the queue.",
     "edit": "Edit queued message",
     "remove": "Remove queued message",
@@ -175,6 +177,7 @@
   },
   "no_agent_banner": "You need an agent to start chatting.",
   "archived_agent_banner": "{{name}} has been archived — this conversation is read-only.",
+  "agent_access_revoked_banner": "You no longer have permission to run {{name}} — this conversation is read-only.",
   "runtime_required_banner": {
     "fallback_name": "The agent",
     "message": "{{name}} needs a runtime before it can reply.",

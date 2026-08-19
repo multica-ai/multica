@@ -1478,3 +1478,32 @@ describe("ChatInput send keeps composer focus", () => {
     expect(onStop).toHaveBeenCalledTimes(1);
   });
 });
+
+// MUL-6380: the composer's placeholder is the only text on screen once the input
+// is disabled, so it has to name the right reason. `agentAccessRevoked` wins over
+// `noAgent` because both are true in the reported case — the workspace's only
+// agent is the one this user may no longer run — and "create an agent" would then
+// send them to build a second agent they do not need.
+describe("ChatInput revoked-access placeholder", () => {
+  it("names the revoked permission rather than the archived-session reason", () => {
+    renderInput({ disabled: true, agentAccessRevoked: true });
+
+    expect(editorProps.last?.placeholder).toBe(
+      "You no longer have permission to run this agent",
+    );
+  });
+
+  it("wins over noAgent when the revoked agent is the only one in the workspace", () => {
+    renderInput({ disabled: true, agentAccessRevoked: true, noAgent: true });
+
+    expect(editorProps.last?.placeholder).toBe(
+      "You no longer have permission to run this agent",
+    );
+  });
+
+  it("leaves the normal placeholder alone when access is intact", () => {
+    renderInput({ agentName: "Multica" });
+
+    expect(editorProps.last?.placeholder).toBe("Message Multica…");
+  });
+});

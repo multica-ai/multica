@@ -8,6 +8,7 @@ import {
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
   AgentTaskListSchema,
+  AutopilotQuotaUsageSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   CommentTriggerPreviewSchema,
@@ -87,6 +88,20 @@ const baseIssue = {
 };
 
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  it("accepts null activity during backfill and rejects malformed activity", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, last_activity_at: null }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.last_activity_at).toBeNull();
+    expect(() =>
+      ListIssuesResponseSchema.parse({
+        issues: [{ ...baseIssue, last_activity_at: 42 }],
+        total: 1,
+      }),
+    ).toThrow();
+  });
+
   it("accepts a primitive metadata KV map", () => {
     const payload = {
       issues: [
@@ -1121,6 +1136,39 @@ describe("AutopilotRunSchema", () => {
     const parsed = parseWithFallback("not-an-object", AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
     expect(parsed).toBe(FALLBACK_AUTOPILOT_RUN);
     expect(parsed.status).toBe("failed");
+  });
+});
+
+describe("AutopilotQuotaUsageSchema", () => {
+  const baseUsage = {
+    action: "enforce",
+    used: 12,
+    reserved: 2,
+    limit: 100,
+    period_start: "2026-08-01T00:00:00Z",
+    period_end: "2026-09-01T00:00:00Z",
+    reset_at: "2026-09-01T00:00:00Z",
+  };
+
+  it("preserves durable blocked counts by execution source", () => {
+    const parsed = AutopilotQuotaUsageSchema.parse({
+      ...baseUsage,
+      blocked_counts: { schedule: 3, webhook: 7 },
+    });
+    expect(parsed.blocked_counts).toEqual({ schedule: 3, webhook: 7 });
+  });
+
+  it("defaults blocked_counts to null for an older server", () => {
+    expect(AutopilotQuotaUsageSchema.parse(baseUsage).blocked_counts).toBeNull();
+  });
+
+  it("isolates a malformed blocked_counts field", () => {
+    const parsed = AutopilotQuotaUsageSchema.parse({
+      ...baseUsage,
+      blocked_counts: { webhook: "many" },
+    });
+    expect(parsed.used).toBe(12);
+    expect(parsed.blocked_counts).toBeNull();
   });
 });
 

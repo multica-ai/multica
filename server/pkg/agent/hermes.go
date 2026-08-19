@@ -288,7 +288,7 @@ func (b *hermesBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 	hermesArgs := hermesCLIArgs(opts.CustomArgs, b.cfg.Logger)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, hermesArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", hermesArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(hermesArgs, trustAgentCommandPositional(0, hermesACPSubcommand)))
 	agentsMDPresent := false
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd

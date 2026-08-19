@@ -125,6 +125,26 @@ func (q *Queries) DeleteWorkspaceAutopilotChildren(ctx context.Context, workspac
 	return err
 }
 
+const deleteWorkspaceAutopilotQuotaPeriods = `-- name: DeleteWorkspaceAutopilotQuotaPeriods :exec
+DELETE FROM autopilot_quota_period
+WHERE autopilot_quota_period.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceAutopilotQuotaPeriods(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceAutopilotQuotaPeriods, workspaceID)
+	return err
+}
+
+const deleteWorkspaceAutopilotQuotaReservations = `-- name: DeleteWorkspaceAutopilotQuotaReservations :exec
+DELETE FROM autopilot_quota_reservation
+WHERE autopilot_quota_reservation.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceAutopilotQuotaReservations(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceAutopilotQuotaReservations, workspaceID)
+	return err
+}
+
 const deleteWorkspaceAutopilotRuns = `-- name: DeleteWorkspaceAutopilotRuns :exec
 DELETE FROM autopilot_run
 WHERE autopilot_id IN (

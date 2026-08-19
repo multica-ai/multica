@@ -121,7 +121,21 @@ func repoCheckoutModeFor(provider, goos string) string {
 var (
 	taskPrepareLeaseRefresh = 15 * time.Second
 	taskPrepareLeaseTimeout = 10 * time.Second
+	errInvalidTaskIdentity  = errors.New("invalid task identity")
 )
+
+func validateTaskIdentity(task Task) error {
+	if strings.TrimSpace(task.AgentID) == "" {
+		return fmt.Errorf("%w: task %s has no authoritative agent_id", errInvalidTaskIdentity, task.ID)
+	}
+	if task.Agent == nil {
+		return fmt.Errorf("%w: task %s has no agent payload (agent_id=%s)", errInvalidTaskIdentity, task.ID, task.AgentID)
+	}
+	if task.Agent.ID != task.AgentID {
+		return fmt.Errorf("%w: task %s agent_id=%s but agent.id=%s", errInvalidTaskIdentity, task.ID, task.AgentID, task.Agent.ID)
+	}
+	return nil
+}
 
 func taskScopedAuthToken(task Task) (string, error) {
 	token := strings.TrimSpace(task.AuthToken)
@@ -551,6 +565,13 @@ type Daemon struct {
 	activeStoresCond *sync.Cond      // signalled when an in-flight store deletion finishes, so a blocked markActive can proceed
 	activeStores     map[string]int  // persistent store path (per-conversation Codex sessions, per-agent Hermes memories) -> live-task refcount; guards the store from GC mid-task (MUL-4424)
 	deletingStores   map[string]bool // store paths a GC delete has reserved; markActive waits these out so a task never mounts a store mid-removal
+
+	// repoCheckoutTasks binds the localhost /repo/checkout endpoint to the
+	// task-scoped bearer token of a currently running agent. The request body is
+	// never an identity source: workspace, task, agent, and allowed workdir all
+	// come from this registry.
+	repoCheckoutTasksMu sync.RWMutex
+	repoCheckoutTasks   map[string]activeRepoCheckoutTask
 
 	// localPathLocks serialises agent tasks whose project resource is a
 	// local_directory pinned to this daemon. Two tasks targeting the same
@@ -5205,6 +5226,9 @@ func (e *worktreePreservedError) Error() string { return e.err.Error() }
 func (e *worktreePreservedError) Unwrap() error { return e.err }
 
 func taskRunFailureReason(err error) string {
+	if errors.Is(err, errInvalidTaskIdentity) {
+		return taskfailure.ReasonInvalidTaskIdentity.String()
+	}
 	if errors.Is(err, errTaskPrepareTimeout) {
 		return taskfailure.ReasonTimeout.String()
 	}
@@ -5705,14 +5729,13 @@ func sessionHomeReachable(provider string, env *execenv.Environment, envReused b
 	return envReused
 }
 
-// shouldReusePriorWorkdir keeps the local_directory lock invariant without
-// forcing every squad-leader follow-up onto a fresh provider session. Worker
-// tasks already expose their current local-directory assignment, so their
-// existing reuse behavior remains unchanged. Leader tasks intentionally skip
-// that assignment and its lock; they may therefore reuse only directories
+// shouldReusePriorWorkdir keeps the local_directory lock and cross-agent
+// isolation invariants without forcing managed follow-ups onto a fresh
+// provider session. Every managed issue or chat task may reuse only directories
 // that resolve to the {workspace}/{task}/workdir shape, carry Prepare-time
-// managed-env provenance for the same workspace/issue/agent, and carry a
-// matching daemon task-context marker.
+// managed-env provenance for the same workspace/scope/agent, and carry a
+// matching daemon task-context marker. Other task kinds have no durable scope
+// with which to prove ownership and therefore start fresh.
 //
 // Reuse eligibility is deliberately keyed off .managed_env.json (written by
 // execenv.Prepare) and NOT .gc_meta.json (written only after the task reaches
@@ -5725,9 +5748,6 @@ func sessionHomeReachable(provider string, env *execenv.Environment, envReused b
 func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignment, workspacesRoot string) bool {
 	if task.PriorWorkDir == "" || localAssignment != nil {
 		return false
-	}
-	if !task.IsLeaderTask {
-		return true
 	}
 
 	root, err := filepath.EvalSymlinks(workspacesRoot)
@@ -5750,15 +5770,15 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	if len(parts) != 3 || parts[0] != task.WorkspaceID || parts[1] == "" || parts[2] != "workdir" {
 		return false
 	}
-	if task.AgentID == "" || task.IssueID == "" {
+	if task.AgentID == "" || (task.IssueID == "" && task.ChatSessionID == "") {
 		return false
 	}
-	// Managed-env provenance is written only for non-local managed issue envs,
-	// so its presence (plus the workspace/issue/agent match) proves this is a
+	// Managed-env provenance is written only for non-local resumable envs, so
+	// its presence (plus the workspace/scope/agent match) proves this is a
 	// safe daemon-managed reuse target and not a residual local_directory path.
 	prov, err := execenv.ReadManagedEnvProvenance(filepath.Dir(workdir))
 	if err != nil || prov.ManagedBy != execenv.ManagedEnvProvenanceManagedBy ||
-		prov.WorkspaceID != task.WorkspaceID || prov.IssueID != task.IssueID ||
+		prov.WorkspaceID != task.WorkspaceID ||
 		prov.AgentID != task.AgentID {
 		return false
 	}
@@ -5768,15 +5788,21 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 		return false
 	}
 	var marker struct {
-		ManagedBy string `json:"managed_by"`
-		AgentID   string `json:"agent_id"`
-		IssueID   string `json:"issue_id"`
+		ManagedBy     string `json:"managed_by"`
+		AgentID       string `json:"agent_id"`
+		IssueID       string `json:"issue_id"`
+		ChatSessionID string `json:"chat_session_id"`
 	}
 	if json.Unmarshal(data, &marker) != nil {
 		return false
 	}
-	return marker.ManagedBy == execenv.TaskContextMarkerManagedBy &&
-		marker.AgentID == task.AgentID && marker.IssueID == task.IssueID
+	if marker.ManagedBy != execenv.TaskContextMarkerManagedBy || marker.AgentID != task.AgentID {
+		return false
+	}
+	if task.IssueID != "" {
+		return prov.IssueID == task.IssueID && marker.IssueID == task.IssueID
+	}
+	return prov.ChatSessionID == task.ChatSessionID && marker.ChatSessionID == task.ChatSessionID
 }
 
 // gateCodexResumeToRolloutPresence drops the prior Codex session when its
@@ -6099,6 +6125,14 @@ func skillRefFromBundle(bundle SkillData) SkillRefData {
 }
 
 func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot int, taskLog *slog.Logger) (taskResult TaskResult, returnErr error) {
+	// A claim carries the task-row agent id both at the top level and inside
+	// the expanded agent configuration. The top-level id is authoritative
+	// because it is also bound into the task-scoped token. Never prepare or
+	// reuse a workdir when the two identities disagree.
+	if err := validateTaskIdentity(task); err != nil {
+		return TaskResult{}, err
+	}
+
 	// Refuse to spawn an agent without a workspace. An empty workspace_id
 	// here would make MULTICA_WORKSPACE_ID empty in the agent env, and the
 	// CLI would otherwise silently fall back to the user-global config — a
@@ -6187,15 +6221,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	}
 
 	agentName := "agent"
-	var agentID string
 	var skills []SkillData
 	var instructions string
-	if task.Agent != nil {
-		agentID = task.Agent.ID
-		agentName = task.Agent.Name
-		skills = task.Agent.Skills
-		instructions = task.Agent.Instructions
-	}
+	agentName = task.Agent.Name
+	skills = task.Agent.Skills
+	instructions = task.Agent.Instructions
 
 	// Prepare isolated execution environment.
 	// Repos are passed as metadata only — the agent checks them out on demand
@@ -6213,7 +6243,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		// absent). Seed the brief's continuity disclosure from it; the local
 		// resume gates below only ever OR it to true, so the signal is monotonic.
 		PriorSessionResumeUnavailable:    task.PriorSessionResumeUnavailable,
-		AgentID:                          agentID,
+		AgentID:                          task.AgentID,
 		AgentName:                        agentName,
 		AgentInstructions:                instructions,
 		AgentSkills:                      convertSkillsForEnv(skills),
@@ -7064,6 +7094,20 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		)
 		return TaskResult{Status: "completed", Comment: "", WorkDir: env.WorkDir, EnvRoot: env.RootDir}, nil
 	}
+
+	// Authenticate the localhost repo-checkout endpoint with the same
+	// task-scoped token the child receives. The endpoint derives identity and
+	// branch ownership from this in-memory record instead of trusting request
+	// fields or ambient process environment. Register only for the provider
+	// execution window and always remove the credential afterwards.
+	d.registerActiveRepoCheckoutTask(agentToken, activeRepoCheckoutTask{
+		WorkspaceID: task.WorkspaceID,
+		TaskID:      task.ID,
+		AgentID:     task.AgentID,
+		AgentName:   task.Agent.Name,
+		WorkDir:     env.WorkDir,
+	})
+	defer d.clearActiveRepoCheckoutTask(agentToken)
 
 	taskLog.Debug("invoking backend",
 		"provider", provider,

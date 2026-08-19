@@ -173,6 +173,7 @@ func NewRuntime(runtimeID string, cfg Config) (Backend, error) {
 	if !ok {
 		return nil, fmt.Errorf("unknown runtime identity: %q", runtimeID)
 	}
+	cfg.provider = runtimeID
 	backend, err := New(desc.ProtocolFamily, cfg)
 	if err != nil {
 		return nil, fmt.Errorf("runtime %q (family %q): %w", runtimeID, desc.ProtocolFamily, err)
