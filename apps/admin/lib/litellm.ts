@@ -14,17 +14,17 @@ import {
  * when the proxy isn't reachable or configured (this app ships without it
  * wired in most local dev setups).
  *
- * Auth: Authorization: Bearer ${LITELLM_API_KEY} (master key or a key with
- * the get_spend_routes permission). Host: ${LITELLM_BASE_URL}, e.g.
+ * Auth: Authorization: Bearer ${LLMPROXY_MASTER_KEY} (master key or a key
+ * with the get_spend_routes permission). Host: ${LLMPROXY_BASE_URL}, e.g.
  * https://llmproxy.g2.com/v1.
  */
 
-// LITELLM_BASE_URL carries a `/v1` suffix for OpenAI-compatible routes
+// LLMPROXY_BASE_URL carries a `/v1` suffix for OpenAI-compatible routes
 // (chat/completions etc.), but the admin API (/key/*, /team/*) used here is
 // mounted at the proxy root, not under /v1 — strip it so apiGet() doesn't
 // 404 every call.
-const BASE = (process.env.LITELLM_BASE_URL || "").replace(/\/$/, "").replace(/\/v1$/, "");
-const KEY = process.env.LITELLM_API_KEY || "";
+const BASE = (process.env.LLMPROXY_BASE_URL || "").replace(/\/$/, "").replace(/\/v1$/, "");
+const KEY = process.env.LLMPROXY_MASTER_KEY || "";
 
 export function litellmConfigured(): boolean {
   return Boolean(BASE && KEY);
@@ -60,8 +60,8 @@ const MAX_KEY_PAGES = 200; // hard backstop — 20k keys is far beyond any real 
  * "Not linked" rather than 500 the whole list when the proxy is flaky.
  *
  * Filtered server-side to agentfarm- keys via key_alias + substring_matching,
- * which LiteLLM only honors for proxy_admin-role callers (LITELLM_API_KEY is
- * the proxy master key) — a narrower key would silently get zero results.
+ * which LiteLLM only honors for proxy_admin-role callers (LLMPROXY_MASTER_KEY
+ * is the proxy master key) — a narrower key would silently get zero results.
  */
 export async function listLiteLlmKeys(): Promise<LiteLlmKey[]> {
   if (!litellmConfigured()) return [];

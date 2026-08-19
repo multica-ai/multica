@@ -56,9 +56,9 @@ spec:
             - name: http
               containerPort: 3002
               protocol: TCP
-          # LITELLM_BASE_URL / LITELLM_API_KEY / ADMIN_ALLOW_UNSAFE_NO_AUTH
-          # come from here (SSM /agentfarm/tools/<NAME>) — none exist yet.
-          # Until LITELLM_BASE_URL/LITELLM_API_KEY are provisioned, the app
+          # LLMPROXY_BASE_URL / LLMPROXY_MASTER_KEY / ADMIN_ALLOW_UNSAFE_NO_AUTH
+          # come from here (SSM /agentfarm/tools/<NAME>).
+          # Until LLMPROXY_BASE_URL/LLMPROXY_MASTER_KEY are provisioned, the app
           # just shows LiteLLM sections as "not linked" (see
           # apps/admin/lib/litellm.ts's litellmConfigured() guard) — that's
           # a soft-fail, safe to deploy without them. ADMIN_ALLOW_UNSAFE_NO_AUTH
