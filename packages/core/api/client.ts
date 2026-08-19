@@ -148,9 +148,12 @@ import type {
   WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  PluginHookResult,
   PluginInstallation,
   PluginInstallationListResponse,
+  PluginInvocation,
   PluginPreview,
+  PluginTokenIssue,
   PluginPreviewRequest,
   PluginInstallRequest,
   PluginConfigRequest,
@@ -389,7 +392,10 @@ import {
   EMPTY_WORKSPACE_MCP_SERVER,
   EMPTY_PLUGIN_INSTALLATION_LIST,
   EMPTY_PLUGIN_PREVIEW,
+  PluginHookResultSchema,
   PluginInstallationListResponseSchema,
+  PluginInvocationListSchema,
+  PluginTokenIssueSchema,
   PluginInstallationSchema,
   PluginPreviewSchema,
   WorkspaceMcpServerListSchema,
@@ -2495,6 +2501,54 @@ export class ApiClient {
       headers: { "X-Multica-Plugin-Installation": installationId },
       body: request.body === undefined ? undefined : JSON.stringify(request.body),
     });
+  }
+
+  /**
+   * Invokes one hook on behalf of a person.
+   *
+   * `ui` comes from a button inside a surface, `manual` from the issue actions
+   * menu or the command palette. Both block this request and only this request:
+   * somebody is waiting for the answer. The `event` trigger never comes through
+   * here — the host dispatches it, so no client can ask for one and inherit an
+   * identity that is supposed to be the plugin's.
+   */
+  async invokePluginHook(
+    installationId: string,
+    hookKey: string,
+    request: { trigger: "ui" | "manual"; issueId?: string; input?: unknown },
+  ): Promise<PluginHookResult> {
+    const raw = await this.fetch<unknown>(`/api/v1/plugin/hooks/${encodeURIComponent(hookKey)}`, {
+      method: "POST",
+      headers: { "X-Multica-Plugin-Installation": installationId },
+      body: JSON.stringify({ trigger: request.trigger, issue_id: request.issueId, input: request.input }),
+    });
+    return parseWithFallback(raw, PluginHookResultSchema, {
+      status: "ok",
+      hook_key: hookKey,
+      trigger: request.trigger,
+      latency_ms: 0,
+      attempts: 1,
+    }, { endpoint: "POST /api/v1/plugin/hooks/{key}" });
+  }
+
+  async listPluginInvocations(workspaceId: string, installationId: string): Promise<PluginInvocation[]> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/invocations`);
+    return parseWithFallback(raw, PluginInvocationListSchema, { invocations: [] }, {
+      endpoint: "GET /api/workspaces/{id}/plugins/{installationId}/invocations",
+    }).invocations;
+  }
+
+  async rotatePluginToken(workspaceId: string, installationId: string): Promise<PluginTokenIssue> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/token`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, PluginTokenIssueSchema, { token: "", signing_secret: "" }, {
+      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/token",
+    });
+  }
+
+  async revokePluginToken(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/plugins/${installationId}/token`, { method: "DELETE" });
   }
 
   async uninstallPlugin(workspaceId: string, installationId: string): Promise<void> {

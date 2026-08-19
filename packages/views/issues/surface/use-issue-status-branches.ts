@@ -13,7 +13,7 @@ import {
   type UseQueryResult,
 } from "@tanstack/react-query";
 import { ALL_STATUSES } from "@multica/core/issues/config";
-import { statusCategoryOfKey } from "@multica/core/issues";
+import { issueColumnCategory } from "@multica/core/issues";
 import type { IssueStatusCatalog } from "@multica/core/issue-statuses";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import {
@@ -117,19 +117,6 @@ function rebaseCursorState(
 }
 
 /**
- * The column an issue belongs to.
- *
- * `status_category` is filled by the server for every issue payload, so this is
- * a plain read in the normal case. The fallback covers a row that predates the
- * field (an older backend, or an optimistic client-side patch): a built-in key
- * IS its own category, so it still resolves exactly, and a custom key with no
- * category lands in `todo` rather than disappearing.
- */
-function rowCategory(issue: Issue): IssueStatusCategory {
-  return issue.status_category ?? statusCategoryOfKey(issue.status);
-}
-
-/**
  * Per-column totals from the server's status facet.
  *
  * The facet is keyed by concrete status KEY, while columns are categories, so
@@ -142,14 +129,27 @@ function rowCategory(issue: Issue): IssueStatusCategory {
  * header is worse than a total that is briefly one card short. Before the
  * catalog loads there is nothing to fold, so only built-ins are counted — which
  * is exactly the pre-feature behavior. (MUL-6243)
+ *
+ * The status facet is DISJUNCTIVE — the server answers it with the status
+ * filter dropped, so the filter menu can show what each option would select.
+ * A column header is the opposite question, so an active filter narrows the
+ * fold to the keys it selected. Without that, filtering by one custom status
+ * headed the In Review column with every in_review issue (220) above the 5
+ * cards that actually matched. (MUL-6409)
  */
 function statusCountsFromFacets(
   facets: IssueTableFacetsResponse | undefined,
   catalog: Pick<IssueStatusCatalog, "entryOf" | "isLoaded">,
+  selectedStatuses: readonly string[] | undefined,
 ) {
   const counts = new Map<IssueStatusCategory, number>();
+  const selected =
+    selectedStatuses && selectedStatuses.length > 0
+      ? new Set(selectedStatuses)
+      : null;
   const statusFacet = facets?.facets.find((facet) => facet.kind === "status");
   for (const value of statusFacet?.values ?? []) {
+    if (selected && !selected.has(value.key)) continue;
     const builtIn = ALL_STATUSES.find((category) => category === value.key);
     const category = builtIn ?? (catalog.isLoaded ? catalog.entryOf(value.key)?.category : undefined);
     if (!category || !ALL_STATUSES.includes(category)) continue;
@@ -328,7 +328,7 @@ export function useIssueStatusBranches({
           // patched card under a column it no longer belongs to. The comparison
           // is against the CATEGORY, so a custom status stays in its column
           // instead of being dropped for not equalling the column key.
-          if (rowCategory(row.issue) !== target.status) continue;
+          if (issueColumnCategory(row.issue) !== target.status) continue;
           if (seen.has(row.issue.id)) continue;
           seen.add(row.issue.id);
           current.rows.push(row.issue);
@@ -395,8 +395,8 @@ export function useIssueStatusBranches({
   ]);
 
   const counts = useMemo(
-    () => statusCountsFromFacets(facets, catalog),
-    [facets, catalog],
+    () => statusCountsFromFacets(facets, catalog, query.filters.statuses),
+    [facets, catalog, query.filters.statuses],
   );
   const loadMore = useCallback(
     (status: IssueStatusCategory) => {

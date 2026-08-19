@@ -277,6 +277,13 @@ export interface TaskMessagePayload {
   input?: Record<string, unknown>;
   output?: string;
   created_at?: string;
+  /**
+   * Set when the server clipped `input` / `output` for the realtime fanout
+   * (MUL-6396). The persisted row is untouched — a client that needs the full
+   * text refetches it from the task-messages endpoint. Never set on REST
+   * responses.
+   */
+  truncated?: boolean;
 }
 
 export interface TaskQueuedPayload {

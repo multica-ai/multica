@@ -56,7 +56,9 @@ import {
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
 import {
+  backfillTaskMessages,
   chatKeys,
+  isTaskMessageTimelineHeld,
   mergeTaskMessagesBySeq,
   sortChatSessions,
   QUICK_ACTIONS_PENDING_TIMEOUT_MS,
@@ -117,6 +119,18 @@ import type {
 } from "../types";
 
 const chatWsLogger = createLogger("chat.ws");
+
+/**
+ * Window over which incoming `task:message` frames are batched into a single
+ * timeline cache write (MUL-6396).
+ *
+ * A fixed window, armed on the first frame and not reset by later ones, so a
+ * sustained stream still lands every 100ms rather than being deferred until
+ * the stream pauses. Short enough that streamed text still reads as live;
+ * long enough that a run emitting several frames per second costs one merge
+ * and one render instead of one per frame.
+ */
+const TASK_MESSAGE_FLUSH_MS = 100;
 
 const logger = createLogger("realtime-sync");
 
@@ -1291,12 +1305,83 @@ export function useRealtimeSync(
     // task:completed / task:failed invalidate messages + pending-task so the
     // DB remains authoritative.
 
+    // Two guards stand between the workspace-wide message firehose and the
+    // renderer (MUL-6396). `task:message` is broadcast to EVERY client for
+    // EVERY run in the workspace, but only the handful of runs a user actually
+    // opens is ever rendered:
+    //
+    // 1. Frames are kept only for a task this client already holds a timeline
+    //    entry for — opened at some point, and not yet garbage-collected. The
+    //    old `(old = [])` default built that entry on first sight instead, so
+    //    every client accumulated the transcript of every run its user would
+    //    never open, unbounded tool input included.
+    // 2. Frames that survive that gate are coalesced into one cache write per
+    //    window, so a burst costs one merge and one render instead of N.
+    //
+    // The entry can be collected between the two, which is why the flush
+    // re-checks rather than trusting the gate — see flushTaskMessages.
+    const taskMessageBatches = new Map<string, TaskMessagePayload[]>();
+    const truncatedTaskIds = new Set<string>();
+    let taskMessageFlushTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const flushTaskMessages = () => {
+      taskMessageFlushTimer = null;
+
+      for (const [taskId, batch] of taskMessageBatches) {
+        // Re-check, because holding was last verified up to a window ago and
+        // `setQueryData` does NOT postpone garbage collection — query-core arms
+        // that timer when the last observer leaves and never again on write.
+        // Closing a transcript while its run keeps streaming therefore has the
+        // entry disappear mid-window, and writing then REBUILDS it holding only
+        // this batch. With the app-wide `staleTime: Infinity` the next open
+        // would read that stub as fresh and never fetch, so everything before
+        // it would be missing until the window is reloaded. Dropping the batch
+        // instead costs nothing: the rows are persisted, so the next open
+        // fetches the whole timeline.
+        if (!isTaskMessageTimelineHeld(qc, taskId)) {
+          truncatedTaskIds.delete(taskId);
+          continue;
+        }
+        qc.setQueryData<TaskMessagePayload[]>(
+          chatKeys.taskMessages(taskId),
+          (old = []) => mergeTaskMessagesBySeq(old, batch),
+        );
+      }
+      taskMessageBatches.clear();
+
+      // A truncated frame carries clipped tool input/output — the full row
+      // lives only in the DB, and `taskMessagesOptions` is staleTime:Infinity,
+      // so nothing would ever replace the clipped copy on its own. Backfill
+      // once per flush, not once per frame: a run writing several large files
+      // in a row would otherwise queue a fetch for each one.
+      for (const taskId of truncatedTaskIds) {
+        void backfillTaskMessages(qc, taskId).catch((err: unknown) => {
+          chatWsLogger.debug("task:message backfill failed", {
+            task_id: taskId,
+            error: err,
+          });
+        });
+      }
+      truncatedTaskIds.clear();
+    };
+
     const unsubTaskMessage = ws.on("task:message", (p) => {
       const payload = p as TaskMessagePayload;
-      qc.setQueryData<TaskMessagePayload[]>(
-        chatKeys.taskMessages(payload.task_id),
-        (old = []) => mergeTaskMessagesBySeq(old, [payload]),
-      );
+      // Cheap Map lookup, and it runs before anything allocates — this is the
+      // hot path for every run in the workspace, not just the visible ones.
+      if (!isTaskMessageTimelineHeld(qc, payload.task_id)) return;
+
+      const batch = taskMessageBatches.get(payload.task_id);
+      if (batch) batch.push(payload);
+      else taskMessageBatches.set(payload.task_id, [payload]);
+      if (payload.truncated) truncatedTaskIds.add(payload.task_id);
+
+      // Fixed window, not a resetting debounce: a continuous stream must still
+      // flush every TASK_MESSAGE_FLUSH_MS instead of being starved until a gap.
+      if (!taskMessageFlushTimer) {
+        taskMessageFlushTimer = setTimeout(flushTaskMessages, TASK_MESSAGE_FLUSH_MS);
+      }
+
       chatWsLogger.debug("task:message (global)", {
         task_id: payload.task_id,
         seq: payload.seq,
@@ -1638,6 +1723,7 @@ export function useRealtimeSync(
       unsubChatSessionRead();
       unsubChatSessionDeleted();
       unsubChatSessionUpdated();
+      if (taskMessageFlushTimer) clearTimeout(taskMessageFlushTimer);
       if (aggregateRefreshTimer) clearTimeout(aggregateRefreshTimer);
       timers.forEach(clearTimeout);
       timers.clear();

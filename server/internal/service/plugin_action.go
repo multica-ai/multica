@@ -25,6 +25,15 @@ type PluginActionCaller struct {
 	// Scopes is the consented set, read from the installation row rather than
 	// from the manifest the source URL serves today.
 	Scopes []string
+	// IssueScope, when set, is the ONLY issue this caller may touch.
+	//
+	// Set for a callback token issued against a specific issue. A hook called
+	// about one issue has no business reaching another: without this the grant
+	// is worth every issue in the workspace that its actor can see, for the
+	// whole five minutes it lives. Zero means unrestricted — a session caller,
+	// or an invocation that had no issue — and the ordinary workspace and
+	// membership checks still apply on top.
+	IssueScope pgtype.UUID
 }
 
 // AuthorizePluginAction performs the two checks that belong to the plugin: the
@@ -93,11 +102,17 @@ func parseInstallationID(value string) (pgtype.UUID, error) {
 // because it contains nothing the user in front of the iframe cannot already
 // see on the page around it.
 type PluginContext struct {
-	Workspace   PluginContextWorkspace `json:"workspace"`
-	User        PluginContextUser      `json:"user"`
-	Issue       *PluginContextIssue    `json:"issue,omitempty"`
-	Config      map[string]any         `json:"config"`
-	GrantedURLs []string               `json:"granted_net_domains"`
+	Workspace PluginContextWorkspace `json:"workspace"`
+	// User is absent when the caller is the plugin itself — an event hook or a
+	// standing install token has no person behind it, and inventing one here
+	// would let a handler believe it is acting for somebody.
+	User        *PluginContextUser  `json:"user,omitempty"`
+	Issue       *PluginContextIssue `json:"issue,omitempty"`
+	Config      map[string]any      `json:"config"`
+	GrantedURLs []string            `json:"granted_net_domains"`
+	// Actor names which of the two it is, so a handler can branch without
+	// inferring it from a missing field.
+	Actor string `json:"actor"`
 }
 
 type PluginContextWorkspace struct {
@@ -122,7 +137,7 @@ type PluginContextIssue struct {
 // BuildPluginContext assembles the context payload. Config carries only the
 // non-secret installation values — secrets live in their own table and have no
 // read path, so there is no way for one to reach the iframe.
-func (s *PluginService) BuildPluginContext(caller PluginActionCaller, workspace db.Workspace, user db.User, issue *db.Issue) PluginContext {
+func (s *PluginService) BuildPluginContext(caller PluginActionCaller, workspace db.Workspace, user *db.User, issue *db.Issue) PluginContext {
 	config := map[string]any{}
 	if len(caller.Installation.Config) > 0 {
 		_ = json.Unmarshal(caller.Installation.Config, &config)
@@ -134,12 +149,16 @@ func (s *PluginService) BuildPluginContext(caller PluginActionCaller, workspace 
 			Name: workspace.Name,
 			Slug: workspace.Slug,
 		},
-		User: PluginContextUser{
-			ID:   uuidString(user.ID),
-			Name: user.Name,
-		},
 		Config:      config,
 		GrantedURLs: plugincontract.NetDomains(caller.Scopes),
+		Actor:       "plugin",
+	}
+	if user != nil {
+		payload.Actor = "member"
+		payload.User = &PluginContextUser{
+			ID:   uuidString(user.ID),
+			Name: user.Name,
+		}
 	}
 	if issue != nil {
 		payload.Issue = &PluginContextIssue{

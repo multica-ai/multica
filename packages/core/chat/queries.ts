@@ -1,4 +1,4 @@
-import { infiniteQueryOptions, queryOptions } from "@tanstack/react-query";
+import { infiniteQueryOptions, queryOptions, type QueryClient } from "@tanstack/react-query";
 import { api } from "../api";
 import type { TaskMessagePayload } from "../types/events";
 import type {
@@ -201,6 +201,15 @@ export function taskMessagesOptions(taskId: string) {
     queryFn: () => api.listTaskMessages(taskId),
     enabled: isTaskMessageTaskId(taskId),
     staleTime: Infinity,
+    // Every write to this cache — this fetch, a backfill, or a realtime batch —
+    // folds into what is already there instead of replacing it. Without this a
+    // response that resolves after a live frame was written would drop that
+    // seq, and staleTime:Infinity means nothing would ever fetch it again.
+    structuralSharing: (prev, next) =>
+      unionTaskMessagesBySeq(
+        prev as TaskMessagePayload[] | undefined,
+        next as TaskMessagePayload[],
+      ),
   });
 }
 
@@ -225,6 +234,99 @@ export function mergeTaskMessagesBySeq(
   const fresh = incoming.filter((m) => !knownSeqs.has(m.seq));
   if (fresh.length === 0) return existing as TaskMessagePayload[];
   return [...existing, ...fresh].sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * Union two task-message lists by seq, with `authoritative` winning on conflict.
+ *
+ * This is the rule every write to the `["task-messages", taskId]` cache goes
+ * through, wired in as `structuralSharing` on the query itself so a fetch
+ * result cannot replace the array wholesale.
+ *
+ * That matters because a normal query response and the realtime stream race:
+ * the timeline is fetched on first open, and any frame that arrives while that
+ * request is in flight is written to the cache before the response lands. A
+ * plain replace would drop those seqs, and `staleTime: Infinity` means nothing
+ * would ever refetch them — the gap would survive until a reload.
+ *
+ * Server data wins on conflict because the persisted row is the authority: a
+ * broadcast copy may have been clipped for the fanout, and the fetched row
+ * never is. Rows the response did not mention are kept rather than deleted —
+ * a response snapshotted before a seq was persisted must not erase it.
+ *
+ * The `base` reference is returned unchanged when nothing differs, so an event
+ * that adds nothing does not re-render every subscriber.
+ */
+export function unionTaskMessagesBySeq(
+  base: readonly TaskMessagePayload[] | undefined,
+  authoritative: readonly TaskMessagePayload[],
+): TaskMessagePayload[] {
+  if (!base || base.length === 0) {
+    return [...authoritative].sort((a, b) => a.seq - b.seq);
+  }
+
+  const bySeq = new Map(base.map((m) => [m.seq, m]));
+  let changed = false;
+  for (const msg of authoritative) {
+    if (bySeq.get(msg.seq) !== msg) {
+      bySeq.set(msg.seq, msg);
+      changed = true;
+    }
+  }
+  if (!changed) return base as TaskMessagePayload[];
+  return [...bySeq.values()].sort((a, b) => a.seq - b.seq);
+}
+
+/**
+ * True when this client holds a timeline cache entry for `taskId` — i.e. the
+ * task was opened at some point and has not been garbage-collected since.
+ *
+ * Deliberately NOT "a view is mounted right now". Observer count would be a
+ * tighter bound but an unsafe one: with `staleTime: Infinity` a task that
+ * briefly drops to zero observers (an unmount/remount while navigating) would
+ * discard frames, and the remount would read the surviving cache as fresh and
+ * never fetch them back. Entry presence has no such gap — either the entry is
+ * there and keeps accumulating, or it is gone and the next open fetches the
+ * whole timeline. The cost is a bounded tail: writes do not postpone the GC
+ * timer, so an entry outlives its last viewer by at most one `gcTime`.
+ *
+ * The realtime layer uses this to decide whether a `task:message` frame is
+ * worth caching. Every client in the workspace receives every run's frames,
+ * but only a handful of runs are ever opened; without this gate every client
+ * accumulates the transcript of runs its user will never look at (MUL-6396).
+ *
+ * Presence, not data: mounting a `useQuery` registers the entry before the
+ * fetch resolves, so a frame that lands mid-backfill is still kept. Dropping
+ * a frame for an unregistered task is safe — the row is persisted before it
+ * is broadcast, so whoever opens the task next fetches it from the server.
+ */
+export function isTaskMessageTimelineHeld(
+  qc: QueryClient,
+  taskId: string,
+): boolean {
+  return qc.getQueryCache().find({ queryKey: chatKeys.taskMessages(taskId) }) !== undefined;
+}
+
+/**
+ * Refetch a task's full timeline and fold it into the cache.
+ *
+ * Used when a broadcast frame arrived `truncated`: the live copy carries
+ * clipped tool input/output and the full text exists only in the DB. Writing
+ * the fetched rows straight in is enough — `unionTaskMessagesBySeq`, installed
+ * as the query's `structuralSharing`, is what makes the fetched row replace the
+ * clipped one while keeping any seq the response had not yet seen.
+ */
+export async function backfillTaskMessages(
+  qc: QueryClient,
+  taskId: string,
+): Promise<void> {
+  if (!isTaskMessageTaskId(taskId)) return;
+  const msgs = await api.listTaskMessages(taskId);
+  // The entry can be collected while this request is open. Writing anyway
+  // would rebuild a timeline nothing is watching, re-arming another gcTime of
+  // accumulation for a task the user has already closed.
+  if (!isTaskMessageTimelineHeld(qc, taskId)) return;
+  qc.setQueryData<TaskMessagePayload[]>(chatKeys.taskMessages(taskId), msgs);
 }
 
 /**

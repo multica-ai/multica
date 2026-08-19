@@ -37,6 +37,28 @@ export function statusCategoryOfKey(statusKey: string): IssueStatusCategory {
 }
 
 /**
+ * The board/list/swimlane COLUMN an issue renders in — always an answer, never
+ * null (MUL-6409).
+ *
+ * Columns are categories while `issue.status` is a concrete KEY, and bucketing
+ * a card by its key against category columns is how a custom status made cards
+ * disappear: `status:awaiting_response` matched no column id, so the rows the
+ * server had correctly returned were dropped on the floor. Filtering the board
+ * by that status made it total — every card in the one visible column was
+ * custom, so the column rendered empty next to a non-zero header count.
+ *
+ * The unresolved-custom-key fallback lands in `todo` rather than nowhere: a
+ * card in a possibly-wrong column is recoverable, a card in no column is
+ * invisible. In practice it is unreachable — the server sends a category on
+ * every issue payload, and a built-in key IS its own category.
+ */
+export function issueColumnCategory(
+  issue: Pick<Issue, "status" | "status_category">,
+): IssueStatusCategory {
+  return issueStatusCategory(issue) ?? statusCategoryOfKey(issue.status);
+}
+
+/**
  * Rewrites a patch's `status_category` to match its `status`, before the patch
  * reaches any cache (MUL-6243).
  *

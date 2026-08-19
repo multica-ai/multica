@@ -11,11 +11,51 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countRecentPluginFailures = `-- name: CountRecentPluginFailures :one
+SELECT count(*) FROM plugin_invocation
+WHERE installation_id = $1 AND hook_key = $2 AND created_at > $3 AND status <> 'ok'
+`
+
+type CountRecentPluginFailuresParams struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	HookKey        string             `json:"hook_key"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+// Consecutive-failure signal for the event circuit breaker. Bounded by time so
+// a breaker that tripped hours ago does not keep a hook shut forever.
+func (q *Queries) CountRecentPluginFailures(ctx context.Context, arg CountRecentPluginFailuresParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentPluginFailures, arg.InstallationID, arg.HookKey, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countRecentPluginInvocations = `-- name: CountRecentPluginInvocations :one
+SELECT count(*) FROM plugin_invocation
+WHERE installation_id = $1 AND hook_key = $2 AND created_at > $3
+`
+
+type CountRecentPluginInvocationsParams struct {
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	HookKey        string             `json:"hook_key"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+// Feeds the per-hook rate limit. Counts attempts, not distinct calls: a hook
+// retrying into a dead endpoint is exactly the traffic the limit exists to cap.
+func (q *Queries) CountRecentPluginInvocations(ctx context.Context, arg CountRecentPluginInvocationsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countRecentPluginInvocations, arg.InstallationID, arg.HookKey, arg.CreatedAt)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const createPluginInstallation = `-- name: CreatePluginInstallation :one
 INSERT INTO plugin_installation (
     workspace_id, plugin_key, source_url, version, manifest, granted_scopes, installed_by
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at
+RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at
 `
 
 type CreatePluginInstallationParams struct {
@@ -52,8 +92,71 @@ func (q *Queries) CreatePluginInstallation(ctx context.Context, arg CreatePlugin
 		&i.InstalledBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TokenHash,
+		&i.TokenRotatedAt,
 	)
 	return i, err
+}
+
+const createPluginInvocation = `-- name: CreatePluginInvocation :one
+INSERT INTO plugin_invocation (
+    installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error
+) VALUES ($1, $2, $3, $4, $5, $8, $6, $7, $9)
+RETURNING id, installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error, created_at
+`
+
+type CreatePluginInvocationParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	WorkspaceID    pgtype.UUID `json:"workspace_id"`
+	HookKey        string      `json:"hook_key"`
+	Trigger        string      `json:"trigger"`
+	Status         string      `json:"status"`
+	Attempt        int32       `json:"attempt"`
+	LatencyMs      int32       `json:"latency_ms"`
+	EventType      pgtype.Text `json:"event_type"`
+	Error          pgtype.Text `json:"error"`
+}
+
+func (q *Queries) CreatePluginInvocation(ctx context.Context, arg CreatePluginInvocationParams) (PluginInvocation, error) {
+	row := q.db.QueryRow(ctx, createPluginInvocation,
+		arg.InstallationID,
+		arg.WorkspaceID,
+		arg.HookKey,
+		arg.Trigger,
+		arg.Status,
+		arg.Attempt,
+		arg.LatencyMs,
+		arg.EventType,
+		arg.Error,
+	)
+	var i PluginInvocation
+	err := row.Scan(
+		&i.ID,
+		&i.InstallationID,
+		&i.WorkspaceID,
+		&i.HookKey,
+		&i.Trigger,
+		&i.Status,
+		&i.EventType,
+		&i.Attempt,
+		&i.LatencyMs,
+		&i.Error,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteExpiredPluginInvocations = `-- name: DeleteExpiredPluginInvocations :execrows
+DELETE FROM plugin_invocation WHERE created_at < $1
+`
+
+// TTL sweep. This table is operational telemetry, not history to keep.
+func (q *Queries) DeleteExpiredPluginInvocations(ctx context.Context, createdAt pgtype.Timestamptz) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteExpiredPluginInvocations, createdAt)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deletePluginInstallation = `-- name: DeletePluginInstallation :exec
@@ -62,6 +165,15 @@ DELETE FROM plugin_installation WHERE id = $1
 
 func (q *Queries) DeletePluginInstallation(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deletePluginInstallation, id)
+	return err
+}
+
+const deletePluginInvocationsByInstallation = `-- name: DeletePluginInvocationsByInstallation :exec
+DELETE FROM plugin_invocation WHERE installation_id = $1
+`
+
+func (q *Queries) DeletePluginInvocationsByInstallation(ctx context.Context, installationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deletePluginInvocationsByInstallation, installationID)
 	return err
 }
 
@@ -126,7 +238,7 @@ func (q *Queries) DeletePluginStorageValue(ctx context.Context, arg DeletePlugin
 }
 
 const getPluginInstallation = `-- name: GetPluginInstallation :one
-SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at FROM plugin_installation WHERE id = $1
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation WHERE id = $1
 `
 
 func (q *Queries) GetPluginInstallation(ctx context.Context, id pgtype.UUID) (PluginInstallation, error) {
@@ -145,6 +257,35 @@ func (q *Queries) GetPluginInstallation(ctx context.Context, id pgtype.UUID) (Pl
 		&i.InstalledBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TokenHash,
+		&i.TokenRotatedAt,
+	)
+	return i, err
+}
+
+const getPluginInstallationByTokenHash = `-- name: GetPluginInstallationByTokenHash :one
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation WHERE token_hash = $1
+`
+
+// Looked up by hash, so the plaintext token exists only in the caller's request.
+func (q *Queries) GetPluginInstallationByTokenHash(ctx context.Context, tokenHash pgtype.Text) (PluginInstallation, error) {
+	row := q.db.QueryRow(ctx, getPluginInstallationByTokenHash, tokenHash)
+	var i PluginInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.PluginKey,
+		&i.SourceUrl,
+		&i.Version,
+		&i.Manifest,
+		&i.GrantedScopes,
+		&i.Config,
+		&i.Enabled,
+		&i.InstalledBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TokenHash,
+		&i.TokenRotatedAt,
 	)
 	return i, err
 }
@@ -242,7 +383,7 @@ func (q *Queries) GetPluginStorageValue(ctx context.Context, arg GetPluginStorag
 }
 
 const getWorkspacePluginInstallation = `-- name: GetWorkspacePluginInstallation :one
-SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at FROM plugin_installation
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation
 WHERE workspace_id = $1 AND id = $2
 `
 
@@ -267,12 +408,14 @@ func (q *Queries) GetWorkspacePluginInstallation(ctx context.Context, arg GetWor
 		&i.InstalledBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TokenHash,
+		&i.TokenRotatedAt,
 	)
 	return i, err
 }
 
 const getWorkspacePluginInstallationByKey = `-- name: GetWorkspacePluginInstallationByKey :one
-SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at FROM plugin_installation
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation
 WHERE workspace_id = $1 AND plugin_key = $2
 `
 
@@ -297,8 +440,54 @@ func (q *Queries) GetWorkspacePluginInstallationByKey(ctx context.Context, arg G
 		&i.InstalledBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TokenHash,
+		&i.TokenRotatedAt,
 	)
 	return i, err
+}
+
+const listPluginInvocations = `-- name: ListPluginInvocations :many
+SELECT id, installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error, created_at FROM plugin_invocation
+WHERE installation_id = $1
+ORDER BY created_at DESC
+LIMIT $2
+`
+
+type ListPluginInvocationsParams struct {
+	InstallationID pgtype.UUID `json:"installation_id"`
+	Limit          int32       `json:"limit"`
+}
+
+func (q *Queries) ListPluginInvocations(ctx context.Context, arg ListPluginInvocationsParams) ([]PluginInvocation, error) {
+	rows, err := q.db.Query(ctx, listPluginInvocations, arg.InstallationID, arg.Limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []PluginInvocation{}
+	for rows.Next() {
+		var i PluginInvocation
+		if err := rows.Scan(
+			&i.ID,
+			&i.InstallationID,
+			&i.WorkspaceID,
+			&i.HookKey,
+			&i.Trigger,
+			&i.Status,
+			&i.EventType,
+			&i.Attempt,
+			&i.LatencyMs,
+			&i.Error,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listPluginSecretKeys = `-- name: ListPluginSecretKeys :many
@@ -374,7 +563,7 @@ func (q *Queries) ListPluginStorageKeys(ctx context.Context, arg ListPluginStora
 }
 
 const listWorkspacePluginInstallations = `-- name: ListWorkspacePluginInstallations :many
-SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at FROM plugin_installation
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -401,6 +590,8 @@ func (q *Queries) ListWorkspacePluginInstallations(ctx context.Context, workspac
 			&i.InstalledBy,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.TokenHash,
+			&i.TokenRotatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -417,7 +608,7 @@ UPDATE plugin_installation
 SET enabled = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at
+RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at
 `
 
 type SetPluginInstallationEnabledParams struct {
@@ -441,8 +632,26 @@ func (q *Queries) SetPluginInstallationEnabled(ctx context.Context, arg SetPlugi
 		&i.InstalledBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TokenHash,
+		&i.TokenRotatedAt,
 	)
 	return i, err
+}
+
+const setPluginInstallationToken = `-- name: SetPluginInstallationToken :exec
+UPDATE plugin_installation
+SET token_hash = $2, token_rotated_at = now(), updated_at = now()
+WHERE id = $1
+`
+
+type SetPluginInstallationTokenParams struct {
+	ID        pgtype.UUID `json:"id"`
+	TokenHash pgtype.Text `json:"token_hash"`
+}
+
+func (q *Queries) SetPluginInstallationToken(ctx context.Context, arg SetPluginInstallationTokenParams) error {
+	_, err := q.db.Exec(ctx, setPluginInstallationToken, arg.ID, arg.TokenHash)
+	return err
 }
 
 const updatePluginInstallationConfig = `-- name: UpdatePluginInstallationConfig :one
@@ -450,7 +659,7 @@ UPDATE plugin_installation
 SET config = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at
+RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at
 `
 
 type UpdatePluginInstallationConfigParams struct {
@@ -474,6 +683,8 @@ func (q *Queries) UpdatePluginInstallationConfig(ctx context.Context, arg Update
 		&i.InstalledBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TokenHash,
+		&i.TokenRotatedAt,
 	)
 	return i, err
 }
@@ -487,7 +698,7 @@ SET source_url = $2,
     config = $6,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at
+RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at
 `
 
 type UpdatePluginInstallationManifestParams struct {
@@ -525,6 +736,8 @@ func (q *Queries) UpdatePluginInstallationManifest(ctx context.Context, arg Upda
 		&i.InstalledBy,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.TokenHash,
+		&i.TokenRotatedAt,
 	)
 	return i, err
 }

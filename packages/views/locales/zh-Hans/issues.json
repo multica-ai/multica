@@ -639,7 +639,7 @@
       "archived_hint": "已归档属性——值为只读",
       "unknown_value": "无法显示",
       "unknown_value_hint": "该值由更新版本的 Multica 设置，当前版本无法编辑——请更新应用，或清除该值",
-      "none": "无值"
+      "none": "未设置"
     },
     "filter_options_aria": "筛选选项",
     "no_results": "无结果",
@@ -776,6 +776,11 @@
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}} 的界面加载失败。",
-    "surface_local_only": "{{name}} 是从本地源安装的，界面无法在浏览器里加载。"
+    "surface_local_only": "{{name}} 是从本地源安装的，界面无法在浏览器里加载。",
+    "hook_succeeded": "{{name}} 已完成。",
+    "hook_failed": "{{name}} 执行失败。",
+    "hook_refused": "{{name}} 未被执行。",
+    "hook_activity": "最近调用",
+    "hook_never_run": "该 hook 尚未运行过。"
   }
 }

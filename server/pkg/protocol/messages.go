@@ -171,6 +171,13 @@ type TaskMessagePayload struct {
 	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
 	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)
 	CreatedAt string         `json:"created_at,omitempty"`
+
+	// Truncated marks a payload whose Input/Output were clipped for the
+	// realtime fanout (MUL-6396). The REST list endpoints never set it — they
+	// always return the full persisted row — so a client that sees it knows
+	// the authoritative content is one GET away. Clients render the clipped
+	// text immediately and backfill the full row in the background.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.

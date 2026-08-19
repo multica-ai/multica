@@ -207,6 +207,8 @@ var concurrentIndexCleanups = map[string]string{
 	"357_webhook_delivery_replay_idempotency_index":             "uq_webhook_delivery_replay_idempotency",
 	"358_autopilot_quota_reservation_state_index":               "idx_autopilot_quota_reservation_state",
 	"361_issue_last_activity_index":                             "idx_issue_workspace_last_activity",
+	"363_plugin_invocation_installation_index":                  "idx_plugin_invocation_installation_created",
+	"364_plugin_invocation_created_at_index":                    "idx_plugin_invocation_created_at",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

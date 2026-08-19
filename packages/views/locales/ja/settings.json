@@ -159,30 +159,102 @@
       "navigation": "ナビゲーション"
     },
     "actions": {
-      "openSearch": { "label": "検索を開く", "description": "どこからでも検索やコマンドを実行します。" },
-      "createIssue": { "label": "タスクを作成", "description": "優先するタスク作成フローを開きます。" },
-      "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
-      "toggleChat": { "label": "チャットウィンドウを切り替え", "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。" },
-      "findInIssue": { "label": "タスク内を検索", "description": "開いているタスクの詳細を検索します。" },
-      "openThreadNav": { "label": "スレッドナビゲーターを開く", "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。" },
-      "scrollToTop": { "label": "先頭へスクロール", "description": "開いているタスクのタイムラインを先頭までスクロールします。" },
-      "scrollToBottom": { "label": "最下部へスクロール", "description": "開いているタスクのタイムラインを最下部（最新のアクティビティ）までスクロールします。" },
-      "archiveInboxItem": { "label": "通知をアーカイブ", "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。" },
-      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。" },
-      "goBack": { "label": "戻る", "description": "ブラウザーのように履歴を戻ります。" },
-      "goForward": { "label": "進む", "description": "ブラウザーのように履歴を進みます。" },
-      "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
-      "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
-      "goMyIssues": { "label": "自分のタスクへ移動", "description": "自分に割り当てられたタスクを開きます。" },
-      "goIssues": { "label": "タスクへ移動", "description": "タスク一覧を開きます。" },
-      "goProjects": { "label": "プロジェクトへ移動", "description": "プロジェクト一覧を開きます。" },
-      "goAutopilots": { "label": "自動化へ移動", "description": "ワークスペースの自動化を開きます。" },
-      "goAgents": { "label": "エージェントへ移動", "description": "エージェント一覧を開きます。" },
-      "goSquads": { "label": "Squadsへ移動", "description": "Squad一覧を開きます。" },
-      "goUsage": { "label": "使用量へ移動", "description": "使用量分析を開きます。" },
-      "goRuntimes": { "label": "ランタイムへ移動", "description": "ランタイム設定を開きます。" },
-      "goSkills": { "label": "Skillsへ移動", "description": "Skillライブラリを開きます。" },
-      "goSettings": { "label": "設定へ移動", "description": "ワークスペース設定を開きます。" }
+      "openSearch": {
+        "label": "検索を開く",
+        "description": "どこからでも検索やコマンドを実行します。"
+      },
+      "createIssue": {
+        "label": "タスクを作成",
+        "description": "優先するタスク作成フローを開きます。"
+      },
+      "toggleSidebar": {
+        "label": "サイドバーを切り替え",
+        "description": "メインサイドバーの表示を切り替えます。"
+      },
+      "toggleChat": {
+        "label": "チャットウィンドウを切り替え",
+        "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。"
+      },
+      "findInIssue": {
+        "label": "タスク内を検索",
+        "description": "開いているタスクの詳細を検索します。"
+      },
+      "openThreadNav": {
+        "label": "スレッドナビゲーターを開く",
+        "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。"
+      },
+      "scrollToTop": {
+        "label": "先頭へスクロール",
+        "description": "開いているタスクのタイムラインを先頭までスクロールします。"
+      },
+      "scrollToBottom": {
+        "label": "最下部へスクロール",
+        "description": "開いているタスクのタイムラインを最下部（最新のアクティビティ）までスクロールします。"
+      },
+      "archiveInboxItem": {
+        "label": "通知をアーカイブ",
+        "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。"
+      },
+      "send": {
+        "label": "送信",
+        "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。"
+      },
+      "goBack": {
+        "label": "戻る",
+        "description": "ブラウザーのように履歴を戻ります。"
+      },
+      "goForward": {
+        "label": "進む",
+        "description": "ブラウザーのように履歴を進みます。"
+      },
+      "goInbox": {
+        "label": "受信トレイへ移動",
+        "description": "ワークスペースの受信トレイを開きます。"
+      },
+      "goChat": {
+        "label": "チャットへ移動",
+        "description": "ワークスペースのチャットを開きます。"
+      },
+      "goMyIssues": {
+        "label": "自分のタスクへ移動",
+        "description": "自分に割り当てられたタスクを開きます。"
+      },
+      "goIssues": {
+        "label": "タスクへ移動",
+        "description": "タスク一覧を開きます。"
+      },
+      "goProjects": {
+        "label": "プロジェクトへ移動",
+        "description": "プロジェクト一覧を開きます。"
+      },
+      "goAutopilots": {
+        "label": "自動化へ移動",
+        "description": "ワークスペースの自動化を開きます。"
+      },
+      "goAgents": {
+        "label": "エージェントへ移動",
+        "description": "エージェント一覧を開きます。"
+      },
+      "goSquads": {
+        "label": "Squadsへ移動",
+        "description": "Squad一覧を開きます。"
+      },
+      "goUsage": {
+        "label": "使用量へ移動",
+        "description": "使用量分析を開きます。"
+      },
+      "goRuntimes": {
+        "label": "ランタイムへ移動",
+        "description": "ランタイム設定を開きます。"
+      },
+      "goSkills": {
+        "label": "Skillsへ移動",
+        "description": "Skillライブラリを開きます。"
+      },
+      "goSettings": {
+        "label": "設定へ移動",
+        "description": "ワークスペース設定を開きます。"
+      }
     },
     "fixed": {
       "title": "固定のシステムショートカット",
@@ -260,9 +332,9 @@
       "issue_statuses": "ステータス",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
-    "plugins": "Plugins",
-    "mcp": "MCP",
-    "billing": "請求とプラン"
+      "plugins": "Plugins",
+      "mcp": "MCP",
+      "billing": "請求とプラン"
     }
   },
   "plugins": {
@@ -326,7 +398,9 @@
       "storage_workspace": "ワークスペース共有のデータを保存する",
       "net": "{{domain}} にデータを送信する",
       "unknown": "認識できない権限です — インストールしないでください"
-    }
+    },
+    "hook_circuit_open": "連続失敗のためフックの配信を停止しました。",
+    "hook_recent_failures": "最近 {{count}} 件のフック呼び出しが失敗しました。"
   },
   "properties": {
     "title": "プロパティ",

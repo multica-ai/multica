@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
-import { render } from "@testing-library/react";
+import { cleanup, render } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { RESOURCES } from "@multica/views/locales";
@@ -77,6 +77,7 @@ vi.mock("@multica/views/platform", () => ({
 vi.mock("@multica/views/layout", () => ({
   AppSidebar: () => <div data-testid="app-sidebar" />,
   GlobalShortcuts: () => <div data-testid="global-shortcuts" />,
+  NavigationProgress: () => <div data-testid="navigation-progress" />,
 }));
 
 vi.mock("@multica/views/modals/registry", () => ({
@@ -169,6 +170,19 @@ describe("DesktopShell workspace gating", () => {
     const { queryByTestId } = renderShell();
 
     expect(queryByTestId("tab-content")).not.toBeNull();
+  });
+
+  // The shell had no navigation feedback at all before MUL-6404 — the bar
+  // only ever shipped inside web's DashboardLayout. It sits beside TabContent
+  // in the canvas and, like it, is not workspace-gated: a cold workspace
+  // resolve is exactly when the wait is longest.
+  it("mounts the navigation progress bar, workspace or not", () => {
+    expect(renderShell().queryByTestId("navigation-progress")).not.toBeNull();
+
+    cleanup();
+    state.wsList = [];
+
+    expect(renderShell().queryByTestId("navigation-progress")).not.toBeNull();
   });
 
   it("drops chrome for a slug belonging to a workspace the user lost access to", () => {

@@ -159,6 +159,46 @@ export const EMPTY_PLUGIN_INSTALLATION_LIST: PluginInstallationListResponse = {
   plugins: [],
 };
 
+/**
+ * One completed hook call. `status` is the host's classification, not the
+ * endpoint's: "refused" means we declined to make the call at all, which is a
+ * different problem for the reader than an endpoint that answered badly.
+ */
+export const PluginHookResultSchema = z.object({
+  status: z.string().default("ok"),
+  output: z.unknown().optional(),
+  error: z.string().optional(),
+  latency_ms: z.number().default(0),
+  hook_key: z.string().default(""),
+  trigger: z.string().default(""),
+  attempts: z.number().default(1),
+}).loose();
+
+export const PluginInvocationSchema = z.object({
+  id: z.string().default(""),
+  hook_key: z.string().default(""),
+  trigger: z.string().default(""),
+  status: z.string().default(""),
+  event_type: z.string().optional(),
+  attempt: z.number().default(1),
+  latency_ms: z.number().default(0),
+  error: z.string().optional(),
+  created_at: z.string().default(""),
+}).loose();
+
+export const PluginInvocationListSchema = z.object({
+  invocations: z.array(PluginInvocationSchema).default([]),
+}).loose();
+
+/**
+ * Returned once, by the request that minted it. There is no read endpoint for
+ * either value, so a client that discards this cannot recover it.
+ */
+export const PluginTokenIssueSchema = z.object({
+  token: z.string().default(""),
+  signing_secret: z.string().default(""),
+}).loose();
+
 export const PluginManifestSummarySchema = z.object({
   key: z.string().default(""),
   name: z.string().default(""),

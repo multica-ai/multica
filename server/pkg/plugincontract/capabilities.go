@@ -27,13 +27,23 @@ type Capabilities struct {
 // resources land with the agent integration.
 func HostCapabilities() Capabilities {
 	return Capabilities{
-		// issue_panel only: PluginPanelSection is the one mount point that exists.
-		// sidebar_panel has no host location yet, and enabling a surface the host
-		// cannot render installs a plugin that silently never appears — precisely
-		// what this gate exists to prevent.
-		SurfaceTypes:  map[string]bool{SurfaceIssuePanel: true},
-		HookTriggers:  map[string]bool{},
-		HookTransport: map[string]bool{},
+		// issue_panel mounts in PluginPanelSection; modal opens from a manual
+		// hook action. sidebar_panel stays off — it has no host location, and
+		// enabling a surface the host cannot render installs a plugin that
+		// silently never appears, which is precisely what this gate prevents.
+		SurfaceTypes: map[string]bool{
+			SurfaceIssuePanel: true,
+			SurfaceModal:      true,
+		},
+		// The agent trigger is not a fourth call site the host drives; it is a
+		// hook exposed to an agent as an MCP tool, which needs the daemon-side
+		// server that lands with the agent integration.
+		HookTriggers: map[string]bool{
+			TriggerUI:     true,
+			TriggerManual: true,
+			TriggerEvent:  true,
+		},
+		HookTransport: map[string]bool{TransportHTTP: true},
 		ResourceTypes: map[string]bool{},
 	}
 }

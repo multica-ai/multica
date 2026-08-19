@@ -533,6 +533,7 @@ function ActivityBlock({
   getActorName,
   resolveStatusLabel,
   resolveStatusCategory,
+  resolveStatusColor,
   t,
   timeAgo,
 }: {
@@ -548,6 +549,8 @@ function ActivityBlock({
   getActorName: (type: string, id: string) => string;
   resolveStatusLabel: (statusKey: string) => string;
   resolveStatusCategory: (statusKey: string) => IssueStatusCategory;
+  /** A custom status's own `#rrggbb`; null for built-ins and unknown keys. */
+  resolveStatusColor: (statusKey: string) => string | null;
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
 }) {
@@ -614,6 +617,7 @@ function ActivityBlock({
             <StatusIcon
               status={details.to as IssueStatus}
               category={resolveStatusCategory(details.to ?? "")}
+              color={resolveStatusColor(details.to ?? "")}
               className="h-4 w-4 shrink-0"
             />
           );
@@ -1135,7 +1139,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const resolveStatusLabel = useStatusLabel(wsId);
-  const { categoryOf: resolveStatusCategory } = useIssueStatuses(wsId);
+  const { categoryOf: resolveStatusCategory, entryOf: statusEntryOf } =
+    useIssueStatuses(wsId);
+  // The glyph set is per CATEGORY (MUL-6243), so a status-change entry for a
+  // custom status drew the same icon as the built-in it sits beside — an
+  // "In Review → Awaiting Response" line looked like nothing had moved. Colour
+  // is what carries a custom status's own identity, as the inbox row and the
+  // status-changed detail label already render it. Built-ins resolve to null so
+  // they keep their semantic token rather than the catalog's English seed hex.
+  const resolveStatusColor = useCallback(
+    (statusKey: string): string | null => {
+      const entry = statusEntryOf(statusKey);
+      if (!entry || entry.is_system === true) return null;
+      return entry.color;
+    },
+    [statusEntryOf],
+  );
   // Description autosave is deliberately NOT gated (no explicit submit; the
   // editor already strips `blob:` before serializing and binds ids on the
   // later save). It still needs the failure toast, or a failed upload just
@@ -2731,6 +2750,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         getActorName={getActorName}
         resolveStatusLabel={resolveStatusLabel}
         resolveStatusCategory={resolveStatusCategory}
+        resolveStatusColor={resolveStatusColor}
         t={t}
         timeAgo={timeAgo}
       />

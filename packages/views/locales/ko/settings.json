@@ -159,30 +159,102 @@
       "navigation": "탐색"
     },
     "actions": {
-      "openSearch": { "label": "검색 열기", "description": "어디서나 검색하고 명령을 실행합니다." },
-      "createIssue": { "label": "태스크 만들기", "description": "선호하는 태스크 만들기 흐름을 엽니다." },
-      "toggleSidebar": { "label": "사이드바 전환", "description": "기본 사이드바를 표시하거나 숨깁니다." },
-      "toggleChat": { "label": "채팅 창 전환", "description": "플로팅 채팅 창을 열거나 닫습니다. 열면 메시지 입력란에 포커스합니다." },
-      "findInIssue": { "label": "태스크에서 찾기", "description": "열린 태스크 상세 내용에서 검색합니다." },
-      "openThreadNav": { "label": "스레드 내비게이터 열기", "description": "열린 태스크의 댓글 스레드를 나열하고 검색해 이동합니다." },
-      "scrollToTop": { "label": "맨 위로 스크롤", "description": "열려 있는 이슈의 타임라인을 맨 위로 스크롤합니다." },
-      "scrollToBottom": { "label": "맨 아래로 스크롤", "description": "열려 있는 이슈의 타임라인을 맨 아래(최신 활동)로 스크롤합니다." },
-      "archiveInboxItem": { "label": "알림 보관", "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다." },
-      "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 태스크를 만듭니다." },
-      "goBack": { "label": "뒤로 가기", "description": "브라우저처럼 기록을 따라 뒤로 이동합니다." },
-      "goForward": { "label": "앞으로 가기", "description": "브라우저처럼 기록을 따라 앞으로 이동합니다." },
-      "goInbox": { "label": "받은 편지함으로 이동", "description": "워크스페이스 받은 편지함을 엽니다." },
-      "goChat": { "label": "채팅으로 이동", "description": "워크스페이스 채팅을 엽니다." },
-      "goMyIssues": { "label": "내 태스크로 이동", "description": "나에게 할당된 태스크를 엽니다." },
-      "goIssues": { "label": "태스크로 이동", "description": "태스크 목록을 엽니다." },
-      "goProjects": { "label": "프로젝트로 이동", "description": "프로젝트 목록을 엽니다." },
-      "goAutopilots": { "label": "자동화로 이동", "description": "워크스페이스 자동화를 엽니다." },
-      "goAgents": { "label": "에이전트로 이동", "description": "에이전트 목록을 엽니다." },
-      "goSquads": { "label": "스쿼드로 이동", "description": "스쿼드 목록을 엽니다." },
-      "goUsage": { "label": "사용량으로 이동", "description": "사용량 분석을 엽니다." },
-      "goRuntimes": { "label": "런타임으로 이동", "description": "런타임 설정을 엽니다." },
-      "goSkills": { "label": "Skills로 이동", "description": "Skill 라이브러리를 엽니다." },
-      "goSettings": { "label": "설정으로 이동", "description": "워크스페이스 설정을 엽니다." }
+      "openSearch": {
+        "label": "검색 열기",
+        "description": "어디서나 검색하고 명령을 실행합니다."
+      },
+      "createIssue": {
+        "label": "태스크 만들기",
+        "description": "선호하는 태스크 만들기 흐름을 엽니다."
+      },
+      "toggleSidebar": {
+        "label": "사이드바 전환",
+        "description": "기본 사이드바를 표시하거나 숨깁니다."
+      },
+      "toggleChat": {
+        "label": "채팅 창 전환",
+        "description": "플로팅 채팅 창을 열거나 닫습니다. 열면 메시지 입력란에 포커스합니다."
+      },
+      "findInIssue": {
+        "label": "태스크에서 찾기",
+        "description": "열린 태스크 상세 내용에서 검색합니다."
+      },
+      "openThreadNav": {
+        "label": "스레드 내비게이터 열기",
+        "description": "열린 태스크의 댓글 스레드를 나열하고 검색해 이동합니다."
+      },
+      "scrollToTop": {
+        "label": "맨 위로 스크롤",
+        "description": "열려 있는 이슈의 타임라인을 맨 위로 스크롤합니다."
+      },
+      "scrollToBottom": {
+        "label": "맨 아래로 스크롤",
+        "description": "열려 있는 이슈의 타임라인을 맨 아래(최신 활동)로 스크롤합니다."
+      },
+      "archiveInboxItem": {
+        "label": "알림 보관",
+        "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다."
+      },
+      "send": {
+        "label": "보내기",
+        "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 태스크를 만듭니다."
+      },
+      "goBack": {
+        "label": "뒤로 가기",
+        "description": "브라우저처럼 기록을 따라 뒤로 이동합니다."
+      },
+      "goForward": {
+        "label": "앞으로 가기",
+        "description": "브라우저처럼 기록을 따라 앞으로 이동합니다."
+      },
+      "goInbox": {
+        "label": "받은 편지함으로 이동",
+        "description": "워크스페이스 받은 편지함을 엽니다."
+      },
+      "goChat": {
+        "label": "채팅으로 이동",
+        "description": "워크스페이스 채팅을 엽니다."
+      },
+      "goMyIssues": {
+        "label": "내 태스크로 이동",
+        "description": "나에게 할당된 태스크를 엽니다."
+      },
+      "goIssues": {
+        "label": "태스크로 이동",
+        "description": "태스크 목록을 엽니다."
+      },
+      "goProjects": {
+        "label": "프로젝트로 이동",
+        "description": "프로젝트 목록을 엽니다."
+      },
+      "goAutopilots": {
+        "label": "자동화로 이동",
+        "description": "워크스페이스 자동화를 엽니다."
+      },
+      "goAgents": {
+        "label": "에이전트로 이동",
+        "description": "에이전트 목록을 엽니다."
+      },
+      "goSquads": {
+        "label": "스쿼드로 이동",
+        "description": "스쿼드 목록을 엽니다."
+      },
+      "goUsage": {
+        "label": "사용량으로 이동",
+        "description": "사용량 분석을 엽니다."
+      },
+      "goRuntimes": {
+        "label": "런타임으로 이동",
+        "description": "런타임 설정을 엽니다."
+      },
+      "goSkills": {
+        "label": "Skills로 이동",
+        "description": "Skill 라이브러리를 엽니다."
+      },
+      "goSettings": {
+        "label": "설정으로 이동",
+        "description": "워크스페이스 설정을 엽니다."
+      }
     },
     "fixed": {
       "title": "고정 시스템 단축키",
@@ -260,9 +332,9 @@
       "issue_statuses": "이슈 상태",
       "properties": "속성",
       "quick_actions": "퀵 액션",
-    "plugins": "Plugins",
-    "mcp": "MCP",
-    "billing": "결제 및 요금제"
+      "plugins": "Plugins",
+      "mcp": "MCP",
+      "billing": "결제 및 요금제"
     }
   },
   "plugins": {
@@ -326,7 +398,9 @@
       "storage_workspace": "워크스페이스 공유 데이터 저장",
       "net": "{{domain}}(으)로 데이터 전송",
       "unknown": "알 수 없는 권한 — 설치하지 마세요"
-    }
+    },
+    "hook_circuit_open": "반복 실패로 훅 전달이 중단되었습니다.",
+    "hook_recent_failures": "최근 훅 호출 {{count}}건이 실패했습니다."
   },
   "properties": {
     "title": "속성",

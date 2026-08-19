@@ -2,7 +2,12 @@
 import { describe, expect, it } from "vitest";
 import { buildIssueStatusCatalog } from "../issue-statuses";
 import type { Issue, IssueStatusEntry } from "../types";
-import { issueBehavesAs, issueBehavesAsAny, statusFilterColumns } from "./status-category";
+import {
+  issueBehavesAs,
+  issueBehavesAsAny,
+  issueColumnCategory,
+  statusFilterColumns,
+} from "./status-category";
 
 function issue(status: string, statusCategory?: string): Pick<Issue, "status" | "status_category"> {
   return { status, status_category: statusCategory } as Pick<Issue, "status" | "status_category">;
@@ -57,6 +62,32 @@ describe("issueBehavesAs", () => {
   it("matches any of several categories", () => {
     expect(issueBehavesAsAny(issue("qa", "cancelled"), ["done", "cancelled"])).toBe(true);
     expect(issueBehavesAsAny(issue("qa", "in_review"), ["done", "cancelled"])).toBe(false);
+  });
+});
+
+/**
+ * The board/list/swimlane column a card renders in. Columns are categories and
+ * `issue.status` is a key, so a custom status has to be translated — the
+ * regression it guards is a card in NO column at all (MUL-6409).
+ */
+describe("issueColumnCategory", () => {
+  it("answers a built-in key with no server hint", () => {
+    expect(issueColumnCategory(issue("in_review"))).toBe("in_review");
+  });
+
+  it("puts a custom status in the column of the category it behaves as", () => {
+    expect(issueColumnCategory(issue("awaiting_response", "in_review"))).toBe("in_review");
+  });
+
+  // Never null: a card in a possibly-wrong column is recoverable, a card in no
+  // column is invisible. The server sends a category on every issue payload, so
+  // this is the unreachable-in-practice floor.
+  it("falls back to todo for a custom key the payload did not resolve", () => {
+    expect(issueColumnCategory(issue("awaiting_response"))).toBe("todo");
+  });
+
+  it("ignores a status_category the client does not recognise", () => {
+    expect(issueColumnCategory(issue("done", "shipped"))).toBe("done");
   });
 });
 

@@ -306,9 +306,11 @@ WHERE i.workspace_id = $1
   AND (sqlc.narg('metadata_filter')::jsonb IS NULL OR i.metadata @> sqlc.narg('metadata_filter')::jsonb)
   -- properties_filter is a jsonb array of groups, each group an array of
   -- containment patterns (built by parsePropertiesFilterParam): the issue
-  -- must match at least one pattern from EVERY group (AND of ORs). The
-  -- correlated form skips the GIN index, which is fine here: open_only is
-  -- an unpaginated workspace scan already narrowed by status.
+  -- must match at least one pattern from EVERY group (AND of ORs). A pattern
+  -- of the shape {"__none__": "<definitionId>"} is the "no value" marker and
+  -- matches when the issue's properties are missing that key. The correlated
+  -- form skips the GIN index, which is fine here: open_only is an
+  -- unpaginated workspace scan already narrowed by status.
   AND (
     sqlc.narg('properties_filter')::jsonb IS NULL
     OR NOT EXISTS (
@@ -317,7 +319,8 @@ WHERE i.workspace_id = $1
       WHERE NOT EXISTS (
         SELECT 1
         FROM jsonb_array_elements(pf.alternatives) AS alt(pattern)
-        WHERE i.properties @> alt.pattern
+        WHERE (alt.pattern ? '__none__' AND NOT (i.properties ? (alt.pattern ->> '__none__')))
+           OR (NOT (alt.pattern ? '__none__') AND i.properties @> alt.pattern)
       )
     )
   )

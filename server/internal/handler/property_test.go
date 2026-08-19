@@ -580,6 +580,105 @@ func TestListIssuesPropertyFilterAndSort(t *testing.T) {
 	if got := listIssues("?limit=5&sort=property:" + uuid.NewString()); len(got) == 0 {
 		t.Fatalf("unknown-definition sort should fall back to position order, got empty")
 	}
+
+	// "No value" filter (the "__none__" sentinel): issues without the property
+	// match, the one explicitly set to `true` does not. limit=200 so the ~55
+	// matching issues (54 pad + numLow/numHigh, all without the checkbox) fit
+	// on one page — the 50-row default would hide numLow behind windowing.
+	noValueQuery := func(values ...string) string {
+		buf, _ := json.Marshal(map[string][]string{box.ID: values})
+		return "?limit=200&properties=" + url.QueryEscape(string(buf))
+	}
+	noneGot := ids(listIssues(noValueQuery("__none__")))
+	if _, present := noneGot[target]; present {
+		t.Fatalf("no-value filter included the issue with the property set")
+	}
+	if _, present := noneGot[numLow]; !present {
+		t.Fatalf("no-value filter missed an issue without the property")
+	}
+
+	// OR within a definition: "true" plus "no value" covers set and unset.
+	both := ids(listIssues(noValueQuery("true", "__none__")))
+	if _, present := both[target]; !present {
+		t.Fatalf("OR no-value filter missed the set issue")
+	}
+	if _, present := both[numLow]; !present {
+		t.Fatalf("OR no-value filter missed the unset issue")
+	}
+
+	// AND across definitions: matching select + no-value checkbox must exclude
+	// the target (it has the checkbox set, so it cannot match the unset branch).
+	andBuf, _ := json.Marshal(map[string][]string{sel.ID: {hitID}, box.ID: {"__none__"}})
+	andGot := ids(listIssues("?limit=50&properties=" + url.QueryEscape(string(andBuf))))
+	if _, present := andGot[target]; present {
+		t.Fatalf("AND no-value semantics failed: target matched contradictory filter")
+	}
+
+	// The open_only branch unrolls the same compiled filter through the static
+	// ListOpenIssues query, so the marker must be honored there too.
+	openNone := ids(listIssues(filterQuery(box.ID, "__none__") + "&open_only=true"))
+	if _, present := openNone[target]; present {
+		t.Fatalf("open_only no-value filter included the set issue")
+	}
+	if len(openNone) == 0 {
+		t.Fatalf("open_only no-value filter returned nothing")
+	}
+}
+
+func TestParsePropertiesFilterNoValueUnit(t *testing.T) {
+	defID := uuid.NewString()
+	w := httptest.NewRecorder()
+	var args []any
+	addArg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	// "__none__" compiles to the marker object, and the predicate turns that
+	// marker into a key-absence check rather than a containment pattern.
+	groups, ok := parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":["__none__"]}`, defID))
+	if !ok {
+		t.Fatalf("no-value parse failed: %s", w.Body.String())
+	}
+	if len(groups) != 1 || len(groups[0]) != 1 {
+		t.Fatalf("expected one group with one alternative, got %d / %d", len(groups), len(groups[0]))
+	}
+	if parsed, isMarker := parseNoPropertyValuePattern(groups[0][0]); !isMarker || parsed != defID {
+		t.Fatalf("expected no-value marker for %s, got %q isMarker=%v", defID, parsed, isMarker)
+	}
+	sql := propertiesFilterPredicate(groups, addArg)
+	if !strings.Contains(sql, "NOT (i.properties ? $1)") {
+		t.Fatalf("no-value predicate wrong: %s", sql)
+	}
+
+	// A normal containment alternative is never mistaken for the marker.
+	groups, ok = parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":["true"]}`, defID))
+	if !ok {
+		t.Fatalf("containment parse failed: %s", w.Body.String())
+	}
+	if _, isMarker := parseNoPropertyValuePattern(groups[0][0]); isMarker {
+		t.Fatalf("checkbox true alternative misdetected as the marker")
+	}
+
+	// Mixed true + no value: containment OR key-absence.
+	groups, ok = parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":["true","__none__"]}`, defID))
+	if !ok {
+		t.Fatalf("mixed parse failed: %s", w.Body.String())
+	}
+	args = nil
+	sql = propertiesFilterPredicate(groups, addArg)
+	if !strings.Contains(sql, "@> $1") || !strings.Contains(sql, "NOT (i.properties ? ") {
+		t.Fatalf("mixed predicate wrong: %s", sql)
+	}
+
+	// Duplicate sentinels collapse to a single marker.
+	groups, ok = parsePropertiesFilterParam(w, fmt.Sprintf(`{"%s":["__none__","__none__"]}`, defID))
+	if !ok {
+		t.Fatalf("duplicate parse failed: %s", w.Body.String())
+	}
+	if len(groups[0]) != 1 {
+		t.Fatalf("duplicate sentinel produced %d alternatives, want 1", len(groups[0]))
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -978,6 +1077,59 @@ func TestIssueActorPropertyFacets(t *testing.T) {
 	memberCounts := facetKeys(plainMemberID)
 	if memberCounts[memberRef] != 1 || memberCounts[otherRef] != 1 {
 		t.Fatalf("plain member sees different facet keys than the owner: %v", memberCounts)
+	}
+}
+
+// TestIssuePropertyFacetNoValue verifies the checkbox facet reports an unset
+// "__none__" bucket alongside "true"/"false", so the filter menu's "No value"
+// option carries a real count. A brand-new select marker narrows the facet to
+// exactly the two issues created here, keeping the counts deterministic in the
+// shared fixture workspace.
+func TestIssuePropertyFacetNoValue(t *testing.T) {
+	marker := createTestProperty(t, map[string]any{
+		"name": "FM" + uuid.NewString()[:8], "type": "select",
+		"config": map[string]any{"options": []map[string]any{{"name": "Only", "color": "#3b82f6"}}},
+	})
+	markerOpt := marker.Config.Options[0].ID
+	hold := createTestProperty(t, map[string]any{"name": "FH" + uuid.NewString()[:8], "type": "checkbox"})
+
+	setID := createPropertyTestIssue(t, "hold facet set")
+	unsetID := createPropertyTestIssue(t, "hold facet unset")
+	for _, id := range []string{setID, unsetID} {
+		if w := setIssuePropertyRaw(t, id, marker.ID, markerOpt); w.Code != http.StatusOK {
+			t.Fatalf("seed marker: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if w := setIssuePropertyRaw(t, setID, hold.ID, true); w.Code != http.StatusOK {
+		t.Fatalf("set hold: %d %s", w.Code, w.Body.String())
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodPost, "/api/issues/table/facets", map[string]any{
+		"query": map[string]any{
+			"scope":   map[string]any{"kind": "workspace"},
+			"filters": map[string]any{"properties": map[string][]string{marker.ID: {markerOpt}}},
+			"sort":    map[string]any{"field": "position", "direction": "asc"},
+		},
+		"facets":        []map[string]any{{"kind": "property", "property_id": hold.ID}},
+		"include_total": false,
+	})
+	testHandler.ListIssueTableFacets(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListIssueTableFacets: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp issueTableFacetsResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode facets: %v", err)
+	}
+	counts := map[string]int64{}
+	for _, facet := range resp.Facets {
+		for _, value := range facet.Values {
+			counts[value.Key] = value.Count
+		}
+	}
+	if counts["true"] != 1 || counts["__none__"] != 1 {
+		t.Fatalf("hold facet counts wrong: %v", counts)
 	}
 }
 
