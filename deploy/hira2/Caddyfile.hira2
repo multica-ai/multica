@@ -1,0 +1,56 @@
+# Site block cho hira2 — APPEND vào cuối /srv/lumi/Caddyfile trên VPS mới.
+#
+# KHÔNG dùng `import lumi_app`: snippet đó hardcode `reverse_proxy frontend:3000`
+# (trỏ về app hàng xóm) và X-Frame-Options SAMEORIGIN.
+#
+# Tên upstream là hira-web / hira-api — alias mà deploy/hira2/docker-compose.vps.yml
+# cấp trên network dùng chung. Không dùng `frontend`/`backend`: xem chú thích đầu file
+# compose để biết vì sao.
+
+app2.hira.vn {
+	encode zstd gzip
+
+	request_body {
+		max_size 50MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	# GIAI ĐOẠN STAGING + CUTOVER: dùng cert copy từ VPS cũ, Caddy KHÔNG gọi ACME.
+	# Nhờ vậy có thể phục vụ app2.hira.vn trước khi DNS trỏ về máy này (verify bằng
+	# /etc/hosts), và cutover không có rủi ro xin cert thất bại.
+	# XOÁ đúng 1 dòng này sau khi cutover xong để Caddy tự xin + tự gia hạn.
+	tls /data/hira2/app2.hira.vn.crt /data/hira2/app2.hira.vn.key
+
+	# WebSocket phải đứng TRƯỚC mọi route khác.
+	# flush_interval -1 tắt buffering; thiếu nó thì comment/typing indicator bị trễ.
+	@ws path /ws /ws/*
+	handle @ws {
+		reverse_proxy hira-api:8080 {
+			flush_interval -1
+		}
+	}
+
+	@api path /api/* /auth/* /uploads/* /health
+	handle @api {
+		reverse_proxy hira-api:8080
+	}
+
+	handle {
+		reverse_proxy hira-web:3000
+	}
+
+	# VPS cũ KHÔNG ghi access log cho app2.hira.vn — thêm lại ở đây.
+	log {
+		output file /data/access-hira2.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}
