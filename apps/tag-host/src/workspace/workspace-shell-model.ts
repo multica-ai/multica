@@ -10,6 +10,11 @@ export interface TagWorkspaceSection {
   items: readonly TagWorkspaceNavItem[];
 }
 
+export const CHAT_WORKSPACE_TABS = [
+  { key: 'chat', label: 'Chat', path: 'chat' },
+  { key: 'files', label: 'Files', path: 'chat/files' },
+] as const;
+
 export const TAG_WORKSPACE_SECTIONS: readonly TagWorkspaceSection[] = [
   {
     label: 'Personal',
@@ -28,7 +33,6 @@ export const TAG_WORKSPACE_SECTIONS: readonly TagWorkspaceSection[] = [
         status: 'available',
       },
       { key: 'members', label: 'Members', path: null, status: 'migrating' },
-      { key: 'files', label: 'Files', path: null, status: 'migrating' },
       {
         key: 'notifications',
         label: 'Notifications',
@@ -59,6 +63,9 @@ export function workspaceSwitchDestination(
   const modulePath = segments[1];
 
   if (modulePath === 'chat') {
+    if (segments[2] === 'files') {
+      return `/${encodeURIComponent(targetSlug)}/chat/files`;
+    }
     return `/${encodeURIComponent(targetSlug)}/chat`;
   }
   if (modulePath === 'issues') {

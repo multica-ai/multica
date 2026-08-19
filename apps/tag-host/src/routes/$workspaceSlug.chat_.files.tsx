@@ -1,17 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { ChatPage } from '@multica/views/chat';
+import { WorkspaceFilesPage } from '@multica/views/attachments';
 import { ChatWorkspaceRoute } from '@/workspace/chat-workspace-route';
 
-export const Route = createFileRoute('/$workspaceSlug/chat')({
+export const Route = createFileRoute('/$workspaceSlug/chat_/files')({
   ssr: false,
-  component: TagWorkspaceChatRoute,
+  component: TagWorkspaceFilesRoute,
 });
 
-function TagWorkspaceChatRoute() {
+function TagWorkspaceFilesRoute() {
   const { workspaceSlug } = Route.useParams();
   return (
     <ChatWorkspaceRoute workspaceSlug={workspaceSlug}>
-      <ChatPage />
+      <WorkspaceFilesPage />
     </ChatWorkspaceRoute>
   );
 }

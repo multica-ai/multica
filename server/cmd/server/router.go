@@ -1738,6 +1738,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			})
 
 			// Attachments
+			r.Get("/api/attachments", h.ListWorkspaceAttachments)
 			r.Get("/api/attachments/{id}", h.GetAttachmentByID)
 			// /api/attachments/{id}/download is registered in the
 			// outer Auth-only group above so it can be loaded as a

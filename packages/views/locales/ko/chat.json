@@ -225,5 +225,23 @@
     "delete": "채팅 삭제",
     "archive": "채팅 보관",
     "unarchive": "채팅 보관 해제"
+  },
+  "files": {
+    "navigation_label": "채팅 워크스페이스",
+    "title": "파일",
+    "description": "이 워크스페이스의 채팅과 태스크에서 공유된 파일입니다.",
+    "loading": "파일 불러오는 중",
+    "list_label": "워크스페이스 파일",
+    "empty_title": "아직 공유된 파일이 없습니다",
+    "empty_description": "채팅이나 태스크에 첨부된 파일이 여기에 표시됩니다.",
+    "load_failed": "파일을 불러오지 못했습니다.",
+    "retry": "다시 시도",
+    "preview": "미리보기",
+    "download": "다운로드",
+    "source_chat": "채팅",
+    "source_issue": "태스크",
+    "untitled_chat": "제목 없는 채팅",
+    "load_more": "더 불러오기",
+    "loading_more": "불러오는 중…"
   }
 }

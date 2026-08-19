@@ -16,6 +16,7 @@ import { Route as WorkspaceSlugChatRouteImport } from './routes/$workspaceSlug.c
 import { Route as WorkspaceSlugAgentsRouteImport } from './routes/$workspaceSlug.agents'
 import { Route as WorkspaceSlugRuntimesMachineIdRouteImport } from './routes/$workspaceSlug.runtimes_.$machineId'
 import { Route as WorkspaceSlugIssuesIssueIdRouteImport } from './routes/$workspaceSlug.issues_.$issueId'
+import { Route as WorkspaceSlugChatFilesRouteImport } from './routes/$workspaceSlug.chat_.files'
 import { Route as WorkspaceSlugAgentsTeamsRouteImport } from './routes/$workspaceSlug.agents_.teams'
 import { Route as WorkspaceSlugAgentsAgentIdRouteImport } from './routes/$workspaceSlug.agents_.$agentId'
 import { Route as WorkspaceSlugIssuesAutomationsAutopilotIdRouteImport } from './routes/$workspaceSlug.issues_.automations_.$autopilotId'
@@ -60,6 +61,11 @@ const WorkspaceSlugIssuesIssueIdRoute =
     path: '/$workspaceSlug/issues/$issueId',
     getParentRoute: () => rootRouteImport,
   } as any)
+const WorkspaceSlugChatFilesRoute = WorkspaceSlugChatFilesRouteImport.update({
+  id: '/$workspaceSlug/chat_/files',
+  path: '/$workspaceSlug/chat/files',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkspaceSlugAgentsTeamsRoute =
   WorkspaceSlugAgentsTeamsRouteImport.update({
     id: '/$workspaceSlug/agents_/teams',
@@ -105,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/$workspaceSlug/settings': typeof WorkspaceSlugSettingsRoute
   '/$workspaceSlug/agents/$agentId': typeof WorkspaceSlugAgentsAgentIdRoute
   '/$workspaceSlug/agents/teams': typeof WorkspaceSlugAgentsTeamsRoute
+  '/$workspaceSlug/chat/files': typeof WorkspaceSlugChatFilesRoute
   '/$workspaceSlug/issues/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
   '/$workspaceSlug/runtimes/$machineId': typeof WorkspaceSlugRuntimesMachineIdRoute
   '/$workspaceSlug/agents/new/manual': typeof WorkspaceSlugAgentsNewManualRoute
@@ -120,6 +127,7 @@ export interface FileRoutesByTo {
   '/$workspaceSlug/settings': typeof WorkspaceSlugSettingsRoute
   '/$workspaceSlug/agents/$agentId': typeof WorkspaceSlugAgentsAgentIdRoute
   '/$workspaceSlug/agents/teams': typeof WorkspaceSlugAgentsTeamsRoute
+  '/$workspaceSlug/chat/files': typeof WorkspaceSlugChatFilesRoute
   '/$workspaceSlug/issues/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
   '/$workspaceSlug/runtimes/$machineId': typeof WorkspaceSlugRuntimesMachineIdRoute
   '/$workspaceSlug/agents/new/manual': typeof WorkspaceSlugAgentsNewManualRoute
@@ -136,6 +144,7 @@ export interface FileRoutesById {
   '/$workspaceSlug/settings': typeof WorkspaceSlugSettingsRoute
   '/$workspaceSlug/agents_/$agentId': typeof WorkspaceSlugAgentsAgentIdRoute
   '/$workspaceSlug/agents_/teams': typeof WorkspaceSlugAgentsTeamsRoute
+  '/$workspaceSlug/chat_/files': typeof WorkspaceSlugChatFilesRoute
   '/$workspaceSlug/issues_/$issueId': typeof WorkspaceSlugIssuesIssueIdRoute
   '/$workspaceSlug/runtimes_/$machineId': typeof WorkspaceSlugRuntimesMachineIdRoute
   '/$workspaceSlug/agents_/new/manual': typeof WorkspaceSlugAgentsNewManualRoute
@@ -153,6 +162,7 @@ export interface FileRouteTypes {
     | '/$workspaceSlug/settings'
     | '/$workspaceSlug/agents/$agentId'
     | '/$workspaceSlug/agents/teams'
+    | '/$workspaceSlug/chat/files'
     | '/$workspaceSlug/issues/$issueId'
     | '/$workspaceSlug/runtimes/$machineId'
     | '/$workspaceSlug/agents/new/manual'
@@ -168,6 +178,7 @@ export interface FileRouteTypes {
     | '/$workspaceSlug/settings'
     | '/$workspaceSlug/agents/$agentId'
     | '/$workspaceSlug/agents/teams'
+    | '/$workspaceSlug/chat/files'
     | '/$workspaceSlug/issues/$issueId'
     | '/$workspaceSlug/runtimes/$machineId'
     | '/$workspaceSlug/agents/new/manual'
@@ -183,6 +194,7 @@ export interface FileRouteTypes {
     | '/$workspaceSlug/settings'
     | '/$workspaceSlug/agents_/$agentId'
     | '/$workspaceSlug/agents_/teams'
+    | '/$workspaceSlug/chat_/files'
     | '/$workspaceSlug/issues_/$issueId'
     | '/$workspaceSlug/runtimes_/$machineId'
     | '/$workspaceSlug/agents_/new/manual'
@@ -199,6 +211,7 @@ export interface RootRouteChildren {
   WorkspaceSlugSettingsRoute: typeof WorkspaceSlugSettingsRoute
   WorkspaceSlugAgentsAgentIdRoute: typeof WorkspaceSlugAgentsAgentIdRoute
   WorkspaceSlugAgentsTeamsRoute: typeof WorkspaceSlugAgentsTeamsRoute
+  WorkspaceSlugChatFilesRoute: typeof WorkspaceSlugChatFilesRoute
   WorkspaceSlugIssuesIssueIdRoute: typeof WorkspaceSlugIssuesIssueIdRoute
   WorkspaceSlugRuntimesMachineIdRoute: typeof WorkspaceSlugRuntimesMachineIdRoute
   WorkspaceSlugAgentsNewManualRoute: typeof WorkspaceSlugAgentsNewManualRoute
@@ -258,6 +271,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof WorkspaceSlugIssuesIssueIdRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/$workspaceSlug/chat_/files': {
+      id: '/$workspaceSlug/chat_/files'
+      path: '/$workspaceSlug/chat/files'
+      fullPath: '/$workspaceSlug/chat/files'
+      preLoaderRoute: typeof WorkspaceSlugChatFilesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$workspaceSlug/agents_/teams': {
       id: '/$workspaceSlug/agents_/teams'
       path: '/$workspaceSlug/agents/teams'
@@ -311,6 +331,7 @@ const rootRouteChildren: RootRouteChildren = {
   WorkspaceSlugSettingsRoute: WorkspaceSlugSettingsRoute,
   WorkspaceSlugAgentsAgentIdRoute: WorkspaceSlugAgentsAgentIdRoute,
   WorkspaceSlugAgentsTeamsRoute: WorkspaceSlugAgentsTeamsRoute,
+  WorkspaceSlugChatFilesRoute: WorkspaceSlugChatFilesRoute,
   WorkspaceSlugIssuesIssueIdRoute: WorkspaceSlugIssuesIssueIdRoute,
   WorkspaceSlugRuntimesMachineIdRoute: WorkspaceSlugRuntimesMachineIdRoute,
   WorkspaceSlugAgentsNewManualRoute: WorkspaceSlugAgentsNewManualRoute,

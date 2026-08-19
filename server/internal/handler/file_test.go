@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -489,6 +490,97 @@ func seedAttachmentURL(t *testing.T, rawURL, filename, contentType string, sizeB
 		testPool.Exec(context.Background(), `DELETE FROM attachment WHERE id = $1`, id)
 	})
 	return id
+}
+
+func TestListWorkspaceAttachmentsProjectsBoundFilesOnly(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	issueTitle := "Workspace Files source " + uuid.NewString()[:8]
+	issueID := createTestIssue(t, issueTitle, "todo", "none")
+	t.Cleanup(func() { deleteTestIssue(t, issueID) })
+	boundID := seedAttachmentURL(t, "https://cdn.example.test/roadmap.pdf", "roadmap.pdf", "application/pdf", 2048)
+	_ = seedAttachmentURL(t, "https://cdn.example.test/draft.txt", "draft.txt", "text/plain", 5)
+	if _, err := testPool.Exec(context.Background(), `UPDATE attachment SET issue_id = $1 WHERE id = $2`, issueID, boundID); err != nil {
+		t.Fatalf("bind attachment to issue: %v", err)
+	}
+
+	agentID := createHandlerTestAgent(t, "WorkspaceFilesAgent", []byte("[]"))
+	chatID := createHandlerTestChatSession(t, agentID)
+	var chatMessageID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content)
+		VALUES ($1, 'user', 'shared notes') RETURNING id
+	`, chatID).Scan(&chatMessageID); err != nil {
+		t.Fatalf("seed chat message: %v", err)
+	}
+	chatAttachmentID := seedAttachmentURL(t, "https://cdn.example.test/notes.md", "notes.md", "text/markdown", 42)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE attachment SET chat_session_id = $1, chat_message_id = $2 WHERE id = $3
+	`, chatID, chatMessageID, chatAttachmentID); err != nil {
+		t.Fatalf("bind attachment to chat: %v", err)
+	}
+
+	var foreignUserID, foreignChatID, foreignMessageID string
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO "user" (name, email) VALUES ('Foreign Files User', $1) RETURNING id
+	`, "foreign-files-"+uuid.NewString()+"@multica.test").Scan(&foreignUserID); err != nil {
+		t.Fatalf("seed foreign user: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, foreignUserID) })
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
+		VALUES ($1, $2, $3, 'Private foreign chat', 'active') RETURNING id
+	`, testWorkspaceID, agentID, foreignUserID).Scan(&foreignChatID); err != nil {
+		t.Fatalf("seed foreign chat: %v", err)
+	}
+	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, foreignChatID) })
+	if err := testPool.QueryRow(context.Background(), `
+		INSERT INTO chat_message (chat_session_id, role, content)
+		VALUES ($1, 'user', 'private notes') RETURNING id
+	`, foreignChatID).Scan(&foreignMessageID); err != nil {
+		t.Fatalf("seed foreign chat message: %v", err)
+	}
+	foreignAttachmentID := seedAttachmentURL(t, "https://cdn.example.test/private.md", "private.md", "text/markdown", 7)
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE attachment SET chat_session_id = $1, chat_message_id = $2 WHERE id = $3
+	`, foreignChatID, foreignMessageID, foreignAttachmentID); err != nil {
+		t.Fatalf("bind foreign attachment: %v", err)
+	}
+
+	req := newRequest(http.MethodGet, "/api/attachments?limit=50&offset=0", nil)
+	w := httptest.NewRecorder()
+	testHandler.ListWorkspaceAttachments(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListWorkspaceAttachments: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var got WorkspaceAttachmentListResponse
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(got.Attachments) != 2 {
+		t.Fatalf("attachments = %d, want the Issue and caller-owned Chat files; body=%s", len(got.Attachments), w.Body.String())
+	}
+	filesByID := make(map[string]WorkspaceAttachmentResponse, len(got.Attachments))
+	for _, file := range got.Attachments {
+		filesByID[file.ID] = file
+	}
+	issueFile := filesByID[boundID]
+	if issueFile.SourceType != "issue" || issueFile.SourceID != issueID || issueFile.SourceTitle != issueTitle {
+		t.Fatalf("unexpected Issue source projection: %#v", issueFile)
+	}
+	chatFile := filesByID[chatAttachmentID]
+	if chatFile.SourceType != "chat" || chatFile.SourceID != chatID || chatFile.SourceTitle != "Handler Test Chat Session" {
+		t.Fatalf("unexpected Chat source projection: %#v", chatFile)
+	}
+	if _, leaked := filesByID[foreignAttachmentID]; leaked {
+		t.Fatalf("foreign user's Chat attachment leaked into Workspace Files")
+	}
+	if got.HasMore || got.NextOffset != nil {
+		t.Fatalf("unexpected pagination: has_more=%v next_offset=%v", got.HasMore, got.NextOffset)
+	}
 }
 
 func newPreviewRequest(t *testing.T, attachmentID, workspaceID string) (*http.Request, *httptest.ResponseRecorder) {

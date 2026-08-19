@@ -4,6 +4,8 @@ import type {
   AgentBuilderSession,
   AgentBuilderSessionSummary,
   Attachment,
+  WorkspaceFile,
+  WorkspaceFilesPage,
   AutopilotRun,
   BillingBalance,
   BillingBatchesPage,
@@ -790,6 +792,82 @@ export const EMPTY_ATTACHMENT: Attachment = {
   content_type: "",
   size_bytes: 0,
   created_at: "",
+};
+
+const WorkspaceFileWireSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string(),
+  issue_id: z.string().nullable(),
+  comment_id: z.string().nullable(),
+  chat_session_id: z.string().nullable(),
+  chat_message_id: z.string().nullable(),
+  uploader_type: z.string(),
+  uploader_id: z.string(),
+  filename: z.string(),
+  url: z.string(),
+  download_url: z.string(),
+  attachment_download_url: z.string().optional(),
+  markdown_url: z.string().optional().default(""),
+  content_type: z.string(),
+  size_bytes: z.number(),
+  created_at: z.string(),
+  source_type: z.enum(["issue", "chat"]),
+  source_id: z.string(),
+  source_title: z.string(),
+}).loose();
+
+const WorkspaceFileSchema = WorkspaceFileWireSchema.transform(({
+  workspace_id,
+  issue_id,
+  comment_id,
+  chat_session_id,
+  chat_message_id,
+  uploader_type,
+  uploader_id,
+  download_url,
+  attachment_download_url,
+  markdown_url,
+  content_type,
+  size_bytes,
+  created_at,
+  source_type,
+  source_id,
+  source_title,
+  ...file
+}) => ({
+  ...file,
+  workspaceId: workspace_id,
+  issueId: issue_id,
+  commentId: comment_id,
+  chatSessionId: chat_session_id,
+  chatMessageId: chat_message_id,
+  uploaderType: uploader_type,
+  uploaderId: uploader_id,
+  downloadUrl: download_url,
+  attachmentDownloadUrl: attachment_download_url,
+  markdownUrl: markdown_url,
+  contentType: content_type,
+  sizeBytes: size_bytes,
+  createdAt: created_at,
+  sourceType: source_type,
+  sourceId: source_id,
+  sourceTitle: source_title,
+})) satisfies z.ZodType<WorkspaceFile>;
+
+export const WorkspaceFilesResponseSchema = z.object({
+  attachments: z.array(WorkspaceFileSchema).default([]),
+  has_more: z.boolean().default(false),
+  next_offset: z.number().int().nonnegative().nullable().default(null),
+}).loose().transform(({ has_more, next_offset, ...response }) => ({
+  ...response,
+  hasMore: has_more,
+  nextOffset: next_offset,
+})) satisfies z.ZodType<WorkspaceFilesPage>;
+
+export const EMPTY_WORKSPACE_FILES_RESPONSE: WorkspaceFilesPage = {
+  attachments: [],
+  hasMore: false,
+  nextOffset: null,
 };
 
 // All object schemas use `.loose()` so unknown server-side fields pass

@@ -90,6 +90,76 @@ describe("ApiClient Remote MCP OAuth response schema", () => {
   });
 });
 
+describe('ApiClient workspace Files response schema', () => {
+  it('reads the workspace attachment library through the existing attachment API', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          attachments: [
+            {
+              id: 'att-1',
+              workspace_id: 'ws-1',
+              issue_id: null,
+              comment_id: null,
+              chat_session_id: 'chat-1',
+              chat_message_id: 'message-1',
+              uploader_type: 'member',
+              uploader_id: 'user-1',
+              filename: 'notes.md',
+              url: 'https://cdn.example/notes.md',
+              download_url: '/api/attachments/att-1/download',
+              markdown_url: '/api/attachments/att-1/download',
+              content_type: 'text/markdown',
+              size_bytes: 42,
+              created_at: '2026-08-18T20:00:00Z',
+              source_type: 'chat',
+              source_id: 'chat-1',
+              source_title: 'Launch notes',
+            },
+          ],
+          has_more: false,
+          next_offset: null,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await new ApiClient('https://api.example.test').listWorkspaceAttachments();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.example.test/api/attachments?limit=50&offset=0',
+      expect.any(Object),
+    );
+    expect(result.attachments[0]).toMatchObject({
+      id: 'att-1',
+      workspaceId: 'ws-1',
+      chatSessionId: 'chat-1',
+      contentType: 'text/markdown',
+      sizeBytes: 42,
+      sourceType: 'chat',
+      sourceTitle: 'Launch notes',
+    });
+    expect(result).toMatchObject({ hasMore: false, nextOffset: null });
+  });
+
+  it('fails closed to an empty page when attachment metadata is malformed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({ attachments: [{ id: 'att-1', filename: 42 }] }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        ),
+      ),
+    );
+
+    await expect(
+      new ApiClient('https://api.example.test').listWorkspaceAttachments(),
+    ).resolves.toEqual({ attachments: [], hasMore: false, nextOffset: null });
+  });
+});
+
 describe("ApiClient server Table query", () => {
   it("posts the canonical query to the group and branch endpoints", async () => {
     const fetchMock = vi

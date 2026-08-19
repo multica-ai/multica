@@ -47,3 +47,38 @@ export interface Attachment {
   size_bytes: number;
   created_at: string;
 }
+
+export type WorkspaceFileSourceType = "issue" | "chat";
+
+/**
+ * An attachment that is already bound to a Workspace-visible source.
+ * Files is a read-only projection over the attachment truth, not a second
+ * persistence model.
+ */
+export interface WorkspaceFile {
+  id: string;
+  workspaceId: string;
+  issueId: string | null;
+  commentId: string | null;
+  chatSessionId: string | null;
+  chatMessageId: string | null;
+  uploaderType: string;
+  uploaderId: string;
+  filename: string;
+  url: string;
+  downloadUrl: string;
+  attachmentDownloadUrl?: string;
+  markdownUrl: string;
+  contentType: string;
+  sizeBytes: number;
+  createdAt: string;
+  sourceType: WorkspaceFileSourceType;
+  sourceId: string;
+  sourceTitle: string;
+}
+
+export interface WorkspaceFilesPage {
+  attachments: WorkspaceFile[];
+  hasMore: boolean;
+  nextOffset: number | null;
+}

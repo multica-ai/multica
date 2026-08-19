@@ -62,7 +62,6 @@ const NAV_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   agents: Bot,
   runtimes: Gauge,
   members: Users,
-  files: FileText,
   notifications: Bell,
   settings: Settings,
 };

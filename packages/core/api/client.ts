@@ -82,6 +82,7 @@ import type {
   AssigneeFrequencyEntry,
   TaskMessagePayload,
   Attachment,
+  WorkspaceFilesPage,
   ChatSession,
   ChatPinnedAgent,
   ChatMessage,
@@ -222,6 +223,7 @@ import { parseWithFallback } from "./schema";
 import {
   AgentTaskListSchema,
   AttachmentResponseSchema,
+  WorkspaceFilesResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
   ChatMessageListSchema,
@@ -249,6 +251,7 @@ import {
   DashboardUsageDailyListSchema,
   EMPTY_APP_CONFIG,
   EMPTY_ATTACHMENT,
+  EMPTY_WORKSPACE_FILES_RESPONSE,
   EMPTY_CHAT_MESSAGE_LIST,
   EMPTY_CHAT_PENDING_TASK,
   EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
@@ -3077,6 +3080,22 @@ export class ApiClient {
 
   async listAttachments(issueId: string): Promise<Attachment[]> {
     return this.fetch(`/api/issues/${issueId}/attachments`);
+  }
+
+  async listWorkspaceAttachments(
+    params: { limit?: number; offset?: number } = {},
+  ): Promise<WorkspaceFilesPage> {
+    const search = new URLSearchParams({
+      limit: String(params.limit ?? 50),
+      offset: String(params.offset ?? 0),
+    });
+    const raw = await this.fetch<unknown>(`/api/attachments?${search}`);
+    return parseWithFallback(
+      raw,
+      WorkspaceFilesResponseSchema,
+      EMPTY_WORKSPACE_FILES_RESPONSE,
+      { endpoint: "GET /api/attachments" },
+    );
   }
 
   // Fetches a fresh attachment metadata record. The server re-signs

@@ -21,6 +21,7 @@ describe("paths.workspace(slug)", () => {
     expect(ws.chatWithAgent("agent one")).toBe(
       "/acme/chat?agent=agent%20one",
     );
+    expect(ws.chatFiles()).toBe("/acme/chat/files");
     expect(ws.chatSession("session one")).toBe(
       "/acme/chat?session=session%20one",
     );

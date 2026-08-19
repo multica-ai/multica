@@ -107,6 +107,19 @@ type AttachmentResponse struct {
 	CreatedAt   string `json:"created_at"`
 }
 
+type WorkspaceAttachmentResponse struct {
+	AttachmentResponse
+	SourceType  string `json:"source_type"`
+	SourceID    string `json:"source_id"`
+	SourceTitle string `json:"source_title"`
+}
+
+type WorkspaceAttachmentListResponse struct {
+	Attachments []WorkspaceAttachmentResponse `json:"attachments"`
+	HasMore     bool                          `json:"has_more"`
+	NextOffset  *int32                        `json:"next_offset"`
+}
+
 // attachmentURLMode selects how DownloadURL is rendered on a response.
 //
 // MUL-5372 / GitHub #5999. A CloudFront-signed DownloadURL is ~800 chars, of
@@ -198,6 +211,120 @@ func (h *Handler) attachmentToResponse(a db.Attachment, mode attachmentURLMode) 
 
 func attachmentDownloadPath(id string) string {
 	return "/api/attachments/" + id + "/download"
+}
+
+func attachmentFromWorkspaceRow(row db.ListWorkspaceAttachmentsRow) db.Attachment {
+	return db.Attachment{
+		ID:            row.ID,
+		WorkspaceID:   row.WorkspaceID,
+		IssueID:       row.IssueID,
+		CommentID:     row.CommentID,
+		UploaderType:  row.UploaderType,
+		UploaderID:    row.UploaderID,
+		Filename:      row.Filename,
+		Url:           row.Url,
+		ContentType:   row.ContentType,
+		SizeBytes:     row.SizeBytes,
+		CreatedAt:     row.CreatedAt,
+		ChatSessionID: row.ChatSessionID,
+		ChatMessageID: row.ChatMessageID,
+		TaskID:        row.TaskID,
+	}
+}
+
+// ListWorkspaceAttachments exposes a read-only Workspace Files projection over
+// the existing attachment records. Draft uploads are omitted by the query, and
+// Chat-sourced files inherit the same creator and private-agent gates as Chat.
+func (h *Handler) ListWorkspaceAttachments(w http.ResponseWriter, r *http.Request) {
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
+	workspaceID := h.resolveWorkspaceID(r)
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, "workspace_id is required")
+		return
+	}
+
+	member, ok := h.workspaceMember(w, r, workspaceID)
+	if !ok {
+		return
+	}
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	allowed, ok := h.accessibleAgentIDs(r.Context(), workspaceID, actorType, actorID, member.Role)
+	if !ok {
+		writeError(w, http.StatusInternalServerError, "failed to resolve agent access")
+		return
+	}
+	allowedAgentIDs := make([]pgtype.UUID, 0, len(allowed))
+	for id := range allowed {
+		allowedAgentIDs = append(allowedAgentIDs, parseUUID(id))
+	}
+
+	limit := int32(50)
+	if value := r.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || parsed < 1 || parsed > 100 {
+			writeError(w, http.StatusBadRequest, "limit must be between 1 and 100")
+			return
+		}
+		limit = int32(parsed)
+	}
+	offset := int32(0)
+	if value := r.URL.Query().Get("offset"); value != "" {
+		parsed, err := strconv.ParseInt(value, 10, 32)
+		if err != nil || parsed < 0 {
+			writeError(w, http.StatusBadRequest, "offset must be a non-negative integer")
+			return
+		}
+		offset = int32(parsed)
+	}
+
+	rows, err := h.Queries.ListWorkspaceAttachments(r.Context(), db.ListWorkspaceAttachmentsParams{
+		WorkspaceID:     parseUUID(workspaceID),
+		UserID:          parseUUID(userID),
+		AllowedAgentIds: allowedAgentIDs,
+		PageOffset:      offset,
+		PageSize:        limit + 1,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list workspace attachments")
+		return
+	}
+
+	hasMore := len(rows) > int(limit)
+	if hasMore {
+		rows = rows[:limit]
+	}
+	attachments := make([]WorkspaceAttachmentResponse, 0, len(rows))
+	mode := attachmentURLModeFromRequest(r)
+	for _, row := range rows {
+		sourceType := "chat"
+		sourceID := uuidToString(row.ChatSessionID)
+		sourceTitle := row.SourceChatTitle
+		if row.SourceIssueID.Valid {
+			sourceType = "issue"
+			sourceID = uuidToString(row.SourceIssueID)
+			sourceTitle = row.SourceIssueTitle
+		}
+		attachments = append(attachments, WorkspaceAttachmentResponse{
+			AttachmentResponse: h.attachmentToResponse(attachmentFromWorkspaceRow(row), mode),
+			SourceType:         sourceType,
+			SourceID:           sourceID,
+			SourceTitle:        sourceTitle,
+		})
+	}
+
+	var nextOffset *int32
+	if hasMore {
+		next := offset + limit
+		nextOffset = &next
+	}
+	writeJSON(w, http.StatusOK, WorkspaceAttachmentListResponse{
+		Attachments: attachments,
+		HasMore:     hasMore,
+		NextOffset:  nextOffset,
+	})
 }
 
 // buildMarkdownURL chooses the durable URL the client persists into

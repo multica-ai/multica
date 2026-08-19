@@ -685,6 +685,129 @@ func (q *Queries) ListAttachmentsByIssue(ctx context.Context, arg ListAttachment
 	return items, nil
 }
 
+const listWorkspaceAttachments = `-- name: ListWorkspaceAttachments :many
+SELECT a.id, a.workspace_id, a.issue_id, a.comment_id, a.uploader_type, a.uploader_id, a.filename, a.url, a.content_type, a.size_bytes, a.created_at, a.chat_session_id, a.chat_message_id, a.task_id,
+       COALESCE(a.issue_id, c.issue_id) AS source_issue_id,
+       COALESCE(i.title, '') AS source_issue_title,
+       COALESCE(cs.title, '') AS source_chat_title
+FROM attachment a
+LEFT JOIN comment c
+  ON c.id = a.comment_id
+ AND c.workspace_id = a.workspace_id
+LEFT JOIN issue i
+  ON i.id = COALESCE(a.issue_id, c.issue_id)
+ AND i.workspace_id = a.workspace_id
+LEFT JOIN chat_session cs
+  ON cs.id = a.chat_session_id
+ AND cs.workspace_id = a.workspace_id
+WHERE a.workspace_id = $1
+  AND (
+    COALESCE(a.issue_id, c.issue_id) IS NOT NULL
+    OR (
+      a.chat_message_id IS NOT NULL
+      AND cs.creator_id = $2
+      AND cs.agent_id = ANY($3::uuid[])
+      AND (
+        EXISTS (
+          SELECT 1 FROM chat_message public_message
+          WHERE public_message.chat_session_id = cs.id
+            AND public_message.message_kind != 'channel_command'
+        )
+        OR (
+          NOT EXISTS (
+            SELECT 1 FROM channel_chat_session_binding binding
+            WHERE binding.chat_session_id = cs.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM chat_message channel_message
+            WHERE channel_message.chat_session_id = cs.id
+              AND channel_message.channel_ingested
+          )
+        )
+      )
+    )
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT $5
+OFFSET $4
+`
+
+type ListWorkspaceAttachmentsParams struct {
+	WorkspaceID     pgtype.UUID   `json:"workspace_id"`
+	UserID          pgtype.UUID   `json:"user_id"`
+	AllowedAgentIds []pgtype.UUID `json:"allowed_agent_ids"`
+	PageOffset      int32         `json:"page_offset"`
+	PageSize        int32         `json:"page_size"`
+}
+
+type ListWorkspaceAttachmentsRow struct {
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	IssueID          pgtype.UUID        `json:"issue_id"`
+	CommentID        pgtype.UUID        `json:"comment_id"`
+	UploaderType     string             `json:"uploader_type"`
+	UploaderID       pgtype.UUID        `json:"uploader_id"`
+	Filename         string             `json:"filename"`
+	Url              string             `json:"url"`
+	ContentType      string             `json:"content_type"`
+	SizeBytes        int64              `json:"size_bytes"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ChatSessionID    pgtype.UUID        `json:"chat_session_id"`
+	ChatMessageID    pgtype.UUID        `json:"chat_message_id"`
+	TaskID           pgtype.UUID        `json:"task_id"`
+	SourceIssueID    pgtype.UUID        `json:"source_issue_id"`
+	SourceIssueTitle string             `json:"source_issue_title"`
+	SourceChatTitle  string             `json:"source_chat_title"`
+}
+
+// Files is a read-only projection over attachments that are already bound to
+// a Workspace-visible Task or to one of the caller's accessible public Chat
+// sessions. In-flight / abandoned uploads remain draft state and must not leak
+// into the shared library.
+func (q *Queries) ListWorkspaceAttachments(ctx context.Context, arg ListWorkspaceAttachmentsParams) ([]ListWorkspaceAttachmentsRow, error) {
+	rows, err := q.db.Query(ctx, listWorkspaceAttachments,
+		arg.WorkspaceID,
+		arg.UserID,
+		arg.AllowedAgentIds,
+		arg.PageOffset,
+		arg.PageSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListWorkspaceAttachmentsRow{}
+	for rows.Next() {
+		var i ListWorkspaceAttachmentsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.IssueID,
+			&i.CommentID,
+			&i.UploaderType,
+			&i.UploaderID,
+			&i.Filename,
+			&i.Url,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.CreatedAt,
+			&i.ChatSessionID,
+			&i.ChatMessageID,
+			&i.TaskID,
+			&i.SourceIssueID,
+			&i.SourceIssueTitle,
+			&i.SourceChatTitle,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const replaceCommentAttachments = `-- name: ReplaceCommentAttachments :exec
 UPDATE attachment
 SET comment_id = CASE

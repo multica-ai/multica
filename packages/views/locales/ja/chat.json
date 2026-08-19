@@ -225,5 +225,23 @@
     "delete": "チャットを削除",
     "archive": "チャットをアーカイブ",
     "unarchive": "アーカイブを解除"
+  },
+  "files": {
+    "navigation_label": "チャットワークスペース",
+    "title": "ファイル",
+    "description": "このワークスペースのチャットとタスクで共有されたファイルです。",
+    "loading": "ファイルを読み込み中",
+    "list_label": "ワークスペースのファイル",
+    "empty_title": "共有ファイルはまだありません",
+    "empty_description": "チャットやタスクに添付されたファイルがここに表示されます。",
+    "load_failed": "ファイルを読み込めませんでした。",
+    "retry": "再試行",
+    "preview": "プレビュー",
+    "download": "ダウンロード",
+    "source_chat": "チャット",
+    "source_issue": "タスク",
+    "untitled_chat": "無題のチャット",
+    "load_more": "さらに読み込む",
+    "loading_more": "読み込み中…"
   }
 }

@@ -225,5 +225,23 @@
     "delete": "删除会话",
     "archive": "归档会话",
     "unarchive": "取消归档"
+  },
+  "files": {
+    "navigation_label": "聊天工作区",
+    "title": "文件",
+    "description": "此工作区中来自聊天和任务的共享文件。",
+    "loading": "正在加载文件",
+    "list_label": "工作区文件",
+    "empty_title": "还没有共享文件",
+    "empty_description": "聊天或任务中的附件会显示在这里。",
+    "load_failed": "无法加载文件。",
+    "retry": "重试",
+    "preview": "预览",
+    "download": "下载",
+    "source_chat": "聊天",
+    "source_issue": "任务",
+    "untitled_chat": "未命名聊天",
+    "load_more": "加载更多",
+    "loading_more": "正在加载..."
   }
 }

@@ -14,6 +14,56 @@ SELECT * FROM attachment
 WHERE issue_id = $1 AND workspace_id = $2
 ORDER BY created_at ASC;
 
+-- name: ListWorkspaceAttachments :many
+-- Files is a read-only projection over attachments that are already bound to
+-- a Workspace-visible Issue or to one of the caller's accessible public Chat
+-- sessions. In-flight / abandoned uploads remain draft state and must not leak
+-- into the shared library.
+SELECT a.*,
+       COALESCE(a.issue_id, c.issue_id) AS source_issue_id,
+       COALESCE(i.title, '') AS source_issue_title,
+       COALESCE(cs.title, '') AS source_chat_title
+FROM attachment a
+LEFT JOIN comment c
+  ON c.id = a.comment_id
+ AND c.workspace_id = a.workspace_id
+LEFT JOIN issue i
+  ON i.id = COALESCE(a.issue_id, c.issue_id)
+ AND i.workspace_id = a.workspace_id
+LEFT JOIN chat_session cs
+  ON cs.id = a.chat_session_id
+ AND cs.workspace_id = a.workspace_id
+WHERE a.workspace_id = sqlc.arg(workspace_id)
+  AND (
+    COALESCE(a.issue_id, c.issue_id) IS NOT NULL
+    OR (
+      a.chat_message_id IS NOT NULL
+      AND cs.creator_id = sqlc.arg(user_id)
+      AND cs.agent_id = ANY(sqlc.arg(allowed_agent_ids)::uuid[])
+      AND (
+        EXISTS (
+          SELECT 1 FROM chat_message public_message
+          WHERE public_message.chat_session_id = cs.id
+            AND public_message.message_kind != 'channel_command'
+        )
+        OR (
+          NOT EXISTS (
+            SELECT 1 FROM channel_chat_session_binding binding
+            WHERE binding.chat_session_id = cs.id
+          )
+          AND NOT EXISTS (
+            SELECT 1 FROM chat_message channel_message
+            WHERE channel_message.chat_session_id = cs.id
+              AND channel_message.channel_ingested
+          )
+        )
+      )
+    )
+  )
+ORDER BY a.created_at DESC, a.id DESC
+LIMIT sqlc.arg(page_size)
+OFFSET sqlc.arg(page_offset);
+
 -- name: ListAttachmentsByComment :many
 SELECT * FROM attachment
 WHERE comment_id = $1 AND workspace_id = $2
