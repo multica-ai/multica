@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -394,6 +395,71 @@ func appendIssueTableInvolvedPredicate(where []string, addArg func(any) string, 
 )`, ref))
 }
 
+// Age out long-closed issues from the issue surface.
+//
+// Every status column renders identically, so on a long-running instance done
+// and cancelled grow without bound. These two env vars drop closed issues out of
+// the issue surface once they have sat in their terminal status for long enough.
+// Unset, empty, or non-positive disables each independently, so the default is
+// unchanged: every closed issue stays visible.
+const (
+	hideCancelledAfterHoursEnv = "MULTICA_BOARD_HIDE_CANCELLED_HOURS"
+	hideDoneAfterHoursEnv      = "MULTICA_BOARD_HIDE_DONE_HOURS"
+)
+
+// closedAtExpr is the moment an issue entered its current terminal status.
+//
+// The issue table has no completed_at column, and updated_at is bumped by any
+// later comment or edit, so it would keep resurrecting issues that were closed
+// days ago. activity_log holds the real transition and is covered by
+// idx_activity_log_issue_keyset. updated_at stays as the fallback for rows whose
+// activity predates the log.
+const closedAtExpr = `(SELECT a.created_at FROM activity_log a
+		WHERE a.issue_id = i.id AND a.action = 'status_changed' AND a.details->>'to' = i.status
+		ORDER BY a.created_at DESC LIMIT 1)`
+
+func closedIssueAgeCutoffHours(env string) int {
+	hours, err := strconv.Atoi(strings.TrimSpace(os.Getenv(env)))
+	if err != nil || hours <= 0 {
+		return 0
+	}
+	return hours
+}
+
+// appendClosedIssueAgeFilter hides aged-out done/cancelled issues.
+//
+// Skipped entirely when the caller is searching: a hidden issue must still be
+// findable by name, and the queue issues cross-reference cancelled ones by
+// identifier. Hiding is presentation-only — GET /api/issues, the CLI, quick
+// search and direct links are all untouched.
+func appendClosedIssueAgeFilter(where []string, addArg func(any) string, search string) []string {
+	if strings.TrimSpace(search) != "" {
+		return where
+	}
+	// Fixed order: the generated SQL and its argument positions must be stable
+	// across requests so PostgreSQL can reuse the plan.
+	terminal := []struct {
+		status string
+		env    string
+	}{
+		{"cancelled", hideCancelledAfterHoursEnv},
+		{"done", hideDoneAfterHoursEnv},
+	}
+	var aged []string
+	for _, t := range terminal {
+		if hours := closedIssueAgeCutoffHours(t.env); hours > 0 {
+			aged = append(aged, fmt.Sprintf(
+				"(i.status = %s AND COALESCE(%s, i.updated_at) < now() - make_interval(hours => %s))",
+				addArg(t.status), closedAtExpr, addArg(hours),
+			))
+		}
+	}
+	if len(aged) == 0 {
+		return where
+	}
+	return append(where, "NOT ("+strings.Join(aged, " OR ")+")")
+}
+
 func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request, spec issueTableQuerySpec) (issueTableSQL, bool) {
 	workspaceID := h.resolveWorkspaceID(r)
 	workspaceUUID, ok := parseUUIDOrBadRequest(w, workspaceID, "workspace_id")
@@ -611,6 +677,8 @@ func (h *Handler) compileIssueTableQuery(w http.ResponseWriter, r *http.Request,
 		}
 		where = append(where, fmt.Sprintf("i.%s >= %s AND i.%s < %s", column, addArg(start), column, addArg(end)))
 	}
+
+	where = appendClosedIssueAgeFilter(where, addArg, spec.Search)
 
 	if spec.Filters.WorkingOnly {
 		where = append(where, "EXISTS (SELECT 1 FROM agent_task_queue atq WHERE atq.issue_id = i.id AND atq.status = 'running')")

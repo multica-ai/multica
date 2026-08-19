@@ -1471,3 +1471,102 @@ func TestIssueTableHierarchyRootKeysetPagination(t *testing.T) {
 		}
 	}
 }
+
+func newClosedIssueAgeArgRecorder() (func(any) string, *[]any) {
+	args := make([]any, 0, 4)
+	return func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	}, &args
+}
+
+func TestClosedIssueAgeFilterIsOffByDefault(t *testing.T) {
+	t.Setenv(hideCancelledAfterHoursEnv, "")
+	t.Setenv(hideDoneAfterHoursEnv, "")
+
+	addArg, _ := newClosedIssueAgeArgRecorder()
+	if where := appendClosedIssueAgeFilter(nil, addArg, ""); len(where) != 0 {
+		t.Fatalf("unset cutoffs produced a predicate: %v", where)
+	}
+
+	for _, value := range []string{"0", "-1", "not-a-number", " "} {
+		t.Setenv(hideDoneAfterHoursEnv, value)
+		addArg, _ := newClosedIssueAgeArgRecorder()
+		if where := appendClosedIssueAgeFilter(nil, addArg, ""); len(where) != 0 {
+			t.Fatalf("cutoff %q produced a predicate: %v", value, where)
+		}
+	}
+}
+
+func TestClosedIssueAgeFilterHidesEachStatusIndependently(t *testing.T) {
+	t.Setenv(hideCancelledAfterHoursEnv, "24")
+	t.Setenv(hideDoneAfterHoursEnv, "")
+
+	addArg, args := newClosedIssueAgeArgRecorder()
+	where := appendClosedIssueAgeFilter(nil, addArg, "")
+	if len(where) != 1 {
+		t.Fatalf("cancelled cutoff produced %d predicates, want 1", len(where))
+	}
+	if strings.Contains(where[0], "'done'") || len(*args) != 2 {
+		t.Fatalf("cancelled-only cutoff leaked the done branch: %s %v", where[0], *args)
+	}
+	if (*args)[0] != "cancelled" || (*args)[1] != 24 {
+		t.Fatalf("cancelled cutoff args = %v, want [cancelled 24]", *args)
+	}
+	if !strings.HasPrefix(where[0], "NOT (") {
+		t.Fatalf("predicate must exclude, not select: %s", where[0])
+	}
+	if !strings.Contains(where[0], "activity_log") {
+		t.Fatalf("age clock must read activity_log, not updated_at alone: %s", where[0])
+	}
+}
+
+func TestClosedIssueAgeFilterArgumentOrderIsStable(t *testing.T) {
+	t.Setenv(hideCancelledAfterHoursEnv, "24")
+	t.Setenv(hideDoneAfterHoursEnv, "72")
+
+	first, firstArgs := newClosedIssueAgeArgRecorder()
+	second, secondArgs := newClosedIssueAgeArgRecorder()
+	firstWhere := appendClosedIssueAgeFilter(nil, first, "")
+	secondWhere := appendClosedIssueAgeFilter(nil, second, "")
+
+	if len(firstWhere) != 1 || firstWhere[0] != secondWhere[0] {
+		t.Fatalf("generated SQL is unstable across requests:\n%v\n%v", firstWhere, secondWhere)
+	}
+	if len(*firstArgs) != 4 {
+		t.Fatalf("both cutoffs must bind 4 args, got %v", *firstArgs)
+	}
+	for i := range *firstArgs {
+		if (*firstArgs)[i] != (*secondArgs)[i] {
+			t.Fatalf("argument order is unstable at %d: %v vs %v", i, *firstArgs, *secondArgs)
+		}
+	}
+}
+
+func TestClosedIssueAgeFilterExemptsSearch(t *testing.T) {
+	t.Setenv(hideCancelledAfterHoursEnv, "24")
+	t.Setenv(hideDoneAfterHoursEnv, "72")
+
+	for _, search := range []string{"login bug", "  padded  "} {
+		addArg, args := newClosedIssueAgeArgRecorder()
+		if where := appendClosedIssueAgeFilter(nil, addArg, search); len(where) != 0 || len(*args) != 0 {
+			t.Fatalf("search %q was filtered: %v", search, where)
+		}
+	}
+
+	addArg, _ := newClosedIssueAgeArgRecorder()
+	if where := appendClosedIssueAgeFilter(nil, addArg, "   "); len(where) != 1 {
+		t.Fatalf("a blank search must not count as searching: %v", where)
+	}
+}
+
+func TestClosedIssueAgeFilterPreservesExistingPredicates(t *testing.T) {
+	t.Setenv(hideCancelledAfterHoursEnv, "24")
+	t.Setenv(hideDoneAfterHoursEnv, "")
+
+	addArg, _ := newClosedIssueAgeArgRecorder()
+	where := appendClosedIssueAgeFilter([]string{"i.workspace_id = $1::uuid"}, addArg, "")
+	if len(where) != 2 || where[0] != "i.workspace_id = $1::uuid" {
+		t.Fatalf("existing predicates were not preserved: %v", where)
+	}
+}
