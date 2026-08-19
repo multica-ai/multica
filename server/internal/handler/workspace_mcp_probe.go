@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -375,9 +376,29 @@ func (h *Handler) GetWorkspaceMcpProbe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, req)
 }
 
+// requireDaemonMcpProbeCaller allows mdt_ and PAT (how daemons auth today)
+// and 404s browser JWT / direct handler calls so write-only config never
+// leaves on a user session.
+func (h *Handler) requireDaemonMcpProbeCaller(w http.ResponseWriter, r *http.Request) bool {
+	if middleware.DaemonIDFromContext(r.Context()) != "" {
+		return true
+	}
+	switch middleware.DaemonAuthPathFromContext(r.Context()) {
+	case middleware.DaemonAuthPathPAT, middleware.DaemonAuthPathCloudPAT, middleware.DaemonAuthPathDaemonToken:
+		return true
+	default:
+		writeError(w, http.StatusNotFound, "not found")
+		return false
+	}
+}
+
 // GetDaemonMcpProbeJob returns the write-only config to the daemon that will
-// run the handshake. User tokens never hit this route.
+// run the handshake. Browser JWT is rejected here; live daemons still
+// authenticate with PAT or mdt_ on /api/daemon.
 func (h *Handler) GetDaemonMcpProbeJob(w http.ResponseWriter, r *http.Request) {
+	if !h.requireDaemonMcpProbeCaller(w, r) {
+		return
+	}
 	runtimeID := chi.URLParam(r, "runtimeId")
 	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
 		return
@@ -421,6 +442,9 @@ func (h *Handler) GetDaemonMcpProbeJob(w http.ResponseWriter, r *http.Request) {
 
 // ReportDaemonMcpProbeResult receives the handshake outcome from the daemon.
 func (h *Handler) ReportDaemonMcpProbeResult(w http.ResponseWriter, r *http.Request) {
+	if !h.requireDaemonMcpProbeCaller(w, r) {
+		return
+	}
 	runtimeID := chi.URLParam(r, "runtimeId")
 	if _, ok := h.requireDaemonRuntimeAccess(w, r, runtimeID); !ok {
 		return

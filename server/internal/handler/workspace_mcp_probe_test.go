@@ -172,6 +172,40 @@ func TestProbeWorkspaceMcpServer_EnqueuesAndDaemonJobIsSecret(t *testing.T) {
 	testutil.Call(t, testHandler.GetDaemonMcpProbeJob, userJob).WantOneOf(http.StatusUnauthorized, http.StatusForbidden, http.StatusNotFound)
 }
 
+func TestGetDaemonMcpProbeJob_AllowsDaemonToken(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	serverID := mcpProbeServer(t, "probe-daemon-job")
+	rtID := capableRuntime(t, "probe-daemon-capable")
+
+	enqueue := testutil.WithURLParams(
+		newRequest(http.MethodPost, "/api/workspaces/"+testWorkspaceID+"/mcp-servers/"+serverID+"/probe", map[string]any{
+			"runtime_id": rtID,
+		}),
+		"id", testWorkspaceID, "serverId", serverID,
+	)
+	var queued McpProbeRequest
+	testutil.Call(t, testHandler.ProbeWorkspaceMcpServer, enqueue).Want(http.StatusOK).JSON(&queued)
+
+	daemonJob := testutil.WithURLParams(
+		newDaemonTokenRequest(http.MethodGet, "/api/daemon/runtimes/"+rtID+"/mcp-probes/"+queued.ID, nil, testWorkspaceID, "probe-daemon"),
+		"runtimeId", rtID, "requestId", queued.ID,
+	)
+	var job struct {
+		RequestID  string         `json:"request_id"`
+		ServerName string         `json:"server_name"`
+		Config     map[string]any `json:"config"`
+	}
+	resp := testutil.Call(t, testHandler.GetDaemonMcpProbeJob, daemonJob).Want(http.StatusOK).JSON(&job)
+	if job.RequestID != queued.ID || job.ServerName != "probe-daemon-job" {
+		t.Fatalf("job = %+v", job)
+	}
+	if !strings.Contains(resp.Text(), workspaceMcpTestSecret) {
+		t.Fatalf("daemon job omitted the write-only secret: %s", resp.Text())
+	}
+}
+
 func TestUpdateWorkspaceMcpServer_ConfigClearsLastProbe(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
