@@ -1,13 +1,10 @@
-"use client";
+import { redirect } from "next/navigation";
 
-import { use } from "react";
-import { AiBuilderSessionPage } from "@multica/views/agents";
-
-export default function NewAgentAiSessionRoute({
+export default async function NewAgentAiSessionRoute({
   params,
 }: {
-  params: Promise<{ sessionId: string }>;
+  params: Promise<{ workspaceSlug: string; sessionId: string }>;
 }) {
-  const { sessionId } = use(params);
-  return <AiBuilderSessionPage sessionId={sessionId} />;
+  const { workspaceSlug } = await params;
+  redirect(`/${encodeURIComponent(workspaceSlug)}/agents`);
 }

@@ -35,10 +35,9 @@ import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
  *
  * Two things shape this screen and are worth stating up front:
  *
- *  - A server added here is given to NO agent. It is a library entry, exactly
- *    like a workspace skill: an agent owner assigns it on the agent's own MCP
- *    tab, where it also gets a per-agent on/off toggle. Nothing here reaches an
- *    agent implicitly.
+ *  - A server added here is given to NO agent. It is an independent library
+ *    entry. Existing agent assignments remain available to execution, but new
+ *    browser assignment was retired with Agent advanced management.
  *  - The stored configuration is WRITE-ONLY. The API returns names and
  *    transports, never urls / commands / headers / env, so there is no
  *    "current value" to prefill and editing a server means supplying its
@@ -72,8 +71,8 @@ export function McpTab() {
     null,
   );
 
-  // The dialog is shared with the agent MCP tab, which hands it the saved
-  // entry to prefill. Here there is nothing to prefill — an edit always
+  // The dialog keeps the generic managed-server shape. Here there is nothing
+  // to prefill — an edit always
   // starts from an empty form and REPLACES the entry. The transport still
   // comes from the safe summary so the form opens on the right one.
   const dialogServer: ManagedMcpServer | null = editingServer

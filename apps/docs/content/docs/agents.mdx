@@ -18,7 +18,7 @@ An agent is not a continuously running process. It is a reusable identity and co
 | **Skills** | Provide reusable methods, reference material, and supporting files. |
 | **Runtime, model, and thinking level** | Decide which runtime, AI coding tool, and model it runs on; some tools (such as Codex) also offer a service tier. |
 | **Access** | Decides which members can run it. |
-| **Execution settings** | Include the concurrency limit, environment variables, CLI arguments, MCP, and external integrations. |
+| **Concurrency limit** | Controls how many tasks the agent can run at the same time. |
 
 Switching models or editing instructions does not create a new agent, and past issues, comments, and task history are not lost.
 
@@ -61,8 +61,6 @@ Workspace `owner`s and `admin`s can see and manage every agent, but cannot bypas
 
 **Seeing** an agent is determined by ownership, workspace admin roles, and Access together; **modifying** is open to the agent owner and workspace owners/admins, except Access itself, which only the agent owner can change.
 
-Configuration that may contain credentials, such as environment variables and MCP, has stricter read rules — see [Create and configure an agent](/agents-create#environment-variables-and-credentials).
-
 ## Online, offline, and workload status
 
 The agent list shows two kinds of status side by side:
@@ -84,7 +82,7 @@ The agent owner and workspace `owner`s and `admin`s can archive or restore an ag
 
 ## Next steps
 
-- [Create and configure an agent](/agents-create) — start blank, or build with AI.
+- [Create and configure an agent](/agents-create) — create one manually and choose its runtime.
 - [Skills](/skills) — add reusable methods and material to an agent.
 - [Squads](/squads) — let a leader pick the right member for the work.
 - [Daemon and runtimes](/daemon-runtimes) — where agents actually execute.

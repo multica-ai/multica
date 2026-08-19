@@ -32,7 +32,8 @@ describe('VIBES Tag task vocabulary', () => {
       'Failed to move task'
     );
     expect(taskCopy.runtimes.machine.metrics.health_clear).toBe('No issues');
-    expect(taskCopy.settings.lark.page_description).toContain('/issue');
+    expect(taskCopy.settings.lark.page_description).not.toContain('/issue');
+    expect(taskCopy.settings.lark.page_description).toContain('issue workflows');
     expect(multicaCopy.issues.page.breadcrumb_title).toBe('Issues');
   });
 });

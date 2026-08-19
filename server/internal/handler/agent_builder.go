@@ -53,6 +53,9 @@ type CreateAgentBuilderSessionResponse struct {
 // chat/task pipeline is intentionally agent-backed; it never appears in normal
 // agent lists and cannot be selected as an assignee.
 func (h *Handler) CreateAgentBuilderSession(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -182,6 +185,9 @@ type ListAgentBuilderSessionsResponse struct {
 // like every other chat read — a workspace admin cannot list someone else's
 // drafts, matching loadChatSessionForUser's rule.
 func (h *Handler) ListAgentBuilderSessions(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -246,6 +252,9 @@ type SaveAgentBuilderDraftRequest struct {
 // two orderings the only ones: either the save commits first and the delete
 // prunes it, or the delete commits first and the save finds nothing to write to.
 func (h *Handler) SaveAgentBuilderDraft(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {
@@ -391,6 +400,9 @@ type SwitchAgentBuilderRuntimeResponse struct {
 // provider session instead of resuming A's. Multica-side chat history and the
 // draft are untouched.
 func (h *Handler) SwitchAgentBuilderRuntime(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	workspaceID := h.resolveWorkspaceID(r)
 	userID, ok := requireUserID(w, r)
 	if !ok {

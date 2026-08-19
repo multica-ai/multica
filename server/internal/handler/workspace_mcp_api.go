@@ -321,6 +321,9 @@ func (h *Handler) DeleteWorkspaceMcpServer(w http.ResponseWriter, r *http.Reques
 // ListAgentMcpServers returns the workspace servers bound to this agent, with
 // each binding's toggle state.
 func (h *Handler) ListAgentMcpServers(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
 		return
@@ -378,6 +381,9 @@ type AddAgentMcpServerRequest struct {
 // AddAgentMcpServer gives one workspace MCP server to this agent. This is the
 // only way a library entry reaches an agent.
 func (h *Handler) AddAgentMcpServer(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	agent, ok := h.requireAgentMcpWriter(w, r)
 	if !ok {
 		return
@@ -442,6 +448,9 @@ type SetAgentMcpServerEnabledRequest struct {
 // SetAgentMcpServerEnabled flips one binding's toggle without dropping it, so
 // turning a server back on does not mean finding it again.
 func (h *Handler) SetAgentMcpServerEnabled(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	agent, ok := h.requireAgentMcpWriter(w, r)
 	if !ok {
 		return
@@ -480,6 +489,9 @@ func (h *Handler) SetAgentMcpServerEnabled(w http.ResponseWriter, r *http.Reques
 // RemoveAgentMcpServer takes a workspace server away from this agent. The
 // library entry itself is untouched.
 func (h *Handler) RemoveAgentMcpServer(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	agent, ok := h.requireAgentMcpWriter(w, r)
 	if !ok {
 		return

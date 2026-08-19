@@ -96,6 +96,9 @@ type RegisterSlackBYORequest struct {
 // at-rest key configured (SlackInstall != nil), NOT the hosted OAuth client
 // credentials — BYO is exactly the path for deployments without a hosted app.
 func (h *Handler) RegisterSlackBYO(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	if h.SlackInstall == nil {
 		writeError(w, http.StatusServiceUnavailable, "slack integration not enabled")
 		return

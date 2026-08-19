@@ -19,14 +19,14 @@ export interface DingTalkInstallation {
 export interface ListDingTalkInstallationsResponse {
   installations: DingTalkInstallation[];
   /** Whether the deployment has the at-rest secret key configured. When false
-   * the connect entry points are hidden and the panel renders an "ask the
-   * operator to enable DingTalk" state. */
+   * the retained-installations panel renders an operator notice. */
   configured: boolean;
-  /** Whether the install path is available (true whenever DingTalk is
+  /** Whether the legacy install path is available (true whenever DingTalk is
    * configured, i.e. the at-rest key is set — a bring-your-own-app install
    * needs no hosted credentials). Kept as a separate flag for forward/backward
    * compat; optional so an older desktop build that predates it treats it as
-   * off. */
+   * off. Retained for wire compatibility after browser install entry
+   * retirement. */
   install_supported?: boolean;
   /** Whether this backend exposes DingTalk group routing. Optional and gated
    * with `=== true` so newer Web/Desktop clients do not call a route that an
@@ -50,19 +50,6 @@ export interface DingTalkGroupRoute {
 
 export interface ListDingTalkGroupRoutesResponse {
   routes: DingTalkGroupRoute[];
-}
-
-export interface UpdateDingTalkGroupRouteRequest {
-  agent_id: string;
-}
-
-/** Request body for a bring-your-own-app (BYO) install: the AppKey and
- * AppSecret the admin pastes from the DingTalk Stream-mode robot they created.
- * The backend validates both before persisting, then returns the created
- * DingTalkInstallation. */
-export interface RegisterDingTalkBYORequest {
-  client_id: string;
-  client_secret: string;
 }
 
 /** Post-redemption echo: the DingTalk user id the token carried is now bound to

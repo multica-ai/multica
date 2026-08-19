@@ -252,10 +252,7 @@ func (h *Handler) RedeemLarkBindingToken(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// BeginLarkInstallResponse is the payload the QR-code dialog consumes.
-// The frontend renders `qr_code_url` as a QR image (and as a tap-to-
-// open link fallback) and starts polling
-// /lark/install/{session_id}/status at the supplied cadence.
+// BeginLarkInstallResponse is retained for non-Tag client compatibility.
 type BeginLarkInstallResponse struct {
 	SessionID           string `json:"session_id"`
 	QRCodeURL           string `json:"qr_code_url"`
@@ -273,9 +270,11 @@ type BeginLarkInstallResponse struct {
 // this workspace (RegistrationService re-checks that defense-in-depth).
 //
 // Returns 503 when the integration is not wired (no at-rest key, no
-// HTTP client, no RegistrationService); the UI hides the bind button
-// in that case so this should not be reached through the normal flow.
+// HTTP client, no RegistrationService).
 func (h *Handler) BeginLarkInstall(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	if h.LarkRegistration == nil {
 		writeError(w, http.StatusServiceUnavailable, "lark install not configured")
 		return
@@ -299,9 +298,8 @@ func (h *Handler) BeginLarkInstall(w http.ResponseWriter, r *http.Request) {
 	}
 	// region is the cloud the user explicitly chose to bind against —
 	// "feishu" (mainland, accounts.feishu.cn) or "lark" (international,
-	// accounts.larksuite.com). The frontend now exposes two CTAs ("Bind
-	// to Feishu" / "Bind to Lark") so the QR is rendered against the
-	// right cloud up front rather than relying on the mid-poll
+	// accounts.larksuite.com). Retained non-Tag clients choose the cloud so
+	// the QR is rendered against the right host rather than relying on the mid-poll
 	// tenant-brand auto-switch from a Feishu-first begin. We accept
 	// "feishu", "lark", and the empty string (for back-compat with
 	// callers that pre-date the split CTA, which RegionOrDefault inside
@@ -380,10 +378,13 @@ type LarkInstallStatusResponse struct {
 // restart".
 //
 // On success this handler does NOT clean up the session — the
-// frontend may poll once more after the dialog closes to confirm
+// a compatible client may poll once more after its flow closes to confirm
 // before the in-process GC sweep retires the entry; reading is
 // idempotent.
 func (h *Handler) GetLarkInstallStatus(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	if h.LarkRegistration == nil {
 		writeError(w, http.StatusServiceUnavailable, "lark install not configured")
 		return

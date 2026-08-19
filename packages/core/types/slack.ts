@@ -22,23 +22,14 @@ export interface SlackInstallation {
 export interface ListSlackInstallationsResponse {
   installations: SlackInstallation[];
   /** Whether the deployment has the at-rest secret key configured. When false
-   * the connect entry points are hidden and the panel renders an "ask the
-   * operator to enable Slack" state. */
+   * the retained-installations panel renders an operator notice. */
   configured: boolean;
-  /** Whether the install path is available (true whenever Slack is configured,
+  /** Whether the legacy install path is available (true whenever Slack is configured,
    * i.e. the at-rest key is set — a bring-your-own-app install needs no hosted
    * OAuth credentials). Kept as a separate flag for forward/backward compat;
-   * optional so an older desktop build that predates it treats it as off. */
+   * optional so an older desktop build that predates it treats it as off.
+   * Retained for wire compatibility after browser install entry retirement. */
   install_supported?: boolean;
-}
-
-/** Request body for a bring-your-own-app (BYO) install: the two tokens the
- * admin pastes from the Slack app they created. The backend validates that both
- * belong to the same Slack app (and that the app token is live) before
- * persisting, then returns the created SlackInstallation. */
-export interface RegisterSlackBYORequest {
-  bot_token: string;
-  app_token: string;
 }
 
 /** Post-redemption echo: the Slack user id the token carried is now bound to

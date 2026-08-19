@@ -17,9 +17,8 @@ import {
 export type { AgentPermissionScope };
 
 /**
- * The in-progress configuration of an agent being created. Shared by every
- * creation surface (manual, duplicate, AI builder) so the same field set is
- * validated, seeded and submitted the same way regardless of entry point.
+ * The in-progress configuration of an agent being created. Manual creation
+ * and duplication share the same validated, seeded request shape.
  */
 export interface AgentDraft {
   name: string;
@@ -87,8 +86,8 @@ export function applyDraftModelChange(
 
 /**
  * Mirrors the server's `utf8.RuneCountInString` check (agent.go:1013). The
- * textarea's `maxLength` covers typing and pasting, but a duplicated agent or
- * an AI-builder draft can seed a longer value programmatically — without this
+ * textarea's `maxLength` covers typing and pasting, but a duplicated agent can
+ * seed a longer value programmatically — without this
  * the create button would submit into a guaranteed 400.
  */
 export function isDraftDescriptionWithinLimit(description: string): boolean {
@@ -201,17 +200,15 @@ export function buildDuplicateDraft(
 /**
  * Assembles the `POST /api/agents` body. Empty execution overrides are omitted
  * rather than sent as `""` so the runtime resolves its own default, and the
- * duplicate-only fields are the runtime-independent ones (`custom_args`,
- * concurrency) — mirroring `multica agent copy`.
+ * duplicate-only concurrency remains approved. Retired Agent-scoped custom
+ * arguments are deliberately not copied into a new product write.
  */
 export function buildCreateAgentRequest(options: {
   draft: AgentDraft;
   runtimeId: string;
-  /** Creation-source attribution for the `agent_created` analytics event. */
-  template?: string;
   duplicateSource?: Agent | null;
 }): CreateAgentRequest {
-  const { draft, runtimeId, template, duplicateSource } = options;
+  const { draft, runtimeId, duplicateSource } = options;
   const request: CreateAgentRequest = {
     name: draft.name.trim(),
     description: draft.description.trim(),
@@ -225,12 +222,8 @@ export function buildCreateAgentRequest(options: {
       draft.permissionScope === "private" ? "private" : "public_to",
     invocation_targets: buildInvocationTargets(draft),
     skill_ids: [...draft.skillIds],
-    template,
   };
   if (duplicateSource) {
-    if (duplicateSource.custom_args.length > 0) {
-      request.custom_args = duplicateSource.custom_args;
-    }
     const sourceConcurrency = duplicateSource.max_concurrent_tasks;
     if (
       Number.isInteger(sourceConcurrency) &&

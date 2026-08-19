@@ -138,6 +138,9 @@ func canManageAgentEnv(agent db.Agent, member db.Member) bool {
 // can fix it; the alternative — quietly handing out secrets — is
 // invisible.
 func (h *Handler) GetAgentEnv(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	agent, member, ok := h.authorizeAgentEnv(w, r)
 	if !ok {
 		return
@@ -186,6 +189,9 @@ func (h *Handler) GetAgentEnv(w http.ResponseWriter, r *http.Request) {
 // an unaudited env mutation on disk, and a persist failure does not
 // leave a phantom audit row claiming a change that never happened.
 func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	agent, member, ok := h.authorizeAgentEnv(w, r)
 	if !ok {
 		return

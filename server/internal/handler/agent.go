@@ -854,9 +854,13 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := requestUserID(r)
+	vibesMirrored, err := h.isRetiredVIBESAgentProductRequest(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve VIBES identity")
+		return
+	}
 
 	var agents []db.Agent
-	var err error
 	if r.URL.Query().Get("include_archived") == "true" {
 		agents, err = h.Queries.ListAllAgents(r.Context(), parseUUID(workspaceID))
 	} else {
@@ -943,6 +947,9 @@ func (h *Handler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		} else if actorType == "agent" || uuidToString(a.OwnerID) != userID {
 			redactComposioToolkitAllowlist(&resp)
 		}
+		if vibesMirrored {
+			redactRetiredAgentAdvancedFields(&resp)
+		}
 		visible = append(visible, resp)
 	}
 
@@ -1002,6 +1009,10 @@ func (h *Handler) GetAgent(w http.ResponseWriter, r *http.Request) {
 		suppressComposioToolkitAllowlist(&resp)
 	} else if actorType == "agent" || uuidToString(agent.OwnerID) != userID {
 		redactComposioToolkitAllowlist(&resp)
+	}
+	if err := h.redactRetiredAgentAdvancedFieldsForVIBES(r, &resp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve VIBES identity")
+		return
 	}
 
 	writeJSON(w, http.StatusOK, resp)
@@ -1073,6 +1084,9 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if hasRetiredAgentAdvancedWrite(rawFields) && h.rejectRetiredVIBESAgentSurface(w, r) {
 		return
 	}
 
@@ -1319,6 +1333,10 @@ func (h *Handler) CreateAgent(w http.ResponseWriter, r *http.Request) {
 	if !h.composioMCPAppsEnabled(r.Context()) {
 		suppressComposioToolkitAllowlist(&resp)
 	}
+	if err := h.redactRetiredAgentAdvancedFieldsForVIBES(r, &resp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve VIBES identity")
+		return
+	}
 	writeJSON(w, http.StatusCreated, resp)
 }
 
@@ -1561,6 +1579,9 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	rawFields, err := decodeJSONBodyWithRawFields(r.Body, &req)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if hasRetiredAgentAdvancedWrite(rawFields) && h.rejectRetiredVIBESAgentSurface(w, r) {
 		return
 	}
 
@@ -1968,6 +1989,10 @@ func (h *Handler) UpdateAgent(w http.ResponseWriter, r *http.Request) {
 	} else if uuidToString(updated.OwnerID) != userID {
 		redactComposioToolkitAllowlist(&resp)
 	}
+	if err := h.redactRetiredAgentAdvancedFieldsForVIBES(r, &resp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve VIBES identity")
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -2197,6 +2222,10 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentArchived, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
+	if err := h.redactRetiredAgentAdvancedFieldsForVIBES(r, &resp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve VIBES identity")
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 
@@ -2233,6 +2262,10 @@ func (h *Handler) RestoreAgent(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, wsID)
 	h.publish(protocol.EventAgentRestored, wsID, actorType, actorID, map[string]any{"agent": broadcastAgentResponse(resp)})
 	redactAgentResponseForActor(&resp, actorType)
+	if err := h.redactRetiredAgentAdvancedFieldsForVIBES(r, &resp); err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to resolve VIBES identity")
+		return
+	}
 	writeJSON(w, http.StatusOK, resp)
 }
 

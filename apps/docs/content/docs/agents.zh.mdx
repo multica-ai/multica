@@ -18,7 +18,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 | **Skills** | 提供可以复用的方法、参考资料和支持文件。 |
 | **运行时、模型和思考强度** | 决定在哪个运行时、用哪款 AI 编程工具和哪个模型执行；部分工具（如 Codex）还可选择速度档。 |
 | **Access** | 决定哪些成员可以运行它。 |
-| **执行配置** | 包括并发上限、环境变量、CLI 参数、MCP 和外部集成。 |
+| **并发上限** | 控制这名智能体最多同时运行多少条任务。 |
 
 更换模型或修改指令不会创建新智能体，过去的 issue、评论和执行记录也不会丢失。
 
@@ -61,8 +61,6 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 **看见**由 owner 身份、工作区管理角色和 Access 共同决定；**修改**开放给智能体 owner 和工作区 owner/admin，其中 Access 只有智能体 owner 能改。
 
-环境变量和 MCP 等可能包含凭据的配置有更严格的读取规则，见[创建和配置智能体](/agents-create#环境变量与凭据)。
-
 ## 在线、离线和工作状态
 
 智能体列表会同时展示两类状态：
@@ -84,7 +82,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 接下来
 
-- [创建和配置智能体](/agents-create) — 从空白开始，或通过 AI 创建。
+- [创建和配置智能体](/agents-create) — 手动创建并选择运行时。
 - [Skills](/skills) — 给智能体添加可复用的方法和资料。
 - [小队](/squads) — 让 leader 根据任务选择合适的成员。
 - [守护进程与运行时](/daemon-runtimes) — 了解智能体实际在哪里执行。

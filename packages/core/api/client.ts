@@ -21,13 +21,7 @@ import type {
   IssueTableRowsResponse,
   Agent,
   CreateAgentRequest,
-  AgentBuilderRuntimeSwitch,
-  AgentBuilderSession,
-  AgentBuilderSessionSummary,
-  StoredAgentDraft,
   UpdateAgentRequest,
-  AgentEnvResponse,
-  UpdateAgentEnvRequest,
   AgentTask,
   AgentActivityBucket,
   AgentRunCount,
@@ -164,26 +158,16 @@ import type {
   ConnectVCSRequest,
   ConnectVCSResponse,
   ListLarkInstallationsResponse,
-  BeginLarkInstallResponse,
-  LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
   ComposioToolkit,
   ComposioConnection,
   ComposioConnectInitResponse,
-  SlackInstallation,
   ListSlackInstallationsResponse,
-  RegisterSlackBYORequest,
   RedeemSlackBindingTokenResponse,
-  DingTalkGroupRoute,
-  DingTalkInstallation,
   ListDingTalkGroupRoutesResponse,
   ListDingTalkInstallationsResponse,
-  RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
-  UpdateDingTalkGroupRouteRequest,
-  WecomInstallation,
   ListWecomInstallationsResponse,
-  RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
   Squad,
   SquadMember,
@@ -232,11 +216,6 @@ import {
   IssueTriggerPreviewSchema,
   CloudRuntimeNodeListSchema,
   CloudRuntimeNodeSchema,
-  AgentBuilderRuntimeSwitchSchema,
-  AgentBuilderSessionSchema,
-  AgentBuilderSessionListSchema,
-  EMPTY_AGENT_BUILDER_SESSION_LIST,
-  agentBuilderRuntimeSwitchFallback,
   DashboardAgentRunTimeListSchema,
   DashboardRunTimeDailyListSchema,
   DashboardFailureDailyListSchema,
@@ -251,7 +230,6 @@ import {
   EMPTY_PRIORITIZE_QUEUED_CHAT_TASK_RESPONSE,
   EMPTY_CLOUD_RUNTIME_NODE,
   EMPTY_CLOUD_RUNTIME_NODE_LIST,
-  EMPTY_AGENT_BUILDER_SESSION,
   EMPTY_GROUPED_ISSUES_RESPONSE,
   EMPTY_ISSUE_TABLE_FACETS_RESPONSE,
   EMPTY_ISSUE_TABLE_GROUPS_RESPONSE,
@@ -309,20 +287,14 @@ import {
   CreateWorkspaceSubscriptionCheckoutResponseSchema,
   WorkspaceSubscriptionSeatReconcileResultSchema,
   CreateWorkspaceSubscriptionPortalResponseSchema,
-  DingTalkInstallationSchema,
-  DingTalkGroupRouteSchema,
   ListDingTalkGroupRoutesResponseSchema,
   ListDingTalkInstallationsResponseSchema,
   RedeemDingTalkBindingTokenResponseSchema,
-  EMPTY_DINGTALK_INSTALLATION,
-  EMPTY_DINGTALK_GROUP_ROUTE,
   EMPTY_LIST_DINGTALK_GROUP_ROUTES_RESPONSE,
   EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE,
-  WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
-  EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
   EMPTY_BILLING_BALANCE,
@@ -1412,85 +1384,6 @@ export class ApiClient {
     });
   }
 
-  async createAgentBuilderSession(data: {
-    runtime_id: string;
-    model?: string;
-  }): Promise<AgentBuilderSession> {
-    const raw = await this.fetch<unknown>("/api/agent-builder/sessions", {
-      method: "POST",
-      body: JSON.stringify(data),
-    });
-    return parseWithFallback(
-      raw,
-      AgentBuilderSessionSchema,
-      EMPTY_AGENT_BUILDER_SESSION,
-      { endpoint: "POST /api/agent-builder/sessions" },
-    );
-  }
-
-  /**
-   * The caller's unfinished agent-creation conversations.
-   *
-   * Builder sessions are hidden from every chat list (their carrier agent is
-   * `kind = 'system'`), so this is the only route back to one. A 404 means the
-   * backend predates the endpoint: degrade to "no drafts" instead of erroring
-   * the Agents page, exactly as listChatDraftRestores does.
-   */
-  async listAgentBuilderSessions(): Promise<AgentBuilderSessionSummary[]> {
-    let raw: unknown;
-    try {
-      raw = await this.fetch<unknown>("/api/agent-builder/sessions");
-    } catch (err) {
-      if (err instanceof ApiError && err.status === 404) return [];
-      throw err;
-    }
-    return parseWithFallback(
-      raw,
-      AgentBuilderSessionListSchema,
-      EMPTY_AGENT_BUILDER_SESSION_LIST,
-      { endpoint: "GET /api/agent-builder/sessions" },
-    ).sessions;
-  }
-
-  /**
-   * Stores the configuration a creation conversation has arrived at, including
-   * edits the user typed but has not sent. Whole-object last-write-wins: one
-   * conversation has one editor, so a field-level merge could only reconstruct
-   * a state nobody saw. Read back through `listAgentBuilderSessions`.
-   */
-  async saveAgentBuilderDraft(
-    sessionId: string,
-    draft: StoredAgentDraft,
-  ): Promise<void> {
-    await this.fetch(`/api/agent-builder/sessions/${sessionId}/draft`, {
-      method: "PUT",
-      body: JSON.stringify({ draft }),
-    });
-  }
-
-  /** Rebinds a live builder conversation to another runtime. Callers must not
-   *  show the new runtime as selected until this resolves — the whole point is
-   *  that the UI's runtime and the executing runtime agree.
-   *
-   *  A non-2xx throws before we get here and nothing was committed. Reaching the
-   *  parse means the server bound `data.runtime_id`, so that is the fallback for
-   *  an unparseable body — see agentBuilderRuntimeSwitchFallback. */
-  async switchAgentBuilderRuntime(
-    sessionId: string,
-    data: { runtime_id: string },
-  ): Promise<AgentBuilderRuntimeSwitch> {
-    const raw = await this.fetch<unknown>(
-      `/api/agent-builder/sessions/${sessionId}/runtime`,
-      { method: "PATCH", body: JSON.stringify(data) },
-    );
-    return parseWithFallback(
-      raw,
-      AgentBuilderRuntimeSwitchSchema,
-      agentBuilderRuntimeSwitchFallback(data.runtime_id),
-      { endpoint: "PATCH /api/agent-builder/sessions/{id}/runtime" },
-    );
-  }
-
   async updateAgent(id: string, data: UpdateAgentRequest): Promise<Agent> {
     return this.fetch(`/api/agents/${id}`, {
       method: "PUT",
@@ -1500,34 +1393,6 @@ export class ApiClient {
 
   async archiveAgent(id: string): Promise<Agent> {
     return this.fetch(`/api/agents/${id}/archive`, { method: "POST" });
-  }
-
-  /**
-   * Returns the plaintext `custom_env` map for an agent. Admits the
-   * agent's owner or a workspace owner/admin (MUL-5438); calls from
-   * agent-actor sessions get a 403. Every successful call writes an
-   * `agent_env_revealed` activity_log row server-side. MUL-2600.
-   */
-  async getAgentEnv(id: string): Promise<AgentEnvResponse> {
-    return this.fetch(`/api/agents/${id}/env`);
-  }
-
-  /**
-   * Replaces an agent's `custom_env` wholesale. Values equal to
-   * `"****"` are preserved server-side (the **** guard) so a partial
-   * UI edit doesn't overwrite real secrets with the masked
-   * placeholder. Admits the agent's owner or a workspace owner/admin
-   * (MUL-5438); agent actors get a 403. Every successful call writes an
-   * `agent_env_updated` activity_log row. MUL-2600.
-   */
-  async updateAgentEnv(
-    id: string,
-    data: UpdateAgentEnvRequest,
-  ): Promise<AgentEnvResponse> {
-    return this.fetch(`/api/agents/${id}/env`, {
-      method: "PUT",
-      body: JSON.stringify(data),
-    });
   }
 
   async restoreAgent(id: string): Promise<Agent> {
@@ -2583,7 +2448,7 @@ export class ApiClient {
 
   /**
    * Adds a server to the library. It is assigned to NO agent — an agent gets
-   * it only through addAgentMcpServer.
+   * no implicit binding from this independent workspace operation.
    */
   async createWorkspaceMcpServer(
     workspaceId: string,
@@ -2641,100 +2506,14 @@ export class ApiClient {
     );
   }
 
-  /** The workspace MCP servers assigned to this agent, with their toggles. */
-  async listAgentMcpServers(agentId: string): Promise<WorkspaceMcpServer[]> {
-    const raw = await this.fetch<unknown>(`/api/agents/${agentId}/mcp-servers`);
-    return parseWithFallback(
-      raw,
-      WorkspaceMcpServerListSchema,
-      [] as WorkspaceMcpServer[],
-      {
-        endpoint: "GET /api/agents/{id}/mcp-servers",
-      },
-    );
-  }
-
-  /**
-   * Gives one workspace server to this agent. Every write returns the
-   * resulting assignment list, so the client never has to guess the state.
-   */
-  async addAgentMcpServer(
-    agentId: string,
-    serverId: string,
-  ): Promise<WorkspaceMcpServer[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/agents/${agentId}/mcp-servers`,
-      {
-        method: "POST",
-        body: JSON.stringify({ server_id: serverId }),
-      },
-    );
-    return parseWithFallback(
-      raw,
-      WorkspaceMcpServerListSchema,
-      [] as WorkspaceMcpServer[],
-      {
-        endpoint: "POST /api/agents/{id}/mcp-servers",
-      },
-    );
-  }
-
-  async setAgentMcpServerEnabled(
-    agentId: string,
-    serverId: string,
-    enabled: boolean,
-  ): Promise<WorkspaceMcpServer[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/agents/${agentId}/mcp-servers/${encodeURIComponent(serverId)}/enabled`,
-      { method: "PUT", body: JSON.stringify({ enabled }) },
-    );
-    return parseWithFallback(
-      raw,
-      WorkspaceMcpServerListSchema,
-      [] as WorkspaceMcpServer[],
-      {
-        endpoint: "PUT /api/agents/{id}/mcp-servers/{serverId}/enabled",
-      },
-    );
-  }
-
-  async removeAgentMcpServer(
-    agentId: string,
-    serverId: string,
-  ): Promise<WorkspaceMcpServer[]> {
-    const raw = await this.fetch<unknown>(
-      `/api/agents/${agentId}/mcp-servers/${encodeURIComponent(serverId)}`,
-      { method: "DELETE" },
-    );
-    return parseWithFallback(
-      raw,
-      WorkspaceMcpServerListSchema,
-      [] as WorkspaceMcpServer[],
-      {
-        endpoint: "DELETE /api/agents/{id}/mcp-servers/{serverId}",
-      },
-    );
-  }
-
-  async installPlugin(
-    workspaceId: string,
-    request: PluginReleaseRequest,
-  ): Promise<PluginInstallation> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/plugins/install`,
-      {
-        method: "POST",
-        body: JSON.stringify(request),
-      },
-    );
-    return parseWithFallback(
-      raw,
-      PluginInstallationSchema,
-      EMPTY_PLUGIN_INSTALLATION,
-      {
-        endpoint: "POST /api/workspaces/{id}/plugins/install",
-      },
-    );
+  async installPlugin(workspaceId: string, request: PluginReleaseRequest): Promise<PluginInstallation> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/install`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    return parseWithFallback(raw, PluginInstallationSchema, EMPTY_PLUGIN_INSTALLATION, {
+      endpoint: "POST /api/workspaces/{id}/plugins/install",
+    });
   }
 
   async upgradePlugin(
@@ -4729,47 +4508,10 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/lark/installations`);
   }
 
-  async beginLarkInstall(
-    workspaceId: string,
-    agentId: string,
-    region: "feishu" | "lark",
-  ): Promise<BeginLarkInstallResponse> {
-    // The user picks the cloud explicitly in the UI ("Bind to Feishu"
-    // vs "Bind to Lark"), and the backend POSTs the device-flow `begin`
-    // against the corresponding accounts host (accounts.feishu.cn vs
-    // accounts.larksuite.com) so the QR renders against the right
-    // cloud up front. Empty / omitted region still resolves to Feishu
-    // server-side (RegionOrDefault) — we surface region as a required
-    // arg here so every call site is forced to make a deliberate
-    // choice rather than silently defaulting to mainland.
-    const search = new URLSearchParams({ agent_id: agentId, region });
-    return this.fetch(
-      `/api/workspaces/${workspaceId}/lark/install/begin?${search.toString()}`,
-      {
-        method: "POST",
-      },
-    );
-  }
-
-  async getLarkInstallStatus(
-    workspaceId: string,
-    sessionId: string,
-  ): Promise<LarkInstallStatusResponse> {
-    return this.fetch(
-      `/api/workspaces/${workspaceId}/lark/install/${sessionId}/status`,
-    );
-  }
-
-  async deleteLarkInstallation(
-    workspaceId: string,
-    installationId: string,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/workspaces/${workspaceId}/lark/installations/${installationId}`,
-      {
-        method: "DELETE",
-      },
-    );
+  async deleteLarkInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/lark/installations/${installationId}`, {
+      method: "DELETE",
+    });
   }
 
   async redeemLarkBindingToken(
@@ -4822,34 +4564,10 @@ export class ApiClient {
     return this.fetch(`/api/workspaces/${workspaceId}/slack/installations`);
   }
 
-  // registerSlackBYO performs a bring-your-own-app install: the admin pastes the
-  // bot token (xoxb-) + app-level token (xapp-) of the Slack app they created,
-  // and the backend validates + persists it, returning the new installation.
-  async registerSlackBYO(
-    workspaceId: string,
-    agentId: string,
-    body: RegisterSlackBYORequest,
-  ): Promise<SlackInstallation> {
-    const search = new URLSearchParams({ agent_id: agentId });
-    return this.fetch(
-      `/api/workspaces/${workspaceId}/slack/install/byo?${search.toString()}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    );
-  }
-
-  async deleteSlackInstallation(
-    workspaceId: string,
-    installationId: string,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/workspaces/${workspaceId}/slack/installations/${installationId}`,
-      {
-        method: "DELETE",
-      },
-    );
+  async deleteSlackInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/slack/installations/${installationId}`, {
+      method: "DELETE",
+    });
   }
 
   async redeemSlackBindingToken(
@@ -4890,62 +4608,10 @@ export class ApiClient {
     );
   }
 
-  async updateDingTalkGroupRoute(
-    workspaceId: string,
-    routeId: string,
-    body: UpdateDingTalkGroupRouteRequest,
-  ): Promise<DingTalkGroupRoute> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/dingtalk/group-routes/${routeId}`,
-      { method: "PATCH", body: JSON.stringify(body) },
-    );
-    return parseWithFallback(
-      raw,
-      DingTalkGroupRouteSchema,
-      EMPTY_DINGTALK_GROUP_ROUTE,
-      {
-        endpoint: "PATCH /api/workspaces/:id/dingtalk/group-routes/:routeId",
-      },
-    );
-  }
-
-  // registerDingTalkBYO performs a bring-your-own-app install: the admin pastes
-  // the AppKey (client id) + AppSecret (client secret) of the DingTalk
-  // Stream-mode robot they created, and the backend validates + persists it,
-  // returning the new installation.
-  async registerDingTalkBYO(
-    workspaceId: string,
-    agentId: string,
-    body: RegisterDingTalkBYORequest,
-  ): Promise<DingTalkInstallation> {
-    const search = new URLSearchParams({ agent_id: agentId });
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/dingtalk/install/byo?${search.toString()}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    );
-    return parseWithFallback(
-      raw,
-      DingTalkInstallationSchema,
-      EMPTY_DINGTALK_INSTALLATION,
-      {
-        endpoint: "POST /api/workspaces/:id/dingtalk/install/byo",
-      },
-    );
-  }
-
-  async deleteDingTalkInstallation(
-    workspaceId: string,
-    installationId: string,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/workspaces/${workspaceId}/dingtalk/installations/${installationId}`,
-      {
-        method: "DELETE",
-      },
-    );
+  async deleteDingTalkInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/dingtalk/installations/${installationId}`, {
+      method: "DELETE",
+    });
   }
 
   async redeemDingTalkBindingToken(
@@ -4965,14 +4631,10 @@ export class ApiClient {
   // WeCom smart-bot ("智能机器人" / aibot) integration. The bot dials a
   // WebSocket long connection to wss://openws.work.weixin.qq.com and stays
   // authenticated with (bot_id, secret); no public callback URL is required.
-  // These three methods drive the Settings-page BYO Connect dialog + list +
-  // disconnect only — the inbound WebSocket loop runs entirely server-side.
-  async listWecomInstallations(
-    workspaceId: string,
-  ): Promise<ListWecomInstallationsResponse> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/wecom/installations`,
-    );
+  // The browser retains list/disconnect management for existing installations;
+  // the inbound WebSocket loop runs entirely server-side.
+  async listWecomInstallations(workspaceId: string): Promise<ListWecomInstallationsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/wecom/installations`);
     return parseWithFallback(
       raw,
       ListWecomInstallationsResponseSchema,
@@ -4981,43 +4643,10 @@ export class ApiClient {
     );
   }
 
-  // registerWecomBYO performs a bring-your-own-app install: the admin pastes
-  // the bot id and long-connection secret from the WeCom admin console,
-  // and the backend seals the secret with MULTICA_WECOM_SECRET_KEY before
-  // persisting, returning the new installation.
-  async registerWecomBYO(
-    workspaceId: string,
-    agentId: string,
-    body: RegisterWecomBYORequest,
-  ): Promise<WecomInstallation> {
-    const search = new URLSearchParams({ agent_id: agentId });
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/wecom/install/byo?${search.toString()}`,
-      {
-        method: "POST",
-        body: JSON.stringify(body),
-      },
-    );
-    return parseWithFallback(
-      raw,
-      WecomInstallationSchema,
-      EMPTY_WECOM_INSTALLATION,
-      {
-        endpoint: "POST /api/workspaces/:id/wecom/install/byo",
-      },
-    );
-  }
-
-  async deleteWecomInstallation(
-    workspaceId: string,
-    installationId: string,
-  ): Promise<void> {
-    await this.fetch(
-      `/api/workspaces/${workspaceId}/wecom/installations/${installationId}`,
-      {
-        method: "DELETE",
-      },
-    );
+  async deleteWecomInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/wecom/installations/${installationId}`, {
+      method: "DELETE",
+    });
   }
 
   // redeemWecomBindingToken binds the WeCom aibot userid carried by the

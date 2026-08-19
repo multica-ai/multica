@@ -16,11 +16,11 @@
  * two edges visibly failed to line up.
  *
  * The gutter scales with the CONTAINER, never the viewport. These components
- * render in a resizable split pane (the chat tab), a 360px floating window, and
- * the agent builder — all of which are independent widths inside the same
- * browser window, so a `lg:` viewport variant would widen the floating window's
- * gutter just because the window behind it is wide. Hosts therefore have to mark
- * the chat column `@container`; ChatPage, ChatWindow, and the agent builder do.
+ * render in a resizable split pane (the chat tab) and a 360px floating window —
+ * independent widths inside the same browser window, so a `lg:` viewport variant
+ * would widen the floating window's gutter just because the window behind it is
+ * wide. Hosts therefore have to mark the chat column `@container`; ChatPage and
+ * ChatWindow do.
  * Without that ancestor the `@` variants simply never match and the column keeps
  * the base 20px, which is the old behavior rather than a broken layout.
  */

@@ -37,4 +37,16 @@ describe('Tag Host workspace routes', () => {
       expect(route?.parentRoute?.id, fullPath).toBe('__root__');
     }
   });
+
+  it('does not resolve retired Agent Builder deep links', () => {
+    const fullPaths = Object.values(getRouter().routesById).map(
+      (route) => route.fullPath
+    );
+
+    expect(fullPaths).not.toContain('/$workspaceSlug/agents/new/ai');
+    expect(fullPaths).not.toContain(
+      '/$workspaceSlug/agents/new/ai/$sessionId'
+    );
+    expect(fullPaths).not.toContain('/$workspaceSlug/agents/new');
+  });
 });

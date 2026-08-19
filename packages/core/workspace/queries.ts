@@ -202,12 +202,3 @@ export function workspaceMcpServersOptions(wsId: string) {
     enabled: wsId !== "",
   });
 }
-
-/** The workspace MCP servers assigned to one agent, with their toggles. */
-export function agentMcpServersOptions(agentId: string) {
-  return queryOptions({
-    queryKey: ["agents", agentId, "mcp-servers"] as const,
-    queryFn: () => api.listAgentMcpServers(agentId),
-    enabled: agentId !== "",
-  });
-}

@@ -41,14 +41,9 @@ export type {
   CreateRuntimeProfileRequest,
   UpdateRuntimeProfileRequest,
   CreateAgentRequest,
-  AgentBuilderRuntimeSwitch,
-  AgentBuilderSession,
-  AgentBuilderSessionSummary,
   AgentPermissionScope,
   StoredAgentDraft,
   UpdateAgentRequest,
-  AgentEnvResponse,
-  UpdateAgentEnvRequest,
   Skill,
   SkillSummary,
   AgentSkillSummary,
@@ -278,8 +273,6 @@ export type {
 export type {
   LarkInstallation,
   ListLarkInstallationsResponse,
-  BeginLarkInstallResponse,
-  LarkInstallStatusResponse,
   RedeemLarkBindingTokenResponse,
 } from "./lark";
 export type {
@@ -290,7 +283,6 @@ export type {
 export type {
   SlackInstallation,
   ListSlackInstallationsResponse,
-  RegisterSlackBYORequest,
   RedeemSlackBindingTokenResponse,
 } from "./slack";
 export type {
@@ -298,14 +290,11 @@ export type {
   DingTalkGroupRoute,
   ListDingTalkInstallationsResponse,
   ListDingTalkGroupRoutesResponse,
-  RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
-  UpdateDingTalkGroupRouteRequest,
 } from "./dingtalk";
 export type {
   WecomInstallation,
   ListWecomInstallationsResponse,
-  RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
 } from "./wecom";
 export type {

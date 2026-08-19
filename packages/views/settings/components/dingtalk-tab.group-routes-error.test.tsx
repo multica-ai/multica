@@ -14,17 +14,12 @@ import enSettings from "../../locales/en/settings.json";
 
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 
-const agentListQueryFn = vi.hoisted(() => vi.fn());
 const memberListQueryFn = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
     queryKey: ["members", "workspace-1"],
     queryFn: memberListQueryFn,
-  }),
-  agentListOptions: () => ({
-    queryKey: ["agents", "workspace-1"],
-    queryFn: agentListQueryFn,
   }),
 }));
 
@@ -67,10 +62,6 @@ afterEach(() => {
 });
 
 beforeEach(() => {
-  agentListQueryFn.mockReset();
-  agentListQueryFn.mockResolvedValue([
-    { id: "agent-1", name: "Agent One", archived_at: null },
-  ]);
   memberListQueryFn.mockReset();
   memberListQueryFn.mockResolvedValue([{ user_id: "user-1", role: "owner" }]);
 });
@@ -150,7 +141,6 @@ function installApi({
     listDingTalkInstallations,
     listDingTalkGroupRoutes,
     deleteDingTalkInstallation: vi.fn(),
-    updateDingTalkGroupRoute: vi.fn(),
   } as unknown as ApiClient);
   return { listDingTalkInstallations, listDingTalkGroupRoutes };
 }
@@ -198,125 +188,6 @@ describe("DingTalkTab group-route query failures", () => {
     });
     expect(listDingTalkGroupRoutes).toHaveBeenCalledTimes(4);
 
-    queryClient.clear();
-  });
-
-  it("keeps routes visible while Agents load and disables reassignment", async () => {
-    vi.useFakeTimers();
-    agentListQueryFn.mockImplementation(() => new Promise(() => {}));
-    installApi();
-    const queryClient = renderTab();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-
-    expect(screen.getByText("Loading Agents for group routing…")).toBeTruthy();
-    expect(screen.getByText("Platform team")).toBeTruthy();
-    expect(screen.getByText("cid-platform")).toBeTruthy();
-    expect(screen.queryByText("No eligible Agents")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).toBeDisabled();
-    queryClient.clear();
-  });
-
-  it("keeps routes visible on Agent failure and disables reassignment", async () => {
-    vi.useFakeTimers();
-    agentListQueryFn.mockRejectedValue(new Error("agents unavailable"));
-    installApi();
-    const queryClient = renderTab();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_001);
-    });
-
-    expect(screen.getByText("Could not load Agents")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Retry Agents" })).toBeTruthy();
-    expect(screen.getByText("Platform team")).toBeTruthy();
-    expect(screen.getByText("cid-platform")).toBeTruthy();
-    expect(screen.queryByText("No eligible Agents")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).toBeDisabled();
-    queryClient.clear();
-  });
-
-  it("keeps routes visible for a successfully-loaded empty Agent list", async () => {
-    vi.useFakeTimers();
-    agentListQueryFn.mockResolvedValue([]);
-    installApi();
-    const queryClient = renderTab();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-
-    expect(screen.getByText("No eligible Agents")).toBeTruthy();
-    expect(screen.getByText("Platform team")).toBeTruthy();
-    expect(screen.getByText("cid-platform")).toBeTruthy();
-    expect(screen.queryByText("Loading Agents for group routing…")).toBeNull();
-    expect(screen.queryByText("Could not load Agents")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).toBeDisabled();
-    queryClient.clear();
-  });
-
-  it("recovers the Agent selector after an explicit retry succeeds", async () => {
-    vi.useFakeTimers();
-    agentListQueryFn
-      .mockRejectedValueOnce(new Error("agents unavailable"))
-      .mockRejectedValueOnce(new Error("agents unavailable"))
-      .mockResolvedValueOnce([
-        { id: "agent-1", name: "Agent One", archived_at: null },
-      ]);
-    installApi();
-    const queryClient = renderTab();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1_001);
-    });
-    expect(screen.getByText("Could not load Agents")).toBeTruthy();
-
-    fireEvent.click(screen.getByRole("button", { name: "Retry Agents" }));
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(0);
-    });
-
-    expect(screen.queryByText("Could not load Agents")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).not.toBeDisabled();
-    queryClient.clear();
-  });
-
-  it("keeps a route visible when its assigned Agent is archived", async () => {
-    vi.useFakeTimers();
-    agentListQueryFn.mockResolvedValue([
-      { id: "agent-1", name: "Agent One", archived_at: "2026-08-11T00:00:00Z" },
-    ]);
-    installApi();
-    const queryClient = renderTab();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-
-    expect(screen.getByText("Platform team")).toBeTruthy();
-    expect(screen.getAllByText("Agent One").length).toBeGreaterThan(0);
-    expect(screen.getByText("No eligible Agents")).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).toBeDisabled();
-    queryClient.clear();
-  });
-
-  it("keeps a route visible for a member who cannot see its assigned private Agent", async () => {
-    vi.useFakeTimers();
-    memberListQueryFn.mockResolvedValue([{ user_id: "user-1", role: "member" }]);
-    agentListQueryFn.mockResolvedValue([]);
-    installApi();
-    const queryClient = renderTab();
-
-    await act(async () => {
-      await vi.advanceTimersByTimeAsync(1);
-    });
-
-    expect(screen.getByText("Platform team")).toBeTruthy();
-    expect(screen.getByText("cid-platform")).toBeTruthy();
-    expect(screen.getByText("Unknown Agent")).toBeTruthy();
-    expect(screen.queryByRole("combobox", { name: "Agent for this group" })).toBeNull();
     queryClient.clear();
   });
 

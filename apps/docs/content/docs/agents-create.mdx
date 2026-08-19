@@ -1,26 +1,11 @@
 ---
 title: Create and configure an agent
-description: Choose a starting point, then define the agent's responsibilities, capabilities, execution setup, and Access.
+description: Define the agent's responsibilities, capabilities, execution setup, and Access.
 ---
-
-import { Callout } from "fumadocs-ui/components/callout";
 
 Creating an agent requires a working [runtime](/daemon-runtimes) first. The runtime decides which computer and which AI coding tool the agent uses; the agent holds the long-lived identity, instructions, and capabilities.
 
 On the workspace **Agents** page, click **New agent**.
-
-## Starting points
-
-The creation page offers two options:
-
-| Option | When it fits |
-|---|---|
-| **Start blank** | You already know the agent's responsibilities and want to fill in every field yourself. |
-| **Build with AI** | Describe the goal first and let the Agent Builder ask the key questions and generate a draft. |
-
-Build with AI needs an online runtime for the Builder conversation. Either way, you can review and edit the final configuration before creating.
-
-![Agent creation starting points: Start blank and Build with AI](/images/docs/quickstart-new-agent.png)
 
 ## Required fields
 
@@ -89,43 +74,15 @@ Only the agent owner can change Access — workspace admins cannot. Workspace `o
 
 ## Configuration after creation
 
-On the agent's detail page you can keep adjusting:
+On the agent's detail page you can keep adjusting its name, avatar, description, instructions, runtime, model, thinking level, service tier, concurrency limit, Skills, and Access.
 
-| Setting | What it does |
-|---|---|
-| **Concurrency limit** | How many tasks the agent can run at the same time. The default is 6; tasks beyond the cap keep queuing. |
-| **Environment variables** | Inject variables when the AI coding tool starts. |
-| **Custom arguments** | Appended item by item to the AI coding tool's CLI arguments. |
-| **MCP** | Provide MCP server configuration for AI coding tools that support it. |
-| **Integrations** | Connect external services this agent can use. |
-
-The daemon hosting the runtime also has a global concurrency cap (default 20); the effective concurrency is the smaller of the two.
+The daemon hosting the runtime also has a global concurrency cap (default 20); the effective concurrency is the smaller of that cap and the agent's concurrency limit.
 
 Editing configuration does not change tasks already running. Later tasks use the agent configuration saved at the time the runtime picks them up.
 
-## Environment variables and credentials
-
-Environment variables suit limited-privilege credentials the agent needs at run time, such as a read-only API key or a single-scope token.
-
-<Callout type="warning">
-**`custom_env` values are stored in plaintext in the Multica server database** — they are not "stays on this machine" data. Agent list and detail endpoints no longer return any env values, only an opaque count; only workspace `owner`s and `admin`s can unlock and modify values, and every read or change leaves an audit record. A running agent cannot call the admin endpoints to read another agent's variables.
-</Callout>
-
-Do not use production database admin passwords or other high-value long-lived credentials.
-
-Critical runtime variables such as `PATH`, `HOME`, and `MULTICA_*` cannot be overridden here.
-
-## Custom arguments and MCP
-
-Custom arguments are passed to the AI coding tool as an array, item by item, without shell expansion. Whether an argument is valid is up to the tool; model configuration that already has a dedicated field doesn't need to be repeated here.
-
-MCP configuration may contain tokens; its storage and display rules match environment variables. Only runtimes that support managed MCP configuration show this section; tools without MCP support don't gain it just because a configuration is saved.
-
 ## Duplicating an agent
 
-Duplicating carries over most working configuration except the name, including instructions, skills, custom arguments, avatar, concurrency limit, and Access settings. The model, thinking level, and service tier come along too; if the original runtime is unavailable and the copy is forced onto another runtime, those three are cleared and must be re-selected.
-
-Environment variable values and MCP configuration are never copied and must be set again on the new agent. Duplication keeps the original agent's runtime binding and Access settings.
+Duplicating carries over instructions, skills, avatar, concurrency limit, and Access settings. The model, thinking level, and service tier come along too; if the original runtime is unavailable and the copy is forced onto another runtime, those three are cleared and must be re-selected.
 
 ## Creating with the CLI
 
@@ -145,7 +102,7 @@ When a similarly configured agent already exists, copy it directly:
 multica agent copy <agent-id>
 ```
 
-By default the copy stays on the same runtime; add `--runtime-id` to move it to another runtime, which also requires `--model`. Environment variables, MCP configuration, and `runtime_config` are never copied; the runtime binding itself is kept. Full flags in [Using the CLI](/cli).
+By default the copy stays on the same runtime; add `--runtime-id` to move it to another runtime, which also requires `--model`. Full flags are in [Using the CLI](/cli).
 
 ## Next steps
 

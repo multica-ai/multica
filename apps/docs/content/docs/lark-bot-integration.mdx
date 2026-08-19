@@ -1,28 +1,18 @@
 ---
 title: Feishu Bot
-description: Connect an agent to Feishu and hand it work directly from a DM or a group chat.
+description: Use and manage retained Feishu Bot installations after Agent-scoped connection was retired.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Connect a Multica agent as a Feishu Bot and team members can DM it in Feishu, @-mention it in a group, or use `/issue` to create issues. Conversations and run records are still saved to the Multica workspace.
+Existing Feishu Bot installations let team members DM their assigned Multica agent, @-mention it in a group, or use `/issue` to create issues. Conversations and run records remain in the Multica workspace.
 
-Each Bot maps to exactly one agent. To use several agents in Feishu, connect a Bot for each of them.
-
-## Connect a Bot
-
-The agent's owner and workspace owners and admins can start a connection:
-
-1. Open **Agents** and select the agent to connect to Feishu.
-2. Go to **Integrations** and click **Bind to Feishu**.
-3. Scan the QR code with Feishu and confirm the authorization.
-4. Return to Multica. Once the page shows **Connected to Feishu**, the Bot is ready.
-
-
-The QR code is a one-time credential; if it expires, generate a new one. An agent that is already connected no longer shows the scan entry point; to rename the Bot or adjust its permissions, click **Manage in Feishu**.
+Each retained Bot keeps its existing one-Agent mapping.
 
 <Callout type="info">
-New connections are currently open only for mainland-China Feishu. Existing international Lark connections keep working and can still be managed.
+  New Agent-scoped Bot connections are retired. Existing installations keep
+  running and workspace owners or admins can manage them in **Settings →
+  Integrations**.
 </Callout>
 
 ## First use
@@ -58,7 +48,7 @@ The first line becomes the title and the rest becomes the description. Sending `
 
 ## Manage connections
 
-Open **Settings → Integrations** to view the Bots connected in the workspace. Workspace owners and admins can disconnect them here; an agent's owner can also manage their own Bot from that agent's **Integrations** page.
+Open **Settings → Integrations** to view retained Bots connected in the workspace. Workspace owners and admins can disconnect them here.
 
 After disconnecting, the Bot stops receiving new messages. Existing conversations and audit records are not deleted.
 
@@ -76,14 +66,13 @@ Generate one like this:
 openssl rand -base64 32
 ```
 
-Restart the API server, then connect the Bot from the agent's **Integrations** page. Keep this key long-term: if it is rotated or lost, existing credentials can no longer be decrypted and the Bot must be reconnected.
+Restart the API server after setting the key. Keep it long-term: if it is rotated or lost, existing credentials can no longer be decrypted.
 
 `MULTICA_LARK_HTTP_BASE_URL` and `MULTICA_LARK_CALLBACK_BASE_URL` exist only for special deployments such as proxies and testing; leave them unset in normal operation.
 
 ## Troubleshooting
 
-- **No bind button**: confirm the current account is the agent's owner or a workspace owner or admin, and check that the self-hosting key is configured.
-- **QR code expired**: close the dialog and start the connection again.
+- **No new connection action**: Agent-scoped browser connection is retired. Existing installations remain visible in Settings and continue to run.
 - **The Bot asks for account binding**: open the binding link and sign in with the Multica account for that workspace.
 - **The Bot doesn't run**: check whether the agent is archived and whether the [runtime](/daemon-runtimes) it uses is online.
 

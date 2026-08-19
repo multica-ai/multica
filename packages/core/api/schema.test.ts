@@ -418,31 +418,6 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
-  describe("updateDingTalkGroupRoute", () => {
-    it("falls back safely on a malformed PATCH response and sends the scoped request", async () => {
-      stubFetchJson({ id: 42, agent_id: { wrong: "shape" } });
-      const client = new ApiClient("https://api.example.test");
-      await expect(
-        client.updateDingTalkGroupRoute("ws-1", "route-1", { agent_id: "agent-2" }),
-      ).resolves.toEqual({
-        id: "",
-        workspace_id: "",
-        installation_id: "",
-        conversation_id: "",
-        conversation_title: "",
-        agent_id: "",
-        discovered_at: "",
-        updated_at: "",
-      });
-      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
-        "https://api.example.test/api/workspaces/ws-1/dingtalk/group-routes/route-1",
-        expect.objectContaining({
-          method: "PATCH",
-          body: JSON.stringify({ agent_id: "agent-2" }),
-        }),
-      );
-    });
-  });
 
   describe("getConfig", () => {
     it("drops malformed daemon setup URLs instead of throwing", async () => {
@@ -570,35 +545,6 @@ describe("ApiClient schema fallback", () => {
       const detail = await client.getAutopilotDelivery("ap-1", "d-1");
       expect(detail.id).toBe("d-1");
       expect(detail.autopilot_id).toBe("ap-1");
-    });
-  });
-
-  describe("listAgentBuilderSessions", () => {
-    it("falls back to no drafts when the response is malformed", async () => {
-      stubFetchJson({ unexpected: "shape" });
-      const client = new ApiClient("https://api.example.test");
-      expect(await client.listAgentBuilderSessions()).toEqual([]);
-    });
-
-    // Losing the whole row would lose the conversation. A draft missing its
-    // runtime degrades to "let the user pick one" instead.
-    it("keeps a draft whose runtime the server omitted", async () => {
-      stubFetchJson({
-        sessions: [{ session_id: "s-1", title: "Create an agent" }],
-      });
-      const client = new ApiClient("https://api.example.test");
-      const sessions = await client.listAgentBuilderSessions();
-      expect(sessions).toHaveLength(1);
-      expect(sessions[0]?.session_id).toBe("s-1");
-      expect(sessions[0]?.runtime_id).toBe("");
-    });
-
-    // An installed desktop build can outrun a self-hosted backend. Without this
-    // the Agents page would error instead of simply offering no drafts.
-    it("treats a 404 from an older backend as no drafts", async () => {
-      stubFetchJson({ error: "not found" }, 404);
-      const client = new ApiClient("https://api.example.test");
-      expect(await client.listAgentBuilderSessions()).toEqual([]);
     });
   });
 

@@ -105,8 +105,8 @@ func (h *Handler) ListWecomInstallations(w http.ResponseWriter, r *http.Request)
 	})
 }
 
-// RegisterWecomBYORequest is the body an admin submits from the Web UI's
-// BYO dialog. The bot's stable identifier (BotID) and its long-connection
+// RegisterWecomBYORequest is retained for non-Tag client compatibility.
+// The bot's stable identifier (BotID) and its long-connection
 // secret are copied from the WeCom admin console; the secret is written
 // straight through the secretbox so plaintext never lives on this file's
 // stack past the wecom.InstallationService.Upsert call.
@@ -125,6 +125,9 @@ type RegisterWecomBYORequest struct {
 // installs a user-supplied ("bring your own") wecom smart-bot for an agent.
 // Admin-only at the router.
 func (h *Handler) RegisterWecomBYO(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	if !h.wecomIntegrationConfigured() {
 		writeError(w, http.StatusServiceUnavailable, "wecom integration not enabled")
 		return

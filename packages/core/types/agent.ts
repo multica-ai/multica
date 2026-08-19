@@ -473,8 +473,8 @@ export interface Agent {
   custom_env_key_count?: number;
   /**
    * MCP server configuration forwarded to runtimes that consume
-   * `agent.mcp_config` (see providerSupportsMcpConfig). Each backend
-   * materialises it in the runtime-native place: Claude flags, Codex
+   * `agent.mcp_config`. Each backend materialises it in the runtime-native
+   * place: Claude flags, Codex
    * config.toml, ACP session params, OpenCode env config, OpenClaw
    * wrapper config, etc. `null` (or the field omitted on legacy backends)
    * means no managed config; the daemon falls back to the CLI's own
@@ -482,16 +482,13 @@ export interface Agent {
    *
    * When the caller can't see secrets (an agent actor, or a non-owner
    * non-admin), the server replaces the value with `null` and sets
-   * `mcp_config_redacted` to true so the UI can render a "configured
-   * but hidden" state without exposing potentially sensitive fields.
+   * `mcp_config_redacted` to true. VIBES Tag responses always redact it.
    */
   mcp_config?: unknown | null;
   /**
    * True when the server stripped `mcp_config` from this response
-   * because the caller lacks permission to see secrets. The UI uses
-   * this to distinguish "no config" (`mcp_config === null &&
-   * !mcp_config_redacted`) from "config exists but you can't see it".
-   * Older backends omit this field; treat `undefined` as false.
+   * because the caller lacks permission to see secrets. Older backends omit
+   * this field; treat `undefined` as false.
    */
   mcp_config_redacted?: boolean;
   /**
@@ -506,9 +503,7 @@ export interface Agent {
   composio_toolkit_allowlist?: string[];
   /**
    * True when the server stripped `composio_toolkit_allowlist` from this
-   * response because the caller is not the agent owner. The MCP tab is
-   * creator-only so a redacted value should never reach the editor, but the
-   * UI renders a "hidden" fallback defensively. Older backends omit this
+   * response. VIBES Tag responses always redact it. Older backends omit this
    * field; treat `undefined` as false.
    */
   composio_toolkit_allowlist_redacted?: boolean;
@@ -593,9 +588,6 @@ export interface CreateAgentRequest {
   instructions?: string;
   avatar_url?: string;
   runtime_id: string;
-  runtime_config?: Record<string, unknown>;
-  custom_env?: Record<string, string>;
-  custom_args?: string[];
   visibility?: AgentVisibility;
   /**
    * Invocation permission mode (MUL-3963). When present it is authoritative;
@@ -613,17 +605,8 @@ export interface CreateAgentRequest {
   thinking_level?: string;
   /** Optional Codex service-tier catalog ID. See `Agent.service_tier`. */
   service_tier?: string;
-  /** Optional creation-source attribution. Surfaced as the `template`
-   *  property on the `agent_created` PostHog event. */
-  template?: string;
   /** Workspace skill IDs attached atomically with the agent row. */
   skill_ids?: string[];
-}
-
-export interface AgentBuilderSession {
-  session_id: string;
-  builder_agent_id: string;
-  runtime_id: string;
 }
 
 /** Who may invoke the agent being created, as the creation form models it. */
@@ -654,72 +637,12 @@ export interface StoredAgentDraft {
   applied_message_id: string | null;
 }
 
-/** One unfinished agent-creation conversation, as listed by the studio. */
-export interface AgentBuilderSessionSummary {
-  session_id: string;
-  title: string;
-  /** The carrier's runtime — where this conversation actually executes. The
-   *  picker seeds from it so it can never disagree with what answers the next
-   *  message (MUL-5163). */
-  runtime_id: string;
-  created_at: string;
-  updated_at: string;
-  /** Still in the builder wire format; decode with the builder protocol helpers
-   *  before showing it to a human. */
-  last_message_content: string;
-  last_message_role: string;
-  last_message_at: string;
-  /** The stored configuration, or null when the conversation has never been
-   *  hand-edited — the client then replays the last `<agent_draft>` block. */
-  draft?: StoredAgentDraft | null;
-}
-
-/** Result of rebinding a live builder conversation to another runtime.
- *  `runtime_id` is the runtime the server actually bound — the caller must
- *  wait for it before showing the new runtime as selected. */
-export interface AgentBuilderRuntimeSwitch {
-  runtime_id: string;
-}
-
 export interface UpdateAgentRequest {
   name?: string;
   description?: string;
   instructions?: string;
   avatar_url?: string;
   runtime_id?: string;
-  runtime_config?: Record<string, unknown>;
-  /**
-   * NOTE: `custom_env` is intentionally NOT updatable through this
-   * request shape. Env edits flow through `client.updateAgentEnv` /
-   * `PUT /api/agents/{id}/env` — that path admits the agent owner or a
-   * workspace owner/admin, denies agent actors, and writes a
-   * persistent audit row. The
-   * server REJECTS any `PUT /api/agents/{id}` body that includes
-   * `custom_env` with a 400; do not put the field in this payload.
-   * MUL-2600.
-   */
-  custom_args?: string[];
-  /**
-   * MCP server configuration. Tri-state semantics (MUL-2764):
-   *   - field omitted → no change
-   *   - `null` → clear the column; the daemon falls back to the CLI's
-   *     built-in default at launch
-   *   - object → replace the stored JSON verbatim; runtime backends
-   *     validate / translate it according to their own MCP integration
-   */
-  mcp_config?: unknown | null;
-  /**
-   * Composio toolkit allowlist. Tri-state semantics, mirroring the backend
-   * gate (MUL-3869):
-   *   - field omitted → no change
-   *   - `null` → clear the column (no MCP overlay for anyone)
-   *   - string[] → wholesale replace; the server lowercases / trims / dedupes
-   *     the slugs before persisting
-   * Writes are silently dropped server-side unless the caller is the agent
-   * owner, so the UI only ever exposes this field through the creator-only
-   * MCP tab.
-   */
-  composio_toolkit_allowlist?: string[] | null;
   visibility?: AgentVisibility;
   /**
    * Invocation permission mode (MUL-3963). When present it is authoritative;
@@ -748,28 +671,6 @@ export interface UpdateAgentRequest {
    * clears it, and a non-empty value stores a runtime-catalog ID.
    */
   service_tier?: string;
-}
-
-/**
- * Wire shape for the dedicated env-management endpoints
- * (`GET /api/agents/{id}/env` and `PUT /api/agents/{id}/env`). Kept
- * deliberately separate from `Agent` so generic agent reads cannot
- * accidentally surface env values. MUL-2600.
- */
-export interface AgentEnvResponse {
-  agent_id: string;
-  custom_env: Record<string, string>;
-}
-
-/**
- * Body for `PUT /api/agents/{id}/env`. Values equal to `"****"` are
- * treated by the server as "preserve the existing value for this key"
- * — a defence-in-depth guard so a UI that round-trips a masked map
- * cannot accidentally clobber real secrets. Submit only the keys
- * touched in the form; omitted keys are removed by the server.
- */
-export interface UpdateAgentEnvRequest {
-  custom_env: Record<string, string>;
 }
 
 // Skills

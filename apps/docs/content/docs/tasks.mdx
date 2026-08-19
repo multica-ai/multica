@@ -108,7 +108,7 @@ The failure reasons shown in the execution log and usage stats fall into two gro
 | `provider_network` | Network failure reaching the model provider | Retries automatically; check the executing machine's network if it persists |
 | `model_not_found_or_unavailable` | The model does not exist or is currently unavailable | Pick an available model in the agent settings |
 | `context_overflow` | Context exceeded the model window | Narrow the issue scope or reduce the input |
-| `missing_config` | Required configuration such as an API key is missing | Fill in the agent's environment variables or the tool configuration |
+| `missing_config` | Required configuration such as an API key is missing | Check the executing runtime or tool configuration |
 | `runtime_missing_executable` | The AI coding tool's executable was not found | Reinstall the tool; see [Install AI coding tools](/install-agent-runtime) |
 | `runtime_version_unsupported` | The AI coding tool version is too old | Upgrade the tool |
 | `process_failure` | The tool process exited abnormally | Check the run record to locate the cause, then retry |

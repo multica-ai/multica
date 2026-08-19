@@ -44,8 +44,7 @@ export function RuntimePicker({
   currentUserId: string | null;
   selectedRuntimeId: string;
   onSelect: (id: string) => void;
-  /** Blocks opening the picker while the selection cannot be honoured yet
-   *  (e.g. a builder reply or a runtime rebind is in flight). */
+  /** Blocks opening the picker while the owning surface is committing a selection. */
   disabled?: boolean;
 }) {
   const { t } = useT("agents");

@@ -43,7 +43,7 @@ Multica 不会替代你使用的 AI 编程工具。运行时会调用电脑上�
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 
-"Multica 管理 MCP" 表示你可以在智能体配置中填写 MCP server，由 Multica 在执行前传给对应工具。它不代表该工具本身没有其他 MCP 配置方式。
+“Multica 管理 MCP”记录的是对已有配置的执行兼容性。新的 MCP 设置应放在工具原生的运行时配置或独立的工作区 MCP 库中。
 
 ## 模型来源
 
@@ -66,14 +66,6 @@ DeepSeek Harness 的模型目录由运行时自身提供（`dsh --profile multic
 Multica 会保存工具返回的会话标识。下一次在同一 issue 中继续工作时，运行时会尝试恢复这段会话；无法恢复时，会创建一个新会话继续执行。Pi 保存的是本地会话文件路径，因此更依赖原来的电脑和文件。
 
 有关重试和会话恢复的规则，见 [执行任务](/tasks#手动重试)。
-
-## MCP 配置
-
-Antigravity、GitHub Copilot CLI、DevEco Code 和 Pi 暂不读取智能体中的 MCP 配置，因此创建智能体时不会显示这一项。
-
-<Callout type="warning">
-MCP server 的命令、参数和环境变量会随智能体配置保存在服务器端。不要把不需要共享的本地凭据直接写入配置。
-</Callout>
 
 ## Skill 注入方式
 

@@ -121,14 +121,12 @@ export function ManualCreateAgentPage({
             : t(($) => $.creation_studio.title)
       }
       step={t(($) => $.creation_studio.step_configure)}
-      // A duplicate arrives from the agents list, not from the chooser, so it
-      // returns to where it came from instead of offering a method to pick.
+      // Creation and duplication both return to the canonical agent list.
       onBack={() =>
         backOrReplace(
           squadId && teamDetailHref
             ? teamDetailHref(squadId)
-            : agentsHref ??
-                (duplicateId ? paths.agents() : paths.newAgent()),
+            : agentsHref ?? paths.agents(),
         )
       }
       chips={

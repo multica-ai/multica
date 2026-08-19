@@ -643,77 +643,6 @@ describe("ApiClient label response schemas", () => {
   });
 });
 
-describe("ApiClient agent builder runtime switch", () => {
-  it("PATCHes the session runtime endpoint and returns the runtime the server bound", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ runtime_id: "runtime-b" }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    await expect(
-      client.switchAgentBuilderRuntime("session-1", {
-        runtime_id: "runtime-b",
-      }),
-    ).resolves.toEqual({ runtime_id: "runtime-b" });
-
-    const call = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(call[0]).toContain("/api/agent-builder/sessions/session-1/runtime");
-    expect(call[1].method).toBe("PATCH");
-    expect(JSON.parse(String(call[1].body))).toEqual({
-      runtime_id: "runtime-b",
-    });
-  });
-
-  it("falls back to the requested runtime id for a malformed success body", async () => {
-    // A 2xx means the rebind committed onto the runtime we asked for, so the
-    // fallback must say so. Reporting "unknown" here would leave the picker on
-    // the old runtime while the conversation executes on the new one — the very
-    // split this endpoint exists to close.
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ runtime_id: 42 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    await expect(
-      client.switchAgentBuilderRuntime("session-1", {
-        runtime_id: "runtime-b",
-      }),
-    ).resolves.toEqual({ runtime_id: "runtime-b" });
-  });
-
-  it("rejects without a fallback when the switch is refused", async () => {
-    // 409 (a reply in flight) means nothing was committed, so the caller must
-    // see a rejection and keep the old runtime selected.
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          error: "stop the current reply before switching runtime",
-        }),
-        {
-          status: 409,
-          headers: { "Content-Type": "application/json" },
-        },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchMock);
-
-    const client = new ApiClient("https://api.example.test");
-    await expect(
-      client.switchAgentBuilderRuntime("session-1", {
-        runtime_id: "runtime-b",
-      }),
-    ).rejects.toBeInstanceOf(ApiError);
-  });
-});
-
 describe("ApiClient notification preferences", () => {
   it("sends atomic preference updates with PATCH", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -2434,35 +2363,4 @@ describe("ApiClient workspace MCP servers", () => {
     expect(JSON.parse(String(init.body))).toEqual({ name: "linear-v2" });
   });
 
-  it("assigns and un-assigns a server on the agent routes", async () => {
-    const assigned = [{ ...server, enabled: true }];
-    let fetchMock = stubJSON(assigned);
-
-    const added = await new ApiClient(
-      "https://api.example.test",
-    ).addAgentMcpServer("agent-1", "srv-1");
-    expect(added[0]?.enabled).toBe(true);
-    let [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/agents/agent-1/mcp-servers");
-    expect(init.method).toBe("POST");
-    expect(JSON.parse(String(init.body))).toEqual({ server_id: "srv-1" });
-
-    fetchMock = stubJSON([{ ...server, enabled: false }]);
-    const toggled = await new ApiClient(
-      "https://api.example.test",
-    ).setAgentMcpServerEnabled("agent-1", "srv-1", false);
-    expect(toggled[0]?.enabled).toBe(false);
-    [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/agents/agent-1/mcp-servers/srv-1/enabled");
-    expect(init.method).toBe("PUT");
-
-    fetchMock = stubJSON([]);
-    await new ApiClient("https://api.example.test").removeAgentMcpServer(
-      "agent-1",
-      "srv-1",
-    );
-    [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    expect(url).toContain("/api/agents/agent-1/mcp-servers/srv-1");
-    expect(init.method).toBe("DELETE");
-  });
 });

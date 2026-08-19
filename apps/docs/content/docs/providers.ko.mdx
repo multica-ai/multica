@@ -43,7 +43,7 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
 
-"Multica의 MCP 관리"는 에이전트 설정에 MCP server를 입력하면 Multica가 실행 전에 해당 도구로 전달할 수 있다는 뜻입니다. 도구 자체에 다른 MCP 설정 방법이 없다는 뜻은 아닙니다.
+"Multica의 MCP 관리"는 유지된 설정에 대한 실행 호환성을 나타냅니다. 새로운 MCP 설정은 도구의 기본 런타임 설정이나 독립적인 워크스페이스 MCP 라이브러리에서 관리합니다.
 
 ## 모델 출처
 
@@ -66,14 +66,6 @@ DeepSeek Harness의 모델 카탈로그는 런타임 자체가 제공합니다(`
 Multica는 도구가 반환한 세션 식별자를 저장합니다. 다음에 같은 이슈에서 작업을 이어갈 때 런타임이 이 세션의 복원을 시도합니다. 복원할 수 없으면 새 세션을 만들어 계속 실행합니다. Pi는 로컬 세션 파일 경로를 저장하므로 원래 컴퓨터와 파일에 더 많이 의존합니다.
 
 재시도와 세션 복원 규칙은 [실행 태스크](/tasks#수동-재시도)를 참고하세요.
-
-## MCP 설정
-
-Antigravity, GitHub Copilot CLI, DevEco Code, Pi는 현재 에이전트의 MCP 설정을 읽지 않으므로 에이전트를 만들 때 이 항목이 표시되지 않습니다.
-
-<Callout type="warning">
-MCP server의 명령, 인수, 환경 변수는 에이전트 설정과 함께 서버에 저장됩니다. 공유할 필요가 없는 로컬 자격 증명을 설정에 직접 넣지 마세요.
-</Callout>
 
 ## 스킬 주입 방식
 

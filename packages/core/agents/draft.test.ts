@@ -140,14 +140,14 @@ describe("agent draft execution overrides", () => {
     );
   });
 
-  it("carries the runtime-independent duplicate config", () => {
+  it("preserves approved concurrency without copying retired custom args", () => {
     const request = buildCreateAgentRequest({
       draft: { ...draft(), thinkingLevel: "high", serviceTier: "priority" },
       runtimeId: "runtime-1",
       duplicateSource: sourceAgent(),
     });
 
-    expect(request.custom_args).toEqual(["--verbose"]);
+    expect(request).not.toHaveProperty("custom_args");
     expect(request.max_concurrent_tasks).toBe(9);
     expect(request.thinking_level).toBe("high");
   });

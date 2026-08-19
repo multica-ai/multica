@@ -1,5 +1,10 @@
-import { AiCreateAgentPage } from "@multica/views/agents";
+import { redirect } from "next/navigation";
 
-export default function NewAgentAiRoute() {
-  return <AiCreateAgentPage />;
+export default async function NewAgentAiRoute({
+  params,
+}: {
+  params: Promise<{ workspaceSlug: string }>;
+}) {
+  const { workspaceSlug } = await params;
+  redirect(`/${encodeURIComponent(workspaceSlug)}/agents`);
 }

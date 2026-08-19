@@ -1,176 +1,41 @@
 ---
-title: Slack Bot
-description: エージェント用の Slack Bot を作成し、DM、チャンネル、/issue コマンドから利用します。
+title: Slack Bot 連携
+description: エージェント単位の新規接続廃止前に接続された Slack Bot を利用・管理します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica では、自分で作成した Slack app を使います。接続すると、チームメンバーは Bot へ DM を送る、チャンネルで @メンションする、`/issue` でイシューを作成するといった操作ができます。
+既存の Slack Bot 接続は、Slack アプリと 1 つの[エージェント](/agents)の対応を維持します。メンバーは Bot への DM、チャンネルでの @メンション、ファイル送信、`/issue` を引き続き利用できます。
 
-1 つの Slack app に接続できる Multica エージェントは 1 つです。複数のエージェントを接続する場合は、エージェントごとに app を作成してください。
-
-## 始める前に
-
-接続はワークスペースの owner または admin が行います。最終的に次の 2 つの認証情報を Multica へ入力します。
-
-- `xoxb-` で始まる Bot User OAuth Token
-- `xapp-` で始まる App-level Token
-
-## 1. manifest から Slack app を作成する
-
-[Slack API Apps](https://api.slack.com/apps) を開き、**Create New App → From a manifest** をクリックして Slack workspace を選びます。次の内容を **YAML** に貼り付けてください。
-
-```yaml
-display_information:
-  name: Multica
-features:
-  app_home:
-    home_tab_enabled: false
-    messages_tab_enabled: true
-    messages_tab_read_only_enabled: false
-  bot_user:
-    display_name: Multica
-    always_online: true
-  slash_commands:
-    - command: /issue
-      description: Create a Multica issue
-      usage_hint: "[description]"
-oauth_config:
-  scopes:
-    bot:
-      - app_mentions:read
-      - channels:history
-      - files:read
-      - groups:history
-      - im:history
-      - mpim:history
-      - chat:write
-      - reactions:write
-      - users:read
-      - commands
-settings:
-  event_subscriptions:
-    bot_events:
-      - app_mention
-      - message.im
-      - message.channels
-      - message.groups
-      - message.mpim
-  interactivity:
-    is_enabled: false
-  org_deploy_enabled: false
-  socket_mode_enabled: true
-  token_rotation_enabled: false
-```
-
-作成前に、2 か所の `Multica` をエージェント名に変更してもかまいません。manifest の権限やイベントは削除しないでください。削除すると、DM、チャンネルでのメンション、返信、`/issue` が動作しないことがあります。
-
-<Callout type="warning">
-添付ファイル対応が追加される前にこの Slack app をインストールしていた場合は、Bot scope に `files:read` を追加し、workspace に app を再インストールしてください。app を再インストールするまで、新しい scope は既存の Bot token に反映されません。
+<Callout type="info">
+  新しいエージェント単位の Slack 接続は廃止されました。既存接続は動作を続け、**Settings → Integrations** に表示されます。
 </Callout>
 
-Bot は Socket Mode で Slack へ接続するため、公開 Request URL や OAuth Redirect URL の設定は不要です。
+## 既存 Bot を使う
 
-## 2. 2 つの token を取得する
+- DM は割り当て済みエージェントとの Multica [Chat](/chat) になります。
+- チャンネルとグループでは Bot を @メンションしたメッセージだけが実行されます。
+- 対象メッセージのファイルはエージェント用に Multica ストレージへコピーされます。
+- **`/issue <タイトル>`** は紐づけ済みメンバー名義でイシューを作成します。
+- **`/new <メッセージ>`** は履歴を消さず、以前の文脈なしで実行します。
 
-### Bot token
+最初のメッセージで一度だけ使えるアカウント連携 URL が返る場合があります。対象ワークスペースの Multica アカウントで開いてください。この本人確認コールバックは独立した契約であり、新しいエージェント接続ではありません。
 
-1. Slack app で **Install App** を開きます。
-2. **Install to Workspace** をクリックし、権限を承認します。
-3. `xoxb-` で始まる **Bot User OAuth Token** をコピーします。
+## 保持された接続を管理する
 
-### App-level token
+**Settings → Integrations** で既存 Bot と割り当て済みエージェントを確認できます。workspace owner と admin は接続を切断できます。切断後も会話と監査記録は保持されます。
 
-1. **Basic Information → App-Level Tokens** を開きます。
-2. **Generate Token and Scopes** をクリックします。
-3. `connections:write` scope を追加します。
-4. token を生成し、`xapp-` で始まる値をコピーします。
+## セルフホスト
 
-## 3. エージェントへ接続する
+既存の暗号化済み Slack 認証情報には `MULTICA_SLACK_SECRET_KEY` が必要です。保存済み認証情報を読めなくしないよう、キーを安定して保持してください。Socket Mode は外向きに接続するため、保持接続に公開 Request URL は不要です。
 
-1. Multica で**エージェント**を開き、Slack に接続するエージェントを選びます。
-2. **連携**を開き、**Slack に接続**をクリックします。
-3. Bot token と App-level token を入力します。
-4. **接続**をクリックします。
+## トラブルシューティング
 
-Multica は 2 つの token が同じ app のものか確認します。接続に成功すると、画面に **Slack に接続済み**と表示されます。
-
-<Callout type="warning">
-2 つの token は暗号化して Multica サーバーに保存されます。Token は認証情報です。イシュー、コメント、コードリポジトリには書き込まないでください。ほかのエージェントやワークスペースに接続済みの app をそのまま再利用することはできません。先に元の接続を解除してください。
-</Callout>
-
-## 初回利用
-
-メンバーが初めて Bot に DM を送るか @メンションすると、アカウント連携用のリンクが届きます。そのワークスペースで使う Multica アカウントにログインしてから、Slack に戻ってもう一度メッセージを送ってください。
-
-リンクは 1 回だけ使用でき、15 分後に期限切れになります。期限が切れた場合は、Bot にもう一度メッセージを送ると新しいリンクが届きます。同じ Multica ワークスペースにある複数の Bot が同じ Slack workspace のものなら、通常は既存のアカウント連携を再利用できます。
-
-Bot を利用できるのは、現在の Multica ワークスペースのメンバーだけです。
-
-## Slack から仕事を依頼する
-
-### DM
-
-Slack サイドバーの **Apps** から Bot を開き、そのままメッセージを送ります。@メンションは不要です。
-
-### チャンネルとグループ
-
-まず `/invite @your-bot` を実行して Bot をチャンネルに追加し、`@your-bot 依頼内容` を送ります。スレッドごとに独立したセッションが作られます。追加の依頼も、同じスレッドで Bot を @メンションしてください。
-
-Bot が応答するのは、明示的に @メンションされたチャンネルメッセージだけです。実行時には、権限の範囲内でそのスレッドの直近のコンテキストを読み取ります。
-
-### ファイルを送る
-
-DM、または Bot を @ メンションしたチャンネルのメッセージに、そのままファイルを添付します。ファイルは同じ作業の添付ファイルとして届くので、エージェントは依頼内容と合わせて読み取れます。
-
-これには `files:read` scope が必要です。添付ファイル対応より前にインストールした app の場合は、手順 1 の注意書きを参照してください。1 ファイルあたり 20 MiB 以下、1 メッセージにつき最大 10 件です。サイズ超過、アップロード処理中、または Slack 以外（Google Drive や Dropbox のリンクなど）にあるファイルはスキップされますが、メッセージ本文はエージェントに渡ります。
-
-### `/issue` でイシューを作成する
-
-チャンネルまたは DM で、次のように入力します。
-
-```text
-/issue Safari ではログインに成功してもログイン画面に残る
-```
-
-このコマンドでは Bot の @メンションは不要です。Multica は説明を現在の Bot に対応するエージェントへ渡し、エージェントがタイトルと本文を整理してイシューを作成します。Slack には最初に自分だけが見える受付メッセージが表示されます。作成が完了すると、Multica のインボックスに通知が届きます。
-
-## 接続を管理する
-
-**設定 → 連携**を開くと、接続済みの Slack Bot をすべて確認できます。ワークスペースの owner と admin は接続を解除できます。
-
-接続を解除すると Socket Mode の接続が停止し、Bot は新しいメッセージを受信しなくなります。既存の会話と監査記録は削除されません。
-
-## セルフホスト設定
-
-Multica Cloud では追加設定は不要です。セルフホスト環境では、Slack token を暗号化するキーを先に設定してください。
-
-```dotenv
-MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
-```
-
-次のコマンドで生成できます。
-
-```bash
-openssl rand -base64 32
-```
-
-API サービスを再起動してから Slack app を接続します。このキーは継続して保管してください。変更または紛失すると既存の token を復号できなくなり、app の再接続が必要になります。
-
-アカウント連携用リンクには `MULTICA_APP_URL` が使われ、未設定の場合は `FRONTEND_ORIGIN` にフォールバックします。メンバーがアクセスできる Multica のアドレスを指定してください。
-
-## よくある問題
-
-- **接続時に token が無効と表示される**: 接頭辞を確認し、2 つの token が同じ app のものか確認します。
-- **app を検証できない**: manifest に `users:read` が含まれていることを確認します。権限を更新した後は app を再インストールしてください。
-- **DM の入口がない**: `app_home.messages_tab_enabled` が `true` であることを確認します。
-- **チャンネルで返信がない**: Bot がチャンネルに招待されており、メッセージで @メンションされていることを確認します。
-- **`/issue` がない**: manifest に slash command と `commands` scope が含まれていることを確認し、app を再インストールします。
-- **ファイルがエージェントに届かない**: manifest に `files:read` が含まれていること、scope を追加した後に app を再インストールしたことを確認し、ファイルが 20 MiB 以下かも確認します。
-- **Bot が実行しない**: エージェントがアーカイブされていないことと、使用する[ランタイム](/daemon-runtimes)がオンラインであることを確認します。
+- **新規接続アクションがない**: エージェント単位のブラウザー接続は廃止済みです。
+- **Bot が応答しない**: 接続が有効で、割り当て済みエージェントがアーカイブされておらず、[Runtime](/daemon-runtimes) がオンラインか確認してください。
 
 ## 次のステップ
 
-- [チャット連携](/channels) — プラットフォームの比較、セッションの分離、アカウント連携
-- [エージェントとチャットする](/chat) — Bot の会話と実行の仕組み
-- [イシュー](/issues) — `/issue` で作成される作業単位
+- [Chat integrations](/channels)
+- [Chat](/chat)
+- [Issues](/issues)

@@ -9,20 +9,8 @@ import {
   workspaceKeys,
 } from "@multica/core/workspace/queries";
 import { AgentNameField } from "./agent-configuration-panel";
-import { CreateMethodChooser } from "./choose-create-method-page";
 import { CreateAgentFooter } from "./create-agent-footer";
-import { draftPreview } from "./unfinished-drafts";
 import { classifyAgentCreateError } from "./use-create-agent-submit";
-import { NavigationProvider, type NavigationAdapter } from "../../navigation";
-
-const TEST_NAVIGATION: NavigationAdapter = {
-  push: vi.fn(),
-  replace: vi.fn(),
-  back: vi.fn(),
-  pathname: "/acme/agents/new",
-  searchParams: new URLSearchParams(),
-  getShareableUrl: (path: string) => path,
-};
 
 vi.mock("../../i18n", () => ({
   useT: () => ({
@@ -243,60 +231,5 @@ describe("Agent creation cache handoff", () => {
     expect(
       queryClient.getQueryData(workspaceKeys.agent("ws-1", CREATED_AGENT.id)),
     ).toEqual(CREATED_AGENT);
-  });
-});
-
-// The list endpoint returns the stored message untouched, still in the builder
-// wire format. Rendered raw it is a wall of JSON, which is what the user would
-// see on the one screen meant to help them recognise their own draft.
-describe("Unfinished draft preview", () => {
-  it("unwraps the encoded envelope on a user message", () => {
-    expect(
-      draftPreview({
-        last_message_role: "user",
-        last_message_content:
-          'MULTICA_AGENT_BUILDER_INPUT\n{"user_request":"Create a release manager","current_draft":{"name":"X"}}',
-      }),
-    ).toBe("Create a release manager");
-  });
-
-  it("hides the structured block on an assistant message", () => {
-    expect(
-      draftPreview({
-        last_message_role: "assistant",
-        last_message_content:
-          'Here is a first draft.\n<agent_draft>{"name":"Researcher"}</agent_draft>',
-      }),
-    ).toBe("Here is a first draft.");
-  });
-
-  it("returns an empty preview when the server sent no message", () => {
-    expect(
-      draftPreview({ last_message_role: "", last_message_content: "" }),
-    ).toBe("");
-  });
-});
-
-describe("Agent creation method chooser", () => {
-  it("always offers AI-assisted creation", () => {
-    render(
-      createElement(NavigationProvider, {
-        value: TEST_NAVIGATION,
-        children: createElement(CreateMethodChooser, {
-          blankHref: "/acme/agents/new/manual",
-          aiHref: "/acme/agents/new/ai",
-        }),
-      }),
-    );
-
-    expect(screen.getByText("Start blank")).toBeInTheDocument();
-    expect(screen.getByText("Build with AI")).toBeInTheDocument();
-    expect(
-      screen.getByText("Start blank").closest("a"),
-    ).toHaveAttribute("href", "/acme/agents/new/manual");
-    expect(screen.getByText("Build with AI").closest("a")).toHaveAttribute(
-      "href",
-      "/acme/agents/new/ai",
-    );
   });
 });

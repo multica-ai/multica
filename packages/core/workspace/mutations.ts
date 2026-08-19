@@ -127,34 +127,3 @@ export function useDeleteWorkspaceMcpServer(wsId: string) {
     },
   });
 }
-
-/**
- * Assignment writes all return the agent's resulting list, so the cache is
- * updated from the server's answer rather than a guess.
- */
-function useAgentMcpMutation<TVariables>(
-  agentId: string,
-  mutationFn: (variables: TVariables) => Promise<unknown>,
-) {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn,
-    onSettled: () =>
-      queryClient.invalidateQueries({ queryKey: ["agents", agentId, "mcp-servers"] }),
-  });
-}
-
-export function useAddAgentMcpServer(agentId: string) {
-  return useAgentMcpMutation(agentId, (serverId: string) =>
-    api.addAgentMcpServer(agentId, serverId));
-}
-
-export function useSetAgentMcpServerEnabled(agentId: string) {
-  return useAgentMcpMutation(agentId, ({ serverId, enabled }: { serverId: string; enabled: boolean }) =>
-    api.setAgentMcpServerEnabled(agentId, serverId, enabled));
-}
-
-export function useRemoveAgentMcpServer(agentId: string) {
-  return useAgentMcpMutation(agentId, (serverId: string) =>
-    api.removeAgentMcpServer(agentId, serverId));
-}

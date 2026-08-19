@@ -126,8 +126,8 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
   const [confirmArchive, setConfirmArchive] = useState(false);
 
-  // One-shot channel: the inspector's compact Lark status row asks the
-  // overview pane to focus a tab. The pane clears it after consuming.
+  // One-shot channel for approved detail actions that need to focus a tab.
+  // The pane clears it after consuming.
   const [tabNavIntent, setTabNavIntent] = useState<DetailTab | null>(null);
 
   const handleUpdate = async (id: string, data: Record<string, unknown>) => {

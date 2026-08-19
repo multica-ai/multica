@@ -18,30 +18,13 @@ export interface WecomInstallation {
 export interface ListWecomInstallationsResponse {
   installations: WecomInstallation[];
   /** Whether MULTICA_WECOM_SECRET_KEY is set on this deployment. When false the
-   * BYO Connect button is hidden and the panel renders an "ask the operator"
-   * state. */
+   * retained-installations panel renders an operator notice. */
   configured: boolean;
-  /** Whether the install path is available (true whenever configured). Kept as
+  /** Whether the legacy install path is available (true whenever configured). Kept as
    * a separate flag for parity with Slack / Lark; optional so a desktop build
-   * that predates it treats it as off. */
+   * that predates it treats it as off. Retained for wire compatibility after
+   * browser install entry retirement. */
   install_supported?: boolean;
-}
-
-/** Request body for the Web UI's BYO Connect dialog. The first two fields are
- * copied from the WeCom admin console's smart-bot page: the bot's stable
- * identifier and its long-connection secret. The backend seals the secret
- * with the deployment's MULTICA_WECOM_SECRET_KEY before writing it, so
- * plaintext never lands in the DB. */
-export interface RegisterWecomBYORequest {
-  bot_id: string;
-  secret: string;
-  /** The bot's name as it appears in a chat. Optional, and used for one
-   * thing: recognising the bot's own @-mention in a group. WeCom delivers a
-   * mention as literal text with no structured mention list, so a name
-   * containing a space ("Multica Bot") otherwise swallows the slash command
-   * typed after it. Omitting it on a re-install of the same bot keeps the
-   * name already stored. */
-  bot_name?: string;
 }
 
 /** Post-redemption echo: the WeCom aibot userid the token carried is now

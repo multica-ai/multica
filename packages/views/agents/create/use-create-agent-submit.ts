@@ -44,8 +44,6 @@ export function useCreateAgentSubmit(options: {
   draft: AgentDraft;
   runtimeId: string | null;
   squadId: string | null;
-  /** Creation-source attribution for the `agent_created` analytics event. */
-  template?: string;
   duplicateSource?: Agent | null;
   /** Runs after the agent is committed, before navigation. */
   onCreated?: (agent: Agent) => Promise<void> | void;
@@ -66,7 +64,6 @@ export function useCreateAgentSubmit(options: {
     draft,
     runtimeId,
     squadId,
-    template,
     duplicateSource,
     onCreated,
     createdHref,
@@ -82,7 +79,6 @@ export function useCreateAgentSubmit(options: {
         buildCreateAgentRequest({
           draft,
           runtimeId,
-          template,
           duplicateSource,
         }),
       );

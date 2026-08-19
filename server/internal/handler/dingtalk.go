@@ -106,6 +106,9 @@ type UpdateDingTalkGroupRouteRequest struct {
 // group. The query atomically removes the old chat binding when the agent
 // changes, preventing the new agent from inheriting the old transcript.
 func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	if h.DingTalkInstall == nil {
 		writeError(w, http.StatusServiceUnavailable, "dingtalk integration not configured")
 		return
@@ -266,6 +269,9 @@ type RegisterDingTalkBYORequest struct {
 // organization. Admin-only at the router. Like Slack's BYO path this needs only
 // the at-rest key configured (DingTalkInstall != nil).
 func (h *Handler) RegisterDingTalkBYO(w http.ResponseWriter, r *http.Request) {
+	if h.rejectRetiredVIBESAgentSurface(w, r) {
+		return
+	}
 	if h.DingTalkInstall == nil {
 		writeError(w, http.StatusServiceUnavailable, "dingtalk integration not enabled")
 		return
