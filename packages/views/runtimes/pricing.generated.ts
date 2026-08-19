@@ -2,7 +2,7 @@
 //
 // Source: https://models.dev/api.json (MIT, community-maintained,
 // the same dataset OpenCode uses internally).
-// Snapshot: 2026-08-16
+// Snapshot: 2026-08-19
 //
 // Regenerate with: node scripts/generate-pricing.mjs
 
@@ -162,6 +162,7 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "minimax-m2.7": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 },
   "minimax-m3": { input: 0.3, output: 1.2, cacheRead: 0.06, cacheWrite: 0.3 },
   "muse-spark-1.2": { input: 1.25, output: 4.25, cacheRead: 0.15, cacheWrite: 1.25 },
+  "muse-spark-1.2-contributor": { input: 0.1, output: 0.2, cacheRead: 0.002, cacheWrite: 0.1 },
   "o1": { input: 15, output: 60, cacheRead: 7.5, cacheWrite: 15 },
   "o1-pro": { input: 150, output: 600, cacheRead: 150, cacheWrite: 150 },
   "o3": { input: 2, output: 8, cacheRead: 0.5, cacheWrite: 2 },
@@ -171,10 +172,12 @@ export const MODEL_PRICING: Readonly<Record<string, {
   "openai/gpt-4o-2024-05-13": { input: 5, output: 15, cacheRead: 5, cacheWrite: 5 },
   "openai/gpt-5.2-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
   "openai/gpt-5.3-chat-latest": { input: 1.75, output: 14, cacheRead: 0.175, cacheWrite: 1.75 },
+  "opencode-go/deepseek-v4-flash": { input: 0.22, output: 0.66, cacheRead: 0.007, cacheWrite: 0.22 },
+  "opencode-go/deepseek-v4-pro": { input: 0.66, output: 1.98, cacheRead: 0.022, cacheWrite: 0.66 },
   "opencode-go/glm-5": { input: 1, output: 3.2, cacheRead: 0.2, cacheWrite: 1 },
   "opencode-go/glm-5.1": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
   "opencode-go/glm-5.2": { input: 1.4, output: 4.4, cacheRead: 0.26, cacheWrite: 1.4 },
-  "opencode-go/gpt-5.6-luna": { input: 0.1, output: 0.6, cacheRead: 0.01, cacheWrite: 0.125 },
+  "opencode-go/gpt-5.6-luna": { input: 0.2, output: 1.2, cacheRead: 0.02, cacheWrite: 0.25 },
   "opencode-go/grok-4.5": { input: 2, output: 6, cacheRead: 0.5, cacheWrite: 2 },
   "opencode-go/minimax-m2.5": { input: 0.3, output: 1.2, cacheRead: 0.03, cacheWrite: 0.3 },
   "opencode/deepseek-v4-flash": { input: 0.14, output: 0.28, cacheRead: 0.028, cacheWrite: 0.14 },
