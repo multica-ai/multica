@@ -151,9 +151,19 @@
     "chat_with_named": "Chat with {{name}}"
   },
   "starter_prompts": {
-    "list_open": "List my open tasks by priority",
-    "summarize_today": "Summarize what I did today",
-    "plan_next": "Plan what to work on next"
+    "aria_label": "Suggested first actions",
+    "capabilities": {
+      "label": "What can you help with?",
+      "prompt": "What are you best at helping with? Give me a concise overview."
+    },
+    "first_task": {
+      "label": "Suggest a first task",
+      "prompt": "Suggest three useful tasks I could delegate to you."
+    },
+    "recommend": {
+      "label": "Recommend an action",
+      "prompt": "Review what you know about my workspace and recommend a useful first action."
+    }
   },
   "onboarding_cards": {
     "aria_label": "Ways to start",

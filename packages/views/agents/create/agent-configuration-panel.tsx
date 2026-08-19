@@ -26,6 +26,7 @@ import { ThinkingSettingField } from "../components/inspector/thinking-prop-row"
 import { ModelDropdown } from "../components/model-dropdown";
 import { RuntimePicker } from "../components/runtime-picker";
 import { SkillMultiSelect } from "../components/skill-multi-select";
+import { StarterPromptsEditor } from "../components/starter-prompts-editor";
 
 const PERMISSION_SCOPES: AgentPermissionScope[] = [
   "private",
@@ -170,6 +171,12 @@ export function AgentConfigurationPanel({
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
+          <div className="px-4 py-4">
+            <StarterPromptsEditor
+              value={draft.starterPrompts}
+              onChange={(value) => set("starterPrompts", value)}
+            />
+          </div>
           <div className="px-4 py-4">
             <SkillMultiSelect
               selectedIds={draft.skillIds}

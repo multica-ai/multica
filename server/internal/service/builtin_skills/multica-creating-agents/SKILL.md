@@ -71,7 +71,7 @@ strings. `--max-concurrent-tasks` is validated as 1–50 before the request is
 sent.
 
 The HTTP body (`CreateAgentRequest`) accepts: `name`, `description`,
-`instructions`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
+`instructions`, `starter_prompts`, `avatar_url`, `runtime_id`, `runtime_config`, `custom_env`,
 `custom_args`, `model`, `thinking_level`, `service_tier`, `visibility`,
 `max_concurrent_tasks`, `mcp_config`, `skill_ids`.
 
@@ -91,7 +91,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 ```
 
 - Copied by default, each overridable with the matching flag: `name` (suffixed
-  `" (copy)"`), `description`, `instructions`, avatar, `custom_args`,
+  `" (copy)"`), `description`, `instructions`, `starter_prompts`, avatar, `custom_args`,
   `max_concurrent_tasks`, invocation permission (`permission_mode` +
   allow-list), and assigned workspace skills.
 - A copied `max_concurrent_tasks` is included only when the source value is
@@ -116,6 +116,7 @@ multica agent copy <source-agent-id> --runtime-id <target> --model <model>  # cr
 | `name` | `agent.name` | required, 400 if empty | listings, runtime payload |
 | `description` | `agent.description` | 400 if > 255 code points | catalog/listing only — NOT the runtime prompt |
 | `instructions` | `agent.instructions` | none | daemon → provider at claim time |
+| `starter_prompts` | `agent.starter_prompts` (JSON array) | at most 3 items; each requires a label (≤80 code points) and prompt (≤4000 code points) | human-facing Chat empty state only; selecting one prefills the composer and does not start a run |
 | `avatar_url` | `agent.avatar_url` | none; an explicit non-empty value is preserved, while omitted/empty creates a random `emoji:<glyph>` avatar | catalog/listing UI only — NOT the runtime prompt |
 | `runtime_id` | `agent.runtime_id` (nullable) | required at create (400) + must resolve to a runtime in this workspace | selects runtime/provider; `NULL` means unbound — see below |
 | `model` | `agent.model` (nullable) | none beyond runtime support | daemon reads; empty = runtime default |

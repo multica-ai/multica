@@ -283,7 +283,11 @@ export function ChatPage() {
           quickActionsPendingMessageId={quickActionsPending?.message_id ?? null}
         />
       ) : (
-        <EmptyState agent={c.activeAgent} />
+        <EmptyState
+          agent={c.activeAgent}
+          hasSessions={c.sessions.length > 0}
+          onPickPrompt={c.prefillStarterPrompt}
+        />
       )}
 
       {c.isAgentAccessRevoked ? (

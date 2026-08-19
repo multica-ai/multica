@@ -32,7 +32,7 @@ import {
   useSetChatSessionProject,
   useSetChatSessionArchived,
 } from "@multica/core/chat/mutations";
-import { useChatStore } from "@multica/core/chat";
+import { DRAFT_NEW_SESSION, useChatStore } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import {
   enqueuePendingChatTask,
@@ -276,6 +276,14 @@ export function useChatController(opts?: { isActive?: boolean }) {
   const requestInputFocus = useCallback(
     () => setFocusInputRequest((n) => n + 1),
     [],
+  );
+  const prefillStarterPrompt = useCallback(
+    (prompt: string) => {
+      const draftKey = activeSessionId ?? DRAFT_NEW_SESSION;
+      useChatStore.getState().setInputDraft(draftKey, prompt);
+      requestInputFocus();
+    },
+    [activeSessionId, requestInputFocus],
   );
 
   const currentSession = activeSessionId
@@ -832,6 +840,7 @@ export function useChatController(opts?: { isActive?: boolean }) {
     handleRestoreDraftApplied,
     // compose-box focus nonce (bumped on new chat)
     focusInputRequest,
+    prefillStarterPrompt,
     // actions
     handleSend,
     handleStop,
