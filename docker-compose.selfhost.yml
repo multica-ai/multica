@@ -159,6 +159,15 @@ services:
       # for a debugging session and unset it when that session ends, because
       # what it records is user message content.
       MULTICA_WECOM_TRACE: ${MULTICA_WECOM_TRACE:-}
+      # Best-effort Android push mirror. Topic/token/recipient values stay in
+      # the operator's .env and are never baked into the image.
+      NTFY_ENABLED: ${NTFY_ENABLED:-false}
+      NTFY_BASE_URL: ${NTFY_BASE_URL:-https://ntfy.sh}
+      NTFY_TOPIC: ${NTFY_TOPIC:-}
+      NTFY_RECIPIENT_ID: ${NTFY_RECIPIENT_ID:-}
+      NTFY_TOKEN: ${NTFY_TOKEN:-}
+      NTFY_APP_URL: ${NTFY_APP_URL:-}
+      NTFY_TIMEOUT: ${NTFY_TIMEOUT:-3s}
     restart: unless-stopped
 
   frontend:

@@ -28,6 +28,9 @@ images:
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+#     --from-literal=NTFY_TOPIC="" \
+#     --from-literal=NTFY_RECIPIENT_ID="" \
+#     --from-literal=NTFY_TOKEN="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 #
 # External postgres (postgres.external.enabled=true):
@@ -38,6 +41,9 @@ images:
 #     --from-literal=RESEND_API_KEY="" \
 #     --from-literal=GOOGLE_CLIENT_SECRET="" \
 #     --from-literal=CLOUDFRONT_PRIVATE_KEY="" \
+#     --from-literal=NTFY_TOPIC="" \
+#     --from-literal=NTFY_RECIPIENT_ID="" \
+#     --from-literal=NTFY_TOKEN="" \
 #     --from-literal=MULTICA_DEV_VERIFICATION_CODE=""
 #
 # The chart references this Secret by name; it does not template it, so real
@@ -129,6 +135,12 @@ backend:
     # MULTICA_VCS_SECRET_KEY through existingSecret before connections work.
     # Set false to hide and reject the integration for this deployment.
     vcsIntegrationEnabled: true
+    # Best-effort Android push mirror. Keep topic, recipient ID, and optional
+    # publisher token in existingSecret; only non-secret controls live here.
+    ntfyEnabled: false
+    ntfyBaseUrl: https://ntfy.sh
+    ntfyAppUrl: ""
+    ntfyTimeout: 3s
     googleClientId: ""
     googleRedirectUri: http://multica.dev.lan/auth/callback
     s3Bucket: ""

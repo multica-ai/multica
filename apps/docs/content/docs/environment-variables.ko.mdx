@@ -172,10 +172,54 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 서명 키. `JWT_SECRET`에서 파생 가능 |
 | 자체 호스팅 Git | `MULTICA_VCS_INTEGRATION_ENABLED` | Forgejo/Gitea/GitLab 연동 스위치. compose에서는 기본 활성화 |
 | 자체 호스팅 Git | `MULTICA_VCS_SECRET_KEY` | base64로 인코딩한 32바이트 암호화 키(`openssl rand -base64 32`). 없으면 전체 기능을 사용할 수 없음 |
+| ntfy | `NTFY_ENABLED` | Android 알림 미러의 명시적 스위치. 기본값은 `false` |
+| ntfy | `NTFY_BASE_URL` | ntfy 서버의 HTTPS origin. 공개 서비스는 `https://ntfy.sh` 사용 |
+| ntfy | `NTFY_TOPIC` | 32~64자의 무작위 topic. secret으로 취급하며 로그에 기록하지 않음 |
+| ntfy | `NTFY_RECIPIENT_ID` | 알림을 미러링할 Multica 멤버 UUID |
+| ntfy | `NTFY_TOKEN` | 인증된 ntfy 서버에서 사용하는 선택적 Bearer token |
+| ntfy | `NTFY_APP_URL` | 알림 탭 시 열기 위한 선택적 Multica HTTPS URL. `MULTICA_APP_URL`, `FRONTEND_ORIGIN` 순으로 fallback |
+| ntfy | `NTFY_TIMEOUT` | 데이터베이스 조회와 전송의 총 timeout. `100ms`~`10s`, 기본값 `3s` |
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 done 전환은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
 
 설정 단계는 [GitHub 연동](/github-integration#자체-호스팅-설정), [Feishu Bot](/lark-bot-integration#자체-호스팅-설정), [Slack Bot](/slack-bot-integration#자체-호스팅-설정)을 참고하세요.
+
+### ntfy Android 알림 미러
+
+ntfy 어댑터는 best-effort 미러이며 앱 내 받은 편지함을 대체하거나 변경하지 않습니다. 멤버 멘션, 태스크 할당, 에이전트 실행의 최종 완료 또는 실패, 태스크가 `blocked`로 바뀌는 이벤트를 다룹니다. 완료 또는 실패는 설정한 멤버가 해당 태스크를 계속 구독하고 `agent_activity`를 음소거하지 않은 경우에만 전송하며, 자동 재시도 중인 실패는 보내지 않습니다.
+
+알림 문구에는 업무 본문을 넣지 않고 고정 이벤트 요약만 사용합니다. HTTPS app URL이 설정되어 있으면 Multica 받은 편지함 링크도 추가합니다. 태스크 제목, 댓글, 첨부 파일, 오류 본문, 자격 증명, topic, token은 알림 제목·본문이나 로그에 나타나지 않으며 topic은 ntfy 라우팅 필드로만 사용합니다. 전송은 크기가 제한된 메모리 큐, 짧은 timeout, 재시도 없음으로 동작하므로 timeout, `429`, ntfy 장애, 큐 가득 참이 Multica 요청을 차단하지 않습니다.
+
+<Callout type="warning">
+공개 ntfy 서비스에서 예약되지 않은 topic은 사실상 비밀번호이며 메시지가 서비스에 cache될 수 있습니다. 새 무작위 topic을 생성하고 보호된 채널로만 공유하세요. 태스크, commit, screenshot, 로그에는 붙여 넣지 마세요.
+</Callout>
+
+topic을 생성하고 수신 멤버 UUID를 확인합니다. 결과를 소스 관리에 넣지 마세요.
+
+```bash
+openssl rand -hex 32
+multica user me --output json
+```
+
+값은 backend 배포 환경에만 설정합니다.
+
+```dotenv
+NTFY_ENABLED=true
+NTFY_BASE_URL=https://ntfy.sh
+NTFY_TOPIC=<64-character-random-value>
+NTFY_RECIPIENT_ID=<multica-user-uuid>
+NTFY_TIMEOUT=3s
+```
+
+인증된 ntfy 서버에서는 `NTFY_TOKEN`을 선택적으로 설정할 수 있습니다. `MULTICA_APP_URL` 또는 `FRONTEND_ORIGIN`이 멤버가 접근할 수 있는 HTTPS app URL이면 `NTFY_APP_URL`은 필요하지 않습니다. `.env`를 수정한 뒤 backend를 다시 생성하세요. 일반 Compose restart는 설정을 다시 읽지 않습니다.
+
+```bash
+docker compose -f docker-compose.selfhost.yml up -d --force-recreate backend
+```
+
+ntfy Android App에서 구독을 추가하고 서버로 `https://ntfy.sh`를 선택한 다음 보호된 채널의 topic을 붙여 넣습니다. 로컬 표시 이름은 "Multica"처럼 지정할 수 있습니다. 배포 책임자가 공개 topic 위험을 검토하기 전에는 수동 테스트 메시지를 보내지 마세요. 승인 후 지원 범위의 Multica 이벤트 하나를 발생시켜 고정 요약과 앱 내 링크를 확인합니다.
+
+교체할 때는 새 topic을 생성하고 `NTFY_TOPIC`을 바꾼 뒤 backend를 다시 생성합니다. Android에서 새 topic을 구독하고 승인된 이벤트 하나를 확인한 후 이전 topic 구독을 해제하세요. 코드나 데이터베이스 변경은 필요하지 않습니다. 롤백할 때는 `NTFY_ENABLED=false`로 설정하고 backend를 다시 생성합니다. 앱 내 알림은 그대로 유지됩니다. 더 이상 필요 없는 topic과 token은 배포 secret store에서 삭제하세요.
 
 ## 서버 측 LLM
 
