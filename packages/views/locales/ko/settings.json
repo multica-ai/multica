@@ -165,6 +165,8 @@
       "toggleChat": { "label": "채팅 창 전환", "description": "플로팅 채팅 창을 열거나 닫습니다. 열면 메시지 입력란에 포커스합니다." },
       "findInIssue": { "label": "태스크에서 찾기", "description": "열린 태스크 상세 내용에서 검색합니다." },
       "openThreadNav": { "label": "스레드 내비게이터 열기", "description": "열린 태스크의 댓글 스레드를 나열하고 검색해 이동합니다." },
+      "scrollToTop": { "label": "맨 위로 스크롤", "description": "열려 있는 이슈의 타임라인을 맨 위로 스크롤합니다." },
+      "scrollToBottom": { "label": "맨 아래로 스크롤", "description": "열려 있는 이슈의 타임라인을 맨 아래(최신 활동)로 스크롤합니다." },
       "archiveInboxItem": { "label": "알림 보관", "description": "열린 인박스 알림을 보관합니다. 보관함을 보는 중에는 보관을 해제합니다." },
       "send": { "label": "보내기", "description": "채팅, 댓글, 답글, 피드백 및 프롬프트를 보내고, 생성 대화상자에서 태스크를 만듭니다." },
       "goBack": { "label": "뒤로 가기", "description": "브라우저처럼 기록을 따라 뒤로 이동합니다." },
