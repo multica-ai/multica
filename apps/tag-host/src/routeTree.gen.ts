@@ -9,8 +9,12 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as JoinRouteImport } from './routes/join'
+import { Route as InviteRouteImport } from './routes/invite'
+import { Route as WorkspacesNewRouteImport } from './routes/workspaces.new'
 import { Route as WorkspaceSlugSettingsRouteImport } from './routes/$workspaceSlug.settings'
 import { Route as WorkspaceSlugRuntimesRouteImport } from './routes/$workspaceSlug.runtimes'
+import { Route as WorkspaceSlugMembersRouteImport } from './routes/$workspaceSlug.members'
 import { Route as WorkspaceSlugIssuesRouteImport } from './routes/$workspaceSlug.issues'
 import { Route as WorkspaceSlugChatRouteImport } from './routes/$workspaceSlug.chat'
 import { Route as WorkspaceSlugAgentsRouteImport } from './routes/$workspaceSlug.agents'
@@ -25,6 +29,21 @@ import { Route as WorkspaceSlugAgentsTeamsSquadIdRouteImport } from './routes/$w
 import { Route as WorkspaceSlugAgentsNewManualRouteImport } from './routes/$workspaceSlug.agents_.new.manual'
 import { Route as WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRouteImport } from './routes/$workspaceSlug.runtimes_.$machineId_.runtime.$runtimeId'
 
+const JoinRoute = JoinRouteImport.update({
+  id: '/join',
+  path: '/join',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const InviteRoute = InviteRouteImport.update({
+  id: '/invite',
+  path: '/invite',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspacesNewRoute = WorkspacesNewRouteImport.update({
+  id: '/workspaces/new',
+  path: '/workspaces/new',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const WorkspaceSlugSettingsRoute = WorkspaceSlugSettingsRouteImport.update({
   id: '/$workspaceSlug/settings',
   path: '/$workspaceSlug/settings',
@@ -33,6 +52,11 @@ const WorkspaceSlugSettingsRoute = WorkspaceSlugSettingsRouteImport.update({
 const WorkspaceSlugRuntimesRoute = WorkspaceSlugRuntimesRouteImport.update({
   id: '/$workspaceSlug/runtimes',
   path: '/$workspaceSlug/runtimes',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const WorkspaceSlugMembersRoute = WorkspaceSlugMembersRouteImport.update({
+  id: '/$workspaceSlug/members',
+  path: '/$workspaceSlug/members',
   getParentRoute: () => rootRouteImport,
 } as any)
 const WorkspaceSlugIssuesRoute = WorkspaceSlugIssuesRouteImport.update({
@@ -111,11 +135,15 @@ const WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute =
   } as any)
 
 export interface FileRoutesByFullPath {
+  '/invite': typeof InviteRoute
+  '/join': typeof JoinRoute
   '/$workspaceSlug/agents': typeof WorkspaceSlugAgentsRoute
   '/$workspaceSlug/chat': typeof WorkspaceSlugChatRoute
   '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRoute
+  '/$workspaceSlug/members': typeof WorkspaceSlugMembersRoute
   '/$workspaceSlug/runtimes': typeof WorkspaceSlugRuntimesRoute
   '/$workspaceSlug/settings': typeof WorkspaceSlugSettingsRoute
+  '/workspaces/new': typeof WorkspacesNewRoute
   '/$workspaceSlug/agents/$agentId': typeof WorkspaceSlugAgentsAgentIdRoute
   '/$workspaceSlug/agents/teams': typeof WorkspaceSlugAgentsTeamsRoute
   '/$workspaceSlug/chat/files': typeof WorkspaceSlugChatFilesRoute
@@ -128,11 +156,15 @@ export interface FileRoutesByFullPath {
   '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId': typeof WorkspaceSlugRuntimesMachineIdRuntimeRuntimeIdRoute
 }
 export interface FileRoutesByTo {
+  '/invite': typeof InviteRoute
+  '/join': typeof JoinRoute
   '/$workspaceSlug/agents': typeof WorkspaceSlugAgentsRoute
   '/$workspaceSlug/chat': typeof WorkspaceSlugChatRoute
   '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRoute
+  '/$workspaceSlug/members': typeof WorkspaceSlugMembersRoute
   '/$workspaceSlug/runtimes': typeof WorkspaceSlugRuntimesRoute
   '/$workspaceSlug/settings': typeof WorkspaceSlugSettingsRoute
+  '/workspaces/new': typeof WorkspacesNewRoute
   '/$workspaceSlug/agents/$agentId': typeof WorkspaceSlugAgentsAgentIdRoute
   '/$workspaceSlug/agents/teams': typeof WorkspaceSlugAgentsTeamsRoute
   '/$workspaceSlug/chat/files': typeof WorkspaceSlugChatFilesRoute
@@ -146,11 +178,15 @@ export interface FileRoutesByTo {
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
+  '/invite': typeof InviteRoute
+  '/join': typeof JoinRoute
   '/$workspaceSlug/agents': typeof WorkspaceSlugAgentsRoute
   '/$workspaceSlug/chat': typeof WorkspaceSlugChatRoute
   '/$workspaceSlug/issues': typeof WorkspaceSlugIssuesRoute
+  '/$workspaceSlug/members': typeof WorkspaceSlugMembersRoute
   '/$workspaceSlug/runtimes': typeof WorkspaceSlugRuntimesRoute
   '/$workspaceSlug/settings': typeof WorkspaceSlugSettingsRoute
+  '/workspaces/new': typeof WorkspacesNewRoute
   '/$workspaceSlug/agents_/$agentId': typeof WorkspaceSlugAgentsAgentIdRoute
   '/$workspaceSlug/agents_/teams': typeof WorkspaceSlugAgentsTeamsRoute
   '/$workspaceSlug/chat_/files': typeof WorkspaceSlugChatFilesRoute
@@ -165,11 +201,15 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
+    | '/invite'
+    | '/join'
     | '/$workspaceSlug/agents'
     | '/$workspaceSlug/chat'
     | '/$workspaceSlug/issues'
+    | '/$workspaceSlug/members'
     | '/$workspaceSlug/runtimes'
     | '/$workspaceSlug/settings'
+    | '/workspaces/new'
     | '/$workspaceSlug/agents/$agentId'
     | '/$workspaceSlug/agents/teams'
     | '/$workspaceSlug/chat/files'
@@ -182,11 +222,15 @@ export interface FileRouteTypes {
     | '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId'
   fileRoutesByTo: FileRoutesByTo
   to:
+    | '/invite'
+    | '/join'
     | '/$workspaceSlug/agents'
     | '/$workspaceSlug/chat'
     | '/$workspaceSlug/issues'
+    | '/$workspaceSlug/members'
     | '/$workspaceSlug/runtimes'
     | '/$workspaceSlug/settings'
+    | '/workspaces/new'
     | '/$workspaceSlug/agents/$agentId'
     | '/$workspaceSlug/agents/teams'
     | '/$workspaceSlug/chat/files'
@@ -199,11 +243,15 @@ export interface FileRouteTypes {
     | '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId'
   id:
     | '__root__'
+    | '/invite'
+    | '/join'
     | '/$workspaceSlug/agents'
     | '/$workspaceSlug/chat'
     | '/$workspaceSlug/issues'
+    | '/$workspaceSlug/members'
     | '/$workspaceSlug/runtimes'
     | '/$workspaceSlug/settings'
+    | '/workspaces/new'
     | '/$workspaceSlug/agents_/$agentId'
     | '/$workspaceSlug/agents_/teams'
     | '/$workspaceSlug/chat_/files'
@@ -217,11 +265,15 @@ export interface FileRouteTypes {
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
+  InviteRoute: typeof InviteRoute
+  JoinRoute: typeof JoinRoute
   WorkspaceSlugAgentsRoute: typeof WorkspaceSlugAgentsRoute
   WorkspaceSlugChatRoute: typeof WorkspaceSlugChatRoute
   WorkspaceSlugIssuesRoute: typeof WorkspaceSlugIssuesRoute
+  WorkspaceSlugMembersRoute: typeof WorkspaceSlugMembersRoute
   WorkspaceSlugRuntimesRoute: typeof WorkspaceSlugRuntimesRoute
   WorkspaceSlugSettingsRoute: typeof WorkspaceSlugSettingsRoute
+  WorkspacesNewRoute: typeof WorkspacesNewRoute
   WorkspaceSlugAgentsAgentIdRoute: typeof WorkspaceSlugAgentsAgentIdRoute
   WorkspaceSlugAgentsTeamsRoute: typeof WorkspaceSlugAgentsTeamsRoute
   WorkspaceSlugChatFilesRoute: typeof WorkspaceSlugChatFilesRoute
@@ -236,6 +288,27 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/join': {
+      id: '/join'
+      path: '/join'
+      fullPath: '/join'
+      preLoaderRoute: typeof JoinRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/invite': {
+      id: '/invite'
+      path: '/invite'
+      fullPath: '/invite'
+      preLoaderRoute: typeof InviteRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/workspaces/new': {
+      id: '/workspaces/new'
+      path: '/workspaces/new'
+      fullPath: '/workspaces/new'
+      preLoaderRoute: typeof WorkspacesNewRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/$workspaceSlug/settings': {
       id: '/$workspaceSlug/settings'
       path: '/$workspaceSlug/settings'
@@ -248,6 +321,13 @@ declare module '@tanstack/react-router' {
       path: '/$workspaceSlug/runtimes'
       fullPath: '/$workspaceSlug/runtimes'
       preLoaderRoute: typeof WorkspaceSlugRuntimesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/$workspaceSlug/members': {
+      id: '/$workspaceSlug/members'
+      path: '/$workspaceSlug/members'
+      fullPath: '/$workspaceSlug/members'
+      preLoaderRoute: typeof WorkspaceSlugMembersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/$workspaceSlug/issues': {
@@ -345,11 +425,15 @@ declare module '@tanstack/react-router' {
 }
 
 const rootRouteChildren: RootRouteChildren = {
+  InviteRoute: InviteRoute,
+  JoinRoute: JoinRoute,
   WorkspaceSlugAgentsRoute: WorkspaceSlugAgentsRoute,
   WorkspaceSlugChatRoute: WorkspaceSlugChatRoute,
   WorkspaceSlugIssuesRoute: WorkspaceSlugIssuesRoute,
+  WorkspaceSlugMembersRoute: WorkspaceSlugMembersRoute,
   WorkspaceSlugRuntimesRoute: WorkspaceSlugRuntimesRoute,
   WorkspaceSlugSettingsRoute: WorkspaceSlugSettingsRoute,
+  WorkspacesNewRoute: WorkspacesNewRoute,
   WorkspaceSlugAgentsAgentIdRoute: WorkspaceSlugAgentsAgentIdRoute,
   WorkspaceSlugAgentsTeamsRoute: WorkspaceSlugAgentsTeamsRoute,
   WorkspaceSlugChatFilesRoute: WorkspaceSlugChatFilesRoute,

@@ -7,7 +7,10 @@ import {
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useCurrentWorkspace } from '@multica/core/paths';
-import { workspaceListOptions } from '@multica/core/workspace';
+import {
+  authorityKeys,
+  tagAuthorityClient,
+} from '@multica/core/tag-authority';
 import { useWS } from '@multica/core/realtime';
 import { openCreateIssueWithPreference } from '@multica/core/issues/stores/create-mode-store';
 import {
@@ -17,6 +20,7 @@ import {
   FileText,
   Gauge,
   MessageCircle,
+  Plus,
   Search,
   Settings,
   SquarePen,
@@ -53,6 +57,7 @@ import {
   TAG_WORKSPACE_SECTIONS,
   workspaceSwitchDestination,
 } from './workspace-shell-model';
+import { useAuthorityWorkspaceSwitch } from './use-authority-workspace-switch';
 
 const NAV_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   chat: MessageCircle,
@@ -127,9 +132,14 @@ function RealtimeStatus() {
 
 function TagWorkspaceSidebar() {
   const workspace = useCurrentWorkspace();
-  const { data: workspaces = [] } = useQuery(workspaceListOptions());
-  const { pathname, push } = useNavigation();
+  const { data: workspaces = [] } = useQuery({
+    queryKey: authorityKeys.workspaces(),
+    queryFn: () => tagAuthorityClient.listWorkspaces(),
+  });
+  const { pathname } = useNavigation();
   const { setOpenMobile } = useSidebar();
+  const { switchTo, switchingWorkspaceId, switchError } =
+    useAuthorityWorkspaceSwitch();
 
   useEffect(() => {
     setOpenMobile(false);
@@ -161,21 +171,37 @@ function TagWorkspaceSidebar() {
                     key={candidate.id}
                     aria-label={`Switch to ${candidate.name}`}
                     className="min-h-11 lg:min-h-8"
-                    disabled={candidate.id === workspace?.id}
+                    disabled={
+                      candidate.id === workspace?.id ||
+                      switchingWorkspaceId !== null
+                    }
                     onClick={() =>
-                      push(
+                      void switchTo(
+                        candidate,
                         workspaceSwitchDestination(candidate.slug, pathname)
                       )
                     }
                   >
                     <WorkspaceAvatar
                       name={candidate.name}
-                      avatarUrl={candidate.avatar_url}
                       size="sm"
                     />
                     <span className="truncate">{candidate.name}</span>
                   </DropdownMenuItem>
                 ))}
+                <AppLink
+                  href="/workspaces/new"
+                  aria-label="Create Workspace"
+                  className="flex min-h-11 items-center gap-2 rounded-md px-2 text-body outline-none hover:bg-muted focus-visible:ring-2 focus-visible:ring-ring lg:min-h-8"
+                >
+                  <Plus className="size-4" />
+                  <span>Create Workspace</span>
+                </AppLink>
+                {switchError && (
+                  <p role="alert" className="max-w-64 px-2 py-1 text-caption text-destructive">
+                    {switchError}
+                  </p>
+                )}
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarMenuItem>

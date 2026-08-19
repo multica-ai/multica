@@ -13,6 +13,7 @@ import enMyIssues from "./en/my-issues.json";
 import enSearch from "./en/search.json";
 import enInbox from "./en/inbox.json";
 import enWorkspace from "./en/workspace.json";
+import enTagAuthority from "./en/tag-authority.json";
 import enProjects from "./en/projects.json";
 import enAutopilots from "./en/autopilots.json";
 import enSkills from "./en/skills.json";
@@ -38,6 +39,7 @@ import zhHansMyIssues from "./zh-Hans/my-issues.json";
 import zhHansSearch from "./zh-Hans/search.json";
 import zhHansInbox from "./zh-Hans/inbox.json";
 import zhHansWorkspace from "./zh-Hans/workspace.json";
+import zhHansTagAuthority from "./zh-Hans/tag-authority.json";
 import zhHansProjects from "./zh-Hans/projects.json";
 import zhHansAutopilots from "./zh-Hans/autopilots.json";
 import zhHansSkills from "./zh-Hans/skills.json";
@@ -63,6 +65,7 @@ import koMyIssues from "./ko/my-issues.json";
 import koSearch from "./ko/search.json";
 import koInbox from "./ko/inbox.json";
 import koWorkspace from "./ko/workspace.json";
+import koTagAuthority from "./ko/tag-authority.json";
 import koProjects from "./ko/projects.json";
 import koAutopilots from "./ko/autopilots.json";
 import koSkills from "./ko/skills.json";
@@ -88,6 +91,7 @@ import jaMyIssues from "./ja/my-issues.json";
 import jaSearch from "./ja/search.json";
 import jaInbox from "./ja/inbox.json";
 import jaWorkspace from "./ja/workspace.json";
+import jaTagAuthority from "./ja/tag-authority.json";
 import jaProjects from "./ja/projects.json";
 import jaAutopilots from "./ja/autopilots.json";
 import jaSkills from "./ja/skills.json";
@@ -119,6 +123,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     search: enSearch,
     inbox: enInbox,
     workspace: enWorkspace,
+    "tag-authority": enTagAuthority,
     projects: enProjects,
     autopilots: enAutopilots,
     skills: enSkills,
@@ -146,6 +151,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     search: zhHansSearch,
     inbox: zhHansInbox,
     workspace: zhHansWorkspace,
+    "tag-authority": zhHansTagAuthority,
     projects: zhHansProjects,
     autopilots: zhHansAutopilots,
     skills: zhHansSkills,
@@ -173,6 +179,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     search: koSearch,
     inbox: koInbox,
     workspace: koWorkspace,
+    "tag-authority": koTagAuthority,
     projects: koProjects,
     autopilots: koAutopilots,
     skills: koSkills,
@@ -200,6 +207,7 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     search: jaSearch,
     inbox: jaInbox,
     workspace: jaWorkspace,
+    "tag-authority": jaTagAuthority,
     projects: jaProjects,
     autopilots: jaAutopilots,
     skills: jaSkills,

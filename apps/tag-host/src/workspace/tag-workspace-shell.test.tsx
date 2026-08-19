@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   openCreateTask: vi.fn(),
   floatingChatMounts: 0,
   globalShortcutMounts: 0,
+  switches: [] as Array<{ id: string; destination: string }>,
   workspaces: [
     { id: 'workspace-a', slug: 'studio-a', name: 'Studio A' },
     { id: 'workspace-b', slug: 'studio-b', name: 'Studio B' },
@@ -37,6 +38,21 @@ vi.mock('@multica/core/paths', () => ({
 
 vi.mock('@multica/core/workspace', () => ({
   workspaceListOptions: () => ({ queryKey: ['workspaces', 'list'] }),
+}));
+
+vi.mock('@multica/core/tag-authority', () => ({
+  authorityKeys: { workspaces: () => ['tag-authority', 'workspaces'] },
+  tagAuthorityClient: { listWorkspaces: () => Promise.resolve(state.workspaces) },
+}));
+
+vi.mock('./use-authority-workspace-switch', () => ({
+  useAuthorityWorkspaceSwitch: () => ({
+    switchError: '',
+    switchingWorkspaceId: null,
+    switchTo: (workspace: { id: string }, destination: string) => {
+      state.switches.push({ id: workspace.id, destination });
+    },
+  }),
 }));
 
 vi.mock('@multica/core/realtime', () => ({
@@ -135,6 +151,7 @@ beforeEach(() => {
   state.openCreateTask.mockClear();
   state.floatingChatMounts = 0;
   state.globalShortcutMounts = 0;
+  state.switches = [];
 });
 
 afterEach(cleanup);
@@ -155,6 +172,7 @@ describe('TagWorkspaceShell', () => {
     expect(screen.getByRole('link', { name: 'Tasks' }).getAttribute('href')).toBe('/studio-a/issues');
     expect(screen.getByRole('link', { name: 'Agents' }).getAttribute('href')).toBe('/studio-a/agents');
     expect(screen.getByRole('link', { name: 'Runtimes' }).getAttribute('href')).toBe('/studio-a/runtimes');
+    expect(screen.getByRole('link', { name: 'Members' }).getAttribute('href')).toBe('/studio-a/members');
     expect(screen.queryByText('Projects')).toBeNull();
     for (const removed of ['Inbox', 'My Tasks', 'Skills', 'Squads', 'Autopilots', 'Analytics']) {
       expect(screen.queryByText(removed)).toBeNull();
@@ -196,7 +214,17 @@ describe('TagWorkspaceShell', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Switch to Studio B' }));
 
-    expect(state.pushed).toEqual(['/studio-b/chat']);
+    expect(state.switches).toEqual([
+      { id: 'workspace-b', destination: '/studio-b/chat' },
+    ]);
+  });
+
+  it('enters the VIBES-authoritative create Workspace journey from the switcher', () => {
+    render(<TagWorkspaceShell><div /></TagWorkspaceShell>);
+
+    expect(
+      screen.getByRole('link', { name: 'Create Workspace' }).getAttribute('href')
+    ).toBe('/workspaces/new');
   });
 
   it('keeps the Shell visible while realtime is reconnecting', () => {

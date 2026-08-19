@@ -35,6 +35,8 @@
     "./workspace/no-access-page": "./workspace/no-access-page.tsx",
     "./workspace/welcome-after-onboarding": "./workspace/welcome-after-onboarding.tsx",
     "./workspace/use-workspace-seen": "./workspace/use-workspace-seen.ts",
+    "./workspace/slug": "./workspace/slug.ts",
+    "./tag-authority": "./tag-authority/index.ts",
     "./layout": "./layout/index.ts",
     "./layout/route-icon-components": "./layout/route-icon-components.tsx",
     "./auth": "./auth/index.ts",

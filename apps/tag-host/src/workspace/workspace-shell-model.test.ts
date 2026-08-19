@@ -16,6 +16,7 @@ describe('Tag Workspace Shell navigation model', () => {
       expect.objectContaining({ key: 'tasks', path: 'issues' }),
       expect.objectContaining({ key: 'agents', path: 'agents' }),
       expect.objectContaining({ key: 'runtimes', path: 'runtimes' }),
+      expect.objectContaining({ key: 'members', path: 'members' }),
       expect.objectContaining({ key: 'settings', path: 'settings' }),
     ]);
     const itemKeys = items.map((item) => item.key);
@@ -76,5 +77,8 @@ describe('Tag Workspace Shell navigation model', () => {
     expect(
       workspaceSwitchDestination('studio-b', '/studio-a/settings?tab=mcp')
     ).toBe('/studio-b/settings');
+    expect(
+      workspaceSwitchDestination('studio-b', '/studio-a/members')
+    ).toBe('/studio-b/members');
   });
 });

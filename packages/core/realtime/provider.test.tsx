@@ -76,7 +76,7 @@ vi.mock("./use-realtime-sync", () => ({
   useRealtimeSync: vi.fn(),
 }));
 
-import { WSProvider } from "./provider";
+import { useWS, WSProvider } from "./provider";
 
 const storage: StorageAdapter = {
   getItem: () => null,
@@ -145,5 +145,29 @@ describe("WSProvider workspace isolation", () => {
       auth: { token: null, workspaceSlug: "workspace-b" },
       connectOrder: 3,
     });
+  });
+
+  it("lets an ordered workspace switch stop the active subscription synchronously", async () => {
+    let disconnectCurrent: (() => void) | undefined;
+    function Probe() {
+      disconnectCurrent = useWS().disconnectCurrent;
+      return <div>Tag</div>;
+    }
+
+    render(
+      <WSProvider
+        wsUrl="wss://vibes.test/ws/tag"
+        authStore={authStore}
+        storage={storage}
+        cookieAuth
+      >
+        <Probe />
+      </WSProvider>,
+    );
+
+    await waitFor(() => expect(socketState.clients).toHaveLength(1));
+    act(() => disconnectCurrent?.());
+
+    expect(socketState.clients[0]?.disconnectOrder).toBe(2);
   });
 });

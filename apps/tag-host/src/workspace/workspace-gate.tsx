@@ -39,7 +39,7 @@ export function WorkspaceGate({
   );
 
   if (isAuthLoading) return <TagHostStatus label="Restoring local session" />;
-  if (!user) return <TagHostStatus label="Existing Multica session required" />;
+  if (!user) return <TagHostStatus label="VIBES Tag access needs to be refreshed" />;
   if (isError) {
     return (
       <TagHostStatus label="Could not load workspace">

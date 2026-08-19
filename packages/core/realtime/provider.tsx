@@ -27,6 +27,7 @@ type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => 
 interface WSContextValue {
   subscribe: (event: WSEventType, handler: EventHandler) => () => void;
   onReconnect: (callback: () => void) => () => void;
+  disconnectCurrent: () => void;
   connectionState: WSConnectionState;
 }
 
@@ -145,9 +146,20 @@ export function WSProvider({
     [wsClient],
   );
 
+  const disconnectCurrent = useCallback(() => {
+    wsClient?.disconnect();
+    setWsClient(null);
+    setConnectionState("idle");
+  }, [wsClient]);
+
   return (
     <WSContext.Provider
-      value={{ subscribe, onReconnect: onReconnectCb, connectionState }}
+      value={{
+        subscribe,
+        onReconnect: onReconnectCb,
+        disconnectCurrent,
+        connectionState,
+      }}
     >
       {children}
     </WSContext.Provider>
