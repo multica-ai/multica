@@ -81,6 +81,14 @@ spec:
             # Same $(VAR) composition as deployment-backend.yaml's DATABASE_URL
             # — admin is a read-only consumer of the same agentfarm Postgres
             # cluster (see apps/admin/lib/db.ts).
+            #
+            # uselibpqcompat=true matters here in a way it doesn't for the Go
+            # backend: node-postgres (unlike libpq/pgx) treats sslmode=require
+            # as an alias for verify-full, so without this flag admin fails
+            # every query with UNABLE_TO_GET_ISSUER_CERT_LOCALLY (no CA bundle
+            # is provisioned). This opts into libpq's actual sslmode semantics
+            # (require = encrypt only, don't verify the cert), matching what
+            # the backend already effectively does.
             - name: POSTGRES_HOST
               valueFrom:
                 secretKeyRef:
@@ -104,7 +112,7 @@ spec:
             - name: POSTGRES_DB
               value: agentfarm
             - name: DATABASE_URL
-              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require&uselibpqcompat=true"
           # No /health endpoint — use TCP socket probes, same as web.
           livenessProbe:
             tcpSocket:
