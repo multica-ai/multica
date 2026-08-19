@@ -8,11 +8,14 @@ import styles from '../styles.css?url';
 
 export const Route = createRootRoute({
   head: () => ({
-    links: [{ rel: 'stylesheet', href: styles }],
+    links: [
+      { rel: 'stylesheet', href: styles },
+      { rel: 'manifest', href: '/tag/manifest.webmanifest' },
+    ],
     meta: [
       { charSet: 'utf-8' },
       { name: 'viewport', content: 'width=device-width, initial-scale=1' },
-      { title: 'VIBES Tag local prototype' },
+      { title: 'VIBES Tag' },
     ],
   }),
   shellComponent: RootDocument,

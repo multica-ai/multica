@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite dev --port ${TAG_HOST_PORT:-3001}",
+    "dev": "vite dev",
     "build": "vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
