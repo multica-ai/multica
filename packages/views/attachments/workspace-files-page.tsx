@@ -4,7 +4,6 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { workspaceFilesOptions } from "@multica/core/attachments";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import type { Attachment, WorkspaceFile } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import {
@@ -22,32 +21,6 @@ function formatFileSize(size: number): string {
   if (size < 1024) return `${size} B`;
   if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KB`;
   return `${(size / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/**
- * The shared preview still accepts the existing Attachment contract. Keep its
- * legacy field shape at this reuse seam while Files remains camel-cased from
- * the API boundary onward.
- */
-function toPreviewAttachment(file: WorkspaceFile): Attachment {
-  return {
-    id: file.id,
-    workspace_id: file.workspaceId,
-    issue_id: file.issueId,
-    comment_id: file.commentId,
-    chat_session_id: file.chatSessionId,
-    chat_message_id: file.chatMessageId,
-    uploader_type: file.uploaderType,
-    uploader_id: file.uploaderId,
-    filename: file.filename,
-    url: file.url,
-    download_url: file.downloadUrl,
-    attachment_download_url: file.attachmentDownloadUrl,
-    markdown_url: file.markdownUrl,
-    content_type: file.contentType,
-    size_bytes: file.sizeBytes,
-    created_at: file.createdAt,
-  };
 }
 
 export function WorkspaceFilesPage() {
@@ -150,7 +123,7 @@ export function WorkspaceFilesPage() {
                       aria-label={`${t(($) => $.files.preview)} ${file.filename}`}
                       onClick={() => preview.tryOpen({
                         kind: "full",
-                        attachment: toPreviewAttachment(file),
+                        attachment: file,
                       })}
                     >
                       <Eye className="size-4" aria-hidden />

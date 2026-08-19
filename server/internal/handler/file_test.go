@@ -492,7 +492,7 @@ func seedAttachmentURL(t *testing.T, rawURL, filename, contentType string, sizeB
 	return id
 }
 
-func TestListWorkspaceAttachmentsProjectsBoundFilesOnly(t *testing.T) {
+func TestListWorkspaceAttachmentsVisibleIssueAndChatFilesOnly(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}

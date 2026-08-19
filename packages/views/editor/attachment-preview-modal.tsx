@@ -55,7 +55,7 @@ import {
   Loader2,
   X,
 } from "lucide-react";
-import type { Attachment } from "@multica/core/types";
+import type { Attachment, WorkspaceFile } from "@multica/core/types";
 import { paths, useWorkspaceSlug } from "@multica/core/paths";
 import { cn } from "@multica/ui/lib/utils";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
@@ -96,7 +96,7 @@ import { CodeBlockStatic } from "./code-block-static";
 // from the URL without hitting the text-content proxy.
 
 export type PreviewSource =
-  | { kind: "full"; attachment: Attachment }
+  | { kind: "full"; attachment: Attachment | WorkspaceFile }
   | { kind: "url"; url: string; filename: string };
 
 // PreviewKinds that can render from a URL-only source. Text-based kinds
@@ -111,6 +111,32 @@ interface PreviewState {
   contentType: string;
   mediaUrl: string;
   attachmentId: string | null;
+  attachment: Attachment | null;
+}
+
+function normalizePreviewAttachment(
+  attachment: Attachment | WorkspaceFile,
+): Attachment {
+  if (!("workspaceId" in attachment)) return attachment;
+
+  return {
+    id: attachment.id,
+    workspace_id: attachment.workspaceId,
+    issue_id: attachment.issueId,
+    comment_id: attachment.commentId,
+    chat_session_id: attachment.chatSessionId,
+    chat_message_id: attachment.chatMessageId,
+    uploader_type: attachment.uploaderType,
+    uploader_id: attachment.uploaderId,
+    filename: attachment.filename,
+    url: attachment.url,
+    download_url: attachment.downloadUrl,
+    attachment_download_url: attachment.attachmentDownloadUrl,
+    markdown_url: attachment.markdownUrl,
+    content_type: attachment.contentType,
+    size_bytes: attachment.sizeBytes,
+    created_at: attachment.createdAt,
+  };
 }
 
 function resolvePreviewMediaUrl(attachment: Attachment): string {
@@ -129,11 +155,13 @@ function normalize(source: PreviewSource): PreviewState {
   // form so `<img src>` / `<iframe src>` / `<video src>` actually point at
   // the API server instead of the shell origin.
   if (source.kind === "full") {
+    const attachment = normalizePreviewAttachment(source.attachment);
     return {
-      filename: source.attachment.filename,
-      contentType: source.attachment.content_type,
-      mediaUrl: resolvePreviewMediaUrl(source.attachment),
-      attachmentId: source.attachment.id,
+      filename: attachment.filename,
+      contentType: attachment.content_type,
+      mediaUrl: resolvePreviewMediaUrl(attachment),
+      attachmentId: attachment.id,
+      attachment,
     };
   }
   return {
@@ -141,6 +169,7 @@ function normalize(source: PreviewSource): PreviewState {
     contentType: "",
     mediaUrl: resolvePublicFileUrl(source.url) ?? source.url,
     attachmentId: null,
+    attachment: null,
   };
 }
 
@@ -463,7 +492,6 @@ export function AttachmentPreviewModal({
                 same-resolution screenshots. */}
             <PreviewPanel
               kind={kind}
-              source={source}
               state={state}
               onClose={onClose}
               onDownload={handleDownload}
@@ -488,7 +516,6 @@ export function AttachmentPreviewModal({
 // one owner for that shared state, mounted and destroyed with the open modal.
 function PreviewPanel({
   kind,
-  source,
   state,
   onClose,
   onDownload,
@@ -497,7 +524,6 @@ function PreviewPanel({
   onImageError,
 }: {
   kind: PreviewKind | null;
-  source: PreviewSource;
   state: PreviewState;
   onClose: () => void;
   onDownload: () => void;
@@ -657,7 +683,6 @@ function PreviewPanel({
         ) : (
           <PreviewContent
             kind={kind}
-            source={source}
             state={state}
             onDownload={onDownload}
           />
@@ -777,12 +802,10 @@ function ImagePreview({
 // toolbar and canvas share zoom state.
 function PreviewContent({
   kind,
-  source,
   state,
   onDownload,
 }: {
   kind: Exclude<PreviewKind, "image"> | null;
-  source: PreviewSource;
   state: PreviewState;
   onDownload: () => void;
 }) {
@@ -848,7 +871,7 @@ function PreviewContent({
             <ReadonlyContent
               content={text}
               className="px-6 py-4"
-              attachments={source.kind === "full" ? [source.attachment] : []}
+              attachments={state.attachment ? [state.attachment] : []}
             />
           )}
         />

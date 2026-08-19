@@ -45,15 +45,15 @@ vi.mock('../i18n', () => ({
       selector({
         files: {
           title: 'Files',
-          description: 'Shared files from Chat and Issues',
+          description: 'Shared files from Chat and Tasks',
           empty_title: 'No shared files yet',
-          empty_description: 'Files attached in Chat or Issues will appear here.',
+          empty_description: 'Files attached in Chat or Tasks will appear here.',
           load_failed: 'Files could not be loaded.',
           retry: 'Retry',
           preview: 'Preview',
           download: 'Download',
           source_chat: 'Chat',
-          source_issue: 'Issue',
+          source_issue: 'Task',
           untitled_chat: 'Untitled chat',
           load_more: 'Load more',
           loading_more: 'Loading...',
@@ -108,11 +108,11 @@ describe('WorkspaceFilesPage', () => {
     response = { attachments: [file], hasMore: false, nextOffset: null };
   });
 
-  it('lists the workspace file with its Issue source and reuses preview and download actions', async () => {
+  it('lists the workspace file with its Task source and reuses preview and download actions', async () => {
     renderPage();
 
     expect(await screen.findByText('roadmap.pdf')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /Issue.*Plan launch/ })).toHaveAttribute(
+    expect(screen.getByRole('link', { name: /Task.*Plan launch/ })).toHaveAttribute(
       'href',
       '/studio/issues/issue-1',
     );
@@ -120,13 +120,7 @@ describe('WorkspaceFilesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Preview roadmap.pdf' }));
     expect(tryOpen).toHaveBeenCalledWith({
       kind: 'full',
-      attachment: expect.objectContaining({
-        id: 'att-1',
-        workspace_id: 'ws-1',
-        issue_id: 'issue-1',
-        content_type: 'application/pdf',
-        size_bytes: 2048,
-      }),
+      attachment: file,
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Download roadmap.pdf' }));
