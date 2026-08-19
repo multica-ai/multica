@@ -142,6 +142,13 @@ type AutopilotTriggerResponse struct {
 	// a JSON array of {event, actions?} objects — never as a base64 string
 	// (which is what []byte would produce through encoding/json).
 	EventFilters []WebhookEventFilter `json:"event_filters,omitempty"`
+	// UpstreamAutopilotID names the upstream autopilot whose run reaching a
+	// terminal state fires this trigger. Only present for kind=chain.
+	UpstreamAutopilotID *string `json:"upstream_autopilot_id,omitempty"`
+	// ChainOnStatus is the terminal status filter on the chain edge:
+	// 'completed' (success chain), 'failed' (error-handler chain), or 'any'.
+	// Only present for kind=chain.
+	ChainOnStatus *string `json:"chain_on_status,omitempty"`
 }
 
 type AutopilotRunResponse struct {
@@ -247,6 +254,14 @@ func (h *Handler) triggerToResponse(t db.AutopilotTrigger) AutopilotTriggerRespo
 			// is supposed to make this branch unreachable, and the matcher
 			// fails closed if a corrupt row ever slips through.
 		}
+	}
+	if t.Kind == "chain" {
+		resp.UpstreamAutopilotID = uuidToPtr(t.UpstreamAutopilotID)
+		status := t.ChainOnStatus
+		if status == "" {
+			status = "completed"
+		}
+		resp.ChainOnStatus = &status
 	}
 	return resp
 }
@@ -354,6 +369,13 @@ type CreateAutopilotTriggerRequest struct {
 	// EventFilters is an optional list of {event, actions?} scopes. Only
 	// meaningful for webhook triggers. nil/empty means "accept all events".
 	EventFilters []WebhookEventFilter `json:"event_filters,omitempty"`
+	// UpstreamAutopilotID is required for kind=chain: the upstream autopilot
+	// whose run reaching a terminal state fires this downstream trigger.
+	UpstreamAutopilotID *string `json:"upstream_autopilot_id,omitempty"`
+	// ChainOnStatus filters which terminal status of the upstream run fires
+	// the edge. Only meaningful for kind=chain. Defaults to "completed".
+	// Allowed: "completed", "failed", "any".
+	ChainOnStatus *string `json:"chain_on_status,omitempty"`
 }
 
 // SetSigningSecretRequest is the body shape for PUT
@@ -388,6 +410,11 @@ type UpdateAutopilotTriggerRequest struct {
 	// there is no way to tell "field absent from the PATCH body" from "field
 	// present but empty", and the user can never clear filters once set.
 	EventFilters *[]WebhookEventFilter `json:"event_filters,omitempty"`
+	// ChainOnStatus updates the chain edge's terminal-status filter. Only
+	// meaningful for kind=chain. The upstream autopilot itself cannot be
+	// repointed here - delete and recreate the trigger so the new edge goes
+	// through the cycle check.
+	ChainOnStatus *string `json:"chain_on_status,omitempty"`
 }
 
 // ── Handlers ────────────────────────────────────────────────────────────────
@@ -1278,13 +1305,13 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusBadRequest, "kind is required")
 		return
 	}
-	if req.Kind != "schedule" && req.Kind != "webhook" {
+	if req.Kind != "schedule" && req.Kind != "webhook" && req.Kind != "chain" {
 		// "api" kind is deprecated: it was reserved-but-inert (no scheduler,
 		// no ingress route), and the only way to actually fire one was via
 		// the manual /trigger endpoint — which already works regardless of
 		// trigger kind. Surface stragglers with 400 so callers move to
 		// schedule or webhook.
-		writeError(w, http.StatusBadRequest, "kind must be schedule or webhook")
+		writeError(w, http.StatusBadRequest, "kind must be schedule, webhook, or chain")
 		return
 	}
 	if req.Kind == "schedule" && (req.CronExpression == nil || *req.CronExpression == "") {
@@ -1307,6 +1334,31 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	if err := validateWebhookEventFilters(req.EventFilters); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
+	}
+	// Chain triggers are configured by the upstream relationship, not by a
+	// cron / timezone / webhook_token / event_filter set - reject those fields
+	// loudly so a caller mixing kinds does not silently drop config.
+	if req.Kind == "chain" {
+		if req.CronExpression != nil && *req.CronExpression != "" {
+			writeError(w, http.StatusBadRequest, "cron_expression is not valid for chain triggers")
+			return
+		}
+		if req.Timezone != nil && *req.Timezone != "" {
+			writeError(w, http.StatusBadRequest, "timezone is not valid for chain triggers")
+			return
+		}
+		if req.UpstreamAutopilotID == nil || *req.UpstreamAutopilotID == "" {
+			writeError(w, http.StatusBadRequest, "upstream_autopilot_id is required for chain triggers")
+			return
+		}
+		if req.ChainOnStatus != nil && *req.ChainOnStatus != "" {
+			switch *req.ChainOnStatus {
+			case "completed", "failed", "any":
+			default:
+				writeError(w, http.StatusBadRequest, "chain_on_status must be completed, failed, or any")
+				return
+			}
+		}
 	}
 	// Provider only applies to webhook triggers and the value space is
 	// closed — reject unknowns early so a typo on create doesn't quietly
@@ -1380,7 +1432,49 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	// Schedule create: write the trigger and republish the rule version atomically.
+	// Schedule / chain create: write the trigger and republish the rule version atomically.
+	var (
+		chainUpstreamID pgtype.UUID
+		chainOnStatus   pgtype.Text
+	)
+	if req.Kind == "chain" {
+		chainUpstreamID = parseUUID(*req.UpstreamAutopilotID)
+		if !chainUpstreamID.Valid {
+			writeError(w, http.StatusBadRequest, "upstream_autopilot_id is not a valid UUID")
+			return
+		}
+		if chainUpstreamID == ap.ID {
+			writeError(w, http.StatusBadRequest, "a chain trigger cannot point at its own autopilot")
+			return
+		}
+		// The upstream must live in the same workspace - a cross-workspace
+		// edge would let one tenant's runs fire another tenant's autopilots.
+		wsUUID := parseUUID(workspaceID)
+		if _, err := h.Queries.GetAutopilotInWorkspace(r.Context(), db.GetAutopilotInWorkspaceParams{
+			ID:          chainUpstreamID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			writeError(w, http.StatusBadRequest, "upstream_autopilot_id not found in this workspace")
+			return
+		}
+		// Config-time cycle guard: adding upstream -> downstream closes a
+		// cycle iff downstream can already reach upstream through existing
+		// chain edges. The read is not locked; a concurrent chain create that
+		// individually passes DFS but together forms a cycle is caught at
+		// runtime by the MaxChainDepth backstop (autopilot_chain.go).
+		cycle, err := service.DetectChainCycle(r.Context(), h.Queries, wsUUID, ap.ID, chainUpstreamID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to validate chain trigger")
+			return
+		}
+		if cycle {
+			writeError(w, http.StatusBadRequest, "chain trigger would create a cycle")
+			return
+		}
+		if req.ChainOnStatus != nil && *req.ChainOnStatus != "" {
+			chainOnStatus = pgtype.Text{String: *req.ChainOnStatus, Valid: true}
+		}
+	}
 	tx, err := h.TxStarter.Begin(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
@@ -1401,8 +1495,10 @@ func (h *Handler) CreateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		// Seed the responsible publisher = creator; a later substantive edit re-stamps
 		// it to the editor so runs attribute to whoever last shaped this trigger
 		// (source=trigger_owner, MUL-4302).
-		PublishedByType: pgtype.Text{String: "member", Valid: publisherID.Valid},
-		PublishedByID:   publisherID,
+		PublishedByType:     pgtype.Text{String: "member", Valid: publisherID.Valid},
+		PublishedByID:       publisherID,
+		UpstreamAutopilotID: chainUpstreamID,
+		ChainOnStatus:       chainOnStatus,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create trigger")
@@ -1637,6 +1733,21 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 			return
 		}
 	}
+	// chain_on_status is only meaningful on a chain trigger; the upstream
+	// autopilot itself cannot be repointed here (delete + recreate forces a
+	// fresh cycle check).
+	if req.ChainOnStatus != nil && prev.Kind != "chain" {
+		writeError(w, http.StatusBadRequest, "chain_on_status is only valid for chain triggers")
+		return
+	}
+	if req.ChainOnStatus != nil && *req.ChainOnStatus != "" {
+		switch *req.ChainOnStatus {
+		case "completed", "failed", "any":
+		default:
+			writeError(w, http.StatusBadRequest, "chain_on_status must be completed, failed, or any")
+			return
+		}
+	}
 
 	params := db.UpdateAutopilotTriggerParams{
 		ID:             prev.ID,
@@ -1644,6 +1755,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 		Timezone:       prev.Timezone,
 		NextRunAt:      prev.NextRunAt,
 		Label:          prev.Label,
+		ChainOnStatus:  pgtype.Text{String: prev.ChainOnStatus, Valid: prev.ChainOnStatus != ""},
 	}
 	if req.Enabled != nil {
 		params.Enabled = pgtype.Bool{Bool: *req.Enabled, Valid: true}
@@ -1662,6 +1774,9 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	}
 	if req.Label != nil {
 		params.Label = pgtype.Text{String: *req.Label, Valid: true}
+	}
+	if req.ChainOnStatus != nil && *req.ChainOnStatus != "" {
+		params.ChainOnStatus = pgtype.Text{String: *req.ChainOnStatus, Valid: true}
 	}
 	// Tri-state PATCH for event_filters. A nil pointer (field omitted or
 	// JSON null) leaves the existing row untouched — params.EventFilters
@@ -1736,6 +1851,7 @@ func (h *Handler) UpdateAutopilotTrigger(w http.ResponseWriter, r *http.Request)
 	triggerSubstantiveChange := prev.Enabled != trigger.Enabled ||
 		prev.CronExpression != trigger.CronExpression ||
 		prev.Timezone != trigger.Timezone ||
+		prev.ChainOnStatus != trigger.ChainOnStatus ||
 		!bytes.Equal(prev.EventFilters, trigger.EventFilters)
 	if triggerSubstantiveChange {
 		if err := h.recordAutopilotRuleVersion(r.Context(), qtx, ap, "member", parseUUID(userID)); err != nil {

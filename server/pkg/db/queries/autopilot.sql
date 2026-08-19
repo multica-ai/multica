@@ -172,13 +172,16 @@ WHERE id = $1;
 INSERT INTO autopilot_trigger (
     autopilot_id, kind, enabled, cron_expression, timezone,
     next_run_at, webhook_token, label, provider, event_filters,
-    published_by_type, published_by_id
+    published_by_type, published_by_id,
+    upstream_autopilot_id, chain_on_status
 ) VALUES (
     $1, $2, $3, sqlc.narg('cron_expression'), sqlc.narg('timezone'),
     sqlc.narg('next_run_at'), sqlc.narg('webhook_token'), sqlc.narg('label'),
     COALESCE(sqlc.narg('provider')::text, 'generic'),
     sqlc.narg('event_filters'),
-    sqlc.narg('published_by_type'), sqlc.narg('published_by_id')
+    sqlc.narg('published_by_type'), sqlc.narg('published_by_id'),
+    sqlc.narg('upstream_autopilot_id'),
+    COALESCE(sqlc.narg('chain_on_status')::text, 'completed')
 ) RETURNING *;
 
 -- name: SetAutopilotTriggerPublisher :exec
@@ -207,12 +210,43 @@ UPDATE autopilot_trigger SET
     next_run_at = sqlc.narg('next_run_at'),
     label = COALESCE(sqlc.narg('label'), label),
     event_filters = COALESCE(sqlc.narg('event_filters'), event_filters),
+    chain_on_status = COALESCE(sqlc.narg('chain_on_status')::text, chain_on_status),
     updated_at = now()
 WHERE id = $1
 RETURNING *;
 
 -- name: DeleteAutopilotTrigger :exec
 DELETE FROM autopilot_trigger WHERE id = $1;
+
+-- ───────────────────────────────────────────────────────────────────────────
+-- Chain triggers (cross-autopilot orchestration, WS-768 / S4)
+-- ───────────────────────────────────────────────────────────────────────────
+
+-- name: ListEnabledChainSuccessors :many
+-- Fan-out query: the enabled chain triggers fired when the autopilot named by
+-- $1 reaches a terminal status. The caller picks the matching edge set by
+-- passing the allowed chain_on_status values explicitly - $2 is the text array
+-- of statuses that match the upstream's terminal status ('completed' upstream
+-- -> {'completed','any'}; 'failed' upstream -> {'failed','any'}). 'skipped'
+-- never matches because it is not passed in. Splitting the match set in the
+-- caller (rather than comparing a status param to a literal in SQL) keeps the
+-- param typed. Ordered by created_at so fan-out is deterministic for tests.
+SELECT * FROM autopilot_trigger
+WHERE kind = 'chain'
+  AND upstream_autopilot_id = $1
+  AND enabled = true
+  AND chain_on_status = ANY(@allowed_statuses::text[])
+ORDER BY created_at ASC;
+
+-- name: ListChainTriggersInWorkspace :many
+-- Every chain edge in a workspace, joined to autopilot for workspace scoping.
+-- Used by the config-time DFS cycle check: the caller builds the directed
+-- graph (upstream_autopilot_id -> autopilot_id) and walks it in Go so the
+-- proposed new edge can be included in the visit set before it is persisted.
+SELECT t.* FROM autopilot_trigger t
+JOIN autopilot a ON a.id = t.autopilot_id
+WHERE a.workspace_id = $1 AND t.kind = 'chain'
+ORDER BY t.created_at ASC;
 
 -- name: AdvanceTriggerNextRun :exec
 UPDATE autopilot_trigger
@@ -297,11 +331,13 @@ RETURNING *;
 -- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
 INSERT INTO autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at,
-    webhook_delivery_id
+    webhook_delivery_id, chain_depth, chain_upstream_run_id
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
     sqlc.narg('squad_id'), sqlc.narg('planned_at'),
-    sqlc.narg('webhook_delivery_id')
+    sqlc.narg('webhook_delivery_id'),
+    COALESCE(sqlc.narg('chain_depth')::int, 0),
+    sqlc.narg('chain_upstream_run_id')
 ) RETURNING *;
 
 -- name: GetAutopilotRunByTriggerAndPlanned :one
@@ -321,6 +357,18 @@ LIMIT 1;
 -- name: GetAutopilotRunByWebhookDelivery :one
 SELECT * FROM autopilot_run
 WHERE webhook_delivery_id = $1
+LIMIT 1;
+
+-- name: GetAutopilotRunByChainUpstream :one
+-- Idempotent lookup for chain dispatch: if a run already exists for this
+-- (upstream run, chain trigger) pair, the caller reuses it instead of
+-- creating a duplicate. The partial unique index uq_autopilot_run_chain_upstream
+-- (migration 215) covers the same key, so a race between "look up then insert"
+-- still resolves to a single row - this query is the fast path that lets us
+-- skip the INSERT when we can see the prior row clearly. Returns no rows for
+-- the (much more common) first-time chain dispatch.
+SELECT * FROM autopilot_run
+WHERE chain_upstream_run_id = $1 AND trigger_id = $2 AND source = 'chain'
 LIMIT 1;
 
 -- name: RecoverPartialAutopilotRun :exec

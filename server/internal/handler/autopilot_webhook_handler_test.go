@@ -984,8 +984,172 @@ func TestCreateAutopilotTrigger_RejectsAPIKind(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 on kind=api, got %d body=%s", w.Code, w.Body.String())
 	}
-	if !strings.Contains(w.Body.String(), "schedule or webhook") {
+	if !strings.Contains(w.Body.String(), "schedule, webhook, or chain") {
 		t.Fatalf("expected message to name allowed kinds, body=%s", w.Body.String())
+	}
+}
+
+// TestCreateAutopilotTrigger_AcceptsChainWithUpstream verifies a kind=chain
+// trigger with a same-workspace upstream and an explicit chain_on_status is
+// created (201) and the response echoes the chain config.
+func TestCreateAutopilotTrigger_AcceptsChainWithUpstream(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ChainAccept Agent")
+	upstreamAP := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	downstreamAP := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+downstreamAP+"/triggers", map[string]any{
+		"kind":                  "chain",
+		"upstream_autopilot_id": upstreamAP,
+		"chain_on_status":       "failed",
+	})
+	req = withURLParam(req, "id", downstreamAP)
+	testHandler.CreateAutopilotTrigger(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201 on chain create, got %d body=%s", w.Code, w.Body.String())
+	}
+	var resp AutopilotTriggerResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Kind != "chain" {
+		t.Errorf("kind = %q, want chain", resp.Kind)
+	}
+	if resp.UpstreamAutopilotID == nil || *resp.UpstreamAutopilotID != upstreamAP {
+		got := "(nil)"
+		if resp.UpstreamAutopilotID != nil {
+			got = *resp.UpstreamAutopilotID
+		}
+		t.Errorf("upstream_autopilot_id = %s, want %s", got, upstreamAP)
+	}
+	if resp.ChainOnStatus == nil || *resp.ChainOnStatus != "failed" {
+		got := "(nil)"
+		if resp.ChainOnStatus != nil {
+			got = *resp.ChainOnStatus
+		}
+		t.Errorf("chain_on_status = %s, want failed", got)
+	}
+}
+
+// TestCreateAutopilotTrigger_RejectsChainWithoutUpstream verifies a chain
+// trigger missing the upstream_autopilot_id is rejected with 400.
+func TestCreateAutopilotTrigger_RejectsChainWithoutUpstream(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ChainNoUp Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+apID+"/triggers", map[string]any{
+		"kind": "chain",
+	})
+	req = withURLParam(req, "id", apID)
+	testHandler.CreateAutopilotTrigger(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on chain without upstream, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "upstream_autopilot_id is required") {
+		t.Fatalf("expected upstream-required message, body=%s", w.Body.String())
+	}
+}
+
+// TestCreateAutopilotTrigger_RejectsChainSelfEdge verifies a chain trigger that
+// names its own autopilot as upstream is rejected (self-cycle).
+func TestCreateAutopilotTrigger_RejectsChainSelfEdge(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ChainSelf Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+apID+"/triggers", map[string]any{
+		"kind":                  "chain",
+		"upstream_autopilot_id": apID,
+	})
+	req = withURLParam(req, "id", apID)
+	testHandler.CreateAutopilotTrigger(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on self-edge, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "cannot point at its own autopilot") {
+		t.Fatalf("expected self-edge message, body=%s", w.Body.String())
+	}
+}
+
+// TestCreateAutopilotTrigger_RejectsChainCycle verifies the config-time DFS
+// guard end-to-end through the handler: after seeding edge A->B, creating the
+// closing edge B->A (proposed upstream=B, downstream=A) is rejected with 400.
+func TestCreateAutopilotTrigger_RejectsChainCycle(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ChainCycle Agent")
+	apA := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	apB := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+
+	// Seed edge A->B: trigger on B naming A upstream.
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO autopilot_trigger (autopilot_id, kind, enabled, upstream_autopilot_id, chain_on_status)
+		VALUES ($1, 'chain', true, $2, 'completed')`, apB, apA); err != nil {
+		t.Fatalf("seed A->B edge: %v", err)
+	}
+
+	// Propose closing edge B->A: trigger on A naming B upstream. A already
+	// reaches B (A->B), so B->A closes the cycle.
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/autopilots/"+apA+"/triggers", map[string]any{
+		"kind":                  "chain",
+		"upstream_autopilot_id": apB,
+	})
+	req = withURLParam(req, "id", apA)
+	testHandler.CreateAutopilotTrigger(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 on cycle, got %d body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "cycle") {
+		t.Fatalf("expected cycle message, body=%s", w.Body.String())
+	}
+}
+
+// TestUpdateAutopilotTrigger_UpdatesChainOnStatus verifies the PATCH path
+// updates a chain trigger's chain_on_status and echoes it back.
+func TestUpdateAutopilotTrigger_UpdatesChainOnStatus(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "ChainUpd Agent")
+	upstreamAP := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+	downstreamAP := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+
+	// Create a chain trigger (default chain_on_status=completed).
+	create := httptest.NewRecorder()
+	createReq := newRequest("POST", "/api/autopilots/"+downstreamAP+"/triggers", map[string]any{
+		"kind":                  "chain",
+		"upstream_autopilot_id": upstreamAP,
+	})
+	createReq = withURLParam(createReq, "id", downstreamAP)
+	testHandler.CreateAutopilotTrigger(create, createReq)
+	if create.Code != http.StatusCreated {
+		t.Fatalf("create chain trigger: expected 201, got %d body=%s", create.Code, create.Body.String())
+	}
+	var created AutopilotTriggerResponse
+	if err := json.Unmarshal(create.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode created: %v", err)
+	}
+	if created.ChainOnStatus == nil || *created.ChainOnStatus != "completed" {
+		t.Fatalf("expected default chain_on_status=completed, got %v", created.ChainOnStatus)
+	}
+
+	// Update chain_on_status to 'any'.
+	w := httptest.NewRecorder()
+	req := newRequest("PATCH", "/api/autopilots/"+downstreamAP+"/triggers/"+created.ID, map[string]any{
+		"chain_on_status": "any",
+	})
+	req = withURLParams(req, "id", downstreamAP, "triggerId", created.ID)
+	testHandler.UpdateAutopilotTrigger(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 on update, got %d body=%s", w.Code, w.Body.String())
+	}
+	var updated AutopilotTriggerResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &updated); err != nil {
+		t.Fatalf("decode updated: %v", err)
+	}
+	if updated.ChainOnStatus == nil || *updated.ChainOnStatus != "any" {
+		got := "(nil)"
+		if updated.ChainOnStatus != nil {
+			got = *updated.ChainOnStatus
+		}
+		t.Errorf("chain_on_status = %s, want any", got)
 	}
 }
 

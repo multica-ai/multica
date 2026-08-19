@@ -152,9 +152,11 @@ func init() {
 	autopilotRunsCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// trigger-add — supports schedule and webhook
-	autopilotTriggerAddCmd.Flags().String("kind", "schedule", "Trigger kind: schedule or webhook")
+	autopilotTriggerAddCmd.Flags().String("kind", "schedule", "Trigger kind: schedule, webhook, or chain")
 	autopilotTriggerAddCmd.Flags().String("cron", "", "Cron expression (required for --kind schedule)")
 	autopilotTriggerAddCmd.Flags().String("timezone", "", "IANA timezone (default UTC; schedule only)")
+	autopilotTriggerAddCmd.Flags().String("upstream", "", "Upstream autopilot ID (required for --kind chain)")
+	autopilotTriggerAddCmd.Flags().String("on-status", "", "Fire on upstream terminal status: completed, failed, or any (chain only; default completed)")
 	autopilotTriggerAddCmd.Flags().String("label", "", "Optional human-readable label")
 	autopilotTriggerAddCmd.Flags().String("output", "json", "Output format: table or json")
 
@@ -167,6 +169,7 @@ func init() {
 	autopilotTriggerUpdateCmd.Flags().String("cron", "", "New cron expression")
 	autopilotTriggerUpdateCmd.Flags().String("timezone", "", "New IANA timezone")
 	autopilotTriggerUpdateCmd.Flags().String("label", "", "New label")
+	autopilotTriggerUpdateCmd.Flags().String("on-status", "", "New chain fire-on status: completed, failed, or any (chain only)")
 	autopilotTriggerUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 }
 
@@ -545,8 +548,8 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 	if kind == "" {
 		kind = "schedule"
 	}
-	if kind != "schedule" && kind != "webhook" {
-		return fmt.Errorf("--kind must be schedule or webhook")
+	if kind != "schedule" && kind != "webhook" && kind != "chain" {
+		return fmt.Errorf("--kind must be schedule, webhook, or chain")
 	}
 	cron, _ := cmd.Flags().GetString("cron")
 	if kind == "schedule" && cron == "" {
@@ -560,6 +563,27 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 			return fmt.Errorf("--cron is only valid with --kind schedule")
 		}
 	}
+	upstream, _ := cmd.Flags().GetString("upstream")
+	onStatus, _ := cmd.Flags().GetString("on-status")
+	if kind == "chain" {
+		if upstream == "" {
+			return fmt.Errorf("--upstream is required for --kind chain")
+		}
+		if cron != "" {
+			return fmt.Errorf("--cron is only valid with --kind schedule")
+		}
+		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
+			return fmt.Errorf("--timezone is only valid with --kind schedule")
+		}
+		if onStatus == "" {
+			onStatus = "completed"
+		}
+		if onStatus != "completed" && onStatus != "failed" && onStatus != "any" {
+			return fmt.Errorf("--on-status must be completed, failed, or any")
+		}
+	} else if upstream != "" || onStatus != "" {
+		return fmt.Errorf("--upstream and --on-status are only valid with --kind chain")
+	}
 
 	body := map[string]any{"kind": kind}
 	if kind == "schedule" {
@@ -567,6 +591,10 @@ func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 		if v, _ := cmd.Flags().GetString("timezone"); v != "" {
 			body["timezone"] = v
 		}
+	}
+	if kind == "chain" {
+		body["upstream_autopilot_id"] = upstream
+		body["chain_on_status"] = onStatus
 	}
 	if v, _ := cmd.Flags().GetString("label"); v != "" {
 		body["label"] = v
@@ -682,8 +710,15 @@ func runAutopilotTriggerUpdate(cmd *cobra.Command, args []string) error {
 		v, _ := cmd.Flags().GetString("label")
 		body["label"] = v
 	}
+	if cmd.Flags().Changed("on-status") {
+		v, _ := cmd.Flags().GetString("on-status")
+		if v != "completed" && v != "failed" && v != "any" {
+			return fmt.Errorf("--on-status must be completed, failed, or any")
+		}
+		body["chain_on_status"] = v
+	}
 	if len(body) == 0 {
-		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, or --label")
+		return fmt.Errorf("no fields to update; use --enabled, --cron, --timezone, --label, or --on-status")
 	}
 
 	ctx, cancel := cli.APIContext(context.Background())

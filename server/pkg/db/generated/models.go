@@ -233,22 +233,24 @@ type AutopilotRuleVersion struct {
 }
 
 type AutopilotRun struct {
-	ID                pgtype.UUID        `json:"id"`
-	AutopilotID       pgtype.UUID        `json:"autopilot_id"`
-	TriggerID         pgtype.UUID        `json:"trigger_id"`
-	Source            string             `json:"source"`
-	Status            string             `json:"status"`
-	IssueID           pgtype.UUID        `json:"issue_id"`
-	TaskID            pgtype.UUID        `json:"task_id"`
-	TriggeredAt       pgtype.Timestamptz `json:"triggered_at"`
-	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
-	FailureReason     pgtype.Text        `json:"failure_reason"`
-	TriggerPayload    []byte             `json:"trigger_payload"`
-	Result            []byte             `json:"result"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	SquadID           pgtype.UUID        `json:"squad_id"`
-	PlannedAt         pgtype.Timestamptz `json:"planned_at"`
-	WebhookDeliveryID pgtype.UUID        `json:"webhook_delivery_id"`
+	ID                 pgtype.UUID        `json:"id"`
+	AutopilotID        pgtype.UUID        `json:"autopilot_id"`
+	TriggerID          pgtype.UUID        `json:"trigger_id"`
+	Source             string             `json:"source"`
+	Status             string             `json:"status"`
+	IssueID            pgtype.UUID        `json:"issue_id"`
+	TaskID             pgtype.UUID        `json:"task_id"`
+	TriggeredAt        pgtype.Timestamptz `json:"triggered_at"`
+	CompletedAt        pgtype.Timestamptz `json:"completed_at"`
+	FailureReason      pgtype.Text        `json:"failure_reason"`
+	TriggerPayload     []byte             `json:"trigger_payload"`
+	Result             []byte             `json:"result"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	SquadID            pgtype.UUID        `json:"squad_id"`
+	PlannedAt          pgtype.Timestamptz `json:"planned_at"`
+	WebhookDeliveryID  pgtype.UUID        `json:"webhook_delivery_id"`
+	ChainDepth         int32              `json:"chain_depth"`
+	ChainUpstreamRunID pgtype.UUID        `json:"chain_upstream_run_id"`
 }
 
 type AutopilotSubscriber struct {
@@ -277,7 +279,9 @@ type AutopilotTrigger struct {
 	// Actor type of the trigger's current responsible publisher: member | agent. Set to the creator at creation and re-stamped to the editor on any substantive edit governing this trigger. Consumed only for attribution (source=trigger_owner) — never authorization. NULL on pre-migration triggers (MUL-4302).
 	PublishedByType pgtype.Text `json:"published_by_type"`
 	// The member/agent currently responsible for this trigger's effective config (creator, then last substantive editor). For a member this is the accountable human of runs the trigger fires (source=trigger_owner). No FK, app-layer integrity. NULL on pre-migration triggers, which degrade to rule_owner (MUL-4302).
-	PublishedByID pgtype.UUID `json:"published_by_id"`
+	PublishedByID       pgtype.UUID `json:"published_by_id"`
+	UpstreamAutopilotID pgtype.UUID `json:"upstream_autopilot_id"`
+	ChainOnStatus       string      `json:"chain_on_status"`
 }
 
 type ChannelBindingToken struct {
