@@ -39,6 +39,188 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND channel_type = 'dingtalk'
 FOR UPDATE;
 
+-- name: UpsertDingTalkBotIdentity :one
+-- Bot identity and the optional permission issue belong to the installation,
+-- not to any one group. Keep this as a separate command so the mixed-version
+-- compatibility trigger can observe the completed command state when the
+-- group-presence command runs next.
+WITH target AS MATERIALIZED (
+    SELECT channel_installation.id, channel_installation.workspace_id
+    FROM channel_installation
+    WHERE channel_installation.id = sqlc.arg(installation_id)
+      AND channel_installation.workspace_id = sqlc.arg(workspace_id)
+      AND channel_installation.channel_type = 'dingtalk'
+      AND channel_installation.status = 'active'
+    FOR UPDATE
+), prior_identity AS (
+    SELECT
+        COALESCE(identity.bot_name, '')::text AS bot_name,
+        COALESCE(identity.bot_identity_issue, '')::text AS bot_identity_issue
+    FROM target
+    LEFT JOIN dingtalk_bot_identity identity ON identity.installation_id = target.id
+), upserted_identity AS (
+    INSERT INTO dingtalk_bot_identity (
+        workspace_id, installation_id, bot_name, bot_identity_issue
+    )
+    SELECT
+        target.workspace_id,
+        target.id,
+        COALESCE(NULLIF(sqlc.arg(bot_name)::text, ''), prior_identity.bot_name),
+        CASE
+            WHEN sqlc.arg(bot_identity_issue)::text <> '' THEN sqlc.arg(bot_identity_issue)::text
+            WHEN sqlc.arg(bot_name)::text <> '' THEN ''
+            ELSE prior_identity.bot_identity_issue
+        END
+    FROM target, prior_identity
+    ON CONFLICT (installation_id) DO UPDATE SET
+        workspace_id = EXCLUDED.workspace_id,
+        bot_name = EXCLUDED.bot_name,
+        bot_identity_issue = EXCLUDED.bot_identity_issue,
+        updated_at = now()
+    WHERE dingtalk_bot_identity.workspace_id IS DISTINCT FROM EXCLUDED.workspace_id
+       OR dingtalk_bot_identity.bot_name IS DISTINCT FROM EXCLUDED.bot_name
+       OR dingtalk_bot_identity.bot_identity_issue IS DISTINCT FROM EXCLUDED.bot_identity_issue
+    RETURNING installation_id
+)
+SELECT target.id FROM target;
+
+-- name: RecordDingTalkGroupPresence :one
+-- Records an observed bot/group pair without carrying routing state. The
+-- installation identity is copied only for compatibility with the preceding
+-- draft; readers use dingtalk_bot_identity as the authority.
+WITH target AS MATERIALIZED (
+    SELECT channel_installation.id, channel_installation.workspace_id
+    FROM channel_installation
+    WHERE channel_installation.id = sqlc.arg(installation_id)
+      AND channel_installation.workspace_id = sqlc.arg(workspace_id)
+      AND channel_installation.channel_type = 'dingtalk'
+      AND channel_installation.status = 'active'
+    FOR KEY SHARE
+), current_identity AS (
+    SELECT identity.installation_id, identity.bot_name, identity.bot_identity_issue
+    FROM target
+    JOIN dingtalk_bot_identity identity ON identity.installation_id = target.id
+), observed AS (
+    INSERT INTO dingtalk_group_presence (
+        workspace_id, installation_id, conversation_id, conversation_title,
+        bot_name, bot_identity_issue
+    )
+    SELECT
+        target.workspace_id,
+        target.id,
+        sqlc.arg(conversation_id)::text,
+        sqlc.arg(conversation_title)::text,
+        current_identity.bot_name,
+        current_identity.bot_identity_issue
+    FROM target
+    JOIN current_identity ON current_identity.installation_id = target.id
+    ON CONFLICT (installation_id, conversation_id) DO UPDATE SET
+        conversation_title = CASE
+            WHEN EXCLUDED.conversation_title <> '' THEN EXCLUDED.conversation_title
+            ELSE dingtalk_group_presence.conversation_title
+        END,
+        bot_name = EXCLUDED.bot_name,
+        bot_identity_issue = EXCLUDED.bot_identity_issue,
+        updated_at = now()
+    WHERE (
+        dingtalk_group_presence.conversation_title IS DISTINCT FROM EXCLUDED.conversation_title
+        AND EXCLUDED.conversation_title <> ''
+    )
+       OR dingtalk_group_presence.bot_name IS DISTINCT FROM EXCLUDED.bot_name
+       OR dingtalk_group_presence.bot_identity_issue IS DISTINCT FROM EXCLUDED.bot_identity_issue
+    RETURNING installation_id
+), synced_identity AS (
+    UPDATE dingtalk_group_presence presence
+    SET
+        bot_name = current_identity.bot_name,
+        bot_identity_issue = current_identity.bot_identity_issue,
+        updated_at = now()
+    FROM current_identity
+    WHERE presence.installation_id = current_identity.installation_id
+      AND presence.conversation_id <> sqlc.arg(conversation_id)::text
+      AND (
+          presence.bot_name IS DISTINCT FROM current_identity.bot_name
+          OR presence.bot_identity_issue IS DISTINCT FROM current_identity.bot_identity_issue
+      )
+)
+SELECT target.id FROM target;
+
+-- name: RecordDingTalkGroupActivity :one
+-- Advances activity only after the deduplicated inbound message is durable.
+-- Presence observation runs first, so a forgotten group is recreated before
+-- this update executes.
+UPDATE dingtalk_group_presence
+SET last_active_at = now(), mention_count = mention_count + 1, updated_at = now()
+WHERE installation_id = sqlc.arg(installation_id)
+  AND conversation_id = sqlc.arg(conversation_id)
+RETURNING installation_id;
+
+-- name: ListDingTalkGroupPresencesByWorkspace :many
+-- Active rows are the default inventory. Inactive rows are loaded only when a
+-- client expands one installation's historical section.
+SELECT
+    presence.conversation_id,
+    presence.conversation_title,
+    presence.installation_id,
+    installation.agent_id,
+    COALESCE(identity.bot_name, presence.bot_name)::text AS bot_name,
+    COALESCE(identity.bot_identity_issue, presence.bot_identity_issue)::text AS bot_identity_issue,
+    presence.last_active_at,
+    presence.mention_count
+FROM dingtalk_group_presence presence
+JOIN channel_installation installation ON installation.id = presence.installation_id
+LEFT JOIN dingtalk_bot_identity identity ON identity.installation_id = presence.installation_id
+WHERE installation.workspace_id = sqlc.arg(workspace_id)
+  AND installation.channel_type = 'dingtalk'
+  AND installation.status = 'active'
+  AND (NOT sqlc.arg(filter_by_agent)::boolean OR installation.agent_id = sqlc.arg(agent_id))
+  AND (NOT sqlc.arg(filter_by_installation)::boolean OR installation.id = sqlc.arg(filter_installation_id))
+  AND (
+      (NOT sqlc.arg(include_inactive)::boolean AND presence.last_active_at >= sqlc.arg(active_since))
+      OR (sqlc.arg(include_inactive)::boolean AND (presence.last_active_at < sqlc.arg(active_since) OR presence.last_active_at IS NULL))
+  )
+ORDER BY presence.last_active_at DESC NULLS LAST, presence.conversation_title ASC,
+         presence.conversation_id ASC, installation.installed_at ASC, installation.id ASC
+LIMIT NULLIF(sqlc.arg(page_limit)::integer, 0)
+OFFSET sqlc.arg(page_offset)::integer;
+
+-- name: CountInactiveDingTalkGroupPresencesByWorkspace :many
+SELECT presence.installation_id, installation.agent_id, count(*)::bigint AS group_count
+FROM dingtalk_group_presence presence
+JOIN channel_installation installation ON installation.id = presence.installation_id
+WHERE installation.workspace_id = sqlc.arg(workspace_id)
+  AND installation.channel_type = 'dingtalk'
+  AND installation.status = 'active'
+  AND (presence.last_active_at < sqlc.arg(active_since) OR presence.last_active_at IS NULL)
+  AND (NOT sqlc.arg(filter_by_agent)::boolean OR installation.agent_id = sqlc.arg(agent_id))
+GROUP BY presence.installation_id, installation.agent_id;
+
+-- name: ListDingTalkBotIdentitiesByWorkspace :many
+-- Identity is installation-owned, so forgetting or collapsing groups cannot
+-- change the connection label.
+SELECT
+    installation.id AS installation_id,
+    installation.agent_id,
+    identity.bot_name,
+    identity.bot_identity_issue
+FROM channel_installation installation
+JOIN dingtalk_bot_identity identity ON identity.installation_id = installation.id
+WHERE installation.workspace_id = sqlc.arg(workspace_id)
+  AND installation.channel_type = 'dingtalk'
+  AND installation.status = 'active'
+  AND (NOT sqlc.arg(filter_by_agent)::boolean OR installation.agent_id = sqlc.arg(agent_id));
+
+-- name: ForgetDingTalkGroupPresence :one
+DELETE FROM dingtalk_group_presence presence
+USING channel_installation installation
+WHERE presence.installation_id = installation.id
+  AND presence.workspace_id = sqlc.arg(workspace_id)
+  AND presence.installation_id = sqlc.arg(installation_id)
+  AND presence.conversation_id = sqlc.arg(conversation_id)
+  AND installation.workspace_id = sqlc.arg(workspace_id)
+  AND installation.channel_type = 'dingtalk'
+RETURNING presence.installation_id;
+
 -- name: DeleteDingTalkInstallationForReplacement :one
 -- Retires an installation when the same agent is connected with a DIFFERENT
 -- AppKey. A senderStaffId is scoped to one DingTalk organization, so none of the
@@ -57,6 +239,14 @@ WITH retired AS (
       AND ci.agent_id = sqlc.arg(agent_id)
       AND ci.channel_type = 'dingtalk'
     RETURNING ci.id
+),
+cleared_group_presence AS (
+    DELETE FROM dingtalk_group_presence
+    WHERE installation_id IN (SELECT id FROM retired)
+),
+cleared_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity
+    WHERE installation_id IN (SELECT id FROM retired)
 ),
 cleared_group_routes AS (
     DELETE FROM dingtalk_group_route

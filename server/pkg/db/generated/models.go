@@ -546,6 +546,29 @@ type DaemonToken struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type DingtalkBotIdentity struct {
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	InstallationID   pgtype.UUID        `json:"installation_id"`
+	BotName          string             `json:"bot_name"`
+	BotIdentityIssue string             `json:"bot_identity_issue"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type DingtalkGroupPresence struct {
+	WorkspaceID       pgtype.UUID        `json:"workspace_id"`
+	InstallationID    pgtype.UUID        `json:"installation_id"`
+	ConversationID    string             `json:"conversation_id"`
+	ConversationTitle string             `json:"conversation_title"`
+	BotName           string             `json:"bot_name"`
+	BotIdentityIssue  string             `json:"bot_identity_issue"`
+	FirstSeenAt       pgtype.Timestamptz `json:"first_seen_at"`
+	LastActiveAt      pgtype.Timestamptz `json:"last_active_at"`
+	MentionCount      int64              `json:"mention_count"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
 type DingtalkGroupRoute struct {
 	ID                pgtype.UUID        `json:"id"`
 	WorkspaceID       pgtype.UUID        `json:"workspace_id"`

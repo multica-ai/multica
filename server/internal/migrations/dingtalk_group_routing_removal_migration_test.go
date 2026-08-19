@@ -44,8 +44,12 @@ func TestDingTalkGroupRoutingRemovalMigrations(t *testing.T) {
 	if _, err := conn.Exec(ctx, `
 		CREATE TABLE channel_installation (
 			id UUID PRIMARY KEY,
+			workspace_id UUID NOT NULL,
 			channel_type TEXT NOT NULL,
-			agent_id UUID NOT NULL
+			agent_id UUID NOT NULL,
+			config JSONB NOT NULL DEFAULT '{}'::jsonb,
+			status TEXT NOT NULL DEFAULT 'active',
+			installed_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
 		CREATE TABLE chat_session (
 			id UUID PRIMARY KEY,
@@ -77,6 +81,7 @@ func TestDingTalkGroupRoutingRemovalMigrations(t *testing.T) {
 	}
 
 	const (
+		workspaceID  = "d3480000-0000-4000-8000-000000000000"
 		defaultAgent = "d3480000-0000-4000-8000-000000000001"
 		otherAgent   = "d3480000-0000-4000-8000-000000000002"
 		dingtalkInst = "d3480000-0000-4000-8000-000000000003"
@@ -87,10 +92,10 @@ func TestDingTalkGroupRoutingRemovalMigrations(t *testing.T) {
 		otherChannel = "d3480000-0000-4000-8000-000000000008"
 	)
 	if _, err := conn.Exec(ctx, `
-		INSERT INTO channel_installation (id, channel_type, agent_id) VALUES
-			($1, 'dingtalk', $3),
-			($2, 'slack', $3)
-	`, dingtalkInst, slackInst, defaultAgent); err != nil {
+		INSERT INTO channel_installation (id, workspace_id, channel_type, agent_id, config) VALUES
+			($1, $4, 'dingtalk', $3, '{"group_bot_names":{"stale-group":"Migration Bot"}}'),
+			($2, $4, 'slack', $3, '{}')
+	`, dingtalkInst, slackInst, defaultAgent, workspaceID); err != nil {
 		t.Fatalf("seed installations: %v", err)
 	}
 	if _, err := conn.Exec(ctx, `
@@ -101,6 +106,15 @@ func TestDingTalkGroupRoutingRemovalMigrations(t *testing.T) {
 			($6, $4)
 	`, defaultGroup, defaultAgent, staleGroup, otherAgent, staleP2P, otherChannel); err != nil {
 		t.Fatalf("seed chat sessions: %v", err)
+	}
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO dingtalk_group_route (
+			workspace_id, installation_id, conversation_id, conversation_title, agent_id, discovered_at
+		) VALUES
+			($1, $2, 'default-group', 'Default group', $3, '2026-01-01T00:00:00Z'),
+			($1, $2, 'stale-group', 'Stale group', $4, '2026-02-01T00:00:00Z')
+	`, workspaceID, dingtalkInst, defaultAgent, otherAgent); err != nil {
+		t.Fatalf("seed legacy routes: %v", err)
 	}
 	if _, err := conn.Exec(ctx, `
 		INSERT INTO channel_chat_session_binding (
@@ -142,18 +156,145 @@ func TestDingTalkGroupRoutingRemovalMigrations(t *testing.T) {
 		t.Fatalf("stale group state remains: binding=%t card=%t", staleBindingExists, staleCardExists)
 	}
 
-	var tableExists bool
-	if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, dingtalkRoutingRemovalTestSchema+".dingtalk_group_route").Scan(&tableExists); err != nil {
+	for _, name := range []string{
+		"383_create_dingtalk_group_presence.up.sql",
+		"384_create_dingtalk_group_presence_identity_index.up.sql",
+		"385_create_dingtalk_group_presence_activity_index.up.sql",
+		"386_backfill_dingtalk_group_presence.up.sql",
+		"387_create_dingtalk_bot_identity.up.sql",
+		"388_create_dingtalk_bot_identity_installation_index.up.sql",
+		"389_backfill_dingtalk_bot_identity.up.sql",
+	} {
+		applyMigrationFile(t, ctx, conn.Conn(), name)
+	}
+	var routeTableExists, presenceTableExists bool
+	if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, dingtalkRoutingRemovalTestSchema+".dingtalk_group_route").Scan(&routeTableExists); err != nil {
 		t.Fatalf("inspect retained route table: %v", err)
 	}
-	if !tableExists {
+	if !routeTableExists {
 		t.Fatal("legacy route table was removed during the compatibility window")
 	}
+	if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, dingtalkRoutingRemovalTestSchema+".dingtalk_group_presence").Scan(&presenceTableExists); err != nil {
+		t.Fatalf("inspect presence table: %v", err)
+	}
+	if !presenceTableExists {
+		t.Fatal("dingtalk_group_presence was not created")
+	}
+	var identityTableExists bool
+	if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, dingtalkRoutingRemovalTestSchema+".dingtalk_bot_identity").Scan(&identityTableExists); err != nil {
+		t.Fatalf("inspect Bot identity table: %v", err)
+	}
+	if !identityTableExists {
+		t.Fatal("dingtalk_bot_identity was not created")
+	}
+	assertMigrationRowCount(t, ctx, conn, "dingtalk_group_presence", 2)
+	assertMigrationRowCount(t, ctx, conn, "dingtalk_bot_identity", 1)
+	var title string
+	var lastActiveAt *string
+	var mentionCount int64
+	if err := conn.QueryRow(ctx, `
+		SELECT conversation_title, last_active_at::text, mention_count
+		FROM dingtalk_group_presence
+		WHERE installation_id = $1 AND conversation_id = 'stale-group'
+	`, dingtalkInst).Scan(&title, &lastActiveAt, &mentionCount); err != nil {
+		t.Fatalf("inspect backfilled presence: %v", err)
+	}
+	if title != "Stale group" || lastActiveAt != nil || mentionCount != 0 {
+		t.Fatalf("backfill = title %q, active %v, mentions %d", title, lastActiveAt, mentionCount)
+	}
+	var botName string
+	if err := conn.QueryRow(ctx, `
+		SELECT bot_name FROM dingtalk_bot_identity WHERE installation_id = $1
+	`, dingtalkInst).Scan(&botName); err != nil {
+		t.Fatalf("inspect backfilled Bot identity: %v", err)
+	}
+	if botName != "Migration Bot" {
+		t.Fatalf("backfilled Bot name = %q, want Migration Bot", botName)
+	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "382_remove_dingtalk_group_routing_bindings.down.sql")
+	// An older process keeps writing the route table after the backfill. The
+	// compatibility trigger must mirror discoveries without interpreting an
+	// admin route revision as message activity.
+	if _, err := conn.Exec(ctx, `
+		INSERT INTO dingtalk_group_route (
+			workspace_id, installation_id, conversation_id, conversation_title, agent_id
+		) VALUES ($1, $2, 'mixed-rollout', 'Mixed rollout', $3)
+	`, workspaceID, dingtalkInst, defaultAgent); err != nil {
+		t.Fatalf("simulate old-process discovery: %v", err)
+	}
+	if err := conn.QueryRow(ctx, `
+		SELECT last_active_at IS NOT NULL, mention_count
+		FROM dingtalk_group_presence
+		WHERE installation_id = $1 AND conversation_id = 'mixed-rollout'
+	`, dingtalkInst).Scan(&presenceTableExists, &mentionCount); err != nil {
+		t.Fatalf("inspect mirrored discovery: %v", err)
+	}
+	if !presenceTableExists || mentionCount != 1 {
+		t.Fatalf("mirrored discovery activity = %t/%d, want true/1", presenceTableExists, mentionCount)
+	}
+	if _, err := conn.Exec(ctx, `
+		UPDATE dingtalk_group_route
+		SET agent_id = $2, revision = revision + 1
+		WHERE installation_id = $1 AND conversation_id = 'mixed-rollout'
+	`, dingtalkInst, otherAgent); err != nil {
+		t.Fatalf("simulate legacy route reassignment: %v", err)
+	}
+	if err := conn.QueryRow(ctx, `
+		SELECT mention_count FROM dingtalk_group_presence
+		WHERE installation_id = $1 AND conversation_id = 'mixed-rollout'
+	`, dingtalkInst).Scan(&mentionCount); err != nil {
+		t.Fatalf("inspect route-only update: %v", err)
+	}
+	if mentionCount != 1 {
+		t.Fatalf("route reassignment incremented activity to %d", mentionCount)
+	}
+
+	// A process from the previous group-backed draft may still update identity
+	// on a presence row during rollout. The compatibility trigger must preserve
+	// that installation-level update.
+	if _, err := conn.Exec(ctx, `
+		UPDATE dingtalk_group_presence
+		SET bot_name = 'Old Draft Bot'
+		WHERE installation_id = $1 AND conversation_id = 'mixed-rollout'
+	`, dingtalkInst); err != nil {
+		t.Fatalf("simulate old-draft identity update: %v", err)
+	}
+	if err := conn.QueryRow(ctx, `
+		SELECT bot_name FROM dingtalk_bot_identity WHERE installation_id = $1
+	`, dingtalkInst).Scan(&botName); err != nil {
+		t.Fatalf("inspect mirrored Bot identity: %v", err)
+	}
+	if botName != "Old Draft Bot" {
+		t.Fatalf("mirrored Bot name = %q, want Old Draft Bot", botName)
+	}
+
+	for _, name := range []string{
+		"389_backfill_dingtalk_bot_identity.down.sql",
+		"388_create_dingtalk_bot_identity_installation_index.down.sql",
+		"387_create_dingtalk_bot_identity.down.sql",
+		"386_backfill_dingtalk_group_presence.down.sql",
+		"385_create_dingtalk_group_presence_activity_index.down.sql",
+		"384_create_dingtalk_group_presence_identity_index.down.sql",
+		"383_create_dingtalk_group_presence.down.sql",
+		"382_remove_dingtalk_group_routing_bindings.down.sql",
+	} {
+		applyMigrationFile(t, ctx, conn.Conn(), name)
+	}
 	assertDingTalkRoutingRemovalIndex(t, ctx, conn, "idx_dingtalk_group_route_installation_conversation", true)
 	assertDingTalkRoutingRemovalIndex(t, ctx, conn, "idx_dingtalk_group_route_workspace", false)
 	assertDingTalkRoutingRemovalIndex(t, ctx, conn, "idx_dingtalk_group_route_id_unique", true)
+	if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, dingtalkRoutingRemovalTestSchema+".dingtalk_group_presence").Scan(&presenceTableExists); err != nil {
+		t.Fatalf("inspect rolled-back presence table: %v", err)
+	}
+	if presenceTableExists {
+		t.Fatal("presence table remains after rollback")
+	}
+	if err := conn.QueryRow(ctx, `SELECT to_regclass($1) IS NOT NULL`, dingtalkRoutingRemovalTestSchema+".dingtalk_bot_identity").Scan(&identityTableExists); err != nil {
+		t.Fatalf("inspect rolled-back Bot identity table: %v", err)
+	}
+	if identityTableExists {
+		t.Fatal("Bot identity table remains after rollback")
+	}
 }
 
 func assertMigrationRowCount(t *testing.T, ctx context.Context, conn *pgxpool.Conn, table string, want int) {

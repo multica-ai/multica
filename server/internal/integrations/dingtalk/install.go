@@ -18,9 +18,9 @@ import (
 )
 
 // This file is the DingTalk install backend. DingTalk uses the
-// bring-your-own-app (BYO) model: the workspace admin creates their own DingTalk
-// Stream-mode robot, and pastes its AppKey (client id) + AppSecret (client
-// secret) into Multica (the paste path lives in byo_install.go). The
+// bring-your-own-app (BYO) model: an agent owner or workspace admin creates a
+// DingTalk Stream-mode robot, then pastes its AppKey (client id) + AppSecret
+// (client secret) into Multica (the paste path lives in byo_install.go). The
 // InstallService owns the at-rest encryption of the AppSecret — so no caller can
 // write a channel_installation with a plaintext secret — plus the shared
 // persistInstall transaction and the list / get / revoke management surface.

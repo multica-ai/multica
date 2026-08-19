@@ -201,8 +201,14 @@ WITH dead AS (
                          AND ci.agent_id = sqlc.arg('agent_id')))
          OR NOT EXISTS (SELECT 1 FROM workspace w WHERE w.id = ci.workspace_id)
          OR NOT EXISTS (SELECT 1 FROM agent a WHERE a.id = ci.agent_id)
-    )
+      )
     RETURNING ci.id
+),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM dead)
 ),
 cleared_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM dead)
@@ -258,6 +264,12 @@ WITH doomed AS (
     WHERE agent_id IN (
         SELECT id FROM agent WHERE runtime_id = sqlc.arg('runtime_id') AND kind = 'system'
     )
+),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM doomed)
 ),
 cleared_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM doomed)

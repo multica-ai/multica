@@ -263,6 +263,18 @@ describe("useRealtimeSync — ws instance change", () => {
     });
   });
 
+  it("ignores removed DingTalk group-route events", () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]?.[0];
+    expect(onAny).toBeDefined();
+
+    onAny!({ type: "dingtalk_group_route:updated", payload: {} } as never);
+
+    expect(invalidateSpy).not.toHaveBeenCalled();
+  });
 });
 
 describe("useRealtimeSync — queued chat promotion", () => {

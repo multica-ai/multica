@@ -221,6 +221,10 @@ export type {
 export type {
   DingTalkInstallation,
   ListDingTalkInstallationsResponse,
+  DingTalkGroupBot,
+  DingTalkGroup,
+  ListDingTalkGroupsResponse,
+  ListDingTalkGroupsParams,
   RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
 } from "./dingtalk";

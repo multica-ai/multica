@@ -192,6 +192,12 @@ WITH
 deleted_sessions AS (
     DELETE FROM chat_session WHERE chat_session.workspace_id = $1
 ),
+deleted_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE workspace_id = $1
+),
+deleted_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE workspace_id = $1
+),
 deleted_channel_installations AS (
     DELETE FROM channel_installation
     WHERE channel_installation.workspace_id = $1

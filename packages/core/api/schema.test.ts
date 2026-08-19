@@ -382,6 +382,19 @@ describe("ApiClient schema fallback", () => {
       expect(res.installations).toHaveLength(1);
       expect(res.configured).toBe(true);
       expect(res.install_supported).toBeUndefined();
+      expect(res.installations[0]?.agent_available).toBeUndefined();
+    });
+
+    it("preserves the orphaned-Agent marker from a new server", async () => {
+      stubFetchJson({
+        installations: [
+          { id: "dt-orphan", status: "active", agent_available: false },
+        ],
+        configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.installations[0]?.agent_available).toBe(false);
     });
 
     it("parses linked DingTalk identities from a new-server row", async () => {
@@ -462,6 +475,144 @@ describe("ApiClient schema fallback", () => {
       });
     });
   });
+
+  describe("listDingTalkGroups", () => {
+    it("preserves bot activity metadata for each group relationship", async () => {
+      stubFetchJson({
+        groups: [
+          {
+            conversation_id: "cid-platform",
+            conversation_title: "Platform",
+            bots: [
+              {
+                installation_id: "inst-1",
+                agent_id: "agent-1",
+                bot_name: "Release Bot",
+                bot_identity_issue: "",
+                last_active_at: "2026-08-19T08:00:00Z",
+                mention_count: 18,
+              },
+            ],
+          },
+        ],
+        group_discovery_supported: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkGroups("ws-1");
+      expect(res.groups[0]?.bots[0]).toMatchObject({
+        last_active_at: "2026-08-19T08:00:00Z",
+        mention_count: 18,
+      });
+    });
+
+    it("uses an agent-scoped endpoint for Agent detail group visibility", async () => {
+      stubFetchJson({ groups: [], group_discovery_supported: true });
+      const client = new ApiClient("https://api.example.test");
+      await client.listAgentDingTalkGroups("agent-1");
+      expect(vi.mocked(fetch)).toHaveBeenCalledWith(
+        "https://api.example.test/api/agents/agent-1/dingtalk/groups",
+        expect.any(Object),
+      );
+    });
+
+    it("requests one inactive installation page and can forget an observation", async () => {
+      stubFetchJson({ groups: [], group_discovery_supported: true });
+      const client = new ApiClient("https://api.example.test");
+      await client.listDingTalkGroups("ws-1", {
+        activity: "inactive",
+        installationId: "inst-1",
+        offset: 20,
+        limit: 10,
+      });
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/dingtalk/groups?activity=inactive&installation_id=inst-1&offset=20&limit=10",
+        expect.any(Object),
+      );
+
+      vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
+      await client.forgetDingTalkGroup("ws-1", "inst-1", "cid/encoded");
+      expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+        "https://api.example.test/api/workspaces/ws-1/dingtalk/installations/inst-1/groups/cid%2Fencoded",
+        expect.objectContaining({ method: "DELETE" }),
+      );
+    });
+
+    it("treats an older backend's missing endpoint as an empty group list", async () => {
+      stubFetchJson({ error: "not found" }, 404);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).resolves.toEqual({
+        groups: [],
+        group_discovery_supported: false,
+      });
+    });
+
+    it("treats an older backend's admin-only group inventory as unsupported for members", async () => {
+      stubFetchJson({ error: "forbidden" }, 403);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).resolves.toEqual({
+        groups: [],
+        group_discovery_supported: false,
+      });
+    });
+
+    it("does not hide a real group-list server failure", async () => {
+      stubFetchJson({ error: "unavailable" }, 503);
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).rejects.toMatchObject({
+        status: 503,
+      });
+    });
+
+    it("falls back to an empty group list when the response is malformed", async () => {
+      stubFetchJson({ groups: "not-an-array" });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listDingTalkGroups("ws-1")).resolves.toEqual({
+        groups: [],
+        group_discovery_supported: false,
+      });
+    });
+
+    it("defaults additive bot identity fields and isolates a malformed bot list", async () => {
+      stubFetchJson({
+        groups: [
+          {
+            conversation_id: "cid-platform",
+            conversation_title: "Platform",
+            bots: [{ installation_id: "inst-1", agent_id: "agent-1" }],
+          },
+          {
+            conversation_id: "cid-old-server",
+            bots: "not-an-array",
+          },
+        ],
+        group_discovery_supported: true,
+        future_field: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkGroups("ws-1");
+      expect(res.group_discovery_supported).toBe(true);
+      expect(res.groups).toEqual([
+        {
+          conversation_id: "cid-platform",
+          conversation_title: "Platform",
+          bots: [
+            {
+              installation_id: "inst-1",
+              agent_id: "agent-1",
+              bot_name: "",
+              bot_identity_issue: "",
+            },
+          ],
+        },
+        {
+          conversation_id: "cid-old-server",
+          conversation_title: "",
+          bots: [],
+        },
+      ]);
+    });
+  });
+
   describe("getConfig", () => {
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({

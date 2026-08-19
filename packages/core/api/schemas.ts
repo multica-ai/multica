@@ -31,6 +31,7 @@ import type {
   CronPreviewResponse,
   DingTalkInstallation,
   ListDingTalkInstallationsResponse,
+  ListDingTalkGroupsResponse,
   RedeemDingTalkBindingTokenResponse,
   WecomInstallation,
   ListWecomInstallationsResponse,
@@ -2554,6 +2555,7 @@ export const DingTalkInstallationSchema = z.object({
   installed_at: z.string().default(""),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  agent_available: z.boolean().optional(),
   bound_dingtalk_user_ids: z.array(z.string()).catch([]).default([]),
 }).loose();
 
@@ -2578,6 +2580,34 @@ export const ListDingTalkInstallationsResponseSchema = z.object({
 export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallationsResponse = {
   installations: [],
   configured: false,
+};
+
+export const DingTalkGroupBotSchema = z.object({
+  installation_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  bot_name: z.string().default(""),
+  bot_identity_issue: z.string().default(""),
+  last_active_at: z.string().optional(),
+  mention_count: z.number().int().nonnegative().optional(),
+}).loose();
+
+export const DingTalkGroupSchema = z.object({
+  conversation_id: z.string(),
+  conversation_title: z.string().default(""),
+  bots: z.array(DingTalkGroupBotSchema).catch([]).default([]),
+}).loose();
+
+export const ListDingTalkGroupsResponseSchema = z.object({
+  groups: z.array(DingTalkGroupSchema).default([]),
+  group_discovery_supported: z.boolean().default(false),
+  inactive_group_counts: z.record(z.string(), z.number().int().nonnegative()).optional(),
+  bot_identities: z.record(z.string(), DingTalkGroupBotSchema).optional(),
+  next_offset: z.number().int().nonnegative().optional(),
+}).loose();
+
+export const EMPTY_LIST_DINGTALK_GROUPS_RESPONSE: ListDingTalkGroupsResponse = {
+  groups: [],
+  group_discovery_supported: false,
 };
 
 export const RedeemDingTalkBindingTokenResponseSchema = z.object({
