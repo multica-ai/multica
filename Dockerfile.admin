@@ -3,11 +3,18 @@ FROM node:22-alpine AS deps
 
 WORKDIR /app
 
-# Copy workspace config and package.json files for the packages apps/admin
-# actually depends on (see apps/admin/package.json) — not the whole workspace.
+# Copy workspace config and package.json for every workspace member, not
+# just the ones apps/admin imports directly: `pnpm install --frozen-lockfile`
+# validates the lockfile against the whole packages/* glob in
+# pnpm-workspace.yaml, and the builder stage below overlays the full
+# packages/ tree — omitting core/views' package.json here left their deps
+# unfetched, so the offline re-link in the builder stage failed. Same full
+# set as Dockerfile.web.
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json .npmrc ./
 COPY apps/admin/package.json apps/admin/
+COPY packages/core/package.json packages/core/
 COPY packages/ui/package.json packages/ui/
+COPY packages/views/package.json packages/views/
 COPY packages/tsconfig/package.json packages/tsconfig/
 COPY packages/eslint-config/package.json packages/eslint-config/
 
