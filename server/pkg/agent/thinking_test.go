@@ -520,14 +520,15 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		// literal gate opens for both.
 		{"hermes", "low", true},
 		{"grok", "", true},
+		{"grok", "none", true},
+		{"grok", "minimal", true},
 		{"grok", "low", true},
 		{"grok", "medium", true},
 		{"grok", "high", true},
 		{"grok", "xhigh", true},
-		{"grok", "none", false},
-		{"grok", "minimal", false},
-		{"grok", "max", false},
-		{"grok", "bogus", false},
+		{"grok", "future-level", true}, // exact support is checked against the daemon catalog
+		{"grok", ".hidden", false},
+		{"grok", "bad value", false},
 	}
 	for _, tc := range tests {
 		if got := IsKnownThinkingValue(tc.provider, tc.value); got != tc.want {
