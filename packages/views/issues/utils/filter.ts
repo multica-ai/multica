@@ -81,6 +81,10 @@ export function issueMatchesPropertyFilters(
     }
     if (typeof value === "string") {
       if (!selected.includes(value)) return false;
+    } else if (typeof value === "number") {
+      // Compare numerically so "3.50" and 3.5 agree with the server's jsonb
+      // number containment; NO_PROPERTY_VALUE never matches a set value.
+      if (!selected.some((id) => id !== NO_PROPERTY_VALUE && Number(id) === value)) return false;
     } else if (Array.isArray(value)) {
       if (!value.some((id) => selected.includes(id))) return false;
     } else if (typeof value === "boolean") {
