@@ -41,4 +41,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "410204ad"
   - name: ghcr.io/g2crowd/agentfarm-admin-prod
-    newTag: "df903110"
+    newTag: "410204ad"
