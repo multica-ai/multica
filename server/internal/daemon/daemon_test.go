@@ -727,6 +727,77 @@ func TestProviderNeedsInlineSystemPrompt(t *testing.T) {
 	}
 }
 
+// providerSupportsInlineSystemPrompt decides whether an in_place task can keep
+// the runtime brief out of the user's repository. Getting it wrong in the
+// permissive direction is the dangerous one: the daemon would skip writing
+// AGENTS.md / CLAUDE.md and hand the brief to a backend that drops the field,
+// leaving the agent with no identity, no CLI usage and no workflow at all.
+func TestProviderSupportsInlineSystemPrompt(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		provider string
+		want     bool
+	}{
+		// Backends that forward SystemPrompt into the turn.
+		{"grok", true},
+		{"kimi", true},
+		{"kiro", true},
+		{"openclaw", true},
+		{"qoder", true},
+		{"qoderclicn", true},
+		{"qwenpaw", true},
+		{"traecli", true},
+		{"codebuddy", true},
+		// Backends that documentedly drop it — these must keep getting the
+		// brief as a file, pollution or not, because inline delivery would
+		// silently deliver nothing.
+		{"claude", false},
+		{"pi", false},
+		{"opencode", false},
+		{"deveco", false},
+		{"hermes", false},
+		{"codex", false},
+		{"copilot", false},
+		{"cursor", false},
+		{"antigravity", false},
+		{"dsh", false},
+		{"reasonix", false},
+		{"qwen", false},
+		// Built-in runtime identities inherit from their protocol family;
+		// omp is a pi fork, and pi drops the field.
+		{"omp", false},
+		// Unknown providers must never be assumed capable.
+		{"", false},
+		{"not-a-runtime", false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.provider, func(t *testing.T) {
+			t.Parallel()
+			if got := providerSupportsInlineSystemPrompt(tc.provider); got != tc.want {
+				t.Fatalf("providerSupportsInlineSystemPrompt(%q) = %v, want %v", tc.provider, got, tc.want)
+			}
+		})
+	}
+}
+
+// Every provider that NEEDS inline delivery must also be able to receive it.
+// The two lists are maintained separately, and a "needs" entry missing from
+// "supports" would mean a runtime whose brief goes nowhere in any mode.
+func TestProvidersNeedingInlineAlsoSupportIt(t *testing.T) {
+	t.Parallel()
+
+	for _, provider := range []string{"openclaw", "kimi", "traecli", "qwenpaw"} {
+		if !providerNeedsInlineSystemPrompt(provider) {
+			t.Fatalf("test list is stale: %q no longer needs inline delivery", provider)
+		}
+		if !providerSupportsInlineSystemPrompt(provider) {
+			t.Errorf("%q needs the brief inline but is not listed as supporting it", provider)
+		}
+	}
+}
+
 // TestComposeOpenclawIncludeRoots — the Elon must-fix regression: the
 // daemon must grant OpenClaw permission to follow the wrapper's $include
 // link from envRoot into the user's active config dir, while preserving

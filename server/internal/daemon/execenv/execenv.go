@@ -245,6 +245,13 @@ type Environment struct {
 	// scratch that the GC should reclaim on the normal schedule, and the
 	// sidecar rollback that protects a user's directory is unnecessary.
 	LocalDirectory bool
+	// SidecarPaths lists the shallowest paths Prepare created inside WorkDir,
+	// set only for the in_place local_directory flow. The daemon feeds them to
+	// ExcludeSidecarsFromGit so the runtime's own files stay out of the user's
+	// `git status` — and therefore out of any `git add -A` the agent runs —
+	// for the length of the task. Empty everywhere else: a cloud workdir is
+	// daemon scratch, and worktree mode deletes the worktree instead.
+	SidecarPaths []string
 	// MulticaConfigRoot is the private per-task config directory exported to
 	// child CLI invocations. It prevents implicit discovery of the daemon
 	// owner's ~/.multica profile without changing the provider-facing HOME.
@@ -464,8 +471,35 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}()
 	}
 
+	// In place the workdir is the user's own repository, so "this path does
+	// not exist" is not enough to prove it is ours to write: git may still
+	// track it from a run that committed a sidecar before cleanup deleted it
+	// (GitHub #7114). Load those paths first so writeContextFiles treats them
+	// as the user's — skills route around them, Multica-only markers degrade
+	// to absent — rather than modifying a tracked file no ignore rule can hide.
+	if params.LocalWorkDir != "" {
+		reserved, trackedErr := GitTrackedFilesUnder(workDir, SidecarScanRoots(workDir, params.Provider))
+		if trackedErr != nil {
+			// Fail closed. An empty result is indistinguishable from "this
+			// repository is clean", and assuming clean is what re-arms the
+			// injection loop on a repository that already carries committed
+			// sidecars.
+			return nil, fmt.Errorf("execenv: %w", trackedErr)
+		}
+		manifest.reserved = reserved
+	}
+
 	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
+	}
+
+	// In place only: hand the caller the set of paths we just created inside
+	// the user's repository so it can keep them out of the agent's git view
+	// for the duration of the run. Derived from the manifest rather than from
+	// a hardcoded list of sidecar names, so it stays exact as runtimes are
+	// added and can never name a path we did not create.
+	if params.LocalWorkDir != "" {
+		env.SidecarPaths = manifest.excludablePaths()
 	}
 
 	// Persist managed-env provenance for non-local issue envs at Prepare time

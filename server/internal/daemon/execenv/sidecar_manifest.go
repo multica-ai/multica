@@ -7,6 +7,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // sidecarManifestFile is the on-disk JSON Prepare writes into envRoot to
@@ -66,6 +67,44 @@ var errPathPreExists = errors.New("execenv: refuse to overwrite pre-existing pat
 type sidecarManifest struct {
 	Files []string `json:"files,omitempty"`
 	Dirs  []string `json:"dirs,omitempty"`
+
+	// reserved holds absolute paths that must be treated as though they
+	// already exist even when os.Lstat says otherwise: files git still tracks
+	// but the working tree no longer has. Not serialised — it is an input to
+	// this Prepare, not a record of what it wrote.
+	//
+	// A repository already polluted by GitHub #7114 is usually in exactly this
+	// state: sidecars were committed by an earlier run, then removed by its
+	// cleanup, so the paths are absent from disk but live in the index.
+	// Writing them again produces a modification to a TRACKED file, which no
+	// ignore rule can hide and the agent's next `git add -A` stages — the
+	// reported loop, reproducing on the repositories that already suffered it.
+	reserved map[string]struct{}
+}
+
+// isReserved reports whether path is one git still tracks, or a directory
+// holding one. Callers treat a reserved path exactly like a pre-existing one.
+//
+// The comparison runs in canonical path space. The reserved set is built from
+// git's output, which is always resolved, while the paths Prepare writes carry
+// whatever spelling the local_directory resource used — a symlinked resource
+// makes those two differ for every entry, and comparing them raw matched
+// nothing at all.
+func (m *sidecarManifest) isReserved(path string) bool {
+	if m == nil || len(m.reserved) == 0 {
+		return false
+	}
+	canonical := canonicalPath(path)
+	if _, ok := m.reserved[canonical]; ok {
+		return true
+	}
+	prefix := canonical + string(filepath.Separator)
+	for tracked := range m.reserved {
+		if strings.HasPrefix(tracked, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 // recordMkdirAll behaves like os.MkdirAll(path, perm) but additionally
@@ -138,6 +177,11 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 	if m == nil {
 		return os.WriteFile(path, data, perm)
 	}
+	if m.isReserved(path) {
+		// Absent from disk but still in git's index. Writing here would
+		// modify a tracked file, which no excludes file can hide.
+		return fmt.Errorf("%w: %s (tracked by git)", errPathPreExists, path)
+	}
 	_, statErr := os.Lstat(path)
 	if statErr == nil {
 		// Any existing entry — regular file, symlink, directory —
@@ -173,11 +217,17 @@ func recordWriteFile(path string, data []byte, perm os.FileMode, m *sidecarManif
 // collisions on the same slug indicates an upstream bug, not a
 // realistic state. Returning an error in that case forces the caller
 // to surface the problem instead of looping forever.
-func allocateCollisionFreeSkillDir(skillsParent, baseSlug string) (slug, dir string, err error) {
+func allocateCollisionFreeSkillDir(skillsParent, baseSlug string, m *sidecarManifest) (slug, dir string, err error) {
 	const maxAttempts = 64
 	for i := 0; i < maxAttempts; i++ {
 		candidate := skillSlugCandidate(baseSlug, i)
 		path := filepath.Join(skillsParent, candidate)
+		// A directory git still tracks is the user's, even when the working
+		// tree no longer has it — take the next candidate name so the skill
+		// still gets written somewhere the agent can find it.
+		if m.isReserved(path) {
+			continue
+		}
 		if _, statErr := os.Lstat(path); statErr != nil {
 			if errors.Is(statErr, fs.ErrNotExist) {
 				return candidate, path, nil

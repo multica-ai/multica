@@ -179,13 +179,44 @@ func formatProjectResource(r ProjectResourceForEnv) string {
 // For Grok:        writes {workDir}/AGENTS.md  (Grok Build CLI reads AGENTS.md natively from the workdir)
 // For Qwen:        writes {workDir}/QWEN.md (Qwen Code's native context file; it also reads AGENTS.md, but QWEN.md avoids cross-runtime ambiguity)
 func InjectRuntimeConfig(workDir, provider string, ctx TaskContextForEnv) (string, error) {
-	content := buildMetaSkillContent(provider, ctx)
+	content, _, err := InjectRuntimeConfigCreated(workDir, provider, ctx)
+	return content, err
+}
+
+// InjectRuntimeConfigCreated is InjectRuntimeConfig plus whether the config
+// file had to be created because it did not already exist.
+//
+// The in_place local_directory flow needs that distinction. A config file we
+// created is wholly Multica's and is an untracked new file in the user's
+// repository, so it can — and must — be kept out of the agent's git view for
+// the run. A config file that pre-existed is the user's own, usually tracked,
+// and no ignore rule applies to it; only the marker block inside it is ours,
+// and CleanupRuntimeConfig is what reverses that.
+func InjectRuntimeConfigCreated(workDir, provider string, ctx TaskContextForEnv) (content string, created bool, err error) {
+	content = buildMetaSkillContent(provider, ctx)
 	path := runtimeConfigPath(workDir, provider)
 	if path == "" {
 		// Unknown provider — skip config injection, prompt-only mode.
-		return content, nil
+		return content, false, nil
 	}
-	return content, writeRuntimeConfigFile(path, content)
+	_, statErr := os.Lstat(path)
+	created = errors.Is(statErr, fs.ErrNotExist)
+	return content, created, writeRuntimeConfigFile(path, content)
+}
+
+// BuildRuntimeBrief returns the runtime brief for a provider WITHOUT writing
+// it anywhere. Used by the in_place local_directory flow for runtimes that can
+// receive the brief inline in the turn, where writing it to disk would mean
+// appending a Multica-managed block to a file the user's project versions as
+// its own instructions (GitHub #7114).
+func BuildRuntimeBrief(provider string, ctx TaskContextForEnv) string {
+	return buildMetaSkillContent(provider, ctx)
+}
+
+// RuntimeConfigPath exposes the config file a provider's brief would be
+// written to, or "" when the provider has no file-based target.
+func RuntimeConfigPath(workDir, provider string) string {
+	return runtimeConfigPath(workDir, provider)
 }
 
 // runtimeConfigPath returns the absolute path to the runtime config file that
