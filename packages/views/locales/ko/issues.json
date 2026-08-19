@@ -9,6 +9,7 @@
   "task_center": {
     "navigation_label": "태스크 섹션",
     "tasks": "태스크",
+    "projects": "프로젝트",
     "mine": "내 태스크",
     "activity": "활동",
     "automations": "자동화",

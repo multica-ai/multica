@@ -18,24 +18,19 @@ describe('Tag Workspace Shell navigation model', () => {
       expect.objectContaining({ key: 'runtimes', path: 'runtimes' }),
       expect.objectContaining({ key: 'settings', path: 'settings' }),
     ]);
-    expect(items.map((item) => item.key)).not.toEqual(
-      expect.arrayContaining([
-        'files',
-        'inbox',
-        'my-tasks',
-        'skills',
-        'squads',
-        'autopilots',
-        'analytics',
-      ])
-    );
-    expect(items).toContainEqual(
-      expect.objectContaining({
-        key: 'files',
-        path: null,
-        status: 'migrating',
-      })
-    );
+    const itemKeys = items.map((item) => item.key);
+    for (const mergedOrRemoved of [
+      'files',
+      'inbox',
+      'my-tasks',
+      'projects',
+      'skills',
+      'squads',
+      'autopilots',
+      'analytics',
+    ]) {
+      expect(itemKeys).not.toContain(mergedOrRemoved);
+    }
     expect(items.filter((item) => item.status === 'migrating')).not.toHaveLength(
       0
     );
@@ -65,7 +60,13 @@ describe('Tag Workspace Shell navigation model', () => {
     ).toBe('/studio-b/issues');
     expect(
       workspaceSwitchDestination('studio-b', '/studio-a/projects')
-    ).toBe('/studio-b/chat');
+    ).toBe('/studio-b/projects');
+    expect(
+      workspaceSwitchDestination(
+        'studio-b',
+        '/studio-a/projects/project-1'
+      )
+    ).toBe('/studio-b/projects');
     expect(
       workspaceSwitchDestination('studio-b', '/studio-a/agents/agent-1')
     ).toBe('/studio-b/agents');

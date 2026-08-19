@@ -9,6 +9,7 @@
   "task_center": {
     "navigation_label": "任务分区",
     "tasks": "任务",
+    "projects": "项目",
     "mine": "我的任务",
     "activity": "动态",
     "automations": "自动化",

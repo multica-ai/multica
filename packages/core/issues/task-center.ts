@@ -7,6 +7,7 @@
  */
 export const TASK_CENTER_TABS = [
   "tasks",
+  "projects",
   "mine",
   "activity",
   "automations",

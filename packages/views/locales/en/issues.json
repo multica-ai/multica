@@ -9,6 +9,7 @@
   "task_center": {
     "navigation_label": "Tasks sections",
     "tasks": "Tasks",
+    "projects": "Projects",
     "mine": "My Tasks",
     "activity": "Activity",
     "automations": "Automations",

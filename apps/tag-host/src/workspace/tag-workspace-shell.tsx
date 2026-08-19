@@ -15,7 +15,6 @@ import {
   Bell,
   Bot,
   FileText,
-  FolderKanban,
   Gauge,
   MessageCircle,
   Search,
@@ -58,7 +57,6 @@ import {
 const NAV_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   chat: MessageCircle,
   tasks: FileText,
-  projects: FolderKanban,
   agents: Bot,
   runtimes: Gauge,
   members: Users,
@@ -224,7 +222,10 @@ function TagWorkspaceSidebar() {
                     ? `/${encodeURIComponent(workspace?.slug ?? '')}/${item.path}`
                     : null;
                   const active = href
-                    ? pathname === href || pathname.startsWith(`${href}/`)
+                    ? pathname === href ||
+                      pathname.startsWith(`${href}/`) ||
+                      (item.key === 'tasks' &&
+                        pathname.split('/').filter(Boolean)[1] === 'projects')
                     : false;
 
                   return (

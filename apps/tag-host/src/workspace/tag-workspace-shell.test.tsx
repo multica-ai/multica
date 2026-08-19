@@ -90,14 +90,17 @@ vi.mock('@multica/ui/components/ui/sidebar', () => ({
   SidebarMenuButton: ({
     children,
     render,
+    isActive,
     ...props
   }: {
     children: React.ReactNode;
     render?: React.ReactElement;
+    isActive?: boolean;
   } & React.ComponentProps<'button'>) =>
     render ? (
       <a
         href={(render.props as { href: string }).href}
+        data-active={isActive ? 'true' : undefined}
         className={props.className}
         onClick={(event) => {
           event.preventDefault();
@@ -152,12 +155,22 @@ describe('TagWorkspaceShell', () => {
     expect(screen.getByRole('link', { name: 'Tasks' }).getAttribute('href')).toBe('/studio-a/issues');
     expect(screen.getByRole('link', { name: 'Agents' }).getAttribute('href')).toBe('/studio-a/agents');
     expect(screen.getByRole('link', { name: 'Runtimes' }).getAttribute('href')).toBe('/studio-a/runtimes');
-    expect(screen.getByText('Projects').closest('button')?.disabled).toBe(true);
+    expect(screen.queryByText('Projects')).toBeNull();
     for (const removed of ['Inbox', 'My Tasks', 'Skills', 'Squads', 'Autopilots', 'Analytics']) {
       expect(screen.queryByText(removed)).toBeNull();
     }
     expect(screen.getAllByText('Migrating').length).toBeGreaterThan(0);
     expect(screen.getByText('Chat content')).toBeTruthy();
+  });
+
+  it('keeps Tasks selected while a nested Project is open', () => {
+    state.pathname = '/studio-a/projects/project-1';
+
+    render(<TagWorkspaceShell><div>Project detail</div></TagWorkspaceShell>);
+
+    expect(screen.getByRole('link', { name: 'Tasks' }).dataset.active).toBe(
+      'true'
+    );
   });
 
   it('offers the VIBES return and mobile navigation as 44px controls', () => {

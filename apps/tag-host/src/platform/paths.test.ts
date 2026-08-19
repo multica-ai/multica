@@ -29,6 +29,28 @@ describe('TanStack Tag Host path adapter', () => {
     expect(location.searchParams.get('panel')).toBe('activity');
   });
 
+  it('mounts canonical Project links beneath Tasks and restores them after refresh', () => {
+    expect(toTagHostPath('/design-lab/projects')).toBe(
+      '/tag/design-lab/issues?tab=projects'
+    );
+    expect(
+      toTagHostPath('/design-lab/projects/project%201?view=table#tasks')
+    ).toBe('/tag/design-lab/issues/projects/project%201?view=table#tasks');
+
+    const list = fromTagHostLocation(
+      '/tag/design-lab/issues',
+      '?tab=projects'
+    );
+    expect(list.pathname).toBe('/design-lab/projects');
+    expect(list.searchParams.get('tab')).toBe('projects');
+
+    const detail = fromTagHostLocation(
+      '/tag/design-lab/issues/projects/project-1',
+      ''
+    );
+    expect(detail.pathname).toBe('/design-lab/projects/project-1');
+  });
+
   it('builds share links and explicit same-origin API and WebSocket bases', () => {
     expect(
       toTagShareUrl(
@@ -36,6 +58,9 @@ describe('TanStack Tag Host path adapter', () => {
         '/design-lab/chat?session=session-1'
       )
     ).toBe('http://localhost:3000/tag/design-lab/chat?session=session-1');
+    expect(
+      toTagShareUrl('http://localhost:3000', '/design-lab/projects/project-1')
+    ).toBe('http://localhost:3000/tag/design-lab/issues/projects/project-1');
 
     expect(resolveTagRuntimeUrls('https://vibes.test')).toEqual({
       apiBaseUrl: '/api/tag',

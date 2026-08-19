@@ -24,7 +24,6 @@ export const TAG_WORKSPACE_SECTIONS: readonly TagWorkspaceSection[] = [
     label: 'Workspace',
     items: [
       { key: 'tasks', label: 'Tasks', path: 'issues', status: 'available' },
-      { key: 'projects', label: 'Projects', path: null, status: 'migrating' },
       { key: 'agents', label: 'Agents', path: 'agents', status: 'available' },
       {
         key: 'runtimes',
@@ -70,6 +69,9 @@ export function workspaceSwitchDestination(
   }
   if (modulePath === 'issues') {
     return `/${encodeURIComponent(targetSlug)}/issues`;
+  }
+  if (modulePath === 'projects') {
+    return `/${encodeURIComponent(targetSlug)}/projects`;
   }
   if (modulePath === 'agents') {
     return `/${encodeURIComponent(targetSlug)}/agents`;

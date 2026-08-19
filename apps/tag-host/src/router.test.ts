@@ -12,6 +12,7 @@ describe('Tag Host workspace routes', () => {
       expect.arrayContaining([
         '/$workspaceSlug/issues',
         '/$workspaceSlug/issues/$issueId',
+        '/$workspaceSlug/issues/projects/$projectId',
         '/$workspaceSlug/issues/automations/$autopilotId',
         '/$workspaceSlug/agents',
         '/$workspaceSlug/agents/$agentId',

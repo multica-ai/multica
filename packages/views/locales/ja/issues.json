@@ -9,6 +9,7 @@
   "task_center": {
     "navigation_label": "タスクのセクション",
     "tasks": "タスク",
+    "projects": "プロジェクト",
     "mine": "マイタスク",
     "activity": "アクティビティ",
     "automations": "自動化",
