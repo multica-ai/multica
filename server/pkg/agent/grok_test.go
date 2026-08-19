@@ -77,7 +77,7 @@ while IFS= read -r line; do
         printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"authenticate must complete first"}}\n' "$id"
         exit 0
       fi
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_new","models":{"availableModels":[{"modelId":"grok-4.5","name":"Grok 4.5","description":""},{"modelId":"grok-composer-2.5-fast","name":"Grok Composer 2.5 Fast","description":""}],"currentModelId":"grok-4.5"}}}\n' "$id"
+		printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_new","models":{"availableModels":[{"modelId":"grok-4.6","name":"Grok 4.6","_meta":{"supportsReasoningEffort":true,"reasoningEfforts":[{"id":"xhigh","value":"xhigh","label":"Extra High Effort","description":"Most deliberate","default":false},{"id":"high","value":"high","label":"High Effort","description":"Balanced","default":true},{"id":"medium","value":"medium","label":"Medium Effort","default":false},{"id":"low","value":"low","label":"Low Effort","default":false}]}},{"modelId":"grok-4.5","name":"Grok 4.5","_meta":{"supportsReasoningEffort":true,"reasoningEfforts":[{"id":"high","value":"high","label":"High Effort","default":true},{"id":"medium","value":"medium","label":"Medium Effort","default":false},{"id":"low","value":"low","label":"Low Effort","default":false}]}},{"modelId":"grok-composer-2.5-fast","name":"Grok Composer 2.5 Fast"}],"currentModelId":"grok-4.6"}}}\n' "$id"
       ;;
     *'"method":"session/load"'*)
       if [ -z "$authenticated" ]; then
@@ -750,11 +750,29 @@ func TestDiscoverGrokModelsWaitsForAdvertisedAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("discover grok models: %v", err)
 	}
-	if len(catalog.Models) != 2 || catalog.Models[0].ID != "grok-4.5" {
+	if len(catalog.Models) != 3 || catalog.Models[0].ID != "grok-4.6" {
 		t.Fatalf("unexpected models: %+v", catalog.Models)
 	}
 	if catalog.Fallback {
 		t.Error("a successful ACP discovery must not be marked Fallback")
+	}
+	byID := make(map[string]Model, len(catalog.Models))
+	for _, model := range catalog.Models {
+		byID[model.ID] = model
+	}
+	grok46 := byID["grok-4.6"].Thinking
+	if grok46 == nil || grok46.DefaultLevel != "high" ||
+		strings.Join(thinkingLevelValues(grok46), ",") != "xhigh,high,medium,low" ||
+		grok46.SupportedLevels[0].Description != "Most deliberate" {
+		t.Fatalf("grok-4.6 thinking = %+v, want advertised catalog", grok46)
+	}
+	grok45 := byID["grok-4.5"].Thinking
+	if grok45 == nil || grok45.DefaultLevel != "high" ||
+		strings.Join(thinkingLevelValues(grok45), ",") != "high,medium,low" {
+		t.Fatalf("grok-4.5 thinking = %+v, want advertised catalog", grok45)
+	}
+	if thinking := byID["grok-composer-2.5-fast"].Thinking; thinking != nil {
+		t.Fatalf("model without vendor reasoning metadata got %+v", thinking)
 	}
 	raw, err := os.ReadFile(requestsFile)
 	if err != nil {
@@ -819,23 +837,24 @@ func TestDiscoverGrokModelsStopsOnAuthFailures(t *testing.T) {
 
 func TestGrokThinkingCatalogIsPerModel(t *testing.T) {
 	models := grokStaticModels()
+	if len(models) != 3 || !models[0].Default || models[0].ID != "grok-4.6" {
+		t.Fatalf("static fallback must default to grok-4.6: %+v", models)
+	}
 	if models[0].Thinking == nil {
-		t.Fatal("grok-4.5 should advertise documented effort levels")
+		t.Fatal("grok-4.6 should advertise its observed effort levels")
 	}
 	got := make([]string, 0, len(models[0].Thinking.SupportedLevels))
 	for _, level := range models[0].Thinking.SupportedLevels {
 		got = append(got, level.Value)
 	}
-	if strings.Join(got, ",") != "low,medium,high" {
-		t.Fatalf("grok-4.5 levels = %v, want low/medium/high", got)
+	if strings.Join(got, ",") != "xhigh,high,medium,low" || models[0].Thinking.DefaultLevel != "high" {
+		t.Fatalf("grok-4.6 thinking = %+v, want xhigh/high/medium/low with high default", models[0].Thinking)
 	}
-	if models[1].Thinking != nil {
-		t.Fatalf("unverified composer model must hide thinking controls: %+v", models[1].Thinking)
+	if models[1].Thinking == nil || strings.Join(thinkingLevelValues(models[1].Thinking), ",") != "high,medium,low" {
+		t.Fatalf("grok-4.5 thinking = %+v, want observed high/medium/low catalog", models[1].Thinking)
 	}
-	unknown := []Model{{ID: "future-grok", Label: "Future"}}
-	annotateGrokThinking(unknown)
-	if unknown[0].Thinking != nil {
-		t.Fatalf("unknown models must not inherit grok-4.5 effort levels: %+v", unknown[0].Thinking)
+	if models[2].Thinking != nil {
+		t.Fatalf("composer model without observed efforts must hide thinking controls: %+v", models[2].Thinking)
 	}
 }
 
@@ -845,7 +864,8 @@ func TestGrokValidateThinkingLevelUsesPerModelCatalog(t *testing.T) {
 		level string
 		want  bool
 	}{
-		{model: "grok-4.5", level: "low", want: true},
+		{model: "grok-4.6", level: "xhigh", want: true},
+		{model: "grok-4.5", level: "high", want: true},
 		{model: "grok-4.5", level: "none", want: false},
 		{model: "grok-4.5", level: "xhigh", want: false},
 		{model: "grok-composer-2.5-fast", level: "low", want: false},
@@ -889,14 +909,22 @@ func TestGrokSelectAuthMethod(t *testing.T) {
 
 func TestGrokIsKnownThinkingValue(t *testing.T) {
 	t.Parallel()
-	for _, level := range []string{"", "low", "medium", "high"} {
+	for _, level := range []string{"", "low", "medium", "high", "xhigh", "future-level"} {
 		if !IsKnownThinkingValue("grok", level) {
 			t.Errorf("IsKnownThinkingValue(grok, %q) = false", level)
 		}
 	}
-	for _, level := range []string{"none", "minimal", "xhigh", "bogus", "max"} {
+	for _, level := range []string{"none", "minimal", ".hidden", "bad value"} {
 		if IsKnownThinkingValue("grok", level) {
 			t.Errorf("IsKnownThinkingValue(grok, %q) = true, want rejected", level)
 		}
 	}
+}
+
+func thinkingLevelValues(thinking *ModelThinking) []string {
+	values := make([]string, 0, len(thinking.SupportedLevels))
+	for _, level := range thinking.SupportedLevels {
+		values = append(values, level.Value)
+	}
+	return values
 }

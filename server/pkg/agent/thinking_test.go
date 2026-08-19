@@ -523,11 +523,10 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"grok", "low", true},
 		{"grok", "medium", true},
 		{"grok", "high", true},
-		{"grok", "none", false},
-		{"grok", "minimal", false},
-		{"grok", "xhigh", false},
-		{"grok", "max", false},
-		{"grok", "bogus", false},
+		{"grok", "xhigh", true},
+		{"grok", "future-level", true}, // exact support is checked against the daemon catalog
+		{"grok", ".hidden", false},
+		{"grok", "bad value", false},
 	}
 	for _, tc := range tests {
 		if got := IsKnownThinkingValue(tc.provider, tc.value); got != tc.want {

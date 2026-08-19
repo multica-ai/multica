@@ -2144,6 +2144,7 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 		clientName:   "multica-model-discovery",
 		tmpdirPrefix: "multica-grok-discovery-",
 		acpArgs:      []string{"--no-auto-update", "agent", "--always-approve", "stdio"},
+		annotate:     annotateGrokThinkingFromACP,
 		selectAuthMethod: func(initResult json.RawMessage, childEnv []string) (string, error) {
 			return selectGrokAuthMethod(extractACPAuthMethods(initResult), envHasNonEmpty(childEnv, "XAI_API_KEY"))
 		},
@@ -2160,35 +2161,119 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 			models[i].Provider = "xai"
 		}
 	}
-	annotateGrokThinking(models)
 	return Catalog{Models: models}, nil
 }
 
 // grokStaticModels is the offline fallback catalog for the Grok Build CLI.
-// IDs match a typical signed-in `session/new` / `grok models` listing.
+// The default and effort catalogs come from observed signed-in `session/new`
+// responses. Models without an observed reasoningEfforts list keep Thinking
+// nil, so the UI does not offer an override the CLI may reject.
 func grokStaticModels() []Model {
-	models := []Model{
-		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai", Default: true},
+	return []Model{
+		{
+			ID: "grok-4.6", Label: "Grok 4.6", Provider: "xai", Default: true,
+			Thinking: &ModelThinking{
+				SupportedLevels: []ThinkingLevel{
+					{Value: "xhigh", Label: "Extra High Effort"},
+					{Value: "high", Label: "High Effort"},
+					{Value: "medium", Label: "Medium Effort"},
+					{Value: "low", Label: "Low Effort"},
+				},
+				DefaultLevel: "high",
+			},
+		},
+		{
+			ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai",
+			Thinking: &ModelThinking{
+				SupportedLevels: []ThinkingLevel{
+					{Value: "high", Label: "High Effort"},
+					{Value: "medium", Label: "Medium Effort"},
+					{Value: "low", Label: "Low Effort"},
+				},
+				DefaultLevel: "high",
+			},
+		},
 		{ID: "grok-composer-2.5-fast", Label: "Grok Composer 2.5 Fast", Provider: "xai"},
 	}
-	annotateGrokThinking(models)
-	return models
 }
 
-// annotateGrokThinking attaches only capabilities confirmed by xAI's
-// per-model reasoning documentation. session/new does not advertise effort
-// catalogs, so unknown and composer models deliberately keep Thinking nil
-// instead of exposing values that may fail at runtime.
-func annotateGrokThinking(models []Model) {
-	for i := range models {
-		if models[i].ID != "grok-4.5" {
+// annotateGrokThinkingFromACP reads the xAI-specific reasoning catalog from
+// each model's vendor _meta block. This data is not part of the ACP schema, so
+// models without the advertised extension keep Thinking nil.
+func annotateGrokThinkingFromACP(models []Model, raw json.RawMessage) {
+	type reasoningEffort struct {
+		ID          string `json:"id"`
+		Value       string `json:"value"`
+		Label       string `json:"label"`
+		Description string `json:"description"`
+		Default     bool   `json:"default"`
+	}
+	type modelMetadata struct {
+		SupportsReasoningEffort bool              `json:"supportsReasoningEffort"`
+		ReasoningEfforts        []reasoningEffort `json:"reasoningEfforts"`
+	}
+	type modelInfo struct {
+		ModelID      string        `json:"modelId"`
+		ModelIDSnake string        `json:"model_id"`
+		Metadata     modelMetadata `json:"_meta"`
+	}
+	var response struct {
+		Models struct {
+			AvailableModels      []modelInfo `json:"availableModels"`
+			AvailableModelsSnake []modelInfo `json:"available_models"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return
+	}
+	availableModels := response.Models.AvailableModels
+	if len(availableModels) == 0 && response.Models.AvailableModelsSnake != nil {
+		availableModels = response.Models.AvailableModelsSnake
+	}
+	thinkingByModel := make(map[string]*ModelThinking, len(availableModels))
+	for _, model := range availableModels {
+		modelID := strings.TrimSpace(model.ModelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(model.ModelIDSnake)
+		}
+		if modelID == "" || !model.Metadata.SupportsReasoningEffort {
 			continue
 		}
-		models[i].Thinking = &ModelThinking{SupportedLevels: []ThinkingLevel{
-			{Value: "low", Label: "Low"},
-			{Value: "medium", Label: "Medium"},
-			{Value: "high", Label: "High"},
-		}}
+
+		seen := make(map[string]bool, len(model.Metadata.ReasoningEfforts))
+		levels := make([]ThinkingLevel, 0, len(model.Metadata.ReasoningEfforts))
+		defaultLevel := ""
+		for _, effort := range model.Metadata.ReasoningEfforts {
+			value := strings.TrimSpace(effort.Value)
+			if value == "" {
+				value = strings.TrimSpace(effort.ID)
+			}
+			if value == "" || seen[value] || !isValidDynamicThinkingValue(value) {
+				continue
+			}
+			seen[value] = true
+			label := strings.TrimSpace(effort.Label)
+			if label == "" {
+				label = value
+			}
+			levels = append(levels, ThinkingLevel{
+				Value:       value,
+				Label:       label,
+				Description: strings.TrimSpace(effort.Description),
+			})
+			if effort.Default {
+				defaultLevel = value
+			}
+		}
+		if len(levels) > 0 {
+			thinkingByModel[modelID] = &ModelThinking{
+				SupportedLevels: levels,
+				DefaultLevel:    defaultLevel,
+			}
+		}
+	}
+	for i := range models {
+		models[i].Thinking = thinkingByModel[models[i].ID]
 	}
 }
 
