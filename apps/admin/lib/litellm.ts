@@ -52,6 +52,10 @@ const MAX_KEY_PAGES = 20; // hard backstop — 20k keys at size=1000 is far beyo
  * whatever pages were already collected (or `[]`) instead of throwing, since
  * callers (attachLiteLlmToList / findKeyForSlug) must be able to render
  * "Not linked" rather than 500 the whole list when the proxy is flaky.
+ *
+ * Filtered server-side to agentfarm- keys via key_alias + substring_matching,
+ * which LiteLLM only honors for proxy_admin-role callers (LITELLM_API_KEY is
+ * the proxy master key) — a narrower key would silently get zero results.
  */
 export async function listLiteLlmKeys(): Promise<LiteLlmKey[]> {
   if (!litellmConfigured()) return [];
@@ -59,7 +63,12 @@ export async function listLiteLlmKeys(): Promise<LiteLlmKey[]> {
   for (let page = 1; page <= MAX_KEY_PAGES; page++) {
     let raw: unknown;
     try {
-      raw = await apiGet("/key/list", { page: String(page), size: "1000" });
+      raw = await apiGet("/key/list", {
+        page: String(page),
+        size: "1000",
+        key_alias: "agentfarm-",
+        substring_matching: "true",
+      });
     } catch (error) {
       console.error(`[admin] LiteLLM /key/list page ${page} failed`, error);
       break;
