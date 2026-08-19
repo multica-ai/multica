@@ -141,7 +141,8 @@ func TestRunTask_StartTaskCalledAfterWorkdirOnDisk(t *testing.T) {
 		WorkspaceID: workspaceID,
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-runtask",
-		Agent:       &AgentData{Name: "test-agent"},
+		AgentID:     "agent-runtask",
+		Agent:       &AgentData{ID: "agent-runtask", Name: "test-agent"},
 	}
 
 	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -215,6 +216,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		WorkspaceID: workspaceID,
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-private-temp",
+		AgentID:     "agent-private-temp",
 		AuthToken:   "mat_private_temp",
 		Agent: &AgentData{
 			ID:   "agent-private-temp",
@@ -446,6 +448,7 @@ printf '%s\n' '{"type":"result","subtype":"success","is_error":false,"session_id
 		WorkspaceID: workspaceID,
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-temp-base",
+		AgentID:     "agent-temp-base",
 		AuthToken:   "mat_temp_base",
 		Agent: &AgentData{
 			ID:   "agent-temp-base",
@@ -545,6 +548,7 @@ printf 'ran\n' > "$CAPTURE_FILE"
 		WorkspaceID: "ws-temp-base-invalid",
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-temp-base-invalid",
+		AgentID:     "agent-temp-base-invalid",
 		AuthToken:   "mat_temp_base_invalid",
 		Agent: &AgentData{
 			ID:        "agent-temp-base-invalid",
@@ -627,7 +631,8 @@ func TestRunTask_ExtendsPrepareLeaseDuringStartTask(t *testing.T) {
 		WorkspaceID: workspaceID,
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-runtask-start-lease",
-		Agent:       &AgentData{Name: "test-agent"},
+		AgentID:     "agent-runtask-start-lease",
+		Agent:       &AgentData{ID: "agent-runtask-start-lease", Name: "test-agent"},
 	}
 
 	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
@@ -717,7 +722,8 @@ func TestRunTask_PrepareTimeoutStopsLeaseDuringBlockedStartTask(t *testing.T) {
 		WorkspaceID: "ws-runtask-start-timeout",
 		RuntimeID:   "rt-1",
 		IssueID:     "issue-runtask-start-timeout",
-		Agent:       &AgentData{Name: "test-agent"},
+		AgentID:     "agent-runtask-start-timeout",
+		Agent:       &AgentData{ID: "agent-runtask-start-timeout", Name: "test-agent"},
 	}
 	taskLog := slog.New(slog.NewTextHandler(io.Discard, nil))
 	startedAt := time.Now()

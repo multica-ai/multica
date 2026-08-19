@@ -32,7 +32,20 @@ e2e/test-results
 coverage
 
 # Docs
-docs/
+/docs/
+*.md
 
-# Desktop app (not needed for web self-hosting)
-apps/desktop
+# Only the web workspace is used by Dockerfile.web. Default-exclude future
+# app workspaces so they do not silently enter the build context.
+/apps/*
+!/apps/web/
+
+# Repository-only tooling
+/.github/
+/deploy/
+# Docker can't re-include a file whose parent directory is excluded, so
+# scripts/ is excluded file-by-file (via *) rather than as a whole directory
+# — docker/agentrunner-runtime/Dockerfile COPYs smoke-test-agentrunner.sh
+# into /opt/agentfarm/scripts/ and needs it to stay in the build context.
+/scripts/*
+!/scripts/smoke-test-agentrunner.sh

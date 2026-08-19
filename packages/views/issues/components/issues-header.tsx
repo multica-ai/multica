@@ -57,7 +57,6 @@ import {
 } from "@multica/ui/components/ui/select";
 import { Toggle } from "@multica/ui/components/ui/toggle";
 import {
-  ALL_STATUSES,
   PRIORITY_DISPLAY_ORDER,
 } from "@multica/core/issues/config";
 import { StatusIcon, PriorityIcon } from ".";
@@ -116,6 +115,8 @@ import { Tooltip, TooltipTrigger, TooltipContent } from "@multica/ui/components/
 import { cn } from "@multica/ui/lib/utils";
 import { PAGE_GUTTER } from "../../layout/page-header";
 import { useT } from "../../i18n";
+import { useStatusOptions } from "../utils/status-options";
+import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { FILTER_ITEM_CLASS, HoverCheck } from "../../common/hover-check";
 import { WorkspaceAgentWorkingChip } from "./workspace-agent-working-chip";
@@ -704,26 +705,38 @@ function PropertyFilterOptions({
       }));
   }, [actorProperty, actorMembers, currentUserId]);
 
-  const options = actorProperty
-    ? actorOptions.map((option) => ({
-        id: option.id,
-        name: option.name,
-        color: undefined as string | undefined,
-        actorType: option.actorType as string | undefined,
-        actorId: option.actorId as string | undefined,
-      }))
-    : property.type === "checkbox"
-      ? [
-          { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined, actorType: undefined, actorId: undefined },
-          { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined, actorType: undefined, actorId: undefined },
-        ]
-      : (property.config.options ?? []).map((option) => ({
+  // "No value" is offered for every property type: it selects issues where the
+  // property is unset, the inverse of picking one of the options below.
+  const noValueOption = {
+    id: NO_PROPERTY_VALUE,
+    name: t(($) => $.pickers.custom_property.none),
+    color: undefined as string | undefined,
+    actorType: undefined as string | undefined,
+    actorId: undefined as string | undefined,
+  };
+  const options = [
+    ...(actorProperty
+      ? actorOptions.map((option) => ({
           id: option.id,
           name: option.name,
-          color: option.color as string | undefined,
-          actorType: undefined as string | undefined,
-          actorId: undefined as string | undefined,
-        }));
+          color: undefined as string | undefined,
+          actorType: option.actorType as string | undefined,
+          actorId: option.actorId as string | undefined,
+        }))
+      : property.type === "checkbox"
+        ? [
+            { id: "true", name: t(($) => $.pickers.custom_property.true_label), color: undefined, actorType: undefined, actorId: undefined },
+            { id: "false", name: t(($) => $.pickers.custom_property.false_label), color: undefined, actorType: undefined, actorId: undefined },
+          ]
+        : (property.config.options ?? []).map((option) => ({
+            id: option.id,
+            name: option.name,
+            color: option.color as string | undefined,
+            actorType: undefined as string | undefined,
+            actorId: undefined as string | undefined,
+          }))),
+    noValueOption,
+  ];
 
   return (
     <>
@@ -1212,6 +1225,7 @@ export function IssueFilterMenu({
   const viewStoreApi = useViewStoreApi();
   const act = viewStoreApi.getState();
   const wsId = useWorkspaceId();
+  const statusOptions = useStatusOptions(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const filterableProperties = useMemo(
     () =>
@@ -1306,22 +1320,33 @@ export function IssueFilterMenu({
                 )}
               </DropdownMenuSubTrigger>
               <DropdownMenuSubContent className="w-auto min-w-48">
-                {ALL_STATUSES.map((s) => {
-                  const checked = statusFilters.includes(s);
-                  const count = counts.status.get(s) ?? 0;
-                  const fixed = viewBaseline?.status.has(s) === true;
+                {/* Options come from the workspace catalog, so a custom status
+                    is filterable — otherwise an issue moved onto one could not
+                    be narrowed to. One flat list in category order: the icon
+                    already carries the category, and a heading per category
+                    doubled the menu's height for no added information
+                    (MUL-6243, MUL-6399). */}
+                {statusOptions.map((option) => {
+                  const checked = statusFilters.includes(option.key);
+                  const count = counts.status.get(option.key) ?? 0;
+                  const fixed = viewBaseline?.status.has(option.key) === true;
                   return (
                     <DropdownMenuCheckboxItem
-                      key={s}
+                      key={option.key}
                       checked={checked}
                       disabled={fixed}
                       title={fixed ? fixedTitle : undefined}
-                      onCheckedChange={() => act.toggleStatusFilter(s)}
+                      onCheckedChange={() => act.toggleStatusFilter(option.key)}
                       className={FILTER_ITEM_CLASS}
                     >
                       <HoverCheck checked={checked} />
-                      <StatusIcon status={s} className="h-3.5 w-3.5" />
-                      {t(($) => $.status[s])}
+                      <StatusIcon
+                        status={option.key}
+                        category={option.category}
+                        color={option.color}
+                        className="h-3.5 w-3.5"
+                      />
+                      {option.label}
                       {count > 0 && (
                         <span className="ml-auto text-caption text-muted-foreground">
                           {t(($) => $.filters.issue_count, { count })}

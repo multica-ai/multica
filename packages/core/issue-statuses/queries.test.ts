@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { buildIssueStatusCatalog, isIssueStatusCategory } from "./queries";
+import { buildIssueStatusCatalog, compareIssueStatusEntries, isIssueStatusCategory } from "./queries";
 import type { IssueStatusEntry } from "../types";
 
 function entry(key: string, category: string, name = key, archivedAt: string | null = null): IssueStatusEntry {
@@ -85,5 +85,47 @@ describe("archived statuses stay resolvable", () => {
   it("excludes archived from a category's pickable list", () => {
     expect(c.inCategory("done")).toEqual([]);
     expect(c.inCategory("in_review").map((e) => e.key)).toEqual(["human_review"]);
+  });
+});
+
+describe("compareIssueStatusEntries", () => {
+  function at(key: string, category: string, position: number): IssueStatusEntry {
+    return { ...entry(key, category), position };
+  }
+
+  // Mirrors ListIssueStatusEntries in issue_status.sql. An optimistic reorder
+  // re-sorts the cached array with this, so a drift from the server's ORDER BY
+  // would show one order until the refetch lands and a different one after.
+  it("orders by category rank before position", () => {
+    const sorted = [at("qa", "done", 1), at("review", "in_review", 9)].sort(
+      compareIssueStatusEntries,
+    );
+    expect(sorted.map((e) => e.key)).toEqual(["review", "qa"]);
+  });
+
+  it("orders by position within a category", () => {
+    const sorted = [at("b", "in_review", 2), at("a", "in_review", 1)].sort(
+      compareIssueStatusEntries,
+    );
+    expect(sorted.map((e) => e.key)).toEqual(["a", "b"]);
+  });
+
+  // Positions collide while a reorder is mid-flight; without the key tiebreak
+  // the list order would depend on the sort's stability.
+  it("falls back to key when positions tie", () => {
+    const sorted = [at("zeta", "todo", 1), at("alpha", "todo", 1)].sort(
+      compareIssueStatusEntries,
+    );
+    expect(sorted.map((e) => e.key)).toEqual(["alpha", "zeta"]);
+  });
+
+  // The built-in is seeded at position 0 and cannot be PATCHed, so it is
+  // permanently the head of its category. Reorder writes start at 1 for that
+  // reason; if the comparator ever let a custom status sort ahead of it, the
+  // picker would open on a status the workspace never chose as its default.
+  it("keeps the built-in ahead of custom statuses in its category", () => {
+    const builtIn = { ...at("in_review", "in_review", 0), is_system: true };
+    const sorted = [at("qa", "in_review", 1), builtIn].sort(compareIssueStatusEntries);
+    expect(sorted.map((e) => e.key)).toEqual(["in_review", "qa"]);
   });
 });

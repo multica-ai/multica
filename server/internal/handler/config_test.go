@@ -462,3 +462,34 @@ func TestGetConfigExposesEnabledPluginsV1Flag(t *testing.T) {
 		t.Fatal("plugins_v1: want true with flag enabled, got false")
 	}
 }
+
+// Clients fail closed on this flag: absent covers every server that predates
+// the signal, including the ones that accept a worktree resource, silently drop
+// execution_mode and run the task in the user's working copy (#7113). A build
+// that HAS the save gate therefore has to say so,
+// unconditionally — not behind a deployment check, an env var or a feature
+// flag, all of which would disable worktree mode for the users who can run it.
+func TestGetConfigDeclaresLocalWorktreeSupport(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "/api/config", nil)
+	w := httptest.NewRecorder()
+	testHandler.GetConfig(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetConfig: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var cfg AppConfig
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatalf("decode config: %v", err)
+	}
+	if !cfg.LocalWorktreeSupported {
+		t.Fatal("this build runs the worktree save gate but does not advertise it; clients will hide the mode")
+	}
+	// Serialised as a real key, not omitted when false-by-accident: the client
+	// distinguishes "absent" (old server) from an explicit answer.
+	var raw map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &raw); err != nil {
+		t.Fatalf("decode raw config: %v", err)
+	}
+	if _, ok := raw["local_worktree_supported"]; !ok {
+		t.Fatal("local_worktree_supported missing from the JSON body")
+	}
+}

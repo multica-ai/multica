@@ -25,7 +25,8 @@
 //
 //     queued_expired, runtime_offline, runtime_reconnect_timeout,
 //     runtime_recovery, timeout, iteration_limit, agent_blocked,
-//     api_invalid_request, skill_bundle_unavailable
+//     api_invalid_request, skill_bundle_unavailable,
+//     runtime_cli_timeout, invalid_task_identity
 //
 //   - 14 agent-side values (with `agent_error.` prefix) produced by
 //     Classify(rawError) when the agent process surfaced an error string.
@@ -117,6 +118,26 @@ const (
 	// taskRunFailureReason in daemon/daemon.go.
 	ReasonSkillBundleUnavailable Reason = "skill_bundle_unavailable"
 
+	// ReasonRuntimeCLITimeout: a local runtime CLI the daemon must call
+	// during task preparation did not answer within its deadline — today
+	// that is OpenClaw config discovery (`openclaw config file`), which on
+	// a slow host takes 8-11s against a deadline that used to be 5s
+	// (#7112). Platform-side: the agent process was never launched and no
+	// provider was contacted. Deliberately NOT retryable — the stall is
+	// local and deterministic, so retrying re-pays the same wall-clock and
+	// fails identically. The user-facing fix is to raise
+	// MULTICA_OPENCLAW_CLI_TIMEOUT or speed the CLI up, which is why the
+	// copy names the CLI instead of blaming the network. Written by
+	// taskRunFailureReason in daemon/daemon.go.
+	ReasonRuntimeCLITimeout Reason = "runtime_cli_timeout"
+
+	// ReasonInvalidTaskIdentity: the daemon refused a claimed task because
+	// the task row's authoritative agent_id was absent or disagreed with the
+	// nested agent payload. The agent process is never launched. This is
+	// deliberately non-retryable: retrying the same contradictory claim would
+	// only repeat an isolation failure.
+	ReasonInvalidTaskIdentity Reason = "invalid_task_identity"
+
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
 	// the right sub-reason from the string. IsAgentError returns true
@@ -192,7 +213,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 22 reasons. Order is
+// allReasons is the canonical ordered list of the 25 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -212,6 +233,8 @@ var allReasons = []Reason{
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
 	ReasonSkillBundleUnavailable,
+	ReasonRuntimeCLITimeout,
+	ReasonInvalidTaskIdentity,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,

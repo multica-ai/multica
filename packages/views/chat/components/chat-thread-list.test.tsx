@@ -89,13 +89,18 @@ const sessions: ChatSession[] = [
 
 function renderList(
   activeSessionId: string | null,
-  { onArchive = vi.fn(), onSelectSession = vi.fn() } = {},
+  {
+    onArchive = vi.fn(),
+    onSelectSession = vi.fn(),
+    renderedSessions = sessions,
+    renderedAgents = [agent],
+  } = {},
 ) {
   render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <ChatThreadList
-        sessions={sessions}
-        agents={[agent]}
+        sessions={renderedSessions}
+        agents={renderedAgents}
         activeSessionId={activeSessionId}
         onSelectSession={onSelectSession}
         onArchive={onArchive}
@@ -171,6 +176,48 @@ describe("ChatThreadList no_response preview (MUL-4351)", () => {
     expect(
       screen.queryByText("The agent finished this turn without a text reply."),
     ).not.toBeInTheDocument();
+  });
+});
+
+describe("ChatThreadList agent identity", () => {
+  it("shows and bounds the resolved agent name without replacing the preview", () => {
+    const longName = "A very long agent name that must not take over the conversation row";
+    const longNameAgent = { id: "agent-1", name: longName } as unknown as Agent;
+    const session = makeSession({
+      id: "agent-name",
+      last_message: {
+        content: "Latest project update",
+        role: "assistant",
+        created_at: "2026-07-08T03:00:00Z",
+      },
+    });
+
+    renderList(null, {
+      renderedSessions: [session],
+      renderedAgents: [longNameAgent],
+    });
+
+    const name = screen.getByText(longName);
+    expect(name.className).toContain("max-w-[40%]");
+    expect(name.className).toContain("truncate");
+    expect(screen.getByText("Latest project update")).toBeInTheDocument();
+  });
+
+  it("keeps the existing preview when the session agent is unavailable", () => {
+    const session = makeSession({
+      id: "missing-agent",
+      agent_id: "missing-agent-id",
+      last_message: {
+        content: "Still identifiable by its preview",
+        role: "assistant",
+        created_at: "2026-07-08T03:00:00Z",
+      },
+    });
+
+    renderList(null, { renderedSessions: [session] });
+
+    expect(screen.queryByText("Alpha")).not.toBeInTheDocument();
+    expect(screen.getByText("Still identifiable by its preview")).toBeInTheDocument();
   });
 });
 

@@ -294,6 +294,30 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.30",
+        date: "2026-08-19",
+        title: "Safer Issue editing, empty-property filters, and clearer agent identity",
+        changes: [],
+        features: [
+          "You can see which agent is handling each chat session.",
+          "Workspace admins can see linked DingTalk identities.",
+          "You can filter Issues by custom properties that have no value.",
+          "When an Issue or comment changes while you edit it, you can compare both versions before saving.",
+        ],
+        improvements: [
+          "The command palette now includes every workspace page.",
+          "Chat sessions now resume faster.",
+          "Issue activity times now reflect meaningful updates.",
+        ],
+        fixes: [
+          "Private agents can only be invoked by their owners.",
+          "Agent workspaces stay isolated when tasks run at the same time.",
+          "Provider command logs no longer expose credentials or prompts.",
+          "Posting a comment no longer reports a false send failure.",
+          "A dependency security vulnerability has been fixed.",
+        ],
+      },
+      {
         version: "0.4.29",
         date: "2026-08-18",
         title: "MiniMax Code, cleaner run transcripts, and Hermes agent fixes",

@@ -9,7 +9,7 @@ import { setApiInstance } from "@multica/core/api";
 import type { ApiClient } from "@multica/core/api/client";
 import type {
   Issue,
-  IssueStatus,
+  IssueStatusCategory,
   IssueTableQuerySpec,
   IssueTableRowsRequest,
 } from "@multica/core/types";
@@ -79,7 +79,12 @@ describe("useIssueStatusBranches", () => {
         };
       },
     );
-    setApiInstance({ listIssueTableRows } as unknown as ApiClient);
+    setApiInstance({
+      listIssueTableRows,
+      // The hook pages by category, so it reads the catalog. Empty is the real
+      // shape for a workspace with no custom statuses. (MUL-6243)
+      listIssueStatuses: async () => ({ statuses: [], categories: [], total: 0 }),
+    } as unknown as ApiClient);
     // Mirror the production client (createQueryClient): row pages stay fresh
     // until explicitly invalidated, so re-expanding a collapsed section reuses
     // settled cursor pages instead of refetching them on observer reattach.
@@ -88,7 +93,7 @@ describe("useIssueStatusBranches", () => {
     });
 
     const { result, rerender } = renderHook(
-      ({ statuses }: { statuses: IssueStatus[] }) =>
+      ({ statuses }: { statuses: IssueStatusCategory[] }) =>
         useIssueStatusBranches({
           wsId: "ws-1",
           query,
@@ -133,6 +138,9 @@ describe("useIssueStatusBranches", () => {
     expect(listIssueTableRows).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
+        // No custom statuses in this fixture, so the hook keeps the
+        // pre-feature contract. See use-issue-status-branches.category.test.tsx
+        // for the category contract. (MUL-6243)
         group_key: "status:todo",
         page: { limit: 50, cursor: "cursor-2" },
       }),

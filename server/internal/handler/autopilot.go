@@ -77,6 +77,17 @@ type AutopilotResponse struct {
 	CanManageAccess *bool `json:"can_manage_access,omitempty"`
 }
 
+type AutopilotQuotaUsageResponse struct {
+	Action        string           `json:"action"`
+	Used          *int64           `json:"used"`
+	Reserved      *int64           `json:"reserved"`
+	Limit         *int64           `json:"limit"`
+	PeriodStart   *string          `json:"period_start"`
+	PeriodEnd     *string          `json:"period_end"`
+	ResetAt       *string          `json:"reset_at"`
+	BlockedCounts map[string]int64 `json:"blocked_counts"`
+}
+
 // AutopilotCollaboratorEntry is a member explicitly granted write access to an
 // autopilot, surfaced on the detail response and the collaborator endpoints.
 type AutopilotCollaboratorEntry struct {
@@ -156,10 +167,9 @@ type AutopilotRunResponse struct {
 	CompletedAt   *string `json:"completed_at"`
 	FailureReason *string `json:"failure_reason"`
 	// ReasonCode is a stable, localizable, enumeration-safe classification of a
-	// non-success run (skipped/failed), derived from FailureReason. The "run now"
-	// UI localizes it instead of echoing the raw English reason (which may name a
-	// private assignee agent). Additive: nil for success-path runs and ignored by
-	// old clients (MUL-4525).
+	// non-success run (skipped/failed), persisted at the decision source. The UI
+	// localizes it instead of echoing the raw English reason (which may name a
+	// private assignee agent). Additive: nil for legacy/success-path runs.
 	ReasonCode     *string `json:"reason_code,omitempty"`
 	TriggerPayload any     `json:"trigger_payload"`
 	Result         any     `json:"result"`
@@ -279,20 +289,17 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 		json.Unmarshal(r.Result, &result)
 	}
 	return AutopilotRunResponse{
-		ID:            uuidToString(r.ID),
-		AutopilotID:   uuidToString(r.AutopilotID),
-		TriggerID:     uuidToPtr(r.TriggerID),
-		Source:        r.Source,
-		Status:        r.Status,
-		IssueID:       uuidToPtr(r.IssueID),
-		TaskID:        uuidToPtr(r.TaskID),
-		TriggeredAt:   timestampToString(r.TriggeredAt),
-		CompletedAt:   timestampToPtr(r.CompletedAt),
-		FailureReason: textToPtr(r.FailureReason),
-		// ReasonCode is left unset here: it is a decision-time value the manual
-		// "run now" handler injects from the typed dispatch outcome (MUL-4525).
-		// Persisted rows (list/history) surface the human failure_reason instead
-		// of a code reverse-engineered from that text.
+		ID:             uuidToString(r.ID),
+		AutopilotID:    uuidToString(r.AutopilotID),
+		TriggerID:      uuidToPtr(r.TriggerID),
+		Source:         r.Source,
+		Status:         r.Status,
+		IssueID:        uuidToPtr(r.IssueID),
+		TaskID:         uuidToPtr(r.TaskID),
+		TriggeredAt:    timestampToString(r.TriggeredAt),
+		CompletedAt:    timestampToPtr(r.CompletedAt),
+		FailureReason:  textToPtr(r.FailureReason),
+		ReasonCode:     textToPtr(r.ReasonCode),
 		TriggerPayload: payload,
 		Result:         result,
 		CreatedAt:      timestampToString(r.CreatedAt),
@@ -2085,8 +2092,30 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
-	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManual(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID))
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if len(idempotencyKey) > 255 {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key is too long")
+		return
+	}
+	if idempotencyKey == "" {
+		idempotencyKey = service.NewRequestIdempotencyKey()
+	}
+	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManualWithKey(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID), idempotencyKey)
 	if err != nil {
+		var quotaErr *service.AutopilotQuotaExceededError
+		if errors.As(err, &quotaErr) {
+			retryAfter := int64(time.Until(quotaErr.ResetAt).Seconds())
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
+			w.Header().Set("Retry-After", strconv.FormatInt(retryAfter, 10))
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"reason_code": "quota_exceeded", "used": quotaErr.Used,
+				"reserved": quotaErr.Reserved, "limit": quotaErr.Limit,
+				"reset_at": quotaErr.ResetAt.UTC().Format(time.RFC3339),
+			})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return
 	}
@@ -2098,6 +2127,41 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	if reasonCode != "" {
 		c := string(reasonCode)
 		resp.ReasonCode = &c
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetAutopilotQuotaUsage exposes Cloud-provided interval facts plus durable
+// server-owned blocked counts. When the gate is off or malformed, the service
+// returns before any quota-table read.
+func (h *Handler) GetAutopilotQuotaUsage(w http.ResponseWriter, r *http.Request) {
+	workspaceID, err := util.ParseUUID(h.resolveWorkspaceID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace")
+		return
+	}
+	usage, err := h.AutopilotService.AutopilotQuotaUsage(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load autopilot quota usage")
+		return
+	}
+	resp := AutopilotQuotaUsageResponse{Action: "off"}
+	if usage.Enabled {
+		resp.Action = usage.Action
+		resp.Used, resp.Reserved, resp.Limit = usage.Used, usage.Reserved, usage.Limit
+		resp.BlockedCounts = usage.BlockedCounts
+		if usage.PeriodStart != nil {
+			v := usage.PeriodStart.UTC().Format(time.RFC3339)
+			resp.PeriodStart = &v
+		}
+		if usage.PeriodEnd != nil {
+			v := usage.PeriodEnd.UTC().Format(time.RFC3339)
+			resp.PeriodEnd = &v
+		}
+		if usage.ResetAt != nil {
+			v := usage.ResetAt.UTC().Format(time.RFC3339)
+			resp.ResetAt = &v
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

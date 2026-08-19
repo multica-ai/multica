@@ -60,6 +60,8 @@ func newDingTalkGroupRouteHandlerFixture(t *testing.T) dingtalkGroupRouteHandler
 
 	t.Cleanup(func() {
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE installation_id = $1`, installationID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_user_binding WHERE installation_id = $1`, installationID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_binding_token WHERE installation_id = $1`, installationID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM dingtalk_group_route WHERE installation_id = $1`, installationID)
 		_, _ = testPool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
 	})
@@ -337,7 +339,7 @@ func TestListDingTalkInstallationsAdvertisesGroupRoutingCapability(t *testing.T)
 	})
 
 	t.Run("configured deployment", func(t *testing.T) {
-		_ = newDingTalkGroupRouteHandlerFixture(t)
+		fx := newDingTalkGroupRouteHandlerFixture(t)
 		box, err := secretbox.New(make([]byte, secretbox.KeySize))
 		if err != nil {
 			t.Fatalf("create DingTalk test secret box: %v", err)
@@ -347,25 +349,155 @@ func TestListDingTalkInstallationsAdvertisesGroupRoutingCapability(t *testing.T)
 			t.Fatalf("create DingTalk install service: %v", err)
 		}
 		testHandler.DingTalkInstall = service
+		var regularMemberID string
+		if err := testPool.QueryRow(context.Background(), `
+			INSERT INTO "user" (name, email)
+			VALUES ('DingTalk installation list member', 'dingtalk-installation-list-member@multica.test')
+			RETURNING id
+		`).Scan(&regularMemberID); err != nil {
+			t.Fatalf("create regular member for DingTalk installation listing: %v", err)
+		}
+		if _, err := testPool.Exec(context.Background(), `
+			INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+		`, testWorkspaceID, regularMemberID); err != nil {
+			t.Fatalf("add regular member for DingTalk installation listing: %v", err)
+		}
+		var adminMemberID string
+		if err := testPool.QueryRow(context.Background(), `
+			INSERT INTO "user" (name, email)
+			VALUES ('DingTalk installation list admin', 'dingtalk-installation-list-admin@multica.test')
+			RETURNING id
+		`).Scan(&adminMemberID); err != nil {
+			t.Fatalf("create admin for DingTalk installation listing: %v", err)
+		}
+		if _, err := testPool.Exec(context.Background(), `
+			INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin')
+		`, testWorkspaceID, adminMemberID); err != nil {
+			t.Fatalf("add admin for DingTalk installation listing: %v", err)
+		}
+		t.Cleanup(func() {
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id IN ($2, $3)`, testWorkspaceID, regularMemberID, adminMemberID)
+			_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id IN ($1, $2)`, regularMemberID, adminMemberID)
+		})
+		if _, err := testPool.Exec(context.Background(), `
+			INSERT INTO channel_user_binding (
+				workspace_id, multica_user_id, installation_id,
+				channel_type, channel_user_id
+			) VALUES
+				($1, $2, $3, 'dingtalk', 'staff-current-member'),
+				($1, $4, $3, 'dingtalk', 'staff-regular-member'),
+				($1, $5, $3, 'dingtalk', 'staff-admin-member')
+		`, testWorkspaceID, testUserID, fx.installationID, regularMemberID, adminMemberID); err != nil {
+			t.Fatalf("seed member-scoped DingTalk bindings: %v", err)
+		}
 
 		req := requestWithRouteParams(
-			httptest.NewRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/installations", nil),
+			newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/installations", nil),
 			testWorkspaceID,
 			"",
 		)
+		ownerMember, err := testHandler.Queries.GetMemberByUserAndWorkspace(context.Background(), db.GetMemberByUserAndWorkspaceParams{
+			UserID:      parseUUID(testUserID),
+			WorkspaceID: parseUUID(testWorkspaceID),
+		})
+		if err != nil {
+			t.Fatalf("load owner member context: %v", err)
+		}
+		req = req.WithContext(middleware.SetMemberContext(req.Context(), testWorkspaceID, ownerMember))
 		rec := httptest.NewRecorder()
 		testHandler.ListDingTalkInstallations(rec, req)
 		if rec.Code != http.StatusOK {
 			t.Fatalf("configured installations status = %d, want 200: %s", rec.Code, rec.Body.String())
 		}
 		var body struct {
-			GroupRoutingSupported bool `json:"group_routing_supported"`
+			GroupRoutingSupported bool                           `json:"group_routing_supported"`
+			Installations         []DingTalkInstallationResponse `json:"installations"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode configured installations response: %v", err)
 		}
 		if !body.GroupRoutingSupported {
 			t.Fatal("configured deployment did not advertise group routing")
+		}
+		var found *DingTalkInstallationResponse
+		for i := range body.Installations {
+			if body.Installations[i].ID == fx.installationID {
+				found = &body.Installations[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Fatalf("configured installations omitted fixture %s: %+v", fx.installationID, body.Installations)
+		}
+		if len(found.BoundDingTalkUserIDs) != 1 || found.BoundDingTalkUserIDs[0] != "staff-current-member" {
+			t.Fatalf("member-scoped DingTalk ids = %v, want [staff-current-member]", found.BoundDingTalkUserIDs)
+		}
+
+		lockTx, err := testPool.Begin(context.Background())
+		if err != nil {
+			t.Fatalf("begin controlled DingTalk binding-query failure: %v", err)
+		}
+		t.Cleanup(func() { _ = lockTx.Rollback(context.Background()) })
+		if _, err := lockTx.Exec(context.Background(), `LOCK TABLE channel_user_binding IN ACCESS EXCLUSIVE MODE`); err != nil {
+			_ = lockTx.Rollback(context.Background())
+			t.Fatalf("lock DingTalk bindings for controlled query failure: %v", err)
+		}
+		errorReq := requestWithRouteParams(
+			newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/installations", nil),
+			testWorkspaceID,
+			"",
+		)
+		errorReq = errorReq.WithContext(middleware.SetMemberContext(errorReq.Context(), testWorkspaceID, ownerMember))
+		errorCtx, cancelErrorRequest := context.WithTimeout(errorReq.Context(), 250*time.Millisecond)
+		errorReq = errorReq.WithContext(errorCtx)
+		errorRec := httptest.NewRecorder()
+		testHandler.ListDingTalkInstallations(errorRec, errorReq)
+		cancelErrorRequest()
+		if err := lockTx.Rollback(context.Background()); err != nil {
+			t.Fatalf("release controlled DingTalk binding lock: %v", err)
+		}
+		if errorRec.Code != http.StatusInternalServerError || !strings.Contains(errorRec.Body.String(), "failed to list dingtalk user bindings") {
+			t.Fatalf("binding query failure status = %d, want 500 without fallback: %s", errorRec.Code, errorRec.Body.String())
+		}
+
+		router := chi.NewRouter()
+		router.Route("/api/workspaces/{id}", func(r chi.Router) {
+			r.Use(middleware.RequireWorkspaceMemberFromURL(testHandler.Queries, "id"))
+			r.Get("/dingtalk/installations", testHandler.ListDingTalkInstallations)
+		})
+		memberReq := httptest.NewRequest(
+			http.MethodGet,
+			"/api/workspaces/"+testWorkspaceID+"/dingtalk/installations",
+			nil,
+		)
+		memberReq.Header.Set("X-User-ID", regularMemberID)
+		memberRec := httptest.NewRecorder()
+		router.ServeHTTP(memberRec, memberReq)
+		if memberRec.Code != http.StatusOK {
+			t.Fatalf("regular member installations status = %d: %s", memberRec.Code, memberRec.Body.String())
+		}
+		if !strings.Contains(memberRec.Body.String(), fx.installationID) {
+			t.Fatalf("regular member could not see connected bot: %s", memberRec.Body.String())
+		}
+		for _, forbidden := range []string{"bound_dingtalk_user_ids", "staff-regular-member"} {
+			if strings.Contains(memberRec.Body.String(), forbidden) {
+				t.Fatalf("regular member installation response leaked %q: %s", forbidden, memberRec.Body.String())
+			}
+		}
+
+		adminReq := httptest.NewRequest(
+			http.MethodGet,
+			"/api/workspaces/"+testWorkspaceID+"/dingtalk/installations",
+			nil,
+		)
+		adminReq.Header.Set("X-User-ID", adminMemberID)
+		adminRec := httptest.NewRecorder()
+		router.ServeHTTP(adminRec, adminReq)
+		if adminRec.Code != http.StatusOK {
+			t.Fatalf("admin installations status = %d: %s", adminRec.Code, adminRec.Body.String())
+		}
+		if !strings.Contains(adminRec.Body.String(), `"bound_dingtalk_user_ids":["staff-admin-member"]`) {
+			t.Fatalf("admin installation response omitted its DingTalk identity: %s", adminRec.Body.String())
 		}
 	})
 }

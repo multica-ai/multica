@@ -2,7 +2,7 @@
 
 import { statusCategoryOfKey } from "@multica/core/issues";
 import { Eye, MoreHorizontal } from "lucide-react";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatusCategory } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import {
   DropdownMenu,
@@ -28,8 +28,8 @@ export function HiddenColumnsPanel({
   hiddenStatuses,
   renderRow,
 }: {
-  hiddenStatuses: IssueStatus[];
-  renderRow: (status: IssueStatus) => React.ReactNode;
+  hiddenStatuses: IssueStatusCategory[];
+  renderRow: (status: IssueStatusCategory) => React.ReactNode;
 }) {
   const { t } = useT("issues");
   return (
@@ -54,7 +54,7 @@ export function HiddenColumnRow({
   status,
   total,
 }: {
-  status: IssueStatus;
+  status: IssueStatusCategory;
   total?: number;
 }) {
   const { t } = useT("issues");

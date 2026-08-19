@@ -30,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -121,9 +122,16 @@ type Config struct {
 	//   - LLMAPIKey       -> MULTICA_LLM_API_KEY
 	//   - LLMBaseURL       -> MULTICA_LLM_BASE_URL (OpenAI or any compatible gateway)
 	//   - LLMDefaultModel  -> MULTICA_LLM_DEFAULT_MODEL (used when a request omits `model`)
+	//   - LLMMaxRetries    -> MULTICA_LLM_MAX_RETRIES (transport retry budget)
 	LLMAPIKey       string
 	LLMBaseURL      string
 	LLMDefaultModel string
+	// LLMMaxRetries is the parsed MULTICA_LLM_MAX_RETRIES budget. nil means
+	// unset (llm.DefaultMaxRetries applies); llm.Retries(0) disables retries.
+	// The type carries the validation: it can only be built through llm.Retries,
+	// and cmd/server additionally fails the boot on an out-of-range value before
+	// one reaches this struct. See llm.Config.MaxRetries for the full semantics.
+	LLMMaxRetries *llm.RetryOverride
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
 	// Surfaced through /api/config so self-hosted operators can confirm which
@@ -172,11 +180,17 @@ type Handler struct {
 	LocalSkillListStore    LocalSkillListStore
 	LocalSkillImportStore  LocalSkillImportStore
 	FeatureFlags           *featureflag.Service
-	LivenessStore          LivenessStore
-	HeartbeatScheduler     HeartbeatScheduler
-	Storage                storage.Storage
-	CFSigner               *auth.CloudFrontSigner
-	Analytics              analytics.Client
+	// IssueStatusCatalog reads the workspace status catalog. Defaults to
+	// Queries; a test can substitute a counting wrapper to assert HOW MANY
+	// catalog reads a request performs, which is the only property that
+	// distinguishes the current one-read derivation from the N+1 it replaced.
+	// (MUL-6243)
+	IssueStatusCatalog issuestatus.Querier
+	LivenessStore      LivenessStore
+	HeartbeatScheduler HeartbeatScheduler
+	Storage            storage.Storage
+	CFSigner           *auth.CloudFrontSigner
+	Analytics          analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
@@ -370,7 +384,21 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		APIKey:       cfg.LLMAPIKey,
 		BaseURL:      cfg.LLMBaseURL,
 		DefaultModel: cfg.LLMDefaultModel,
+		MaxRetries:   cfg.LLMMaxRetries,
 	})
+	// Report the effective retry policy so an operator can confirm from the
+	// boot log alone what a misbehaving upstream will cost, instead of inferring
+	// it from an env var whose semantics used to be unguessable (MUL-6364).
+	// Read off the client, not off cfg, so the line cannot drift from what the
+	// SDK actually enforces. Counts and an enum only — never the key or the base
+	// URL, since a self-hosted gateway URL routinely embeds a token.
+	llmRetry := llmClient.RetryBudget()
+	slog.Info("llm retry policy",
+		"max_retries", llmRetry.MaxRetries,
+		"source", llmRetry.Source,
+		"request_timeout", llmRetry.RequestTimeout,
+		"enabled", llmClient.Enabled(),
+	)
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
@@ -480,6 +508,26 @@ func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
+func writeRevisionConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID, expected, actual int64) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":             "resource changed since it was loaded",
+		"code":              "revision_conflict",
+		"resource_type":     resourceType,
+		"resource_id":       uuidToString(resourceID),
+		"expected_revision": expected,
+		"actual_revision":   actual,
+	})
+}
+
+func writeEditConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":         "resource field changed since it was loaded",
+		"code":          "revision_conflict",
+		"resource_type": resourceType,
+		"resource_id":   uuidToString(resourceID),
+	})
+}
+
 // Thin wrappers around util functions.
 //
 // parseUUID is intentionally the panicking variant: any handler call site
@@ -499,8 +547,11 @@ func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
 func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
-func dateToPtr(d pgtype.Date) *string               { return util.DateToPtr(d) }
-func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
+func timestampToNanoPtr(t pgtype.Timestamptz) *string {
+	return util.TimestampToNanoPtr(t)
+}
+func dateToPtr(d pgtype.Date) *string { return util.DateToPtr(d) }
+func uuidToPtr(u pgtype.UUID) *string { return util.UUIDToPtr(u) }
 
 // uuidsToStrings maps a UUID array column to string ids, skipping NULL/invalid
 // entries. Returns nil (not an empty slice) when there is nothing to emit so

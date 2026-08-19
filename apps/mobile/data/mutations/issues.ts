@@ -30,6 +30,18 @@ import { inboxKeys } from "@/data/queries/inbox";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useFailedCommentsStore } from "@/data/stores/failed-comments-store";
+import {
+  commentContentFromTimeline,
+  shouldAcceptServerRevision,
+} from "@/data/revision";
+import {
+  advanceCommentRevision,
+  onIssueAuxiliaryRevision,
+  reconcileIssueFullSnapshotRevision,
+  commentToTimelineEntry,
+  patchIssueLabels,
+  replaceCommentTimelineEntry,
+} from "@/data/realtime/issue-ws-updaters";
 
 export type ToggleCommentReactionVars = {
   commentId: string;
@@ -116,7 +128,10 @@ export function useCreateComment(issueId: string) {
     // to keep its optimistic entry so the inline retry UI has something to
     // render against. The success refetch replaces the synthetic id with
     // the server-issued one (same ASC bottom position).
-    onSuccess: () => {
+    onSuccess: (comment) => {
+      if (wsId) {
+        onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
+      }
       qc.invalidateQueries({
         queryKey: issueKeys.timeline(wsId, issueId),
       });
@@ -208,6 +223,17 @@ export function useToggleCommentReaction(issueId: string) {
         qc.setQueryData(ctx.key, ctx.prev);
       }
     },
+    onSuccess: (reaction, vars) => {
+      if (reaction && wsId) {
+        advanceCommentRevision(
+          qc,
+          wsId,
+          issueId,
+          vars.commentId,
+          reaction.comment_revision,
+        );
+      }
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
@@ -235,7 +261,17 @@ export function useEditComment(issueId: string) {
       commentId: string;
       content: string;
       attachmentIds?: string[];
-    }) => api.updateComment(commentId, content, attachmentIds),
+    }) => {
+      const timeline = qc.getQueryData<TimelineEntry[]>(
+        issueKeys.timeline(wsId, issueId),
+      );
+      return api.updateComment(
+        commentId,
+        content,
+        attachmentIds,
+        commentContentFromTimeline(timeline, commentId),
+      );
+    },
     onMutate: async ({ commentId, content }) => {
       const key = issueKeys.timeline(wsId, issueId);
       await qc.cancelQueries({ queryKey: key });
@@ -256,6 +292,16 @@ export function useEditComment(issueId: string) {
     onError: (_err, _vars, ctx) => {
       if (ctx?.prev !== undefined && ctx.key) {
         qc.setQueryData(ctx.key, ctx.prev);
+      }
+    },
+    onSuccess: (comment) => {
+      if (wsId) {
+        replaceCommentTimelineEntry(
+          qc,
+          wsId,
+          issueId,
+          commentToTimelineEntry(comment),
+        );
       }
     },
     onSettled: () => {
@@ -345,6 +391,16 @@ export function useResolveComment(issueId: string) {
         qc.setQueryData(ctx.key, ctx.prev);
       }
     },
+    onSuccess: (comment) => {
+      if (wsId) {
+        replaceCommentTimelineEntry(
+          qc,
+          wsId,
+          issueId,
+          commentToTimelineEntry(comment),
+        );
+      }
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, issueId) });
     },
@@ -402,6 +458,17 @@ export function useToggleIssueReaction(issueId: string) {
         qc.setQueryData(ctx.key, ctx.prev);
       }
     },
+    onSuccess: (reaction) => {
+      if (reaction && wsId) {
+        onIssueAuxiliaryRevision(
+          qc,
+          wsId,
+          issueId,
+          reaction.issue_revision,
+          "issue_reactions",
+        );
+      }
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
     },
@@ -435,6 +502,8 @@ export function useUpdateIssue(issueId: string) {
         const {
           description: _description,
           description_base: _descriptionBase,
+          title_base: _titleBase,
+          expected_revision: _expectedRevision,
           ...optimisticPatch
         } = patch;
         qc.setQueryData<Issue>(key, { ...prev, ...optimisticPatch });
@@ -447,7 +516,19 @@ export function useUpdateIssue(issueId: string) {
       }
     },
     onSuccess: (server) => {
-      qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), server);
+      qc.setQueryData<Issue>(issueKeys.detail(wsId, issueId), (current) =>
+        !current || shouldAcceptServerRevision(current.revision, server.revision)
+          ? server
+          : current,
+      );
+      if (wsId) {
+        reconcileIssueFullSnapshotRevision(
+          qc,
+          wsId,
+          issueId,
+          server.revision,
+        );
+      }
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) });
@@ -494,10 +575,8 @@ export function useAttachLabel(issueId: string) {
       }
     },
     onSuccess: (server) => {
-      const key = issueKeys.detail(wsId, issueId);
-      const current = qc.getQueryData<Issue>(key);
-      if (current) {
-        qc.setQueryData<Issue>(key, { ...current, labels: server.labels });
+      if (wsId) {
+        patchIssueLabels(qc, wsId, issueId, server.labels, server.issue_revision);
       }
     },
     onSettled: () => {
@@ -534,10 +613,8 @@ export function useDetachLabel(issueId: string) {
       }
     },
     onSuccess: (server) => {
-      const key = issueKeys.detail(wsId, issueId);
-      const current = qc.getQueryData<Issue>(key);
-      if (current) {
-        qc.setQueryData<Issue>(key, { ...current, labels: server.labels });
+      if (wsId) {
+        patchIssueLabels(qc, wsId, issueId, server.labels, server.issue_revision);
       }
     },
     onSettled: () => {

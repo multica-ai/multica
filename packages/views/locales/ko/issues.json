@@ -1,4 +1,19 @@
 {
+  "status_catalog_error": {
+    "title": "상태 목록을 불러오지 못했습니다",
+    "hint": "이것 없이는 상태 필터를 적용할 수 없어 이슈를 표시하지 않습니다.",
+    "retry": "다시 시도"
+  },
+  "revision": {
+    "conflict": "태스크 또는 댓글이 변경되었습니다. 최신 버전으로 새로 고쳤으니 비교한 후 다시 저장하세요.",
+    "compare_title": "제목이 동시에 변경되었습니다. 두 버전을 비교하세요.",
+    "compare_description": "설명이 동시에 변경되었습니다. 두 버전을 비교하세요.",
+    "compare_comment": "댓글이 동시에 변경되었습니다. 두 버전을 비교하세요.",
+    "server_version": "서버의 최신 버전",
+    "local_version": "내 로컬 버전",
+    "keep_local": "내 버전 유지",
+    "use_server": "최신 버전 사용"
+  },
   "page": {
     "breadcrumb_title": "태스크",
     "breadcrumb_workspace_fallback": "워크스페이스",
@@ -37,6 +52,7 @@
   "filters": {
     "tooltip": "필터",
     "placeholder": "필터...",
+    "search_status": "상태 검색...",
     "no_results": "결과 없음",
     "no_labels": "아직 라벨이 없습니다",
     "no_assignee": "담당자 없음",
@@ -754,5 +770,10 @@
     "manage_hint": "순서와 표시 설정은 본인에게만 적용됩니다",
     "visible_toggle": "뷰 바에 표시",
     "more_label": "더 많은 뷰"
+  },
+  "plugins": {
+    "panels": "Plugins",
+    "surface_failed": "{{name}}의 인터페이스를 불러오지 못했습니다.",
+    "surface_local_only": "{{name}}은(는) 로컬 소스에서 설치되어 브라우저에서 인터페이스를 불러올 수 없습니다."
   }
 }

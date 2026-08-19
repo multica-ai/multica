@@ -35,14 +35,11 @@
     "class-variance-authority": "catalog:",
     "clsx": "catalog:",
     "cmdk": "^1.1.1",
-    "date-fns": "^4.1.0",
-    "embla-carousel-react": "^8.6.0",
     "emoji-mart": "^5.6.0",
     "input-otp": "^1.4.2",
     "linkify-it": "^5.0.0",
     "katex": "catalog:",
     "lucide-react": "catalog:",
-    "motion": "^12.38.0",
     "next-themes": "^0.4.6",
     "react-day-picker": "^9.14.0",
     "react-markdown": "^10.1.0",
@@ -57,9 +54,7 @@
     "shiki": "^3.21.0",
     "sonner": "^2.0.7",
     "tailwind-merge": "catalog:",
-    "tw-animate-css": "^1.4.0",
-    "unicode-animations": "catalog:",
-    "vaul": "^1.1.2"
+    "unicode-animations": "catalog:"
   },
   "peerDependencies": {
     "i18next": "catalog:",

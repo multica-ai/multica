@@ -1,4 +1,19 @@
 {
+  "status_catalog_error": {
+    "title": "Couldn't load the status list",
+    "hint": "Issues are hidden until it loads, because a status filter can't be applied without it.",
+    "retry": "Try again"
+  },
+  "revision": {
+    "conflict": "The issue or comment changed. The latest version was refreshed; compare it before saving again.",
+    "compare_title": "The title was changed concurrently. Compare both versions.",
+    "compare_description": "The description was changed concurrently. Compare both versions.",
+    "compare_comment": "The comment was changed concurrently. Compare both versions.",
+    "server_version": "Latest server version",
+    "local_version": "Your local version",
+    "keep_local": "Keep my version",
+    "use_server": "Use the latest version"
+  },
   "page": {
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "Workspace",
@@ -37,6 +52,7 @@
   "filters": {
     "tooltip": "Filter",
     "placeholder": "Filter...",
+    "search_status": "Search status...",
     "no_results": "No results",
     "no_labels": "No labels yet",
     "no_assignee": "No assignee",
@@ -784,5 +800,10 @@
     "manage_hint": "Order and visibility only affect you",
     "visible_toggle": "Show in view bar",
     "more_label": "More views"
+  },
+  "plugins": {
+    "panels": "Plugins",
+    "surface_failed": "{{name}} could not load its interface.",
+    "surface_local_only": "{{name}} was installed from a local source, so its interface cannot be loaded in the browser."
   }
 }

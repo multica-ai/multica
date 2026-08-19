@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-shellwords"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
@@ -198,6 +199,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	//     binary lookup; pre-existing path.
 	//   - OPENCLAW_STATE_DIR:    OpenClaw's own env var; the daemon already
 	//     forwards it to spawned children via mergeEnv (server/pkg/agent/...).
+	//   - MULTICA_OPENCLAW_CLI_TIMEOUT: read by execenv when it sets the
+	//     deadline on each `openclaw config ...` call during task prep.
 	//
 	// Precedence is "env wins over config wins over default" — same shape
 	// users already get with MULTICA_OPENCLAW_PATH today. We achieve it with
@@ -1076,7 +1079,8 @@ func openclawOverrideFrom(cfg cli.CLIConfig) *cli.OpenClawOverride {
 //
 // Side-effecting on os.Setenv is intentional and scoped:
 //
-//   - The two vars touched (MULTICA_OPENCLAW_PATH, OPENCLAW_STATE_DIR) are
+//   - The three vars touched (MULTICA_OPENCLAW_PATH, OPENCLAW_STATE_DIR,
+//     MULTICA_OPENCLAW_CLI_TIMEOUT) are
 //     OpenClaw-specific. Other backends do not read them; setting them in the
 //     daemon process has no observable effect on, e.g., Claude Code or Codex
 //     spawn behavior.
@@ -1096,6 +1100,11 @@ func applyOpenclawOverride(oc *cli.OpenClawOverride) {
 	if oc.StateDir != "" {
 		if _, set := os.LookupEnv("OPENCLAW_STATE_DIR"); !set {
 			_ = os.Setenv("OPENCLAW_STATE_DIR", oc.StateDir)
+		}
+	}
+	if oc.CLITimeout != "" {
+		if _, set := os.LookupEnv(execenv.OpenclawCLITimeoutEnv); !set {
+			_ = os.Setenv(execenv.OpenclawCLITimeoutEnv, oc.CLITimeout)
 		}
 	}
 }

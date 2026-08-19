@@ -180,6 +180,12 @@ handler inspects `custom_args` for a model flag. Pi is stricter at invocation
 time: `--thinking` in `custom_args` is filtered because the first-class
 `thinking_level` field owns that flag and must be the only source of its value.
 
+Never put credentials or other secrets in `custom_args`. Daemon command logs
+redact argument values, but the values still live in the provider process's
+argv and may be visible to other local processes through `ps` or `/proc`. Put
+provider credentials in `custom_env` instead, using its stdin or 0600 file
+input where possible.
+
 ## Env & secrets
 
 `custom_env` is secret material. The CLI offers three input channels; two keep

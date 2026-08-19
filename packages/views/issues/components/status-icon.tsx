@@ -1,5 +1,5 @@
 import { statusCategoryOfKey } from "@multica/core/issues";
-import type { IssueStatus } from "@multica/core/types";
+import type { IssueStatus, IssueStatusCategory } from "@multica/core/types";
 import { STATUS_CONFIG } from "@multica/core/issues/config";
 
 // ---------------------------------------------------------------------------
@@ -144,7 +144,7 @@ function CancelledIcon() {
 // Renderer map
 // ---------------------------------------------------------------------------
 
-const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
+const STATUS_RENDERERS: Record<IssueStatusCategory, () => React.ReactNode> = {
   backlog: BacklogIcon,
   todo: TodoIcon,
   in_progress: InProgressIcon,
@@ -160,22 +160,40 @@ const STATUS_RENDERERS: Record<IssueStatus, () => React.ReactNode> = {
 
 export function StatusIcon({
   status,
+  category: categoryProp,
+  color,
   className = "h-4 w-4",
   inheritColor = false,
 }: {
   status: IssueStatus | string;
+  /**
+   * Resolved category, for callers that hold the workspace catalog. Without it
+   * the key resolves on its own, which is exact for the 7 built-ins and falls
+   * back to `todo` for a custom key this render has no catalog for.
+   */
+  category?: IssueStatusCategory;
+  /** A custom status's `#rrggbb`. Built-ins keep their semantic token color. */
+  color?: string | null;
   className?: string;
   inheritColor?: boolean;
 }) {
-  const knownStatus = status in STATUS_RENDERERS ? (status as IssueStatus) : null;
-  const cfg = knownStatus ? STATUS_CONFIG[statusCategoryOfKey(knownStatus)] : null;
-  const Renderer = knownStatus ? STATUS_RENDERERS[knownStatus] : TodoIcon;
+  // The glyph set is per CATEGORY: a custom status renders with its category's
+  // icon, which is what makes it read as "the same kind of thing". (MUL-6243)
+  const category = categoryProp ?? statusCategoryOfKey(status);
+  const cfg = STATUS_CONFIG[category];
+  const Renderer = STATUS_RENDERERS[category] ?? TodoIcon;
+  // A custom color wins over the category's token, but only when the caller
+  // isn't already forcing the glyph to inherit (selected rows, dark chips).
+  const useCustomColor = !inheritColor && Boolean(color);
 
   return (
     <svg
       viewBox="0 0 14 14"
       fill="none"
-      className={`${className} ${inheritColor ? "" : cfg?.iconColor ?? "text-muted-foreground"} shrink-0`}
+      style={useCustomColor ? { color: color ?? undefined } : undefined}
+      className={`${className} ${
+        inheritColor || useCustomColor ? "" : cfg?.iconColor ?? "text-muted-foreground"
+      } shrink-0`}
     >
       <Renderer />
     </svg>

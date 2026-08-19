@@ -982,10 +982,11 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
 	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id":   uuidToString(updated.ID),
-		"properties": properties,
+		"issue_id":       uuidToString(updated.ID),
+		"properties":     properties,
+		"issue_revision": updated.Revision,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
+	writeJSON(w, http.StatusOK, map[string]any{"properties": properties, "issue_revision": updated.Revision})
 }
 
 func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
@@ -1032,10 +1033,11 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
 	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id":   uuidToString(updated.ID),
-		"properties": properties,
+		"issue_id":       uuidToString(updated.ID),
+		"properties":     properties,
+		"issue_revision": updated.Revision,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
+	writeJSON(w, http.StatusOK, map[string]any{"properties": properties, "issue_revision": updated.Revision})
 }
 
 // withPropertyLock runs fn inside a transaction holding the advisory lock
@@ -1070,6 +1072,11 @@ func (h *Handler) withPropertyLock(r *http.Request, lockKeys []string, fn func(q
 const (
 	maxPropertiesFilterDefinitions = 20
 	maxPropertiesFilterValues      = 50
+	// noPropertyValue is the filter value that means "unset" — it compiles to a
+	// key-absence predicate instead of a jsonb containment pattern. The string
+	// cannot collide with a real option id (select option ids are UUIDs and
+	// checkbox uses "true"/"false").
+	noPropertyValue = "__none__"
 )
 
 // parsePropertiesFilterParam reads the `properties` query parameter — a JSON
@@ -1080,6 +1087,10 @@ const (
 // checkbox. The stored value shape differs per type (string, array element,
 // boolean), so each value expands to every containment form it could match;
 // forms that can't match are simply never satisfied.
+//
+// The special value noPropertyValue ("__none__") means "unset": it emits the
+// marker object {"__none__": "<definitionId>"} that parseNoPropertyValuePattern
+// and the static ListOpenIssues unroll both recognize as a key-absence check.
 //
 // Returns (nil, true) when the parameter is empty.
 func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.RawMessage, bool) {
@@ -1119,10 +1130,24 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 			alternatives = append(alternatives, buf)
 			return true
 		}
+		hasNoValue := false
 		for _, value := range values {
 			if value == "" {
 				writeError(w, http.StatusBadRequest, "properties filter values cannot be empty")
 				return nil, false
+			}
+			if value == noPropertyValue {
+				if hasNoValue {
+					continue
+				}
+				marker, err := json.Marshal(map[string]string{noPropertyValue: definitionID})
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "properties filter is invalid")
+					return nil, false
+				}
+				alternatives = append(alternatives, marker)
+				hasNoValue = true
+				continue
 			}
 			if !appendAlt(value) || !appendAlt([]string{value}) { // select string / multi_select element
 				return nil, false
@@ -1148,16 +1173,36 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 	return groups, true
 }
 
+// parseNoPropertyValuePattern reports whether an alternative is the synthesized
+// "no value" marker — the jsonb object {"__none__": "<definitionId>"} — and
+// returns the definition id whose key-absence the predicate must test.
+func parseNoPropertyValuePattern(alt json.RawMessage) (string, bool) {
+	var marker map[string]string
+	if err := json.Unmarshal(alt, &marker); err != nil {
+		return "", false
+	}
+	defID, ok := marker[noPropertyValue]
+	return defID, ok
+}
+
 // propertiesFilterPredicate renders the AND-of-ORs containment check for a
 // compiled filter as plain `i.properties @> $n` disjunctions with one bind
 // parameter per alternative. Constant containment operands are what lets the
 // planner drive the jsonb_path_ops GIN index (a correlated
 // jsonb_array_elements form defeats it — verified via EXPLAIN in review).
+//
+// A "no value" marker alternative renders as a key-absence disjunction —
+// `NOT (i.properties ? $m)` — which cannot use the GIN index but is exact for
+// the unset state (property values are never null; DELETE unsets).
 func propertiesFilterPredicate(groups [][]json.RawMessage, addArg func(any) string) string {
 	groupSQL := make([]string, 0, len(groups))
 	for _, alternatives := range groups {
 		ors := make([]string, 0, len(alternatives))
 		for _, alt := range alternatives {
+			if defID, ok := parseNoPropertyValuePattern(alt); ok {
+				ors = append(ors, fmt.Sprintf("NOT (i.properties ? %s)", addArg(defID)))
+				continue
+			}
 			ors = append(ors, fmt.Sprintf("i.properties @> %s::jsonb", addArg(string(alt))))
 		}
 		groupSQL = append(groupSQL, "("+strings.Join(ors, " OR ")+")")

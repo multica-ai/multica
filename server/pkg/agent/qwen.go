@@ -98,8 +98,8 @@ func (b *qwenBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	}()
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
-	// args contain the task prompt; never expose it in daemon logs.
-	b.cfg.Logger.Info("agent command", "exec", execPath, "provider", "qwen")
+	// args contain the task prompt; the shared logger preserves only flag names.
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd

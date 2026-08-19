@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { QueryClient, hashKey } from "@tanstack/react-query";
 import {
   applyIssueChange,
+  invalidateLastActivitySortedIssueLists,
   invalidateUpdatedAtSortedIssueLists,
   rollbackIssueChange,
   type IssueFlatCache,
@@ -89,6 +90,32 @@ const flatUpdatedSortKey = issueKeys.flat(
   "workspace:all",
   {},
   updatedSort,
+);
+const lastActivitySort: IssueSortParam = {
+  sort_by: "last_activity",
+  sort_direction: "desc",
+};
+const wsLastActivityKey = issueKeys.listSorted(WS_ID, lastActivitySort);
+const flatLastActivityKey = issueKeys.flat(
+  WS_ID,
+  "workspace:all",
+  {},
+  lastActivitySort,
+);
+const assigneeGroupsLastActivityKey = issueKeys.assigneeGroups(WS_ID, {
+  ...lastActivitySort,
+});
+const tableLastActivityKey = issueKeys.tableRows(
+  WS_ID,
+  {
+    scope: { kind: "workspace" },
+    filters: {},
+    sort: { field: "last_activity", direction: "desc" },
+  },
+  { kind: "none" },
+  null,
+  false,
+  null,
 );
 // Assignee-grouped boards fold the sort into their filter bag
 // (issueAssigneeGroupsOptions does `{ ...filter, ...sort }`).
@@ -305,6 +332,36 @@ describe("applyIssueChange", () => {
     const stale = result.staleKeys.map(hashKey);
     expect(stale).toContain(hashKey(wsUpdatedKey));
     expect(stale).not.toContain(hashKey(wsKey));
+  });
+
+  it("re-sorts last_activity windows for semantic edits but not position-only moves", () => {
+    qc.setQueryData<ListIssuesCache>(wsLastActivityKey, bucketed([issue()]));
+    qc.setQueryData<IssueFlatCache>(flatLastActivityKey, {
+      pages: [{ issues: [issue()], total: 1 }],
+      pageParams: [0],
+    });
+
+    const titlePatch = { title: "semantic edit" };
+    const semantic = applyIssueChange(qc, WS_ID, "issue-1", titlePatch, {
+      changed: issueChangedDims(titlePatch, issue()),
+      baseIssue: issue(),
+    });
+    expect(semantic.staleKeys.map(hashKey)).toEqual([
+      hashKey(wsLastActivityKey),
+      hashKey(flatLastActivityKey),
+    ]);
+
+    const positionPatch = { position: 99 };
+    const layout = applyIssueChange(qc, WS_ID, "issue-1", positionPatch, {
+      changed: issueChangedDims(positionPatch, issue()),
+      baseIssue: issue(),
+    });
+    expect(layout.staleKeys.map(hashKey)).not.toContain(
+      hashKey(wsLastActivityKey),
+    );
+    expect(layout.staleKeys.map(hashKey)).not.toContain(
+      hashKey(flatLastActivityKey),
+    );
   });
 
   it("marks an updated_at-sorted board stale even when the edited card is beyond its window", () => {
@@ -630,5 +687,34 @@ describe("invalidateUpdatedAtSortedIssueLists", () => {
     invalidateUpdatedAtSortedIssueLists(qc, WS_ID);
 
     expect(qc.getQueryState(wsKey)?.isInvalidated).toBe(false);
+  });
+});
+
+describe("invalidateLastActivitySortedIssueLists", () => {
+  it("invalidates bucketed, flat, grouped, and server Table activity sorts only", () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    qc.setQueryData<ListIssuesCache>(wsLastActivityKey, bucketed([makeIssue(1)]));
+    qc.setQueryData<IssueFlatCache>(flatLastActivityKey, {
+      pages: [{ issues: [makeIssue(1)], total: 1 }],
+      pageParams: [0],
+    });
+    qc.setQueryData(assigneeGroupsLastActivityKey, { groups: [] });
+    qc.setQueryData(tableLastActivityKey, { rows: [] });
+    qc.setQueryData<ListIssuesCache>(wsUpdatedKey, bucketed([makeIssue(1)]));
+    qc.setQueryData<ListIssuesCache>(wsKey, bucketed([makeIssue(1)]));
+
+    invalidateLastActivitySortedIssueLists(qc, WS_ID);
+
+    for (const key of [
+      wsLastActivityKey,
+      flatLastActivityKey,
+      assigneeGroupsLastActivityKey,
+      tableLastActivityKey,
+    ]) {
+      expect(qc.getQueryState(key)?.isInvalidated).toBe(true);
+    }
+    expect(qc.getQueryState(wsUpdatedKey)?.isInvalidated).toBe(false);
+    expect(qc.getQueryState(wsKey)?.isInvalidated).toBe(false);
+    qc.clear();
   });
 });

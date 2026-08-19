@@ -6,9 +6,6 @@ import (
 	"net/netip"
 	"strings"
 	"testing"
-
-	"github.com/multica-ai/multica/server/pkg/plugincontract"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 )
 
 type staticResolver map[string][]netip.Addr
@@ -66,15 +63,15 @@ func TestToolSetDigestIgnoresInputSchemaObjectKeyOrder(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	schemaDigest := plugincontract.DigestBytes(canonical)
+	schemaDigest := DigestBytes(canonical)
 
-	first, err := ToolSetDigest([]pluginruntime.RemoteMCPTool{{
+	first, err := ToolSetDigest([]Tool{{
 		Name: "search", InputSchema: firstSchema, SchemaDigest: schemaDigest, Risk: "read",
 	}})
 	if err != nil {
 		t.Fatal(err)
 	}
-	second, err := ToolSetDigest([]pluginruntime.RemoteMCPTool{{
+	second, err := ToolSetDigest([]Tool{{
 		Name: "search", InputSchema: secondSchema, SchemaDigest: schemaDigest, Risk: "read",
 	}})
 	if err != nil {

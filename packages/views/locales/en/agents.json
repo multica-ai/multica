@@ -736,7 +736,7 @@
   "visibility": {
     "private": {
       "label": "Personal",
-      "tooltip": "Personal · only you and workspace admins can use this agent"
+      "tooltip": "Personal · only the owner and people they allow can run this agent"
     },
     "workspace": {
       "label": "Workspace",

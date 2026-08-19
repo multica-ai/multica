@@ -19,16 +19,16 @@ export type IssueStatusCategory =
   | "cancelled";
 
 /**
- * A status KEY as stored on the issue.
+ * A status KEY as stored on the issue: one of the 7 built-ins, or a custom key
+ * an admin defined for this workspace.
  *
- * STILL the closed 7-value union. Widening it to `string` — so a workspace's
- * CUSTOM statuses are representable — is the first task of the follow-up PR,
- * because it forces every `Record<IssueStatus, …>` presentation lookup in
- * `packages/views` to resolve a key to its category first. The catalog module
- * and the category type below exist so that change is mechanical rather than
- * exploratory. (MUL-6243)
+ * OPEN by design. `(string & {})` keeps editor autocomplete for the 7 built-ins
+ * while accepting any catalog key, which is what the server has always been
+ * able to send. Anything that needs presentation (label, colour, board column)
+ * must resolve the key to its CATEGORY first — `useIssueStatuses(wsId)` in a
+ * component, `statusCategoryOfKey` in a pure path. (MUL-6243)
  */
-export type IssueStatus = IssueStatusCategory;
+export type IssueStatus = IssueStatusCategory | (string & {});
 
 export type IssuePriority = "urgent" | "high" | "medium" | "low" | "none";
 
@@ -41,6 +41,7 @@ export interface IssueReaction {
   actor_id: string;
   emoji: string;
   created_at: string;
+  issue_revision?: number;
 }
 
 /**
@@ -93,4 +94,12 @@ export interface Issue {
   labels?: Label[];
   created_at: string;
   updated_at: string;
+  /** Monotonic server revision; absent when connected to an older backend. */
+  revision?: number;
+  /**
+   * Null until the server's historical activity backfill reaches this row.
+   * This RFC3339 timestamp may include sub-second precision while legacy
+   * created_at/updated_at values are second-precision; parse before comparing.
+   */
+  last_activity_at?: string | null;
 }

@@ -87,7 +87,7 @@ func (b *reasonixBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	reasonixArgs := append(reasonixACPLaunchArgs(), filterCustomArgs(opts.CustomArgs, reasonixBlockedArgs, b.cfg.Logger)...)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, reasonixArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", reasonixArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(reasonixArgs, trustAgentCommandPositional(0, "acp")))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

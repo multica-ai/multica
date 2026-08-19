@@ -1,6 +1,8 @@
 "use client";
 
-import { statusCategoryOfKey } from "@multica/core/issues";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useStatusLabel } from "../utils/status-label";
+import { NO_PROPERTY_VALUE } from "../utils/filter";
 import { useMemo, type ReactNode } from "react";
 import {
   CalendarDays,
@@ -179,6 +181,8 @@ function useFilterChips(
 ) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const resolveStatusLabel = useStatusLabel(wsId);
+  const { categoryOf, entryOf } = useIssueStatuses(wsId);
 
   const statusFilters = useViewStore((s) => s.statusFilters);
   const priorityFilters = useViewStore((s) => s.priorityFilters);
@@ -344,13 +348,19 @@ function useFilterChips(
       valueIcons: (
         <IconStack>
           {deltaStatus.slice(0, 3).map((s) => (
-            <StatusIcon key={s} status={s} className="size-3" />
+            <StatusIcon
+              key={s}
+              status={s}
+              category={categoryOf(s)}
+              color={entryOf(s)?.is_system === true ? null : entryOf(s)?.color}
+              className="size-3"
+            />
           ))}
         </IconStack>
       ),
       value:
         onlyStatus !== undefined && deltaStatus.length === 1
-          ? t(($) => $.status[statusCategoryOfKey(onlyStatus)])
+          ? resolveStatusLabel(onlyStatus)
           : t(($) => $.filters.chip_status_count, { count: deltaStatus.length }),
       onRemove: () => clearDimension("status"),
     });
@@ -448,6 +458,9 @@ function useFilterChips(
     const actorProperty = isActorPropertyType(definition.type);
     const actorValues = actorProperty ? actorFilterValues(selected) : [];
     const optionName = (optionId: string): string | undefined => {
+      if (optionId === NO_PROPERTY_VALUE) {
+        return t(($) => $.pickers.custom_property.none);
+      }
       if (actorProperty) {
         const ref = parseActorRef(optionId);
         return ref ? actorName({ type: ref.kind, id: ref.id }) : undefined;

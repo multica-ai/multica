@@ -7,6 +7,7 @@ import type { LocalDirectoryResourceRef, ProjectResource } from "@multica/core/t
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useLocalDaemonStatus } from "../../platform";
 import { useT } from "../../i18n";
+import { localDirectoryLabel } from "./local-directory-label";
 
 /**
  * Banner shown at the top of the issue's Activity section when the
@@ -58,8 +59,7 @@ export function LocalDirectoryHint({
     <div className="mt-3 space-y-1 rounded-md border border-dashed bg-muted/40 px-3 py-2 text-caption text-muted-foreground">
       {matches.map((resource) => {
         const ref = resource.resource_ref;
-        const label = (ref.label || resource.label || ref.local_path).trim() ||
-          ref.local_path;
+        const label = localDirectoryLabel(resource);
         // Anything other than an explicit "worktree" is in_place: the mode is
         // absent on resources created before it existed, and an unknown value
         // from a newer server must not claim isolation we cannot verify.

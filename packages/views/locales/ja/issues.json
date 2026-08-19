@@ -1,4 +1,19 @@
 {
+  "status_catalog_error": {
+    "title": "ステータス一覧を読み込めませんでした",
+    "hint": "これがないとステータスの絞り込みを適用できないため、イシューは表示されません。",
+    "retry": "再試行"
+  },
+  "revision": {
+    "conflict": "タスクまたはコメントが変更されました。最新版に更新したので、比較してからもう一度保存してください。",
+    "compare_title": "タイトルが同時に変更されました。両方の内容を比較してください。",
+    "compare_description": "説明が同時に変更されました。両方の内容を比較してください。",
+    "compare_comment": "コメントが同時に変更されました。両方の内容を比較してください。",
+    "server_version": "サーバー上の最新版",
+    "local_version": "ローカル版",
+    "keep_local": "自分の版を使用",
+    "use_server": "最新版を使用"
+  },
   "page": {
     "breadcrumb_title": "タスク",
     "breadcrumb_workspace_fallback": "ワークスペース",
@@ -37,6 +52,7 @@
   "filters": {
     "tooltip": "フィルター",
     "placeholder": "フィルター...",
+    "search_status": "ステータスを検索...",
     "no_results": "結果なし",
     "no_labels": "まだラベルがありません",
     "no_assignee": "担当者なし",
@@ -754,5 +770,10 @@
     "manage_hint": "並び順と表示設定は自分にのみ適用されます",
     "visible_toggle": "ビューバーに表示",
     "more_label": "その他のビュー"
+  },
+  "plugins": {
+    "panels": "Plugins",
+    "surface_failed": "{{name}} のインターフェースを読み込めませんでした。",
+    "surface_local_only": "{{name}} はローカルソースからインストールされているため、ブラウザでインターフェースを読み込めません。"
   }
 }

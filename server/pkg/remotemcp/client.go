@@ -17,9 +17,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/multica-ai/multica/server/pkg/plugincontract"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 )
 
 const (
@@ -157,7 +154,7 @@ type discoveredTool struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
-func Discover(ctx context.Context, rawEndpoint string, allowedHosts, protocolVersions []string, headers http.Header) ([]pluginruntime.RemoteMCPTool, string, error) {
+func Discover(ctx context.Context, rawEndpoint string, allowedHosts, protocolVersions []string, headers http.Header) ([]Tool, string, error) {
 	endpoint, err := ValidatePublicHTTPSEndpoint(ctx, rawEndpoint, allowedHosts, nil)
 	if err != nil {
 		return nil, "", err
@@ -204,7 +201,7 @@ func Discover(ctx context.Context, rawEndpoint string, allowedHosts, protocolVer
 	if err := json.Unmarshal(toolsResponse.Result, &result); err != nil {
 		return nil, "", fmt.Errorf("decode tools/list result: %w", err)
 	}
-	tools := make([]pluginruntime.RemoteMCPTool, 0, len(result.Tools))
+	tools := make([]Tool, 0, len(result.Tools))
 	seen := map[string]bool{}
 	for _, tool := range result.Tools {
 		if strings.TrimSpace(tool.Name) == "" || seen[tool.Name] {
@@ -215,9 +212,9 @@ func Discover(ctx context.Context, rawEndpoint string, allowedHosts, protocolVer
 		if err != nil {
 			return nil, "", fmt.Errorf("tool %q input schema: %w", tool.Name, err)
 		}
-		tools = append(tools, pluginruntime.RemoteMCPTool{
+		tools = append(tools, Tool{
 			Name: tool.Name, Description: tool.Description, InputSchema: canonical,
-			SchemaDigest: plugincontract.DigestBytes(canonical),
+			SchemaDigest: DigestBytes(canonical),
 		})
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
@@ -356,8 +353,8 @@ func canonicalJSON(raw json.RawMessage) (json.RawMessage, error) {
 	return json.RawMessage(canonical), err
 }
 
-func ToolSetDigest(tools []pluginruntime.RemoteMCPTool) (string, error) {
-	copyTools := append([]pluginruntime.RemoteMCPTool(nil), tools...)
+func ToolSetDigest(tools []Tool) (string, error) {
+	copyTools := append([]Tool(nil), tools...)
 	for i := range copyTools {
 		canonical, err := canonicalJSON(copyTools[i].InputSchema)
 		if err != nil {
@@ -370,5 +367,5 @@ func ToolSetDigest(tools []pluginruntime.RemoteMCPTool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return plugincontract.DigestBytes(raw), nil
+	return DigestBytes(raw), nil
 }

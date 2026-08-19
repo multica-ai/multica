@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { issueKeys, PAGINATED_CATEGORIES } from "@multica/core/issues/queries";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { IssueStatus, ListIssuesCache } from "@multica/core/types";
+import type { IssueStatusCategory, ListIssuesCache } from "@multica/core/types";
 import type { QueryClient } from "@tanstack/react-query";
 import enCommon from "../../locales/en/common.json";
 import enAuth from "../../locales/en/auth.json";
@@ -117,7 +117,7 @@ function fakeQc(data: {
   const byStatus: ListIssuesCache["byStatus"] = {};
   for (const status of PAGINATED_CATEGORIES) {
     const bucket = (data.issues ?? []).filter((i) => i.status === status);
-    byStatus[status as IssueStatus] = { issues: bucket as never, total: bucket.length };
+    byStatus[status as IssueStatusCategory] = { issues: bucket as never, total: bucket.length };
   }
   map.set(
     JSON.stringify(issueKeys.list("ws-1")),
@@ -906,9 +906,9 @@ describe("MentionList cancelled demotion", () => {
 
   it("sorts cancelled issues below live ones regardless of input order", () => {
     const items: MentionItem[] = [
-      { id: "i-1", label: "MUL-1", type: "issue", status: "cancelled" },
+      { id: "i-1", label: "MUL-1", type: "issue", status: "cancelled", statusCategory: "cancelled" },
       { id: "i-2", label: "MUL-2", type: "issue", status: "in_progress" },
-      { id: "i-3", label: "MUL-3", type: "issue", status: "cancelled" },
+      { id: "i-3", label: "MUL-3", type: "issue", status: "cancelled", statusCategory: "cancelled" },
       { id: "i-4", label: "MUL-4", type: "issue", status: "backlog" },
     ];
 
@@ -927,6 +927,7 @@ describe("MentionList cancelled demotion", () => {
         label: `MUL-${100 + n}`,
         type: "issue" as const,
         status: "cancelled" as const,
+        statusCategory: "cancelled" as const,
       })),
       { id: "i-live", label: "MUL-9", type: "issue", status: "todo" },
     ];
@@ -944,7 +945,7 @@ describe("MentionList cancelled demotion", () => {
     // "Current" is explicit context, not a relevance hit — demoting it past the
     // truncation would make the issue on screen vanish from its own picker.
     const items: MentionItem[] = [
-      { id: "i-cur", label: "MUL-7", type: "issue", status: "cancelled", group: "current" },
+      { id: "i-cur", label: "MUL-7", type: "issue", status: "cancelled", statusCategory: "cancelled", group: "current" },
       { id: "i-live", label: "MUL-8", type: "issue", status: "in_progress" },
     ];
 
@@ -984,7 +985,7 @@ describe("MentionList cancelled demotion", () => {
     // The cached row is merged first; without the demotion it would render on
     // top of the server's higher-ranked live match.
     const items: MentionItem[] = [
-      { id: "i-cached", label: "MUL-20", type: "issue", status: "cancelled", description: "Cancelled match" },
+      { id: "i-cached", label: "MUL-20", type: "issue", status: "cancelled", statusCategory: "cancelled", description: "Cancelled match" },
     ];
 
     render(<I18nWrapper><MentionList items={items} query="match" command={vi.fn()} /></I18nWrapper>);

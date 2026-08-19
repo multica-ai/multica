@@ -17,7 +17,7 @@ import {
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Virtuoso } from "react-virtuoso";
 import { Button } from "@multica/ui/components/ui/button";
-import type { Issue, IssueStatus, Project } from "@multica/core/types";
+import type { Issue, IssueStatusCategory, Project } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
@@ -57,7 +57,7 @@ const LIST_ROW_ESTIMATED_HEIGHT = 36;
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
 
-function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
+function buildListGroups(visibleStatuses: IssueStatusCategory[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
     id: statusGroupId(status),
     title: status,
@@ -77,7 +77,7 @@ function ListViewImpl({
   onCreateIssue,
 }: {
   issues: Issue[];
-  visibleStatuses: IssueStatus[];
+  visibleStatuses: IssueStatusCategory[];
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
   statusPagination: IssueStatusPagination;
@@ -357,7 +357,7 @@ function ListViewImpl({
           const wasExpanded = expandedStatuses.includes(status);
           const isExpanded = value.includes(status);
           if (wasExpanded !== isExpanded) {
-            toggleListCollapsed(status as IssueStatus);
+            toggleListCollapsed(status as IssueStatusCategory);
           }
         }
       }}
@@ -432,7 +432,7 @@ function StatusAccordionItem({
   sortLabel,
   scrollParent,
 }: {
-  status: IssueStatus;
+  status: IssueStatusCategory;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;

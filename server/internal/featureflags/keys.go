@@ -62,6 +62,9 @@ var frontendPublicFlags = []string{
 	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
 	PluginsV1,
+	// The settings UI needs this to decide whether to offer status creation at
+	// all. Without it the tab would show a "New status" button that 403s.
+	CustomIssueStatuses,
 }
 
 func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {

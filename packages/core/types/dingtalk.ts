@@ -14,6 +14,10 @@ export interface DingTalkInstallation {
   installed_at: string;
   created_at: string;
   updated_at: string;
+  /** DingTalk staff ids linked by the currently authenticated Multica user for
+   * this bot. Member-scoped so the member-visible installation endpoint does
+   * not disclose other members' DingTalk identities. */
+  bound_dingtalk_user_ids?: string[];
 }
 
 export interface ListDingTalkInstallationsResponse {
