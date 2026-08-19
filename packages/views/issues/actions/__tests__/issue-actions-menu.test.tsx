@@ -1,12 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type {
-  AgentRuntime,
-  AgentTask,
-  Issue,
-  ProjectResource,
-} from "@multica/core/types";
+import type { AgentTask, Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
@@ -111,24 +106,19 @@ vi.mock("../../../navigation", () => ({
   }),
 }));
 
-vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+const { toastSuccessMock } = vi.hoisted(() => ({
+  toastSuccessMock: vi.fn(),
 }));
 
-const { apiMocks, copyTextMock, localDaemonState } = vi.hoisted(() => ({
+vi.mock("sonner", () => ({
+  toast: { success: toastSuccessMock, error: vi.fn() },
+}));
+
+const { apiMocks, copyTextMock } = vi.hoisted(() => ({
   apiMocks: {
-    listProjectResources: vi.fn(),
-    listRuntimes: vi.fn(),
     listTasksByIssue: vi.fn(),
   },
   copyTextMock: vi.fn(),
-  localDaemonState: {
-    current: {
-      daemonId: null as string | null,
-      deviceName: null as string | null,
-      running: false,
-    },
-  },
 }));
 
 vi.mock("@multica/core/api", () => ({
@@ -137,10 +127,6 @@ vi.mock("@multica/core/api", () => ({
 
 vi.mock("@multica/ui/lib/clipboard", () => ({
   copyText: copyTextMock,
-}));
-
-vi.mock("../../../platform", () => ({
-  useLocalDaemonStatus: () => localDaemonState.current,
 }));
 
 vi.mock("../../../common/actor-avatar", () => ({
@@ -155,8 +141,6 @@ import {
 } from "../issue-actions-context-menu";
 
 const listTasksByIssueMock = apiMocks.listTasksByIssue;
-const listRuntimesMock = apiMocks.listRuntimes;
-const listProjectResourcesMock = apiMocks.listProjectResources;
 
 const mockIssue: Issue = {
   id: "issue-1",
@@ -197,17 +181,9 @@ beforeEach(() => {
   navState.hasOpenInNewTab = true;
   copyTextMock.mockReset();
   copyTextMock.mockResolvedValue(true);
-  localDaemonState.current = {
-    daemonId: null,
-    deviceName: null,
-    running: false,
-  };
+  toastSuccessMock.mockReset();
   listTasksByIssueMock.mockReset();
   listTasksByIssueMock.mockResolvedValue([]);
-  listRuntimesMock.mockReset();
-  listRuntimesMock.mockResolvedValue([]);
-  listProjectResourcesMock.mockReset();
-  listProjectResourcesMock.mockResolvedValue({ resources: [], total: 0 });
 });
 
 describe("IssueActionsDropdown", () => {
@@ -319,84 +295,50 @@ describe("IssueActionsDropdown", () => {
   });
 
   it("copies the durable local project path for a worktree task", async () => {
-    localDaemonState.current = {
-      daemonId: "daemon-local",
-      deviceName: "MacBook",
-      running: true,
-    };
-    const projectIssue = { ...mockIssue, project_id: "project-1" } as Issue;
     listTasksByIssueMock.mockResolvedValue([
       {
-        runtime_id: "runtime-local",
+        status: "completed",
         created_at: "2026-08-18T10:00:00Z",
         work_dir: "/managed/task/worktree",
+        durable_work_dir: "/Users/dev/project",
+        branch_name: "agent/j/abc12345",
       } as AgentTask,
     ]);
-    listRuntimesMock.mockResolvedValue([
-      { id: "runtime-local", daemon_id: "daemon-local" } as AgentRuntime,
-    ]);
-    listProjectResourcesMock.mockResolvedValue({
-      resources: [
-        {
-          id: "resource-1",
-          project_id: "project-1",
-          workspace_id: "ws-1",
-          resource_type: "local_directory",
-          resource_ref: {
-            daemon_id: "daemon-local",
-            local_path: "/Users/dev/project",
-            execution_mode: "worktree",
-          },
-          label: "project",
-          position: 0,
-          created_at: "2026-08-18T09:00:00Z",
-          created_by: "user-1",
-        } satisfies ProjectResource,
-      ],
-      total: 1,
-    });
 
     render(
       wrap(
         <IssueActionsDropdown
-          issue={projectIssue}
+          issue={mockIssue}
           trigger={<button data-testid="trigger">Menu</button>}
         />,
       ),
     );
 
     fireEvent.click(screen.getByTestId("trigger"));
-    await waitFor(() => {
-      expect(listProjectResourcesMock).toHaveBeenCalledWith("project-1");
-    });
-    fireEvent.click(await screen.findByText("Copy local workdir path"));
+    fireEvent.click(await screen.findByText("Copy project directory path"));
 
     await waitFor(() => {
       expect(copyTextMock).toHaveBeenCalledWith("/Users/dev/project");
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        "Project directory path copied — work is on agent/j/abc12345",
+      );
     });
   });
 
-  it("falls back to the task workdir while local context is loading", async () => {
-    localDaemonState.current = {
-      daemonId: "daemon-local",
-      deviceName: "MacBook",
-      running: true,
-    };
-    const projectIssue = { ...mockIssue, project_id: "project-1" } as Issue;
+  it("keeps a live task on its actual workdir", async () => {
     listTasksByIssueMock.mockResolvedValue([
       {
-        runtime_id: "runtime-local",
+        status: "running",
         created_at: "2026-08-18T10:00:00Z",
         work_dir: "/managed/task/worktree",
+        durable_work_dir: "/Users/dev/project",
       } as AgentTask,
     ]);
-    listRuntimesMock.mockImplementation(() => new Promise(() => {}));
-    listProjectResourcesMock.mockImplementation(() => new Promise(() => {}));
 
     render(
       wrap(
         <IssueActionsDropdown
-          issue={projectIssue}
+          issue={mockIssue}
           trigger={<button data-testid="trigger">Menu</button>}
         />,
       ),
@@ -405,8 +347,6 @@ describe("IssueActionsDropdown", () => {
     fireEvent.click(screen.getByTestId("trigger"));
     await waitFor(() => {
       expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1");
-      expect(listRuntimesMock).toHaveBeenCalled();
-      expect(listProjectResourcesMock).toHaveBeenCalledWith("project-1");
     });
     fireEvent.click(await screen.findByText("Copy local workdir path"));
 

@@ -368,6 +368,8 @@
     "link_copied": "リンクをコピーしました",
     "link_copy_failed": "リンクをコピーできませんでした",
     "workdir_path_copied": "作業ディレクトリのパスをコピーしました",
+    "project_directory_path_copied": "プロジェクトディレクトリのパスをコピーしました",
+    "project_directory_path_copied_with_branch": "プロジェクトディレクトリのパスをコピーしました — 作業は {{branch}} ブランチにあります",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
     "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません"
   },
@@ -616,6 +618,7 @@
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
     "copy_link": "リンクをコピー",
     "copy_workdir_path": "ローカルの作業ディレクトリのパスをコピー",
+    "copy_project_directory_path": "プロジェクトディレクトリのパスをコピー",
     "relations": "関係",
     "create_sub_issue": "サブタスクを作成",
     "set_parent_issue": "親タスクを設定...",

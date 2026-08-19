@@ -373,6 +373,8 @@
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link",
     "workdir_path_copied": "Workdir path copied",
+    "project_directory_path_copied": "Project directory path copied",
+    "project_directory_path_copied_with_branch": "Project directory path copied — work is on {{branch}}",
     "workdir_path_copy_failed": "Failed to copy workdir path",
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
   },
@@ -646,6 +648,7 @@
     "unpin_from_sidebar": "Unpin from sidebar",
     "copy_link": "Copy link",
     "copy_workdir_path": "Copy local workdir path",
+    "copy_project_directory_path": "Copy project directory path",
     "relations": "Relations",
     "create_sub_issue": "Create sub-issue",
     "set_parent_issue": "Set parent issue...",

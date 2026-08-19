@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -20,11 +20,9 @@ import {
   UserMinus,
 } from "lucide-react";
 import type { Issue } from "@multica/core/types";
-import { resolveWorkdirCopyPath } from "@multica/core/issues";
+import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
 import { api } from "@multica/core/api";
-import { projectResourcesOptions } from "@multica/core/projects";
-import { runtimeListOptions } from "@multica/core/runtimes/queries";
 import {
   PRIORITY_DISPLAY_ORDER,
   PRIORITY_CONFIG,
@@ -52,7 +50,6 @@ import {
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
 import { useT } from "../../i18n";
-import { useLocalDaemonStatus } from "../../platform";
 
 // Both Dropdown and Context menu wrappers expose an API-compatible surface
 // (variant, inset, onClick, etc.). We bundle the primitives we need into a
@@ -109,7 +106,6 @@ export function IssueActionsMenuItems({
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const localDaemon = useLocalDaemonStatus();
   const { options: statusOptions } = useStatusOptions(wsId);
   const { categoryOf, entryOf } = useIssueStatuses(wsId);
   const {
@@ -138,17 +134,10 @@ export function IssueActionsMenuItems({
     queryFn: () => api.listTasksByIssue(issue.id),
     staleTime: 30_000,
   });
-  const shouldResolveLocalDirectory = Boolean(
-    localDaemon.daemonId && issue.project_id,
+  const workdirCopyTarget = useMemo(
+    () => resolveWorkdirCopyTarget(tasks),
+    [tasks],
   );
-  const runtimesQuery = useQuery({
-    ...runtimeListOptions(wsId),
-    enabled: shouldResolveLocalDirectory,
-  });
-  const projectResourcesQuery = useQuery({
-    ...projectResourcesOptions(wsId, issue.project_id ?? ""),
-    enabled: shouldResolveLocalDirectory,
-  });
 
   // Synchronous click handler — the awaited fetch in the previous version
   // dropped the browser's transient user activation, which made
@@ -156,26 +145,28 @@ export function IssueActionsMenuItems({
   // was cold. We now read straight from the cached query result and write
   // to the clipboard inside the same task as the click.
   const handleCopyWorkdirPath = useCallback(() => {
-    const latestWorkDir = resolveWorkdirCopyPath(tasks, {
-      localDaemonId: localDaemon.daemonId,
-      runtimes: runtimesQuery.data,
-      projectResources: projectResourcesQuery.data,
-    });
-    if (!latestWorkDir) {
+    if (!workdirCopyTarget) {
       toast.error(t(($) => $.detail.workdir_path_unavailable));
       return;
     }
-    void copyText(latestWorkDir).then((ok) => {
-      if (ok) toast.success(t(($) => $.detail.workdir_path_copied));
-      else toast.error(t(($) => $.detail.workdir_path_copy_failed));
+    void copyText(workdirCopyTarget.path).then((ok) => {
+      if (!ok) {
+        toast.error(t(($) => $.detail.workdir_path_copy_failed));
+        return;
+      }
+      if (workdirCopyTarget.source === "durable_project_directory") {
+        toast.success(
+          workdirCopyTarget.branchName
+            ? t(($) => $.detail.project_directory_path_copied_with_branch, {
+                branch: workdirCopyTarget.branchName,
+              })
+            : t(($) => $.detail.project_directory_path_copied),
+        );
+        return;
+      }
+      toast.success(t(($) => $.detail.workdir_path_copied));
     });
-  }, [
-    localDaemon.daemonId,
-    projectResourcesQuery.data,
-    runtimesQuery.data,
-    tasks,
-    t,
-  ]);
+  }, [workdirCopyTarget, t]);
 
   return (
     <>
@@ -326,7 +317,9 @@ export function IssueActionsMenuItems({
       </P.Item>
       <P.Item onClick={handleCopyWorkdirPath}>
         <FolderOpen className="h-3.5 w-3.5" />
-        {t(($) => $.actions.copy_workdir_path)}
+        {workdirCopyTarget?.source === "durable_project_directory"
+          ? t(($) => $.actions.copy_project_directory_path)
+          : t(($) => $.actions.copy_workdir_path)}
       </P.Item>
 
       <P.Separator />

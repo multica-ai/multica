@@ -1,65 +1,68 @@
-import type { AgentRuntime, AgentTask } from "../types/agent";
-import type { ProjectResource } from "../types/project";
+import type { AgentTask } from "../types/agent";
 
-type WorkdirTask = Pick<AgentTask, "created_at" | "runtime_id" | "work_dir">;
-type WorkdirRuntime = Pick<AgentRuntime, "daemon_id" | "id">;
-type WorkdirProjectResource = Pick<
-  ProjectResource,
-  "resource_ref" | "resource_type"
+type WorkdirTask = Pick<
+  AgentTask,
+  | "branch_name"
+  | "created_at"
+  | "durable_work_dir"
+  | "relative_durable_work_dir"
+  | "relative_work_dir"
+  | "status"
+  | "work_dir"
 >;
 
-export interface WorkdirCopyContext {
-  localDaemonId?: string | null;
-  projectResources?: readonly WorkdirProjectResource[];
-  runtimes?: readonly WorkdirRuntime[];
+export interface WorkdirCopyTarget {
+  path: string;
+  relativePath?: string;
+  branchName?: string;
+  source: "durable_project_directory" | "task_workdir";
 }
 
+const terminalStatuses = new Set(["completed", "failed", "cancelled"]);
+
 /**
- * Resolves the path copied by issue actions.
+ * Resolves the path copied for a task without inferring ownership from the
+ * current machine or mutable project configuration.
  *
- * A worktree-mode local_directory task records its disposable task worktree in
- * `work_dir`. Once that task is finalized the worktree is removed, so Desktop
- * should copy the durable project `local_path` when it can prove the latest
- * task ran on this daemon. Every unverified case keeps the existing `work_dir`
- * behavior instead of guessing that a local project binding owns a remote run.
+ * `durable_work_dir` is a daemon-reported lifecycle fact: it is populated only
+ * after a disposable worktree was finalized and its removal confirmed. Until
+ * then (and for mixed-version deployments) `work_dir` remains authoritative.
  */
-export function resolveWorkdirCopyPath(
+export function resolveWorkdirCopyTarget(
   tasks: readonly WorkdirTask[] | undefined,
-  context: WorkdirCopyContext = {},
-): string | undefined {
+): WorkdirCopyTarget | undefined {
   const latestTask = tasks
-    ?.filter((task) => Boolean(task.work_dir))
+    ?.filter((task) => {
+      if (task.work_dir?.trim()) return true;
+      return (
+        terminalStatuses.has(task.status) &&
+        Boolean(task.durable_work_dir?.trim())
+      );
+    })
     .reduce<WorkdirTask | undefined>(
       (latest, task) =>
         !latest || task.created_at > latest.created_at ? task : latest,
       undefined,
     );
-  if (!latestTask?.work_dir) return undefined;
 
-  const { localDaemonId, projectResources = [], runtimes = [] } = context;
-  if (!localDaemonId) return latestTask.work_dir;
+  if (!latestTask) return undefined;
 
-  const latestRuntime = runtimes.find(
-    (runtime) => runtime.id === latestTask.runtime_id,
-  );
-  if (latestRuntime?.daemon_id !== localDaemonId) return latestTask.work_dir;
+  const durablePath = latestTask.durable_work_dir?.trim();
+  if (terminalStatuses.has(latestTask.status) && durablePath) {
+    return {
+      path: durablePath,
+      relativePath: latestTask.relative_durable_work_dir?.trim() || undefined,
+      branchName: latestTask.branch_name?.trim() || undefined,
+      source: "durable_project_directory",
+    };
+  }
 
-  const localPaths = projectResources.flatMap((resource) => {
-    if (resource.resource_type !== "local_directory") return [];
-    const ref = resource.resource_ref;
-    if (
-      typeof ref !== "object" ||
-      ref === null ||
-      !("daemon_id" in ref) ||
-      !("local_path" in ref) ||
-      ref.daemon_id !== localDaemonId ||
-      typeof ref.local_path !== "string" ||
-      ref.local_path.length === 0
-    ) {
-      return [];
-    }
-    return [ref.local_path];
-  });
-
-  return localPaths.length === 1 ? localPaths[0] : latestTask.work_dir;
+  const workDir = latestTask.work_dir?.trim();
+  if (!workDir) return undefined;
+  return {
+    path: workDir,
+    relativePath: latestTask.relative_work_dir?.trim() || undefined,
+    branchName: latestTask.branch_name?.trim() || undefined,
+    source: "task_workdir",
+  };
 }

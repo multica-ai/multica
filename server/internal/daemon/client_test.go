@@ -322,7 +322,7 @@ func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL)
-	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "", "timeout", true, ""); err != nil {
+	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "", "timeout", true, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 	if got := calls.Load(); got != 3 {
@@ -452,14 +452,14 @@ func TestTerminalReportsCarryRetiredSessionID(t *testing.T) {
 			name:     "complete",
 			endpoint: "/api/daemon/tasks/task-1/complete",
 			call: func(c *Client) error {
-				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "POISONED-S")
+				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "POISONED-S", "")
 			},
 		},
 		{
 			name:     "fail",
 			endpoint: "/api/daemon/tasks/task-1/fail",
 			call: func(c *Client) error {
-				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "api_invalid_request", false, "POISONED-S")
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "api_invalid_request", false, "POISONED-S", "")
 			},
 		},
 	} {
@@ -495,10 +495,53 @@ func TestTerminalReportsOmitEmptyRetiredSessionID(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	if err := NewClient(srv.URL).CompleteTask(context.Background(), "task-1", "done", "", "sess-1", "/tmp/wd", false, ""); err != nil {
+	if err := NewClient(srv.URL).CompleteTask(context.Background(), "task-1", "done", "", "sess-1", "/tmp/wd", false, "", ""); err != nil {
 		t.Fatalf("CompleteTask: %v", err)
 	}
 	if _, present := body["retired_session_id"]; present {
 		t.Fatalf("retired_session_id must be omitted when nothing was retired, got %v", body)
+	}
+}
+
+func TestTerminalReportsCarryDurableWorkDir(t *testing.T) {
+	const durableWorkDir = "/Users/dev/project"
+	for _, tc := range []struct {
+		name string
+		call func(*Client) error
+	}{
+		{
+			name: "complete",
+			call: func(c *Client) error {
+				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "", durableWorkDir)
+			},
+		},
+		{
+			name: "fail",
+			call: func(c *Client) error {
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "agent_error", false, "", durableWorkDir)
+			},
+		},
+		{
+			name: "cancel ack",
+			call: func(c *Client) error {
+				return c.AckTaskCancelled(context.Background(), "task-1", TaskCancelAck{DurableWorkDir: durableWorkDir})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			if err := tc.call(NewClient(srv.URL)); err != nil {
+				t.Fatalf("terminal report: %v", err)
+			}
+			if got := body["durable_work_dir"]; got != durableWorkDir {
+				t.Fatalf("durable_work_dir = %v, want %q (body: %v)", got, durableWorkDir, body)
+			}
+		})
 	}
 }

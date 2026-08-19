@@ -122,12 +122,10 @@ func TestWorktreeClaimBlockReason(t *testing.T) {
 	})
 }
 
-// branch_name has to survive the whole way to the task row on BOTH terminal
-// paths. It was previously dropped at decode (the request struct had no field),
-// so the daemon sent it and nobody received it. The failure path matters most:
-// worktree mode commits the agent's leftovers before tearing the worktree down,
-// so a run that died partway still produced something the user needs to find.
-func TestBranchNameRoundTripsThroughBothTerminalPaths(t *testing.T) {
+// Worktree delivery metadata has to survive the whole way to the task row on
+// BOTH terminal paths. branch_name locates the commit, while durable_work_dir
+// records the directory that remains usable after the task worktree is gone.
+func TestWorktreeDeliveryMetadataRoundTripsThroughBothTerminalPaths(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -189,14 +187,27 @@ func TestBranchNameRoundTripsThroughBothTerminalPaths(t *testing.T) {
 		}
 		return branch.String
 	}
+	readDurableWorkDir := func(t *testing.T, taskID string) string {
+		t.Helper()
+		var durableWorkDir pgtype.Text
+		if err := testPool.QueryRow(ctx,
+			`SELECT durable_work_dir FROM agent_task_queue WHERE id = $1`, taskID).Scan(&durableWorkDir); err != nil {
+			t.Fatalf("read durable_work_dir: %v", err)
+		}
+		return durableWorkDir.String
+	}
 
 	t.Run("complete", func(t *testing.T) {
 		taskID := newRunningTask(t)
 		post(t, taskID, "complete", map[string]any{
 			"output": "done", "branch_name": "agent/j/abc12345",
+			"durable_work_dir": "/Users/dev/project",
 		}, testHandler.CompleteTask)
 		if got := readBranch(t, taskID); got != "agent/j/abc12345" {
 			t.Errorf("branch_name = %q, want it persisted from the complete callback", got)
+		}
+		if got := readDurableWorkDir(t, taskID); got != "/Users/dev/project" {
+			t.Errorf("durable_work_dir = %q, want daemon-confirmed project path", got)
 		}
 	})
 
@@ -204,9 +215,13 @@ func TestBranchNameRoundTripsThroughBothTerminalPaths(t *testing.T) {
 		taskID := newRunningTask(t)
 		post(t, taskID, "fail", map[string]any{
 			"error": "agent crashed", "branch_name": "agent/j/def67890",
+			"durable_work_dir": "/Users/dev/project",
 		}, testHandler.FailTask)
 		if got := readBranch(t, taskID); got != "agent/j/def67890" {
 			t.Errorf("branch_name = %q, want the partial work still findable after a failure", got)
+		}
+		if got := readDurableWorkDir(t, taskID); got != "/Users/dev/project" {
+			t.Errorf("durable_work_dir = %q, want daemon-confirmed project path", got)
 		}
 	})
 
@@ -216,14 +231,17 @@ func TestBranchNameRoundTripsThroughBothTerminalPaths(t *testing.T) {
 		if got := readBranch(t, taskID); got != "" {
 			t.Errorf("branch_name = %q, want empty when the daemon reports none", got)
 		}
+		if got := readDurableWorkDir(t, taskID); got != "" {
+			t.Errorf("durable_work_dir = %q, want empty when the daemon reports none", got)
+		}
 	})
 }
 
-// Every terminal path that can carry a branch must carry it. A worktree run
-// commits before it learns its fate, so the branch is equally real whether the
-// run completed, failed, was rerouted, or was cancelled — and the user has no
-// other way to find it.
-func TestBranchNameSurvivesEveryTerminalPath(t *testing.T) {
+// Every terminal path that can carry worktree delivery metadata must carry it.
+// A worktree run finalizes before it learns its fate, so both the branch and
+// durable handoff are equally real after completion, failure, reroute, or
+// cancellation.
+func TestWorktreeDeliveryMetadataSurvivesEveryTerminalPath(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -280,14 +298,24 @@ func TestBranchNameSurvivesEveryTerminalPath(t *testing.T) {
 		}
 		return branch.String
 	}
+	readDurableWorkDir := func(t *testing.T, taskID string) string {
+		t.Helper()
+		var durableWorkDir pgtype.Text
+		if err := testPool.QueryRow(ctx,
+			`SELECT durable_work_dir FROM agent_task_queue WHERE id = $1`, taskID).Scan(&durableWorkDir); err != nil {
+			t.Fatalf("read durable_work_dir: %v", err)
+		}
+		return durableWorkDir.String
+	}
 
 	// A context-exhausted "success" is rerouted to the failure path server-side.
 	// The run still delivered a branch; the reroute must not eat it.
 	t.Run("context-exhausted reroute keeps the branch", func(t *testing.T) {
 		taskID := newTask(t, "running")
 		post(t, taskID, "complete", map[string]any{
-			"output":      "Prompt is too long and cannot be compacted further.",
-			"branch_name": "agent/j/ctx11111",
+			"output":           "Prompt is too long and cannot be compacted further.",
+			"branch_name":      "agent/j/ctx11111",
+			"durable_work_dir": "/Users/dev/project",
 		}, testHandler.CompleteTask)
 
 		var status string
@@ -301,6 +329,9 @@ func TestBranchNameSurvivesEveryTerminalPath(t *testing.T) {
 		if got := readBranch(t, taskID); got != "agent/j/ctx11111" {
 			t.Errorf("branch_name = %q, want it carried across the complete→fail reroute", got)
 		}
+		if got := readDurableWorkDir(t, taskID); got != "/Users/dev/project" {
+			t.Errorf("durable_work_dir = %q, want it carried across the complete→fail reroute", got)
+		}
 	})
 
 	// Cancellation discards the whole result payload, but the worktree was
@@ -309,10 +340,14 @@ func TestBranchNameSurvivesEveryTerminalPath(t *testing.T) {
 	t.Run("cancel ack records the branch", func(t *testing.T) {
 		taskID := newTask(t, "cancelled")
 		post(t, taskID, "cancel-ack", map[string]any{
-			"branch_name": "agent/j/cancel11",
+			"branch_name":      "agent/j/cancel11",
+			"durable_work_dir": "/Users/dev/project",
 		}, testHandler.AckTaskCancelled)
 		if got := readBranch(t, taskID); got != "agent/j/cancel11" {
 			t.Errorf("branch_name = %q, want the cancelled run's committed work discoverable", got)
+		}
+		if got := readDurableWorkDir(t, taskID); got != "/Users/dev/project" {
+			t.Errorf("durable_work_dir = %q, want the cancelled run's project path", got)
 		}
 	})
 
@@ -393,14 +428,18 @@ func TestBranchNameSurvivesEveryTerminalPath(t *testing.T) {
 	t.Run("cancel ack replay is idempotent", func(t *testing.T) {
 		taskID := newTask(t, "cancelled")
 		body := map[string]any{
-			"branch_name":    "agent/j/replay11",
-			"error_message":  "preserved at /env/worktree",
-			"failure_reason": "local_directory_error",
+			"branch_name":      "agent/j/replay11",
+			"durable_work_dir": "/Users/dev/project",
+			"error_message":    "preserved at /env/worktree",
+			"failure_reason":   "local_directory_error",
 		}
 		post(t, taskID, "cancel-ack", body, testHandler.AckTaskCancelled)
 		post(t, taskID, "cancel-ack", body, testHandler.AckTaskCancelled)
 		if got := readBranch(t, taskID); got != "agent/j/replay11" {
 			t.Errorf("branch_name = %q after replay, want agent/j/replay11", got)
+		}
+		if got := readDurableWorkDir(t, taskID); got != "/Users/dev/project" {
+			t.Errorf("durable_work_dir = %q after replay, want unchanged", got)
 		}
 		gotErr, _ := readError(t, taskID)
 		if gotErr != "preserved at /env/worktree" {
@@ -416,12 +455,16 @@ func TestBranchNameSurvivesEveryTerminalPath(t *testing.T) {
 		taskID := newTask(t, "running")
 		post(t, taskID, "complete", map[string]any{"output": "all done"}, testHandler.CompleteTask)
 		post(t, taskID, "cancel-ack", map[string]any{
-			"branch_name":    "agent/j/stale011",
-			"error_message":  "stale preserved-path message",
-			"failure_reason": "local_directory_error",
+			"branch_name":      "agent/j/stale011",
+			"durable_work_dir": "/Users/dev/stale-project",
+			"error_message":    "stale preserved-path message",
+			"failure_reason":   "local_directory_error",
 		}, testHandler.AckTaskCancelled)
 		if got := readBranch(t, taskID); got != "" {
 			t.Errorf("branch_name = %q, want empty — a late ack backfilled a completed row", got)
+		}
+		if got := readDurableWorkDir(t, taskID); got != "" {
+			t.Errorf("durable_work_dir = %q, want empty — a late ack backfilled a completed row", got)
 		}
 		gotErr, gotReason := readError(t, taskID)
 		if gotErr != "" || gotReason != "" {
@@ -433,10 +476,14 @@ func TestBranchNameSurvivesEveryTerminalPath(t *testing.T) {
 		taskID := newTask(t, "running")
 		post(t, taskID, "fail", map[string]any{"error": "agent crashed"}, testHandler.FailTask)
 		post(t, taskID, "cancel-ack", map[string]any{
-			"branch_name": "agent/j/stale012",
+			"branch_name":      "agent/j/stale012",
+			"durable_work_dir": "/Users/dev/stale-project",
 		}, testHandler.AckTaskCancelled)
 		if got := readBranch(t, taskID); got != "" {
 			t.Errorf("branch_name = %q, want empty — a late ack backfilled a failed row", got)
+		}
+		if got := readDurableWorkDir(t, taskID); got != "" {
+			t.Errorf("durable_work_dir = %q, want empty — a late ack backfilled a failed row", got)
 		}
 		gotErr, _ := readError(t, taskID)
 		if gotErr != "agent crashed" {
