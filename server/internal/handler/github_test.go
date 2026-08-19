@@ -244,8 +244,8 @@ func TestStateRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("signState: %v", err)
 	}
-	if parts := strings.Split(tok, "."); len(parts) != 3 {
-		t.Fatalf("default return state has %d parts, want legacy 3-part format", len(parts))
+	if parts := strings.Split(tok, "."); len(parts) != 5 {
+		t.Fatalf("state has %d parts, want workspace.returnTo.issuedAt.nonce.sig", len(parts))
 	}
 	got, ok := verifyState(tok)
 	if !ok {
@@ -277,8 +277,8 @@ func TestStateRoundTripWithRepositoryReturnTarget(t *testing.T) {
 	if err != nil {
 		t.Fatalf("signStateForReturn: %v", err)
 	}
-	if parts := strings.Split(tok, "."); len(parts) != 4 {
-		t.Fatalf("repository return state has %d parts, want 4", len(parts))
+	if parts := strings.Split(tok, "."); len(parts) != 5 {
+		t.Fatalf("repository return state has %d parts, want 5", len(parts))
 	}
 	gotWorkspaceID, gotReturnTo, ok := verifyStateWithReturn(tok)
 	if !ok {
@@ -303,6 +303,8 @@ func TestStateRoundTripWithRepositoryReturnTarget(t *testing.T) {
 func TestGitHubConnectRepositoryReturnTarget(t *testing.T) {
 	t.Setenv("GITHUB_APP_SLUG", "multica-test")
 	t.Setenv("GITHUB_WEBHOOK_SECRET", "test-secret-123")
+	t.Setenv("GITHUB_APP_CLIENT_ID", "Iv1.test-client")
+	t.Setenv("GITHUB_APP_CLIENT_SECRET", "test-client-secret")
 	wsID := "11111111-2222-3333-4444-555555555555"
 
 	req := httptest.NewRequest(
@@ -2615,16 +2617,13 @@ func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM github_pending_installation WHERE installation_id = $1`, installationID)
 	})
 
-	// Force fetchInstallationAccount to take its degraded path. This pins that
-	// the final real account name comes from the earlier webhook, not the
-	// setup callback's synchronous GitHub API lookup.
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// The installing user owns this installation, so the ownership check
+	// passes. Everything else 401s, which forces fetchInstallationAccount down
+	// its degraded path — that pins that the final real account name comes
+	// from the earlier webhook, not the setup callback's synchronous lookup.
+	code := stubGitHubInstallOwnership(t, []int64{installationID}, func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "auth required", http.StatusUnauthorized)
-	}))
-	t.Cleanup(srv.Close)
-	oldBase := githubAPIBase
-	githubAPIBase = srv.URL
-	t.Cleanup(func() { githubAPIBase = oldBase })
+	})
 
 	body, _ := json.Marshal(map[string]any{
 		"action": "created",
@@ -2664,7 +2663,7 @@ func TestSetupCallback_ConsumesPendingInstallationCreated(t *testing.T) {
 		t.Fatalf("signState: %v", err)
 	}
 	setupReq := httptest.NewRequest("GET",
-		fmt.Sprintf("/api/github/setup?installation_id=%d&state=%s", installationID, state),
+		fmt.Sprintf("/api/github/setup?installation_id=%d&code=%s&state=%s", installationID, code, state),
 		nil,
 	)
 	setupRec := httptest.NewRecorder()

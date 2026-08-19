@@ -113,7 +113,8 @@ GitHub의 **Developer settings → GitHub Apps**에서 App을 만들고 다음 �
 | 필드 | 값 |
 |---|---|
 | Homepage URL | Multica 프런트엔드 주소. 예: `https://multica.example.com` |
-| Callback URL | 비워 둠 |
+| Callback URL | `https://<api-host>/api/github/setup` — Setup URL과 동일한 endpoint |
+| Request user authorization (OAuth) during installation | 활성화 |
 | Setup URL | `https://<api-host>/api/github/setup`, **Redirect on update** 활성화 |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 장기 보관할 임의 문자열 |
@@ -145,10 +146,14 @@ App의 공개 주소에서 slug를 확인합니다. 예를 들어 `https://githu
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<App을 만들 때 입력한 webhook secret>
+GITHUB_APP_CLIENT_ID=<App의 Client ID>
+GITHUB_APP_CLIENT_SECRET=<App 설정 페이지에서 생성한 client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-`GITHUB_APP_SLUG`와 `GITHUB_WEBHOOK_SECRET` 중 하나라도 없으면 연결 버튼이 비활성화되고 webhook endpoint도 이벤트 처리를 거부합니다.
+연결 버튼이 활성화되려면 네 값이 모두 필요합니다. webhook secret이 없으면 webhook endpoint도 이벤트 처리를 거부합니다.
+
+`GITHUB_APP_CLIENT_ID`와 `GITHUB_APP_CLIENT_SECRET`은 연결하려는 installation이 실제로 연결하는 사람의 것인지 설치 콜백에서 확인하는 데 사용합니다. Multica는 GitHub가 돌려준 사용자 인증 code를 user-to-server 토큰으로 교환한 뒤, 해당 installation이 그 사용자의 것인지 대조합니다. 검증할 수 없는 연결은 거부되므로 App에서 **Request user authorization (OAuth) during installation**을 활성화하고 callback URL을 `/api/github/setup`으로 지정해야 합니다.
 
 다음 두 변수는 PR 카드에서 CI 상태와 merge 가능 여부를 표시하기 위해 필요합니다. Multica는 이 값으로 App 신원을 인증하고 snapshot을 가져옵니다.
 
@@ -171,7 +176,8 @@ API 서비스를 다시 시작한 뒤 **설정 → GitHub**에서 연결을 완�
 
 ## 자주 묻는 문제
 
-- **연결 버튼을 사용할 수 없음**: `GITHUB_APP_SLUG`와 `GITHUB_WEBHOOK_SECRET`이 API 프로세스에 전달되었는지 확인합니다.
+- **연결 버튼을 사용할 수 없음**: `GITHUB_APP_SLUG`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_CLIENT_ID`, `GITHUB_APP_CLIENT_SECRET`이 모두 API 프로세스에 전달되었는지 확인합니다.
+- **설치 직후 연결이 실패함**: App에서 **Request user authorization (OAuth) during installation**을 활성화하고 callback URL을 `/api/github/setup`으로 설정해야 합니다. 인증 code가 없으면 Multica는 해당 installation이 본인 것인지 확인할 수 없어 연결을 거부하며, 서버 로그에 이유(`missing_authorization`, `installation_not_authorized`, `verification_failed`)가 남습니다.
 - **Webhook이 401을 반환함**: GitHub App과 API가 같은 Webhook secret을 사용하는지 확인하고 GitHub의 **Recent Deliveries**에서 다시 전달합니다.
 - **PR이 연결되지 않음**: 저장소가 App 승인 범위에 있는지, 자동 연결이 켜져 있는지, 번호가 현재 워크스페이스에 속하는지 확인합니다.
 - **본문에 번호를 썼지만 표시되지 않음**: `Closes MUL-123`을 사용하거나 번호를 브랜치 이름 또는 PR 제목에 넣습니다.

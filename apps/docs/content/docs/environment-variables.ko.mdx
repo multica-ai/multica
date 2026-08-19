@@ -163,6 +163,8 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | GitHub App slug |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC 및 연결 state 서명 키 |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App Client ID. 연결에 필수이며 설치 콜백이 해당 installation의 소유자를 확인하는 데 사용합니다 |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | Client ID와 짝을 이루는 client secret. 용도는 동일합니다 |
 | GitHub | `GITHUB_APP_ID` | PR 카드의 CI 상태, merge 가능 여부, "GitHub에서 선택" 저장소에 필요 |
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | App ID와 짝을 이루는 전체 PEM private key. 용도는 위와 같음 |
 | Feishu | `MULTICA_LARK_SECRET_KEY` | base64로 인코딩한 32바이트 자격 증명 암호화 키 |

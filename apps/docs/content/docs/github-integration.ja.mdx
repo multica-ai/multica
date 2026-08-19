@@ -113,7 +113,8 @@ GitHub の **Developer settings → GitHub Apps** で App を作成し、次の�
 | フィールド | 値 |
 |---|---|
 | Homepage URL | Multica のフロントエンド URL。例: `https://multica.example.com` |
-| Callback URL | 空欄 |
+| Callback URL | `https://<api-host>/api/github/setup`。Setup URL と同じエンドポイント |
+| Request user authorization (OAuth) during installation | 有効にする |
 | Setup URL | `https://<api-host>/api/github/setup`。**Redirect on update** を有効にする |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 長期保管するランダムな文字列 |
@@ -145,10 +146,14 @@ App の公開 URL から slug を確認します。たとえば `https://github.
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<webhook secret entered when creating the App>
+GITHUB_APP_CLIENT_ID=<the App's Client ID>
+GITHUB_APP_CLIENT_SECRET=<a client secret generated on the App's settings page>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-`GITHUB_APP_SLUG` と `GITHUB_WEBHOOK_SECRET` のいずれかがない場合、接続ボタンは無効になり、webhook エンドポイントもイベントを拒否します。
+接続ボタンが有効になるには 4 つすべてが必要です。webhook secret がない場合は、webhook エンドポイントもイベントを拒否します。
+
+`GITHUB_APP_CLIENT_ID` と `GITHUB_APP_CLIENT_SECRET` は、接続しようとしている installation が本当に操作者のものかをインストールコールバックで確認するために使います。Multica は GitHub が返すユーザー認可 code を user-to-server トークンに交換し、その installation がそのユーザーのものかを照合します。検証できない接続は拒否されるため、App では **Request user authorization (OAuth) during installation** を有効にし、callback URL を `/api/github/setup` に向けてください。
 
 次の 2 つの変数は、PR カードに CI の状態とマージ可能性を表示するために必要です。Multica は App として認証し、スナップショットを取得します。
 
@@ -171,7 +176,8 @@ API サービスを再起動し、**設定 → GitHub** から接続します。
 
 ## よくある問題
 
-- **接続ボタンを使用できない**: `GITHUB_APP_SLUG` と `GITHUB_WEBHOOK_SECRET` が API プロセスに設定されていることを確認します。
+- **接続ボタンを使用できない**: `GITHUB_APP_SLUG`、`GITHUB_WEBHOOK_SECRET`、`GITHUB_APP_CLIENT_ID`、`GITHUB_APP_CLIENT_SECRET` がすべて API プロセスに設定されていることを確認します。
+- **インストール直後に接続が失敗する**: App で **Request user authorization (OAuth) during installation** を有効にし、callback URL を `/api/github/setup` に設定してください。認可 code がないと、Multica はその installation が自分のものだと確認できず、紐づけを拒否します。理由はサーバーログに記録されます（`missing_authorization`、`installation_not_authorized`、`verification_failed`）。
 - **Webhook が 401 を返す**: GitHub App と API が同じ Webhook secret を使っていることを確認し、GitHub の **Recent Deliveries** から再配信します。
 - **PR が紐づかない**: リポジトリが App の許可範囲にあること、PR の自動紐づけが有効であること、番号が現在のワークスペースのものかを確認します。
 - **本文に番号を書いても表示されない**: `Closes MUL-123` を使うか、番号をブランチ名または PR タイトルに入れます。

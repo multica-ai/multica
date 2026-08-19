@@ -239,9 +239,11 @@ export function GitHubTab() {
             {canManage && !configured && (
               <p className="text-caption text-muted-foreground">
                 {t(($) => $.github.not_configured)}{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_APP_SLUG</code>{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_APP_SLUG</code>,{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_WEBHOOK_SECRET</code>,{" "}
+                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_APP_CLIENT_ID</code>{" "}
                 {t(($) => $.github.not_configured_and)}{" "}
-                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_WEBHOOK_SECRET</code>.
+                <code className="rounded bg-muted px-1 py-0.5 text-micro">GITHUB_APP_CLIENT_SECRET</code>.
               </p>
             )}
 

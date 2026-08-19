@@ -163,6 +163,8 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | GitHub App の slug |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC と接続 state の署名シークレット |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App の Client ID。接続に必須で、インストールコールバックがこの installation の所有者を確認するために使います |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | Client ID と対になる client secret。用途は同じです |
 | GitHub | `GITHUB_APP_ID` | PR カードの CI ステータス・マージ可否と「GitHub から選択」リポジトリに必要です |
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | App ID と対になる完全な PEM 秘密鍵。用途は同上 |
 | Lark | `MULTICA_LARK_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー |

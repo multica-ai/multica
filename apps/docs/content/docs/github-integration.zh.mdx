@@ -114,7 +114,8 @@ Multica Cloud 无需执行本节。自托管需要先创建自己的 GitHub App�
 | 字段 | 值 |
 |---|---|
 | Homepage URL | Multica 前端地址，例如 `https://multica.example.com` |
-| Callback URL | 留空 |
+| Callback URL | `https://<api-host>/api/github/setup`，与 Setup URL 相同 |
+| Request user authorization (OAuth) during installation | 勾选 |
 | Setup URL | `https://<api-host>/api/github/setup`，并启用 **Redirect on update** |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | 一段长期保存的随机字符串 |
@@ -146,10 +147,14 @@ Repository permissions：
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<创建 App 时填写的 webhook secret>
+GITHUB_APP_CLIENT_ID=<App 的 Client ID>
+GITHUB_APP_CLIENT_SECRET=<在 App 设置页生成的 client secret>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-`GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 缺少任意一个时，连接按钮会被禁用，webhook 接口也会拒绝处理事件。
+这四个变量齐备时连接按钮才会启用；缺少 webhook secret 时，webhook 接口还会拒绝处理事件。
+
+`GITHUB_APP_CLIENT_ID` 和 `GITHUB_APP_CLIENT_SECRET` 用于在安装回调里确认「正在连接的 installation 确实属于当前操作者」：Multica 用 GitHub 返回的用户授权 code 换取 user-to-server token，再核对该 installation 是否在这个用户名下。无法验证的连接一律拒绝，因此 App 必须勾选 **Request user authorization (OAuth) during installation**，并把 callback URL 指向 `/api/github/setup`。
 
 下面两个变量是 PR 卡片显示 CI 状态与可合并性的必要条件——Multica 用它们以 App 身份鉴权并拉取快照：
 
@@ -172,7 +177,8 @@ make migrate-up
 
 ## 常见问题
 
-- **连接按钮不可用**：检查 `GITHUB_APP_SLUG` 和 `GITHUB_WEBHOOK_SECRET` 是否已进入 API 进程。
+- **连接按钮不可用**：检查 `GITHUB_APP_SLUG`、`GITHUB_WEBHOOK_SECRET`、`GITHUB_APP_CLIENT_ID`、`GITHUB_APP_CLIENT_SECRET` 是否都已进入 API 进程。
+- **安装完成后连接失败**：App 需要勾选 **Request user authorization (OAuth) during installation**，并把 callback URL 设为 `/api/github/setup`。拿不到授权 code 时，Multica 无法确认该 installation 属于你，会拒绝绑定；服务端日志会写明原因（`missing_authorization`、`installation_not_authorized` 或 `verification_failed`）。
 - **Webhook 返回 401**：确认 GitHub App 与 API 使用同一个 Webhook secret，然后在 GitHub 的 **Recent Deliveries** 中重新投递。
 - **PR 没有关联**：检查仓库是否在 App 授权范围内、自动关联是否开启，以及编号是否属于当前工作区。
 - **正文写了编号但没显示**：改用 `Closes MUL-123`，或把编号放到分支名、PR 标题中。

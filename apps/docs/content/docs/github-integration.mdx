@@ -114,7 +114,8 @@ Create the App under GitHub's **Developer settings → GitHub Apps** and fill in
 | Field | Value |
 |---|---|
 | Homepage URL | Your Multica frontend address, e.g. `https://multica.example.com` |
-| Callback URL | Leave blank |
+| Callback URL | `https://<api-host>/api/github/setup` — the same endpoint as the Setup URL |
+| Request user authorization (OAuth) during installation | Enabled |
 | Setup URL | `https://<api-host>/api/github/setup`, with **Redirect on update** enabled |
 | Webhook URL | `https://<api-host>/api/webhooks/github` |
 | Webhook secret | A random string you keep long-term |
@@ -146,10 +147,14 @@ Take the slug from the App's public URL. For example, the slug of `https://githu
 ```dotenv
 GITHUB_APP_SLUG=multica-acme
 GITHUB_WEBHOOK_SECRET=<the webhook secret you entered when creating the App>
+GITHUB_APP_CLIENT_ID=<the App's Client ID>
+GITHUB_APP_CLIENT_SECRET=<a client secret generated on the App's settings page>
 FRONTEND_ORIGIN=https://multica.example.com
 ```
 
-If either `GITHUB_APP_SLUG` or `GITHUB_WEBHOOK_SECRET` is missing, the connect button is disabled and the webhook endpoint refuses to process events.
+All four are required for the connect button to enable; the webhook endpoint additionally refuses to process events when the webhook secret is missing.
+
+`GITHUB_APP_CLIENT_ID` and `GITHUB_APP_CLIENT_SECRET` are what let the install callback confirm that the installation being connected really belongs to the person connecting it: Multica trades GitHub's user-authorization code for a user-to-server token and checks the installation against that user's own installations. A connect it cannot verify is refused, so the App must have **Request user authorization (OAuth) during installation** enabled and its callback URL pointed at `/api/github/setup`.
 
 The next two variables are required for the PR card to show CI status and mergeability — Multica uses them to authenticate as the App and pull snapshots:
 
@@ -172,7 +177,8 @@ Restart the API server, then complete the connection in **Settings → GitHub**.
 
 ## Troubleshooting
 
-- **Connect button disabled**: check that `GITHUB_APP_SLUG` and `GITHUB_WEBHOOK_SECRET` reached the API process.
+- **Connect button disabled**: check that `GITHUB_APP_SLUG`, `GITHUB_WEBHOOK_SECRET`, `GITHUB_APP_CLIENT_ID`, and `GITHUB_APP_CLIENT_SECRET` all reached the API process.
+- **Connect fails right after installing**: the App needs **Request user authorization (OAuth) during installation** enabled and its callback URL set to `/api/github/setup`. Without the authorization code Multica cannot confirm the installation is yours and refuses to bind it; the server log names the reason (`missing_authorization`, `installation_not_authorized`, or `verification_failed`).
 - **Webhook returns 401**: confirm the GitHub App and the API use the same webhook secret, then redeliver from GitHub's **Recent Deliveries**.
 - **PR not linked**: check that the repository is in the App's authorized scope, auto-linking is on, and the identifier belongs to the current workspace.
 - **Identifier in the body but not shown**: switch to `Closes MUL-123`, or put the identifier in the branch name or PR title.

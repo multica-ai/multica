@@ -163,6 +163,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 |---|---|---|
 | GitHub | `GITHUB_APP_SLUG` | GitHub App slug |
 | GitHub | `GITHUB_WEBHOOK_SECRET` | Webhook HMAC 与连接 state 签名密钥 |
+| GitHub | `GITHUB_APP_CLIENT_ID` | App 的 Client ID。连接 GitHub 必需：安装回调用它确认该 installation 属于当前操作者 |
+| GitHub | `GITHUB_APP_CLIENT_SECRET` | 与 Client ID 配对的 client secret，用途同上 |
 | GitHub | `GITHUB_APP_ID` | PR 卡片的 CI 状态、可合并性和"从 GitHub 选择"仓库都需要它 |
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | 与 App ID 配套的完整 PEM 私钥，用途同上 |
 | 飞书 | `MULTICA_LARK_SECRET_KEY` | base64 编码的 32 字节凭据加密密钥 |
