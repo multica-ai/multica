@@ -39,6 +39,6 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newTag: "df903110"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
-    newTag: "5343cac9"
+    newTag: "df903110"
   - name: ghcr.io/g2crowd/agentfarm-admin-prod
     newTag: "5343cac9"
