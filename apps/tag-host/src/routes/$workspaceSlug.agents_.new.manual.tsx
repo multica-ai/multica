@@ -11,7 +11,7 @@ function TagWorkspaceManualAgentCreateRoute() {
   const { workspaceSlug } = Route.useParams();
   return (
     <AgentWorkspaceRoute workspaceSlug={workspaceSlug}>
-      <ManualCreateAgentPage />
+      <ManualCreateAgentPage showWorkspaceSkills={false} />
     </AgentWorkspaceRoute>
   );
 }

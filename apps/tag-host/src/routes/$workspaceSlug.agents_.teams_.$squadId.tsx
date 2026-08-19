@@ -11,7 +11,12 @@ function TagWorkspaceTeamDetailRoute() {
   const { workspaceSlug, squadId } = Route.useParams();
   return (
     <AgentWorkspaceRoute workspaceSlug={workspaceSlug} resetKeys={[squadId]}>
-      <SquadDetailPage />
+      <SquadDetailPage
+        squadId={squadId}
+        collectionHref={`/${encodeURIComponent(workspaceSlug)}/agents/teams`}
+        collectionLabel="Teams"
+        createAgentHref={`/${encodeURIComponent(workspaceSlug)}/agents/new/manual?squad=${encodeURIComponent(squadId)}`}
+      />
     </AgentWorkspaceRoute>
   );
 }

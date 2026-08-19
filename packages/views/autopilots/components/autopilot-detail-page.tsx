@@ -639,7 +639,15 @@ function SubscriberChips({
   );
 }
 
-export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
+export function AutopilotDetailPage({
+  autopilotId,
+  collectionHref,
+  collectionLabel,
+}: {
+  autopilotId: string;
+  collectionHref?: string;
+  collectionLabel?: string;
+}) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
   const wsPaths = useWorkspacePaths();
@@ -750,7 +758,7 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
     try {
       await deleteAutopilot.mutateAsync(autopilotId);
       toast.success(t(($) => $.detail.toast_deleted));
-      router.push(wsPaths.autopilots());
+      router.push(collectionHref ?? wsPaths.autopilots());
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -769,7 +777,12 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
     <div className="flex h-full flex-col">
       {/* Header */}
       <BreadcrumbHeader
-        segments={[{ href: wsPaths.autopilots(), label: t(($) => $.page.title) }]}
+        segments={[
+          {
+            href: collectionHref ?? wsPaths.autopilots(),
+            label: collectionLabel ?? t(($) => $.page.title),
+          },
+        ]}
         leaf={
           <>
             <h1 className="min-w-0 truncate text-body font-medium text-foreground">{autopilot.title}</h1>

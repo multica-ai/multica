@@ -46,6 +46,7 @@ export function AgentConfigurationPanel({
   onRuntimeSelect,
   runtimeSwitchPending = false,
   runtimeSwitchInFlight = false,
+  showWorkspaceSkills = true,
 }: {
   draft: AgentDraft;
   onChange: (draft: AgentDraft) => void;
@@ -64,6 +65,7 @@ export function AgentConfigurationPanel({
   runtimeSwitchPending?: boolean;
   /** A rebind request is in flight. */
   runtimeSwitchInFlight?: boolean;
+  showWorkspaceSkills?: boolean;
 }) {
   const { t } = useT("agents");
   const selectedRuntime =
@@ -170,12 +172,14 @@ export function AgentConfigurationPanel({
               className="min-h-44 resize-y font-mono text-label leading-6"
             />
           </DraftFieldRow>
-          <div className="px-4 py-4">
-            <SkillMultiSelect
-              selectedIds={draft.skillIds}
-              onChange={(ids) => set("skillIds", ids)}
-            />
-          </div>
+          {showWorkspaceSkills ? (
+            <div className="px-4 py-4">
+              <SkillMultiSelect
+                selectedIds={draft.skillIds}
+                onChange={(ids) => set("skillIds", ids)}
+              />
+            </div>
+          ) : null}
         </SettingsCard>
       </SettingsSection>
 

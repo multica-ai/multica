@@ -244,7 +244,7 @@
     "clear_full": "清除选择（使用提供方默认）"
   },
   "role_center": {
-    "tasks_description": "任务分配和完整执行记录统一放在 Tasks 中。",
+    "tasks_description": "任务分配和完整执行记录统一放在任务中。",
     "team_membership": "团队归属",
     "no_team": "该智能体尚未加入团队。"
   },

@@ -236,7 +236,7 @@
     "clear_full": "選択をクリア（プロバイダーのデフォルトを使用）"
   },
   "role_center": {
-    "tasks_description": "タスクの割り当てと完全な実行履歴は Tasks にまとめられます。",
+    "tasks_description": "タスクの割り当てと完全な実行履歴はタスクにまとめられます。",
     "team_membership": "チーム所属",
     "no_team": "このエージェントはまだチームに参加していません。"
   },

@@ -244,7 +244,7 @@
     "clear_full": "선택 지우기(제공자 기본값 사용)"
   },
   "role_center": {
-    "tasks_description": "태스크 할당과 전체 실행 기록은 Tasks에 함께 보관됩니다.",
+    "tasks_description": "태스크 할당과 전체 실행 기록은 태스크에 함께 보관됩니다.",
     "team_membership": "팀 소속",
     "no_team": "이 에이전트는 아직 팀에 속해 있지 않습니다."
   },

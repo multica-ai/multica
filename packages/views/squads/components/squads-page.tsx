@@ -317,7 +317,13 @@ function ArchiveSquadDialog({
   );
 }
 
-function SquadRowActions({ squad }: { squad: Squad }) {
+function SquadRowActions({
+  squad,
+  detailHref,
+}: {
+  squad: Squad;
+  detailHref?: (squadId: string) => string;
+}) {
   const { t } = useT("squads");
   const { t: tCommon } = useT("common");
   const p = useWorkspacePaths();
@@ -344,7 +350,7 @@ function SquadRowActions({ squad }: { squad: Squad }) {
           <DropdownMenuItem
             onClick={() =>
               intentNavigate(
-                p.squadDetail(squad.id),
+                detailHref?.(squad.id) ?? p.squadDetail(squad.id),
                 "foreground-tab",
                 squad.name,
               )
@@ -770,7 +776,13 @@ function SquadListToolbar({
 // Page
 // ---------------------------------------------------------------------------
 
-export function SquadsPage() {
+export function SquadsPage({
+  title,
+  detailHref,
+}: {
+  title?: string;
+  detailHref?: (squadId: string) => string;
+} = {}) {
   const { t } = useT("squads");
   const workspace = useCurrentWorkspace();
   const wsId = workspace?.id ?? "";
@@ -912,7 +924,7 @@ export function SquadsPage() {
     <div className="flex flex-1 min-h-0 flex-col">
       <CollectionPageHeader
         icon={Users}
-        title={t(($) => $.page.title)}
+        title={title ?? t(($) => $.page.title)}
         count={squads.length}
         actions={
           <CollectionPageHeaderAction
@@ -982,7 +994,10 @@ export function SquadsPage() {
                   <ListGridRow
                     key={squad.id}
                     className="cursor-pointer"
-                    {...rowLink(p.squadDetail(squad.id), squad.name)}
+                    {...rowLink(
+                      detailHref?.(squad.id) ?? p.squadDetail(squad.id),
+                      squad.name,
+                    )}
                   >
                     <NameCell squad={squad} />
                     <LeaderCell
@@ -1019,7 +1034,10 @@ export function SquadsPage() {
                     <ListGridCell className="justify-end px-0">
                       {isWorkspaceAdmin ||
                       (!!currentUser && squad.creator_id === currentUser.id) ? (
-                        <SquadRowActions squad={squad} />
+                        <SquadRowActions
+                          squad={squad}
+                          detailHref={detailHref}
+                        />
                       ) : null}
                     </ListGridCell>
                   </ListGridRow>

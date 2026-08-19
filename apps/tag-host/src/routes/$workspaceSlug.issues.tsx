@@ -13,7 +13,12 @@ function TagWorkspaceTasksRoute() {
   return (
     <TaskWorkspaceRoute workspaceSlug={workspaceSlug}>
       <TaskCreateButton />
-      <TaskCenterPage workspaceSlug={workspaceSlug} />
+      <TaskCenterPage
+        workspaceSlug={workspaceSlug}
+        automationDetailHref={(autopilotId) =>
+          `/${encodeURIComponent(workspaceSlug)}/issues/automations/${encodeURIComponent(autopilotId)}`
+        }
+      />
     </TaskWorkspaceRoute>
   );
 }

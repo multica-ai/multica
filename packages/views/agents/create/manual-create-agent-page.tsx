@@ -26,7 +26,11 @@ import {
  * starting empty — the two share one route because after seeding they are the
  * same screen with the same submit path.
  */
-export function ManualCreateAgentPage() {
+export function ManualCreateAgentPage({
+  showWorkspaceSkills = true,
+}: {
+  showWorkspaceSkills?: boolean;
+} = {}) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
@@ -35,7 +39,9 @@ export function ManualCreateAgentPage() {
   const duplicateId = navigation.searchParams.get("duplicate");
   const squadId = navigation.searchParams.get("squad");
 
-  const form = useCreateAgentForm();
+  const form = useCreateAgentForm({
+    includeWorkspaceSkills: showWorkspaceSkills,
+  });
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
   const duplicateAgent = duplicateId
     ? agents.find((agent) => agent.id === duplicateId) ?? null
@@ -146,6 +152,7 @@ export function ManualCreateAgentPage() {
               submit.clearNameError();
               form.setDraft((current) => ({ ...current, name }));
             }}
+            showWorkspaceSkills={showWorkspaceSkills}
           />
         </div>
         <CreateAgentFooter

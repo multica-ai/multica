@@ -73,6 +73,8 @@ export function useCreateAgentForm(options?: {
    * MUL-5163 presented runtime A while every message ran on B.
    */
   runtimeSeed?: RuntimeSeed;
+  /** Workspace skills are hidden in hosts where skills belong to the local runtime. */
+  includeWorkspaceSkills?: boolean;
 }): CreateAgentForm {
   const wsId = useWorkspaceId();
   const currentUser = useAuthStore((state) => state.user);
@@ -85,7 +87,10 @@ export function useCreateAgentForm(options?: {
     isError: runtimesFailed,
   } = useQuery(runtimeListOptions(wsId));
   const { data: members = [] } = useQuery(memberListOptions(wsId));
-  const { data: workspaceSkills = [] } = useQuery(skillListOptions(wsId));
+  const { data: workspaceSkills = [] } = useQuery({
+    ...skillListOptions(wsId),
+    enabled: options?.includeWorkspaceSkills !== false,
+  });
 
   const [draft, setDraft] = useState<AgentDraft>(EMPTY_AGENT_DRAFT);
 

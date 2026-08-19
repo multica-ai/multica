@@ -1,18 +1,18 @@
 {
   "page": {
-    "title": "スクワッド",
-    "new_button": "新規スクワッド",
-    "empty_no_squads": "スクワッドはまだありません。作成して始めましょう。",
-    "empty_no_match": "フィルターに一致するスクワッドはありません。",
+    "title": "チーム",
+    "new_button": "新規チーム",
+    "empty_no_squads": "チームはまだありません。作成して始めましょう。",
+    "empty_no_match": "フィルターに一致するチームはありません。",
     "table": {
-      "name": "スカッド",
+      "name": "チーム",
       "leader": "リーダー",
       "members": "メンバー",
       "creator": "作成者",
       "created": "作成日時"
     },
-    "no_matches": "該当するスカッドはありません",
-    "row_menu": "スカッドの操作",
+    "no_matches": "該当するチームはありません",
+    "row_menu": "チームの操作",
     "archive_action": "アーカイブ"
   },
   "inspector": {
@@ -20,19 +20,19 @@
     "archive_button": "アーカイブ"
   },
   "archive_dialog": {
-    "title": "このスクワッドをアーカイブしますか？",
-    "description": "\"{{name}}\" がアーカイブされます。現在このスクワッドに割り当てられているタスクはリーダーに引き継がれます。この操作は取り消せません。ルーティングを元に戻すには、新しいスクワッドを作成してください。",
+    "title": "このチームをアーカイブしますか？",
+    "description": "\"{{name}}\" がアーカイブされます。現在このチームに割り当てられているタスクはリーダーに引き継がれます。この操作は取り消せません。ルーティングを元に戻すには、新しいチームを作成してください。",
     "cancel": "キャンセル",
     "confirm": "アーカイブ",
     "archiving": "アーカイブ中…",
-    "success": "スカッドをアーカイブしました"
+    "success": "チームをアーカイブしました"
   },
   "name_editor": {
     "cancel": "キャンセル"
   },
   "add_member_dialog": {
     "title": "メンバーを追加",
-    "description": "ワークスペースのメンバーまたはエージェントをこのスクワッドに追加します。",
+    "description": "ワークスペースのメンバーまたはエージェントをこのチームに追加します。",
     "label_member": "メンバー",
     "label_role": "役割",
     "label_optional": "（任意）",
@@ -52,13 +52,13 @@
   },
   "members_tab": {
     "section_title": "メンバー",
-    "section_count_other": "このスクワッドのメンバー {{count}}名",
+    "section_count_other": "このチームのメンバー {{count}}名",
     "add_member_button": "メンバーを追加",
     "create_agent_button": "エージェントを作成",
     "leader_chip": "リーダー",
     "view_agent_tooltip": "エージェントの詳細を開く",
-    "make_leader_tooltip": "スクワッドリーダーに指定",
-    "remove_member_tooltip": "スクワッドから削除",
+    "make_leader_tooltip": "チームリーダーに指定",
+    "remove_member_tooltip": "チームから削除",
     "status_working": "作業中",
     "status_idle": "アイドル",
     "status_offline": "オフライン",
@@ -69,7 +69,7 @@
     "status_archived": "アーカイブ済み"
   },
   "profile_card": {
-    "unavailable": "スクワッドを利用できません",
+    "unavailable": "チームを利用できません",
     "detail_link": "詳細 →",
     "archived": "アーカイブ済み",
     "member_count_other": "メンバー {{count}}名",
@@ -77,7 +77,7 @@
     "more_members_other": "他 {{count}}名"
   },
   "instructions_tab": {
-    "description": "スクワッドの指示は、リーダーエージェントがこのスクワッドに割り当てられたタスクに取り組むたびに、そのプロンプトに挿入されます。スクワッド全体の方針、進め方の取り決め、リーダーがすべての作業で従うべきコンテキストを伝えるために使用します。",
+    "description": "チームの指示は、リーダーエージェントがこのチームに割り当てられたタスクに取り組むたびに、そのプロンプトに挿入されます。チーム全体の方針、進め方の取り決め、リーダーがすべての作業で従うべきコンテキストを伝えるために使用します。",
     "unsaved_changes": "保存していない変更",
     "save_button": "保存"
   },
@@ -91,7 +91,7 @@
     "direction_asc": "昇順",
     "direction_desc": "降順",
     "section_columns": "列",
-    "result_count_title": "該当スカッド / すべてのスカッド",
+    "result_count_title": "該当チーム / すべてのチーム",
     "filter_label": "フィルター",
     "filter_active_count_other": "{{count}} 件のフィルター",
     "clear_filters": "フィルターをクリア"

@@ -603,11 +603,13 @@ export function AutopilotsPage({
   createLabel,
   emptyTitle,
   emptyHint,
+  detailHref,
 }: {
   title?: string;
   createLabel?: string;
   emptyTitle?: string;
   emptyHint?: string;
+  detailHref?: (autopilotId: string) => string;
 } = {}) {
   const { t } = useT("autopilots");
   const wsId = useWorkspaceId();
@@ -908,7 +910,11 @@ export function AutopilotsPage({
                       className={`cursor-pointer ${
                         selectedIds.has(autopilot.id) ? "bg-accent/30" : ""
                       }`}
-                      {...rowLink(wsPaths.autopilotDetail(autopilot.id), autopilot.title)}
+                      {...rowLink(
+                        detailHref?.(autopilot.id) ??
+                          wsPaths.autopilotDetail(autopilot.id),
+                        autopilot.title,
+                      )}
                     >
                       <CheckboxCell
                         checked={selectedIds.has(autopilot.id)}
@@ -953,7 +959,10 @@ export function AutopilotsPage({
                         <ListGridCell className="hidden px-0 @2xl:flex" />
                       )}
                       <ListGridCell className="justify-end px-0">
-                        <AutopilotRowActions row={autopilot} />
+                        <AutopilotRowActions
+                          row={autopilot}
+                          detailHref={detailHref}
+                        />
                       </ListGridCell>
                     </ListGridRow>
                   );

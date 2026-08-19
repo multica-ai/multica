@@ -11,7 +11,13 @@ import { IssuesPage } from "./issues-page";
 
 const TABS = ["tasks", "mine", "activity", "automations"] as const;
 
-export function TaskCenterPage({ workspaceSlug }: { workspaceSlug: string }) {
+export function TaskCenterPage({
+  workspaceSlug,
+  automationDetailHref,
+}: {
+  workspaceSlug: string;
+  automationDetailHref?: (autopilotId: string) => string;
+}) {
   const { searchParams, replace } = useNavigation();
   const { t } = useT("issues");
   const activeTab = taskCenterTabFromSearch(searchParams);
@@ -59,6 +65,7 @@ export function TaskCenterPage({ workspaceSlug }: { workspaceSlug: string }) {
           createLabel={t(($) => $.task_center.new_automation)}
           emptyTitle={t(($) => $.task_center.no_automations)}
           emptyHint={t(($) => $.task_center.automations_hint)}
+          detailHref={automationDetailHref}
         />
       ) : null}
     </div>

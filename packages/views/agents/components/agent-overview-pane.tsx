@@ -10,12 +10,11 @@ import type {
   Squad,
   SquadMember,
 } from "@multica/core/types";
-import { api } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
+  squadMemberListOptions,
   squadListOptions,
-  workspaceKeys,
 } from "@multica/core/workspace/queries";
 import {
   AlertDialog,
@@ -277,18 +276,15 @@ function RoleCenterOverview({
 function AgentTeamMemberships({ agentId }: { agentId: string }) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
-  const paths = useWorkspacePaths();
   const { data: squads = [] } = useQuery(squadListOptions(wsId));
   const activeSquads = useMemo(
     () => squads.filter((squad) => !squad.archived_at),
     [squads],
   );
   const memberQueries = useQueries({
-    queries: activeSquads.map((squad) => ({
-      queryKey: [...workspaceKeys.squads(wsId), squad.id, "members"],
-      queryFn: () => api.listSquadMembers(squad.id),
-      enabled: !!wsId,
-    })),
+    queries: activeSquads.map((squad) =>
+      squadMemberListOptions(wsId, squad.id),
+    ),
   });
   const teams = useMemo(
     () =>
@@ -310,13 +306,12 @@ function AgentTeamMemberships({ agentId }: { agentId: string }) {
       {teams.length > 0 ? (
         <div className="mt-3 flex flex-wrap gap-2">
           {teams.map((team: Squad) => (
-            <AppLink
+            <span
               key={team.id}
-              href={paths.squadDetail(team.id)}
               className="rounded-md border border-surface-border bg-surface-hover px-2 py-1 text-caption text-foreground"
             >
               {team.name}
-            </AppLink>
+            </span>
           ))}
         </div>
       ) : (

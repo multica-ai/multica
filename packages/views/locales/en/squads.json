@@ -1,18 +1,18 @@
 {
   "page": {
-    "title": "Squads",
-    "new_button": "New Squad",
-    "empty_no_squads": "No squads yet. Create one to get started.",
-    "empty_no_match": "No squads match your filters.",
+    "title": "Teams",
+    "new_button": "New Team",
+    "empty_no_squads": "No teams yet. Create one to get started.",
+    "empty_no_match": "No teams match your filters.",
     "table": {
-      "name": "Squad",
+      "name": "Team",
       "leader": "Leader",
       "members": "Members",
       "creator": "Created by",
       "created": "Created"
     },
-    "no_matches": "No squads match",
-    "row_menu": "Squad actions",
+    "no_matches": "No teams match",
+    "row_menu": "Team actions",
     "archive_action": "Archive"
   },
   "inspector": {
@@ -20,19 +20,19 @@
     "archive_button": "Archive"
   },
   "archive_dialog": {
-    "title": "Archive this squad?",
-    "description": "\"{{name}}\" will be archived. Issues currently assigned to this squad will be transferred to its leader. This can't be undone — create a new squad if you need the routing back.",
+    "title": "Archive this team?",
+    "description": "\"{{name}}\" will be archived. Issues currently assigned to this team will be transferred to its leader. This can't be undone — create a new team if you need the routing back.",
     "cancel": "Cancel",
     "confirm": "Archive",
     "archiving": "Archiving…",
-    "success": "Squad archived"
+    "success": "Team archived"
   },
   "name_editor": {
     "cancel": "Cancel"
   },
   "add_member_dialog": {
     "title": "Add Member",
-    "description": "Add a workspace member or agent to this squad.",
+    "description": "Add a workspace member or agent to this team.",
     "label_member": "Member",
     "label_role": "Role",
     "label_optional": "(optional)",
@@ -52,14 +52,14 @@
   },
   "members_tab": {
     "section_title": "Members",
-    "section_count_one": "{{count}} member in this squad",
-    "section_count_other": "{{count}} members in this squad",
+    "section_count_one": "{{count}} member in this team",
+    "section_count_other": "{{count}} members in this team",
     "add_member_button": "Add Member",
     "create_agent_button": "Create Agent",
     "leader_chip": "Leader",
     "view_agent_tooltip": "Open agent detail",
-    "make_leader_tooltip": "Make squad leader",
-    "remove_member_tooltip": "Remove from squad",
+    "make_leader_tooltip": "Make team leader",
+    "remove_member_tooltip": "Remove from team",
     "status_working": "Working",
     "status_idle": "Idle",
     "status_offline": "Offline",
@@ -70,7 +70,7 @@
     "last_active_label": "last active {{time}}"
   },
   "profile_card": {
-    "unavailable": "Squad unavailable",
+    "unavailable": "Team unavailable",
     "detail_link": "Detail →",
     "archived": "Archived",
     "member_count_one": "{{count}} member",
@@ -80,7 +80,7 @@
     "more_members_other": "+{{count}} more"
   },
   "instructions_tab": {
-    "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
+    "description": "Team instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this team. Use them to give the leader team-wide guidance, working agreements, or context the leader should follow on every task.",
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save"
   },
@@ -94,7 +94,7 @@
     "direction_asc": "Ascending",
     "direction_desc": "Descending",
     "section_columns": "Columns",
-    "result_count_title": "Matching squads / all squads",
+    "result_count_title": "Matching teams / all teams",
     "filter_label": "Filter",
     "filter_active_count_one": "{{count}} filter",
     "filter_active_count_other": "{{count}} filters",

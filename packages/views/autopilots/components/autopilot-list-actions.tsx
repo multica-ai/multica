@@ -144,7 +144,13 @@ function useSetStatus() {
 // stopPropagation, no preventDefault (same pattern as the skills list).
 // ---------------------------------------------------------------------------
 
-export function AutopilotRowActions({ row }: { row: Autopilot }) {
+export function AutopilotRowActions({
+  row,
+  detailHref,
+}: {
+  row: Autopilot;
+  detailHref?: (autopilotId: string) => string;
+}) {
   const { t } = useT("autopilots");
   const { t: tCommon } = useT("common");
   const wsPaths = useWorkspacePaths();
@@ -180,7 +186,7 @@ export function AutopilotRowActions({ row }: { row: Autopilot }) {
           <DropdownMenuItem
             onClick={() =>
               intentNavigate(
-                wsPaths.autopilotDetail(row.id),
+                detailHref?.(row.id) ?? wsPaths.autopilotDetail(row.id),
                 "foreground-tab",
                 row.title,
               )

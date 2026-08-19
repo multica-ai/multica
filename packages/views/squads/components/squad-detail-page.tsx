@@ -10,7 +10,7 @@ import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { isImeComposing } from "@multica/core/utils";
 import { getShortcut, shortcutMatchesEvent } from "@multica/core/shortcuts";
 import { useTimeAgo } from "../../i18n";
-import { agentListOptions, memberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, squadMemberListOptions, squadMemberStatusOptions, workspaceKeys } from "@multica/core/workspace/queries";
 import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
@@ -63,14 +63,24 @@ import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Age
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 
-export function SquadDetailPage() {
+export function SquadDetailPage({
+  squadId: squadIdProp,
+  collectionHref,
+  collectionLabel,
+  createAgentHref,
+}: {
+  squadId?: string;
+  collectionHref?: string;
+  collectionLabel?: string;
+  createAgentHref?: string;
+} = {}) {
   const { t } = useT("squads");
   const workspace = useCurrentWorkspace();
   const wsId = useWorkspaceId();
   const p = useWorkspacePaths();
   const { pathname, push } = useNavigation();
   const queryClient = useQueryClient();
-  const squadId = pathname.split("/").pop() ?? "";
+  const squadId = squadIdProp ?? pathname.split("/").pop() ?? "";
 
   const { data: squad, refetch: refetchSquad } = useQuery<Squad>({
     queryKey: [...workspaceKeys.squads(wsId), squadId],
@@ -78,11 +88,9 @@ export function SquadDetailPage() {
     enabled: !!workspace?.id && !!squadId,
   });
 
-  const { data: members = [], refetch: refetchMembers } = useQuery<SquadMember[]>({
-    queryKey: [...workspaceKeys.squads(wsId), squadId, "members"],
-    queryFn: () => api.listSquadMembers(squadId),
-    enabled: !!workspace?.id && !!squadId,
-  });
+  const { data: members = [], refetch: refetchMembers } = useQuery(
+    squadMemberListOptions(wsId, squadId),
+  );
 
   // Per-squad working/idle/offline + active-issue snapshot. WS task / agent /
   // daemon events invalidate this via use-realtime-sync; the staleTime is a
@@ -172,9 +180,9 @@ export function SquadDetailPage() {
 
   const deleteMut = useMutation({
     mutationFn: () => api.deleteSquad(squadId),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(p.squads()); toast.success("Squad archived"); },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) }); push(collectionHref ?? p.squads()); toast.success("Team archived"); },
     onError: (err) =>
-      toast.error(err instanceof Error && err.message ? err.message : "Failed to archive squad"),
+      toast.error(err instanceof Error && err.message ? err.message : "Failed to archive team"),
   });
 
   const getEntityName = (type: string, id: string) => {
@@ -202,7 +210,12 @@ export function SquadDetailPage() {
   return (
     <div className="flex flex-1 min-h-0 flex-col">
       <BreadcrumbHeader
-        segments={[{ href: p.squads(), label: t(($) => $.page.title) }]}
+        segments={[
+          {
+            href: collectionHref ?? p.squads(),
+            label: collectionLabel ?? t(($) => $.page.title),
+          },
+        ]}
         leaf={
           <>
             <SquadHeaderAvatar squad={squad} initials={initials} />
@@ -243,7 +256,12 @@ export function SquadDetailPage() {
           isArchived={isArchived}
           getEntityName={getEntityName}
           onAddMemberClick={() => setShowAddMember(true)}
-          createAgentHref={canManage ? `${p.newAgent()}?squad=${encodeURIComponent(squadId)}` : undefined}
+          createAgentHref={
+            canManage
+              ? createAgentHref ??
+                `${p.newAgent()}?squad=${encodeURIComponent(squadId)}`
+              : undefined
+          }
           onSetLeader={(id) => setLeaderMut.mutate(id)}
           onRemoveMember={(m) => removeMemberMut.mutate(m)}
           onUpdateRole={async (m, role) => { await updateRoleMut.mutateAsync({ member: m, role }); }}
@@ -382,8 +400,8 @@ function SquadNameEditor({
     <InlineEditPopover
       value={value}
       onSave={onSave}
-      title="Rename squad"
-      placeholder="Squad name"
+      title="Rename team"
+      placeholder="Team name"
       validate={(v) => (v.trim().length > 0 ? null : "Name is required")}
     >
       {(triggerProps) => (
@@ -904,7 +922,7 @@ function SquadDescriptionEditorBody({
         autoFocus
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
-        placeholder="What is this squad responsible for?"
+        placeholder="What is this team responsible for?"
         rows={6}
         onKeyDown={(e) => {
           if (e.key === "Escape") { onClose(); return; }

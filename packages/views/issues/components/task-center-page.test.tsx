@@ -6,6 +6,7 @@ const navigation = vi.hoisted(() => ({
   searchParams: new URLSearchParams(),
   replace: vi.fn(),
 }));
+const autopilotsPage = vi.hoisted(() => vi.fn());
 
 vi.mock("../../navigation", () => ({
   useNavigation: () => navigation,
@@ -33,7 +34,10 @@ vi.mock("../../inbox/components/inbox-page", () => ({
   InboxPage: () => <div>activity-panel</div>,
 }));
 vi.mock("../../autopilots/components/autopilots-page", () => ({
-  AutopilotsPage: () => <div>automations-panel</div>,
+  AutopilotsPage: (props: unknown) => {
+    autopilotsPage(props);
+    return <div>automations-panel</div>;
+  },
 }));
 
 import { TaskCenterPage } from "./task-center-page";
@@ -54,6 +58,24 @@ describe("TaskCenterPage", () => {
     fireEvent.click(screen.getByRole("tab", { name: "Automations" }));
     expect(navigation.replace).toHaveBeenCalledWith(
       "/studio/issues?tab=automations",
+    );
+  });
+
+  it("passes the host-owned Automation detail path into the reused list", () => {
+    navigation.searchParams = new URLSearchParams("tab=automations");
+    const automationDetailHref = (id: string) =>
+      `/studio/issues/automations/${id}`;
+
+    render(
+      <TaskCenterPage
+        workspaceSlug="studio"
+        automationDetailHref={automationDetailHref}
+      />,
+    );
+
+    expect(screen.getByText("automations-panel")).toBeTruthy();
+    expect(autopilotsPage).toHaveBeenLastCalledWith(
+      expect.objectContaining({ detailHref: automationDetailHref }),
     );
   });
 });
