@@ -4377,14 +4377,14 @@ const (
 // retryAttemptCeiling reports how many attempts the auto-retry path allows for
 // a failure reason. It only ever WIDENS the task's generic max_attempts, and
 // only for reasons with a bespoke schedule; everything else keeps the column's
-// value (default 2 = first run + one retry).
+// value (default 4 = first run + three retries).
 //
 // max_attempts <= 1 explicitly disables auto-retry (055_task_lease_and_retry.up
 // .sql: "1 disables retry"), so it is never overridden — a disabled task must
 // not be revived by a raised ceiling. Callers persist this value into the retry
 // child (CreateRetryTask's max_attempts) so the row stays self-consistent:
 // provider_network's chain records attempt=3, max_attempts=3, not a
-// contradictory attempt=3, max_attempts=2 (MUL-4910).
+// contradictory attempt=N, max_attempts=2 (legacy default) (MUL-4910).
 func retryAttemptCeiling(reason string, taskMaxAttempts int32) int32 {
 	if taskMaxAttempts <= 1 {
 		return taskMaxAttempts
