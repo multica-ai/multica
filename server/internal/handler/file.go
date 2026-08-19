@@ -44,12 +44,6 @@ const (
 	attachmentDownloadModeProxy      attachmentDownloadMode = "proxy"
 )
 
-// maxPreviewTextSize caps the body the preview proxy will load into memory
-// for text-based types. Anything larger returns 413 and the UI falls back
-// to "please download". Sized so a typical README/source-file fits but a
-// 100 MB log dump can't blow up the renderer.
-const maxPreviewTextSize = 2 << 20 // 2 MB
-
 // ---------------------------------------------------------------------------
 // Response types
 // ---------------------------------------------------------------------------
@@ -1239,8 +1233,8 @@ func normalizeFrameAncestorSource(raw string) (string, bool) {
 // the explicit /download route signs redirects as attachment downloads and
 // proxy mode streams with the same media-type policy as storage uploads.
 //
-// Hard cap: 2 MB. Larger files return 413. Anything outside the text
-// whitelist returns 415.
+// Files above the configured inline-preview limit return 413. Anything outside
+// the text whitelist returns 415.
 // ---------------------------------------------------------------------------
 
 func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
@@ -1259,6 +1253,14 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "storage not configured")
 		return
 	}
+	limit := h.maxPreviewSizeBytes()
+	// The recorded size lets known-oversized objects fail before opening remote
+	// storage. A value at or below the limit is not trusted to admit the object;
+	// the bounded read below still enforces the limit against the actual body.
+	if att.SizeBytes > limit {
+		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
+		return
+	}
 	key := h.Storage.KeyFromURL(att.Url)
 	reader, err := h.Storage.GetReader(r.Context(), key)
 	if err != nil {
@@ -1268,15 +1270,15 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	}
 	defer reader.Close()
 
-	// LimitReader to maxPreviewTextSize+1 so we can detect "exactly at the
-	// limit" vs "exceeds the limit" by checking the returned length.
-	body, err := io.ReadAll(io.LimitReader(reader, maxPreviewTextSize+1))
+	// Read one byte beyond the limit so the exact boundary remains valid. The
+	// configured hard maximum guarantees that limit+1 cannot overflow.
+	body, err := io.ReadAll(io.LimitReader(reader, limit+1))
 	if err != nil {
 		slog.Error("failed to read attachment body for preview", "id", attachmentID, "error", err)
 		writeError(w, http.StatusBadGateway, "failed to read attachment body")
 		return
 	}
-	if len(body) > maxPreviewTextSize {
+	if int64(len(body)) > limit {
 		writeError(w, http.StatusRequestEntityTooLarge, "file too large for inline preview")
 		return
 	}
@@ -1289,8 +1291,8 @@ func (h *Handler) GetAttachmentContent(w http.ResponseWriter, r *http.Request) {
 	// No-store: workspace membership / attachment ACL can change between
 	// requests (member removed, attachment deleted). A cached body would
 	// stay readable past the revocation window. The redundant request is
-	// fine here — bodies are capped at 2 MB and the endpoint is only hit
-	// when a user explicitly opens a preview.
+	// fine here — bodies are bounded by the configured inline-preview limit
+	// and the endpoint is only hit when a user explicitly opens a preview.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	h.setAttachmentPreviewSecurityHeaders(w)

@@ -97,6 +97,7 @@ For file uploads and attachments, configure S3 and (optionally) CloudFront:
 | `S3_USE_PATH_STYLE` | Optional S3 addressing mode. Leave empty for the default (`true` when `AWS_ENDPOINT_URL` is set, `false` for AWS S3). Set `false` for S3-compatible providers that require virtual-hosted-style URLs |
 | `ATTACHMENT_DOWNLOAD_MODE` | Attachment download behavior: `auto` (default), `cloudfront`, `presign`, or `proxy`. Use `proxy` for private buckets behind Docker/VPC-only endpoints such as `http://rustfs:9000`. Avatars follow the same policy — see below |
 | `ATTACHMENT_DOWNLOAD_URL_TTL` | TTL for CloudFront signed URLs and S3 presigned download URLs (default: `30m`) |
+| `MULTICA_MAX_PREVIEW_SIZE` | Maximum attachment body loaded into memory for inline text preview (default `2MiB`, maximum `16MiB`). Accepts bytes or `KB`/`MB` and `KiB`/`MiB` suffixes. Larger files remain downloadable; this setting does not change upload or download limits. |
 | `CLOUDFRONT_DOMAIN` | CloudFront distribution domain — when set, public URLs use this host instead of the S3 host |
 | `CLOUDFRONT_KEY_PAIR_ID` | CloudFront key pair ID for signed URLs |
 | `CLOUDFRONT_PRIVATE_KEY` | CloudFront private key (PEM format) |

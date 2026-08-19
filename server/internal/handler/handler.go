@@ -108,6 +108,9 @@ type Config struct {
 	CloudRuntimeFleetTimeout time.Duration
 	AttachmentDownloadMode   string
 	AttachmentDownloadURLTTL time.Duration
+	// MaxPreviewSizeBytes is the maximum attachment body buffered for inline
+	// text preview. Zero selects DefaultMaxPreviewSizeBytes.
+	MaxPreviewSizeBytes int64
 	// AttachmentFrameAncestors are trusted browser origins allowed to embed
 	// attachment preview responses. In production this should mirror the
 	// frontend/CORS origin allowlist so split app/api self-hosted deployments
@@ -361,6 +364,12 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 	if cfg.AttachmentDownloadURLTTL <= 0 {
 		cfg.AttachmentDownloadURLTTL = defaultAttachmentDownloadURLTTL
 	}
+	if cfg.MaxPreviewSizeBytes < 0 || cfg.MaxPreviewSizeBytes > MaxConfigurablePreviewSizeBytes {
+		slog.Warn("invalid max preview size, using default",
+			"value_bytes", cfg.MaxPreviewSizeBytes,
+			"default_bytes", DefaultMaxPreviewSizeBytes)
+	}
+	cfg.MaxPreviewSizeBytes = normalizeMaxPreviewSize(cfg.MaxPreviewSizeBytes)
 
 	var daemonHub *daemonws.Hub
 	if len(daemonHubs) > 0 {

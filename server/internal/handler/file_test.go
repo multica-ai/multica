@@ -55,6 +55,7 @@ func createHandlerTestChatSession(t *testing.T, agentID string) string {
 type mockStorage struct {
 	mu                  sync.Mutex
 	files               map[string][]byte
+	getReaderCalls      int
 	presignCalls        []string
 	presignDispositions []string
 }
@@ -107,10 +108,16 @@ func (m *mockStorageNoCdn) CdnDomain() string { return "" }
 func (m *mockStorage) GetReader(_ context.Context, key string) (io.ReadCloser, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	m.getReaderCalls++
 	if data, ok := m.files[key]; ok {
 		return io.NopCloser(bytes.NewReader(data)), nil
 	}
 	return nil, fmt.Errorf("mockStorage GetReader: key not found: %q", key)
+}
+func (m *mockStorage) GetReaderCallCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.getReaderCalls
 }
 func (m *mockStorage) PresignGet(_ context.Context, key string, _ time.Duration) (string, error) {
 	m.mu.Lock()
@@ -455,6 +462,11 @@ func TestUploadFile_RejectsForeignChatSession(t *testing.T) {
 // installing the mockStorage on testHandler before calling.
 func seedPreviewAttachment(t *testing.T, store *mockStorage, key, filename, contentType string, body []byte) string {
 	t.Helper()
+	return seedPreviewAttachmentWithSize(t, store, key, filename, contentType, body, int64(len(body)))
+}
+
+func seedPreviewAttachmentWithSize(t *testing.T, store *mockStorage, key, filename, contentType string, body []byte, sizeBytes int64) string {
+	t.Helper()
 	// Register the body so GetReader can find it via KeyFromURL → key.
 	url, err := store.Upload(context.Background(), key, body, contentType, filename)
 	if err != nil {
@@ -466,7 +478,7 @@ func seedPreviewAttachment(t *testing.T, store *mockStorage, key, filename, cont
 		INSERT INTO attachment (workspace_id, uploader_type, uploader_id, filename, url, content_type, size_bytes)
 		VALUES ($1, 'member', $2, $3, $4, $5, $6)
 		RETURNING id::text
-	`, testWorkspaceID, testUserID, filename, url, contentType, len(body)).Scan(&id); err != nil {
+	`, testWorkspaceID, testUserID, filename, url, contentType, sizeBytes).Scan(&id); err != nil {
 		t.Fatalf("seed attachment row: %v", err)
 	}
 	t.Cleanup(func() {
@@ -500,6 +512,13 @@ func newPreviewRequest(t *testing.T, attachmentID, workspaceID string) (*http.Re
 	rctx.URLParams.Add("id", attachmentID)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
 	return req, httptest.NewRecorder()
+}
+
+func previewHandlerWithLimit(store storage.Storage, limit int64) *Handler {
+	h := *testHandler
+	h.Storage = store
+	h.cfg.MaxPreviewSizeBytes = limit
+	return &h
 }
 
 func newDownloadRequest(t *testing.T, attachmentID, workspaceID string) (*http.Request, *httptest.ResponseRecorder) {
@@ -1552,18 +1571,86 @@ func TestGetAttachmentContent_Unsupported_PDF(t *testing.T) {
 
 func TestGetAttachmentContent_TooLarge(t *testing.T) {
 	store := &mockStorage{}
-	origStorage := testHandler.Storage
-	testHandler.Storage = store
-	defer func() { testHandler.Storage = origStorage }()
+	h := previewHandlerWithLimit(store, 0)
 
 	// One byte over the limit. Allocate ASCII so io.ReadAll has work to do.
-	big := bytes.Repeat([]byte("a"), maxPreviewTextSize+1)
+	big := bytes.Repeat([]byte("a"), int(DefaultMaxPreviewSizeBytes+1))
 	id := seedPreviewAttachment(t, store, "huge-key.txt", "huge.txt", "text/plain", big)
 
 	req, w := newPreviewRequest(t, id, testWorkspaceID)
-	testHandler.GetAttachmentContent(w, req)
+	h.GetAttachmentContent(w, req)
 	if w.Code != http.StatusRequestEntityTooLarge {
 		t.Fatalf("status = %d, want 413; body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestGetAttachmentContent_CustomLimitBoundary(t *testing.T) {
+	const limit = int64(8)
+	tests := []struct {
+		name       string
+		body       []byte
+		wantStatus int
+	}{
+		{name: "exact boundary", body: []byte("12345678"), wantStatus: http.StatusOK},
+		{name: "one byte over", body: []byte("123456789"), wantStatus: http.StatusRequestEntityTooLarge},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := &mockStorage{}
+			h := previewHandlerWithLimit(store, limit)
+			sizeBytes := int64(len(tt.body))
+			if tt.wantStatus == http.StatusRequestEntityTooLarge {
+				// Under-report the metadata so the bounded object read, rather than
+				// the metadata fast path, must detect the oversized body.
+				sizeBytes = limit
+			}
+			id := seedPreviewAttachmentWithSize(t, store, "custom-limit.txt", "custom-limit.txt", "text/plain", tt.body, sizeBytes)
+
+			req, w := newPreviewRequest(t, id, testWorkspaceID)
+			h.GetAttachmentContent(w, req)
+			if w.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d; body=%s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			if tt.wantStatus == http.StatusOK && !bytes.Equal(w.Body.Bytes(), tt.body) {
+				t.Fatalf("body = %q, want %q", w.Body.Bytes(), tt.body)
+			}
+			if calls := store.GetReaderCallCount(); calls != 1 {
+				t.Fatalf("GetReader calls = %d, want 1", calls)
+			}
+		})
+	}
+}
+
+func TestGetAttachmentContent_MetadataOverLimitSkipsStorageRead(t *testing.T) {
+	const limit = int64(8)
+	store := &mockStorage{}
+	h := previewHandlerWithLimit(store, limit)
+	id := seedPreviewAttachmentWithSize(t, store, "metadata-over.txt", "metadata-over.txt", "text/plain", []byte("small"), limit+1)
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	h.GetAttachmentContent(w, req)
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want 413; body=%s", w.Code, w.Body.String())
+	}
+	if calls := store.GetReaderCallCount(); calls != 0 {
+		t.Fatalf("GetReader calls = %d, want 0", calls)
+	}
+}
+
+func TestGetAttachmentContent_ExtremeConfigFallsBackWithoutOverflow(t *testing.T) {
+	store := &mockStorage{}
+	h := previewHandlerWithLimit(store, int64(1<<63-1))
+	body := []byte("preview remains intact")
+	id := seedPreviewAttachment(t, store, "extreme-config.md", "extreme-config.md", "text/markdown", body)
+
+	req, w := newPreviewRequest(t, id, testWorkspaceID)
+	h.GetAttachmentContent(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	if !bytes.Equal(w.Body.Bytes(), body) {
+		t.Fatalf("body = %q, want %q", w.Body.Bytes(), body)
 	}
 }
 
