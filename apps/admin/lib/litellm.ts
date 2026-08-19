@@ -46,7 +46,9 @@ async function apiGet(path: string, params: Record<string, string> = {}): Promis
   return r.json();
 }
 
-const MAX_KEY_PAGES = 20; // hard backstop — 20k keys at size=1000 is far beyond any real proxy
+// This LiteLLM deployment caps /key/list's `size` at 100 (larger values 422).
+const KEY_PAGE_SIZE = 100;
+const MAX_KEY_PAGES = 200; // hard backstop — 20k keys is far beyond any real proxy
 
 /**
  * Fetches all LiteLLM keys, paginating on `metadata.total_pages` (same
@@ -69,7 +71,7 @@ export async function listLiteLlmKeys(): Promise<LiteLlmKey[]> {
     try {
       raw = await apiGet("/key/list", {
         page: String(page),
-        size: "1000",
+        size: String(KEY_PAGE_SIZE),
         key_alias: "agentfarm-",
         substring_matching: "true",
         // Without this, /key/list returns `keys` as an array of hashed
