@@ -419,24 +419,27 @@ func TestExecOpenclawCLIPrefersRealStderr(t *testing.T) {
 	}
 }
 
-// TestExecOpenclawCLIPreservesFailedStdout covers OpenClaw 2026.7.x, whose
-// JSON commands report errors on stdout while exiting non-zero. The caller
-// needs that payload to recognize a missing config path and use the registry.
-func TestExecOpenclawCLIPreservesFailedStdout(t *testing.T) {
+// TestExecOpenclawCLIPreservesFailedStdoutWithoutLeakingIt covers the process
+// boundary behind #7130. cmd.Output returns stdout even when the child exits
+// non-zero; callers need that value to inspect OpenClaw's JSON error envelope,
+// but it must stay out of the error text because other config commands can
+// print resolved configuration and secrets there.
+func TestExecOpenclawCLIPreservesFailedStdoutWithoutLeakingIt(t *testing.T) {
+	const marker = "stdout-only-sensitive-marker"
 	shim := writeShim(t, t.TempDir(),
-		"#!/bin/sh\nprintf '%s\\n' '{\"error\":\"Config path not found: agents.list\"}'\nexit 1\n",
-		"@echo off\r\necho {\"error\":\"Config path not found: agents.list\"}\r\nexit /b 1\r\n",
+		"#!/bin/sh\necho '"+marker+"'\nexit 1\n",
+		"@echo off\r\necho "+marker+"\r\nexit /b 1\r\n",
 	)
 
-	_, err := execOpenclawCLI(context.Background(), shim, "config", "get", "agents.list", "--json")
+	out, err := execOpenclawCLI(context.Background(), shim, "config", "get", "agents.list", "--json")
 	if err == nil {
-		t.Fatal("expected the CLI failure to surface as an error")
+		t.Fatalf("expected the shim failure to surface as an error, got output %q", out)
 	}
-	if !strings.Contains(err.Error(), `stdout: {"error":"Config path not found: agents.list"}`) {
-		t.Fatalf("failed stdout must be preserved for error classification; got: %s", err)
+	if !strings.Contains(out, marker) {
+		t.Fatalf("failed stdout was discarded; got %q", out)
 	}
-	if !isOpenclawKeyMissing(err) {
-		t.Fatalf("failed stdout should trigger the agents registry fallback; got: %s", err)
+	if strings.Contains(err.Error(), marker) {
+		t.Fatalf("failed stdout leaked into the error text: %s", err)
 	}
 }
 
