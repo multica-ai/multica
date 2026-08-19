@@ -115,6 +115,32 @@ export function useUpdateWorkspaceMcpServer(wsId: string) {
   });
 }
 
+export function useProbeWorkspaceMcpServer(wsId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ serverId, runtimeId }: { serverId: string; runtimeId?: string }) => {
+      const first = await api.probeWorkspaceMcpServer(wsId, serverId, runtimeId);
+      if (first.status !== "pending" && first.status !== "running") {
+        return first;
+      }
+      const deadline = Date.now() + 70_000;
+      let current = first;
+      while (current.status === "pending" || current.status === "running") {
+        if (Date.now() > deadline) {
+          throw new Error("The daemon did not finish the probe in time");
+        }
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        current = await api.getWorkspaceMcpProbe(wsId, serverId, current.id);
+      }
+      return current;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: workspaceKeys.mcpServers(wsId) });
+      queryClient.invalidateQueries({ queryKey: ["agents"] });
+    },
+  });
+}
+
 export function useDeleteWorkspaceMcpServer(wsId: string) {
   const queryClient = useQueryClient();
   return useMutation({

@@ -194,6 +194,7 @@ func daemonClientCapabilities() string {
 		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilityRPCV1,
+		protocol.DaemonCapabilityMcpProbeV1,
 	}, ",")
 }
 
@@ -523,6 +524,7 @@ type (
 	PendingModelList        = protocol.DaemonHeartbeatPendingModelList
 	PendingLocalSkills      = protocol.DaemonHeartbeatPendingLocalSkills
 	PendingLocalSkillImport = protocol.DaemonHeartbeatPendingLocalSkillImport
+	PendingMcpProbe         = protocol.DaemonHeartbeatPendingMcpProbe
 )
 
 func (c *Client) SendHeartbeat(ctx context.Context, runtimeID string) (*HeartbeatResponse, error) {
@@ -554,6 +556,25 @@ func (c *Client) ReportLocalSkillListResult(ctx context.Context, runtimeID, requ
 // ReportLocalSkillImportResult sends a runtime-local-skill bundle back to the server.
 func (c *Client) ReportLocalSkillImportResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
 	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/local-skills/import/%s/result", runtimeID, requestID), result, nil)
+}
+
+// McpProbeJob is the daemon-only payload for one workspace MCP probe.
+type McpProbeJob struct {
+	RequestID  string          `json:"request_id"`
+	ServerName string          `json:"server_name"`
+	Config     json.RawMessage `json:"config"`
+}
+
+func (c *Client) GetMcpProbeJob(ctx context.Context, runtimeID, requestID string) (*McpProbeJob, error) {
+	var job McpProbeJob
+	if err := c.getJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/mcp-probes/%s", runtimeID, requestID), &job); err != nil {
+		return nil, err
+	}
+	return &job, nil
+}
+
+func (c *Client) ReportMcpProbeResult(ctx context.Context, runtimeID, requestID string, result map[string]any) error {
+	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/runtimes/%s/mcp-probes/%s/result", runtimeID, requestID), result, nil)
 }
 
 // WorkspaceInfo holds minimal workspace metadata returned by the API.

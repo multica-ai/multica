@@ -269,7 +269,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `runs <id>` | View run history | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | |
 | `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace | |
-| | `mcp list/add/update/remove` | Manage the workspace's MCP server library | Writes are owner/admin. A server added here is assigned to no agent — give it to one with `multica agent mcp add`. `list` shows names and transports only; the stored entry is write-only and never returned. `--server-config-file` / `--server-config-stdin` keep tokens out of shell history |
+| | `mcp list/add/update/remove/probe` | Manage the workspace's MCP server library | Writes are owner/admin. A server added here is assigned to no agent — give it to one with `multica agent mcp add`. `list` shows names, transports, and the last daemon probe. `probe` runs initialize + tools/list on a connected daemon (`--runtime-id` when several are online). The stored entry is write-only and never returned. `--server-config-file` / `--server-config-stdin` keep tokens out of shell history |
 | | `member list/invite <email>` | View members, send invites | `invite`: `--role` (member or admin, default member) |
 | `repo` | `list/add/remove/checkout` | Manage workspace repositories and check them out locally | `--url` (repeatable); `checkout`: `--ref` |
 | `skill` | `list/get/create/update/delete` | Manage skills | |

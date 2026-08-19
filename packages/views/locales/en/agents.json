@@ -529,6 +529,7 @@
       "dialog_name_locked": "The name cannot be changed here — renaming would add a second server and leave this one behind. Remove and re-add it instead.",
       "workspace_overridden_badge": "Overridden",
       "workspace_disabled_badge": "Disabled",
+      "workspace_probe_failed": "Last probe failed on {{runtime}}",
       "runtime_title": "Inherited from runtime",
       "runtime_title_named": "Inherited from {{runtime}}",
       "refresh_action": "Refresh",

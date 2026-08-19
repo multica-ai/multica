@@ -3925,13 +3925,14 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 	if resp == nil {
 		return
 	}
-	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil {
+	if resp.PendingUpdate != nil || resp.PendingModelList != nil || resp.PendingLocalSkills != nil || resp.PendingLocalSkillImport != nil || resp.PendingMcpProbe != nil {
 		d.logger.Debug("heartbeat: pending actions",
 			"runtime_id", runtimeID,
 			"update", resp.PendingUpdate != nil,
 			"model_list", resp.PendingModelList != nil,
 			"local_skills", resp.PendingLocalSkills != nil,
 			"local_skill_import", resp.PendingLocalSkillImport != nil,
+			"mcp_probe", resp.PendingMcpProbe != nil,
 		)
 	}
 	if resp.PendingUpdate != nil {
@@ -3958,6 +3959,9 @@ func (d *Daemon) handleHeartbeatActions(ctx context.Context, runtimeID string, r
 		if rt := d.findRuntime(runtimeID); rt != nil {
 			go d.handleLocalSkillImport(ctx, *rt, *resp.PendingLocalSkillImport)
 		}
+	}
+	if resp.PendingMcpProbe != nil {
+		go d.handleMcpProbe(ctx, runtimeID, resp.PendingMcpProbe.ID)
 	}
 }
 

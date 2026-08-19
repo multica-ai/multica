@@ -300,7 +300,14 @@
     "updated_toast": "共有 MCP サーバーを更新しました",
     "removed_toast": "共有 MCP サーバーを削除しました",
     "save_failed_toast": "共有 MCP サーバーを保存できませんでした",
-    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした"
+    "remove_failed_toast": "共有 MCP サーバーを削除できませんでした",
+    "test_connection": "接続をテスト",
+    "probe_runtime_label": "プローブするランタイム",
+    "probe_runtime_placeholder": "ランタイムを選択",
+    "probe_ok": "前回のプローブ: \"{{runtime}}\" で成功 {{time}} · {{count}} ツール",
+    "probe_fail": "前回のプローブ: \"{{runtime}}\" で失敗 {{time}} · {{error}}",
+    "probe_ok_toast": "接続に成功しました",
+    "probe_failed_toast": "接続に失敗しました"
   },
   "page": {
     "title": "設定",

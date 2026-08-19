@@ -474,6 +474,13 @@ function McpWorkspaceServerRow({
         <p className="text-caption uppercase text-muted-foreground">
           {server.transport || "unknown"}
         </p>
+        {server.last_probe?.status === "fail" ? (
+          <p className="mt-0.5 text-caption text-destructive">
+            {t(($) => $.tab_body.mcp_config.workspace_probe_failed, {
+              runtime: server.last_probe.runtime_name,
+            })}
+          </p>
+        ) : null}
       </div>
       {canEdit && (
         <>

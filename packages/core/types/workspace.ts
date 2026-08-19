@@ -30,12 +30,39 @@ export interface Workspace {
  * `enabled` is only present on an AGENT's assignment list, where it is the
  * per-agent toggle; the workspace library listing has no binding to report.
  */
+export interface WorkspaceMcpLastProbe {
+  status: string;
+  probed_at: string;
+  runtime_id: string;
+  runtime_name: string;
+  elapsed_ms: number;
+  error_code?: string;
+  error?: string;
+  tools?: string[];
+}
+
 export interface WorkspaceMcpServer {
   id: string;
   workspace_id: string;
   name: string;
   transport: string;
   enabled?: boolean;
+  last_probe?: WorkspaceMcpLastProbe;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WorkspaceMcpProbeRequest {
+  id: string;
+  workspace_id: string;
+  server_id: string;
+  runtime_id: string;
+  runtime_name: string;
+  status: string;
+  error_code?: string;
+  error?: string;
+  elapsed_ms?: number;
+  tools?: string[];
   created_at: string;
   updated_at: string;
 }

@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"text/tabwriter"
+	"time"
 	"unicode/utf8"
 
 	"github.com/spf13/cobra"
@@ -156,6 +157,16 @@ var workspaceMcpRemoveCmd = &cobra.Command{
 	RunE: runWorkspaceMcpRemove,
 }
 
+var workspaceMcpProbeCmd = &cobra.Command{
+	Use:   "probe <server-id> [workspace-id|slug|prefix]",
+	Short: "Test a workspace MCP server on a connected daemon (admin/owner only)",
+	Long: "Asks a connected daemon to handshake the server (initialize + tools/list) " +
+		"and prints the redacted result. The stored configuration is never returned. " +
+		"When more than one runtime is online, pass --runtime-id.",
+	Args: cobra.RangeArgs(1, 2),
+	RunE: runWorkspaceMcpProbe,
+}
+
 func init() {
 	workspaceCmd.AddCommand(workspaceListCmd)
 	workspaceCmd.AddCommand(workspaceCreateCmd)
@@ -170,6 +181,7 @@ func init() {
 	workspaceMcpCmd.AddCommand(workspaceMcpAddCmd)
 	workspaceMcpCmd.AddCommand(workspaceMcpUpdateCmd)
 	workspaceMcpCmd.AddCommand(workspaceMcpRemoveCmd)
+	workspaceMcpCmd.AddCommand(workspaceMcpProbeCmd)
 
 	workspaceListCmd.Flags().String("output", "table", "Output format: table or json")
 	workspaceListCmd.Flags().Bool("full-id", false, "Show full UUIDs in table output")
@@ -208,6 +220,8 @@ func init() {
 	workspaceMcpUpdateCmd.Flags().String("server-config-file", "", "Read the replacement server entry JSON from a file")
 	workspaceMcpUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 	workspaceMcpRemoveCmd.Flags().String("output", "json", "Output format: table or json")
+	workspaceMcpProbeCmd.Flags().String("runtime-id", "", "Runtime that should run the probe (required when several are online)")
+	workspaceMcpProbeCmd.Flags().String("output", "table", "Output format: table or json")
 }
 
 // workspaceSummary is the subset of fields the CLI needs from /api/workspaces
@@ -741,17 +755,86 @@ func runWorkspaceMcpRemove(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
+func runWorkspaceMcpProbe(cmd *cobra.Command, args []string) error {
+	serverID := strings.TrimSpace(args[0])
+	if serverID == "" {
+		return fmt.Errorf("server ID must not be empty")
+	}
+	wsID, err := resolveWorkspaceArg(cmd, args[1:])
+	if err != nil {
+		return err
+	}
+	if wsID == "" {
+		return fmt.Errorf("workspace ID is required: pass an id/slug/prefix as argument or set MULTICA_WORKSPACE_ID")
+	}
+
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+	runtimeID, _ := cmd.Flags().GetString("runtime-id")
+	body := map[string]any{}
+	if strings.TrimSpace(runtimeID) != "" {
+		body["runtime_id"] = strings.TrimSpace(runtimeID)
+	}
+
+	ctx, cancel := cli.APIContext(context.Background())
+	defer cancel()
+
+	var req workspaceMcpProbeRequest
+	path := "/api/workspaces/" + wsID + "/mcp-servers/" + url.PathEscape(serverID) + "/probe"
+	if err := client.PostJSON(ctx, path, body, &req); err != nil {
+		return fmt.Errorf("probe workspace mcp server: %w", err)
+	}
+
+	deadline := time.Now().Add(70 * time.Second)
+	for req.Status == "pending" || req.Status == "running" {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("probe timed out waiting for the daemon")
+		}
+		time.Sleep(500 * time.Millisecond)
+		poll := "/api/workspaces/" + wsID + "/mcp-servers/" + url.PathEscape(serverID) + "/probes/" + url.PathEscape(req.ID)
+		if err := client.GetJSON(ctx, poll, &req); err != nil {
+			return fmt.Errorf("poll workspace mcp probe: %w", err)
+		}
+	}
+	return printWorkspaceMcpProbe(cmd, req)
+}
+
 // workspaceMcpServer is the CLI's half of the write-only boundary. Decoding
 // into named fields — rather than a map[string]any that gets re-encoded —
 // means a server that regressed to returning a stored entry, or a `url` /
 // `headers` inside one, cannot reach stdout through ANY output format. Fields
 // not declared here are dropped by encoding/json.
+type workspaceMcpLastProbe struct {
+	Status      string   `json:"status"`
+	ProbedAt    string   `json:"probed_at"`
+	RuntimeID   string   `json:"runtime_id"`
+	RuntimeName string   `json:"runtime_name"`
+	ElapsedMs   int64    `json:"elapsed_ms"`
+	ErrorCode   string   `json:"error_code,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	Tools       []string `json:"tools,omitempty"`
+}
+
 type workspaceMcpServer struct {
 	ID        string `json:"id"`
 	Name      string `json:"name"`
 	Transport string `json:"transport"`
 	// Only set on an agent's assignment list; nil in the workspace library.
-	Enabled *bool `json:"enabled,omitempty"`
+	Enabled   *bool                  `json:"enabled,omitempty"`
+	LastProbe *workspaceMcpLastProbe `json:"last_probe,omitempty"`
+}
+
+type workspaceMcpProbeRequest struct {
+	ID          string   `json:"id"`
+	Status      string   `json:"status"`
+	RuntimeID   string   `json:"runtime_id"`
+	RuntimeName string   `json:"runtime_name"`
+	ErrorCode   string   `json:"error_code,omitempty"`
+	Error       string   `json:"error,omitempty"`
+	ElapsedMs   int64    `json:"elapsed_ms,omitempty"`
+	Tools       []string `json:"tools,omitempty"`
 }
 
 // printWorkspaceMcpServers renders an MCP server list. There is no entry to
@@ -777,10 +860,70 @@ func printWorkspaceMcpServers(cmd *cobra.Command, servers []workspaceMcpServer) 
 				status = "disabled"
 			}
 		}
-		rows = append(rows, []string{server.ID, server.Name, server.Transport, status})
+		rows = append(rows, []string{
+			server.ID, server.Name, server.Transport, status,
+			formatWorkspaceMcpProbe(server.LastProbe),
+			workspaceMcpProbeRuntime(server.LastProbe),
+			workspaceMcpProbeTools(server.LastProbe),
+		})
 	}
-	cli.PrintTable(os.Stdout, []string{"ID", "NAME", "TRANSPORT", "STATUS"}, rows)
+	cli.PrintTable(os.Stdout, []string{"ID", "NAME", "TRANSPORT", "STATUS", "PROBE", "RUNTIME", "TOOLS"}, rows)
 	return nil
+}
+
+func printWorkspaceMcpProbe(cmd *cobra.Command, req workspaceMcpProbeRequest) error {
+	output, _ := cmd.Flags().GetString("output")
+	if output != "table" {
+		return cli.PrintJSON(os.Stdout, req)
+	}
+	status := req.Status
+	if status == "completed" {
+		status = "ok"
+	}
+	if status == "failed" || status == "timeout" {
+		status = "fail"
+	}
+	detail := req.Error
+	if detail == "" && len(req.Tools) > 0 {
+		detail = strings.Join(req.Tools, ", ")
+	}
+	cli.PrintTable(os.Stdout, []string{"STATUS", "RUNTIME", "ELAPSED", "DETAIL"}, [][]string{{
+		status,
+		req.RuntimeName,
+		fmt.Sprintf("%dms", req.ElapsedMs),
+		detail,
+	}})
+	return nil
+}
+
+func formatWorkspaceMcpProbe(probe *workspaceMcpLastProbe) string {
+	if probe == nil || probe.Status == "" {
+		return "never"
+	}
+	if probe.Status == "ok" {
+		return "ok"
+	}
+	if probe.ErrorCode != "" {
+		return "fail " + probe.ErrorCode
+	}
+	return "fail"
+}
+
+func workspaceMcpProbeRuntime(probe *workspaceMcpLastProbe) string {
+	if probe == nil {
+		return ""
+	}
+	return probe.RuntimeName
+}
+
+func workspaceMcpProbeTools(probe *workspaceMcpLastProbe) string {
+	if probe == nil {
+		return ""
+	}
+	if probe.Status == "ok" {
+		return fmt.Sprintf("%d", len(probe.Tools))
+	}
+	return ""
 }
 
 func runWorkspaceMembers(cmd *cobra.Command, args []string) error {
