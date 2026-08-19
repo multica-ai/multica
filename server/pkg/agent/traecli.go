@@ -113,7 +113,10 @@ func (b *traecliBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	)
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, traecliArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", traecliArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(traecliArgs,
+		trustAgentCommandPositional(0, "acp"),
+		trustAgentCommandPositional(1, "serve"),
+	))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

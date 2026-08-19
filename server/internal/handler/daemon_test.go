@@ -2570,16 +2570,38 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 	}
 }
 
+func TestClaimResponseAgentIdentityMatches(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		resp AgentTaskResponse
+		want bool
+	}{
+		{name: "matching", resp: AgentTaskResponse{AgentID: "agent-a", Agent: &TaskAgentData{ID: "agent-a"}}, want: true},
+		{name: "mismatched", resp: AgentTaskResponse{AgentID: "agent-a", Agent: &TaskAgentData{ID: "agent-b"}}},
+		{name: "missing top-level identity", resp: AgentTaskResponse{Agent: &TaskAgentData{ID: "agent-a"}}},
+		{name: "missing response agent", resp: AgentTaskResponse{AgentID: "agent-a"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := claimResponseAgentIdentityMatches(tc.resp); got != tc.want {
+				t.Fatalf("claimResponseAgentIdentityMatches() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 type claimRuntimeGuardTask struct {
-	PriorSessionID           string   `json:"prior_session_id"`
-	PriorWorkDir             string   `json:"prior_work_dir"`
-	ChatMessage              string   `json:"chat_message"`
-	ThreadName               string   `json:"thread_name"`
-	QuickCreateAttachmentIDs []string `json:"quick_create_attachment_ids"`
-	QuickCreatePriority      string   `json:"quick_create_priority"`
-	QuickCreateDueDate       string   `json:"quick_create_due_date"`
-	ProjectID                string   `json:"project_id"`
-	ProjectDescription       string   `json:"project_description"`
+	PriorSessionID                string   `json:"prior_session_id"`
+	PriorWorkDir                  string   `json:"prior_work_dir"`
+	PriorSessionResumeUnavailable bool     `json:"prior_session_resume_unavailable"`
+	ChatMessage                   string   `json:"chat_message"`
+	ThreadName                    string   `json:"thread_name"`
+	QuickCreateAttachmentIDs      []string `json:"quick_create_attachment_ids"`
+	QuickCreatePriority           string   `json:"quick_create_priority"`
+	QuickCreateDueDate            string   `json:"quick_create_due_date"`
+	ProjectID                     string   `json:"project_id"`
+	ProjectDescription            string   `json:"project_description"`
 }
 
 func claimTaskForRuntimeGuard(t *testing.T, runtimeID, daemonID string) *claimRuntimeGuardTask {
@@ -3001,6 +3023,37 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 		}
 		if task.PriorSessionID != "" {
 			t.Fatalf("PriorSessionID = %q, want empty (cross-runtime session cannot resolve)", task.PriorSessionID)
+		}
+	})
+
+	t.Run("different_agent_source_starts_fresh", func(t *testing.T) {
+		issueNum++
+		issueID := dbfx.Issue(t, "manual-retry-cross-agent fixture", testutil.Cols{
+			"status": "in_progress",
+			"number": issueNum,
+		})
+		otherAgentID := dbfx.Agent(t, "Rerun Source Other Agent", runtimeID, testutil.Cols{})
+		sourceID := dbfx.Task(t, otherAgentID, testutil.Cols{
+			"runtime_id": runtimeID,
+			"issue_id":   issueID,
+			"status":     "failed",
+			"session_id": "other-agent-session",
+			"work_dir":   "/tmp/other-agent-workdir",
+		})
+		dbfx.Exec(t, `
+			INSERT INTO agent_task_queue (
+				agent_id, runtime_id, issue_id, status, priority,
+				rerun_of_task_id, force_fresh_session
+			)
+			VALUES ($1, $2, $3, 'queued', 0, $4, TRUE)
+		`, agentID, runtimeID, issueID, sourceID)
+
+		task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
+		if task.PriorWorkDir != "" || task.PriorSessionID != "" {
+			t.Fatalf("cross-agent rerun inherited source pointers: session=%q workdir=%q", task.PriorSessionID, task.PriorWorkDir)
+		}
+		if !task.PriorSessionResumeUnavailable {
+			t.Fatal("cross-agent rerun must disclose that the requested source was not resumable")
 		}
 	})
 }

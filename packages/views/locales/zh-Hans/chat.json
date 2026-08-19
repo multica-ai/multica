@@ -14,6 +14,7 @@
     "placeholder_archived": "此会话已归档",
     "placeholder_archived_agent": "该智能体已归档",
     "placeholder_runtime_required": "绑定运行时后继续",
+    "placeholder_access_revoked": "你已没有运行该智能体的权限",
     "placeholder_named": "给 {{name}} 发消息…",
     "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
@@ -36,6 +37,7 @@
     "clear": "全部清空",
     "steer": "引导",
     "steer_unavailable": "当前回复开始后才能引导",
+    "steer_no_permission": "你已没有运行该智能体的权限",
     "steer_unavailable_toast": "暂时无法引导，正在刷新队列。",
     "edit": "编辑排队消息",
     "remove": "移除排队消息",
@@ -171,6 +173,7 @@
   },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "archived_agent_banner": "{{name}} 已归档——此会话为只读。",
+  "agent_access_revoked_banner": "你已没有运行 {{name}} 的权限——此会话为只读。",
   "runtime_required_banner": {
     "fallback_name": "该智能体",
     "message": "{{name}} 需要绑定运行时后才能回复。",

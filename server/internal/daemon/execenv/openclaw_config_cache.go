@@ -51,6 +51,22 @@ const (
 	// config file. The TTL is the backstop that keeps those visible, at the
 	// cost of re-running discovery at most once a minute.
 	openclawDiscoveryCacheTTL = time.Minute
+
+	// openclawDiscoveryCacheFutureSkew is how far ahead of the reader's clock
+	// sample an entry may be dated and still count as fresh.
+	//
+	// Without it, tasks starting together on one daemon evict each other's
+	// work. Every caller samples time.Now() once and passes it down, so a peer
+	// that sampled later but committed its rename first leaves an entry dated
+	// microseconds "in the future" — and the reader, whose own store just
+	// succeeded, throws it away and re-runs discovery for nothing. The same
+	// interleaving is what made TestOpenclawDiscoveryCacheConcurrentPreparations
+	// flake in CI.
+	//
+	// One second is far above that window and far below what the guard below
+	// exists to catch. It also bounds the cost of being wrong: an entry dated
+	// into the future outlives its TTL by at most this much.
+	openclawDiscoveryCacheFutureSkew = time.Second
 )
 
 // openclawDiscoveryFingerprint is the "is this entry still true?" evidence
@@ -208,10 +224,13 @@ func loadOpenclawDiscoveryCache(cachePath, bin string, now time.Time) (openclawD
 		return openclawDiscoveryCacheEntry{}, false
 	}
 	age := now.Sub(time.Unix(0, entry.CachedAtNano))
-	// A negative age means the entry was written in the future — a clock jump
-	// or a hand-edited file. Treat it as a miss rather than trusting it for a
-	// TTL that may never expire.
-	if age < 0 || age > openclawDiscoveryCacheTTL {
+	// An age well below zero means the entry was written in the future — a
+	// clock jump or a hand-edited file. Treat it as a miss rather than trusting
+	// it for a TTL that may never expire. Sub-second future dating is not that:
+	// it is the ordinary result of a concurrent writer on this same daemon
+	// (see openclawDiscoveryCacheFutureSkew), and rejecting it only buys an
+	// unnecessary discovery run.
+	if age < -openclawDiscoveryCacheFutureSkew || age > openclawDiscoveryCacheTTL {
 		return openclawDiscoveryCacheEntry{}, false
 	}
 	current, err := buildOpenclawDiscoveryFingerprint(bin, entry.ActiveConfigPath)

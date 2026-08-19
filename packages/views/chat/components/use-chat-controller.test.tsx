@@ -95,7 +95,14 @@ vi.mock("@multica/core/workspace/queries", () => ({
 vi.mock("@multica/core/projects/queries", () => ({
   projectListOptions: () => ({ queryKey: ["projects"] }),
 }));
-vi.mock("@multica/views/issues/components", () => ({ canAssignAgent: () => true }));
+// Steerable per test: the invoke rule is what decides whether an OPEN session's
+// agent is still runnable. Default true so every existing case is unaffected.
+const invokableAgentIds = vi.hoisted(() => ({ current: null as string[] | null }));
+vi.mock("@multica/views/issues/components", () => ({
+  canAssignAgent: (agent: { id: string }) =>
+    invokableAgentIds.current === null ||
+    invokableAgentIds.current.includes(agent.id),
+}));
 vi.mock("@multica/core/api", () => ({
   ApiError: class ApiError extends Error {
     constructor(
@@ -1168,5 +1175,56 @@ describe("useChatController.handleSend — compose target tracking", () => {
     expect(commitInput).toHaveBeenCalledWith(
       expect.objectContaining({ clearEditor: true, extraDraftKeys: ["sA"] }),
     );
+  });
+});
+
+// MUL-6380: a chat session outlives the permission that created it. The agent can
+// be flipped to personal, change owner, or drop this member from its allow-list;
+// the server keeps serving the transcript (view gate) but refuses every send
+// (invoke gate, MUL-4525). The controller must reach that verdict up front so the
+// composer is read-only, instead of the user learning it from a 403 after typing.
+describe("useChatController revoked invoke permission", () => {
+  const revokedSession = makeSession({ id: "revoked", agent_id: "agent-a" });
+
+  beforeEach(() => {
+    h.createSessionMutate.mockClear();
+    vi.mocked(api.sendChatMessage).mockClear();
+  });
+
+  afterEach(() => {
+    invokableAgentIds.current = null;
+  });
+
+  it("flags the open session's agent as revoked while still resolving it", () => {
+    invokableAgentIds.current = [];
+    const result = setup("revoked", [revokedSession], [agentA]);
+
+    // Still bound — the transcript stays readable and the header keeps naming
+    // the real agent; only running is refused.
+    expect(result.current.activeAgent?.id).toBe("agent-a");
+    expect(result.current.isAgentAccessRevoked).toBe(true);
+    // Not conflated with the retired-agent state, which has different copy.
+    expect(result.current.isAgentArchived).toBe(false);
+  });
+
+  it("does not flag an agent the user may still invoke", () => {
+    invokableAgentIds.current = ["agent-a"];
+    const result = setup("revoked", [revokedSession], [agentA]);
+
+    expect(result.current.isAgentAccessRevoked).toBe(false);
+  });
+
+  it("refuses the send instead of letting the server reject it", async () => {
+    invokableAgentIds.current = [];
+    const result = setup("revoked", [revokedSession], [agentA]);
+
+    let sent: boolean | undefined;
+    await act(async () => {
+      sent = await result.current.handleSend("are you there?");
+    });
+
+    expect(sent).toBe(false);
+    expect(vi.mocked(api.sendChatMessage)).not.toHaveBeenCalled();
+    expect(h.createSessionMutate).not.toHaveBeenCalled();
   });
 });

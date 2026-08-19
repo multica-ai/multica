@@ -291,6 +291,38 @@ func TestOpenclawDiscoveryCacheSkipsFailedDiscovery(t *testing.T) {
 	}
 }
 
+// TestOpenclawDiscoveryCacheFutureDatedEntry pins both edges of the
+// future-dating rule.
+//
+// Callers sample time.Now() once and pass it down, so on a daemon running
+// several tasks at once a peer routinely commits an entry stamped after the
+// reader's sample. That entry is completely valid — rejecting it just costs an
+// extra discovery run, and it is what made the concurrency test below flake.
+// A real clock jump still has to be caught, since an entry dated far ahead
+// would otherwise never age out of its TTL.
+func TestOpenclawDiscoveryCacheFutureDatedEntry(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		ahead time.Duration
+		want  bool
+	}{
+		{"concurrent writer, microseconds ahead", 500 * time.Microsecond, true},
+		{"just inside the tolerance", openclawDiscoveryCacheFutureSkew - time.Millisecond, true},
+		{"clock jump, well past the tolerance", openclawDiscoveryCacheFutureSkew + time.Minute, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newOpenclawCacheFixture(t)
+			readerNow := time.Now()
+			if err := storeOpenclawDiscoveryCache(f.cachePath(), f.bin, f.configPath, []any{map[string]any{"id": "scout"}}, false, readerNow.Add(tc.ahead)); err != nil {
+				t.Fatalf("store: %v", err)
+			}
+			if _, ok := loadOpenclawDiscoveryCache(f.cachePath(), f.bin, readerNow); ok != tc.want {
+				t.Fatalf("entry dated %v ahead of the reader: hit = %t, want %t", tc.ahead, ok, tc.want)
+			}
+		})
+	}
+}
+
 // TestOpenclawDiscoveryCacheConcurrentPreparations covers several tasks
 // starting at once on the same daemon: the writes are atomic, so every task
 // either sees a complete old entry or a complete new one, and none of them

@@ -43,7 +43,49 @@ function announce(source: Window | null) {
   window.dispatchEvent(event);
 }
 
-const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+/**
+ * Resolves once the bridge has answered everything posted before this call.
+ *
+ * Nothing here may wait by timer. jsdom has no MessageChannel, so `frame.port`
+ * is Node's, and a port delivers on an event-loop drain rather than as a DOM
+ * task — `setTimeout(0)` can fire first. That is how this suite failed in CI:
+ * the assertions ran before the bridge saw anything, and the handler landed in
+ * the *next* test, which then failed on a call it never made.
+ *
+ * A port is FIFO, so a request posted last and answered proves every earlier
+ * one was handled. This probe names a path outside the Action API, which the
+ * bridge refuses without awaiting anything. Its answer is not the test's, so it
+ * is dropped from `posted` before returning.
+ */
+async function answered(frame: { port: MessagePort }, posted: unknown[]) {
+  const id = "probe:has-the-bridge-caught-up";
+  frame.port.postMessage({ id, kind: "action", method: "GET", path: "/probe" });
+  const sent = (message: unknown) => (message as { id?: string } | null)?.id === id;
+  await vi.waitFor(() => {
+    if (!posted.some(sent)) throw new Error("bridge has not answered the probe yet");
+  });
+  posted.splice(posted.findIndex(sent), 1);
+}
+
+/**
+ * Waits out one event-loop port drain — the cycle any pending delivery rides.
+ *
+ * Only for the closed-bridge case, where the assertion is that a message is
+ * never delivered and there is therefore no answer to wait for. A drain of our
+ * own is the closest available clock: a delivery the closed port wrongly made
+ * would have come through on the same one.
+ */
+const portDrain = () =>
+  new Promise<void>((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      channel.port2.close();
+      resolve();
+    };
+    channel.port1.start();
+    channel.port2.postMessage(0);
+  });
 
 describe("surface bridge", () => {
   beforeEach(() => {
@@ -54,13 +96,14 @@ describe("surface bridge", () => {
   it("forwards an allowed path with the installation that owns the channel", async () => {
     const { frame } = connectedBridge({ installationId: "installation-1", issueId: "issue-1" });
     frame.port.postMessage({ id: "r1", kind: "action", method: "GET", path: "/context" });
-    await settle();
 
-    expect(mockCall).toHaveBeenCalledWith("installation-1", expect.objectContaining({
-      method: "GET",
-      path: "/context",
-      issueId: "issue-1",
-    }));
+    await vi.waitFor(() => {
+      expect(mockCall).toHaveBeenCalledWith("installation-1", expect.objectContaining({
+        method: "GET",
+        path: "/context",
+        issueId: "issue-1",
+      }));
+    });
   });
 
   it("refuses a path outside the Action API before it reaches the network", async () => {
@@ -70,10 +113,9 @@ describe("surface bridge", () => {
     for (const path of ["/me", "/workspaces/w1/plugins", "/../admin", "/issues/i1/comments/extra"]) {
       frame.port.postMessage({ id: `bad-${path}`, kind: "action", method: "GET", path });
     }
-    await settle();
+    await vi.waitFor(() => expect(posted).toHaveLength(4));
 
     expect(mockCall).not.toHaveBeenCalled();
-    expect(posted).toHaveLength(4);
     for (const response of posted as Array<{ ok: boolean; status: number }>) {
       expect(response.ok).toBe(false);
       expect(response.status).toBe(400);
@@ -86,7 +128,7 @@ describe("surface bridge", () => {
     mockCall.mockRejectedValue(Object.assign(new Error("not granted comments:write"), { status: 403 }));
     const { frame, posted } = connectedBridge();
     frame.port.postMessage({ id: "r1", kind: "action", method: "POST", path: "/issues/i1/comments", body: {} });
-    await settle();
+    await vi.waitFor(() => expect(posted).toHaveLength(1));
 
     expect(posted[0]).toMatchObject({ id: "r1", ok: false, status: 403 });
   });
@@ -95,7 +137,7 @@ describe("surface bridge", () => {
     const { frame, posted } = connectedBridge();
     frame.port.postMessage({ id: "r1", kind: "action", method: "TRACE", path: "/context" });
     frame.port.postMessage({ id: "r2", kind: "action", method: "get", path: "/context" });
-    await settle();
+    await answered(frame, posted);
 
     expect(mockCall).not.toHaveBeenCalled();
     expect(posted).toHaveLength(0);
@@ -105,7 +147,7 @@ describe("surface bridge", () => {
     const { frame, posted } = connectedBridge();
     frame.port.postMessage({ hello: "world" });
     frame.port.postMessage({ id: 7, kind: "action", method: "GET", path: "/context" });
-    await settle();
+    await answered(frame, posted);
 
     expect(mockCall).not.toHaveBeenCalled();
     expect(posted).toHaveLength(0);
@@ -113,19 +155,20 @@ describe("surface bridge", () => {
 
   it("clamps a resize so a surface cannot push the page out of view", async () => {
     const heights: number[] = [];
-    const { frame } = connectedBridge({ installationId: "installation-1", onResize: (h) => heights.push(h) });
+    const { frame, posted } = connectedBridge({ installationId: "installation-1", onResize: (h) => heights.push(h) });
     frame.port.postMessage({ id: "r1", kind: "ui.resize", height: 10_000_000 });
     frame.port.postMessage({ id: "r2", kind: "ui.resize", height: -5 });
     frame.port.postMessage({ id: "r3", kind: "ui.resize", height: 320 });
-    await settle();
+    await answered(frame, posted);
 
     expect(heights).toEqual([4000, 0, 320]);
   });
 
-  it("ignores a readiness signal from a window it does not own", async () => {
+  it("ignores a readiness signal from a window it does not own", () => {
     // Every sandboxed frame reports the opaque origin "null", so the window
     // reference is the only thing that distinguishes this surface from any
     // other frame on the page — including a hostile one shouting the signal.
+    // Nothing to wait for: the host answers the signal on the dispatch itself.
     const bridge = createSurfaceBridge({ installationId: "installation-1" });
     let transferred = false;
     const frame = {
@@ -133,18 +176,22 @@ describe("surface bridge", () => {
     } as unknown as HTMLIFrameElement;
     bridge.connect(frame, {});
     announce({} as Window);
-    await settle();
 
     expect(transferred).toBe(false);
     bridge.close();
   });
 
   it("stops answering once closed", async () => {
+    // Answer one request first. Without that, a bridge that answered nothing at
+    // all — closed or not — would pass this test.
     const { bridge, frame } = connectedBridge();
-    bridge.close();
     frame.port.postMessage({ id: "r1", kind: "action", method: "GET", path: "/context" });
-    await settle();
+    await vi.waitFor(() => expect(mockCall).toHaveBeenCalledTimes(1));
 
-    expect(mockCall).not.toHaveBeenCalled();
+    bridge.close();
+    frame.port.postMessage({ id: "r2", kind: "action", method: "GET", path: "/context" });
+    await portDrain();
+
+    expect(mockCall).toHaveBeenCalledTimes(1);
   });
 });

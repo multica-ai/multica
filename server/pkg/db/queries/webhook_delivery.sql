@@ -10,13 +10,19 @@ INSERT INTO webhook_delivery (
     workspace_id, autopilot_id, trigger_id, provider, event,
     dedupe_key, dedupe_source, signature_status, status,
     selected_headers, content_type, raw_body,
-    replayed_from_delivery_id
+    replayed_from_delivery_id, replay_idempotency_key, reason_code
 ) VALUES (
     $1, $2, $3, $4, $5,
     sqlc.narg('dedupe_key'), sqlc.narg('dedupe_source'), $6, $7,
     $8, sqlc.narg('content_type'), sqlc.narg('raw_body'),
-    sqlc.narg('replayed_from_delivery_id')
+    sqlc.narg('replayed_from_delivery_id'), sqlc.narg('replay_idempotency_key'),
+    sqlc.narg('reason_code')
 ) RETURNING *;
+
+-- name: GetWebhookReplayByIdempotencyKey :one
+SELECT * FROM webhook_delivery
+WHERE replayed_from_delivery_id = $1 AND replay_idempotency_key = $2
+LIMIT 1;
 
 -- name: GetWebhookDelivery :one
 SELECT * FROM webhook_delivery
@@ -119,6 +125,7 @@ SET status = $3,
     autopilot_run_id = sqlc.narg('autopilot_run_id'),
     dispatch_attempts = dispatch_attempts + 1,
     error = sqlc.narg('error'),
+    reason_code = sqlc.narg('reason_code'),
     lease_token = NULL,
     lease_expires_at = NULL,
     last_attempt_at = now()
@@ -147,6 +154,7 @@ RETURNING *;
 UPDATE webhook_delivery
 SET status = $2,
     error = sqlc.narg('error'),
+    reason_code = sqlc.narg('reason_code'),
     response_status = sqlc.narg('response_status'),
     response_body = sqlc.narg('response_body'),
     last_attempt_at = now()
@@ -168,7 +176,7 @@ SELECT
     d.attempt_count, d.content_type, d.response_status,
     d.autopilot_run_id, d.replayed_from_delivery_id, d.error,
     d.received_at, d.last_attempt_at, d.created_at,
-    d.available_at, d.dispatch_attempts
+    d.available_at, d.dispatch_attempts, d.reason_code, d.replay_idempotency_key
 FROM webhook_delivery d
 JOIN autopilot a ON a.id = d.autopilot_id
 WHERE d.autopilot_id = $1

@@ -347,7 +347,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// workspace/resource_type-guarded and ON CONFLICT DO NOTHING, and the
 	// ids were already validated above.
 	for _, label := range labels {
-		if err := qtx.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+		if err := qtx.AttachLabelToIssueOnCreate(ctx, db.AttachLabelToIssueOnCreateParams{
 			IssueID:     issue.ID,
 			LabelID:     label.ID,
 			WorkspaceID: p.WorkspaceID,
@@ -460,10 +460,11 @@ func (s *IssueService) linkAttachments(ctx context.Context, issue db.Issue, ids 
 	if len(ids) == 0 {
 		return nil
 	}
-	if err := s.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		Column3:     ids,
+	if _, err := s.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
+		IssueID:       issue.ID,
+		WorkspaceID:   issue.WorkspaceID,
+		AttachmentIds: ids,
+		BumpRevision:  false,
 	}); err != nil {
 		slog.Error("failed to link attachments to issue",
 			"issue_id", util.UUIDToString(issue.ID),
@@ -515,16 +516,8 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 	if s.Bus == nil {
 		return
 	}
-	s.Bus.Publish(events.Event{
-		Type:        protocol.EventIssueAttachmentsChanged,
-		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
-		ActorType:   "member",
-		ActorID:     util.UUIDToString(actorID),
-		Payload: map[string]any{
-			"issue_id": util.UUIDToString(issue.ID),
-		},
-	})
 	if s.Queries == nil {
+		s.publishIssueAttachmentsChanged(issue, actorID, 0)
 		return
 	}
 
@@ -535,12 +528,17 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 	if err != nil {
 		slog.Warn("failed to load issue after channel media bind",
 			"issue_id", util.UUIDToString(issue.ID), "error", err)
+		s.publishIssueAttachmentsChanged(issue, actorID, 0)
 		return
 	}
 	workspace, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID)
 	if err != nil {
 		slog.Warn("failed to load workspace after channel media bind",
 			"workspace_id", util.UUIDToString(issue.WorkspaceID), "error", err)
+		// Without the workspace we cannot publish the matching owner snapshot.
+		// Keep this auxiliary event unversioned so clients invalidate instead of
+		// advancing the owner revision past a snapshot they never received.
+		s.publishIssueAttachmentsChanged(issue, actorID, 0)
 		return
 	}
 	s.Bus.Publish(events.Event{
@@ -554,6 +552,24 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 			"status_changed":   false,
 			"project_changed":  false,
 		},
+	})
+	// Publish the auxiliary projection only after the full owner snapshot at
+	// this revision. Reversing these two events makes revision-aware clients
+	// reject the issue:updated payload as an equal-revision duplicate.
+	s.publishIssueAttachmentsChanged(current, actorID, current.Revision)
+}
+
+func (s *IssueService) publishIssueAttachmentsChanged(issue db.Issue, actorID pgtype.UUID, revision int64) {
+	payload := map[string]any{"issue_id": util.UUIDToString(issue.ID)}
+	if revision > 0 {
+		payload["issue_revision"] = revision
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventIssueAttachmentsChanged,
+		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+		ActorType:   "member",
+		ActorID:     util.UUIDToString(actorID),
+		Payload:     payload,
 	})
 }
 

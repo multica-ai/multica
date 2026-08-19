@@ -261,6 +261,10 @@ type Config struct {
 	// vendor's binary; it defaults to false so an unset caller fails
 	// closed onto standard behavior.
 	BuiltinRuntime bool
+	// provider is the runtime/provider identity used in safe launch logs. New
+	// fills it from the protocol family; NewRuntime preserves the concrete
+	// built-in runtime identity instead (for example omp rather than pi).
+	provider string
 	// LaunchPrefix is the argv prefix that belongs to ExecutablePath itself —
 	// a custom runtime profile's fixed_args. It is spliced in directly after
 	// the executable, ahead of every argument a backend builds, because a
@@ -360,6 +364,9 @@ func ResumeRejectionUndetectable(agentType string) bool {
 func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
+	}
+	if cfg.provider == "" {
+		cfg.provider = agentType
 	}
 	// Filter the launch prefix here, at the one point that knows both the
 	// prefix and the protocol family. Doing it per-backend would be the same

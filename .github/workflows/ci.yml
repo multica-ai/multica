@@ -11,13 +11,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Decides whether the heavy frontend validation jobs and sqlc verification
-  # have anything to do.
+  # Decides whether the heavy frontend validation jobs, the backend Go jobs
+  # and sqlc verification have anything to do.
   # The frontend jobs validate the web/desktop apps, the shared packages,
   # the install graph, and the selfhost / reserved-slugs scripts it runs;
   # a pure backend-only or docs-only PR touches none of those and gains
-  # nothing from a full web build. The outputs are consumed by the focused
-  # jobs below.
+  # nothing from a full web build. Symmetrically, the backend jobs compile
+  # and test server/, so a frontend-only or docs-only PR gains nothing from
+  # a `go test -race` run. The outputs are consumed by the focused jobs
+  # below.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -25,6 +27,7 @@ jobs:
       pull-requests: read
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
+      backend: ${{ steps.decide.outputs.backend }}
       sqlc: ${{ steps.decide.outputs.sqlc }}
     steps:
       - name: Checkout
@@ -72,6 +75,34 @@ jobs:
               - 'docker-compose.selfhost.yml'
               - 'docker-compose.selfhost.build.yml'
               - 'Makefile'
+            # Everything the backend jobs (backend-tests,
+            # go-vulnerability-scan, windows-execenv) read, which is NOT the
+            # same thing as server/**: four Go tests reach out of the module
+            # to pin a contract against a file the other side owns, across
+            # three cross-module file dependencies. Each of those files has
+            # to be listed here or the PR that breaks the contract is exactly
+            # the PR that skips the test. Same bias as the frontend filter:
+            # over-match rather than silently skip validation.
+            backend:
+              - 'server/**'
+              - 'deploy/helm/**'
+              # pkg/agent/worktree_capability_contract_test.go reads this file
+              # and compares LOCAL_WORKTREE_CAPABILITY against the daemon's
+              # protocol constant. A typo on either side disables worktree
+              # mode for everyone with no error anywhere, so a change to the
+              # frontend half must run the backend suite.
+              - 'packages/core/runtimes/cli-version.ts'
+              # internal/daemon/agent_command_names_test.go reads both of
+              # these as test inputs; the guard script is additionally the
+              # entry point scripts/test-go.sh runs, and the names file is
+              # the data that guard consumes.
+              - 'scripts/agent-cli-command-names.txt'
+              - 'scripts/go-test-with-agent-cli-guard.sh'
+              - 'scripts/helm-config.test.sh'
+              - 'scripts/test-go.sh'
+              - 'scripts/test-go.test.sh'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
             sqlc:
               - 'server/pkg/db/queries/**'
               - 'server/pkg/db/generated/**'
@@ -82,21 +113,30 @@ jobs:
 
       - name: Decide
         id: decide
-        # Always run the frontend job on push to main (full validation);
-        # on pull_request, run only when frontend-relevant paths changed.
-        # The frontend job itself always runs and reports success — its
-        # steps are gated on this output rather than the job being skipped
-        # — so the required "frontend" status check is satisfied with a
-        # genuine green instead of being left pending on filtered PRs.
+        # Always run everything on push to main (full validation); on
+        # pull_request, run only the areas whose paths changed.
+        # The gated jobs themselves always run and report success — their
+        # steps are gated on these outputs rather than the job being skipped
+        # — so the required "frontend" / "backend" status checks are
+        # satisfied with a genuine green instead of being left pending on
+        # filtered PRs. It also keeps the aggregate gates strict: a job that
+        # goes missing for any OTHER reason (a failed `changes`, a cancelled
+        # run) still reports non-success and fails the gate.
         env:
           EVENT_NAME: ${{ github.event_name }}
           FRONTEND_CHANGED: ${{ steps.filter.outputs.frontend }}
+          BACKEND_CHANGED: ${{ steps.filter.outputs.backend }}
           SQLC_CHANGED: ${{ steps.filter.outputs.sqlc }}
         run: |
           if [ "$EVENT_NAME" != "pull_request" ] || [ "$FRONTEND_CHANGED" = "true" ]; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
           else
             echo "frontend=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$BACKEND_CHANGED" = "true" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
           fi
           if [ "$EVENT_NAME" != "pull_request" ] || [ "$SQLC_CHANGED" = "true" ]; then
             echo "sqlc=true" >> "$GITHUB_OUTPUT"
@@ -384,7 +424,14 @@ jobs:
           fi
 
   backend-tests:
+    needs: changes
     runs-on: ubuntu-latest
+    # `services` cannot be conditional, so the Postgres and Redis containers
+    # still start on a filtered PR. That is ~1 minute of runner time against
+    # the several minutes the gated steps below cost; job-level `if` would
+    # save it but report `skipped` to the aggregate gate, which then has to
+    # accept `skipped` as success and stops catching jobs that go missing for
+    # reasons other than the path filter.
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -417,9 +464,11 @@ jobs:
       REDIS_TEST_URL: redis://localhost:6379/1
     steps:
       - name: Checkout
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/checkout@v6
 
       - name: Setup Go
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/setup-go@v5
         with:
           # Deliberately independent from the minimum patch in server/go.mod:
@@ -429,32 +478,41 @@ jobs:
           cache-dependency-path: server/go.sum
 
       - name: Setup Helm
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: azure/setup-helm@v4
 
       - name: Test Helm chart
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/helm-config.test.sh
 
       - name: Build
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go build ./...
 
       - name: Run migrations
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go run ./cmd/migrate up
 
       - name: Verify Go test wrapper
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/test-go.test.sh
 
       - name: Test
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/test-go.sh --race
 
   # Keep the live vulnerability database from hiding build and test results.
   # The aggregate backend job below still treats both jobs as one merge gate.
   go-vulnerability-scan:
+    needs: changes
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/checkout@v6
 
       - name: Setup Go
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/setup-go@v5
         with:
           # Deliberately independent from the minimum patch in server/go.mod:
@@ -464,6 +522,7 @@ jobs:
           cache-dependency-path: server/go.sum
 
       - name: Scan Go vulnerabilities
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         run: go tool govulncheck ./...
 
@@ -492,12 +551,18 @@ jobs:
     # The environment-preparation deadline owns a process tree, not just a Go
     # process. This Windows runtime test verifies Job Object cancellation kills
     # a delayed descendant before an immediate retry can reuse the same root.
+    # Every step here is a Go test under server/, so it rides the same path
+    # filter as the backend jobs; steps are gated rather than the job so the
+    # check still reports green on a filtered PR.
+    needs: changes
     runs-on: windows-latest
     steps:
       - name: Checkout
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/checkout@v6
 
       - name: Setup Go
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/setup-go@v5
         with:
           # Deliberately independent from the minimum patch in server/go.mod:
@@ -507,6 +572,7 @@ jobs:
           cache-dependency-path: server/go.sum
 
       - name: Test Windows execution-environment isolation
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # Keep this job scoped to the runtime regression it exists to prove.
         # The package's legacy OpenClaw HOME tests are not Windows-safe and are
@@ -514,6 +580,7 @@ jobs:
         run: go test ./internal/daemon/execenv -run '^TestPrepareIsolated_WindowsKillsDescendantBeforeRetry$' -count=1 -timeout=5m
 
       - name: Test Windows agent launcher argv/stdin handling
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # Agent prompts must never reach a Windows launcher through argv: the
         # official cursor-agent.ps1 and pi.ps1 launch native children with
@@ -530,6 +597,7 @@ jobs:
         run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPiExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
 
       - name: Test Windows OpenCode oversized prompt reaches stdin
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # #6538: the daemon inlined the whole task prompt as an argv element,
         # so every OpenCode task whose prompt cleared CreateProcess's 32,767
@@ -546,6 +614,7 @@ jobs:
         run: go test ./pkg/agent -v -run '^TestOpencodeExecuteOversizedPromptStartsOnWindows$' -count=1 -timeout=5m
 
       - name: Test Windows agent process-tree ownership
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # A Job Object is the only way to prove whole-tree termination on
         # Windows, and only a real Windows runner can exercise it: that a
@@ -556,6 +625,7 @@ jobs:
         run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree)$' -count=1 -timeout=5m
 
       - name: Test Windows OpenClaw npm shim interpreter resolution
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # #6061: every OpenClaw task failed execenv prep on a Windows host with
         # a bare `exit status 1` and no stderr. A batch shim resolves and runs
@@ -577,6 +647,7 @@ jobs:
         run: go test ./internal/daemon/execenv -v -run '^TestWindowsOpenclawShim' -count=1 -timeout=5m
 
       - name: Test Windows isolated repo checkout is committable
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # #6449: on Windows the daemon now hands Codex tasks a checkout whose
         # .git lives inside the task workdir, because a linked worktree's
@@ -598,6 +669,7 @@ jobs:
         run: go test ./internal/daemon/repocache -v -run '^(TestIsolatedCheckoutIsCommittableOnWindows|TestIsolatedCheckoutAcrossVolumesOnWindows)$' -count=1 -timeout=5m
 
       - name: Test Windows directory-junction link safety
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # MUL-6000: the per-task codex-home links the user's real skills into
         # the task directory instead of copying them. On Windows that link is a
@@ -617,6 +689,7 @@ jobs:
           go test ./internal/daemon -v -run '^(TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction|TestTaskSize_DoesNotCountDirectoryJunction)$' -count=1 -timeout=5m
 
       - name: Test Windows agent executable junction resolution
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # The standalone Codex installer exposes bin as a directory junction.
         # filepath.EvalSymlinks cannot traverse that reparse-point shape, so
@@ -627,6 +700,7 @@ jobs:
         run: go test ./internal/daemon -v -run '^(TestCanonicalExecutablePath|TestTrimExtendedLengthPrefix|TestResolveAgentExecutablePathKeeps|TestResolveAgentEntry(FollowsRetargetedInstallerJunction|CanonicalizesRediscoveredJunction|ForLaunchKeepsCmdShimLaunchable|ForLaunchRejectsUnverifiedInitialJunctionTarget|ForLaunchRejectsRediscoveredJunctionWhenFinalPathResolutionFails|DoesNotSharePreRetargetSingleflightResult|ForLaunchFailsWhenJunctionKeepsRetargeting)|TestHandleTaskReportsWindowsCodexProcessStartFailure)' -count=1 -timeout=5m
 
       - name: Build Windows CLI helper entrypoint
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         run: go build ./cmd/multica
 

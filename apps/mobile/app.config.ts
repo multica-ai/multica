@@ -32,6 +32,17 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     icon: "./assets/icon.png",
     ios: {
       supportsTablet: false,
+      // Pins DEVELOPMENT_TEAM on every prebuild. Leaving it unset is the normal
+      // path — `expo run:ios` then resolves a signing identity from the Keychain
+      // itself, which is right when the Apple ID owns exactly one team. With
+      // several (a personal team plus an employer's) it takes the *first*
+      // identity found whenever the terminal is non-interactive, writes that
+      // choice into the generated ios/, and never clears it again: prebuild only
+      // writes DEVELOPMENT_TEAM when a value is present, so a project pinned to
+      // the wrong team stays wrong until ios/ is deleted. Setting this re-applies
+      // the intended team on every `scripts/ios-run.sh` run, which also repairs
+      // an already-mispinned checkout.
+      appleTeamId: process.env.EXPO_APPLE_TEAM_ID,
       // Per-variant bundle id overrides exist for one reason: an Apple ID
       // can only sign bundle prefixes it owns, so contributors not on the
       // Multica Apple Developer team (and external users self-building a

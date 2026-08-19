@@ -198,6 +198,15 @@ var concurrentIndexCleanups = map[string]string{
 	"345_plugin_installation_workspace_key_index":               "idx_plugin_installation_workspace_key",
 	"346_plugin_storage_scope_key_index":                        "idx_plugin_storage_scope_key",
 	"347_plugin_secret_installation_key_index":                  "idx_plugin_secret_installation_key",
+	"349_agent_task_queue_chat_terminal_resume_index":           "idx_agent_task_queue_chat_terminal_resume",
+	"350_agent_task_queue_chat_retired_session_index":           "idx_agent_task_queue_chat_retired_session",
+	"353_autopilot_quota_period_scope_index":                    "uq_autopilot_quota_period_scope",
+	"354_autopilot_quota_reservation_id_index":                  "autopilot_quota_reservation_pkey_uidx",
+	"355_autopilot_quota_reservation_key_index":                 "uq_autopilot_quota_reservation_key",
+	"356_autopilot_run_quota_reservation_index":                 "uq_autopilot_run_quota_reservation",
+	"357_webhook_delivery_replay_idempotency_index":             "uq_webhook_delivery_replay_idempotency",
+	"358_autopilot_quota_reservation_state_index":               "idx_autopilot_quota_reservation_state",
+	"361_issue_last_activity_index":                             "idx_issue_workspace_last_activity",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

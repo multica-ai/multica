@@ -376,6 +376,7 @@ export const EMPTY_LIST_ISSUE_STATUSES_RESPONSE: ListIssueStatusesResponse = {
 
 export const ResourceLabelsResponseSchema = z.object({
   labels: z.array(LabelSchema).default([]),
+  issue_revision: z.number().int().positive().optional(),
 }).loose();
 
 export const EMPTY_RESOURCE_LABELS_RESPONSE: ResourceLabelsResponse = {
@@ -568,6 +569,7 @@ export const IssuePropertyValuesSchema = z.preprocess(
 
 export const IssuePropertiesResponseSchema = z.object({
   properties: IssuePropertyValuesSchema,
+  issue_revision: z.number().int().positive().optional(),
 }).loose();
 
 export const EMPTY_ISSUE_PROPERTIES_RESPONSE: IssuePropertiesResponse = {
@@ -750,6 +752,7 @@ const TimelineEntrySchema = z.object({
   content: z.string().optional(),
   parent_id: z.string().nullable().optional(),
   updated_at: z.string().optional(),
+  revision: z.number().int().positive().optional(),
   comment_type: z.string().optional(),
   reactions: z.array(ReactionSchema).optional(),
   attachments: z.array(AttachmentSchema).optional(),
@@ -849,6 +852,7 @@ export const CommentSchema = z.object({
   attachments: z.array(AttachmentSchema).default([]),
   created_at: z.string(),
   updated_at: z.string(),
+  revision: z.number().int().positive().optional(),
   source_task_id: z.string().nullable().optional(),
   // Set only on comments a quick action produced (MUL-5465). Server-only.
   quick_action_id: z.string().nullable().optional(),
@@ -963,6 +967,10 @@ export const IssueSchema = z.object({
   labels: z.array(z.unknown()).optional(),
   created_at: z.string(),
   updated_at: z.string(),
+  revision: z.number().int().positive().optional(),
+  // Optional for compatibility with older self-hosted backends; a current
+  // backend emits null until its historical backfill reaches the issue.
+  last_activity_at: z.string().nullable().optional(),
 }).loose();
 
 export const ListIssuesResponseSchema = z.object({
@@ -1814,6 +1822,8 @@ const WebhookDeliverySchema = z.object({
   autopilot_run_id: z.string().nullable(),
   replayed_from_delivery_id: z.string().nullable(),
   error: z.string().nullable(),
+  reason_code: z.string().nullable().default(null),
+  replay_idempotency_key: z.string().nullable().default(null),
   received_at: z.string(),
   last_attempt_at: z.string(),
   created_at: z.string(),
@@ -1904,6 +1914,17 @@ export const AutopilotRunSchema = z.object({
   created_at: z.string().default(""),
 }).loose();
 
+export const AutopilotQuotaUsageSchema = z.object({
+  action: z.enum(["off", "observe", "enforce"]).default("off"),
+  used: z.number().nullable().default(null),
+  reserved: z.number().nullable().default(null),
+  limit: z.number().nullable().default(null),
+  period_start: z.string().nullable().default(null),
+  period_end: z.string().nullable().default(null),
+  reset_at: z.string().nullable().default(null),
+  blocked_counts: z.record(z.string(), z.number().int().nonnegative()).nullable().catch(null).default(null),
+}).loose();
+
 export const FALLBACK_AUTOPILOT_RUN: AutopilotRun = {
   id: "",
   autopilot_id: "",
@@ -1951,6 +1972,8 @@ export const EMPTY_WEBHOOK_DELIVERY: WebhookDelivery = {
   autopilot_run_id: null,
   replayed_from_delivery_id: null,
   error: null,
+  reason_code: null,
+  replay_idempotency_key: null,
   received_at: "",
   last_attempt_at: "",
   created_at: "",

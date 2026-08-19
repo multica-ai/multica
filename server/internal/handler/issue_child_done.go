@@ -312,7 +312,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; frontend code should branch on
 	// author_type === 'system' rather than on the UUID value.
-	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:     parent.ID,
 		WorkspaceID: parent.WorkspaceID,
 		AuthorType:  "system",
@@ -328,6 +328,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 			"parent_id", uuidToString(parent.ID))
 		return
 	}
+	comment := created.Comment()
 
 	h.publish(protocol.EventCommentCreated, uuidToString(parent.WorkspaceID), "system", "", map[string]any{
 		"comment":             commentToResponse(comment, nil, nil),
@@ -335,6 +336,7 @@ func (h *Handler) postChildDoneComment(ctx context.Context, parent, completed db
 		"issue_assignee_type": textToPtr(parent.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(parent.AssigneeID),
 		"issue_status":        parent.Status,
+		"issue_revision":      created.IssueRevision,
 	})
 
 	// Dispatch the explicit trigger / inbox row for the parent assignee.

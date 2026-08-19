@@ -5,10 +5,15 @@ enforcement-policy endpoint. Commercial inputs stay in Cloud: this package does
 not contain plan names, subscription-state mapping, rollout dates, cohorts,
 exemptions, limit values, or kill-switch policy.
 
-PR-2 intentionally has no production caller. `Config.Enabled` defaults to
-`false`, a disabled client performs no HTTP request, and all gates return `off`.
-Future SaaS wiring must explicitly enable and construct the client; self-hosted
-deployments remain disabled.
+Production wiring remains explicit and off by default. Set
+`MULTICA_ENTITLEMENT_POLICY_ENABLED=true`,
+`MULTICA_ENTITLEMENT_POLICY_URL`, and the independent
+`MULTICA_ENTITLEMENT_SERVICE_TOKEN` to enable the client. A disabled client
+performs no HTTP request, and the autopilot consumer does not access its quota
+tables; self-hosted deployments therefore retain the legacy dispatch path.
+Timeout, stale grace, and the emergency down switch are controlled by
+`MULTICA_ENTITLEMENT_POLICY_TIMEOUT`, `MULTICA_ENTITLEMENT_STALE_GRACE`, and
+`MULTICA_ENTITLEMENT_EMERGENCY_DISABLED`.
 
 ## Contract
 
@@ -45,8 +50,9 @@ also bounds Cloud request rate when an outage returns errors immediately; cold
 failures are cached only as `off` and never as policy.
 
 `SetEmergencyDisabled(true)` is the local immediate down switch. It only returns
-`off`; it cannot promote a Cloud action. No background goroutine, database
-state, migration, or startup dependency is introduced by this package.
+`off`; it cannot promote a Cloud action. The client itself has no background
+goroutine and introduces no startup dependency; the autopilot consumer owns its
+policy-neutral accounting and recovery lifecycle separately.
 
 Future consumers should depend on the small `Provider` interface. Tests can use
 `server/internal/entitlement/entitlementtest.Stub` without Cloud.

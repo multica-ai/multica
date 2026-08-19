@@ -115,6 +115,24 @@ type failDeleteCommentDB struct {
 	delegate db.DBTX
 }
 
+type zeroDeleteCommentDB struct {
+	delegate db.DBTX
+}
+
+type deleteCommentResultRow struct {
+	changed bool
+	err     error
+}
+
+func (r deleteCommentResultRow) Scan(dest ...interface{}) error {
+	if r.err != nil {
+		return r.err
+	}
+	*(dest[0].(*bool)) = r.changed
+	*(dest[1].(*int64)) = 0
+	return nil
+}
+
 func (f *failDeleteCommentDB) Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
 	if strings.Contains(query, "-- name: DeleteComment") {
 		return pgconn.CommandTag{}, errors.New("injected comment deletion failure")
@@ -127,7 +145,28 @@ func (f *failDeleteCommentDB) Query(ctx context.Context, query string, args ...i
 }
 
 func (f *failDeleteCommentDB) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
+	if strings.Contains(query, "-- name: DeleteComment") {
+		return deleteCommentResultRow{err: errors.New("injected comment deletion failure")}
+	}
 	return f.delegate.QueryRow(ctx, query, args...)
+}
+
+func (z *zeroDeleteCommentDB) Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
+	if strings.Contains(query, "-- name: DeleteComment") {
+		return pgconn.NewCommandTag("DELETE 0"), nil
+	}
+	return z.delegate.Exec(ctx, query, args...)
+}
+
+func (z *zeroDeleteCommentDB) Query(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error) {
+	return z.delegate.Query(ctx, query, args...)
+}
+
+func (z *zeroDeleteCommentDB) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
+	if strings.Contains(query, "-- name: DeleteComment") {
+		return deleteCommentResultRow{changed: false}
+	}
+	return z.delegate.QueryRow(ctx, query, args...)
 }
 
 func (f *failNthBegin) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -459,6 +498,28 @@ func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
 	if existing != 1 {
 		t.Fatalf("failed delete unexpectedly removed trigger")
 	}
+	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
+}
+
+func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	fixture := createCommentDeliveryFixture(t, "Concurrent deletion batch repair")
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET assignee_type = 'agent', assignee_id = $2 WHERE id = $1`, fixture.issueID, fixture.agentID); err != nil {
+		t.Fatalf("assign concurrent-delete issue: %v", err)
+	}
+
+	zeroHandler := *testHandler
+	zeroHandler.Queries = db.New(&zeroDeleteCommentDB{delegate: testPool})
+	w := httptest.NewRecorder()
+	req := newRequest(http.MethodDelete, "/api/comments/"+fixture.commentID[2], nil)
+	req = withURLParam(req, "commentId", fixture.commentID[2])
+	zeroHandler.DeleteComment(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("DeleteComment no-op: got %d: %s", w.Code, w.Body.String())
+	}
+
 	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
 }
 

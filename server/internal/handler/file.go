@@ -18,6 +18,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // extContentTypes overrides http.DetectContentType for extensions it gets wrong.
@@ -570,7 +571,26 @@ func (h *Handler) UploadFile(w http.ResponseWriter, r *http.Request) {
 			// S3 upload succeeded but DB record failed — still return the link
 			// so the file is usable. Log the error for investigation.
 		} else {
-			writeJSON(w, http.StatusOK, h.attachmentToResponse(att, attachmentURLModeFromRequest(r)))
+			if att.IssueRevision > 0 && att.IssueID.Valid {
+				h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, uploaderType, uploaderID, map[string]any{
+					"issue_id":       uuidToString(att.IssueID),
+					"issue_revision": att.IssueRevision,
+				})
+			}
+			if att.CommentRevision > 0 && att.CommentID.Valid {
+				if comment, loadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+					ID:          att.CommentID,
+					WorkspaceID: att.WorkspaceID,
+				}); loadErr == nil {
+					commentID := uuidToString(comment.ID)
+					reactions := h.groupReactions(r, []pgtype.UUID{comment.ID})
+					attachments := h.groupAttachments(r, []pgtype.UUID{comment.ID})
+					h.publish(protocol.EventCommentUpdated, workspaceID, uploaderType, uploaderID, map[string]any{
+						"comment": commentToResponse(comment, reactions[commentID], attachments[commentID]),
+					})
+				}
+			}
+			writeJSON(w, http.StatusOK, h.attachmentToResponse(att.Attachment(), attachmentURLModeFromRequest(r)))
 			return
 		}
 
@@ -1413,13 +1433,33 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DeleteAttachment(r.Context(), db.DeleteAttachmentParams{
+	deleted, err := h.Queries.DeleteAttachment(r.Context(), db.DeleteAttachmentParams{
 		ID:          att.ID,
 		WorkspaceID: att.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Error("failed to delete attachment", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete attachment")
 		return
+	}
+	if deleted.Changed && att.IssueID.Valid {
+		h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, "member", userID, map[string]any{
+			"issue_id":       uuidToString(att.IssueID),
+			"issue_revision": deleted.IssueRevision,
+		})
+	}
+	if deleted.Changed && att.CommentID.Valid {
+		if comment, loadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{
+			ID:          att.CommentID,
+			WorkspaceID: att.WorkspaceID,
+		}); loadErr == nil {
+			commentID := uuidToString(comment.ID)
+			reactions := h.groupReactions(r, []pgtype.UUID{comment.ID})
+			attachments := h.groupAttachments(r, []pgtype.UUID{comment.ID})
+			h.publish(protocol.EventCommentUpdated, workspaceID, "member", userID, map[string]any{
+				"comment": commentToResponse(comment, reactions[commentID], attachments[commentID]),
+			})
+		}
 	}
 
 	h.deleteS3Object(r.Context(), att.Url)
@@ -1430,16 +1470,16 @@ func (h *Handler) DeleteAttachment(w http.ResponseWriter, r *http.Request) {
 // Attachment linking
 // ---------------------------------------------------------------------------
 
-// linkAttachmentsByIssueIDs links the given attachment IDs to an issue.
-// Only updates attachments that have no issue_id yet.
-func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []pgtype.UUID) {
-	if err := h.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
-		IssueID:     issueID,
-		WorkspaceID: workspaceID,
-		Column3:     ids,
-	}); err != nil {
-		slog.Error("failed to link attachments to issue", "error", err)
-	}
+// linkAttachmentsByIssueIDs links unbound attachments to an issue. A caller
+// that did not already advance the issue revision can ask this visible change
+// to advance it exactly once.
+func (h *Handler) linkAttachmentsByIssueIDs(ctx context.Context, issueID, workspaceID pgtype.UUID, ids []pgtype.UUID, bumpRevision bool) (db.LinkAttachmentsToIssueRow, error) {
+	return h.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
+		IssueID:       issueID,
+		WorkspaceID:   workspaceID,
+		AttachmentIds: ids,
+		BumpRevision:  bumpRevision,
+	})
 }
 
 // linkAttachmentsByIDs links the given attachment IDs to a comment.

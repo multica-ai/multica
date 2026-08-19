@@ -44,6 +44,13 @@ function initFrom(source: unknown, port: MessagePort) {
   fakeWindow.dispatchEvent(event);
 }
 
+/**
+ * Waits out a turn for a delivery that must never come.
+ *
+ * Only sound for an assertion that stays true forever: a port delivers on an
+ * event-loop drain rather than as a DOM task, so a timer is no barrier for one
+ * that IS coming. Wait on the traffic itself in that case — see the third test.
+ */
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 describe("surface bridge handshake", () => {
@@ -100,12 +107,13 @@ describe("surface bridge handshake", () => {
     // not be able to take the channel over afterwards.
     initFrom(fakeWindow.parent, hijack.port1);
     void multica.context.get(true);
-    await settle();
+    // The request arriving on the first port is the barrier: until it does,
+    // "the hijacker got nothing" is true of a channel nobody has used yet.
+    await vi.waitFor(() => expect(onReal.length).toBeGreaterThan(0));
 
     // The property under test is that the second init cannot capture the
     // channel — traffic keeps going to the port bound first, and the hijacker's
     // port stays silent.
     expect(onHijack).toHaveLength(0);
-    expect(onReal.length).toBeGreaterThan(0);
   });
 });

@@ -6,6 +6,75 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient edit guards", () => {
+  it("serializes field baselines for issue and comment writes", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response("{}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.updateIssue("issue-1", { title: "Latest", title_base: "Original" });
+    await client.updateComment("comment-1", "Latest", [], undefined, "Original");
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      title: "Latest",
+      title_base: "Original",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      content: "Latest",
+      content_base: "Original",
+    });
+  });
+
+  it("accepts an older issue response without revision and rejects a malformed revision", async () => {
+    const legacyIssue = {
+      id: "issue-1",
+      workspace_id: "ws-1",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Legacy issue",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-08-16T00:00:00Z",
+      updated_at: "2026-08-16T00:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ issues: [legacyIssue], total: 1 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        issues: [{ ...legacyIssue, revision: "invalid" }],
+        total: 1,
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const parsedLegacy = await client.listIssues();
+    expect(parsedLegacy).toMatchObject({ issues: [{ id: "issue-1" }], total: 1 });
+    expect(parsedLegacy.issues[0]).not.toHaveProperty("revision");
+    await expect(client.listIssues()).resolves.toEqual({ issues: [], total: 0 });
+  });
+});
+
 describe("ApiClient pull-request response schema", () => {
   const validPR = {
     id: "pr-1",
@@ -823,6 +892,7 @@ describe("ApiClient", () => {
     await client.updateAutopilot("ap-1", { status: "paused", project_id: null });
     await client.deleteAutopilot("ap-1");
     await client.triggerAutopilot("ap-1");
+    await client.getAutopilotQuotaUsage();
     await client.listAutopilotRuns("ap-1", { limit: 10, offset: 20 });
     await client.createAutopilotTrigger("ap-1", {
       kind: "schedule",
@@ -837,6 +907,7 @@ describe("ApiClient", () => {
       url,
       method: init?.method ?? "GET",
       body: init?.body,
+      idempotencyKey: (init?.headers as Record<string, string> | undefined)?.["Idempotency-Key"],
     }));
 
     expect(calls).toMatchObject([
@@ -858,7 +929,12 @@ describe("ApiClient", () => {
         body: JSON.stringify({ status: "paused", project_id: null }),
       },
       { url: "https://api.example.test/api/autopilots/ap-1", method: "DELETE" },
-      { url: "https://api.example.test/api/autopilots/ap-1/trigger", method: "POST" },
+      {
+        url: "https://api.example.test/api/autopilots/ap-1/trigger",
+        method: "POST",
+        idempotencyKey: expect.any(String),
+      },
+      { url: "https://api.example.test/api/autopilots/usage", method: "GET" },
       { url: "https://api.example.test/api/autopilots/ap-1/runs?limit=10&offset=20", method: "GET" },
       {
         url: "https://api.example.test/api/autopilots/ap-1/triggers",

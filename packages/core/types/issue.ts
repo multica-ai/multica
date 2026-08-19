@@ -41,6 +41,7 @@ export interface IssueReaction {
   actor_id: string;
   emoji: string;
   created_at: string;
+  issue_revision?: number;
 }
 
 /**
@@ -93,4 +94,12 @@ export interface Issue {
   labels?: Label[];
   created_at: string;
   updated_at: string;
+  /** Monotonic server revision; absent when connected to an older backend. */
+  revision?: number;
+  /**
+   * Null until the server's historical activity backfill reaches this row.
+   * This RFC3339 timestamp may include sub-second precision while legacy
+   * created_at/updated_at values are second-precision; parse before comparing.
+   */
+  last_activity_at?: string | null;
 }

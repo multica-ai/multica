@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -18,11 +19,13 @@ import (
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/profiling"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
+	"github.com/multica-ai/multica/server/pkg/llm"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -116,6 +119,46 @@ func envNonNegativeInt(name string, def int) int {
 		return def
 	}
 	return v
+}
+
+// maxLLMRetriesLimit caps MULTICA_LLM_MAX_RETRIES. The ceiling is a latency
+// budget, not a taste call: SDK backoff is 0.5s doubling to an 8s cap, so 6
+// retries spend ~21s and 10 spend ~48s sleeping before the last attempt. Every
+// internal caller of pkg/llm runs under a far tighter deadline (8s for chat
+// quick actions, 20s for title generation), so a budget past 5 cannot finish —
+// it only converts a retryable upstream failure into a deadline-exceeded one.
+const maxLLMRetriesLimit = 5
+
+// parseLLMMaxRetries turns the raw MULTICA_LLM_MAX_RETRIES value into the
+// tri-state llm.Config.MaxRetries expects: nil for unset (use the default),
+// llm.Retries(0) to disable retries, llm.Retries(N) for a ceiling of N.
+//
+// Unlike the envFooInt helpers above it returns an error instead of warning and
+// falling back to a default. A retry budget silently corrected to something the
+// operator did not ask for is the failure this knob exists to remove
+// (MUL-6364): a typo'd "3x" or a negative must stop the boot, not quietly
+// restore the default and look configured.
+func parseLLMMaxRetries(raw string) (*llm.RetryOverride, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return nil, fmt.Errorf("must be an integer, got %q", raw)
+	}
+	if v > maxLLMRetriesLimit {
+		return nil, fmt.Errorf("must be at most %d, got %d", maxLLMRetriesLimit, v)
+	}
+	// llm.Retries owns the lower bound. It is the boundary that makes a negative
+	// budget unrepresentable, and this is the only place the server builds one,
+	// so the deployment-specific ceiling above and the type-level floor here
+	// cannot disagree.
+	override, err := llm.Retries(v)
+	if err != nil {
+		return nil, fmt.Errorf("must not be negative, got %d (use 0 to disable retries)", v)
+	}
+	return override, nil
 }
 
 func envPositiveInt64(name string, def int64) int64 {
@@ -431,6 +474,15 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
+	// Validate the LLM retry budget before the router exists: an operator who
+	// typed a value we cannot honor should see the boot stop, the same way a
+	// malformed feature-flag file does above.
+	llmMaxRetries, err := parseLLMMaxRetries(os.Getenv("MULTICA_LLM_MAX_RETRIES"))
+	if err != nil {
+		slog.Error("invalid MULTICA_LLM_MAX_RETRIES", "error", err)
+		os.Exit(1)
+	}
+
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:         httpMetrics,
 		BusinessMetrics:     businessMetrics,
@@ -441,12 +493,14 @@ func main() {
 		DaemonWakeup:        daemonWakeup,
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
+		LLMMaxRetries:       llmMaxRetries,
 	})
 
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
 	}
+	profilingServer := profiling.NewServer()
 
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
@@ -480,6 +534,9 @@ func main() {
 	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
+	if autopilotSvc.QuotaEnabled() {
+		go runAutopilotQuotaReconciler(autopilotCtx, autopilotSvc)
+	}
 	go runDBStatsLogger(sweepCtx, pool)
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
@@ -546,6 +603,13 @@ func main() {
 			}
 		}()
 	}
+
+	go func() {
+		slog.Info("pprof server starting", "addr", profilingServer.Addr)
+		if err := profilingServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("pprof server disabled after startup error", "error", err)
+		}
+	}()
 
 	go func() {
 		slog.Info("server starting", "port", port)
@@ -620,5 +684,10 @@ func main() {
 		}
 		metricsShutdownCancel()
 	}
+	profilingShutdownCtx, profilingShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	if err := profilingServer.Shutdown(profilingShutdownCtx); err != nil {
+		slog.Error("pprof server forced to shutdown", "error", err)
+	}
+	profilingShutdownCancel()
 	slog.Info("server stopped")
 }

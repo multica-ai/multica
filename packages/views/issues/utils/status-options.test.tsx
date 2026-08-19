@@ -67,7 +67,7 @@ describe("useStatusOptions", () => {
     catalogEntries = undefined;
     const { result } = renderHook(() => useStatusOptions("workspace-1"));
 
-    expect(result.current.options.map((o) => o.key)).toEqual([
+    expect(result.current.map((o) => o.key)).toEqual([
       "backlog",
       "todo",
       "in_progress",
@@ -76,18 +76,34 @@ describe("useStatusOptions", () => {
       "blocked",
       "cancelled",
     ]);
-    expect(result.current.hasCustom).toBe(false);
   });
 
-  it("groups a custom status under the category it behaves as", () => {
+  // One flat list, never nested by category (MUL-6399): a custom status sits
+  // directly after the built-in of the category it behaves as, so the whole
+  // catalog reads top to bottom in canonical order.
+  it("places a custom status inline, after the built-in of its category", () => {
     catalogEntries = [...BUILT_INS, entry({ key: "qa", name: "QA", category: "in_review" })];
     const { result } = renderHook(() => useStatusOptions("workspace-1"));
 
-    const inReview = result.current.groups.find((g) => g.category === "in_review");
-    expect(inReview?.options.map((o) => o.key)).toEqual(["in_review", "qa"]);
-    // Still 7 groups: a custom status must never create an eighth board column.
-    expect(result.current.groups).toHaveLength(7);
-    expect(result.current.hasCustom).toBe(true);
+    expect(result.current.map((o) => o.key)).toEqual([
+      "backlog",
+      "todo",
+      "in_progress",
+      "in_review",
+      "qa",
+      "done",
+      "blocked",
+      "cancelled",
+    ]);
+  });
+
+  // The category is what the row's icon and hover color are drawn from, so it
+  // travels with the option now that no heading states it.
+  it("carries the category a custom status behaves as", () => {
+    catalogEntries = [...BUILT_INS, entry({ key: "qa", name: "QA", category: "in_review" })];
+    const { result } = renderHook(() => useStatusOptions("workspace-1"));
+
+    expect(result.current.find((o) => o.key === "qa")?.category).toBe("in_review");
   });
 
   // Archiving retires a status from FUTURE assignment. Offering it here would
@@ -99,7 +115,7 @@ describe("useStatusOptions", () => {
     ];
     const { result } = renderHook(() => useStatusOptions("workspace-1"));
 
-    expect(result.current.options.map((o) => o.key)).not.toContain("qa");
+    expect(result.current.map((o) => o.key)).not.toContain("qa");
   });
 
   // Built-ins keep their semantic token color; a hex here would override it.
@@ -107,7 +123,7 @@ describe("useStatusOptions", () => {
     catalogEntries = [...BUILT_INS, entry({ key: "qa", name: "QA", color: "#ff0000" })];
     const { result } = renderHook(() => useStatusOptions("workspace-1"));
 
-    const byKey = new Map(result.current.options.map((o) => [o.key, o.color]));
+    const byKey = new Map(result.current.map((o) => [o.key, o.color]));
     expect(byKey.get("qa")).toBe("#ff0000");
     expect(byKey.get("in_review")).toBeNull();
   });

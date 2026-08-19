@@ -7,7 +7,8 @@
 -- "Assigned to me"), and the two filters must produce disjoint result sets.
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+       i.revision
 FROM issue i
 WHERE i.workspace_id = $1
   AND (sqlc.narg('status')::text IS NULL OR i.status = sqlc.narg('status'))
@@ -89,9 +90,10 @@ WHERE id = $1 AND workspace_id = $2
 FOR KEY SHARE;
 
 -- name: LockIssueForDescriptionUpdate :one
--- Serialize user description saves with detached channel-media appends. The
--- handler merges channel media that landed after the editor's submitted base
--- while holding this lock, then performs UpdateIssue in the same transaction.
+-- Serialize field-baseline checks and combined attachment binding on the
+-- owner row. The handler merges channel media that landed after the editor's
+-- submitted base, updates the issue, and binds this request's attachments in
+-- the same transaction while holding this lock.
 SELECT * FROM issue
 WHERE id = $1 AND workspace_id = $2
 FOR UPDATE;
@@ -102,6 +104,8 @@ FOR UPDATE;
 -- with the fully composed Markdown so rich-text ordering survives. If a user
 -- edited concurrently (or the adapter has no inline layout), append instead;
 -- preserving user-authored bytes takes precedence over layout fidelity.
+-- This is asynchronous system materialization, not a new user action, so it
+-- intentionally preserves last_activity_at while still advancing revision.
 UPDATE issue
 SET description = CASE
         WHEN sqlc.narg('base_description')::text IS NOT NULL
@@ -110,6 +114,7 @@ SET description = CASE
         WHEN description IS NULL OR description = '' THEN sqlc.arg(markdown)
         ELSE description || E'\n\n' || sqlc.arg(markdown)
     END,
+    revision = revision + 1,
     updated_at = now()
 WHERE id = sqlc.arg(id)
   AND workspace_id = sqlc.arg(workspace_id)
@@ -129,10 +134,10 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    stage
+    stage, last_activity_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('stage')
+    sqlc.narg('stage'), now()
 ) RETURNING *;
 
 -- name: GetIssueByNumber :one
@@ -140,27 +145,77 @@ SELECT * FROM issue
 WHERE workspace_id = $1 AND number = $2;
 
 -- name: UpdateIssue :one
-UPDATE issue SET
-    title = COALESCE(sqlc.narg('title'), title),
-    description = COALESCE(sqlc.narg('description'), description),
-    status = COALESCE(sqlc.narg('status'), status),
-    priority = COALESCE(sqlc.narg('priority'), priority),
-    assignee_type = sqlc.narg('assignee_type'),
-    assignee_id = sqlc.narg('assignee_id'),
-    position = COALESCE(sqlc.narg('position'), position),
-    start_date = sqlc.narg('start_date'),
-    due_date = sqlc.narg('due_date'),
-    parent_issue_id = sqlc.narg('parent_issue_id'),
-    project_id = sqlc.narg('project_id'),
-    stage = sqlc.narg('stage'),
-    updated_at = now()
-WHERE id = $1
-RETURNING *;
+WITH candidate AS (
+    SELECT
+        i.*,
+        COALESCE(sqlc.narg('title')::text, i.title) AS next_title,
+        COALESCE(sqlc.narg('description')::text, i.description) AS next_description,
+        COALESCE(sqlc.narg('status')::text, i.status) AS next_status,
+        COALESCE(sqlc.narg('priority')::text, i.priority) AS next_priority,
+        sqlc.narg('assignee_type')::text AS next_assignee_type,
+        sqlc.narg('assignee_id')::uuid AS next_assignee_id,
+        COALESCE(sqlc.narg('position')::double precision, i.position) AS next_position,
+        sqlc.narg('start_date')::date AS next_start_date,
+        sqlc.narg('due_date')::date AS next_due_date,
+        sqlc.narg('parent_issue_id')::uuid AS next_parent_issue_id,
+        sqlc.narg('project_id')::uuid AS next_project_id,
+        sqlc.narg('stage')::integer AS next_stage
+    FROM issue AS i
+    WHERE i.id = $1
+      AND (sqlc.narg('expected_revision')::bigint IS NULL OR i.revision = sqlc.narg('expected_revision')::bigint)
+), changed AS (
+    SELECT
+        candidate.*,
+        ROW(
+            title, description, status, priority, assignee_type, assignee_id,
+            position, start_date, due_date, parent_issue_id, project_id, stage
+        ) IS DISTINCT FROM ROW(
+            next_title, next_description, next_status, next_priority,
+            next_assignee_type, next_assignee_id, next_position, next_start_date,
+            next_due_date, next_parent_issue_id, next_project_id, next_stage
+        ) AS did_change,
+        ROW(
+            title, description, status, priority, assignee_type, assignee_id,
+            start_date, due_date, parent_issue_id, project_id, stage
+        ) IS DISTINCT FROM ROW(
+            next_title, next_description, next_status, next_priority,
+            next_assignee_type, next_assignee_id, next_start_date, next_due_date,
+            next_parent_issue_id, next_project_id, next_stage
+        ) AS did_activity
+    FROM candidate
+)
+UPDATE issue AS i SET
+    title = changed.next_title,
+    description = changed.next_description,
+    status = changed.next_status,
+    priority = changed.next_priority,
+    assignee_type = changed.next_assignee_type,
+    assignee_id = changed.next_assignee_id,
+    position = changed.next_position,
+    start_date = changed.next_start_date,
+    due_date = changed.next_due_date,
+    parent_issue_id = changed.next_parent_issue_id,
+    project_id = changed.next_project_id,
+    stage = changed.next_stage,
+    revision = i.revision + changed.did_change::integer,
+    last_activity_at = CASE WHEN changed.did_activity
+        THEN GREATEST(COALESCE(i.last_activity_at, i.updated_at), now())
+        ELSE i.last_activity_at
+    END,
+    updated_at = CASE WHEN changed.did_change THEN now() ELSE i.updated_at END
+FROM changed
+WHERE i.id = changed.id
+RETURNING i.*;
 
 -- name: UpdateIssueStatus :one
 -- Workspace_id in the WHERE clause is a SQL-layer tenant guard; see DeleteIssue.
 UPDATE issue SET
     status = $2,
+    revision = revision + CASE WHEN status IS DISTINCT FROM $2 THEN 1 ELSE 0 END,
+    last_activity_at = CASE WHEN status IS DISTINCT FROM $2
+        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
+        ELSE last_activity_at
+    END,
     updated_at = now()
 WHERE id = $1 AND workspace_id = $3
 RETURNING *;
@@ -170,10 +225,10 @@ INSERT INTO issue (
     workspace_id, title, description, status, priority,
     assignee_type, assignee_id, creator_type, creator_id,
     parent_issue_id, position, start_date, due_date, number, project_id,
-    origin_type, origin_id, stage
+    origin_type, origin_id, stage, last_activity_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15,
-    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage')
+    sqlc.narg('origin_type'), sqlc.narg('origin_id'), sqlc.narg('stage'), now()
 ) RETURNING *;
 
 -- name: LockIssueDuplicateKey :exec
@@ -238,7 +293,8 @@ DELETE FROM issue WHERE issue.id IN (SELECT target.id FROM target);
 -- filter; member-direct assignment is intentionally excluded).
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+       i.revision
 FROM issue i
 WHERE i.workspace_id = $1
   AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')
@@ -411,6 +467,12 @@ GROUP BY parent_issue_id;
 -- issue first so this is also the tenant check.
 UPDATE issue SET
     metadata = jsonb_set(metadata, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb),
+    revision = revision + CASE WHEN metadata -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN 1 ELSE 0 END,
+    last_activity_at = CASE
+        WHEN metadata -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb
+        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
+        ELSE last_activity_at
+    END,
     updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;
@@ -420,6 +482,12 @@ RETURNING *;
 -- Deleting a missing key is a no-op (still returns the row).
 UPDATE issue SET
     metadata = metadata - sqlc.arg('key')::text,
+    revision = revision + CASE WHEN metadata ? sqlc.arg('key')::text THEN 1 ELSE 0 END,
+    last_activity_at = CASE
+        WHEN metadata ? sqlc.arg('key')::text
+        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
+        ELSE last_activity_at
+    END,
     updated_at = now()
 WHERE id = sqlc.arg('id') AND workspace_id = sqlc.arg('workspace_id')
 RETURNING *;

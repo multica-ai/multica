@@ -121,6 +121,7 @@ import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
 import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
+import { buildCommentUpdateBody } from "./revision";
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL;
 
@@ -718,6 +719,7 @@ class ApiClient {
     commentId: string,
     content: string,
     attachmentIds?: string[],
+    contentBase?: string,
   ): Promise<Comment> {
     return this.fetchValidatedWith(
       `/api/comments/${commentId}`,
@@ -725,10 +727,9 @@ class ApiClient {
       EMPTY_COMMENT,
       {
         method: "PUT",
-        body: JSON.stringify({
-          content,
-          ...(attachmentIds ? { attachment_ids: attachmentIds } : {}),
-        }),
+        body: JSON.stringify(
+          buildCommentUpdateBody(content, attachmentIds, contentBase),
+        ),
       },
       { endpoint: "updateComment" },
     );

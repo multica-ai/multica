@@ -22,6 +22,11 @@ import (
 // looks for it. A typo on either side silently disables worktree mode for
 // everyone, with no error anywhere — which is precisely the failure this whole
 // area keeps producing.
+// This test reads OUT of the Go module, so CI's backend path filter has to
+// list the frontend file explicitly (`backend` in .github/workflows/ci.yml).
+// Without it, a PR that only edits the frontend token skips the very test
+// that would catch the mismatch. Move or rename the path below and the
+// filter must move with it.
 func TestWorktreeCapabilityTokenMatchesFrontend(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "packages", "core", "runtimes", "cli-version.ts")
 	src, err := os.ReadFile(path)

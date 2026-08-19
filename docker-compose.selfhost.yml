@@ -102,6 +102,15 @@ services:
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
       DISABLE_WORKSPACE_CREATION: ${DISABLE_WORKSPACE_CREATION:-}
+      # Managed entitlement policy is explicitly opt-in. The false/empty
+      # defaults keep self-hosted installs on the legacy path with no Cloud
+      # request and no quota-table access.
+      MULTICA_ENTITLEMENT_POLICY_ENABLED: ${MULTICA_ENTITLEMENT_POLICY_ENABLED:-false}
+      MULTICA_ENTITLEMENT_POLICY_URL: ${MULTICA_ENTITLEMENT_POLICY_URL:-}
+      MULTICA_ENTITLEMENT_SERVICE_TOKEN: ${MULTICA_ENTITLEMENT_SERVICE_TOKEN:-}
+      MULTICA_ENTITLEMENT_POLICY_TIMEOUT: ${MULTICA_ENTITLEMENT_POLICY_TIMEOUT:-3s}
+      MULTICA_ENTITLEMENT_STALE_GRACE: ${MULTICA_ENTITLEMENT_STALE_GRACE:-15m}
+      MULTICA_ENTITLEMENT_EMERGENCY_DISABLED: ${MULTICA_ENTITLEMENT_EMERGENCY_DISABLED:-false}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
       # Public URL the API is reachable at from the open internet, no
@@ -117,6 +126,15 @@ services:
       # Empty default = headers ignored, RemoteAddr used. Set e.g.
       # "127.0.0.1/32" when running behind a same-host reverse proxy.
       MULTICA_TRUSTED_PROXIES: ${MULTICA_TRUSTED_PROXIES:-}
+      # Server-side LLM layer, backing internal helpers such as chat title
+      # generation. Both the API key and the base URL empty = layer disabled,
+      # and callers fall back silently rather than failing. MULTICA_LLM_MAX_RETRIES
+      # is the retry budget: unset = 2, 0 = disabled, 1-5 = an exact ceiling.
+      # Anything else fails the boot instead of being silently corrected.
+      MULTICA_LLM_API_KEY: ${MULTICA_LLM_API_KEY:-}
+      MULTICA_LLM_BASE_URL: ${MULTICA_LLM_BASE_URL:-}
+      MULTICA_LLM_DEFAULT_MODEL: ${MULTICA_LLM_DEFAULT_MODEL:-}
+      MULTICA_LLM_MAX_RETRIES: ${MULTICA_LLM_MAX_RETRIES:-}
       # Lark / Feishu bot integration. MULTICA_LARK_SECRET_KEY is the
       # opt-in: unset = integration disabled. Mainland 飞书 and international
       # Lark are auto-detected per installation and served side by side, so

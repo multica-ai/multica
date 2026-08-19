@@ -105,7 +105,7 @@ export function IssueActionsMenuItems({
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const { options: statusOptions } = useStatusOptions(wsId);
+  const statusOptions = useStatusOptions(wsId);
   const { categoryOf, entryOf } = useIssueStatuses(wsId);
   const {
     isPinned,
@@ -167,9 +167,8 @@ export function IssueActionsMenuItems({
         <P.SubContent>
           {/* Catalog-driven, like the picker and the filter: every entry point
               that can change a status must offer the same set, or a custom
-              status is unreachable from the board's right-click menu. Flat
-              rather than grouped — these primitives have no label item — but
-              already in canonical category order. (MUL-6243) */}
+              status is unreachable from the board's right-click menu. One flat
+              list in canonical category order. (MUL-6243) */}
           {statusOptions.map((option) => (
             <P.Item
               key={option.key}
@@ -177,7 +176,7 @@ export function IssueActionsMenuItems({
             >
               <StatusIcon
                 status={option.key}
-                category={categoryOf(option.key)}
+                category={option.category}
                 color={option.color}
                 className="h-3.5 w-3.5"
               />

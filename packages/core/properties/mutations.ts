@@ -133,7 +133,7 @@ export function useSetIssueProperty() {
       rollbackSingleKey(qc, wsId, ctx);
     },
     onSuccess: (data, { issueId }) => {
-      onIssuePropertiesChanged(qc, wsId, issueId, data.properties ?? {});
+      onIssuePropertiesChanged(qc, wsId, issueId, data.properties ?? {}, data.issue_revision);
     },
     onSettled: (_data, _err, { issueId }) => {
       settleIssuePropertyCaches(qc, wsId, issueId);
@@ -164,7 +164,7 @@ export function useUnsetIssueProperty() {
       rollbackSingleKey(qc, wsId, ctx);
     },
     onSuccess: (data, { issueId }) => {
-      onIssuePropertiesChanged(qc, wsId, issueId, data.properties ?? {});
+      onIssuePropertiesChanged(qc, wsId, issueId, data.properties ?? {}, data.issue_revision);
     },
     onSettled: (_data, _err, { issueId }) => {
       settleIssuePropertyCaches(qc, wsId, issueId);
