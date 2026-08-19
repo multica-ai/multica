@@ -25,8 +25,12 @@ type Backend interface {
 // TaskContractInput carries a task's deterministic contract — the goal,
 // natural-language acceptance criteria, optional state file path, and ordered
 // verification commands. Protocols that expose a structured channel forward it
-// verbatim (currently dsh); every other backend ignores it because the daemon
-// already injects the same contract into the prompt.
+// verbatim (currently dsh); every other backend ignores it.
+//
+// This is a reserved channel: the daemon does not yet assemble or populate
+// ExecOptions.TaskContract for production runs. It exists so the DSH adapter
+// can forward the contract once the issue/run orchestration starts producing
+// it.
 type TaskContractInput struct {
 	Goal           string   `json:"goal"`
 	Acceptance     []string `json:"acceptance,omitempty"`
@@ -135,7 +139,9 @@ type ExecOptions struct {
 	// can expose MULTICA_ISSUE_ID to the agent.
 	IssueID string
 	// TaskContract carries the deterministic task contract described above.
-	// Backends without a structured contract channel ignore it.
+	// It is a reserved channel with no production caller yet, so it is always
+	// zero-valued in practice. Backends without a structured contract channel
+	// ignore it.
 	TaskContract TaskContractInput
 }
 

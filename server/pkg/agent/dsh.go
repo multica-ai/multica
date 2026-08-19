@@ -365,7 +365,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 
 		result := state.result
 		if result == nil {
-			result = &Result{Status: "failed", SessionID: state.sessionID, Usage: state.usage}
+			result = &Result{Status: "failed", SessionID: state.sessionID, Usage: state.usage, Progress: state.progress, Acceptance: state.acceptance}
 			switch {
 			case errors.Is(runCtx.Err(), context.DeadlineExceeded):
 				result.Status = "timeout"

@@ -146,6 +146,70 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-contract","status":"com
 	}
 }
 
+func TestDshBackendOmitsTaskContractWhenEmpty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+if [ "$1" != "--profile" ] || [ "$2" != "multica" ] || [ "$3" != "--stdio" ]; then exit 9; fi
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r command
+case "$command" in *'"type":"execute"'*) ;; *) exit 8 ;; esac
+case "$command" in *'"task_contract"'*) exit 7 ;; esac
+printf '%s\n' '{"v":1,"type":"result","request_id":"task-empty-contract","status":"completed","session_id":"session-empty-contract","output":"ok","resume_rejected":false}'
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-empty-contract", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "ship it", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "ok" {
+		t.Fatalf("bad result: %#v", result)
+	}
+}
+
+func TestDshBackendPreservesProgressOnNonTerminalStream(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+if [ "$1" != "--profile" ] || [ "$2" != "multica" ] || [ "$3" != "--stdio" ]; then exit 9; fi
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r command
+case "$command" in *'"type":"execute"'*) ;; *) exit 8 ;; esac
+printf '%s\n' '{"v":1,"type":"progress","request_id":"task-fallback","phase":"acceptance_check","message":"","data":{"index":0,"command":"true","exit_code":0,"passed":true}}'
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-fallback", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "run", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected failed fallback result, got %#v", result)
+	}
+	if len(result.Progress) != 1 || result.Progress[0].Phase != "acceptance_check" || result.Progress[0].Data["command"] != "true" {
+		t.Fatalf("fallback dropped progress: %#v", result.Progress)
+	}
+}
+
 func TestDshBackendCancellationUsesProtocol(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("shell fixture")
