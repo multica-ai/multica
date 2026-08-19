@@ -260,7 +260,7 @@ func TestValidatedInboundResolverDiscoversGroupAndFinalizesAgent(t *testing.T) {
 	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, routeAgentID.Valid = true, true, true, true
 	fake := &fakeValidatedInboundQueries{row: db.DiscoverDingTalkGroupRouteRow{
 		TargetType: string(engine.TargetAgent), TargetID: routeAgentID,
-		AgentID: routeAgentID, Revision: 7, AgentActive: pgtype.Bool{Bool: true, Valid: true},
+		AgentID: routeAgentID, Revision: 7, AgentActive: true,
 	}}
 	raw, _ := json.Marshal(dingtalkRawEvent{ConversationTitle: "Platform team"})
 	resolved, err := (&validatedInboundResolver{q: fake}).ResolveValidatedInbound(

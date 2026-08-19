@@ -260,7 +260,7 @@ func (r *validatedInboundResolver) ResolveValidatedInbound(ctx context.Context, 
 	inst.TargetID = row.TargetID
 	inst.TargetRevision = row.TargetRevision
 	inst.RouteRevision = row.Revision
-	if !row.AgentActive.Bool {
+	if !row.AgentActive {
 		return inst, engine.ErrTargetAgentArchived
 	}
 	return inst, nil

@@ -142,7 +142,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	if err != nil {
 		t.Fatalf("discover group: %v", err)
 	}
-	if resolved.AgentID != util.MustParseUUID(defaultAgent) || !resolved.AgentActive.Bool {
+	if resolved.AgentID != util.MustParseUUID(defaultAgent) || !resolved.AgentActive {
 		t.Fatalf("new group route = %+v, want active installation default", resolved)
 	}
 	routes, err := queries.ListDingTalkGroupRoutesByWorkspace(ctx, util.MustParseUUID(workspaceID))
@@ -206,7 +206,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
 		ConversationID: conversation, ConversationTitle: "Platform team renamed",
 	})
-	if err != nil || resolved.AgentID != util.MustParseUUID(routedAgent) || !resolved.AgentActive.Bool {
+	if err != nil || resolved.AgentID != util.MustParseUUID(routedAgent) || !resolved.AgentActive {
 		t.Fatalf("re-resolve group route = %+v, err=%v", resolved, err)
 	}
 
@@ -456,7 +456,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
 		ConversationID: conversation, ConversationTitle: "Platform team archived",
 	})
-	if err != nil || archivedRoute.AgentID != util.MustParseUUID(defaultAgent) || archivedRoute.AgentActive.Bool {
+	if err != nil || archivedRoute.AgentID != util.MustParseUUID(defaultAgent) || archivedRoute.AgentActive {
 		t.Fatalf("archived route lifecycle = %+v, err=%v", archivedRoute, err)
 	}
 	matches, err := queries.DingTalkGroupRouteMatchesTarget(ctx, db.DingTalkGroupRouteMatchesTargetParams{
@@ -471,7 +471,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
 		ConversationID: conversation, ConversationTitle: "Platform team restored",
 	})
-	if err != nil || restoredRoute.AgentID != util.MustParseUUID(defaultAgent) || !restoredRoute.AgentActive.Bool {
+	if err != nil || restoredRoute.AgentID != util.MustParseUUID(defaultAgent) || !restoredRoute.AgentActive {
 		t.Fatalf("restored route lifecycle = %+v, err=%v", restoredRoute, err)
 	}
 
@@ -525,7 +525,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
 		ConversationID: conversation, ConversationTitle: "Platform team B archived",
 	})
-	if err != nil || assignmentThenArchive.AgentID != util.MustParseUUID(routedAgent) || assignmentThenArchive.AgentActive.Bool {
+	if err != nil || assignmentThenArchive.AgentID != util.MustParseUUID(routedAgent) || assignmentThenArchive.AgentActive {
 		t.Fatalf("assignment-then-archive lifecycle = %+v, err=%v", assignmentThenArchive, err)
 	}
 	exec(`UPDATE agent SET archived_at = NULL, archived_by = NULL WHERE id = $1`, routedAgent)
@@ -533,7 +533,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 		InstallationID: util.MustParseUUID(installation), WorkspaceID: util.MustParseUUID(workspaceID),
 		ConversationID: conversation, ConversationTitle: "Platform team B restored",
 	})
-	if err != nil || restoredAssignedRoute.AgentID != util.MustParseUUID(routedAgent) || !restoredAssignedRoute.AgentActive.Bool {
+	if err != nil || restoredAssignedRoute.AgentID != util.MustParseUUID(routedAgent) || !restoredAssignedRoute.AgentActive {
 		t.Fatalf("restored assigned route = %+v, err=%v", restoredAssignedRoute, err)
 	}
 }

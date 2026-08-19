@@ -292,33 +292,38 @@ WITH workspace_guard AS MATERIALIZED (
         END
     RETURNING workspace_id, target_type, target_id, revision
 ), target_agent AS MATERIALIZED (
-    SELECT a.id
+    SELECT a.id,
+           (a.kind = 'user' AND a.archived_at IS NULL) AS active
     FROM group_route r
     JOIN agent a ON a.id = r.target_id AND a.workspace_id = r.workspace_id
     WHERE r.target_type = 'agent'
-      AND a.kind = 'user'
-      AND a.archived_at IS NULL
     FOR SHARE OF a
 ), target_squad AS MATERIALIZED (
-    SELECT s.leader_id AS id, s.leader_revision
+    SELECT s.leader_id AS id,
+           s.leader_revision,
+           (s.archived_at IS NULL
+            AND a.kind = 'user'
+            AND a.archived_at IS NULL) AS active
     FROM group_route r
     JOIN squad s ON s.id = r.target_id AND s.workspace_id = r.workspace_id
     JOIN agent a ON a.id = s.leader_id AND a.workspace_id = s.workspace_id
     WHERE r.target_type = 'squad'
-      AND s.archived_at IS NULL
-      AND a.kind = 'user'
-      AND a.archived_at IS NULL
     FOR SHARE OF s, a
 )
 SELECT r.target_type,
        r.target_id,
        COALESCE((SELECT id FROM target_agent), (SELECT id FROM target_squad))::uuid AS agent_id,
        (CASE WHEN r.target_type = 'squad'
-             THEN (SELECT leader_revision FROM target_squad)
+             THEN COALESCE((SELECT leader_revision FROM target_squad), 0)
              ELSE 0 END)::bigint AS target_revision,
        r.revision,
-       EXISTS (SELECT 1 FROM target_agent)
-           OR EXISTS (SELECT 1 FROM target_squad) AS agent_active
+       COALESCE(
+           CASE WHEN r.target_type = 'squad'
+                THEN (SELECT active FROM target_squad)
+                ELSE (SELECT active FROM target_agent)
+           END,
+           false
+       )::boolean AS agent_active
 FROM group_route r
 `
 
@@ -335,7 +340,7 @@ type DiscoverDingTalkGroupRouteRow struct {
 	AgentID        pgtype.UUID `json:"agent_id"`
 	TargetRevision int64       `json:"target_revision"`
 	Revision       int64       `json:"revision"`
-	AgentActive    pgtype.Bool `json:"agent_active"`
+	AgentActive    bool        `json:"agent_active"`
 }
 
 // Persist a group only after the shared inbound router has accepted the @bot
