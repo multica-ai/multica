@@ -51,7 +51,7 @@ func (s *MemoryStore) SetFailure(err error) {
 }
 
 // NewMemoryStore creates a concurrency-safe fixture adapter with the same
-// ordering and grant rules as PostgresStore.
+// ordering and grant rules as the private PostgreSQL adapter.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		projections: make(map[projectionKey]ProjectionEvent),
@@ -62,7 +62,7 @@ func NewMemoryStore() *MemoryStore {
 	}
 }
 
-func (s *MemoryStore) ApplyProjection(_ context.Context, delivery ProjectionDelivery, digest [32]byte) (ApplyResult, error) {
+func (s *MemoryStore) applyProjection(_ context.Context, delivery ProjectionDelivery, digest [32]byte) (ApplyResult, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failure != nil {
@@ -114,7 +114,7 @@ func (s *MemoryStore) ApplyProjection(_ context.Context, delivery ProjectionDeli
 	return result, nil
 }
 
-func (s *MemoryStore) CreateGrant(_ context.Context, grant SessionGrant, now time.Time) error {
+func (s *MemoryStore) createGrant(_ context.Context, grant SessionGrant, now time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.failure != nil {
@@ -165,7 +165,7 @@ func (s *MemoryStore) CreateGrant(_ context.Context, grant SessionGrant, now tim
 	return nil
 }
 
-func (s *MemoryStore) LoadAccess(_ context.Context, request AccessRequest) (accessState, error) {
+func (s *MemoryStore) loadAccess(_ context.Context, request AccessRequest) (accessState, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	if s.failure != nil {

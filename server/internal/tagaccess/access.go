@@ -151,9 +151,9 @@ type accessState struct {
 }
 
 type store interface {
-	ApplyProjection(context.Context, ProjectionDelivery, [32]byte) (ApplyResult, error)
-	CreateGrant(context.Context, SessionGrant, time.Time) error
-	LoadAccess(context.Context, AccessRequest) (accessState, error)
+	applyProjection(context.Context, ProjectionDelivery, [32]byte) (ApplyResult, error)
+	createGrant(context.Context, SessionGrant, time.Time) error
+	loadAccess(context.Context, AccessRequest) (accessState, error)
 }
 
 type Gate struct {
@@ -204,7 +204,7 @@ func (g *Gate) applyDelivery(ctx context.Context, delivery ProjectionDelivery) (
 	if err != nil {
 		return "", ErrInvalidProjection
 	}
-	return g.store.ApplyProjection(ctx, normalized, sha256.Sum256(payload))
+	return g.store.applyProjection(ctx, normalized, sha256.Sum256(payload))
 }
 
 // GrantSession records a VIBES-session-bound Tag session and its Workspace
@@ -218,7 +218,7 @@ func (g *Gate) GrantSession(ctx context.Context, grant SessionGrant) error {
 		!grant.SessionExpiresAt.After(now) || !grant.GrantExpiresAt.After(now) || grant.GrantExpiresAt.After(grant.SessionExpiresAt) {
 		return ErrInvalidGrant
 	}
-	return g.store.CreateGrant(ctx, grant, now)
+	return g.store.createGrant(ctx, grant, now)
 }
 
 // Authorize returns an explicit denial rather than an error so every HTTP,
@@ -227,7 +227,7 @@ func (g *Gate) Authorize(ctx context.Context, request AccessRequest) Decision {
 	if request.TagSessionID == "" || request.VIBESUserID == "" || request.WorkspaceID == "" {
 		return Decision{Reason: DenyMissingGrant}
 	}
-	state, err := g.store.LoadAccess(ctx, request)
+	state, err := g.store.loadAccess(ctx, request)
 	if err != nil {
 		if errors.Is(err, errAccessNotFound) {
 			return Decision{Reason: DenyUnknownProjection}

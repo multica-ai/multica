@@ -15,17 +15,18 @@ type postgresDB interface {
 	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
-type PostgresStore struct {
+type postgresStore struct {
 	db postgresDB
 }
 
-// NewPostgresStore creates the production adapter. Both pgxpool.Pool and
-// pgx.Conn satisfy its transaction and query interface.
-func NewPostgresStore(db postgresDB) *PostgresStore {
-	return &PostgresStore{db: db}
+// NewPostgresStore creates the opaque production adapter. Callers can pass it
+// to New but cannot bypass Gate by invoking persistence mutations directly.
+// Both pgxpool.Pool and pgx.Conn satisfy its private database interface.
+func NewPostgresStore(db postgresDB) *postgresStore {
+	return &postgresStore{db: db}
 }
 
-func (s *PostgresStore) ApplyProjection(ctx context.Context, delivery ProjectionDelivery, digest [32]byte) (ApplyResult, error) {
+func (s *postgresStore) applyProjection(ctx context.Context, delivery ProjectionDelivery, digest [32]byte) (ApplyResult, error) {
 	first := delivery.Projections[0]
 	tx, err := s.db.Begin(ctx)
 	if err != nil {
@@ -134,7 +135,7 @@ func insertProjectionDelivery(ctx context.Context, tx pgx.Tx, delivery Projectio
 	return err
 }
 
-func (s *PostgresStore) CreateGrant(ctx context.Context, grant SessionGrant, now time.Time) error {
+func (s *postgresStore) createGrant(ctx context.Context, grant SessionGrant, now time.Time) error {
 	if !grant.SessionExpiresAt.After(now) || !grant.GrantExpiresAt.After(now) {
 		return ErrGrantDenied
 	}
@@ -177,7 +178,7 @@ func (s *PostgresStore) CreateGrant(ctx context.Context, grant SessionGrant, now
 	return tx.Commit(ctx)
 }
 
-func (s *PostgresStore) LoadAccess(ctx context.Context, request AccessRequest) (accessState, error) {
+func (s *postgresStore) loadAccess(ctx context.Context, request AccessRequest) (accessState, error) {
 	row := s.db.QueryRow(ctx, `
 		SELECT p.role, p.status, p.account_epoch, p.membership_generation,
 		       p.authority_version, w.authority_version, w.observed_authority_version, w.integrity_state,
