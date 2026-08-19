@@ -10,12 +10,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
@@ -1858,6 +1861,23 @@ func chatSessionResumeFallbackNeeded(priorSessionID, priorWorkDir string) bool {
 	return priorSessionID == "" || priorWorkDir == ""
 }
 
+func rerunSourceMatchesTaskScope(task, source db.AgentTaskQueue) bool {
+	if task.AgentID != source.AgentID {
+		return false
+	}
+	if task.IssueID.Valid {
+		return source.IssueID.Valid && task.IssueID == source.IssueID
+	}
+	if task.ChatSessionID.Valid {
+		return source.ChatSessionID.Valid && task.ChatSessionID == source.ChatSessionID
+	}
+	return false
+}
+
+func claimResponseAgentIdentityMatches(resp AgentTaskResponse) bool {
+	return resp.AgentID != "" && resp.Agent != nil && resp.Agent.ID == resp.AgentID
+}
+
 // buildClaimedTaskResponse assembles the full daemon claim payload for a
 // single already-claimed task and computes the exact comment ids embedded in
 // it (deliveredCommentIDs). Shared by the per-runtime handler
@@ -1884,104 +1904,145 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if composioMCPEnabled {
 		resp.ConnectedApps = parseRuntimeConnectedAppsForClaim(task.RuntimeConnectedApps, task.ID)
 	}
-	if agent, err := h.Queries.GetAgent(r.Context(), task.AgentID); err == nil {
-		useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
-		var customEnv map[string]string
-		if agent.CustomEnv != nil {
-			if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
-				slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(agent.ID), "error", err)
-			}
+	agent, err := h.Queries.GetAgent(r.Context(), task.AgentID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			// The current schema cascades agent deletion to task rows, so a
+			// durable orphan task cannot normally reach this branch. It remains a
+			// fail-closed guard for a deletion racing response assembly or for
+			// externally corrupted data; settlement may report that the task row
+			// already disappeared, but no claim payload is dispatched either way.
+			slog.Error("daemon claim: task agent no longer exists; refusing dispatch",
+				"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID))
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+				r.Context(), task,
+				"Task identity is invalid: the assigned agent no longer exists.",
+				taskfailure.ReasonInvalidTaskIdentity,
+				"error_invalid_task_identity", http.StatusConflict, "task agent no longer exists",
+			)
 		}
-		var customArgs []string
-		if agent.CustomArgs != nil {
-			if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {
-				slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
-			}
+		slog.Error("daemon claim: load task agent failed; requeueing claim",
+			"task_id", uuidToString(task.ID), "agent_id", uuidToString(task.AgentID), "error", err)
+		if _, requeueErr := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); requeueErr != nil {
+			slog.Error("daemon claim: requeue after agent load failure failed; stale reclaim will recover it",
+				"task_id", uuidToString(task.ID), "error", requeueErr)
 		}
-		var mcpConfig json.RawMessage
-		if agent.McpConfig != nil {
-			mcpConfig = json.RawMessage(agent.McpConfig)
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+			outcome: "error_load_task_agent",
+			status:  http.StatusInternalServerError,
+			message: "failed to load task agent",
 		}
-		// Fold in the workspace MCP servers this agent has been explicitly
-		// given (GH #6062). Only bound AND enabled servers are read, so a
-		// workspace library entry nobody added reaches nothing. Read on every
-		// claim, exactly like the agent column, so an admin's edit or a toggle
-		// lands on the agent's next task with nothing to restart. Errors —
-		// including a failed read — leave the agent config untouched: a broken
-		// shared entry must never take away servers the agent runs with today.
-		if bound, err := h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID); err != nil {
-			slog.Warn("daemon claim: load agent mcp servers failed; using agent mcp_config",
+	}
+	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
+	var customEnv map[string]string
+	if agent.CustomEnv != nil {
+		if err := json.Unmarshal(agent.CustomEnv, &customEnv); err != nil {
+			slog.Warn("failed to unmarshal agent custom_env", "agent_id", uuidToString(agent.ID), "error", err)
+		}
+	}
+	var customArgs []string
+	if agent.CustomArgs != nil {
+		if err := json.Unmarshal(agent.CustomArgs, &customArgs); err != nil {
+			slog.Warn("failed to unmarshal agent custom_args", "agent_id", uuidToString(agent.ID), "error", err)
+		}
+	}
+	var mcpConfig json.RawMessage
+	if agent.McpConfig != nil {
+		mcpConfig = json.RawMessage(agent.McpConfig)
+	}
+	// Fold in the workspace MCP servers this agent has been explicitly
+	// given (GH #6062). Only bound AND enabled servers are read, so a
+	// workspace library entry nobody added reaches nothing. Read on every
+	// claim, exactly like the agent column, so an admin's edit or a toggle
+	// lands on the agent's next task with nothing to restart. Errors —
+	// including a failed read — leave the agent config untouched: a broken
+	// shared entry must never take away servers the agent runs with today.
+	if bound, err := h.Queries.ListEnabledAgentMcpServers(r.Context(), agent.ID); err != nil {
+		slog.Warn("daemon claim: load agent mcp servers failed; using agent mcp_config",
+			"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
+	} else if len(bound) > 0 {
+		bindings := make([]WorkspaceMcpBinding, 0, len(bound))
+		for _, server := range bound {
+			bindings = append(bindings, WorkspaceMcpBinding{Name: server.Name, Config: json.RawMessage(server.Config)})
+		}
+		if resolved, err := ResolveAgentMcpConfig(bindings, mcpConfig); err != nil {
+			slog.Warn("daemon claim: resolve agent mcp servers failed; falling back to agent mcp_config",
 				"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
-		} else if len(bound) > 0 {
-			bindings := make([]WorkspaceMcpBinding, 0, len(bound))
-			for _, server := range bound {
-				bindings = append(bindings, WorkspaceMcpBinding{Name: server.Name, Config: json.RawMessage(server.Config)})
-			}
-			if resolved, err := ResolveAgentMcpConfig(bindings, mcpConfig); err != nil {
-				slog.Warn("daemon claim: resolve agent mcp servers failed; falling back to agent mcp_config",
-					"task_id", uuidToString(task.ID), "agent_id", uuidToString(agent.ID), "error", err)
-			} else {
-				mcpConfig = resolved
-			}
-		}
-		// Layer the per-task overlay (set at enqueue from the initiator
-		// user's active integrations — currently Composio) on top of the
-		// agent's saved mcp_config. Overlay wins on server-name collisions
-		// because it carries the live user-scoped session URL. Errors are
-		// logged but never fail the claim: a broken overlay must not prevent
-		// the agent from running with its base config.
-		if composioMCPEnabled && len(task.RuntimeMcpOverlay) > 0 {
-			if merged, err := mergeMCPOverlay(mcpConfig, json.RawMessage(task.RuntimeMcpOverlay)); err != nil {
-				slog.Warn("daemon claim: merge runtime_mcp_overlay failed; falling back to agent mcp_config", "task_id", uuidToString(task.ID), "error", err)
-			} else {
-				mcpConfig = merged
-			}
-		}
-		// runtime_config is stored as JSONB and may legitimately be the
-		// empty object `{}` for agents that haven't opted into any
-		// provider-specific tuning. Forward only non-empty payloads so the
-		// daemon's per-provider decoders treat absent-or-empty identically.
-		var runtimeConfig json.RawMessage
-		if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
-			runtimeConfig = json.RawMessage(agent.RuntimeConfig)
-		}
-		resp.Agent = &TaskAgentData{
-			ID:                    uuidToString(agent.ID),
-			Name:                  agent.Name,
-			Instructions:          agent.Instructions,
-			CustomEnv:             customEnv,
-			CustomArgs:            customArgs,
-			McpConfig:             mcpConfig,
-			Model:                 agent.Model.String,
-			ThinkingLevel:         agent.ThinkingLevel.String,
-			ServiceTier:           agent.ServiceTier.String,
-			RuntimeConfig:         runtimeConfig,
-			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
-		}
-		// System agents carry a product-owned instruction layer that ships with
-		// this binary instead of being copied into their row at creation. That
-		// is what makes it hot-updatable: editing the embedded file and
-		// deploying reaches every existing workspace on its next task, with no
-		// migration and no client upgrade. agent.Instructions holds only the
-		// workspace's own notes, so a release can never overwrite them.
-		//
-		// Composing here covers every task kind, because this is the single
-		// place a claimed task's agent payload is assembled.
-		if agent.SystemKey.String == service.MikaSystemKey {
-			resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
-		}
-		if useSkillRefs {
-			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
-			agentSkillCount = len(skillRefs)
-			resp.Agent.SkillRefs = skillRefs
 		} else {
-			skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
-			agentSkillCount = len(skills)
-			builtinSkills := h.TaskService.BuiltinSkills()
-			builtinSkillCount = len(builtinSkills)
-			skills = append(skills, builtinSkills...)
-			resp.Agent.Skills = skills
+			mcpConfig = resolved
 		}
+	}
+	// Layer the per-task overlay (set at enqueue from the initiator
+	// user's active integrations — currently Composio) on top of the
+	// agent's saved mcp_config. Overlay wins on server-name collisions
+	// because it carries the live user-scoped session URL. Errors are
+	// logged but never fail the claim: a broken overlay must not prevent
+	// the agent from running with its base config.
+	if composioMCPEnabled && len(task.RuntimeMcpOverlay) > 0 {
+		if merged, err := mergeMCPOverlay(mcpConfig, json.RawMessage(task.RuntimeMcpOverlay)); err != nil {
+			slog.Warn("daemon claim: merge runtime_mcp_overlay failed; falling back to agent mcp_config", "task_id", uuidToString(task.ID), "error", err)
+		} else {
+			mcpConfig = merged
+		}
+	}
+	// runtime_config is stored as JSONB and may legitimately be the
+	// empty object `{}` for agents that haven't opted into any
+	// provider-specific tuning. Forward only non-empty payloads so the
+	// daemon's per-provider decoders treat absent-or-empty identically.
+	var runtimeConfig json.RawMessage
+	if rc := bytes.TrimSpace(agent.RuntimeConfig); len(rc) > 0 && !bytes.Equal(rc, []byte("{}")) && !bytes.Equal(rc, []byte("null")) {
+		runtimeConfig = json.RawMessage(agent.RuntimeConfig)
+	}
+	resp.Agent = &TaskAgentData{
+		ID:                    uuidToString(agent.ID),
+		Name:                  agent.Name,
+		Instructions:          agent.Instructions,
+		CustomEnv:             customEnv,
+		CustomArgs:            customArgs,
+		McpConfig:             mcpConfig,
+		Model:                 agent.Model.String,
+		ThinkingLevel:         agent.ThinkingLevel.String,
+		ServiceTier:           agent.ServiceTier.String,
+		RuntimeConfig:         runtimeConfig,
+		DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
+	}
+	// System agents carry a product-owned instruction layer that ships with
+	// this binary instead of being copied into their row at creation. That
+	// is what makes it hot-updatable: editing the embedded file and
+	// deploying reaches every existing workspace on its next task, with no
+	// migration and no client upgrade. agent.Instructions holds only the
+	// workspace's own notes, so a release can never overwrite them.
+	//
+	// Composing here covers every task kind, because this is the single
+	// place a claimed task's agent payload is assembled.
+	if agent.SystemKey.String == service.MikaSystemKey {
+		resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
+	}
+	if useSkillRefs {
+		_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
+		agentSkillCount = len(skillRefs)
+		resp.Agent.SkillRefs = skillRefs
+	} else {
+		skills := h.TaskService.LoadAgentSkills(r.Context(), task.AgentID)
+		agentSkillCount = len(skills)
+		builtinSkills := h.TaskService.BuiltinSkills()
+		builtinSkillCount = len(builtinSkills)
+		skills = append(skills, builtinSkills...)
+		resp.Agent.Skills = skills
+	}
+	if !claimResponseAgentIdentityMatches(resp) {
+		responseAgentID := ""
+		if resp.Agent != nil {
+			responseAgentID = resp.Agent.ID
+		}
+		slog.Error("daemon claim: response agent identity mismatch; refusing dispatch",
+			"task_id", uuidToString(task.ID), "task_agent_id", resp.AgentID, "response_agent_id", responseAgentID)
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, h.failClaimedTaskBeforeLaunch(
+			r.Context(), task,
+			"Task identity is invalid: the task and response agent disagree.",
+			taskfailure.ReasonInvalidTaskIdentity,
+			"error_invalid_task_identity", http.StatusConflict, "task response agent identity mismatch",
+		)
 	}
 
 	// Resolve the runtime owner's profile description so the daemon can
@@ -2343,7 +2404,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// directory. PriorWorkDir is offered regardless of runtime (a shared
 			// mount may still resolve it); only the per-cwd session is
 			// runtime-gated.
-			if src, err := h.Queries.GetAgentTask(r.Context(), task.RerunOfTaskID); err == nil {
+			if src, err := h.Queries.GetAgentTask(r.Context(), task.RerunOfTaskID); err == nil && rerunSourceMatchesTaskScope(*task, src) {
 				if src.WorkDir.Valid {
 					resp.PriorWorkDir = src.WorkDir.String
 				}
@@ -2357,6 +2418,16 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if src.SessionRolloutMissing {
 					resp.PriorSessionResumeUnavailable = true
 				}
+			} else if err == nil {
+				slog.Warn("daemon claim: rerun source belongs to another agent or scope; starting fresh",
+					"task_id", uuidToString(task.ID),
+					"task_agent_id", uuidToString(task.AgentID),
+					"task_issue_id", uuidToString(task.IssueID),
+					"source_task_id", uuidToString(src.ID),
+					"source_agent_id", uuidToString(src.AgentID),
+					"source_issue_id", uuidToString(src.IssueID),
+				)
+				resp.PriorSessionResumeUnavailable = true
 			}
 		} else if !task.ForceFreshSession {
 			// Non-rerun follow-up on the same issue: resume the most recent
@@ -4313,7 +4384,18 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	for _, msg := range req.Messages {
+	messageIDs := make([]pgtype.UUID, len(req.Messages))
+	for i := range messageIDs {
+		id, err := uuid.NewV7()
+		if err != nil {
+			slog.Error("failed to generate task message id", "task_id", taskID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to persist task message")
+			return
+		}
+		messageIDs[i] = pgtype.UUID{Bytes: [16]byte(id), Valid: true}
+	}
+
+	for i, msg := range req.Messages {
 		// Redact sensitive information before persisting or broadcasting.
 		msg.Content = redact.Text(msg.Content)
 		msg.Output = redact.Text(msg.Output)
@@ -4341,6 +4423,7 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 			inputJSON, _ = json.Marshal(msg.Input)
 		}
 		created, createErr := h.Queries.CreateTaskMessage(r.Context(), db.CreateTaskMessageParams{
+			ID:      messageIDs[i],
 			TaskID:  parseUUID(taskID),
 			Seq:     int32(msg.Seq),
 			Type:    msg.Type,
@@ -4357,7 +4440,8 @@ func (h *Handler) ReportTaskMessages(w http.ResponseWriter, r *http.Request) {
 
 		if workspaceID != "" {
 			h.publishTask(protocol.EventTaskMessage, workspaceID, "system", "", taskID,
-				taskMessageToPayload(created, taskID, uuidToString(task.IssueID)))
+				truncateTaskMessageForBroadcast(
+					taskMessageToPayload(created, taskID, uuidToString(task.IssueID))))
 		}
 	}
 
@@ -4469,6 +4553,152 @@ func taskMessageToPayload(m db.TaskMessage, taskID, issueID string) protocol.Tas
 		Output:    m.Output.String,
 		CreatedAt: createdAt,
 	}
+}
+
+// taskMessageBroadcastClipEnv gates the clipping below. It is OFF by default,
+// and must stay off until clients that understand `truncated` have saturated.
+//
+// Clipping is not an additive field a client can ignore: it changes the meaning
+// of `input` / `output`, which every existing client already consumes. A client
+// built before this PR writes the clipped copy into a `staleTime: Infinity`
+// cache and never refetches, so its execution log would stay incomplete until
+// the window is reloaded. The client half of this change (the `truncated`
+// reader) ships first; flipping this env var is the second step, once installed
+// builds have caught up.
+//
+// Routing by connection capability instead would be the principled fix, but the
+// hub does not retain the `client_version` it is handed at upgrade, and frames
+// cross nodes through the Redis relay as already-serialized bytes — so it needs
+// the same protocol work that per-task scope routing is waiting on
+// (server/cmd/server/listeners.go). Deliberately one env var, not that.
+const taskMessageBroadcastClipEnv = "MULTICA_CLIP_TASK_MESSAGE_BROADCAST"
+
+// taskMessageBroadcastClipEnabled reports whether oversized tool input/output
+// should be clipped out of the realtime copy of a task message.
+func taskMessageBroadcastClipEnabled() bool {
+	v := strings.TrimSpace(os.Getenv(taskMessageBroadcastClipEnv))
+	return v == "1" || strings.EqualFold(v, "true")
+}
+
+// Byte budgets for the realtime fanout of a task message (MUL-6396).
+//
+// A `task:message` frame is broadcast to EVERY client in the workspace, and a
+// tool_use input is unbounded: a Write of a large file, or a MultiEdit with
+// long old/new strings, ships the whole body to every open client, which then
+// retains it. Persisted rows keep the full content — only the broadcast copy
+// is clipped, and `Truncated` tells the client to backfill from the REST
+// endpoint when it actually needs the full text.
+const (
+	// broadcastStringLimit caps each individual string inside Input, so small
+	// fields (file_path, command, description) survive intact and only the
+	// genuinely large ones are clipped.
+	broadcastStringLimit = 4096
+	// broadcastInputLimit caps the serialized Input after per-string clipping.
+	// A map with thousands of small keys can still be large; past this the
+	// input is dropped entirely and the client backfills.
+	broadcastInputLimit = 16384
+	// broadcastOutputLimit mirrors the daemon-side cap on tool output
+	// (see daemon.reportMessages). Belt and braces: other producers, and any
+	// future relaxation of the daemon cap, must not reopen the fanout hole.
+	broadcastOutputLimit = 8192
+)
+
+// clipUTF8 truncates s to at most limit bytes without splitting a rune.
+func clipUTF8(s string, limit int) string {
+	if len(s) <= limit {
+		return s
+	}
+	cut := limit
+	for cut > 0 && !utf8.RuneStart(s[cut]) {
+		cut--
+	}
+	return s[:cut]
+}
+
+// clipJSONValue returns v with every string at any depth clipped to
+// broadcastStringLimit. It never mutates the input: containers are rebuilt
+// only when something inside them actually changed.
+func clipJSONValue(v any) (any, bool) {
+	switch t := v.(type) {
+	case string:
+		if len(t) <= broadcastStringLimit {
+			return t, false
+		}
+		return clipUTF8(t, broadcastStringLimit), true
+	case map[string]any:
+		var out map[string]any
+		for k, val := range t {
+			clipped, did := clipJSONValue(val)
+			if !did {
+				continue
+			}
+			if out == nil {
+				out = make(map[string]any, len(t))
+				for ck, cv := range t {
+					out[ck] = cv
+				}
+			}
+			out[k] = clipped
+		}
+		if out == nil {
+			return t, false
+		}
+		return out, true
+	case []any:
+		var out []any
+		for i, val := range t {
+			clipped, did := clipJSONValue(val)
+			if !did {
+				continue
+			}
+			if out == nil {
+				out = make([]any, len(t))
+				copy(out, t)
+			}
+			out[i] = clipped
+		}
+		if out == nil {
+			return t, false
+		}
+		return out, true
+	default:
+		return v, false
+	}
+}
+
+// truncateTaskMessageForBroadcast clips the realtime copy of a task message so
+// one oversized tool call cannot flood every client in the workspace. The
+// returned payload is a copy; the caller's row and the REST responses built
+// from it are untouched.
+func truncateTaskMessageForBroadcast(p protocol.TaskMessagePayload) protocol.TaskMessagePayload {
+	if !taskMessageBroadcastClipEnabled() {
+		return p
+	}
+
+	truncated := false
+
+	if len(p.Output) > broadcastOutputLimit {
+		p.Output = clipUTF8(p.Output, broadcastOutputLimit)
+		truncated = true
+	}
+
+	if p.Input != nil {
+		clipped, didClip := clipJSONValue(p.Input)
+		if didClip {
+			truncated = true
+			if m, ok := clipped.(map[string]any); ok {
+				p.Input = m
+			}
+		}
+		// Re-measure: per-string clipping bounds each value, not the total.
+		if encoded, err := json.Marshal(p.Input); err != nil || len(encoded) > broadcastInputLimit {
+			p.Input = nil
+			truncated = true
+		}
+	}
+
+	p.Truncated = truncated
+	return p
 }
 
 // ListTaskMessages returns the persisted messages for a task (for catch-up after reconnect).

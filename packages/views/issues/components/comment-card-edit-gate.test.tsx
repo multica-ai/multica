@@ -90,6 +90,7 @@ vi.mock("../../editor", async () => ({
   ) {
     editorDefaultValues.values.push(defaultValue);
     const valueRef = useRef(defaultValue ?? "");
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     // Mirrors the real editor's `uploading` node attrs — see the sibling
     // composer suite for the same stand-in.
     const inFlightRef = useRef(0);
@@ -123,9 +124,16 @@ vi.mock("../../editor", async () => ({
       // Mocks track ids only — no document to draw into.
       insertUploadPlaceholder: () => true,
       settleUploadPlaceholder: () => false,
+      // The real handle applies content the `defaultValue` prop cannot land
+      // (mount-only) and does so without emitting an update.
+      adoptContent: (markdown: string) => {
+        valueRef.current = markdown;
+        if (textareaRef.current) textareaRef.current.value = markdown;
+      },
     }));
     return (
       <textarea
+        ref={textareaRef}
         data-testid="editor"
         defaultValue={defaultValue}
         placeholder={placeholder}
@@ -245,6 +253,38 @@ describe("comment edit — content conflict", () => {
     expect(
       useCommentDraftStore.getState().getDraft("edit:issue-1:comment-1"),
     ).toBe("My local edit");
+  });
+
+  it("loads the server version into the editor when the user takes theirs", async () => {
+    const onEdit = vi.fn().mockRejectedValue({
+      body: { code: "revision_conflict" },
+    });
+    renderCard(onEdit);
+    await startEditing();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "My local edit" },
+    });
+    fireEvent.click(getSaveButton());
+    expect(
+      await screen.findByText("The comment was changed concurrently. Compare both versions."),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "Use the latest version" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("The comment was changed concurrently. Compare both versions."),
+      ).not.toBeInTheDocument(),
+    );
+    // The draft is replaced by the server body, and the editor shows it — a
+    // dirty editor ignores prop-driven content, so this proves adoptContent ran.
+    expect((screen.getByTestId("editor") as HTMLTextAreaElement).value).toBe("Original body");
+    expect(
+      useCommentDraftStore.getState().getDraft("edit:issue-1:comment-1"),
+    ).toBe("Original body");
+    // Taking the server version is local-only: the server already holds it.
+    expect(onEdit).toHaveBeenCalledTimes(1);
   });
 });
 

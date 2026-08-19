@@ -6,7 +6,7 @@ import { STATUS_CONFIG } from "@multica/core/issues/config";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { StatusIcon } from "../status-icon";
-import { PropertyPicker, PickerItem, PickerGroupLabel } from "./property-picker";
+import { PropertyPicker, PickerItem } from "./property-picker";
 import { useT } from "../../../i18n";
 import { useStatusLabel } from "../../utils/status-label";
 import { useStatusOptions } from "../../utils/status-options";
@@ -50,30 +50,21 @@ export function StatusPicker({
   const labelOf = useStatusLabel(wsId);
 
   /**
-   * Offerable statuses grouped by category, in canonical category order.
+   * Offerable statuses as one flat list, in canonical category order.
    *
    * Archived statuses are excluded: archiving retires a status from future
    * assignment while leaving the issues already on it untouched. Falls back to
    * the 7 built-ins until the catalog lands, so a cold render offers exactly
    * what it always did instead of an empty popover. (MUL-6243)
    */
-  const { groups: allGroups, options: allOptions, hasCustom } = useStatusOptions(wsId);
+  const allOptions = useStatusOptions(wsId);
 
-  const groups = useMemo(() => {
+  const options = useMemo(() => {
     const q = query.trim().toLowerCase();
-    if (!q) return allGroups;
-    return allGroups
-      .map((g) => ({
-        ...g,
-        options: g.options.filter((o) => o.label.toLowerCase().includes(q)),
-      }))
-      .filter((g) => g.options.length > 0);
-  }, [allGroups, query]);
+    if (!q) return allOptions;
+    return allOptions.filter((o) => o.label.toLowerCase().includes(q));
+  }, [allOptions, query]);
 
-  // Category headings only earn their space once a category holds more than
-  // one status. A workspace that never customized anything sees the same flat
-  // 7-row list as before.
-  const showGroupLabels = hasCustom;
   const searchable = allOptions.length > SEARCH_THRESHOLD;
 
   return (
@@ -104,32 +95,25 @@ export function StatusPicker({
         ) : null)
       }
     >
-      {groups.map((group) => (
-        <div key={group.category}>
-          {showGroupLabels && (
-            <PickerGroupLabel>{t(($) => $.status[group.category])}</PickerGroupLabel>
-          )}
-          {group.options.map((option) => (
-            <PickerItem
-              key={option.key}
-              selected={option.key === status}
-              hoverClassName={STATUS_CONFIG[group.category].hoverBg}
-              onClick={() => {
-                onUpdate({ status: option.key });
-                setOpen(false);
-                setQuery("");
-              }}
-            >
-              <StatusIcon
-                status={option.key}
-                category={group.category}
-                color={option.color}
-                className="h-3.5 w-3.5"
-              />
-              <span className="truncate">{option.label}</span>
-            </PickerItem>
-          ))}
-        </div>
+      {options.map((option) => (
+        <PickerItem
+          key={option.key}
+          selected={option.key === status}
+          hoverClassName={STATUS_CONFIG[option.category].hoverBg}
+          onClick={() => {
+            onUpdate({ status: option.key });
+            setOpen(false);
+            setQuery("");
+          }}
+        >
+          <StatusIcon
+            status={option.key}
+            category={option.category}
+            color={option.color}
+            className="h-3.5 w-3.5"
+          />
+          <span className="truncate">{option.label}</span>
+        </PickerItem>
       ))}
     </PropertyPicker>
   );

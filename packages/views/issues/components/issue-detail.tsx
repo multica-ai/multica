@@ -532,6 +532,7 @@ function ActivityBlock({
   getActorName,
   resolveStatusLabel,
   resolveStatusCategory,
+  resolveStatusColor,
   t,
   timeAgo,
 }: {
@@ -547,6 +548,8 @@ function ActivityBlock({
   getActorName: (type: string, id: string) => string;
   resolveStatusLabel: (statusKey: string) => string;
   resolveStatusCategory: (statusKey: string) => IssueStatusCategory;
+  /** A custom status's own `#rrggbb`; null for built-ins and unknown keys. */
+  resolveStatusColor: (statusKey: string) => string | null;
   t: ActivityT;
   timeAgo: (dateStr: string) => string;
 }) {
@@ -613,6 +616,7 @@ function ActivityBlock({
             <StatusIcon
               status={details.to as IssueStatus}
               category={resolveStatusCategory(details.to ?? "")}
+              color={resolveStatusColor(details.to ?? "")}
               className="h-4 w-4 shrink-0"
             />
           );
@@ -1134,7 +1138,22 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const { data: allIssues = [] } = useQuery(issueListOptions(wsId));
   const { getActorName } = useActorName();
   const resolveStatusLabel = useStatusLabel(wsId);
-  const { categoryOf: resolveStatusCategory } = useIssueStatuses(wsId);
+  const { categoryOf: resolveStatusCategory, entryOf: statusEntryOf } =
+    useIssueStatuses(wsId);
+  // The glyph set is per CATEGORY (MUL-6243), so a status-change entry for a
+  // custom status drew the same icon as the built-in it sits beside — an
+  // "In Review → Awaiting Response" line looked like nothing had moved. Colour
+  // is what carries a custom status's own identity, as the inbox row and the
+  // status-changed detail label already render it. Built-ins resolve to null so
+  // they keep their semantic token rather than the catalog's English seed hex.
+  const resolveStatusColor = useCallback(
+    (statusKey: string): string | null => {
+      const entry = statusEntryOf(statusKey);
+      if (!entry || entry.is_system === true) return null;
+      return entry.color;
+    },
+    [statusEntryOf],
+  );
   // Description autosave is deliberately NOT gated (no explicit submit; the
   // editor already strips `blob:` before serializing and binds ids on the
   // later save). It still needs the failure toast, or a failed upload just
@@ -1973,6 +1992,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const titleBaseRef = useRef<string | undefined>(issue?.title);
   const [titleConflictDraft, setTitleConflictDraft] = useState<string | null>(null);
+  // Bumped when a conflicting title draft is discarded. TitleEditor reads its
+  // text from `defaultValue` at mount and exposes no imperative setter, so
+  // remounting is the only way to put the server's title back in the editor.
+  const [titleResetToken, setTitleResetToken] = useState(0);
   useEffect(() => {
     setTitleConflictDraft(null);
     setDescriptionConflictDraft(null);
@@ -2661,6 +2684,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
         getActorName={getActorName}
         resolveStatusLabel={resolveStatusLabel}
         resolveStatusCategory={resolveStatusCategory}
+        resolveStatusColor={resolveStatusColor}
         t={t}
         timeAgo={timeAgo}
       />
@@ -2848,7 +2872,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           {titleLazy.active && (
             <div className={titleLazy.ready ? undefined : "hidden"}>
               <TitleEditor
-                key={`title-${id}`}
+                key={`title-${id}-${titleResetToken}`}
                 ref={titleEditorRef}
                 defaultValue={titleConflictDraft ?? issue.title}
                 placeholder={t(($) => $.detail.title_placeholder)}
@@ -2908,26 +2932,43 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               serverValue={issue.title}
               localValue={titleConflictDraft}
               actions={(
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    const draft = titleConflictDraft.trim();
-                    if (!draft) return;
-                    handleUpdateField(
-                      { title: draft, title_base: issue.title },
-                      {
-                        onSuccess: (serverIssue) => {
-                          setTitleConflictDraft(null);
-                          titleBaseRef.current = serverIssue.title;
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      const draft = titleConflictDraft.trim();
+                      if (!draft) return;
+                      handleUpdateField(
+                        { title: draft, title_base: issue.title },
+                        {
+                          onSuccess: (serverIssue) => {
+                            setTitleConflictDraft(null);
+                            titleBaseRef.current = serverIssue.title;
+                          },
                         },
-                      },
-                    );
-                  }}
-                >
-                  {t(($) => $.revision.keep_local)}
-                </Button>
+                      );
+                    }}
+                  >
+                    {t(($) => $.revision.keep_local)}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => {
+                      // Local-only: the server already holds this title, so
+                      // discarding writes nothing. The remount is what puts it
+                      // back into the editor (see titleResetToken).
+                      setTitleConflictDraft(null);
+                      titleBaseRef.current = issue.title;
+                      setTitleResetToken((token) => token + 1);
+                    }}
+                  >
+                    {t(($) => $.revision.use_server)}
+                  </Button>
+                </div>
               )}
             />
           ) : null}
@@ -3026,30 +3067,51 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 serverValue={issue.description || ""}
                 localValue={descriptionConflictDraft}
                 actions={(
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => {
-                      handleUpdateField(
-                        {
-                          description: descriptionConflictDraft,
-                          description_base: issue.description || "",
-                          attachment_ids:
-                            descriptionAttachmentIdsRef.current.length > 0
-                              ? descriptionAttachmentIdsRef.current
-                              : undefined,
-                        },
-                        {
-                          onSuccess: () => {
-                            setDescriptionConflictDraft(null);
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        handleUpdateField(
+                          {
+                            description: descriptionConflictDraft,
+                            description_base: issue.description || "",
+                            attachment_ids:
+                              descriptionAttachmentIdsRef.current.length > 0
+                                ? descriptionAttachmentIdsRef.current
+                                : undefined,
                           },
-                        },
-                      );
-                    }}
-                  >
-                    {t(($) => $.revision.keep_local)}
-                  </Button>
+                          {
+                            onSuccess: () => {
+                              setDescriptionConflictDraft(null);
+                            },
+                          },
+                        );
+                      }}
+                    >
+                      {t(($) => $.revision.keep_local)}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        // The editor is dirty — that is why this conflict
+                        // exists — so the `value` prop cannot land: ContentEditor
+                        // deliberately refuses to clobber unsaved bytes.
+                        // adoptContent is the explicit "take this content"
+                        // channel and applies without emitting an update, so
+                        // discarding never writes.
+                        descEditorRef.current?.adoptContent(issue.description || "");
+                        descriptionAttachmentIdsRef.current = [];
+                        pendingDescriptionSaveRef.current = null;
+                        setDescriptionConflictDraft(null);
+                      }}
+                    >
+                      {t(($) => $.revision.use_server)}
+                    </Button>
+                  </div>
                 )}
               />
             ) : null}

@@ -100,6 +100,9 @@ let searchParams = new URLSearchParams();
 
 vi.mock("../../navigation", () => ({
   useNavigation: () => ({ searchParams, replace }),
+  // Real hook: reports the detail-pane swap to the shell's progress bar.
+  // Nothing here renders that bar, and the page reads nothing back from it.
+  useReportNavigating: () => {},
 }));
 
 // Drive the layout from a viewport width so a test can name the device it

@@ -181,6 +181,7 @@ export interface ListIssuesParams {
     | "title"
     | "created_at"
     | "updated_at"
+    | "last_activity"
     | "start_date"
     | "due_date"
     | `property:${string}`;
@@ -229,6 +230,7 @@ export interface ListGroupedIssuesParams {
     | "title"
     | "created_at"
     | "updated_at"
+    | "last_activity"
     | "start_date"
     | "due_date"
     | `property:${string}`;
@@ -293,6 +295,7 @@ export type IssueTableSortField =
   | "title"
   | "created_at"
   | "updated_at"
+  | "last_activity"
   | "start_date"
   | "due_date"
   | `property:${string}`;

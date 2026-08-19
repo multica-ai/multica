@@ -374,8 +374,10 @@ func TestConcurrentRevisionWritesHaveExactlyOneWinner(t *testing.T) {
 	if err := testPool.QueryRow(ctx, `SELECT revision FROM comment WHERE id = $1`, commentID).Scan(&commentRevision); err != nil {
 		t.Fatalf("reload concurrent comment: %v", err)
 	}
-	if issueRevision != 2 || commentRevision != 2 {
-		t.Fatalf("concurrent revisions = issue:%d comment:%d, want 2/2", issueRevision, commentRevision)
+	// The winning comment edit is semantic issue activity, so it advances the
+	// parent issue revision once in addition to the winning issue title edit.
+	if issueRevision != 3 || commentRevision != 2 {
+		t.Fatalf("concurrent revisions = issue:%d comment:%d, want 3/2", issueRevision, commentRevision)
 	}
 }
 

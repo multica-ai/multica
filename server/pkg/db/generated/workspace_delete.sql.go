@@ -125,6 +125,26 @@ func (q *Queries) DeleteWorkspaceAutopilotChildren(ctx context.Context, workspac
 	return err
 }
 
+const deleteWorkspaceAutopilotQuotaPeriods = `-- name: DeleteWorkspaceAutopilotQuotaPeriods :exec
+DELETE FROM autopilot_quota_period
+WHERE autopilot_quota_period.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceAutopilotQuotaPeriods(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceAutopilotQuotaPeriods, workspaceID)
+	return err
+}
+
+const deleteWorkspaceAutopilotQuotaReservations = `-- name: DeleteWorkspaceAutopilotQuotaReservations :exec
+DELETE FROM autopilot_quota_reservation
+WHERE autopilot_quota_reservation.workspace_id = $1
+`
+
+func (q *Queries) DeleteWorkspaceAutopilotQuotaReservations(ctx context.Context, workspaceID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deleteWorkspaceAutopilotQuotaReservations, workspaceID)
+	return err
+}
+
 const deleteWorkspaceAutopilotRuns = `-- name: DeleteWorkspaceAutopilotRuns :exec
 DELETE FROM autopilot_run
 WHERE autopilot_id IN (
@@ -472,6 +492,10 @@ deleted_storage AS (
 deleted_secrets AS (
     DELETE FROM plugin_secret
     WHERE installation_id IN (SELECT id FROM installations)
+),
+deleted_invocations AS (
+    DELETE FROM plugin_invocation
+    WHERE workspace_id = $1
 )
 DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations)
 `
@@ -479,6 +503,9 @@ DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations)
 // Plugin relationships have no foreign keys or cascades. Storage and secrets
 // hang off the installation, so both leaf tables are cleared through the
 // workspace's installation ids before the installations themselves.
+// Hook call records are workspace-scoped in their own right, so this deletes by
+// workspace rather than through the installation ids: a row whose installation
+// was already uninstalled would otherwise survive the workspace it described.
 func (q *Queries) DeleteWorkspacePluginData(ctx context.Context, workspaceID pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspacePluginData, workspaceID)
 	return err

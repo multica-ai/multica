@@ -18,7 +18,7 @@ import {
   useRotateAutopilotTriggerWebhookToken,
 } from "@multica/core/autopilots/mutations";
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
-import { api } from "@multica/core/api";
+import { api, dispatchReasonCode } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -741,7 +741,12 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         toast.error(message);
       }
     } catch (e: any) {
-      toast.error(e?.message || t(($) => $.detail.toast_trigger_failed));
+      const reason = dispatchReasonCode(e);
+      toast.error(
+        reason
+          ? t(($) => $.detail[runNowBlockedKey(reason)])
+          : e?.message || t(($) => $.detail.toast_trigger_failed),
+      );
     }
   };
 

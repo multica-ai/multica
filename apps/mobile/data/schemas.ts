@@ -350,6 +350,9 @@ export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object(
   input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),
   created_at: z.string().optional(),
+  // Set on the WS copy when the server clipped input/output for the fanout
+  // (MUL-6396); never present on the REST list response.
+  truncated: z.boolean().optional(),
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);

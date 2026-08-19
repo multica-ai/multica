@@ -9,6 +9,7 @@ export * from "./stores";
 export {
   issueBehavesAs,
   issueBehavesAsAny,
+  issueColumnCategory,
   issueStatusCategory,
   statusCategoryOfKey,
   statusFilterColumns,

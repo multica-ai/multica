@@ -7,6 +7,7 @@ import { inboxKeys } from "../inbox/queries";
 import {
   applyIssueChange,
   invalidateIssueDerivatives,
+  invalidateLastActivitySortedIssueLists,
   invalidateStaleListKeys,
   rollbackIssueChange,
   type IssueFlatCache,
@@ -37,6 +38,7 @@ import type { TimelineEntry, IssueSubscriber, Reaction } from "../types";
 import { sortTimelineEntriesAsc } from "./timeline-sort";
 import {
   onIssueAuxiliaryRevision,
+  invalidateIssueOwnerProjections,
   reconcileIssueFullSnapshotRevision,
 } from "./ws-updaters";
 
@@ -731,7 +733,12 @@ export function useCreateComment(issueId: string) {
       suppressAgentIds?: string[];
     }) => api.createComment(issueId, content, type, parentId, attachmentIds, suppressAgentIds),
     onSuccess: (comment) => {
-      onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
+      if (comment.issue_revision) {
+        onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
+      } else {
+        invalidateIssueOwnerProjections(qc, wsId, issueId);
+      }
+      invalidateLastActivitySortedIssueLists(qc, wsId);
       const entry: TimelineEntry = {
         type: "comment",
         id: comment.id,
@@ -770,6 +777,7 @@ export function useCreateComment(issueId: string) {
 
 export function useUpdateComment(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: ({
       commentId,
@@ -804,6 +812,16 @@ export function useUpdateComment(issueId: string) {
         qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
       }
     },
+    onSuccess: (comment) => {
+      if (comment.issue_revision) {
+        onIssueAuxiliaryRevision(qc, wsId, issueId, comment.issue_revision);
+      } else {
+        // Mixed-version fallback: an older backend may have committed the
+        // aggregate revision without returning it.
+        invalidateIssueOwnerProjections(qc, wsId, issueId);
+      }
+      invalidateLastActivitySortedIssueLists(qc, wsId);
+    },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });
     },
@@ -812,6 +830,7 @@ export function useUpdateComment(issueId: string) {
 
 export function useDeleteComment(issueId: string) {
   const qc = useQueryClient();
+  const wsId = useWorkspaceId();
   return useMutation({
     mutationFn: (commentId: string) => api.deleteComment(commentId),
     onMutate: async (commentId) => {
@@ -846,6 +865,13 @@ export function useDeleteComment(issueId: string) {
       if (ctx?.prev !== undefined) {
         qc.setQueryData(issueKeys.timeline(issueId), ctx.prev);
       }
+    },
+    onSuccess: () => {
+      // The endpoint remains 204 for compatibility, so the local caller has
+      // no body carrying issue_revision. The realtime event will narrow this
+      // with its revision when connected; this is the no-WS safety net.
+      invalidateIssueOwnerProjections(qc, wsId, issueId);
+      invalidateLastActivitySortedIssueLists(qc, wsId);
     },
     onSettled: () => {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) });

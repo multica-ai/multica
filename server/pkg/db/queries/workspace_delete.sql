@@ -533,6 +533,14 @@ WHERE autopilot_id IN (
     SELECT id FROM autopilot WHERE autopilot.workspace_id = $1
 );
 
+-- name: DeleteWorkspaceAutopilotQuotaReservations :exec
+DELETE FROM autopilot_quota_reservation
+WHERE autopilot_quota_reservation.workspace_id = $1;
+
+-- name: DeleteWorkspaceAutopilotQuotaPeriods :exec
+DELETE FROM autopilot_quota_period
+WHERE autopilot_quota_period.workspace_id = $1;
+
 -- name: DeleteWorkspaceAutopilotChildren :exec
 WITH
 deleted_triggers AS (
@@ -583,6 +591,13 @@ deleted_storage AS (
 deleted_secrets AS (
     DELETE FROM plugin_secret
     WHERE installation_id IN (SELECT id FROM installations)
+),
+-- Hook call records are workspace-scoped in their own right, so this deletes by
+-- workspace rather than through the installation ids: a row whose installation
+-- was already uninstalled would otherwise survive the workspace it described.
+deleted_invocations AS (
+    DELETE FROM plugin_invocation
+    WHERE workspace_id = $1
 )
 DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);
 

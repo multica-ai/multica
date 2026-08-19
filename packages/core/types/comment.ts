@@ -29,7 +29,7 @@ export interface Comment {
   updated_at: string;
   /** Monotonic server revision; absent when connected to an older backend. */
   revision?: number;
-  /** Parent issue revision after this comment creation; create responses only. */
+  /** Parent issue revision after this semantic comment mutation. */
   issue_revision?: number;
   resolved_at: string | null;
   resolved_by_type: CommentAuthorType | null;

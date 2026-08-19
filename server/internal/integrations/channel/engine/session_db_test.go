@@ -461,6 +461,10 @@ func TestMaterializeIssueChannelMediaMarkdownPreservesEditedDescription(t *testi
 	`, fixture.workspaceID, fixture.userID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)
 	}
+	activityAt := time.Date(2020, time.January, 1, 0, 0, 0, 0, time.UTC)
+	if _, err := pool.Exec(ctx, `UPDATE issue SET last_activity_at = $2 WHERE id = $1`, issueID, activityAt); err != nil {
+		t.Fatalf("seed issue activity: %v", err)
+	}
 
 	const markdown = "![](/api/attachments/22222222-2222-4222-8222-222222222222/download)"
 	issue, err := db.New(pool).MaterializeIssueChannelMediaMarkdown(ctx, db.MaterializeIssueChannelMediaMarkdownParams{
@@ -476,6 +480,9 @@ func TestMaterializeIssueChannelMediaMarkdownPreservesEditedDescription(t *testi
 	want := "Reproduction steps\n\n" + markdown
 	if !issue.Description.Valid || issue.Description.String != want {
 		t.Fatalf("issue description = %#v, want %q", issue.Description, want)
+	}
+	if !issue.LastActivityAt.Valid || !issue.LastActivityAt.Time.Equal(activityAt) {
+		t.Fatalf("system media materialization changed activity: got=%v want=%s", issue.LastActivityAt, activityAt)
 	}
 }
 

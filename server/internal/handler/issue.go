@@ -63,6 +63,9 @@ type IssueResponse struct {
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
 	Revision  int64   `json:"revision"`
+	// LastActivityAt is the latest semantic issue activity. It stays nullable
+	// while the operator-run historical backfill is incomplete.
+	LastActivityAt *string `json:"last_activity_at"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -295,6 +298,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
 		Revision:       i.Revision,
+		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
 	}
@@ -331,6 +335,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
 		Revision:       i.Revision,
+		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
 	}
@@ -399,6 +404,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
 		Revision:       i.Revision,
+		LastActivityAt: timestampToNanoPtr(i.LastActivityAt),
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
 	}
@@ -825,7 +831,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
-		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
+		i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id,
 		i.revision,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
@@ -912,6 +918,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 				&sr.issue.DueDate,
 				&sr.issue.CreatedAt,
 				&sr.issue.UpdatedAt,
+				&sr.issue.LastActivityAt,
 				&sr.issue.Number,
 				&sr.issue.ProjectID,
 				&sr.issue.Revision,
@@ -1201,6 +1208,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		switch s {
 		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
+		case "last_activity":
+			sortCol = "last_activity_at"
 		case "status":
 			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
 			sortIsExpr = true
@@ -1233,6 +1242,9 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sortDir := "ASC"
+	if sortCol == "last_activity_at" {
+		sortDir = "DESC"
+	}
 	if sortCol != "position" {
 		if d := r.URL.Query().Get("direction"); d != "" {
 			switch strings.ToLower(d) {
@@ -1426,7 +1438,7 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 		orderBy = "i." + sortCol
 	}
 	orderBy += " " + sortDir
-	if sortCol == "start_date" || sortCol == "due_date" || sortIsProperty {
+	if sortCol == "start_date" || sortCol == "due_date" || sortCol == "last_activity_at" || sortIsProperty {
 		// Property values are sparse: issues without one sort last in both
 		// directions (mirrors the client comparator).
 		orderBy += " NULLS LAST"
@@ -1434,14 +1446,18 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 	// created_at alone is not unique (bulk imports share timestamps); without
 	// a unique final key the database may reorder ties between two
 	// LIMIT/OFFSET requests, duplicating or dropping rows at page boundaries.
-	orderBy += ", i.created_at DESC, i.id DESC"
+	if sortCol == "last_activity_at" {
+		orderBy += ", i.id DESC"
+	} else {
+		orderBy += ", i.created_at DESC, i.id DESC"
+	}
 
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
 	   i.revision
 FROM issue i
 WHERE %s
@@ -1476,6 +1492,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.DueDate,
 			&row.CreatedAt,
 			&row.UpdatedAt,
+			&row.LastActivityAt,
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
@@ -1957,6 +1974,8 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		switch s {
 		case "position", "title", "created_at", "updated_at", "start_date", "due_date":
 			sortCol = s
+		case "last_activity":
+			sortCol = "last_activity_at"
 		case "status":
 			sortCol = "CASE i.status WHEN 'backlog' THEN 0 WHEN 'todo' THEN 1 WHEN 'in_progress' THEN 2 WHEN 'in_review' THEN 3 WHEN 'done' THEN 4 WHEN 'blocked' THEN 5 WHEN 'cancelled' THEN 6 ELSE 7 END"
 			sortIsExpr = true
@@ -1989,6 +2008,9 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	sortDir := "ASC"
+	if sortCol == "last_activity_at" {
+		sortDir = "DESC"
+	}
 	if sortCol != "position" {
 		if d := r.URL.Query().Get("direction"); d != "" {
 			switch strings.ToLower(d) {
@@ -2008,12 +2030,16 @@ func (h *Handler) ListGroupedIssues(w http.ResponseWriter, r *http.Request) {
 		intraGroupOrder = "i." + sortCol
 	}
 	intraGroupOrder += " " + sortDir
-	if sortCol == "start_date" || sortCol == "due_date" || sortIsProperty {
+	if sortCol == "start_date" || sortCol == "due_date" || sortCol == "last_activity_at" || sortIsProperty {
 		intraGroupOrder += " NULLS LAST"
 	}
 	// Unique final key — see ListIssues: created_at ties would otherwise make
 	// ROW_NUMBER() unstable across per-group offset pages.
-	intraGroupOrder += ", i.created_at DESC, i.id DESC"
+	if sortCol == "last_activity_at" {
+		intraGroupOrder += ", i.id DESC"
+	} else {
+		intraGroupOrder += ", i.created_at DESC, i.id DESC"
+	}
 
 	offsetRef := addArg(int64(offset))
 	limitRef := addArg(int64(limit))
@@ -2022,8 +2048,8 @@ WITH ranked AS (
 	SELECT
 		i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at,
-		i.number, i.project_id, i.metadata, i.stage, i.properties,
+		i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.last_activity_at,
+		i.number, i.project_id, i.metadata, i.stage, i.properties, i.revision,
 		COUNT(*) OVER (PARTITION BY i.assignee_type, i.assignee_id) AS group_total,
 		ROW_NUMBER() OVER (
 			PARTITION BY i.assignee_type, i.assignee_id
@@ -2035,8 +2061,8 @@ WITH ranked AS (
 SELECT
 	id, workspace_id, title, description, status, priority,
 	assignee_type, assignee_id, creator_type, creator_id,
-	parent_issue_id, position, start_date, due_date, created_at, updated_at,
-	number, project_id, metadata, stage, properties, group_total
+	parent_issue_id, position, start_date, due_date, created_at, updated_at, last_activity_at,
+	number, project_id, metadata, stage, properties, revision, group_total
 FROM ranked
 WHERE rn > %s AND rn <= %s + %s
 ORDER BY
@@ -2078,11 +2104,13 @@ ORDER BY
 			&row.DueDate,
 			&row.CreatedAt,
 			&row.UpdatedAt,
+			&row.LastActivityAt,
 			&row.Number,
 			&row.ProjectID,
 			&row.Metadata,
 			&row.Stage,
 			&row.Properties,
+			&row.Revision,
 			&row.GroupTotal,
 		); err != nil {
 			slog.Warn("ListGroupedIssues scan failed", "error", err)
@@ -3555,11 +3583,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 // validateAssigneePair verifies the (assignee_type, assignee_id) pair refers
-// to an existing entity in the workspace. For agent assignees it also rejects
-// archived agents and runs the private-agent gate via canAccessPrivateAgent
-// — assigning an issue is a task-producing surface, so it must use the same
-// predicate as chat / @-mention / history. Agent callers (X-Agent-ID) bypass
-// the gate so A2A flows can still hand work off to private agents.
+// to an existing entity in the workspace. For agent and squad assignees it
+// also rejects archived targets and runs the INVOKE gate — canInvokeAgent, not
+// the softer canAccessPrivateAgent view gate: assigning an issue produces a
+// run, so it must clear the same predicate as chat / @-mention (MUL-3963).
+// That means owner-only for a private agent, with NO workspace-admin bypass
+// and NO unconditional agent-to-agent bypass — an agent caller (X-Agent-ID) is
+// judged by the top-of-chain human originator like everywhere else.
 //
 // Returns (statusCode, errorMessage). statusCode == 0 means the pair is valid;
 // callers should treat any non-zero status as a rejection and surface it back
@@ -3599,7 +3629,15 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
 		if !h.canInvokeAgent(ctx, agent, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
-			return http.StatusForbidden, "cannot assign to private agent"
+			// Names the missing permission, not the target's configuration: the
+			// old "private agent" wording both disclosed the agent's permission
+			// mode and was simply wrong for a `public_to` agent scoped to
+			// specific people. This is NOT full enumeration-safety — the
+			// not-in-workspace branch above still answers 400 where this
+			// answers 403, so existence remains observable; the guarantee here
+			// is only that the reason no longer names the target's permission
+			// mode (MUL-6380 / GH #7180).
+			return http.StatusForbidden, "you do not have permission to assign work to this agent"
 		}
 		return 0, ""
 	case "squad":
@@ -3619,7 +3657,9 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 		}
 		actorType, actorID := h.resolveActor(r, requestUserID(r), workspaceID)
 		if !h.canInvokeAgent(ctx, leader, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), workspaceID) {
-			return http.StatusForbidden, "cannot assign to squad with private leader"
+			// Same wording rule as the agent branch above; "this squad"
+			// avoids disclosing the leader agent's permission mode.
+			return http.StatusForbidden, "you do not have permission to assign work to this squad"
 		}
 		return 0, ""
 	default:
@@ -3749,7 +3789,7 @@ func (h *Handler) DeleteIssue(w http.ResponseWriter, r *http.Request) {
 
 	h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
 	// Fail any linked autopilot runs before delete (ON DELETE SET NULL clears issue_id).
-	h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
+	_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
 	attachmentURLs, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue)
 	if err != nil {
@@ -4215,7 +4255,7 @@ func (h *Handler) BatchDeleteIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		h.TaskService.CancelTasksForIssue(r.Context(), issue.ID)
-		h.Queries.FailAutopilotRunsByIssue(r.Context(), issue.ID)
+		_ = h.AutopilotService.FailAutopilotRunsByIssue(r.Context(), issue.ID)
 
 		attachmentURLs, err := h.deleteIssueAndCollectAttachmentURLs(r.Context(), issue)
 		if err != nil {

@@ -459,6 +459,30 @@ describe("SwimLaneView", () => {
     expect(screen.getByText("Cancelled Orphan")).toBeInTheDocument();
   });
 
+  // Cells are CATEGORIES, cards carry concrete status KEYS. Keying the cell by
+  // the raw key gave a custom status a cell that does not exist, and the card
+  // fell out of the grid entirely (MUL-6409).
+  const customStatusOrphan: Issue = {
+    ...cancelledOrphan,
+    id: "custom-orphan",
+    number: 10,
+    identifier: "PROJ-10",
+    title: "Awaiting Reporter",
+    status: "awaiting_response",
+    status_category: "in_review",
+  };
+
+  it("renders a custom-status card in its category's column", () => {
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, customStatusOrphan]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Awaiting Reporter")).toBeInTheDocument();
+  });
+
   it("omits the Cancelled column when the status filter narrows to a subset without cancelled", () => {
     renderWithI18n(
       <SwimLaneView

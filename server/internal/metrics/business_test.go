@@ -176,6 +176,12 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordCloudRuntimeRequest("provision", "ok", 0.5)
 	m.RecordDaemonWSMessageReceived("heartbeat")
 	m.RecordChatOutputLocalPath("file_url")
+	m.RecordEntitlementConfigError()
+	m.RecordEntitlementCache("hit")
+	m.RecordEntitlementRefresh("success", 0.01)
+	m.RecordEntitlementDecision("autopilot_runs", "observe", "cache_fresh")
+	m.RecordEntitlementVersionRegression("refresh")
+	m.RecordAutopilotQuotaDecision("observe", "manual", "admitted")
 
 	families, err := registry.Gather()
 	if err != nil {
@@ -189,6 +195,9 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 		if !seen[metric] {
 			t.Fatalf("registry did not expose metric family %s", metric)
 		}
+	}
+	if !seen["multica_entitlement_config_error_total"] {
+		t.Fatal("registry did not expose metric family multica_entitlement_config_error_total")
 	}
 }
 

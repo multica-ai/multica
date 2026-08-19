@@ -7,7 +7,14 @@ import {
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+  TelegramInstallationSchema,
+  ListTelegramInstallationsResponseSchema,
+  RedeemTelegramBindingTokenResponseSchema,
+  EMPTY_TELEGRAM_INSTALLATION,
+  EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
   AgentTaskListSchema,
+  AutopilotQuotaUsageSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   CommentTriggerPreviewSchema,
@@ -87,6 +94,20 @@ const baseIssue = {
 };
 
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  it("accepts null activity during backfill and rejects malformed activity", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, last_activity_at: null }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.last_activity_at).toBeNull();
+    expect(() =>
+      ListIssuesResponseSchema.parse({
+        issues: [{ ...baseIssue, last_activity_at: 42 }],
+        total: 1,
+      }),
+    ).toThrow();
+  });
+
   it("accepts a primitive metadata KV map", () => {
     const payload = {
       issues: [
@@ -1124,6 +1145,39 @@ describe("AutopilotRunSchema", () => {
   });
 });
 
+describe("AutopilotQuotaUsageSchema", () => {
+  const baseUsage = {
+    action: "enforce",
+    used: 12,
+    reserved: 2,
+    limit: 100,
+    period_start: "2026-08-01T00:00:00Z",
+    period_end: "2026-09-01T00:00:00Z",
+    reset_at: "2026-09-01T00:00:00Z",
+  };
+
+  it("preserves durable blocked counts by execution source", () => {
+    const parsed = AutopilotQuotaUsageSchema.parse({
+      ...baseUsage,
+      blocked_counts: { schedule: 3, webhook: 7 },
+    });
+    expect(parsed.blocked_counts).toEqual({ schedule: 3, webhook: 7 });
+  });
+
+  it("defaults blocked_counts to null for an older server", () => {
+    expect(AutopilotQuotaUsageSchema.parse(baseUsage).blocked_counts).toBeNull();
+  });
+
+  it("isolates a malformed blocked_counts field", () => {
+    const parsed = AutopilotQuotaUsageSchema.parse({
+      ...baseUsage,
+      blocked_counts: { webhook: "many" },
+    });
+    expect(parsed.used).toBe(12);
+    expect(parsed.blocked_counts).toBeNull();
+  });
+});
+
 // The comment composer branches on preview.blocked to warn before sending
 // (MUL-4525 §2), so the additive field must parse and degrade gracefully.
 describe("CommentTriggerPreviewSchema.blocked", () => {
@@ -1399,6 +1453,66 @@ describe("WeCom installation schemas", () => {
       { endpoint: "POST /api/wecom/binding/redeem" },
     );
     expect(redeem).toEqual(EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE);
+  });
+});
+
+// Telegram drives the same connect/disabled/revoked UI decisions as WeCom.
+// Keep its wire-contract fallbacks explicit so malformed or older responses
+// cannot render a bot as connected or report a binding success.
+describe("Telegram installation schemas", () => {
+  it("parses a well-formed installation", () => {
+    const parsed = TelegramInstallationSchema.parse({
+      id: "i1",
+      workspace_id: "w1",
+      agent_id: "a1",
+      bot_id: "12345",
+      bot_username: "multica_test_bot",
+      installer_user_id: "u1",
+      status: "active",
+    });
+    expect(parsed.bot_username).toBe("multica_test_bot");
+    expect(parsed.status).toBe("active");
+  });
+
+  it("defaults incomplete data to the disconnected state", () => {
+    const parsed = TelegramInstallationSchema.parse({ id: "i1" });
+    expect(parsed.status).toBe("revoked");
+    expect(parsed.bot_id).toBe("");
+    expect(parsed.bot_username).toBe("");
+
+    const list = ListTelegramInstallationsResponseSchema.parse({});
+    expect(list).toEqual({ installations: [], configured: false });
+  });
+
+  it("keeps unknown forward-compatible installation fields", () => {
+    const parsed = TelegramInstallationSchema.parse({ id: "i1", future_field: "keep" });
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe("keep");
+  });
+
+  it("falls back safely for malformed list, install, and redeem responses", () => {
+    expect(
+      parseWithFallback(
+        "not json",
+        ListTelegramInstallationsResponseSchema,
+        EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+        { endpoint: "GET /api/workspaces/:id/telegram/installations" },
+      ),
+    ).toEqual(EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE);
+
+    expect(
+      parseWithFallback(42, TelegramInstallationSchema, EMPTY_TELEGRAM_INSTALLATION, {
+        endpoint: "POST /api/workspaces/:id/telegram/install",
+      }),
+    ).toEqual(EMPTY_TELEGRAM_INSTALLATION);
+
+    expect(
+      parseWithFallback(
+        null,
+        RedeemTelegramBindingTokenResponseSchema,
+        EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+        { endpoint: "POST /api/telegram/binding/redeem" },
+      ),
+    ).toEqual(EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE);
   });
 });
 

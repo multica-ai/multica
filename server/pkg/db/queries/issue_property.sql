@@ -53,6 +53,11 @@ RETURNING *;
 UPDATE issue
 SET properties = jsonb_set(properties, ARRAY[sqlc.arg('key')::text], sqlc.arg('value')::jsonb, true),
     revision = revision + CASE WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN 1 ELSE 0 END,
+    last_activity_at = CASE
+        WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb
+        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
+        ELSE last_activity_at
+    END,
     updated_at = CASE WHEN properties -> sqlc.arg('key')::text IS DISTINCT FROM sqlc.arg('value')::jsonb THEN now() ELSE updated_at END
 WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uuid
 RETURNING *;
@@ -61,6 +66,11 @@ RETURNING *;
 UPDATE issue
 SET properties = properties - sqlc.arg('key')::text,
     revision = revision + CASE WHEN properties ? sqlc.arg('key')::text THEN 1 ELSE 0 END,
+    last_activity_at = CASE
+        WHEN properties ? sqlc.arg('key')::text
+        THEN GREATEST(COALESCE(last_activity_at, updated_at), now())
+        ELSE last_activity_at
+    END,
     updated_at = CASE WHEN properties ? sqlc.arg('key')::text THEN now() ELSE updated_at END
 WHERE id = sqlc.arg('id')::uuid AND workspace_id = sqlc.arg('workspace_id')::uuid
 RETURNING *;

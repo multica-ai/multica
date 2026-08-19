@@ -48,6 +48,7 @@ import {
 } from "@multica/ui/components/ui/context-menu";
 import { copyText } from "@multica/ui/lib/clipboard";
 import type { UseIssueActionsResult } from "./use-issue-actions";
+import { PluginHookMenuItems, PluginModalMenuItems } from "../../plugins";
 import { useT } from "../../i18n";
 
 // Both Dropdown and Context menu wrappers expose an API-compatible surface
@@ -105,7 +106,7 @@ export function IssueActionsMenuItems({
 }: IssueActionsMenuItemsProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
-  const { options: statusOptions } = useStatusOptions(wsId);
+  const statusOptions = useStatusOptions(wsId);
   const { categoryOf, entryOf } = useIssueStatuses(wsId);
   const {
     isPinned,
@@ -167,9 +168,8 @@ export function IssueActionsMenuItems({
         <P.SubContent>
           {/* Catalog-driven, like the picker and the filter: every entry point
               that can change a status must offer the same set, or a custom
-              status is unreachable from the board's right-click menu. Flat
-              rather than grouped — these primitives have no label item — but
-              already in canonical category order. (MUL-6243) */}
+              status is unreachable from the board's right-click menu. One flat
+              list in canonical category order. (MUL-6243) */}
           {statusOptions.map((option) => (
             <P.Item
               key={option.key}
@@ -177,7 +177,7 @@ export function IssueActionsMenuItems({
             >
               <StatusIcon
                 status={option.key}
-                category={categoryOf(option.key)}
+                category={option.category}
                 color={option.color}
                 className="h-3.5 w-3.5"
               />
@@ -335,6 +335,16 @@ export function IssueActionsMenuItems({
           </P.Item>
         </P.SubContent>
       </P.Sub>
+
+      {/* Manual plugin hooks. Rendered by the host rather than by the plugin
+          because the trigger decides identity: a `manual` call acts as the
+          person who picked it, so the entry has to live where the host can
+          prove somebody did. Renders nothing when no plugin declares one. */}
+      <PluginHookMenuItems issueId={issue.id} Item={P.Item} Separator={P.Separator} />
+      {/* Modal surfaces open from here for the same reason: a modal is a third
+          party's UI taking over the screen, so it opens because a person chose
+          it, never on the plugin's own initiative. */}
+      <PluginModalMenuItems issueId={issue.id} Item={P.Item} />
 
       <P.Separator />
 

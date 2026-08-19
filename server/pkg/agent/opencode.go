@@ -106,8 +106,9 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// (8,191 when a .cmd shim routes the call through cmd.exe), and a prompt
 	// carrying the workspace's models and skills clears that on its own — the
 	// process then never starts and Go surfaces the misleading "The filename or
-	// extension is too long" (#6538). Keeping the prompt off argv also stops it
-	// from being echoed into the "agent command" log line below.
+	// extension is too long" (#6538). Keeping the prompt off argv also keeps it
+	// out of OS process listings; the shared command logger separately redacts
+	// argv values.
 
 	cmd := b.cfg.commandAt(execPath).exec(runCtx, args...)
 	hideAgentWindow(cmd)
@@ -123,7 +124,7 @@ func (b *opencodeBackend) Execute(ctx context.Context, prompt string, opts ExecO
 	// signalled. Returning nil here keeps os/exec from racing us with its own
 	// kill; WaitDelay remains the hard backstop.
 	cmd.Cancel = func() error { return nil }
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", args, "prompt_bytes", len(prompt))
+	b.cfg.logAgentCommandWithPrompt(cmd, newAgentCommandLogArgs(args, trustAgentCommandPositional(0, "run")), len(prompt))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd

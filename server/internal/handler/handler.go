@@ -29,6 +29,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -122,9 +123,16 @@ type Config struct {
 	//   - LLMAPIKey       -> MULTICA_LLM_API_KEY
 	//   - LLMBaseURL       -> MULTICA_LLM_BASE_URL (OpenAI or any compatible gateway)
 	//   - LLMDefaultModel  -> MULTICA_LLM_DEFAULT_MODEL (used when a request omits `model`)
+	//   - LLMMaxRetries    -> MULTICA_LLM_MAX_RETRIES (transport retry budget)
 	LLMAPIKey       string
 	LLMBaseURL      string
 	LLMDefaultModel string
+	// LLMMaxRetries is the parsed MULTICA_LLM_MAX_RETRIES budget. nil means
+	// unset (llm.DefaultMaxRetries applies); llm.Retries(0) disables retries.
+	// The type carries the validation: it can only be built through llm.Retries,
+	// and cmd/server additionally fails the boot on an out-of-range value before
+	// one reaches this struct. See llm.Config.MaxRetries for the full semantics.
+	LLMMaxRetries *llm.RetryOverride
 	// ServerVersion is the build version of the running API binary (the same
 	// value main.go stamps via -X main.version and reports on /metrics).
 	// Surfaced through /api/config so self-hosted operators can confirm which
@@ -297,6 +305,18 @@ type Handler struct {
 	// the install path runs without a socket.
 	WecomCredentialProbe wecom.CredentialProbe
 
+	// TelegramInstall owns the Telegram bot install lifecycle (register a
+	// pasted BotFather token / list / revoke) and the at-rest encryption of
+	// each bot's token. Nil unless MULTICA_TELEGRAM_SECRET_KEY is set.
+	TelegramInstall *telegram.InstallService
+	// TelegramBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your Telegram account" prompt. Nil unless Telegram is configured.
+	TelegramBindingTokens *telegram.BindingTokenService
+	// TelegramOutbound owns the asynchronous terminal-delivery worker pool.
+	// The process owner starts and joins it; the synchronous event bus only
+	// enqueues EventChatDone work.
+	TelegramOutbound *telegram.Outbound
+
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the
 	// conversation. It answers the claim response's
@@ -377,7 +397,21 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		APIKey:       cfg.LLMAPIKey,
 		BaseURL:      cfg.LLMBaseURL,
 		DefaultModel: cfg.LLMDefaultModel,
+		MaxRetries:   cfg.LLMMaxRetries,
 	})
+	// Report the effective retry policy so an operator can confirm from the
+	// boot log alone what a misbehaving upstream will cost, instead of inferring
+	// it from an env var whose semantics used to be unguessable (MUL-6364).
+	// Read off the client, not off cfg, so the line cannot drift from what the
+	// SDK actually enforces. Counts and an enum only — never the key or the base
+	// URL, since a self-hosted gateway URL routinely embeds a token.
+	llmRetry := llmClient.RetryBudget()
+	slog.Info("llm retry policy",
+		"max_retries", llmRetry.MaxRetries,
+		"source", llmRetry.Source,
+		"request_timeout", llmRetry.RequestTimeout,
+		"enabled", llmClient.Enabled(),
+	)
 
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
@@ -526,8 +560,11 @@ func ptrToText(s *string) pgtype.Text               { return util.PtrToText(s) }
 func strToText(s string) pgtype.Text                { return util.StrToText(s) }
 func timestampToString(t pgtype.Timestamptz) string { return util.TimestampToString(t) }
 func timestampToPtr(t pgtype.Timestamptz) *string   { return util.TimestampToPtr(t) }
-func dateToPtr(d pgtype.Date) *string               { return util.DateToPtr(d) }
-func uuidToPtr(u pgtype.UUID) *string               { return util.UUIDToPtr(u) }
+func timestampToNanoPtr(t pgtype.Timestamptz) *string {
+	return util.TimestampToNanoPtr(t)
+}
+func dateToPtr(d pgtype.Date) *string { return util.DateToPtr(d) }
+func uuidToPtr(u pgtype.UUID) *string { return util.UUIDToPtr(u) }
 
 // uuidsToStrings maps a UUID array column to string ids, skipping NULL/invalid
 // entries. Returns nil (not an empty slice) when there is nothing to emit so

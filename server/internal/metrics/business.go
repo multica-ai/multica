@@ -42,6 +42,13 @@ type BusinessMetrics struct {
 	runtimeGCFailed                   prometheus.Counter
 	runtimeGCBlocked                  prometheus.Gauge
 	runtimeGCBlockedObservationFailed prometheus.Counter
+	entitlementConfigError            prometheus.Counter
+	entitlementCache                  *prometheus.CounterVec
+	entitlementRefresh                *prometheus.CounterVec
+	entitlementRefreshDuration        *prometheus.HistogramVec
+	entitlementDecision               *prometheus.CounterVec
+	entitlementVersionRegression      *prometheus.CounterVec
+	autopilotQuotaDecision            *prometheus.CounterVec
 
 	activeMu    sync.Mutex
 	activeTasks map[string]activeTaskLabels
@@ -197,6 +204,34 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Name:      "blocked_observation_failed_total",
 			Help:      "Total failures while observing stale runtimes blocked from garbage collection.",
 		}),
+		entitlementConfigError: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "config_error_total",
+			Help: "Total startup failures caused by explicitly enabled but invalid entitlement policy configuration.",
+		}),
+		entitlementCache: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "cache_total",
+			Help: "Total entitlement cache outcomes.",
+		}, metricLabels("multica_entitlement_cache_total")),
+		entitlementRefresh: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "refresh_total",
+			Help: "Total entitlement refresh outcomes.",
+		}, metricLabels("multica_entitlement_refresh_total")),
+		entitlementRefreshDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "refresh_duration_seconds",
+			Help: "Duration of entitlement refreshes.", Buckets: chatClaimResumeQueryDurationBuckets,
+		}, metricLabels("multica_entitlement_refresh_duration_seconds")),
+		entitlementDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "decision_total",
+			Help: "Total entitlement decisions by bounded gate, action, and reason.",
+		}, metricLabels("multica_entitlement_decision_total")),
+		entitlementVersionRegression: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "version_regression_total",
+			Help: "Total rejected entitlement version regressions.",
+		}, metricLabels("multica_entitlement_version_regression_total")),
+		autopilotQuotaDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "autopilot_quota", Name: "decision_total",
+			Help: "Total autopilot quota admission outcomes.",
+		}, metricLabels("multica_autopilot_quota_decision_total")),
 		activeTasks: map[string]activeTaskLabels{},
 		events:      newBusinessEventMetrics(),
 	}
@@ -229,7 +264,58 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.runtimeGCFailed,
 		m.runtimeGCBlocked,
 		m.runtimeGCBlockedObservationFailed,
+		m.entitlementConfigError,
+		m.entitlementCache,
+		m.entitlementRefresh,
+		m.entitlementRefreshDuration,
+		m.entitlementDecision,
+		m.entitlementVersionRegression,
+		m.autopilotQuotaDecision,
 	}, m.events.collectors()...)
+}
+
+func (m *BusinessMetrics) RecordEntitlementConfigError() {
+	if m != nil {
+		m.entitlementConfigError.Inc()
+	}
+}
+
+func (m *BusinessMetrics) RecordEntitlementCache(outcome string) {
+	if m != nil {
+		m.entitlementCache.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *BusinessMetrics) RecordEntitlementRefresh(outcome string, seconds float64) {
+	if m == nil {
+		return
+	}
+	m.entitlementRefresh.WithLabelValues(outcome).Inc()
+	m.entitlementRefreshDuration.WithLabelValues(outcome).Observe(seconds)
+}
+
+func (m *BusinessMetrics) RecordEntitlementDecision(gate, action, reason string) {
+	if m != nil {
+		m.entitlementDecision.WithLabelValues(gate, action, reason).Inc()
+	}
+}
+
+func (m *BusinessMetrics) RecordEntitlementVersionRegression(source string) {
+	if m != nil {
+		m.entitlementVersionRegression.WithLabelValues(source).Inc()
+	}
+}
+
+func (m *BusinessMetrics) RecordAutopilotQuotaDecision(action, source, result string) {
+	if m == nil {
+		return
+	}
+	switch source {
+	case "schedule", "webhook", "manual", "api":
+	default:
+		source = "other"
+	}
+	m.autopilotQuotaDecision.WithLabelValues(action, source, result).Inc()
 }
 
 func (m *BusinessMetrics) RecordRuntimeGCDeleted() {

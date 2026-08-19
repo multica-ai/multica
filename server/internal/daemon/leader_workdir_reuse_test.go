@@ -84,18 +84,43 @@ func TestRunTaskSquadLeaderDoesNotReuseExternalPriorWorkdir(t *testing.T) {
 	}
 }
 
-// TestShouldReusePriorWorkdirNonLeaderReusesUnchanged locks the refactor's
-// non-leader branch: the leader-only provenance/marker gate must not touch the
-// pre-existing behavior where any non-local prior workdir is reused.
-func TestShouldReusePriorWorkdirNonLeaderReusesUnchanged(t *testing.T) {
+// TestShouldReusePriorWorkdirNonLeaderRequiresProvenance prevents an ordinary
+// task from inheriting another agent's repository and Git HEAD merely because
+// the server offered that path.
+func TestShouldReusePriorWorkdirNonLeaderRequiresProvenance(t *testing.T) {
 	t.Parallel()
 
 	root := t.TempDir()
 	task := leaderReuseTestTask("task-non-leader")
 	task.IsLeaderTask = false
 	task.PriorWorkDir = filepath.Join(root, "anything", "workdir")
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatal("non-leader task reused a prior workdir without any ownership provenance")
+	}
+}
+
+func TestShouldReusePriorWorkdirChatAcceptsMatchingConversation(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-chat", "12345678", "workdir")
+	writeChatTaskMarker(t, workDir, "agent-chat", "chat-session")
+	writeChatManagedEnvProvenance(t, workDir, "ws-chat", "chat-session", "agent-chat")
+
+	task := leaderReuseTestTask("task-chat")
+	task.WorkspaceID = "ws-chat"
+	task.IssueID = ""
+	task.ChatSessionID = "chat-session"
+	task.AgentID = "agent-chat"
+	task.IsLeaderTask = false
+	task.PriorWorkDir = workDir
 	if !shouldReusePriorWorkdir(task, nil, root) {
-		t.Fatal("non-leader task must reuse its prior workdir without any provenance requirement")
+		t.Fatalf("chat task did not reuse its fully-provenanced conversation workdir %q", workDir)
+	}
+
+	task.ChatSessionID = "another-chat"
+	if shouldReusePriorWorkdir(task, nil, root) {
+		t.Fatal("chat task reused a workdir belonging to another conversation")
 	}
 }
 
@@ -300,6 +325,19 @@ func writeLeaderTaskMarker(t *testing.T, workDir, agentID, issueID string) {
 	}
 }
 
+func writeChatTaskMarker(t *testing.T, workDir, agentID, chatSessionID string) {
+	t.Helper()
+
+	markerPath := filepath.Join(workDir, execenv.TaskContextMarkerRelPath)
+	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
+		t.Fatalf("mkdir marker dir: %v", err)
+	}
+	marker := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `","agent_id":"` + agentID + `","chat_session_id":"` + chatSessionID + `"}`)
+	if err := os.WriteFile(markerPath, marker, 0o644); err != nil {
+		t.Fatalf("write marker: %v", err)
+	}
+}
+
 func writeLeaderManagedEnvProvenance(t *testing.T, workDir, workspaceID, issueID, agentID string) {
 	t.Helper()
 
@@ -311,6 +349,22 @@ func writeLeaderManagedEnvProvenance(t *testing.T, workDir, workspaceID, issueID
 		WorkspaceID: workspaceID,
 		IssueID:     issueID,
 		AgentID:     agentID,
+	}); err != nil {
+		t.Fatalf("write managed env provenance: %v", err)
+	}
+}
+
+func writeChatManagedEnvProvenance(t *testing.T, workDir, workspaceID, chatSessionID, agentID string) {
+	t.Helper()
+
+	envRoot := filepath.Dir(workDir)
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatalf("mkdir env root: %v", err)
+	}
+	if err := execenv.WriteManagedEnvProvenance(envRoot, execenv.ManagedEnvProvenance{
+		WorkspaceID:   workspaceID,
+		ChatSessionID: chatSessionID,
+		AgentID:       agentID,
 	}); err != nil {
 		t.Fatalf("write managed env provenance: %v", err)
 	}

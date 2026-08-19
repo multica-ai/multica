@@ -11,8 +11,8 @@
     "compare_comment": "댓글이 동시에 변경되었습니다. 두 버전을 비교하세요.",
     "server_version": "서버의 최신 버전",
     "local_version": "내 로컬 버전",
-    "keep_local": "로컬 버전으로 저장",
-    "save_again": "두 버전을 확인한 후 저장을 다시 클릭하면 로컬 버전을 사용할 수 있습니다."
+    "keep_local": "내 버전 유지",
+    "use_server": "최신 버전 사용"
   },
   "page": {
     "breadcrumb_title": "태스크",
@@ -774,6 +774,11 @@
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}}의 인터페이스를 불러오지 못했습니다.",
-    "surface_local_only": "{{name}}은(는) 로컬 소스에서 설치되어 브라우저에서 인터페이스를 불러올 수 없습니다."
+    "surface_local_only": "{{name}}은(는) 로컬 소스에서 설치되어 브라우저에서 인터페이스를 불러올 수 없습니다.",
+    "hook_succeeded": "{{name}} 완료됨.",
+    "hook_failed": "{{name}} 실패함.",
+    "hook_refused": "{{name}}이(가) 실행되지 않았습니다.",
+    "hook_activity": "최근 호출",
+    "hook_never_run": "이 훅은 아직 실행되지 않았습니다."
   }
 }

@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "re
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Issue, Label, TimelineEntry } from "@multica/core/types";
+import type { Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
+import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
@@ -182,20 +183,36 @@ vi.mock("../../editor", async () => ({
     const valueRef = useRef(initialValue);
     const baseRef = useRef(initialValue);
     const [editorValue, setEditorValue] = useState(initialValue);
+    // Mirrors the real editor's dirty guard: once the user has typed, an
+    // external `value` change is refused so it cannot clobber unsaved bytes.
+    // Only the imperative adoptContent channel lands after that point.
+    const dirtyRef = useRef(false);
     useEffect(() => {
       contentEditorMounts.count += 1;
       onReady?.();
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []);
     useEffect(() => {
-      if (syncedValue === undefined) return;
+      if (syncedValue === undefined || dirtyRef.current) return;
       valueRef.current = syncedValue;
       baseRef.current = syncedValue;
       setEditorValue(syncedValue);
     }, [syncedValue]);
     useImperativeHandle(ref, () => ({
       getMarkdown: () => valueRef.current,
-      clearContent: () => { valueRef.current = ""; setEditorValue(""); },
+      clearContent: () => {
+        valueRef.current = "";
+        dirtyRef.current = false;
+        setEditorValue("");
+      },
+      // The real handle applies content the `value` prop cannot land (a dirty
+      // editor refuses external syncs) and does so without emitting an update.
+      adoptContent: (markdown: string) => {
+        valueRef.current = markdown;
+        baseRef.current = markdown;
+        dirtyRef.current = false;
+        setEditorValue(markdown);
+      },
       focus: () => {},
       focusAtCoords: () => {},
       // The top-level composer blurs after a posted comment (afterAccepted).
@@ -214,6 +231,7 @@ vi.mock("../../editor", async () => ({
         value={editorValue}
         onChange={(e) => {
           valueRef.current = e.target.value;
+          dirtyRef.current = true;
           setEditorValue(e.target.value);
           onUpdate?.(e.target.value, baseRef.current);
         }}
@@ -589,6 +607,28 @@ function createTestQueryClient() {
 
 function renderIssueDetail(issueId = "issue-1") {
   const queryClient = createTestQueryClient();
+  return render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={queryClient}>
+        <IssueDetail issueId={issueId} />
+      </QueryClientProvider>
+    </I18nProvider>,
+  );
+}
+
+/**
+ * Renders with the workspace status catalog already in cache, so custom
+ * statuses resolve to their real name, category and color. Seeding the query
+ * (rather than stubbing the hook) keeps the shipped resolvers in the path; the
+ * generous staleTime on the catalog query means it is never refetched. Every
+ * other test runs without it — the cold-catalog case. (MUL-6243)
+ */
+function renderIssueDetailWithStatusCatalog(
+  entries: IssueStatusEntry[],
+  issueId = "issue-1",
+) {
+  const queryClient = createTestQueryClient();
+  queryClient.setQueryData(issueStatusKeys.list("ws-1"), { statuses: entries });
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
@@ -1298,6 +1338,94 @@ describe("IssueDetail (shared)", () => {
     });
   });
 
+  // -------------------------------------------------------------------------
+  // MUL-6413 — the activity glyph is per CATEGORY, so a move into a custom
+  // status drew the icon of the built-in it sits beside: "In Review → Awaiting
+  // Response" repainted identically and read as though nothing had moved.
+  // Colour is what carries a custom status's own identity.
+  // -------------------------------------------------------------------------
+
+  const IN_REVIEW_BUILT_IN: IssueStatusEntry = {
+    id: "in_review",
+    workspace_id: "ws-1",
+    key: "in_review",
+    name: "In Review",
+    description: "",
+    category: "in_review",
+    color: "#8b5cf6",
+    is_system: true,
+    position: 0,
+    archived_at: null,
+    created_at: "",
+    updated_at: "",
+  };
+
+  const AWAITING_RESPONSE: IssueStatusEntry = {
+    ...IN_REVIEW_BUILT_IN,
+    id: "awaiting_response",
+    key: "awaiting_response",
+    name: "Awaiting Response",
+    color: "#ff0000",
+    is_system: false,
+    position: 1,
+  };
+
+  function statusChangeIcon(to: string): SVGElement {
+    const row = screen.getByText(new RegExp(`to ${to}$`, "i")).closest("div")
+      ?.parentElement;
+    const icon = row?.querySelector("svg");
+    if (!icon) throw new Error(`no status glyph for the "${to}" activity row`);
+    return icon;
+  }
+
+  it("paints a status-change activity in the custom status's own colour", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-custom-status",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "in_review", to: "awaiting_response" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetailWithStatusCatalog([IN_REVIEW_BUILT_IN, AWAITING_RESPONSE]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/from In Review to Awaiting Response/i),
+      ).toBeInTheDocument();
+    });
+    expect(statusChangeIcon("Awaiting Response").style.color).toBe("rgb(255, 0, 0)");
+  });
+
+  it("leaves a built-in status-change activity on its semantic token colour", async () => {
+    // The catalog seeds a colour for the built-ins too, but those are theme
+    // tokens in the UI — painting the seeded hex would hard-code one theme.
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-built-in-status",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "in_progress", to: "in_review" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetailWithStatusCatalog([IN_REVIEW_BUILT_IN, AWAITING_RESPONSE]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument();
+    });
+    const icon = statusChangeIcon("In Review");
+    expect(icon.style.color).toBe("");
+    expect(icon.getAttribute("class")).toContain("text-success");
+  });
+
   it("truncates the trailing activity block to the most recent 8 entries with a show-more toggle", async () => {
     // 10 activities, all in the trailing block (no comment after them, so it's
     // the trailing block by definition). Alternating action types so the
@@ -1667,6 +1795,35 @@ describe("IssueDetail (shared)", () => {
     expect(screen.getByDisplayValue("My local description")).toBeVisible();
   });
 
+  it("restores the server description when the user takes the latest version", async () => {
+    mockApiObj.updateIssue.mockRejectedValueOnce({
+      body: { code: "revision_conflict" },
+    });
+    renderIssueDetail();
+
+    const editor = await screen.findByDisplayValue("Add JWT auth to the backend");
+    fireEvent.focus(editor);
+    fireEvent.change(editor, { target: { value: "My local description" } });
+
+    expect(
+      await screen.findByText("The description was changed concurrently. Compare both versions."),
+    ).toBeVisible();
+    const callsBeforeDiscard = mockApiObj.updateIssue.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Use the latest version" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("The description was changed concurrently. Compare both versions."),
+      ).not.toBeInTheDocument(),
+    );
+    // A dirty editor ignores prop-driven content, so seeing the server text
+    // back in the editor proves the imperative adopt path ran.
+    expect(screen.getByDisplayValue("Add JWT auth to the backend")).toBeVisible();
+    // Taking the server version is local-only: the server already holds it.
+    expect(mockApiObj.updateIssue).toHaveBeenCalledTimes(callsBeforeDiscard);
+  });
+
   it("serializes description saves and rebases the queued draft on submitted content", async () => {
     let resolveFirst!: (issue: Issue) => void;
     const firstSave = new Promise<Issue>((resolve) => {
@@ -1815,6 +1972,36 @@ describe("IssueDetail (shared)", () => {
     ).toBeVisible();
     expect(screen.getAllByText("My local title").length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue("My local title")).toBeVisible();
+  });
+
+  it("restores the server title when the user takes the latest version", async () => {
+    mockApiObj.updateIssue.mockRejectedValueOnce({
+      body: { code: "revision_conflict" },
+    });
+    renderIssueDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Implement authentication" }));
+    const editor = await screen.findByTestId("title-editor");
+    fireEvent.change(editor, { target: { value: "My local title" } });
+    fireEvent.blur(editor);
+
+    expect(
+      await screen.findByText("The title was changed concurrently. Compare both versions."),
+    ).toBeVisible();
+    const callsBeforeDiscard = mockApiObj.updateIssue.mock.calls.length;
+
+    fireEvent.click(screen.getByRole("button", { name: "Use the latest version" }));
+
+    await waitFor(() =>
+      expect(
+        screen.queryByText("The title was changed concurrently. Compare both versions."),
+      ).not.toBeInTheDocument(),
+    );
+    // TitleEditor takes its text at mount, so the remount is what puts the
+    // server title back — see titleResetToken.
+    expect(await screen.findByDisplayValue("Implement authentication")).toBeVisible();
+    // Taking the server version is local-only: the server already holds it.
+    expect(mockApiObj.updateIssue).toHaveBeenCalledTimes(callsBeforeDiscard);
   });
 
   describe("sub-issues list", () => {

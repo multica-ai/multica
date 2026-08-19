@@ -99,6 +99,9 @@ export type {
   PluginPreviewRequest,
   PluginInstallRequest,
   PluginConfigRequest,
+  PluginHookResult,
+  PluginInvocation,
+  PluginTokenIssue,
 } from "./plugin";
 export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread } from "./inbox";
 export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse } from "./notification-preference";
@@ -230,6 +233,12 @@ export type {
   RedeemWecomBindingTokenResponse,
 } from "./wecom";
 export type {
+  TelegramInstallation,
+  ListTelegramInstallationsResponse,
+  RegisterTelegramRequest,
+  RedeemTelegramBindingTokenResponse,
+} from "./telegram";
+export type {
   Autopilot,
   AutopilotStatus,
   AutopilotExecutionMode,
@@ -243,6 +252,7 @@ export type {
   AutopilotRun,
   AutopilotRunStatus,
   AutopilotRunSource,
+  AutopilotQuotaUsage,
   WebhookEventFilter,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,

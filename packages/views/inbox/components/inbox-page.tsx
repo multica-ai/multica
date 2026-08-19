@@ -1,6 +1,13 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import {
+  useState,
+  useEffect,
+  useCallback,
+  useDeferredValue,
+  useMemo,
+  useRef,
+} from "react";
 import { useDefaultLayout } from "react-resizable-panels";
 import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -35,7 +42,7 @@ import {
 import { IssueDetail, issueHighlightMementoKey } from "../../issues/components";
 import { useViewStateWriter } from "../../platform";
 import { ErrorBoundary } from "@multica/ui/components/common/error-boundary";
-import { useNavigation } from "../../navigation";
+import { useNavigation, useReportNavigating } from "../../navigation";
 import { toast } from "sonner";
 import {
   MoreHorizontal,
@@ -72,7 +79,11 @@ import { InboxList } from "./inbox-list";
 import { InboxContextMenuProvider } from "./inbox-context-menu";
 import { ARCHIVED_VIEW_PARAM, type InboxView } from "./inbox-view";
 import { useTypeLabels } from "./inbox-detail-label";
-import { getInboxDisplayTitle, isQuickCreateOutcome } from "./inbox-display";
+import {
+  getInboxDisplayTitle,
+  isQuickCreateOutcome,
+  resolveDetailItem,
+} from "./inbox-display";
 import { useT } from "../../i18n";
 
 export function InboxPage() {
@@ -116,6 +127,24 @@ export function InboxPage() {
 
   const selected =
     visibleItems.find((i) => (i.issue_id ?? i.id) === selectedKey) ?? null;
+
+  // What the DETAIL pane shows, one React transition behind the click.
+  //
+  // Mounting `IssueDetail` is the expensive half of switching rows, and driven
+  // straight off `selectedKey` it ran as an urgent update: the main thread
+  // blocked from the click until the new detail was ready, which is the
+  // "click, freeze, jump" the desktop shell showed (MUL-6404). Deferred, the
+  // click commits the row highlight and the URL right away, React renders the
+  // new detail at transition priority — interruptible, so the shell keeps
+  // painting — and the previous issue stays on screen until it is ready.
+  const detailKey = useDeferredValue(selectedKey);
+  const detailSwapping = detailKey !== selectedKey;
+  const detailItem = resolveDetailItem(visibleItems, selectedKey, detailKey);
+
+  // The gap above is invisible to the navigation adapter — the inbox stays on
+  // the same route and only rewrites `?issue=` — so report it explicitly and
+  // the shell's progress bar covers the swap on both platforms.
+  useReportNavigating(detailSwapping);
 
   // Track the last key we actually resolved against the inbox list. Lets the
   // fallback effect distinguish "shared-link to a notification not in our
@@ -564,13 +593,13 @@ export function InboxPage() {
     </div>
   ) : null;
 
-  const detailContent = selected?.issue_id ? (
+  const detailContent = detailItem?.issue_id ? (
     // Key by issue_id (not inbox-item id): a new comment/reaction generates a
     // new inbox notification for the same issue, and the dedup helper picks the
     // newest one — keying on its id would remount IssueDetail on every event,
     // wiping the comment composer draft and resetting scroll position.
     <ErrorBoundary
-      resetKeys={[selected.issue_id]}
+      resetKeys={[detailItem.issue_id]}
       // The default fallback is a bare message card. On a phone it would be the
       // only thing on screen, so it has to carry the way back too — the bar is
       // the point here, the message is whatever the boundary caught.
@@ -584,11 +613,11 @@ export function InboxPage() {
       ) : undefined}
     >
       <IssueDetail
-        key={selected.issue_id}
-        issueId={selected.issue_id}
+        key={detailItem.issue_id}
+        issueId={detailItem.issue_id}
         defaultSidebarOpen={false}
         layoutId="multica_inbox_issue_detail_layout"
-        highlightCommentId={selected.details?.comment_id ?? undefined}
+        highlightCommentId={detailItem.details?.comment_id ?? undefined}
         highlightRequestToken={highlightRequestToken}
         leadingAction={compactBackAction}
         onDelete={() => {
@@ -599,31 +628,31 @@ export function InboxPage() {
           setSelectedKey("");
         }}
         onDone={() => {
-          handleArchive(selected.id);
+          handleArchive(detailItem.id);
         }}
       />
     </ErrorBoundary>
-  ) : selected ? (
+  ) : detailItem ? (
     <div className="p-6">
-      <h2 className="text-title font-semibold">{getInboxDisplayTitle(selected)}</h2>
+      <h2 className="text-title font-semibold">{getInboxDisplayTitle(detailItem)}</h2>
       <p className="mt-1 text-body text-muted-foreground">
-        {typeLabels[selected.type]} · {timeAgo(selected.created_at)}
+        {typeLabels[detailItem.type]} · {timeAgo(detailItem.created_at)}
       </p>
-      {selected.body && (
+      {detailItem.body && (
         <div className="mt-4 whitespace-pre-wrap text-body leading-relaxed text-foreground">
-          {selected.body}
+          {detailItem.body}
         </div>
       )}
-      {isQuickCreateOutcome(selected.type) && selected.details?.original_prompt && (
+      {isQuickCreateOutcome(detailItem.type) && detailItem.details?.original_prompt && (
         <div className="mt-4 rounded-md border bg-muted/40 p-3">
           <p className="text-caption font-medium text-muted-foreground">
             {t(($) => $.detail.original_input)}
           </p>
-          <p className="mt-1 whitespace-pre-wrap text-body">{selected.details.original_prompt}</p>
+          <p className="mt-1 whitespace-pre-wrap text-body">{detailItem.details.original_prompt}</p>
         </div>
       )}
       <div className="mt-4 flex gap-2">
-        {isQuickCreateOutcome(selected.type) && (
+        {isQuickCreateOutcome(detailItem.type) && (
           <Button
             size="sm"
             onClick={() => {
@@ -631,8 +660,8 @@ export function InboxPage() {
               // user can recover their input in the full editor instead of
               // retyping. The agent picker hint becomes the assignee
               // candidate (still editable).
-              const prompt = selected.details?.original_prompt ?? "";
-              const agentId = selected.details?.agent_id;
+              const prompt = detailItem.details?.original_prompt ?? "";
+              const agentId = detailItem.details?.agent_id;
               useIssueDraftStore.getState().setManual({
                 description: prompt,
                 ...(agentId
@@ -651,7 +680,7 @@ export function InboxPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleUnarchive(selected.id)}
+            onClick={() => handleUnarchive(detailItem.id)}
           >
             <ArchiveRestore className="mr-1.5 h-3.5 w-3.5" />
             {t(($) => $.detail.unarchive)}
@@ -660,7 +689,7 @@ export function InboxPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => handleArchive(selected.id)}
+            onClick={() => handleArchive(detailItem.id)}
           >
             <Archive className="mr-1.5 h-3.5 w-3.5" />
             {t(($) => $.detail.archive)}
@@ -698,7 +727,7 @@ export function InboxPage() {
     // of selection get their chrome from different places, so they render
     // differently — `InboxItem.issue_id` is nullable and a null one is a plain
     // notification (a failed quick-create, say), not an issue.
-    if (selected?.issue_id) {
+    if (detailItem?.issue_id) {
       // No scroll container and no back bar of our own: `IssueDetail` owns
       // both, and takes the way back through `leadingAction`. Wrapping it in
       // an `overflow-y-auto` used to collapse its inner scroller to content
@@ -710,7 +739,7 @@ export function InboxPage() {
       return <div className="flex flex-1 flex-col min-h-0">{detailContent}</div>;
     }
 
-    if (selected) {
+    if (detailItem) {
       // A notification body is a plain block with no header to host a leading
       // slot and no scroller of its own, so this branch keeps supplying both.
       return (

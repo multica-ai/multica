@@ -41,6 +41,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import { ArchivedAgentBanner } from "./archived-agent-banner";
+import { AgentAccessRevokedBanner } from "./agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./runtime-required-banner";
 import {
   chatSessionsOptions,
@@ -241,6 +242,15 @@ export function ChatWindow() {
   const activeAgentRuntimeBound =
     !!activeAgent && isAgentRuntimeBound(activeAgent);
 
+  // A session outlives the permission that created it: the agent can be flipped
+  // to personal, change owner, or drop this member from its allow-list, and the
+  // server then refuses every send with `invocation_not_allowed` while still
+  // serving the transcript (MUL-4525). Judge the SESSION's agent, not just the
+  // picker list, so the composer goes read-only up front rather than after the
+  // user types (MUL-6380). Mirrors use-chat-controller.ts.
+  const isAgentAccessRevoked =
+    !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
+
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
   // Three-state availability — "loading" stays neutral (no banner, no
@@ -412,6 +422,16 @@ export function ChatWindow() {
         });
         return false;
       }
+      // Invoke permission was revoked while this session was open — the server
+      // would refuse before persisting anything. Keep the draft, skip the
+      // roundtrip. The input is disabled here; belt-and-braces guard.
+      if (isAgentAccessRevoked) {
+        apiLogger.warn("sendChatMessage skipped: invoke permission revoked", {
+          sessionId: activeSessionId,
+          agentId: activeAgent.id,
+        });
+        return false;
+      }
       if (pendingTaskId && pendingTask?.supports_queue !== true) {
         apiLogger.warn("sendChatMessage skipped: server does not support follow-up queues", {
           sessionId: activeSessionId,
@@ -560,6 +580,7 @@ export function ChatWindow() {
       activeAgent,
       activeAgentRuntimeBound,
       isAgentArchived,
+      isAgentAccessRevoked,
       pendingTask,
       pendingTaskId,
       ensureSession,
@@ -881,6 +902,7 @@ export function ChatWindow() {
             !!pendingTaskId ||
             isSessionArchived ||
             isAgentArchived ||
+            isAgentAccessRevoked ||
             !activeAgentRuntimeBound ||
             noAgent
           }
@@ -913,6 +935,8 @@ export function ChatWindow() {
        *  first agent-list response stays banner-free. */}
       {noAgent ? (
         <NoAgentBanner />
+      ) : isAgentAccessRevoked ? (
+        <AgentAccessRevokedBanner agentName={activeAgent?.name} />
       ) : isAgentArchived ? (
         <ArchivedAgentBanner agentName={activeAgent?.name} />
       ) : !activeAgentRuntimeBound && activeAgent ? (
@@ -928,6 +952,7 @@ export function ChatWindow() {
         tasks={queuedTasks}
         headStatus={pendingTask?.status}
         onSendNow={handleSendQueuedTaskNow}
+        sendNowDisabled={isAgentAccessRevoked}
         onEdit={handleEditQueuedTask}
         onRemove={handleRemoveQueuedTask}
         onClear={handleClearQueuedTasks}
@@ -940,15 +965,19 @@ export function ChatWindow() {
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
         onRestoreDraftApplied={handleRestoreDraftApplied}
-        uploadEnabled={!!activeAgent}
+        uploadEnabled={!!activeAgent && !isAgentAccessRevoked}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
         allowSubmitWhileRunning={pendingTask?.supports_queue === true}
         disabled={
-          isSessionArchived || isAgentArchived || !activeAgentRuntimeBound
+          isSessionArchived ||
+          isAgentArchived ||
+          isAgentAccessRevoked ||
+          !activeAgentRuntimeBound
         }
         noAgent={noAgent}
         agentArchived={isAgentArchived}
+        agentAccessRevoked={isAgentAccessRevoked}
         agentRuntimeRequired={!activeAgentRuntimeBound}
         agentName={activeAgent?.name}
         projects={projects}

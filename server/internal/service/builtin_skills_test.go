@@ -377,6 +377,7 @@ func TestCreatingAgentsSkillCoversAgentCreationContracts(t *testing.T) {
 		"multica agent create --name <name> --runtime-id <runtime-id>",
 		"`model` is a first-class persisted column",
 		"custom_env",
+		"Never put credentials or other secrets in `custom_args`",
 		"--custom-env-stdin",
 		"--custom-env-file",
 		"multica agent skills add <agent-id> --skill-ids <skill-id> --output json",

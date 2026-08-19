@@ -24,6 +24,7 @@ import (
 
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -571,6 +572,16 @@ func (h *Handler) HandleAutopilotWebhook(w http.ResponseWriter, r *http.Request)
 		delivery.ID,
 	)
 	if err != nil {
+		var quotaErr *service.AutopilotQuotaExceededError
+		if errors.As(err, &quotaErr) {
+			respBody := map[string]any{
+				"status": "ignored", "delivery_id": uuidToString(delivery.ID),
+				"reason_code": "quota_exceeded",
+			}
+			h.finaliseDeliveryTerminal(r, delivery.ID, deliveryStatusIgnored, http.StatusOK, respBody, quotaErr.Error(), "quota_exceeded")
+			writeJSON(w, http.StatusOK, respBody)
+			return
+		}
 		slog.Warn("webhook admission failed",
 			"trigger_id", uuidToString(trigRow.ID),
 			"autopilot_id", uuidToString(autopilot.ID),
@@ -844,6 +855,7 @@ func (h *Handler) finaliseDeliveryTerminal(
 	httpStatus int,
 	responseBody any,
 	errMsg string,
+	reasonCode ...string,
 ) {
 	bodyJSON, _ := json.Marshal(responseBody)
 	params := db.UpdateWebhookDeliveryTerminalParams{
@@ -854,6 +866,9 @@ func (h *Handler) finaliseDeliveryTerminal(
 	}
 	if errMsg != "" {
 		params.Error = pgtype.Text{String: errMsg, Valid: true}
+	}
+	if len(reasonCode) > 0 && reasonCode[0] != "" {
+		params.ReasonCode = pgtype.Text{String: reasonCode[0], Valid: true}
 	}
 	if _, err := h.Queries.UpdateWebhookDeliveryTerminal(r.Context(), params); err != nil {
 		slog.Warn("webhook: finalise terminal failed",

@@ -470,6 +470,29 @@ describe("issue property snapshots", () => {
   });
 });
 
+describe("auxiliary issue activity ordering", () => {
+  it.each([
+    ["labels", (qc: QueryClient) => onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB])],
+    ["metadata", (qc: QueryClient) => onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { state: "changed" })],
+    ["properties", (qc: QueryClient) => onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 5 })],
+  ])("re-sorts last_activity after committed %s changes", (_kind, apply) => {
+    const qc = new QueryClient();
+    const activityKey = issueKeys.listSorted(WS_ID, {
+      sort_by: "last_activity",
+      sort_direction: "desc",
+    });
+    const positionKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+    qc.setQueryData<ListIssuesCache>(activityKey, makeListCache(baseIssue));
+    qc.setQueryData<ListIssuesCache>(positionKey, makeListCache(baseIssue));
+
+    apply(qc);
+
+    expectInvalidated(qc, activityKey);
+    expect(qc.getQueryState(positionKey)?.isInvalidated).toBe(false);
+    qc.clear();
+  });
+});
+
 describe("project progress invalidation", () => {
   let qc: QueryClient;
 
