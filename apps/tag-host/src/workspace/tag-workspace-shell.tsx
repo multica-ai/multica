@@ -1,11 +1,18 @@
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
   type ComponentType,
   type ReactNode,
 } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import {
+  hasOtherWorkspaceUnread,
+  inboxUnreadSummaryOptions,
+  unreadWorkspaceIds,
+  useInboxUnreadCount,
+} from '@multica/core/inbox/queries';
 import { useCurrentWorkspace } from '@multica/core/paths';
 import {
   authorityKeys,
@@ -43,6 +50,7 @@ import {
   SidebarTrigger,
   useSidebar,
 } from '@multica/ui/components/ui/sidebar';
+import { CappedNumberFlow } from '@multica/ui/components/ui/number-flow';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -65,7 +73,7 @@ const NAV_ICONS: Record<string, ComponentType<{ className?: string }>> = {
   agents: Bot,
   runtimes: Gauge,
   members: Users,
-  notifications: Bell,
+  inbox: Bell,
   settings: Settings,
 };
 
@@ -132,10 +140,23 @@ function RealtimeStatus() {
 
 function TagWorkspaceSidebar() {
   const workspace = useCurrentWorkspace();
+  const unreadCount = useInboxUnreadCount(workspace?.id);
   const { data: workspaces = [] } = useQuery({
     queryKey: authorityKeys.workspaces(),
     queryFn: () => tagAuthorityClient.listWorkspaces(),
   });
+  const { data: unreadSummary = [] } = useQuery({
+    ...inboxUnreadSummaryOptions(),
+    enabled: Boolean(workspace?.id),
+  });
+  const otherWorkspaceUnread = useMemo(
+    () => hasOtherWorkspaceUnread(unreadSummary, workspace?.id),
+    [unreadSummary, workspace?.id]
+  );
+  const unreadWsIds = useMemo(
+    () => unreadWorkspaceIds(unreadSummary),
+    [unreadSummary]
+  );
   const { pathname } = useNavigation();
   const { setOpenMobile } = useSidebar();
   const { switchTo, switchingWorkspaceId, switchError } =
@@ -156,11 +177,20 @@ function TagWorkspaceSidebar() {
                   <SidebarMenuButton className="min-h-11 lg:min-h-8" />
                 }
               >
-                <WorkspaceAvatar
-                  name={workspace?.name ?? 'Workspace'}
-                  avatarUrl={workspace?.avatar_url}
-                  size="sm"
-                />
+                <span className="relative">
+                  <WorkspaceAvatar
+                    name={workspace?.name ?? 'Workspace'}
+                    avatarUrl={workspace?.avatar_url}
+                    size="sm"
+                  />
+                  {otherWorkspaceUnread && (
+                    <span
+                      aria-hidden="true"
+                      className="absolute -right-0.5 -top-0.5 size-2 rounded-full bg-brand ring-1 ring-sidebar"
+                      data-testid="other-workspace-unread"
+                    />
+                  )}
+                </span>
                 <span className="min-w-0 flex-1 truncate font-medium">
                   {workspace?.name ?? 'Workspace'}
                 </span>
@@ -186,7 +216,15 @@ function TagWorkspaceSidebar() {
                       name={candidate.name}
                       size="sm"
                     />
-                    <span className="truncate">{candidate.name}</span>
+                    <span className="flex-1 truncate">{candidate.name}</span>
+                    {candidate.id !== workspace?.id &&
+                      unreadWsIds.has(candidate.id) && (
+                        <span
+                          aria-hidden="true"
+                          className="size-2 rounded-full bg-brand"
+                          data-testid="workspace-unread"
+                        />
+                      )}
                   </DropdownMenuItem>
                 ))}
                 <AppLink
@@ -265,6 +303,13 @@ function TagWorkspaceSidebar() {
                         >
                           <Icon />
                           <span>{item.label}</span>
+                          {item.key === 'inbox' && unreadCount > 0 && (
+                            <CappedNumberFlow
+                              animated={false}
+                              className="ml-auto text-caption"
+                              value={unreadCount}
+                            />
+                          )}
                         </SidebarMenuButton>
                       ) : (
                         <SidebarMenuButton

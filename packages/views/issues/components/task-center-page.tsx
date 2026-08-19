@@ -1,7 +1,9 @@
 "use client";
 
+import { useEffect } from "react";
 import {
   TASK_CENTER_TABS,
+  taskCenterLegacyRedirect,
   taskCenterPath,
   taskCenterTabFromSearch,
 } from "@multica/core/issues/task-center";
@@ -9,7 +11,6 @@ import { cn } from "@multica/ui/lib/utils";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { MyIssuesPage } from "../../my-issues/components/my-issues-page";
-import { InboxPage } from "../../inbox/components/inbox-page";
 import { AutopilotsPage } from "../../autopilots/components/autopilots-page";
 import { ProjectsPage } from "../../projects/components/projects-page";
 import { IssuesPage } from "./issues-page";
@@ -23,12 +24,19 @@ export function TaskCenterPage({
 }) {
   const { searchParams, replace } = useNavigation();
   const { t } = useT("issues");
+  const legacyRedirect = taskCenterLegacyRedirect(workspaceSlug, searchParams);
+
+  useEffect(() => {
+    if (legacyRedirect) replace(legacyRedirect);
+  }, [legacyRedirect, replace]);
+
+  if (legacyRedirect) return null;
+
   const activeTab = taskCenterTabFromSearch(searchParams);
   const labels = {
     tasks: t(($) => $.task_center.tasks),
     projects: t(($) => $.task_center.projects),
     mine: t(($) => $.task_center.mine),
-    activity: t(($) => $.task_center.activity),
     automations: t(($) => $.task_center.automations),
   };
 
@@ -61,9 +69,6 @@ export function TaskCenterPage({
       {activeTab === "tasks" ? <IssuesPage /> : null}
       {activeTab === "projects" ? <ProjectsPage /> : null}
       {activeTab === "mine" ? <MyIssuesPage title={labels.mine} /> : null}
-      {activeTab === "activity" ? (
-        <InboxPage title={labels.activity} backLabel={labels.activity} />
-      ) : null}
       {activeTab === "automations" ? (
         <AutopilotsPage
           title={labels.automations}

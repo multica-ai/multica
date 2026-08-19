@@ -1,7 +1,7 @@
 export interface TagWorkspaceNavItem {
   key: string;
   label: string;
-  path: 'chat' | 'issues' | 'agents' | 'runtimes' | 'members' | 'settings' | null;
+  path: 'chat' | 'inbox' | 'issues' | 'agents' | 'runtimes' | 'members' | 'settings' | null;
   status: 'available' | 'migrating';
 }
 
@@ -32,12 +32,7 @@ export const TAG_WORKSPACE_SECTIONS: readonly TagWorkspaceSection[] = [
         status: 'available',
       },
       { key: 'members', label: 'Members', path: 'members', status: 'available' },
-      {
-        key: 'notifications',
-        label: 'Notifications',
-        path: null,
-        status: 'migrating',
-      },
+      { key: 'inbox', label: 'Inbox', path: 'inbox', status: 'available' },
     ],
   },
   {
@@ -69,6 +64,9 @@ export function workspaceSwitchDestination(
   }
   if (modulePath === 'issues') {
     return `/${encodeURIComponent(targetSlug)}/issues`;
+  }
+  if (modulePath === 'inbox') {
+    return `/${encodeURIComponent(targetSlug)}/inbox`;
   }
   if (modulePath === 'projects') {
     return `/${encodeURIComponent(targetSlug)}/projects`;

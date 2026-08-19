@@ -5,6 +5,11 @@ import type {
 } from "../types";
 
 const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
+  "needs_attention",
+  "task_agent_progress",
+  "comments_mentions",
+  "system_health",
+  "browser_push",
   "assignments",
   "status_changes",
   "comments",
@@ -13,6 +18,14 @@ const NOTIFICATION_GROUP_KEYS: readonly NotificationGroupKey[] = [
   "agent_activity",
   "system_notifications",
 ];
+
+const CANONICAL_GROUP_KEYS = new Set<NotificationGroupKey>([
+  "needs_attention",
+  "task_agent_progress",
+  "comments_mentions",
+  "system_health",
+  "browser_push",
+]);
 
 function preferenceValue(
   preferences: NotificationPreferences,
@@ -32,8 +45,12 @@ export function deriveNotificationPreferencePatch(
   const patch: NotificationPreferences = {};
 
   for (const key of NOTIFICATION_GROUP_KEYS) {
-    const previousValue = preferenceValue(previous, key);
-    const nextValue = preferenceValue(next, key);
+    const previousValue = CANONICAL_GROUP_KEYS.has(key)
+      ? previous[key]
+      : preferenceValue(previous, key);
+    const nextValue = CANONICAL_GROUP_KEYS.has(key)
+      ? next[key]
+      : preferenceValue(next, key);
     if (previousValue !== nextValue) {
       patch[key] = nextValue;
     }
@@ -51,7 +68,10 @@ export function applyNotificationPreferencePatch(
 
   for (const key of NOTIFICATION_GROUP_KEYS) {
     const value = patch[key];
-    if (value === "muted") {
+    if (
+      value === "muted" ||
+      (value === "all" && CANONICAL_GROUP_KEYS.has(key))
+    ) {
       next[key] = value;
     } else if (value === "all") {
       delete next[key];
@@ -81,8 +101,8 @@ export function rollbackNotificationPreferencePatch(
       continue;
     }
 
-    const previousValue = preferenceValue(previous, key);
-    if (previousValue === "all") {
+    const previousValue = previous[key];
+    if (previousValue === undefined) {
       delete next[key];
     } else {
       next[key] = previousValue;

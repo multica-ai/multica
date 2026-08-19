@@ -3,6 +3,32 @@
     "title": "收件箱",
     "back": "收件箱"
   },
+  "preferences": {
+    "delivery": {
+      "title": "通知方式",
+      "description": "选择此浏览器是否可在页面之外发送收件箱提醒。",
+      "label": "浏览器提醒与 Web Push",
+      "hint": "为新的收件箱项目显示系统横幅和后台推送。"
+    },
+    "groups": {
+      "needs_attention": {
+        "label": "需要我处理",
+        "description": "分配、审阅请求及其他等待你处理的工作。"
+      },
+      "task_agent_progress": {
+        "label": "任务/智能体进展",
+        "description": "任务变更与智能体的正常执行进展。"
+      },
+      "comments_mentions": {
+        "label": "评论与提及",
+        "description": "协作讨论中的回复、提及与表情反应。"
+      },
+      "system_health": {
+        "label": "系统健康",
+        "description": "失败、阻塞、暂停或结果未确认的自动化工作。"
+      }
+    }
+  },
   "menu": {
     "mark_all_read": "全部标为已读",
     "archive_all": "归档全部",

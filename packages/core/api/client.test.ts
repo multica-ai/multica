@@ -5,6 +5,40 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+describe("ApiClient Tag Web Push same-origin seam", () => {
+  it("uses the Tag gateway prefix for config and subscription writes", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        Response.json({ enabled: true, public_key: "public-key" }),
+      )
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("/api/tag");
+    const subscription = {
+      endpoint: "https://push.example/subscription",
+      expirationTime: null,
+      keys: { p256dh: "p256dh", auth: "auth" },
+    };
+
+    await expect(client.getWebPushConfig()).resolves.toEqual({
+      enabled: true,
+      public_key: "public-key",
+    });
+    await client.upsertWebPushSubscription(subscription);
+    await client.deleteWebPushSubscription(subscription.endpoint);
+
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => [url, init.method ?? "GET"]),
+    ).toEqual([
+      ["/api/tag/api/web-push/config", "GET"],
+      ["/api/tag/api/web-push/subscriptions", "POST"],
+      ["/api/tag/api/web-push/subscriptions", "DELETE"],
+    ]);
+  });
+});
+
 describe("ApiClient pull-request response schema", () => {
   const validPR = {
     id: "pr-1",

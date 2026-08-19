@@ -6,11 +6,10 @@ export { createPersistStorage } from "./persist-storage";
 export { createWorkspaceAwareStorage, setCurrentWorkspace, getCurrentSlug, getCurrentWsId, subscribeToCurrentSlug, registerForWorkspaceRehydration } from "./workspace-storage";
 export { clearWorkspaceStorage } from "./storage-cleanup";
 export {
-  registerSystemNotificationClickHandler,
-  isWebNotificationSupported,
-  getWebNotificationPermission,
-  requestWebNotificationPermission,
-  showWebNotification,
-  type SystemNotificationPayload,
-  type WebNotificationPermission,
-} from "./system-notification";
+  VIBES_PUSH_SERVICE_WORKER_URL,
+  ensureWebPushSubscription,
+  getWebPushCapability,
+  revokeWebPushSubscription,
+  type WebPushCapability,
+  type WebPushSubscriptionJSON,
+} from "./web-push";

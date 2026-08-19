@@ -155,40 +155,11 @@ const desktopAPI = {
   setImmersiveMode: (immersive: boolean) =>
     ipcRenderer.invoke("window:setImmersive", immersive),
   /**
-   * Show a native OS notification for a new inbox item. Fired from the
-   * renderer only when the app is unfocused — in-focus feedback is the
-   * inbox sidebar's unread styling. `slug`, `itemId`, and `issueKey` are
-   * all round-tripped on click: slug pins routing to the source workspace
-   * (the user may switch workspaces before clicking the banner), itemId
-   * lets the renderer mark the row read, issueKey maps to the inbox URL
-   * param.
-   */
-  showNotification: (payload: {
-    slug: string;
-    itemId: string;
-    issueKey: string;
-    title: string;
-    body: string;
-  }) => ipcRenderer.send("notification:show", payload),
-  /**
    * Update the OS dock / taskbar unread badge. Pass 0 to clear. Values
    * above 99 render as "99+" (capping is handled in the main process).
    */
   setUnreadBadge: (count: number) =>
     ipcRenderer.send("badge:set", Math.max(0, Math.floor(count))),
-  /**
-   * Subscribe to "open this inbox row" requests sent by the main process
-   * when the user clicks an OS notification banner. Returns an unsubscribe
-   * function. The payload echoes the `slug`, `itemId`, and `issueKey` that
-   * were passed to `showNotification`.
-   */
-  onInboxOpen: (
-    callback: (payload: {
-      slug: string;
-      itemId: string;
-      issueKey: string;
-    }) => void,
-  ) => subscribeToMainRendererChannel("inbox:open", callback),
   /** Listen for native macOS back/forward swipe gestures. */
   onNavigationGesture: (callback: (gesture: NavigationGesture) => void) => {
     const handler = (_event: Electron.IpcRendererEvent, gesture: unknown) => {

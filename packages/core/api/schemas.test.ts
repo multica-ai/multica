@@ -53,6 +53,7 @@ import {
   RemoteMCPDiscoveryResponseSchema,
   RemoteMCPOAuthStartResponseSchema,
   EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
+  WebPushConfigResponseSchema,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema } from "./schemas";
 import {
@@ -86,6 +87,15 @@ const baseIssue = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
+
+describe("WebPushConfigResponseSchema", () => {
+  it("fails safe when an older or malformed backend omits the public key contract", () => {
+    expect(WebPushConfigResponseSchema.parse({ enabled: "yes" })).toEqual({
+      enabled: false,
+      public_key: "",
+    });
+  });
+});
 
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
   it("accepts a primitive metadata KV map", () => {

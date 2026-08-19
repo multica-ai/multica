@@ -57,3 +57,29 @@ func TestNotifTypeToGroupMentionsIsOwnGroup(t *testing.T) {
 		t.Fatalf("notifTypeToGroup[new_comment] = %q, want %q", got, "comments")
 	}
 }
+
+func TestCanonicalNotificationGroupsOverrideLegacyPerEventPreferences(t *testing.T) {
+	cases := []struct {
+		name      string
+		prefs     map[string]string
+		notifType string
+		want      bool
+	}{
+		{"legacy comment mute remains effective", map[string]string{"comments": "muted"}, "new_comment", true},
+		{"legacy mention choice remains independent", map[string]string{"comments": "muted"}, "mentioned", false},
+		{"canonical comments group overrides both legacy keys", map[string]string{"comments_mentions": "muted", "mentions": "all"}, "mentioned", true},
+		{"progress canonical override covers successful task events", map[string]string{"task_agent_progress": "muted", "agent_activity": "all"}, "task_completed", true},
+		{"system health canonical override separates failures from progress", map[string]string{"system_health": "all", "agent_activity": "muted"}, "task_failed", false},
+		{"legacy agent activity still mutes failure before migration", map[string]string{"agent_activity": "muted"}, "task_failed", true},
+		{"previously ungrouped reaction follows comments and mentions", map[string]string{"comments_mentions": "muted"}, "reaction_added", true},
+		{"previously ungrouped quick-create failure follows system health", map[string]string{"system_health": "muted"}, "quick_create_failed", true},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isNotifMuted(tc.prefs, tc.notifType); got != tc.want {
+				t.Fatalf("isNotifMuted(%v, %q) = %v, want %v", tc.prefs, tc.notifType, got, tc.want)
+			}
+		})
+	}
+}

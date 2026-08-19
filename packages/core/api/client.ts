@@ -147,6 +147,8 @@ import type {
   WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
+  WebPushConfigResponse,
+  WebPushSubscriptionRequest,
   PluginBindingRequest,
   PluginCatalogResponse,
   PluginInstallation,
@@ -349,6 +351,8 @@ import {
   EMPTY_INBOX_ITEMS,
   NotificationPreferenceResponseSchema,
   EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
+  WebPushConfigResponseSchema,
+  EMPTY_WEB_PUSH_CONFIG_RESPONSE,
   LabelSchema,
   ListLabelsResponseSchema,
   ListIssueStatusesResponseSchema,
@@ -2287,6 +2291,32 @@ export class ApiClient {
       EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
       { endpoint: "PATCH /api/notification-preferences" },
     );
+  }
+
+  async getWebPushConfig(): Promise<WebPushConfigResponse> {
+    const raw = await this.fetch<unknown>("/api/web-push/config");
+    return parseWithFallback(
+      raw,
+      WebPushConfigResponseSchema,
+      EMPTY_WEB_PUSH_CONFIG_RESPONSE,
+      { endpoint: "GET /api/web-push/config" },
+    );
+  }
+
+  async upsertWebPushSubscription(
+    subscription: WebPushSubscriptionRequest,
+  ): Promise<void> {
+    await this.fetch("/api/web-push/subscriptions", {
+      method: "POST",
+      body: JSON.stringify(subscription),
+    });
+  }
+
+  async deleteWebPushSubscription(endpoint: string): Promise<void> {
+    await this.fetch("/api/web-push/subscriptions", {
+      method: "DELETE",
+      body: JSON.stringify({ endpoint }),
+    });
   }
 
   // App Config

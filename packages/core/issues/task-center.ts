@@ -1,7 +1,7 @@
 /**
  * Product-facing views that live inside Tag's single Tasks route.
  *
- * The underlying API still calls these resources issues, inbox items, and
+ * The underlying API still calls these resources issues and
  * autopilots. Keeping the mapping here lets host adapters collapse their
  * legacy URLs without making the API or WebSocket vocabulary product-facing.
  */
@@ -9,7 +9,6 @@ export const TASK_CENTER_TABS = [
   "tasks",
   "projects",
   "mine",
-  "activity",
   "automations",
 ] as const;
 
@@ -24,4 +23,17 @@ export function taskCenterTabFromSearch(search: URLSearchParams): TaskCenterTab 
 
 export function taskCenterPath(workspaceSlug: string, tab: TaskCenterTab): string {
   return `/${encodeURIComponent(workspaceSlug)}/issues?tab=${tab}`;
+}
+
+/** Normalize the retired Tasks Activity mount to the standalone Inbox. */
+export function taskCenterLegacyRedirect(
+  workspaceSlug: string,
+  search: URLSearchParams,
+): string | null {
+  if (search.get("tab") !== "activity") return null;
+  const next = new URLSearchParams(search);
+  next.delete("tab");
+  const query = next.toString();
+  const inbox = `/${encodeURIComponent(workspaceSlug)}/inbox`;
+  return query ? `${inbox}?${query}` : inbox;
 }

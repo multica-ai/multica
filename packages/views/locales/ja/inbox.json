@@ -3,6 +3,32 @@
     "title": "インボックス",
     "back": "インボックス"
   },
+  "preferences": {
+    "delivery": {
+      "title": "配信方法",
+      "description": "このブラウザーが開いていないページの外でもインボックス通知を配信するか選択します。",
+      "label": "ブラウザー通知と Web Push",
+      "hint": "新しいインボックス項目をシステムバナーとバックグラウンド Push で通知します。"
+    },
+    "groups": {
+      "needs_attention": {
+        "label": "対応が必要",
+        "description": "割り当て、レビュー依頼など、あなたの対応を待つ作業。"
+      },
+      "task_agent_progress": {
+        "label": "タスク／エージェントの進捗",
+        "description": "タスクの変更とエージェントの正常な進捗。"
+      },
+      "comments_mentions": {
+        "label": "コメントとメンション",
+        "description": "共同作業スレッドの返信、メンション、リアクション。"
+      },
+      "system_health": {
+        "label": "システム状態",
+        "description": "失敗、ブロック、一時停止、未確認の自動処理。"
+      }
+    }
+  },
   "menu": {
     "mark_all_read": "すべて既読にする",
     "archive_all": "すべてアーカイブ",

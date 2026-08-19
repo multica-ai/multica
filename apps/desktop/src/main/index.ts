@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, Notification, screen } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, screen } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 import { pathToFileURL } from "url";
@@ -55,10 +55,6 @@ import {
   type MainRendererMessageChannel,
 } from "../shared/main-renderer-messages";
 import { AuthSessionCoordinator } from "./auth-session-coordinator";
-import {
-  NotificationGate,
-  parseNativeNotificationPayload,
-} from "./notification-gate";
 
 // Guards against registering the will-download handler more than once on the
 // same session. window.webContents.session is shared, and createWindow() can
@@ -134,7 +130,6 @@ const authSessionCoordinator = new AuthSessionCoordinator<BrowserWindow>(
     if (!window.isDestroyed()) window.close();
   },
 );
-const notificationGate = new NotificationGate();
 const mainRendererMessages = new MainRendererMessageQueue();
 let desktopInitialized = false;
 let authSessionGeneration = 0;
@@ -770,7 +765,6 @@ if (!gotTheLock) {
         const accountInvalidated = authSessionCoordinator.reportMain(userId);
         if (accountInvalidated) {
           authSessionGeneration += 1;
-          mainRendererMessages.clear("inbox:open");
         }
         return;
       }
@@ -787,50 +781,6 @@ if (!gotTheLock) {
       BrowserWindow.fromWebContents(event.sender)?.setWindowButtonVisibility(
         !immersive,
       );
-    });
-
-    // Main owns foreground detection and item-level dedupe. Every renderer
-    // has its own WebSocket and `document.hasFocus()` only describes that one
-    // window, so renderer-only gating can emit N duplicate system banners.
-    ipcMain.on("notification:show", (event, value: unknown) => {
-      const sourceWindow = BrowserWindow.fromWebContents(event.sender);
-      if (!sourceWindow) return;
-      if (sourceWindow === mainWindow) {
-        if (!authSessionCoordinator.hasActiveMainSession()) return;
-      } else if (
-        !issueWindows.has(sourceWindow) ||
-        !authSessionCoordinator.isCurrentIssueSession(sourceWindow)
-      ) {
-        return;
-      }
-
-      const payload = parseNativeNotificationPayload(value);
-      if (!payload || !Notification.isSupported()) return;
-      const anyWindowFocused = BrowserWindow.getAllWindows().some(
-        (window) => !window.isDestroyed() && window.isFocused(),
-      );
-      if (!notificationGate.shouldShow(payload.itemId, anyWindowFocused)) {
-        return;
-      }
-
-      const notification = new Notification({
-        title: payload.title,
-        body: payload.body,
-      });
-      const notificationSessionGeneration = authSessionGeneration;
-      notification.on("click", () => {
-        // A banner emitted for user A must not navigate after the main window
-        // logs out or switches to user B.
-        if (notificationSessionGeneration !== authSessionGeneration) return;
-        // Recreate the main window when an issue-only window outlived it, then
-        // wait for the inbox listener before delivering the navigation.
-        dispatchToMainRenderer("inbox:open", {
-          slug: payload.slug,
-          itemId: payload.itemId,
-          issueKey: payload.issueKey,
-        });
-      });
-      notification.show();
     });
 
     // IPC: update the dock / taskbar unread badge. Values above 99 render as

@@ -3,6 +3,32 @@
     "title": "Inbox",
     "back": "Inbox"
   },
+  "preferences": {
+    "delivery": {
+      "title": "Delivery",
+      "description": "Choose whether this browser may deliver Inbox alerts outside the open page.",
+      "label": "Browser alerts & Web Push",
+      "hint": "Show system banners and background Push for new Inbox items."
+    },
+    "groups": {
+      "needs_attention": {
+        "label": "Needs my attention",
+        "description": "Assignments, review requests, and other work waiting on you."
+      },
+      "task_agent_progress": {
+        "label": "Task/Agent progress",
+        "description": "Task changes and successful Agent progress."
+      },
+      "comments_mentions": {
+        "label": "Comments & mentions",
+        "description": "Replies, mentions, and reactions in collaboration threads."
+      },
+      "system_health": {
+        "label": "System health",
+        "description": "Failed, blocked, paused, or unconfirmed automated work."
+      }
+    }
+  },
   "menu": {
     "mark_all_read": "Mark all as read",
     "archive_all": "Archive all",

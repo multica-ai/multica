@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS web_push_subscription_user_idx;

@@ -55,6 +55,7 @@
     "./notification-preferences/queries": "./notification-preferences/queries.ts",
     "./notification-preferences/mutations": "./notification-preferences/mutations.ts",
     "./notification-preferences/patch": "./notification-preferences/patch.ts",
+    "./notification-preferences/web-push": "./notification-preferences/web-push.ts",
     "./chat": "./chat/index.ts",
     "./chat/queries": "./chat/queries.ts",
     "./chat/mutations": "./chat/mutations.ts",

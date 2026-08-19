@@ -41,6 +41,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	"github.com/multica-ai/multica/server/internal/vibeshandoff"
+	webpushdelivery "github.com/multica-ai/multica/server/internal/webpush"
 	composiosdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
@@ -368,6 +369,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.TagSessionGrantor = opts.TagAuthorityAccess.Gate
 		h.TagAccessGate = opts.TagAuthorityAccess.Gate
 	}
+	webPushConfig := webpushdelivery.Config{
+		PublicKey:  os.Getenv("WEB_PUSH_VAPID_PUBLIC_KEY"),
+		PrivateKey: os.Getenv("WEB_PUSH_VAPID_PRIVATE_KEY"),
+		Subject:    os.Getenv("WEB_PUSH_VAPID_SUBJECT"),
+	}
+	webPushService := webpushdelivery.NewService(
+		webPushConfig,
+		webpushdelivery.NewDBStore(pool),
+		webpushdelivery.NewProtocolSender(webPushConfig),
+	)
+	h.WebPush = webPushService
+	webPushService.Register(bus)
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -2055,6 +2068,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Patch("/", h.PatchNotificationPreferences)
 				r.Put("/", h.UpdateNotificationPreferences)
 			})
+
+			// Browser background Web Push. This is a delivery adapter over the
+			// existing persisted Inbox; it owns no notification truth or queue.
+			r.Get("/api/web-push/config", h.GetWebPushConfig)
+			r.Post("/api/web-push/subscriptions", h.UpsertWebPushSubscription)
+			r.Delete("/api/web-push/subscriptions", h.DeleteWebPushSubscription)
 		})
 	})
 

@@ -23,6 +23,7 @@ describe('Tag Host workspace routes', () => {
         '/$workspaceSlug/runtimes/$machineId',
         '/$workspaceSlug/runtimes/$machineId/runtime/$runtimeId',
         '/$workspaceSlug/members',
+        '/$workspaceSlug/inbox',
         '/$workspaceSlug/settings',
         '/workspaces/new',
         '/invite',

@@ -116,7 +116,6 @@ function renderShell() {
     window as unknown as { desktopAPI: Record<string, unknown> }
   ).desktopAPI = {
     onNavigationGesture: () => () => {},
-    onInboxOpen: () => () => {},
   };
 
   const qc = new QueryClient({

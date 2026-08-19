@@ -61,6 +61,16 @@ describe('TanStack Tag Host path adapter', () => {
     expect(
       toTagShareUrl('http://localhost:3000', '/design-lab/projects/project-1')
     ).toBe('http://localhost:3000/tag/design-lab/issues/projects/project-1');
+    expect(
+      toTagShareUrl('http://localhost:3100', '/design-lab/inbox?issue=task-1')
+    ).toBe('http://localhost:3100/tag/design-lab/inbox?issue=task-1');
+
+    const inbox = fromTagHostLocation(
+      '/tag/design-lab/inbox',
+      '?issue=task-1'
+    );
+    expect(inbox.pathname).toBe('/design-lab/inbox');
+    expect(inbox.searchParams.get('issue')).toBe('task-1');
 
     expect(resolveTagRuntimeUrls('https://vibes.test')).toEqual({
       apiBaseUrl: '/api/tag',

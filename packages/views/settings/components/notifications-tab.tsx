@@ -4,7 +4,14 @@ import { useQuery } from "@tanstack/react-query";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { notificationPreferenceOptions } from "@multica/core/notification-preferences/queries";
 import { useUpdateNotificationPreferences } from "@multica/core/notification-preferences/mutations";
-import type { NotificationGroupKey, NotificationPreferences } from "@multica/core/types";
+import {
+  CONTENT_NOTIFICATION_GROUPS,
+  notificationContentGroupState,
+  notificationDeliveryEnabled,
+  setNotificationContentGroup,
+  setNotificationDelivery,
+} from "@multica/core/notification-preferences";
+import type { NotificationPreferences } from "@multica/core/types";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { toast } from "sonner";
 import { useT } from "../../i18n";
@@ -16,40 +23,24 @@ import {
   SettingsTab,
 } from "./settings-layout";
 
-// Inbox event groups rendered in the per-event toggle list. `system_notifications`
-// is a sibling preference key but lives in its own section below.
-const INBOX_GROUP_KEYS = [
-  "assignments",
-  "status_changes",
-  "comments",
-  "mentions",
-  "updates",
-  "agent_activity",
-] as const;
-type InboxGroupKey = (typeof INBOX_GROUP_KEYS)[number];
-
 export function NotificationsTab() {
   const { t } = useT("settings");
+  const { t: inboxT } = useT("inbox");
   const wsId = useWorkspaceId();
   const { data } = useQuery(notificationPreferenceOptions(wsId));
   const mutation = useUpdateNotificationPreferences();
 
   const preferences = data?.preferences ?? {};
 
-  const handleToggle = (key: NotificationGroupKey, enabled: boolean) => {
-    const updated: NotificationPreferences = {
-      ...preferences,
-      [key]: enabled ? "all" : "muted",
-    };
-    // Remove keys set to "all" (default) to keep the object clean
-    if (enabled) {
-      delete updated[key];
-    }
+  const save = (updated: NotificationPreferences) => {
     mutation.mutate(updated, {
       onSuccess: () =>
-        toast.success(t(($) => $.auto_save.toast_saved), {
-          id: "settings-auto-save",
-        }),
+        toast.success(
+          t(($) => $.auto_save.toast_saved),
+          {
+            id: "settings-auto-save",
+          },
+        ),
       onError: (err) =>
         toast.error(
           err instanceof Error && err.message
@@ -59,7 +50,7 @@ export function NotificationsTab() {
     });
   };
 
-  const systemEnabled = preferences.system_notifications !== "muted";
+  const deliveryEnabled = notificationDeliveryEnabled(preferences);
 
   return (
     <SettingsTab title={t(($) => $.page.tabs.notifications)}>
@@ -68,44 +59,58 @@ export function NotificationsTab() {
         description={t(($) => $.notifications.description)}
       >
         <SettingsCard>
-            {INBOX_GROUP_KEYS.map((key: InboxGroupKey) => {
-              const enabled = preferences[key] !== "muted";
-              return (
-                <SettingsRow
-                  key={key}
-                  label={t(($) => $.notifications.groups[key].label)}
-                  description={t(($) => $.notifications.groups[key].description)}
-                >
-                  <Switch
-                    checked={enabled}
-                    aria-label={t(($) => $.notifications.groups[key].label)}
-                    onCheckedChange={(checked) => handleToggle(key, checked)}
-                  />
-                </SettingsRow>
-              );
-            })}
+          {CONTENT_NOTIFICATION_GROUPS.map((group) => {
+            const state = notificationContentGroupState(preferences, group.key);
+            return (
+              <SettingsRow
+                key={group.key}
+                label={inboxT(($) => $.preferences.groups[group.key].label)}
+                description={inboxT(
+                  ($) => $.preferences.groups[group.key].description,
+                )}
+              >
+                <Switch
+                  checked={state !== "muted"}
+                  aria-label={inboxT(
+                    ($) => $.preferences.groups[group.key].label,
+                  )}
+                  onCheckedChange={(checked) =>
+                    save(
+                      setNotificationContentGroup(
+                        preferences,
+                        group.key,
+                        checked,
+                      ),
+                    )
+                  }
+                />
+              </SettingsRow>
+            );
+          })}
         </SettingsCard>
       </SettingsSection>
 
       <SettingsSection
-        title={t(($) => $.notifications.system.title)}
-        description={t(($) => $.notifications.system.description)}
+        title={inboxT(($) => $.preferences.delivery.title)}
+        description={inboxT(($) => $.preferences.delivery.description)}
       >
         <SettingsCard>
           <SettingsRow
-            label={t(($) => $.notifications.system.label)}
-            description={t(($) => $.notifications.system.hint)}
+            label={inboxT(($) => $.preferences.delivery.label)}
+            description={inboxT(($) => $.preferences.delivery.hint)}
           >
-              <Switch
-                checked={systemEnabled}
-                aria-label={t(($) => $.notifications.system.label)}
-                onCheckedChange={(checked) => handleToggle("system_notifications", checked)}
-              />
+            <Switch
+              checked={deliveryEnabled}
+              aria-label={inboxT(($) => $.preferences.delivery.label)}
+              onCheckedChange={(checked) =>
+                save(setNotificationDelivery(preferences, checked))
+              }
+            />
           </SettingsRow>
         </SettingsCard>
 
-        {/* Web-only: the browser permission banners require. Renders nothing on
-            desktop (OS-native delivery) or where the Notification API is absent. */}
+        {/* Web-only: permission and the durable background Push subscription.
+            Renders nothing where service-worker Push is unavailable. */}
         <BrowserNotificationSetting />
       </SettingsSection>
     </SettingsTab>

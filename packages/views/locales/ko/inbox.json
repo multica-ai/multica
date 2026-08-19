@@ -3,6 +3,32 @@
     "title": "인박스",
     "back": "인박스"
   },
+  "preferences": {
+    "delivery": {
+      "title": "알림 방식",
+      "description": "이 브라우저가 열린 페이지 밖에서도 인박스 알림을 보낼지 선택합니다.",
+      "label": "브라우저 알림 및 Web Push",
+      "hint": "새 인박스 항목을 시스템 배너와 백그라운드 Push로 알립니다."
+    },
+    "groups": {
+      "needs_attention": {
+        "label": "내 확인이 필요함",
+        "description": "할당, 리뷰 요청 등 내 응답을 기다리는 작업입니다."
+      },
+      "task_agent_progress": {
+        "label": "작업/에이전트 진행 상황",
+        "description": "작업 변경과 에이전트의 정상 진행 상황입니다."
+      },
+      "comments_mentions": {
+        "label": "댓글 및 멘션",
+        "description": "협업 스레드의 답글, 멘션, 반응입니다."
+      },
+      "system_health": {
+        "label": "시스템 상태",
+        "description": "실패, 차단, 일시 중지 또는 미확인 자동 작업입니다."
+      }
+    }
+  },
   "menu": {
     "mark_all_read": "모두 읽음으로 표시",
     "archive_all": "모두 보관",

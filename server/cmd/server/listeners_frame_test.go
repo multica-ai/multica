@@ -43,6 +43,18 @@ func TestRegisterListeners_FrameContainsActorType(t *testing.T) {
 			checkUser: true,
 			userID:    "user-1",
 		},
+		{
+			name: "personal event (inbox:unread) stays private",
+			event: events.Event{
+				Type:        protocol.EventInboxUnread,
+				WorkspaceID: "ws-1",
+				ActorID:     "member-xyz",
+				ActorType:   "member",
+				Payload:     map[string]any{"recipient_id": "user-1"},
+			},
+			checkUser: true,
+			userID:    "user-1",
+		},
 	}
 
 	for _, tc := range cases {

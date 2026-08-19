@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cloneElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
@@ -12,6 +13,11 @@ const state = vi.hoisted(() => ({
   floatingChatMounts: 0,
   globalShortcutMounts: 0,
   switches: [] as Array<{ id: string; destination: string }>,
+  unreadCount: 2,
+  unreadSummary: [
+    { workspace_id: 'workspace-a', count: 2 },
+    { workspace_id: 'workspace-b', count: 1 },
+  ],
   workspaces: [
     { id: 'workspace-a', slug: 'studio-a', name: 'Studio A' },
     { id: 'workspace-b', slug: 'studio-b', name: 'Studio B' },
@@ -40,6 +46,20 @@ vi.mock('@multica/core/workspace', () => ({
   workspaceListOptions: () => ({ queryKey: ['workspaces', 'list'] }),
 }));
 
+vi.mock('@multica/core/inbox/queries', () => ({
+  inboxUnreadSummaryOptions: () => ({
+    queryKey: ['inbox', 'unread-summary'],
+  }),
+  hasOtherWorkspaceUnread: (
+    entries: Array<{ workspace_id: string; count: number }>,
+    currentId: string
+  ) => entries.some((entry) => entry.workspace_id !== currentId && entry.count > 0),
+  unreadWorkspaceIds: (
+    entries: Array<{ workspace_id: string; count: number }>
+  ) => new Set(entries.filter((entry) => entry.count > 0).map((entry) => entry.workspace_id)),
+  useInboxUnreadCount: () => state.unreadCount,
+}));
+
 vi.mock('@multica/core/tag-authority', () => ({
   authorityKeys: { workspaces: () => ['tag-authority', 'workspaces'] },
   tagAuthorityClient: { listWorkspaces: () => Promise.resolve(state.workspaces) },
@@ -64,7 +84,14 @@ vi.mock('@multica/core/issues/stores/create-mode-store', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
-  useQuery: () => ({ data: state.workspaces }),
+  useQuery: ({ queryKey }: { queryKey: string[] }) => ({
+    data:
+      queryKey[0] === 'inbox' ? state.unreadSummary : state.workspaces,
+  }),
+}));
+
+vi.mock('@multica/ui/components/ui/number-flow', () => ({
+  CappedNumberFlow: ({ value }: { value: number }) => <span>{value}</span>,
 }));
 
 vi.mock('@multica/views/navigation', () => ({
@@ -136,7 +163,13 @@ vi.mock('@multica/ui/components/ui/sidebar', () => ({
 
 vi.mock('@multica/ui/components/ui/dropdown-menu', () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
-  DropdownMenuTrigger: ({ render }: { render: React.ReactElement }) => render,
+  DropdownMenuTrigger: ({
+    render,
+    children,
+  }: {
+    render: React.ReactElement;
+    children: React.ReactNode;
+  }) => cloneElement(render, undefined, children),
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   DropdownMenuItem: ({ children, onClick, ...props }: { children: React.ReactNode; onClick?: () => void } & React.ComponentProps<'button'>) => <button onClick={onClick} {...props}>{children}</button>,
 }));
@@ -152,6 +185,11 @@ beforeEach(() => {
   state.floatingChatMounts = 0;
   state.globalShortcutMounts = 0;
   state.switches = [];
+  state.unreadCount = 2;
+  state.unreadSummary = [
+    { workspace_id: 'workspace-a', count: 2 },
+    { workspace_id: 'workspace-b', count: 1 },
+  ];
 });
 
 afterEach(cleanup);
@@ -173,8 +211,10 @@ describe('TagWorkspaceShell', () => {
     expect(screen.getByRole('link', { name: 'Agents' }).getAttribute('href')).toBe('/studio-a/agents');
     expect(screen.getByRole('link', { name: 'Runtimes' }).getAttribute('href')).toBe('/studio-a/runtimes');
     expect(screen.getByRole('link', { name: 'Members' }).getAttribute('href')).toBe('/studio-a/members');
+    expect(screen.getByRole('link', { name: /^Inbox/ }).getAttribute('href')).toBe('/studio-a/inbox');
+    expect(screen.queryByText('Notifications')).toBeNull();
     expect(screen.queryByText('Projects')).toBeNull();
-    for (const removed of ['Inbox', 'My Tasks', 'Skills', 'Squads', 'Autopilots', 'Analytics']) {
+    for (const removed of ['My Tasks', 'Skills', 'Squads', 'Autopilots', 'Analytics']) {
       expect(screen.queryByText(removed)).toBeNull();
     }
     expect(screen.getAllByText('Migrating').length).toBeGreaterThan(0);
@@ -217,6 +257,21 @@ describe('TagWorkspaceShell', () => {
     expect(state.switches).toEqual([
       { id: 'workspace-b', destination: '/studio-b/chat' },
     ]);
+  });
+
+  it('reuses Inbox truth for the active count and cross-Workspace attention dots', () => {
+    render(<TagWorkspaceShell><div /></TagWorkspaceShell>);
+
+    expect(screen.getByRole('link', { name: /^Inbox\s*2$/ })).toBeTruthy();
+    expect(screen.getByTestId('other-workspace-unread')).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Switch to Studio B' })
+        .querySelector('[data-testid="workspace-unread"]')
+    ).toBeTruthy();
+    expect(
+      screen.getByRole('button', { name: 'Switch to Studio A' })
+        .querySelector('[data-testid="workspace-unread"]')
+    ).toBeNull();
   });
 
   it('enters the VIBES-authoritative create Workspace journey from the switcher', () => {

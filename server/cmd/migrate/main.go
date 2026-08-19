@@ -218,6 +218,8 @@ var concurrentIndexCleanups = map[string]string{
 	"377_tag_session_ws_delivery_id_index":                      "tag_access_session_workspace_delivery_id_uidx",
 	"379_vibes_cli_pat_binding_identity_index":                  "vibes_cli_pat_binding_pat_id_uidx",
 	"381_tag_member_execution_cleanup_key_index":                "tag_member_execution_cleanup_key_uidx",
+	"383_web_push_subscription_endpoint_index":                  "web_push_subscription_endpoint_idx",
+	"384_web_push_subscription_user_index":                      "web_push_subscription_user_idx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

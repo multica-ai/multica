@@ -1,4 +1,4 @@
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { motion } from "motion/react";
 import { useQuery } from "@tanstack/react-query";
@@ -16,12 +16,9 @@ import { ModalRegistry } from "@multica/views/modals/registry";
 import { AppSidebar, GlobalShortcuts } from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
-import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
+import { WorkspaceSlugProvider, useCurrentWorkspace } from "@multica/core/paths";
 import { workspaceListOptions } from "@multica/core/workspace";
-import {
-  useNavigation,
-  type LinkClickIntent,
-} from "@multica/views/navigation";
+import { type LinkClickIntent } from "@multica/views/navigation";
 import { getCurrentSlug, subscribeToCurrentSlug } from "@multica/core/platform";
 import { useDesktopUnreadBadge } from "@multica/views/platform";
 import {
@@ -172,47 +169,10 @@ function useInternalLinkHandler() {
   }, []);
 }
 
-/**
- * Bridge between the renderer and the Electron main process for inbox-level
- * OS integration. Mounted inside WorkspaceSlugProvider so it can resolve the
- * current workspace's id for the badge hook.
- *
- * Two responsibilities:
- *   1. Mirror the unread inbox count onto the dock/taskbar badge.
- *   2. When the user clicks an OS notification, open the notified
- *      workspace's inbox focused on that item. The route uses the `slug`
- *      that the notification was *emitted* with — not the currently active
- *      workspace — so a notification from workspace A always opens A's
- *      inbox even if the user has since switched to workspace B. Marking
- *      the row read is handled by InboxPage's selected-item effect, which
- *      covers both click-to-select and URL-param-select paths.
- *
- * The click routes through `useNavigation().push` — NOT the
- * `multica:navigate` event, whose handler `openTab`s into the ACTIVE
- * workspace's tab group. The navigation adapter detects a cross-workspace
- * path and translates it into `switchWorkspace(slug, path)`, so clicking a
- * workspace-A notification while B is active performs a real workspace
- * switch instead of mounting A's inbox inside B's tab group (#3766).
- */
-function DesktopInboxBridge() {
+/** Mirrors the persisted Inbox unread count onto the dock/taskbar badge. */
+function DesktopUnreadBadgeBridge() {
   const workspace = useCurrentWorkspace();
   useDesktopUnreadBadge(workspace?.id ?? null);
-  const { push } = useNavigation();
-  // The adapter identity changes with the active tab's location; the ref
-  // keeps the main-process subscription stable across navigations.
-  const pushRef = useRef(push);
-  useEffect(() => {
-    pushRef.current = push;
-  }, [push]);
-
-  useEffect(() => {
-    return window.desktopAPI.onInboxOpen(({ slug, issueKey }) => {
-      if (!slug) return;
-      const inboxPath = `${paths.workspace(slug).inbox()}?issue=${encodeURIComponent(issueKey)}`;
-      pushRef.current(inboxPath);
-    });
-  }, []);
-
   return null;
 }
 
@@ -264,7 +224,7 @@ export function DesktopShell() {
           window-level overlay (new-workspace flow) triggered by
           IndexRedirect, not a route. */}
       <WorkspaceSlugProvider slug={slug}>
-        <DesktopInboxBridge />
+        <DesktopUnreadBadgeBridge />
         <div className="flex h-screen bg-app-shell">
           {/* bg-app-shell is the wrapper's non-inset fill, so it also owns the
               non-inset half of --sidebar-wrapper-fill. sidebar.tsx supplies the

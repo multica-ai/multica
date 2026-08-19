@@ -148,9 +148,41 @@ var notifTypeToGroup = map[string]string{
 	"agent_completed":    "agent_activity",
 }
 
+// notifTypeToCanonicalGroup is the four-group product vocabulary. A stored
+// canonical value wins; when absent, isNotifMuted falls back to the exact
+// legacy per-event group above so existing mixed choices remain effective
+// until the user changes a collapsed group.
+var notifTypeToCanonicalGroup = map[string]string{
+	"issue_assigned":           "needs_attention",
+	"unassigned":               "needs_attention",
+	"assignee_changed":         "needs_attention",
+	"issue_subscribed":         "needs_attention",
+	"review_requested":         "needs_attention",
+	"status_changed":           "task_agent_progress",
+	"priority_changed":         "task_agent_progress",
+	"start_date_changed":       "task_agent_progress",
+	"due_date_changed":         "task_agent_progress",
+	"task_completed":           "task_agent_progress",
+	"agent_completed":          "task_agent_progress",
+	"quick_create_done":        "task_agent_progress",
+	"new_comment":              "comments_mentions",
+	"mentioned":                "comments_mentions",
+	"reaction_added":           "comments_mentions",
+	"task_failed":              "system_health",
+	"agent_blocked":            "system_health",
+	"quick_create_failed":      "system_health",
+	"quick_create_unconfirmed": "system_health",
+	"autopilot_paused":         "system_health",
+}
+
 // isNotifMuted returns true if the given notification type is muted for a user
 // based on their parsed preferences map.
 func isNotifMuted(prefs map[string]string, notifType string) bool {
+	if canonicalGroup, ok := notifTypeToCanonicalGroup[notifType]; ok {
+		if value, explicit := prefs[canonicalGroup]; explicit {
+			return value == "muted"
+		}
+	}
 	group, ok := notifTypeToGroup[notifType]
 	if !ok {
 		return false // unconfigurable types are always delivered

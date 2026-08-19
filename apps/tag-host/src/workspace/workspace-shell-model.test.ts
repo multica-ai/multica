@@ -17,12 +17,12 @@ describe('Tag Workspace Shell navigation model', () => {
       expect.objectContaining({ key: 'agents', path: 'agents' }),
       expect.objectContaining({ key: 'runtimes', path: 'runtimes' }),
       expect.objectContaining({ key: 'members', path: 'members' }),
+      expect.objectContaining({ key: 'inbox', path: 'inbox' }),
       expect.objectContaining({ key: 'settings', path: 'settings' }),
     ]);
     const itemKeys = items.map((item) => item.key);
     for (const mergedOrRemoved of [
       'files',
-      'inbox',
       'my-tasks',
       'projects',
       'skills',
@@ -32,14 +32,7 @@ describe('Tag Workspace Shell navigation model', () => {
     ]) {
       expect(itemKeys).not.toContain(mergedOrRemoved);
     }
-    expect(items.filter((item) => item.status === 'migrating')).not.toHaveLength(
-      0
-    );
-    expect(
-      items
-        .filter((item) => item.status === 'migrating')
-        .every((item) => item.path === null)
-    ).toBe(true);
+    expect(items.filter((item) => item.status === 'migrating')).toHaveLength(0);
   });
 
   it('keeps Files beside Chat instead of exposing it as a primary sidebar item', () => {
@@ -80,5 +73,8 @@ describe('Tag Workspace Shell navigation model', () => {
     expect(
       workspaceSwitchDestination('studio-b', '/studio-a/members')
     ).toBe('/studio-b/members');
+    expect(
+      workspaceSwitchDestination('studio-b', '/studio-a/inbox?issue=task-1')
+    ).toBe('/studio-b/inbox');
   });
 });

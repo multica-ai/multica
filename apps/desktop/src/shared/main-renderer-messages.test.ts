@@ -22,8 +22,8 @@ describe("MainRendererMessageQueue", () => {
     const queue = new MainRendererMessageQueue();
     const send = vi.fn();
 
-    queue.setReady("inbox:open", true, send);
-    queue.enqueue("inbox:open", { itemId: "item-1" }, send);
+    queue.setReady("invite:open", true, send);
+    queue.enqueue("invite:open", "invite-1", send);
 
     expect(send).toHaveBeenCalledOnce();
   });
@@ -45,9 +45,9 @@ describe("MainRendererMessageQueue", () => {
     const queue = new MainRendererMessageQueue();
     const send = vi.fn();
 
-    queue.enqueue("inbox:open", { itemId: "old-account-item" }, send);
-    queue.clear("inbox:open");
-    queue.setReady("inbox:open", true, send);
+    queue.enqueue("invite:open", "old-account-invite", send);
+    queue.clear("invite:open");
+    queue.setReady("invite:open", true, send);
 
     expect(send).not.toHaveBeenCalled();
   });

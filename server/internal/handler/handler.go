@@ -155,6 +155,12 @@ type tagSessionGrantor interface {
 	GrantSession(context.Context, tagaccess.SessionGrant) error
 }
 
+type WebPushManager interface {
+	PublicKey() (string, bool)
+	Upsert(ctx context.Context, userID, endpoint, p256dh, auth string) error
+	Delete(ctx context.Context, userID, endpoint string) error
+}
+
 // DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
 // daemon so a queued heartbeat-carried request (model discovery) is picked up
 // immediately instead of on the daemon's next scheduled tick (MUL-5444).
@@ -188,6 +194,7 @@ type Handler struct {
 	Storage                storage.Storage
 	CFSigner               *auth.CloudFrontSigner
 	Analytics              analytics.Client
+	WebPush                WebPushManager
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the

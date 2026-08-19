@@ -34,9 +34,6 @@ vi.mock("../../projects/components/projects-page", () => ({
 vi.mock("../../my-issues/components/my-issues-page", () => ({
   MyIssuesPage: () => <div>mine-panel</div>,
 }));
-vi.mock("../../inbox/components/inbox-page", () => ({
-  InboxPage: () => <div>activity-panel</div>,
-}));
 vi.mock("../../autopilots/components/autopilots-page", () => ({
   AutopilotsPage: (props: unknown) => {
     autopilotsPage(props);
@@ -63,22 +60,27 @@ describe("TaskCenterPage", () => {
     expect(navigation.replace).toHaveBeenCalledWith("/studio/issues?tab=tasks");
   });
 
-  it("keeps My Tasks, Activity, and Automations under the one Tasks route", () => {
-    navigation.searchParams = new URLSearchParams("tab=activity");
+  it("keeps My Tasks and Automations under Tasks without mounting Inbox", () => {
+    navigation.searchParams = new URLSearchParams("tab=mine");
     navigation.replace.mockClear();
 
     render(<TaskCenterPage workspaceSlug="studio" />);
 
-    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute(
-      "aria-selected",
-      "true",
-    );
-    expect(screen.getByText("activity-panel")).toBeTruthy();
+    expect(screen.queryByRole("tab", { name: "Activity" })).toBeNull();
+    expect(screen.getByText("mine-panel")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("tab", { name: "Automations" }));
     expect(navigation.replace).toHaveBeenCalledWith(
       "/studio/issues?tab=automations",
     );
+  });
+
+  it("normalizes the retired Activity deep link to standalone Inbox", () => {
+    navigation.searchParams = new URLSearchParams("tab=activity&issue=task-1");
+    navigation.replace.mockClear();
+    render(<TaskCenterPage workspaceSlug="studio" />);
+    expect(navigation.replace).toHaveBeenCalledWith("/studio/inbox?issue=task-1");
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
 
   it("passes the host-owned Automation detail path into the reused list", () => {

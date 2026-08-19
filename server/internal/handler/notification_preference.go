@@ -13,11 +13,15 @@ import (
 
 // validNotifGroups is the set of notification preference group keys that the
 // API accepts. Keys not in this set are rejected. `system_notifications` is
-// not an inbox event group — it's a delivery-channel toggle controlling
-// whether native OS notification banners fire — but it shares the same
-// preferences map so a single endpoint covers all user notification
-// preferences.
+// not an inbox event group — it is the legacy delivery-channel key now used
+// only as a fallback for `browser_push`. Both remain accepted so installed
+// clients and persisted choices keep working during the compatibility window.
 var validNotifGroups = map[string]bool{
+	"needs_attention":      true,
+	"task_agent_progress":  true,
+	"comments_mentions":    true,
+	"system_health":        true,
+	"browser_push":         true,
 	"assignments":          true,
 	"status_changes":       true,
 	"comments":             true,

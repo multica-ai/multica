@@ -961,6 +961,16 @@ export const EMPTY_NOTIFICATION_PREFERENCE_RESPONSE: NotificationPreferenceRespo
   preferences: {},
 };
 
+export const WebPushConfigResponseSchema = z.object({
+  enabled: z.boolean().catch(false),
+  public_key: z.string().catch(""),
+}).loose();
+
+export const EMPTY_WEB_PUSH_CONFIG_RESPONSE = {
+  enabled: false,
+  public_key: "",
+};
+
 export const CreateFeedbackResponseSchema = z.object({
   id: z.string(),
   created_at: z.string(),

@@ -73,4 +73,20 @@ describe("notification preference patches", () => {
       ),
     ).toEqual({});
   });
+
+  it("persists explicit canonical all values so they override legacy mute choices", () => {
+    expect(
+      deriveNotificationPreferencePatch(
+        { assignments: "muted" },
+        { assignments: "muted", needs_attention: "all" },
+      ),
+    ).toEqual({ needs_attention: "all" });
+
+    expect(
+      applyNotificationPreferencePatch(
+        { assignments: "muted" },
+        { needs_attention: "all" },
+      ),
+    ).toEqual({ assignments: "muted", needs_attention: "all" });
+  });
 });
