@@ -1,5 +1,11 @@
 import { useCallback, useEffect } from "react";
+import {
+  getShortcutPlatform,
+  isEditableShortcutTarget,
+} from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
 import { useTabStore, useActiveTabHistory } from "@/stores/tab-store";
+import { useWindowOverlayStore } from "@/stores/window-overlay-store";
 
 /**
  * Shell back/forward for the active tab (MUL-4741 session architecture).
@@ -27,18 +33,11 @@ export function useTabHistory() {
   return { canGoBack, canGoForward, goBack, goForward };
 }
 
-function isEditableTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
-  if (target.isContentEditable) return true;
-  const tag = target.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT";
-}
-
 /**
- * Keyboard and mouse back/forward for the active tab's history:
- * Cmd/Ctrl+←/→ (browser convention), plus mouse side buttons 3/4. The
- * Cmd/Ctrl+[ / ] chords are handled by the shared shortcut registry
- * (packages/core/shortcuts via <GlobalShortcuts>) instead, so they stay
+ * Desktop tab cycling plus keyboard and mouse back/forward for the active
+ * tab's history. Cmd/Ctrl+Shift+[ / ] cycles tabs; Cmd/Ctrl+←/→ and mouse side
+ * buttons 3/4 navigate history. Unshifted Cmd/Ctrl+[ / ] stays in the shared
+ * shortcut registry (packages/core/shortcuts via <GlobalShortcuts>) so it is
  * rebindable and identical on web and desktop. The renderer's mouseup is the
  * ONE cross-platform source for side buttons — the main process deliberately
  * does not forward `app-command` (Windows/Linux emit both, which would
@@ -48,7 +47,31 @@ export function useNavigationInputBindings() {
   const { goBack, goForward } = useTabHistory();
 
   useEffect(() => {
+    if (window.desktopAPI.windowContext?.kind === "issue") return undefined;
+
     const onKeyDown = (e: KeyboardEvent) => {
+      const platform = getShortcutPlatform();
+      const primaryOnly =
+        platform === "macos"
+          ? e.metaKey && !e.ctrlKey
+          : e.ctrlKey && !e.metaKey;
+      const previousTab = e.key === "[" || e.key === "{";
+      const nextTab = e.key === "]" || e.key === "}";
+      if (primaryOnly && e.shiftKey && !e.altKey && (previousTab || nextTab)) {
+        if (
+          e.defaultPrevented ||
+          e.repeat ||
+          isImeComposing(e) ||
+          isEditableShortcutTarget(e.target) ||
+          useWindowOverlayStore.getState().overlay
+        ) {
+          return;
+        }
+        e.preventDefault();
+        useTabStore.getState().cycleActiveTab(previousTab ? -1 : 1);
+        return;
+      }
+
       const mod = e.metaKey || e.ctrlKey;
       if (!mod || e.altKey || e.shiftKey) return;
       // Cmd/Ctrl+[ and +] are intentionally NOT handled here: they are
@@ -63,7 +86,7 @@ export function useNavigationInputBindings() {
       if (!back && !forward) return;
       // In editable contexts these chords belong to the text field:
       // cmd+arrow moves the caret to the line edge, cmd+bracket indents.
-      if (isEditableTarget(e.target)) return;
+      if (isEditableShortcutTarget(e.target)) return;
       e.preventDefault();
       if (back) goBack();
       else goForward();

@@ -167,4 +167,17 @@ describe("KeyboardShortcutsTab", () => {
       createShortcutChord("K", { primary: true }),
     );
   });
+
+  it("shows the fixed desktop tab-cycling shortcuts", () => {
+    renderWithI18n(<KeyboardShortcutsTab />);
+
+    expect(screen.getByText("Previous tab")).toBeInTheDocument();
+    expect(screen.getByText("Next tab")).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Ctrl+Shift+[" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("img", { name: "Ctrl+Shift+]" }),
+    ).toBeInTheDocument();
+  });
 });

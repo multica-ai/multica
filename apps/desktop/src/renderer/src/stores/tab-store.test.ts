@@ -392,6 +392,63 @@ describe("useTabStore actions", () => {
     store.setActiveTab(acmeTabId);
     expect(useTabStore.getState().activeWorkspaceSlug).toBe("acme");
   });
+
+  it("cycles tabs in visual order with wraparound", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const secondId = store.addTab("/acme/projects", "Projects");
+    const thirdId = store.addTab("/acme/skills", "Skills");
+    const firstId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+
+    store.cycleActiveTab(1);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(secondId);
+    expect(useTabStore.getState().byWorkspace.acme.recentTabIds[0]).toBe(firstId);
+    store.cycleActiveTab(1);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(thirdId);
+    store.cycleActiveTab(1);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(firstId);
+    store.cycleActiveTab(-1);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(thirdId);
+  });
+
+  it("cycles through reordered tab-strip positions", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const secondId = store.addTab("/acme/projects", "Projects");
+    const thirdId = store.addTab("/acme/skills", "Skills");
+
+    store.moveTab(2, 1);
+    store.cycleActiveTab(1);
+
+    expect(useTabStore.getState().byWorkspace.acme.tabs.map((tab) => tab.id)).toEqual([
+      expect.any(String),
+      thirdId,
+      secondId,
+    ]);
+    expect(useTabStore.getState().byWorkspace.acme.activeTabId).toBe(thirdId);
+  });
+
+  it("does not cycle without at least two valid tabs", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const before = useTabStore.getState().byWorkspace.acme;
+
+    store.cycleActiveTab(1);
+    expect(useTabStore.getState().byWorkspace.acme).toBe(before);
+
+    useTabStore.setState({
+      byWorkspace: {
+        acme: {
+          ...before,
+          tabs: [...before.tabs, { ...before.tabs[0], id: "t2" }],
+          activeTabId: "missing",
+        },
+      },
+    });
+    const invalid = useTabStore.getState().byWorkspace.acme;
+    store.cycleActiveTab(1);
+    expect(useTabStore.getState().byWorkspace.acme).toBe(invalid);
+  });
 });
 
 describe("navigateActiveSession", () => {
