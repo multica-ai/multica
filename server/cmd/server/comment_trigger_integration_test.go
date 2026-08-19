@@ -9,14 +9,14 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/auth"
 )
 
-// authRequestWithAgent makes an authenticated request with X-Agent-ID +
-// X-Task-ID headers, causing the server to resolve the actor as an agent
-// instead of a member. resolveActor requires both headers to grant agent
-// identity (defense against header forgery — see #2359 PR review), so we
-// seed a queued task for the agent on demand and pass its UUID as
-// X-Task-ID. The task is best-effort cleaned up via test teardown elsewhere.
+// authRequestWithAgent authenticates through a real server-bound mat_ task
+// token. Normal JWT/PAT requests must not be able to turn X-Agent-ID and
+// X-Task-ID headers into an agent actor; this helper exercises the same trust
+// boundary as a daemon-launched agent.
 func authRequestWithAgent(t *testing.T, method, path string, body any, agentID string) *http.Response {
 	t.Helper()
 	var bodyReader io.Reader
@@ -29,10 +29,24 @@ func authRequestWithAgent(t *testing.T, method, path string, body any, agentID s
 		t.Fatalf("failed to create request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+testToken)
+	taskID := ensureAgentTask(t, agentID)
+	taskToken, err := auth.GenerateAgentTaskToken()
+	if err != nil {
+		t.Fatalf("generate task token: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		INSERT INTO task_token (token_hash, task_id, agent_id, workspace_id, user_id, expires_at)
+		VALUES ($1, $2, $3, $4, $5, now() + interval '1 hour')
+	`, auth.HashToken(taskToken), taskID, agentID, testWorkspaceID, testUserID); err != nil {
+		t.Fatalf("insert task token: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM task_token WHERE token_hash = $1`, auth.HashToken(taskToken))
+	})
+	req.Header.Set("Authorization", "Bearer "+taskToken)
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	req.Header.Set("X-Agent-ID", agentID)
-	req.Header.Set("X-Task-ID", ensureAgentTask(t, agentID))
+	req.Header.Set("X-Task-ID", taskID)
 
 	r, err := http.DefaultClient.Do(req)
 	if err != nil {
