@@ -1877,6 +1877,52 @@ func replaceEnvValue(env []string, key, value string) []string {
 	return append(out, key+"="+value)
 }
 
+// acpSessionModel is one raw model entry from an ACP `session/new` response.
+// It carries both id spellings and the vendor `_meta` block, so generic
+// catalog parsing and provider-specific metadata reads share one shape.
+type acpSessionModel struct {
+	ModelID      string          `json:"modelId"`
+	ModelIDSnake string          `json:"model_id"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	Meta         json.RawMessage `json:"_meta"`
+}
+
+// id returns the entry's model id, accepting either spelling.
+func (e acpSessionModel) id() string {
+	if modelID := strings.TrimSpace(e.ModelID); modelID != "" {
+		return modelID
+	}
+	return strings.TrimSpace(e.ModelIDSnake)
+}
+
+// parseACPModelEntries returns the raw session/new model entries plus the
+// advertised current model, accepting both camel and snake spellings. ok is
+// false only when the response is not JSON we can read at all; a response
+// without a `models` block parses fine and yields no entries.
+func parseACPModelEntries(raw json.RawMessage) (entries []acpSessionModel, currentModelID string, ok bool) {
+	var resp struct {
+		Models struct {
+			AvailableModels      []acpSessionModel `json:"availableModels"`
+			AvailableModelsSnake []acpSessionModel `json:"available_models"`
+			CurrentModelID       string            `json:"currentModelId"`
+			CurrentModelIDSnake  string            `json:"current_model_id"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, "", false
+	}
+	entries = resp.Models.AvailableModels
+	if len(entries) == 0 && resp.Models.AvailableModelsSnake != nil {
+		entries = resp.Models.AvailableModelsSnake
+	}
+	currentModelID = strings.TrimSpace(resp.Models.CurrentModelID)
+	if currentModelID == "" {
+		currentModelID = strings.TrimSpace(resp.Models.CurrentModelIDSnake)
+	}
+	return entries, currentModelID, true
+}
+
 // parseACPSessionNewModels extracts the model catalog from an ACP
 // `session/new` response. Hermes and older Kimi (and any other ACP
 // agent that follows that schema) emit:
@@ -1897,64 +1943,23 @@ func replaceEnvValue(env []string, key, value string) []string {
 // `configOptions` is consulted only when it yields nothing, so no
 // existing provider changes behaviour.
 //
-// acpModelEntry is a raw ACP session/new model entry. The field spellings are
-// shared by generic model discovery and provider-specific vendor metadata.
-type acpModelEntry struct {
-	ModelID      string          `json:"modelId"`
-	ModelIDSnake string          `json:"model_id"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	Meta         json.RawMessage `json:"_meta"`
-}
-
-// parseACPModelEntries returns the raw session/new model entries plus the
-// advertised current model, accepting both camel and snake spellings.
-func parseACPModelEntries(raw json.RawMessage) (entries []acpModelEntry, currentModelID string) {
-	var resp struct {
-		Models struct {
-			AvailableModels      []acpModelEntry `json:"availableModels"`
-			AvailableModelsSnake []acpModelEntry `json:"available_models"`
-			CurrentModelID       string          `json:"currentModelId"`
-			CurrentModelIDSnake  string          `json:"current_model_id"`
-		} `json:"models"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, ""
-	}
-	entries = resp.Models.AvailableModels
-	if len(entries) == 0 && resp.Models.AvailableModelsSnake != nil {
-		entries = resp.Models.AvailableModelsSnake
-	}
-	currentModelID = strings.TrimSpace(resp.Models.CurrentModelID)
-	if currentModelID == "" {
-		currentModelID = strings.TrimSpace(resp.Models.CurrentModelIDSnake)
-	}
-	return entries, currentModelID
-}
-
 // Returns nil (not an empty slice) when the payload is missing so
 // the caller can distinguish "parsed with no models" (valid but
 // empty catalog) from "couldn't find the structure at all".
 func parseACPSessionNewModels(raw json.RawMessage) []Model {
-	entries, currentModelID := parseACPModelEntries(raw)
-	if entries == nil {
-		if fromConfig := parseACPConfigOptionModels(raw); len(fromConfig) > 0 {
-			return fromConfig
-		}
+	entries, currentModelID, ok := parseACPModelEntries(raw)
+	if !ok {
 		return nil
 	}
 	models := make([]Model, 0, len(entries))
 	seen := map[string]bool{}
 	for _, entry := range entries {
-		modelID := strings.TrimSpace(entry.ModelID)
-		if modelID == "" {
-			modelID = strings.TrimSpace(entry.ModelIDSnake)
-		}
+		modelID := entry.id()
 		if modelID == "" || seen[modelID] {
 			continue
 		}
 		seen[modelID] = true
-		models = append(models, newACPModel(modelID, entry.Name, currentModelID))
+		models = append(models, acpModelEntry(modelID, entry.Name, currentModelID))
 	}
 	if len(models) > 0 {
 		return models
@@ -2032,7 +2037,7 @@ func parseACPConfigOptionModels(raw json.RawMessage) []Model {
 				continue
 			}
 			seen[modelID] = true
-			models = append(models, newACPModel(modelID, choice.Name, currentValue))
+			models = append(models, acpModelEntry(modelID, choice.Name, currentValue))
 		}
 		if len(models) > 0 {
 			return models
@@ -2041,11 +2046,11 @@ func parseACPConfigOptionModels(raw json.RawMessage) []Model {
 	return nil
 }
 
-// newACPModel builds one dropdown entry from an ACP-advertised model id
+// acpModelEntry builds one dropdown entry from an ACP-advertised model id
 // and its display name. Provider is derived from the `provider:model` form
 // only — ids like kimi's `kimi-code/k3` carry no colon and stay ungrouped,
 // which matches how the UI renders a flat catalog.
-func newACPModel(modelID, name, currentModelID string) Model {
+func acpModelEntry(modelID, name, currentModelID string) Model {
 	provider := ""
 	if idx := strings.Index(modelID, ":"); idx > 0 {
 		provider = modelID[:idx]
@@ -2190,6 +2195,8 @@ var grokEffortLabels = map[string]string{
 	"low":    "Low Effort",
 }
 
+// grokThinking builds one offline catalog entry. defaultLevel is the effort
+// Grok advertises as the default and must also appear in values.
 func grokThinking(defaultLevel string, values ...string) *ModelThinking {
 	levels := make([]ThinkingLevel, 0, len(values))
 	for _, value := range values {
@@ -2231,15 +2238,15 @@ func annotateGrokThinkingFromACP(models []Model, raw json.RawMessage) {
 		SupportsReasoningEffort bool              `json:"supportsReasoningEffort"`
 		ReasoningEfforts        []reasoningEffort `json:"reasoningEfforts"`
 	}
-	entries, _ := parseACPModelEntries(raw)
+	entries, _, _ := parseACPModelEntries(raw)
 	thinkingByModel := make(map[string]*ModelThinking, len(entries))
 	for _, entry := range entries {
-		modelID := strings.TrimSpace(entry.ModelID)
+		modelID := entry.id()
 		if modelID == "" {
-			modelID = strings.TrimSpace(entry.ModelIDSnake)
+			continue
 		}
 		var metadata modelMetadata
-		if modelID == "" || json.Unmarshal(entry.Meta, &metadata) != nil || !metadata.SupportsReasoningEffort {
+		if err := json.Unmarshal(entry.Meta, &metadata); err != nil || !metadata.SupportsReasoningEffort {
 			continue
 		}
 
