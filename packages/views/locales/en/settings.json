@@ -75,7 +75,8 @@
       "in_review": "Delivered, waiting on human review. Finalizes the autopilot run.",
       "blocked": "Stalled on an external dependency.",
       "done": "Completed.",
-      "cancelled": "Decided not to do."
+      "cancelled": "Decided not to do.",
+      "archived": "Set aside without deleting. Terminal — behaves like cancelled."
     },
     "pr_auto_complete_badge": "Set when PRs merge",
     "built_in_locked": "Built-in statuses drive system behavior, so they can't be edited or archived. You can still reorder them.",

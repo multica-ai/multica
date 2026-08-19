@@ -62,9 +62,11 @@ const BUILT_INS: IssueStatusEntry[] = (
 );
 
 describe("useStatusOptions", () => {
-  // A cold render must offer the same 7 statuses it always did, or the picker
-  // opens empty on first paint and on any workspace whose catalog fetch failed.
-  it("offers the 7 built-ins when the catalog has not loaded", () => {
+  // A cold render must offer the same built-in statuses it always did, or the
+  // picker opens empty on first paint and on any workspace whose catalog fetch
+  // failed. Fork note: 8 built-ins, not upstream's 7 — "archived" (M-11) is a
+  // fork-only terminal status/category.
+  it("offers the 8 built-ins when the catalog has not loaded", () => {
     catalogEntries = undefined;
     const { result } = renderHook(() => useStatusOptions("workspace-1"));
 
@@ -76,6 +78,7 @@ describe("useStatusOptions", () => {
       "blocked",
       "done",
       "cancelled",
+      "archived",
     ]);
   });
 
@@ -95,6 +98,9 @@ describe("useStatusOptions", () => {
       "qa",
       "done",
       "cancelled",
+      // Fork note: "archived" (M-11) rides as an 8th built-in, so a custom
+      // status still never creates an extra board column.
+      "archived",
     ]);
   });
 
