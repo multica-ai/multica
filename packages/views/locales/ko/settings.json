@@ -986,6 +986,7 @@
     "empty_description_suffix": "을(를) 클릭해 로봇을 설치하세요.",
     "revoked_badge": "해제됨",
     "installed_at_label": "{{when}}에 설치됨",
+    "identity_label": "연결된 DingTalk ID: {{identity}}",
     "disconnect": "연결 해제",
     "disconnecting": "연결 해제 중…",
     "disconnect_confirm_title": "이 DingTalk 봇을 연결 해제할까요?",

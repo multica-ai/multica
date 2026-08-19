@@ -15,6 +15,8 @@ export interface PluginConfigField {
   required: boolean;
   options?: string[];
   placeholder?: string;
+  /** String fields only: render a textarea instead of a single-line input. */
+  multiline?: boolean;
 }
 
 export type PluginSurfaceType = "issue_panel" | "sidebar_panel" | "modal";

@@ -14,6 +14,7 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
@@ -32,6 +33,8 @@ type CommentResponse struct {
 	ParentID       *string `json:"parent_id"`
 	CreatedAt      string  `json:"created_at"`
 	UpdatedAt      string  `json:"updated_at"`
+	Revision       int64   `json:"revision"`
+	IssueRevision  int64   `json:"issue_revision,omitempty"`
 	ResolvedAt     *string `json:"resolved_at"`
 	ResolvedByType *string `json:"resolved_by_type"`
 	ResolvedByID   *string `json:"resolved_by_id"`
@@ -104,6 +107,7 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		ParentID:       uuidToPtr(c.ParentID),
 		CreatedAt:      timestampToString(c.CreatedAt),
 		UpdatedAt:      timestampToString(c.UpdatedAt),
+		Revision:       c.Revision,
 		ResolvedAt:     timestampToPtr(c.ResolvedAt),
 		ResolvedByType: textToPtr(c.ResolvedByType),
 		ResolvedByID:   uuidToPtr(c.ResolvedByID),
@@ -797,6 +801,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					ResolvedByID:   r.ResolvedByID,
 					SourceTaskID:   r.SourceTaskID,
 					QuickActionID:  r.QuickActionID,
+					Revision:       r.Revision,
 				}
 				if !r.ParentID.Valid {
 					root := c
@@ -890,6 +895,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				ResolvedByID:   r.ResolvedByID,
 				SourceTaskID:   r.SourceTaskID,
 				QuickActionID:  r.QuickActionID,
+				Revision:       r.Revision,
 			}
 			if !r.ParentID.Valid {
 				root := c
@@ -977,6 +983,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				ResolvedByID:   r.ResolvedByID,
 				SourceTaskID:   r.SourceTaskID,
 				QuickActionID:  r.QuickActionID,
+				Revision:       r.Revision,
 			})
 		}
 
@@ -1035,7 +1042,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 					ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 					ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
-					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID,
+					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 				}
 				stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 			}
@@ -1065,7 +1072,7 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 				ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
-				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID,
+				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 			}
 			stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 		}
@@ -1861,7 +1868,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
 		AuthorType:   authorType,
@@ -1876,6 +1883,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
 		return
 	}
+	comment := created.Comment()
 
 	// Link uploaded attachments to this comment.
 	if len(attachmentIDs) > 0 {
@@ -1885,6 +1893,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
+	resp.IssueRevision = created.IssueRevision
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
 	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
@@ -1892,6 +1901,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
+		"issue_revision":      created.IssueRevision,
 	})
 
 	// A reply in a resolved thread re-opens it. Done after CreateComment commits
@@ -3224,8 +3234,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Content          string    `json:"content"`
+		ContentBase      *string   `json:"content_base,omitempty"`
 		AttachmentIDs    *[]string `json:"attachment_ids"`
 		SuppressAgentIDs []string  `json:"suppress_agent_ids"`
+		ExpectedRevision *int64    `json:"expected_revision,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -3235,10 +3247,25 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// rejects before the empty check, so an edit that introduces such a byte
 	// can't 500 (GH #5388).
 	req.Content = sanitizeNullBytes(req.Content)
+	if req.ContentBase != nil {
+		sanitized := sanitizeNullBytes(*req.ContentBase)
+		req.ContentBase = &sanitized
+	}
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
+	if req.ExpectedRevision != nil {
+		if *req.ExpectedRevision < 1 {
+			writeError(w, http.StatusBadRequest, "expected_revision must be a positive integer")
+			return
+		}
+		if existing.Revision != *req.ExpectedRevision {
+			writeRevisionConflict(w, "comment", existing.ID, *req.ExpectedRevision, existing.Revision)
+			return
+		}
+	}
+	strictContentEdit := req.ContentBase != nil || req.ExpectedRevision != nil
 
 	var attachmentIDs []pgtype.UUID
 	replaceAttachments := req.AttachmentIDs != nil
@@ -3287,25 +3314,89 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		} else {
 			sourceTaskID = pgtype.UUID{}
 		}
-		cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
-		if err != nil {
-			slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
-			return
+		// Legacy clients keep the existing cancel-before-update behavior. Strict
+		// revision writes defer cancellation until the conditional UPDATE wins,
+		// so a race that returns 409 cannot mutate the task queue.
+		if !strictContentEdit {
+			cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
+			if err != nil {
+				slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
+				return
+			}
 		}
 	}
 
-	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
+	updateParams := db.UpdateCommentParams{
 		ID:           commentUUID,
 		Content:      req.Content,
 		SourceTaskID: sourceTaskID,
-	})
+	}
+	if req.ContentBase != nil {
+		updateParams.ContentBase = pgtype.Text{String: *req.ContentBase, Valid: true}
+	}
+	if req.ExpectedRevision != nil {
+		updateParams.ExpectedRevision = pgtype.Int8{Int64: *req.ExpectedRevision, Valid: true}
+	}
+	var comment db.Comment
+	transactionalEdit := replaceAttachments || (oldContent != req.Content && strictContentEdit)
+	if transactionalEdit {
+		// Strict body edits, attachment-set edits, and cancellation of tasks built
+		// from the old body are one database outcome. UpdateComment takes the row
+		// lock before the attachment replacement, so two modern editors cannot
+		// interleave their CAS check and attachment selection. A body + attachment
+		// edit is one visible mutation and therefore bumps revision exactly once.
+		tx, beginErr := h.TxStarter.Begin(r.Context())
+		if beginErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+		comment, err = qtx.UpdateComment(r.Context(), updateParams)
+		if err == nil && oldContent != req.Content && strictContentEdit {
+			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
+		}
+		if err == nil && replaceAttachments {
+			var changed int64
+			changed, err = qtx.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
+				CommentID:     comment.ID,
+				IssueID:       existing.IssueID,
+				AttachmentIds: attachmentIDs,
+			})
+			if err == nil && changed > 0 && oldContent == req.Content {
+				comment, err = qtx.BumpCommentRevision(r.Context(), db.BumpCommentRevisionParams{
+					ID:          comment.ID,
+					WorkspaceID: existing.WorkspaceID,
+				})
+			}
+		}
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+		if err == nil {
+			h.TaskService.BroadcastCancelledTasks(r.Context(), uuidToString(existing.WorkspaceID), cancelled)
+		}
+	} else {
+		comment, err = h.Queries.UpdateComment(r.Context(), updateParams)
+	}
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
-		if triggerIssue != nil {
+		if triggerIssue != nil && !strictContentEdit {
 			// Cancellation committed but the edit did not. Restore the complete
 			// original batch, including the still-valid unchanged comment.
 			h.retriggerCancelledTaskSurvivors(r.Context(), *triggerIssue, cancelled, pgtype.UUID{})
+		}
+		if errors.Is(err, pgx.ErrNoRows) && strictContentEdit {
+			current, reloadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{ID: commentUUID, WorkspaceID: wsUUID})
+			if reloadErr == nil {
+				if req.ExpectedRevision != nil {
+					writeRevisionConflict(w, "comment", current.ID, *req.ExpectedRevision, current.Revision)
+				} else {
+					writeEditConflict(w, "comment", current.ID)
+				}
+				return
+			}
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update comment")
 		return
@@ -3333,25 +3424,6 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		// the old authoring run's authority.
 		delegationAuthority := h.autopilotDelegationAuthorityFromComment(r.Context(), issue, comment)
 		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), delegationAuthority, suppressAgentIDs)
-	}
-
-	// Replace the comment attachment set when a modern client sends
-	// attachment_ids. Older clients omit the field; in that case preserve the
-	// existing attachment links rather than unlinking everything.
-	if replaceAttachments {
-		if err := h.Queries.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
-			CommentID:     comment.ID,
-			IssueID:       existing.IssueID,
-			AttachmentIds: attachmentIDs,
-		}); err != nil {
-			slog.Error("failed to replace comment attachments", "error", err)
-			// UpdateComment already committed the new body. Even though attachment
-			// replacement failed, repair task routing for that persisted edit so a
-			// dispatched run cannot permanently keep the old comment version.
-			retriggerEditedComment()
-			writeError(w, http.StatusInternalServerError, "failed to update attachments")
-			return
-		}
 	}
 
 	// Fetch reactions and attachments for the updated comment.

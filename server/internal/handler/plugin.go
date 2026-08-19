@@ -40,6 +40,8 @@ func writePluginError(w http.ResponseWriter, err error, fallback string) {
 		writeError(w, http.StatusNotFound, pluginErr.Message)
 	case service.PluginErrorConflict:
 		writeError(w, http.StatusConflict, pluginErr.Message)
+	case service.PluginErrorForbidden:
+		writeError(w, http.StatusForbidden, pluginErr.Message)
 	case service.PluginErrorIncompatible:
 		writeError(w, http.StatusUnprocessableEntity, pluginErr.Message)
 	case service.PluginErrorQuota:

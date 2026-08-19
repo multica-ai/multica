@@ -22,6 +22,10 @@ vi.mock("@multica/core/api", () => ({
   // Uploads flow through the coordinator, which calls api.uploadFile (MUL-5181).
   api: { uploadFile: apiUploadFile },
   dispatchReasonCode: () => undefined,
+  errorCode: (error: unknown) =>
+    typeof error === "object" && error !== null && "body" in error
+      ? (error as { body?: { code?: string } }).body?.code
+      : undefined,
 }));
 
 vi.mock("../../navigation", () => ({
@@ -150,6 +154,7 @@ const entry: TimelineEntry = {
   type: "comment",
   created_at: "2026-07-01T00:00:00Z",
   updated_at: "2026-07-01T00:00:00Z",
+  revision: 7,
   attachments: [],
   reactions: [],
 } as unknown as TimelineEntry;
@@ -209,6 +214,37 @@ describe("comment edit — draft snapshot", () => {
         .getDraft("edit:issue-1:comment-1"),
     ).toBe("test.de");
     expect(editorDefaultValues.values.at(-1)).toBe("Original body");
+  });
+});
+
+describe("comment edit — content conflict", () => {
+  it("keeps the local draft visible and resubmits with the captured content", async () => {
+    const onEdit = vi.fn().mockRejectedValue({
+      body: { code: "revision_conflict" },
+    });
+    renderCard(onEdit);
+    await startEditing();
+
+    fireEvent.change(screen.getByTestId("editor"), {
+      target: { value: "My local edit" },
+    });
+    fireEvent.click(getSaveButton());
+
+    await waitFor(() =>
+      expect(onEdit).toHaveBeenCalledWith(
+        "comment-1",
+        "My local edit",
+        [],
+        undefined,
+        "Original body",
+      ),
+    );
+    expect(await screen.findByText("The comment was changed concurrently. Compare both versions.")).toBeVisible();
+    expect(screen.getByText("My local edit")).toBeVisible();
+    expect(screen.getByTestId("editor")).toBeVisible();
+    expect(
+      useCommentDraftStore.getState().getDraft("edit:issue-1:comment-1"),
+    ).toBe("My local edit");
   });
 });
 

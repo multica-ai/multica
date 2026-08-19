@@ -17,6 +17,7 @@ import {
   issueKeys,
   type IssueSortParam,
 } from "./queries";
+import { onIssueUpdated, onIssueAuxiliaryRevision } from "./ws-updaters";
 import { inboxKeys } from "../inbox/queries";
 import type {
   InboxItem,
@@ -183,6 +184,88 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
     }
   });
 
+  it("does not couple a field update to the cached aggregate revision", async () => {
+    qc.setQueryData(
+      issueKeys.detail(WS_ID, "issue-1"),
+      makeIssue(1, { revision: 6 }),
+    );
+    updateIssue.mockResolvedValue(makeIssue(1, { title: "Renamed", revision: 7 }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync({ id: "issue-1", title: "Renamed" });
+    });
+
+    expect(updateIssue).toHaveBeenCalledWith("issue-1", {
+      title: "Renamed",
+    });
+  });
+
+  it("does not let an older successful response overwrite a newer WS revision", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((done) => {
+        resolve = done;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(detailKey, makeIssue(1, { revision: 1 }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", title: "local" });
+    });
+    await waitFor(() => expect(updateIssue).toHaveBeenCalled());
+    onIssueUpdated(
+      qc,
+      WS_ID,
+      makeIssue(1, { title: "newer remote", revision: 3 }),
+    );
+
+    await act(async () => {
+      resolve(makeIssue(1, { title: "older success", revision: 2 }));
+    });
+
+    expect(qc.getQueryData<Issue>(detailKey)).toMatchObject({
+      title: "newer remote",
+      revision: 3,
+    });
+  });
+
+  it("keeps a full response admissible after a newer revision-only response", async () => {
+    let resolve!: (issue: Issue) => void;
+    updateIssue.mockReturnValue(
+      new Promise<Issue>((done) => {
+        resolve = done;
+      }),
+    );
+    const detailKey = issueKeys.detail(WS_ID, "issue-1");
+    qc.setQueryData<Issue>(detailKey, makeIssue(1, { title: "A", revision: 1 }));
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+
+    act(() => {
+      result.current.mutate({ id: "issue-1", title: "local" });
+    });
+    await waitFor(() => expect(updateIssue).toHaveBeenCalled());
+    onIssueAuxiliaryRevision(qc, WS_ID, "issue-1", 3);
+
+    await act(async () => {
+      resolve(makeIssue(1, { title: "B", revision: 2 }));
+    });
+
+    expect(qc.getQueryData<Issue>(detailKey)).toMatchObject({
+      title: "B",
+      revision: 2,
+    });
+    expect(qc.getQueryState(detailKey)?.isInvalidated).toBe(true);
+  });
+
   it("keeps the authoritative description base while a description update is pending", async () => {
     let resolve!: (issue: Issue) => void;
     updateIssue.mockReturnValue(
@@ -282,6 +365,7 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
   it("rolls both caches back when the request fails", async () => {
     updateIssue.mockRejectedValue(new Error("boom"));
+    const invalidateSpy = vi.spyOn(qc, "invalidateQueries");
 
     const { result } = renderHook(() => useUpdateIssue(), {
       wrapper: createWrapper(qc),
@@ -297,6 +381,12 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
       expect(bucketIds(key, "todo")).toEqual(["issue-1"]);
       expect(bucketIds(key, "in_progress")).toEqual([]);
     }
+    const invalidatedKeys = invalidateSpy.mock.calls.map((c) => c[0]?.queryKey);
+    expect(invalidatedKeys).toContainEqual(issueKeys.detail(WS_ID, "issue-1"));
+    expect(invalidatedKeys).toContainEqual(issueKeys.list(WS_ID));
+    expect(invalidatedKeys).toContainEqual(issueKeys.myAll(WS_ID));
+    expect(invalidatedKeys).toContainEqual(issueKeys.flatAll(WS_ID));
+    expect(invalidatedKeys).toContainEqual(issueKeys.tableAll(WS_ID));
   });
 
   it("rolls the linked inbox row status back when the request fails", async () => {

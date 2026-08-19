@@ -66,6 +66,7 @@ import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
+import { errorCode } from "@multica/core/api";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
@@ -77,6 +78,7 @@ import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
 import { ProjectPicker } from "../../projects/components/project-picker";
 import { LocalDirectoryHint } from "../../projects/components/local-directory-hint";
 import { CommentCard } from "./comment-card";
+import { RevisionConflictCompare } from "./revision-conflict-compare";
 import { CommentInput } from "./comment-input";
 import { CurrentIssueRenderContextProvider } from "../current-issue-render-context";
 import { ResolvedThreadBar } from "./resolved-thread-bar";
@@ -88,6 +90,7 @@ import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
 import { QuickActionsSection } from "./quick-actions-section";
+import { PluginPanelSection } from "../../plugins";
 import { PullRequestList } from "./pull-request-list";
 import { useGitHubSettings } from "@multica/core/github";
 import { useQuery } from "@tanstack/react-query";
@@ -692,7 +695,10 @@ function SubIssueRow({
   const handleUpdate = useCallback(
     (updates: Partial<UpdateIssueRequest>) => {
       updateIssue.mutate(
-        { id: child.id, ...updates },
+        {
+          id: child.id,
+          ...updates,
+        },
         {
           onError: (err) =>
             toast.error(
@@ -1949,12 +1955,33 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   }, [highlightCommentId, highlightRequestToken, id, writeViewState, items, targetIdx, scrollContainerEl, replyToRoot, expandedResolved, timelineView, toggleResolvedExpand]);
 
   const descEditorRef = useRef<ContentEditorRef>(null);
+  const descriptionEditingRef = useRef(false);
+  const [descriptionConflictDraft, setDescriptionConflictDraft] = useState<string | null>(null);
+  const descriptionAttachmentIdsRef = useRef<string[]>([]);
+  const descriptionSaveInFlightRef = useRef(false);
+  const descriptionSaveIssueIdRef = useRef(id);
+  const pendingDescriptionSaveRef = useRef<{
+    markdown: string;
+    baseMarkdown: string;
+    attachmentIds: string[];
+  } | null>(null);
   // Keep the description editor mounted from the start. Unlike the empty
   // composer shells, a long rendered description cannot swap between
   // react-markdown and ProseMirror without small per-block height differences
   // accumulating into a visible scroll/layout jump. The chunked Markdown path
   // keeps this single eager editor affordable; title and composers stay lazy.
   const titleEditorRef = useRef<TitleEditorRef>(null);
+  const titleBaseRef = useRef<string | undefined>(issue?.title);
+  const [titleConflictDraft, setTitleConflictDraft] = useState<string | null>(null);
+  useEffect(() => {
+    setTitleConflictDraft(null);
+    setDescriptionConflictDraft(null);
+    titleBaseRef.current = undefined;
+    descriptionAttachmentIdsRef.current = [];
+    descriptionSaveInFlightRef.current = false;
+    descriptionSaveIssueIdRef.current = id;
+    pendingDescriptionSaveRef.current = null;
+  }, [id]);
   const titleLazy = useLazyEditor({ editorRef: titleEditorRef, resetKey: id });
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((file) => descEditorRef.current?.uploadFile(file)),
@@ -2187,6 +2214,61 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return <IssueNotFound showBackLink={!onDelete} leading={leadingAction} />;
   }
 
+  const persistDescriptionSave = (
+    draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
+  ) => {
+    descriptionSaveInFlightRef.current = true;
+    handleUpdateField(
+      {
+        description: draft.markdown,
+        description_base: draft.baseMarkdown,
+        attachment_ids:
+          draft.attachmentIds.length > 0 ? draft.attachmentIds : undefined,
+      },
+      {
+        onSuccess: (serverIssue) => {
+          if (descriptionSaveIssueIdRef.current !== id) return;
+          setDescriptionConflictDraft(null);
+          descriptionSaveInFlightRef.current = false;
+          const pending = pendingDescriptionSaveRef.current;
+          pendingDescriptionSaveRef.current = null;
+          if (pending) {
+            // Usually the accepted document is exactly what we submitted. If
+            // the server appended late channel media, keep the submitted body
+            // as the next editor baseline: the server can recognize that the
+            // only delta is media the editor never saw and preserve it again.
+            const nextBase = serverIssue.description === draft.markdown
+              ? serverIssue.description
+              : draft.markdown;
+            persistDescriptionSave({ ...pending, baseMarkdown: nextBase });
+          }
+        },
+        onError: (error) => {
+          if (descriptionSaveIssueIdRef.current !== id) return;
+          descriptionSaveInFlightRef.current = false;
+          const pending = pendingDescriptionSaveRef.current;
+          pendingDescriptionSaveRef.current = null;
+          if (errorCode(error) === "revision_conflict") {
+            const latest = pending ?? draft;
+            descriptionAttachmentIdsRef.current = latest.attachmentIds;
+            setDescriptionConflictDraft(latest.markdown);
+          }
+        },
+      },
+    );
+  };
+
+  const queueDescriptionSave = (
+    draft: { markdown: string; baseMarkdown: string; attachmentIds: string[] },
+  ) => {
+    descriptionAttachmentIdsRef.current = draft.attachmentIds;
+    if (descriptionSaveInFlightRef.current) {
+      pendingDescriptionSaveRef.current = draft;
+      return;
+    }
+    persistDescriptionSave(draft);
+  };
+
   const sidebarContent = (
     <div className="space-y-5">
       {/* Properties */}
@@ -2387,6 +2469,7 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           click an action they cannot run, and the refusal is explained at run
           time rather than by a silently shorter list. */}
       <QuickActionsSection issueId={issue.id} />
+      <PluginPanelSection issueId={issue.id} />
 
       {/* Parent issue — standalone section, only when the issue has a
           parent. Setting a parent is reachable via the issue actions menu;
@@ -2767,13 +2850,28 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               <TitleEditor
                 key={`title-${id}`}
                 ref={titleEditorRef}
-                defaultValue={issue.title}
+                defaultValue={titleConflictDraft ?? issue.title}
                 placeholder={t(($) => $.detail.title_placeholder)}
                 className="w-full text-display-sm font-bold leading-snug tracking-tight"
                 onReady={titleLazy.onReady}
                 onBlur={(value) => {
                   const trimmed = value.trim();
-                  if (trimmed && trimmed !== issue.title) handleUpdateField({ title: trimmed });
+                  if (trimmed && trimmed !== issue.title) {
+                    handleUpdateField({
+                      title: trimmed,
+                      title_base: titleBaseRef.current,
+                    }, {
+                      onSuccess: (serverIssue) => {
+                        setTitleConflictDraft(null);
+                        titleBaseRef.current = serverIssue.title;
+                      },
+                      onError: (error) => {
+                        if (errorCode(error) === "revision_conflict") {
+                          setTitleConflictDraft(trimmed);
+                        }
+                      },
+                    });
+                  }
                 }}
               />
             </div>
@@ -2787,11 +2885,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 // A drag-selection (copying the title) must not summon the editor.
                 const sel = window.getSelection();
                 if (sel && !sel.isCollapsed) return;
+                titleBaseRef.current = issue.title;
                 titleLazy.activate({ x: e.clientX, y: e.clientY });
               }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" || e.key === " ") {
                   e.preventDefault();
+                  titleBaseRef.current = issue.title;
                   titleLazy.activate();
                 }
               }}
@@ -2799,6 +2899,38 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               {issue.title}
             </div>
           )}
+          {titleConflictDraft !== null ? (
+            <RevisionConflictCompare
+              className="mt-2"
+              title={t(($) => $.revision.compare_title)}
+              serverLabel={t(($) => $.revision.server_version)}
+              localLabel={t(($) => $.revision.local_version)}
+              serverValue={issue.title}
+              localValue={titleConflictDraft}
+              actions={(
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    const draft = titleConflictDraft.trim();
+                    if (!draft) return;
+                    handleUpdateField(
+                      { title: draft, title_base: issue.title },
+                      {
+                        onSuccess: (serverIssue) => {
+                          setTitleConflictDraft(null);
+                          titleBaseRef.current = serverIssue.title;
+                        },
+                      },
+                    );
+                  }}
+                >
+                  {t(($) => $.revision.keep_local)}
+                </Button>
+              )}
+            />
+          ) : null}
 
           {parentIssue && (
             <AppLink
@@ -2829,11 +2961,24 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             </AppLink>
           )}
 
-          <div {...descDropZoneProps} className="relative mt-5 rounded-lg">
+          <div
+            {...descDropZoneProps}
+            className="relative mt-5 rounded-lg"
+            onFocusCapture={() => {
+              if (!descriptionEditingRef.current) {
+                descriptionEditingRef.current = true;
+              }
+            }}
+            onBlurCapture={(event) => {
+              if (!event.currentTarget.contains(event.relatedTarget)) {
+                descriptionEditingRef.current = false;
+              }
+            }}
+          >
             <ContentEditor
               ref={descEditorRef}
               key={id}
-              value={issue.description || ""}
+              value={descriptionConflictDraft ?? issue.description ?? ""}
               placeholder={t(($) => $.detail.desc_placeholder)}
               onUpdate={(md, baseMarkdown) => {
                 // Bind any pending uploads still referenced in the markdown
@@ -2856,10 +3001,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 const ids = descPendingAttachmentsRef.current
                   .filter((a) => contentReferencesAttachment(md, a))
                   .map((a) => a.id);
-                handleUpdateField({
-                  description: md,
-                  description_base: baseMarkdown,
-                  attachment_ids: ids.length > 0 ? ids : undefined,
+                queueDescriptionSave({
+                  markdown: md,
+                  baseMarkdown,
+                  attachmentIds: ids,
                 });
               }}
               onUploadFile={handleDescriptionUpload}
@@ -2871,6 +3016,43 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
               currentIssueId={id}
               attachments={descEditorAttachments}
             />
+
+            {descriptionConflictDraft !== null ? (
+              <RevisionConflictCompare
+                className="mt-3"
+                title={t(($) => $.revision.compare_description)}
+                serverLabel={t(($) => $.revision.server_version)}
+                localLabel={t(($) => $.revision.local_version)}
+                serverValue={issue.description || ""}
+                localValue={descriptionConflictDraft}
+                actions={(
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      handleUpdateField(
+                        {
+                          description: descriptionConflictDraft,
+                          description_base: issue.description || "",
+                          attachment_ids:
+                            descriptionAttachmentIdsRef.current.length > 0
+                              ? descriptionAttachmentIdsRef.current
+                              : undefined,
+                        },
+                        {
+                          onSuccess: () => {
+                            setDescriptionConflictDraft(null);
+                          },
+                        },
+                      );
+                    }}
+                  >
+                    {t(($) => $.revision.keep_local)}
+                  </Button>
+                )}
+              />
+            ) : null}
 
             <div className="flex items-center gap-1 mt-3">
               <ReactionBar

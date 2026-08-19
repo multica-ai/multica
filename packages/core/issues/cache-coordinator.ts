@@ -274,9 +274,13 @@ export function applyIssueChange(
      *  where the card is not loaded. Omitting it degrades those judgments to
      *  "unknown" → a deferred refetch, never a wrong patch. */
     baseIssue?: Issue;
+    /** Optional per-cache admission guard. Realtime uses this to reject a
+     *  non-increasing revision in a fresh cache while still healing another
+     *  loaded projection that holds an older revision of the same issue. */
+    acceptCurrent?: (current: Issue) => boolean;
   },
 ): IssueCacheChangeResult {
-  const { changed, baseIssue } = opts;
+  const { changed, baseIssue, acceptCurrent = () => true } = opts;
   // Normalize ONCE, at the door. Every write below is a `{...entity, ...patch}`
   // spread, and an optimistic `{status}` patch would otherwise leave the stale
   // status_category on the entity while the card moves buckets. (MUL-6243)
@@ -290,6 +294,7 @@ export function applyIssueChange(
   for (const [key, data] of bucketedListEntries(qc, wsId)) {
     const { scope, filter, sort } = listContractFromKey(key);
     const loc = findIssueLocation(data, id);
+    if (loc && !acceptCurrent(loc.issue)) continue;
     const filterTouched = listFilterDependsOn(scope, filter, changed);
 
     // "Updated date" sort: every persisted edit advances updated_at, but the
@@ -418,6 +423,7 @@ export function applyIssueChange(
       ...page,
       issues: page.issues.map((issue) => {
         if (issue.id !== id) return issue;
+        if (!acceptCurrent(issue)) return issue;
         found = issue;
         return { ...issue, ...patch };
       }),
@@ -441,6 +447,7 @@ export function applyIssueChange(
     let found: Issue | undefined;
     const rows = data.rows.map((row) => {
       if (row.issue.id !== id) return row;
+      if (!acceptCurrent(row.issue)) return row;
       found = row.issue;
       return { ...row, issue: { ...row.issue, ...patch } };
     });
@@ -451,7 +458,7 @@ export function applyIssueChange(
   }
 
   const prevDetail = qc.getQueryData<Issue>(issueKeys.detail(wsId, id));
-  if (prevDetail) {
+  if (prevDetail && acceptCurrent(prevDetail)) {
     qc.setQueryData<Issue>(issueKeys.detail(wsId, id), {
       ...prevDetail,
       ...patch,

@@ -693,6 +693,18 @@ importers:
         specifier: ^8.35.0
         version: 8.58.1(eslint@9.39.4(jiti@2.7.0))(typescript@5.9.3)
 
+  packages/plugin-sdk:
+    devDependencies:
+      '@multica/eslint-config':
+        specifier: workspace:*
+        version: link:../eslint-config
+      '@multica/tsconfig':
+        specifier: workspace:*
+        version: link:../tsconfig
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+
   packages/tsconfig: {}
 
   packages/ui:
@@ -1002,6 +1014,9 @@ importers:
       '@multica/eslint-config':
         specifier: workspace:*
         version: link:../eslint-config
+      '@multica/plugin-sdk':
+        specifier: workspace:*
+        version: link:../plugin-sdk
       '@multica/tsconfig':
         specifier: workspace:*
         version: link:../tsconfig

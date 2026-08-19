@@ -27,7 +27,11 @@ type Capabilities struct {
 // resources land with the agent integration.
 func HostCapabilities() Capabilities {
 	return Capabilities{
-		SurfaceTypes:  map[string]bool{},
+		// issue_panel only: PluginPanelSection is the one mount point that exists.
+		// sidebar_panel has no host location yet, and enabling a surface the host
+		// cannot render installs a plugin that silently never appears — precisely
+		// what this gate exists to prevent.
+		SurfaceTypes:  map[string]bool{SurfaceIssuePanel: true},
 		HookTriggers:  map[string]bool{},
 		HookTransport: map[string]bool{},
 		ResourceTypes: map[string]bool{},

@@ -311,6 +311,17 @@ function QwenPawLogo({ className }: { className: string }) {
   );
 }
 
+// MiniMax Code (mcode) — official mark from the MiniMax Code docs logo.
+// The docs ship separate #171717 and white variants; currentColor preserves
+// that light/dark behavior with one inline path.
+function McodeLogo({ className }: { className: string }) {
+  return (
+    <svg viewBox="2.1 2 27.9 28" fill="currentColor" className={className}>
+      <path d="M27.0157 5.80436C27.867 5.80448 28.5567 6.49502 28.5567 7.34635V20.7487C28.5567 21.2424 28.3347 21.7099 27.9522 22.0221L23.4102 25.7311C23.1167 25.9708 22.7491 26.1021 22.3702 26.1022H5.12508C4.27367 26.1022 3.58308 25.4116 3.58308 24.5602V11.5592C3.58308 11.0643 3.80649 10.5951 4.19051 10.2829L9.24519 6.17253C9.53831 5.93433 9.90459 5.80436 10.2823 5.80436H27.0157ZM11.0587 8.88053C10.8705 8.88052 10.6884 8.94584 10.5421 9.06413L6.99519 11.9313C6.80216 12.0874 6.69051 12.3227 6.69051 12.571V22.4987C6.69073 22.7823 6.92051 23.0124 7.20418 23.0124H9.7491V17.6745C9.74924 17.2206 10.1175 16.8524 10.5714 16.8522H12.5245C12.9784 16.8523 13.3466 17.2206 13.3468 17.6745V23.0124H15.1964V17.6745C15.1965 17.2205 15.5647 16.8522 16.0186 16.8522H17.9718C18.4256 16.8524 18.7939 17.2206 18.794 17.6745V23.0124H21.5587C21.7476 23.0124 21.9306 22.947 22.0772 22.8278L25.17 20.3112C25.3618 20.1551 25.4736 19.9208 25.4737 19.6735V9.40104C25.4736 9.11741 25.2437 8.8875 24.96 8.88737L11.0587 8.88053Z" />
+    </svg>
+  );
+}
+
 // DeepSeek Harness — official mark copied from deepseek-ai/deepseek-harness
 // (apps/web/public/favicon.svg, MIT — Copyright 2026 DeepSeek). Upstream picks
 // its colour with a prefers-color-scheme block; inlining the path lets
@@ -375,6 +386,8 @@ export function ProviderLogo({
       return <QwenLogo className={className} />;
     case "qwenpaw":
       return <QwenPawLogo className={className} />;
+    case "mcode":
+      return <McodeLogo className={className} />;
     case "dsh":
       return <DshLogo className={className} />;
     default:

@@ -861,6 +861,7 @@
     "empty_description_suffix": "为其安装机器人。",
     "revoked_badge": "已撤销",
     "installed_at_label": "安装于 {{when}}",
+    "identity_label": "钉钉绑定身份：{{identity}}",
     "disconnect": "断开连接",
     "disconnecting": "正在断开…",
     "disconnect_confirm_title": "断开此钉钉机器人？",

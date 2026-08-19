@@ -204,6 +204,10 @@ type ConfigField struct {
 	Required    bool     `json:"required,omitempty"`
 	Options     []string `json:"options,omitempty"`
 	Placeholder string   `json:"placeholder,omitempty"`
+	// Multiline asks the host to render a textarea. Only meaningful for string
+	// fields; without it a value that is a list of lines is unreadable in the
+	// generated form, which is the one thing the host owns rendering for.
+	Multiline bool `json:"multiline,omitempty"`
 }
 
 // ConfigSchema keeps declaration order so the generated form is stable across
@@ -246,7 +250,8 @@ func (c ConfigSchema) MarshalJSON() ([]byte, error) {
 			Required    bool     `json:"required,omitempty"`
 			Options     []string `json:"options,omitempty"`
 			Placeholder string   `json:"placeholder,omitempty"`
-		}{field.Type, field.Label, field.Description, field.Required, field.Options, field.Placeholder})
+			Multiline   bool     `json:"multiline,omitempty"`
+		}{field.Type, field.Label, field.Description, field.Required, field.Options, field.Placeholder, field.Multiline})
 		if err != nil {
 			return nil, err
 		}
@@ -452,6 +457,9 @@ func (m Manifest) validateConfig() error {
 			if len(field.Options) > 0 {
 				return fmt.Errorf("%s.options is only valid for enum fields", label)
 			}
+			if field.Multiline && field.Type != ConfigString {
+				return fmt.Errorf("%s.multiline is only valid for string fields", label)
+			}
 		case ConfigEnum:
 			if len(field.Options) == 0 {
 				return fmt.Errorf("%s.options must not be empty for enum fields", label)
@@ -471,6 +479,9 @@ func (m Manifest) validateConfig() error {
 			}
 		default:
 			return fmt.Errorf("%s.type is unsupported: %q", label, field.Type)
+		}
+		if field.Multiline && field.Type != ConfigString {
+			return fmt.Errorf("%s.multiline is only valid for string fields", label)
 		}
 		if err := validateDisplayText(label+".label", field.Label, 160); err != nil {
 			return err

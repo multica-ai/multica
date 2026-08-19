@@ -487,6 +487,26 @@ func writeErrorCode(w http.ResponseWriter, status int, code, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg, "code": code})
 }
 
+func writeRevisionConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID, expected, actual int64) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":             "resource changed since it was loaded",
+		"code":              "revision_conflict",
+		"resource_type":     resourceType,
+		"resource_id":       uuidToString(resourceID),
+		"expected_revision": expected,
+		"actual_revision":   actual,
+	})
+}
+
+func writeEditConflict(w http.ResponseWriter, resourceType string, resourceID pgtype.UUID) {
+	writeJSON(w, http.StatusConflict, map[string]any{
+		"error":         "resource field changed since it was loaded",
+		"code":          "revision_conflict",
+		"resource_type": resourceType,
+		"resource_id":   uuidToString(resourceID),
+	})
+}
+
 // Thin wrappers around util functions.
 //
 // parseUUID is intentionally the panicking variant: any handler call site

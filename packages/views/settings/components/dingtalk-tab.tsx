@@ -414,9 +414,12 @@ function InstallationRow({
   const { getAgentName } = useActorName();
   const isActive = installation.status === "active";
   const agentName = getAgentName(installation.agent_id);
+  const linkedIdentityIDs = canManage
+    ? (installation.bound_dingtalk_user_ids ?? [])
+    : [];
   return (
     <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
-      <div className="flex items-start gap-3">
+      <div className="flex min-w-0 items-start gap-3">
         <ActorAvatar
           actorType="agent"
           actorId={installation.agent_id}
@@ -424,7 +427,7 @@ function InstallationRow({
           enableHoverCard
           profileLink
         />
-        <div className="space-y-1">
+        <div className="min-w-0 space-y-1">
           <p className="text-body font-medium">
             {agentName}
             {!isActive && (
@@ -433,7 +436,18 @@ function InstallationRow({
               </span>
             )}
           </p>
-          <p className="text-micro text-muted-foreground">
+          <p
+            className="max-w-full truncate text-micro text-muted-foreground"
+            title={linkedIdentityIDs.length > 0 ? linkedIdentityIDs.join(", ") : undefined}
+          >
+            {linkedIdentityIDs.length > 0 && (
+              <>
+                {t(($) => $.dingtalk.identity_label, {
+                  identity: linkedIdentityIDs.join(", "),
+                })}
+                {" · "}
+              </>
+            )}
             {t(($) => $.dingtalk.installed_at_label, {
               when: formatInstalledAt(installation.installed_at),
             })}

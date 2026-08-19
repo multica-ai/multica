@@ -62,6 +62,7 @@ type IssueResponse struct {
 	DueDate   *string `json:"due_date"`
 	CreatedAt string  `json:"created_at"`
 	UpdatedAt string  `json:"updated_at"`
+	Revision  int64   `json:"revision"`
 	// Metadata is the per-issue KV map (see issue_metadata.go). Always emitted
 	// (empty object when unset) so frontend code can `issue.metadata[key]`
 	// without nil-guarding the parent field.
@@ -151,12 +152,12 @@ var errIssueStatusArchivedRace = errors.New("issue status was archived while the
 // 400 — but an archive can commit between that pre-flight check and the write.
 // Re-checking here, under the lock, means the status is provably active at the
 // moment the row is written. ArchiveIssueStatus holds the EXCLUSIVE side around
-// its in-use census, so the two orderings are both covered:
+// retirement, so the two orderings are both covered:
 //
 //   - archive first: it commits, this re-resolve then fails and the write is
-//     rejected, so no issue is stranded on an archived status;
-//   - writer first: the census blocks until this transaction commits, then sees
-//     the issue and refuses the archive with a conflict.
+//     rejected, so no new assignment lands on an archived status;
+//   - writer first: archive blocks until this transaction commits, then retires
+//     the status from future use while the issue keeps its existing assignment.
 //
 // A built-in status is a no-op: it can never be archived (enforced by
 // issue_status_system_not_archivable), so the common path takes no lock and
@@ -293,6 +294,7 @@ func issueToResponse(i db.Issue, issuePrefix string) IssueResponse {
 		DueDate:        dateToPtr(i.DueDate),
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
+		Revision:       i.Revision,
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
 	}
@@ -328,6 +330,7 @@ func issueListRowToResponse(i db.ListIssuesRow, issuePrefix string) IssueRespons
 		DueDate:        dateToPtr(i.DueDate),
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
+		Revision:       i.Revision,
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
 	}
@@ -395,6 +398,7 @@ func openIssueRowToResponse(i db.ListOpenIssuesRow, issuePrefix string) IssueRes
 		DueDate:        dateToPtr(i.DueDate),
 		CreatedAt:      timestampToString(i.CreatedAt),
 		UpdatedAt:      timestampToString(i.UpdatedAt),
+		Revision:       i.Revision,
 		Metadata:       parseIssueMetadata(i.Metadata),
 		Properties:     parseIssueProperties(i.Properties),
 	}
@@ -822,6 +826,7 @@ func buildSearchQuery(phrase string, terms []string, queryNum int, hasNum bool, 
 		i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
 		i.parent_issue_id, i.acceptance_criteria, i.context_refs, i.position,
 		i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id,
+		i.revision,
 		COUNT(*) OVER() AS total_count,
 		%s AS match_source,
 		%s AS matched_comment_content
@@ -909,6 +914,7 @@ func (h *Handler) SearchIssues(w http.ResponseWriter, r *http.Request) {
 				&sr.issue.UpdatedAt,
 				&sr.issue.Number,
 				&sr.issue.ProjectID,
+				&sr.issue.Revision,
 				&sr.totalCount,
 				&sr.matchSource,
 				&sr.matchedCommentContent,
@@ -1435,7 +1441,8 @@ func (h *Handler) ListIssues(w http.ResponseWriter, r *http.Request) {
 
 	query := fmt.Sprintf(`SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
-       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties
+       i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at, i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+	   i.revision
 FROM issue i
 WHERE %s
 ORDER BY %s
@@ -1474,6 +1481,7 @@ LIMIT %s OFFSET %s`, whereSql, orderBy, limitRef, offsetRef)
 			&row.Metadata,
 			&row.Stage,
 			&row.Properties,
+			&row.Revision,
 		); err != nil {
 			slog.Warn("ListIssues scan failed", "error", err)
 			writeError(w, http.StatusInternalServerError, "failed to list issues")
@@ -2984,7 +2992,11 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateIssueRequest struct {
-	Title       *string `json:"title"`
+	ExpectedRevision *int64  `json:"expected_revision,omitempty"`
+	Title            *string `json:"title"`
+	// TitleBase is the title adopted by the editor before producing Title. It
+	// protects title edits without coupling them to unrelated issue mutations.
+	TitleBase   *string `json:"title_base,omitempty"`
 	Description *string `json:"description"`
 	// DescriptionBase is the authoritative Markdown the editor had adopted
 	// before producing Description. It lets the server preserve channel media
@@ -3097,60 +3109,102 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 	}
 }
 
-func (h *Handler) updateIssueWithDescriptionMerge(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, base *string, statusKey string) (db.Issue, db.Issue, error) {
+var errIssueFieldConflict = errors.New("issue text field conflict")
+
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
-		return db.Issue{}, db.Issue{}, errors.New("issue description update requires transaction starter")
+		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("begin issue description update: %w", err)
+		return db.Issue{}, db.Issue{}, false, fmt.Errorf("begin atomic issue update: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
 	qtx := h.Queries.WithTx(tx)
 	// This path opens its own transaction, so it carries the archive-race guard
-	// itself rather than going through runWithIssueStatusGuard. Taken before the
-	// row lock below to keep the global catalog-then-row lock order. (MUL-6243)
+	// itself rather than going through runWithIssueStatusGuard. The catalog lock
+	// must precede both attachment and issue row locks everywhere. (MUL-6243)
 	if err := assertIssueStatusStillActive(ctx, qtx, workspaceID, statusKey); err != nil {
-		return db.Issue{}, db.Issue{}, err
+		return db.Issue{}, db.Issue{}, false, err
+	}
+	if len(attachmentIDs) > 0 {
+		if _, err := qtx.LockAttachmentsForIssueLink(ctx, db.LockAttachmentsForIssueLinkParams{
+			WorkspaceID:   workspaceID,
+			AttachmentIds: attachmentIDs,
+		}); err != nil {
+			return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue attachments: %w", err)
+		}
 	}
 	current, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
 		ID:          params.ID,
 		WorkspaceID: workspaceID,
 	})
 	if err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("lock issue description: %w", err)
-	}
-	attachments, err := qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
-		IssueID:     current.ID,
-		WorkspaceID: current.WorkspaceID,
-	})
-	if err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("list issue attachments for description merge: %w", err)
+		return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue for update: %w", err)
 	}
 
-	currentDescription := ""
-	if current.Description.Valid {
-		currentDescription = current.Description.String
+	if params.Title.Valid && titleBase != nil && current.Title != *titleBase && current.Title != params.Title.String {
+		return db.Issue{}, current, false, errIssueFieldConflict
 	}
-	incomingDescription := ""
+
 	if params.Description.Valid {
-		incomingDescription = params.Description.String
-	}
-	params.Description = pgtype.Text{
-		String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, base, attachments),
-		Valid:  true,
+		attachments, listErr := qtx.ListAttachmentsByIssue(ctx, db.ListAttachmentsByIssueParams{
+			IssueID:     current.ID,
+			WorkspaceID: current.WorkspaceID,
+		})
+		if listErr != nil {
+			return db.Issue{}, current, false, fmt.Errorf("list issue attachments for description merge: %w", listErr)
+		}
+		currentDescription := ""
+		if current.Description.Valid {
+			currentDescription = current.Description.String
+		}
+		incomingDescription := params.Description.String
+		if descriptionBase != nil && currentDescription != *descriptionBase && currentDescription != incomingDescription {
+			baseWithLateMedia := mergeIssueChannelMediaDescription(currentDescription, *descriptionBase, descriptionBase, attachments)
+			if currentDescription != baseWithLateMedia {
+				return db.Issue{}, current, false, errIssueFieldConflict
+			}
+		}
+		params.Description = pgtype.Text{
+			String: mergeIssueChannelMediaDescription(currentDescription, incomingDescription, descriptionBase, attachments),
+			Valid:  true,
+		}
 	}
 	refreshUntouchedNullableIssueParams(&params, current, rawFields)
 
 	issue, err := qtx.UpdateIssue(ctx, params)
 	if err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("update locked issue description: %w", err)
+		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
+	}
+
+	attachmentsChanged := false
+	if len(attachmentIDs) > 0 {
+		linked, linkErr := qtx.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
+			IssueID:       issue.ID,
+			WorkspaceID:   issue.WorkspaceID,
+			AttachmentIds: attachmentIDs,
+			BumpRevision:  issue.Revision == current.Revision,
+		})
+		if linkErr != nil {
+			return db.Issue{}, current, false, fmt.Errorf("link issue attachments: %w", linkErr)
+		}
+		attachmentsChanged = linked.LinkedCount > 0
+		if linked.IssueRevision > 0 {
+			issue, err = qtx.GetIssueInWorkspace(ctx, db.GetIssueInWorkspaceParams{
+				ID:          issue.ID,
+				WorkspaceID: issue.WorkspaceID,
+			})
+			if err != nil {
+				return db.Issue{}, current, false, fmt.Errorf("reload issue after attachment link: %w", err)
+			}
+		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return db.Issue{}, db.Issue{}, fmt.Errorf("commit issue description update: %w", err)
+		return db.Issue{}, current, false, fmt.Errorf("commit atomic issue update: %w", err)
 	}
-	return issue, current, nil
+	return issue, current, attachmentsChanged, nil
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -3189,6 +3243,17 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		ParentIssueID: prevIssue.ParentIssueID,
 		ProjectID:     prevIssue.ProjectID,
 		Stage:         prevIssue.Stage,
+	}
+	if req.ExpectedRevision != nil {
+		if *req.ExpectedRevision < 1 {
+			writeError(w, http.StatusBadRequest, "expected_revision must be a positive integer")
+			return
+		}
+		if prevIssue.Revision != *req.ExpectedRevision {
+			writeRevisionConflict(w, "issue", prevIssue.ID, *req.ExpectedRevision, prevIssue.Revision)
+			return
+		}
+		params.ExpectedRevision = pgtype.Int8{Int64: *req.ExpectedRevision, Valid: true}
 	}
 
 	// COALESCE fields — only set when explicitly provided
@@ -3355,12 +3420,13 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var issue db.Issue
-	if req.Description != nil {
+	attachmentsChanged := false
+	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
-		issue, lockedPrev, err = h.updateIssueWithDescriptionMerge(
-			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.DescriptionBase, statusKeyForGuard,
+		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
 		)
-		if err == nil {
+		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
 		}
 	} else {
@@ -3374,14 +3440,24 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		if writeIssueStatusRaceError(w, err) {
 			return
 		}
+		if errors.Is(err, errIssueFieldConflict) {
+			writeEditConflict(w, "issue", prevIssue.ID)
+			return
+		}
+		if errors.Is(err, pgx.ErrNoRows) && req.ExpectedRevision != nil {
+			current, reloadErr := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{ID: prevIssue.ID, WorkspaceID: prevIssue.WorkspaceID})
+			if reloadErr == nil {
+				writeRevisionConflict(w, "issue", current.ID, *req.ExpectedRevision, current.Revision)
+				return
+			}
+		}
 		slog.Warn("update issue failed", append(logger.RequestAttrs(r), "error", err, "issue_id", id, "workspace_id", workspaceID)...)
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
 
-	if len(attachmentIDs) > 0 {
-		h.linkAttachmentsByIssueIDs(r.Context(), issue.ID, issue.WorkspaceID, attachmentIDs)
-	}
+	// Determine actor identity: agent (via X-Agent-ID header) or member.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
@@ -3406,9 +3482,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	dueDateChanged := prevDueDate != resp.DueDate && (prevDueDate == nil) != (resp.DueDate == nil) ||
 		(prevDueDate != nil && resp.DueDate != nil && *prevDueDate != *resp.DueDate)
 
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
-
 	h.publish(protocol.EventIssueUpdated, workspaceID, actorType, actorID, map[string]any{
 		"issue":               resp,
 		"assignee_changed":    assigneeChanged,
@@ -3430,6 +3503,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		"creator_type":        prevIssue.CreatorType,
 		"creator_id":          uuidToString(prevIssue.CreatorID),
 	})
+	if attachmentsChanged {
+		// The full owner snapshot must be admitted before an auxiliary event at
+		// the same revision. Otherwise clients advance only the revision here and
+		// reject issue:updated as non-increasing, stranding the old issue fields.
+		h.publish(protocol.EventIssueAttachmentsChanged, workspaceID, actorType, actorID, map[string]any{
+			"issue_id":       uuidToString(issue.ID),
+			"issue_revision": issue.Revision,
+		})
+	}
 
 	// Reconcile the task queue. Whether this write starts an agent run — and
 	// for whom (agent assignee or squad leader) — is decided by the single
@@ -3992,8 +4074,8 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			// Preserve every marked channel-media block conservatively, matching
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
-			issue, lockedPrev, err = h.updateIssueWithDescriptionMerge(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, batchStatusKey,
+			issue, lockedPrev, _, err = h.updateIssueAtomically(
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey,
 			)
 			if err == nil {
 				prevIssue = lockedPrev

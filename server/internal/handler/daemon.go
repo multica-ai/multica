@@ -1854,6 +1854,10 @@ func (h *Handler) failClaimedTaskBeforeLaunch(
 	return &claimBuildFailure{outcome: outcome, status: status, message: claimMessage}
 }
 
+func chatSessionResumeFallbackNeeded(priorSessionID, priorWorkDir string) bool {
+	return priorSessionID == "" || priorWorkDir == ""
+}
+
 // buildClaimedTaskResponse assembles the full daemon claim payload for a
 // single already-claimed task and computes the exact comment ids embedded in
 // it (deliveredCommentIDs). Shared by the per-runtime handler
@@ -2522,21 +2526,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if cs.WorkDir.Valid {
 					resp.PriorWorkDir = cs.WorkDir.String
 				}
-				if prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID); err == nil && prior.SessionID.Valid {
-					if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
-						resp.PriorSessionID = prior.SessionID.String
-					}
-					if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
-						resp.PriorWorkDir = prior.WorkDir.String
-					}
-				}
-				// MUL-5305: if the most recent terminal task on this chat session
-				// withheld its Codex session (rollout missing), we resumed an older
-				// session (or none) above — disclose the continuity gap so the next
-				// turn tells the user the most recent turn's context is missing.
-				if missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), cs.ID); err == nil && missing {
-					resp.PriorSessionResumeUnavailable = true
-				}
 			}
 			// Resolve the user-message input batch for this run. A task-owned
 			// task (chat_input_task_id set) reads exactly the user messages
@@ -2574,6 +2563,49 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 					outcome: "error_chat_input_load",
 					status:  http.StatusInternalServerError,
 					message: "failed to load chat input",
+				}
+			}
+
+			// Input ownership is the claim's fail-closed boundary. Resume-history
+			// reads belong after it: a task that cannot load its input is preserved
+			// for redelivery and must not spend two more queries before returning.
+			if !task.ForceFreshSession {
+				// GetLastChatTaskSession currently has exactly two consumers: the
+				// prior session and prior workdir fields. Keep this guard coupled to
+				// both so adding a third consumer cannot silently skip its fallback.
+				if chatSessionResumeFallbackNeeded(resp.PriorSessionID, resp.PriorWorkDir) {
+					h.Metrics.RecordChatClaimSessionFallbackNeeded()
+					started := time.Now()
+					prior, err := h.Queries.GetLastChatTaskSession(r.Context(), cs.ID)
+					h.Metrics.ObserveChatClaimLastSessionQuery(time.Since(started).Seconds())
+					switch {
+					case err == nil && prior.SessionID.Valid:
+						h.Metrics.RecordChatClaimSessionFallbackHit()
+						if resp.PriorSessionID == "" && prior.RuntimeID == task.RuntimeID {
+							resp.PriorSessionID = prior.SessionID.String
+						}
+						if prior.WorkDir.Valid && resp.PriorWorkDir == "" {
+							resp.PriorWorkDir = prior.WorkDir.String
+						}
+					case errors.Is(err, pgx.ErrNoRows):
+						h.Metrics.RecordChatClaimSessionFallbackMiss()
+					case err == nil:
+						// Defensive only: the SQL excludes NULL session ids, but
+						// preserve miss semantics if that contract ever changes.
+						h.Metrics.RecordChatClaimSessionFallbackMiss()
+					default:
+						h.Metrics.RecordChatClaimSessionFallbackError()
+					}
+				}
+
+				// MUL-5305: continuity-gap disclosure is independent of whether
+				// either pointer field needed fallback, so this query stays
+				// unconditional for non-force-fresh chat claims.
+				started := time.Now()
+				missing, err := h.Queries.GetLatestChatTaskRolloutMissing(r.Context(), cs.ID)
+				h.Metrics.ObserveChatClaimRolloutMissingQuery(time.Since(started).Seconds())
+				if err == nil && missing {
+					resp.PriorSessionResumeUnavailable = true
 				}
 			}
 

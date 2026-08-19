@@ -262,14 +262,42 @@ func TestValidateStorageKeyEnforcesTheKeyQuota(t *testing.T) {
 }
 
 func TestCapabilityMessageNamesTheMissingCapabilities(t *testing.T) {
+	// Asserted against an explicitly empty host set, not the shipped one: this
+	// covers the message, and tying it to whatever HostCapabilities happens to
+	// enable today makes every future capability flip fail a test that has
+	// nothing to say about the flip.
 	manifest := testManifest(t)
-	err := manifest.CheckCapabilities(plugincontract.HostCapabilities())
+	err := manifest.CheckCapabilities(plugincontract.Capabilities{})
 	if err == nil {
-		t.Fatal("expected the shipped host set to reject a surface contribution")
+		t.Fatal("an empty host set must reject every contribution")
 	}
 	message := capabilityMessage(err)
 	if !strings.Contains(message, "surface issue_panel") {
 		t.Fatalf("capabilityMessage = %q, want it to name the missing capability", message)
+	}
+}
+
+func TestShippedHostCapabilitiesRunTheSurfacesTheHostMounts(t *testing.T) {
+	// The gate is only meaningful if it tracks what actually renders. A surface
+	// type enabled here with no mount point installs successfully and then never
+	// appears — the exact silent failure the gate exists to prevent.
+	shipped := plugincontract.HostCapabilities()
+	if !shipped.SurfaceTypes[plugincontract.SurfaceIssuePanel] {
+		t.Fatal("issue_panel is mounted by PluginPanelSection and must be shipped")
+	}
+	if shipped.SurfaceTypes[plugincontract.SurfaceSidebarPanel] {
+		t.Fatal("sidebar_panel has no mount point yet; enabling it would install surfaces that never render")
+	}
+	if shipped.SurfaceTypes[plugincontract.SurfaceModal] {
+		t.Fatal("modal is opened by the manual trigger, which the hook engine has not landed")
+	}
+	for _, trigger := range []string{plugincontract.TriggerUI, plugincontract.TriggerManual, plugincontract.TriggerAgent, plugincontract.TriggerEvent} {
+		if shipped.HookTriggers[trigger] {
+			t.Fatalf("hook trigger %q is enabled but the hook engine has not landed", trigger)
+		}
+	}
+	if shipped.ResourceTypes[plugincontract.ResourceSkill] {
+		t.Fatal("skill resources are enabled but the agent integration has not landed")
 	}
 }
 

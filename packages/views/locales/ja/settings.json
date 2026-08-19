@@ -861,6 +861,7 @@
     "empty_description_suffix": "をクリックしてロボットをインストールします。",
     "revoked_badge": "取り消し済み",
     "installed_at_label": "{{when}} にインストール",
+    "identity_label": "連携済みの DingTalk ID：{{identity}}",
     "disconnect": "切断",
     "disconnecting": "切断中…",
     "disconnect_confirm_title": "この DingTalk ボットを切断しますか？",

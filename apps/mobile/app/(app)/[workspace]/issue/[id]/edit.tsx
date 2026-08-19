@@ -37,6 +37,7 @@ import { MentionSuggestionBar } from "@/components/issue/mention-suggestion-bar"
 import { MOBILE_PLACEHOLDER_COLOR } from "@/components/ui/input-tokens";
 import { issueDetailOptions } from "@/data/queries/issues";
 import { useUpdateIssue } from "@/data/mutations/issues";
+import { buildIssueTextUpdate } from "@/data/issue-edit";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useMentionInput } from "@/lib/use-mention-input";
 
@@ -47,7 +48,8 @@ export default function EditIssue() {
   const update = useUpdateIssue(id);
 
   const [title, setTitle] = useState("");
-  const [descriptionBase, setDescriptionBase] = useState("");
+  const [initialTitle, setInitialTitle] = useState("");
+  const [initialDescription, setInitialDescription] = useState("");
   const description = useMentionInput();
   const [seeded, setSeeded] = useState(false);
   // `useMentionInput` returns `setText` from `useState`, which is a stable
@@ -60,9 +62,10 @@ export default function EditIssue() {
   useEffect(() => {
     if (!detail.data || seeded) return;
     setTitle(detail.data.title);
+    setInitialTitle(detail.data.title);
     const initial = detail.data.description ?? "";
     setDescriptionText(stripChannelMediaMarkers(initial));
-    setDescriptionBase(initial);
+    setInitialDescription(initial);
     setSeeded(true);
   }, [detail.data, seeded, setDescriptionText]);
 
@@ -71,11 +74,11 @@ export default function EditIssue() {
   const dirty = useMemo(() => {
     if (!detail.data || !seeded) return false;
     return (
-      title.trim() !== detail.data.title ||
+      title.trim() !== initialTitle ||
       currentDescription.trim() !==
-        stripChannelMediaMarkers(descriptionBase).trim()
+        stripChannelMediaMarkers(initialDescription).trim()
     );
-  }, [detail.data, seeded, title, currentDescription, descriptionBase]);
+  }, [detail.data, seeded, title, initialTitle, currentDescription, initialDescription]);
 
   const canSave =
     seeded && title.trim().length > 0 && dirty && !update.isPending;
@@ -103,12 +106,11 @@ export default function EditIssue() {
     if (!canSave) return;
     // `UpdateIssueRequest.description` is `string | undefined` — server
     // treats empty string as "clear the description", which is what we
-    // want when the user wipes the field.
-    const patch = {
-      title: title.trim(),
-      description: currentDescription.trim(),
-      description_base: descriptionBase,
-    };
+    // want when the user wipes the field. Mobile deliberately omits strict
+    // text baselines until this screen has a conflict reconciliation flow;
+    // otherwise a real 409 would leave the draft in an unrecoverable retry
+    // loop. Web/desktop keep baseline protection with their compare UI.
+    const patch = buildIssueTextUpdate(title, currentDescription);
     update.mutate(patch, {
       onSuccess: () => router.back(),
       onError: (err) => {
@@ -118,7 +120,7 @@ export default function EditIssue() {
         );
       },
     });
-  }, [canSave, title, currentDescription, descriptionBase, update]);
+  }, [canSave, title, currentDescription, update]);
 
   const headerLeft = useCallback(
     () => (
