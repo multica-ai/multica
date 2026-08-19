@@ -1,0 +1,16 @@
+# yaml-language-server: $schema=https://json.schemastore.org/kustomization
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Deliberately its own kustomization root, not just three loose files listed
+# in gitops/environments/tools/kustomization.yaml directly: kustomize's
+# default LoadRestrictionsRootOnly policy forbids a kustomization from
+# referencing individual resource files that live outside its own root
+# (../../base/deployment-admin.yaml from environments/tools/ fails that
+# check). A nested kustomization directory has no such restriction — this
+# mirrors how gitops/base/ itself is referenced as `../../base/`. See
+# AIPLAT-219.
+resources:
+  - deployment-admin.yaml
+  - service-admin.yaml
+  - ingress-admin.yaml

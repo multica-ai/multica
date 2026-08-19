@@ -1,0 +1,70 @@
+# --- Dependencies ---
+FROM node:22-alpine AS deps
+
+WORKDIR /app
+
+# Copy workspace config and package.json files for the packages apps/admin
+# actually depends on (see apps/admin/package.json) — not the whole workspace.
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json .npmrc ./
+COPY apps/admin/package.json apps/admin/
+COPY packages/ui/package.json packages/ui/
+COPY packages/tsconfig/package.json packages/tsconfig/
+COPY packages/eslint-config/package.json packages/eslint-config/
+
+RUN corepack enable && \
+    PNPM_VERSION="$(node -p 'require("./package.json").packageManager')" && \
+    corepack prepare "$PNPM_VERSION" --activate
+RUN pnpm install --frozen-lockfile
+
+# --- Build ---
+FROM node:22-alpine AS builder
+
+WORKDIR /app
+
+# Activate the same pnpm version declared by the repository before the
+# offline frozen install validates package-manager metadata in pnpm-lock.yaml.
+COPY package.json ./
+RUN corepack enable && \
+    PNPM_VERSION="$(node -p 'require("./package.json").packageManager')" && \
+    corepack prepare "$PNPM_VERSION" --activate
+
+# Copy installed dependencies (preserves pnpm symlink structure)
+COPY --from=deps /app ./
+
+# Copy source
+COPY package.json turbo.json pnpm-workspace.yaml ./
+COPY apps/admin/ apps/admin/
+COPY packages/ packages/
+
+# Re-link after source overlay (fixes any symlinks overwritten by COPY)
+RUN pnpm install --frozen-lockfile --offline
+
+ENV STANDALONE=true
+
+# Build the admin app (standalone output for minimal runtime)
+RUN pnpm --filter @multica/admin build
+
+# --- Runtime ---
+FROM node:22-alpine AS runner
+
+WORKDIR /app
+
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
+
+# Copy standalone output (includes traced node_modules)
+COPY --from=builder --chown=nextjs:nodejs /app/apps/admin/.next/standalone ./
+# Copy static files (not included in standalone)
+COPY --from=builder --chown=nextjs:nodejs /app/apps/admin/.next/static ./apps/admin/.next/static
+# Ship the license and attribution notices with the image (LICENSE condition 1b)
+COPY --chown=nextjs:nodejs LICENSE NOTICE ./
+
+USER nextjs
+
+EXPOSE 3002
+ENV PORT=3002
+ENV HOSTNAME=0.0.0.0
+
+CMD ["node", "apps/admin/server.js"]

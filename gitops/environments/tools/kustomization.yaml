@@ -9,6 +9,13 @@ labels:
     includeTemplates: true
 resources:
   - ../../base/
+  # apps/admin is intentionally NOT added to ../../base/kustomization.yaml —
+  # wired only here so it doesn't also land in the development environment
+  # (which imports ../../base/ wholesale and has no admin image tag pinned).
+  # It's its own nested kustomization directory (not loose files) because
+  # kustomize's default security policy rejects individual resource files
+  # that resolve outside this kustomization's root. See AIPLAT-219.
+  - ../../base/admin/
 patches:
   - path: patches/service-account.yaml
     target:
@@ -26,4 +33,6 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newTag: "8532179b"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
+    newTag: "8532179b"
+  - name: ghcr.io/g2crowd/agentfarm-admin-prod
     newTag: "8532179b"

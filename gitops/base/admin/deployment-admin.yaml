@@ -1,0 +1,146 @@
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: agentfarm-admin
+  namespace: agentfarm
+  labels:
+    app: agentfarm
+    component: admin
+spec:
+  # No HPA for admin (low-traffic internal dashboard, not autoscaled) — see
+  # AIPLAT-219. Explicit so a future HPA addition is an intentional change,
+  # not just "the field was already absent".
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 0
+      maxSurge: 1
+  selector:
+    matchLabels:
+      app: agentfarm
+      component: admin
+  template:
+    metadata:
+      labels:
+        app: agentfarm
+        component: admin
+      annotations:
+        # Reloader rolls pods when agentfarm-secret-store changes (10m SSM refresh).
+        reloader.stakater.com/auto: "true"
+    spec:
+      # Plain "agentfarm" SA (same as web) — admin talks to Postgres + LiteLLM
+      # over the network, not AWS APIs, so it needs no IAM role.
+      serviceAccountName: agentfarm
+      imagePullSecrets:
+        - name: regcred
+      # EKS Auto Mode, Karpenter `shared` pool (arm64 variant, Graviton).
+      # See deployment-backend.yaml for rationale (images are arm64-only,
+      # devops pool is amd64-only, shared is the tools-cluster arm64 path).
+      nodeSelector:
+        karpenter.sh/nodepool: shared
+        kubernetes.io/arch: arm64
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+        runAsGroup: 1001
+        fsGroup: 1001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: admin
+          image: ghcr.io/g2crowd/agentfarm-admin-prod
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 3002
+              protocol: TCP
+          # LITELLM_BASE_URL / LITELLM_API_KEY / ADMIN_ALLOW_UNSAFE_NO_AUTH
+          # come from here (SSM /agentfarm/tools/<NAME>) — none exist yet.
+          # Until LITELLM_BASE_URL/LITELLM_API_KEY are provisioned, the app
+          # just shows LiteLLM sections as "not linked" (see
+          # apps/admin/lib/litellm.ts's litellmConfigured() guard) — that's
+          # a soft-fail, safe to deploy without them. ADMIN_ALLOW_UNSAFE_NO_AUTH
+          # must stay UNSET here on purpose: apps/admin has no auth of its own
+          # and 503s every request in production until that var is explicitly
+          # set to "true" (apps/admin/middleware.ts + lib/access-guard.ts).
+          # Flipping it via SSM is a deliberate, separate decision to make
+          # once ingress-admin.yaml's internal-only routing is confirmed live
+          # — do not bake it into this manifest.
+          envFrom:
+            - secretRef:
+                name: agentfarm-secret-store
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: PORT
+              value: "3002"
+            - name: HOSTNAME
+              value: 0.0.0.0
+            # Same $(VAR) composition as deployment-backend.yaml's DATABASE_URL
+            # — admin is a read-only consumer of the same agentfarm Postgres
+            # cluster (see apps/admin/lib/db.ts).
+            - name: POSTGRES_HOST
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-rds-connection-secret
+                  key: endpoint
+            - name: POSTGRES_PORT
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-rds-connection-secret
+                  key: port
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-rds-connection-secret
+                  key: master_username
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: agentfarm-rds-connection-secret
+                  key: attribute.master_password
+            - name: POSTGRES_DB
+              value: agentfarm
+            - name: DATABASE_URL
+              value: "postgres://$(POSTGRES_USER):$(POSTGRES_PASSWORD)@$(POSTGRES_HOST):$(POSTGRES_PORT)/$(POSTGRES_DB)?sslmode=require"
+          # No /health endpoint — use TCP socket probes, same as web.
+          livenessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 3
+            failureThreshold: 3
+          readinessProbe:
+            tcpSocket:
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 3
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          volumeMounts:
+            - name: next-cache
+              mountPath: /app/apps/admin/.next/cache
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: next-cache
+          emptyDir:
+            sizeLimit: 128Mi
+        - name: tmp
+          emptyDir:
+            sizeLimit: 64Mi

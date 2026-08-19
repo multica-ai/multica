@@ -118,6 +118,15 @@ jobs:
       runs-on: ubicloud-standard-4-arm
     secrets: inherit
 
+  bake-build-admin:
+    uses: g2crowd/gh-actions/.github/workflows/gitops-bake-build.yml@main
+    with:
+      environment: prod
+      branch: ${{ github.head_ref || github.ref_name }}
+      bakefile: docker-bake.admin.hcl
+      runs-on: ubicloud-standard-4-arm
+    secrets: inherit
+
   bake-build-agentrunner-runtime:
     # FROMs agent-runtime-base directly — base must publish first.
     needs: [bake-build-agent-runtime-base]
@@ -135,8 +144,8 @@ jobs:
   # The deploy fans out into two independent groups so a fast server build is
   # never held hostage by the slower runner build chain (PLA-391).
   #
-  #   * Server group  — backend + web build in parallel, then bump their two
-  #     image tags in gitops/environments/tools/kustomization.yaml.
+  #   * Server group  — backend + web + admin build in parallel, then bump
+  #     their three image tags in gitops/environments/tools/kustomization.yaml.
   #   * Runner group  — agent-runtime-base -> agentrunner-runtime build in
   #     sequence (FROM chain); agentrunner-runtime bumps its gitops target as
   #     soon as that image is built.
@@ -147,24 +156,27 @@ jobs:
   # the SAME repo+path are queued safely; two deploys to the same repo at
   # DIFFERENT paths are NOT — the second push is rejected non-fast-forward.
   # Every commit that targets g2crowd/agentfarm is therefore chained into one
-  # sequence (backend -> web -> agent-runtime).
+  # sequence (backend -> web -> admin -> agent-runtime).
   # ----------------------------------------------------------------------------
 
   extract-server-tags:
-    needs: [bake-build-backend, bake-build-web]
+    needs: [bake-build-backend, bake-build-web, bake-build-admin]
     runs-on: ubuntu-latest
     outputs:
       backend_tag: ${{ steps.extract.outputs.backend_tag }}
       web_tag: ${{ steps.extract.outputs.web_tag }}
+      admin_tag: ${{ steps.extract.outputs.admin_tag }}
     steps:
       - name: Extract server image tags
         id: extract
         env:
           BACKEND_IMAGE: ${{ needs.bake-build-backend.outputs.image_name }}
           WEB_IMAGE: ${{ needs.bake-build-web.outputs.image_name }}
+          ADMIN_IMAGE: ${{ needs.bake-build-admin.outputs.image_name }}
         run: |
           echo "backend_tag=${BACKEND_IMAGE##*:}" >> "$GITHUB_OUTPUT"
           echo "web_tag=${WEB_IMAGE##*:}" >> "$GITHUB_OUTPUT"
+          echo "admin_tag=${ADMIN_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
   extract-agentrunner-runtime-tag:
     needs: [bake-build-agentrunner-runtime]
@@ -179,10 +191,10 @@ jobs:
         run: |
           echo "agentrunner_runtime_tag=${AGENTRUNNER_RUNTIME_IMAGE##*:}" >> "$GITHUB_OUTPUT"
 
-  # ---- Server group: bump backend then web in tools/kustomization.yaml ----
-  # backend and web write the same file (indices [0] and [1]); chaining them
-  # keeps the two pushes ordered and deterministic. Neither waits on the runner
-  # build chain anymore.
+  # ---- Server group: bump backend, web, then admin in tools/kustomization.yaml ----
+  # backend, web, and admin write the same file (indices [0], [1], [2]);
+  # chaining them keeps the three pushes ordered and deterministic. None of
+  # them wait on the runner build chain.
   commit-to-gitops-backend:
     needs: [extract-server-tags]
     uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
@@ -205,16 +217,27 @@ jobs:
       path_to_kustomization: gitops/environments/tools/kustomization.yaml
       image_yq_matcher: .images[1].newTag
 
+  commit-to-gitops-admin:
+    needs: [extract-server-tags, commit-to-gitops-web]
+    uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
+    secrets: inherit
+    with:
+      gitops_repository: g2crowd/agentfarm
+      image_tag: ${{ needs.extract-server-tags.outputs.admin_tag }}
+      app_repo_branch: ${{ github.head_ref || github.ref_name }}
+      path_to_kustomization: gitops/environments/tools/kustomization.yaml
+      image_yq_matcher: .images[2].newTag
+
   # ---- Runner group ----
   # agent-runtime bumps g2crowd/agentfarm at a DIFFERENT path than the server
   # bump, so the reusable workflow's repo+path concurrency group does NOT
   # serialize it against the server commits. It is chained after
-  # commit-to-gitops-web to avoid a concurrent push to agentfarm main, which
+  # commit-to-gitops-admin to avoid a concurrent push to agentfarm main, which
   # the shared gitops-deploy workflow does not rebase/retry. By the time the
   # agentrunner image (last in the build chain) is ready, the server commits
   # have long finished, so this dependency adds no real latency.
   commit-to-gitops-agent-runtime:
-    needs: [extract-agentrunner-runtime-tag, commit-to-gitops-web]
+    needs: [extract-agentrunner-runtime-tag, commit-to-gitops-admin]
     uses: g2crowd/gh-actions/.github/workflows/gitops-deploy.yml@main
     secrets: inherit
     with:

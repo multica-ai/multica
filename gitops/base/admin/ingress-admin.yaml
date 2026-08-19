@@ -1,0 +1,37 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: agentfarm-admin
+  labels:
+    app: agentfarm
+    component: admin
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/backend-protocol: HTTP
+    nginx.ingress.kubernetes.io/configuration-snippet: |
+      if ($http_x_forwarded_proto = 'http') {
+        return 301 https://$host$request_uri;
+      }
+    external-dns.alpha.kubernetes.io/hostname: agentfarm-admin.g2.com
+    external-dns.alpha.kubernetes.io/ttl: "300"
+spec:
+  # apps/admin ships with no authentication of its own (see
+  # apps/admin/middleware.ts + lib/access-guard.ts) — AIPLAT-219 requires
+  # locking the ingress internal-only rather than public before it's
+  # reachable off a single machine. `nginx-internal` (same class already
+  # used for the whole agentfarm app in
+  # gitops/environments/development/patches/ingress.yaml) keeps this off the
+  # public nginx-external/Cloudflare path that gitops/base/ingress.yaml uses.
+  # Do not switch this to nginx-external without adding real auth first.
+  ingressClassName: nginx-internal
+  rules:
+    - host: agentfarm-admin.g2.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: agentfarm-admin
+                port:
+                  name: http
