@@ -26,7 +26,7 @@ back for review. Self-hostable, works with 20 agent CLIs, no lock-in.
 </div>
 
 <p align="center">
-  <img src="docs/assets/hero-board.png" alt="A Multica board where six agents and their human teammates are moving work across columns" width="100%">
+  <img src="apps/docs/public/images/docs/workspace-overview.webp" alt="A Multica board where six agents and their human teammates are moving work across columns" width="100%">
 </p>
 
 <p align="center">

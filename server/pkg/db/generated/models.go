@@ -940,18 +940,34 @@ type PinnedItem struct {
 }
 
 type PluginInstallation struct {
-	ID            pgtype.UUID        `json:"id"`
-	WorkspaceID   pgtype.UUID        `json:"workspace_id"`
-	PluginKey     string             `json:"plugin_key"`
-	SourceUrl     string             `json:"source_url"`
-	Version       string             `json:"version"`
-	Manifest      []byte             `json:"manifest"`
-	GrantedScopes []byte             `json:"granted_scopes"`
-	Config        []byte             `json:"config"`
-	Enabled       bool               `json:"enabled"`
-	InstalledBy   pgtype.UUID        `json:"installed_by"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID             pgtype.UUID        `json:"id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	PluginKey      string             `json:"plugin_key"`
+	SourceUrl      string             `json:"source_url"`
+	Version        string             `json:"version"`
+	Manifest       []byte             `json:"manifest"`
+	GrantedScopes  []byte             `json:"granted_scopes"`
+	Config         []byte             `json:"config"`
+	Enabled        bool               `json:"enabled"`
+	InstalledBy    pgtype.UUID        `json:"installed_by"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	TokenHash      pgtype.Text        `json:"token_hash"`
+	TokenRotatedAt pgtype.Timestamptz `json:"token_rotated_at"`
+}
+
+type PluginInvocation struct {
+	ID             pgtype.UUID        `json:"id"`
+	InstallationID pgtype.UUID        `json:"installation_id"`
+	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
+	HookKey        string             `json:"hook_key"`
+	Trigger        string             `json:"trigger"`
+	Status         string             `json:"status"`
+	EventType      pgtype.Text        `json:"event_type"`
+	Attempt        int32              `json:"attempt"`
+	LatencyMs      int32              `json:"latency_ms"`
+	Error          pgtype.Text        `json:"error"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type PluginSecret struct {

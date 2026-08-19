@@ -804,6 +804,11 @@
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}} could not load its interface.",
-    "surface_local_only": "{{name}} was installed from a local source, so its interface cannot be loaded in the browser."
+    "surface_local_only": "{{name}} was installed from a local source, so its interface cannot be loaded in the browser.",
+    "hook_succeeded": "{{name}} finished.",
+    "hook_failed": "{{name}} failed.",
+    "hook_refused": "{{name}} was not run.",
+    "hook_activity": "Recent calls",
+    "hook_never_run": "This hook has not run yet."
   }
 }

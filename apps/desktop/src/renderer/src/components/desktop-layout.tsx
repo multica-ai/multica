@@ -13,7 +13,11 @@ import {
   useSidebar,
 } from "@multica/ui/components/ui/sidebar";
 import { ModalRegistry } from "@multica/views/modals/registry";
-import { AppSidebar, GlobalShortcuts } from "@multica/views/layout";
+import {
+  AppSidebar,
+  GlobalShortcuts,
+  NavigationProgress,
+} from "@multica/views/layout";
 import { SearchCommand, SearchTrigger } from "@multica/views/search";
 import { FloatingChat } from "@multica/views/chat";
 import { WorkspaceSlugProvider, paths, useCurrentWorkspace } from "@multica/core/paths";
@@ -288,6 +292,12 @@ export function DesktopShell() {
             <div className="flex flex-1 min-w-0 flex-col">
               <MainTopBar />
               <MainCanvas>
+                {/* Same indicator, same anchor as web: DashboardLayout puts it
+                    at the top of SidebarInset, and MainCanvas is desktop's
+                    equivalent relative/overflow-hidden content box. Desktop
+                    used to have no navigation feedback at all — a click just
+                    froze until the destination committed (MUL-6404). */}
+                <NavigationProgress />
                 <TabContent />
                 {slug && <FloatingChat />}
               </MainCanvas>

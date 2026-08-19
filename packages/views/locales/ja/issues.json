@@ -774,6 +774,11 @@
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}} のインターフェースを読み込めませんでした。",
-    "surface_local_only": "{{name}} はローカルソースからインストールされているため、ブラウザでインターフェースを読み込めません。"
+    "surface_local_only": "{{name}} はローカルソースからインストールされているため、ブラウザでインターフェースを読み込めません。",
+    "hook_succeeded": "{{name}} が完了しました。",
+    "hook_failed": "{{name}} が失敗しました。",
+    "hook_refused": "{{name}} は実行されませんでした。",
+    "hook_activity": "最近の呼び出し",
+    "hook_never_run": "このフックはまだ実行されていません。"
   }
 }

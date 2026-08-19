@@ -91,7 +91,7 @@ describe("IssueStatusesTab", () => {
     catalog = [BUILT_IN_IN_REVIEW];
     render(<IssueStatusesTab />);
 
-    expect(screen.getAllByText(en.issue_statuses.add).length).toBeGreaterThan(0);
+    expect(screen.getAllByLabelText(en.issue_statuses.add).length).toBeGreaterThan(0);
     expect(screen.queryByText(en.issue_statuses.flag_off)).toBeNull();
   });
 
@@ -102,7 +102,7 @@ describe("IssueStatusesTab", () => {
     flagOn = false;
     render(<IssueStatusesTab />);
 
-    expect(screen.queryByText(en.issue_statuses.add)).toBeNull();
+    expect(screen.queryByLabelText(en.issue_statuses.add)).toBeNull();
     expect(screen.getByText(en.issue_statuses.flag_off)).toBeInTheDocument();
     expect(screen.getByText("QA")).toBeInTheDocument();
   });
@@ -112,7 +112,7 @@ describe("IssueStatusesTab", () => {
     role = "member";
     render(<IssueStatusesTab />);
 
-    expect(screen.queryByText(en.issue_statuses.add)).toBeNull();
+    expect(screen.queryByLabelText(en.issue_statuses.add)).toBeNull();
     expect(screen.getByText("QA")).toBeInTheDocument();
     expect(
       screen.queryByLabelText(
@@ -134,6 +134,23 @@ describe("IssueStatusesTab", () => {
     // the workspace has one.
     expect(screen.queryByText("QA")).toBeNull();
     expect(screen.getByRole("switch")).toBeEnabled();
+  });
+
+  // The category header used to repeat the sentence its built-in row already
+  // carried, so every category said the same thing twice. (MUL-6422)
+  it("states a category's behavior once, on its built-in row", () => {
+    catalog = [BUILT_IN_IN_REVIEW];
+    render(<IssueStatusesTab />);
+
+    expect(screen.getAllByText(en.issue_statuses.categories.in_review)).toHaveLength(1);
+  });
+
+  // A toggle that can only ever reveal nothing is not worth a row of chrome.
+  it("offers the archived toggle only once something is archived", () => {
+    catalog = [BUILT_IN_IN_REVIEW, entry({ key: "qa", name: "QA" })];
+    render(<IssueStatusesTab />);
+
+    expect(screen.queryByRole("switch")).toBeNull();
   });
 
   it("does not offer reorder when a category holds a single custom status", () => {

@@ -29,6 +29,7 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
+import { PluginHookActivity } from "../../plugins";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 
@@ -352,6 +353,10 @@ function InstalledPlugin({
     toast.error(error instanceof Error ? error.message : t(($) => $.plugins.action_failed));
   };
 
+  // Only rendered when a hook contributes one: a plugin with no hooks has no
+  // failing calls to report.
+  const hasHooks = (installation.hooks ?? []).length > 0;
+
   const contributions = [
     ...installation.surfaces.map((surface) => `${surface.name} (${surface.type})`),
     ...installation.hooks.map((hook) => `${hook.name} (${hook.triggers.join(", ")})`),
@@ -361,6 +366,7 @@ function InstalledPlugin({
   return (
     <SettingsCard>
       <div className="space-y-4 px-4 py-4">
+        {hasHooks ? <PluginHookActivity wsId={wsId} installationId={installation.id} /> : null}
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">

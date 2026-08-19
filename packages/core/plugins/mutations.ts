@@ -52,3 +52,43 @@ export function useUninstallPlugin(wsId: string) {
     onSettled: invalidate,
   });
 }
+
+/**
+ * Invokes a hook the user asked for.
+ *
+ * A mutation rather than a query for the same reason preview is: it performs an
+ * outbound call to a third-party server, and a cache refetch must never replay
+ * it. Whatever the hook did on the far side is not something to repeat because
+ * a component remounted.
+ *
+ * Deliberately does NOT invalidate on settle. A hook may have changed nothing,
+ * or may have written through the Action API under its own attribution — the
+ * caller knows which and invalidates what it actually expects to have moved.
+ */
+export function useInvokePluginHook() {
+  return useMutation({
+    mutationFn: ({ installationId, hookKey, ...request }: {
+      installationId: string;
+      hookKey: string;
+      trigger: "ui" | "manual";
+      issueId?: string;
+      input?: unknown;
+    }) => api.invokePluginHook(installationId, hookKey, request),
+  });
+}
+
+export function useRotatePluginToken(wsId: string) {
+  const invalidate = useInvalidatePlugins(wsId);
+  return useMutation({
+    mutationFn: (installationId: string) => api.rotatePluginToken(wsId, installationId),
+    onSettled: invalidate,
+  });
+}
+
+export function useRevokePluginToken(wsId: string) {
+  const invalidate = useInvalidatePlugins(wsId);
+  return useMutation({
+    mutationFn: (installationId: string) => api.revokePluginToken(wsId, installationId),
+    onSettled: invalidate,
+  });
+}

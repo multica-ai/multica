@@ -107,3 +107,43 @@ DELETE FROM plugin_secret WHERE installation_id = $1 AND key = $2;
 
 -- name: DeletePluginSecretsByInstallation :exec
 DELETE FROM plugin_secret WHERE installation_id = $1;
+
+-- name: SetPluginInstallationToken :exec
+UPDATE plugin_installation
+SET token_hash = $2, token_rotated_at = now(), updated_at = now()
+WHERE id = $1;
+
+-- name: GetPluginInstallationByTokenHash :one
+-- Looked up by hash, so the plaintext token exists only in the caller's request.
+SELECT * FROM plugin_installation WHERE token_hash = $1;
+
+-- name: CreatePluginInvocation :one
+INSERT INTO plugin_invocation (
+    installation_id, workspace_id, hook_key, trigger, status, event_type, attempt, latency_ms, error
+) VALUES ($1, $2, $3, $4, $5, sqlc.narg(event_type), $6, $7, sqlc.narg(error))
+RETURNING *;
+
+-- name: ListPluginInvocations :many
+SELECT * FROM plugin_invocation
+WHERE installation_id = $1
+ORDER BY created_at DESC
+LIMIT $2;
+
+-- name: CountRecentPluginInvocations :one
+-- Feeds the per-hook rate limit. Counts attempts, not distinct calls: a hook
+-- retrying into a dead endpoint is exactly the traffic the limit exists to cap.
+SELECT count(*) FROM plugin_invocation
+WHERE installation_id = $1 AND hook_key = $2 AND created_at > $3;
+
+-- name: CountRecentPluginFailures :one
+-- Consecutive-failure signal for the event circuit breaker. Bounded by time so
+-- a breaker that tripped hours ago does not keep a hook shut forever.
+SELECT count(*) FROM plugin_invocation
+WHERE installation_id = $1 AND hook_key = $2 AND created_at > $3 AND status <> 'ok';
+
+-- name: DeletePluginInvocationsByInstallation :exec
+DELETE FROM plugin_invocation WHERE installation_id = $1;
+
+-- name: DeleteExpiredPluginInvocations :execrows
+-- TTL sweep. This table is operational telemetry, not history to keep.
+DELETE FROM plugin_invocation WHERE created_at < $1;

@@ -2,7 +2,8 @@ import { forwardRef, useEffect, useRef, useState, useImperativeHandle } from "re
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Issue, Label, TimelineEntry } from "@multica/core/types";
+import type { Issue, IssueStatusEntry, Label, TimelineEntry } from "@multica/core/types";
+import { issueStatusKeys } from "@multica/core/issue-statuses";
 import { I18nProvider } from "@multica/core/i18n/react";
 import { toast } from "sonner";
 import { useResolvedExpandStore } from "@multica/core/issues/stores/resolved-expand-store";
@@ -606,6 +607,28 @@ function createTestQueryClient() {
 
 function renderIssueDetail(issueId = "issue-1") {
   const queryClient = createTestQueryClient();
+  return render(
+    <I18nProvider locale="en" resources={TEST_RESOURCES}>
+      <QueryClientProvider client={queryClient}>
+        <IssueDetail issueId={issueId} />
+      </QueryClientProvider>
+    </I18nProvider>,
+  );
+}
+
+/**
+ * Renders with the workspace status catalog already in cache, so custom
+ * statuses resolve to their real name, category and color. Seeding the query
+ * (rather than stubbing the hook) keeps the shipped resolvers in the path; the
+ * generous staleTime on the catalog query means it is never refetched. Every
+ * other test runs without it — the cold-catalog case. (MUL-6243)
+ */
+function renderIssueDetailWithStatusCatalog(
+  entries: IssueStatusEntry[],
+  issueId = "issue-1",
+) {
+  const queryClient = createTestQueryClient();
+  queryClient.setQueryData(issueStatusKeys.list("ws-1"), { statuses: entries });
   return render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <QueryClientProvider client={queryClient}>
@@ -1313,6 +1336,94 @@ describe("IssueDetail (shared)", () => {
     await waitFor(() => {
       expect(screen.getByText(/from Todo to mystery_status/i)).toBeInTheDocument();
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // MUL-6413 — the activity glyph is per CATEGORY, so a move into a custom
+  // status drew the icon of the built-in it sits beside: "In Review → Awaiting
+  // Response" repainted identically and read as though nothing had moved.
+  // Colour is what carries a custom status's own identity.
+  // -------------------------------------------------------------------------
+
+  const IN_REVIEW_BUILT_IN: IssueStatusEntry = {
+    id: "in_review",
+    workspace_id: "ws-1",
+    key: "in_review",
+    name: "In Review",
+    description: "",
+    category: "in_review",
+    color: "#8b5cf6",
+    is_system: true,
+    position: 0,
+    archived_at: null,
+    created_at: "",
+    updated_at: "",
+  };
+
+  const AWAITING_RESPONSE: IssueStatusEntry = {
+    ...IN_REVIEW_BUILT_IN,
+    id: "awaiting_response",
+    key: "awaiting_response",
+    name: "Awaiting Response",
+    color: "#ff0000",
+    is_system: false,
+    position: 1,
+  };
+
+  function statusChangeIcon(to: string): SVGElement {
+    const row = screen.getByText(new RegExp(`to ${to}$`, "i")).closest("div")
+      ?.parentElement;
+    const icon = row?.querySelector("svg");
+    if (!icon) throw new Error(`no status glyph for the "${to}" activity row`);
+    return icon;
+  }
+
+  it("paints a status-change activity in the custom status's own colour", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-custom-status",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "in_review", to: "awaiting_response" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetailWithStatusCatalog([IN_REVIEW_BUILT_IN, AWAITING_RESPONSE]);
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/from In Review to Awaiting Response/i),
+      ).toBeInTheDocument();
+    });
+    expect(statusChangeIcon("Awaiting Response").style.color).toBe("rgb(255, 0, 0)");
+  });
+
+  it("leaves a built-in status-change activity on its semantic token colour", async () => {
+    // The catalog seeds a colour for the built-ins too, but those are theme
+    // tokens in the UI — painting the seeded hex would hard-code one theme.
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "activity",
+        id: "act-built-in-status",
+        actor_type: "member",
+        actor_id: "user-1",
+        action: "status_changed",
+        details: { from: "in_progress", to: "in_review" },
+        created_at: "2026-01-18T00:00:00Z",
+      },
+    ] as TimelineEntry[]);
+
+    renderIssueDetailWithStatusCatalog([IN_REVIEW_BUILT_IN, AWAITING_RESPONSE]);
+
+    await waitFor(() => {
+      expect(screen.getByText(/from In Progress to In Review/i)).toBeInTheDocument();
+    });
+    const icon = statusChangeIcon("In Review");
+    expect(icon.style.color).toBe("");
+    expect(icon.getAttribute("class")).toContain("text-success");
   });
 
   it("truncates the trailing activity block to the most recent 8 entries with a show-more toggle", async () => {

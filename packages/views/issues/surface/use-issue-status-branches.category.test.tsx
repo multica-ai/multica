@@ -186,6 +186,60 @@ describe("useIssueStatusBranches — category columns", () => {
       expect(result.current.pagination.in_review?.total).toBe(5),
     );
   });
+
+  // The status facet is disjunctive: the server answers it with the status
+  // filter dropped so the filter MENU can show per-option counts. A column
+  // header asks the opposite question, so an active filter has to narrow the
+  // fold — otherwise filtering by one custom status headed the In Review
+  // column with every in_review issue while showing only the matching cards
+  // beneath it. (MUL-6409)
+  it("counts only the selected statuses while a status filter is active", async () => {
+    setApiInstance({
+      listIssueTableRows: async (request: IssueTableRowsRequest) => ({
+        query_fingerprint: "test",
+        group_key: request.group_key ?? null,
+        parent_id: null,
+        total: 0,
+        rows: [],
+        branch_total: 0,
+        next_cursor: null,
+      }),
+      listIssueStatuses: async () => ({ statuses: [QA_ENTRY], categories: [], total: 1 }),
+    } as unknown as ApiClient);
+
+    const qc = new QueryClient({
+      defaultOptions: { queries: { retry: false, staleTime: Infinity } },
+    });
+    const { result } = renderHook(
+      () =>
+        useIssueStatusBranches({
+          wsId: "ws-1",
+          query: { ...QUERY, filters: { statuses: ["qa"] } },
+          statuses: ["in_review"],
+          facets: {
+            query_fingerprint: "test",
+            total: 5,
+            facets: [
+              {
+                kind: "status",
+                values: [
+                  { key: "in_review", count: 2 },
+                  { key: "qa", count: 3 },
+                ],
+              },
+            ],
+          },
+          facetsPending: false,
+          facetsFetching: false,
+          enabled: true,
+        }),
+      { wrapper: wrapper(qc) },
+    );
+
+    await waitFor(() =>
+      expect(result.current.pagination.in_review?.total).toBe(3),
+    );
+  });
 });
 
 /**

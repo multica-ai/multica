@@ -11,6 +11,9 @@ import {
   workspaceListOptions,
 } from "./queries";
 import { resolvePublicFileUrl } from "./avatar-url";
+import { useFeatureEnabled } from "../config";
+import { PLUGINS_V1_FLAG } from "../feature-flags";
+import { pluginInstallationsOptions } from "../plugins";
 
 // Stable empties for the still-loading directory queries. A fresh `= []`
 // default allocates a new array on every render while `data` is undefined,
@@ -63,14 +66,26 @@ export function buildActorNameResolver(directories: {
   members: readonly { user_id: string; name: string }[];
   agents: readonly { id: string; name: string }[];
   squads: readonly { id: string; name: string }[];
+  /**
+   * Installed plugins. Optional because most callers have no reason to load
+   * them, and an event-written row then falls back to a generic "Plugin" —
+   * vague, but not wrong the way "System" would be.
+   */
+  plugins?: readonly { id: string; name: string }[];
 }) {
   const memberNames = new Map(directories.members.map((m) => [m.user_id, m.name]));
   const agentNames = new Map(directories.agents.map((a) => [a.id, a.name]));
   const squadNames = new Map(directories.squads.map((s) => [s.id, s.name]));
+  const pluginNames = new Map((directories.plugins ?? []).map((p) => [p.id, p.name]));
   return (type: string, id: string) => {
     if (type === "member") return memberNames.get(id) ?? "Unknown";
     if (type === "agent") return agentNames.get(id) ?? "Unknown Agent";
     if (type === "squad") return squadNames.get(id) ?? "Unknown Squad";
+    // An event-triggered hook writes as the installation itself: there is no
+    // person behind it, and borrowing the last member who touched the issue
+    // would be a lie the audit trail cannot undo. An id that no longer
+    // resolves means the plugin was uninstalled — the row stays readable.
+    if (type === "plugin") return pluginNames.get(id) ?? "Plugin";
     if (type === "system") return "Multica";
     return "System";
   };
@@ -81,6 +96,13 @@ export function useActorName() {
   const { data: members = EMPTY_MEMBERS } = useQuery(memberListOptions(wsId));
   const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
   const { data: squads = EMPTY_SQUADS } = useQuery(squadListOptions(wsId));
+  // Only for naming a plugin-authored row. Gated on the flag so a workspace
+  // without plugins does not fetch a list it can never render an author from.
+  const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
+  const { data: pluginData } = useQuery({
+    ...pluginInstallationsOptions(wsId),
+    enabled: pluginsEnabled && wsId.length > 0,
+  });
 
   const getMemberName = useCallback((userId: string) => {
     const m = members.find((m) => m.user_id === userId);
@@ -98,8 +120,8 @@ export function useActorName() {
   }, [squads]);
 
   const getActorName = useMemo(
-    () => buildActorNameResolver({ members, agents, squads }),
-    [agents, members, squads],
+    () => buildActorNameResolver({ members, agents, squads, plugins: pluginData?.plugins }),
+    [agents, members, squads, pluginData],
   );
 
   const getActorInitials = useCallback((type: string, id: string) => {

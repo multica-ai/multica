@@ -105,3 +105,42 @@ export interface PluginInstallRequest {
 export interface PluginConfigRequest {
   values: Record<string, unknown>;
 }
+
+/** One completed hook call, as returned to whoever invoked it. */
+export interface PluginHookResult {
+  /**
+   * The HOST's classification, not the endpoint's. "refused" means the call was
+   * never made — a scope, a rate limit or a disabled install — which is a
+   * different problem for the reader than an endpoint that answered badly.
+   */
+  status: string;
+  output?: unknown;
+  error?: string;
+  latency_ms: number;
+  hook_key: string;
+  trigger: string;
+  attempts: number;
+}
+
+/**
+ * One recorded hook call. Operational telemetry, TTL-swept, and deliberately
+ * carrying no request or response body — a table that kept every payload would
+ * be a second copy of workspace content with none of its deletion paths.
+ */
+export interface PluginInvocation {
+  id: string;
+  hook_key: string;
+  trigger: string;
+  status: string;
+  event_type?: string;
+  attempt: number;
+  latency_ms: number;
+  error?: string;
+  created_at: string;
+}
+
+/** Both values are shown once, by the request that minted them. */
+export interface PluginTokenIssue {
+  token: string;
+  signing_secret: string;
+}

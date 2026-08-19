@@ -29,6 +29,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -303,6 +304,18 @@ type Handler struct {
 	// production, which gets the real handshake probe; tests inject a fake so
 	// the install path runs without a socket.
 	WecomCredentialProbe wecom.CredentialProbe
+
+	// TelegramInstall owns the Telegram bot install lifecycle (register a
+	// pasted BotFather token / list / revoke) and the at-rest encryption of
+	// each bot's token. Nil unless MULTICA_TELEGRAM_SECRET_KEY is set.
+	TelegramInstall *telegram.InstallService
+	// TelegramBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your Telegram account" prompt. Nil unless Telegram is configured.
+	TelegramBindingTokens *telegram.BindingTokenService
+	// TelegramOutbound owns the asynchronous terminal-delivery worker pool.
+	// The process owner starts and joins it; the synchronous event bus only
+	// enqueues EventChatDone work.
+	TelegramOutbound *telegram.Outbound
 
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the
