@@ -1,0 +1,181 @@
+name: Replay Attestation
+
+# AIPLAT-205 steps D + G + F, merged into one file: replay/reprocessing,
+# backfill discovery, and cross-verification all ultimately drive the same
+# notes-backend pipeline and previously lived in 3 separate files
+# (replay-attestation.yaml / backfill-replay.yaml / cross-verify-replay.yaml)
+# mainly because each mapped 1:1 to a workplan step, not because their
+# triggers required separate files. Merged for fewer files to maintain;
+# behavior is otherwise unchanged — see the "Triggers" and per-job comments
+# below for the old-file-and-trigger -> new-job mapping this preserves.
+#
+# Independence is still load-bearing, same as before the merge:
+#   - `replay` has no `needs:` on the synchronous git-ai.yaml job — the
+#     point is independence from that job's outcome and git-ai pin, per
+#     AIPLAT-199.
+#   - `verify` has no `needs:` on `discover`/`replay` — cross-verification
+#     runs against whatever replay_runs/note_enrichment rows already exist,
+#     independent of whether this run's own discover/replay did anything.
+#   - `discover` -> `replay` is the one real dependency (unchanged from the
+#     old backfill-replay.yaml): `replay`'s `if:` uses `always()` so it
+#     isn't auto-skipped on the trigger paths where `discover` doesn't run
+#     (repository_dispatch, or a manual dispatch that already supplied
+#     pr-numbers).
+#
+# Triggers (union of the 3 old files):
+#   - repository_dispatch (event-type: replay-attestation): the webhook
+#     path, one PR number in client_payload.pr_number -> `replay` only.
+#   - workflow_dispatch:
+#       - `pr-numbers` set: manual retry/backfill of specific PRs -> `replay`
+#         only (this input was `required: true` on the old
+#         replay-attestation.yaml; it's optional here so the same input set
+#         can also express backfill/verify intent).
+#       - `pr-numbers` empty, `run-cross-verify` false (default): manual
+#         backfill discovery -> `discover` -> `replay` (old
+#         backfill-replay.yaml's workflow_dispatch behavior).
+#       - `run-cross-verify: true`: manual cross-verify -> `verify` only.
+#         New input, not present on any of the 3 old files — required to
+#         disambiguate manual runs now that "which file did you dispatch"
+#         no longer signals intent.
+#   - schedule '43 */6 * * *': backfill discovery -> `discover` -> `replay`
+#     (unchanged cadence from backfill-replay.yaml).
+#   - schedule '17 */6 * * *': cross-verify -> `verify` (unchanged
+#     cadence/offset from cross-verify-replay.yaml — still 3h off the tick
+#     above so the two don't collide on the arc-runner-set pool).
+on:
+  repository_dispatch:
+    types: [replay-attestation]
+  workflow_dispatch:
+    inputs:
+      pr-numbers:
+        required: false
+        type: string
+        description: "Comma-separated merged PR numbers to replay (manual retry/backfill). Leave empty to run backfill discovery instead."
+      repo:
+        required: false
+        type: string
+        description: "owner/repo to target for backfill discovery or cross-verify (defaults to this repo, g2crowd/ai-attribution)"
+      limit:
+        required: false
+        type: string
+        description: "backfill only: max PRs to dispatch in one run (defaults to 100, capped at 500 by the endpoint)"
+      run-cross-verify:
+        required: false
+        type: boolean
+        default: false
+        description: "manual dispatch only: run cross-verification instead of replay/backfill"
+  schedule:
+    - cron: '43 */6 * * *'  # backfill discovery + replay
+    - cron: '17 */6 * * *'  # cross-verify
+
+jobs:
+  # AIPLAT-205 step G (was backfill-replay.yaml's `discover`): a merged PR
+  # with no CI-note coverage (prCoverage='none') has no path into
+  # `replay_runs` unless something finds it and asks — step D's replay job
+  # only ever runs when dispatched. Unchanged from the old file.
+  discover:
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '43 */6 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs['pr-numbers'] == '' && inputs['run-cross-verify'] == false)
+    # notes-backend is internal-only (VPN/tools-cluster network) — a public
+    # ubuntu-latest runner can't reach it, same lesson as ANK-86.
+    runs-on: arc-runner-set
+    outputs:
+      pr-numbers: ${{ steps.discover.outputs.pr-numbers }}
+    env:
+      NOTES_API_URL: ${{ secrets.NOTES_API_URL }}
+      NOTES_API_KEY: ${{ secrets.NOTES_API_KEY }}
+      TARGET_REPO: ${{ inputs.repo || github.repository }}
+      REPLAY_LIMIT: ${{ inputs.limit || '100' }}
+    steps:
+      - name: Find PRs needing a replay attempt
+        id: discover
+        run: |
+          response=$(curl -sS -G -w '\n%{http_code}' \
+            "${NOTES_API_URL}/worker/pr-facts/needing-replay" \
+            --data-urlencode "repo=${TARGET_REPO}" \
+            --data-urlencode "limit=${REPLAY_LIMIT}" \
+            -H "X-API-Key: ${NOTES_API_KEY}")
+          status="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          echo "$body" | jq . || echo "$body"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::needing-replay request failed with status $status"
+            exit 1
+          fi
+
+          pr_numbers=$(echo "$body" | jq -r '[.prs[].pr_number] | join(",")')
+          echo "### Backfill discovery: $TARGET_REPO" >> "$GITHUB_STEP_SUMMARY"
+          echo "found $(echo "$body" | jq '.prs | length') PR(s) with no CI-note coverage and no prior replay attempt" >> "$GITHUB_STEP_SUMMARY"
+          echo "pr-numbers=$pr_numbers" >> "$GITHUB_OUTPUT"
+
+  # AIPLAT-205 step D (was replay-attestation.yaml's `replay`): independently
+  # recompute a merged PR's AI attestation via `git-ai ci local merge`.
+  # Unchanged from the old file except the `pr-numbers` ternary gaining a
+  # third branch (fall back to `discover`'s output) and the `if:`/`needs:`
+  # needed to fold in the backfill trigger paths.
+  replay:
+    needs: discover
+    if: >-
+      always() && (
+        github.event_name == 'repository_dispatch' ||
+        (github.event_name == 'workflow_dispatch' && inputs['pr-numbers'] != '' && inputs['run-cross-verify'] == false) ||
+        (needs.discover.result == 'success' && needs.discover.outputs.pr-numbers != '')
+      )
+    uses: g2crowd/gh-actions/.github/workflows/replay-attestation.yml@main
+    with:
+      # Bracket notation is required for inputs['pr-numbers'] — the hyphen
+      # makes `inputs.pr-numbers` parse as subtraction in GitHub Actions
+      # expressions rather than a property access, silently resolving to a
+      # number (usually NaN-ish garbage) instead of the input value.
+      # client_payload.pr_number arrives as whatever type the sender's JSON
+      # payload used; toJSON+fromJSON round-trip would be overkill, so just
+      # coerce it to a string the same way workflow_dispatch's own string
+      # input already is.
+      pr-numbers: >-
+        ${{
+          github.event_name == 'workflow_dispatch' && inputs['pr-numbers'] != '' && inputs['pr-numbers']
+          || (github.event_name == 'repository_dispatch' && format('{0}', github.event.client_payload.pr_number))
+          || needs.discover.outputs.pr-numbers
+        }}
+    secrets: inherit
+
+  # AIPLAT-205 step F (was cross-verify-replay.yaml's `verify`): periodically
+  # drives POST /worker/replay-runs/verify, which cross-verifies step D's
+  # replay_runs against step C's local-daemon telemetry and promotes
+  # whatever clears the confidence gate (see
+  # notes-backend/src/cross-verification.ts and the "Cross-verification"
+  # section of the README). Unchanged from the old file.
+  verify:
+    if: >-
+      (github.event_name == 'schedule' && github.event.schedule == '17 */6 * * *') ||
+      (github.event_name == 'workflow_dispatch' && inputs['run-cross-verify'] == true)
+    # notes-backend is internal-only (VPN/tools-cluster network) — a public
+    # ubuntu-latest runner can't reach it. Same lesson as ANK-86 (record-pr-facts
+    # hardcoded ubuntu-latest and timed out reaching notes-backend.tools.g2.com).
+    runs-on: arc-runner-set
+    env:
+      NOTES_API_URL: ${{ secrets.NOTES_API_URL }}
+      NOTES_API_KEY: ${{ secrets.NOTES_API_KEY }}
+      TARGET_REPO: ${{ inputs.repo || github.repository }}
+    steps:
+      - name: Cross-verify pending replay runs
+        run: |
+          response=$(curl -sS -w '\n%{http_code}' -X POST \
+            "${NOTES_API_URL}/worker/replay-runs/verify?repo=${TARGET_REPO}" \
+            -H "X-API-Key: ${NOTES_API_KEY}")
+          status="${response##*$'\n'}"
+          body="${response%$'\n'*}"
+          echo "$body" | jq . || echo "$body"
+
+          if [ "$status" != "200" ]; then
+            echo "::error::cross-verify request failed with status $status"
+            exit 1
+          fi
+
+          promoted_count=$(echo "$body" | jq '.promoted | length')
+          echo "### Cross-verification: $TARGET_REPO" >> "$GITHUB_STEP_SUMMARY"
+          echo "$body" | jq '.summary' >> "$GITHUB_STEP_SUMMARY"
+          echo "batch_cleared_confidence_gate: $(echo "$body" | jq '.batch_cleared_confidence_gate')" >> "$GITHUB_STEP_SUMMARY"
+          echo "promoted: $promoted_count row(s)" >> "$GITHUB_STEP_SUMMARY"
