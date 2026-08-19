@@ -12,7 +12,6 @@ metadata:
       if ($http_x_forwarded_proto = 'http') {
         return 301 https://$host$request_uri;
       }
-    external-dns.alpha.kubernetes.io/hostname: agentfarm-admin.g2.com
     external-dns.alpha.kubernetes.io/ttl: "300"
 spec:
   # apps/admin ships with no authentication of its own (see
@@ -23,9 +22,15 @@ spec:
   # gitops/environments/development/patches/ingress.yaml) keeps this off the
   # public nginx-external/Cloudflare path that gitops/base/ingress.yaml uses.
   # Do not switch this to nginx-external without adding real auth first.
+  #
+  # Host is under tools.g2.com, not the g2.com apex: the tools cluster's
+  # nginx-internal NLB presents an ACM cert scoped to tools.g2.com +
+  # *.tools.g2.com only (terraform/tools/acm.tf in the infrastructure repo),
+  # so a bare *.g2.com host fails Cloudflare's origin cert validation with a
+  # 526. See AIPLAT-219.
   ingressClassName: nginx-internal
   rules:
-    - host: agentfarm-admin.g2.com
+    - host: agentfarm-admin.tools.g2.com
       http:
         paths:
           - path: /
