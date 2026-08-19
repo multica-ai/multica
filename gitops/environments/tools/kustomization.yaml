@@ -29,6 +29,12 @@ patches:
       version: v1
       kind: ServiceAccount
       name: agentfarm-backend
+  - path: patches/elasticache-replication-group.yaml
+    target:
+      group: elasticache.aws.upbound.io
+      version: v1beta2
+      kind: ReplicationGroup
+      name: agentfarm-redis
 images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newTag: "09ee92e1"

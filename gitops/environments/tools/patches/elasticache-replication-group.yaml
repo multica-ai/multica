@@ -1,0 +1,18 @@
+# tools-only override: cache.t4g.small was hitting maxmemory (used for
+# WebSocket relay streams — see ws:relay:shard:* in redis_relay.go), causing
+# "OOM command not allowed" on writes and cascading backend 500s/OOMKills.
+# Resized to t4g.medium (~3.09GiB vs ~1.37GiB usable). applyImmediately: true
+# so the fix lands now instead of waiting on the next maintenance window —
+# expect a brief (<1m) connection blip while AWS replaces the single node
+# (automaticFailoverEnabled: false, numCacheClusters: 1, no HA).
+# Scoped to tools only: development has its own separate ReplicationGroup
+# (gitops/environments/development/infra/elasticache-replication-group.yaml)
+# which intentionally stays on t4g.small.
+apiVersion: elasticache.aws.upbound.io/v1beta2
+kind: ReplicationGroup
+metadata:
+  name: agentfarm-redis
+spec:
+  forProvider:
+    nodeType: cache.t4g.medium
+    applyImmediately: true
