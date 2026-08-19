@@ -921,6 +921,11 @@ type GetLastChatTaskSessionRow struct {
 // state. Keep this list in sync with resumeUnsafeFailureReason and
 // GetLastTaskSession.
 //
+// The plan depends on idx_agent_task_queue_chat_terminal_resume for the
+// terminal/cutoff scans and idx_agent_task_queue_chat_retired_session for the
+// retired set. Keep their partial predicates broad enough for every CTE here,
+// especially the NULL-session resume_overflow_at rows.
+//
 // 'cancelled' is resumable and its absence was GH #6340: the user stops a turn
 // the agent had already started answering, and the next message starts from
 // nothing. A cancelled row only carries a session_id because the daemon pinned

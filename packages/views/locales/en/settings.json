@@ -862,6 +862,7 @@
     "empty_description_suffix": "to install a robot for it.",
     "revoked_badge": "revoked",
     "installed_at_label": "Installed {{when}}",
+    "identity_label": "Linked DingTalk identity: {{identity}}",
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "disconnect_confirm_title": "Disconnect this DingTalk bot?",

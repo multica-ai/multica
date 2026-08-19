@@ -215,6 +215,9 @@ Rules:
 - Mock `@multica/core/api` for API calls.
 - E2E tests should use `TestApiClient` for setup/teardown.
 - Prefer writing the failing test in the correct package before implementation when the change is behavioral.
+- DB-backed Go tests build their rows through `server/internal/testutil` (`dbfx.Issue`, `dbfx.Task`, `dbfx.Insert`) and drive handlers through `testutil.Call(h, req).Want(status).JSON(&out)`. Do not open-code an `INSERT ... RETURNING id` with its matching `t.Cleanup(DELETE ...)`, or a `httptest.NewRecorder()` / status-check / decode quartet, in a new test. `internal/handler` held ~1000 of the first and ~1200 of the second before the shared fixtures landed, and every change to a shared contract had to be made once per copy.
+- Keep an assertion where the test wrote it when its message says something the shared one cannot. `.Want()` prints the request line, both statuses and the response body; it does not know which case in a loop was running.
+- Helpers in `internal/testutil` insert rows, run handlers and report mismatches. They must not assert a product rule on a test's behalf — a helper that knows what a correct response looks like has taken the assertion away from the test making it.
 - Default tests must never resolve or execute user-installed agent CLIs. Pass a test-created fake executable path or a test-created missing path to agent subprocess code.
 - Real-agent smoke tests belong behind the `agentintegration` build tag and must check `MULTICA_RUN_REAL_AGENT_SMOKE=1` before executable lookup or account access.
 - Run an explicitly authorized real-agent smoke test with `(cd server && MULTICA_RUN_REAL_AGENT_SMOKE=1 go test -tags=agentintegration ./pkg/agent -run '<test-name>' -count=1 -v)`. This command may access an authenticated account and consume quota.

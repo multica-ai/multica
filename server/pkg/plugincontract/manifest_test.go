@@ -378,7 +378,8 @@ func TestCheckCapabilitiesReportsEveryUnavailableContribution(t *testing.T) {
 
 	// The shipped host set is what gates a staged rollout: a manifest naming a
 	// capability this build cannot run must fail loudly, never install
-	// half-working.
+	// half-working. Surfaces ship with the surface runtime; hooks and skill
+	// resources are still ahead, so they are what must be reported here.
 	err = manifest.CheckCapabilities(HostCapabilities())
 	if err == nil {
 		t.Fatal("CheckCapabilities accepted contributions the host cannot run")
@@ -387,10 +388,15 @@ func TestCheckCapabilitiesReportsEveryUnavailableContribution(t *testing.T) {
 	if !asCapabilityError(err, &unavailable) {
 		t.Fatalf("error type = %T, want *ErrCapabilityUnavailable", err)
 	}
-	for _, want := range []string{"surface issue_panel", "hook trigger ui", "hook transport http", "resource skill"} {
+	for _, want := range []string{"hook trigger ui", "hook transport http", "resource skill"} {
 		if !containsString(unavailable.Missing, want) {
 			t.Fatalf("missing = %v, want it to include %q", unavailable.Missing, want)
 		}
+	}
+	// A shipped capability must NOT be reported, or every install of a plain
+	// panel plugin would fail on a capability the host can actually run.
+	if containsString(unavailable.Missing, "surface "+SurfaceIssuePanel) {
+		t.Fatalf("missing = %v, want it to exclude the shipped issue_panel surface", unavailable.Missing)
 	}
 
 	full := Capabilities{

@@ -181,4 +181,5 @@ export interface ListPropertiesResponse {
 /** Response of PUT/DELETE /api/issues/{id}/properties/{propertyId}: the full post-mutation bag. */
 export interface IssuePropertiesResponse {
   properties: IssuePropertyValues;
+  issue_revision?: number;
 }

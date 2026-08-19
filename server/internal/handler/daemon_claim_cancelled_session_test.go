@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -39,31 +40,21 @@ func TestClaimTask_ChatResumesCancelledTurnSession(t *testing.T) {
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
 	// A brand-new chat: no resume pointer of its own yet.
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
-		VALUES ($1, $2, $3, 'cancelled first turn')
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title": "cancelled first turn",
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, started_at, completed_at, session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'cancelled', 0, now(), now(), 'cancelled-turn-session', '/tmp/cancelled-turn-workdir')
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create cancelled chat task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, runtimeID, chatSessionID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create follow-up chat task: %v", err)
-	}
+	`, agentID, runtimeID, chatSessionID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "cancelled-turn-session" {
@@ -85,43 +76,31 @@ func TestClaimTask_ChatCancelledSessionStaysExcludedWhenRetired(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
-		VALUES ($1, $2, $3, 'cancelled retired turn')
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title": "cancelled retired turn",
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, started_at, completed_at, session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'cancelled', 0, now() - interval '5 minutes', now() - interval '4 minutes',
 		        'retired-cancelled-session', '/tmp/retired-cancelled-workdir')
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create cancelled chat task: %v", err)
-	}
+	`, agentID, runtimeID, chatSessionID)
 	// A later run resumed that session, could not use it, and retired it.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, started_at, completed_at, retired_session_id
 		)
 		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes', now() - interval '1 minutes',
 		        'retired-cancelled-session')
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create retiring chat task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, runtimeID, chatSessionID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create follow-up chat task: %v", err)
-	}
+	`, agentID, runtimeID, chatSessionID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "" {
@@ -139,31 +118,22 @@ func TestClaimTask_IssueResumesCancelledTaskSession(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'cancelled issue run fixture', 'in_progress', 'none', $2, 'member', 86340, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "cancelled issue run fixture", testutil.Cols{
+		"status": "in_progress",
+		"number": 86340,
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at, session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'cancelled', 0, now(), now(), 'cancelled-issue-session', '/tmp/cancelled-issue-workdir')
-	`, agentID, runtimeID, issueID); err != nil {
-		t.Fatalf("setup: create cancelled issue task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, runtimeID, issueID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, issueID); err != nil {
-		t.Fatalf("setup: create follow-up issue task: %v", err)
-	}
+	`, agentID, runtimeID, issueID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "cancelled-issue-session" {
@@ -186,32 +156,22 @@ func TestCancelTask_AdvancesChatSessionResumePointer(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'cancel advances pointer', 'turn1-session', '/tmp/turn1-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "cancel advances pointer",
+		"session_id": "turn1-session",
+		"work_dir":   "/tmp/turn1-workdir",
+		"runtime_id": runtimeID,
+	})
 
 	// Turn 2 is running and has already pinned its own session id.
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, started_at, session_id, work_dir
-		)
-		VALUES ($1, $2, $3, 'running', 0, now(), 'turn2-session', '/tmp/turn2-workdir')
-		RETURNING id
-	`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create running chat task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "running",
+		"started_at":      testutil.Raw("now()"),
+		"session_id":      "turn2-session",
+		"work_dir":        "/tmp/turn2-workdir",
+	})
 
 	if _, err := testHandler.TaskService.CancelTaskWithResult(ctx, parseUUID(taskID),
 		service.CancelTaskOptions{ClientSupportsDraftRestore: true}); err != nil {
@@ -219,11 +179,9 @@ func TestCancelTask_AdvancesChatSessionResumePointer(t *testing.T) {
 	}
 
 	var sessionID, workDir, pointerRuntimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT session_id, work_dir, runtime_id FROM chat_session WHERE id = $1
-	`, chatSessionID).Scan(&sessionID, &workDir, &pointerRuntimeID); err != nil {
-		t.Fatalf("read chat session pointer: %v", err)
-	}
+	`, chatSessionID).Scan(&sessionID, &workDir, &pointerRuntimeID)
 	if sessionID != "turn2-session" {
 		t.Fatalf("chat_session.session_id = %q, want turn2-session (the cancelled turn owns the newest session)", sessionID)
 	}
@@ -246,28 +204,19 @@ func TestCancelTask_KeepsChatPointerWhenNoSessionEstablished(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'cancel keeps pointer', 'turn1-session', '/tmp/turn1-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "cancel keeps pointer",
+		"session_id": "turn1-session",
+		"work_dir":   "/tmp/turn1-workdir",
+		"runtime_id": runtimeID,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, started_at)
-		VALUES ($1, $2, $3, 'running', 0, now())
-		RETURNING id
-	`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create running chat task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "running",
+		"started_at":      testutil.Raw("now()"),
+	})
 
 	if _, err := testHandler.TaskService.CancelTaskWithResult(ctx, parseUUID(taskID),
 		service.CancelTaskOptions{ClientSupportsDraftRestore: true}); err != nil {
@@ -275,11 +224,9 @@ func TestCancelTask_KeepsChatPointerWhenNoSessionEstablished(t *testing.T) {
 	}
 
 	var sessionID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT session_id FROM chat_session WHERE id = $1
-	`, chatSessionID).Scan(&sessionID); err != nil {
-		t.Fatalf("read chat session pointer: %v", err)
-	}
+	`, chatSessionID).Scan(&sessionID)
 	if sessionID != "turn1-session" {
 		t.Fatalf("chat_session.session_id = %q, want turn1-session (a session-less cancel must not touch the pointer)", sessionID)
 	}
@@ -302,39 +249,27 @@ func TestCancelTask_PointerAdvanceIsAtomicWithStatusFlip(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'cancel atomicity', 'turn1-session', '/tmp/turn1-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "cancel atomicity",
+		"session_id": "turn1-session",
+		"work_dir":   "/tmp/turn1-workdir",
+		"runtime_id": runtimeID,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, started_at, session_id, work_dir
-		)
-		VALUES ($1, $2, $3, 'running', 0, now(), 'turn2-session', '/tmp/turn2-workdir')
-		RETURNING id
-	`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create running chat task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "running",
+		"started_at":      testutil.Raw("now()"),
+		"session_id":      "turn2-session",
+		"work_dir":        "/tmp/turn2-workdir",
+	})
 
 	// The follow-up the user queued while the turn was still running.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create queued follow-up: %v", err)
-	}
+	`, agentID, runtimeID, chatSessionID)
 
 	// Hold the chat row from another connection so the pointer write blocks.
 	blockTx := beginWarmedTx(t, ctx)
@@ -371,9 +306,7 @@ func TestCancelTask_PointerAdvanceIsAtomicWithStatusFlip(t *testing.T) {
 	}
 
 	var pointer string
-	if err := testPool.QueryRow(ctx, `SELECT session_id FROM chat_session WHERE id = $1`, chatSessionID).Scan(&pointer); err != nil {
-		t.Fatalf("read chat session pointer: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT session_id FROM chat_session WHERE id = $1`, chatSessionID).Scan(&pointer)
 	if pointer != "turn2-session" {
 		t.Fatalf("chat_session.session_id = %q, want turn2-session", pointer)
 	}
@@ -401,41 +334,28 @@ func TestPinTaskSession_LateCancelledPinAdvancesChatPointer(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'late pin', 'turn1-session', '/tmp/turn1-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "late pin",
+		"session_id": "turn1-session",
+		"work_dir":   "/tmp/turn1-workdir",
+		"runtime_id": runtimeID,
+	})
 
 	// Cancelled before the backend revealed its session.
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, started_at, completed_at
-		)
-		VALUES ($1, $2, $3, 'cancelled', 0, now(), now())
-		RETURNING id
-	`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create cancelled chat task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "cancelled",
+		"started_at":      testutil.Raw("now()"),
+		"completed_at":    testutil.Raw("now()"),
+	})
 
 	pinTaskSessionViaAPI(t, taskID, daemonID, "turn2-session", "/tmp/turn2-workdir")
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create follow-up chat task: %v", err)
-	}
+	`, agentID, runtimeID, chatSessionID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "turn2-session" {
@@ -457,35 +377,24 @@ func TestPinTaskSession_LateCancelledPinYieldsToNewerTurn(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'late pin yields', 'turn3-session', '/tmp/turn3-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "late pin yields",
+		"session_id": "turn3-session",
+		"work_dir":   "/tmp/turn3-workdir",
+		"runtime_id": runtimeID,
+	})
 
-	var cancelledID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, created_at, started_at, completed_at
-		)
-		VALUES ($1, $2, $3, 'cancelled', 0, now() - interval '10 minutes',
-		        now() - interval '10 minutes', now() - interval '9 minutes')
-		RETURNING id
-	`, agentID, runtimeID, chatSessionID).Scan(&cancelledID); err != nil {
-		t.Fatalf("setup: create cancelled chat task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, cancelledID) })
+	cancelledID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "cancelled",
+		"created_at":      testutil.Raw("now() - interval '10 minutes'"),
+		"started_at":      testutil.Raw("now() - interval '10 minutes'"),
+		"completed_at":    testutil.Raw("now() - interval '9 minutes'"),
+	})
 
 	// A newer turn already ran to completion and owns the pointer.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, created_at, started_at, completed_at, session_id, work_dir
@@ -493,16 +402,12 @@ func TestPinTaskSession_LateCancelledPinYieldsToNewerTurn(t *testing.T) {
 		VALUES ($1, $2, $3, 'completed', 0, now() - interval '2 minutes',
 		        now() - interval '2 minutes', now() - interval '1 minutes',
 		        'turn3-session', '/tmp/turn3-workdir')
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create newer completed task: %v", err)
-	}
+	`, agentID, runtimeID, chatSessionID)
 
 	pinTaskSessionViaAPI(t, cancelledID, daemonID, "turn2-session", "/tmp/turn2-workdir")
 
 	var pointer string
-	if err := testPool.QueryRow(ctx, `SELECT session_id FROM chat_session WHERE id = $1`, chatSessionID).Scan(&pointer); err != nil {
-		t.Fatalf("read chat session pointer: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT session_id FROM chat_session WHERE id = $1`, chatSessionID).Scan(&pointer)
 	if pointer != "turn3-session" {
 		t.Fatalf("chat_session.session_id = %q, want turn3-session (a straggler pin must not rewind a newer turn)", pointer)
 	}
@@ -520,38 +425,25 @@ func TestPinTaskSession_PointerAdvanceIsAtomicWithPin(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'pin atomicity', 'turn1-session', '/tmp/turn1-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "pin atomicity",
+		"session_id": "turn1-session",
+		"work_dir":   "/tmp/turn1-workdir",
+		"runtime_id": runtimeID,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, started_at, completed_at
-		)
-		VALUES ($1, $2, $3, 'cancelled', 0, now(), now())
-		RETURNING id
-	`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create cancelled chat task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "cancelled",
+		"started_at":      testutil.Raw("now()"),
+		"completed_at":    testutil.Raw("now()"),
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create queued follow-up: %v", err)
-	}
+	`, agentID, runtimeID, chatSessionID)
 
 	blockTx := beginWarmedTx(t, ctx)
 	if _, err := blockTx.Exec(ctx, `SELECT id FROM chat_session WHERE id = $1 FOR UPDATE`, chatSessionID); err != nil {
@@ -618,31 +510,21 @@ func TestCancelTask_TakesChatSessionLockBeforeTask(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'cancel lock order', 'turn1-session', '/tmp/turn1-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "cancel lock order",
+		"session_id": "turn1-session",
+		"work_dir":   "/tmp/turn1-workdir",
+		"runtime_id": runtimeID,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, chat_session_id,
-			status, priority, started_at, session_id, work_dir
-		)
-		VALUES ($1, $2, $3, 'running', 0, now(), 'turn2-session', '/tmp/turn2-workdir')
-		RETURNING id
-	`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create running chat task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":      runtimeID,
+		"chat_session_id": chatSessionID,
+		"status":          "running",
+		"started_at":      testutil.Raw("now()"),
+		"session_id":      "turn2-session",
+		"work_dir":        "/tmp/turn2-workdir",
+	})
 
 	// Both transactions are opened and warmed BEFORE anything is locked: a
 	// connection taken mid-hold can queue behind a sibling package's DDL.
@@ -701,29 +583,21 @@ func TestCancelTask_ConcurrentWithChatSessionDelete(t *testing.T) {
 	agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
 
 	for i := 0; i < 12; i++ {
-		var chatSessionID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO chat_session (
-				workspace_id, agent_id, creator_id, title,
-				session_id, work_dir, runtime_id
-			)
-			VALUES ($1, $2, $3, 'cancel vs delete', 'turn1-session', '/tmp/turn1-workdir', $4)
-			RETURNING id
-		`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-			t.Fatalf("setup: create chat session: %v", err)
-		}
+		chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+			"title":      "cancel vs delete",
+			"session_id": "turn1-session",
+			"work_dir":   "/tmp/turn1-workdir",
+			"runtime_id": runtimeID,
+		})
 
-		var taskID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (
-				agent_id, runtime_id, chat_session_id,
-				status, priority, started_at, session_id, work_dir
-			)
-			VALUES ($1, $2, $3, 'running', 0, now(), 'turn2-session', '/tmp/turn2-workdir')
-			RETURNING id
-		`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-			t.Fatalf("setup: create running chat task: %v", err)
-		}
+		taskID := dbfx.Task(t, agentID, testutil.Cols{
+			"runtime_id":      runtimeID,
+			"chat_session_id": chatSessionID,
+			"status":          "running",
+			"started_at":      testutil.Raw("now()"),
+			"session_id":      "turn2-session",
+			"work_dir":        "/tmp/turn2-workdir",
+		})
 
 		start := make(chan struct{})
 		cancelErr := make(chan error, 1)
@@ -787,30 +661,19 @@ func TestTerminalReports_TakeChatSessionLockBeforeTask(t *testing.T) {
 			ctx := context.Background()
 			agentID, runtimeID, _ := createRuntimeGuardAgent(t, ctx)
 
-			var chatSessionID string
-			if err := testPool.QueryRow(ctx, `
-				INSERT INTO chat_session (
-					workspace_id, agent_id, creator_id, title,
-					session_id, work_dir, runtime_id
-				)
-				VALUES ($1, $2, $3, 'report lock order', 'turn1-session', '/tmp/turn1-workdir', $4)
-				RETURNING id
-			`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-				t.Fatalf("setup: create chat session: %v", err)
-			}
-			t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+			chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+				"title":      "report lock order",
+				"session_id": "turn1-session",
+				"work_dir":   "/tmp/turn1-workdir",
+				"runtime_id": runtimeID,
+			})
 
-			var taskID string
-			if err := testPool.QueryRow(ctx, `
-				INSERT INTO agent_task_queue (
-					agent_id, runtime_id, chat_session_id, status, priority, started_at
-				)
-				VALUES ($1, $2, $3, 'running', 0, now())
-				RETURNING id
-			`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-				t.Fatalf("setup: create running chat task: %v", err)
-			}
-			t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+			taskID := dbfx.Task(t, agentID, testutil.Cols{
+				"runtime_id":      runtimeID,
+				"chat_session_id": chatSessionID,
+				"status":          "running",
+				"started_at":      testutil.Raw("now()"),
+			})
 
 			// Opened and warmed before anything is locked; see beginWarmedTx.
 			holderTx := beginWarmedTx(t, ctx)
@@ -913,28 +776,19 @@ func TestCancelAndPin_ConcurrentWithTerminalReport(t *testing.T) {
 	for _, c := range contenders {
 		t.Run(c.name, func(t *testing.T) {
 			for i := 0; i < 12; i++ {
-				var chatSessionID string
-				if err := testPool.QueryRow(ctx, `
-					INSERT INTO chat_session (
-						workspace_id, agent_id, creator_id, title,
-						session_id, work_dir, runtime_id
-					)
-					VALUES ($1, $2, $3, 'race', 'turn1-session', '/tmp/turn1-workdir', $4)
-					RETURNING id
-				`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-					t.Fatalf("setup: create chat session: %v", err)
-				}
+				chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+					"title":      "race",
+					"session_id": "turn1-session",
+					"work_dir":   "/tmp/turn1-workdir",
+					"runtime_id": runtimeID,
+				})
 
-				var taskID string
-				if err := testPool.QueryRow(ctx, `
-					INSERT INTO agent_task_queue (
-						agent_id, runtime_id, chat_session_id, status, priority, started_at
-					)
-					VALUES ($1, $2, $3, 'running', 0, now())
-					RETURNING id
-				`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-					t.Fatalf("setup: create running chat task: %v", err)
-				}
+				taskID := dbfx.Task(t, agentID, testutil.Cols{
+					"runtime_id":      runtimeID,
+					"chat_session_id": chatSessionID,
+					"status":          "running",
+					"started_at":      testutil.Raw("now()"),
+				})
 
 				start := make(chan struct{})
 				firstErr := make(chan error, 1)
@@ -1080,24 +934,20 @@ func TestPinTaskSession_LateCancelledPin(t *testing.T) {
 		if sessionID != "" {
 			session = sessionID
 		}
-		if err := testPool.QueryRow(ctx, `
+		dbfx.QueryRow(t, `
 			INSERT INTO agent_task_queue (
 				agent_id, runtime_id, status, priority, started_at, completed_at, session_id
 			)
 			VALUES ($1, $2, $3, 0, now(), now(), $4)
 			RETURNING id
-		`, agentID, runtimeID, status, session).Scan(&id); err != nil {
-			t.Fatalf("setup: create %s task: %v", status, err)
-		}
+		`, agentID, runtimeID, status, session).Scan(&id)
 		t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, id) })
 		return id
 	}
 	readSession := func(taskID string) string {
 		t.Helper()
 		var sessionID *string
-		if err := testPool.QueryRow(ctx, `SELECT session_id FROM agent_task_queue WHERE id = $1`, taskID).Scan(&sessionID); err != nil {
-			t.Fatalf("read task session: %v", err)
-		}
+		dbfx.QueryRow(t, `SELECT session_id FROM agent_task_queue WHERE id = $1`, taskID).Scan(&sessionID)
 		if sessionID == nil {
 			return ""
 		}

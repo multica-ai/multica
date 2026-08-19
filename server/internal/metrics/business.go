@@ -9,6 +9,8 @@ import (
 
 var taskDurationBuckets = []float64{1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1200, 3600, 7200}
 
+var chatClaimResumeQueryDurationBuckets = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
+
 type activeTaskLabels struct {
 	source      string
 	runtimeMode string
@@ -33,6 +35,9 @@ type BusinessMetrics struct {
 
 	taskQueuedExpired                 *prometheus.CounterVec
 	taskLeaseExpired                  *prometheus.CounterVec
+	chatClaimSessionFallbackNeeded    prometheus.Counter
+	chatClaimSessionFallbackResult    *prometheus.CounterVec
+	chatClaimResumeQueryDuration      *prometheus.HistogramVec
 	runtimeGCDeleted                  prometheus.Counter
 	runtimeGCFailed                   prometheus.Counter
 	runtimeGCBlocked                  prometheus.Gauge
@@ -149,6 +154,25 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Name:      "lease_expired_total",
 			Help:      "Total dispatched or running task leases expired by the scheduler.",
 		}, metricLabels("multica_task_lease_expired_total")),
+		chatClaimSessionFallbackNeeded: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "chat_claim",
+			Name:      "session_fallback_needed_total",
+			Help:      "Total chat claims whose session pointer lacked a provider session or workdir.",
+		}),
+		chatClaimSessionFallbackResult: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "chat_claim",
+			Name:      "session_fallback_result_total",
+			Help:      "Total chat-claim session fallback query results (hit, miss, or error).",
+		}, metricLabels("multica_chat_claim_session_fallback_result_total")),
+		chatClaimResumeQueryDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica",
+			Subsystem: "chat_claim",
+			Name:      "resume_query_duration_seconds",
+			Help:      "Duration of chat-claim resume-history queries by fixed query name.",
+			Buckets:   chatClaimResumeQueryDurationBuckets,
+		}, metricLabels("multica_chat_claim_resume_query_duration_seconds")),
 		runtimeGCDeleted: prometheus.NewCounter(prometheus.CounterOpts{
 			Namespace: "multica",
 			Subsystem: "runtime_gc",
@@ -198,6 +222,9 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.llmRequests,
 		m.taskQueuedExpired,
 		m.taskLeaseExpired,
+		m.chatClaimSessionFallbackNeeded,
+		m.chatClaimSessionFallbackResult,
+		m.chatClaimResumeQueryDuration,
 		m.runtimeGCDeleted,
 		m.runtimeGCFailed,
 		m.runtimeGCBlocked,
@@ -308,6 +335,49 @@ func (m *BusinessMetrics) RecordTaskLeaseExpired(source string) {
 		return
 	}
 	m.taskLeaseExpired.WithLabelValues(NormalizeTaskSource(source)).Inc()
+}
+
+// RecordChatClaimSessionFallbackNeeded counts a claim whose chat-session
+// pointer lacked either the provider session or the workdir.
+func (m *BusinessMetrics) RecordChatClaimSessionFallbackNeeded() {
+	if m == nil {
+		return
+	}
+	m.chatClaimSessionFallbackNeeded.Inc()
+}
+
+func (m *BusinessMetrics) RecordChatClaimSessionFallbackHit() {
+	m.recordChatClaimSessionFallbackResult("hit")
+}
+
+func (m *BusinessMetrics) RecordChatClaimSessionFallbackMiss() {
+	m.recordChatClaimSessionFallbackResult("miss")
+}
+
+func (m *BusinessMetrics) RecordChatClaimSessionFallbackError() {
+	m.recordChatClaimSessionFallbackResult("error")
+}
+
+func (m *BusinessMetrics) recordChatClaimSessionFallbackResult(result string) {
+	if m == nil {
+		return
+	}
+	m.chatClaimSessionFallbackResult.WithLabelValues(result).Inc()
+}
+
+func (m *BusinessMetrics) observeChatClaimResumeQuery(query string, seconds float64) {
+	if m == nil || seconds < 0 {
+		return
+	}
+	m.chatClaimResumeQueryDuration.WithLabelValues(query).Observe(seconds)
+}
+
+func (m *BusinessMetrics) ObserveChatClaimLastSessionQuery(seconds float64) {
+	m.observeChatClaimResumeQuery("last_session", seconds)
+}
+
+func (m *BusinessMetrics) ObserveChatClaimRolloutMissingQuery(seconds float64) {
+	m.observeChatClaimResumeQuery("rollout_missing", seconds)
 }
 
 // costUSDTicks is the provider's own price for this usage in 1e-10 USD, or 0

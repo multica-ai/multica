@@ -1,0 +1,18 @@
+-- Plugin-mediated writes record which plugin mediated them.
+--
+-- A surface writes as the CURRENT USER — a plugin can never do more than the
+-- person using it — so author_type/author_id stay exactly what they would be
+-- without a plugin. This column is the missing half of that: permission-wise
+-- the write is the user's, but audit-wise it must stay attributable to the
+-- plugin that produced it, or an installed plugin becomes an untraceable way
+-- to act as someone.
+--
+-- Modeled on comment.quick_action_id (migration 239) for the same two reasons:
+-- adding a nullable column with no default is metadata-only and instant on a
+-- hot table, and there is no request field for it — only the plugin Action API
+-- sets it — so the marker cannot be forged by a member posting normally.
+--
+-- No FK per repository policy. The render path treats an unresolvable id as an
+-- ordinary write, so uninstalling a plugin degrades old rows to plain
+-- attribution instead of breaking them.
+ALTER TABLE comment ADD COLUMN IF NOT EXISTS via_plugin_id UUID;

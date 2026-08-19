@@ -38,6 +38,27 @@ const handlerTestManifest = `{
   }
 }`
 
+// hookOnlyTestManifest declares a contribution kind the host does not ship yet.
+// Kept separate from handlerTestManifest so flipping a surface on never silently
+// changes what the capability-gate test is asserting.
+const hookOnlyTestManifest = `{
+  "manifest_version": 1,
+  "key": "com.example.hooked",
+  "name": "Hooked",
+  "version": "1.0.0",
+  "author": { "name": "example" },
+  "scopes": ["issues:read", "net:example.com"],
+  "contributes": {
+    "hooks": [{
+      "key": "summarize",
+      "name": "Summarize",
+      "description": "Compress the discussion.",
+      "triggers": ["ui"],
+      "transport": { "type": "http", "url": "https://example.com/hooks/summarize" }
+    }]
+  }
+}`
+
 func pluginHandlerRequest(method, path string, body []byte, params map[string]string) *http.Request {
 	request := httptest.NewRequest(method, path, bytes.NewReader(body))
 	request.Header.Set("X-User-ID", testUserID)
@@ -308,9 +329,38 @@ func TestPluginInstallRejectsMalformedManifest(t *testing.T) {
 func TestPluginInstallRejectsUnshippedCapabilities(t *testing.T) {
 	withPluginsV1Flag(t, testHandler, true)
 	cleanupPluginInstallations(t)
+	// A hook is the contribution kind the host genuinely cannot run yet, so this
+	// exercises the real shipped gate rather than a capability that happens to be
+	// off today. Written against a still-gated kind on purpose: asserting on a
+	// SHIPPED one turns every future capability flip into a test failure that
+	// says nothing about the gate itself.
+	source := withLocalPluginSource(t, hookOnlyTestManifest)
+	testHandler.PluginService.Host = plugincontract.HostCapabilities()
+
+	body, _ := json.Marshal(map[string]any{
+		"source_url":     source,
+		"granted_scopes": []string{"issues:read", "net:example.com"},
+	})
+	recorder := httptest.NewRecorder()
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", body, map[string]string{"id": testWorkspaceID}))
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("unshipped capability status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	// A declared-but-unrunnable contribution must fail the install outright and
+	// name what is missing: silently dropping it would look installed and never
+	// fire.
+	if !strings.Contains(recorder.Body.String(), "hook trigger") {
+		t.Fatalf("error does not name the missing capability: %s", recorder.Body.String())
+	}
+}
+
+func TestPluginInstallAcceptsAShippedSurface(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	// The other half of the gate: a contribution the host DOES ship must install
+	// against the real HostCapabilities set, not only against a test set that
+	// enables everything.
 	source := withLocalPluginSource(t, handlerTestManifest)
-	// A declared-but-unshipped contribution must fail the install outright: a
-	// silently dropped surface would look installed and never render.
 	testHandler.PluginService.Host = plugincontract.HostCapabilities()
 
 	body, _ := json.Marshal(map[string]any{
@@ -319,11 +369,8 @@ func TestPluginInstallRejectsUnshippedCapabilities(t *testing.T) {
 	})
 	recorder := httptest.NewRecorder()
 	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", body, map[string]string{"id": testWorkspaceID}))
-	if recorder.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("unshipped capability status=%d body=%s", recorder.Code, recorder.Body.String())
-	}
-	if !strings.Contains(recorder.Body.String(), "issue_panel") {
-		t.Fatalf("error does not name the missing capability: %s", recorder.Body.String())
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("shipped surface was refused: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

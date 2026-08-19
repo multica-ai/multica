@@ -66,6 +66,29 @@ func TestBusinessMetricsFailureReasonUsesCanonicalClassifier(t *testing.T) {
 	}
 }
 
+func TestBusinessMetricsChatClaimResumeObservations(t *testing.T) {
+	m := NewBusinessMetrics()
+
+	m.RecordChatClaimSessionFallbackNeeded()
+	m.RecordChatClaimSessionFallbackHit()
+	m.RecordChatClaimSessionFallbackMiss()
+	m.RecordChatClaimSessionFallbackError()
+	m.ObserveChatClaimLastSessionQuery(0.01)
+	m.ObserveChatClaimRolloutMissingQuery(0.02)
+
+	if got := testutil.ToFloat64(m.chatClaimSessionFallbackNeeded); got != 1 {
+		t.Errorf("chat claim fallback needed = %v, want 1", got)
+	}
+	for _, result := range []string{"hit", "miss", "error"} {
+		if got := testutil.ToFloat64(m.chatClaimSessionFallbackResult.WithLabelValues(result)); got != 1 {
+			t.Errorf("chat claim fallback %s = %v, want 1", result, got)
+		}
+	}
+	if got := testutil.CollectAndCount(m.chatClaimResumeQueryDuration); got != 2 {
+		t.Fatalf("chat claim resume query series = %d, want 2", got)
+	}
+}
+
 func TestBusinessMetricsLLMPricingAndUnpricedTokens(t *testing.T) {
 	m := NewBusinessMetrics()
 
@@ -108,6 +131,10 @@ func TestBusinessMetricsRegistryExposesAllFamilies(t *testing.T) {
 	m.RecordTaskFailed("issue", "local", taskfailure.ReasonTimeout.String())
 	m.RecordTaskQueuedExpired("issue", "local")
 	m.RecordTaskLeaseExpired("issue")
+	m.RecordChatClaimSessionFallbackNeeded()
+	m.RecordChatClaimSessionFallbackHit()
+	m.ObserveChatClaimLastSessionQuery(0.01)
+	m.ObserveChatClaimRolloutMissingQuery(0.01)
 	m.RecordLLMUsage("issue", "local", "codex", "gpt-5.4", 1, 1, 1, 1, 0)
 	m.RecordLLMUsage("issue", "local", "custom-provider", "custom-model", 1, 0, 0, 0, 0)
 

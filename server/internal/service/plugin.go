@@ -7,9 +7,11 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -37,16 +39,22 @@ type PluginService struct {
 	Secrets *secretbox.Box
 	// LocalDir is MULTICA_PLUGIN_DIR. Empty disables local sources.
 	LocalDir string
+	// DevOrigins is MULTICA_PLUGIN_DEV_ORIGINS: origins a plugin author may
+	// serve a manifest from while building one, typically a localhost static
+	// server. Empty in every deployment that has not opted in, which is the
+	// only reason it is safe to skip the public-HTTPS guard for them.
+	DevOrigins []string
 	// Host gates which declared contributions this build can actually run.
 	Host plugincontract.Capabilities
 }
 
 func NewPluginService(queries *db.Queries, txStarter TxStarter) *PluginService {
 	return &PluginService{
-		Queries:   queries,
-		TxStarter: txStarter,
-		LocalDir:  strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_DIR")),
-		Host:      plugincontract.HostCapabilities(),
+		Queries:    queries,
+		TxStarter:  txStarter,
+		LocalDir:   strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_DIR")),
+		DevOrigins: parseDevOrigins(os.Getenv("MULTICA_PLUGIN_DEV_ORIGINS")),
+		Host:       plugincontract.HostCapabilities(),
 	}
 }
 
@@ -56,6 +64,7 @@ const (
 	PluginErrorInvalid      PluginErrorKind = "invalid"
 	PluginErrorNotFound     PluginErrorKind = "not_found"
 	PluginErrorConflict     PluginErrorKind = "conflict"
+	PluginErrorForbidden    PluginErrorKind = "forbidden"
 	PluginErrorIncompatible PluginErrorKind = "incompatible"
 	PluginErrorQuota        PluginErrorKind = "quota"
 	PluginErrorUnavailable  PluginErrorKind = "unavailable"
@@ -103,6 +112,7 @@ type PluginConfigField struct {
 	Required    bool     `json:"required"`
 	Options     []string `json:"options,omitempty"`
 	Placeholder string   `json:"placeholder,omitempty"`
+	Multiline   bool     `json:"multiline,omitempty"`
 }
 
 // ConfigFieldsForManifest flattens the manifest config schema into declaration
@@ -118,6 +128,7 @@ func ConfigFieldsForManifest(manifest plugincontract.Manifest) []PluginConfigFie
 			Required:    field.Required,
 			Options:     field.Options,
 			Placeholder: field.Placeholder,
+			Multiline:   field.Multiline,
 		})
 	}
 	return fields
@@ -140,9 +151,16 @@ func (s *PluginService) FetchManifest(ctx context.Context, sourceURL string) (pl
 
 	var raw []byte
 	var err error
-	if strings.HasPrefix(sourceURL, LocalSourcePrefix) {
+	switch {
+	case strings.HasPrefix(sourceURL, LocalSourcePrefix):
 		raw, err = s.readLocalManifest(strings.TrimPrefix(sourceURL, LocalSourcePrefix))
-	} else {
+	case s.isDevOrigin(sourceURL):
+		// Explicitly opted in by the operator, so the public-HTTPS guard is
+		// skipped rather than worked around. This is what makes iterating on a
+		// surface possible: the author serves it from localhost and installs by
+		// URL, exactly as a published plugin would be.
+		raw, err = fetchDevManifest(ctx, sourceURL)
+	default:
 		raw, err = fetchRemoteManifest(ctx, sourceURL)
 	}
 	if err != nil {
@@ -154,6 +172,70 @@ func (s *PluginService) FetchManifest(ctx context.Context, sourceURL string) (pl
 		return plugincontract.Manifest{}, nil, &PluginError{Kind: PluginErrorInvalid, Message: "plugin manifest is invalid", Err: parseErr}
 	}
 	return manifest, canonical, nil
+}
+
+// parseDevOrigins reads the opt-in list. Anything that is not a bare origin is
+// dropped rather than half-honored: a path or query here would read as a broader
+// grant than it is.
+func parseDevOrigins(raw string) []string {
+	origins := make([]string, 0)
+	for _, candidate := range strings.Split(raw, ",") {
+		candidate = strings.TrimRight(strings.TrimSpace(candidate), "/")
+		if candidate == "" {
+			continue
+		}
+		parsed, err := url.Parse(candidate)
+		if err != nil || parsed.Host == "" || parsed.Path != "" || parsed.RawQuery != "" {
+			continue
+		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			continue
+		}
+		origins = append(origins, parsed.Scheme+"://"+parsed.Host)
+	}
+	return origins
+}
+
+func (s *PluginService) isDevOrigin(sourceURL string) bool {
+	if len(s.DevOrigins) == 0 {
+		return false
+	}
+	parsed, err := url.Parse(sourceURL)
+	if err != nil || parsed.Host == "" {
+		return false
+	}
+	origin := parsed.Scheme + "://" + parsed.Host
+	for _, allowed := range s.DevOrigins {
+		if origin == allowed {
+			return true
+		}
+	}
+	return false
+}
+
+// fetchDevManifest is the opted-in path: an ordinary bounded GET with no SSRF
+// guard, because the operator named this exact origin.
+func fetchDevManifest(ctx context.Context, sourceURL string) ([]byte, error) {
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, sourceURL, nil)
+	if err != nil {
+		return nil, &PluginError{Kind: PluginErrorInvalid, Message: "build manifest request", Err: err}
+	}
+	response, err := (&http.Client{Timeout: 10 * time.Second}).Do(request)
+	if err != nil {
+		return nil, &PluginError{Kind: PluginErrorUnavailable, Message: "fetch plugin manifest", Err: err}
+	}
+	defer response.Body.Close()
+	if response.StatusCode != http.StatusOK {
+		return nil, pluginErrf(PluginErrorUnavailable, "plugin manifest request returned HTTP %d", response.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(response.Body, plugincontract.MaxManifestSize+1))
+	if err != nil {
+		return nil, &PluginError{Kind: PluginErrorUnavailable, Message: "read plugin manifest", Err: err}
+	}
+	if len(raw) > plugincontract.MaxManifestSize {
+		return nil, pluginErrf(PluginErrorInvalid, "plugin manifest exceeds %d bytes", plugincontract.MaxManifestSize)
+	}
+	return raw, nil
 }
 
 func (s *PluginService) readLocalManifest(name string) ([]byte, error) {
@@ -406,6 +488,10 @@ func pruneConfig(raw []byte, manifest plugincontract.Manifest) []byte {
 	}
 	return encoded
 }
+
+func parseUUIDValue(value string) (pgtype.UUID, error) { return util.ParseUUID(value) }
+
+func uuidString(value pgtype.UUID) string { return util.UUIDToString(value) }
 
 // ParseInstallationManifest reads back the consented snapshot. Callers must use
 // this, never a freshly fetched manifest: what the source URL serves today is

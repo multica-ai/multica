@@ -982,10 +982,11 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
 	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id":   uuidToString(updated.ID),
-		"properties": properties,
+		"issue_id":       uuidToString(updated.ID),
+		"properties":     properties,
+		"issue_revision": updated.Revision,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
+	writeJSON(w, http.StatusOK, map[string]any{"properties": properties, "issue_revision": updated.Revision})
 }
 
 func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
@@ -1032,10 +1033,11 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
 	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id":   uuidToString(updated.ID),
-		"properties": properties,
+		"issue_id":       uuidToString(updated.ID),
+		"properties":     properties,
+		"issue_revision": updated.Revision,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
+	writeJSON(w, http.StatusOK, map[string]any{"properties": properties, "issue_revision": updated.Revision})
 }
 
 // withPropertyLock runs fn inside a transaction holding the advisory lock

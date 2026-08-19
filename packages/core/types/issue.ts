@@ -41,6 +41,7 @@ export interface IssueReaction {
   actor_id: string;
   emoji: string;
   created_at: string;
+  issue_revision?: number;
 }
 
 /**
@@ -93,4 +94,6 @@ export interface Issue {
   labels?: Label[];
   created_at: string;
   updated_at: string;
+  /** Monotonic server revision; absent when connected to an older backend. */
+  revision?: number;
 }

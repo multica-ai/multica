@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
@@ -97,13 +98,9 @@ func setHandlerTestWorkspaceRepos(t *testing.T, repos []map[string]string) {
 	if err != nil {
 		t.Fatalf("marshal repos: %v", err)
 	}
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, data, testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
-	}
+	dbfx.Exec(t, `UPDATE workspace SET repos = $1 WHERE id = $2`, data, testWorkspaceID)
 	t.Cleanup(func() {
-		if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte("[]"), testWorkspaceID); err != nil {
-			t.Fatalf("reset workspace repos: %v", err)
-		}
+		dbfx.Exec(t, `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte("[]"), testWorkspaceID)
 	})
 }
 
@@ -148,17 +145,10 @@ func TestRemoteMCPDaemonTokenForClaim(t *testing.T) {
 }
 
 func TestListDaemonWorkspaces_UserScopedAndConditional(t *testing.T) {
-	w := httptest.NewRecorder()
-	req := newRequest(http.MethodGet, "/api/daemon/workspaces", nil)
-	testHandler.ListDaemonWorkspaces(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ListDaemonWorkspaces: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ListDaemonWorkspaces, newRequest(http.MethodGet, "/api/daemon/workspaces", nil)).Want(http.StatusOK)
 
 	var workspaces []DaemonWorkspaceResponse
-	if err := json.NewDecoder(w.Body).Decode(&workspaces); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	w.JSON(&workspaces)
 	if len(workspaces) == 0 {
 		t.Fatal("expected at least one daemon workspace")
 	}
@@ -170,30 +160,19 @@ func TestListDaemonWorkspaces_UserScopedAndConditional(t *testing.T) {
 		t.Fatal("expected ETag")
 	}
 
-	w = httptest.NewRecorder()
-	req = newRequest(http.MethodGet, "/api/daemon/workspaces", nil)
+	req := newRequest(http.MethodGet, "/api/daemon/workspaces", nil)
 	req.Header.Set("If-None-Match", etag)
-	testHandler.ListDaemonWorkspaces(w, req)
-	if w.Code != http.StatusNotModified {
-		t.Fatalf("conditional ListDaemonWorkspaces: expected 304, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.ListDaemonWorkspaces, req).Want(http.StatusNotModified)
 	if w.Body.Len() != 0 {
 		t.Fatalf("expected empty 304 body, got %q", w.Body.String())
 	}
 }
 
 func TestListDaemonWorkspaces_DaemonTokenIsWorkspaceScoped(t *testing.T) {
-	w := httptest.NewRecorder()
-	req := newDaemonTokenRequest(http.MethodGet, "/api/daemon/workspaces", nil, testWorkspaceID, "daemon-test")
-	testHandler.ListDaemonWorkspaces(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ListDaemonWorkspaces: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ListDaemonWorkspaces, newDaemonTokenRequest(http.MethodGet, "/api/daemon/workspaces", nil, testWorkspaceID, "daemon-test")).Want(http.StatusOK)
 
 	var workspaces []DaemonWorkspaceResponse
-	if err := json.NewDecoder(w.Body).Decode(&workspaces); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	w.JSON(&workspaces)
 	if len(workspaces) != 1 || workspaces[0].ID != testWorkspaceID {
 		t.Fatalf("daemon-token workspaces = %+v, want only %s", workspaces, testWorkspaceID)
 	}
@@ -202,18 +181,9 @@ func TestListDaemonWorkspaces_DaemonTokenIsWorkspaceScoped(t *testing.T) {
 func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) string {
 	t.Helper()
 
-	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider,
-			status, device_info, metadata, last_seen_at, visibility, owner_id
-		)
-		VALUES ($1, NULL, $2, 'cloud', 'handler_test_runtime', 'online', 'claim reclaim fixture', '{}'::jsonb, now(), 'private', $3)
-		RETURNING id
-	`, testWorkspaceID, name, testUserID).Scan(&runtimeID); err != nil {
-		t.Fatalf("setup: create runtime: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	runtimeID := dbfx.Runtime(t, name, testutil.Cols{
+		"device_info": "claim reclaim fixture",
+	})
 
 	return runtimeID
 }
@@ -221,21 +191,10 @@ func createClaimReclaimRuntime(t *testing.T, ctx context.Context, name string) s
 func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeID, name string) (string, string) {
 	t.Helper()
 
-	var agentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
-			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks, owner_id
-		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'private', 1, $4)
-		RETURNING id
-	`, testWorkspaceID, name, runtimeID, testUserID).Scan(&agentID); err != nil {
-		t.Fatalf("setup: create agent: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
+	agentID := dbfx.Agent(t, name, runtimeID)
 
 	var issueID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES (
 			$1, $2, 'in_progress', 'none', $3, 'member',
@@ -243,9 +202,7 @@ func createClaimReclaimAgentAndIssue(t *testing.T, ctx context.Context, runtimeI
 			0
 		)
 		RETURNING id
-	`, testWorkspaceID, name+" issue", testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
+	`, testWorkspaceID, name+" issue", testUserID).Scan(&issueID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
 
 	return agentID, issueID
@@ -255,15 +212,13 @@ func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID
 	t.Helper()
 
 	var taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id, status, priority, dispatched_at, started_at
 		)
 		VALUES ($1, $2, $3, 'dispatched', 0, now() - ($4::interval), CASE WHEN $5::boolean THEN now() ELSE NULL END)
 		RETURNING id
-	`, agentID, runtimeID, issueID, dispatchedAge, started).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create dispatched task: %v", err)
-	}
+	`, agentID, runtimeID, issueID, dispatchedAge, started).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 
 	return taskID
@@ -271,13 +226,11 @@ func createDispatchedClaimFixtureTask(t *testing.T, ctx context.Context, agentID
 
 func setTaskPrepareLeaseForTest(t *testing.T, ctx context.Context, taskID, expiresIn string) {
 	t.Helper()
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		UPDATE agent_task_queue
 		SET prepare_lease_expires_at = now() + ($2::interval)
 		WHERE id = $1
-	`, taskID, expiresIn); err != nil {
-		t.Fatalf("setup: set prepare lease: %v", err)
-	}
+	`, taskID, expiresIn)
 }
 
 func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
@@ -285,24 +238,17 @@ func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 }, string) {
 	t.Helper()
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "claim-reclaim-review")
 	req = withURLParam(req, "runtimeId", runtimeID)
-
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
 		Task *struct {
 			ID string `json:"id"`
 		} `json:"task"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode claim response: %v", err)
-	}
+	w.JSON(&resp)
 	return resp.Task, w.Body.String()
 }
 
@@ -312,15 +258,10 @@ func claimTaskByRuntimeForTest(t *testing.T, runtimeID string) (*struct {
 func claimChatIntroForTest(t *testing.T, runtimeID string) (string, bool, string) {
 	t.Helper()
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "chat-intro-review")
 	req = withURLParam(req, "runtimeId", runtimeID)
-
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
 		Task *struct {
@@ -328,9 +269,7 @@ func claimChatIntroForTest(t *testing.T, runtimeID string) (string, bool, string
 			ChatIntro bool   `json:"chat_intro"`
 		} `json:"task"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode claim response: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Task == nil {
 		t.Fatalf("expected a claimable task, got none: %s", w.Body.String())
 	}
@@ -352,30 +291,19 @@ func TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies(t *testing.T) {
 	agentID, _ := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Chat intro gate agent")
 	// Allow more than one in-flight task so the second claim isn't blocked by
 	// the first (which stays 'dispatched') on the concurrency limit.
-	if _, err := testPool.Exec(ctx, `UPDATE agent SET max_concurrent_tasks = 5 WHERE id = $1`, agentID); err != nil {
-		t.Fatalf("raise max_concurrent_tasks: %v", err)
-	}
+	dbfx.Exec(t, `UPDATE agent SET max_concurrent_tasks = 5 WHERE id = $1`, agentID)
 
-	var sessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status, runtime_id, is_agent_intro)
-		VALUES ($1, $2, $3, '👋 intro', 'active', $4, true)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&sessionID); err != nil {
-		t.Fatalf("insert intro chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+	sessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":          "👋 intro",
+		"runtime_id":     runtimeID,
+		"is_agent_intro": true,
+	})
 
 	seedQueuedChatTask := func() string {
-		var taskID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, chat_session_id)
-			VALUES ($1, $2, 'queued', 0, $3)
-			RETURNING id
-		`, agentID, runtimeID, sessionID).Scan(&taskID); err != nil {
-			t.Fatalf("seed queued chat task: %v", err)
-		}
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+		taskID := dbfx.Task(t, agentID, testutil.Cols{
+			"runtime_id":      runtimeID,
+			"chat_session_id": sessionID,
+		})
 		return taskID
 	}
 
@@ -391,17 +319,13 @@ func TestClaimTaskByRuntime_ChatIntroGateClearsAfterUserReplies(t *testing.T) {
 
 	// The intro run finishes. Chat tasks serialize on chat_session_id, so the
 	// next turn only becomes claimable once this one leaves an in-flight state.
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, introTaskID); err != nil {
-		t.Fatalf("complete intro task: %v", err)
-	}
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'completed' WHERE id = $1`, introTaskID)
 
 	// The creator replies: persist a user message on the same session.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO chat_message (chat_session_id, role, content)
 		VALUES ($1, 'user', 'thanks! can you help me with X?')
-	`, sessionID); err != nil {
-		t.Fatalf("insert user reply: %v", err)
-	}
+	`, sessionID)
 
 	// Second turn on the same is_agent_intro session must NOT re-introduce.
 	followupTaskID := seedQueuedChatTask()
@@ -433,13 +357,11 @@ func TestClaimTaskByRuntime_ReclaimsStaleDispatchedTask(t *testing.T) {
 	}
 
 	var refreshed bool
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT dispatched_at > now() - interval '15 seconds'
 		FROM agent_task_queue
 		WHERE id = $1
-	`, taskID).Scan(&refreshed); err != nil {
-		t.Fatalf("load refreshed dispatched_at: %v", err)
-	}
+	`, taskID).Scan(&refreshed)
 	if !refreshed {
 		t.Fatal("expected reclaimed task to refresh dispatched_at")
 	}
@@ -461,13 +383,11 @@ func TestClaimTaskByRuntime_DoesNotReclaimFreshDispatchedTask(t *testing.T) {
 	}
 
 	var stillFresh bool
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT dispatched_at < now() - interval '70 seconds'
 		FROM agent_task_queue
 		WHERE id = $1
-	`, taskID).Scan(&stillFresh); err != nil {
-		t.Fatalf("load fresh dispatched task: %v", err)
-	}
+	`, taskID).Scan(&stillFresh)
 	if !stillFresh {
 		t.Fatal("expected fresh dispatched task to keep its original dispatched_at")
 	}
@@ -490,13 +410,11 @@ func TestClaimTaskByRuntime_DoesNotReclaimActivePrepareLease(t *testing.T) {
 	}
 
 	var leaseActive bool
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT prepare_lease_expires_at > now()
 		FROM agent_task_queue
 		WHERE id = $1
-	`, taskID).Scan(&leaseActive); err != nil {
-		t.Fatalf("load active prepare lease: %v", err)
-	}
+	`, taskID).Scan(&leaseActive)
 	if !leaseActive {
 		t.Fatal("expected prepare lease to remain active")
 	}
@@ -522,13 +440,11 @@ func TestClaimTaskByRuntime_ReclaimsExpiredPrepareLease(t *testing.T) {
 	}
 
 	var leaseRefreshed bool
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT prepare_lease_expires_at > now()
 		FROM agent_task_queue
 		WHERE id = $1
-	`, taskID).Scan(&leaseRefreshed); err != nil {
-		t.Fatalf("load refreshed prepare lease: %v", err)
-	}
+	`, taskID).Scan(&leaseRefreshed)
 	if !leaseRefreshed {
 		t.Fatal("expected reclaimed task to refresh prepare lease")
 	}
@@ -545,32 +461,22 @@ func TestExtendTaskPrepareLease(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Extend prepare lease agent")
 	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+otherRuntimeID+"/tasks/"+taskID+"/prepare-lease", nil,
 		testWorkspaceID, "extend-prepare-lease")
 	req = withURLParams(req, "runtimeId", otherRuntimeID, "taskId", taskID)
-	testHandler.ExtendTaskPrepareLease(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("ExtendTaskPrepareLease wrong runtime: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.ExtendTaskPrepareLease, req).Want(http.StatusNotFound)
 
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/prepare-lease", nil,
 		testWorkspaceID, "extend-prepare-lease")
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
-	testHandler.ExtendTaskPrepareLease(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ExtendTaskPrepareLease: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.ExtendTaskPrepareLease, req).Want(http.StatusOK)
 
 	var leaseActive bool
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT prepare_lease_expires_at > now()
 		FROM agent_task_queue
 		WHERE id = $1
-	`, taskID).Scan(&leaseActive); err != nil {
-		t.Fatalf("load extended prepare lease: %v", err)
-	}
+	`, taskID).Scan(&leaseActive)
 	if !leaseActive {
 		t.Fatal("expected prepare lease to be extended")
 	}
@@ -592,13 +498,11 @@ func TestClaimTaskByRuntime_DoesNotReclaimAlreadyStartedTask(t *testing.T) {
 	}
 
 	var startedAtValid bool
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT started_at IS NOT NULL
 		FROM agent_task_queue
 		WHERE id = $1
-	`, taskID).Scan(&startedAtValid); err != nil {
-		t.Fatalf("load started dispatched task: %v", err)
-	}
+	`, taskID).Scan(&startedAtValid)
 	if !startedAtValid {
 		t.Fatal("expected started dispatched task to keep started_at")
 	}
@@ -621,13 +525,11 @@ func TestClaimTaskByRuntime_DoesNotReclaimDifferentRuntimeTask(t *testing.T) {
 	}
 
 	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT runtime_id::text
 		FROM agent_task_queue
 		WHERE id = $1
-	`, taskID).Scan(&runtimeID); err != nil {
-		t.Fatalf("load other-runtime dispatched task: %v", err)
-	}
+	`, taskID).Scan(&runtimeID)
 	if runtimeID != owningRuntimeID {
 		t.Fatalf("task runtime_id = %s, want %s", runtimeID, owningRuntimeID)
 	}
@@ -642,51 +544,36 @@ func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Skill refs runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Skill refs agent")
 
-	var skillID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-		VALUES ($1, 'deploy-skill-ref-test', 'Deploy safely', 'main skill content', '{}'::jsonb, $2)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&skillID); err != nil {
-		t.Fatalf("setup: create skill: %v", err)
-	}
+	skillID := dbfx.Insert(t, "skill", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"name":         "deploy-skill-ref-test",
+		"description":  "Deploy safely",
+		"content":      "main skill content",
+		"config":       testutil.Raw("'{}'::jsonb"),
+		"created_by":   testUserID,
+	})
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM agent_skill WHERE skill_id = $1`, skillID)
 		testPool.Exec(ctx, `DELETE FROM skill_file WHERE skill_id = $1`, skillID)
 		testPool.Exec(ctx, `DELETE FROM skill WHERE id = $1`, skillID)
 	})
-	if _, err := testPool.Exec(ctx, `INSERT INTO skill_file (skill_id, path, content) VALUES ($1, 'rules.md', 'rules content')`, skillID); err != nil {
-		t.Fatalf("setup: create skill file: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`, agentID, skillID); err != nil {
-		t.Fatalf("setup: bind skill: %v", err)
-	}
+	dbfx.Exec(t, `INSERT INTO skill_file (skill_id, path, content) VALUES ($1, 'rules.md', 'rules content')`, skillID)
+	dbfx.Exec(t, `INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`, agentID, skillID)
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
-		VALUES ($1, $2, $3, 'queued', 0)
-		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+	})
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "skill-refs-daemon")
 	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilitySkillBundlesV1)
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var claimResp struct {
 		Task *AgentTaskResponse `json:"task"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &claimResp); err != nil {
-		t.Fatalf("decode claim: %v", err)
-	}
+	w.JSON(&claimResp)
 	if claimResp.Task == nil || claimResp.Task.Agent == nil {
 		t.Fatalf("missing task agent in response: %s", w.Body.String())
 	}
@@ -705,60 +592,38 @@ func TestClaimTaskByRuntime_SkillBundleRefsAndResolve(t *testing.T) {
 	}
 
 	staleHashBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: "sha256:stale"}}}
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", staleHashBody, testWorkspaceID, "skill-refs-daemon")
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
-	testHandler.ResolveTaskSkillBundles(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ResolveTaskSkillBundles with stale hash: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusOK)
 	var staleHashResp struct {
 		Bundles []service.AgentSkillData `json:"bundles"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &staleHashResp); err != nil {
-		t.Fatalf("decode stale hash resolve: %v", err)
-	}
+	w.JSON(&staleHashResp)
 	if len(staleHashResp.Bundles) != 1 || staleHashResp.Bundles[0].Hash != ref.Hash {
 		t.Fatalf("stale hash resolve did not return current bundle: %+v", staleHashResp.Bundles)
 	}
 
 	invalidRefBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source}}}
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", invalidRefBody, testWorkspaceID, "skill-refs-daemon")
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
-	testHandler.ResolveTaskSkillBundles(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("ResolveTaskSkillBundles with invalid ref: expected 400, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusBadRequest)
 
 	resolveBody := resolveSkillBundlesRequest{Skills: []resolveSkillBundleRef{{ID: ref.ID, Source: ref.Source, Hash: ref.Hash}}}
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
-	testHandler.ResolveTaskSkillBundles(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ResolveTaskSkillBundles: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusOK)
 	var resolveResp struct {
 		Bundles []service.AgentSkillData `json:"bundles"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resolveResp); err != nil {
-		t.Fatalf("decode resolve: %v", err)
-	}
+	w.JSON(&resolveResp)
 	if len(resolveResp.Bundles) != 1 || resolveResp.Bundles[0].Content != "main skill content" || len(resolveResp.Bundles[0].Files) != 1 || resolveResp.Bundles[0].Files[0].Content != "rules content" {
 		t.Fatalf("unexpected resolved bundles: %+v", resolveResp.Bundles)
 	}
 
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskID); err != nil {
-		t.Fatalf("setup: mark task running: %v", err)
-	}
-	w = httptest.NewRecorder()
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'running', started_at = now() WHERE id = $1`, taskID)
 	req = newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/"+taskID+"/skill-bundles/resolve", resolveBody, testWorkspaceID, "skill-refs-daemon")
 	req = withURLParams(req, "runtimeId", runtimeID, "taskId", taskID)
-	testHandler.ResolveTaskSkillBundles(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("ResolveTaskSkillBundles for running task: expected 409, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.ResolveTaskSkillBundles, req).Want(http.StatusConflict)
 }
 
 // TestClaimTaskByRuntime_PopulatesWorkspaceContext verifies the claim
@@ -774,12 +639,8 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 	ctx := context.Background()
 	const wsContext = "All comments must be in English. Prefer concise PR descriptions."
 	var prior string
-	if err := testPool.QueryRow(ctx, `SELECT COALESCE(context, '') FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&prior); err != nil {
-		t.Fatalf("read workspace.context: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET context = $1 WHERE id = $2`, wsContext, testWorkspaceID); err != nil {
-		t.Fatalf("set workspace.context: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT COALESCE(context, '') FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&prior)
+	dbfx.Exec(t, `UPDATE workspace SET context = $1 WHERE id = $2`, wsContext, testWorkspaceID)
 	t.Cleanup(func() {
 		if prior == "" {
 			testPool.Exec(ctx, `UPDATE workspace SET context = NULL WHERE id = $1`, testWorkspaceID)
@@ -792,14 +653,10 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Workspace context claim agent")
 	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "workspace-context-claim")
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
 		Task *struct {
@@ -807,9 +664,7 @@ func TestClaimTaskByRuntime_PopulatesWorkspaceContext(t *testing.T) {
 			WorkspaceContext string `json:"workspace_context"`
 		} `json:"task"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode claim response: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Task == nil {
 		t.Fatalf("expected dispatched task %s to be claimed, got nil response: %s", taskID, w.Body.String())
 	}
@@ -833,12 +688,8 @@ func TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset(t *testing.T) {
 
 	ctx := context.Background()
 	var prior string
-	if err := testPool.QueryRow(ctx, `SELECT COALESCE(context, '') FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&prior); err != nil {
-		t.Fatalf("read workspace.context: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET context = NULL WHERE id = $1`, testWorkspaceID); err != nil {
-		t.Fatalf("clear workspace.context: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT COALESCE(context, '') FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&prior)
+	dbfx.Exec(t, `UPDATE workspace SET context = NULL WHERE id = $1`, testWorkspaceID)
 	t.Cleanup(func() {
 		if prior == "" {
 			testPool.Exec(ctx, `UPDATE workspace SET context = NULL WHERE id = $1`, testWorkspaceID)
@@ -851,14 +702,10 @@ func TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Workspace context empty claim agent")
 	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "workspace-context-empty-claim")
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
 		Task *struct {
@@ -866,9 +713,7 @@ func TestClaimTaskByRuntime_WorkspaceContextEmptyWhenUnset(t *testing.T) {
 			WorkspaceContext string `json:"workspace_context"`
 		} `json:"task"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode claim response: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Task == nil {
 		t.Fatalf("expected dispatched task %s to be claimed, got nil: %s", taskID, w.Body.String())
 	}
@@ -883,38 +728,32 @@ func TestClaimTaskByRuntime_MissingRuntimeOwnerCancelsAndRejects(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider,
-			status, device_info, metadata, last_seen_at, visibility
-		)
-		VALUES ($1, NULL, 'Missing owner claim runtime', 'cloud', 'handler_test_runtime', 'online', 'claim missing owner fixture', '{}'::jsonb, now(), 'private')
-		RETURNING id
-	`, testWorkspaceID).Scan(&runtimeID); err != nil {
-		t.Fatalf("setup: create runtime: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	runtimeID := dbfx.Insert(t, "agent_runtime", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    nil,
+		"name":         "Missing owner claim runtime",
+		"runtime_mode": "cloud",
+		"provider":     "handler_test_runtime",
+		"status":       "online",
+		"device_info":  "claim missing owner fixture",
+		"metadata":     testutil.Raw("'{}'::jsonb"),
+		"last_seen_at": testutil.Raw("now()"),
+		"visibility":   "private",
+	})
 
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Missing owner claim agent")
 	taskID := createDispatchedClaimFixtureTask(t, ctx, agentID, runtimeID, issueID, "120 seconds", false)
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil,
 		testWorkspaceID, "missing-owner-claim")
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("ClaimTaskByRuntime: expected 500, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusInternalServerError)
 	if !strings.Contains(w.Body.String(), "runtime owner required to mint task token") {
 		t.Fatalf("ClaimTaskByRuntime body = %q, want runtime owner error", w.Body.String())
 	}
 
 	var status string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
-		t.Fatalf("read task status: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if status != "cancelled" {
 		t.Fatalf("task status = %q, want cancelled", status)
 	}
@@ -925,7 +764,6 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID,
 		"daemon_id":    "test-daemon-mdt",
@@ -934,11 +772,7 @@ func TestDaemonRegister_WithDaemonToken(t *testing.T) {
 			{"name": "test-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
 		},
 	}, testWorkspaceID, "test-daemon-mdt")
-
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DaemonRegister with daemon token: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 
 	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
@@ -963,7 +797,6 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 	ctx := context.Background()
 	profileID := insertRuntimeProfileFixture(t, ctx, "Missing Custom Codex", "codex", "missing-codex")
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID,
 		"daemon_id":    "test-daemon-profile-failure",
@@ -977,23 +810,17 @@ func TestDaemonRegister_RecordsRuntimeProfileRegistrationFailure(t *testing.T) {
 		},
 	}, testWorkspaceID, "test-daemon-profile-failure")
 	req.Header.Set("X-Client-Capabilities", protocol.DaemonCapabilityLocalWorktreeV1)
-
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE profile_id = $1`, profileID)
 	})
 
 	var status string
 	var metadata []byte
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT status, metadata FROM agent_runtime
 		WHERE workspace_id = $1 AND daemon_id = $2 AND profile_id = $3
-	`, testWorkspaceID, "test-daemon-profile-failure", profileID).Scan(&status, &metadata); err != nil {
-		t.Fatalf("read failed profile runtime row: %v", err)
-	}
+	`, testWorkspaceID, "test-daemon-profile-failure", profileID).Scan(&status, &metadata)
 	if status != "offline" {
 		t.Fatalf("status = %q, want offline", status)
 	}
@@ -1052,7 +879,6 @@ func TestDaemonHeartbeat_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	}
 
 	// First, register a runtime using PAT (existing flow).
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID,
 		"daemon_id":    "test-daemon-heartbeat",
@@ -1061,10 +887,7 @@ func TestDaemonHeartbeat_WithDaemonToken_CrossWorkspace(t *testing.T) {
 			{"name": "test-runtime-hb", "type": "claude", "version": "1.0.0", "status": "online"},
 		},
 	})
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("Setup: DaemonRegister failed: %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 	var regResp map[string]any
 	json.NewDecoder(w.Body).Decode(&regResp)
 	runtimes := regResp["runtimes"].([]any)
@@ -1072,15 +895,10 @@ func TestDaemonHeartbeat_WithDaemonToken_CrossWorkspace(t *testing.T) {
 	defer testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
 
 	// Try heartbeat with a daemon token from a DIFFERENT workspace — should fail.
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("POST", "/api/daemon/heartbeat", map[string]any{
 		"runtime_id": runtimeID,
 	}, "00000000-0000-0000-0000-000000000000", "attacker-daemon")
-
-	testHandler.DaemonHeartbeat(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("DaemonHeartbeat with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusNotFound)
 }
 
 // TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError pins the fix for
@@ -1123,31 +941,16 @@ func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
 
 	ctx := context.Background()
 	slug := "handler-ws-heartbeat-" + uuid.New().String()
-	var workspaceID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, "WS Heartbeat Scope", slug, "Temporary workspace for WS heartbeat tests", "HWS").Scan(&workspaceID); err != nil {
-		t.Fatalf("setup: create workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	workspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "WS Heartbeat Scope",
+		"slug":         slug,
+		"description":  "Temporary workspace for WS heartbeat tests",
+		"issue_prefix": "HWS",
 	})
 
-	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider,
-			status, device_info, metadata, owner_id, last_seen_at
-		)
-		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
-		RETURNING id
-	`, workspaceID, "WS Heartbeat Runtime", "handler_test_runtime", "WS heartbeat runtime", testUserID).Scan(&runtimeID); err != nil {
-		t.Fatalf("setup: create runtime: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	runtimeID := dbfx.Runtime(t, "WS Heartbeat Runtime", testutil.Cols{
+		"workspace_id": workspaceID,
+		"device_info":  "WS heartbeat runtime",
 	})
 
 	ack, err := testHandler.HandleDaemonWSHeartbeat(ctx,
@@ -1171,15 +974,10 @@ func TestDaemonHeartbeat_HTTPRuntimeGoneReturns404(t *testing.T) {
 	}
 
 	missingRuntime := uuid.New().String()
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id": missingRuntime,
 	}, testWorkspaceID, "test-daemon")
-	testHandler.DaemonHeartbeat(w, req)
-
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("expected 404 for missing runtime, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusNotFound)
 	if !strings.Contains(strings.ToLower(w.Body.String()), "runtime not found") {
 		t.Fatalf("expected 'runtime not found' body, got %s", w.Body.String())
 	}
@@ -1246,15 +1044,10 @@ func TestDaemonHeartbeat_EmptyQueueSkipsPopPending(t *testing.T) {
 		testHandler.LocalSkillImportStore = origImport
 	})
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat", map[string]any{
 		"runtime_id": runtimeID,
 	}, testWorkspaceID, "runtime-local-skills-daemon")
-
-	testHandler.DaemonHeartbeat(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DaemonHeartbeat: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DaemonHeartbeat, req).Want(http.StatusOK)
 	if listSpy.popCalls != 0 {
 		t.Fatalf("expected 0 PopPending calls on empty list queue, got %d", listSpy.popCalls)
 	}
@@ -1335,15 +1128,10 @@ func TestGetTaskStatus_TransientDBError_Returns500(t *testing.T) {
 	h := &Handler{}
 	h.Queries = db.New(&mockDB{getUserErr: errors.New("connection reset by peer")})
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("GET", "/api/daemon/tasks/00000000-0000-0000-0000-000000000001/status", nil,
 		"00000000-0000-0000-0000-000000000000", "test-daemon")
 	req = withURLParam(req, "taskId", "00000000-0000-0000-0000-000000000001")
-
-	h.GetTaskStatus(w, req)
-	if w.Code != http.StatusInternalServerError {
-		t.Fatalf("transient DB error: expected 500, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, h.GetTaskStatus, req).Want(http.StatusInternalServerError)
 	if strings.Contains(w.Body.String(), "task not found") {
 		t.Fatalf("transient DB error must not surface as %q (daemon treats that as a deletion): %s", "task not found", w.Body.String())
 	}
@@ -1356,15 +1144,10 @@ func TestGetTaskStatus_ErrNoRows_Returns404(t *testing.T) {
 	h := &Handler{}
 	h.Queries = db.New(&mockDB{getUserErr: pgx.ErrNoRows})
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("GET", "/api/daemon/tasks/00000000-0000-0000-0000-000000000001/status", nil,
 		"00000000-0000-0000-0000-000000000000", "test-daemon")
 	req = withURLParam(req, "taskId", "00000000-0000-0000-0000-000000000001")
-
-	h.GetTaskStatus(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("ErrNoRows: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, h.GetTaskStatus, req).Want(http.StatusNotFound)
 	if !strings.Contains(w.Body.String(), "task not found") {
 		t.Fatalf("ErrNoRows: expected body to contain %q, got %s", "task not found", w.Body.String())
 	}
@@ -1390,34 +1173,22 @@ func TestGetIssueGCCheck_WithDaemonToken_CrossWorkspace(t *testing.T) {
 
 	// Cross-workspace daemon token must be rejected with 404 — same status
 	// code as "issue not found" so there is no UUID enumeration oracle.
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("GET", "/api/daemon/issues/"+issueID+"/gc-check", nil,
 		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
 	req = withURLParam(req, "issueId", issueID)
-
-	testHandler.GetIssueGCCheck(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("GetIssueGCCheck with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.GetIssueGCCheck, req).Want(http.StatusNotFound)
 
 	// Same-workspace daemon token succeeds and returns status + updated_at.
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("GET", "/api/daemon/issues/"+issueID+"/gc-check", nil,
 		testWorkspaceID, "legit-daemon")
 	req = withURLParam(req, "issueId", issueID)
-
-	testHandler.GetIssueGCCheck(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GetIssueGCCheck with correct workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.GetIssueGCCheck, req).Want(http.StatusOK)
 
 	var resp struct {
 		Status    string `json:"status"`
 		UpdatedAt string `json:"updated_at"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Status != "done" {
 		t.Fatalf("expected status %q, got %q", "done", resp.Status)
 	}
@@ -1443,16 +1214,11 @@ func TestBatchIssueGCCheck_WithDaemonToken(t *testing.T) {
 	defer testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
 
 	missingID := "00000000-0000-0000-0000-000000000099"
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{
 		"issue_ids": []string{issueID, missingID},
 	}, testWorkspaceID, "legit-daemon")
 	req = withURLParam(req, "workspaceId", testWorkspaceID)
-
-	testHandler.BatchIssueGCCheck(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("BatchIssueGCCheck: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusOK)
 	var resp struct {
 		Issues []struct {
 			ID        string `json:"id"`
@@ -1461,9 +1227,7 @@ func TestBatchIssueGCCheck_WithDaemonToken(t *testing.T) {
 			UpdatedAt string `json:"updated_at"`
 		} `json:"issues"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	w.JSON(&resp)
 	if len(resp.Issues) != 2 {
 		t.Fatalf("issues length = %d, want 2", len(resp.Issues))
 	}
@@ -1475,15 +1239,11 @@ func TestBatchIssueGCCheck_WithDaemonToken(t *testing.T) {
 	}
 
 	// A token for another workspace is rejected before any issue lookup.
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+testWorkspaceID+"/issues/gc-check", map[string]any{
 		"issue_ids": []string{issueID},
 	}, "00000000-0000-0000-0000-000000000000", "attacker-daemon")
 	req = withURLParam(req, "workspaceId", testWorkspaceID)
-	testHandler.BatchIssueGCCheck(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("cross-workspace batch: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.BatchIssueGCCheck, req).Want(http.StatusNotFound)
 }
 
 // withURLParams merges the given chi URL parameters into the request context.
@@ -1522,60 +1282,48 @@ func TestListTaskMessagesByUser_InvalidTaskIDReturnsBadRequest(t *testing.T) {
 // Returns (issueID, taskID). All rows are cleaned up when the test ends.
 func setupForeignWorkspaceFixture(t *testing.T) (string, string) {
 	t.Helper()
-	ctx := context.Background()
 
-	var foreignWorkspaceID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, "Foreign Workspace", "foreign-idor-tests", "Cross-tenant IDOR test workspace", "FOR").Scan(&foreignWorkspaceID); err != nil {
-		t.Fatalf("setup: create foreign workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID)
+	foreignWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Foreign Workspace",
+		"slug":         "foreign-idor-tests",
+		"description":  "Cross-tenant IDOR test workspace",
+		"issue_prefix": "FOR",
 	})
 
-	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
-		)
-		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
-		RETURNING id
-	`, foreignWorkspaceID, "Foreign Runtime", "foreign_runtime", "Foreign runtime").Scan(&runtimeID); err != nil {
-		t.Fatalf("setup: create foreign runtime: %v", err)
-	}
+	runtimeID := dbfx.Insert(t, "agent_runtime", testutil.Cols{
+		"workspace_id": foreignWorkspaceID,
+		"daemon_id":    nil,
+		"name":         "Foreign Runtime",
+		"runtime_mode": "cloud",
+		"provider":     "foreign_runtime",
+		"status":       "online",
+		"device_info":  "Foreign runtime",
+		"metadata":     testutil.Raw("'{}'::jsonb"),
+		"last_seen_at": testutil.Raw("now()"),
+	})
 
-	var agentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (
-			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, max_concurrent_tasks
-		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 1)
-		RETURNING id
-	`, foreignWorkspaceID, "Foreign Agent", runtimeID).Scan(&agentID); err != nil {
-		t.Fatalf("setup: create foreign agent: %v", err)
-	}
+	agentID := dbfx.Insert(t, "agent", testutil.Cols{
+		"workspace_id":         foreignWorkspaceID,
+		"name":                 "Foreign Agent",
+		"description":          "",
+		"runtime_mode":         "cloud",
+		"runtime_config":       testutil.Raw("'{}'::jsonb"),
+		"runtime_id":           runtimeID,
+		"visibility":           "workspace",
+		"max_concurrent_tasks": 1,
+	})
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type)
-		VALUES ($1, 'foreign-workspace-issue', 'todo', 'medium', $2, 'agent')
-		RETURNING id
-	`, foreignWorkspaceID, agentID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create foreign issue: %v", err)
-	}
+	issueID := dbfx.Issue(t, "foreign-workspace-issue", testutil.Cols{
+		"workspace_id": foreignWorkspaceID,
+		"priority":     "medium",
+		"creator_id":   agentID,
+		"creator_type": "agent",
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
-		VALUES ($1, $2, 'queued', $3)
-		RETURNING id
-	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create foreign task: %v", err)
-	}
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"issue_id":   issueID,
+		"runtime_id": runtimeID,
+	})
 
 	return issueID, taskID
 }
@@ -1590,14 +1338,9 @@ func TestGetActiveTaskForIssue_CrossWorkspace_Returns404(t *testing.T) {
 
 	foreignIssueID, _ := setupForeignWorkspaceFixture(t)
 
-	w := httptest.NewRecorder()
 	req := newRequest("GET", "/api/issues/"+foreignIssueID+"/active-task", nil)
 	req = withURLParam(req, "id", foreignIssueID)
-
-	testHandler.GetActiveTaskForIssue(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("GetActiveTaskForIssue with cross-workspace issueId: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.GetActiveTaskForIssue, req).Want(http.StatusNotFound)
 }
 
 // TestCancelTask_CrossWorkspace_Returns404 verifies that a member of workspace
@@ -1610,22 +1353,15 @@ func TestCancelTask_CrossWorkspace_Returns404(t *testing.T) {
 
 	foreignIssueID, foreignTaskID := setupForeignWorkspaceFixture(t)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/"+foreignIssueID+"/tasks/"+foreignTaskID+"/cancel", nil)
 	req = withURLParams(req, "id", foreignIssueID, "taskId", foreignTaskID)
-
-	testHandler.CancelTask(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("CancelTask with cross-workspace issueId/taskId: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CancelTask, req).Want(http.StatusNotFound)
 
 	// The foreign task must not have been cancelled.
 	var status string
-	if err := testPool.QueryRow(context.Background(),
+	dbfx.QueryRow(t,
 		`SELECT status FROM agent_task_queue WHERE id = $1`, foreignTaskID,
-	).Scan(&status); err != nil {
-		t.Fatalf("read foreign task status: %v", err)
-	}
+	).Scan(&status)
 	if status != "queued" {
 		t.Fatalf("foreign task status was mutated: expected 'queued', got %q", status)
 	}
@@ -1640,62 +1376,42 @@ func TestCancelTask_TaskBelongsToDifferentIssue_Returns404(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	).Scan(&agentID, &runtimeID)
 
 	// Issue X — the task's real parent.
 	var issueXID, taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'cancel-crossissue-x', 'todo', 'medium', $2, 'member', 91001, 0)
 		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueXID); err != nil {
-		t.Fatalf("setup: create issue X: %v", err)
-	}
+	`, testWorkspaceID, testUserID).Scan(&issueXID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueXID) })
 
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
 		VALUES ($1, $2, 'queued', $3)
 		RETURNING id
-	`, agentID, issueXID, runtimeID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create task: %v", err)
-	}
+	`, agentID, issueXID, runtimeID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 
 	// Issue Y — a sibling in the same workspace, used only as the URL cover.
-	var issueYID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'cancel-crossissue-y', 'todo', 'medium', $2, 'member', 91002, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueYID); err != nil {
-		t.Fatalf("setup: create issue Y: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueYID) })
+	issueYID := dbfx.Issue(t, "cancel-crossissue-y", testutil.Cols{
+		"priority": "medium",
+		"number":   91002,
+	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/"+issueYID+"/tasks/"+taskID+"/cancel", nil)
 	req = withURLParams(req, "id", issueYID, "taskId", taskID)
-
-	testHandler.CancelTask(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("CancelTask with mismatched issueId/taskId: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CancelTask, req).Want(http.StatusNotFound)
 
 	var status string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT status FROM agent_task_queue WHERE id = $1`, taskID,
-	).Scan(&status); err != nil {
-		t.Fatalf("read task status: %v", err)
-	}
+	).Scan(&status)
 	if status != "queued" {
 		t.Fatalf("task status was mutated: expected 'queued', got %q", status)
 	}
@@ -1708,43 +1424,30 @@ func TestCancelTask_SameIssue_Succeeds(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	).Scan(&agentID, &runtimeID)
 
 	var issueID, taskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'cancel-happy-path', 'todo', 'medium', $2, 'member', 91003, 0)
 		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
+	`, testWorkspaceID, testUserID).Scan(&issueID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
 
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
 		VALUES ($1, $2, 'queued', $3)
 		RETURNING id
-	`, agentID, issueID, runtimeID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create task: %v", err)
-	}
+	`, agentID, issueID, runtimeID).Scan(&taskID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues/"+issueID+"/tasks/"+taskID+"/cancel", nil)
 	req = withURLParams(req, "id", issueID, "taskId", taskID)
-
-	testHandler.CancelTask(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("CancelTask with matching issueId/taskId: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CancelTask, req).Want(http.StatusOK)
 }
 
 // TestListTasksByIssue_CrossWorkspace_Returns404 verifies that task history
@@ -1756,14 +1459,9 @@ func TestListTasksByIssue_CrossWorkspace_Returns404(t *testing.T) {
 
 	foreignIssueID, _ := setupForeignWorkspaceFixture(t)
 
-	w := httptest.NewRecorder()
 	req := newRequest("GET", "/api/issues/"+foreignIssueID+"/task-runs", nil)
 	req = withURLParam(req, "id", foreignIssueID)
-
-	testHandler.ListTasksByIssue(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("ListTasksByIssue with cross-workspace issueId: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.ListTasksByIssue, req).Want(http.StatusNotFound)
 }
 
 // TestGetIssueUsage_CrossWorkspace_Returns404 verifies that per-issue token
@@ -1775,14 +1473,9 @@ func TestGetIssueUsage_CrossWorkspace_Returns404(t *testing.T) {
 
 	foreignIssueID, _ := setupForeignWorkspaceFixture(t)
 
-	w := httptest.NewRecorder()
 	req := newRequest("GET", "/api/issues/"+foreignIssueID+"/usage", nil)
 	req = withURLParam(req, "id", foreignIssueID)
-
-	testHandler.GetIssueUsage(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("GetIssueUsage with cross-workspace issueId: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.GetIssueUsage, req).Want(http.StatusNotFound)
 }
 
 func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
@@ -1795,23 +1488,16 @@ func TestGetDaemonWorkspaceRepos_WithDaemonToken(t *testing.T) {
 		{"url": "  git@example.com:team/web.git  ", "description": " Web "},
 	})
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil, testWorkspaceID, "test-daemon-mdt")
 	req = withURLParam(req, "workspaceId", testWorkspaceID)
-
-	testHandler.GetDaemonWorkspaceRepos(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GetDaemonWorkspaceRepos: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.GetDaemonWorkspaceRepos, req).Want(http.StatusOK)
 
 	var resp struct {
 		WorkspaceID  string              `json:"workspace_id"`
 		Repos        []map[string]string `json:"repos"`
 		ReposVersion string              `json:"repos_version"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	w.JSON(&resp)
 
 	if resp.WorkspaceID != testWorkspaceID {
 		t.Fatalf("expected workspace_id %s, got %s", testWorkspaceID, resp.WorkspaceID)
@@ -1832,14 +1518,9 @@ func TestGetDaemonWorkspaceRepos_WithDaemonToken_WorkspaceMismatch(t *testing.T)
 		t.Skip("database not available")
 	}
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil, "00000000-0000-0000-0000-000000000000", "test-daemon-mdt")
 	req = withURLParam(req, "workspaceId", testWorkspaceID)
-
-	testHandler.GetDaemonWorkspaceRepos(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("GetDaemonWorkspaceRepos with mismatched workspace: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.GetDaemonWorkspaceRepos, req).Want(http.StatusNotFound)
 }
 
 func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T) {
@@ -1854,35 +1535,25 @@ func TestGetDaemonWorkspaceRepos_VersionIgnoresOrderAndDescription(t *testing.T)
 
 	getReposVersion := func() string {
 		t.Helper()
-		w := httptest.NewRecorder()
 		req := newDaemonTokenRequest("GET", "/api/daemon/workspaces/"+testWorkspaceID+"/repos", nil, testWorkspaceID, "test-daemon-mdt")
 		req = withURLParam(req, "workspaceId", testWorkspaceID)
-		testHandler.GetDaemonWorkspaceRepos(w, req)
-		if w.Code != http.StatusOK {
-			t.Fatalf("GetDaemonWorkspaceRepos: expected 200, got %d: %s", w.Code, w.Body.String())
-		}
+		w := testutil.Call(t, testHandler.GetDaemonWorkspaceRepos, req).Want(http.StatusOK)
 		var resp struct {
 			ReposVersion string `json:"repos_version"`
 		}
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode response: %v", err)
-		}
+		w.JSON(&resp)
 		return resp.ReposVersion
 	}
 
 	version1 := getReposVersion()
 
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/web.git","description":"frontend"},{"url":"git@example.com:team/api.git","description":"backend"}]`), testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
-	}
+	dbfx.Exec(t, `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/web.git","description":"frontend"},{"url":"git@example.com:team/api.git","description":"backend"}]`), testWorkspaceID)
 	version2 := getReposVersion()
 	if version1 != version2 {
 		t.Fatalf("expected repos_version to ignore order/description changes, got %s vs %s", version1, version2)
 	}
 
-	if _, err := testPool.Exec(context.Background(), `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/api.git","description":"backend"},{"url":"git@example.com:team/mobile.git","description":"mobile"}]`), testWorkspaceID); err != nil {
-		t.Fatalf("update workspace repos: %v", err)
-	}
+	dbfx.Exec(t, `UPDATE workspace SET repos = $1 WHERE id = $2`, []byte(`[{"url":"git@example.com:team/api.git","description":"backend"},{"url":"git@example.com:team/mobile.git","description":"mobile"}]`), testWorkspaceID)
 	version3 := getReposVersion()
 	if strings.EqualFold(version2, version3) {
 		t.Fatalf("expected repos_version to change when URL set changes, got %s", version3)
@@ -1907,63 +1578,52 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
 	const legacyDaemonID = "TestMachine.local"
 	const newDaemonID = "0192a7a0-9ab3-7c3f-9f1c-4a6fe8c4e801"
 
 	// Seed a legacy runtime row keyed on the hostname-derived id.
-	var legacyRuntimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
-		VALUES ($1, $2, 'legacy-runtime', 'local', 'claude', 'offline', 'TestMachine.local', '{}'::jsonb, $3, now() - interval '1 hour')
-		RETURNING id
-	`, testWorkspaceID, legacyDaemonID, testUserID).Scan(&legacyRuntimeID); err != nil {
-		t.Fatalf("seed legacy runtime: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyRuntimeID)
+	legacyRuntimeID := dbfx.Runtime(t, "legacy-runtime", testutil.Cols{
+		"daemon_id":    legacyDaemonID,
+		"runtime_mode": "local",
+		"provider":     "claude",
+		"status":       "offline",
+		"device_info":  "TestMachine.local",
+		"last_seen_at": testutil.Raw("now() - interval '1 hour'"),
 	})
 
 	// An agent bound to the legacy runtime.
-	var legacyAgentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
-		VALUES ($1, 'legacy-agent', 'local', '{}'::jsonb, $2, 'workspace', 1)
-		RETURNING id
-	`, testWorkspaceID, legacyRuntimeID).Scan(&legacyAgentID); err != nil {
-		t.Fatalf("seed legacy agent: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, legacyAgentID)
+	legacyAgentID := dbfx.Insert(t, "agent", testutil.Cols{
+		"workspace_id":         testWorkspaceID,
+		"name":                 "legacy-agent",
+		"runtime_mode":         "local",
+		"runtime_config":       testutil.Raw("'{}'::jsonb"),
+		"runtime_id":           legacyRuntimeID,
+		"visibility":           "workspace",
+		"max_concurrent_tasks": 1,
 	})
 
 	// An issue + task also bound to the legacy runtime (tasks have ON DELETE
 	// CASCADE, so without reassignment deleting the legacy row would silently
 	// drop historical tasks).
 	var legacyIssueID, legacyTaskID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
 		VALUES ($1, 'legacy-task-owner', 'todo', 'medium', $2, 'member', 97501, 0)
 		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&legacyIssueID); err != nil {
-		t.Fatalf("seed legacy issue: %v", err)
-	}
+	`, testWorkspaceID, testUserID).Scan(&legacyIssueID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, legacyIssueID) })
 
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_task_queue (agent_id, issue_id, status, runtime_id)
 		VALUES ($1, $2, 'completed', $3)
 		RETURNING id
-	`, legacyAgentID, legacyIssueID, legacyRuntimeID).Scan(&legacyTaskID); err != nil {
-		t.Fatalf("seed legacy task: %v", err)
-	}
+	`, legacyAgentID, legacyIssueID, legacyRuntimeID).Scan(&legacyTaskID)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, legacyTaskID)
 	})
 
 	// Register under the new stable UUID, declaring the prior hostname-derived
 	// id as legacy. The handler should merge the legacy row into the new one.
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id":      testWorkspaceID,
 		"daemon_id":         newDaemonID,
@@ -1973,15 +1633,10 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 			{"name": "test-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
 		},
 	})
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 
 	var resp map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	w.JSON(&resp)
 	runtimes := resp["runtimes"].([]any)
 	newRuntimeID := runtimes[0].(map[string]any)["id"].(string)
 	t.Cleanup(func() {
@@ -1994,18 +1649,14 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 
 	// Agent should now point at the new runtime.
 	var agentRuntimeID string
-	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, legacyAgentID).Scan(&agentRuntimeID); err != nil {
-		t.Fatalf("read agent runtime_id: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, legacyAgentID).Scan(&agentRuntimeID)
 	if agentRuntimeID != newRuntimeID {
 		t.Fatalf("agent not reassigned: got runtime_id=%s, want %s", agentRuntimeID, newRuntimeID)
 	}
 
 	// Task should be reassigned (not dropped).
 	var taskRuntimeID string
-	if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent_task_queue WHERE id = $1`, legacyTaskID).Scan(&taskRuntimeID); err != nil {
-		t.Fatalf("read task runtime_id: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT runtime_id FROM agent_task_queue WHERE id = $1`, legacyTaskID).Scan(&taskRuntimeID)
 	if taskRuntimeID != newRuntimeID {
 		t.Fatalf("task not reassigned: got runtime_id=%s, want %s", taskRuntimeID, newRuntimeID)
 	}
@@ -2013,18 +1664,14 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime(t *testing.T) {
 	// Legacy runtime row must be gone — no more "online + offline" duplicates
 	// for the same machine.
 	var legacyCount int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
-		t.Fatalf("count legacy runtime: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount)
 	if legacyCount != 0 {
 		t.Fatalf("expected legacy runtime row to be deleted, still present")
 	}
 
 	// New row should record which legacy id it subsumed, for debug/audit.
 	var legacyTrace *string
-	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace); err != nil {
-		t.Fatalf("read legacy_daemon_id: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace)
 	if legacyTrace == nil || *legacyTrace != legacyDaemonID {
 		t.Fatalf("expected legacy_daemon_id=%q, got %v", legacyDaemonID, legacyTrace)
 	}
@@ -2040,24 +1687,17 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal(t *testing.T
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
 	const legacyDaemonID = "ReverseDotLocalHost"        // stored without .local
 	const emittedLegacyID = "ReverseDotLocalHost.local" // daemon now reports with .local
 	const newDaemonID = "0192a7b0-0011-7ee9-9c21-30a5bcf86aa2"
 
-	var legacyRuntimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
-		VALUES ($1, $2, 'legacy-runtime-reverse', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now())
-		RETURNING id
-	`, testWorkspaceID, legacyDaemonID, testUserID).Scan(&legacyRuntimeID); err != nil {
-		t.Fatalf("seed legacy runtime: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyRuntimeID)
+	legacyRuntimeID := dbfx.Runtime(t, "legacy-runtime-reverse", testutil.Cols{
+		"daemon_id":    legacyDaemonID,
+		"runtime_mode": "local",
+		"provider":     "claude",
+		"status":       "offline",
 	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id":      testWorkspaceID,
 		"daemon_id":         newDaemonID,
@@ -2067,10 +1707,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal(t *testing.T
 			{"name": "reverse-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
 		},
 	})
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 
 	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
@@ -2080,9 +1717,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_ReverseDotLocal(t *testing.T
 	})
 
 	var legacyCount int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
-		t.Fatalf("count legacy runtime: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount)
 	if legacyCount != 0 {
 		t.Fatalf("expected legacy row to be merged and deleted, still present")
 	}
@@ -2098,24 +1733,17 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
 	const storedDaemonID = "Jiayuans-MacBook-Pro.local"  // DB has original mixed case
 	const emittedLegacyID = "jiayuans-macbook-pro.local" // Daemon now reports lowercased
 	const newDaemonID = "0192a7b0-0022-7ee9-9c21-30a5bcf86aa3"
 
-	var legacyRuntimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
-		VALUES ($1, $2, 'legacy-runtime-case', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now())
-		RETURNING id
-	`, testWorkspaceID, storedDaemonID, testUserID).Scan(&legacyRuntimeID); err != nil {
-		t.Fatalf("seed legacy runtime: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyRuntimeID)
+	legacyRuntimeID := dbfx.Runtime(t, "legacy-runtime-case", testutil.Cols{
+		"daemon_id":    storedDaemonID,
+		"runtime_mode": "local",
+		"provider":     "claude",
+		"status":       "offline",
 	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id":      testWorkspaceID,
 		"daemon_id":         newDaemonID,
@@ -2125,10 +1753,7 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift(t *testing.T) {
 			{"name": "case-drift-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
 		},
 	})
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 
 	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
@@ -2138,17 +1763,13 @@ func TestDaemonRegister_MergesLegacyDaemonIDRuntime_CaseDrift(t *testing.T) {
 	})
 
 	var legacyCount int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount); err != nil {
-		t.Fatalf("count legacy runtime: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM agent_runtime WHERE id = $1`, legacyRuntimeID).Scan(&legacyCount)
 	if legacyCount != 0 {
 		t.Fatalf("expected case-drift legacy row to be merged and deleted, still present")
 	}
 
 	var legacyTrace *string
-	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace); err != nil {
-		t.Fatalf("read legacy_daemon_id: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, newRuntimeID).Scan(&legacyTrace)
 	if legacyTrace == nil || *legacyTrace != emittedLegacyID {
 		t.Fatalf("expected legacy_daemon_id trace = %q, got %v", emittedLegacyID, legacyTrace)
 	}
@@ -2168,50 +1789,40 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
 	const storedUpperID = "DupHost.local"
 	const storedLowerID = "duphost.local"
 	const newDaemonID = "0192a7b0-0033-7ee9-9c21-30a5bcf86aa4"
 
 	var legacyUpperID, legacyLowerID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
 		VALUES ($1, $2, 'legacy-upper', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now() - interval '2 hours')
 		RETURNING id
-	`, testWorkspaceID, storedUpperID, testUserID).Scan(&legacyUpperID); err != nil {
-		t.Fatalf("seed upper-case legacy runtime: %v", err)
-	}
+	`, testWorkspaceID, storedUpperID, testUserID).Scan(&legacyUpperID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyUpperID) })
 
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent_runtime (workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at)
 		VALUES ($1, $2, 'legacy-lower', 'local', 'claude', 'offline', '', '{}'::jsonb, $3, now() - interval '1 hour')
 		RETURNING id
-	`, testWorkspaceID, storedLowerID, testUserID).Scan(&legacyLowerID); err != nil {
-		t.Fatalf("seed lower-case legacy runtime: %v", err)
-	}
+	`, testWorkspaceID, storedLowerID, testUserID).Scan(&legacyLowerID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, legacyLowerID) })
 
 	// Bind one agent to each legacy row to verify both sides get reassigned.
 	var upperAgentID, lowerAgentID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
 		VALUES ($1, 'dup-agent-upper', 'local', '{}'::jsonb, $2, 'workspace', 1)
 		RETURNING id
-	`, testWorkspaceID, legacyUpperID).Scan(&upperAgentID); err != nil {
-		t.Fatalf("seed upper agent: %v", err)
-	}
+	`, testWorkspaceID, legacyUpperID).Scan(&upperAgentID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, upperAgentID) })
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent (workspace_id, name, runtime_mode, runtime_config, runtime_id, visibility, max_concurrent_tasks)
 		VALUES ($1, 'dup-agent-lower', 'local', '{}'::jsonb, $2, 'workspace', 1)
 		RETURNING id
-	`, testWorkspaceID, legacyLowerID).Scan(&lowerAgentID); err != nil {
-		t.Fatalf("seed lower agent: %v", err)
-	}
+	`, testWorkspaceID, legacyLowerID).Scan(&lowerAgentID)
 	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, lowerAgentID) })
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id":      testWorkspaceID,
 		"daemon_id":         newDaemonID,
@@ -2221,10 +1832,7 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 			{"name": "dup-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
 		},
 	})
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 
 	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
@@ -2235,11 +1843,9 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 
 	// Both case-duplicate legacy rows must be gone — not just one.
 	var stillPresent int
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT count(*) FROM agent_runtime WHERE id = ANY($1)
-	`, []string{legacyUpperID, legacyLowerID}).Scan(&stillPresent); err != nil {
-		t.Fatalf("count legacy runtimes: %v", err)
-	}
+	`, []string{legacyUpperID, legacyLowerID}).Scan(&stillPresent)
 	if stillPresent != 0 {
 		t.Fatalf("expected both case-duplicate legacy rows merged and deleted, %d still present", stillPresent)
 	}
@@ -2247,9 +1853,7 @@ func TestDaemonRegister_MergesAllCaseDuplicateLegacyRuntimes(t *testing.T) {
 	// Both agents must point at the new runtime.
 	for _, agentID := range []string{upperAgentID, lowerAgentID} {
 		var runtimeID string
-		if err := testPool.QueryRow(ctx, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
-			t.Fatalf("read agent runtime_id: %v", err)
-		}
+		dbfx.QueryRow(t, `SELECT runtime_id FROM agent WHERE id = $1`, agentID).Scan(&runtimeID)
 		if runtimeID != newRuntimeID {
 			t.Fatalf("agent %s not reassigned: runtime_id=%s, want %s", agentID, runtimeID, newRuntimeID)
 		}
@@ -2266,9 +1870,6 @@ func TestDaemonRegister_LegacyIDNoMatchIsNoop(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id":      testWorkspaceID,
 		"daemon_id":         "0192a7a1-5e3c-7be9-9a7d-6e0f1cb3deab",
@@ -2278,10 +1879,7 @@ func TestDaemonRegister_LegacyIDNoMatchIsNoop(t *testing.T) {
 			{"name": "fresh-runtime", "type": "claude", "version": "1.0.0", "status": "online"},
 		},
 	})
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 
 	var resp map[string]any
 	json.NewDecoder(w.Body).Decode(&resp)
@@ -2291,9 +1889,7 @@ func TestDaemonRegister_LegacyIDNoMatchIsNoop(t *testing.T) {
 	})
 
 	var legacy *string
-	if err := testPool.QueryRow(ctx, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&legacy); err != nil {
-		t.Fatalf("read legacy_daemon_id: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT legacy_daemon_id FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&legacy)
 	if legacy != nil {
 		t.Fatalf("expected legacy_daemon_id to stay NULL when no merge occurred, got %q", *legacy)
 	}
@@ -2310,45 +1906,33 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	var autopilotID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot (
-			workspace_id, title, assignee_id, execution_mode,
-			created_by_type, created_by_id
-		)
-		VALUES ($1, 'run_only fixture', $2, 'run_only', 'member', $3)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
-		t.Fatalf("setup: create autopilot: %v", err)
-	}
+	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    testWorkspaceID,
+		"title":           "run_only fixture",
+		"assignee_id":     agentID,
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	})
 	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 
-	var runID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot_run (autopilot_id, source, status)
-		VALUES ($1, 'manual', 'running')
-		RETURNING id
-	`, autopilotID).Scan(&runID); err != nil {
-		t.Fatalf("setup: create autopilot_run: %v", err)
-	}
+	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
+		"autopilot_id": autopilotID,
+		"source":       "manual",
+		"status":       "running",
+	})
 
 	// issue_id is explicitly NULL — the condition that used to trigger 404.
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, status, priority, autopilot_run_id
-		)
-		VALUES ($1, $2, NULL, 'dispatched', 0, $3)
-		RETURNING id
-	`, agentID, runtimeID, runID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create autopilot task: %v", err)
-	}
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":       runtimeID,
+		"issue_id":         nil,
+		"status":           "dispatched",
+		"autopilot_run_id": runID,
+	})
 	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 
 	// Cross-workspace daemon token must still 404.
@@ -2376,9 +1960,7 @@ func TestStartTask_AutopilotRunOnlyTask_ResolvesWorkspace(t *testing.T) {
 	}
 
 	var status string
-	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
-		t.Fatalf("post-check: read task status: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if status != "running" {
 		t.Fatalf("expected task status 'running' after StartTask, got %q", status)
 	}
@@ -2393,8 +1975,6 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
 	// Workspace repos: two of them, neither matches the project repo URL.
 	setHandlerTestWorkspaceRepos(t, []map[string]string{
 		{"url": "https://github.com/example/workspace-repo-a", "description": "ws a"},
@@ -2403,62 +1983,37 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 
 	// Project + project_resource(github_repo) with a URL that is NOT in the
 	// workspace's repos list.
-	var projectID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
-	`, testWorkspaceID, "Claim project repo override").Scan(&projectID); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+	projectID := dbfx.Project(t, "Claim project repo override")
 
 	const projectRepoURL = "https://github.com/example/project-only-repo"
 	const projectRepoRef = "release/v2"
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO project_resource (
 			project_id, workspace_id, resource_type, resource_ref, position
 		) VALUES ($1, $2, 'github_repo', $3::jsonb, 0)
-	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`","ref":"`+projectRepoRef+`"}`); err != nil {
-		t.Fatalf("create project_resource: %v", err)
-	}
+	`, projectID, testWorkspaceID, `{"url":"`+projectRepoURL+`","ref":"`+projectRepoRef+`"}`)
 
 	// Agent + runtime + queued task in this project.
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("get agent: %v", err)
-	}
+	).Scan(&agentID, &runtimeID)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (
-			workspace_id, project_id, title, status, priority, creator_id, creator_type, number, position
-		) VALUES ($1, $2, 'project repo override', 'todo', 'medium', $3, 'member', 88001, 0)
-		RETURNING id
-	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "project repo override", testutil.Cols{
+		"project_id": projectID,
+		"priority":   "medium",
+		"number":     88001,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, status, priority
-		) VALUES ($1, $2, $3, 'queued', 0)
-		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+	})
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-project-repos")
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
 		Task *struct {
@@ -2467,9 +2022,7 @@ func TestClaimTask_ProjectGithubReposOverrideWorkspaceRepos(t *testing.T) {
 			ProjectResources []ProjectResourceData `json:"project_resources"`
 		} `json:"task"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Task == nil {
 		t.Fatal("expected task in response")
 	}
@@ -2502,54 +2055,31 @@ func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
 	const projectDescription = "Always write copy in British English. Ship behind a feature flag."
-	var projectID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, description) VALUES ($1, $2, $3) RETURNING id
-	`, testWorkspaceID, "Claim project description", projectDescription).Scan(&projectID); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+	projectID := dbfx.Project(t, "Claim project description", testutil.Cols{
+		"description": projectDescription,
+	})
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("get agent: %v", err)
-	}
+	).Scan(&agentID, &runtimeID)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (
-			workspace_id, project_id, title, status, priority, creator_id, creator_type, number, position
-		) VALUES ($1, $2, 'project description', 'todo', 'medium', $3, 'member', 88002, 0)
-		RETURNING id
-	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "project description", testutil.Cols{
+		"project_id": projectID,
+		"priority":   "medium",
+		"number":     88002,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, status, priority
-		) VALUES ($1, $2, $3, 'queued', 0)
-		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+	})
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-project-desc")
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
 		Task *struct {
@@ -2557,9 +2087,7 @@ func TestClaimTask_ProjectDescriptionInjected(t *testing.T) {
 			ProjectDescription string `json:"project_description"`
 		} `json:"task"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Task == nil {
 		t.Fatal("expected task in response")
 	}
@@ -2583,13 +2111,9 @@ func TestClaimTask_QuickCreateInjectsProjectDescription(t *testing.T) {
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
 	const projectDescription = "Use the design system tokens; never hardcode colors."
-	var projectID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, description) VALUES ($1, $2, $3) RETURNING id
-	`, testWorkspaceID, "Quick-create project description", projectDescription).Scan(&projectID); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+	projectID := dbfx.Project(t, "Quick-create project description", testutil.Cols{
+		"description": projectDescription,
+	})
 
 	quickContext, _ := json.Marshal(map[string]any{
 		"type":         "quick_create",
@@ -2598,12 +2122,10 @@ func TestClaimTask_QuickCreateInjectsProjectDescription(t *testing.T) {
 		"workspace_id": testWorkspaceID,
 		"project_id":   projectID,
 	})
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
 		VALUES ($1, $2, 'queued', 2, $3)
-	`, agentID, runtimeID, quickContext); err != nil {
-		t.Fatalf("setup: create quick-create task: %v", err)
-	}
+	`, agentID, runtimeID, quickContext)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.ProjectID != projectID {
@@ -2621,66 +2143,39 @@ func TestClaimTask_ProjectWithoutRepos_FallsBackToWorkspaceRepos(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
 	setHandlerTestWorkspaceRepos(t, []map[string]string{
 		{"url": "https://github.com/example/workspace-fallback", "description": "ws"},
 	})
 
-	var projectID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title) VALUES ($1, $2) RETURNING id
-	`, testWorkspaceID, "Claim project without repos").Scan(&projectID); err != nil {
-		t.Fatalf("create project: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM project WHERE id = $1`, projectID) })
+	projectID := dbfx.Project(t, "Claim project without repos")
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
-	).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("get agent: %v", err)
-	}
+	).Scan(&agentID, &runtimeID)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (
-			workspace_id, project_id, title, status, priority, creator_id, creator_type, number, position
-		) VALUES ($1, $2, 'no project repos', 'todo', 'medium', $3, 'member', 88002, 0)
-		RETURNING id
-	`, testWorkspaceID, projectID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "no project repos", testutil.Cols{
+		"project_id": projectID,
+		"priority":   "medium",
+		"number":     88002,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, status, priority
-		) VALUES ($1, $2, $3, 'queued', 0)
-		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
-		t.Fatalf("create task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+	})
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/claim", nil, testWorkspaceID, "test-claim-fallback")
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: %d %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 
 	var resp struct {
 		Task *struct {
 			Repos []RepoData `json:"repos"`
 		} `json:"task"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Task == nil {
 		t.Fatal("expected task in response")
 	}
@@ -2702,45 +2197,32 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceID(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	var autopilotID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot (
-			workspace_id, title, assignee_id, execution_mode,
-			created_by_type, created_by_id
-		)
-		VALUES ($1, 'claim workspace fixture', $2, 'run_only', 'member', $3)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
-		t.Fatalf("setup: create autopilot: %v", err)
-	}
+	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    testWorkspaceID,
+		"title":           "claim workspace fixture",
+		"assignee_id":     agentID,
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	})
 	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 
-	var runID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot_run (autopilot_id, source, status)
-		VALUES ($1, 'manual', 'running')
-		RETURNING id
-	`, autopilotID).Scan(&runID); err != nil {
-		t.Fatalf("setup: create autopilot_run: %v", err)
-	}
+	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
+		"autopilot_id": autopilotID,
+		"source":       "manual",
+		"status":       "running",
+	})
 
 	// Create a queued task with only AutopilotRunID (no IssueID, no ChatSessionID).
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, status, priority, autopilot_run_id
-		)
-		VALUES ($1, $2, NULL, 'queued', 0, $3)
-		RETURNING id
-	`, agentID, runtimeID, runID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create autopilot task: %v", err)
-	}
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":       runtimeID,
+		"issue_id":         nil,
+		"autopilot_run_id": runID,
+	})
 	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 
 	w := httptest.NewRecorder()
@@ -2790,50 +2272,36 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
 	// Local agent/runtime (belongs to testWorkspace).
 	var localAgentID, localRuntimeID string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
 		testWorkspaceID,
-	).Scan(&localAgentID, &localRuntimeID); err != nil {
-		t.Fatalf("setup: get local agent: %v", err)
-	}
+	).Scan(&localAgentID, &localRuntimeID)
 
 	// Foreign workspace with its own issue — what the misrouted task will
 	// resolve to.
-	var foreignWorkspaceID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, "Mismatch Foreign", "mismatch-foreign-claim", "", "MFC").Scan(&foreignWorkspaceID); err != nil {
-		t.Fatalf("setup: create foreign workspace: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, foreignWorkspaceID) })
+	foreignWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Mismatch Foreign",
+		"slug":         "mismatch-foreign-claim",
+		"description":  "",
+		"issue_prefix": "MFC",
+	})
 
-	var foreignIssueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'mismatch-foreign-issue', 'todo', 'medium', $2, 'member', 77001, 0)
-		RETURNING id
-	`, foreignWorkspaceID, testUserID).Scan(&foreignIssueID); err != nil {
-		t.Fatalf("setup: create foreign issue: %v", err)
-	}
+	foreignIssueID := dbfx.Issue(t, "mismatch-foreign-issue", testutil.Cols{
+		"workspace_id": foreignWorkspaceID,
+		"priority":     "medium",
+		"number":       77001,
+	})
 
 	// Construct the inconsistent task: runtime_id belongs to testWorkspace,
 	// but issue_id is in foreignWorkspace. This is the data shape a routing
 	// bug would produce.
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority)
-		VALUES ($1, $2, $3, 'queued', 2)
-		RETURNING id
-	`, localAgentID, localRuntimeID, foreignIssueID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create mismatched task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, localAgentID, testutil.Cols{
+		"runtime_id": localRuntimeID,
+		"issue_id":   foreignIssueID,
+		"priority":   2,
+	})
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+localRuntimeID+"/claim", nil,
@@ -2850,11 +2318,9 @@ func TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects(t *testing.T
 	// Task must NOT remain dispatched — it has to be cancelled so the agent
 	// is released immediately rather than stuck until the sweeper fires.
 	var status string
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT status FROM agent_task_queue WHERE id = $1`, taskID,
-	).Scan(&status); err != nil {
-		t.Fatalf("read task status: %v", err)
-	}
+	).Scan(&status)
 	if status != "cancelled" {
 		t.Fatalf("ClaimTaskByRuntime (mismatch): expected task status=cancelled, got %q", status)
 	}
@@ -2875,46 +2341,27 @@ func TestCompleteTask_CommentTriggered_SynthesizesCommentWhenAgentSilent(t *test
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
 	setWorkspaceIssuePrefixForTest(t, "MUL")
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'mul-3310 agent output fixture', 'in_progress', 'none', $2, 'member', 3310, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "mul-3310 agent output fixture", testutil.Cols{
+		"status": "in_progress",
+		"number": 3310,
+	})
 
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
-		VALUES ($1, $2, 'member', $3, 'please take a look', 'comment')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: create trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "please take a look")
 
 	// Comment-triggered, already running (as CompleteAgentTask requires).
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, trigger_comment_id,
-			status, priority, started_at
-		)
-		VALUES ($1, $2, $3, $4, 'running', 0, now())
-		RETURNING id
-	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create comment-triggered task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":         runtimeID,
+		"issue_id":           issueID,
+		"trigger_comment_id": triggerCommentID,
+		"status":             "running",
+		"started_at":         testutil.Raw("now()"),
+	})
 
 	agentFinalOutput := fmt.Sprintf(
 		"sure, see MUL-3310, issue/MUL-3310, feature/MUL-3310, and [MUL-3310](mention://issue/%s)",
@@ -2980,54 +2427,31 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'mul-1198 dedup fixture', 'in_progress', 'none', $2, 'member', 81199, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "mul-1198 dedup fixture", testutil.Cols{
+		"status": "in_progress",
+		"number": 81199,
+	})
 
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
-		VALUES ($1, $2, 'member', $3, 'please take a look', 'comment')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: create trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "please take a look")
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, trigger_comment_id,
-			status, priority, started_at
-		)
-		VALUES ($1, $2, $3, $4, 'running', 0, now())
-		RETURNING id
-	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create comment-triggered task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":         runtimeID,
+		"issue_id":           issueID,
+		"trigger_comment_id": triggerCommentID,
+		"status":             "running",
+		"started_at":         testutil.Raw("now()"),
+	})
 
 	// Agent posts its own reply during the run — exactly the compliant path.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
 		VALUES ($1, $2, 'agent', $3, 'done, see PR', 'comment', $4)
-	`, issueID, testWorkspaceID, agentID, triggerCommentID); err != nil {
-		t.Fatalf("setup: create agent reply: %v", err)
-	}
+	`, issueID, testWorkspaceID, agentID, triggerCommentID)
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
@@ -3043,12 +2467,10 @@ func TestCompleteTask_CommentTriggered_SkipsSynthesisWhenAgentAlreadyCommented(t
 	}
 
 	var count int
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT count(*) FROM comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
-	`, issueID, agentID).Scan(&count); err != nil {
-		t.Fatalf("count agent comments: %v", err)
-	}
+	`, issueID, agentID).Scan(&count)
 	if count != 1 {
 		t.Fatalf("expected 1 agent comment (the agent's own reply), got %d — synthesis duplicated", count)
 	}
@@ -3059,46 +2481,25 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'trivial-done-suppression fixture', 'in_progress', 'none', $2, 'member', 81200, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "trivial-done-suppression fixture", testutil.Cols{
+		"status": "in_progress",
+		"number": 81200,
+	})
 
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
-		VALUES ($1, $2, 'member', $3, 'please follow up', 'comment')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: create trigger comment: %v", err)
-	}
+	triggerCommentID := dbfx.Comment(t, issueID, "please follow up")
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, trigger_comment_id,
-			status, priority, started_at
-		)
-		VALUES ($1, $2, $3, $4, 'running', 0, now())
-		RETURNING id
-	`, agentID, runtimeID, issueID, triggerCommentID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create comment-triggered task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":         runtimeID,
+		"issue_id":           issueID,
+		"trigger_comment_id": triggerCommentID,
+		"status":             "running",
+		"started_at":         testutil.Raw("now()"),
+	})
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
@@ -3114,12 +2515,10 @@ func TestCompleteTask_CommentTriggered_SuppressesTrivialDoneOutput(t *testing.T)
 	}
 
 	var count int
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT count(*) FROM comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
-	`, issueID, agentID).Scan(&count); err != nil {
-		t.Fatalf("count agent comments: %v", err)
-	}
+	`, issueID, agentID).Scan(&count)
 	if count != 0 {
 		t.Fatalf("expected no synthesized agent comment for trivial Done output, got %d", count)
 	}
@@ -3130,37 +2529,22 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 		t.Skip("database not available")
 	}
 
-	ctx := context.Background()
-
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'assignment-trivial-done fixture', 'in_progress', 'none', $2, 'member', 81201, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
-		t.Fatalf("setup: create issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
+	issueID := dbfx.Issue(t, "assignment-trivial-done fixture", testutil.Cols{
+		"status": "in_progress",
+		"number": 81201,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id,
-			status, priority, started_at
-		)
-		VALUES ($1, $2, $3, 'running', 0, now())
-		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create assignment-triggered task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": runtimeID,
+		"issue_id":   issueID,
+		"status":     "running",
+		"started_at": testutil.Raw("now()"),
+	})
 
 	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/complete",
@@ -3176,13 +2560,11 @@ func TestCompleteTask_AssignmentTriggered_DoesNotSuppressTrivialDoneOutput(t *te
 	}
 
 	var content string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT content FROM comment
 		WHERE issue_id = $1 AND author_type = 'agent' AND author_id = $2
 		ORDER BY created_at DESC LIMIT 1
-	`, issueID, agentID).Scan(&content); err != nil {
-		t.Fatalf("query synthesized comment: %v", err)
-	}
+	`, issueID, agentID).Scan(&content)
 	if content != "Done." {
 		t.Fatalf("synthesized comment content = %q, want Done.", content)
 	}
@@ -3231,7 +2613,6 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 	t.Helper()
 
 	daemonID = "runtime-guard-" + strings.ToLower(strings.ReplaceAll(t.Name(), "/", "-"))
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/register", map[string]any{
 		"workspace_id": testWorkspaceID,
 		"daemon_id":    daemonID,
@@ -3240,35 +2621,25 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 			{"name": "runtime-guard-current", "type": "opencode", "version": "test", "status": "online"},
 		},
 	}, testWorkspaceID, daemonID)
-
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("setup: DaemonRegister: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusOK)
 	var resp map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("setup: decode DaemonRegister response: %v", err)
-	}
+	w.JSON(&resp)
 	runtimes, ok := resp["runtimes"].([]any)
 	if !ok || len(runtimes) == 0 {
 		t.Fatalf("setup: expected registered runtime, got %v", resp)
 	}
 	runtimeID = runtimes[0].(map[string]any)["id"].(string)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
-	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET owner_id = $1 WHERE id = $2`, testUserID, runtimeID); err != nil {
-		t.Fatalf("setup: set runtime owner: %v", err)
-	}
+	dbfx.Exec(t, `UPDATE agent_runtime SET owner_id = $1 WHERE id = $2`, testUserID, runtimeID)
 
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO agent (
 			workspace_id, name, runtime_mode, runtime_config,
 			runtime_id, visibility, max_concurrent_tasks
 		)
 		VALUES ($1, $2, 'local', '{}'::jsonb, $3, 'workspace', 3)
 		RETURNING id
-	`, testWorkspaceID, "Runtime Guard Agent "+t.Name(), runtimeID).Scan(&agentID); err != nil {
-		t.Fatalf("setup: create runtime guard agent: %v", err)
-	}
+	`, testWorkspaceID, "Runtime Guard Agent "+t.Name(), runtimeID).Scan(&agentID)
 	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent WHERE id = $1`, agentID) })
 
 	return agentID, runtimeID, daemonID
@@ -3277,19 +2648,13 @@ func createRuntimeGuardAgent(t *testing.T, ctx context.Context) (agentID, runtim
 func createRuntimeGuardRuntime(t *testing.T, ctx context.Context, provider string) string {
 	t.Helper()
 
-	var runtimeID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status,
-			device_info, metadata, owner_id, last_seen_at
-		)
-		VALUES ($1, 'runtime-guard-' || gen_random_uuid()::text, 'Runtime Guard Fixture',
-		        'local', $2, 'offline', '{}'::jsonb, '{}'::jsonb, $3, now())
-		RETURNING id
-	`, testWorkspaceID, provider, testUserID).Scan(&runtimeID); err != nil {
-		t.Fatalf("setup: create runtime: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_runtime WHERE id = $1`, runtimeID) })
+	runtimeID := dbfx.Runtime(t, "Runtime Guard Fixture", testutil.Cols{
+		"daemon_id":    testutil.Raw("'runtime-guard-' || gen_random_uuid()::text"),
+		"runtime_mode": "local",
+		"provider":     provider,
+		"status":       "offline",
+		"device_info":  testutil.Raw("'{}'::jsonb"),
+	})
 	return runtimeID
 }
 
@@ -3411,35 +2776,26 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
 
-	var skipIssueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'runtime-session-skip fixture', 'in_progress', 'none', $2, 'member', 81203, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&skipIssueID); err != nil {
-		t.Fatalf("setup: create skip issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, skipIssueID) })
+	skipIssueID := dbfx.Issue(t, "runtime-session-skip fixture", testutil.Cols{
+		"status": "in_progress",
+		"number": 81203,
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'old-runtime-session', '/tmp/old-runtime-workdir')
-	`, agentID, oldRuntimeID, skipIssueID); err != nil {
-		t.Fatalf("setup: create old-runtime prior task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, oldRuntimeID, skipIssueID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority
 		)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, skipIssueID); err != nil {
-		t.Fatalf("setup: create current-runtime task: %v", err)
-	}
+	`, agentID, runtimeID, skipIssueID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "" {
@@ -3451,43 +2807,32 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	if task.ThreadName != "runtime-session-skip fixture" {
 		t.Fatalf("issue task thread_name = %q, want issue title", task.ThreadName)
 	}
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		UPDATE agent_task_queue
 		SET status = 'completed', completed_at = now()
 		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
-	`, skipIssueID); err != nil {
-		t.Fatalf("setup: complete claimed skip task: %v", err)
-	}
+	`, skipIssueID)
 
-	var resumeIssueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'runtime-session-resume fixture', 'in_progress', 'none', $2, 'member', 81204, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&resumeIssueID); err != nil {
-		t.Fatalf("setup: create resume issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, resumeIssueID) })
+	resumeIssueID := dbfx.Issue(t, "runtime-session-resume fixture", testutil.Cols{
+		"status": "in_progress",
+		"number": 81204,
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'same-runtime-session', '/tmp/same-runtime-workdir')
-	`, agentID, runtimeID, resumeIssueID); err != nil {
-		t.Fatalf("setup: create same-runtime prior task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, runtimeID, resumeIssueID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority
 		)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, resumeIssueID); err != nil {
-		t.Fatalf("setup: create same-runtime task: %v", err)
-	}
+	`, agentID, runtimeID, resumeIssueID)
 
 	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "same-runtime-session" {
@@ -3497,43 +2842,27 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 		t.Fatalf("runtime match: expected PriorWorkDir='/tmp/same-runtime-workdir', got %q", task.PriorWorkDir)
 	}
 
-	var commentIssueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'comment-triggered-session-skip fixture', 'in_progress', 'none', $2, 'member', 81205, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&commentIssueID); err != nil {
-		t.Fatalf("setup: create comment-triggered issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, commentIssueID) })
+	commentIssueID := dbfx.Issue(t, "comment-triggered-session-skip fixture", testutil.Cols{
+		"status": "in_progress",
+		"number": 81205,
+	})
 
-	var triggerCommentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
-		VALUES ($1, $2, 'member', $3, 'please follow up', 'comment')
-		RETURNING id
-	`, commentIssueID, testWorkspaceID, testUserID).Scan(&triggerCommentID); err != nil {
-		t.Fatalf("setup: create trigger comment: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	triggerCommentID := dbfx.Comment(t, commentIssueID, "please follow up")
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'comment-prior-session', '/tmp/comment-prior-workdir')
-	`, agentID, runtimeID, commentIssueID); err != nil {
-		t.Fatalf("setup: create comment-trigger prior task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, runtimeID, commentIssueID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id, trigger_comment_id,
 			status, priority
 		)
 		VALUES ($1, $2, $3, $4, 'queued', 0)
-	`, agentID, runtimeID, commentIssueID, triggerCommentID); err != nil {
-		t.Fatalf("setup: create comment-triggered task: %v", err)
-	}
+	`, agentID, runtimeID, commentIssueID, triggerCommentID)
 
 	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	// Comment-triggered tasks now resume the prior session by default (same
@@ -3544,42 +2873,31 @@ func TestClaimTask_IssuePriorSessionRuntimeGuard(t *testing.T) {
 	if task.PriorWorkDir != "/tmp/comment-prior-workdir" {
 		t.Fatalf("comment trigger: expected PriorWorkDir='/tmp/comment-prior-workdir', got %q", task.PriorWorkDir)
 	}
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		UPDATE agent_task_queue
 		SET status = 'completed', completed_at = now()
 		WHERE issue_id = $1 AND status IN ('dispatched', 'running')
-	`, commentIssueID); err != nil {
-		t.Fatalf("setup: complete claimed comment-trigger task: %v", err)
-	}
+	`, commentIssueID)
 
-	var freshIssueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'force-fresh-session fixture', 'in_progress', 'none', $2, 'member', 81206, 0)
-		RETURNING id
-	`, testWorkspaceID, testUserID).Scan(&freshIssueID); err != nil {
-		t.Fatalf("setup: create force-fresh issue: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, freshIssueID) })
-	if _, err := testPool.Exec(ctx, `
+	freshIssueID := dbfx.Issue(t, "force-fresh-session fixture", testutil.Cols{
+		"status": "in_progress",
+		"number": 81206,
+	})
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'force-fresh-prior-session', '/tmp/force-fresh-prior-workdir')
-	`, agentID, runtimeID, freshIssueID); err != nil {
-		t.Fatalf("setup: create force-fresh prior task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, runtimeID, freshIssueID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, issue_id,
 			status, priority, force_fresh_session
 		)
 		VALUES ($1, $2, $3, 'queued', 0, TRUE)
-	`, agentID, runtimeID, freshIssueID); err != nil {
-		t.Fatalf("setup: create force-fresh task: %v", err)
-	}
+	`, agentID, runtimeID, freshIssueID)
 
 	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "" {
@@ -3617,38 +2935,28 @@ func TestClaimTask_ManualRetryReusesWorkdir(t *testing.T) {
 	insertRerun := func(t *testing.T, sourceRuntimeID, failureReason, errorText, session, workdir string) *claimRuntimeGuardTask {
 		t.Helper()
 		issueNum++
-		var issueID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-			VALUES ($1, 'manual-retry-reuse fixture', 'in_progress', 'none', $2, 'member', $3, 0)
-			RETURNING id
-		`, testWorkspaceID, testUserID, issueNum).Scan(&issueID); err != nil {
-			t.Fatalf("setup: create issue: %v", err)
-		}
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM issue WHERE id = $1`, issueID) })
-		var sourceID string
-		if err := testPool.QueryRow(ctx, `
-			INSERT INTO agent_task_queue (
-				agent_id, runtime_id, issue_id, status, priority,
-				failure_reason, error, session_id, work_dir
-			)
-			VALUES ($1, $2, $3, 'failed', 0, $4, $5, $6, $7)
-			RETURNING id
-		`, agentID, sourceRuntimeID, issueID, failureReason, errorText, session, workdir).Scan(&sourceID); err != nil {
-			t.Fatalf("setup: insert source task: %v", err)
-		}
-		t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, sourceID) })
+		issueID := dbfx.Issue(t, "manual-retry-reuse fixture", testutil.Cols{
+			"status": "in_progress",
+			"number": issueNum,
+		})
+		sourceID := dbfx.Task(t, agentID, testutil.Cols{
+			"runtime_id":     sourceRuntimeID,
+			"issue_id":       issueID,
+			"status":         "failed",
+			"failure_reason": failureReason,
+			"error":          errorText,
+			"session_id":     session,
+			"work_dir":       workdir,
+		})
 		// force_fresh_session is always true on a rerun row (rollback-safe); the
 		// new claim handler resumes from the source task regardless.
-		if _, err := testPool.Exec(ctx, `
+		dbfx.Exec(t, `
 			INSERT INTO agent_task_queue (
 				agent_id, runtime_id, issue_id, status, priority,
 				rerun_of_task_id, force_fresh_session
 			)
 			VALUES ($1, $2, $3, 'queued', 0, $4, TRUE)
-		`, agentID, runtimeID, issueID, sourceID); err != nil {
-			t.Fatalf("setup: insert rerun task: %v", err)
-		}
+		`, agentID, runtimeID, issueID, sourceID)
 		return claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	}
 
@@ -3707,38 +3015,28 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 	oldRuntimeID := createRuntimeGuardRuntime(t, ctx, "kimi")
 
-	var skipSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'runtime guard skip chat', 'old-chat-session', '/tmp/old-chat-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, oldRuntimeID).Scan(&skipSessionID); err != nil {
-		t.Fatalf("setup: create skip chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, skipSessionID) })
+	skipSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "runtime guard skip chat",
+		"session_id": "old-chat-session",
+		"work_dir":   "/tmp/old-chat-workdir",
+		"runtime_id": oldRuntimeID,
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'old-chat-session', '/tmp/old-chat-workdir')
-	`, agentID, oldRuntimeID, skipSessionID); err != nil {
-		t.Fatalf("setup: create old-runtime chat task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, oldRuntimeID, skipSessionID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority
 		)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, skipSessionID); err != nil {
-		t.Fatalf("setup: create current-runtime chat task: %v", err)
-	}
+	`, agentID, runtimeID, skipSessionID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "" {
@@ -3747,36 +3045,26 @@ func TestClaimTask_ChatPriorSessionRuntimeGuard(t *testing.T) {
 	if task.PriorWorkDir != "/tmp/old-chat-workdir" {
 		t.Fatalf("chat runtime mismatch: expected PriorWorkDir='/tmp/old-chat-workdir', got %q", task.PriorWorkDir)
 	}
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		UPDATE agent_task_queue
 		SET status = 'completed', completed_at = now()
 		WHERE chat_session_id = $1 AND status IN ('dispatched', 'running')
-	`, skipSessionID); err != nil {
-		t.Fatalf("setup: complete claimed skip chat task: %v", err)
-	}
+	`, skipSessionID)
 
-	var resumeSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'runtime guard resume chat', 'same-chat-session', '/tmp/same-chat-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&resumeSessionID); err != nil {
-		t.Fatalf("setup: create resume chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, resumeSessionID) })
+	resumeSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "runtime guard resume chat",
+		"session_id": "same-chat-session",
+		"work_dir":   "/tmp/same-chat-workdir",
+		"runtime_id": runtimeID,
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority
 		)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, resumeSessionID); err != nil {
-		t.Fatalf("setup: create same-runtime chat task: %v", err)
-	}
+	`, agentID, runtimeID, resumeSessionID)
 
 	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "same-chat-session" {
@@ -3800,31 +3088,21 @@ func TestClaimTask_ChatDeliversAllUnansweredUserMessages(t *testing.T) {
 	ctx := context.Background()
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
-	var sessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
-		VALUES ($1, $2, $3, 'debounce delivery chat')
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&sessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+	sessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title": "debounce delivery chat",
+	})
 
 	// Two user messages debounced into one run (explicit created_at so the
 	// ASC ordering is deterministic).
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO chat_message (chat_session_id, role, content, created_at) VALUES
 			($1, 'user', '看上海天气', now()),
 			($1, 'user', '还有青岛',   now() + interval '1 second')
-	`, sessionID); err != nil {
-		t.Fatalf("setup: insert user messages: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, sessionID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 2)
-	`, agentID, runtimeID, sessionID); err != nil {
-		t.Fatalf("setup: create chat task: %v", err)
-	}
+	`, agentID, runtimeID, sessionID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.ChatMessage != "看上海天气\n\n还有青岛" {
@@ -3836,30 +3114,22 @@ func TestClaimTask_ChatDeliversAllUnansweredUserMessages(t *testing.T) {
 
 	// Complete the run and record the agent's assistant reply, then send a
 	// fresh user message — only the new one should be delivered next.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		UPDATE agent_task_queue SET status = 'completed', completed_at = now()
 		WHERE chat_session_id = $1 AND status IN ('dispatched', 'running')
-	`, sessionID); err != nil {
-		t.Fatalf("setup: complete first chat task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, sessionID)
+	dbfx.Exec(t, `
 		INSERT INTO chat_message (chat_session_id, role, content, created_at)
 		VALUES ($1, 'assistant', '上海与青岛天气如下…', now() + interval '2 second')
-	`, sessionID); err != nil {
-		t.Fatalf("setup: insert assistant reply: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, sessionID)
+	dbfx.Exec(t, `
 		INSERT INTO chat_message (chat_session_id, role, content, created_at)
 		VALUES ($1, 'user', '深圳呢', now() + interval '3 second')
-	`, sessionID); err != nil {
-		t.Fatalf("setup: insert follow-up user message: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, sessionID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority)
 		VALUES ($1, $2, $3, 'queued', 2)
-	`, agentID, runtimeID, sessionID); err != nil {
-		t.Fatalf("setup: create follow-up chat task: %v", err)
-	}
+	`, agentID, runtimeID, sessionID)
 
 	task = claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.ChatMessage != "深圳呢" {
@@ -3882,45 +3152,28 @@ func TestClaimTask_ChatPopulatesInitiator(t *testing.T) {
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
 	// A separate user stands in for the Lark group session creator (installer).
-	var installerID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO "user" (name, email) VALUES ('Installer User', 'installer-test@multica.ai')
-		RETURNING id
-	`).Scan(&installerID); err != nil {
-		t.Fatalf("setup: create installer user: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM "user" WHERE id = $1`, installerID) })
+	installerID := dbfx.Insert(t, "user", testutil.Cols{
+		"name":  "Installer User",
+		"email": "installer-test@multica.ai",
+	})
 
-	var sessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
-		VALUES ($1, $2, $3, 'initiator chat')
-		RETURNING id
-	`, testWorkspaceID, agentID, installerID).Scan(&sessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID) })
+	sessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"creator_id": installerID,
+		"title":      "initiator chat",
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO chat_message (chat_session_id, role, content) VALUES ($1, 'user', 'hi there')
-	`, sessionID); err != nil {
-		t.Fatalf("setup: insert user message: %v", err)
-	}
+	`, sessionID)
 	// initiator_user_id = the real sender (testUserID), distinct from creator.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, chat_session_id, status, priority, initiator_user_id)
 		VALUES ($1, $2, $3, 'queued', 2, $4)
-	`, agentID, runtimeID, sessionID, testUserID); err != nil {
-		t.Fatalf("setup: create chat task: %v", err)
-	}
+	`, agentID, runtimeID, sessionID, testUserID)
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, daemonID)
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 	var resp struct {
 		Task *struct {
 			InitiatorType  string `json:"initiator_type"`
@@ -3929,9 +3182,7 @@ func TestClaimTask_ChatPopulatesInitiator(t *testing.T) {
 			InitiatorEmail string `json:"initiator_email"`
 		} `json:"task"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode claim response: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Task == nil {
 		t.Fatalf("expected a claimed task, got %s", w.Body.String())
 	}
@@ -3963,12 +3214,10 @@ func TestClaimTask_QuickCreatePopulatesThreadName(t *testing.T) {
 		"attachment_ids": []string{attachmentID},
 	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, context)
 		VALUES ($1, $2, 'queued', 2, $3)
-	`, agentID, runtimeID, quickContext); err != nil {
-		t.Fatalf("setup: create quick-create task: %v", err)
-	}
+	`, agentID, runtimeID, quickContext)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.ThreadName != quickPrompt {
@@ -3991,38 +3240,28 @@ func TestClaimTask_ChatForceFreshSessionSkipsPriorSession(t *testing.T) {
 
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'force fresh chat', 'chat-pointer-session', '/tmp/chat-pointer-workdir', $4)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID, runtimeID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "force fresh chat",
+		"session_id": "chat-pointer-session",
+		"work_dir":   "/tmp/chat-pointer-workdir",
+		"runtime_id": runtimeID,
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'task-row-session', '/tmp/task-row-workdir')
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create prior chat task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, runtimeID, chatSessionID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, force_fresh_session
 		)
 		VALUES ($1, $2, $3, 'queued', 0, TRUE)
-	`, agentID, runtimeID, chatSessionID); err != nil {
-		t.Fatalf("setup: create force-fresh chat task: %v", err)
-	}
+	`, agentID, runtimeID, chatSessionID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "" {
@@ -4046,38 +3285,28 @@ func TestClaimTask_ChatLegacyNullRuntimeFallsBackToTaskRow(t *testing.T) {
 
 	agentID, runtimeID, daemonID := createRuntimeGuardAgent(t, ctx)
 
-	var legacySessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (
-			workspace_id, agent_id, creator_id, title,
-			session_id, work_dir, runtime_id
-		)
-		VALUES ($1, $2, $3, 'runtime guard legacy chat', NULL, NULL, NULL)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&legacySessionID); err != nil {
-		t.Fatalf("setup: create legacy chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, legacySessionID) })
+	legacySessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title":      "runtime guard legacy chat",
+		"session_id": nil,
+		"work_dir":   nil,
+		"runtime_id": nil,
+	})
 
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority, started_at, completed_at,
 			session_id, work_dir
 		)
 		VALUES ($1, $2, $3, 'completed', 0, now(), now(), 'legacy-fallback-session', '/tmp/legacy-fallback-workdir')
-	`, agentID, runtimeID, legacySessionID); err != nil {
-		t.Fatalf("setup: create matching-runtime prior task: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	`, agentID, runtimeID, legacySessionID)
+	dbfx.Exec(t, `
 		INSERT INTO agent_task_queue (
 			agent_id, runtime_id, chat_session_id,
 			status, priority
 		)
 		VALUES ($1, $2, $3, 'queued', 0)
-	`, agentID, runtimeID, legacySessionID); err != nil {
-		t.Fatalf("setup: create current chat task: %v", err)
-	}
+	`, agentID, runtimeID, legacySessionID)
 
 	task := claimTaskForRuntimeGuard(t, runtimeID, daemonID)
 	if task.PriorSessionID != "legacy-fallback-session" {
@@ -4099,46 +3328,29 @@ func TestGetChatSessionGCCheck(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
 
-	var sessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, status)
-		VALUES ($1, $2, $3, 'gc-check fixture', 'active')
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&sessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
+	sessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title": "gc-check fixture",
+	})
 	defer testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID)
 
 	// Cross-workspace daemon token must 404 with no oracle.
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
 		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
 	req = withURLParam(req, "sessionId", sessionID)
-	testHandler.GetChatSessionGCCheck(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.GetChatSessionGCCheck, req).Want(http.StatusNotFound)
 
 	// Same-workspace daemon token sees the live row.
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
 		testWorkspaceID, "legit-daemon")
 	req = withURLParam(req, "sessionId", sessionID)
-	testHandler.GetChatSessionGCCheck(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.GetChatSessionGCCheck, req).Want(http.StatusOK)
 	var resp struct {
 		Status    string `json:"status"`
 		UpdatedAt string `json:"updated_at"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Status != "active" {
 		t.Fatalf("expected status %q, got %q", "active", resp.Status)
 	}
@@ -4148,17 +3360,11 @@ func TestGetChatSessionGCCheck(t *testing.T) {
 
 	// Hard-deleted session: 404 — exactly what the daemon needs to reclaim
 	// the workdir on the next GC pass after a user runs DeleteChatSession.
-	if _, err := testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, sessionID); err != nil {
-		t.Fatalf("delete chat session: %v", err)
-	}
-	w = httptest.NewRecorder()
+	dbfx.Exec(t, `DELETE FROM chat_session WHERE id = $1`, sessionID)
 	req = newDaemonTokenRequest("GET", "/api/daemon/chat-sessions/"+sessionID+"/gc-check", nil,
 		testWorkspaceID, "legit-daemon")
 	req = withURLParam(req, "sessionId", sessionID)
-	testHandler.GetChatSessionGCCheck(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("hard-deleted session: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.GetChatSessionGCCheck, req).Want(http.StatusNotFound)
 }
 
 // TestGetAutopilotRunGCCheck verifies the autopilot-run gc-check endpoint:
@@ -4171,58 +3377,41 @@ func TestGetAutopilotRunGCCheck(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
 
-	var autopilotID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot (
-			workspace_id, title, assignee_id, execution_mode,
-			created_by_type, created_by_id
-		)
-		VALUES ($1, 'gc-check autopilot', $2, 'run_only', 'member', $3)
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&autopilotID); err != nil {
-		t.Fatalf("setup: create autopilot: %v", err)
-	}
+	autopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    testWorkspaceID,
+		"title":           "gc-check autopilot",
+		"assignee_id":     agentID,
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	})
 	defer testPool.Exec(ctx, `DELETE FROM autopilot WHERE id = $1`, autopilotID)
 
-	var runID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO autopilot_run (autopilot_id, source, status, completed_at)
-		VALUES ($1, 'manual', 'completed', NOW() - INTERVAL '6 days')
-		RETURNING id
-	`, autopilotID).Scan(&runID); err != nil {
-		t.Fatalf("setup: create autopilot_run: %v", err)
-	}
+	runID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
+		"autopilot_id": autopilotID,
+		"source":       "manual",
+		"status":       "completed",
+		"completed_at": testutil.Raw("NOW() - INTERVAL '6 days'"),
+	})
 
 	// Cross-workspace probe.
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil,
 		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
 	req = withURLParam(req, "runId", runID)
-	testHandler.GetAutopilotRunGCCheck(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.GetAutopilotRunGCCheck, req).Want(http.StatusNotFound)
 
 	// Same-workspace probe.
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("GET", "/api/daemon/autopilot-runs/"+runID+"/gc-check", nil,
 		testWorkspaceID, "legit-daemon")
 	req = withURLParam(req, "runId", runID)
-	testHandler.GetAutopilotRunGCCheck(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.GetAutopilotRunGCCheck, req).Want(http.StatusOK)
 	var resp struct {
 		Status      string `json:"status"`
 		CompletedAt string `json:"completed_at"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Status != "completed" {
 		t.Fatalf("expected status %q, got %q", "completed", resp.Status)
 	}
@@ -4241,11 +3430,9 @@ func TestGetTaskGCCheck(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
 	// Quick-create-shaped task: no issue_id, no chat_session_id, no run id.
 	// context.type is set so ResolveTaskWorkspaceID can recover workspace.
@@ -4256,44 +3443,30 @@ func TestGetTaskGCCheck(t *testing.T) {
 		"workspace_id": testWorkspaceID,
 	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, status, priority, context, completed_at
-		)
-		VALUES ($1, $2, 'completed', 0, $3, NOW())
-		RETURNING id
-	`, agentID, runtimeID, quickContext).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create quick-create task: %v", err)
-	}
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":   runtimeID,
+		"status":       "completed",
+		"context":      quickContext,
+		"completed_at": testutil.Raw("NOW()"),
+	})
 	defer testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 
 	// Cross-workspace probe.
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("GET", "/api/daemon/tasks/"+taskID+"/gc-check", nil,
 		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
 	req = withURLParam(req, "taskId", taskID)
-	testHandler.GetTaskGCCheck(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.GetTaskGCCheck, req).Want(http.StatusNotFound)
 
 	// Same-workspace probe — terminal task returns its status.
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("GET", "/api/daemon/tasks/"+taskID+"/gc-check", nil,
 		testWorkspaceID, "legit-daemon")
 	req = withURLParam(req, "taskId", taskID)
-	testHandler.GetTaskGCCheck(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("same-workspace token: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.GetTaskGCCheck, req).Want(http.StatusOK)
 	var resp struct {
 		Status      string `json:"status"`
 		CompletedAt string `json:"completed_at"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Status != "completed" {
 		t.Fatalf("expected status %q, got %q", "completed", resp.Status)
 	}
@@ -4332,14 +3505,9 @@ func installFreshMembershipCache(t *testing.T) {
 func createEphemeralUser(t *testing.T, label string) string {
 	t.Helper()
 	email := fmt.Sprintf("membership-cache-%s-%s@multica.ai", label, uuid.NewString())
-	var userID string
-	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO "user" (name, email) VALUES ($1, $2) RETURNING id
-	`, "Membership Cache Test "+label, email).Scan(&userID); err != nil {
-		t.Fatalf("create ephemeral user: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, userID)
+	userID := dbfx.Insert(t, "user", testutil.Cols{
+		"name":  "Membership Cache Test " + label,
+		"email": email,
 	})
 	return userID
 }
@@ -4350,14 +3518,10 @@ func createEphemeralUser(t *testing.T, label string) string {
 func createEphemeralMember(t *testing.T, workspaceID, label, role string) (string, string) {
 	t.Helper()
 	userID := createEphemeralUser(t, label)
-	var memberID string
-	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, $3) RETURNING id
-	`, workspaceID, userID, role).Scan(&memberID); err != nil {
-		t.Fatalf("create ephemeral member: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM member WHERE id = $1`, memberID)
+	memberID := dbfx.Insert(t, "member", testutil.Cols{
+		"workspace_id": workspaceID,
+		"user_id":      userID,
+		"role":         role,
 	})
 	return userID, memberID
 }
@@ -4438,13 +3602,9 @@ func TestMembershipCache_InvalidatedOnDeleteMember(t *testing.T) {
 		t.Fatal("setup: expected cache hit after Set")
 	}
 
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/members/"+targetMemberID, nil)
 	req = withURLParams(req, "id", testWorkspaceID, "memberId", targetMemberID)
-	testHandler.DeleteMember(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DeleteMember: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DeleteMember, req).Want(http.StatusNoContent)
 
 	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
 		t.Fatal("DeleteMember handler did not invalidate membership cache for removed user")
@@ -4466,14 +3626,10 @@ func TestMembershipCache_InvalidatedOnUpdateMember(t *testing.T) {
 	targetUserID, targetMemberID := createEphemeralMember(t, testWorkspaceID, "update", "admin")
 	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/workspaces/"+testWorkspaceID+"/members/"+targetMemberID,
 		map[string]any{"role": "member"})
 	req = withURLParams(req, "id", testWorkspaceID, "memberId", targetMemberID)
-	testHandler.UpdateMember(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateMember: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.UpdateMember, req).Want(http.StatusOK)
 
 	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
 		t.Fatal("UpdateMember handler did not invalidate membership cache for updated user")
@@ -4495,13 +3651,9 @@ func TestMembershipCache_InvalidatedOnLeaveWorkspace(t *testing.T) {
 	targetUserID, _ := createEphemeralMember(t, testWorkspaceID, "leave", "admin")
 	testHandler.MembershipCache.Set(ctx, targetUserID, testWorkspaceID)
 
-	w := httptest.NewRecorder()
 	req := newRequestAsUser(targetUserID, "DELETE", "/api/workspaces/"+testWorkspaceID+"/leave", nil)
 	req = withURLParam(req, "id", testWorkspaceID)
-	testHandler.LeaveWorkspace(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("LeaveWorkspace: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.LeaveWorkspace, req).Want(http.StatusNoContent)
 
 	if testHandler.MembershipCache.Get(ctx, targetUserID, testWorkspaceID) {
 		t.Fatal("LeaveWorkspace handler did not invalidate membership cache for leaver")
@@ -4521,37 +3673,27 @@ func TestMembershipCache_InvalidatedOnDeleteWorkspace(t *testing.T) {
 
 	const slug = "membership-cache-delete-ws"
 	_, _ = testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
-	var wsID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
-		VALUES ($1, $2, $3, $4) RETURNING id
-	`, "Membership Cache Delete WS", slug, "DeleteWorkspace cache invalidation test", "MCD").Scan(&wsID); err != nil {
-		t.Fatalf("create workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, wsID)
+	wsID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Membership Cache Delete WS",
+		"slug":         slug,
+		"description":  "DeleteWorkspace cache invalidation test",
+		"issue_prefix": "MCD",
 	})
 
 	// testUser must be an owner of the isolated workspace to call
 	// DeleteWorkspace.
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'owner')
-	`, wsID, testUserID); err != nil {
-		t.Fatalf("add owner: %v", err)
-	}
+	`, wsID, testUserID)
 
 	extraUserID, _ := createEphemeralMember(t, wsID, "ws-delete-extra", "admin")
 
 	testHandler.MembershipCache.Set(ctx, testUserID, wsID)
 	testHandler.MembershipCache.Set(ctx, extraUserID, wsID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+wsID, nil)
 	req = withURLParam(req, "id", wsID)
-	testHandler.DeleteWorkspace(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DeleteWorkspace: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DeleteWorkspace, req).Want(http.StatusNoContent)
 
 	if testHandler.MembershipCache.Get(ctx, testUserID, wsID) {
 		t.Fatal("DeleteWorkspace handler did not invalidate owner cache entry")
@@ -4566,25 +3708,15 @@ func TestMembershipCache_InvalidatedOnDeleteWorkspace(t *testing.T) {
 // Returns the task id and the trigger comment id.
 func createCommentTriggeredClaimTask(t *testing.T, ctx context.Context, agentID, runtimeID, issueID string, parentID *string) (string, string) {
 	t.Helper()
-	var commentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
-		VALUES ($1, $2, 'member', $3, 'trigger comment', 'comment', $4)
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID, parentID).Scan(&commentID); err != nil {
-		t.Fatalf("insert trigger comment: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, commentID) })
+	commentID := dbfx.Comment(t, issueID, "trigger comment", testutil.Cols{
+		"parent_id": parentID,
+	})
 
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, trigger_comment_id)
-		VALUES ($1, $2, $3, 'queued', 0, $4)
-		RETURNING id
-	`, agentID, runtimeID, issueID, commentID).Scan(&taskID); err != nil {
-		t.Fatalf("insert comment-triggered task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID) })
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":         runtimeID,
+		"issue_id":           issueID,
+		"trigger_comment_id": commentID,
+	})
 	return taskID, commentID
 }
 
@@ -4600,17 +3732,11 @@ type claimCommentTaskResp struct {
 
 func claimCommentTask(t *testing.T, runtimeID, daemonID string) claimCommentTaskResp {
 	t.Helper()
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, daemonID)
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 	var resp claimCommentTaskResp
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode claim response: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Task == nil {
 		t.Fatalf("expected a claimed task, got nil: %s", w.Body.String())
 	}
@@ -4632,45 +3758,23 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesNewCommentCount(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Comment newcount agent")
 
 	// A prior run establishes the "since" anchor (its started_at, in the past).
-	var priorTaskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at)
-		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 hour', now() - interval '50 minutes')
-		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&priorTaskID); err != nil {
-		t.Fatalf("insert prior task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, priorTaskID) })
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":   runtimeID,
+		"issue_id":     issueID,
+		"status":       "completed",
+		"started_at":   testutil.Raw("now() - interval '1 hour'"),
+		"completed_at": testutil.Raw("now() - interval '50 minutes'"),
+	})
 
-	var threadRootID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
-		VALUES ($1, $2, 'member', $3, 'same-thread context', 'comment')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&threadRootID); err != nil {
-		t.Fatalf("insert trigger thread root: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, threadRootID) })
+	threadRootID := dbfx.Comment(t, issueID, "same-thread context")
 
-	var unrelatedRootID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type)
-		VALUES ($1, $2, 'member', $3, 'unrelated thread context', 'comment')
-		RETURNING id
-	`, issueID, testWorkspaceID, testUserID).Scan(&unrelatedRootID); err != nil {
-		t.Fatalf("insert unrelated thread root: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, unrelatedRootID) })
+	dbfx.Comment(t, issueID, "unrelated thread context")
 
-	var agentOwnID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id)
-		VALUES ($1, $2, 'agent', $3, 'agent self reply', 'comment', $4)
-		RETURNING id
-	`, issueID, testWorkspaceID, agentID, threadRootID).Scan(&agentOwnID); err != nil {
-		t.Fatalf("insert agent self reply: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM comment WHERE id = $1`, agentOwnID) })
+	dbfx.Comment(t, issueID, "agent self reply", testutil.Cols{
+		"author_type": "agent",
+		"author_id":   agentID,
+		"parent_id":   threadRootID,
+	})
 
 	// The trigger comment (member-authored, created now) lands after the anchor
 	// but is injected into the prompt, so it should not be counted.
@@ -4704,13 +3808,9 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesInitiator(t *testing.T) {
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Comment initiator agent")
 	taskID, _ := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+runtimeID+"/tasks/claim", nil, testWorkspaceID, "comment-initiator-claim")
 	req = withURLParam(req, "runtimeId", runtimeID)
-	testHandler.ClaimTaskByRuntime(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ClaimTaskByRuntime: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusOK)
 	var resp struct {
 		Task *struct {
 			ID             string `json:"id"`
@@ -4720,9 +3820,7 @@ func TestClaimTaskByRuntime_CommentTaskPopulatesInitiator(t *testing.T) {
 			InitiatorEmail string `json:"initiator_email"`
 		} `json:"task"`
 	}
-	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
-		t.Fatalf("decode claim response: %v", err)
-	}
+	w.JSON(&resp)
 	if resp.Task == nil || resp.Task.ID != taskID {
 		t.Fatalf("expected claimed task %s, got %s", taskID, w.Body.String())
 	}
@@ -4748,15 +3846,13 @@ func TestClaimTaskByRuntime_CommentTaskOmitsDeltaWhenOnlyTriggerIsNew(t *testing
 	runtimeID := createClaimReclaimRuntime(t, ctx, "Comment trigger-only runtime")
 	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Comment trigger-only agent")
 
-	var priorTaskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, started_at, completed_at)
-		VALUES ($1, $2, $3, 'completed', 0, now() - interval '1 hour', now() - interval '50 minutes')
-		RETURNING id
-	`, agentID, runtimeID, issueID).Scan(&priorTaskID); err != nil {
-		t.Fatalf("insert prior task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, priorTaskID) })
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":   runtimeID,
+		"issue_id":     issueID,
+		"status":       "completed",
+		"started_at":   testutil.Raw("now() - interval '1 hour'"),
+		"completed_at": testutil.Raw("now() - interval '50 minutes'"),
+	})
 
 	_, triggerID := createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 
@@ -4785,15 +3881,13 @@ func TestClaimTaskByRuntime_CommentResumeDefaultOn(t *testing.T) {
 
 	// A prior completed task on the same (agent, issue, runtime) with a session.
 	const priorSession = "sess-prior-123"
-	var priorTaskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, session_id, completed_at)
-		VALUES ($1, $2, $3, 'completed', 0, $4, now())
-		RETURNING id
-	`, agentID, runtimeID, issueID, priorSession).Scan(&priorTaskID); err != nil {
-		t.Fatalf("insert prior completed task: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, priorTaskID) })
+	dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":   runtimeID,
+		"issue_id":     issueID,
+		"status":       "completed",
+		"session_id":   priorSession,
+		"completed_at": testutil.Raw("now()"),
+	})
 
 	createCommentTriggeredClaimTask(t, ctx, agentID, runtimeID, issueID, nil)
 
@@ -4815,107 +3909,75 @@ func TestAckTaskCancelled(t *testing.T) {
 	ctx := context.Background()
 
 	var agentID, runtimeID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
-	`, testWorkspaceID).Scan(&agentID, &runtimeID); err != nil {
-		t.Fatalf("setup: get agent: %v", err)
-	}
+	`, testWorkspaceID).Scan(&agentID, &runtimeID)
 
-	var chatSessionID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO chat_session (workspace_id, agent_id, creator_id, title)
-		VALUES ($1, $2, $3, 'cancel ack test')
-		RETURNING id
-	`, testWorkspaceID, agentID, testUserID).Scan(&chatSessionID); err != nil {
-		t.Fatalf("setup: create chat session: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM chat_session WHERE id = $1`, chatSessionID) })
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{
+		"title": "cancel ack test",
+	})
 
 	// Cancelled chat task with a pending deferred-finalize marker, plus a
 	// transcript row that landed after the cancel (the daemon's late flush).
-	var taskID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO agent_task_queue (
-			agent_id, runtime_id, issue_id, chat_session_id, status, priority,
-			started_at, completed_at, chat_finalize_deferred_at
-		)
-		VALUES ($1, $2, NULL, $3, 'cancelled', 0, now(), now(), now())
-		RETURNING id
-	`, agentID, runtimeID, chatSessionID).Scan(&taskID); err != nil {
-		t.Fatalf("setup: create task: %v", err)
-	}
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id":                runtimeID,
+		"issue_id":                  nil,
+		"chat_session_id":           chatSessionID,
+		"status":                    "cancelled",
+		"started_at":                testutil.Raw("now()"),
+		"completed_at":              testutil.Raw("now()"),
+		"chat_finalize_deferred_at": testutil.Raw("now()"),
+	})
 	t.Cleanup(func() {
 		testPool.Exec(ctx, `DELETE FROM task_message WHERE task_id = $1`, taskID)
 		testPool.Exec(ctx, `DELETE FROM chat_message WHERE task_id = $1`, taskID)
 		testPool.Exec(ctx, `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
 	})
-	if _, err := testPool.Exec(ctx, `
+	dbfx.Exec(t, `
 		INSERT INTO task_message (task_id, seq, type, content)
 		VALUES ($1, 1, 'text', 'late flush')
-	`, taskID); err != nil {
-		t.Fatalf("setup: insert task message: %v", err)
-	}
+	`, taskID)
 
 	// Cross-workspace daemon token must still 404 and leave the marker armed.
-	w := httptest.NewRecorder()
 	req := newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
 		"00000000-0000-0000-0000-000000000000", "attacker-daemon")
 	req = withURLParam(req, "taskId", taskID)
-	testHandler.AckTaskCancelled(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("AckTaskCancelled with cross-workspace token: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.AckTaskCancelled, req).Want(http.StatusNotFound)
 	var deferredAt *time.Time
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT chat_finalize_deferred_at FROM agent_task_queue WHERE id = $1
-	`, taskID).Scan(&deferredAt); err != nil {
-		t.Fatalf("read marker: %v", err)
-	}
+	`, taskID).Scan(&deferredAt)
 	if deferredAt == nil {
 		t.Fatal("cross-workspace ack must not claim the marker")
 	}
 
 	// Same-workspace token settles the deferred finalize.
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
 		testWorkspaceID, "legit-daemon")
 	req = withURLParam(req, "taskId", taskID)
-	testHandler.AckTaskCancelled(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("AckTaskCancelled same-workspace: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if err := testPool.QueryRow(ctx, `
+	testutil.Call(t, testHandler.AckTaskCancelled, req).Want(http.StatusOK)
+	dbfx.QueryRow(t, `
 		SELECT chat_finalize_deferred_at FROM agent_task_queue WHERE id = $1
-	`, taskID).Scan(&deferredAt); err != nil {
-		t.Fatalf("read marker: %v", err)
-	}
+	`, taskID).Scan(&deferredAt)
 	if deferredAt != nil {
 		t.Errorf("marker should be claimed, got %v", deferredAt)
 	}
 	var stopped int
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT count(*) FROM chat_message WHERE task_id = $1 AND role = 'assistant' AND content = 'Stopped.'
-	`, taskID).Scan(&stopped); err != nil {
-		t.Fatalf("count stopped rows: %v", err)
-	}
+	`, taskID).Scan(&stopped)
 	if stopped != 1 {
 		t.Errorf("Stopped. rows = %d, want 1", stopped)
 	}
 
 	// Idempotent: a second ack is a no-op (no duplicate Stopped.).
-	w = httptest.NewRecorder()
 	req = newDaemonTokenRequest("POST", "/api/daemon/tasks/"+taskID+"/cancel-ack", nil,
 		testWorkspaceID, "legit-daemon")
 	req = withURLParam(req, "taskId", taskID)
-	testHandler.AckTaskCancelled(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("second AckTaskCancelled: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
-	if err := testPool.QueryRow(ctx, `
+	testutil.Call(t, testHandler.AckTaskCancelled, req).Want(http.StatusOK)
+	dbfx.QueryRow(t, `
 		SELECT count(*) FROM chat_message WHERE task_id = $1 AND role = 'assistant' AND content = 'Stopped.'
-	`, taskID).Scan(&stopped); err != nil {
-		t.Fatalf("count stopped rows: %v", err)
-	}
+	`, taskID).Scan(&stopped)
 	if stopped != 1 {
 		t.Errorf("Stopped. rows after second ack = %d, want 1", stopped)
 	}

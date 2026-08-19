@@ -35,6 +35,7 @@ import {
   onIssueLabelsChanged,
   onIssuePropertiesChanged,
   onIssueMetadataChanged,
+  onIssueAuxiliaryRevision,
 } from "../issues/ws-updaters";
 import { invalidateUpdatedAtSortedIssueLists } from "../issues/cache-coordinator";
 import { onInboxNew, onInboxInvalidate, onInboxIssueStatusChanged, onInboxIssueDeleted, onInboxSummaryInvalidate } from "../inbox/ws-updaters";
@@ -986,31 +987,33 @@ export function useRealtimeSync(
     });
 
     const unsubIssueLabelsChanged = ws.on("issue_labels:changed", (p) => {
-      const { issue_id, labels } = p as IssueLabelsChangedPayload;
+      const { issue_id, labels, issue_revision } = p as IssueLabelsChangedPayload;
       if (!issue_id) return;
       const wsId = getCurrentWsId();
-      if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? []);
+      if (wsId) onIssueLabelsChanged(qc, wsId, issue_id, labels ?? [], issue_revision);
     });
 
     const unsubIssueAttachmentsChanged = ws.on("issue_attachments:changed", (p) => {
-      const { issue_id } = p as IssueAttachmentsChangedPayload;
+      const { issue_id, issue_revision } = p as IssueAttachmentsChangedPayload;
       if (!issue_id) return;
       qc.invalidateQueries({ queryKey: issueKeys.attachments(issue_id) });
+      const wsId = getCurrentWsId();
+      if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
     });
 
     const unsubIssueMetadataChanged = ws.on("issue_metadata:changed", (p) => {
-      const { issue_id, metadata } = p as IssueMetadataChangedPayload;
+      const { issue_id, metadata, issue_revision } = p as IssueMetadataChangedPayload;
       if (!issue_id) return;
       const wsId = getCurrentWsId();
-      if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {});
+      if (wsId) onIssueMetadataChanged(qc, wsId, issue_id, metadata ?? {}, issue_revision);
     });
 
     const unsubIssuePropertiesChanged = ws.on("issue_properties:changed", (p) => {
-      const { issue_id, properties } = p as IssuePropertiesChangedPayload;
+      const { issue_id, properties, issue_revision } = p as IssuePropertiesChangedPayload;
       if (!issue_id) return;
       const wsId = getCurrentWsId();
       if (wsId) {
-        onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {});
+        onIssuePropertiesChanged(qc, wsId, issue_id, properties ?? {}, issue_revision);
         // The catalog embeds per-definition usage counts; every value
         // set/unset shifts them. The list is tiny, so a refetch beats
         // trying to patch counts client-side.
@@ -1062,7 +1065,7 @@ export function useRealtimeSync(
     };
 
     const unsubCommentCreated = ws.on("comment:created", (p) => {
-      const { comment } = p as CommentCreatedPayload;
+      const { comment, issue_revision: issueRevision } = p as CommentCreatedPayload;
       if (!comment?.issue_id) return;
       invalidateTimeline(comment.issue_id);
       // A new comment bumps the parent issue's updated_at server-side
@@ -1071,7 +1074,13 @@ export function useRealtimeSync(
       // place; every other sort is untouched. Only comment:created bumps
       // updated_at, so the other comment events below deliberately do not.
       const wsId = getCurrentWsId();
-      if (wsId) invalidateUpdatedAtSortedIssueLists(qc, wsId);
+      if (wsId) {
+        invalidateUpdatedAtSortedIssueLists(qc, wsId);
+        // A comment carries only the aggregate owner revision, not a full
+        // Issue snapshot. Mark stale projections for an authoritative fetch
+        // without making a later full snapshot look older than the cache.
+        onIssueAuxiliaryRevision(qc, wsId, comment.issue_id, issueRevision);
+      }
     });
 
     const unsubCommentUpdated = ws.on("comment:updated", (p) => {
@@ -1112,13 +1121,21 @@ export function useRealtimeSync(
     // --- Issue-level reactions & subscribers (global fallback) ---
 
     const unsubIssueReactionAdded = ws.on("issue_reaction:added", (p) => {
-      const { issue_id } = p as IssueReactionAddedPayload;
-      if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
+      const { issue_id, issue_revision } = p as IssueReactionAddedPayload;
+      if (issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
+        const wsId = getCurrentWsId();
+        if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
+      }
     });
 
     const unsubIssueReactionRemoved = ws.on("issue_reaction:removed", (p) => {
-      const { issue_id } = p as IssueReactionRemovedPayload;
-      if (issue_id) qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
+      const { issue_id, issue_revision } = p as IssueReactionRemovedPayload;
+      if (issue_id) {
+        qc.invalidateQueries({ queryKey: issueKeys.reactions(issue_id) });
+        const wsId = getCurrentWsId();
+        if (wsId) onIssueAuxiliaryRevision(qc, wsId, issue_id, issue_revision);
+      }
     });
 
     const unsubSubscriberAdded = ws.on("subscriber:added", (p) => {

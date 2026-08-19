@@ -16,6 +16,7 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import type { IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useUpdateIssue, useBatchUpdateIssues } from "@multica/core/issues/mutations";
+import { errorCode } from "@multica/core/api";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
@@ -54,6 +55,7 @@ interface RunConfirmData {
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;
   assigneeName?: string;
+  issueRevision?: number;
 }
 
 /**
@@ -81,6 +83,7 @@ export function RunConfirmModal({
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
+  const { t: tIssues } = useT("issues");
   const { getActorName } = useActorName();
   const sendShortcut = useShortcut("send");
   const d = (data ?? {}) as RunConfirmData;
@@ -157,13 +160,22 @@ export function RunConfirmModal({
       // no result toast to add here. Whether a run started is the server's
       // existing decision at write time, not something this dialog reports.
       if (issueIds.length === 1) {
-        await updateIssue.mutateAsync({ id: issueIds[0]!, ...payload });
+        await updateIssue.mutateAsync({
+          id: issueIds[0]!,
+          ...payload,
+        });
       } else {
         await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });
       }
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.run_confirm.toast_failed));
+      toast.error(
+        errorCode(err) === "revision_conflict"
+          ? tIssues(($) => $.revision.conflict)
+          : err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.run_confirm.toast_failed),
+      );
       setPendingAction(null);
     }
   };

@@ -159,7 +159,6 @@
   "dependencies": {
     "@formatjs/intl-localematcher": "catalog:",
     "@tanstack/react-query": "catalog:",
-    "@tanstack/react-query-devtools": "^5.96.2",
     "i18next": "catalog:",
     "posthog-js": "catalog:",
     "react-i18next": "catalog:",

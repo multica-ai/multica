@@ -5069,7 +5069,7 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 		if !errors.Is(err, pgx.ErrNoRows) {
 			return fmt.Errorf("find recovery comment: %w", err)
 		}
-		comment, err = qtx.CreateComment(ctx, db.CreateCommentParams{
+		createdComment, err := qtx.CreateComment(ctx, db.CreateCommentParams{
 			IssueID:      target.issue.ID,
 			WorkspaceID:  target.issue.WorkspaceID,
 			AuthorType:   "system",
@@ -5081,7 +5081,7 @@ func (s *TaskService) ensureDelegatedFailureRecoveryComment(ctx context.Context,
 		if err != nil {
 			return fmt.Errorf("create recovery comment: %w", err)
 		}
-		target.comment = comment
+		target.comment = createdComment.Comment()
 		created = true
 		return nil
 	}); err != nil {
@@ -5174,7 +5174,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 			return fmt.Errorf("find delegated failure exhaustion comment: %w", err)
 		}
 
-		comment, err = qtx.CreateComment(ctx, db.CreateCommentParams{
+		createdComment, err := qtx.CreateComment(ctx, db.CreateCommentParams{
 			IssueID:      target.issue.ID,
 			WorkspaceID:  target.issue.WorkspaceID,
 			AuthorType:   "system",
@@ -5186,7 +5186,7 @@ func (s *TaskService) exhaustDelegatedFailureRecovery(ctx context.Context, targe
 		if err != nil {
 			return fmt.Errorf("create delegated failure exhaustion comment: %w", err)
 		}
-		exhaustedComment = comment
+		exhaustedComment = createdComment.Comment()
 		created = true
 
 		// Exhaustion deliberately does not @mention the coordinator agent: doing
@@ -6015,7 +6015,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 			rootComment = &root
 		}
 	}
-	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
 		IssueID:      issueID,
 		WorkspaceID:  issue.WorkspaceID,
 		AuthorType:   "agent",
@@ -6028,6 +6028,7 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 	if err != nil {
 		return
 	}
+	comment := created.Comment()
 	s.CancelDeferredEscalationsForIssueAgent(ctx, issueID, agentID)
 	s.Bus.Publish(events.Event{
 		Type:        protocol.EventCommentCreated,
@@ -6045,9 +6046,11 @@ func (s *TaskService) createAgentComment(ctx context.Context, issueID, agentID p
 				"parent_id":      util.UUIDToPtr(comment.ParentID),
 				"source_task_id": util.UUIDToPtr(comment.SourceTaskID),
 				"created_at":     comment.CreatedAt.Time.Format("2006-01-02T15:04:05Z"),
+				"revision":       comment.Revision,
 			},
-			"issue_title":  issue.Title,
-			"issue_status": issue.Status,
+			"issue_title":    issue.Title,
+			"issue_status":   issue.Status,
+			"issue_revision": created.IssueRevision,
 		},
 	})
 	s.AutoUnresolveThreadOnReply(ctx, rootComment, util.UUIDToString(issue.WorkspaceID), "agent", util.UUIDToString(agentID))
@@ -6087,6 +6090,7 @@ func (s *TaskService) AutoUnresolveThreadOnReply(ctx context.Context, parent *db
 				"resolved_at":      util.TimestampToPtr(updated.ResolvedAt),
 				"resolved_by_type": util.TextToPtr(updated.ResolvedByType),
 				"resolved_by_id":   util.UUIDToPtr(updated.ResolvedByID),
+				"revision":         updated.Revision,
 			},
 		},
 	})
@@ -6152,6 +6156,7 @@ func IssueToMap(issue db.Issue, issuePrefix string) map[string]any {
 		"due_date":        util.DateToPtr(issue.DueDate),
 		"created_at":      util.TimestampToString(issue.CreatedAt),
 		"updated_at":      util.TimestampToString(issue.UpdatedAt),
+		"revision":        issue.Revision,
 		"metadata":        util.JSONObjectOrEmpty(issue.Metadata),
 		"properties":      util.JSONObjectOrEmpty(issue.Properties),
 	}

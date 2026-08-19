@@ -23,6 +23,8 @@
     "typecheck": "turbo typecheck --filter=!@multica/mobile",
     "test": "turbo test --filter=!@multica/mobile",
     "lint": "turbo lint --filter=!@multica/mobile",
+    "knip": "knip",
+    "check:ui-exports": "node scripts/check-ui-wildcard-exports.mjs",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
     "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
@@ -48,6 +50,7 @@
     "@playwright/test": "^1.58.2",
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
+    "knip": "^6.32.2",
     "pg": "^8.20.0",
     "turbo": "^2.5.4",
     "typescript": "catalog:"

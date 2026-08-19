@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@multica/ui/components/ui/select";
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
@@ -215,6 +216,17 @@ function ConfigField({
               const parsed = Number(event.target.value);
               onValueChange(event.target.value === "" || Number.isNaN(parsed) ? undefined : parsed);
             }}
+          />
+        ) : field.multiline === true ? (
+          // A field whose value is a list of lines is unreadable in a
+          // single-line input — and the generated form is the one piece of
+          // plugin UI the host owns, so getting it wrong is our bug.
+          <Textarea
+            rows={4}
+            disabled={disabled}
+            value={typeof value === "string" ? value : ""}
+            placeholder={field.placeholder ?? ""}
+            onChange={(event) => onValueChange(event.target.value)}
           />
         ) : (
           <Input

@@ -30,27 +30,31 @@ const (
 	labelEventKind    = "event_kind"
 	labelAction       = "action"
 	labelResult       = "result"
+	labelQuery        = "query"
 	labelOp           = "op"
 	labelGate         = "gate"
 )
 
 var businessMetricLabels = map[string][]string{
-	"multica_agent_task_enqueued_total":     {labelSource, labelRuntimeMode},
-	"multica_agent_task_dispatched_total":   {labelSource, labelRuntimeMode},
-	"multica_agent_task_started_total":      {labelSource, labelRuntimeMode, labelProvider},
-	"multica_agent_task_terminal_total":     {labelSource, labelRuntimeMode, labelTerminalStatus},
-	"multica_agent_task_failed_total":       {labelSource, labelRuntimeMode, labelFailureReason},
-	"multica_agent_task_queue_wait_seconds": {labelSource, labelRuntimeMode},
-	"multica_agent_task_run_seconds":        {labelSource, labelRuntimeMode, labelTerminalStatus},
-	"multica_agent_task_total_seconds":      {labelSource, labelRuntimeMode, labelTerminalStatus},
-	"multica_agent_task_in_progress":        {labelSource, labelRuntimeMode},
-	"multica_agent_task_iteration_count":    {labelSource, labelTerminalStatus},
-	"multica_llm_tokens_total":              {labelProvider, labelModel, labelTokenType, labelRuntimeMode, labelSource},
-	"multica_llm_cost_usd_total":            {labelProvider, labelModel, labelTokenType, labelRuntimeMode, labelSource},
-	"multica_llm_unpriced_tokens_total":     {labelProvider, labelModelAlias, labelTokenType},
-	"multica_llm_request_total":             {labelProvider, labelModel, labelRuntimeMode},
-	"multica_task_queued_expired_total":     {labelSource, labelRuntimeMode},
-	"multica_task_lease_expired_total":      {labelSource},
+	"multica_agent_task_enqueued_total":                {labelSource, labelRuntimeMode},
+	"multica_agent_task_dispatched_total":              {labelSource, labelRuntimeMode},
+	"multica_agent_task_started_total":                 {labelSource, labelRuntimeMode, labelProvider},
+	"multica_agent_task_terminal_total":                {labelSource, labelRuntimeMode, labelTerminalStatus},
+	"multica_agent_task_failed_total":                  {labelSource, labelRuntimeMode, labelFailureReason},
+	"multica_agent_task_queue_wait_seconds":            {labelSource, labelRuntimeMode},
+	"multica_agent_task_run_seconds":                   {labelSource, labelRuntimeMode, labelTerminalStatus},
+	"multica_agent_task_total_seconds":                 {labelSource, labelRuntimeMode, labelTerminalStatus},
+	"multica_agent_task_in_progress":                   {labelSource, labelRuntimeMode},
+	"multica_agent_task_iteration_count":               {labelSource, labelTerminalStatus},
+	"multica_llm_tokens_total":                         {labelProvider, labelModel, labelTokenType, labelRuntimeMode, labelSource},
+	"multica_llm_cost_usd_total":                       {labelProvider, labelModel, labelTokenType, labelRuntimeMode, labelSource},
+	"multica_llm_unpriced_tokens_total":                {labelProvider, labelModelAlias, labelTokenType},
+	"multica_llm_request_total":                        {labelProvider, labelModel, labelRuntimeMode},
+	"multica_task_queued_expired_total":                {labelSource, labelRuntimeMode},
+	"multica_task_lease_expired_total":                 {labelSource},
+	"multica_chat_claim_session_fallback_needed_total": {},
+	"multica_chat_claim_session_fallback_result_total": {labelResult},
+	"multica_chat_claim_resume_query_duration_seconds": {labelQuery},
 
 	// PR3 funnel / community / commercial.
 	"multica_signup_total":                             {labelSignupSource},

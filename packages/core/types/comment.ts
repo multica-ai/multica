@@ -12,6 +12,7 @@ export interface Reaction {
   actor_id: string;
   emoji: string;
   created_at: string;
+  comment_revision?: number;
 }
 
 export interface Comment {
@@ -26,6 +27,10 @@ export interface Comment {
   attachments: import("./attachment").Attachment[];
   created_at: string;
   updated_at: string;
+  /** Monotonic server revision; absent when connected to an older backend. */
+  revision?: number;
+  /** Parent issue revision after this comment creation; create responses only. */
+  issue_revision?: number;
   resolved_at: string | null;
   resolved_by_type: CommentAuthorType | null;
   resolved_by_id: string | null;
