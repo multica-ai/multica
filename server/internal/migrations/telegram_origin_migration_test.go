@@ -56,21 +56,21 @@ func TestTelegramOriginMigrationsUpDownAndCatalog(t *testing.T) {
 
 	assertTelegramOriginRejected(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000001")
 
-	applyMigrationFile(t, ctx, conn.Conn(), "349_issue_origin_telegram_chat.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "366_issue_origin_telegram_chat.up.sql")
 	assertTelegramOriginConstraint(t, ctx, conn.Conn(), false, true)
 	if _, err := conn.Exec(ctx, `INSERT INTO issue (id, origin_type) VALUES ($1, 'telegram_chat')`, "00000000-0000-4000-8000-000000000002"); err != nil {
 		t.Fatalf("insert telegram_chat after widening constraint: %v", err)
 	}
 
-	applyMigrationFile(t, ctx, conn.Conn(), "350_issue_origin_telegram_chat_validate.up.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "367_issue_origin_telegram_chat_validate.up.sql")
 	assertTelegramOriginConstraint(t, ctx, conn.Conn(), true, true)
 
-	applyMigrationFile(t, ctx, conn.Conn(), "350_issue_origin_telegram_chat_validate.down.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "367_issue_origin_telegram_chat_validate.down.sql")
 	assertTelegramOriginConstraint(t, ctx, conn.Conn(), false, true)
 	if _, err := conn.Exec(ctx, `DELETE FROM issue WHERE origin_type = 'telegram_chat'`); err != nil {
 		t.Fatalf("remove Telegram row before narrowing rollback: %v", err)
 	}
-	applyMigrationFile(t, ctx, conn.Conn(), "349_issue_origin_telegram_chat.down.sql")
+	applyMigrationFile(t, ctx, conn.Conn(), "366_issue_origin_telegram_chat.down.sql")
 	assertTelegramOriginConstraint(t, ctx, conn.Conn(), true, false)
 	assertTelegramOriginRejected(t, ctx, conn.Conn(), "00000000-0000-4000-8000-000000000003")
 }
