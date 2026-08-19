@@ -37,6 +37,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/tagaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	composiosdk "github.com/multica-ai/multica/server/pkg/composio"
@@ -191,6 +192,7 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	TagAuthorityAccess *tagaccess.AuthenticatedAccess
 }
 
 func buildChannelSupervisor(
@@ -1075,6 +1077,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowCredentials: true,
 		MaxAge:           300,
 	}))
+	if opts.TagAuthorityAccess != nil {
+		ingress, err := tagaccess.NewHTTPIngress(opts.TagAuthorityAccess)
+		if err != nil {
+			panic(err)
+		}
+		r.Post("/internal/tag-authority/workspace-projections", ingress.Workspace)
+		r.Post("/internal/tag-authority/identity-restrictions", ingress.Identity)
+	}
 
 	// Health / readiness checks
 	r.Get("/health", health.liveHandler)

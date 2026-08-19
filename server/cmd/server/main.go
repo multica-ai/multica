@@ -257,6 +257,11 @@ func main() {
 	}
 	slog.Info("connected to database")
 	logPoolConfig(pool)
+	tagAuthorityAccess, err := tagProjectionAccessFromEnv(pool)
+	if err != nil {
+		slog.Error("Tag projection ingress configuration failed", "error", err)
+		os.Exit(1)
+	}
 
 	bus := events.New()
 	hub := realtime.NewHub()
@@ -441,6 +446,7 @@ func main() {
 		DaemonWakeup:        daemonWakeup,
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
+		TagAuthorityAccess:  tagAuthorityAccess,
 	})
 
 	srv := &http.Server{
