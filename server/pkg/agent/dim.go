@@ -200,7 +200,7 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	// nil keeps os/exec from racing us with its own kill.
 	cmd.Cancel = func() error { return nil }
 	cmd.WaitDelay = 10 * time.Second
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", dimArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(dimArgs, trustAgentCommandPositional(0, "acp")))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
