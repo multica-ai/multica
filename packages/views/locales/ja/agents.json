@@ -236,6 +236,9 @@
     "clear_full": "選択をクリア（プロバイダーのデフォルトを使用）"
   },
   "role_center": {
+    "navigation_label": "エージェント",
+    "roles": "ロール",
+    "teams": "チーム",
     "tasks_description": "タスクの割り当てと完全な実行履歴はタスクにまとめられます。",
     "team_membership": "チーム所属",
     "no_team": "このエージェントはまだチームに参加していません。"
@@ -302,7 +305,7 @@
     "cancel": "キャンセル",
     "create_failed_toast": "エージェントを作成できませんでした",
     "skill_attach_failed_toast": "エージェントは作成されましたが、スキルを追加できませんでした: {{error}}",
-    "squad_join_failed_toast": "エージェント \"{{name}}\" は作成されましたが、スクワッドに参加できませんでした: {{error}}。メンバーから手動で追加できます。",
+    "squad_join_failed_toast": "エージェント \"{{name}}\" は作成されましたが、チームに参加できませんでした: {{error}}。メンバーから手動で追加できます。",
     "instructions": {
       "label": "指示",
       "placeholder_blank": "クリックして指示を作成...",
@@ -793,7 +796,7 @@
   },
   "creation_studio": {
     "title": "エージェントを作成",
-    "squad_title": "このスクワッド用のエージェントを作成",
+    "squad_title": "このチーム用のエージェントを作成",
     "duplicate_title": "{{name}} を複製",
     "back": "戻る",
     "eyebrow": "エージェント作成",
@@ -874,7 +877,7 @@
     "duplicate_env_notice": "指示、スキル、コマンド引数がコピーされます。環境変数、MCP サーバー、マシンローカルのランタイム設定はコピーされません。",
     "duplicate_runtime_reset_notice": "元のランタイムが利用できないため、このコピーは別のランタイムで実行されます。モデル・思考レベル・速度は選択したランタイムでのみ有効なため、クリアされました。",
     "create_and_open": "作成して開く",
-    "create_and_add": "作成してスクワッドに追加",
+    "create_and_add": "作成してチームに追加",
     "creating": "エージェントを作成中…",
     "create_failed": "エージェントを作成できませんでした。",
     "name_conflict": "同じ名前のエージェントがすでに存在します。",

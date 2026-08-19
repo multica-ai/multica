@@ -22,7 +22,6 @@ interface SquadProfileCardProps {
 export function SquadProfileCard({ squadId }: SquadProfileCardProps) {
   const { t } = useT("squads");
   const wsId = useWorkspaceId();
-  const p = useWorkspacePaths();
   const { data: squads = [], isLoading: squadsLoading } = useQuery(
     squadListOptions(wsId),
   );
@@ -82,14 +81,6 @@ export function SquadProfileCard({ squadId }: SquadProfileCardProps) {
             )}
           </div>
         </div>
-        {!isArchived && (
-          <AppLink
-            href={p.squadDetail(squad.id)}
-            className="mr-1 mt-0.5 shrink-0 text-caption font-normal text-brand opacity-0 transition-opacity group-hover:opacity-100"
-          >
-            {t(($) => $.profile_card.detail_link)}
-          </AppLink>
-        )}
       </div>
 
       {squad.description && (

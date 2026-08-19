@@ -244,6 +244,9 @@
     "clear_full": "선택 지우기(제공자 기본값 사용)"
   },
   "role_center": {
+    "navigation_label": "에이전트",
+    "roles": "역할",
+    "teams": "팀",
     "tasks_description": "태스크 할당과 전체 실행 기록은 태스크에 함께 보관됩니다.",
     "team_membership": "팀 소속",
     "no_team": "이 에이전트는 아직 팀에 속해 있지 않습니다."
@@ -310,7 +313,7 @@
     "cancel": "취소",
     "create_failed_toast": "에이전트를 만들지 못했습니다",
     "skill_attach_failed_toast": "에이전트는 만들었지만 스킬을 연결하지 못했습니다: {{error}}",
-    "squad_join_failed_toast": "에이전트 \"{{name}}\"은(는) 만들었지만 스쿼드에 참가하지 못했습니다: {{error}}. 멤버에서 직접 추가할 수 있습니다.",
+    "squad_join_failed_toast": "에이전트 \"{{name}}\"은(는) 만들었지만 팀에 참가하지 못했습니다: {{error}}. 멤버에서 직접 추가할 수 있습니다.",
     "instructions": {
       "label": "지침",
       "placeholder_blank": "클릭해서 지침 작성...",
@@ -793,7 +796,7 @@
   },
   "creation_studio": {
     "title": "에이전트 만들기",
-    "squad_title": "이 스쿼드용 에이전트 만들기",
+    "squad_title": "이 팀용 에이전트 만들기",
     "duplicate_title": "{{name}} 복제",
     "back": "뒤로",
     "eyebrow": "에이전트 만들기",
@@ -874,7 +877,7 @@
     "duplicate_env_notice": "지침, 스킬, 명령 인수는 복사됩니다. 환경 변수, MCP 서버, 머신 로컬 런타임 설정은 복사되지 않습니다.",
     "duplicate_runtime_reset_notice": "원래 런타임을 사용할 수 없어 이 복사본은 다른 런타임에서 실행됩니다. 모델, 추론 수준, 속도는 선택한 런타임에서만 유효하므로 초기화되었습니다.",
     "create_and_open": "만들고 열기",
-    "create_and_add": "만들고 스쿼드에 추가",
+    "create_and_add": "만들고 팀에 추가",
     "creating": "에이전트 만드는 중…",
     "create_failed": "에이전트를 만들지 못했습니다.",
     "name_conflict": "같은 이름의 에이전트가 이미 있습니다.",

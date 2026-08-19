@@ -244,6 +244,9 @@
     "clear_full": "清除选择（使用提供方默认）"
   },
   "role_center": {
+    "navigation_label": "智能体",
+    "roles": "角色",
+    "teams": "团队",
     "tasks_description": "任务分配和完整执行记录统一放在任务中。",
     "team_membership": "团队归属",
     "no_team": "该智能体尚未加入团队。"
@@ -274,7 +277,7 @@
   },
   "creation_studio": {
     "title": "创建智能体",
-    "squad_title": "为小队创建智能体",
+    "squad_title": "为团队创建智能体",
     "duplicate_title": "复制 {{name}}",
     "back": "返回",
     "eyebrow": "创建智能体",
@@ -355,7 +358,7 @@
     "duplicate_env_notice": "指令、skill 和命令行参数会被复制。环境变量、MCP 服务器和本机运行时配置不会复制。",
     "duplicate_runtime_reset_notice": "原运行时当前不可用，副本已改用其他运行时。模型、思考等级和速度只在所选运行时上有效，因此已被清空。",
     "create_and_open": "创建并打开",
-    "create_and_add": "创建并加入小队",
+    "create_and_add": "创建并加入团队",
     "creating": "正在创建…",
     "create_failed": "无法创建智能体。",
     "name_conflict": "工作区中已存在同名智能体。",
@@ -409,7 +412,7 @@
     "cancel": "取消",
     "create_failed_toast": "创建智能体失败",
     "skill_attach_failed_toast": "智能体已创建，但 skill 关联失败：{{error}}",
-    "squad_join_failed_toast": "智能体\"{{name}}\"已创建，但加入小队失败：{{error}}。你可以在 Members 标签里手动添加。",
+    "squad_join_failed_toast": "智能体\"{{name}}\"已创建，但加入团队失败：{{error}}。你可以在 Members 标签里手动添加。",
     "instructions": {
       "label": "指令",
       "placeholder_blank": "点击撰写指令…",

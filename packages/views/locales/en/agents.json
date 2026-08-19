@@ -253,6 +253,9 @@
     "clear_full": "Clear selection (use provider default)"
   },
   "role_center": {
+    "navigation_label": "Agents",
+    "roles": "Roles",
+    "teams": "Teams",
     "tasks_description": "Task assignments and the full execution history stay together in Tasks.",
     "team_membership": "Team membership",
     "no_team": "This agent is not in a team yet."
@@ -283,7 +286,7 @@
   },
   "creation_studio": {
     "title": "Create an agent",
-    "squad_title": "Create an agent for this squad",
+    "squad_title": "Create an agent for this team",
     "duplicate_title": "Duplicate {{name}}",
     "back": "Go back",
     "eyebrow": "Agent creation",
@@ -364,7 +367,7 @@
     "duplicate_env_notice": "Instructions, skills and command arguments are copied. Environment variables, MCP servers and machine-local runtime config are not.",
     "duplicate_runtime_reset_notice": "The original runtime is unavailable, so this copy runs on another one. Model, thinking level and speed were cleared because they only apply to the runtime they were chosen on.",
     "create_and_open": "Create & open agent",
-    "create_and_add": "Create & add to squad",
+    "create_and_add": "Create & add to team",
     "creating": "Creating agent…",
     "create_failed": "Could not create the agent.",
     "name_conflict": "An agent with this name already exists.",
@@ -418,7 +421,7 @@
     "cancel": "Cancel",
     "create_failed_toast": "Failed to create agent",
     "skill_attach_failed_toast": "Agent created, but failed to attach skills: {{error}}",
-    "squad_join_failed_toast": "Agent \"{{name}}\" was created but couldn't join the squad: {{error}}. You can add it manually from Members.",
+    "squad_join_failed_toast": "Agent \"{{name}}\" was created but couldn't join the team: {{error}}. You can add it manually from Members.",
     "instructions": {
       "label": "Instructions",
       "placeholder_blank": "Click to write instructions…",

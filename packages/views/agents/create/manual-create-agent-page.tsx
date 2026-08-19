@@ -28,8 +28,12 @@ import {
  */
 export function ManualCreateAgentPage({
   showWorkspaceSkills = true,
+  agentsHref,
+  teamDetailHref,
 }: {
   showWorkspaceSkills?: boolean;
+  agentsHref?: string;
+  teamDetailHref?: (squadId: string) => string;
 } = {}) {
   const { t } = useT("agents");
   const wsId = useWorkspaceId();
@@ -93,6 +97,13 @@ export function ManualCreateAgentPage({
     // fields to whoever opens this form next. Only this flow's slot — another
     // half-finished copy is still someone's unfinished work.
     onCreated: () => clearManualDraftForOwner(duplicateId),
+    createdHref:
+      agentsHref || teamDetailHref
+        ? (agent, createdForSquadId) =>
+            createdForSquadId && teamDetailHref
+              ? teamDetailHref(createdForSquadId)
+              : agentsHref ?? paths.agentDetail(agent.id)
+        : undefined,
   });
 
   const canCreate =
@@ -113,7 +124,12 @@ export function ManualCreateAgentPage({
       // A duplicate arrives from the agents list, not from the chooser, so it
       // returns to where it came from instead of offering a method to pick.
       onBack={() =>
-        backOrReplace(duplicateId ? paths.agents() : paths.newAgent())
+        backOrReplace(
+          squadId && teamDetailHref
+            ? teamDetailHref(squadId)
+            : agentsHref ??
+                (duplicateId ? paths.agents() : paths.newAgent()),
+        )
       }
       chips={
         <>

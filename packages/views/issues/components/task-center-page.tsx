@@ -33,7 +33,7 @@ export function TaskCenterPage({
       <nav
         role="tablist"
         aria-label={t(($) => $.task_center.navigation_label)}
-        className="flex h-12 shrink-0 items-end gap-1 border-b px-4"
+        className="flex h-12 shrink-0 items-end gap-1 overflow-x-auto border-b px-4"
       >
         {TABS.map((tab) => (
           <button
@@ -42,7 +42,7 @@ export function TaskCenterPage({
             role="tab"
             aria-selected={activeTab === tab}
             className={cn(
-              "h-full border-b-2 px-2.5 text-caption font-medium transition-colors",
+              "h-full shrink-0 whitespace-nowrap border-b-2 px-2.5 text-caption font-medium transition-colors",
               activeTab === tab
                 ? "border-foreground text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground",

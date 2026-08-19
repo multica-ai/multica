@@ -9,9 +9,16 @@ export const Route = createFileRoute('/$workspaceSlug/agents_/new/manual')({
 
 function TagWorkspaceManualAgentCreateRoute() {
   const { workspaceSlug } = Route.useParams();
+  const agentsHref = `/${encodeURIComponent(workspaceSlug)}/agents`;
   return (
     <AgentWorkspaceRoute workspaceSlug={workspaceSlug}>
-      <ManualCreateAgentPage showWorkspaceSkills={false} />
+      <ManualCreateAgentPage
+        showWorkspaceSkills={false}
+        agentsHref={agentsHref}
+        teamDetailHref={(squadId) =>
+          `${agentsHref}/teams/${encodeURIComponent(squadId)}`
+        }
+      />
     </AgentWorkspaceRoute>
   );
 }

@@ -146,4 +146,35 @@ describe("useCreateAgentSubmit cache handoff", () => {
       queryKey: workspaceKeys.agents("ws-1"),
     });
   });
+
+  it("uses the host-owned Team destination after joining a Team", async () => {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    const createdHref = vi.fn(
+      (_agent: Agent, squadId: string | null) =>
+        `/acme/agents/teams/${squadId}`,
+    );
+    const { result } = renderHook(
+      () =>
+        useCreateAgentSubmit({
+          draft: {
+            ...EMPTY_AGENT_DRAFT,
+            name: CREATED_AGENT.name,
+            runtimeId: CREATED_AGENT.runtime_id,
+          },
+          runtimeId: CREATED_AGENT.runtime_id,
+          squadId: "team-1",
+          createdHref,
+        }),
+      { wrapper: wrapper(queryClient) },
+    );
+
+    await act(async () => {
+      await result.current.create();
+    });
+
+    expect(createdHref).toHaveBeenCalledWith(CREATED_AGENT, "team-1");
+    expect(mockPush).toHaveBeenCalledWith("/acme/agents/teams/team-1");
+  });
 });
