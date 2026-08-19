@@ -1877,52 +1877,6 @@ func replaceEnvValue(env []string, key, value string) []string {
 	return append(out, key+"="+value)
 }
 
-// acpSessionModel is one raw model entry from an ACP `session/new` response.
-// It carries both id spellings and the vendor `_meta` block, so generic
-// catalog parsing and provider-specific metadata reads share one shape.
-type acpSessionModel struct {
-	ModelID      string          `json:"modelId"`
-	ModelIDSnake string          `json:"model_id"`
-	Name         string          `json:"name"`
-	Description  string          `json:"description"`
-	Meta         json.RawMessage `json:"_meta"`
-}
-
-// id returns the entry's model id, accepting either spelling.
-func (e acpSessionModel) id() string {
-	if modelID := strings.TrimSpace(e.ModelID); modelID != "" {
-		return modelID
-	}
-	return strings.TrimSpace(e.ModelIDSnake)
-}
-
-// parseACPModelEntries returns the raw session/new model entries plus the
-// advertised current model, accepting both camel and snake spellings. ok is
-// false only when the response is not JSON we can read at all; a response
-// without a `models` block parses fine and yields no entries.
-func parseACPModelEntries(raw json.RawMessage) (entries []acpSessionModel, currentModelID string, ok bool) {
-	var resp struct {
-		Models struct {
-			AvailableModels      []acpSessionModel `json:"availableModels"`
-			AvailableModelsSnake []acpSessionModel `json:"available_models"`
-			CurrentModelID       string            `json:"currentModelId"`
-			CurrentModelIDSnake  string            `json:"current_model_id"`
-		} `json:"models"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
-		return nil, "", false
-	}
-	entries = resp.Models.AvailableModels
-	if len(entries) == 0 && resp.Models.AvailableModelsSnake != nil {
-		entries = resp.Models.AvailableModelsSnake
-	}
-	currentModelID = strings.TrimSpace(resp.Models.CurrentModelID)
-	if currentModelID == "" {
-		currentModelID = strings.TrimSpace(resp.Models.CurrentModelIDSnake)
-	}
-	return entries, currentModelID, true
-}
-
 // parseACPSessionNewModels extracts the model catalog from an ACP
 // `session/new` response. Hermes and older Kimi (and any other ACP
 // agent that follows that schema) emit:
@@ -1947,19 +1901,43 @@ func parseACPModelEntries(raw json.RawMessage) (entries []acpSessionModel, curre
 // the caller can distinguish "parsed with no models" (valid but
 // empty catalog) from "couldn't find the structure at all".
 func parseACPSessionNewModels(raw json.RawMessage) []Model {
-	entries, currentModelID, ok := parseACPModelEntries(raw)
-	if !ok {
+	type acpModelInfo struct {
+		ModelID      string `json:"modelId"`
+		ModelIDSnake string `json:"model_id"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+	}
+	var resp struct {
+		Models struct {
+			AvailableModels      []acpModelInfo `json:"availableModels"`
+			AvailableModelsSnake []acpModelInfo `json:"available_models"`
+			CurrentModelID       string         `json:"currentModelId"`
+			CurrentModelIDSnake  string         `json:"current_model_id"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
 		return nil
 	}
-	models := make([]Model, 0, len(entries))
+	availableModels := resp.Models.AvailableModels
+	if len(availableModels) == 0 && resp.Models.AvailableModelsSnake != nil {
+		availableModels = resp.Models.AvailableModelsSnake
+	}
+	currentModelID := strings.TrimSpace(resp.Models.CurrentModelID)
+	if currentModelID == "" {
+		currentModelID = strings.TrimSpace(resp.Models.CurrentModelIDSnake)
+	}
+	models := make([]Model, 0, len(availableModels))
 	seen := map[string]bool{}
-	for _, entry := range entries {
-		modelID := entry.id()
+	for _, m := range availableModels {
+		modelID := strings.TrimSpace(m.ModelID)
+		if modelID == "" {
+			modelID = strings.TrimSpace(m.ModelIDSnake)
+		}
 		if modelID == "" || seen[modelID] {
 			continue
 		}
 		seen[modelID] = true
-		models = append(models, acpModelEntry(modelID, entry.Name, currentModelID))
+		models = append(models, acpModelEntry(modelID, m.Name, currentModelID))
 	}
 	if len(models) > 0 {
 		return models
@@ -2186,78 +2164,70 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 	return Catalog{Models: models}, nil
 }
 
-// grokEffortLabels keeps observed static-catalog labels consistent between
-// Grok versions.
-var grokEffortLabels = map[string]string{
-	"xhigh":  "Extra High Effort",
-	"high":   "High Effort",
-	"medium": "Medium Effort",
-	"low":    "Low Effort",
-}
-
-// grokThinking builds one offline catalog entry. defaultLevel is the effort
-// Grok advertises as the default and must also appear in values.
-func grokThinking(defaultLevel string, values ...string) *ModelThinking {
-	levels := make([]ThinkingLevel, 0, len(values))
-	for _, value := range values {
-		levels = append(levels, ThinkingLevel{Value: value, Label: grokEffortLabels[value]})
-	}
-	return &ModelThinking{SupportedLevels: levels, DefaultLevel: defaultLevel}
-}
-
 // grokStaticModels is the offline fallback catalog for the Grok Build CLI.
 // The default and effort catalogs come from observed signed-in `session/new`
 // responses. Models without an observed reasoningEfforts list keep Thinking
 // nil, so the UI does not offer an override the CLI may reject.
 func grokStaticModels() []Model {
 	return []Model{
-		{
-			ID: "grok-4.6", Label: "Grok 4.6", Provider: "xai", Default: true,
-			Thinking: grokThinking("high", "xhigh", "high", "medium", "low"),
-		},
-		{
-			ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai",
-			Thinking: grokThinking("high", "high", "medium", "low"),
-		},
+		{ID: "grok-4.6", Label: "Grok 4.6", Provider: "xai", Default: true, Thinking: &ModelThinking{
+			DefaultLevel: "high",
+			SupportedLevels: []ThinkingLevel{
+				{Value: "xhigh", Label: "Extra High Effort"},
+				{Value: "high", Label: "High Effort"},
+				{Value: "medium", Label: "Medium Effort"},
+				{Value: "low", Label: "Low Effort"},
+			},
+		}},
+		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai", Thinking: &ModelThinking{
+			DefaultLevel: "high",
+			SupportedLevels: []ThinkingLevel{
+				{Value: "high", Label: "High Effort"},
+				{Value: "medium", Label: "Medium Effort"},
+				{Value: "low", Label: "Low Effort"},
+			},
+		}},
 		{ID: "grok-composer-2.5-fast", Label: "Grok Composer 2.5 Fast", Provider: "xai"},
 	}
 }
 
-// annotateGrokThinkingFromACP reads the xAI-specific reasoning catalog from
-// each model's vendor _meta block. This data is not part of the ACP schema, so
-// models without the advertised extension keep Thinking nil.
-func annotateGrokThinkingFromACP(models []Model, raw json.RawMessage) {
-	type reasoningEffort struct {
-		ID          string `json:"id"`
-		Value       string `json:"value"`
-		Label       string `json:"label"`
-		Description string `json:"description"`
-		Default     bool   `json:"default"`
+// annotateGrokThinkingFromACP fills in each model's effort catalog from the
+// xAI vendor `_meta` block on its `session/new` entry:
+//
+//	{"modelId": "grok-4.6", "_meta": {"supportsReasoningEffort": true,
+//	  "reasoningEfforts": [{"value": "high", "label": "High Effort", "default": true}, ...]}}
+//
+// This extension is outside the core ACP schema, so the parse stays narrow:
+// models whose entry does not advertise it keep Thinking nil, which hides the
+// picker instead of offering levels the CLI may reject.
+func annotateGrokThinkingFromACP(models []Model, sessionResult json.RawMessage) {
+	var resp struct {
+		Models struct {
+			AvailableModels []struct {
+				ModelID string `json:"modelId"`
+				Meta    struct {
+					SupportsReasoningEffort bool `json:"supportsReasoningEffort"`
+					ReasoningEfforts        []struct {
+						Value   string `json:"value"`
+						Label   string `json:"label"`
+						Default bool   `json:"default"`
+					} `json:"reasoningEfforts"`
+				} `json:"_meta"`
+			} `json:"availableModels"`
+		} `json:"models"`
 	}
-	type modelMetadata struct {
-		SupportsReasoningEffort bool              `json:"supportsReasoningEffort"`
-		ReasoningEfforts        []reasoningEffort `json:"reasoningEfforts"`
+	if err := json.Unmarshal(sessionResult, &resp); err != nil {
+		return
 	}
-	entries, _, _ := parseACPModelEntries(raw)
-	thinkingByModel := make(map[string]*ModelThinking, len(entries))
-	for _, entry := range entries {
-		modelID := entry.id()
-		if modelID == "" {
+	thinkingByModel := map[string]*ModelThinking{}
+	for _, entry := range resp.Models.AvailableModels {
+		if !entry.Meta.SupportsReasoningEffort {
 			continue
 		}
-		var metadata modelMetadata
-		if err := json.Unmarshal(entry.Meta, &metadata); err != nil || !metadata.SupportsReasoningEffort {
-			continue
-		}
-
-		seen := make(map[string]bool, len(metadata.ReasoningEfforts))
-		levels := make([]ThinkingLevel, 0, len(metadata.ReasoningEfforts))
-		defaultLevel := ""
-		for _, effort := range metadata.ReasoningEfforts {
+		thinking := &ModelThinking{}
+		seen := map[string]bool{}
+		for _, effort := range entry.Meta.ReasoningEfforts {
 			value := strings.TrimSpace(effort.Value)
-			if value == "" {
-				value = strings.TrimSpace(effort.ID)
-			}
 			if value == "" || seen[value] || !isValidDynamicThinkingValue(value) {
 				continue
 			}
@@ -2266,20 +2236,13 @@ func annotateGrokThinkingFromACP(models []Model, raw json.RawMessage) {
 			if label == "" {
 				label = value
 			}
-			levels = append(levels, ThinkingLevel{
-				Value:       value,
-				Label:       label,
-				Description: strings.TrimSpace(effort.Description),
-			})
+			thinking.SupportedLevels = append(thinking.SupportedLevels, ThinkingLevel{Value: value, Label: label})
 			if effort.Default {
-				defaultLevel = value
+				thinking.DefaultLevel = value
 			}
 		}
-		if len(levels) > 0 {
-			thinkingByModel[modelID] = &ModelThinking{
-				SupportedLevels: levels,
-				DefaultLevel:    defaultLevel,
-			}
+		if len(thinking.SupportedLevels) > 0 {
+			thinkingByModel[strings.TrimSpace(entry.ModelID)] = thinking
 		}
 	}
 	for i := range models {
