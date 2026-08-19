@@ -37,6 +37,7 @@ func (e SignupError) Error() string {
 
 var ErrSignupProhibited = SignupError{Message: "user registration is disabled on this self-hosted instance"}
 var ErrEmailNotAllowed = SignupError{Message: "email address or domain not allowed on this instance"}
+var ErrVIBESAuthorityRequired = errors.New("VIBES sign-in is required for this account")
 
 const devVerificationCodeEnv = "MULTICA_DEV_VERIFICATION_CODE"
 
@@ -168,8 +169,18 @@ func (h *Handler) issueJWT(user db.User) (string, error) {
 // event fires on that edge, covering both the verification-code and Google
 // OAuth entry points.
 func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.User, isNew bool, err error) {
+	if h.TagAuthorityEnabled {
+		return db.User{}, false, ErrVIBESAuthorityRequired
+	}
 	if auth.IsTemporarilyDisabledUserEmail(email) {
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
+	}
+	reservedByVIBES, err := h.isVIBESProfileEmail(ctx, email)
+	if err != nil {
+		return db.User{}, false, err
+	}
+	if reservedByVIBES {
+		return db.User{}, false, ErrVIBESAuthorityRequired
 	}
 
 	user, err = h.Queries.GetUserByEmail(ctx, email)
@@ -179,6 +190,15 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 	}
 	if !isNew && auth.IsTemporarilyDisabledUser(uuidToString(user.ID), user.Email) {
 		return db.User{}, false, auth.ErrTemporarilyDisabledUser
+	}
+	if !isNew {
+		mirrored, mirrorErr := h.isMirroredVIBESUser(ctx, uuidToString(user.ID))
+		if mirrorErr != nil {
+			return db.User{}, false, mirrorErr
+		}
+		if mirrored {
+			return db.User{}, false, ErrVIBESAuthorityRequired
+		}
 	}
 
 	if err := h.checkSignupAllowed(email, isNew); err != nil {
@@ -201,6 +221,35 @@ func (h *Handler) findOrCreateUser(ctx context.Context, email string) (user db.U
 		return db.User{}, false, err
 	}
 	return created, true, nil
+}
+
+// isVIBESProfileEmail is a deny-only native-login fence. Profile email never
+// resolves a VIBES identity; stable userId remains the sole mirror key.
+func (h *Handler) isVIBESProfileEmail(ctx context.Context, email string) (bool, error) {
+	if h.DB == nil {
+		return false, errors.New("VIBES identity mirror store unavailable")
+	}
+	var reserved bool
+	err := h.DB.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM vibes_user_mirror
+			WHERE profile_email <> '' AND lower(btrim(profile_email)) = lower(btrim($1))
+		)
+	`, email).Scan(&reserved)
+	return reserved, err
+}
+
+func (h *Handler) isMirroredVIBESUser(ctx context.Context, userID string) (bool, error) {
+	if h.DB == nil {
+		return false, errors.New("VIBES identity mirror store unavailable")
+	}
+	var mirrored bool
+	err := h.DB.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1 FROM vibes_user_mirror WHERE multica_user_id = $1::uuid
+		)
+	`, userID).Scan(&mirrored)
+	return mirrored, err
 }
 
 // signupSourceFromRequest reads the attribution cookie the web frontend
@@ -276,6 +325,10 @@ func contains(slice []string, s string) bool {
 }
 
 func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
+	if h.TagAuthorityEnabled {
+		writeError(w, http.StatusForbidden, ErrVIBESAuthorityRequired.Error())
+		return
+	}
 	var req SendCodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -289,6 +342,15 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 	}
 	if auth.IsTemporarilyDisabledUserEmail(email) {
 		writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+		return
+	}
+	reservedByVIBES, mirrorErr := h.isVIBESProfileEmail(r.Context(), email)
+	if mirrorErr != nil {
+		writeError(w, http.StatusInternalServerError, "failed to lookup user")
+		return
+	}
+	if reservedByVIBES {
+		writeError(w, http.StatusForbidden, ErrVIBESAuthorityRequired.Error())
 		return
 	}
 
@@ -315,6 +377,15 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 		// User already exists → always allowed to login
 		if auth.IsTemporarilyDisabledUser(uuidToString(existingUser.ID), existingUser.Email) {
 			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
+			return
+		}
+		mirrored, mirrorErr := h.isMirroredVIBESUser(r.Context(), uuidToString(existingUser.ID))
+		if mirrorErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to lookup user")
+			return
+		}
+		if mirrored {
+			writeError(w, http.StatusForbidden, ErrVIBESAuthorityRequired.Error())
 			return
 		}
 		isNewUser := false
@@ -366,6 +437,10 @@ func (h *Handler) SendCode(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
+	if h.TagAuthorityEnabled {
+		writeError(w, http.StatusForbidden, ErrVIBESAuthorityRequired.Error())
+		return
+	}
 	var req VerifyCodeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -404,6 +479,10 @@ func (h *Handler) VerifyCode(w http.ResponseWriter, r *http.Request) {
 
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		if errors.Is(err, ErrVIBESAuthorityRequired) {
+			writeError(w, http.StatusForbidden, ErrVIBESAuthorityRequired.Error())
+			return
+		}
 		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
 			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
 			return
@@ -492,6 +571,10 @@ type googleUserInfo struct {
 }
 
 func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
+	if h.TagAuthorityEnabled {
+		writeError(w, http.StatusForbidden, ErrVIBESAuthorityRequired.Error())
+		return
+	}
 	var req GoogleLoginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -584,6 +667,10 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 
 	user, isNew, err := h.findOrCreateUser(r.Context(), email)
 	if err != nil {
+		if errors.Is(err, ErrVIBESAuthorityRequired) {
+			writeError(w, http.StatusForbidden, ErrVIBESAuthorityRequired.Error())
+			return
+		}
 		if errors.Is(err, auth.ErrTemporarilyDisabledUser) {
 			writeError(w, http.StatusForbidden, auth.TemporarilyDisabledUserError)
 			return

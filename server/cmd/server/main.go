@@ -262,6 +262,11 @@ func main() {
 		slog.Error("Tag projection ingress configuration failed", "error", err)
 		os.Exit(1)
 	}
+	tagHTTPVerifier, err := tagHTTPAssertionVerifierFromEnv()
+	if err != nil {
+		slog.Error("Tag HTTP assertion configuration failed", "error", err)
+		os.Exit(1)
+	}
 
 	bus := events.New()
 	hub := realtime.NewHub()
@@ -447,6 +452,7 @@ func main() {
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
 		TagAuthorityAccess:  tagAuthorityAccess,
+		TagHTTPVerifier:     tagHTTPVerifier,
 	})
 
 	srv := &http.Server{

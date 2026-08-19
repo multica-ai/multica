@@ -206,7 +206,7 @@ func (s *postgresStore) loadAccess(ctx context.Context, request AccessRequest) (
 		       i.identity_restriction_version, i.observed_identity_restriction_version,
 		       i.account_epoch, i.revoked_through_account_epoch, i.integrity_state,
 		       s.tag_session_id, s.vibes_session_id, s.vibes_user_id, s.account_epoch,
-		       s.expires_at, s.revoked_at,
+		       s.session_workspace_generation, s.expires_at, s.revoked_at,
 		       g.membership_generation, g.authority_version, g.expires_at, g.revoked_at
 		FROM tag_access_projection p
 		JOIN tag_access_workspace_state w ON w.vibes_workspace_id = p.vibes_workspace_id
@@ -218,18 +218,18 @@ func (s *postgresStore) loadAccess(ctx context.Context, request AccessRequest) (
 		WHERE p.vibes_user_id = $1 AND p.vibes_workspace_id = $2
 	`, request.VIBESUserID, request.WorkspaceID, request.TagSessionID)
 	var (
-		role, status, integrity                                              string
-		accountEpoch, generation, version, workspaceVersion, observedVersion int64
-		identityVersion, identityObserved, identityEpoch, identityRevoked    pgtype.Int8
-		identityIntegrity                                                    pgtype.Text
-		sessionID, vibesSessionID, sessionUserID                             pgtype.Text
-		sessionAccountEpoch, grantGeneration, grantVersion                   pgtype.Int8
-		sessionExpiresAt, grantExpiresAt, sessionRevokedAt, grantRevokedAt   pgtype.Timestamptz
+		role, status, integrity                                                        string
+		accountEpoch, generation, version, workspaceVersion, observedVersion           int64
+		identityVersion, identityObserved, identityEpoch, identityRevoked              pgtype.Int8
+		identityIntegrity                                                              pgtype.Text
+		sessionID, vibesSessionID, sessionUserID                                       pgtype.Text
+		sessionAccountEpoch, sessionWorkspaceGeneration, grantGeneration, grantVersion pgtype.Int8
+		sessionExpiresAt, grantExpiresAt, sessionRevokedAt, grantRevokedAt             pgtype.Timestamptz
 	)
 	if err := row.Scan(
 		&role, &status, &accountEpoch, &generation, &version, &workspaceVersion, &observedVersion, &integrity,
 		&identityVersion, &identityObserved, &identityEpoch, &identityRevoked, &identityIntegrity,
-		&sessionID, &vibesSessionID, &sessionUserID, &sessionAccountEpoch, &sessionExpiresAt, &sessionRevokedAt,
+		&sessionID, &vibesSessionID, &sessionUserID, &sessionAccountEpoch, &sessionWorkspaceGeneration, &sessionExpiresAt, &sessionRevokedAt,
 		&grantGeneration, &grantVersion, &grantExpiresAt, &grantRevokedAt,
 	); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -237,11 +237,11 @@ func (s *postgresStore) loadAccess(ctx context.Context, request AccessRequest) (
 		}
 		return accessState{}, err
 	}
-	if !sessionID.Valid || !vibesSessionID.Valid || !sessionUserID.Valid || !sessionAccountEpoch.Valid || !sessionExpiresAt.Valid ||
+	if !sessionID.Valid || !vibesSessionID.Valid || !sessionUserID.Valid || !sessionAccountEpoch.Valid || !sessionWorkspaceGeneration.Valid || !sessionExpiresAt.Valid ||
 		!grantGeneration.Valid || !grantVersion.Valid || !grantExpiresAt.Valid || sessionRevokedAt.Valid || grantRevokedAt.Valid {
 		return accessState{}, errGrantNotFound
 	}
-	if accountEpoch < 0 || generation < 0 || version < 0 || workspaceVersion < version || observedVersion < workspaceVersion || sessionAccountEpoch.Int64 < 0 || grantGeneration.Int64 < 0 || grantVersion.Int64 < 0 {
+	if accountEpoch < 0 || generation < 0 || version < 0 || workspaceVersion < version || observedVersion < workspaceVersion || sessionAccountEpoch.Int64 < 0 || sessionWorkspaceGeneration.Int64 < 0 || grantGeneration.Int64 < 0 || grantVersion.Int64 < 0 {
 		return accessState{}, errors.New("invalid persisted Tag access state")
 	}
 	state := accessState{
@@ -256,15 +256,16 @@ func (s *postgresStore) loadAccess(ctx context.Context, request AccessRequest) (
 		},
 		integrity: projectionIntegrity(integrity),
 		session: SessionGrant{
-			TagSessionID:         sessionID.String,
-			VIBESSessionID:       vibesSessionID.String,
-			VIBESUserID:          sessionUserID.String,
-			WorkspaceID:          request.WorkspaceID,
-			AccountEpoch:         uint64(sessionAccountEpoch.Int64),
-			MembershipGeneration: uint64(grantGeneration.Int64),
-			AuthorityVersion:     uint64(grantVersion.Int64),
-			SessionExpiresAt:     sessionExpiresAt.Time,
-			GrantExpiresAt:       grantExpiresAt.Time,
+			TagSessionID:               sessionID.String,
+			VIBESSessionID:             vibesSessionID.String,
+			VIBESUserID:                sessionUserID.String,
+			WorkspaceID:                request.WorkspaceID,
+			AccountEpoch:               uint64(sessionAccountEpoch.Int64),
+			SessionWorkspaceGeneration: uint64(sessionWorkspaceGeneration.Int64),
+			MembershipGeneration:       uint64(grantGeneration.Int64),
+			AuthorityVersion:           uint64(grantVersion.Int64),
+			SessionExpiresAt:           sessionExpiresAt.Time,
+			GrantExpiresAt:             grantExpiresAt.Time,
 		},
 	}
 	if identityVersion.Valid || identityObserved.Valid || identityEpoch.Valid || identityRevoked.Valid || identityIntegrity.Valid {
@@ -403,19 +404,22 @@ func upsertProjection(ctx context.Context, tx pgx.Tx, projection ProjectionEvent
 
 func upsertBoundSession(ctx context.Context, tx pgx.Tx, grant SessionGrant) (time.Time, error) {
 	var vibesSessionID, userID string
-	var accountEpoch int64
+	var accountEpoch, sessionWorkspaceGeneration int64
 	var expiresAt time.Time
 	var revokedAt pgtype.Timestamptz
 	err := tx.QueryRow(ctx, `
-		SELECT vibes_session_id, vibes_user_id, account_epoch, expires_at, revoked_at
+		SELECT vibes_session_id, vibes_user_id, account_epoch, session_workspace_generation, expires_at, revoked_at
 		FROM tag_access_session WHERE tag_session_id = $1 FOR UPDATE
-	`, grant.TagSessionID).Scan(&vibesSessionID, &userID, &accountEpoch, &expiresAt, &revokedAt)
+	`, grant.TagSessionID).Scan(&vibesSessionID, &userID, &accountEpoch, &sessionWorkspaceGeneration, &expiresAt, &revokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if grant.Continuous {
+			return time.Time{}, ErrGrantDenied
+		}
 		_, err = tx.Exec(ctx, `
 			INSERT INTO tag_access_session (
-				tag_session_id, vibes_session_id, vibes_user_id, account_epoch, expires_at
-			) VALUES ($1, $2, $3, $4, $5)
-		`, grant.TagSessionID, grant.VIBESSessionID, grant.VIBESUserID, int64(grant.AccountEpoch), grant.SessionExpiresAt)
+				tag_session_id, vibes_session_id, vibes_user_id, account_epoch, session_workspace_generation, expires_at
+			) VALUES ($1, $2, $3, $4, $5, $6)
+		`, grant.TagSessionID, grant.VIBESSessionID, grant.VIBESUserID, int64(grant.AccountEpoch), int64(grant.SessionWorkspaceGeneration), grant.SessionExpiresAt)
 		return grant.SessionExpiresAt, err
 	}
 	if err != nil {
@@ -424,9 +428,38 @@ func upsertBoundSession(ctx context.Context, tx pgx.Tx, grant SessionGrant) (tim
 	if revokedAt.Valid || vibesSessionID != grant.VIBESSessionID || userID != grant.VIBESUserID || accountEpoch != int64(grant.AccountEpoch) {
 		return time.Time{}, ErrGrantDenied
 	}
-	if grant.SessionExpiresAt.Before(expiresAt) {
+	if int64(grant.SessionWorkspaceGeneration) < sessionWorkspaceGeneration ||
+		(grant.Continuous && int64(grant.SessionWorkspaceGeneration) != sessionWorkspaceGeneration) {
+		return time.Time{}, ErrGrantDenied
+	}
+	generationAdvanced := int64(grant.SessionWorkspaceGeneration) > sessionWorkspaceGeneration
+	if !grant.Continuous && !generationAdvanced {
+		var conflictingWorkspace bool
+		if err := tx.QueryRow(ctx, `
+			SELECT EXISTS (
+				SELECT 1 FROM tag_session_workspace_grant
+				WHERE tag_session_id = $1 AND vibes_workspace_id <> $2
+			)
+		`, grant.TagSessionID, grant.WorkspaceID).Scan(&conflictingWorkspace); err != nil {
+			return time.Time{}, err
+		}
+		if conflictingWorkspace {
+			return time.Time{}, ErrGrantDenied
+		}
+	}
+	if generationAdvanced {
+		if _, err := tx.Exec(ctx, `DELETE FROM tag_session_workspace_grant WHERE tag_session_id = $1`, grant.TagSessionID); err != nil {
+			return time.Time{}, err
+		}
+		sessionWorkspaceGeneration = int64(grant.SessionWorkspaceGeneration)
+	}
+	if generationAdvanced || (!grant.Continuous && grant.SessionExpiresAt.Before(expiresAt)) {
 		expiresAt = grant.SessionExpiresAt
-		if _, err := tx.Exec(ctx, `UPDATE tag_access_session SET expires_at = $2, updated_at = now() WHERE tag_session_id = $1`, grant.TagSessionID, expiresAt); err != nil {
+		if _, err := tx.Exec(ctx, `
+			UPDATE tag_access_session
+			SET session_workspace_generation = $2, expires_at = $3, updated_at = now()
+			WHERE tag_session_id = $1
+		`, grant.TagSessionID, sessionWorkspaceGeneration, expiresAt); err != nil {
 			return time.Time{}, err
 		}
 	}
@@ -444,6 +477,9 @@ func upsertBoundWorkspaceGrant(ctx context.Context, tx pgx.Tx, grant SessionGran
 		FOR UPDATE
 	`, grant.TagSessionID, grant.WorkspaceID).Scan(&generation, &version, &expiresAt, &revokedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
+		if grant.Continuous {
+			return ErrGrantDenied
+		}
 		_, err = tx.Exec(ctx, `
 			INSERT INTO tag_session_workspace_grant (
 				tag_session_id, vibes_workspace_id, membership_generation, authority_version, expires_at
@@ -454,10 +490,15 @@ func upsertBoundWorkspaceGrant(ctx context.Context, tx pgx.Tx, grant SessionGran
 	if err != nil {
 		return err
 	}
-	if revokedAt.Valid || generation != int64(grant.MembershipGeneration) || version > int64(grant.AuthorityVersion) {
+	if revokedAt.Valid {
 		return ErrGrantDenied
 	}
-	if grant.GrantExpiresAt.After(expiresAt) {
+	if !grant.Continuous && uint64(generation) != grant.MembershipGeneration {
+		return ErrGrantDenied
+	}
+	if grant.Continuous {
+		grant.GrantExpiresAt = expiresAt
+	} else if grant.GrantExpiresAt.After(expiresAt) {
 		grant.GrantExpiresAt = expiresAt
 	}
 	_, err = tx.Exec(ctx, `

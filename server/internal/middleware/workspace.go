@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/multica-ai/multica/server/internal/tagaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -205,6 +206,39 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 				return
 			}
 
+			// Mirrored browser identity is authorized by the VIBES assertion plus
+			// TagAccessGate before this middleware runs. The native member row is
+			// retained only as a compatibility identity for existing handlers; its
+			// role is never permission truth and is overwritten from the Gate
+			// decision. A URL-scoped route cannot widen the asserted Workspace.
+			if tagIdentity, ok := TagHTTPIdentityFromContext(r.Context()); ok && tagIdentity.Mirrored && !tagIdentity.Service {
+				if tagIdentity.MulticaWorkspaceID == "" || workspaceID != tagIdentity.MulticaWorkspaceID {
+					writeError(w, http.StatusForbidden, "Tag access denied")
+					return
+				}
+				if len(roles) > 0 && !tagHTTPRoleAllowed(tagIdentity.Role, roles) {
+					writeError(w, http.StatusForbidden, "insufficient permissions")
+					return
+				}
+				userUUID, userErr := util.ParseUUID(tagIdentity.MulticaUserID)
+				workspaceUUID, workspaceErr := util.ParseUUID(workspaceID)
+				if userErr != nil || workspaceErr != nil || queries == nil {
+					writeError(w, http.StatusServiceUnavailable, "Tag mirror unavailable")
+					return
+				}
+				member, err := queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
+					UserID: userUUID, WorkspaceID: workspaceUUID,
+				})
+				if err != nil {
+					writeError(w, http.StatusServiceUnavailable, "Tag mirror unavailable")
+					return
+				}
+				member.Role = string(tagIdentity.Role)
+				ctx := SetMemberContext(r.Context(), workspaceID, member)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
 			// Final task-token binding check: even when the workspace
 			// was resolved from a chi URL parameter
 			// (RequireWorkspaceMemberFromURL), the agent must not be
@@ -262,4 +296,13 @@ func buildMiddleware(queries *db.Queries, resolve workspaceResolver, roles []str
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func tagHTTPRoleAllowed(role tagaccess.Role, roles []string) bool {
+	for _, allowed := range roles {
+		if string(role) == allowed {
+			return true
+		}
+	}
+	return false
 }

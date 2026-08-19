@@ -6,12 +6,15 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"net/http"
 	"regexp"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/tagaccess"
 	"github.com/multica-ai/multica/server/internal/vibeshandoff"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -48,6 +51,32 @@ func (h *Handler) VIBESHandoff(w http.ResponseWriter, r *http.Request) {
 		writeErrorCode(w, http.StatusUnauthorized, "handoff_rejected", "Tag handoff was rejected")
 		return
 	}
+	if h.TagSessionGrantor == nil {
+		writeErrorCode(w, http.StatusServiceUnavailable, "authority_unavailable", "Tag authority is unavailable")
+		return
+	}
+	now := time.Now()
+	expiresAt := now.Add(auth.AuthTokenTTL())
+	grant := tagaccess.SessionGrant{
+		TagSessionID:               tagaccess.BrowserTagSessionID(identity.UserID, identity.SessionID),
+		VIBESSessionID:             identity.SessionID,
+		VIBESUserID:                identity.UserID,
+		WorkspaceID:                identity.WorkspaceID,
+		AccountEpoch:               identity.AccountEpoch,
+		SessionWorkspaceGeneration: identity.SessionWorkspaceGeneration,
+		MembershipGeneration:       identity.MembershipGeneration,
+		AuthorityVersion:           identity.AuthorityVersion,
+		SessionExpiresAt:           expiresAt,
+		GrantExpiresAt:             expiresAt,
+	}
+	if err := h.TagSessionGrantor.GrantSession(r.Context(), grant); err != nil {
+		if errors.Is(err, tagaccess.ErrGrantDenied) || errors.Is(err, tagaccess.ErrInvalidGrant) {
+			writeErrorCode(w, http.StatusUnauthorized, "handoff_rejected", "Tag handoff was rejected")
+		} else {
+			writeErrorCode(w, http.StatusServiceUnavailable, "authority_unavailable", "Tag authority is unavailable")
+		}
+		return
+	}
 	user, err := h.mirrorVIBESIdentity(r.Context(), identity)
 	if err != nil {
 		writeErrorCode(w, http.StatusUnauthorized, "handoff_rejected", "Tag handoff was rejected")
@@ -64,10 +93,16 @@ func (h *Handler) VIBESHandoff(w http.ResponseWriter, r *http.Request) {
 
 func validVIBESIdentity(identity vibeshandoff.Identity) bool {
 	return len(identity.UserID) <= 255 &&
+		identity.UserID != "" && identity.SessionID != "" && len(identity.SessionID) <= 255 &&
+		identity.WorkspaceID != "" &&
 		len(identity.WorkspaceID) <= 255 &&
 		len(identity.Name) <= 255 &&
 		len(identity.WorkspaceName) <= 255 &&
-		len(identity.Email) <= 320 &&
+		len(identity.Email) <= 320 && identity.AccountEpoch > 0 && identity.AccountEpoch <= math.MaxInt64 &&
+		identity.SessionWorkspaceGeneration > 0 && identity.SessionWorkspaceGeneration <= math.MaxInt64 &&
+		identity.AuthorityVersion > 0 && identity.AuthorityVersion <= math.MaxInt64 &&
+		identity.MembershipGeneration > 0 && identity.MembershipGeneration <= math.MaxInt64 &&
+		(identity.Role == string(tagaccess.RoleOwner) || identity.Role == string(tagaccess.RoleAdmin) || identity.Role == string(tagaccess.RoleMember)) &&
 		vibesWorkspaceSlugPattern.MatchString(identity.WorkspaceSlug)
 }
 
@@ -109,7 +144,7 @@ func (h *Handler) mirrorVIBESIdentity(ctx context.Context, identity vibeshandoff
 		`, identity.UserID, userID, identity.Email)
 	} else if err == nil {
 		user, err = queries.GetUser(ctx, userID)
-		if err == nil {
+		if err == nil && identity.Email != "" {
 			_, err = tx.Exec(ctx, `
 				UPDATE vibes_user_mirror SET profile_email = $2, updated_at = now()
 				WHERE vibes_user_id = $1
@@ -151,10 +186,7 @@ func (h *Handler) mirrorVIBESIdentity(ctx context.Context, identity vibeshandoff
 		return db.User{}, err
 	}
 
-	role := "member"
-	if identity.Role == "owner" {
-		role = "owner"
-	}
+	role := identity.Role
 	member, err := queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
 		UserID:      userID,
 		WorkspaceID: workspaceID,

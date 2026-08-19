@@ -56,19 +56,21 @@ func TestIdentityIngressSessionLogoutRevokesOnlyExactVIBESSession(t *testing.T) 
 		t.Fatalf("DeliverIdentity() receipt = %#v", receipt)
 	}
 	if decision := access.Gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: "tag-session-a", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		TagSessionID: "tag-session-a", VIBESSessionID: "vibes-session-a", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		AccountEpoch: 7, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 	}); decision.Allowed || decision.Reason != tagaccess.DenyMissingGrant {
 		t.Fatalf("logged-out session decision = %#v", decision)
 	}
 	if decision := access.Gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: "tag-session-b", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		TagSessionID: "tag-session-b", VIBESSessionID: "vibes-session-b", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		AccountEpoch: 7, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 	}); !decision.Allowed {
 		t.Fatalf("sibling session decision = %#v", decision)
 	}
 	if err := access.Gate.GrantSession(context.Background(), tagaccess.SessionGrant{
 		TagSessionID: "tag-session-replayed", VIBESSessionID: "vibes-session-a",
 		VIBESUserID: "user-1", WorkspaceID: "workspace-1", AccountEpoch: 7,
-		MembershipGeneration: 1, AuthorityVersion: 1,
+		SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 		SessionExpiresAt: now.Add(time.Hour), GrantExpiresAt: now.Add(30 * time.Minute),
 	}); err != tagaccess.ErrGrantDenied {
 		t.Fatalf("logged-out VIBES session GrantSession() error = %v, want grant denied", err)
@@ -100,7 +102,8 @@ func TestIdentityIngressAccountBanRevokesAllUserSessionsAtHigherEpoch(t *testing
 	}
 	for _, tagSessionID := range []string{"tag-session-a", "tag-session-b"} {
 		decision := access.Gate.Authorize(context.Background(), tagaccess.AccessRequest{
-			TagSessionID: tagSessionID, VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+			TagSessionID: tagSessionID, VIBESSessionID: strings.Replace(tagSessionID, "tag-", "vibes-", 1), VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+			AccountEpoch: 7, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 		})
 		if decision.Allowed || decision.Reason != tagaccess.DenyMissingGrant {
 			t.Fatalf("account-ban decision for %s = %#v", tagSessionID, decision)
@@ -113,7 +116,7 @@ func TestIdentityIngressAccountBanRevokesAllUserSessionsAtHigherEpoch(t *testing
 		if err := access.Gate.GrantSession(context.Background(), tagaccess.SessionGrant{
 			TagSessionID: "tag-session-after-ban", VIBESSessionID: "vibes-session-after-ban",
 			VIBESUserID: "user-1", WorkspaceID: "workspace-1", AccountEpoch: attempt.epoch,
-			MembershipGeneration: 1, AuthorityVersion: attempt.authorityVersion,
+			SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: attempt.authorityVersion,
 			SessionExpiresAt: now.Add(time.Hour), GrantExpiresAt: now.Add(30 * time.Minute),
 		}); err != tagaccess.ErrGrantDenied {
 			t.Fatalf("epoch %d GrantSession() error = %v, want grant denied", attempt.epoch, err)
@@ -150,7 +153,8 @@ func TestIdentityIngressVersionGapFailsClosedWithoutRevokingBeforeApply(t *testi
 		t.Fatalf("gap close commands = %#v", port.commands)
 	}
 	decision := access.Gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: "tag-session-a", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		TagSessionID: "tag-session-a", VIBESSessionID: "vibes-session-a", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		AccountEpoch: 7, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 	})
 	if decision.Allowed || decision.Reason != tagaccess.DenyIdentityRestrictionGap {
 		t.Fatalf("gap decision = %#v", decision)
@@ -162,7 +166,8 @@ func TestIdentityIngressVersionGapFailsClosedWithoutRevokingBeforeApply(t *testi
 		t.Fatalf("durably applied missing version = %#v", got)
 	}
 	decision = access.Gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: "tag-session-a", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		TagSessionID: "tag-session-a", VIBESSessionID: "vibes-session-a", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		AccountEpoch: 7, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 	})
 	if decision.Allowed || decision.Reason != tagaccess.DenyIdentityRestrictionGap {
 		t.Fatalf("remaining observed gap decision = %#v", decision)
@@ -409,7 +414,7 @@ func grantSession(t *testing.T, gate *tagaccess.Gate, now time.Time, tagSessionI
 	t.Helper()
 	if err := gate.GrantSession(context.Background(), tagaccess.SessionGrant{
 		TagSessionID: tagSessionID, VIBESSessionID: vibesSessionID, VIBESUserID: "user-1", WorkspaceID: "workspace-1",
-		AccountEpoch: accountEpoch, MembershipGeneration: 1, AuthorityVersion: 1,
+		AccountEpoch: accountEpoch, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 		SessionExpiresAt: now.Add(time.Hour), GrantExpiresAt: now.Add(30 * time.Minute),
 	}); err != nil {
 		t.Fatal(err)

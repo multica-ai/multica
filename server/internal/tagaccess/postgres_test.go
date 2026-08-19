@@ -64,24 +64,21 @@ func TestPostgresStoreMatchesAccessGateContract(t *testing.T) {
 		t.Fatalf("duplicate ApplyProjection() = %q, %v", result, err)
 	}
 	grant := tagaccess.SessionGrant{
-		TagSessionID:         "tag-session-1",
-		VIBESSessionID:       "vibes-session-1",
-		VIBESUserID:          event.VIBESUserID,
-		WorkspaceID:          event.WorkspaceID,
-		AccountEpoch:         event.AccountEpoch,
-		MembershipGeneration: event.MembershipGeneration,
-		AuthorityVersion:     event.AuthorityVersion,
-		SessionExpiresAt:     now.Add(time.Hour),
-		GrantExpiresAt:       now.Add(30 * time.Minute),
+		TagSessionID:               "tag-session-1",
+		VIBESSessionID:             "vibes-session-1",
+		VIBESUserID:                event.VIBESUserID,
+		WorkspaceID:                event.WorkspaceID,
+		AccountEpoch:               event.AccountEpoch,
+		SessionWorkspaceGeneration: 1,
+		MembershipGeneration:       event.MembershipGeneration,
+		AuthorityVersion:           event.AuthorityVersion,
+		SessionExpiresAt:           now.Add(time.Hour),
+		GrantExpiresAt:             now.Add(30 * time.Minute),
 	}
 	if err := gate.GrantSession(context.Background(), grant); err != nil {
 		t.Fatalf("GrantSession() error = %v", err)
 	}
-	decision := gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: grant.TagSessionID,
-		VIBESUserID:  grant.VIBESUserID,
-		WorkspaceID:  grant.WorkspaceID,
-	})
+	decision := gate.Authorize(context.Background(), accessRequestForGrant(grant))
 	if !decision.Allowed || decision.Role != tagaccess.RoleOwner || decision.AuthorityVersion != 1 {
 		t.Fatalf("Authorize() = %#v", decision)
 	}
@@ -92,7 +89,7 @@ func TestPostgresStoreMatchesAccessGateContract(t *testing.T) {
 	if result, err := gate.ApplyProjection(context.Background(), version3); err != nil || result != tagaccess.ApplyGap {
 		t.Fatalf("out-of-order version 3 = %q, %v", result, err)
 	}
-	if decision := gate.Authorize(context.Background(), tagaccess.AccessRequest{TagSessionID: grant.TagSessionID, VIBESUserID: grant.VIBESUserID, WorkspaceID: grant.WorkspaceID}); decision.Reason != tagaccess.DenyProjectionGap {
+	if decision := gate.Authorize(context.Background(), accessRequestForGrant(grant)); decision.Reason != tagaccess.DenyProjectionGap {
 		t.Fatalf("gap Authorize() = %#v", decision)
 	}
 	version2 := event
@@ -108,7 +105,7 @@ func TestPostgresStoreMatchesAccessGateContract(t *testing.T) {
 	if err := gate.GrantSession(context.Background(), grant); err != nil {
 		t.Fatalf("refresh GrantSession() error = %v", err)
 	}
-	if decision := gate.Authorize(context.Background(), tagaccess.AccessRequest{TagSessionID: grant.TagSessionID, VIBESUserID: grant.VIBESUserID, WorkspaceID: grant.WorkspaceID}); !decision.Allowed || decision.AuthorityVersion != 3 {
+	if decision := gate.Authorize(context.Background(), accessRequestForGrant(grant)); !decision.Allowed || decision.AuthorityVersion != 3 {
 		t.Fatalf("refreshed Authorize() = %#v", decision)
 	}
 
@@ -164,7 +161,7 @@ func TestPostgresStoreMatchesAccessGateContract(t *testing.T) {
 	if result, err := gate.ApplyAuthorityDelivery(context.Background(), replacementSnapshot); err != nil || result != tagaccess.ApplyApplied {
 		t.Fatalf("replacement snapshot v7 = %q, %v", result, err)
 	}
-	if decision := gate.Authorize(context.Background(), tagaccess.AccessRequest{TagSessionID: omittedGrant.TagSessionID, VIBESUserID: omittedGrant.VIBESUserID, WorkspaceID: omittedGrant.WorkspaceID}); decision.Reason != tagaccess.DenyInactiveMembership {
+	if decision := gate.Authorize(context.Background(), accessRequestForGrant(omittedGrant)); decision.Reason != tagaccess.DenyInactiveMembership {
 		t.Fatalf("omitted PostgreSQL member Authorize() = %#v", decision)
 	}
 	omittedMember.EventID = "snapshot-member-b-8"
@@ -273,12 +270,14 @@ func TestPostgresIdentityRestrictionReceiptSurvivesAdapterRestart(t *testing.T) 
 		t.Fatalf("restarted identity receipt = %#v", restarted)
 	}
 	if decision := newAccess().Gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: "tag-session-a", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		TagSessionID: "tag-session-a", VIBESSessionID: "vibes-session-a", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		AccountEpoch: 7, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 	}); decision.Allowed || decision.Reason != tagaccess.DenyMissingGrant {
 		t.Fatalf("revoked session decision = %#v", decision)
 	}
 	if decision := newAccess().Gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: "tag-session-b", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		TagSessionID: "tag-session-b", VIBESSessionID: "vibes-session-b", VIBESUserID: "user-1", WorkspaceID: "workspace-1",
+		AccountEpoch: 7, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 	}); !decision.Allowed {
 		t.Fatalf("sibling session decision = %#v", decision)
 	}
@@ -295,7 +294,7 @@ func TestPostgresIdentityRestrictionReceiptSurvivesAdapterRestart(t *testing.T) 
 	if err := newAccess().Gate.GrantSession(context.Background(), tagaccess.SessionGrant{
 		TagSessionID: "tag-session-after-ban", VIBESSessionID: "vibes-session-after-ban",
 		VIBESUserID: "user-1", WorkspaceID: "workspace-1", AccountEpoch: 8,
-		MembershipGeneration: 1, AuthorityVersion: 2,
+		SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 2,
 		SessionExpiresAt: now.Add(time.Hour), GrantExpiresAt: now.Add(30 * time.Minute),
 	}); err != tagaccess.ErrGrantDenied {
 		t.Fatalf("same banned epoch GrantSession() error = %v, want grant denied", err)
@@ -349,6 +348,10 @@ func openDisposableTagAccessDatabase(t *testing.T) *pgx.Conn {
 		"361_tag_access_identity_delivery_key_index.up.sql",
 		"362_tag_access_identity_event_index.up.sql",
 		"363_tag_access_identity_idempotency_index.up.sql",
+		"364_tag_access_session_workspace_generation.up.sql",
+		"365_tag_http_assertion_replay.up.sql",
+		"366_tag_http_assertion_replay_identity_index.up.sql",
+		"367_tag_http_assertion_replay_expiry_index.up.sql",
 	} {
 		body, err := os.ReadFile(filepath.Join(migrationsDir(t), migration))
 		if err != nil {

@@ -1,0 +1,1 @@
+CREATE INDEX CONCURRENTLY tag_http_assertion_replay_expiry_idx ON tag_http_assertion_replay(expires_at);

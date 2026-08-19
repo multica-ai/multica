@@ -312,10 +312,7 @@ func (h *Handler) canManageIssueView(r *http.Request, view db.IssueView, userID 
 	if view.Visibility != "workspace" {
 		return false
 	}
-	member, err := h.Queries.GetMemberByUserAndWorkspace(r.Context(), db.GetMemberByUserAndWorkspaceParams{
-		UserID:      parseUUID(userID),
-		WorkspaceID: view.WorkspaceID,
-	})
+	member, err := h.getWorkspaceMember(r.Context(), userID, uuidToString(view.WorkspaceID))
 	if err != nil {
 		return false
 	}

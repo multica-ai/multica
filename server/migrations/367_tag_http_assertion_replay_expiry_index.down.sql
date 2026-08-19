@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS tag_http_assertion_replay_expiry_idx;

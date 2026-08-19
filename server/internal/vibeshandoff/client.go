@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
@@ -17,13 +18,18 @@ import (
 var ErrRejected = errors.New("VIBES handoff rejected")
 
 type Identity struct {
-	UserID        string `json:"userId"`
-	WorkspaceID   string `json:"workspaceId"`
-	WorkspaceSlug string `json:"workspaceSlug"`
-	WorkspaceName string `json:"workspaceName"`
-	Name          string `json:"name"`
-	Email         string `json:"email"`
-	Role          string `json:"role"`
+	UserID                     string `json:"userId"`
+	SessionID                  string `json:"sessionId"`
+	WorkspaceID                string `json:"workspaceId"`
+	WorkspaceSlug              string `json:"workspaceSlug"`
+	WorkspaceName              string `json:"workspaceName"`
+	Name                       string `json:"name"`
+	Email                      string `json:"email"`
+	Role                       string `json:"role"`
+	AccountEpoch               uint64 `json:"accountEpoch"`
+	SessionWorkspaceGeneration uint64 `json:"sessionWorkspaceGeneration"`
+	AuthorityVersion           uint64 `json:"authorityVersion"`
+	MembershipGeneration       uint64 `json:"membershipGeneration"`
 }
 
 type Client struct {
@@ -85,10 +91,14 @@ func (c *Client) Consume(ctx context.Context, code, audience string) (Identity, 
 	if err := decoder.Decode(&identity); err != nil {
 		return Identity{}, ErrRejected
 	}
-	if identity.UserID == "" || identity.WorkspaceID == "" || identity.WorkspaceSlug == "" || identity.WorkspaceName == "" || identity.Name == "" || identity.Email == "" {
+	if identity.UserID == "" || identity.SessionID == "" || identity.WorkspaceID == "" || identity.WorkspaceSlug == "" || identity.WorkspaceName == "" || identity.Name == "" ||
+		identity.AccountEpoch == 0 || identity.AccountEpoch > math.MaxInt64 ||
+		identity.SessionWorkspaceGeneration == 0 || identity.SessionWorkspaceGeneration > math.MaxInt64 ||
+		identity.AuthorityVersion == 0 || identity.AuthorityVersion > math.MaxInt64 ||
+		identity.MembershipGeneration == 0 || identity.MembershipGeneration > math.MaxInt64 {
 		return Identity{}, ErrRejected
 	}
-	if identity.Role != "owner" && identity.Role != "member" {
+	if identity.Role != "owner" && identity.Role != "admin" && identity.Role != "member" {
 		return Identity{}, fmt.Errorf("%w", ErrRejected)
 	}
 	return identity, nil

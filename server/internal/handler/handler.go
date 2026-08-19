@@ -35,6 +35,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/storage"
+	"github.com/multica-ai/multica/server/internal/tagaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -148,6 +149,10 @@ type WorkspaceSetRefreshNotifier interface {
 	NotifyWorkspacesChanged(userID string)
 }
 
+type tagSessionGrantor interface {
+	GrantSession(context.Context, tagaccess.SessionGrant) error
+}
+
 // DaemonPendingWorkNotifier pushes a runtime-scoped "heartbeat now" hint to the
 // daemon so a queued heartbeat-carried request (model discovery) is picked up
 // immediately instead of on the daemon's next scheduled tick (MUL-5444).
@@ -195,10 +200,18 @@ type Handler struct {
 	// May be nil in tests / self-hosted with the metrics listener disabled;
 	// every Record* method is nil-safe and obsmetrics.RecordEvent treats a
 	// nil Metrics as "PostHog only".
-	Metrics                      *obsmetrics.BusinessMetrics
-	PATCache                     *auth.PATCache
-	DaemonTokenCache             *auth.DaemonTokenCache
-	MembershipCache              *auth.MembershipCache
+	Metrics          *obsmetrics.BusinessMetrics
+	PATCache         *auth.PATCache
+	DaemonTokenCache *auth.DaemonTokenCache
+	MembershipCache  *auth.MembershipCache
+	// TagAuthorityEnabled closes native browser signup/login when the existing
+	// VIBES authority projection is configured. Handoff is the only browser
+	// identity ingress in that mode.
+	TagAuthorityEnabled bool
+	// TagSessionGrantor binds a consumed VIBES handoff to the existing
+	// projection-backed AccessGate. It is deliberately narrower than the Gate:
+	// handlers may establish a session binding but cannot project authority.
+	TagSessionGrantor            tagSessionGrantor
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
@@ -813,6 +826,11 @@ func countOwners(members []db.Member) int {
 }
 
 func (h *Handler) getWorkspaceMember(ctx context.Context, userID, workspaceID string) (db.Member, error) {
+	if contextWorkspaceID := ctxWorkspaceID(ctx); contextWorkspaceID == workspaceID {
+		if member, ok := ctxMember(ctx); ok && uuidToString(member.UserID) == userID {
+			return member, nil
+		}
+	}
 	userUUID, err := util.ParseUUID(userID)
 	if err != nil {
 		return db.Member{}, err
@@ -836,6 +854,11 @@ func (h *Handler) requireWorkspaceMember(w http.ResponseWriter, r *http.Request,
 	userID, ok := requireUserID(w, r)
 	if !ok {
 		return db.Member{}, false
+	}
+	if contextWorkspaceID := ctxWorkspaceID(r.Context()); contextWorkspaceID == workspaceID {
+		if member, found := ctxMember(r.Context()); found {
+			return member, true
+		}
 	}
 
 	member, err := h.getWorkspaceMember(r.Context(), userID, workspaceID)

@@ -59,6 +59,16 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// to convince a downstream handler that its request came
 			// from a non-task-token path.
 			r.Header.Del("X-Actor-Source")
+			if identity, ok := TagHTTPIdentityFromContext(r.Context()); ok && identity.Mirrored && identity.MulticaUserID != "" {
+				// #299 strips browser Cookie/Authorization before forwarding.
+				// Only the private typed context written by the verified
+				// pre-Auth adapter may take this branch; request headers alone
+				// can never select it.
+				r.Header.Set("X-User-ID", identity.MulticaUserID)
+				r.Header.Del("X-User-Email")
+				next.ServeHTTP(w, r)
+				return
+			}
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {

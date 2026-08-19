@@ -193,6 +193,8 @@ type RouterOptions struct {
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
 	TagAuthorityAccess *tagaccess.AuthenticatedAccess
+	TagHTTPVerifier    *tagaccess.HTTPAssertionVerifier
+	TagHTTPReplay      tagaccess.HTTPAssertionReplayStore
 }
 
 func buildChannelSupervisor(
@@ -348,6 +350,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		VIBESHandoffServiceSecret: strings.TrimSpace(os.Getenv("VIBES_HANDOFF_SERVICE_SECRET")),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	if opts.TagAuthorityAccess != nil {
+		h.TagAuthorityEnabled = true
+		h.TagSessionGrantor = opts.TagAuthorityAccess.Gate
+	}
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -1207,7 +1213,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
-		r.Use(middleware.DaemonAuth(queries, patCache, daemonTokenCache, cloudPATVerifier))
+		r.Use(middleware.DaemonAuth(
+			queries,
+			patCache,
+			daemonTokenCache,
+			cloudPATVerifier,
+			middleware.NewPostgresTagHTTPMirrorResolver(pool),
+		))
 
 		r.Post("/register", h.DaemonRegister)
 		r.Post("/deregister", h.DaemonDeregister)
@@ -1255,24 +1267,45 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Protected API routes
 	r.Group(func(r chi.Router) {
+		mirrors := middleware.NewPostgresTagHTTPMirrorResolver(pool)
+		var tagHTTPAuthenticator *middleware.TagHTTPBrowserAuthenticator
+		if opts.TagAuthorityAccess != nil && opts.TagHTTPVerifier != nil {
+			replay := opts.TagHTTPReplay
+			if replay == nil {
+				var err error
+				replay, err = tagaccess.NewPostgresHTTPAssertionReplayStore(pool, tagaccess.SystemClock{})
+				if err != nil {
+					panic(err)
+				}
+			}
+			var err error
+			tagHTTPAuthenticator, err = middleware.NewTagHTTPBrowserAuthenticator(
+				opts.TagAuthorityAccess.Gate, opts.TagHTTPVerifier, replay, mirrors,
+			)
+			if err != nil {
+				panic(err)
+			}
+		}
+		r.Use(middleware.AuthenticateTagHTTPBrowser(tagHTTPAuthenticator))
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+		r.Use(middleware.RequireTagHTTP(mirrors))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)
-		r.Patch("/api/me", h.UpdateMe)
-		r.Patch("/api/me/onboarding", h.PatchOnboarding)
-		r.Post("/api/me/onboarding/complete", h.CompleteOnboarding)
-		r.Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
+		r.With(middleware.DenyMirroredAuthorityWriter).Patch("/api/me", h.UpdateMe)
+		r.With(middleware.DenyMirroredAuthorityWriter).Patch("/api/me/onboarding", h.PatchOnboarding)
+		r.With(middleware.DenyMirroredAuthorityWriter).Post("/api/me/onboarding/complete", h.CompleteOnboarding)
+		r.With(middleware.DenyMirroredAuthorityWriter).Post("/api/me/onboarding/cloud-waitlist", h.JoinCloudWaitlist)
 		// DEPRECATED — shim routes for desktop < v3 during the rollout
 		// window. v3 frontend creates the Helper agent + starter issue
 		// via generic CreateAgent / CreateIssue and only calls /complete
 		// here. Remove once X-Client-Version telemetry confirms zero
 		// pre-v3 desktops are still calling these. Handlers live in
 		// server/internal/handler/onboarding_shim.go.
-		r.Post("/api/me/onboarding/runtime-bootstrap", h.BootstrapOnboardingRuntime)
-		r.Post("/api/me/onboarding/no-runtime-bootstrap", h.BootstrapOnboardingNoRuntime)
-		r.Post("/api/cli-token", h.IssueCliToken)
+		r.With(middleware.DenyMirroredAuthorityWriter).Post("/api/me/onboarding/runtime-bootstrap", h.BootstrapOnboardingRuntime)
+		r.With(middleware.DenyMirroredAuthorityWriter).Post("/api/me/onboarding/no-runtime-bootstrap", h.BootstrapOnboardingNoRuntime)
+		r.With(middleware.DenyMirroredAuthorityWriter).Post("/api/cli-token", h.IssueCliToken)
 		r.Post("/api/upload-file", h.UploadFile)
 		r.Post("/api/feedback", h.CreateFeedback)
 		r.With(handler.RequireHumanActor).Post("/api/client-usage", h.UpsertClientUsage)
@@ -1299,14 +1332,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 		r.Route("/api/workspaces", func(r chi.Router) {
 			r.Get("/", h.ListWorkspaces)
-			r.Post("/", h.CreateWorkspace)
+			r.With(middleware.DenyMirroredAuthorityWriter).Post("/", h.CreateWorkspace)
 			r.Route("/{id}", func(r chi.Router) {
 				// Member-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
 					r.Get("/", h.GetWorkspace)
 					r.Get("/members", h.ListMembersWithUser)
-					r.Post("/leave", h.LeaveWorkspace)
+					r.With(middleware.DenyMirroredAuthorityWriter).Post("/leave", h.LeaveWorkspace)
 					r.Get("/invitations", h.ListWorkspaceInvitations)
 					// Listing GitHub installations is member-visible so the
 					// integrations tab no longer renders blank for non-admins;
@@ -1336,22 +1369,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				// Admin-level access
 				r.Group(func(r chi.Router) {
 					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
-					r.Put("/", h.UpdateWorkspace)
-					r.Patch("/", h.UpdateWorkspace)
-					r.Post("/members", h.CreateInvitation)
+					r.With(middleware.DenyMirroredAuthorityWriter).Put("/", h.UpdateWorkspace)
+					r.With(middleware.DenyMirroredAuthorityWriter).Patch("/", h.UpdateWorkspace)
+					r.With(middleware.DenyMirroredAuthorityWriter).Post("/members", h.CreateInvitation)
 					r.Route("/members/{memberId}", func(r chi.Router) {
-						r.Patch("/", h.UpdateMember)
-						r.Delete("/", h.DeleteMember)
+						r.With(middleware.DenyMirroredAuthorityWriter).Patch("/", h.UpdateMember)
+						r.With(middleware.DenyMirroredAuthorityWriter).Delete("/", h.DeleteMember)
 					})
-					r.Delete("/invitations/{invitationId}", h.RevokeInvitation)
+					r.With(middleware.DenyMirroredAuthorityWriter).Delete("/invitations/{invitationId}", h.RevokeInvitation)
 					// Curating the shared MCP library is an admin action.
 					// Creating an entry binds it to no agent; an agent owner
 					// adds it to their own agent through the agent routes.
 					r.Post("/mcp-servers", h.CreateWorkspaceMcpServer)
 					r.Put("/mcp-servers/{serverId}", h.UpdateWorkspaceMcpServer)
 					r.Delete("/mcp-servers/{serverId}", h.DeleteWorkspaceMcpServer)
-					r.Post("/share-links", h.CreateShareLink)
-					r.Delete("/share-links/{linkId}", h.RevokeShareLink)
+					r.With(middleware.DenyMirroredAuthorityWriter).Post("/share-links", h.CreateShareLink)
+					r.With(middleware.DenyMirroredAuthorityWriter).Delete("/share-links/{linkId}", h.RevokeShareLink)
 					r.Get("/share-links", h.ListShareLinks)
 					// Custom runtime profile mutations (admin-only).
 					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
@@ -1372,7 +1405,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/plugins/{installationId}", h.UninstallPlugin)
 				})
 				// Owner-only access
-				r.With(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner")).Delete("/", h.DeleteWorkspace)
+				r.With(
+					middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner"),
+					middleware.DenyMirroredAuthorityWriter,
+				).Delete("/", h.DeleteWorkspace)
 
 				// GitHub integration — connect / disconnect remain admin-only;
 				// the read-only list endpoint lives in the member-level group
@@ -1484,15 +1520,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// User-scoped invitation routes (no workspace context required)
 		r.Get("/api/invitations", h.ListMyInvitations)
 		r.Get("/api/invitations/{id}", h.GetMyInvitation)
-		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
-		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
-		r.Post("/api/share-links/join", h.JoinByShareLink)
+		r.With(middleware.DenyMirroredAuthorityWriter).Post("/api/invitations/{id}/accept", h.AcceptInvitation)
+		r.With(middleware.DenyMirroredAuthorityWriter).Post("/api/invitations/{id}/decline", h.DeclineInvitation)
+		r.With(middleware.DenyMirroredAuthorityWriter).Post("/api/share-links/join", h.JoinByShareLink)
 
 		r.Route("/api/tokens", func(r chi.Router) {
 			r.Get("/", h.ListPersonalAccessTokens)
-			r.Post("/", h.CreatePersonalAccessToken)
-			r.Post("/current/renew", h.RenewCurrentPersonalAccessToken)
-			r.Delete("/{id}", h.RevokePersonalAccessToken)
+			r.With(middleware.DenyMirroredAuthorityWriter).Post("/", h.CreatePersonalAccessToken)
+			r.With(middleware.DenyMirroredAuthorityWriter).Post("/current/renew", h.RenewCurrentPersonalAccessToken)
+			r.With(middleware.DenyMirroredAuthorityWriter).Delete("/{id}", h.RevokePersonalAccessToken)
 		})
 
 		// Cloud Billing proxy. Same upstream service / port as

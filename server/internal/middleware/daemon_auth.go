@@ -76,7 +76,11 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 // branch — same fail-closed contract as the regular Auth middleware.
 //
 // Cache misses fall back to the original DB-backed behavior.
-func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
+func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier, mirrorResolvers ...TagHTTPMirrorResolver) func(http.Handler) http.Handler {
+	var mirrors TagHTTPMirrorResolver
+	if len(mirrorResolvers) > 0 {
+		mirrors = mirrorResolvers[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — strip any
@@ -197,6 +201,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
 						return
 					}
+					if rejectMirroredDaemonFallback(w, r, mirrors, userID) {
+						return
+					}
 					r.Header.Set("X-User-ID", userID)
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathPAT)
 					next.ServeHTTP(w, r.WithContext(ctx))
@@ -216,6 +223,9 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 
 				userID := uuidToString(pat.UserID)
 				if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {
+					return
+				}
+				if rejectMirroredDaemonFallback(w, r, mirrors, userID) {
 					return
 				}
 				r.Header.Set("X-User-ID", userID)
@@ -262,9 +272,28 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			if rejectTemporarilyDisabledUser(w, r, sub, email, DaemonAuthPathJWT) {
 				return
 			}
+			if rejectMirroredDaemonFallback(w, r, mirrors, sub) {
+				return
+			}
 			r.Header.Set("X-User-ID", sub)
 			ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathJWT)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func rejectMirroredDaemonFallback(w http.ResponseWriter, r *http.Request, mirrors TagHTTPMirrorResolver, userID string) bool {
+	if mirrors == nil {
+		return false
+	}
+	_, mirrored, err := mirrors.VIBESUserID(r.Context(), userID)
+	if err != nil {
+		writeError(w, http.StatusServiceUnavailable, "Tag authority unavailable")
+		return true
+	}
+	if mirrored {
+		writeError(w, http.StatusForbidden, "mirrored VIBES users require an explicit service identity")
+		return true
+	}
+	return false
 }

@@ -3,6 +3,7 @@ package tagaccess
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"sort"
@@ -97,26 +98,32 @@ type SystemClock struct{}
 func (SystemClock) Now() time.Time { return time.Now() }
 
 type AccessRequest struct {
-	TagSessionID string
-	VIBESUserID  string
-	WorkspaceID  string
+	TagSessionID               string
+	VIBESSessionID             string
+	VIBESUserID                string
+	WorkspaceID                string
+	AccountEpoch               uint64
+	SessionWorkspaceGeneration uint64
+	MembershipGeneration       uint64
+	AuthorityVersion           uint64
 }
 
 type DenyReason string
 
 const (
-	DenyUnknownProjection           DenyReason = "unknown_projection"
-	DenyStoreUnavailable            DenyReason = "store_unavailable"
-	DenyProjectionGap               DenyReason = "projection_gap"
-	DenyProjectionConflict          DenyReason = "projection_conflict"
-	DenyIdentityRestrictionGap      DenyReason = "identity_restriction_gap"
-	DenyIdentityRestrictionConflict DenyReason = "identity_restriction_conflict"
-	DenyInactiveMembership          DenyReason = "inactive_membership"
-	DenyMissingGrant                DenyReason = "missing_grant"
-	DenyExpiredGrant                DenyReason = "expired_grant"
-	DenyStaleAccountEpoch           DenyReason = "stale_account_epoch"
-	DenyStaleGeneration             DenyReason = "stale_membership_generation"
-	DenyStaleVersion                DenyReason = "stale_authority_version"
+	DenyUnknownProjection               DenyReason = "unknown_projection"
+	DenyStoreUnavailable                DenyReason = "store_unavailable"
+	DenyProjectionGap                   DenyReason = "projection_gap"
+	DenyProjectionConflict              DenyReason = "projection_conflict"
+	DenyIdentityRestrictionGap          DenyReason = "identity_restriction_gap"
+	DenyIdentityRestrictionConflict     DenyReason = "identity_restriction_conflict"
+	DenyInactiveMembership              DenyReason = "inactive_membership"
+	DenyMissingGrant                    DenyReason = "missing_grant"
+	DenyExpiredGrant                    DenyReason = "expired_grant"
+	DenyStaleAccountEpoch               DenyReason = "stale_account_epoch"
+	DenyStaleSessionWorkspaceGeneration DenyReason = "stale_session_workspace_generation"
+	DenyStaleGeneration                 DenyReason = "stale_membership_generation"
+	DenyStaleVersion                    DenyReason = "stale_authority_version"
 )
 
 type Decision struct {
@@ -127,15 +134,20 @@ type Decision struct {
 }
 
 type SessionGrant struct {
-	TagSessionID         string
-	VIBESSessionID       string
-	VIBESUserID          string
-	WorkspaceID          string
-	AccountEpoch         uint64
-	MembershipGeneration uint64
-	AuthorityVersion     uint64
-	SessionExpiresAt     time.Time
-	GrantExpiresAt       time.Time
+	TagSessionID               string
+	VIBESSessionID             string
+	VIBESUserID                string
+	WorkspaceID                string
+	AccountEpoch               uint64
+	SessionWorkspaceGeneration uint64
+	MembershipGeneration       uint64
+	AuthorityVersion           uint64
+	SessionExpiresAt           time.Time
+	GrantExpiresAt             time.Time
+	// Continuous is reserved for a fresh, request-bound gateway assertion. It
+	// may refresh projection counters only for an already handoff-bound session
+	// and Workspace; it can never create or switch the binding.
+	Continuous bool
 }
 
 type projectionIntegrity string
@@ -223,6 +235,7 @@ func (g *Gate) GrantSession(ctx context.Context, grant SessionGrant) error {
 	now := g.clock.Now()
 	if !validStableID(grant.TagSessionID) || !validStableID(grant.VIBESSessionID) || !validStableID(grant.VIBESUserID) || !validStableID(grant.WorkspaceID) ||
 		grant.AccountEpoch == 0 || grant.AccountEpoch > maxDatabaseCounter ||
+		grant.SessionWorkspaceGeneration == 0 || grant.SessionWorkspaceGeneration > maxDatabaseCounter ||
 		grant.MembershipGeneration == 0 || grant.MembershipGeneration > maxDatabaseCounter ||
 		grant.AuthorityVersion == 0 || grant.AuthorityVersion > maxDatabaseCounter ||
 		!grant.SessionExpiresAt.After(now) || !grant.GrantExpiresAt.After(now) || grant.GrantExpiresAt.After(grant.SessionExpiresAt) {
@@ -234,7 +247,11 @@ func (g *Gate) GrantSession(ctx context.Context, grant SessionGrant) error {
 // Authorize returns an explicit denial rather than an error so every HTTP,
 // WebSocket, daemon, and worker adapter shares the same fail-closed behavior.
 func (g *Gate) Authorize(ctx context.Context, request AccessRequest) Decision {
-	if request.TagSessionID == "" || request.VIBESUserID == "" || request.WorkspaceID == "" {
+	if request.TagSessionID == "" || request.VIBESSessionID == "" || request.VIBESUserID == "" || request.WorkspaceID == "" ||
+		request.AccountEpoch == 0 || request.AccountEpoch > maxDatabaseCounter ||
+		request.SessionWorkspaceGeneration == 0 || request.SessionWorkspaceGeneration > maxDatabaseCounter ||
+		request.MembershipGeneration == 0 || request.MembershipGeneration > maxDatabaseCounter ||
+		request.AuthorityVersion == 0 || request.AuthorityVersion > maxDatabaseCounter {
 		return Decision{Reason: DenyMissingGrant}
 	}
 	state, err := g.store.loadAccess(ctx, request)
@@ -274,23 +291,34 @@ func (g *Gate) Authorize(ctx context.Context, request AccessRequest) Decision {
 		return Decision{Reason: DenyUnknownProjection}
 	}
 	if state.session.TagSessionID != request.TagSessionID || state.session.VIBESUserID != request.VIBESUserID ||
-		state.session.WorkspaceID != request.WorkspaceID || state.session.VIBESSessionID == "" {
+		state.session.WorkspaceID != request.WorkspaceID || state.session.VIBESSessionID != request.VIBESSessionID {
 		return Decision{Reason: DenyMissingGrant}
 	}
 	now := g.clock.Now()
 	if !state.session.SessionExpiresAt.After(now) || !state.session.GrantExpiresAt.After(now) {
 		return Decision{Reason: DenyExpiredGrant}
 	}
-	if state.session.AccountEpoch != state.projection.AccountEpoch {
+	if state.session.SessionWorkspaceGeneration != request.SessionWorkspaceGeneration {
+		return Decision{Reason: DenyStaleSessionWorkspaceGeneration}
+	}
+	if state.session.AccountEpoch != state.projection.AccountEpoch || request.AccountEpoch != state.projection.AccountEpoch {
 		return Decision{Reason: DenyStaleAccountEpoch}
 	}
-	if state.session.MembershipGeneration != state.projection.MembershipGeneration {
+	if state.session.MembershipGeneration != state.projection.MembershipGeneration || request.MembershipGeneration != state.projection.MembershipGeneration {
 		return Decision{Reason: DenyStaleGeneration}
 	}
-	if state.session.AuthorityVersion != state.projection.AuthorityVersion {
+	if state.session.AuthorityVersion != state.projection.AuthorityVersion || request.AuthorityVersion != state.projection.AuthorityVersion {
 		return Decision{Reason: DenyStaleVersion}
 	}
 	return Decision{Allowed: true, Role: state.projection.Role, AuthorityVersion: state.projection.AuthorityVersion}
+}
+
+// BrowserTagSessionID is the stable #299 handoff/HTTP grant key. Workspace
+// switches reuse this key so a higher session Workspace generation can
+// atomically supersede every earlier Workspace grant for the VIBES session.
+func BrowserTagSessionID(vibesUserID, vibesSessionID string) string {
+	digest := sha256.Sum256([]byte(vibesUserID + "\x00" + vibesSessionID))
+	return "tag-browser-" + hex.EncodeToString(digest[:])
 }
 
 func validProjection(event ProjectionEvent) bool {

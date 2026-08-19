@@ -45,11 +45,12 @@ type identitySessionKey struct {
 }
 
 type memorySession struct {
-	vibesSessionID string
-	vibesUserID    string
-	accountEpoch   uint64
-	expiresAt      time.Time
-	revoked        bool
+	vibesSessionID             string
+	vibesUserID                string
+	accountEpoch               uint64
+	sessionWorkspaceGeneration uint64
+	expiresAt                  time.Time
+	revoked                    bool
 }
 
 type memoryGrant struct {
@@ -195,6 +196,9 @@ func (s *MemoryStore) createGrant(_ context.Context, grant SessionGrant, now tim
 		return ErrGrantDenied
 	}
 	session, sessionExists := s.sessions[grant.TagSessionID]
+	if grant.Continuous && !sessionExists {
+		return ErrGrantDenied
+	}
 	if identity, exists := s.identityStates[grant.VIBESUserID]; exists &&
 		(identity.integrity != integrityHealthy || grant.AccountEpoch < identity.accountEpoch || grant.AccountEpoch <= identity.revokedThrough) {
 		return ErrGrantDenied
@@ -206,23 +210,52 @@ func (s *MemoryStore) createGrant(_ context.Context, grant SessionGrant, now tim
 		if session.revoked || session.vibesSessionID != grant.VIBESSessionID || session.vibesUserID != grant.VIBESUserID || session.accountEpoch != grant.AccountEpoch {
 			return ErrGrantDenied
 		}
-		if grant.SessionExpiresAt.Before(session.expiresAt) {
+		if grant.SessionWorkspaceGeneration < session.sessionWorkspaceGeneration ||
+			(grant.Continuous && grant.SessionWorkspaceGeneration != session.sessionWorkspaceGeneration) {
+			return ErrGrantDenied
+		}
+		if !grant.Continuous && grant.SessionWorkspaceGeneration == session.sessionWorkspaceGeneration {
+			for key := range s.grants {
+				if key.tagSessionID == grant.TagSessionID && key.workspaceID != grant.WorkspaceID {
+					return ErrGrantDenied
+				}
+			}
+		}
+		if grant.SessionWorkspaceGeneration > session.sessionWorkspaceGeneration {
+			for key := range s.grants {
+				if key.tagSessionID == grant.TagSessionID {
+					delete(s.grants, key)
+				}
+			}
+			session.sessionWorkspaceGeneration = grant.SessionWorkspaceGeneration
+		}
+		if !grant.Continuous && grant.SessionExpiresAt.Before(session.expiresAt) {
 			session.expiresAt = grant.SessionExpiresAt
 		}
 	} else {
 		session = memorySession{
-			vibesSessionID: grant.VIBESSessionID,
-			vibesUserID:    grant.VIBESUserID,
-			accountEpoch:   grant.AccountEpoch,
-			expiresAt:      grant.SessionExpiresAt,
+			vibesSessionID:             grant.VIBESSessionID,
+			vibesUserID:                grant.VIBESUserID,
+			accountEpoch:               grant.AccountEpoch,
+			sessionWorkspaceGeneration: grant.SessionWorkspaceGeneration,
+			expiresAt:                  grant.SessionExpiresAt,
 		}
 	}
 	grantKey := workspaceGrantKey{tagSessionID: grant.TagSessionID, workspaceID: grant.WorkspaceID}
 	existingGrant, grantExists := s.grants[grantKey]
-	if grantExists && (existingGrant.revoked || existingGrant.membershipGeneration != grant.MembershipGeneration || existingGrant.authorityVersion > grant.AuthorityVersion) {
+	if grant.Continuous && !grantExists {
+		return ErrGrantDenied
+	}
+	if grantExists && existingGrant.revoked {
+		return ErrGrantDenied
+	}
+	if grantExists && !grant.Continuous && existingGrant.membershipGeneration != grant.MembershipGeneration {
 		return ErrGrantDenied
 	}
 	grantExpiry := grant.GrantExpiresAt
+	if grant.Continuous && grantExists {
+		grantExpiry = existingGrant.expiresAt
+	}
 	if grantExpiry.After(session.expiresAt) {
 		grantExpiry = session.expiresAt
 	}
@@ -264,15 +297,16 @@ func (s *MemoryStore) loadAccess(_ context.Context, request AccessRequest) (acce
 		identity:       identity,
 		identityExists: identityExists,
 		session: SessionGrant{
-			TagSessionID:         request.TagSessionID,
-			VIBESSessionID:       session.vibesSessionID,
-			VIBESUserID:          session.vibesUserID,
-			WorkspaceID:          request.WorkspaceID,
-			AccountEpoch:         session.accountEpoch,
-			MembershipGeneration: grant.membershipGeneration,
-			AuthorityVersion:     grant.authorityVersion,
-			SessionExpiresAt:     session.expiresAt,
-			GrantExpiresAt:       grant.expiresAt,
+			TagSessionID:               request.TagSessionID,
+			VIBESSessionID:             session.vibesSessionID,
+			VIBESUserID:                session.vibesUserID,
+			WorkspaceID:                request.WorkspaceID,
+			AccountEpoch:               session.accountEpoch,
+			SessionWorkspaceGeneration: session.sessionWorkspaceGeneration,
+			MembershipGeneration:       grant.membershipGeneration,
+			AuthorityVersion:           grant.authorityVersion,
+			SessionExpiresAt:           session.expiresAt,
+			GrantExpiresAt:             grant.expiresAt,
 		},
 	}, nil
 }

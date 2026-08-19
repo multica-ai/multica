@@ -28,13 +28,18 @@ func TestClientConsumesOpaqueCodeOverRestrictedLoopbackContract(t *testing.T) {
 			t.Fatalf("unexpected body: %#v", body)
 		}
 		_ = json.NewEncoder(w).Encode(Identity{
-			UserID:        "vibes-user-1",
-			WorkspaceID:   "vibes-workspace-1",
-			WorkspaceSlug: "design-lab",
-			WorkspaceName: "Design Lab",
-			Name:          "VIBES User",
-			Email:         "same@example.test",
-			Role:          "owner",
+			UserID:                     "vibes-user-1",
+			SessionID:                  "vibes-session-1",
+			WorkspaceID:                "vibes-workspace-1",
+			WorkspaceSlug:              "design-lab",
+			WorkspaceName:              "Design Lab",
+			Name:                       "VIBES User",
+			Email:                      "",
+			Role:                       "owner",
+			AccountEpoch:               7,
+			SessionWorkspaceGeneration: 5,
+			AuthorityVersion:           11,
+			MembershipGeneration:       3,
 		})
 	}))
 	defer server.Close()
@@ -49,6 +54,24 @@ func TestClientConsumesOpaqueCodeOverRestrictedLoopbackContract(t *testing.T) {
 	}
 	if identity.UserID != "vibes-user-1" || identity.WorkspaceID != "vibes-workspace-1" {
 		t.Fatalf("wrong stable identity: %#v", identity)
+	}
+}
+
+func TestClientRejectsHandoffWithoutSessionAuthorityBinding(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(Identity{
+			UserID: "vibes-user-1", WorkspaceID: "vibes-workspace-1",
+			WorkspaceSlug: "design-lab", WorkspaceName: "Design Lab",
+			Name: "VIBES User", Email: "user@example.test", Role: "member",
+		})
+	}))
+	defer server.Close()
+	client, err := NewClient(server.URL, "local-service-secret-at-least-32-bytes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Consume(context.Background(), "opaque-code", "vibes-tag-local"); !errors.Is(err, ErrRejected) {
+		t.Fatalf("Consume error = %v, want ErrRejected", err)
 	}
 }
 

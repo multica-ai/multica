@@ -18,6 +18,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -165,6 +166,20 @@ func (h *Handler) ListWorkspaces(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list workspaces")
 		return
+	}
+	if identity, ok := middleware.TagHTTPIdentityFromContext(r.Context()); ok && identity.Mirrored {
+		var scoped []db.Workspace
+		for _, workspace := range workspaces {
+			if uuidToString(workspace.ID) == identity.MulticaWorkspaceID {
+				scoped = append(scoped, workspace)
+				break
+			}
+		}
+		if len(scoped) != 1 {
+			writeError(w, http.StatusServiceUnavailable, "Tag workspace mirror unavailable")
+			return
+		}
+		workspaces = scoped
 	}
 
 	resp := make([]WorkspaceResponse, len(workspaces))

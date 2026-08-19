@@ -9,14 +9,23 @@ import (
 	"github.com/multica-ai/multica/server/internal/tagaccess"
 )
 
+func accessRequestForGrant(grant tagaccess.SessionGrant) tagaccess.AccessRequest {
+	return tagaccess.AccessRequest{
+		TagSessionID: grant.TagSessionID, VIBESSessionID: grant.VIBESSessionID,
+		VIBESUserID: grant.VIBESUserID, WorkspaceID: grant.WorkspaceID,
+		AccountEpoch: grant.AccountEpoch, SessionWorkspaceGeneration: grant.SessionWorkspaceGeneration,
+		MembershipGeneration: grant.MembershipGeneration, AuthorityVersion: grant.AuthorityVersion,
+	}
+}
+
 func TestAccessGateDeniesUnknownProjection(t *testing.T) {
 	store := tagaccess.NewMemoryStore()
 	gate, _ := newMemoryGate(store, fixedClock{now: time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)})
 
 	decision := gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: "tag-session-1",
-		VIBESUserID:  "vibes-user-1",
-		WorkspaceID:  "vibes-workspace-1",
+		TagSessionID: "tag-session-1", VIBESSessionID: "vibes-session-1",
+		VIBESUserID: "vibes-user-1", WorkspaceID: "vibes-workspace-1",
+		AccountEpoch: 1, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
 	})
 
 	if decision.Allowed || decision.Reason != tagaccess.DenyUnknownProjection {
@@ -250,25 +259,22 @@ func TestAccessGateAuthorizesOnlyAProjectionBoundSessionGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant := tagaccess.SessionGrant{
-		TagSessionID:         "tag-session-1",
-		VIBESSessionID:       "vibes-session-1",
-		VIBESUserID:          event.VIBESUserID,
-		WorkspaceID:          event.WorkspaceID,
-		AccountEpoch:         event.AccountEpoch,
-		MembershipGeneration: event.MembershipGeneration,
-		AuthorityVersion:     event.AuthorityVersion,
-		SessionExpiresAt:     now.Add(time.Hour),
-		GrantExpiresAt:       now.Add(30 * time.Minute),
+		TagSessionID:               "tag-session-1",
+		VIBESSessionID:             "vibes-session-1",
+		VIBESUserID:                event.VIBESUserID,
+		WorkspaceID:                event.WorkspaceID,
+		AccountEpoch:               event.AccountEpoch,
+		SessionWorkspaceGeneration: 1,
+		MembershipGeneration:       event.MembershipGeneration,
+		AuthorityVersion:           event.AuthorityVersion,
+		SessionExpiresAt:           now.Add(time.Hour),
+		GrantExpiresAt:             now.Add(30 * time.Minute),
 	}
 	if err := gate.GrantSession(context.Background(), grant); err != nil {
 		t.Fatalf("GrantSession() error = %v", err)
 	}
 
-	decision := gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: grant.TagSessionID,
-		VIBESUserID:  grant.VIBESUserID,
-		WorkspaceID:  grant.WorkspaceID,
-	})
+	decision := gate.Authorize(context.Background(), accessRequestForGrant(grant))
 	if !decision.Allowed || decision.Role != tagaccess.RoleAdmin || decision.AuthorityVersion != 1 {
 		t.Fatalf("Authorize() = %#v, want current admin projection", decision)
 	}
@@ -292,9 +298,10 @@ func TestAccessGateRejectsLegacyCredentialWithoutSessionGrant(t *testing.T) {
 	}
 
 	decision := gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: "legacy-30-day-jwt-subject",
-		VIBESUserID:  event.VIBESUserID,
-		WorkspaceID:  event.WorkspaceID,
+		TagSessionID: "legacy-30-day-jwt-subject", VIBESSessionID: "legacy-vibes-session",
+		VIBESUserID: event.VIBESUserID, WorkspaceID: event.WorkspaceID,
+		AccountEpoch: event.AccountEpoch, SessionWorkspaceGeneration: 1,
+		MembershipGeneration: event.MembershipGeneration, AuthorityVersion: event.AuthorityVersion,
 	})
 	if decision.Allowed || decision.Reason != tagaccess.DenyMissingGrant {
 		t.Fatalf("Authorize() = %#v, want missing grant denial", decision)
@@ -319,15 +326,16 @@ func TestAccessGateFailsClosedOnVersionGapAndStoreFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant := tagaccess.SessionGrant{
-		TagSessionID:         "tag-session-1",
-		VIBESSessionID:       "vibes-session-1",
-		VIBESUserID:          event.VIBESUserID,
-		WorkspaceID:          event.WorkspaceID,
-		AccountEpoch:         1,
-		MembershipGeneration: 1,
-		AuthorityVersion:     1,
-		SessionExpiresAt:     now.Add(time.Hour),
-		GrantExpiresAt:       now.Add(time.Hour),
+		TagSessionID:               "tag-session-1",
+		VIBESSessionID:             "vibes-session-1",
+		VIBESUserID:                event.VIBESUserID,
+		WorkspaceID:                event.WorkspaceID,
+		AccountEpoch:               1,
+		SessionWorkspaceGeneration: 1,
+		MembershipGeneration:       1,
+		AuthorityVersion:           1,
+		SessionExpiresAt:           now.Add(time.Hour),
+		GrantExpiresAt:             now.Add(time.Hour),
 	}
 	if err := gate.GrantSession(context.Background(), grant); err != nil {
 		t.Fatal(err)
@@ -338,7 +346,7 @@ func TestAccessGateFailsClosedOnVersionGapAndStoreFailure(t *testing.T) {
 	if result, err := gate.ApplyProjection(context.Background(), version3); err != nil || result != tagaccess.ApplyGap {
 		t.Fatalf("ApplyProjection(version 3) = %q, %v", result, err)
 	}
-	request := tagaccess.AccessRequest{TagSessionID: grant.TagSessionID, VIBESUserID: grant.VIBESUserID, WorkspaceID: grant.WorkspaceID}
+	request := accessRequestForGrant(grant)
 	if decision := gate.Authorize(context.Background(), request); decision.Allowed || decision.Reason != tagaccess.DenyProjectionGap {
 		t.Fatalf("gap decision = %#v", decision)
 	}
@@ -367,20 +375,21 @@ func TestAccessGateRejectsStaleVersionAndMembershipGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	grant := tagaccess.SessionGrant{
-		TagSessionID:         "tag-session-1",
-		VIBESSessionID:       "vibes-session-1",
-		VIBESUserID:          event.VIBESUserID,
-		WorkspaceID:          event.WorkspaceID,
-		AccountEpoch:         event.AccountEpoch,
-		MembershipGeneration: event.MembershipGeneration,
-		AuthorityVersion:     event.AuthorityVersion,
-		SessionExpiresAt:     now.Add(time.Hour),
-		GrantExpiresAt:       now.Add(time.Hour),
+		TagSessionID:               "tag-session-1",
+		VIBESSessionID:             "vibes-session-1",
+		VIBESUserID:                event.VIBESUserID,
+		WorkspaceID:                event.WorkspaceID,
+		AccountEpoch:               event.AccountEpoch,
+		SessionWorkspaceGeneration: 1,
+		MembershipGeneration:       event.MembershipGeneration,
+		AuthorityVersion:           event.AuthorityVersion,
+		SessionExpiresAt:           now.Add(time.Hour),
+		GrantExpiresAt:             now.Add(time.Hour),
 	}
 	if err := gate.GrantSession(context.Background(), grant); err != nil {
 		t.Fatal(err)
 	}
-	request := tagaccess.AccessRequest{TagSessionID: grant.TagSessionID, VIBESUserID: grant.VIBESUserID, WorkspaceID: grant.WorkspaceID}
+	request := accessRequestForGrant(grant)
 
 	roleChange := event
 	roleChange.EventID = "event-2"
@@ -411,6 +420,70 @@ func TestAccessGateRejectsStaleVersionAndMembershipGeneration(t *testing.T) {
 	}
 }
 
+func TestAccessGateBindsAndSupersedesSessionWorkspaceGeneration(t *testing.T) {
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	gate, _ := newMemoryGate(tagaccess.NewMemoryStore(), fixedClock{now: now})
+	for _, event := range []tagaccess.ProjectionEvent{
+		{
+			EventID: "workspace-a-1", VIBESUserID: "vibes-user-1", WorkspaceID: "workspace-a",
+			Role: tagaccess.RoleOwner, Status: tagaccess.StatusActive, AccountEpoch: 1,
+			MembershipGeneration: 1, AuthorityVersion: 1,
+		},
+		{
+			EventID: "workspace-b-1", VIBESUserID: "vibes-user-1", WorkspaceID: "workspace-b",
+			Role: tagaccess.RoleMember, Status: tagaccess.StatusActive, AccountEpoch: 1,
+			MembershipGeneration: 1, AuthorityVersion: 1,
+		},
+	} {
+		if _, err := gate.ApplyProjection(context.Background(), event); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tagSessionID := tagaccess.BrowserTagSessionID("vibes-user-1", "vibes-session-1")
+	grant := tagaccess.SessionGrant{
+		TagSessionID: tagSessionID, VIBESSessionID: "vibes-session-1", VIBESUserID: "vibes-user-1",
+		WorkspaceID: "workspace-a", AccountEpoch: 1, SessionWorkspaceGeneration: 1,
+		MembershipGeneration: 1, AuthorityVersion: 1,
+		SessionExpiresAt: now.Add(time.Hour), GrantExpiresAt: now.Add(time.Hour),
+	}
+	if err := gate.GrantSession(context.Background(), grant); err != nil {
+		t.Fatal(err)
+	}
+	request := tagaccess.AccessRequest{
+		TagSessionID: tagSessionID, VIBESSessionID: grant.VIBESSessionID, VIBESUserID: grant.VIBESUserID,
+		WorkspaceID: grant.WorkspaceID, AccountEpoch: 1, SessionWorkspaceGeneration: 1,
+		MembershipGeneration: 1, AuthorityVersion: 1,
+	}
+	if decision := gate.Authorize(context.Background(), request); !decision.Allowed {
+		t.Fatalf("generation 1 decision = %#v", decision)
+	}
+
+	newWorkspaceGrant := grant
+	newWorkspaceGrant.WorkspaceID = "workspace-b"
+	if err := gate.GrantSession(context.Background(), newWorkspaceGrant); !errors.Is(err, tagaccess.ErrGrantDenied) {
+		t.Fatalf("same-generation Workspace switch error = %v, want denied", err)
+	}
+	newWorkspaceGrant.SessionWorkspaceGeneration = 2
+	if err := gate.GrantSession(context.Background(), newWorkspaceGrant); err != nil {
+		t.Fatal(err)
+	}
+	if decision := gate.Authorize(context.Background(), request); decision.Allowed {
+		t.Fatalf("superseded Workspace grant remained active: %#v", decision)
+	}
+	request.WorkspaceID = "workspace-b"
+	request.SessionWorkspaceGeneration = 2
+	if decision := gate.Authorize(context.Background(), request); !decision.Allowed {
+		t.Fatalf("generation 2 decision = %#v", decision)
+	}
+	request.SessionWorkspaceGeneration = 1
+	if decision := gate.Authorize(context.Background(), request); decision.Allowed || decision.Reason != tagaccess.DenyStaleSessionWorkspaceGeneration {
+		t.Fatalf("stale session Workspace generation decision = %#v", decision)
+	}
+	if err := gate.GrantSession(context.Background(), grant); !errors.Is(err, tagaccess.ErrGrantDenied) {
+		t.Fatalf("stale handoff grant error = %v, want denied", err)
+	}
+}
+
 func TestAccessGateNeverRevivesOldSessionAfterReinvite(t *testing.T) {
 	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
 	store := tagaccess.NewMemoryStore()
@@ -429,15 +502,16 @@ func TestAccessGateNeverRevivesOldSessionAfterReinvite(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldGrant := tagaccess.SessionGrant{
-		TagSessionID:         "tag-session-old",
-		VIBESSessionID:       "vibes-session-1",
-		VIBESUserID:          active.VIBESUserID,
-		WorkspaceID:          active.WorkspaceID,
-		AccountEpoch:         1,
-		MembershipGeneration: 5,
-		AuthorityVersion:     1,
-		SessionExpiresAt:     now.Add(time.Hour),
-		GrantExpiresAt:       now.Add(time.Hour),
+		TagSessionID:               "tag-session-old",
+		VIBESSessionID:             "vibes-session-1",
+		VIBESUserID:                active.VIBESUserID,
+		WorkspaceID:                active.WorkspaceID,
+		AccountEpoch:               1,
+		SessionWorkspaceGeneration: 1,
+		MembershipGeneration:       5,
+		AuthorityVersion:           1,
+		SessionExpiresAt:           now.Add(time.Hour),
+		GrantExpiresAt:             now.Add(time.Hour),
 	}
 	if err := gate.GrantSession(context.Background(), oldGrant); err != nil {
 		t.Fatal(err)
@@ -457,7 +531,7 @@ func TestAccessGateNeverRevivesOldSessionAfterReinvite(t *testing.T) {
 	if result, err := gate.ApplyProjection(context.Background(), rejoined); err != nil || result != tagaccess.ApplyApplied {
 		t.Fatalf("rejoin = %q, %v", result, err)
 	}
-	request := tagaccess.AccessRequest{TagSessionID: oldGrant.TagSessionID, VIBESUserID: oldGrant.VIBESUserID, WorkspaceID: oldGrant.WorkspaceID}
+	request := accessRequestForGrant(oldGrant)
 	if decision := gate.Authorize(context.Background(), request); decision.Reason != tagaccess.DenyStaleGeneration {
 		t.Fatalf("old session after rejoin = %#v", decision)
 	}
@@ -501,24 +575,21 @@ func TestVerifiedSnapshotBootstrapsNewMemberAtCurrentWorkspaceVersion(t *testing
 		t.Fatalf("ApplyProjection(snapshot v5) = %q, %v, want applied", result, err)
 	}
 	grant := tagaccess.SessionGrant{
-		TagSessionID:         "tag-session-new",
-		VIBESSessionID:       "vibes-session-new",
-		VIBESUserID:          event.VIBESUserID,
-		WorkspaceID:          event.WorkspaceID,
-		AccountEpoch:         event.AccountEpoch,
-		MembershipGeneration: event.MembershipGeneration,
-		AuthorityVersion:     event.AuthorityVersion,
-		SessionExpiresAt:     now.Add(time.Hour),
-		GrantExpiresAt:       now.Add(30 * time.Minute),
+		TagSessionID:               "tag-session-new",
+		VIBESSessionID:             "vibes-session-new",
+		VIBESUserID:                event.VIBESUserID,
+		WorkspaceID:                event.WorkspaceID,
+		AccountEpoch:               event.AccountEpoch,
+		SessionWorkspaceGeneration: 1,
+		MembershipGeneration:       event.MembershipGeneration,
+		AuthorityVersion:           event.AuthorityVersion,
+		SessionExpiresAt:           now.Add(time.Hour),
+		GrantExpiresAt:             now.Add(30 * time.Minute),
 	}
 	if err := gate.GrantSession(context.Background(), grant); err != nil {
 		t.Fatalf("GrantSession() error = %v", err)
 	}
-	decision := gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: grant.TagSessionID,
-		VIBESUserID:  grant.VIBESUserID,
-		WorkspaceID:  grant.WorkspaceID,
-	})
+	decision := gate.Authorize(context.Background(), accessRequestForGrant(grant))
 	if !decision.Allowed || decision.AuthorityVersion != 5 {
 		t.Fatalf("Authorize() = %#v, want allowed snapshot at v5", decision)
 	}
@@ -734,7 +805,7 @@ func TestCompleteSnapshotCannotLeaveAnOmittedMemberAuthorized(t *testing.T) {
 	grant := tagaccess.SessionGrant{
 		TagSessionID: "tag-session-b", VIBESSessionID: "vibes-session-b",
 		VIBESUserID: memberB.VIBESUserID, WorkspaceID: memberB.WorkspaceID,
-		AccountEpoch: 1, MembershipGeneration: 1, AuthorityVersion: 3,
+		AccountEpoch: 1, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 3,
 		SessionExpiresAt: now.Add(time.Hour), GrantExpiresAt: now.Add(30 * time.Minute),
 	}
 	if err := gate.GrantSession(context.Background(), grant); err != nil {
@@ -750,9 +821,7 @@ func TestCompleteSnapshotCannotLeaveAnOmittedMemberAuthorized(t *testing.T) {
 	if _, err := gate.ApplyAuthorityDelivery(context.Background(), replacement); err != nil {
 		t.Fatal(err)
 	}
-	decision := gate.Authorize(context.Background(), tagaccess.AccessRequest{
-		TagSessionID: grant.TagSessionID, VIBESUserID: grant.VIBESUserID, WorkspaceID: grant.WorkspaceID,
-	})
+	decision := gate.Authorize(context.Background(), accessRequestForGrant(grant))
 	if decision.Allowed || decision.Reason != tagaccess.DenyInactiveMembership {
 		t.Fatalf("omitted member Authorize() = %#v, want inactive membership denial", decision)
 	}
@@ -788,7 +857,7 @@ func TestSnapshotOmissionRequiresHigherGenerationAndNeverRevivesOldSession(t *te
 	oldGrant := tagaccess.SessionGrant{
 		TagSessionID: "tag-session-old", VIBESSessionID: "vibes-session-old",
 		VIBESUserID: memberB.VIBESUserID, WorkspaceID: memberB.WorkspaceID,
-		AccountEpoch: 1, MembershipGeneration: 1, AuthorityVersion: 3,
+		AccountEpoch: 1, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 3,
 		SessionExpiresAt: now.Add(time.Hour), GrantExpiresAt: now.Add(30 * time.Minute),
 	}
 	if err := gate.GrantSession(context.Background(), oldGrant); err != nil {
@@ -812,7 +881,7 @@ func TestSnapshotOmissionRequiresHigherGenerationAndNeverRevivesOldSession(t *te
 	if result, err := gate.ApplyProjection(context.Background(), rejoined); err != nil || result != tagaccess.ApplyApplied {
 		t.Fatalf("higher-generation rejoin = %q, %v", result, err)
 	}
-	request := tagaccess.AccessRequest{TagSessionID: oldGrant.TagSessionID, VIBESUserID: oldGrant.VIBESUserID, WorkspaceID: oldGrant.WorkspaceID}
+	request := accessRequestForGrant(oldGrant)
 	if decision := gate.Authorize(context.Background(), request); decision.Reason != tagaccess.DenyStaleGeneration {
 		t.Fatalf("old session after higher-generation rejoin = %#v", decision)
 	}

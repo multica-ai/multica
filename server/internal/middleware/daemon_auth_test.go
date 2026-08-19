@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	redismock "github.com/go-redis/redismock/v9"
 	"github.com/multica-ai/multica/server/internal/auth"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -87,6 +88,44 @@ func TestDaemonAuth_PATCacheHit(t *testing.T) {
 	}
 	if gotPath != DaemonAuthPathPAT {
 		t.Fatalf("expected auth path %q, got %q", DaemonAuthPathPAT, gotPath)
+	}
+}
+
+func TestDaemonAuth_RejectsMirroredPATFallbackButPreservesDaemonToken(t *testing.T) {
+	patRedis, patMock := redismock.NewClientMock()
+	patCache := auth.NewPATCache(patRedis)
+	patToken := "mul_mirrored_daemon_pat"
+	patMock.ExpectGet("mul:auth:pat:" + auth.HashToken(patToken)).SetVal("mirrored-user")
+	mirrors := tagHTTPMirrorFixture{usersByMultica: map[string]string{"mirrored-user": "vibes-user-1"}}
+
+	patRequest := httptest.NewRequest(http.MethodPost, "/api/daemon/heartbeat", nil)
+	patRequest.Header.Set("Authorization", "Bearer "+patToken)
+	patResponse := httptest.NewRecorder()
+	DaemonAuth(nil, patCache, nil, nil, mirrors)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+		t.Fatal("mirrored PAT reached daemon handler")
+	})).ServeHTTP(patResponse, patRequest)
+	if patResponse.Code != http.StatusForbidden {
+		t.Fatalf("mirrored PAT status = %d", patResponse.Code)
+	}
+	if err := patMock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+
+	daemonRedis, daemonMock := redismock.NewClientMock()
+	daemonCache := auth.NewDaemonTokenCache(daemonRedis)
+	daemonToken := "mdt_explicit_service"
+	daemonMock.ExpectGet("mul:auth:daemon:" + auth.HashToken(daemonToken)).SetVal(`{"w":"ws-1","d":"daemon-1"}`)
+	daemonRequest := httptest.NewRequest(http.MethodPost, "/api/daemon/heartbeat", nil)
+	daemonRequest.Header.Set("Authorization", "Bearer "+daemonToken)
+	daemonResponse := httptest.NewRecorder()
+	DaemonAuth(nil, patCache, daemonCache, nil, mirrors)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	})).ServeHTTP(daemonResponse, daemonRequest)
+	if daemonResponse.Code != http.StatusNoContent {
+		t.Fatalf("daemon token status = %d", daemonResponse.Code)
+	}
+	if err := daemonMock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
 	}
 }
 
@@ -284,7 +323,6 @@ func TestDaemonAuth_MCN_FleetUnreachable(t *testing.T) {
 		t.Fatalf("expected 503 when fleet is unavailable, got %d", w.Code)
 	}
 }
-
 
 // TestDaemonAuth_MCN_OwnerNotInLocalDB pins the new owner-existence
 // guard end-to-end through the middleware. Cloud verifies the token

@@ -1,0 +1,61 @@
+{
+  "fixtureVersion": 1,
+  "warning": "TEST-ONLY KEY. Never use this fixture key outside contract tests.",
+  "testKeyBase64": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+  "vectors": [
+    {
+      "name": "unsafe-http-post-with-duplicate-query",
+      "rawBodyBase64": "eyJtZXNzYWdlIjoiaGVsbG8ifQ==",
+      "payload": {
+        "schemaVersion": 1,
+        "issuer": "vibes-tag-gateway-v1",
+        "audience": "vibes-tag-browser-http-v1",
+        "keyId": "gateway-test-key",
+        "method": "POST",
+        "path": "/api/v1/workspaces/~alpha/messages",
+        "query": "a=first&a=second&space=hello%20world&z=%2F",
+        "bodySha256": "9b2d43affbf49a367028df2e1414f84c0e099ac98c3d54a8a80157fd7771af25",
+        "userId": "user-1",
+        "workspaceId": "workspace-1",
+        "sessionId": "session-1",
+        "accountEpoch": 7,
+        "sessionWorkspaceGeneration": 5,
+        "authorityVersion": 11,
+        "membershipGeneration": 3,
+        "issuedAt": 1787155200000,
+        "expiresAt": 1787155205000,
+        "requestId": "request-1",
+        "nonce": "nonce-1"
+      },
+      "canonical": "vibes-tag-gateway-request-v1\n{\"schemaVersion\":1,\"issuer\":\"vibes-tag-gateway-v1\",\"audience\":\"vibes-tag-browser-http-v1\",\"keyId\":\"gateway-test-key\",\"method\":\"POST\",\"path\":\"/api/v1/workspaces/~alpha/messages\",\"query\":\"a=first\\u0026a=second\\u0026space=hello%20world\\u0026z=%2F\",\"bodySha256\":\"9b2d43affbf49a367028df2e1414f84c0e099ac98c3d54a8a80157fd7771af25\",\"userId\":\"user-1\",\"workspaceId\":\"workspace-1\",\"sessionId\":\"session-1\",\"accountEpoch\":7,\"sessionWorkspaceGeneration\":5,\"authorityVersion\":11,\"membershipGeneration\":3,\"issuedAt\":1787155200000,\"expiresAt\":1787155205000,\"requestId\":\"request-1\",\"nonce\":\"nonce-1\"}",
+      "signature": "sHeMRaWlW8VMdtX6ppk19FVb89vJbI3pAXkq0Wn6SWQ"
+    },
+    {
+      "name": "websocket-upgrade",
+      "rawBodyBase64": "",
+      "payload": {
+        "schemaVersion": 1,
+        "issuer": "vibes-tag-gateway-v1",
+        "audience": "vibes-tag-browser-ws-v1",
+        "keyId": "gateway-test-key",
+        "method": "GET",
+        "path": "/ws",
+        "query": "workspace_id=workspace-1",
+        "bodySha256": "",
+        "userId": "user-1",
+        "workspaceId": "workspace-1",
+        "sessionId": "session-1",
+        "accountEpoch": 7,
+        "sessionWorkspaceGeneration": 5,
+        "authorityVersion": 11,
+        "membershipGeneration": 3,
+        "issuedAt": 1787155200000,
+        "expiresAt": 1787155205000,
+        "requestId": "request-ws-1",
+        "nonce": "nonce-ws-1"
+      },
+      "canonical": "vibes-tag-gateway-request-v1\n{\"schemaVersion\":1,\"issuer\":\"vibes-tag-gateway-v1\",\"audience\":\"vibes-tag-browser-ws-v1\",\"keyId\":\"gateway-test-key\",\"method\":\"GET\",\"path\":\"/ws\",\"query\":\"workspace_id=workspace-1\",\"bodySha256\":\"\",\"userId\":\"user-1\",\"workspaceId\":\"workspace-1\",\"sessionId\":\"session-1\",\"accountEpoch\":7,\"sessionWorkspaceGeneration\":5,\"authorityVersion\":11,\"membershipGeneration\":3,\"issuedAt\":1787155200000,\"expiresAt\":1787155205000,\"requestId\":\"request-ws-1\",\"nonce\":\"nonce-ws-1\"}",
+      "signature": "cesxaMnYXlDSvRXNaLQYCwyAjKz6fxGcSheCSgzQNX4"
+    }
+  ]
+}

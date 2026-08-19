@@ -16,6 +16,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/storage"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -906,6 +907,13 @@ func (h *Handler) loadAttachmentForDownload(w http.ResponseWriter, r *http.Reque
 	if workspaceID == "" {
 		writeError(w, http.StatusNotFound, "attachment not found")
 		return db.Attachment{}, false
+	}
+	if identity, mirrored := middleware.TagHTTPIdentityFromContext(r.Context()); mirrored && identity.Mirrored {
+		if identity.MulticaWorkspaceID != workspaceID {
+			writeError(w, http.StatusNotFound, "attachment not found")
+			return db.Attachment{}, false
+		}
+		return att, true
 	}
 	if h.MembershipCache.Get(r.Context(), userID, workspaceID) {
 		return att, true

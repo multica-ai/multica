@@ -9,29 +9,50 @@ import (
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/tagaccess"
 	"github.com/multica-ai/multica/server/internal/vibeshandoff"
 )
+
+type recordingTagSessionGrantor struct {
+	grants []tagaccess.SessionGrant
+	err    error
+}
+
+func (g *recordingTagSessionGrantor) GrantSession(_ context.Context, grant tagaccess.SessionGrant) error {
+	g.grants = append(g.grants, grant)
+	return g.err
+}
 
 func TestVIBESHandoffCreatesStableDistinctMirrorsAndCookieSession(t *testing.T) {
 	const secret = "local-service-secret-at-least-32-bytes"
 	identities := map[string]vibeshandoff.Identity{
 		"first": {
-			UserID:        "vibes-handler-user-1",
-			WorkspaceID:   "vibes-handler-workspace-1",
-			WorkspaceSlug: "vibes-handler-workspace",
-			WorkspaceName: "VIBES Handler Workspace",
-			Name:          "First VIBES User",
-			Email:         "same-profile@example.test",
-			Role:          "owner",
+			UserID:                     "vibes-handler-user-1",
+			SessionID:                  "vibes-handler-session-1",
+			WorkspaceID:                "vibes-handler-workspace-1",
+			WorkspaceSlug:              "vibes-handler-workspace",
+			WorkspaceName:              "VIBES Handler Workspace",
+			Name:                       "First VIBES User",
+			Email:                      "same-profile@example.test",
+			Role:                       "owner",
+			AccountEpoch:               1,
+			SessionWorkspaceGeneration: 1,
+			AuthorityVersion:           1,
+			MembershipGeneration:       1,
 		},
 		"second": {
-			UserID:        "vibes-handler-user-2",
-			WorkspaceID:   "vibes-handler-workspace-1",
-			WorkspaceSlug: "vibes-handler-workspace",
-			WorkspaceName: "VIBES Handler Workspace",
-			Name:          "Second VIBES User",
-			Email:         "same-profile@example.test",
-			Role:          "member",
+			UserID:                     "vibes-handler-user-2",
+			SessionID:                  "vibes-handler-session-2",
+			WorkspaceID:                "vibes-handler-workspace-1",
+			WorkspaceSlug:              "vibes-handler-workspace",
+			WorkspaceName:              "VIBES Handler Workspace",
+			Name:                       "Second VIBES User",
+			Email:                      "same-profile@example.test",
+			Role:                       "member",
+			AccountEpoch:               1,
+			SessionWorkspaceGeneration: 1,
+			AuthorityVersion:           1,
+			MembershipGeneration:       1,
 		},
 	}
 	issuer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -54,9 +75,15 @@ func TestVIBESHandoffCreatesStableDistinctMirrorsAndCookieSession(t *testing.T) 
 	defer issuer.Close()
 
 	previous := testHandler.cfg
+	previousGrantor := testHandler.TagSessionGrantor
+	grantor := &recordingTagSessionGrantor{}
 	testHandler.cfg.VIBESHandoffConsumeURL = issuer.URL
 	testHandler.cfg.VIBESHandoffServiceSecret = secret
-	t.Cleanup(func() { testHandler.cfg = previous })
+	testHandler.TagSessionGrantor = grantor
+	t.Cleanup(func() {
+		testHandler.cfg = previous
+		testHandler.TagSessionGrantor = previousGrantor
+	})
 	cleanupVIBESMirrorTest(t)
 	t.Cleanup(func() { cleanupVIBESMirrorTest(t) })
 
@@ -105,6 +132,42 @@ func TestVIBESHandoffCreatesStableDistinctMirrorsAndCookieSession(t *testing.T) 
 	}
 	if userCount != 2 || distinctUserCount != 2 || workspaceCount != 1 {
 		t.Fatalf("wrong mirror cardinality: users=%d distinct=%d workspaces=%d", userCount, distinctUserCount, workspaceCount)
+	}
+	if len(grantor.grants) != 3 {
+		t.Fatalf("handoff grants = %d, want 3", len(grantor.grants))
+	}
+	firstGrant := grantor.grants[0]
+	if firstGrant.TagSessionID != tagaccess.BrowserTagSessionID(identities["first"].UserID, identities["first"].SessionID) ||
+		firstGrant.VIBESSessionID != identities["first"].SessionID ||
+		firstGrant.VIBESUserID != identities["first"].UserID || firstGrant.WorkspaceID != identities["first"].WorkspaceID ||
+		firstGrant.AccountEpoch != 1 || firstGrant.SessionWorkspaceGeneration != 1 ||
+		firstGrant.AuthorityVersion != 1 || firstGrant.MembershipGeneration != 1 ||
+		!firstGrant.SessionExpiresAt.Equal(firstGrant.GrantExpiresAt) {
+		t.Fatalf("first handoff grant = %#v", firstGrant)
+	}
+}
+
+func TestNativeLoginRejectsMirroredVIBESIdentity(t *testing.T) {
+	cleanupVIBESMirrorTest(t)
+	t.Cleanup(func() { cleanupVIBESMirrorTest(t) })
+	identity := vibeshandoff.Identity{
+		UserID: "vibes-handler-user-native-login", SessionID: "vibes-handler-session-native-login",
+		WorkspaceID: "vibes-handler-workspace-1", WorkspaceSlug: "vibes-handler-workspace",
+		WorkspaceName: "VIBES Handler Workspace", Name: "VIBES User", Email: "profile@example.test",
+		Role: "member", AccountEpoch: 1, SessionWorkspaceGeneration: 1, AuthorityVersion: 1, MembershipGeneration: 1,
+	}
+	user, err := testHandler.mirrorVIBESIdentity(t.Context(), identity)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if user.Email == identity.Email {
+		t.Fatal("test requires a synthetic local email distinct from VIBES profile metadata")
+	}
+	request := httptest.NewRequest(http.MethodPost, "/auth/send-code", strings.NewReader(`{"email":"`+identity.Email+`"}`))
+	response := httptest.NewRecorder()
+	testHandler.SendCode(response, request)
+	if response.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body=%s", response.Code, response.Body.String())
 	}
 }
 
