@@ -606,9 +606,9 @@ func TestGrokPropagatesMCPAndUsage(t *testing.T) {
 	if !strings.Contains(requests, `"name":"fetch"`) || !strings.Contains(requests, `"command":"uvx"`) {
 		t.Fatalf("session/new did not receive MCP server:\n%s", raw)
 	}
-	usage, ok := result.Usage["grok-4.5"]
+	usage, ok := result.Usage["grok-4.6"]
 	if !ok {
-		t.Fatalf("usage missing grok-4.5 key: %+v", result.Usage)
+		t.Fatalf("usage missing grok-4.6 key: %+v", result.Usage)
 	}
 	// The fixture's totalTokens (150) equals input + output, so its 20 cached
 	// reads sit inside inputTokens and are billed once: input is stored as the
@@ -814,7 +814,7 @@ func TestDiscoverGrokModelsStopsOnAuthFailures(t *testing.T) {
 			if err != nil {
 				t.Fatalf("discover grok models: %v", err)
 			}
-			if len(catalog.Models) != 2 || catalog.Models[0].ID != "grok-4.5" {
+			if len(catalog.Models) != 3 || catalog.Models[0].ID != "grok-4.6" {
 				t.Fatalf("expected static fallback, got %+v", catalog.Models)
 			}
 			if !catalog.Fallback {
@@ -909,12 +909,12 @@ func TestGrokSelectAuthMethod(t *testing.T) {
 
 func TestGrokIsKnownThinkingValue(t *testing.T) {
 	t.Parallel()
-	for _, level := range []string{"", "low", "medium", "high", "xhigh", "future-level"} {
+	for _, level := range []string{"", "none", "minimal", "low", "medium", "high", "xhigh", "future-level"} {
 		if !IsKnownThinkingValue("grok", level) {
 			t.Errorf("IsKnownThinkingValue(grok, %q) = false", level)
 		}
 	}
-	for _, level := range []string{"none", "minimal", ".hidden", "bad value"} {
+	for _, level := range []string{".hidden", "bad value"} {
 		if IsKnownThinkingValue("grok", level) {
 			t.Errorf("IsKnownThinkingValue(grok, %q) = true, want rejected", level)
 		}
