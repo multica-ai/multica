@@ -11,7 +11,7 @@ export const Route = createFileRoute('/$workspaceSlug/agents_/teams_/$squadId')(
 function TagWorkspaceTeamDetailRoute() {
   const { workspaceSlug, squadId } = Route.useParams();
   const { t } = useT('squads');
-  const { t: tAgents } = useT('agents');
+  const { t: tIssues } = useT('issues');
   return (
     <AgentWorkspaceRoute workspaceSlug={workspaceSlug} resetKeys={[squadId]}>
       <SquadDetailPage
@@ -20,7 +20,7 @@ function TagWorkspaceTeamDetailRoute() {
         collectionLabel={t(($) => $.page.title)}
         createAgentHref={`/${encodeURIComponent(workspaceSlug)}/agents/new/manual?squad=${encodeURIComponent(squadId)}`}
         tasksHref={`/${encodeURIComponent(workspaceSlug)}/issues`}
-        tasksLabel={tAgents(($) => $.tabs.tasks)}
+        tasksLabel={tIssues(($) => $.task_center.tasks)}
       />
     </AgentWorkspaceRoute>
   );

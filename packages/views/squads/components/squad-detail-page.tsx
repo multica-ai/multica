@@ -213,16 +213,16 @@ export function SquadDetailPage({
           </>
         }
         actions={
-          tasksHref || canManage ? (
+          (tasksHref && tasksLabel) || canManage ? (
             <>
-              {tasksHref ? (
+              {tasksHref && tasksLabel ? (
                 <Button
                   size="sm"
                   variant="outline"
                   render={<AppLink href={tasksHref} />}
                   nativeButton={false}
                 >
-                  {tasksLabel ?? "Tasks"}
+                  {tasksLabel}
                   <ArrowUpRight className="ml-1 size-3.5" />
                 </Button>
               ) : null}
