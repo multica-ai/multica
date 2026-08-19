@@ -198,6 +198,11 @@ var concurrentIndexCleanups = map[string]string{
 	"344_vibes_multica_user_index":                              "vibes_user_mirror_multica_id_uidx",
 	"346_vibes_workspace_id_index":                              "vibes_workspace_mirror_vibes_id_uidx",
 	"347_vibes_multica_workspace_index":                         "vibes_workspace_mirror_multica_id_uidx",
+	"349_tag_access_projection_identity_index":                  "tag_access_projection_identity_uidx",
+	"351_tag_access_session_identity_index":                     "tag_access_session_identity_uidx",
+	"353_tag_session_workspace_grant_identity_index":            "tag_session_workspace_grant_identity_uidx",
+	"355_tag_access_projection_delivery_identity_index":         "tag_access_projection_delivery_identity_idx",
+	"357_tag_access_workspace_state_identity_index":             "tag_access_workspace_state_identity_idx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
