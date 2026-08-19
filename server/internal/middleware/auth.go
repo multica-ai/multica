@@ -59,6 +59,12 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// to convince a downstream handler that its request came
 			// from a non-task-token path.
 			r.Header.Del("X-Actor-Source")
+			// Worker identity is server-authenticated task context, never a
+			// member-controlled header pair. Clear both values before every
+			// non-task-token branch; the task-token branch below overwrites
+			// them from the validated token row.
+			r.Header.Del("X-Agent-ID")
+			r.Header.Del("X-Task-ID")
 
 			tokenString, fromCookie := extractToken(r)
 			if tokenString == "" {
@@ -110,7 +116,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// this header is allowed to carry — strip anything else a
 				// client tried to send.
 				r.Header.Set("X-Actor-Source", "task_token")
-				next.ServeHTTP(w, r)
+				ctx := SetAuthenticatedActorContext(r.Context(), "agent", uuidToString(tt.AgentID))
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
@@ -170,7 +177,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// treated as the owner having approved an account-
 				// level action.
 				r.Header.Set("X-Actor-Source", "cloud_pat")
-				next.ServeHTTP(w, r)
+				ctx := SetAuthenticatedActorContext(r.Context(), "member", identity.OwnerID)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
@@ -187,7 +195,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 						return
 					}
 					r.Header.Set("X-User-ID", userID)
-					next.ServeHTTP(w, r)
+					ctx := SetAuthenticatedActorContext(r.Context(), "member", userID)
+					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
 
@@ -222,7 +231,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				// within the TTL window skip this write entirely.
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
 
-				next.ServeHTTP(w, r)
+				ctx := SetAuthenticatedActorContext(r.Context(), "member", userID)
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
@@ -261,7 +271,8 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 				r.Header.Set("X-User-Email", email)
 			}
 
-			next.ServeHTTP(w, r)
+			ctx := SetAuthenticatedActorContext(r.Context(), "member", sub)
+			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
 }

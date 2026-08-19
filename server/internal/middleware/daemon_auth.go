@@ -88,6 +88,11 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			// trust this header regardless of which auth path the
 			// request arrived on.
 			r.Header.Del("X-Actor-Source")
+			// A daemon-authenticated request is not a task-token request.
+			// Do not let a client carry a forged worker header pair into a
+			// downstream handler that still supports legacy direct calls.
+			r.Header.Del("X-Agent-ID")
+			r.Header.Del("X-Task-ID")
 
 			authHeader := r.Header.Get("Authorization")
 			if authHeader == "" {
@@ -111,6 +116,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, id.WorkspaceID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonID, id.DaemonID)
 					ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
+					ctx = SetAuthenticatedActorContext(ctx, "member", "")
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
@@ -141,6 +147,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, identity.WorkspaceID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonID, identity.DaemonID)
 				ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathDaemonToken)
+				ctx = SetAuthenticatedActorContext(ctx, "member", "")
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -185,6 +192,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				// differently depending on which one routed it.
 				r.Header.Set("X-Actor-Source", "cloud_pat")
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathCloudPAT)
+				ctx = SetAuthenticatedActorContext(ctx, "member", identity.OwnerID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -199,6 +207,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 					}
 					r.Header.Set("X-User-ID", userID)
 					ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathPAT)
+					ctx = SetAuthenticatedActorContext(ctx, "member", userID)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}
@@ -231,6 +240,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 				go queries.UpdatePersonalAccessTokenLastUsed(context.Background(), pat.ID)
 
 				ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathPAT)
+				ctx = SetAuthenticatedActorContext(ctx, "member", userID)
 				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
@@ -264,6 +274,7 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			}
 			r.Header.Set("X-User-ID", sub)
 			ctx := context.WithValue(r.Context(), ctxKeyDaemonAuthPath, DaemonAuthPathJWT)
+			ctx = SetAuthenticatedActorContext(ctx, "member", sub)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

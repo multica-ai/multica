@@ -441,6 +441,87 @@ func TestProtectedRoutesRequireAuth(t *testing.T) {
 	}
 }
 
+// TestIssueReopenRouteDoesNotTrustForgedWorkerHeaders exercises the complete
+// Auth -> workspace -> issue route. A member may use the ordinary member
+// reopen behavior, but forged X-Agent-ID/X-Task-ID headers must not turn that
+// request into a worker claim renewal.
+func TestIssueReopenRouteDoesNotTrustForgedWorkerHeaders(t *testing.T) {
+	resp := authRequest(t, "GET", "/api/agents?workspace_id="+testWorkspaceID, nil)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list agents: expected 200, got %d", resp.StatusCode)
+	}
+	var agents []map[string]any
+	readJSON(t, resp, &agents)
+	if len(agents) == 0 {
+		t.Fatal("expected integration fixture agent")
+	}
+	agentID, _ := agents[0]["id"].(string)
+
+	resp = authRequest(t, "POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
+		"title":         "forged worker header reopen",
+		"status":        "todo",
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("create issue: expected 201, got %d: %s", resp.StatusCode, body)
+	}
+	var issue map[string]any
+	readJSON(t, resp, &issue)
+	issueID, _ := issue["id"].(string)
+	if issueID == "" {
+		t.Fatal("create issue returned no id")
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	})
+
+	// Put the fixture into the terminal/unused-claim state without relying on
+	// the route under test, and remove the create-triggered task.
+	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET status = 'done' WHERE id = $1`, issueID); err != nil {
+		t.Fatalf("prepare terminal issue: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
+		t.Fatalf("clear create task: %v", err)
+	}
+
+	body, err := json.Marshal(map[string]any{"status": "in_progress"})
+	if err != nil {
+		t.Fatalf("marshal reopen: %v", err)
+	}
+	req, err := http.NewRequest("PUT", testServer.URL+"/api/issues/"+issueID, bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("build reopen request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+testToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", "00000000-0000-0000-0000-000000000001")
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("reopen request: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("forged member reopen: expected 200, got %d: %s", resp.StatusCode, body)
+	}
+	resp.Body.Close()
+
+	var queued int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2
+	`, issueID, agentID).Scan(&queued); err != nil {
+		t.Fatalf("count forged worker renewal: %v", err)
+	}
+	if queued != 0 {
+		t.Fatalf("forged member headers created %d worker task(s)", queued)
+	}
+}
+
 func TestInvalidJWT(t *testing.T) {
 	cases := []struct {
 		name  string

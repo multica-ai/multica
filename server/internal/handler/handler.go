@@ -746,16 +746,15 @@ func requestUserID(r *http.Request) string {
 
 // resolveActor determines whether the request is from an agent or a human member.
 //
-// First-class signal: X-Actor-Source set to "task_token" means the request
-// authenticated via an `mat_` task-scoped token. The auth middleware sets
-// that header (and stripped any client-supplied value first), so it is
-// authoritative — the bound (agent_id, task_id) cannot be forged or
-// stripped by the agent process. This is the path MUL-2600 relies on to
-// reject agent-process traffic on owner-only endpoints.
+// First-class signal: Auth or DaemonAuth sets the authenticated actor context
+// only after server-side token validation. A task token binds the agent to
+// the token row; a member token binds the request to the member. Headers are
+// never authoritative on an authenticated route.
 //
-// Fallback signal (legacy CLI / member-token paths): the request MUST
-// carry both X-Agent-ID and a valid X-Task-ID, and the task must belong
-// to the claimed agent. Otherwise we fall back to "member".
+// Fallback signal (direct handler tests and legacy callers that do not pass
+// through auth middleware): the request MUST carry both X-Agent-ID and a
+// valid X-Task-ID, and the task must belong to the claimed agent. Production
+// authenticated routes always take the context path above.
 //
 // X-Agent-ID alone is not trusted: any workspace member can guess or observe
 // an agent's UUID, and a member-supplied X-Agent-ID would otherwise let that
@@ -765,10 +764,8 @@ func requestUserID(r *http.Request) string {
 //
 // Returns ("agent", agentID) on success, ("member", userID) otherwise.
 func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (actorType, actorID string) {
-	if r.Header.Get("X-Actor-Source") == "task_token" {
-		// Server-set header — auth middleware also forced X-Agent-ID
-		// from the token row. Trust it directly without re-querying.
-		return "agent", r.Header.Get("X-Agent-ID")
+	if actor, ok := middleware.AuthenticatedActorFromContext(r.Context()); ok {
+		return actor.Type, actor.ID
 	}
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {

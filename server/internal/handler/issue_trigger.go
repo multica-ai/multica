@@ -246,6 +246,21 @@ func (h *Handler) PreviewIssueTrigger(w http.ResponseWriter, r *http.Request) {
 		if req.Status != nil && *req.Status != "" {
 			post.Status = *req.Status
 			in.StatusChanged = loaded.Status != *req.Status
+			// Preview follows the same worker-renewal authorization as the
+			// write path. An authorized worker sees the reopen trigger that
+			// will be dispatched; an unauthorized/occupied claim gets the
+			// same explicit error instead of a misleading empty preview.
+			targetAssigneeType := post.AssigneeType
+			targetAssigneeID := post.AssigneeID
+			workerReopen, reopenStatus, reopenMessage := h.authorizeWorkerReopen(
+				r.Context(), loaded, *req.Status, actorType, actorID,
+				targetAssigneeType, targetAssigneeID,
+			)
+			if reopenStatus != 0 {
+				writeError(w, reopenStatus, reopenMessage)
+				return
+			}
+			in.WorkerReopen = workerReopen
 		}
 		in.Issue = post
 		appendTrigger(post, in)

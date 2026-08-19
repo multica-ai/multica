@@ -16,7 +16,29 @@ type contextKey int
 const (
 	ctxKeyWorkspaceID contextKey = iota
 	ctxKeyMember
+	ctxKeyAuthenticatedActor
 )
+
+// AuthenticatedActor is the identity selected by server-side token
+// validation. Handler actor resolution must prefer this context over request
+// headers because headers are transport input and may be forged by a member.
+type AuthenticatedActor struct {
+	Type string
+	ID   string
+}
+
+// AuthenticatedActorFromContext returns the actor established by Auth or
+// DaemonAuth, when the request passed through one of those middlewares.
+func AuthenticatedActorFromContext(ctx context.Context) (AuthenticatedActor, bool) {
+	actor, ok := ctx.Value(ctxKeyAuthenticatedActor).(AuthenticatedActor)
+	return actor, ok
+}
+
+// SetAuthenticatedActorContext marks the actor selected by server-side token
+// validation. It intentionally does not expose a request-header equivalent.
+func SetAuthenticatedActorContext(ctx context.Context, actorType, actorID string) context.Context {
+	return context.WithValue(ctx, ctxKeyAuthenticatedActor, AuthenticatedActor{Type: actorType, ID: actorID})
+}
 
 // MemberFromContext returns the workspace member injected by the workspace middleware.
 func MemberFromContext(ctx context.Context) (db.Member, bool) {

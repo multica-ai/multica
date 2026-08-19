@@ -10,6 +10,46 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
+type workerReopenGuard struct {
+	actorID            string
+	targetStatus       string
+	targetAssigneeType pgtype.Text
+	targetAssigneeID   pgtype.UUID
+}
+
+type workerReopenDeniedError struct {
+	status  int
+	message string
+}
+
+func (e workerReopenDeniedError) Error() string { return e.message }
+
+// enforceWorkerReopenOnLockedIssue is the authoritative check. Its caller
+// must hold the issue row lock in the same transaction that performs the
+// update, so a competing task insert or issue mutation cannot pass the check
+// and then win the claim before the renewal is committed.
+func enforceWorkerReopenOnLockedIssue(
+	ctx context.Context,
+	queries *db.Queries,
+	issue db.Issue,
+	guard workerReopenGuard,
+) error {
+	workerReopen, status, message := authorizeWorkerReopenWithQueries(
+		ctx, queries, issue, guard.targetStatus, "agent", guard.actorID,
+		guard.targetAssigneeType, guard.targetAssigneeID,
+	)
+	if status != 0 {
+		return workerReopenDeniedError{status: status, message: message}
+	}
+	if !workerReopen {
+		return workerReopenDeniedError{
+			status:  http.StatusConflict,
+			message: "issue changed before worker claim renewal",
+		}
+	}
+	return nil
+}
+
 // authorizeWorkerReopen admits the narrow worker-only reopen path. A trusted
 // worker may reopen a terminal issue only if the resulting issue remains
 // assigned to that worker and the (issue, worker) claim has no active task.
@@ -26,14 +66,30 @@ func (h *Handler) authorizeWorkerReopen(
 	targetAssigneeType pgtype.Text,
 	targetAssigneeID pgtype.UUID,
 ) (workerReopen bool, status int, message string) {
+	return authorizeWorkerReopenWithQueries(
+		ctx, h.Queries, issue, targetStatus, actorType, actorID,
+		targetAssigneeType, targetAssigneeID,
+	)
+}
+
+func authorizeWorkerReopenWithQueries(
+	ctx context.Context,
+	queries *db.Queries,
+	issue db.Issue,
+	targetStatus string,
+	actorType string,
+	actorID string,
+	targetAssigneeType pgtype.Text,
+	targetAssigneeID pgtype.UUID,
+) (workerReopen bool, status int, message string) {
 	if actorType != "agent" {
 		return false, 0, ""
 	}
-	previousStatus := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status)
-	nextStatus := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, targetStatus)
-	return h.authorizeWorkerReopenWithEffectiveStatuses(
+	previousStatus := issuestatus.Effective(ctx, queries, issue.WorkspaceID, issue.Status)
+	nextStatus := issuestatus.Effective(ctx, queries, issue.WorkspaceID, targetStatus)
+	return authorizeWorkerReopenWithEffectiveStatuses(
 		ctx, issue, targetStatus, actorType, actorID, targetAssigneeType,
-		targetAssigneeID, previousStatus, nextStatus,
+		targetAssigneeID, previousStatus, nextStatus, queries,
 	)
 }
 
@@ -47,6 +103,24 @@ func (h *Handler) authorizeWorkerReopenWithEffectiveStatuses(
 	targetAssigneeID pgtype.UUID,
 	previousStatus string,
 	nextStatus string,
+) (workerReopen bool, status int, message string) {
+	return authorizeWorkerReopenWithEffectiveStatuses(
+		ctx, issue, targetStatus, actorType, actorID, targetAssigneeType,
+		targetAssigneeID, previousStatus, nextStatus, h.Queries,
+	)
+}
+
+func authorizeWorkerReopenWithEffectiveStatuses(
+	ctx context.Context,
+	issue db.Issue,
+	targetStatus string,
+	actorType string,
+	actorID string,
+	targetAssigneeType pgtype.Text,
+	targetAssigneeID pgtype.UUID,
+	previousStatus string,
+	nextStatus string,
+	queries *db.Queries,
 ) (workerReopen bool, status int, message string) {
 	if actorType != "agent" {
 		return false, 0, ""
@@ -72,7 +146,10 @@ func (h *Handler) authorizeWorkerReopenWithEffectiveStatuses(
 		return false, http.StatusForbidden, "only the assigned worker can reopen this issue"
 	}
 
-	active, err := h.hasActiveTaskForIssueAndAgent(ctx, issue.ID, targetAssigneeID)
+	active, err := queries.HasActiveTaskForIssueAndAgent(ctx, db.HasActiveTaskForIssueAndAgentParams{
+		IssueID: issue.ID,
+		AgentID: targetAssigneeID,
+	})
 	if err != nil {
 		slog.Warn("worker reopen denied: claim occupancy unavailable",
 			"issue_id", uuidToString(issue.ID), "agent_id", actorID, "error", err)

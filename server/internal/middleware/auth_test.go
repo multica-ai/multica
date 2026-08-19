@@ -279,10 +279,15 @@ func TestAuth_InvalidPAT(t *testing.T) {
 // into treating the request differently — exactly the kind of trust
 // boundary MUL-2600 introduces.
 func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
-	var gotActorSource string
+	var gotActorSource, gotAgentID, gotTaskID string
+	var gotActor AuthenticatedActor
+	var gotActorOK bool
 	mw := Auth(nil, nil, nil)
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotActorSource = r.Header.Get("X-Actor-Source")
+		gotAgentID = r.Header.Get("X-Agent-ID")
+		gotTaskID = r.Header.Get("X-Task-ID")
+		gotActor, gotActorOK = AuthenticatedActorFromContext(r.Context())
 		w.WriteHeader(http.StatusOK)
 	}))
 
@@ -293,6 +298,8 @@ func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
 	// discard it before the JWT branch runs (which doesn't set it again
 	// for human sessions).
 	req.Header.Set("X-Actor-Source", "task_token")
+	req.Header.Set("X-Agent-ID", "forged-agent")
+	req.Header.Set("X-Task-ID", "forged-task")
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
@@ -301,6 +308,12 @@ func TestAuth_StripsClientSuppliedActorSource(t *testing.T) {
 	}
 	if gotActorSource != "" {
 		t.Fatalf("X-Actor-Source must be cleared on non-task-token paths, got %q", gotActorSource)
+	}
+	if gotAgentID != "" || gotTaskID != "" {
+		t.Fatalf("worker headers must be cleared on member auth, got agent=%q task=%q", gotAgentID, gotTaskID)
+	}
+	if !gotActorOK || gotActor.Type != "member" || gotActor.ID != "test-user-id" {
+		t.Fatalf("expected server-authenticated member context, got %+v (ok=%v)", gotActor, gotActorOK)
 	}
 }
 

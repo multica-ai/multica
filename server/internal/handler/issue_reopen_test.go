@@ -3,8 +3,10 @@ package handler
 import (
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
@@ -63,6 +65,51 @@ func TestUpdateIssueWorkerCanReopenAssignedIssueWhenClaimIsUnused(t *testing.T) 
 	}
 	if got := queuedTaskCountFor(t, issueID, agentID); got != 1 {
 		t.Fatalf("accepted worker reopen must renew the claim with one queued task, got %d", got)
+	}
+}
+
+func TestUpdateIssueWorkerConcurrentReopenRenewsClaimOnce(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, issueID, taskID := workerReopenFixture(t, "WorkerReopenConcurrent")
+	start := make(chan struct{})
+	responses := make(chan int, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			w := httptest.NewRecorder()
+			testHandler.UpdateIssue(w, workerReopenRequest(t, agentID, taskID, issueID, "in_progress"))
+			responses <- w.Code
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(responses)
+
+	var okCount, conflictCount int
+	for status := range responses {
+		switch status {
+		case http.StatusOK:
+			okCount++
+		case http.StatusConflict:
+			conflictCount++
+		default:
+			t.Fatalf("concurrent worker reopen status = %d, want one 200 and one 409", status)
+		}
+	}
+	if okCount != 1 || conflictCount != 1 {
+		t.Fatalf("concurrent worker reopen results = %d success, %d conflict; want 1/1", okCount, conflictCount)
+	}
+	if got := issueStatusForTest(t, issueID); got != "in_progress" {
+		t.Fatalf("concurrent reopen status = %q, want in_progress", got)
+	}
+	if got := queuedTaskCountFor(t, issueID, agentID); got != 1 {
+		t.Fatalf("concurrent reopen must renew once, got %d queued tasks", got)
 	}
 }
 
@@ -224,6 +271,25 @@ func TestUpdateIssueWorkerCannotReopenWithoutRenewingClaim(t *testing.T) {
 	}
 }
 
+func TestPreviewIssueTriggerWorkerReopenMatchesRenewalAuthorization(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, issueID, taskID := workerReopenFixture(t, "WorkerReopenPreview")
+	req := newRequest("POST", "/api/issues/preview-trigger?workspace_id="+testWorkspaceID, map[string]any{
+		"issue_ids": []string{issueID},
+		"status":    "in_progress",
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	var resp IssueTriggerPreviewResponse
+	testutil.Call(t, testHandler.PreviewIssueTrigger, req).Want(http.StatusOK).JSON(&resp)
+	if resp.TotalCount != 1 || len(resp.Triggers) != 1 || resp.Triggers[0].Source != string(service.RunSourceReopen) {
+		t.Fatalf("worker reopen preview = %+v, want one reopen trigger", resp)
+	}
+}
+
 func TestBatchUpdateIssuesWorkerCannotReopenAssignedIssueWithActiveClaim(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -306,5 +372,53 @@ func TestBatchUpdateIssuesWorkerReopenDeduplicatesIssueIDs(t *testing.T) {
 	}
 	if got := queuedTaskCountFor(t, issueID, agentID); got != 1 {
 		t.Fatalf("duplicate batch reopen must renew once, got %d queued tasks", got)
+	}
+}
+
+func TestBatchUpdateIssuesWorkerConcurrentReopenRenewsClaimOnce(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, issueID, taskID := workerReopenFixture(t, "BatchWorkerReopenConcurrent")
+	start := make(chan struct{})
+	responses := make(chan int, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+				"issue_ids": []string{issueID},
+				"updates":   map[string]any{"status": "in_progress"},
+			})
+			req.Header.Set("X-Agent-ID", agentID)
+			req.Header.Set("X-Task-ID", taskID)
+			w := httptest.NewRecorder()
+			testHandler.BatchUpdateIssues(w, req)
+			responses <- w.Code
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(responses)
+
+	var okCount, conflictCount int
+	for status := range responses {
+		switch status {
+		case http.StatusOK:
+			okCount++
+		case http.StatusConflict:
+			conflictCount++
+		default:
+			t.Fatalf("concurrent batch worker reopen status = %d, want one 200 and one 409", status)
+		}
+	}
+	if okCount != 1 || conflictCount != 1 {
+		t.Fatalf("concurrent batch worker reopen results = %d success, %d conflict; want 1/1", okCount, conflictCount)
+	}
+	if got := queuedTaskCountFor(t, issueID, agentID); got != 1 {
+		t.Fatalf("concurrent batch reopen must renew once, got %d queued tasks", got)
 	}
 }

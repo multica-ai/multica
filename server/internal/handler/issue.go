@@ -3139,7 +3139,7 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 
 var errIssueFieldConflict = errors.New("issue text field conflict")
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string) (db.Issue, db.Issue, bool, error) {
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string, workerGuard *workerReopenGuard) (db.Issue, db.Issue, bool, error) {
 	if h.TxStarter == nil {
 		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
 	}
@@ -3170,6 +3170,11 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	})
 	if err != nil {
 		return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue for update: %w", err)
+	}
+	if workerGuard != nil {
+		if err := enforceWorkerReopenOnLockedIssue(ctx, qtx, current, *workerGuard); err != nil {
+			return db.Issue{}, current, false, err
+		}
 	}
 
 	if params.Title.Valid && titleBase != nil && current.Title != *titleBase && current.Title != params.Title.String {
@@ -3464,6 +3469,15 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	var workerGuard *workerReopenGuard
+	if workerReopen {
+		workerGuard = &workerReopenGuard{
+			actorID:            actorID,
+			targetStatus:       statusKeyForGuard,
+			targetAssigneeType: params.AssigneeType,
+			targetAssigneeID:   params.AssigneeID,
+		}
+	}
 
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
@@ -3472,10 +3486,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var issue db.Issue
 	attachmentsChanged := false
-	if req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
+	if workerReopen || req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
 		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
-			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard,
+			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, workerGuard,
 		)
 		if lockedPrev.ID.Valid {
 			prevIssue = lockedPrev
@@ -3488,6 +3502,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	if err != nil {
+		var workerDenied workerReopenDeniedError
+		if errors.As(err, &workerDenied) {
+			writeError(w, workerDenied.status, workerDenied.message)
+			return
+		}
 		if writeIssueStatusRaceError(w, err) {
 			return
 		}
@@ -4193,35 +4212,28 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		workerReopen := workerReopenByIssue[uuidToString(prevIssue.ID)]
+		var workerGuard *workerReopenGuard
 		if workerReopen {
 			if workerReopenProcessed[uuidToString(prevIssue.ID)] {
 				continue
 			}
 			workerReopenProcessed[uuidToString(prevIssue.ID)] = true
-			if !params.AssigneeType.Valid || params.AssigneeType.String != "agent" ||
-				!params.AssigneeID.Valid || actorID != uuidToString(params.AssigneeID) {
-				writeError(w, http.StatusForbidden, "only the assigned worker can reopen this issue")
-				return
-			}
-			active, activeErr := h.hasActiveTaskForIssueAndAgent(r.Context(), prevIssue.ID, params.AssigneeID)
-			if activeErr != nil {
-				writeError(w, http.StatusServiceUnavailable, "cannot verify whether the worker claim is active")
-				return
-			}
-			if active {
-				writeError(w, http.StatusConflict, "cannot reopen an issue while its worker claim is active")
-				return
+			workerGuard = &workerReopenGuard{
+				actorID:            actorID,
+				targetStatus:       batchStatusKey,
+				targetAssigneeType: params.AssigneeType,
+				targetAssigneeID:   params.AssigneeID,
 			}
 		}
 
 		var issue db.Issue
-		if req.Updates.Description != nil {
+		if workerReopen || req.Updates.Description != nil {
 			// One batch-level base cannot describe multiple issue documents.
 			// Preserve every marked channel-media block conservatively, matching
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
 			issue, lockedPrev, _, err = h.updateIssueAtomically(
-				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey,
+				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey, workerGuard,
 			)
 			if err == nil {
 				prevIssue = lockedPrev
@@ -4234,6 +4246,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 		if err != nil {
+			var workerDenied workerReopenDeniedError
+			if errors.As(err, &workerDenied) {
+				writeError(w, workerDenied.status, workerDenied.message)
+				return
+			}
 			// The archive race is a property of the batch's shared target
 			// status, not of one issue, so every remaining item would fail the
 			// same way. Abort with 409 instead of reporting a partial update.
