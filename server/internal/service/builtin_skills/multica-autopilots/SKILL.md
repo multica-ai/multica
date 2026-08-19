@@ -39,7 +39,10 @@ Execution modes:
 multica autopilot list --output json
 multica autopilot get <autopilot-id> --output json
 multica autopilot create --title "<title>" --description "<task prompt>" --agent <agent-name-or-id> --mode create_issue|run_only --output json
+multica autopilot create --title "<title>" --description "<task prompt>" --squad <squad-name-or-id> --mode create_issue|run_only --output json
 multica autopilot update <autopilot-id> --status active|paused --output json
+multica autopilot update <autopilot-id> --agent <agent-name-or-id> --output json
+multica autopilot update <autopilot-id> --squad <squad-name-or-id> --output json
 multica autopilot runs <autopilot-id> --output json
 multica autopilot trigger-add <autopilot-id> --kind schedule --cron "0 9 * * *" --timezone Asia/Shanghai --output json
 multica autopilot trigger-add <autopilot-id> --kind webhook --label "ci" --output json
@@ -50,6 +53,9 @@ multica autopilot trigger-rotate-url <autopilot-id> <trigger-id> --yes --output 
 Use `trigger` only when the user explicitly asks for a manual run. Use `trigger-rotate-url` only when rotating a webhook URL; the old URL stops being valid.
 
 `autopilot get` redacts `webhook_token`, `webhook_path`, and `webhook_url` by default while reporting whether a token exists and its non-sensitive hint. Only add `--show-secrets` when the user explicitly asks to retrieve the live webhook credential; the command warns on stderr. Do not paste webhook tokens or signing material into comments, logs, docs, or PRs.
+For `create` and `update`, `--agent` and `--squad` are mutually exclusive. Use exactly one when creating an autopilot or changing its assignee; both flags accept a name or UUID.
+
+Webhook trigger output can include a URL/token. Do not paste webhook tokens or signing material into comments, logs, docs, or PRs. Redact secrets.
 
 ## Debugging
 
