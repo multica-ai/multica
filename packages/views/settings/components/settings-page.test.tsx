@@ -163,3 +163,52 @@ describe("SettingsPage workspace subscription feature flag", () => {
     expect(screen.getByText("BillingTab")).toBeInTheDocument();
   });
 });
+
+describe("SettingsPage host capability filtering", () => {
+  it("omits every tab whose surrounding host route is not mounted", () => {
+    navigationState.search = "tab=workspace";
+    configStore.getState().setFeatureFlags({
+      [BILLING_WORKSPACE_SUBSCRIPTIONS_FLAG]: true,
+      [PLUGINS_V1_FLAG]: true,
+    });
+
+    renderWithI18n(
+      <SettingsPage
+        hiddenWorkspaceTabs={[
+          "general",
+          "repositories",
+          "github",
+          "integrations",
+          "members",
+          "billing",
+          "plugins",
+        ]}
+      />,
+    );
+
+    expect(
+      screen.queryByRole("tab", { name: "General" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Repositories" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "GitHub" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Integrations" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Members" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Billing" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("tab", { name: "Plugins" }),
+    ).not.toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Labs" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "MCP" })).toBeInTheDocument();
+    expect(screen.getByText("AccountTab")).toBeInTheDocument();
+  });
+});

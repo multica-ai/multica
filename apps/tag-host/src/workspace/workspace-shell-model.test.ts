@@ -15,6 +15,7 @@ describe('Tag Workspace Shell navigation model', () => {
       expect.objectContaining({ key: 'tasks', path: 'issues' }),
       expect.objectContaining({ key: 'agents', path: 'agents' }),
       expect.objectContaining({ key: 'runtimes', path: 'runtimes' }),
+      expect.objectContaining({ key: 'settings', path: 'settings' }),
     ]);
     expect(items.map((item) => item.key)).not.toEqual(
       expect.arrayContaining([
@@ -25,6 +26,13 @@ describe('Tag Workspace Shell navigation model', () => {
         'autopilots',
         'analytics',
       ])
+    );
+    expect(items).toContainEqual(
+      expect.objectContaining({
+        key: 'files',
+        path: null,
+        status: 'migrating',
+      })
     );
     expect(items.filter((item) => item.status === 'migrating')).not.toHaveLength(
       0
@@ -52,5 +60,8 @@ describe('Tag Workspace Shell navigation model', () => {
     expect(
       workspaceSwitchDestination('studio-b', '/studio-a/runtimes/machine-1')
     ).toBe('/studio-b/runtimes');
+    expect(
+      workspaceSwitchDestination('studio-b', '/studio-a/settings?tab=mcp')
+    ).toBe('/studio-b/settings');
   });
 });

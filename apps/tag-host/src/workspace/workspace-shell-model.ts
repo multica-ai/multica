@@ -1,7 +1,7 @@
 export interface TagWorkspaceNavItem {
   key: string;
   label: string;
-  path: 'chat' | 'issues' | 'agents' | 'runtimes' | null;
+  path: 'chat' | 'issues' | 'agents' | 'runtimes' | 'settings' | null;
   status: 'available' | 'migrating';
 }
 
@@ -40,7 +40,12 @@ export const TAG_WORKSPACE_SECTIONS: readonly TagWorkspaceSection[] = [
   {
     label: 'Configure',
     items: [
-      { key: 'settings', label: 'Settings', path: null, status: 'migrating' },
+      {
+        key: 'settings',
+        label: 'Settings',
+        path: 'settings',
+        status: 'available',
+      },
     ],
   },
 ];
@@ -64,6 +69,9 @@ export function workspaceSwitchDestination(
   }
   if (modulePath === 'runtimes') {
     return `/${encodeURIComponent(targetSlug)}/runtimes`;
+  }
+  if (modulePath === 'settings') {
+    return `/${encodeURIComponent(targetSlug)}/settings`;
   }
   return `/${encodeURIComponent(targetSlug)}/chat`;
 }

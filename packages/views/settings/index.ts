@@ -1,4 +1,5 @@
 export { SettingsPage } from "./components";
+export type { WorkspaceSettingsTabKey } from "./components/settings-page";
 export type { ExtraSettingsTab } from "./components";
 export {
   SettingsCard,

@@ -77,6 +77,7 @@ const WORKSPACE_TAB_KEYS = [
   "mcp",
   "plugins",
 ] as const;
+export type WorkspaceSettingsTabKey = (typeof WORKSPACE_TAB_KEYS)[number];
 const WORKSPACE_TAB_VALUES = {
   general: "workspace",
   repositories: "repositories",
@@ -130,9 +131,14 @@ export interface ExtraSettingsTab {
 interface SettingsPageProps {
   /** Additional tabs injected by platform (e.g. desktop daemon settings) */
   extraAccountTabs?: ExtraSettingsTab[];
+  /** Host surfaces omit tabs whose surrounding callback or lifecycle routes are not mounted yet. */
+  hiddenWorkspaceTabs?: readonly WorkspaceSettingsTabKey[];
 }
 
-export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
+export function SettingsPage({
+  extraAccountTabs,
+  hiddenWorkspaceTabs = [],
+}: SettingsPageProps = {}) {
   const { t } = useT("settings");
   const workspaceName = useCurrentWorkspace()?.name;
   const navigation = useNavigation();
@@ -147,10 +153,11 @@ export function SettingsPage({ extraAccountTabs }: SettingsPageProps = {}) {
     () =>
       WORKSPACE_TAB_KEYS.filter(
         (key) =>
+          !hiddenWorkspaceTabs.includes(key) &&
           (key !== "plugins" || pluginsEnabled) &&
           (key !== "billing" || billingEnabled),
       ),
-    [billingEnabled, pluginsEnabled],
+    [billingEnabled, hiddenWorkspaceTabs, pluginsEnabled],
   );
 
   // Whitelist of valid tab values; unknown ?tab=… values silently fall back to
