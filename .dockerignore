@@ -35,10 +35,11 @@ coverage
 /docs/
 *.md
 
-# Only the web workspace is used by Dockerfile.web. Default-exclude future
-# app workspaces so they do not silently enter the build context.
+# Only web/admin are used by Dockerfile.web/Dockerfile.admin. Default-exclude
+# future app workspaces so they do not silently enter the build context.
 /apps/*
 !/apps/web/
+!/apps/admin/
 
 # Repository-only tooling
 /.github/
