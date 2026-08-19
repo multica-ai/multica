@@ -18,7 +18,11 @@
     "POSTGRES_DB",
     "POSTGRES_PORT",
     "DESKTOP_RENDERER_PORT",
-    "DESKTOP_APP_SUFFIX"
+    "DESKTOP_APP_SUFFIX",
+    "ADMIN_PORT",
+    "LITELLM_BASE_URL",
+    "LITELLM_API_KEY",
+    "ADMIN_ALLOW_UNSAFE_NO_AUTH"
   ],
   "tasks": {
     "build": {

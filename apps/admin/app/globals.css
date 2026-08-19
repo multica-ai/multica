@@ -1,0 +1,86 @@
+@import "tailwindcss";
+@import "../../../packages/ui/styles/tokens.css";
+
+@source "../../../packages/ui/**/*.{ts,tsx}";
+
+@custom-variant dark (&:is(.dark *));
+
+/* ---------------------------------------------------------------------------
+ * Multica Admin Dashboard — theming
+ *
+ * The shared packages/ui theme (base-nova/zinc) is pinned for Web + Desktop.
+ * DESIGN.md specifies a distinct parchment/terracotta palette for this admin
+ * app. Rather than hardcoding colors in components (CLAUDE.md CSS
+ * Architecture rule), this remaps the same semantic CSS variables shared
+ * components already consume — token *values* differ per app, components
+ * stay reusable. Same mechanism Tailwind v4/shadcn use for light/dark, just
+ * scoped per-app instead of per-color-scheme (see plan's Theming section).
+ *
+ * multica-admin-dashboard-plan.md §6 source values: Canvas/bg #f5f4ed,
+ * Surfaces/Ivory #faf9f5, Accent/terracotta #c96442, Text primary (Near
+ * Black) #141413, Text secondary (Olive Gray) #5e5d59, Borders (Border
+ * Cream) #f0eee6. success/warning/danger aren't specified in §6 — those three
+ * come from this app's own status-badge/derived-health conventions instead.
+ * ------------------------------------------------------------------------- */
+
+:root {
+  --background: oklch(0.97 0.007 95);      /* #f5f4ed parchment */
+  --foreground: oklch(0.24 0.01 60);       /* warm ink */
+  --card: oklch(0.99 0.003 95);             /* #faf9f5 ivory (table/panel surfaces) */
+  --card-foreground: oklch(0.24 0.01 60);
+  --popover: oklch(0.99 0.003 95);
+  --popover-foreground: oklch(0.24 0.01 60);
+  --primary: oklch(0.58 0.14 40);          /* #c96442 terracotta accent */
+  --primary-foreground: oklch(0.98 0.005 95);
+  --secondary: oklch(0.94 0.01 90);
+  --secondary-foreground: oklch(0.24 0.01 60);
+  --muted: oklch(0.94 0.01 90);
+  --muted-foreground: oklch(0.42 0.008 95);  /* #5e5d59 Olive Gray, §6 secondary text */
+  --accent: oklch(0.92 0.03 40);           /* soft terracotta wash */
+  --accent-foreground: oklch(0.46 0.14 40);
+  --border: oklch(0.89 0.012 90);          /* #f0eee6 Border Cream */
+  --input: oklch(0.89 0.012 90);
+  --ring: oklch(0.58 0.14 40);
+  --destructive: oklch(0.5 0.16 25);       /* #b53333 danger */
+  --success: oklch(0.55 0.15 145);         /* #17a34a */
+  --warning: oklch(0.75 0.15 90);          /* #eab308 warn */
+  --radius: 0.5rem;
+}
+
+.dark {
+  --background: oklch(0.2 0.012 60);
+  --foreground: oklch(0.95 0.012 90);
+  --card: oklch(0.24 0.012 60);
+  --card-foreground: oklch(0.95 0.012 90);
+  --popover: oklch(0.24 0.012 60);
+  --popover-foreground: oklch(0.95 0.012 90);
+  --primary: oklch(0.68 0.15 40);
+  --primary-foreground: oklch(0.18 0.012 60);
+  --secondary: oklch(0.28 0.012 60);
+  --secondary-foreground: oklch(0.95 0.012 90);
+  --muted: oklch(0.28 0.012 60);
+  --muted-foreground: oklch(0.68 0.012 75);
+  --accent: oklch(0.32 0.05 40);
+  --accent-foreground: oklch(0.8 0.14 40);
+  --border: oklch(0.32 0.012 60);
+  --input: oklch(0.32 0.012 60);
+  --ring: oklch(0.68 0.15 40);
+  --destructive: oklch(0.66 0.17 25);
+  --success: oklch(0.65 0.14 145);
+  --warning: oklch(0.72 0.15 90);
+}
+
+/* ---------------------------------------------------------------------------
+ * Font stacks — Anthropic Serif/Sans/Mono, falling back to system fonts.
+ * No web fonts are loaded for this internal tool; these are pure fallback
+ * chains resolved directly to whatever's on the operator's machine.
+ * ------------------------------------------------------------------------- */
+
+:root {
+  --font-sans: "Styrene A", "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI",
+    Roboto, Helvetica, Arial, sans-serif;
+  --font-serif: "Tiempos Text", "Source Serif 4", ui-serif, Georgia, "Times New Roman",
+    serif;
+  --font-mono: "Styrene Mono", "Berkeley Mono", ui-monospace, SFMono-Regular, Menlo,
+    Consolas, monospace;
+}
