@@ -13,6 +13,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -196,12 +197,33 @@ func backgroundServices(h *handler.Handler) (*service.TaskService, *service.Auto
 	return h.TaskService, h.AutopilotService
 }
 
+// jwtSecretBootError returns a non-nil error when the combination of
+// JWT_SECRET and APP_ENV is unsafe to boot with: production must never run
+// on an empty or publicly-known default secret (auth.ValidateJWTSecret).
+// Non-production keeps the historical dev fallback (see auth.JWTSecret)
+// and only warns.
+func jwtSecretBootError(jwtSecret, appEnv string) error {
+	isProduction := strings.EqualFold(strings.TrimSpace(appEnv), "production")
+	if !isProduction {
+		return nil
+	}
+	return auth.ValidateJWTSecret(jwtSecret)
+}
+
 func main() {
 	logger.Init()
 
 	// Warn about missing configuration
+	if err := jwtSecretBootError(os.Getenv("JWT_SECRET"), os.Getenv("APP_ENV")); err != nil {
+		slog.Error(
+			"refusing to start: "+err.Error()+
+				"; generate a strong secret with `openssl rand -hex 32` and set JWT_SECRET (see .env.example)",
+			"app_env", os.Getenv("APP_ENV"),
+		)
+		os.Exit(1)
+	}
 	if os.Getenv("JWT_SECRET") == "" {
-		slog.Warn("JWT_SECRET is not set — using insecure default. Set JWT_SECRET for production use.")
+		slog.Warn("JWT_SECRET is not set — using insecure dev default (allowed only because APP_ENV is not production).")
 	}
 	if os.Getenv("RESEND_API_KEY") == "" && strings.TrimSpace(os.Getenv("SMTP_HOST")) == "" {
 		slog.Warn("no email backend configured (RESEND_API_KEY and SMTP_HOST both empty) — verification codes will be printed to the log instead of emailed.")
