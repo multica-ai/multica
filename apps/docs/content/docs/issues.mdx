@@ -52,6 +52,15 @@ Assignment does not bypass an agent's Access; when assigning to a squad, the lea
 
 There is no fixed flow between statuses — members and agents can change them directly.
 
+Reopening a terminal issue is claim-aware for workers. A trusted worker can
+move `done` or `cancelled` to an active status only when the issue is still
+assigned to that worker and its `(issue, worker)` claim has no active task; the
+server then queues one replacement run. Reopening to `backlog` cannot renew a
+claim, and workers receive a denial for active claims or issues assigned to a
+different worker. Human members retain the normal status-edit behavior.
+Worker reopen cannot be combined with `--no-start` / `suppress_run`, because
+that would reopen the issue without renewing its claim.
+
 Once an issue is assigned to an agent, the agent is expected to move the status from `backlog` / `todo` to `in_progress` when it starts, then to `in_review` when it has delivered. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a task starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or an integration such as a PR with close intent that merges.
 
 <Callout type="info">

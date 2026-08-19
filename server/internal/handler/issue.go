@@ -3442,6 +3442,29 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// A trusted worker can reopen only its still-owned issue and only when the
+	// issue/worker claim is currently unused. Members retain the existing
+	// status-edit behavior; the narrow worker gate is recorded for the trigger
+	// predicate below so an accepted reopen renews the claim with a new run.
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	workerReopen := false
+	if req.Status != nil {
+		var reopenStatus int
+		var reopenMessage string
+		workerReopen, reopenStatus, reopenMessage = h.authorizeWorkerReopen(
+			r.Context(), prevIssue, statusKeyForGuard, actorType, actorID,
+			params.AssigneeType, params.AssigneeID,
+		)
+		if reopenStatus != 0 {
+			writeError(w, reopenStatus, reopenMessage)
+			return
+		}
+		if workerReopen && req.SuppressRun {
+			writeError(w, http.StatusForbidden, "worker reopen must renew the issue claim")
+			return
+		}
+	}
+
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
 		return
@@ -3483,9 +3506,6 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to update issue: "+err.Error())
 		return
 	}
-
-	// Determine actor identity: agent (via X-Agent-ID header) or member.
-	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 	prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 	resp := issueToResponse(issue, prefix)
@@ -3564,6 +3584,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			PrevStatus:      prevIssue.Status,
 			AssigneeChanged: assigneeChanged,
 			StatusChanged:   statusChanged,
+			WorkerReopen:    workerReopen,
 		},
 		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 	); ok && !req.SuppressRun {
@@ -3956,6 +3977,68 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		batchProjectID = projectUUID
 	}
 
+	actorType, actorID := h.resolveActor(r, userID, workspaceID)
+	workerReopenByIssue := make(map[string]bool)
+	batchTargetStatus := ""
+	if req.Updates.Status != nil && actorType == "agent" {
+		batchTargetStatus = issuestatus.Effective(r.Context(), h.Queries, wsUUID, batchStatusKey)
+	}
+	// Reject every unauthorized worker reopen before the batch mutates its
+	// first issue. The write loop repeats the occupancy check immediately
+	// before each authorized update to close the normal check-to-write race as
+	// far as this non-transactional batch endpoint can.
+	if req.Updates.Status != nil && actorType == "agent" {
+		for _, issueID := range req.IssueIDs {
+			issueUUID, err := util.ParseUUID(issueID)
+			if err != nil {
+				continue
+			}
+			prevIssue, err := h.Queries.GetIssueInWorkspace(r.Context(), db.GetIssueInWorkspaceParams{
+				ID:          issueUUID,
+				WorkspaceID: wsUUID,
+			})
+			if err != nil {
+				continue
+			}
+
+			targetAssigneeType := prevIssue.AssigneeType
+			targetAssigneeID := prevIssue.AssigneeID
+			if _, touched := rawUpdates["assignee_type"]; touched {
+				if req.Updates.AssigneeType == nil {
+					targetAssigneeType = pgtype.Text{Valid: false}
+				} else {
+					targetAssigneeType = pgtype.Text{String: *req.Updates.AssigneeType, Valid: true}
+				}
+			}
+			if _, touched := rawUpdates["assignee_id"]; touched {
+				if req.Updates.AssigneeID == nil {
+					targetAssigneeID = pgtype.UUID{Valid: false}
+				} else {
+					targetAssigneeID, err = util.ParseUUID(*req.Updates.AssigneeID)
+					if err != nil {
+						continue
+					}
+				}
+			}
+
+			workerReopen, reopenStatus, reopenMessage := h.authorizeWorkerReopenWithEffectiveStatuses(
+				r.Context(), prevIssue, batchStatusKey, actorType, actorID,
+				targetAssigneeType, targetAssigneeID,
+				issuestatus.Effective(r.Context(), h.Queries, wsUUID, prevIssue.Status),
+				batchTargetStatus,
+			)
+			if reopenStatus != 0 {
+				writeError(w, reopenStatus, reopenMessage)
+				return
+			}
+			workerReopenByIssue[uuidToString(prevIssue.ID)] = workerReopen
+			if workerReopen && req.Updates.SuppressRun {
+				writeError(w, http.StatusForbidden, "worker reopen must renew the issue claim")
+				return
+			}
+		}
+	}
+
 	updated := 0
 	// One Resolver for the whole batch — a per-issue filler would query the
 	// catalog once per custom-status row. (MUL-6243)
@@ -3964,6 +4047,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	// the parent/stage notification is evaluated once against the final state
 	// after the loop (MUL-4155) rather than per-child mid-batch.
 	var childDoneCompleted []db.Issue
+	workerReopenProcessed := make(map[string]bool)
 	for _, issueID := range req.IssueIDs {
 		issueUUID, err := util.ParseUUID(issueID)
 		if err != nil {
@@ -4108,6 +4192,28 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 
+		workerReopen := workerReopenByIssue[uuidToString(prevIssue.ID)]
+		if workerReopen {
+			if workerReopenProcessed[uuidToString(prevIssue.ID)] {
+				continue
+			}
+			workerReopenProcessed[uuidToString(prevIssue.ID)] = true
+			if !params.AssigneeType.Valid || params.AssigneeType.String != "agent" ||
+				!params.AssigneeID.Valid || actorID != uuidToString(params.AssigneeID) {
+				writeError(w, http.StatusForbidden, "only the assigned worker can reopen this issue")
+				return
+			}
+			active, activeErr := h.hasActiveTaskForIssueAndAgent(r.Context(), prevIssue.ID, params.AssigneeID)
+			if activeErr != nil {
+				writeError(w, http.StatusServiceUnavailable, "cannot verify whether the worker claim is active")
+				return
+			}
+			if active {
+				writeError(w, http.StatusConflict, "cannot reopen an issue while its worker claim is active")
+				return
+			}
+		}
+
 		var issue db.Issue
 		if req.Updates.Description != nil {
 			// One batch-level base cannot describe multiple issue documents.
@@ -4140,7 +4246,6 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
-		actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
 		fillBatch(&resp)
 		assigneeChanged := (req.Updates.AssigneeType != nil || req.Updates.AssigneeID != nil) &&
@@ -4169,6 +4274,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				PrevStatus:      prevIssue.Status,
 				AssigneeChanged: assigneeChanged,
 				StatusChanged:   statusChanged,
+				WorkerReopen:    workerReopen,
 			},
 			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
 		); ok && !req.Updates.SuppressRun {

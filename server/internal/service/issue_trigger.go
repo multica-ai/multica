@@ -19,6 +19,9 @@ const (
 	// RunSourceStatus covers promoting an already-assigned issue out of
 	// backlog into an active status.
 	RunSourceStatus RunEnqueueSource = "status"
+	// RunSourceReopen covers a trusted assigned worker reopening a terminal
+	// issue after the handler verified that the worker claim is unused.
+	RunSourceReopen RunEnqueueSource = "reopen"
 )
 
 // IssueTriggerProbe carries the request-scoped checks WillEnqueueRun cannot
@@ -55,6 +58,9 @@ type IssueTriggerInput struct {
 	IsCreate        bool
 	AssigneeChanged bool
 	StatusChanged   bool
+	// WorkerReopen is set only after the HTTP boundary authorizes a trusted
+	// worker to renew an unused issue claim while reopening a terminal issue.
+	WorkerReopen bool
 }
 
 // IssueRunTrigger is the resolved decision shared by preview and the write
@@ -121,6 +127,9 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
+	case in.WorkerReopen && in.StatusChanged && isTerminalIssueStatus(prevStatus) &&
+		!isTerminalIssueStatus(currentStatus) && currentStatus != "backlog":
+		source = RunSourceReopen
 	case in.StatusChanged && prevStatus == "backlog" &&
 		currentStatus != "done" && currentStatus != "cancelled":
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
@@ -144,7 +153,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			probe.SuppressActiveSelfAssignment(issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
+		if (source == RunSourceStatus || source == RunSourceReopen) && s.hasPendingRun(ctx, issue.ID, issue.AssigneeID) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{
@@ -179,7 +188,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		if !canAccess(leader) {
 			return IssueRunTrigger{}, false
 		}
-		if source == RunSourceStatus && s.hasPendingRun(ctx, issue.ID, squad.LeaderID) {
+		if (source == RunSourceStatus || source == RunSourceReopen) && s.hasPendingRun(ctx, issue.ID, squad.LeaderID) {
 			return IssueRunTrigger{}, false
 		}
 		return IssueRunTrigger{
@@ -190,6 +199,10 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		}, true
 	}
 	return IssueRunTrigger{}, false
+}
+
+func isTerminalIssueStatus(status string) bool {
+	return status == "done" || status == "cancelled"
 }
 
 // hasPendingRun reports whether the agent already holds a queued or dispatched

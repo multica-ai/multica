@@ -132,6 +132,8 @@ and is hidden from the PR list.
 | `StartTask` / `CompleteTask` do not write issue status (agent CLI owns progress) | `server/internal/service/task.go` (`StartTask` / `CompleteTask` comments) | new citation |
 | Runtime brief: ordinary agent `in_progress` then `in_review` (Ownership mode unconditionally, Reply mode only for work turns on its own issue); squad leader `in_progress` only on first dispatch | `server/internal/daemon/execenv/runtime_config_sections.go` (`writeWorkflowIssue`) | new citation |
 | Failed task may roll `in_progress` → `todo` when no active task remains | `server/internal/service/task.go` (`HandleFailedTasks`) | new citation |
+| Trusted worker reopen requires same assigned agent and an unused `(issue, agent)` claim; active/unknown occupancy fails closed | `server/internal/handler/issue_reopen.go` (`authorizeWorkerReopen`), `server/internal/handler/issue.go` (`UpdateIssue`, `BatchUpdateIssues`) | new citation |
+| Authorized worker reopen enqueues a replacement run | `server/internal/service/issue_trigger.go` (`RunSourceReopen`, `IssueTriggerInput.WorkerReopen`, `WillEnqueueRun`) | new citation |
 
 Creation with `--status todo` (or any non-backlog status) on an agent-assigned
 issue fires the agent immediately; `--status backlog` parks it with the assignee

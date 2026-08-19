@@ -209,6 +209,14 @@ on it. These are the contracts, not advice:
   `done` it enqueues no new agent work, but it does **not** stop tasks already in
   flight — a run in progress keeps going (MUL-4465). To stop a running task,
   cancel the task itself.
+- Reopening a terminal issue is a worker-specific claim renewal path. A trusted
+  worker may move `done` / `cancelled` to an active status only when the issue
+  remains assigned to that worker and the `(issue, worker)` claim has no active
+  task. The server then enqueues one replacement run. `backlog` cannot renew a
+  claim, an active claim returns a conflict, and an unassigned worker is
+  forbidden. `--no-start` / `suppress_run` is also forbidden on this path,
+  because it would reopen without renewing the claim. Member status edits keep
+  their existing control-plane behavior.
 - **Failed issue-triggered tasks** may roll an issue from `in_progress` back to
   `todo` when no active task / retry remains — that is the main server-owned
   status write on the agent-run path.
