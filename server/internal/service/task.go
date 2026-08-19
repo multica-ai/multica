@@ -1027,6 +1027,25 @@ func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue 
 	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote, actorUserID, pgtype.UUID{}, pgtype.Timestamptz{})
 }
 
+// EnqueueTaskForIssueWithQueries inserts an issue task through the caller's
+// query handle without publishing task events or waking a daemon. Callers use
+// it from a transaction that also changes the issue, then call
+// NotifyTaskEnqueued after that transaction commits. Keeping the insert and
+// ownership write in one transaction prevents a required worker renewal from
+// being lost after the issue becomes active.
+//
+// The transaction-scoped service intentionally does not carry Composio: its
+// overlay builder may perform network I/O, which must not run while the issue
+// row lock is held. The optional overlay is not part of the claim-renewal
+// correctness contract.
+func (s *TaskService) EnqueueTaskForIssueWithQueries(ctx context.Context, q *db.Queries, issue db.Issue, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
+	txService := &TaskService{Queries: q}
+	return txService.enqueueIssueTaskWithCommentPlanAndNotify(
+		ctx, issue, pgtype.UUID{}, nil, false, handoffNote, actorUserID,
+		pgtype.UUID{}, pgtype.Timestamptz{}, false,
+	)
+}
+
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
 // and the manual rerun path. forceFreshSession=true marks the task so the
 // daemon claim handler skips the (agent_id, issue_id) resume lookup — the
@@ -1077,6 +1096,10 @@ func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, trig
 }
 
 func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTaskWithCommentPlanAndNotify(ctx, issue, triggerCommentID, coalescedCommentIDs, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, true)
+}
+
+func (s *TaskService) enqueueIssueTaskWithCommentPlanAndNotify(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, notify bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1178,6 +1201,9 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		"force_fresh_session", forceFreshSession,
 	)
 	if fireAt.Valid {
+		return task, nil
+	}
+	if !notify {
 		return task, nil
 	}
 	// Order matters: broadcast first, notify daemon second. notifyTaskAvailable

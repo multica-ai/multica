@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -65,6 +66,32 @@ func TestUpdateIssueWorkerCanReopenAssignedIssueWhenClaimIsUnused(t *testing.T) 
 	}
 	if got := queuedTaskCountFor(t, issueID, agentID); got != 1 {
 		t.Fatalf("accepted worker reopen must renew the claim with one queued task, got %d", got)
+	}
+}
+
+func TestUpdateIssueWorkerReopenRollsBackWhenRenewalEnqueueFails(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, issueID, taskID := workerReopenFixture(t, "WorkerReopenRenewalEnqueueFailure")
+	// Authorization only proves ownership and claim occupancy. The runtime can
+	// disappear before the write transaction reaches the required renewal; that
+	// failure must abort the status change rather than leave an active issue with
+	// no replacement task.
+	dbfx.Exec(t, `UPDATE agent SET runtime_id = NULL WHERE id = $1`, agentID)
+
+	w := httptest.NewRecorder()
+	testHandler.UpdateIssue(w, workerReopenRequest(t, agentID, taskID, issueID, "in_progress"))
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("worker reopen enqueue failure: expected 503, got %d: %s", w.Code, w.Body.String())
+	}
+	if got := issueStatusForTest(t, issueID); got != "done" {
+		t.Fatalf("failed worker reopen changed issue status to %q, want done", got)
+	}
+	if got := queuedTaskCountFor(t, issueID, agentID); got != 0 {
+		t.Fatalf("failed worker reopen queued %d replacement tasks", got)
 	}
 }
 
@@ -347,6 +374,44 @@ func TestBatchUpdateIssuesWorkerCanReopenAssignedIssueWhenClaimIsUnused(t *testi
 	}
 	if got := queuedTaskCountFor(t, issueID, agentID); got != 1 {
 		t.Fatalf("accepted batch worker reopen must renew the claim with one queued task, got %d", got)
+	}
+}
+
+func TestBatchUpdateIssuesWorkerReopenRetainsEarlierItemWhenLaterItemIsMissing(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	agentID, issueID, taskID := workerReopenFixture(t, "BatchWorkerReopenPerItemScope")
+	missingIssueID := "00000000-0000-0000-0000-000000000001"
+	req := newRequest("POST", "/api/issues/batch-update", map[string]any{
+		"issue_ids": []string{issueID, missingIssueID},
+		"updates": map[string]any{
+			"status": "in_progress",
+		},
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", taskID)
+	w := httptest.NewRecorder()
+	testHandler.BatchUpdateIssues(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("BatchUpdateIssues per-item scope: expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Updated int `json:"updated"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode per-item scope response: %v", err)
+	}
+	if resp.Updated != 1 {
+		t.Fatalf("per-item scope updated=%d, want 1 successful item", resp.Updated)
+	}
+	if got := issueStatusForTest(t, issueID); got != "in_progress" {
+		t.Fatalf("earlier successful item status = %q, want in_progress", got)
+	}
+	if got := queuedTaskCountFor(t, issueID, agentID); got != 1 {
+		t.Fatalf("earlier successful worker reopen queued %d tasks, want 1", got)
 	}
 }
 

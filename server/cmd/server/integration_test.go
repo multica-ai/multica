@@ -479,12 +479,27 @@ func TestIssueReopenRouteDoesNotTrustForgedWorkerHeaders(t *testing.T) {
 	})
 
 	// Put the fixture into the terminal/unused-claim state without relying on
-	// the route under test, and remove the create-triggered task.
+	// the route under test. Keep the create-triggered task row, but complete it,
+	// so the forged header carries a real task UUID while the claim remains
+	// unused. This prevents the regression from passing only because the task
+	// header was syntactically invalid.
 	if _, err := testPool.Exec(context.Background(), `UPDATE issue SET status = 'done' WHERE id = $1`, issueID); err != nil {
 		t.Fatalf("prepare terminal issue: %v", err)
 	}
-	if _, err := testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID); err != nil {
-		t.Fatalf("clear create task: %v", err)
+	var taskID string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT id::text FROM agent_task_queue
+		 WHERE issue_id = $1 AND agent_id = $2
+		 ORDER BY created_at DESC LIMIT 1
+	`, issueID, agentID).Scan(&taskID); err != nil {
+		t.Fatalf("read create task: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent_task_queue
+		   SET status = 'completed', completed_at = now()
+		 WHERE id = $1
+	`, taskID); err != nil {
+		t.Fatalf("complete create task: %v", err)
 	}
 
 	body, err := json.Marshal(map[string]any{"status": "in_progress"})
@@ -499,7 +514,7 @@ func TestIssueReopenRouteDoesNotTrustForgedWorkerHeaders(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-Workspace-ID", testWorkspaceID)
 	req.Header.Set("X-Agent-ID", agentID)
-	req.Header.Set("X-Task-ID", "00000000-0000-0000-0000-000000000001")
+	req.Header.Set("X-Task-ID", taskID)
 	resp, err = http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("reopen request: %v", err)
@@ -513,7 +528,9 @@ func TestIssueReopenRouteDoesNotTrustForgedWorkerHeaders(t *testing.T) {
 
 	var queued int
 	if err := testPool.QueryRow(context.Background(), `
-		SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2
+		SELECT count(*) FROM agent_task_queue
+		 WHERE issue_id = $1 AND agent_id = $2
+		   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
 	`, issueID, agentID).Scan(&queued); err != nil {
 		t.Fatalf("count forged worker renewal: %v", err)
 	}

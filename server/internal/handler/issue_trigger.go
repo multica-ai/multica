@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 
@@ -80,17 +81,24 @@ func (h *Handler) shouldSuppressActiveSelfAssignment(ctx context.Context, actorT
 // dispatchIssueRun executes the enqueue side effect for a decision produced by
 // WillEnqueueRun, carrying an optional handoff note into the run's opening
 // context. The squad path still flows through enqueueSquadLeaderTask so the
-// leader access gate and pending dedup stay in one place.
-func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) {
+// leader access gate and pending dedup stay in one place. Worker reopen does
+// not use this post-commit path: its replacement task is inserted by the issue
+// transaction and only notified here after commit.
+func (h *Handler) dispatchIssueRun(ctx context.Context, issue db.Issue, trigger service.IssueRunTrigger, actorType, actorID, handoffNote string) error {
 	switch trigger.AssigneeType {
 	case "agent":
 		// The member who performed this assign/promote is the accountable human
 		// for the run (MUL-4302 §4). An agent actor is not a human, so only a
 		// member actor is threaded; otherwise attribution falls back to the chain.
-		_, _ = h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID))
+		if _, err := h.TaskService.EnqueueTaskForIssueWithHandoff(ctx, issue, handoffNote, memberActorUserID(actorType, actorID)); err != nil {
+			return fmt.Errorf("enqueue issue run: %w", err)
+		}
 	case "squad":
-		h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote)
+		if !h.enqueueSquadLeaderTask(ctx, issue, pgtype.UUID{}, actorType, actorID, handoffNote) {
+			return fmt.Errorf("enqueue squad leader run failed")
+		}
 	}
+	return nil
 }
 
 // memberActorUserID returns the acting member's user id as a pgtype.UUID when the

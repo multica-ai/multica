@@ -3139,13 +3139,13 @@ func refreshUntouchedNullableIssueParams(params *db.UpdateIssueParams, current d
 
 var errIssueFieldConflict = errors.New("issue text field conflict")
 
-func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string, workerGuard *workerReopenGuard) (db.Issue, db.Issue, bool, error) {
+func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.UUID, params db.UpdateIssueParams, rawFields map[string]json.RawMessage, titleBase, descriptionBase *string, attachmentIDs []pgtype.UUID, statusKey string, workerGuard *workerReopenGuard) (db.Issue, db.Issue, bool, db.AgentTaskQueue, error) {
 	if h.TxStarter == nil {
-		return db.Issue{}, db.Issue{}, false, errors.New("atomic issue update requires transaction starter")
+		return db.Issue{}, db.Issue{}, false, db.AgentTaskQueue{}, errors.New("atomic issue update requires transaction starter")
 	}
 	tx, err := h.TxStarter.Begin(ctx)
 	if err != nil {
-		return db.Issue{}, db.Issue{}, false, fmt.Errorf("begin atomic issue update: %w", err)
+		return db.Issue{}, db.Issue{}, false, db.AgentTaskQueue{}, fmt.Errorf("begin atomic issue update: %w", err)
 	}
 	defer tx.Rollback(ctx)
 
@@ -3154,14 +3154,14 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 	// itself rather than going through runWithIssueStatusGuard. The catalog lock
 	// must precede both attachment and issue row locks everywhere. (MUL-6243)
 	if err := assertIssueStatusStillActive(ctx, qtx, workspaceID, statusKey); err != nil {
-		return db.Issue{}, db.Issue{}, false, err
+		return db.Issue{}, db.Issue{}, false, db.AgentTaskQueue{}, err
 	}
 	if len(attachmentIDs) > 0 {
 		if _, err := qtx.LockAttachmentsForIssueLink(ctx, db.LockAttachmentsForIssueLinkParams{
 			WorkspaceID:   workspaceID,
 			AttachmentIds: attachmentIDs,
 		}); err != nil {
-			return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue attachments: %w", err)
+			return db.Issue{}, db.Issue{}, false, db.AgentTaskQueue{}, fmt.Errorf("lock issue attachments: %w", err)
 		}
 	}
 	current, err := qtx.LockIssueForDescriptionUpdate(ctx, db.LockIssueForDescriptionUpdateParams{
@@ -3169,16 +3169,16 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		WorkspaceID: workspaceID,
 	})
 	if err != nil {
-		return db.Issue{}, db.Issue{}, false, fmt.Errorf("lock issue for update: %w", err)
+		return db.Issue{}, db.Issue{}, false, db.AgentTaskQueue{}, fmt.Errorf("lock issue for update: %w", err)
 	}
 	if workerGuard != nil {
 		if err := enforceWorkerReopenOnLockedIssue(ctx, qtx, current, *workerGuard); err != nil {
-			return db.Issue{}, current, false, err
+			return db.Issue{}, current, false, db.AgentTaskQueue{}, err
 		}
 	}
 
 	if params.Title.Valid && titleBase != nil && current.Title != *titleBase && current.Title != params.Title.String {
-		return db.Issue{}, current, false, errIssueFieldConflict
+		return db.Issue{}, current, false, db.AgentTaskQueue{}, errIssueFieldConflict
 	}
 
 	if params.Description.Valid {
@@ -3187,7 +3187,7 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 			WorkspaceID: current.WorkspaceID,
 		})
 		if listErr != nil {
-			return db.Issue{}, current, false, fmt.Errorf("list issue attachments for description merge: %w", listErr)
+			return db.Issue{}, current, false, db.AgentTaskQueue{}, fmt.Errorf("list issue attachments for description merge: %w", listErr)
 		}
 		currentDescription := ""
 		if current.Description.Valid {
@@ -3197,7 +3197,7 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 		if descriptionBase != nil && currentDescription != *descriptionBase && currentDescription != incomingDescription {
 			baseWithLateMedia := mergeIssueChannelMediaDescription(currentDescription, *descriptionBase, descriptionBase, attachments)
 			if currentDescription != baseWithLateMedia {
-				return db.Issue{}, current, false, errIssueFieldConflict
+				return db.Issue{}, current, false, db.AgentTaskQueue{}, errIssueFieldConflict
 			}
 		}
 		params.Description = pgtype.Text{
@@ -3209,7 +3209,19 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 
 	issue, err := qtx.UpdateIssue(ctx, params)
 	if err != nil {
-		return db.Issue{}, current, false, fmt.Errorf("update locked issue: %w", err)
+		return db.Issue{}, current, false, db.AgentTaskQueue{}, fmt.Errorf("update locked issue: %w", err)
+	}
+
+	var renewalTask db.AgentTaskQueue
+	if workerGuard != nil && workerGuard.requireRenewal {
+		if h.TaskService == nil {
+			return db.Issue{}, current, false, db.AgentTaskQueue{}, workerReopenRenewalError{err: errors.New("worker renewal enqueue service is unavailable")}
+		}
+		var enqueueErr error
+		renewalTask, enqueueErr = h.TaskService.EnqueueTaskForIssueWithQueries(ctx, qtx, issue, "", pgtype.UUID{})
+		if enqueueErr != nil {
+			return db.Issue{}, current, false, db.AgentTaskQueue{}, workerReopenRenewalError{err: enqueueErr}
+		}
 	}
 
 	attachmentsChanged := false
@@ -3221,7 +3233,7 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 			BumpRevision:  issue.Revision == current.Revision,
 		})
 		if linkErr != nil {
-			return db.Issue{}, current, false, fmt.Errorf("link issue attachments: %w", linkErr)
+			return db.Issue{}, current, false, db.AgentTaskQueue{}, fmt.Errorf("link issue attachments: %w", linkErr)
 		}
 		attachmentsChanged = linked.LinkedCount > 0
 		if linked.IssueRevision > 0 {
@@ -3230,14 +3242,14 @@ func (h *Handler) updateIssueAtomically(ctx context.Context, workspaceID pgtype.
 				WorkspaceID: issue.WorkspaceID,
 			})
 			if err != nil {
-				return db.Issue{}, current, false, fmt.Errorf("reload issue after attachment link: %w", err)
+				return db.Issue{}, current, false, db.AgentTaskQueue{}, fmt.Errorf("reload issue after attachment link: %w", err)
 			}
 		}
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return db.Issue{}, current, false, fmt.Errorf("commit atomic issue update: %w", err)
+		return db.Issue{}, current, false, db.AgentTaskQueue{}, fmt.Errorf("commit atomic issue update: %w", err)
 	}
-	return issue, current, attachmentsChanged, nil
+	return issue, current, attachmentsChanged, renewalTask, nil
 }
 
 func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
@@ -3487,9 +3499,10 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 
 	var issue db.Issue
 	attachmentsChanged := false
+	var renewalTask db.AgentTaskQueue
 	if workerReopen || req.Description != nil || req.TitleBase != nil || req.DescriptionBase != nil || len(attachmentIDs) > 0 {
 		var lockedPrev db.Issue
-		issue, lockedPrev, attachmentsChanged, err = h.updateIssueAtomically(
+		issue, lockedPrev, attachmentsChanged, renewalTask, err = h.updateIssueAtomically(
 			r.Context(), prevIssue.WorkspaceID, params, rawFields, req.TitleBase, req.DescriptionBase, attachmentIDs, statusKeyForGuard, workerGuard,
 		)
 		if lockedPrev.ID.Valid {
@@ -3506,6 +3519,11 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		var workerDenied workerReopenDeniedError
 		if errors.As(err, &workerDenied) {
 			writeError(w, workerDenied.status, workerDenied.message)
+			return
+		}
+		var renewalErr workerReopenRenewalError
+		if errors.As(err, &renewalErr) {
+			writeError(w, http.StatusServiceUnavailable, "worker reopen could not renew the issue claim")
 			return
 		}
 		if writeIssueStatusRaceError(w, err) {
@@ -3580,6 +3598,9 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			"issue_revision": issue.Revision,
 		})
 	}
+	if renewalTask.ID.Valid {
+		h.TaskService.NotifyTaskEnqueued(r.Context(), renewalTask)
+	}
 
 	// Reconcile the task queue. Whether this write starts an agent run — and
 	// for whom (agent assignee or squad leader) — is decided by the single
@@ -3598,17 +3619,26 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 	// it stops in-flight agent runs, so that implicit coupling is gone
 	// (MUL-4465). Deleting an issue still cancels its tasks (see DeleteIssue),
 	// because the tasks' owning issue ceases to exist.
-	if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
-		service.IssueTriggerInput{
-			Issue:           issue,
-			PrevStatus:      prevIssue.Status,
-			AssigneeChanged: assigneeChanged,
-			StatusChanged:   statusChanged,
-			WorkerReopen:    workerReopen,
-		},
-		h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-	); ok && !req.SuppressRun {
-		h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote)
+	if !renewalTask.ID.Valid {
+		if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
+			service.IssueTriggerInput{
+				Issue:           issue,
+				PrevStatus:      prevIssue.Status,
+				AssigneeChanged: assigneeChanged,
+				StatusChanged:   statusChanged,
+				WorkerReopen:    workerReopen,
+			},
+			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
+		); ok && !req.SuppressRun {
+			if err := h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.HandoffNote); err != nil {
+				slog.Error("issue run dispatch failed",
+					"issue_id", uuidToString(issue.ID),
+					"agent_id", uuidToString(trigger.AgentID),
+					"source", string(trigger.Source),
+					"error", err,
+				)
+			}
+		}
 	}
 
 	// Platform-driven parent notification: when this issue transitions into
@@ -3894,6 +3924,15 @@ type BatchUpdateIssuesRequest struct {
 	Updates  UpdateIssueRequest `json:"updates"`
 }
 
+// BatchUpdateIssues intentionally has per-item commit scope. Every item gets
+// its own issue transaction; for a worker reopen that transaction includes the
+// replacement task insert, so an accepted item is always renewed atomically.
+// Earlier successful items remain committed when a later item is missing,
+// skipped by validation, or encounters an item-local error. Shared request
+// validation (including worker authorization preflight and status catalog
+// races) still rejects before or aborts the batch when the whole request is
+// invalid. This boundary is part of the API contract, not an accidental
+// approximation of all-or-nothing semantics.
 func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -4233,12 +4272,13 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		}
 
 		var issue db.Issue
+		var renewalTask db.AgentTaskQueue
 		if workerReopen || req.Updates.Description != nil {
 			// One batch-level base cannot describe multiple issue documents.
 			// Preserve every marked channel-media block conservatively, matching
 			// legacy single-update clients that omit description_base.
 			var lockedPrev db.Issue
-			issue, lockedPrev, _, err = h.updateIssueAtomically(
+			issue, lockedPrev, _, renewalTask, err = h.updateIssueAtomically(
 				r.Context(), prevIssue.WorkspaceID, params, rawUpdates, nil, nil, nil, batchStatusKey, workerGuard,
 			)
 			if err == nil {
@@ -4255,6 +4295,11 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			var workerDenied workerReopenDeniedError
 			if errors.As(err, &workerDenied) {
 				writeError(w, workerDenied.status, workerDenied.message)
+				return
+			}
+			var renewalErr workerReopenRenewalError
+			if errors.As(err, &renewalErr) {
+				writeError(w, http.StatusServiceUnavailable, "worker reopen could not renew the issue claim")
 				return
 			}
 			// The archive race is a property of the batch's shared target
@@ -4284,6 +4329,9 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			"priority_changed": priorityChanged,
 			"project_changed":  projectChanged,
 		})
+		if renewalTask.ID.Valid {
+			h.TaskService.NotifyTaskEnqueued(r.Context(), renewalTask)
+		}
 
 		// Reassignment does not cancel existing tasks (#4963 / MUL-4113) —
 		// mirrors UpdateIssue. See that handler for the rationale.
@@ -4291,17 +4339,26 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 		// Same single predicate as UpdateIssue — batch must not grow its own
 		// copy of the enqueue rule (the historical source of four-entry-point
 		// drift, MUL-3375). suppress_run applies batch-wide.
-		if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
-			service.IssueTriggerInput{
-				Issue:           issue,
-				PrevStatus:      prevIssue.Status,
-				AssigneeChanged: assigneeChanged,
-				StatusChanged:   statusChanged,
-				WorkerReopen:    workerReopen,
-			},
-			h.issueTriggerWriteProbe(r, actorType, actorID, issue),
-		); ok && !req.Updates.SuppressRun {
-			h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote)
+		if !renewalTask.ID.Valid {
+			if trigger, ok := h.IssueService.WillEnqueueRun(r.Context(),
+				service.IssueTriggerInput{
+					Issue:           issue,
+					PrevStatus:      prevIssue.Status,
+					AssigneeChanged: assigneeChanged,
+					StatusChanged:   statusChanged,
+					WorkerReopen:    workerReopen,
+				},
+				h.issueTriggerWriteProbe(r, actorType, actorID, issue),
+			); ok && !req.Updates.SuppressRun {
+				if err := h.dispatchIssueRun(r.Context(), issue, trigger, actorType, actorID, req.Updates.HandoffNote); err != nil {
+					slog.Error("batch issue run dispatch failed",
+						"issue_id", uuidToString(issue.ID),
+						"agent_id", uuidToString(trigger.AgentID),
+						"source", string(trigger.Source),
+						"error", err,
+					)
+				}
+			}
 		}
 
 		// No status change — not even → cancelled — cancels active tasks here,

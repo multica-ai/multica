@@ -25,6 +25,23 @@ type workerReopenDeniedError struct {
 
 func (e workerReopenDeniedError) Error() string { return e.message }
 
+// workerReopenRenewalError marks a failure after authorization but before the
+// issue+replacement-task transaction can commit. It is deliberately rendered
+// as 503: the caller was authorized, but the server could not guarantee the
+// required claim renewal.
+type workerReopenRenewalError struct {
+	err error
+}
+
+func (e workerReopenRenewalError) Error() string {
+	if e.err == nil {
+		return "worker reopen renewal failed"
+	}
+	return "worker reopen renewal failed: " + e.err.Error()
+}
+
+func (e workerReopenRenewalError) Unwrap() error { return e.err }
+
 // enforceWorkerReopenOnLockedIssue is the authoritative check. Its caller
 // must hold the issue row lock in the same transaction that performs the
 // update, so a competing task insert or issue mutation cannot pass the check
