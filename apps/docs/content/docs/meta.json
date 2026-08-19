@@ -41,6 +41,7 @@
     "dingtalk-bot-integration",
     "github-integration",
     "vcs-integration",
+    "webhook-notifications",
     "---Apps---",
     "desktop-app",
     "mobile-app",

@@ -1,0 +1,65 @@
+---
+title: 出站 webhook 通知
+description: 当一个 issue 需要人介入时——被指派、进入 in_review、或任务失败——Multica 会向你配置的 URL POST 一个 JSON payload，把它接进 Slack、邮件中继或任何你已有的接收端。
+---
+
+Multica 的[收件箱](/inbox)只在你主动查看时才告诉你"有 issue 需要处理"。出站 webhook 把这个关系反过来：一旦发生需要人来决策的事，Multica 就向你配置的 URL POST 一个小 JSON payload——它背后无论是 Slack incoming webhook、邮件中继、聊天机器人还是 PagerDuty，通知都会主动来找你。
+
+webhook 是工作区级的：每个工作区一个 URL，尽力投递（best-effort）。它只在"把人拉回环里"的时刻触发：
+
+| 事件 | 触发条件 |
+| --- | --- |
+| `issue_assigned` | issue 被指派给类型为 member 或 agent 的新 assignee。取消指派不触发。 |
+| `issue_in_review` | issue 状态移入 `in_review`——通常是智能体做完了工作，请求 review。 |
+| `task_failed` | 智能体任务终态失败。等待重试的失败不触发。 |
+
+## 配置 webhook URL
+
+URL 存在工作区的 `settings` JSON 里，由管理员通过工作区更新 API 设置。用一个[个人访问令牌](/auth-tokens)和你的工作区 id（`multica workspace list`，或 workspaces API）：
+
+```bash
+curl -X PATCH "https://<your-multica>/api/workspaces/<workspace-id>" \
+  -H "Authorization: Bearer <your-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"settings":{"webhook_url":"https://example.com/hooks/multica"}}'
+```
+
+`settings` 是整对象替换：如果工作区已存有其他设置，先 GET 该工作区，把 `webhook_url` 合并进现有 `settings` 再 PATCH 回去。
+
+删掉这个键（或置空）即停止投递——无需重启，每次事件触发时都会现读该设置。
+
+## Payload
+
+每次投递是一个 POST，JSON body 加一个携带事件名的 `X-Multica-Event` 请求头，接收端可以只看请求头做路由、不必先解析 body：
+
+```json
+{
+  "event": "issue_in_review",
+  "issue_id": "825e846a-156f-47d3-82b0-a99a6d070b7d",
+  "issue_title": "Add export button to settings page",
+  "actor_type": "agent",
+  "actor_id": "b1e0c9a2-...",
+  "workspace_id": "12345678-1234-1234-1234-123456789012",
+  "details": { "status": "in_review" }
+}
+```
+
+| 字段 | 含义 |
+| --- | --- |
+| `event` | `issue_assigned`、`issue_in_review`、`task_failed` 三者之一。 |
+| `issue_id` / `issue_title` | 事件对应的 issue。 |
+| `actor_type` / `actor_id` | 谁做的——`member`、`agent` 或 `system`。 |
+| `workspace_id` | issue 所属的工作区。 |
+| `details` | 事件附加信息：指派带 `assignee_id`，状态变更带 `status`，失败带 `agent_id` 和 `failure_reason`。 |
+
+## 投递行为
+
+投递是 best-effort 的，与 Multica 其他出站通道的行为一致：
+
+- 请求 **10 秒**超时，失败只在服务端记日志——不会重试，接收端慢或挂掉也绝不会阻塞触发事件的操作。
+- 接收端应尽快返回 `2xx`，处理放到异步。
+- payload 目前不带签名。把它当作提示而非凭证：不要仅凭 body 里的内容执行特权操作，endpoint 尽量用 HTTPS。
+
+## 接收端思路
+
+payload 刻意做得很小，大多数集成都只是几行胶水代码：转发到 Slack incoming webhook 或[机器人集成](/channels)的群、给 reviewer 发邮件，或交给你的自动化系统。需要更丰富的能力——按事件订阅、签名 payload、投递历史——请在 [#1020](https://github.com/multica-ai/multica/issues/1020) 留言帮助确定范围。

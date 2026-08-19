@@ -1,0 +1,65 @@
+---
+title: Outbound webhook notifications
+description: POST a JSON payload to your own URL when an issue needs a human — when it is assigned, moves to in_review, or a task fails — and wire Multica into Slack, email relays, or any receiver you already run.
+---
+
+Multica's [inbox](/inbox) tells you an issue needs attention only when you look at it. An outbound webhook flips that: when something happens that needs a human decision, Multica POSTs a small JSON payload to a URL you configure, and whatever sits behind it — a Slack incoming webhook, an email relay, a chat bot, a PagerDuty feed — comes to you.
+
+The webhook is workspace-level: one URL per workspace, delivered best-effort. It fires on exactly the moments a human is pulled into the loop:
+
+| Event | Fires when |
+| --- | --- |
+| `issue_assigned` | An issue is assigned to a new assignee of type member or agent. Unassignment does not fire. |
+| `issue_in_review` | An issue's status moves into `in_review` — typically an agent finished its work and asks for review. |
+| `task_failed` | An agent task fails terminally. Failures waiting for a retry do not fire. |
+
+## Configure the webhook URL
+
+The URL lives in the workspace's `settings` JSON, so an admin sets it with the workspace update API. With a [personal access token](/auth-tokens) and your workspace id (`multica workspace list`, or the workspaces API):
+
+```bash
+curl -X PATCH "https://<your-multica>/api/workspaces/<workspace-id>" \
+  -H "Authorization: Bearer <your-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"settings":{"webhook_url":"https://example.com/hooks/multica"}}'
+```
+
+`settings` replaces the whole object, so if the workspace already stores settings, first GET the workspace, merge `webhook_url` into the existing `settings` value, and PATCH the merged object back.
+
+Removing the key (or setting it to an empty value) disables delivery — no restart needed, the setting is read when each event fires.
+
+## Payload
+
+Every delivery is one POST with a JSON body and an `X-Multica-Event` header carrying the event name, so receivers can route without parsing the body first:
+
+```json
+{
+  "event": "issue_in_review",
+  "issue_id": "825e846a-156f-47d3-82b0-a99a6d070b7d",
+  "issue_title": "Add export button to settings page",
+  "actor_type": "agent",
+  "actor_id": "b1e0c9a2-...",
+  "workspace_id": "12345678-1234-1234-1234-123456789012",
+  "details": { "status": "in_review" }
+}
+```
+
+| Field | Meaning |
+| --- | --- |
+| `event` | One of `issue_assigned`, `issue_in_review`, `task_failed`. |
+| `issue_id` / `issue_title` | The issue the event is about. |
+| `actor_type` / `actor_id` | Who did it — `member`, `agent`, or `system`. |
+| `workspace_id` | The workspace the issue belongs to. |
+| `details` | Event-specific extras: `assignee_id` for assignments, `status` for status moves, `agent_id` and `failure_reason` for failures. |
+
+## Delivery behavior
+
+Delivery is best-effort, matching how Multica's other outbound channels work:
+
+- Requests time out after **10 seconds** and failures are only logged server-side — nothing retries, and a slow or broken receiver never blocks the action that triggered the event.
+- Receivers should answer `2xx` quickly and process asynchronously.
+- Payloads carry no signature yet. Treat them as a hint, not proof: don't act on privileged data from the body alone, and prefer HTTPS endpoints.
+
+## Ideas for the receiving side
+
+The payload is deliberately small, so most integrations are a few lines of glue: forward to a Slack incoming webhook or [bot integration](/channels) room, open an email to the reviewer, or hand it to your own automation. For anything richer — per-event subscriptions, signed payloads, delivery history — comment on [#1020](https://github.com/multica-ai/multica/issues/1020) to help scope it.

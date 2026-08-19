@@ -1,0 +1,65 @@
+---
+title: アウトバウンド webhook 通知
+description: イシューに人間が必要になったとき——アサインされた、in_review に移動した、タスクが失敗した——Multica は設定した URL に JSON ペイロードを POST します。Slack、メールリレー、既存の任意のレシーバーへ接続できます。
+---
+
+Multica の[受信トレイ](/inbox)は、あなたが見に行ったときにしか「注意が必要なイシュー」を伝えません。アウトバウンド webhook はこの関係を逆転させます。人間の判断が必要な出来事が起きると、Multica は設定した URL に小さな JSON ペイロードを POST します。その先が Slack の incoming webhook、メールリレー、チャットボット、PagerDuty のフィードのどれであれ、通知のほうからあなたのもとへ来ます。
+
+webhook はワークスペース単位です。ワークスペースごとに 1 つの URL を、ベストエフォートで配信します。発火するのは、まさに人間がループへ引き込まれる瞬間だけです：
+
+| イベント | 発火条件 |
+| --- | --- |
+| `issue_assigned` | イシューが member または agent タイプの新しいアサイン先に割り当てられたとき。アサイン解除では発火しません。 |
+| `issue_in_review` | イシーのステータスが `in_review` に移動したとき——多くの場合、エージェントが作業を終えてレビューを求めています。 |
+| `task_failed` | エージェントのタスクが最終的に失敗したとき。リトライ待ちの失敗では発火しません。 |
+
+## webhook URL の設定
+
+URL はワークスペースの `settings` JSON に保存されるため、admin がワークスペース更新 API で設定します。[個人アクセストークン](/auth-tokens)とワークスペース id（`multica workspace list`、または workspaces API）を使って：
+
+```bash
+curl -X PATCH "https://<your-multica>/api/workspaces/<workspace-id>" \
+  -H "Authorization: Bearer <your-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"settings":{"webhook_url":"https://example.com/hooks/multica"}}'
+```
+
+`settings` はオブジェクト全体を置き換えます。ワークスペースに既存の設定がある場合は、まず GET で取得し、`webhook_url` を既存の `settings` にマージしてから PATCH してください。
+
+このキーを削除（または空に設定）すると配信は停止されます。再起動は不要で、設定は各イベントの発火時に読み込まれます。
+
+## ペイロード
+
+各配信は 1 回の POST で、JSON ボディに加えてイベント名を運ぶ `X-Multica-Event` ヘッダーが付くため、レシーバーはボディをパースせずにルーティングできます：
+
+```json
+{
+  "event": "issue_in_review",
+  "issue_id": "825e846a-156f-47d3-82b0-a99a6d070b7d",
+  "issue_title": "Add export button to settings page",
+  "actor_type": "agent",
+  "actor_id": "b1e0c9a2-...",
+  "workspace_id": "12345678-1234-1234-1234-123456789012",
+  "details": { "status": "in_review" }
+}
+```
+
+| フィールド | 意味 |
+| --- | --- |
+| `event` | `issue_assigned`、`issue_in_review`、`task_failed` のいずれか。 |
+| `issue_id` / `issue_title` | イベントの対象となるイシュー。 |
+| `actor_type` / `actor_id` | 実行者——`member`、`agent`、または `system`。 |
+| `workspace_id` | イシューが属するワークスペース。 |
+| `details` | イベントごとの追加情報。アサインには `assignee_id`、ステータス移動には `status`、失敗には `agent_id` と `failure_reason`。 |
+
+## 配信の挙動
+
+配信はベストエフォートで、Multica の他のアウトバウンドチャネルと同じ挙動です：
+
+- リクエストは **10 秒**でタイムアウトし、失敗はサーバー側のログに記録されるだけです。リトライはなく、遅い・壊れたレシーバーがイベントの引き金となった操作をブロックすることもありません。
+- レシーバーはすぐに `2xx` を返し、処理は非同期で行うべきです。
+- ペイロードにはまだ署名がありません。ヒントとして扱い、証跡としては扱わないでください。ボディの内容だけで特権的な操作を行わず、HTTPS エンドポイントを推奨します。
+
+## レシーバー側のアイデア
+
+ペイロードは意図的に小さくしてあるので、ほとんどの連携は数行のグルーコードで済みます。Slack の incoming webhook や[ボット連携](/channels)のルームへの転送、レビュアーへのメール、自前のオートメーションへの受け渡しなど。より豊富な機能——イベントごとのサブスクリプション、署名付きペイロード、配信履歴——が必要であれば、[#1020](https://github.com/multica-ai/multica/issues/1020) にコメントしてスコープの検討に参加してください。

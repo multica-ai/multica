@@ -1,0 +1,65 @@
+---
+title: 아웃바운드 webhook 알림
+description: 이슈에 사람이 필요한 순간 — 할당되었을 때, in_review로 이동했을 때, 작업이 실패했을 때 — Multica가 설정한 URL로 JSON 페이로드를 POST합니다. Slack, 이메일 릴레이, 이미 운영 중인 어떤 수신자든 연결할 수 있습니다.
+---
+
+Multica의 [수신함](/inbox)은 당신이 직접 들여다볼 때만 "주의가 필요한 이슈"를 알려줍니다. 아웃바운드 webhook은 이 관계를 뒤집습니다. 사람의 판단이 필요한 일이 생기면 Multica가 설정한 URL로 작은 JSON 페이로드를 POST하고, 그 뒤에 있는 것이 Slack incoming webhook이든, 이메일 릴레이든, 챗봇이든, PagerDuty 피드든, 알림이 먼저 당신을 찾아옵니다.
+
+webhook은 워크스페이스 단위입니다. 워크스페이스마다 URL 하나를 best-effort로 전달합니다. 발화하는 것은 사람이 루프로 끌어들여지는 바로 그 순간뿐입니다:
+
+| 이벤트 | 발화 조건 |
+| --- | --- |
+| `issue_assigned` | 이슈가 member 또는 agent 타입의 새 담당자에게 할당되었을 때. 할당 해제는 발화하지 않습니다. |
+| `issue_in_review` | 이슈 상태가 `in_review`로 이동했을 때 — 보통은 에이전트가 작업을 마치고 리뷰를 요청하는 경우입니다. |
+| `task_failed` | 에이전트 작업이 최종적으로 실패했을 때. 재시도 대기 중인 실패는 발화하지 않습니다. |
+
+## webhook URL 설정
+
+URL은 워크스페이스의 `settings` JSON에 저장되므로, admin이 워크스페이스 업데이트 API로 설정합니다. [개인 액세스 토큰](/auth-tokens)과 워크스페이스 id(`multica workspace list`, 또는 workspaces API)를 사용해:
+
+```bash
+curl -X PATCH "https://<your-multica>/api/workspaces/<workspace-id>" \
+  -H "Authorization: Bearer <your-token>" \
+  -H "Content-Type: application/json" \
+  -d '{"settings":{"webhook_url":"https://example.com/hooks/multica"}}'
+```
+
+`settings`는 객체 전체를 교체합니다. 워크스페이스에 기존 설정이 있다면 먼저 GET으로 가져와 `webhook_url`을 기존 `settings`에 병합한 뒤 PATCH하세요.
+
+이 키를 삭제(또는 빈 값으로 설정)하면 전달이 중단됩니다. 재시작은 필요 없으며, 설정은 이벤트가 발화할 때마다 다시 읽힙니다.
+
+## 페이로드
+
+전달은 POST 한 번으로 이루어지고, JSON 본문과 함께 이벤트 이름을 담은 `X-Multica-Event` 헤더가 붙어 수신자는 본문을 파싱하지 않고도 라우팅할 수 있습니다:
+
+```json
+{
+  "event": "issue_in_review",
+  "issue_id": "825e846a-156f-47d3-82b0-a99a6d070b7d",
+  "issue_title": "Add export button to settings page",
+  "actor_type": "agent",
+  "actor_id": "b1e0c9a2-...",
+  "workspace_id": "12345678-1234-1234-1234-123456789012",
+  "details": { "status": "in_review" }
+}
+```
+
+| 필드 | 의미 |
+| --- | --- |
+| `event` | `issue_assigned`, `issue_in_review`, `task_failed` 중 하나. |
+| `issue_id` / `issue_title` | 이벤트의 대상인 이슈. |
+| `actor_type` / `actor_id` | 실행한 주체 — `member`, `agent`, 또는 `system`. |
+| `workspace_id` | 이슈가 속한 워크스페이스. |
+| `details` | 이벤트별 추가 정보. 할당에는 `assignee_id`, 상태 이동에는 `status`, 실패에는 `agent_id`와 `failure_reason`. |
+
+## 전달 동작
+
+전달은 best-effort이며, Multica의 다른 아웃바운드 채널과 동일한 동작입니다:
+
+- 요청은 **10초** 후 타임아웃되며, 실패는 서버 쪽 로그에만 기록됩니다. 재시도는 없고, 느리거나 고장난 수신자가 이벤트를 발생시킨 작업을 차단하는 일도 없습니다.
+- 수신자는 빠르게 `2xx`로 응답하고 처리는 비동기로 하는 것이 좋습니다.
+- 페이로드에는 아직 서명이 없습니다. 힌트로는 삼되 증거로는 삼지 마세요. 본문 내용만으로 권한 있는 동작을 수행하지 말고, HTTPS 엔드포인트를 권장합니다.
+
+## 수신자 측 아이디어
+
+페이로드는 의도적으로 작게 유지되므로, 대부분의 연동은 몇 줄의 글루 코드면 충분합니다. Slack incoming webhook이나 [봇 연동](/channels) 룸으로 전달하거나, 리뷰어에게 이메일을 보내거나, 자체 자동화에 넘기세요. 더 풍부한 기능 — 이벤트별 구독, 서명된 페이로드, 전달 이력 — 이 필요하다면 [#1020](https://github.com/multica-ai/multica/issues/1020)에 코멘트해 스코프 논의에 참여해 주세요.
