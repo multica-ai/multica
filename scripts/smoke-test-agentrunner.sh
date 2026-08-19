@@ -163,7 +163,13 @@ poll() {
 # upstream-sync.sh run in the same checkout refuses to start on a dirty tree.
 # .git/info/exclude covers that. `git rev-parse --git-path` rather than a literal
 # .git/ because an agent checkout is a linked worktree: .git is a FILE there.
-SMOKE_TMPD=".smoke-tmp"
+#
+# Namespaced by MARKER (already unique per run) rather than a fixed name: two
+# invocations sharing one checkout each get their own subdirectory, so the first
+# one to finish teardown can never rmdir the other one's tmp files out from under
+# it (ANK-57). The `/.smoke-tmp/` exclude entry already covers children at any
+# depth, so it needs no change.
+SMOKE_TMPD=".smoke-tmp/${MARKER}"
 if _exclude="$(git rev-parse --git-path info/exclude 2>/dev/null)"; then
   mkdir -p "$(dirname "${_exclude}")" 2>/dev/null || true
   grep -qxF '/.smoke-tmp/' "${_exclude}" 2>/dev/null \
@@ -235,6 +241,17 @@ sweep_stale_throwaways() {
 # ── Teardown (EXIT trap) ───────────────────────────────────────────────────
 teardown() {
   log "=== phase 10: teardown ==="
+
+  # First statement, unconditionally: SMOKE_TMPD is per-run (namespaced by
+  # MARKER) but nothing guarantees it still exists by the time teardown runs
+  # (a killed/relaunched invocation, a stray cleanup elsewhere), and every
+  # report target below writes its body through this directory. Recreating it
+  # here — rather than trusting the pre-flight mkdir — means the marker report
+  # below is the most defended step in the script, not the least: a missing
+  # dir can no longer swallow the verdict. Failure is still advisory: log and
+  # carry on, the multica calls below fail their own guard if the dir is gone.
+  mkdir -p "${SMOKE_TMPD}" 2>/dev/null || log "teardown — could not create ${SMOKE_TMPD}"
+
   if [[ -n "${SMOKE_PROJECT_ID}" ]]; then
     multica project delete "${SMOKE_PROJECT_ID}" 2>/dev/null \
       || log "smoke project cleanup skipped"
@@ -266,33 +283,43 @@ teardown() {
   #     subsequent run.
   if [[ -n "${SMOKE_ISSUE_ID}" ]]; then
     _f="${SMOKE_TMPD}/inner.md"
-    {
+    # Guarded: a failed write here must not abort the rest of teardown (this is
+    # the exact ANK-57 failure — an unguarded `>` redirect died mid-trap and the
+    # sync-ticket and PR reports below never ran either). Log and fall through
+    # to the remaining report targets instead.
+    if {
       printf '%s\n' "${_body}"
       printf '\nThrowaway task — retired by the sync pipeline sweep, not here (cancelling inline races this issue'"'"'s own claiming agent).\n'
-    } > "${_f}"
-    multica issue comment add "${SMOKE_ISSUE_ID}" --content-file "${_f}" >/dev/null 2>&1 \
-      || log "inner result comment skipped"
-    rm -f "${_f}"
+    } > "${_f}" 2>/dev/null; then
+      multica issue comment add "${SMOKE_ISSUE_ID}" --content-file "${_f}" >/dev/null 2>&1 \
+        || log "inner result comment skipped"
+      rm -f "${_f}"
+    else
+      log "inner result file write failed (${_f}) — skipping inner comment, continuing teardown"
+    fi
   fi
 
   # 2 · The sync ticket — one ticket per hop, threaded under its audit root.
   if [[ -n "${SMOKE_SYNC_ISSUE_ID}" ]]; then
     _f="${SMOKE_TMPD}/sync.md"
-    {
+    if {
       printf '%s\n' "${_body}"
       if [[ -n "${SMOKE_ISSUE_ID}" ]]; then
         printf '\nInner agent-claim task (throwaway, swept by `scripts/sync-tick.sh` at the next terminal transition): `%s`\n' "${SMOKE_ISSUE_ID}"
       fi
-    } > "${_f}"
-    if [[ -n "${SMOKE_AUDIT_ROOT_COMMENT_ID}" ]]; then
-      multica issue comment add "${SMOKE_SYNC_ISSUE_ID}" \
-        --parent "${SMOKE_AUDIT_ROOT_COMMENT_ID}" --content-file "${_f}" >/dev/null 2>&1 \
-        || log "sync ticket audit reply skipped"
+    } > "${_f}" 2>/dev/null; then
+      if [[ -n "${SMOKE_AUDIT_ROOT_COMMENT_ID}" ]]; then
+        multica issue comment add "${SMOKE_SYNC_ISSUE_ID}" \
+          --parent "${SMOKE_AUDIT_ROOT_COMMENT_ID}" --content-file "${_f}" >/dev/null 2>&1 \
+          || log "sync ticket audit reply skipped"
+      else
+        multica issue comment add "${SMOKE_SYNC_ISSUE_ID}" --content-file "${_f}" >/dev/null 2>&1 \
+          || log "sync ticket comment skipped"
+      fi
+      rm -f "${_f}"
     else
-      multica issue comment add "${SMOKE_SYNC_ISSUE_ID}" --content-file "${_f}" >/dev/null 2>&1 \
-        || log "sync ticket comment skipped"
+      log "sync ticket file write failed (${_f}) — skipping sync ticket report, continuing teardown"
     fi
-    rm -f "${_f}"
   fi
 
   # 3 · The PR — the machine-readable verdict, and the only signal that crosses
@@ -302,7 +329,7 @@ teardown() {
   if [[ -n "${SMOKE_PR_NUMBER}" && -n "${SMOKE_PR_REPO}" ]]; then
     if command -v gh &>/dev/null; then
       _f="${SMOKE_TMPD}/pr.md"
-      {
+      if {
         if [[ -n "${SMOKE_ARTIFACT_KIND}" && -n "${SMOKE_ARTIFACT_SHA}" ]]; then
           printf '<!-- smoke-result %s=%s; status=%s -->\n' \
             "${SMOKE_ARTIFACT_KIND}" "${SMOKE_ARTIFACT_SHA}" "${_status}"
@@ -310,20 +337,24 @@ teardown() {
           printf '<!-- smoke-result status=%s -->\n' "${_status}"
         fi
         printf '%s\n' "${_body}"
-      } > "${_f}"
-      # REST, not `gh pr comment`: that is a GraphQL mutation and the agentrunner's
-      # GitHub App cannot reach GraphQL mutations ("Resource not accessible by
-      # integration").
-      gh api -X POST "repos/${SMOKE_PR_REPO}/issues/${SMOKE_PR_NUMBER}/comments" \
-        -f body="$(cat "${_f}")" >/dev/null 2>&1 \
-        || log "PR result comment skipped"
-      rm -f "${_f}"
+      } > "${_f}" 2>/dev/null; then
+        # REST, not `gh pr comment`: that is a GraphQL mutation and the agentrunner's
+        # GitHub App cannot reach GraphQL mutations ("Resource not accessible by
+        # integration").
+        gh api -X POST "repos/${SMOKE_PR_REPO}/issues/${SMOKE_PR_NUMBER}/comments" \
+          -f body="$(cat "${_f}")" >/dev/null 2>&1 \
+          || log "PR result comment skipped"
+        rm -f "${_f}"
+      else
+        log "PR result file write failed (${_f}) — skipping PR report, continuing teardown"
+      fi
     else
       log "gh not on PATH — PR result comment skipped"
     fi
   fi
 
   rmdir "${SMOKE_TMPD}" 2>/dev/null || true
+  rmdir "$(dirname "${SMOKE_TMPD}")" 2>/dev/null || true
   log "teardown complete"
 }
 trap teardown EXIT
