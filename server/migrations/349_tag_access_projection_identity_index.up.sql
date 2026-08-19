@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY tag_access_projection_identity_uidx ON tag_access_projection(vibes_user_id, vibes_workspace_id);

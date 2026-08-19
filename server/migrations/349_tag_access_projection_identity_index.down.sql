@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS tag_access_projection_identity_uidx;

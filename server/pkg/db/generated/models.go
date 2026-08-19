@@ -1256,6 +1256,61 @@ type SysCronExecution struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TagAccessProjection struct {
+	VibesUserID          string             `json:"vibes_user_id"`
+	VibesWorkspaceID     string             `json:"vibes_workspace_id"`
+	Role                 string             `json:"role"`
+	Status               string             `json:"status"`
+	AccountEpoch         int64              `json:"account_epoch"`
+	MembershipGeneration int64              `json:"membership_generation"`
+	AuthorityVersion     int64              `json:"authority_version"`
+	LastEventID          string             `json:"last_event_id"`
+	LastPayloadDigest    []byte             `json:"last_payload_digest"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TagAccessProjectionDelivery struct {
+	VibesWorkspaceID     string             `json:"vibes_workspace_id"`
+	AuthorityVersion     int64              `json:"authority_version"`
+	DeliveryKind         string             `json:"delivery_kind"`
+	AuthorityAssertionID string             `json:"authority_assertion_id"`
+	PayloadDigest        []byte             `json:"payload_digest"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type TagAccessSession struct {
+	TagSessionID   string             `json:"tag_session_id"`
+	VibesSessionID string             `json:"vibes_session_id"`
+	VibesUserID    string             `json:"vibes_user_id"`
+	AccountEpoch   int64              `json:"account_epoch"`
+	ExpiresAt      pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt      pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TagAccessWorkspaceState struct {
+	VibesWorkspaceID         string             `json:"vibes_workspace_id"`
+	AuthorityVersion         int64              `json:"authority_version"`
+	ObservedAuthorityVersion int64              `json:"observed_authority_version"`
+	IntegrityState           string             `json:"integrity_state"`
+	BlockedPayloadDigest     []byte             `json:"blocked_payload_digest"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TagSessionWorkspaceGrant struct {
+	TagSessionID         string             `json:"tag_session_id"`
+	VibesWorkspaceID     string             `json:"vibes_workspace_id"`
+	MembershipGeneration int64              `json:"membership_generation"`
+	AuthorityVersion     int64              `json:"authority_version"`
+	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
+	RevokedAt            pgtype.Timestamptz `json:"revoked_at"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
 type TaskMessage struct {
 	ID        pgtype.UUID        `json:"id"`
 	TaskID    pgtype.UUID        `json:"task_id"`
@@ -1427,6 +1482,21 @@ type VerificationCode struct {
 	Used      bool               `json:"used"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	Attempts  int32              `json:"attempts"`
+}
+
+type VibesUserMirror struct {
+	VibesUserID   string             `json:"vibes_user_id"`
+	MulticaUserID pgtype.UUID        `json:"multica_user_id"`
+	ProfileEmail  string             `json:"profile_email"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type VibesWorkspaceMirror struct {
+	VibesWorkspaceID   string             `json:"vibes_workspace_id"`
+	MulticaWorkspaceID pgtype.UUID        `json:"multica_workspace_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type WebhookDelivery struct {

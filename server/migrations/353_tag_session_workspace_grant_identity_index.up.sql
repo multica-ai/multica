@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY tag_session_workspace_grant_identity_uidx ON tag_session_workspace_grant(tag_session_id, vibes_workspace_id);

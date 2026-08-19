@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY tag_access_session_identity_uidx ON tag_access_session(tag_session_id);
