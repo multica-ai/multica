@@ -113,6 +113,16 @@ services:
       MULTICA_ENTITLEMENT_EMERGENCY_DISABLED: ${MULTICA_ENTITLEMENT_EMERGENCY_DISABLED:-false}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      # App API credentials. The pull_request webhook is what mirrors a PR
+      # onto a card; these are what let the server authenticate as the App
+      # and pull the CI / mergeability snapshot that enriches it, plus
+      # Settings -> Repositories -> Choose from GitHub. Left unset,
+      # ghsnapshot.NewClientFromEnv returns a nil client and the enrichment
+      # degrades off silently - no error and no log line to notice.
+      # GITHUB_APP_PRIVATE_KEY is a PEM block: double-quote it in .env so
+      # its newlines survive into the container.
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       # Public URL the API is reachable at from the open internet, no
       # trailing slash. Used to mint absolute webhook URLs for autopilot
       # webhook triggers. Leave unset behind a same-origin reverse proxy
