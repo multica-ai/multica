@@ -2165,28 +2165,12 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 }
 
 // grokStaticModels is the offline fallback catalog for the Grok Build CLI.
-// The default and effort catalogs come from observed signed-in `session/new`
-// responses. Models without an observed reasoningEfforts list keep Thinking
-// nil, so the UI does not offer an override the CLI may reject.
+// It intentionally omits Thinking because effort support is discovered from
+// the installed CLI's session/new response.
 func grokStaticModels() []Model {
 	return []Model{
-		{ID: "grok-4.6", Label: "Grok 4.6", Provider: "xai", Default: true, Thinking: &ModelThinking{
-			DefaultLevel: "high",
-			SupportedLevels: []ThinkingLevel{
-				{Value: "xhigh", Label: "Extra High Effort"},
-				{Value: "high", Label: "High Effort"},
-				{Value: "medium", Label: "Medium Effort"},
-				{Value: "low", Label: "Low Effort"},
-			},
-		}},
-		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai", Thinking: &ModelThinking{
-			DefaultLevel: "high",
-			SupportedLevels: []ThinkingLevel{
-				{Value: "high", Label: "High Effort"},
-				{Value: "medium", Label: "Medium Effort"},
-				{Value: "low", Label: "Low Effort"},
-			},
-		}},
+		{ID: "grok-4.6", Label: "Grok 4.6", Provider: "xai", Default: true},
+		{ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai"},
 		{ID: "grok-composer-2.5-fast", Label: "Grok Composer 2.5 Fast", Provider: "xai"},
 	}
 }

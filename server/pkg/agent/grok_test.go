@@ -830,41 +830,34 @@ func TestDiscoverGrokModelsStopsOnAuthFailures(t *testing.T) {
 	}
 }
 
-func TestGrokThinkingCatalogIsPerModel(t *testing.T) {
+func TestGrokStaticModelsHaveNoThinkingCatalog(t *testing.T) {
 	models := grokStaticModels()
 	if len(models) != 3 || models[0].ID != "grok-4.6" || !models[0].Default {
 		t.Fatalf("static fallback must default to grok-4.6: %+v", models)
 	}
-	if got := thinkingValues(models[0].Thinking); strings.Join(got, ",") != "xhigh,high,medium,low" || models[0].Thinking.DefaultLevel != "high" {
-		t.Fatalf("grok-4.6 thinking = %+v, want xhigh/high/medium/low with high default", models[0].Thinking)
-	}
-	if got := thinkingValues(models[1].Thinking); strings.Join(got, ",") != "high,medium,low" || models[1].Thinking.DefaultLevel != "high" {
-		t.Fatalf("grok-4.5 thinking = %+v, want high/medium/low with high default", models[1].Thinking)
-	}
-	if models[2].Thinking != nil {
-		t.Fatalf("composer model without observed efforts must hide thinking controls: %+v", models[2].Thinking)
+	for _, model := range models {
+		if model.Thinking != nil {
+			t.Fatalf("static fallback model %q must not advertise thinking: %+v", model.ID, model.Thinking)
+		}
 	}
 }
 
-func TestGrokValidateThinkingLevelUsesPerModelCatalog(t *testing.T) {
+func TestGrokValidateThinkingLevelRejectsStaticFallback(t *testing.T) {
 	for _, tc := range []struct {
 		model string
 		level string
-		want  bool
 	}{
-		{model: "grok-4.6", level: "xhigh", want: true},
-		{model: "grok-4.5", level: "high", want: true},
-		{model: "grok-4.5", level: "none", want: false},
-		{model: "grok-4.5", level: "xhigh", want: false},
-		{model: "grok-composer-2.5-fast", level: "low", want: false},
-		{model: "future-grok", level: "high", want: false},
+		{model: "grok-4.6", level: "high"},
+		{model: "grok-4.5", level: "high"},
+		{model: "grok-composer-2.5-fast", level: "low"},
+		{model: "future-grok", level: "high"},
 	} {
 		got, err := ValidateThinkingLevel(context.Background(), "grok", Command{Path: "/nonexistent/grok"}, tc.model, tc.level)
 		if err != nil {
 			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
 		}
-		if got != tc.want {
-			t.Errorf("ValidateThinkingLevel(%q, %q) = %v, want %v", tc.model, tc.level, got, tc.want)
+		if got {
+			t.Errorf("ValidateThinkingLevel(%q, %q) = true, want false without a discovered catalog", tc.model, tc.level)
 		}
 	}
 }
