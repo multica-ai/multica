@@ -72,7 +72,8 @@
     "active_count_other": "{{count}} filtres",
     "in_view": "Déjà dans cette vue",
     "chip_edit": "Modifier",
-    "chip_save_as": "Enregistrer sous"
+    "chip_save_as": "Enregistrer sous",
+    "search_status": "Rechercher un état..."
   },
   "display": {
     "tooltip": "Paramètres d'affichage",
@@ -784,5 +785,30 @@
     "manage_hint": "L'ordre et la visibilité ne concernent que vous",
     "visible_toggle": "Afficher dans la barre de vues",
     "more_label": "Plus de vues"
+  },
+  "status_catalog_error": {
+    "title": "Impossible de charger la liste des états",
+    "hint": "Les tickets restent masqués tant qu'elle n'est pas chargée, car un filtre par état ne peut pas s'appliquer sans elle.",
+    "retry": "Réessayer"
+  },
+  "revision": {
+    "conflict": "Le ticket ou le commentaire a changé. La dernière version a été rechargée ; comparez-les avant d'enregistrer à nouveau.",
+    "compare_title": "Le titre a été modifié en parallèle. Comparez les deux versions.",
+    "compare_description": "La description a été modifiée en parallèle. Comparez les deux versions.",
+    "compare_comment": "Le commentaire a été modifié en parallèle. Comparez les deux versions.",
+    "server_version": "Dernière version du serveur",
+    "local_version": "Votre version locale",
+    "keep_local": "Garder ma version",
+    "use_server": "Utiliser la dernière version"
+  },
+  "plugins": {
+    "panels": "Plugins",
+    "surface_failed": "{{name}} n'a pas pu charger son interface.",
+    "surface_local_only": "{{name}} a été installé depuis une source locale, son interface ne peut donc pas être chargée dans le navigateur.",
+    "hook_succeeded": "{{name}} a terminé.",
+    "hook_failed": "{{name}} a échoué.",
+    "hook_refused": "{{name}} n'a pas été exécuté.",
+    "hook_activity": "Appels récents",
+    "hook_never_run": "Ce hook n'a encore jamais été exécuté."
   }
 }

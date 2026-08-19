@@ -127,8 +127,6 @@
     "mode_worktree_title": "Exécuter en parallèle, en isolation",
     "mode_worktree_description": "Les tâches s'exécutent simultanément sans toucher à votre copie de travail. Chacune restitue une branche agent/… dans ce dépôt, que vous pouvez relire et fusionner.",
     "mode_worktree_needs_git": "Ce dossier n'est pas un dépôt git : il n'y a donc nulle part où placer la branche. Choisissez un dépôt, ou continuez à modifier le dossier directement.",
-    "mode_worktree_needs_upgrade": "L'application Multica sur la machine où réside ce dossier est en version {{current}} ; l'exécution en parallèle exige {{min}} ou plus récent. Mettez-la à jour sur place, puis activez cette option.",
-    "mode_version_unknown": "une version antérieure",
     "mode_cancel": "Annuler",
     "mode_save": "Enregistrer",
     "mode_add": "Ajouter le dossier",
@@ -137,7 +135,8 @@
     "mode_badge_worktree_tooltip": "Les tâches s'exécutent simultanément dans leur propre worktree git et restituent une branche. Votre copie de travail reste intacte.",
     "toast_local_mode_updated": "Mode d'exécution mis à jour",
     "toast_local_mode_update_failed": "Impossible de mettre à jour le mode d'exécution",
-    "mode_badge_in_place": "Direct"
+    "mode_badge_in_place": "Direct",
+    "mode_worktree_needs_server_upgrade": "Votre serveur Multica est trop ancien pour exécuter des tâches en parallèle — il les exécuterait silencieusement dans ce dossier. Mettez le serveur à jour, puis activez cette option."
   },
   "delete_dialog": {
     "title": "Supprimer le projet",

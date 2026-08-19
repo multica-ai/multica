@@ -110,28 +110,94 @@
       "navigation": "Navigation"
     },
     "actions": {
-      "openSearch": { "label": "Ouvrir la recherche", "description": "Rechercher et exécuter des commandes depuis n'importe où." },
-      "createIssue": { "label": "Créer un ticket", "description": "Ouvrir votre mode de création de ticket préféré." },
-      "toggleSidebar": { "label": "Afficher ou masquer la barre latérale", "description": "Afficher ou masquer la barre latérale principale." },
-      "toggleChat": { "label": "Afficher ou masquer la fenêtre de discussion", "description": "Ouvrir ou fermer la fenêtre de discussion flottante. À l'ouverture, le champ de message reçoit le focus." },
-      "findInIssue": { "label": "Rechercher dans le ticket", "description": "Rechercher dans le ticket ouvert." },
-      "openThreadNav": { "label": "Ouvrir le navigateur de fils", "description": "Lister, rechercher et parcourir les fils de commentaires du ticket ouvert." },
-      "archiveInboxItem": { "label": "Archiver la notification", "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives." },
-      "send": { "label": "Envoyer", "description": "Envoyer messages de discussion, commentaires, réponses, retours et invites, et créer des tickets dans la fenêtre de création." },
-      "goBack": { "label": "Revenir en arrière", "description": "Reculer dans l'historique, comme dans un navigateur." },
-      "goForward": { "label": "Avancer", "description": "Avancer dans l'historique, comme dans un navigateur." },
-      "goInbox": { "label": "Aller à la boîte de réception", "description": "Ouvrir la boîte de réception de l'espace de travail." },
-      "goChat": { "label": "Aller aux discussions", "description": "Ouvrir les discussions de l'espace de travail." },
-      "goMyIssues": { "label": "Aller à Mes tickets", "description": "Ouvrir les tickets qui vous sont assignés." },
-      "goIssues": { "label": "Aller aux tickets", "description": "Ouvrir la liste des tickets." },
-      "goProjects": { "label": "Aller aux projets", "description": "Ouvrir la liste des projets." },
-      "goAutopilots": { "label": "Aller aux automatisations", "description": "Ouvrir les automatisations de l'espace de travail." },
-      "goAgents": { "label": "Aller aux agents", "description": "Ouvrir la liste des agents." },
-      "goSquads": { "label": "Aller aux squads", "description": "Ouvrir la liste des squads." },
-      "goUsage": { "label": "Aller aux statistiques", "description": "Ouvrir les statistiques de consommation." },
-      "goRuntimes": { "label": "Aller aux runtimes", "description": "Ouvrir la configuration des runtimes." },
-      "goSkills": { "label": "Aller aux skills", "description": "Ouvrir la bibliothèque de skills." },
-      "goSettings": { "label": "Aller aux paramètres", "description": "Ouvrir les paramètres de l'espace de travail." }
+      "openSearch": {
+        "label": "Ouvrir la recherche",
+        "description": "Rechercher et exécuter des commandes depuis n'importe où."
+      },
+      "createIssue": {
+        "label": "Créer un ticket",
+        "description": "Ouvrir votre mode de création de ticket préféré."
+      },
+      "toggleSidebar": {
+        "label": "Afficher ou masquer la barre latérale",
+        "description": "Afficher ou masquer la barre latérale principale."
+      },
+      "toggleChat": {
+        "label": "Afficher ou masquer la fenêtre de discussion",
+        "description": "Ouvrir ou fermer la fenêtre de discussion flottante. À l'ouverture, le champ de message reçoit le focus."
+      },
+      "findInIssue": {
+        "label": "Rechercher dans le ticket",
+        "description": "Rechercher dans le ticket ouvert."
+      },
+      "openThreadNav": {
+        "label": "Ouvrir le navigateur de fils",
+        "description": "Lister, rechercher et parcourir les fils de commentaires du ticket ouvert."
+      },
+      "archiveInboxItem": {
+        "label": "Archiver la notification",
+        "description": "Archiver la notification ouverte, ou la restaurer lors de la consultation des archives."
+      },
+      "send": {
+        "label": "Envoyer",
+        "description": "Envoyer messages de discussion, commentaires, réponses, retours et invites, et créer des tickets dans la fenêtre de création."
+      },
+      "goBack": {
+        "label": "Revenir en arrière",
+        "description": "Reculer dans l'historique, comme dans un navigateur."
+      },
+      "goForward": {
+        "label": "Avancer",
+        "description": "Avancer dans l'historique, comme dans un navigateur."
+      },
+      "goInbox": {
+        "label": "Aller à la boîte de réception",
+        "description": "Ouvrir la boîte de réception de l'espace de travail."
+      },
+      "goChat": {
+        "label": "Aller aux discussions",
+        "description": "Ouvrir les discussions de l'espace de travail."
+      },
+      "goMyIssues": {
+        "label": "Aller à Mes tickets",
+        "description": "Ouvrir les tickets qui vous sont assignés."
+      },
+      "goIssues": {
+        "label": "Aller aux tickets",
+        "description": "Ouvrir la liste des tickets."
+      },
+      "goProjects": {
+        "label": "Aller aux projets",
+        "description": "Ouvrir la liste des projets."
+      },
+      "goAutopilots": {
+        "label": "Aller aux automatisations",
+        "description": "Ouvrir les automatisations de l'espace de travail."
+      },
+      "goAgents": {
+        "label": "Aller aux agents",
+        "description": "Ouvrir la liste des agents."
+      },
+      "goSquads": {
+        "label": "Aller aux squads",
+        "description": "Ouvrir la liste des squads."
+      },
+      "goUsage": {
+        "label": "Aller aux statistiques",
+        "description": "Ouvrir les statistiques de consommation."
+      },
+      "goRuntimes": {
+        "label": "Aller aux runtimes",
+        "description": "Ouvrir la configuration des runtimes."
+      },
+      "goSkills": {
+        "label": "Aller aux skills",
+        "description": "Ouvrir la bibliothèque de skills."
+      },
+      "goSettings": {
+        "label": "Aller aux paramètres",
+        "description": "Ouvrir les paramètres de l'espace de travail."
+      }
     },
     "fixed": {
       "title": "Raccourcis système fixes",
@@ -210,7 +276,8 @@
       "quick_actions": "Actions rapides",
       "plugins": "Plugins",
       "mcp": "MCP",
-      "billing": "Facturation"
+      "billing": "Facturation",
+      "issue_statuses": "États des tickets"
     }
   },
   "plugins": {
@@ -219,123 +286,64 @@
     "loading": "Chargement des plugins",
     "load_failed": "Impossible de charger les plugins",
     "load_failed_description": "Réessayez. Les plugins déjà activés et les exécutions épinglées ne sont pas affectés.",
-    "backend_unavailable": "La gestion des plugins n'est pas disponible",
-    "backend_unavailable_description": "Ce serveur est antérieur au catalogue de plugins intégré. Mettez le backend à jour pour gérer les plugins ici.",
-    "catalog_degraded": "Certaines versions intégrées ont été isolées",
-    "catalog_degraded_description": "Une source intégrée a échoué à la validation. Les versions signées saines restent disponibles.",
     "read_only": "Accès en lecture seule",
     "read_only_description": "Les propriétaires et administrateurs de l'espace de travail peuvent installer ou modifier les rattachements de plugins.",
     "empty": "Aucun plugin intégré disponible.",
-    "official": "Officiel",
-    "private": "Privé",
-    "unverified": "Non vérifié",
-    "signed": "Signature vérifiée",
-    "signature_unverified": "Signature non vérifiée",
-    "incompatible": "Version incompatible",
-    "incompatible_description": "Cette version exige une API hôte ou une capacité de daemon plus récente et ne peut pas être activée.",
-    "install_disabled_hint": "L'installation laisse le plugin désactivé par défaut. Choisissez une portée d'espace de travail ou d'agent après l'installation.",
-    "install": "Installer",
-    "installed_disabled": "Plugin installé et laissé désactivé",
-    "active_version": "Version active :",
-    "health": "Santé :",
-    "bindings": "Portées activées",
-    "unknown_agent": "Agent inconnu",
-    "unknown_member": "Membre inconnu",
-    "workspace_scope": "Espace de travail",
-    "agent_scope": "Agent",
-    "binding_disabled": "Rattachement du plugin désactivé",
-    "disable_binding": "Désactiver",
-    "no_bindings": "Aucune portée activée. Les nouvelles exécutions ne reçoivent pas ce plugin.",
-    "enable_scope": "Activer la portée",
+    "install": {
+      "title": "Installer un plugin",
+      "description": "Collez l'URL d'un manifeste de plugin. Vous verrez ce qu'il demande avant que quoi que ce soit ne soit installé.",
+      "placeholder": "https://exemple.com/multica.plugin.json",
+      "review": "Examiner"
+    },
     "enabled": "Portée du plugin activée",
-    "disable_workspace": "Désactiver pour l'espace de travail",
     "disabled": "Plugin désactivé pour les nouvelles tâches",
-    "upgraded": "Plugin mis à niveau",
-    "rolled_back": "Plugin restauré à sa version antérieure",
     "source": "Source et déposant",
-    "private_upload": "Dépôt privé de l'espace de travail",
-    "uploaded_by": "Déposé par",
     "uninstall": "Désinstaller",
     "uninstalled": "Plugin désinstallé pour les exécutions futures",
-    "upgrade_to": "Mettre à niveau vers la v{{version}}",
-    "rollback_to": "Revenir à la v{{version}}",
     "action_failed": "Échec de l'action sur le plugin",
-    "none": "Aucun",
     "states": {
-      "disabled": "Désactivé",
-      "activating": "Activation",
-      "healthy": "Sain",
-      "degraded": "Dégradé",
-      "failed": "En échec"
+      "disabled": "Désactivé"
     },
-    "review": {
-      "contributes": "Apporte",
-      "permissions": "Capacité demandée",
-      "compatibility": "Compatibilité",
-      "host_api": "API hôte",
-      "publisher": "Éditeur et identité de signature",
-      "none": "Aucun"
+    "enabled_label": "Activer le plugin",
+    "granted_scopes": "Accès accordés",
+    "contributes": "Apporte",
+    "version": "v{{version}}",
+    "byline": "{{author}} · v{{version}}",
+    "installed": {
+      "title": "Installés"
     },
-    "remote_mcp": {
-      "title": "Connexion MCP distante",
-      "endpoint": "Point d'accès HTTPS",
-      "endpoint_placeholder": "https://mcp.exemple.com/mcp",
-      "auth": "Authentification",
-      "auth_types": {
-        "none": "Aucune",
-        "oauth": "OAuth (recommandé)",
-        "bearer": "Jeton Bearer",
-        "header": "En-tête personnalisé"
-      },
-      "header_name": "Nom de l'en-tête",
-      "credential": "Identifiant (stocké chiffré)",
-      "connect": "Connecter",
-      "connected": "Connecté",
-      "ready_to_connect": "Prêt à se connecter",
-      "complete_before_enabling": "Connectez le MCP et approuvez au moins un outil avant d'activer une portée.",
-      "advanced": "Configuration avancée",
-      "oauth_scope": "Portées OAuth (automatiques si vide)",
-      "oauth_client_id": "ID client OAuth (automatique si vide)",
-      "oauth_client_secret": "Secret client OAuth",
-      "oauth_authorization_endpoint": "Remplacement du point d'accès d'autorisation",
-      "oauth_token_endpoint": "Remplacement du point d'accès de jeton",
-      "oauth_token_auth_method": "Authentification du point d'accès de jeton",
-      "oauth_token_auth_methods": {
-        "none": "Client public (PKCE)",
-        "client_secret_basic": "Secret client (HTTP Basic)",
-        "client_secret_post": "Secret client (corps de requête)"
-      },
-      "public_config": "Configuration publique (objet JSON)",
-      "invalid_public_config": "La configuration publique doit être un objet JSON valide",
-      "failure_policy": "Politique en cas d'échec",
-      "failure_policies": {
-        "required": "Obligatoire — arrêter la tâche",
-        "optional": "Facultatif — continuer sans les outils"
-      },
-      "configure_and_discover": "Enregistrer et détecter les outils",
-      "test": "Tester la connexion",
-      "approve": "Approuver les outils sélectionnés",
-      "revoke": "Révoquer l'identifiant",
-      "credential_states": {
-        "configured": "Identifiant configuré",
-        "revoked": "Identifiant révoqué",
-        "missing": "Identifiant manquant",
-        "not_required": "Aucun identifiant requis"
-      },
-      "reviewed": "Outils approuvés",
-      "pending_review": "Approbation requise",
-      "approved_tools": "Outils approuvés",
-      "no_tools": "Le serveur n'a annoncé aucun outil.",
-      "discovery": "Outils détectés — examinez l'accès explicitement",
-      "read": "Lecture",
-      "write": "Écriture",
-      "configured_success": "Connexion enregistrée ; examinez les outils détectés",
-      "oauth_connected_success": "Connexion OAuth établie ; examinez les outils détectés",
-      "oauth_connect_failed": "La connexion OAuth n'a pas pu aboutir. Réessayez.",
-      "test_success": "Test de connexion réussi",
-      "approved_success": "Accès aux outils approuvé",
-      "revoked_success": "Identifiant révoqué et plugin désactivé"
-    }
+    "consent": {
+      "title": "Ce plugin demande les accès suivants",
+      "description": "Multica n'exécute jamais le code d'un plugin sur ses serveurs. Un plugin ne peut faire que ce que ces accès autorisent, et jamais plus que la personne qui l'utilise.",
+      "cancel": "Annuler",
+      "confirm": "Accorder et installer",
+      "confirm_upgrade": "Accorder et mettre à jour",
+      "installed": "Plugin installé",
+      "upgrade_from": " · mise à jour depuis la v{{version}}",
+      "new_scope": "Nouveau"
+    },
+    "config": {
+      "title": "Configuration",
+      "save": "Enregistrer",
+      "saved": "Configuration enregistrée",
+      "secret_set": "Enregistré — saisissez une nouvelle valeur pour la remplacer"
+    },
+    "scopes": {
+      "issues_read": "Lire les tickets",
+      "issues_write": "Créer et modifier des tickets",
+      "comments_read": "Lire les commentaires",
+      "comments_write": "Publier des commentaires",
+      "tasks_read": "Lire les tâches des agents",
+      "tasks_write": "Démarrer et mettre à jour des tâches d'agent",
+      "agents_read": "Lire la liste des agents",
+      "members_read": "Lire la liste des membres",
+      "storage_user": "Stocker des données pour chaque membre séparément",
+      "storage_workspace": "Stocker des données partagées par l'espace de travail",
+      "net": "Envoyer des données vers {{domain}}",
+      "unknown": "Accès non reconnu — ne pas installer"
+    },
+    "hook_circuit_open": "La distribution des hooks est arrêtée après des échecs répétés.",
+    "hook_recent_failures": "{{count}} appels de hook récents ont échoué."
   },
   "properties": {
     "title": "Propriétés",
@@ -892,7 +900,8 @@
     "byo_submitting": "Connexion…",
     "byo_cancel": "Annuler",
     "byo_success_toast": "Bot DingTalk connecté",
-    "byo_failed_toast": "Impossible de connecter le bot DingTalk"
+    "byo_failed_toast": "Impossible de connecter le bot DingTalk",
+    "identity_label": "Identité DingTalk associée : {{identity}}"
   },
   "wecom": {
     "section_title": "WeCom",
@@ -1068,5 +1077,96 @@
     "expiry_7d": "7 jours",
     "expiry_30d": "30 jours",
     "expiry_never": "Jamais"
+  },
+  "issue_statuses": {
+    "title": "États des tickets",
+    "description": "Ajoutez vos propres états en plus des sept états intégrés. Chaque état appartient à une catégorie, et c'est la catégorie qui détermine son comportement.",
+    "loading": "Chargement des états…",
+    "add": "Ajouter un état",
+    "show_archived": "Afficher les archivés ({{count}})",
+    "archived_badge": "Archivé",
+    "archived_hint": "Retiré des nouvelles affectations. Les tickets qui le portent le gardent.",
+    "flag_off": "Les états personnalisés ne sont pas encore activés sur cette installation. Les états intégrés ci-dessous fonctionnent normalement.",
+    "reorder_failed": "Le nouvel ordre n'a pas pu être enregistré.",
+    "actions": {
+      "open": "Actions pour {{name}}",
+      "edit": "Modifier",
+      "archive": "Archiver",
+      "reorder": "Réordonner {{name}}"
+    },
+    "editor": {
+      "create_title": "Nouvel état",
+      "edit_title": "Modifier l'état",
+      "behavior_hint": "Cet état se comporte exactement comme {{category}}.",
+      "name": "Nom",
+      "name_placeholder": "ex. Relecture de code",
+      "category": "Catégorie",
+      "category_locked": "La catégorie ne peut pas être changée — des tickets qui portent cet état en dépendent.",
+      "description": "Description",
+      "description_placeholder": "Ce que cet état signifie pour votre équipe",
+      "color": "Couleur",
+      "cancel": "Annuler",
+      "save": "Enregistrer",
+      "saving": "Enregistrement…",
+      "save_failed": "L'état n'a pas pu être enregistré.",
+      "key_hint": "Désigné par {{key}} dans l'API et la CLI."
+    },
+    "archive_dialog": {
+      "title": "Archiver cet état ?",
+      "description": "« {{name}} » cesse d'être proposé pour les nouveaux tickets. Ceux qui le portent le gardent et continuent de se comporter exactement comme aujourd'hui.",
+      "cancel": "Annuler",
+      "confirm": "Archiver",
+      "failed": "L'état n'a pas pu être archivé."
+    },
+    "categories": {
+      "backlog": "En attente. Affecter un ticket ici ne démarre jamais un agent.",
+      "todo": "En file. Déplacer un ticket ici démarre l'agent qui lui est affecté.",
+      "in_progress": "En cours de traitement.",
+      "in_review": "Livré, en attente d'une relecture humaine. Clôt l'exécution de l'autopilote.",
+      "done": "Terminé.",
+      "blocked": "À l'arrêt, en attente d'une dépendance extérieure.",
+      "cancelled": "Abandonné."
+    }
+  },
+  "telegram": {
+    "section_title": "Telegram",
+    "page_description": "Connectez chaque agent Multica à son propre bot Telegram. Les membres peuvent écrire au bot en privé, le mentionner dans un groupe, taper /issue pour ouvrir un ticket Multica, et suivre la réponse de l'agent en direct.",
+    "not_enabled_title": "Intégration Telegram non activée",
+    "not_enabled_description_prefix": "Définissez",
+    "not_enabled_description_suffix": "sur le serveur pour autoriser l'installation de bots Telegram.",
+    "not_enabled_self_host_hint": "Auto-hébergement : voir le README du projet pour le détail.",
+    "preview_title": "Installation Telegram bientôt disponible",
+    "preview_description": "La clé de chiffrement au repos est définie, mais les installations ne sont pas encore disponibles sur cette installation. Le bouton Connecter apparaîtra ici dès qu'elles le seront.",
+    "connected_bots": "Bots connectés",
+    "loading": "Chargement…",
+    "load_failed": "Impossible de charger les installations Telegram",
+    "empty_title": "Aucun bot connecté pour l'instant",
+    "empty_description_prefix": "Ouvrez un agent de cet espace de travail et cliquez sur",
+    "empty_description_cta": "Connecter Telegram",
+    "empty_description_suffix": "pour lui installer un bot.",
+    "revoked_badge": "révoqué",
+    "installed_at_label": "Installé {{when}}",
+    "disconnect": "Déconnecter",
+    "disconnecting": "Déconnexion…",
+    "disconnect_confirm_title": "Déconnecter ce bot Telegram ?",
+    "disconnect_confirm_description": "Le bot cessera de recevoir les messages Telegram de cet espace de travail. L'historique des conversations dans Multica est conservé ; vous pourrez le reconnecter plus tard depuis le même agent.",
+    "disconnect_confirm_cancel": "Annuler",
+    "toast_disconnected": "Bot Telegram déconnecté",
+    "toast_disconnect_failed": "La déconnexion a échoué",
+    "bind_button": "Connecter Telegram",
+    "bind_button_title": "Connecter {{agent}} à un bot Telegram",
+    "agent_bot_connected_label": "Connecté à Telegram",
+    "agent_bot_disconnect_tooltip": "Dissocier ce bot Telegram de l'agent. Le bot cessera de recevoir les messages Telegram.",
+    "agent_bot_manage_link": "Ouvrir dans Telegram",
+    "agent_bot_manage_tooltip": "Ouvrir une conversation avec ce bot dans Telegram.",
+    "connect_dialog_title": "Connecter un bot Telegram",
+    "connect_dialog_description": "Créez un bot avec @BotFather dans Telegram, puis collez son jeton ci-dessous. Le jeton est vérifié en direct et stocké chiffré.",
+    "connect_docs_link": "Pas à pas : connecter votre agent Multica à Telegram",
+    "bot_token_label": "Jeton du bot",
+    "connect_submit": "Connecter",
+    "connect_submitting": "Connexion…",
+    "connect_cancel": "Annuler",
+    "connect_success_toast": "Bot Telegram connecté",
+    "connect_failed_toast": "Impossible de connecter le bot Telegram"
   }
 }

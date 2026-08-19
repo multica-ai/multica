@@ -109,7 +109,8 @@
       "cancel": "Annuler",
       "confirm": "Supprimer",
       "deleting": "Suppression..."
-    }
+    },
+    "run_blocked_quota_exceeded": "Non déclenché — la limite d'exécutions de la période est atteinte"
   },
   "access": {
     "title": "Gérer l'accès",

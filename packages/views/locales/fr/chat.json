@@ -30,7 +30,8 @@
     "change_project_context": "Changer le contexte de projet",
     "remove_project_context": "Retirer le contexte de projet",
     "no_projects": "Aucun projet pour l'instant",
-    "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour"
+    "project_context_unsupported": "La description du projet ne s'appliquera pas — le daemon de cet agent doit être mis à jour",
+    "placeholder_access_revoked": "Vous n'avez plus l'autorisation d'exécuter cet agent"
   },
   "queue": {
     "title_one": "{{count}} message en file d'attente",
@@ -43,7 +44,8 @@
     "remove": "Retirer le message de la file d'attente",
     "more": "Plus d'actions sur la file d'attente",
     "fallback": "Message en file d'attente",
-    "action_failed_toast": "Impossible de mettre à jour le message en file d'attente"
+    "action_failed_toast": "Impossible de mettre à jour le message en file d'attente",
+    "steer_no_permission": "Vous n'avez plus l'autorisation d'exécuter cet agent"
   },
   "message_list": {
     "show_details": "Afficher les détails",
@@ -66,7 +68,8 @@
       "context_overflow": "Cette conversation est devenue trop longue pour le modèle. Démarrez une nouvelle session, ou découpez votre demande en étapes plus courtes.",
       "runtime_missing_executable": "Le CLI de l'agent n'a pas pu être exécuté sur cette machine. Vérifiez qu'il est correctement installé et présent dans le PATH, puis réessayez.",
       "runtime_version_unsupported": "Le CLI de l'agent est trop ancien pour ce runtime. Mettez-le à jour, puis réessayez.",
-      "fallback": "Une erreur est survenue et l'agent n'a pas pu terminer sa réponse. Veuillez réessayer."
+      "fallback": "Une erreur est survenue et l'agent n'a pas pu terminer sa réponse. Veuillez réessayer.",
+      "runtime_cli_timeout": "L'outil OpenClaw local n'a pas répondu à temps, l'exécution n'a donc jamais démarré. C'est un délai de démarrage local, pas un problème de réseau — réessayer ne servira à rien tant que l'outil ne démarrera pas plus vite ou que le délai ne sera pas allongé (MULTICA_OPENCLAW_CLI_TIMEOUT)."
     },
     "tools_one": "{{count}} outil",
     "tools_other": "{{count}} outils",
@@ -229,5 +232,6 @@
     "archive": "Archiver la discussion",
     "unarchive": "Désarchiver la discussion",
     "delete": "Supprimer la discussion"
-  }
+  },
+  "agent_access_revoked_banner": "Vous n'avez plus l'autorisation d'exécuter {{name}} — cette conversation est en lecture seule."
 }

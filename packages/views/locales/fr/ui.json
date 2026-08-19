@@ -1,8 +1,6 @@
 {
   "attach_file": "Joindre un fichier",
   "toggle_sidebar": "Afficher ou masquer la barre latérale",
-  "pagination_previous": "Aller à la page précédente",
-  "pagination_next": "Aller à la page suivante",
   "copy_code": "Copier le code",
   "plain_text": "texte brut"
 }
