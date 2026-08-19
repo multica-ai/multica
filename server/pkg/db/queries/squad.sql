@@ -66,6 +66,12 @@ SELECT * FROM squad WHERE workspace_id = $1 ORDER BY created_at ASC;
 UPDATE squad SET
     name = COALESCE(sqlc.narg('name'), name),
     description = COALESCE(sqlc.narg('description'), description),
+    leader_revision = CASE
+        WHEN sqlc.narg('leader_id')::uuid IS NOT NULL
+         AND sqlc.narg('leader_id')::uuid IS DISTINCT FROM leader_id
+            THEN leader_revision + 1
+        ELSE leader_revision
+    END,
     leader_id = COALESCE(sqlc.narg('leader_id'), leader_id),
     avatar_url = COALESCE(sqlc.narg('avatar_url'), avatar_url),
     instructions = COALESCE(sqlc.narg('instructions'), instructions),

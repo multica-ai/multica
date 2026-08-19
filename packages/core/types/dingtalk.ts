@@ -1,14 +1,21 @@
-/** A DingTalk robot installation with one default Multica agent. Group routes
- * may target other agents without duplicating the installation.
+export type DingTalkTargetType = "agent" | "squad";
+
+/** A DingTalk robot installation with one default Multica Agent or Squad.
+ * Group routes may target other Agents or Squads without duplicating it.
  *
  * Wire shape mirrors `DingTalkInstallationResponse` in
  * `server/internal/handler/dingtalk.go`. New fields the backend adds in the
  * future MUST default to optional so older desktop builds keep parsing the
  * response — see CLAUDE.md → API Compatibility. */
 export interface DingTalkInstallation {
-  id: string;
-  workspace_id: string;
-  agent_id: string;
+	id: string;
+	workspace_id: string;
+	/** Optional only for compatibility with older servers. Missing means Agent. */
+	target_type?: DingTalkTargetType;
+	/** Optional only for compatibility with older servers. Falls back to agent_id. */
+	target_id?: string;
+	/** Resolved executable Agent; for a Squad this is its current Leader. */
+	agent_id: string;
   installer_user_id: string;
   status: "active" | "revoked" | string;
   installed_at: string;
@@ -35,19 +42,23 @@ export interface ListDingTalkInstallationsResponse {
   /** Whether this backend exposes DingTalk group routing. Optional and gated
    * with `=== true` so newer Web/Desktop clients do not call a route that an
    * older or version-skewed backend does not have. */
-  group_routing_supported?: boolean;
+	group_routing_supported?: boolean;
+	/** Whether installations and group routes may target a Squad. */
+	squad_routing_supported?: boolean;
 }
 
-/** A DingTalk group observed by one Stream-mode robot and routed to a fixed
- * Multica agent. Groups are discovered from inbound callbacks; admins can
- * reassign the agent without reconnecting or duplicating the robot. */
+/** A DingTalk group observed by one Stream-mode robot and routed to a Multica
+ * Agent or Squad. A Squad route executes on its current Leader. */
 export interface DingTalkGroupRoute {
   id: string;
   workspace_id: string;
   installation_id: string;
-  conversation_id: string;
-  conversation_title: string;
-  agent_id: string;
+	conversation_id: string;
+	conversation_title: string;
+	target_type?: DingTalkTargetType;
+	target_id?: string;
+	/** Resolved executable Agent; for a Squad this is its current Leader. */
+	agent_id: string;
   discovered_at: string;
   updated_at: string;
 }
@@ -56,9 +67,9 @@ export interface ListDingTalkGroupRoutesResponse {
   routes: DingTalkGroupRoute[];
 }
 
-export interface UpdateDingTalkGroupRouteRequest {
-  agent_id: string;
-}
+export type UpdateDingTalkGroupRouteRequest =
+  | { target_type: DingTalkTargetType; target_id: string }
+  | { agent_id: string };
 
 /** Request body for a bring-your-own-app (BYO) install: the AppKey and
  * AppSecret the admin pastes from the DingTalk Stream-mode robot they created.

@@ -50,6 +50,11 @@
     "keep_editing": "계속 편집",
     "discard_button": "버리기"
   },
+  "detail_tabs": {
+    "members": "멤버",
+    "instructions": "지침",
+    "integrations": "연동"
+  },
   "members_tab": {
     "section_title": "멤버",
     "section_count_other": "이 스쿼드의 멤버 {{count}}명",
@@ -80,6 +85,10 @@
     "description": "스쿼드에 할당된 태스크를 리더 에이전트가 처리할 때마다 스쿼드 지침이 리더 프롬프트에 포함됩니다. 스쿼드 전체의 방향, 협업 규칙, 매 작업마다 따라야 할 맥락을 리더에게 전달할 때 사용하세요.",
     "unsaved_changes": "저장하지 않은 변경사항",
     "save_button": "저장"
+  },
+  "integrations_tab": {
+    "dingtalk_title": "DingTalk 로봇",
+    "dingtalk_description": "메시지는 이 Squad의 현재 리더에게만 전달됩니다. 리더가 직접 답변하거나 Squad 멤버에게 작업을 분배할 수 있습니다."
   },
   "scope": {
     "mine": "내 스쿼드",

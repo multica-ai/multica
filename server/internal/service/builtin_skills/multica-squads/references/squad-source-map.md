@@ -14,6 +14,7 @@ Source:
 server/migrations/084_squad.up.sql                # base table: name, description, leader_id, creator_id
 server/migrations/085_squad_archive.up.sql        # archived_at, archived_by columns
 server/migrations/088_squad_instructions.up.sql   # instructions column
+server/migrations/350_chat_session_squad.up.sql   # optional Squad context on channel chat sessions
 server/pkg/db/queries/squad.sql
 packages/core/types/squad.ts
 ```
@@ -25,6 +26,8 @@ Key facts:
 - `squad_member` stores `member_type`, `member_id`, and `role`.
 - `member_type` is constrained to `agent` or `member`.
 - issue `assignee_type` supports `squad`.
+- channel-created chat sessions may retain `squad_id` so their tasks receive
+  the normal leader briefing.
 
 ## CLI
 
@@ -200,6 +203,50 @@ Contracts:
 - `create_issue` keeps the issue assigned to the squad (autopilot.go:88-97);
 - `run_only` creates task directly for leader (autopilot.go:99-106, dispatch via
   `resolveAutopilotLeader` at autopilot.go:284).
+
+## DingTalk Channel Routing
+
+Source:
+
+```text
+server/migrations/349_dingtalk_polymorphic_target.up.sql
+server/migrations/350_chat_session_squad.up.sql
+server/internal/handler/dingtalk.go
+server/internal/integrations/channel/engine/router.go
+server/internal/integrations/dingtalk/resolvers.go
+server/internal/integrations/dingtalk/outbound.go
+server/internal/service/task.go
+server/pkg/db/queries/dingtalk.sql
+server/pkg/db/queries/chat.sql
+packages/views/settings/components/dingtalk-tab.tsx
+packages/views/squads/components/squad-detail-page.tsx
+```
+
+Contracts:
+
+- DingTalk installations and group routes persist
+  `target_type="agent"|"squad"` plus `target_id`;
+- a Squad target preserves the Squad ID while resolving the executable Agent
+  from the current `squad.leader_id` for each inbound message;
+- channel chat sessions persist `squad_id`, and their tasks set
+  `is_leader_task=true` so the standard Leader briefing is injected;
+- session-binding, append, enqueue, and outbound guards compare both the
+  product target and resolved Leader, preventing a Leader handoff from sending
+  work to or accepting a reply from the former Leader;
+- `/issue` uses the product target, so a Squad route creates an Issue assigned
+  to the Squad rather than directly to its Leader;
+- route and install management are exposed in workspace Settings and on the
+  Squad detail Integrations tab.
+
+Relevant tests:
+
+```text
+server/internal/integrations/dingtalk/group_route_db_test.go
+server/internal/integrations/channel/engine/router_test.go
+server/internal/service/attribution_stamp_test.go
+server/internal/handler/dingtalk_group_routes_test.go
+packages/views/settings/components/dingtalk-tab.test.tsx
+```
 
 ## Child-done Parent Trigger
 

@@ -16,10 +16,10 @@ import (
 )
 
 type fakeInstallationQueries struct {
-	params db.GetChannelInstallationByAppIDParams
-	row    db.ChannelInstallation
-	err    error
-	calls  int
+	appID string
+	row   db.ResolveDingTalkInstallationByAppIDRow
+	err   error
+	calls int
 }
 
 type fakeValidatedInboundQueries struct {
@@ -34,12 +34,14 @@ type fakeSessionQueries struct {
 	matches      []bool
 	matchErrs    []error
 	matchCalls   int
+	groupCalls   int
+	directCalls  int
 	deleteCounts []int64
 	deleteErrs   []error
 	deleteCalls  int
 }
 
-func (f *fakeSessionQueries) DingTalkGroupRouteMatchesAgent(context.Context, db.DingTalkGroupRouteMatchesAgentParams) (bool, error) {
+func (f *fakeSessionQueries) nextMatch() (bool, error) {
 	call := f.matchCalls
 	f.matchCalls++
 	var err error
@@ -51,6 +53,16 @@ func (f *fakeSessionQueries) DingTalkGroupRouteMatchesAgent(context.Context, db.
 		match = f.matches[call]
 	}
 	return match, err
+}
+
+func (f *fakeSessionQueries) DingTalkGroupRouteMatchesTarget(context.Context, db.DingTalkGroupRouteMatchesTargetParams) (bool, error) {
+	f.groupCalls++
+	return f.nextMatch()
+}
+
+func (f *fakeSessionQueries) DingTalkInstallationMatchesTarget(context.Context, db.DingTalkInstallationMatchesTargetParams) (bool, error) {
+	f.directCalls++
+	return f.nextMatch()
 }
 
 func (f *fakeSessionQueries) DeleteDingTalkStaleGroupChatBinding(_ context.Context, params db.DeleteDingTalkStaleGroupChatBindingParams) (int64, error) {
@@ -68,8 +80,8 @@ func (f *fakeSessionQueries) DeleteDingTalkStaleGroupChatBinding(_ context.Conte
 	return count, err
 }
 
-func (f *fakeInstallationQueries) GetChannelInstallationByAppID(_ context.Context, params db.GetChannelInstallationByAppIDParams) (db.ChannelInstallation, error) {
-	f.params = params
+func (f *fakeInstallationQueries) ResolveDingTalkInstallationByAppID(_ context.Context, appID string) (db.ResolveDingTalkInstallationByAppIDRow, error) {
+	f.appID = appID
 	f.calls++
 	return f.row, f.err
 }
@@ -124,9 +136,10 @@ func TestInstallationResolverGroupLookupIsReadOnly(t *testing.T) {
 	var installationID, workspaceID, defaultAgentID, installerID pgtype.UUID
 	installationID.Bytes[0], workspaceID.Bytes[0], defaultAgentID.Bytes[0], installerID.Bytes[0] = 1, 2, 3, 5
 	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, installerID.Valid = true, true, true, true
-	fake := &fakeInstallationQueries{row: db.ChannelInstallation{
-		ID: installationID, WorkspaceID: workspaceID, AgentID: defaultAgentID,
-		InstallerUserID: installerID, Status: "active",
+	fake := &fakeInstallationQueries{row: db.ResolveDingTalkInstallationByAppIDRow{
+		ID: installationID, WorkspaceID: workspaceID,
+		TargetType: string(engine.TargetAgent), TargetID: defaultAgentID, AgentID: defaultAgentID,
+		InstallerUserID: installerID, Status: "active", TargetRevision: 7, TargetActive: true,
 	}}
 	raw, _ := json.Marshal(dingtalkRawEvent{AppID: "app-key", ConversationTitle: "Platform team"})
 	resolved, err := (&installationResolver{q: fake}).ResolveInstallation(context.Background(), channel.InboundMessage{
@@ -136,14 +149,14 @@ func TestInstallationResolverGroupLookupIsReadOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if resolved.ID != installationID || resolved.WorkspaceID != workspaceID || resolved.AgentID != defaultAgentID || resolved.InstallerUserID != installerID || !resolved.Active {
+	if resolved.ID != installationID || resolved.WorkspaceID != workspaceID || resolved.AgentID != defaultAgentID || resolved.TargetRevision != 7 || resolved.InstallerUserID != installerID || !resolved.Active {
 		t.Fatalf("resolved group installation = %+v", resolved)
 	}
-	if fake.params.ChannelType != string(TypeDingTalk) || fake.params.AppID != "app-key" {
-		t.Fatalf("installation lookup params = %+v", fake.params)
+	if fake.appID != "app-key" {
+		t.Fatalf("installation lookup app id = %q", fake.appID)
 	}
 	platform, ok := resolved.Platform.(db.ChannelInstallation)
-	if !ok || platform.AgentID != defaultAgentID {
+	if !ok || platform.AgentID != defaultAgentID || platform.TargetType != "agent" || platform.TargetID != defaultAgentID {
 		t.Fatalf("platform installation must retain default agent: %#v", resolved.Platform)
 	}
 }
@@ -204,7 +217,7 @@ func TestDingTalkP2PSkipsGroupDiscoveryAndUsesDefaultAgentSession(t *testing.T) 
 		t.Fatalf("p2p validated resolution = %+v err=%v discovery calls=%d", resolved, err, discovery.calls)
 	}
 
-	queries := &fakeSessionQueries{matchErrs: []error{errors.New("must not query group route session fence for p2p")}}
+	queries := &fakeSessionQueries{}
 	capture := &captureChatSession{}
 	appendFenceCalls := 0
 	binder := &sessionBinder{
@@ -221,8 +234,8 @@ func TestDingTalkP2PSkipsGroupDiscoveryAndUsesDefaultAgentSession(t *testing.T) 
 	}); err != nil {
 		t.Fatalf("p2p EnsureSession: %v", err)
 	}
-	if queries.matchCalls != 0 || queries.deleteCalls != 0 || capture.ensureCalls != 1 {
-		t.Fatalf("p2p route calls = match %d delete %d ensure %d, want 0/0/1", queries.matchCalls, queries.deleteCalls, capture.ensureCalls)
+	if queries.groupCalls != 0 || queries.directCalls != 2 || queries.deleteCalls != 2 || capture.ensureCalls != 1 {
+		t.Fatalf("p2p target calls = group %d direct %d delete %d ensure %d, want 0/2/2/1", queries.groupCalls, queries.directCalls, queries.deleteCalls, capture.ensureCalls)
 	}
 	if capture.ensure.AgentID != defaultAgentID || capture.ensure.BindingKey != "cid-direct" || capture.ensure.ChatType != channel.ChatTypeP2P {
 		t.Fatalf("p2p session input = %+v, want default agent and direct-message binding", capture.ensure)
@@ -246,7 +259,8 @@ func TestValidatedInboundResolverDiscoversGroupAndFinalizesAgent(t *testing.T) {
 	installationID.Bytes[0], workspaceID.Bytes[0], defaultAgentID.Bytes[0], routeAgentID.Bytes[0] = 1, 2, 3, 4
 	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, routeAgentID.Valid = true, true, true, true
 	fake := &fakeValidatedInboundQueries{row: db.DiscoverDingTalkGroupRouteRow{
-		AgentID: routeAgentID, Revision: 7, AgentActive: true,
+		TargetType: string(engine.TargetAgent), TargetID: routeAgentID,
+		AgentID: routeAgentID, Revision: 7, AgentActive: pgtype.Bool{Bool: true, Valid: true},
 	}}
 	raw, _ := json.Marshal(dingtalkRawEvent{ConversationTitle: "Platform team"})
 	resolved, err := (&validatedInboundResolver{q: fake}).ResolveValidatedInbound(
@@ -337,7 +351,7 @@ func TestDingTalkSessionRouting_P2PCarriesStaffID(t *testing.T) {
 		ChatType: channel.ChatTypeP2P,
 		SenderID: "staff-7",
 	}}
-	key, cfg := dingtalkSessionRouting(msg, pgtype.UUID{})
+	key, cfg := dingtalkSessionRouting(msg, engine.ResolvedInstallation{})
 	if key != "cid-1" {
 		t.Errorf("binding key = %q, want conversation id", key)
 	}
@@ -356,7 +370,7 @@ func TestDingTalkSessionRouting_GroupOmitsStaffID(t *testing.T) {
 		ChatType: channel.ChatTypeGroup,
 		SenderID: "staff-7",
 	}}
-	_, cfg := dingtalkSessionRouting(msg, pgtype.UUID{})
+	_, cfg := dingtalkSessionRouting(msg, engine.ResolvedInstallation{})
 	var dc dingtalkBindingConfig
 	_ = json.Unmarshal(cfg, &dc)
 	if dc.ConversationType != convTypeGroup || dc.StaffID != "" {
@@ -369,7 +383,7 @@ func TestOutboundTarget_RoundTripsBindingConfig(t *testing.T) {
 		ChatID:   "cid-3",
 		ChatType: channel.ChatTypeP2P,
 		SenderID: "staff-3",
-	}}, pgtype.UUID{})
+	}}, engine.ResolvedInstallation{})
 	target := outboundTarget(db.ChannelChatSessionBinding{ChannelChatID: "cid-3", Config: cfg})
 	if target.ConversationType != convTypeP2P || target.StaffID != "staff-3" || target.ConversationID != "cid-3" {
 		t.Errorf("round-tripped target = %+v", target)
@@ -410,6 +424,39 @@ func TestSessionBinder_ClearsStaleGroupBindingAndStampsAgent(t *testing.T) {
 	}
 }
 
+func TestSessionBinder_SquadSessionStampsLeaderRevision(t *testing.T) {
+	var installationID, squadID, leaderID pgtype.UUID
+	installationID.Bytes[0], squadID.Bytes[0], leaderID.Bytes[0] = 8, 7, 9
+	installationID.Valid, squadID.Valid, leaderID.Valid = true, true, true
+	queries := &fakeSessionQueries{}
+	capture := &captureChatSession{}
+	binder := &sessionBinder{q: queries, session: capture}
+	if _, err := binder.EnsureSession(context.Background(), engine.EnsureSessionParams{
+		Installation: engine.ResolvedInstallation{
+			ID: installationID, TargetType: engine.TargetSquad, TargetID: squadID,
+			TargetRevision: 4, AgentID: leaderID,
+		},
+		Message: channel.InboundMessage{Source: channel.Source{
+			ChatID: "cid-squad", ChatType: channel.ChatTypeGroup,
+		}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if capture.ensure.SquadID != squadID || !capture.ensure.SquadLeaderRevision.Valid || capture.ensure.SquadLeaderRevision.Int64 != 4 {
+		t.Fatalf("Squad session input = %+v", capture.ensure)
+	}
+	if queries.params.TargetRevision != 4 {
+		t.Fatalf("stale binding target revision = %d, want 4", queries.params.TargetRevision)
+	}
+	var cfg dingtalkBindingConfig
+	if err := json.Unmarshal(capture.ensure.BindingConfig, &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg.TargetType != "squad" || cfg.TargetID == "" || cfg.TargetRevision != 4 || cfg.AgentID == "" {
+		t.Fatalf("Squad binding config = %+v", cfg)
+	}
+}
+
 func TestSessionBinder_StopsWhenGroupRouteChanged(t *testing.T) {
 	queries := &fakeSessionQueries{matches: []bool{false}}
 	capture := &captureChatSession{}
@@ -437,11 +484,11 @@ func TestSessionBinder_GroupRouteFailureMatrix(t *testing.T) {
 		wantContains string
 		wantEnsures  int
 	}{
-		{name: "initial route query error", queries: &fakeSessionQueries{matchErrs: []error{queryErr}}, wantErr: queryErr, wantContains: "verify dingtalk group route"},
-		{name: "initial stale binding cleanup error", queries: &fakeSessionQueries{matches: []bool{true}, deleteErrs: []error{cleanupErr}}, wantErr: cleanupErr, wantContains: "retire stale dingtalk group session"},
+		{name: "initial route query error", queries: &fakeSessionQueries{matchErrs: []error{queryErr}}, wantErr: queryErr, wantContains: "verify dingtalk target"},
+		{name: "initial stale binding cleanup error", queries: &fakeSessionQueries{matches: []bool{true}, deleteErrs: []error{cleanupErr}}, wantErr: cleanupErr, wantContains: "retire stale dingtalk session"},
 		{name: "underlying ensure session error", queries: &fakeSessionQueries{matches: []bool{true}}, ensureErr: ensureErr, wantErr: ensureErr, wantEnsures: 1},
-		{name: "recheck route query error", queries: &fakeSessionQueries{matches: []bool{true, true}, matchErrs: []error{nil, queryErr}}, wantErr: queryErr, wantContains: "recheck dingtalk group route", wantEnsures: 1},
-		{name: "recheck stale binding cleanup error", queries: &fakeSessionQueries{matches: []bool{true, true}, deleteErrs: []error{nil, cleanupErr}}, wantErr: cleanupErr, wantContains: "recheck dingtalk group session", wantEnsures: 1},
+		{name: "recheck route query error", queries: &fakeSessionQueries{matches: []bool{true, true}, matchErrs: []error{nil, queryErr}}, wantErr: queryErr, wantContains: "recheck dingtalk target", wantEnsures: 1},
+		{name: "recheck stale binding cleanup error", queries: &fakeSessionQueries{matches: []bool{true, true}, deleteErrs: []error{nil, cleanupErr}}, wantErr: cleanupErr, wantContains: "recheck dingtalk session", wantEnsures: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			capture := &captureChatSession{ensureErr: tc.ensureErr}

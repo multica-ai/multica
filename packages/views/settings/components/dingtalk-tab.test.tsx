@@ -19,12 +19,24 @@ const installationsRef = vi.hoisted(() => ({
     configured: true,
     install_supported: true,
     group_routing_supported: true,
+    squad_routing_supported: true,
+  } as {
+    installations: unknown[];
+    configured: boolean;
+    install_supported: boolean;
+    group_routing_supported: boolean;
+    squad_routing_supported?: boolean;
   },
 }));
 const agentsRef = vi.hoisted(() => ({
   current: [
     { id: "agent-1", name: "Agent One", archived_at: null },
     { id: "agent-2", name: "Agent Two", archived_at: null },
+  ] as Array<{ id: string; name: string; archived_at: string | null }>,
+}));
+const squadsRef = vi.hoisted(() => ({
+  current: [
+    { id: "squad-1", name: "Platform Squad", archived_at: null },
   ] as Array<{ id: string; name: string; archived_at: string | null }>,
 }));
 const groupRoutesRef = vi.hoisted(() => ({
@@ -53,6 +65,9 @@ vi.mock("@tanstack/react-query", () => ({
         refetch: vi.fn(),
       };
     }
+    if (key.includes("squads")) {
+      return { data: squadsRef.current, isLoading: false, isSuccess: true };
+    }
     if (key.includes("group-routes")) return { data: groupRoutesRef.current, isLoading: false };
     if (key.includes("installations")) return { data: installationsRef.current, isLoading: false };
     return { data: undefined, isLoading: false };
@@ -66,6 +81,7 @@ vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members"], queryFn: vi.fn() }),
   agentListOptions: () => ({ queryKey: ["agents"], queryFn: vi.fn() }),
+  squadListOptions: () => ({ queryKey: ["squads"], queryFn: vi.fn() }),
 }));
 
 vi.mock("@multica/core/workspace/hooks", () => ({
@@ -123,7 +139,7 @@ vi.mock("sonner", () => ({
 
 vi.mock("../../platform", () => ({ openExternal: mockOpenExternal }));
 
-import { DingTalkAgentBindButton, DingTalkTab } from "./dingtalk-tab";
+import { DingTalkAgentBindButton, DingTalkTab, DingTalkTargetBindButton } from "./dingtalk-tab";
 
 const TEST_RESOURCES = { en: { common: enCommon, settings: enSettings } };
 
@@ -145,11 +161,13 @@ function resetFixtures() {
     configured: true,
     install_supported: true,
     group_routing_supported: true,
+    squad_routing_supported: true,
   };
   agentsRef.current = [
     { id: "agent-1", name: "Agent One", archived_at: null },
     { id: "agent-2", name: "Agent Two", archived_at: null },
   ];
+  squadsRef.current = [{ id: "squad-1", name: "Platform Squad", archived_at: null }];
   groupRoutesRef.current = { routes: [] };
 }
 
@@ -159,6 +177,7 @@ function setConnectedGroupRoute() {
     configured: true,
     install_supported: true,
     group_routing_supported: true,
+    squad_routing_supported: true,
   };
   groupRoutesRef.current = {
     routes: [{
@@ -195,6 +214,35 @@ describe("DingTalkAgentBindButton", () => {
       }),
     );
     expect(mockOpenExternal).not.toHaveBeenCalled();
+  });
+
+  it("binds a Squad as the robot target", async () => {
+    mockRegisterBYO.mockResolvedValue({
+      id: "i1",
+      target_type: "squad",
+      target_id: "squad-1",
+      agent_id: "agent-1",
+      status: "active",
+    });
+    renderUI(
+      <DingTalkTargetBindButton
+        targetType="squad"
+        targetId="squad-1"
+        targetName="Platform Squad"
+      />,
+    );
+    await userEvent.click(screen.getByTestId("dingtalk-agent-connect"));
+    await userEvent.type(await screen.findByTestId("dingtalk-byo-client-id"), "ding-appkey");
+    await userEvent.type(screen.getByTestId("dingtalk-byo-client-secret"), "ding-appsecret");
+    await userEvent.click(screen.getByTestId("dingtalk-byo-submit"));
+    await waitFor(() =>
+      expect(mockRegisterBYO).toHaveBeenCalledWith(
+        "workspace-1",
+        "squad-1",
+        { client_id: "ding-appkey", client_secret: "ding-appsecret" },
+        "squad",
+      ),
+    );
   });
 
   it("masks both credential inputs as password fields", async () => {
@@ -334,20 +382,58 @@ describe("DingTalkTab", () => {
     const user = userEvent.setup();
     renderUI(<DingTalkTab />);
 
-    await user.click(screen.getByRole("combobox", { name: "Agent for this group" }));
+    await user.click(screen.getByRole("combobox", { name: "Target for this group" }));
     await user.click(await screen.findByRole("option", { name: "Agent One" }));
 
     await waitFor(() => {
       expect(mockUpdateGroupRoute).toHaveBeenCalledWith(
         "workspace-1",
         "route-1",
-        { agent_id: "agent-1" },
+        { target_type: "agent", target_id: "agent-1" },
       );
     });
     expect(mockInvalidate).toHaveBeenCalledWith({
       queryKey: ["dingtalk", "group-routes", "workspace-1"],
     });
     expect(mockToastSuccess).toHaveBeenCalled();
+  });
+
+  it("lets an owner route a group to a Squad", async () => {
+    setConnectedGroupRoute();
+    mockUpdateGroupRoute.mockResolvedValue({
+      id: "route-1",
+      target_type: "squad",
+      target_id: "squad-1",
+      agent_id: "agent-1",
+    });
+    const user = userEvent.setup();
+    renderUI(<DingTalkTab />);
+
+    await user.click(screen.getByRole("combobox", { name: "Target for this group" }));
+    await user.click(await screen.findByRole("option", { name: "Platform Squad · Squad" }));
+
+    await waitFor(() => {
+      expect(mockUpdateGroupRoute).toHaveBeenCalledWith(
+        "workspace-1",
+        "route-1",
+        { target_type: "squad", target_id: "squad-1" },
+      );
+    });
+  });
+
+  it("keeps Squad routing available when there are no eligible Agents", async () => {
+    setConnectedGroupRoute();
+    agentsRef.current = [];
+    renderUI(<DingTalkTab />);
+
+    expect(screen.queryByText("No eligible targets")).toBeNull();
+    const selector = screen.getByRole("combobox", { name: "Target for this group" });
+    expect(selector).not.toBeDisabled();
+
+    await userEvent.click(selector);
+    expect(
+      await screen.findByRole("option", { name: "Platform Squad · Squad" }),
+    ).toBeTruthy();
   });
 
   it("disables every route selector while one route update is pending", async () => {
@@ -368,13 +454,13 @@ describe("DingTalkTab", () => {
     const user = userEvent.setup();
     renderUI(<DingTalkTab />);
 
-    const selectors = screen.getAllByRole("combobox", { name: "Agent for this group" });
+    const selectors = screen.getAllByRole("combobox", { name: "Target for this group" });
     expect(selectors).toHaveLength(2);
     await user.click(selectors[0]!);
     await user.click(await screen.findByRole("option", { name: "Agent One" }));
 
     await waitFor(() => expect(mockUpdateGroupRoute).toHaveBeenCalledTimes(1));
-    const pendingSelectors = screen.getAllByRole("combobox", { name: "Agent for this group" });
+    const pendingSelectors = screen.getAllByRole("combobox", { name: "Target for this group" });
     expect(pendingSelectors[0]).toBeDisabled();
     expect(pendingSelectors[1]).toBeDisabled();
   });
@@ -386,7 +472,7 @@ describe("DingTalkTab", () => {
 
     expect(screen.getByText("Agent Two")).toBeTruthy();
     expect(
-      screen.queryByRole("combobox", { name: "Agent for this group" }),
+      screen.queryByRole("combobox", { name: "Target for this group" }),
     ).toBeNull();
   });
 
@@ -399,7 +485,7 @@ describe("DingTalkTab", () => {
     renderUI(<DingTalkTab />);
 
     expect(
-      screen.getByRole("combobox", { name: "Agent for this group" }).textContent,
+      screen.getByRole("combobox", { name: "Target for this group" }).textContent,
     ).toContain("Agent Two");
   });
 
@@ -409,7 +495,7 @@ describe("DingTalkTab", () => {
     const user = userEvent.setup();
     renderUI(<DingTalkTab />);
 
-    await user.click(screen.getByRole("combobox", { name: "Agent for this group" }));
+    await user.click(screen.getByRole("combobox", { name: "Target for this group" }));
     await user.click(await screen.findByRole("option", { name: "Agent One" }));
 
     await waitFor(() => {

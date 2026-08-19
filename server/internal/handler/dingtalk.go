@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -22,8 +23,12 @@ import (
 // server-internal (only the outbound sender decrypts it). WS lease columns are
 // runtime state, not API surface, so they are omitted too.
 type DingTalkInstallationResponse struct {
-	ID                   string   `json:"id"`
-	WorkspaceID          string   `json:"workspace_id"`
+	ID          string `json:"id"`
+	WorkspaceID string `json:"workspace_id"`
+	TargetType  string `json:"target_type"`
+	TargetID    string `json:"target_id"`
+	// AgentID is the resolved executable Agent (the current Leader for a Squad)
+	// and remains for backward compatibility with older clients.
 	AgentID              string   `json:"agent_id"`
 	InstallerUserID      string   `json:"installer_user_id"`
 	Status               string   `json:"status"`
@@ -43,15 +48,19 @@ type DingTalkGroupRouteResponse struct {
 	InstallationID    string `json:"installation_id"`
 	ConversationID    string `json:"conversation_id"`
 	ConversationTitle string `json:"conversation_title"`
+	TargetType        string `json:"target_type"`
+	TargetID          string `json:"target_id"`
 	AgentID           string `json:"agent_id"`
 	DiscoveredAt      string `json:"discovered_at"`
 	UpdatedAt         string `json:"updated_at"`
 }
 
-func dingtalkInstallationToResponse(row db.ChannelInstallation) DingTalkInstallationResponse {
+func dingtalkInstallationToResponse(row dingtalk.Installation) DingTalkInstallationResponse {
 	return DingTalkInstallationResponse{
 		ID:              uuidToString(row.ID),
 		WorkspaceID:     uuidToString(row.WorkspaceID),
+		TargetType:      string(row.TargetType),
+		TargetID:        uuidToString(row.TargetID),
 		AgentID:         uuidToString(row.AgentID),
 		InstallerUserID: uuidToString(row.InstallerUserID),
 		Status:          row.Status,
@@ -61,13 +70,15 @@ func dingtalkInstallationToResponse(row db.ChannelInstallation) DingTalkInstalla
 	}
 }
 
-func dingtalkGroupRouteToResponse(row db.DingtalkGroupRoute) DingTalkGroupRouteResponse {
+func dingtalkGroupRouteToResponse(row db.ListDingTalkGroupRoutesByWorkspaceRow) DingTalkGroupRouteResponse {
 	return DingTalkGroupRouteResponse{
 		ID:                uuidToString(row.ID),
 		WorkspaceID:       uuidToString(row.WorkspaceID),
 		InstallationID:    uuidToString(row.InstallationID),
 		ConversationID:    row.ConversationID,
 		ConversationTitle: row.ConversationTitle,
+		TargetType:        row.TargetType,
+		TargetID:          uuidToString(row.TargetID),
 		AgentID:           uuidToString(row.AgentID),
 		DiscoveredAt:      row.DiscoveredAt.Time.UTC().Format(time.RFC3339),
 		UpdatedAt:         row.UpdatedAt.Time.UTC().Format(time.RFC3339),
@@ -98,10 +109,12 @@ func (h *Handler) ListDingTalkGroupRoutes(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]any{"routes": out})
 }
 
-// UpdateDingTalkGroupRouteRequest selects the one agent that handles messages
-// from a discovered DingTalk group.
+// UpdateDingTalkGroupRouteRequest selects the Agent or Squad that handles a
+// discovered DingTalk group. AgentID remains a request-only compatibility path.
 type UpdateDingTalkGroupRouteRequest struct {
-	AgentID string `json:"agent_id"`
+	TargetType string `json:"target_type"`
+	TargetID   string `json:"target_id"`
+	AgentID    string `json:"agent_id"`
 }
 
 // UpdateDingTalkGroupRoute (PATCH
@@ -130,7 +143,17 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	agentUUID, ok := parseUUIDOrBadRequest(w, strings.TrimSpace(body.AgentID), "agent_id")
+	targetType := strings.TrimSpace(body.TargetType)
+	targetID := strings.TrimSpace(body.TargetID)
+	if targetType == "" && targetID == "" {
+		targetType = string(engine.TargetAgent)
+		targetID = strings.TrimSpace(body.AgentID)
+	}
+	if targetType != string(engine.TargetAgent) && targetType != string(engine.TargetSquad) {
+		writeError(w, http.StatusBadRequest, "target_type must be agent or squad")
+		return
+	}
+	targetUUID, ok := parseUUIDOrBadRequest(w, targetID, "target_id")
 	if !ok {
 		return
 	}
@@ -147,9 +170,27 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 		writeError(w, http.StatusInternalServerError, "failed to load dingtalk group route")
 		return
 	}
+	agentUUID := targetUUID
+	if targetType == string(engine.TargetSquad) {
+		squad, squadErr := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+			ID: targetUUID, WorkspaceID: wsUUID,
+		})
+		if squadErr != nil {
+			if errors.Is(squadErr, pgx.ErrNoRows) {
+				writeError(w, http.StatusNotFound, "squad not found in this workspace")
+				return
+			}
+			writeError(w, http.StatusInternalServerError, "failed to load squad")
+			return
+		}
+		if squad.ArchivedAt.Valid {
+			writeError(w, http.StatusConflict, "an archived squad cannot handle a DingTalk group")
+			return
+		}
+		agentUUID = squad.LeaderID
+	}
 	// Load without a kind filter so the explicit non-user validation below is
-	// reachable. Keep the workspace boundary fail-closed in the handler: an
-	// Agent from another workspace remains indistinguishable from a missing ID.
+	// reachable. Keep the workspace boundary fail-closed in the handler.
 	agent, err := h.Queries.GetAgent(r.Context(), agentUUID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -172,7 +213,7 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	row, err := h.Queries.ReassignDingTalkGroupRoute(r.Context(), db.ReassignDingTalkGroupRouteParams{
-		ID: routeUUID, WorkspaceID: wsUUID, AgentID: agentUUID,
+		ID: routeUUID, WorkspaceID: wsUUID, TargetType: targetType, TargetID: targetUUID,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -209,11 +250,14 @@ func (h *Handler) UpdateDingTalkGroupRoute(w http.ResponseWriter, r *http.Reques
 	h.publish(protocol.EventDingTalkGroupRouteUpdated, uuidToString(wsUUID), "user", userID, map[string]any{
 		"id": uuidToString(row.ID),
 	})
-	writeJSON(w, http.StatusOK, dingtalkGroupRouteToResponse(db.DingtalkGroupRoute{
-		ID: row.ID, WorkspaceID: row.WorkspaceID, InstallationID: row.InstallationID,
-		ConversationID: row.ConversationID, ConversationTitle: row.ConversationTitle,
-		AgentID: row.AgentID, DiscoveredAt: row.DiscoveredAt, UpdatedAt: row.UpdatedAt,
-	}))
+	writeJSON(w, http.StatusOK, DingTalkGroupRouteResponse{
+		ID: uuidToString(row.ID), WorkspaceID: uuidToString(row.WorkspaceID),
+		InstallationID: uuidToString(row.InstallationID), ConversationID: row.ConversationID,
+		ConversationTitle: row.ConversationTitle, TargetType: row.TargetType,
+		TargetID: uuidToString(row.TargetID), AgentID: uuidToString(row.AgentID),
+		DiscoveredAt: row.DiscoveredAt.Time.UTC().Format(time.RFC3339),
+		UpdatedAt:    row.UpdatedAt.Time.UTC().Format(time.RFC3339),
+	})
 }
 
 // ListDingTalkInstallations (GET /api/workspaces/{id}/dingtalk/installations) is
@@ -232,6 +276,7 @@ func (h *Handler) ListDingTalkInstallations(w http.ResponseWriter, r *http.Reque
 			"configured":              false,
 			"install_supported":       false,
 			"group_routing_supported": false,
+			"squad_routing_supported": false,
 		})
 		return
 	}
@@ -282,6 +327,7 @@ func (h *Handler) ListDingTalkInstallations(w http.ResponseWriter, r *http.Reque
 		"configured":              true,
 		"install_supported":       true,
 		"group_routing_supported": true,
+		"squad_routing_supported": true,
 	})
 }
 
@@ -292,11 +338,8 @@ type RegisterDingTalkBYORequest struct {
 	ClientSecret string `json:"client_secret"` // AppSecret
 }
 
-// RegisterDingTalkBYO (POST /api/workspaces/{id}/dingtalk/install/byo?agent_id=…)
-// installs a user-supplied ("bring your own") DingTalk robot for an agent, so
-// several agents can each have their own bot identity in the SAME DingTalk
-// organization. Admin-only at the router. Like Slack's BYO path this needs only
-// the at-rest key configured (DingTalkInstall != nil).
+// RegisterDingTalkBYO installs a user-supplied DingTalk robot for an Agent or
+// Squad. The legacy agent_id query remains accepted for older clients.
 func (h *Handler) RegisterDingTalkBYO(w http.ResponseWriter, r *http.Request) {
 	if h.DingTalkInstall == nil {
 		writeError(w, http.StatusServiceUnavailable, "dingtalk integration not enabled")
@@ -310,16 +353,36 @@ func (h *Handler) RegisterDingTalkBYO(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	agentIDStr := strings.TrimSpace(r.URL.Query().Get("agent_id"))
-	if agentIDStr == "" {
-		writeError(w, http.StatusBadRequest, "agent_id is required")
+	targetType := strings.TrimSpace(r.URL.Query().Get("target_type"))
+	targetIDStr := strings.TrimSpace(r.URL.Query().Get("target_id"))
+	if targetType == "" && targetIDStr == "" {
+		targetType = string(engine.TargetAgent)
+		targetIDStr = strings.TrimSpace(r.URL.Query().Get("agent_id"))
+	}
+	if targetType != string(engine.TargetAgent) && targetType != string(engine.TargetSquad) {
+		writeError(w, http.StatusBadRequest, "target_type must be agent or squad")
 		return
 	}
-	agentUUID, ok := parseUUIDOrBadRequest(w, agentIDStr, "agent_id")
+	if targetIDStr == "" {
+		writeError(w, http.StatusBadRequest, "target_id is required")
+		return
+	}
+	targetUUID, ok := parseUUIDOrBadRequest(w, targetIDStr, "target_id")
 	if !ok {
 		return
 	}
-	// Ownership pre-check at the boundary so a wrong agent_id is a clear 404.
+	agentUUID := targetUUID
+	if targetType == string(engine.TargetSquad) {
+		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+			ID: targetUUID, WorkspaceID: wsUUID,
+		})
+		if err != nil || squad.ArchivedAt.Valid {
+			writeError(w, http.StatusNotFound, "active squad not found in this workspace")
+			return
+		}
+		agentUUID = squad.LeaderID
+	}
+	// Ownership pre-check at the boundary so a wrong target is a clear 404.
 	if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
 		ID:          agentUUID,
 		WorkspaceID: wsUUID,
@@ -338,6 +401,8 @@ func (h *Handler) RegisterDingTalkBYO(w http.ResponseWriter, r *http.Request) {
 	}
 	row, err := h.DingTalkInstall.RegisterBYO(r.Context(), dingtalk.RegisterBYOParams{
 		WorkspaceID: wsUUID,
+		TargetType:  engine.TargetType(targetType),
+		TargetID:    targetUUID,
 		AgentID:     agentUUID,
 		InitiatorID: initiatorUUID,
 		AppKey:      body.ClientID,
@@ -348,9 +413,9 @@ func (h *Handler) RegisterDingTalkBYO(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, dingtalk.ErrInvalidAppKey), errors.Is(err, dingtalk.ErrInvalidAppSecret):
 			writeError(w, http.StatusBadRequest, err.Error())
 		case errors.Is(err, dingtalk.ErrRobotOwnedBySameWorkspace):
-			writeError(w, http.StatusConflict, "this DingTalk robot is already connected to another agent in this workspace — disconnect it there first, then connect it here")
+			writeError(w, http.StatusConflict, "this DingTalk robot is already connected to another target in this workspace — disconnect it there first, then connect it here")
 		case errors.Is(err, dingtalk.ErrRobotOwnedByArchivedAgent):
-			writeError(w, http.StatusConflict, "this DingTalk robot is connected to an archived agent in this workspace — restore that agent, or disconnect its robot, before connecting it here")
+			writeError(w, http.StatusConflict, "this DingTalk robot is connected to an archived Agent or Squad in this workspace — restore it, or disconnect its robot, before connecting it here")
 		case errors.Is(err, dingtalk.ErrRobotOwnedByAnotherWorkspace):
 			writeError(w, http.StatusConflict, "this DingTalk robot is already connected to a different Multica workspace — disconnect it there before connecting it here")
 		case errors.Is(err, dingtalk.ErrCredentialValidation):
@@ -375,7 +440,7 @@ func (h *Handler) RegisterDingTalkBYO(w http.ResponseWriter, r *http.Request) {
 // publishDingTalkInstallationCreated emits dingtalk_installation:created for a
 // newly connected bot. The realtime layer fans it out to the workspace; the web
 // app listens on dingtalk_installation:* to invalidate the installations query.
-func (h *Handler) publishDingTalkInstallationCreated(row db.ChannelInstallation, actorID string) {
+func (h *Handler) publishDingTalkInstallationCreated(row dingtalk.Installation, actorID string) {
 	h.publish(protocol.EventDingTalkInstallationCreated, uuidToString(row.WorkspaceID), "user", actorID, map[string]any{
 		"id": uuidToString(row.ID),
 	})

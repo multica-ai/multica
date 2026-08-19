@@ -49,7 +49,7 @@ type fakeInstallQueries struct {
 	// violation on the (channel_type, app_id) routing index — i.e. the pasted
 	// robot is already connected to a LIVE owner (the reclaim has run by then).
 	appIDTaken   bool
-	upsertParams db.UpsertChannelInstallationParams
+	upsertParams db.UpsertDingTalkTargetInstallationParams
 	upsertCalled bool
 	rowID        pgtype.UUID
 
@@ -89,7 +89,7 @@ func (f *fakeInstallQueries) DeleteDingTalkInstallationForReplacement(_ context.
 	return id, nil
 }
 
-func (f *fakeInstallQueries) ReclaimDeadChannelInstallationByAppID(_ context.Context, _ db.ReclaimDeadChannelInstallationByAppIDParams) (pgtype.UUID, error) {
+func (f *fakeInstallQueries) ReclaimDeadDingTalkInstallationByAppID(_ context.Context, _ db.ReclaimDeadDingTalkInstallationByAppIDParams) (pgtype.UUID, error) {
 	f.reclaimCalled = true
 	if f.reclaimedID != nil {
 		return *f.reclaimedID, nil
@@ -97,17 +97,18 @@ func (f *fakeInstallQueries) ReclaimDeadChannelInstallationByAppID(_ context.Con
 	return pgtype.UUID{}, pgx.ErrNoRows
 }
 
-func (f *fakeInstallQueries) GetChannelInstallationOwnerByAppID(_ context.Context, _ db.GetChannelInstallationOwnerByAppIDParams) (db.GetChannelInstallationOwnerByAppIDRow, error) {
+func (f *fakeInstallQueries) GetDingTalkInstallationTargetOwnerByAppID(_ context.Context, _ string) (db.GetDingTalkInstallationTargetOwnerByAppIDRow, error) {
 	if f.ownerMissing {
-		return db.GetChannelInstallationOwnerByAppIDRow{}, pgx.ErrNoRows
+		return db.GetDingTalkInstallationTargetOwnerByAppIDRow{}, pgx.ErrNoRows
 	}
-	return db.GetChannelInstallationOwnerByAppIDRow{
-		WorkspaceID:     f.ownerWorkspaceID,
-		AgentArchivedAt: pgtype.Timestamptz{Valid: f.ownerArchived},
+	return db.GetDingTalkInstallationTargetOwnerByAppIDRow{
+		WorkspaceID:      f.ownerWorkspaceID,
+		TargetType:       "agent",
+		TargetArchivedAt: pgtype.Timestamptz{Valid: f.ownerArchived},
 	}, nil
 }
 
-func (f *fakeInstallQueries) UpsertChannelInstallation(_ context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error) {
+func (f *fakeInstallQueries) UpsertDingTalkTargetInstallation(_ context.Context, arg db.UpsertDingTalkTargetInstallationParams) (db.ChannelInstallation, error) {
 	f.upsertCalled = true
 	f.upsertParams = arg
 	if f.appIDTaken {
@@ -120,15 +121,17 @@ func (f *fakeInstallQueries) UpsertChannelInstallation(_ context.Context, arg db
 	return db.ChannelInstallation{
 		ID:              id,
 		WorkspaceID:     arg.WorkspaceID,
-		AgentID:         arg.AgentID,
-		ChannelType:     arg.ChannelType,
+		AgentID:         arg.TargetID,
+		TargetType:      arg.TargetType,
+		TargetID:        arg.TargetID,
+		ChannelType:     string(TypeDingTalk),
 		Config:          arg.Config,
 		InstallerUserID: arg.InstallerUserID,
 		Status:          "active",
 	}, nil
 }
 
-func (f *fakeInstallQueries) ListChannelInstallationsByWorkspace(_ context.Context, _ db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error) {
+func (f *fakeInstallQueries) ListDingTalkInstallationsByWorkspace(_ context.Context, _ pgtype.UUID) ([]db.ListDingTalkInstallationsByWorkspaceRow, error) {
 	return nil, nil
 }
 

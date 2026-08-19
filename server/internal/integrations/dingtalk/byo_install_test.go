@@ -12,6 +12,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -43,6 +44,8 @@ func dingtalkMockServer(t *testing.T, tokenOK bool) *httptest.Server {
 func byoParams(ws, agent string) RegisterBYOParams {
 	return RegisterBYOParams{
 		WorkspaceID: pgtypeUUID(ws),
+		TargetType:  engine.TargetAgent,
+		TargetID:    pgtypeUUID(agent),
 		AgentID:     pgtypeUUID(agent),
 		InitiatorID: pgtypeUUID("33333333-3333-3333-3333-333333333333"),
 		AppKey:      "ding-app-key-xyz",
@@ -78,7 +81,7 @@ func TestRegisterBYO_PersistsEncryptedSecretKeyedByAppID(t *testing.T) {
 	if row.ID != q.rowID {
 		t.Errorf("row id = %v, want %v", row.ID, q.rowID)
 	}
-	if !q.upsertCalled || q.upsertParams.ChannelType != string(TypeDingTalk) {
+	if !q.upsertCalled || q.upsertParams.TargetType != string(engine.TargetAgent) {
 		t.Fatalf("upsert not called for dingtalk: %+v", q.upsertParams)
 	}
 

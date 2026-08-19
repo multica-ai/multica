@@ -157,7 +157,8 @@ func TestDeleteDingTalkInstallationForReplacementCleansOnlyTargetRoutes(t *testi
 	if _, err := db.New(pool).DeleteDingTalkInstallationForReplacement(ctx, db.DeleteDingTalkInstallationForReplacementParams{
 		InstallationID: util.MustParseUUID(target.installationID),
 		WorkspaceID:    util.MustParseUUID(target.workspaceID),
-		AgentID:        util.MustParseUUID(target.agentID),
+		TargetType:     "agent",
+		TargetID:       util.MustParseUUID(target.agentID),
 	}); err != nil {
 		t.Fatalf("DeleteDingTalkInstallationForReplacement: %v", err)
 	}

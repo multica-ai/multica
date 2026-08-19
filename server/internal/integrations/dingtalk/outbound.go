@@ -12,18 +12,10 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
-
-// outboundQueries is the slice of generated queries the DingTalk outbound
-// subscriber needs. *db.Queries satisfies it.
-type outboundQueries interface {
-	GetAgentTask(ctx context.Context, id pgtype.UUID) (db.AgentTaskQueue, error)
-	TaskHasChannelIngestedMessages(ctx context.Context, taskID pgtype.UUID) (bool, error)
-	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
-	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
-}
 
 // Outbound delivers an agent's chat reply back to DingTalk — the outbound half
 // of the round trip. On EventChatDone / EventTaskFailed
@@ -33,7 +25,8 @@ type outboundQueries interface {
 // subscribers on the shared event bus. Registered only when DingTalk is
 // configured.
 type Outbound struct {
-	q       outboundQueries
+	q       *db.Queries
+	tx      engine.TxStarter
 	decrypt Decrypter
 	client  *Client
 	logger  *slog.Logger
@@ -41,14 +34,14 @@ type Outbound struct {
 
 // NewOutbound builds the DingTalk outbound subscriber over the generated queries,
 // the AppSecret decrypter, and the shared token-caching Client.
-func NewOutbound(q outboundQueries, decrypt Decrypter, client *Client, logger *slog.Logger) *Outbound {
+func NewOutbound(q *db.Queries, tx engine.TxStarter, decrypt Decrypter, client *Client, logger *slog.Logger) *Outbound {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	if client == nil {
 		client = NewClient(nil, "")
 	}
-	return &Outbound{q: q, decrypt: decrypt, client: client, logger: logger}
+	return &Outbound{q: q, tx: tx, decrypt: decrypt, client: client, logger: logger}
 }
 
 // Register subscribes to chat-done and task-failed. Task-failed keeps the DingTalk
@@ -80,7 +73,17 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	if content == "" {
 		return nil // nothing to say (empty completion, or a retry-pending failure)
 	}
-	binding, err := o.q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
+	if o.q == nil || o.tx == nil {
+		return errors.New("dingtalk outbound: database is not configured")
+	}
+	tx, err := o.tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin dingtalk outbound target fence: %w", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := o.q.WithTx(tx)
+
+	binding, err := q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
 		ChatSessionID: sessionID,
 		ChannelType:   string(TypeDingTalk),
 	})
@@ -90,18 +93,79 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		}
 		return fmt.Errorf("lookup dingtalk chat binding: %w", err)
 	}
-	task, err := o.q.GetAgentTask(ctx, taskID)
+	task, err := q.GetAgentTask(ctx, taskID)
 	if err != nil {
 		return fmt.Errorf("load agent task: %w", err)
 	}
-	deliver, err := engine.TaskInputIsChannelIngested(ctx, o.q, task)
+	deliver, err := engine.TaskInputIsChannelIngested(ctx, q, task)
 	if err != nil {
 		return fmt.Errorf("classify task input origin: %w", err)
 	}
 	if !deliver {
 		return nil
 	}
-	inst, err := o.q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
+	session, err := q.GetChatSession(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("load dingtalk chat session: %w", err)
+	}
+	routing := bindingRouting(binding)
+	targetID := task.AgentID
+	if routing.TargetID != "" {
+		targetID, err = util.ParseUUID(routing.TargetID)
+		if err != nil {
+			return fmt.Errorf("decode dingtalk binding target: %w", err)
+		}
+	}
+	targetType := engine.TargetType(routing.TargetType)
+	if targetType != engine.TargetAgent && targetType != engine.TargetSquad {
+		return fmt.Errorf("decode dingtalk binding target: unsupported target type %q", routing.TargetType)
+	}
+
+	if routing.ConversationType == convTypeP2P {
+		_, err = q.LockDingTalkDirectOutboundTarget(ctx, db.LockDingTalkDirectOutboundTargetParams{
+			InstallationID: binding.InstallationID,
+			WorkspaceID:    session.WorkspaceID,
+			TargetType:     string(targetType),
+			TargetID:       targetID,
+			TargetRevision: routing.TargetRevision,
+			AgentID:        task.AgentID,
+		})
+	} else {
+		_, err = q.LockDingTalkGroupOutboundTarget(ctx, db.LockDingTalkGroupOutboundTargetParams{
+			InstallationID: binding.InstallationID,
+			WorkspaceID:    session.WorkspaceID,
+			ConversationID: routing.ConversationID,
+			TargetType:     string(targetType),
+			TargetID:       targetID,
+			TargetRevision: routing.TargetRevision,
+			AgentID:        task.AgentID,
+		})
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil // target, Leader, route, or installation changed after enqueue
+	}
+	if err != nil {
+		return fmt.Errorf("lock dingtalk outbound target: %w", err)
+	}
+
+	// A route reassignment deletes the binding while holding the same route
+	// lock. Re-read it after acquiring the fence so a stale lookup can never
+	// deliver through a newly assigned conversation.
+	currentBinding, err := q.GetChannelChatSessionBindingBySession(ctx, db.GetChannelChatSessionBindingBySessionParams{
+		ChatSessionID: sessionID,
+		ChannelType:   string(TypeDingTalk),
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("recheck dingtalk chat binding: %w", err)
+	}
+	if currentBinding.ID != binding.ID || currentBinding.InstallationID != binding.InstallationID {
+		return nil
+	}
+
+	inst, err := q.GetChannelInstallation(ctx, db.GetChannelInstallationParams{
 		ID:          binding.InstallationID,
 		ChannelType: string(TypeDingTalk),
 	})
@@ -118,6 +182,9 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 	s := &sender{client: o.client, robotCode: creds.RobotCode, appKey: creds.AppKey, appSecret: creds.AppSecret}
 	if _, err := s.send(ctx, outboundTarget(binding), content); err != nil {
 		return fmt.Errorf("post dingtalk reply: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit dingtalk outbound target fence: %w", err)
 	}
 	return nil
 }

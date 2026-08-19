@@ -45,6 +45,7 @@ Important consequences:
 - assigning an issue to a squad routes to the leader;
 - mentioning a squad routes to the leader;
 - squad-assigned autopilot resolves to the leader;
+- DingTalk routes targeting a squad resolve to the current leader;
 - squad members are not automatically fanned out;
 - squad `instructions` are leader briefing content, not member prompts.
 
@@ -213,6 +214,21 @@ and `assignee_id = <squad-id>`, while the actual executing agent is the resolved
 leader. For `run_only` autopilots, no issue is created; the task is created
 directly for the resolved leader agent.
 
+## DingTalk behavior
+
+A DingTalk robot installation or discovered group route can target a squad.
+Current behavior:
+
+- each inbound message resolves the squad's current `leader_id` and enqueues
+  exactly one leader task;
+- the chat task keeps `squad_id` and `is_leader_task=true`, so the Leader gets
+  the Squad Operating Protocol, roster, and instructions;
+- messages are never fanned out to every squad member;
+- `/issue` keeps `assignee_type="squad"` and `assignee_id=<squad-id>`;
+- changing `leader_id` causes the next message to start a fresh chat session;
+- append, enqueue, and outbound-reply fences prevent a stale session from
+  dispatching to or replying as the former Leader.
+
 ## Handling complaints or product gaps
 
 When the user says squad behavior is wrong, confusing, or disappointing, do not
@@ -258,6 +274,7 @@ authorizes them.
 - Squad mention routes to the leader, not every member.
 - Squad assignment routes to the leader, not every member.
 - Squad autopilot resolves to the leader as executable agent.
+- Squad-targeted DingTalk messages resolve to the current leader only.
 - `instructions` are leader briefing content, not automatic member prompts.
 - `description` is not proven runtime prompt content.
 - `role` is roster context, not automatic scheduling.

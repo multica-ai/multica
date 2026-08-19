@@ -31,18 +31,36 @@ var (
 	// ErrRobotOwnedByAnotherWorkspace is returned when the pasted DingTalk robot
 	// is already connected to a live owner in a DIFFERENT Multica workspace — it
 	// would collide with the (channel_type, app_id) routing index. A DingTalk
-	// robot is one bot identity and maps to one installation/default agent;
-	// group-specific routes may target other agents inside that workspace.
+	// robot is one bot identity and maps to one installation target; group routes
+	// may select other Agents or Squads inside that workspace.
 	ErrRobotOwnedByAnotherWorkspace = errors.New("dingtalk: this DingTalk robot is already connected to a different Multica workspace")
 	// ErrRobotOwnedBySameWorkspace is returned when the robot is already connected
-	// to a DIFFERENT (live, non-archived) agent in the SAME workspace, pointing
+	// to a DIFFERENT live target in the SAME workspace, pointing
 	// the user at the Disconnect they can actually reach (#4810).
-	ErrRobotOwnedBySameWorkspace = errors.New("dingtalk: this DingTalk robot is already connected to another agent in this workspace")
-	// ErrRobotOwnedByArchivedAgent is returned when the robot's owning agent is
-	// archived (and so still holds the robot, since archiving is reversible). The
-	// user recovers by restoring that agent or disconnecting its robot.
-	ErrRobotOwnedByArchivedAgent = errors.New("dingtalk: this DingTalk robot is connected to an archived agent in this workspace")
+	ErrRobotOwnedBySameWorkspace = errors.New("dingtalk: this DingTalk robot is already connected to another target in this workspace")
+	// ErrRobotOwnedByArchivedAgent covers an archived Agent or Squad target. Both
+	// are reversible and therefore continue to own their robot until disconnected.
+	ErrRobotOwnedByArchivedAgent = errors.New("dingtalk: this DingTalk robot is connected to an archived target in this workspace")
 )
+
+// Installation is the DingTalk management/runtime view of a shared channel row.
+// AgentID is always executable: for a Squad it is the current Leader, while the
+// stable product destination remains TargetType + TargetID.
+type Installation struct {
+	ID               pgtype.UUID
+	WorkspaceID      pgtype.UUID
+	TargetType       engine.TargetType
+	TargetID         pgtype.UUID
+	AgentID          pgtype.UUID
+	InstallerUserID  pgtype.UUID
+	Status           string
+	Config           []byte
+	WsLeaseToken     pgtype.Text
+	WsLeaseExpiresAt pgtype.Timestamptz
+	InstalledAt      pgtype.Timestamptz
+	CreatedAt        pgtype.Timestamptz
+	UpdatedAt        pgtype.Timestamptz
+}
 
 // installQueries is the slice of generated queries InstallService needs. WithTx
 // returns the same interface bound to a transaction so persistInstall runs its
@@ -52,10 +70,10 @@ type installQueries interface {
 	LockDingTalkInstallationOwner(ctx context.Context, arg db.LockDingTalkInstallationOwnerParams) error
 	GetDingTalkInstallationOwnerForUpdate(ctx context.Context, arg db.GetDingTalkInstallationOwnerForUpdateParams) (db.GetDingTalkInstallationOwnerForUpdateRow, error)
 	DeleteDingTalkInstallationForReplacement(ctx context.Context, arg db.DeleteDingTalkInstallationForReplacementParams) (pgtype.UUID, error)
-	UpsertChannelInstallation(ctx context.Context, arg db.UpsertChannelInstallationParams) (db.ChannelInstallation, error)
-	ReclaimDeadChannelInstallationByAppID(ctx context.Context, arg db.ReclaimDeadChannelInstallationByAppIDParams) (pgtype.UUID, error)
-	GetChannelInstallationOwnerByAppID(ctx context.Context, arg db.GetChannelInstallationOwnerByAppIDParams) (db.GetChannelInstallationOwnerByAppIDRow, error)
-	ListChannelInstallationsByWorkspace(ctx context.Context, arg db.ListChannelInstallationsByWorkspaceParams) ([]db.ChannelInstallation, error)
+	UpsertDingTalkTargetInstallation(ctx context.Context, arg db.UpsertDingTalkTargetInstallationParams) (db.ChannelInstallation, error)
+	ReclaimDeadDingTalkInstallationByAppID(ctx context.Context, arg db.ReclaimDeadDingTalkInstallationByAppIDParams) (pgtype.UUID, error)
+	GetDingTalkInstallationTargetOwnerByAppID(ctx context.Context, appID string) (db.GetDingTalkInstallationTargetOwnerByAppIDRow, error)
+	ListDingTalkInstallationsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]db.ListDingTalkInstallationsByWorkspaceRow, error)
 	GetChannelInstallationInWorkspace(ctx context.Context, arg db.GetChannelInstallationInWorkspaceParams) (db.ChannelInstallation, error)
 	SetChannelInstallationStatus(ctx context.Context, arg db.SetChannelInstallationStatusParams) error
 }
@@ -123,11 +141,13 @@ func newInstallService(q installQueries, tx engine.TxStarter, box *secretbox.Box
 }
 
 // installPersist carries the resolved fields persistInstall writes. configJSON
-// holds the AppKey (config->>'app_id') used for inbound routing; the ROW itself
-// is keyed by (workspace, agent) — one installation/default agent per bot.
+// holds the AppKey (config->>'app_id') used for inbound routing; the row itself
+// is keyed by (workspace, target) through the shared legacy owner column.
 type installPersist struct {
 	wsID        pgtype.UUID
-	agentID     pgtype.UUID
+	targetType  engine.TargetType
+	targetID    pgtype.UUID
+	agentID     pgtype.UUID // resolved current Leader for response/runtime use
 	installerID pgtype.UUID
 	// appIDKey is the AppKey stored at config->>'app_id'; it MUST equal the
 	// app_id inside configJSON. It keys the dead-owner reclaim and the live-owner
@@ -152,10 +172,10 @@ const pgUniqueViolation = "23505"
 // of the AppKey (a revoked placeholder, or an orphan whose workspace/agent was
 // deleted) so the robot can move to the new agent; a LIVE owner trips the unique
 // index and is refused with an accurate conflict sentinel.
-func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (db.ChannelInstallation, error) {
+func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (Installation, error) {
 	tx, err := s.tx.Begin(ctx)
 	if err != nil {
-		return db.ChannelInstallation{}, fmt.Errorf("begin install tx: %w", err)
+		return Installation{}, fmt.Errorf("begin install tx: %w", err)
 	}
 	defer func() { _ = tx.Rollback(ctx) }()
 	qtx := s.q.WithTx(tx)
@@ -165,9 +185,10 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 	// installs cannot update the newly-created identity in place.
 	if err := qtx.LockDingTalkInstallationOwner(ctx, db.LockDingTalkInstallationOwnerParams{
 		WorkspaceID: p.wsID,
-		AgentID:     p.agentID,
+		TargetType:  string(p.targetType),
+		TargetID:    p.targetID,
 	}); err != nil {
-		return db.ChannelInstallation{}, fmt.Errorf("lock dingtalk installation owner: %w", err)
+		return Installation{}, fmt.Errorf("lock dingtalk installation owner: %w", err)
 	}
 
 	// Free the (dingtalk, app_id) routing slot from any DEAD prior owner — a
@@ -176,51 +197,53 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 	// rebound. A live owner (active agent, including an archived one) is left in
 	// place and trips the unique index below, which we turn into an accurate
 	// conflict.
-	if _, err := qtx.ReclaimDeadChannelInstallationByAppID(ctx, db.ReclaimDeadChannelInstallationByAppIDParams{
-		ChannelType: string(TypeDingTalk),
+	if _, err := qtx.ReclaimDeadDingTalkInstallationByAppID(ctx, db.ReclaimDeadDingTalkInstallationByAppIDParams{
 		AppID:       p.appIDKey,
 		WorkspaceID: p.wsID,
-		AgentID:     p.agentID,
+		TargetType:  string(p.targetType),
+		TargetID:    p.targetID,
 	}); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		// pgx.ErrNoRows just means nothing was dead — a no-op, not a failure.
-		return db.ChannelInstallation{}, fmt.Errorf("reclaim dead dingtalk installation: %w", err)
+		return Installation{}, fmt.Errorf("reclaim dead dingtalk installation: %w", err)
 	}
 
 	current, err := qtx.GetDingTalkInstallationOwnerForUpdate(ctx, db.GetDingTalkInstallationOwnerForUpdateParams{
 		WorkspaceID: p.wsID,
-		AgentID:     p.agentID,
+		TargetType:  string(p.targetType),
+		TargetID:    p.targetID,
 	})
 	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-		return db.ChannelInstallation{}, fmt.Errorf("load current dingtalk installation: %w", err)
+		return Installation{}, fmt.Errorf("load current dingtalk installation: %w", err)
 	}
 	if err == nil && current.AppID != p.appIDKey {
 		if _, err := qtx.DeleteDingTalkInstallationForReplacement(ctx, db.DeleteDingTalkInstallationForReplacementParams{
 			InstallationID: current.ID,
 			WorkspaceID:    p.wsID,
-			AgentID:        p.agentID,
+			TargetType:     string(p.targetType),
+			TargetID:       p.targetID,
 		}); err != nil {
-			return db.ChannelInstallation{}, fmt.Errorf("retire replaced dingtalk installation: %w", err)
+			return Installation{}, fmt.Errorf("retire replaced dingtalk installation: %w", err)
 		}
 	}
 
-	inst, err := qtx.UpsertChannelInstallation(ctx, db.UpsertChannelInstallationParams{
+	inst, err := qtx.UpsertDingTalkTargetInstallation(ctx, db.UpsertDingTalkTargetInstallationParams{
 		WorkspaceID:     p.wsID,
-		AgentID:         p.agentID,
-		ChannelType:     string(TypeDingTalk),
+		TargetType:      string(p.targetType),
+		TargetID:        p.targetID,
 		Config:          p.configJSON,
 		InstallerUserID: p.installerID,
 	})
 	if err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == pgUniqueViolation {
-			return db.ChannelInstallation{}, s.liveOwnerConflictErr(ctx, p.wsID, p.appIDKey)
+			return Installation{}, s.liveOwnerConflictErr(ctx, p.wsID, p.appIDKey)
 		}
-		return db.ChannelInstallation{}, fmt.Errorf("upsert dingtalk installation: %w", err)
+		return Installation{}, fmt.Errorf("upsert dingtalk installation: %w", err)
 	}
 	if err := tx.Commit(ctx); err != nil {
-		return db.ChannelInstallation{}, fmt.Errorf("commit dingtalk install: %w", err)
+		return Installation{}, fmt.Errorf("commit dingtalk install: %w", err)
 	}
-	return inst, nil
+	return installationFromChannel(inst, p.targetType, p.targetID, p.agentID), nil
 }
 
 // liveOwnerConflictErr classifies who holds the (dingtalk, app_id) routing slot
@@ -231,17 +254,14 @@ func (s *InstallService) persistInstall(ctx context.Context, p installPersist) (
 // lookup error falls back to the generic cross-workspace sentinel — a retry
 // then succeeds.
 func (s *InstallService) liveOwnerConflictErr(ctx context.Context, requestingWorkspaceID pgtype.UUID, appID string) error {
-	owner, err := s.q.GetChannelInstallationOwnerByAppID(ctx, db.GetChannelInstallationOwnerByAppIDParams{
-		ChannelType: string(TypeDingTalk),
-		AppID:       appID,
-	})
+	owner, err := s.q.GetDingTalkInstallationTargetOwnerByAppID(ctx, appID)
 	if err != nil {
 		return ErrRobotOwnedByAnotherWorkspace
 	}
 	switch {
 	case owner.WorkspaceID != requestingWorkspaceID:
 		return ErrRobotOwnedByAnotherWorkspace
-	case owner.AgentArchivedAt.Valid:
+	case owner.TargetArchivedAt.Valid:
 		return ErrRobotOwnedByArchivedAgent
 	default:
 		return ErrRobotOwnedBySameWorkspace
@@ -250,11 +270,33 @@ func (s *InstallService) liveOwnerConflictErr(ctx context.Context, requestingWor
 
 // ListByWorkspace returns every DingTalk installation in the workspace (active
 // and revoked), for the management surface.
-func (s *InstallService) ListByWorkspace(ctx context.Context, wsID pgtype.UUID) ([]db.ChannelInstallation, error) {
-	return s.q.ListChannelInstallationsByWorkspace(ctx, db.ListChannelInstallationsByWorkspaceParams{
-		WorkspaceID: wsID,
-		ChannelType: string(TypeDingTalk),
-	})
+func (s *InstallService) ListByWorkspace(ctx context.Context, wsID pgtype.UUID) ([]Installation, error) {
+	rows, err := s.q.ListDingTalkInstallationsByWorkspace(ctx, wsID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Installation, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, Installation{
+			ID: row.ID, WorkspaceID: row.WorkspaceID,
+			TargetType: engine.TargetType(row.TargetType), TargetID: row.TargetID,
+			AgentID: row.AgentID, InstallerUserID: row.InstallerUserID,
+			Status: row.Status, Config: row.Config,
+			WsLeaseToken: row.WsLeaseToken, WsLeaseExpiresAt: row.WsLeaseExpiresAt,
+			InstalledAt: row.InstalledAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+		})
+	}
+	return out, nil
+}
+
+func installationFromChannel(row db.ChannelInstallation, targetType engine.TargetType, targetID, agentID pgtype.UUID) Installation {
+	return Installation{
+		ID: row.ID, WorkspaceID: row.WorkspaceID,
+		TargetType: targetType, TargetID: targetID, AgentID: agentID,
+		InstallerUserID: row.InstallerUserID, Status: row.Status, Config: row.Config,
+		WsLeaseToken: row.WsLeaseToken, WsLeaseExpiresAt: row.WsLeaseExpiresAt,
+		InstalledAt: row.InstalledAt, CreatedAt: row.CreatedAt, UpdatedAt: row.UpdatedAt,
+	}
 }
 
 // GetInWorkspace is the workspace-scoped lookup so a forged installation id from

@@ -2462,6 +2462,8 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
 export const DingTalkInstallationSchema = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
+  target_type: z.enum(["agent", "squad"]).optional(),
+  target_id: z.string().optional(),
   agent_id: z.string().default(""),
   installer_user_id: z.string().default(""),
   status: z.string().default("revoked"),
@@ -2474,6 +2476,8 @@ export const DingTalkInstallationSchema = z.object({
 export const EMPTY_DINGTALK_INSTALLATION: DingTalkInstallation = {
   id: "",
   workspace_id: "",
+  target_type: "agent",
+  target_id: "",
   agent_id: "",
   installer_user_id: "",
   status: "revoked",
@@ -2488,6 +2492,7 @@ export const ListDingTalkInstallationsResponseSchema = z.object({
   configured: z.boolean().default(false),
   install_supported: z.boolean().optional(),
   group_routing_supported: z.boolean().optional(),
+  squad_routing_supported: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallationsResponse = {
@@ -2501,6 +2506,8 @@ export const DingTalkGroupRouteSchema = z.object({
   installation_id: z.string().default(""),
   conversation_id: z.string().default(""),
   conversation_title: z.string().default(""),
+  target_type: z.enum(["agent", "squad"]).optional(),
+  target_id: z.string().optional(),
   agent_id: z.string().default(""),
   discovered_at: z.string().default(""),
   updated_at: z.string().default(""),
@@ -2512,6 +2519,8 @@ export const EMPTY_DINGTALK_GROUP_ROUTE: DingTalkGroupRoute = {
   installation_id: "",
   conversation_id: "",
   conversation_title: "",
+  target_type: "agent",
+  target_id: "",
   agent_id: "",
   discovered_at: "",
   updated_at: "",
