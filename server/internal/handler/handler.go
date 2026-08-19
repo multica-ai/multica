@@ -767,6 +767,12 @@ func (h *Handler) resolveActor(r *http.Request, userID, workspaceID string) (act
 	if actor, ok := middleware.AuthenticatedActorFromContext(r.Context()); ok {
 		return actor.Type, actor.ID
 	}
+	// Direct handler callers from the daemon/test seam predate the shared
+	// authenticated context. Keep their server-stamped source compatibility,
+	// but never let it override an Auth/DaemonAuth context (the branch above).
+	if r.Header.Get("X-Actor-Source") == "task_token" && r.Header.Get("X-Agent-ID") != "" {
+		return "agent", r.Header.Get("X-Agent-ID")
+	}
 	agentID := r.Header.Get("X-Agent-ID")
 	if agentID == "" {
 		return "member", userID
