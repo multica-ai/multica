@@ -3470,7 +3470,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	var workerGuard *workerReopenGuard
-	if workerReopen {
+	if actorType == "agent" && req.Status != nil {
 		workerGuard = &workerReopenGuard{
 			actorID:            actorID,
 			targetStatus:       statusKeyForGuard,
@@ -4213,11 +4213,15 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 
 		workerReopen := workerReopenByIssue[uuidToString(prevIssue.ID)]
 		var workerGuard *workerReopenGuard
-		if workerReopen {
+		if actorType == "agent" && req.Updates.Status != nil {
 			if workerReopenProcessed[uuidToString(prevIssue.ID)] {
-				continue
+				if workerReopen {
+					continue
+				}
 			}
-			workerReopenProcessed[uuidToString(prevIssue.ID)] = true
+			if workerReopen {
+				workerReopenProcessed[uuidToString(prevIssue.ID)] = true
+			}
 			workerGuard = &workerReopenGuard{
 				actorID:            actorID,
 				targetStatus:       batchStatusKey,

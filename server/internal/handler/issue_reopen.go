@@ -42,10 +42,11 @@ func enforceWorkerReopenOnLockedIssue(
 		return workerReopenDeniedError{status: status, message: message}
 	}
 	if !workerReopen {
-		return workerReopenDeniedError{
-			status:  http.StatusConflict,
-			message: "issue changed before worker claim renewal",
-		}
+		// The guard is also installed for ordinary agent status mutations so a
+		// row that becomes terminal after advisory preflight cannot turn into an
+		// unrenewed reopen. Non-terminal transitions remain on their existing
+		// path and do not need a claim renewal.
+		return nil
 	}
 	return nil
 }
