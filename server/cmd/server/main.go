@@ -2,12 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -249,7 +251,11 @@ func checkFirstRun() error {
 		if fileExists(".env.example") {
 			slog.Info("首次运行：从 .env.example 创建 .env")
 			if err := copyFile(".env.example", ".env"); err != nil {
-				return fmt.Errorf("failed to create .env: %w", err)
+				// Another server may win the create race. Its complete file is safe
+				// to reuse, so only unexpected errors abort first-run setup.
+				if !errors.Is(err, os.ErrExist) {
+					return fmt.Errorf("failed to create .env: %w", err)
+				}
 			}
 		}
 	}
@@ -331,13 +337,18 @@ func fileExists(path string) bool {
 
 // copyFile copies a file from src to dst.
 func copyFile(src, dst string) error {
+	if unsafeRelativePath(src) || unsafeRelativePath(dst) {
+		return fmt.Errorf("unsafe path: %q -> %q", src, dst)
+	}
 	sourceFile, err := os.Open(src)
 	if err != nil {
 		return err
 	}
 	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
+	// O_EXCL prevents two server instances from truncating each other's .env.
+	// The restrictive mode avoids exposing copied secrets to other users.
+	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		return err
 	}
@@ -345,6 +356,14 @@ func copyFile(src, dst string) error {
 
 	_, err = io.Copy(destFile, sourceFile)
 	return err
+}
+
+func unsafeRelativePath(path string) bool {
+	if filepath.IsAbs(path) {
+		return true
+	}
+	clean := filepath.Clean(path)
+	return clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator))
 }
 
 func main() {
