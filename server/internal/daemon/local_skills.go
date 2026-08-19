@@ -231,6 +231,11 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				}
 			}
 			providerRoot = filepath.Join(qwenpawHome, "skill_pool")
+		case "mcode":
+			// MCode's default data directory is ~/.minimax; global skills live
+			// directly below it. Project skills are injected separately under
+			// <workDir>/.minimax/skills.
+			providerRoot = filepath.Join(home, ".minimax", "skills")
 		default:
 			return nil, false, nil
 		}

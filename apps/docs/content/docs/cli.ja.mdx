@@ -238,7 +238,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `subscriber list/add/remove <issue-id>` | 購読者を管理 | `--user`、`--user-id`（省略時は現在のユーザー） |
 | | `label list/add/remove <issue-id>` | イシューのラベルを管理 | |
 | | `metadata list/get/set/delete <issue-id>` | イシューレベルのキー・バリューメタデータを管理 | |
-| | `property list/set/unset <issue-id>` | カスタムプロパティの値を設定 | `set`: `--name`、`--value` |
+| | `property list/set/unset <issue-id>` | カスタムプロパティの値を設定 | `set`: `--name`、`--value`（`actor` / `multi_actor` はメンバーの名前・メール・id を受け付けます） |
 | | `runs <issue-id>` | 実行履歴を表示 | `--full-id` |
 | | `run-messages <task-id>` | 1 回の実行のメッセージを表示 | `--since`、`--issue` |
 | | `usage <issue-id>` | 集計されたトークン使用量を表示 | |
@@ -248,7 +248,7 @@ CLI の設定ファイルには、あなたとして Multica にアクセスで�
 | | `status <id> <status>` | プロジェクトのステータスを変更 | |
 | | `resource list/add/update/remove` | プロジェクトの追加リソースを管理 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（ローカルディレクトリの `in_place` / `worktree`） |
 | `label` | `list/get/create/update/delete` | ワークスペースのラベルを管理 | |
-| `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`、`--option`（繰り返し可）；`list`: `--include-archived`；タイプは作成後に変更できません |
+| `property` | `list/get/create/update/archive/unarchive` | ワークスペースのカスタムプロパティを管理 | `create`: `--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`）、`--option`（繰り返し可、select 系のみ）；`list`: `--include-archived`；タイプは作成後に変更できません |
 | `agent` | `list/get/create/update/archive/restore` | エージェントを管理 | `--name`、`--runtime-id`（`create` では必須）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 新しいエージェントとして複製。元のエージェントは変更されません | `--name`（デフォルトは元の名前 + ` (copy)`）、`--runtime-id`（別のランタイムへ複製する場合は `--model` の同時指定が必須）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` などの機密設定は複製されないため、`create` と同じフラグで再指定してください |
 | | `tasks <id>` | エージェントのタスクを表示 | |

@@ -30,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/realtime"
@@ -83,9 +84,10 @@ type Config struct {
 	VCSIntegrationEnabled bool
 	// PublicURL is the absolute base URL the API is reachable at from the
 	// public internet, with no trailing slash (e.g. "https://multica.ai").
-	// Used only to build webhook_url responses for autopilot webhook triggers
-	// — never for auth, routing, or workspace resolution. Empty when unset,
-	// in which case clients fall back to webhook_path + their own origin.
+	// Used to build webhook_url responses and the fixed Remote MCP OAuth
+	// callback URI — never to decide request identity, routing, or workspace
+	// scope. Empty when unset; webhook clients can fall back to their own origin,
+	// while OAuth Connect fails closed because providers require an exact URI.
 	// Reading the public host from request headers (Host / X-Forwarded-Host)
 	// is intentionally avoided so a misconfigured reverse proxy cannot trick
 	// the server into minting webhook URLs pointing at an attacker-controlled
@@ -171,11 +173,17 @@ type Handler struct {
 	LocalSkillListStore    LocalSkillListStore
 	LocalSkillImportStore  LocalSkillImportStore
 	FeatureFlags           *featureflag.Service
-	LivenessStore          LivenessStore
-	HeartbeatScheduler     HeartbeatScheduler
-	Storage                storage.Storage
-	CFSigner               *auth.CloudFrontSigner
-	Analytics              analytics.Client
+	// IssueStatusCatalog reads the workspace status catalog. Defaults to
+	// Queries; a test can substitute a counting wrapper to assert HOW MANY
+	// catalog reads a request performs, which is the only property that
+	// distinguishes the current one-read derivation from the N+1 it replaced.
+	// (MUL-6243)
+	IssueStatusCatalog issuestatus.Querier
+	LivenessStore      LivenessStore
+	HeartbeatScheduler HeartbeatScheduler
+	Storage            storage.Storage
+	CFSigner           *auth.CloudFrontSigner
+	Analytics          analytics.Client
 	// DaemonPendingWork pushes "heartbeat now" hints for queued
 	// heartbeat-carried requests (MUL-5444). Optional: when nil,
 	// requestDaemonPendingWork falls back to the local DaemonHub, which is the
@@ -197,6 +205,7 @@ type Handler struct {
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter
+	InvitationRateLimiters       InvitationRateLimiters
 	WebhookDeliveryWorker        *WebhookDeliveryWorker
 	CloudRuntime                 cloudRuntimeProxy
 	// Lark integration. All three are nil when the Lark master key
@@ -228,9 +237,10 @@ type Handler struct {
 	// ChannelSupervisor owns the per-installation supervisor goroutines
 	// that hold the §4.4 WS lease and drive each channel.Channel
 	// (MUL-3620 generalized the Feishu-only Hub into this channel-agnostic
-	// engine). The router constructs it UNCONDITIONALLY — it drives any
-	// channel type, not just Feishu, so it does not depend on the Lark
-	// master key; each platform registers its Factory only when configured
+	// engine). The router constructs it independently of platform secrets — it
+	// drives any channel type, not just Feishu. It remains nil when lease
+	// configuration is unsafe or a selected Redis backend fails its startup
+	// readiness check; each platform registers its Factory only when configured
 	// (Feishu when MULTICA_LARK_SECRET_KEY is set). The router does NOT
 	// call Run; the process owner (main.go) starts it under a long-running
 	// context and joins via WaitWithTimeout (bounded, fenced by
@@ -402,6 +412,7 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		WebhookRateLimiter:           NewMemoryWebhookRateLimiter(DefaultWebhookRateLimit()),
 		WebhookIPRateLimiter:         NewMemoryWebhookIPRateLimiter(DefaultWebhookIPRateLimit()),
 		WebhookAbsoluteIPRateLimiter: NewMemoryWebhookAbsoluteIPRateLimiter(DefaultWebhookAbsoluteIPRateLimit()),
+		InvitationRateLimiters:       NewMemoryInvitationRateLimiters(DefaultInvitationRateLimits()),
 		CloudRuntime: cloudruntime.NewClient(cloudruntime.Config{
 			BaseURL: cfg.CloudRuntimeFleetURL,
 			Timeout: cfg.CloudRuntimeFleetTimeout,

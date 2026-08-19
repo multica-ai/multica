@@ -71,6 +71,17 @@ type SidebarContextProps = {
    */
   isCompact: boolean
   toggleSidebar: () => void
+  /**
+   * The app shell keeps a `SidebarTrigger` of its own on screen, outside the
+   * page chrome — the desktop window toolbar does, beside the traffic lights.
+   *
+   * Surfaces that would otherwise supply a fallback trigger read this and
+   * supply nothing: the shell's own is always reachable, so a second one is
+   * duplicate chrome rather than a way back to a nav that had none (MUL-6218).
+   * It describes the shell, not the current viewport, so it does not track
+   * whether that trigger happens to be mounted this render.
+   */
+  hasExternalTrigger: boolean
 }
 
 type SidebarResizeContextProps = {
@@ -108,6 +119,7 @@ function SidebarProvider({
   defaultOpen = true,
   open: openProp,
   onOpenChange: setOpenProp,
+  hasExternalTrigger = false,
   className,
   style,
   children,
@@ -116,6 +128,15 @@ function SidebarProvider({
   defaultOpen?: boolean
   open?: boolean
   onOpenChange?: (open: boolean) => void
+  /**
+   * Declare that this shell keeps its own always-reachable `SidebarTrigger`
+   * outside the page chrome. See `SidebarContextProps.hasExternalTrigger`.
+   *
+   * Defaults to false, and the default is the safe one: a shell that forgets
+   * to opt out shows one redundant icon, while a shell that has to opt in and
+   * forgets leaves a collapsed nav with no way back.
+   */
+  hasExternalTrigger?: boolean
 }) {
   const isCompact = useIsCompact()
   const [openMobile, setOpenMobile] = React.useState(false)
@@ -211,8 +232,18 @@ function SidebarProvider({
       openMobile,
       setOpenMobile,
       toggleSidebar,
+      hasExternalTrigger,
     }),
-    [state, open, setOpen, isCompact, openMobile, setOpenMobile, toggleSidebar]
+    [
+      state,
+      open,
+      setOpen,
+      isCompact,
+      openMobile,
+      setOpenMobile,
+      toggleSidebar,
+      hasExternalTrigger,
+    ]
   )
   const resizeContextValue = React.useMemo<SidebarResizeContextProps>(
     () => ({

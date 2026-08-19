@@ -40,6 +40,7 @@ oauth_config:
     bot:
       - app_mentions:read
       - channels:history
+      - files:read
       - groups:history
       - im:history
       - mpim:history
@@ -63,6 +64,10 @@ settings:
 ```
 
 作成前に、2 か所の `Multica` をエージェント名に変更してもかまいません。manifest の権限やイベントは削除しないでください。削除すると、DM、チャンネルでのメンション、返信、`/issue` が動作しないことがあります。
+
+<Callout type="warning">
+添付ファイル対応が追加される前にこの Slack app をインストールしていた場合は、Bot scope に `files:read` を追加し、workspace に app を再インストールしてください。app を再インストールするまで、新しい scope は既存の Bot token に反映されません。
+</Callout>
 
 Bot は Socket Mode で Slack へ接続するため、公開 Request URL や OAuth Redirect URL の設定は不要です。
 
@@ -114,6 +119,12 @@ Slack サイドバーの **Apps** から Bot を開き、そのままメッセ�
 
 Bot が応答するのは、明示的に @メンションされたチャンネルメッセージだけです。実行時には、権限の範囲内でそのスレッドの直近のコンテキストを読み取ります。
 
+### ファイルを送る
+
+DM、または Bot を @ メンションしたチャンネルのメッセージに、そのままファイルを添付します。ファイルは同じ作業の添付ファイルとして届くので、エージェントは依頼内容と合わせて読み取れます。
+
+これには `files:read` scope が必要です。添付ファイル対応より前にインストールした app の場合は、手順 1 の注意書きを参照してください。1 ファイルあたり 20 MiB 以下、1 メッセージにつき最大 10 件です。サイズ超過、アップロード処理中、または Slack 以外（Google Drive や Dropbox のリンクなど）にあるファイルはスキップされますが、メッセージ本文はエージェントに渡ります。
+
 ### `/issue` でイシューを作成する
 
 チャンネルまたは DM で、次のように入力します。
@@ -155,6 +166,7 @@ API サービスを再起動してから Slack app を接続します。この�
 - **DM の入口がない**: `app_home.messages_tab_enabled` が `true` であることを確認します。
 - **チャンネルで返信がない**: Bot がチャンネルに招待されており、メッセージで @メンションされていることを確認します。
 - **`/issue` がない**: manifest に slash command と `commands` scope が含まれていることを確認し、app を再インストールします。
+- **ファイルがエージェントに届かない**: manifest に `files:read` が含まれていること、scope を追加した後に app を再インストールしたことを確認し、ファイルが 20 MiB 以下かも確認します。
 - **Bot が実行しない**: エージェントがアーカイブされていないことと、使用する[ランタイム](/daemon-runtimes)がオンラインであることを確認します。
 
 ## 次のステップ

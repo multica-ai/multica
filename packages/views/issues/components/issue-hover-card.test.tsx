@@ -13,6 +13,20 @@ vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "workspace-1",
 }));
 
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  // This suite replaces useQuery wholesale, so the catalog hook is stubbed
+  // rather than left to fall through the shared useQuery mock.
+  useIssueStatuses: () => ({
+    statuses: [],
+    activeStatuses: [],
+    categoryOf: (key: string) => key,
+    labelOf: (key: string) => key,
+    entryOf: () => undefined,
+    inCategory: () => [],
+    isLoaded: true,
+  }),
+}));
+
 vi.mock("@multica/core/issues/queries", () => ({
   issueDetailOptions: (_workspaceId: string, issueId: string) => ({
     queryKey: ["issue", issueId],

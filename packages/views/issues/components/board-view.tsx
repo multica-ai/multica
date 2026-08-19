@@ -17,7 +17,7 @@ import { toast } from "sonner";
 import type {
   Issue,
   IssueAssigneeType,
-  IssueStatus,
+  IssueStatusCategory,
   Project,
   IssueProperty,
 } from "@multica/core/types";
@@ -62,13 +62,13 @@ import {
 
 function isStatusGroup(
   group: BoardColumnGroup,
-): group is BoardColumnGroup & { status: IssueStatus } {
+): group is BoardColumnGroup & { status: IssueStatusCategory } {
   return group.status !== undefined;
 }
 
 function buildGroups(
   issues: Issue[],
-  visibleStatuses: IssueStatus[],
+  visibleStatuses: IssueStatusCategory[],
   grouping: IssueGrouping,
   getActorName: (type: string, id: string) => string,
   noAssigneeLabel: string,
@@ -168,8 +168,8 @@ function BoardViewImpl({
   groupBranches,
 }: {
   issues: Issue[];
-  visibleStatuses: IssueStatus[];
-  hiddenStatuses: IssueStatus[];
+  visibleStatuses: IssueStatusCategory[];
+  hiddenStatuses: IssueStatusCategory[];
   onMoveIssue: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
@@ -553,6 +553,16 @@ function BoardViewImpl({
     [groupedIssues, groups, grouping, groupingOptionIds, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, columnsRef, isDraggingRef, setColumns, applyPropertyGroupValue],
   );
 
+  // An aborted drag (pointercancel, window resize, tab hide, Escape) fires
+  // onDragCancel instead of onDragEnd. Releasing the drag lock here keeps the
+  // column mirror resyncing with the cache afterwards — see the same handler in
+  // list-view for the touch path that makes this routine (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setColumns(buildColumns(groupedIssues, groups, grouping, groupingOptionIds));
+  }, [groupedIssues, groups, grouping, groupingOptionIds, setColumns, isDraggingRef]);
+
   return (
     <DndContext
       sensors={sensors}
@@ -560,6 +570,7 @@ function BoardViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div
         ref={pan.ref}
@@ -720,7 +731,7 @@ function BoardHiddenColumnsPanel({
   hiddenStatuses,
   statusPagination,
 }: {
-  hiddenStatuses: IssueStatus[];
+  hiddenStatuses: IssueStatusCategory[];
   statusPagination?: IssueStatusPagination;
 }) {
   return (

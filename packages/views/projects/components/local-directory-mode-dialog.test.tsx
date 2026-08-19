@@ -15,7 +15,6 @@ function renderDialog(
   overrides: {
     value?: LocalDirectoryExecutionMode;
     unavailableReason?: WorktreeUnavailableReason;
-    currentVersion?: string;
     errorMessage?: string;
     onConfirm?: (mode: LocalDirectoryExecutionMode) => void;
   } = {},
@@ -29,8 +28,6 @@ function renderDialog(
         path="/Users/dev/work/game-client"
         value={overrides.value ?? "in_place"}
         unavailableReason={overrides.unavailableReason}
-        currentVersion={overrides.currentVersion}
-        minVersion="0.4.24"
         errorMessage={overrides.errorMessage}
         confirmLabel="Save"
         onConfirm={onConfirm}
@@ -90,26 +87,45 @@ describe("LocalDirectoryModeDialog", () => {
     expect(onConfirm).toHaveBeenCalledWith("in_place");
   });
 
-  // The server refuses the save below the version floor; saying so up front
-  // beats a bare 422 after the user has already committed to the choice.
-  it("disables parallel mode for an outdated daemon and names both versions", () => {
-    renderDialog({
-      unavailableReason: "daemon_outdated",
-      currentVersion: "0.4.10",
-    });
+  // A server older than the worktree save gate does not reject the mode — it
+  // drops execution_mode, answers 201, and the task then runs in the folder the
+  // user asked to isolate. Nothing downstream catches that, so the option has
+  // to be closed here, and the copy has to say what is actually wrong (#7113).
+  it("blocks parallel mode when the server cannot honour it", () => {
+    const onConfirm = vi.fn();
+    renderDialog({ unavailableReason: "server_outdated", onConfirm });
 
-    expect(worktreeOption().hasAttribute("disabled")).toBe(true);
-    const notice = screen.getByText(/0\.4\.10/);
-    expect(notice.textContent).toContain("0.4.24");
+    const option = worktreeOption();
+    expect(option.hasAttribute("disabled")).toBe(true);
+    const notice = screen.getByText(/Multica server is too old/i);
+    expect(notice.textContent).toMatch(/Update the server/i);
+
+    fireEvent.click(option);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+    expect(onConfirm).toHaveBeenCalledWith("in_place");
   });
 
-  it("falls back to a readable phrase when the daemon reports no version", () => {
-    renderDialog({ unavailableReason: "daemon_outdated", currentVersion: "" });
-    expect(screen.getByText(/an older version/i)).toBeTruthy();
-  });
-
+  // The client no longer predicts whether the machine can run the mode — the
+  // server decides on save, and this is where its answer lands. Guessing it up
+  // front is what disabled the option for a user whose machine was already on
+  // the newest release, with an instruction that could not help (#7113).
   it("shows a server rejection inline so the dialog stays actionable", () => {
-    renderDialog({ errorMessage: "daemon is too old to run worktree mode" });
-    expect(screen.getByText(/too old to run worktree mode/i)).toBeTruthy();
+    renderDialog({
+      errorMessage:
+        "the Multica runtime on that machine does not support it. Update the Multica app on that machine",
+    });
+    expect(screen.getByText(/does not support it/i)).toBeTruthy();
+  });
+
+  it("leaves parallel mode selectable for a git folder, whatever the runtime says", () => {
+    const onConfirm = vi.fn();
+    renderDialog({ onConfirm });
+
+    const option = worktreeOption();
+    expect(option.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(option);
+    fireEvent.click(screen.getByRole("button", { name: "Save" }));
+
+    expect(onConfirm).toHaveBeenCalledWith("worktree");
   });
 });

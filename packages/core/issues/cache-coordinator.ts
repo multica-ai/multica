@@ -1,3 +1,4 @@
+import { issueStatusCategory, normalizeStatusPatch } from "./status-category";
 import {
   hashKey,
   type InfiniteData,
@@ -18,6 +19,7 @@ import {
   findIssueLocation,
   moveBucketTotal,
   patchIssueInBuckets,
+  patchNeedsInvalidation,
   removeIssueFromBuckets,
 } from "./cache-helpers";
 import {
@@ -263,7 +265,7 @@ export function applyIssueChange(
   qc: QueryClient,
   wsId: string,
   id: string,
-  patch: Partial<Issue>,
+  rawPatch: Partial<Issue>,
   opts: {
     /** Which membership dimensions this change actually moved — compute via
      *  `issueChangedDims` (mutations) or the server's WS flags. */
@@ -275,6 +277,10 @@ export function applyIssueChange(
   },
 ): IssueCacheChangeResult {
   const { changed, baseIssue } = opts;
+  // Normalize ONCE, at the door. Every write below is a `{...entity, ...patch}`
+  // spread, and an optimistic `{status}` patch would otherwise leave the stale
+  // status_category on the entity while the card moves buckets. (MUL-6243)
+  const patch = normalizeStatusPatch(rawPatch);
   const prevLists: [QueryKey, ListIssuesCache][] = [];
   const prevFlatLists: [QueryKey, IssueFlatCache][] = [];
   const prevTableRows: [QueryKey, IssueTableRowCache][] = [];
@@ -301,6 +307,11 @@ export function applyIssueChange(
 
     if (loc) {
       if (!prevIssue) prevIssue = loc.issue;
+      // A status this client cannot resolve to a category makes
+      // patchIssueInBuckets a no-op. The row DID move on the server, so
+      // treating that as "nothing to do" would leave the card in its old
+      // column forever — force a refetch instead. (MUL-6243)
+      if (patchNeedsInvalidation(patch)) staleKeys.push(key);
       let next: ListIssuesCache;
       if (filterTouched) {
         const membership = issueMatchesListFilter(
@@ -350,7 +361,22 @@ export function applyIssueChange(
         // buckets; anything else (e.g. member→member reassignment) leaves
         // this list's pages and counts untouched.
         if (!changed.status || patch.status === undefined) continue;
-        const next = moveBucketTotal(data, baseIssue.status, patch.status);
+        // Bucket totals are per category (MUL-6243).
+        // patch.status_category is authoritative when the server sent it; the
+        // key-only fallback covers built-ins.
+        const fromCategory = issueStatusCategory(baseIssue);
+        const toCategory = issueStatusCategory({
+          status: patch.status,
+          status_category: patch.status_category,
+        });
+        if (!fromCategory || !toCategory) {
+          // An unresolvable custom status must NOT be a silent no-op: the row
+          // moved on the server, so leaving this cache untouched drifts the
+          // off-window totals permanently. Force a refetch instead.
+          staleKeys.push(key);
+          continue;
+        }
+        const next = moveBucketTotal(data, fromCategory, toCategory);
         if (next !== data) {
           prevLists.push([key, data]);
           qc.setQueryData<ListIssuesCache>(key, next);
@@ -364,7 +390,12 @@ export function applyIssueChange(
       }
       if (isMember === false) {
         // Left the list entirely — the bucket it was counted in loses one.
-        const next = decrementBucketTotal(data, baseIssue.status);
+        const leavingCategory = issueStatusCategory(baseIssue);
+        if (!leavingCategory) {
+          staleKeys.push(key);
+          continue;
+        }
+        const next = decrementBucketTotal(data, leavingCategory);
         if (next !== data) {
           prevLists.push([key, data]);
           qc.setQueryData<ListIssuesCache>(key, next);

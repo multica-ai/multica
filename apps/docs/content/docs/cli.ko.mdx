@@ -238,7 +238,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `subscriber list/add/remove <issue-id>` | 구독자 관리 | `--user`, `--user-id`(생략하면 현재 사용자) |
 | | `label list/add/remove <issue-id>` | 이슈 라벨 관리 | |
 | | `metadata list/get/set/delete <issue-id>` | 이슈 수준 key-value metadata 관리 | |
-| | `property list/set/unset <issue-id>` | 사용자 지정 속성 값 설정 | `set`: `--name`, `--value` |
+| | `property list/set/unset <issue-id>` | 사용자 지정 속성 값 설정 | `set`: `--name`, `--value`(`actor` / `multi_actor`는 멤버의 이름, 이메일, id를 받습니다) |
 | | `runs <issue-id>` | 실행 기록 확인 | `--full-id` |
 | | `run-messages <task-id>` | 단일 실행 메시지 확인 | `--since`, `--issue` |
 | | `usage <issue-id>` | 집계 token 사용량 확인 | |
@@ -248,7 +248,7 @@ CLI 설정 파일에는 사용자를 대신해 Multica에 접근할 수 있는 t
 | | `status <id> <status>` | 프로젝트 상태 변경 | |
 | | `resource list/add/update/remove` | 프로젝트 추가 리소스 관리 | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode`(로컬 디렉터리의 `in_place` / `worktree`) |
 | `label` | `list/get/create/update/delete` | 워크스페이스 라벨 관리 | |
-| `property` | `list/get/create/update/archive/unarchive` | 워크스페이스 사용자 지정 속성 관리 | `create`: `--name`, `--type`, `--option`(반복 가능). `list`: `--include-archived`. 유형은 생성 후 변경 불가 |
+| `property` | `list/get/create/update/archive/unarchive` | 워크스페이스 사용자 지정 속성 관리 | `create`: `--name`, `--type`(`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option`(반복 가능, select 유형만). `list`: `--include-archived`. 유형은 생성 후 변경 불가 |
 | `agent` | `list/get/create/update/archive/restore` | 에이전트 관리 | `--name`, `--runtime-id`(`create`에서 필수), `--instructions`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
 | | `copy <agent-id>` | 원래 에이전트에 영향 없이 새 에이전트로 복사 | `--name`(기본값은 원래 이름 + ` (copy)`), `--runtime-id`(다른 런타임으로 복사할 때 `--model`도 필수), `--no-skills`. `custom_env`, `mcp_config`, `runtime_config` 같은 기밀 설정은 복사되지 않으며 `create`와 같은 flag로 다시 제공해야 함 |
 | | `tasks <id>` | 에이전트 태스크 확인 | |

@@ -59,11 +59,10 @@ func TestSquadAssignedLeaderCanWrapUpOnCommentTurn(t *testing.T) {
 		t.Fatalf("squad-assigned briefing must grant status ownership:\n%s", briefing)
 	}
 
-	// The runtime brief must not restate the prohibition in its absolute form,
-	// which is what contradicted the grant. The absolute sentence ends right
-	// after "explicitly asks for it"; the leader variant continues past it.
-	if strings.Contains(brief, "explicitly asks for it\n") {
-		t.Error("leader runtime brief still carries the unqualified no-status-change rule, " +
+	// The runtime brief must not carry a blanket no-status-change rule: any
+	// unqualified form of it contradicts the grant this leader just received.
+	if strings.Contains(brief, "Do NOT change the issue status") {
+		t.Error("leader runtime brief still carries an unqualified no-status-change rule, " +
 			"which contradicts the Own-the-parent-issue-status grant")
 	}
 	for _, want := range []string{
@@ -112,8 +111,8 @@ func TestGuestLeaderCannotChangeStatusOnCommentTurn(t *testing.T) {
 		}
 	}
 
-	// But the grant is absent, so the runtime brief's carve-out has nothing to
-	// activate and the default prohibition governs.
+	// But the grant is absent, so the runtime brief's grant branch has nothing
+	// to activate and its no-status-writes branch governs.
 	if strings.Contains(briefing, "Own the parent issue status") {
 		t.Errorf("guest leader must not receive the status-ownership grant:\n%s", briefing)
 	}

@@ -71,12 +71,29 @@ func TestConcurrentIndexCleanupsMatchTheirMigrations(t *testing.T) {
 // that builds an index concurrently must be registered. This prevents a new or
 // historical down migration from silently missing retry cleanup.
 func TestEveryConcurrentDownBuildHasCleanup(t *testing.T) {
-	paths, err := filepath.Glob(filepath.Join("..", "..", "migrations", "*.down.sql"))
+	assertEveryConcurrentBuildHasCleanup(t, "down", concurrentDownIndexCleanups)
+}
+
+// TestEveryConcurrentUpBuildHasCleanup is the up-direction counterpart, added
+// for MUL-6288. Only the down direction was covered before, so registration for
+// up migrations was effectively opt-in: 316, 317, 326, 328, 330 and 331 all
+// shipped without a hook and nothing failed. An unregistered build is invisible
+// until a real interrupted migration turns into either a permanently INVALID
+// index recorded as success (`IF NOT EXISTS`) or a wedged migrator (bare
+// `CREATE`), so the check belongs here rather than in review.
+func TestEveryConcurrentUpBuildHasCleanup(t *testing.T) {
+	assertEveryConcurrentBuildHasCleanup(t, "up", concurrentIndexCleanups)
+}
+
+func assertEveryConcurrentBuildHasCleanup(t *testing.T, direction string, cleanups map[string]string) {
+	t.Helper()
+	suffix := "." + direction + ".sql"
+	paths, err := filepath.Glob(filepath.Join("..", "..", "migrations", "*"+suffix))
 	if err != nil {
-		t.Fatalf("glob down migrations: %v", err)
+		t.Fatalf("glob %s migrations: %v", direction, err)
 	}
 	if len(paths) == 0 {
-		t.Fatal("no down migrations found")
+		t.Fatalf("no %s migrations found", direction)
 	}
 
 	for _, path := range paths {
@@ -89,19 +106,19 @@ func TestEveryConcurrentDownBuildHasCleanup(t *testing.T) {
 		if len(matches) == 0 {
 			continue
 		}
-		version := strings.TrimSuffix(filepath.Base(path), ".down.sql")
+		version := strings.TrimSuffix(filepath.Base(path), suffix)
 		if len(matches) != 1 {
 			t.Errorf("%s: has %d concurrent index builds; cleanup registration supports exactly one", version, len(matches))
 			continue
 		}
 		indexName := string(matches[0][1])
-		registered, ok := concurrentDownIndexCleanups[version]
+		registered, ok := cleanups[version]
 		if !ok {
-			t.Errorf("%s: builds %q concurrently on rollback but has no down cleanup", version, indexName)
+			t.Errorf("%s: builds %q concurrently on %s but has no %s cleanup", version, indexName, direction, direction)
 			continue
 		}
 		if registered != indexName {
-			t.Errorf("%s: down cleanup registers %q, migration builds %q", version, registered, indexName)
+			t.Errorf("%s: %s cleanup registers %q, migration builds %q", version, direction, registered, indexName)
 		}
 	}
 }

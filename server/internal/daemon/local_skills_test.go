@@ -100,6 +100,26 @@ func TestListRuntimeLocalSkills_Claude(t *testing.T) {
 	}
 }
 
+func TestListRuntimeLocalSkills_Mcode(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	writeTestLocalSkill(t, filepath.Join(home, ".minimax", "skills"), "mcode-review", map[string]string{
+		"SKILL.md": "---\nname: MCode Review\ndescription: Review code with MiniMax Code\n---\n",
+	})
+
+	skills, supported, err := listRuntimeLocalSkills("mcode")
+	if err != nil {
+		t.Fatalf("listRuntimeLocalSkills: %v", err)
+	}
+	if !supported || len(skills) != 1 {
+		t.Fatalf("supported=%v skills=%#v", supported, skills)
+	}
+	if skills[0].SourcePath != "~/.minimax/skills/mcode-review" {
+		t.Fatalf("source_path = %q", skills[0].SourcePath)
+	}
+}
+
 // TestListRuntimeLocalSkills_Codebuddy is the regression guard for a bug
 // where CodeBuddy was treated as a drop-in alias for Claude and local
 // (user-level) skills were discovered from ~/.claude/skills. CodeBuddy Code

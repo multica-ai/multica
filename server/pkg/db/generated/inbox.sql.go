@@ -50,7 +50,11 @@ func (q *Queries) ArchiveAllReadInbox(ctx context.Context, arg ArchiveAllReadInb
 const archiveCompletedInbox = `-- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
-  AND i.issue_id IN (SELECT id FROM issue WHERE status IN ('done', 'cancelled'))
+  AND i.issue_id IN (
+    SELECT id FROM issue
+    WHERE workspace_id = $1
+      AND issue_effective_status(workspace_id, status) IN ('done', 'cancelled')
+  )
 `
 
 type ArchiveCompletedInboxParams struct {

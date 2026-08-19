@@ -1,3 +1,4 @@
+// @vitest-environment node
 /**
  * Import boundary guard (MUL-4922, Howard's contract #3).
  *

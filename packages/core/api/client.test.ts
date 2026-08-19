@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY } from "./client";
+import { EMPTY_PLUGIN_PREVIEW } from "./schemas";
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -66,6 +67,25 @@ describe("ApiClient pull-request response schema", () => {
     await expect(
       new ApiClient("https://api.example.test").listIssuePullRequests("issue-1"),
     ).resolves.toEqual({ pull_requests: [] });
+  });
+});
+
+describe("ApiClient Plugin preview response schema", () => {
+  it("degrades a malformed preview so a blank scope list is never shown as approval", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ scopes: "issues:read" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
+
+    await expect(new ApiClient("https://api.example.test").previewPlugin(
+      "workspace-1",
+      { source_url: "https://example.test/multica.plugin.json" },
+    )).resolves.toEqual(EMPTY_PLUGIN_PREVIEW);
   });
 });
 

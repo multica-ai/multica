@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 
 import { cancelReasonLabel, failureReasonLabel } from "./task-failure";
@@ -39,6 +40,12 @@ describe("cancelReasonLabel", () => {
 });
 
 describe("failureReasonLabel", () => {
+  it("explains a runtime that never returned during reconnect grace", () => {
+    expect(failureReasonLabel("runtime_reconnect_timeout")).toBe(
+      "Daemon did not reconnect in time",
+    );
+  });
+
   it("covers the local_directory bucket the worktree paths write", () => {
     expect(failureReasonLabel("local_directory_error")).toBe("Local directory error");
   });

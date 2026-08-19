@@ -1230,6 +1230,71 @@ func TestCodexRawItemCommandExecution(t *testing.T) {
 	}
 }
 
+func TestCodexRawItemMCPToolCall(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var messages []Message
+	c.onMessage = func(msg Message) {
+		messages = append(messages, msg)
+	}
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/started","params":{"item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news","credentials":{"api_key":"sk-12345678901234567890"}},"status":"inProgress"}}}`)
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"mcpToolCall","id":"mcp-1","server":"plugin-exa-search","tool":"web_search_exa","arguments":{"query":"latest Multica news"},"status":"completed","durationMs":1429,"result":{"content":[{"type":"text","text":"private provider payload"}]}}}}`)
+
+	if len(messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(messages))
+	}
+
+	begin := messages[0]
+	if begin.Type != MessageToolUse || begin.Tool != "web_search_exa" || begin.CallID != "mcp-1" {
+		t.Fatalf("unexpected start message: %+v", begin)
+	}
+	if begin.Input["server"] != "plugin-exa-search" {
+		t.Fatalf("expected MCP server provenance, got %#v", begin.Input)
+	}
+	arguments, ok := begin.Input["arguments"].(map[string]any)
+	if !ok || arguments["query"] != "latest Multica news" {
+		t.Fatalf("expected MCP arguments, got %#v", begin.Input["arguments"])
+	}
+	credentials, ok := arguments["credentials"].(map[string]any)
+	if !ok || credentials["api_key"] != "[REDACTED API KEY]" {
+		t.Fatalf("expected nested MCP secret to be redacted, got %#v", arguments["credentials"])
+	}
+
+	end := messages[1]
+	if end.Type != MessageToolResult || end.Tool != "web_search_exa" || end.CallID != "mcp-1" || end.Status != "completed" {
+		t.Fatalf("unexpected complete message: %+v", end)
+	}
+	if end.Output != "completed\nduration: 1429 ms" {
+		t.Fatalf("unexpected MCP result summary: %q", end.Output)
+	}
+	if strings.Contains(end.Output, "private provider payload") {
+		t.Fatalf("MCP result content leaked into transcript summary: %q", end.Output)
+	}
+}
+
+func TestCodexRawItemMCPToolCallFailureIsSanitized(t *testing.T) {
+	t.Parallel()
+
+	c, _, _ := newTestCodexClient(t)
+	c.notificationProtocol = "raw"
+
+	var messages []Message
+	c.onMessage = func(msg Message) { messages = append(messages, msg) }
+
+	c.handleLine(`{"jsonrpc":"2.0","method":"item/completed","params":{"item":{"type":"mcpToolCall","id":"mcp-2","server":"plugin-exa-search","tool":"web_search_exa","status":"failed","error":{"message":"Bearer secret-token-value"}}}}`)
+
+	if len(messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(messages))
+	}
+	if got := messages[0].Output; got != "failed\nerror: Bearer [REDACTED]" {
+		t.Fatalf("unexpected sanitized MCP failure summary: %q", got)
+	}
+}
+
 func TestCodexRawItemAgentMessageFinalAnswer(t *testing.T) {
 	t.Parallel()
 

@@ -1,5 +1,6 @@
 "use client";
 
+import { useStatusLabel } from "../utils/status-label";
 import {
   useCallback,
   useEffect,
@@ -72,7 +73,6 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { ALL_STATUSES } from "@multica/core/issues/config";
 import {
   issueKeys,
   issueTableGroupsOptions,
@@ -98,13 +98,17 @@ import type {
   Issue,
   IssueProperty,
   IssuePropertyValue,
-  IssueStatus,
   IssueTableGroupDescriptor,
   IssueTableGroupSpec,
   IssueTableQuerySpec,
   IssueTableRowsResponse,
   Project,
   UpdateIssueRequest,
+} from "@multica/core/types";
+import {
+  actorRefsFromValue,
+  formatActorRef,
+  isActorPropertyType,
 } from "@multica/core/types";
 import {
   useInfiniteQuery,
@@ -883,6 +887,9 @@ export function IssueTableGroupRow({
 function propertyDisplayValue(
   property: IssueProperty,
   value: IssuePropertyValue | undefined,
+  // Actor values are "<kind>:<uuid>" references; without a resolver they would
+  // export as raw ids, so callers that can export an actor column must pass one.
+  getActorName?: (type: string, id: string) => string,
 ) {
   if (value === undefined) return "";
   const options = property.config.options ?? [];
@@ -894,6 +901,11 @@ function propertyDisplayValue(
     return options
       .filter((option) => ids.includes(option.id))
       .map((option) => option.name)
+      .join(", ");
+  }
+  if (isActorPropertyType(property.type)) {
+    return actorRefsFromValue(value)
+      .map((ref) => (getActorName ? getActorName(ref.kind, ref.id) : formatActorRef(ref.kind, ref.id)))
       .join(", ");
   }
   return String(value);
@@ -1043,7 +1055,8 @@ function IssueTableHeaderCell({
   const propertyId = propertyIdFromViewKey(key);
   const property = propertyId ? meta.propertyById.get(propertyId) : undefined;
   const staticSort = propertyId
-    ? property && !["multi_select", "checkbox"].includes(property.type)
+    ? property &&
+      !["multi_select", "checkbox", "actor", "multi_actor"].includes(property.type)
       ? (`property:${propertyId}` as SortField)
       : undefined
     : SORTABLE_COLUMNS[key as TableSystemColumnKey];
@@ -1267,6 +1280,7 @@ export function TableView({
 }: TableViewProps) {
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
+  const resolveStatusLabel = useStatusLabel(wsId);
   const queryClient = useQueryClient();
   const intentNavigate = useIntentNavigate();
   const paths = useWorkspacePaths();
@@ -1738,13 +1752,12 @@ export function TableView({
     (descriptor: IssueTableGroupDescriptor) => {
       const value = descriptor.value;
       if (value.kind === "status") {
-        if (ALL_STATUSES.includes(value.status as IssueStatus)) {
-          return t(($) => $.status[value.status as IssueStatus]);
-        }
-        // Installed clients can receive a status introduced by a newer
-        // backend. Keep the group usable instead of collapsing the response
-        // to the schema fallback or rendering an empty label.
-        return value.status;
+        // A group is one status KEY, so it shows that status's own name — a
+        // custom status must not read as its category. `resolveStatusLabel`
+        // falls back to the raw key, which is also what keeps a status
+        // introduced by a NEWER backend usable on an installed client instead
+        // of collapsing to the schema fallback or an empty label. (MUL-6243)
+        return resolveStatusLabel(value.status);
       }
       if (value.kind === "assignee") {
         return value.actor
@@ -2247,9 +2260,12 @@ export function TableView({
         const propertyId = propertyIdFromViewKey(column.key);
         return !propertyId || exportPropertyById.has(propertyId);
       });
-      const needsActors = csvColumns.some(
-        (column) => column.key === "assignee" || column.key === "creator",
-      );
+      const needsActors = csvColumns.some((column) => {
+        if (column.key === "assignee" || column.key === "creator") return true;
+        const propertyId = propertyIdFromViewKey(column.key);
+        const property = propertyId ? exportPropertyById.get(propertyId) : undefined;
+        return property ? isActorPropertyType(property.type) : false;
+      });
       const [rows, exportLookups, exportActorName] = await Promise.all([
         mode === "all" ? exportIssues() : Promise.resolve(selectedIssues),
         resolveExportLookups({
@@ -2279,7 +2295,11 @@ export function TableView({
           if (propertyId) {
             const property = exportPropertyById.get(propertyId);
             return property
-              ? propertyDisplayValue(property, issue.properties[propertyId])
+              ? propertyDisplayValue(
+                  property,
+                  issue.properties[propertyId],
+                  exportActorName,
+                )
               : "";
           }
           switch (column.key) {
@@ -2288,7 +2308,7 @@ export function TableView({
             case "identifier":
               return issue.identifier;
             case "status":
-              return t(($) => $.status[issue.status]);
+              return resolveStatusLabel(issue.status);
             case "priority":
               return t(($) => $.priority[issue.priority]);
             case "assignee":

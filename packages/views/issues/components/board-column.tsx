@@ -8,7 +8,7 @@ import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable"
 import type {
   Issue,
   IssueAssigneeType,
-  IssueStatus,
+  IssueStatusCategory,
   Project,
 } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
@@ -74,7 +74,8 @@ const EMPTY_VIRTUOSO_COMPONENTS = {};
 export interface BoardColumnGroup {
   id: string;
   title: string;
-  status?: IssueStatus;
+  /** Board columns are CATEGORIES, never raw status keys. (MUL-6243) */
+  status?: IssueStatusCategory;
   assigneeType?: IssueAssigneeType | null;
   assigneeId?: string | null;
   /** Set when the board is grouped by a select-type custom property. */

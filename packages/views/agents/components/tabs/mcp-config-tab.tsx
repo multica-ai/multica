@@ -218,21 +218,15 @@ export function McpConfigTab({
   };
 
   return (
-    <div className="space-y-8">
-      <p className="max-w-2xl break-words text-pretty text-body leading-6 text-muted-foreground">
-        {t(($) => $.tab_body.mcp_config.intro)}
-      </p>
-
+    // Three sources, one heading each. The prose that used to sit under every
+    // heading is gone: precedence is already shown where it applies (the
+    // Overridden badges) and nobody reads a paragraph to press a button.
+    <div className="space-y-6">
       <section className="space-y-3">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-body font-medium">
-              {t(($) => $.tab_body.mcp_config.managed_title)}
-            </h3>
-            <p className="mt-1 max-w-2xl text-caption leading-5 text-muted-foreground">
-              {t(($) => $.tab_body.mcp_config.managed_hint)}
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-body font-medium">
+            {t(($) => $.tab_body.mcp_config.managed_title)}
+          </h3>
           {!redacted && (
             <Button size="sm" variant="outline" onClick={openAddDialog}>
               <Plus aria-hidden="true" />
@@ -271,15 +265,10 @@ export function McpConfigTab({
       </section>
 
       <section className="space-y-3">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-body font-medium">
-              {t(($) => $.tab_body.mcp_config.workspace_title)}
-            </h3>
-            <p className="mt-1 max-w-2xl text-caption leading-5 text-muted-foreground">
-              {t(($) => $.tab_body.mcp_config.workspace_hint)}
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-4">
+          <h3 className="text-body font-medium">
+            {t(($) => $.tab_body.mcp_config.workspace_title)}
+          </h3>
           {canEdit && availableServers.length > 0 && (
             <McpWorkspaceServerPicker
               servers={availableServers}
@@ -294,7 +283,7 @@ export function McpConfigTab({
             text={t(($) => $.tab_body.mcp_config.workspace_loading)}
           />
         ) : assignedServers.length > 0 ? (
-          <ul className="divide-y divide-surface-border rounded-lg border">
+          <ul className="divide-y rounded-lg border bg-surface-raised/40">
             {assignedServers.map((server) => (
               <McpWorkspaceServerRow
                 key={server.id}
@@ -319,17 +308,16 @@ export function McpConfigTab({
       </section>
 
       <section className="space-y-3">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h3 className="text-body font-medium">
-              {t(($) => $.tab_body.mcp_config.runtime_title)}
-            </h3>
-            <p className="mt-1 max-w-2xl text-caption leading-5 text-muted-foreground">
-              {t(($) => $.tab_body.mcp_config.runtime_hint, {
-                runtime: runtime ? runtimeDisplayLabel(runtime) : "Runtime",
-              })}
-            </p>
-          </div>
+        <div className="flex items-center justify-between gap-4">
+          {/* The machine name moves into the heading — it is the only part of
+              the old description that told the reader anything. */}
+          <h3 className="min-w-0 truncate text-body font-medium">
+            {runtime
+              ? t(($) => $.tab_body.mcp_config.runtime_title_named, {
+                  runtime: runtimeDisplayLabel(runtime),
+                })
+              : t(($) => $.tab_body.mcp_config.runtime_title)}
+          </h3>
           {runtimeId && (
             <Button
               variant="ghost"
@@ -468,8 +456,12 @@ function McpWorkspaceServerRow({
   const { t } = useT("agents");
   const enabled = server.enabled !== false;
   return (
-    <li className="flex items-center gap-3 px-4 py-3">
-      <Server className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+    // Same row shape as the other two lists on this tab — icon chip, name,
+    // transport — so the three sources read as one inventory.
+    <li className="flex items-center gap-3 p-3">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground">
+        <Server className="h-4 w-4" aria-hidden="true" />
+      </span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <span className="truncate text-body font-medium">{server.name}</span>
@@ -479,7 +471,7 @@ function McpWorkspaceServerRow({
             </Badge>
           )}
         </div>
-        <p className="mt-0.5 text-caption text-muted-foreground">
+        <p className="text-caption uppercase text-muted-foreground">
           {server.transport || "unknown"}
         </p>
       </div>
@@ -536,11 +528,21 @@ function McpWorkspaceServerPicker({
           </Button>
         }
       />
-      <DropdownMenuContent align="end">
+      {/* Flush with the trigger's edges (`--anchor-width` is the trigger's own
+          width), free to grow for a long name, and capped so a workspace with
+          many servers scrolls instead of running off the viewport. */}
+      <DropdownMenuContent
+        align="end"
+        className="max-h-72 min-w-(--anchor-width) max-w-[min(20rem,var(--available-width))]"
+      >
         {servers.map((server) => (
-          <DropdownMenuItem key={server.id} onClick={() => onSelect(server.id)}>
-            <span className="truncate">{server.name}</span>
-            <span className="ml-2 text-caption text-muted-foreground">
+          <DropdownMenuItem
+            key={server.id}
+            className="gap-3"
+            onClick={() => onSelect(server.id)}
+          >
+            <span className="min-w-0 flex-1 truncate">{server.name}</span>
+            <span className="shrink-0 text-caption uppercase text-muted-foreground">
               {server.transport || "unknown"}
             </span>
           </DropdownMenuItem>

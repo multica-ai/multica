@@ -6,6 +6,21 @@ import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
 import { InboxListItem } from "./inbox-list-item";
 
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  // The catalog is server state; these suites render leaves without a
+  // QueryClientProvider, so it is stubbed like the other data hooks. Built-in
+  // keys are their own category, which is what this fixture asserts on.
+  useIssueStatuses: () => ({
+    statuses: [],
+    activeStatuses: [],
+    categoryOf: (key: string) => key,
+    labelOf: (key: string) => key,
+    entryOf: () => undefined,
+    inCategory: () => [],
+    isLoaded: true,
+  }),
+}));
+
 vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
 vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
   IssueAgentActivityIndicator: ({

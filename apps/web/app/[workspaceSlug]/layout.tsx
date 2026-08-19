@@ -44,9 +44,10 @@ export default function WorkspaceLayout({
     }
   }, [user, router]);
 
-  // Resolve workspace by slug from the React Query list cache.
-  // Enabled only when user is authenticated — otherwise the list query isn't seeded.
-  const { data: workspace, isFetched: listFetched } = useQuery({
+  // Resolve workspace by slug through the shared workspace-list query. A
+  // warm auth bootstrap reuses its cache; a cold route fetches it directly.
+  // Keep it disabled until identity has been verified.
+  const { data: workspace } = useQuery({
     ...workspaceBySlugOptions(workspaceSlug),
     enabled: !!user,
   });
@@ -84,8 +85,11 @@ export default function WorkspaceLayout({
   // Don't render children until workspace is resolved. useWorkspaceId()
   // throws when the list hasn't populated or the slug is unknown — gating
   // here makes that invariant hold for every descendant.
-  if (!listFetched) return loadingIndicator;
-  if (!workspace) {
+  // The selector returns undefined until the list has resolved, including
+  // after an initial request failure. It returns null only when an
+  // authoritative list does not contain this slug.
+  if (workspace === undefined) return loadingIndicator;
+  if (workspace === null) {
     // If we've resolved this slug before in this session, it was just
     // removed from our list (deleted/left/evicted). A navigate is almost
     // certainly in flight — render null to avoid a NoAccessPage flash.

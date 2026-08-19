@@ -29,14 +29,21 @@ export const PAGE_TOOLBAR = cn(
  * The way back to the nav wherever it is not a permanent column: a sheet below
  * the compact breakpoint, auto-collapsed from there up to `xl`.
  *
- * Every surface below `xl` needs one of these. `PageHeader` supplies it for
- * free, so this is exported for the pages that build their own chrome instead
- * — without it a touch user has no way to reopen the nav at all. Renders
- * nothing outside a `SidebarProvider` so such a page still stands alone.
+ * Every surface below `xl` needs one of these — unless the shell around it
+ * already keeps one on screen. `PageHeader` supplies it for free, so this is
+ * exported for the pages that build their own chrome instead; without it a
+ * touch user has no way to reopen the nav at all.
+ *
+ * Renders nothing in the two cases where it would not be the way back:
+ * outside a `SidebarProvider` (a page that stands alone, with no nav to
+ * reopen), and under a shell that declares `hasExternalTrigger` — the desktop
+ * window toolbar's trigger never scrolls away or hides, so a second copy in
+ * every page header stacked two identical icons 50px apart, and a third
+ * whenever a detail pane brought its own header along (MUL-6218).
  */
 export function CollapsedNavTrigger() {
   const sidebar = useSidebarSafe();
-  if (!sidebar) return null;
+  if (!sidebar || sidebar.hasExternalTrigger) return null;
   return <SidebarTrigger className="xl:hidden" />;
 }
 

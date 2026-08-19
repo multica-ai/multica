@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"crypto/sha256"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"net/netip"
@@ -70,6 +71,8 @@ var corsAllowedHeaders = []string{
 	"X-Client-Version",
 	"X-Client-OS",
 	"X-Client-Capabilities",
+	// Sent by the host page when it relays a plugin surface's Action API call.
+	"X-Multica-Plugin-Installation",
 }
 
 // corsExposedHeaders lists response headers browser clients are allowed to read.
@@ -173,8 +176,12 @@ func NewRouter(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus, analytics
 }
 
 type RouterOptions struct {
-	HTTPMetrics     *obsmetrics.HTTPMetrics
-	BusinessMetrics *obsmetrics.BusinessMetrics
+	HTTPMetrics         *obsmetrics.HTTPMetrics
+	BusinessMetrics     *obsmetrics.BusinessMetrics
+	ChannelLeaseMetrics *obsmetrics.ChannelLeaseMetrics
+	// ChannelLeaseRedis is a dedicated non-blocking Redis client/pool. It is
+	// required only when CHANNEL_WS_LEASE_BACKEND=redis.
+	ChannelLeaseRedis *redis.Client
 	// WecomMetrics is the WeCom adapter's health sink. Nil discards every
 	// counter, which is what a deployment with /metrics turned off gets.
 	WecomMetrics *obsmetrics.WecomMetrics
@@ -186,6 +193,108 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+}
+
+func buildChannelSupervisor(
+	installations engine.InstallationStore,
+	postgresLeases engine.LeaseStore,
+	registry *channel.Registry,
+	inbound channel.InboundHandler,
+	opts RouterOptions,
+) *engine.Supervisor {
+	cfg, err := channelSupervisorConfigFromEnv(opts.ChannelLeaseMetrics)
+	if err != nil {
+		slog.Error("channel engine: invalid lease configuration; supervisor disabled", "error", err)
+		return nil
+	}
+
+	backend := strings.ToLower(strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_BACKEND")))
+	if backend == "" {
+		backend = "postgres"
+	}
+	var leases engine.LeaseStore
+	switch backend {
+	case "postgres":
+		leases = postgresLeases
+	case "redis":
+		if opts.ChannelLeaseRedis == nil {
+			slog.Error("channel engine: Redis lease backend selected but CHANNEL_WS_LEASE_REDIS_URL/REDIS_URL is missing or invalid; supervisor disabled")
+			return nil
+		}
+		namespace := strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_NAMESPACE"))
+		redisLeases, err := engine.NewRedisLeaseStore(opts.ChannelLeaseRedis, namespace)
+		if err != nil {
+			slog.Error("channel engine: Redis lease configuration invalid; supervisor disabled", "error", err)
+			return nil
+		}
+		readyCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		err = redisLeases.Ready(readyCtx)
+		cancel()
+		if err != nil {
+			slog.Error("channel engine: Redis lease backend unavailable; supervisor disabled", "error", err)
+			return nil
+		}
+		leases = redisLeases
+	default:
+		slog.Error("channel engine: unsupported CHANNEL_WS_LEASE_BACKEND; supervisor disabled", "backend", backend)
+		return nil
+	}
+
+	slog.Info("channel engine: lease backend configured",
+		"backend", backend,
+		"ttl", cfg.LeaseTTL.String(),
+		"renew_interval", cfg.LeaseRenewInterval.String(),
+		"poll_interval", cfg.PollInterval.String(),
+	)
+	return engine.NewSupervisor(installations, leases, registry, inbound, cfg)
+}
+
+func channelSupervisorConfigFromEnv(leaseMetrics *obsmetrics.ChannelLeaseMetrics) (engine.Config, error) {
+	ttl, err := strictPositiveDurationEnv("CHANNEL_WS_LEASE_TTL", 180*time.Second)
+	if err != nil {
+		return engine.Config{}, err
+	}
+	renew, err := strictPositiveDurationEnv("CHANNEL_WS_LEASE_RENEW_INTERVAL", 60*time.Second)
+	if err != nil {
+		return engine.Config{}, err
+	}
+	poll, err := strictPositiveDurationEnv("CHANNEL_WS_LEASE_POLL_INTERVAL", 30*time.Second)
+	if err != nil {
+		return engine.Config{}, err
+	}
+	retry, err := strictPositiveDurationEnv("CHANNEL_WS_LEASE_ERROR_RETRY_INTERVAL", 5*time.Second)
+	if err != nil {
+		return engine.Config{}, err
+	}
+	margin, err := strictPositiveDurationEnv("CHANNEL_WS_LEASE_EXPIRY_SAFETY_MARGIN", 5*time.Second)
+	if err != nil {
+		return engine.Config{}, err
+	}
+	cfg := engine.Config{
+		LeaseTTL:                ttl,
+		LeaseRenewInterval:      renew,
+		PollInterval:            poll,
+		LeaseErrorRetryInterval: retry,
+		LeaseExpirySafetyMargin: margin,
+		LeaseMetrics:            leaseMetrics,
+		Logger:                  slog.Default(),
+	}
+	if err := cfg.Validate(); err != nil {
+		return engine.Config{}, err
+	}
+	return cfg, nil
+}
+
+func strictPositiveDurationEnv(name string, fallback time.Duration) (time.Duration, error) {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return fallback, nil
+	}
+	value, err := time.ParseDuration(raw)
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration (got %q)", name, raw)
+	}
+	return value, nil
 }
 
 // NewRouterWithOptions builds the fully-configured Chi router and
@@ -237,6 +346,11 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		ServerVersion:            normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	invitationRateLimits := handler.DefaultInvitationRateLimits()
+	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
+	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
+	invitationRateLimits.Recipient.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_RECIPIENT_24H", invitationRateLimits.Recipient.Limit)
+	h.InvitationRateLimiters = handler.NewMemoryInvitationRateLimiters(invitationRateLimits)
 	h.Metrics = opts.BusinessMetrics
 	h.FeatureFlags = opts.FeatureFlags
 	h.TaskService.FeatureFlags = opts.FeatureFlags
@@ -272,6 +386,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.WebhookRateLimiter = handler.NewRedisWebhookRateLimiter(rdb, handler.DefaultWebhookRateLimit())
 		h.WebhookIPRateLimiter = handler.NewRedisWebhookIPRateLimiter(rdb, handler.DefaultWebhookIPRateLimit())
 		h.WebhookAbsoluteIPRateLimiter = handler.NewRedisWebhookAbsoluteIPRateLimiter(rdb, handler.DefaultWebhookAbsoluteIPRateLimit())
+		h.InvitationRateLimiters = handler.NewRedisInvitationRateLimiters(rdb, invitationRateLimits)
 	}
 
 	// Channel engine (MUL-3620): the platform-agnostic inbound runtime.
@@ -306,11 +421,13 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			Logger:  slog.Default(),
 		}
 	}
-	h.ChannelSupervisor = engine.NewSupervisor(
-		lark.NewChannelInstallationStore(queries),
+	installationStore := lark.NewChannelInstallationStore(queries)
+	h.ChannelSupervisor = buildChannelSupervisor(
+		installationStore,
+		installationStore,
 		channelRegistry,
 		channelRouter.Handle,
-		engine.Config{},
+		opts,
 	)
 
 	// Lark integration. Only wired when MULTICA_LARK_SECRET_KEY is set:
@@ -547,7 +664,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// reaction on a failed run, which the outbound replier does not handle.
 			slackTyping := slack.NewTypingIndicatorManager(queries, box.Open, slog.Default())
 			slackTyping.Register(bus)
-			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping))
+			// Slack attachments require object storage because each chat
+			// attachment points to an uploaded object. When storage is disabled,
+			// leave the media resolver unset and ingest Slack messages as text.
+			var slackMedia engine.MediaResolver
+			if store != nil {
+				slackMedia = slack.NewMediaResolver(
+					box.Open,
+					store,
+					engine.NewDBMediaIntentLedger(queries),
+					slog.Default(),
+				)
+			}
+			channelRouter.Register(slack.TypeSlack, slack.NewSlackResolverSet(queries, pool, slackReplier, slackTyping, slackMedia))
 			slack.NewOutbound(queries, box.Open, slog.Default()).Register(bus)
 
 			// On-demand history reader behind the unified `multica chat history`
@@ -864,6 +993,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
 	}
 
+	// Plugin secrets use a dedicated deployment key. Keeping this separate from
+	// VCS and channel secrets gives operators an isolated rotation and blast
+	// radius; without it, saving a `secret` config field fails closed rather
+	// than storing plaintext.
+	if pluginKey, err := secretbox.LoadKey("MULTICA_PLUGIN_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(pluginKey)
+		if err != nil {
+			slog.Error("plugins: secretbox.New failed; Plugin secrets disabled", "error", err)
+		} else if h.PluginService != nil {
+			h.PluginService.Secrets = box
+			slog.Info("Plugin secret encryption enabled")
+		}
+	} else {
+		slog.Info("Plugin secrets disabled (MULTICA_PLUGIN_SECRET_KEY not set)")
+	}
+
 	if opts.HeartbeatScheduler != nil {
 		h.HeartbeatScheduler = opts.HeartbeatScheduler
 	}
@@ -994,7 +1139,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 	// Auth (public) — per-IP rate limiting.
 	if rdb == nil {
-		slog.Warn("rate limiting disabled: REDIS_URL not configured")
+		slog.Warn("auth rate limiting disabled: REDIS_URL not configured")
 	}
 	trustedProxies := middleware.ParseTrustedProxies(os.Getenv("RATE_LIMIT_TRUSTED_PROXIES"))
 	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
@@ -1008,6 +1153,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Public API
 	r.Get("/api/config", h.GetConfig)
 	r.With(contactSalesRL).Post("/api/contact-sales", h.CreateContactSales)
+	// Public share-link preview — no auth: shows the workspace name/slug and
+	// inviter so a not-yet-logged-in visitor can see what they're joining.
+	r.Get("/api/share-links/{code}", h.GetShareLinkInfo)
 
 	// Webhook ingress for autopilots. Outside the authenticated group on
 	// purpose: the bearer token in the URL path IS the credential. Workspace
@@ -1096,6 +1244,26 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
+		// Plugin Action API. Called by the HOST PAGE on the signed-in user's
+		// session after a surface asks for something over the postMessage
+		// bridge — the iframe holds no credential and never reaches these
+		// directly. Which installation is speaking arrives in a header the
+		// host sets; the workspace is derived from that installation rather
+		// than trusted from the client, and membership is then checked
+		// against it. Sits in the user-scoped group for that reason: there is
+		// no workspace in the path to gate on.
+		r.Route("/api/v1/plugin", func(r chi.Router) {
+			r.Get("/context", h.GetPluginContext)
+			r.Get("/issues/{id}", h.GetPluginIssue)
+			r.Patch("/issues/{id}", h.PatchPluginIssue)
+			r.Get("/issues/{id}/comments", h.ListPluginComments)
+			r.Post("/issues/{id}/comments", h.CreatePluginComment)
+			r.Get("/storage/{scope}", h.ListPluginStorage)
+			r.Get("/storage/{scope}/{key}", h.GetPluginStorage)
+			r.Put("/storage/{scope}/{key}", h.PutPluginStorage)
+			r.Delete("/storage/{scope}/{key}", h.DeletePluginStorage)
+		})
+
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
@@ -1165,11 +1333,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// The payload is names and transports only; the stored
 					// entries are write-only.
 					r.Get("/mcp-servers", h.ListWorkspaceMcpServers)
+					// Installed Plugins are member-visible so a member can
+					// see what is mounted in their workspace and which scopes
+					// it holds; install / configure / remove stay admin-only.
 					r.Get("/plugins", h.ListPlugins)
-					r.Get("/plugins/private", h.ListPrivatePlugins)
-					r.Get("/plugins/private/{pluginRef}", h.GetPrivatePluginStatus)
-					r.Get("/plugins/catalog", h.ListPluginCatalog)
-					r.Get("/plugins/catalog/{pluginKey}", h.GetPluginCatalogRelease)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -1188,17 +1355,23 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/mcp-servers", h.CreateWorkspaceMcpServer)
 					r.Put("/mcp-servers/{serverId}", h.UpdateWorkspaceMcpServer)
 					r.Delete("/mcp-servers/{serverId}", h.DeleteWorkspaceMcpServer)
+					r.Post("/share-links", h.CreateShareLink)
+					r.Delete("/share-links/{linkId}", h.RevokeShareLink)
+					r.Get("/share-links", h.ListShareLinks)
 					// Custom runtime profile mutations (admin-only).
 					r.Post("/runtime-profiles", h.CreateRuntimeProfile)
 					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
 					r.Put("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
 					r.Delete("/runtime-profiles/{profileId}", h.DeleteRuntimeProfile)
-					r.Post("/plugins/install", h.InstallPlugin)
-					r.Post("/plugins/private/install", h.InstallPrivatePlugin)
-					r.Post("/plugins/{installationId}/upgrade", h.UpgradePlugin)
+					// Installing a Plugin is two steps on purpose: preview
+					// parses the manifest and returns the scope list without
+					// writing anything, so the consent screen has something to
+					// show before an installation exists.
+					r.Post("/plugins/preview", h.PreviewPlugin)
+					r.Post("/plugins", h.InstallPlugin)
+					r.Put("/plugins/{installationId}/config", h.ConfigurePlugin)
 					r.Post("/plugins/{installationId}/enable", h.EnablePlugin)
 					r.Post("/plugins/{installationId}/disable", h.DisablePlugin)
-					r.Post("/plugins/{installationId}/rollback", h.RollbackPlugin)
 					r.Delete("/plugins/{installationId}", h.UninstallPlugin)
 				})
 				// Owner-only access
@@ -1316,6 +1489,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/api/invitations/{id}", h.GetMyInvitation)
 		r.Post("/api/invitations/{id}/accept", h.AcceptInvitation)
 		r.Post("/api/invitations/{id}/decline", h.DeclineInvitation)
+		r.Post("/api/share-links/join", h.JoinByShareLink)
 
 		r.Route("/api/tokens", func(r chi.Router) {
 			r.Get("/", h.ListPersonalAccessTokens)
@@ -1478,6 +1652,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Get("/", h.GetLabel)
 					r.Put("/", h.UpdateLabel)
 					r.Delete("/", h.DeleteLabel)
+				})
+			})
+
+			// Issue status catalog (MUL-6243). Reads are open to any member —
+			// every client needs the catalog to render a status. Writes are
+			// gated to workspace owner/admin inside the handlers.
+			r.Route("/api/issue-statuses", func(r chi.Router) {
+				r.Get("/", h.ListIssueStatuses)
+				r.Post("/", h.CreateIssueStatus)
+				r.Patch("/reorder", h.ReorderIssueStatuses)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateIssueStatus)
+					r.Delete("/", h.ArchiveIssueStatus)
 				})
 			})
 

@@ -6,8 +6,7 @@ import {
   handoffSupported,
   MIN_CHAT_PROJECT_CONTEXT_CLI_VERSION,
   MIN_HANDOFF_CLI_VERSION,
-  runtimeSupportsLocalWorktree,
-  daemonSupportsLocalWorktree,
+  runtimeAdvertisesLocalWorktree,
 } from "./cli-version";
 
 describe("checkQuickCreateCliVersion", () => {
@@ -94,48 +93,58 @@ describe("chatProjectContextSupported", () => {
   });
 });
 
-describe("runtimeSupportsLocalWorktree", () => {
+describe("runtimeAdvertisesLocalWorktree", () => {
+  const capable = { capabilities: ["skill-bundles-v1", "local-worktree-v1"] };
+  const incapable = { cli_version: "9.9.9", capabilities: null };
+  const row = (metadata: unknown, last_seen_at: string | null = "2026-08-13T00:00:00Z") => ({
+    daemon_id: "d1",
+    last_seen_at,
+    metadata,
+  });
+
   it("reads the advertised capability", () => {
-    expect(
-      runtimeSupportsLocalWorktree({ capabilities: ["skill-bundles-v1", "local-worktree-v1"] }),
-    ).toBe(true);
-    expect(runtimeSupportsLocalWorktree({ capabilities: ["skill-bundles-v1"] })).toBe(false);
+    expect(runtimeAdvertisesLocalWorktree([row(capable)], "d1")).toBe(true);
+    expect(runtimeAdvertisesLocalWorktree([row({ capabilities: ["skill-bundles-v1"] })], "d1")).toBe(
+      false,
+    );
   });
 
   // The whole reason this replaced a version check: a dev-built daemon reports a
   // git-describe string that the version floor exempts, so a binary with no
   // worktree implementation passed and two tasks ran in the user's own
-  // directory (MUL-5707). The capability must ignore versions entirely.
-  it("ignores the version string in both directions", () => {
-    expect(runtimeSupportsLocalWorktree({ cli_version: "v0.4.21-24-gcd3c0bb89" })).toBe(false);
-    expect(runtimeSupportsLocalWorktree({ cli_version: "9.9.9" })).toBe(false);
+  // directory (MUL-5707).
+  it("ignores the daemon version string in both directions", () => {
+    expect(runtimeAdvertisesLocalWorktree([row({ cli_version: "9.9.9" })], "d1")).toBe(false);
     expect(
-      runtimeSupportsLocalWorktree({ cli_version: "0.0.1", capabilities: ["local-worktree-v1"] }),
+      runtimeAdvertisesLocalWorktree(
+        [row({ cli_version: "0.0.1", capabilities: ["local-worktree-v1"] })],
+        "d1",
+      ),
     ).toBe(true);
   });
 
-  it("fails closed on anything it cannot read", () => {
-    for (const metadata of [undefined, null, {}, "nope", 42, { capabilities: "local-worktree-v1" }]) {
-      expect(runtimeSupportsLocalWorktree(metadata)).toBe(false);
+  // Everything unreadable is simply "has not advertised". This function no
+  // longer tries to say WHY — an old daemon, a row written before the server
+  // recorded capabilities, and a server too old to record them are
+  // indistinguishable from here, and pretending otherwise is what blocked a
+  // user on the newest release with an instruction that could not help (#7113).
+  it("says nothing about the reason when no row advertises", () => {
+    for (const metadata of [{}, { cli_version: "v0.4.28" }, undefined, null, "nope", 42]) {
+      expect(runtimeAdvertisesLocalWorktree([row(metadata)], "d1")).toBe(false);
     }
+    expect(runtimeAdvertisesLocalWorktree([row(incapable)], "d1")).toBe(false);
+    expect(runtimeAdvertisesLocalWorktree([row({ capabilities: "local-worktree-v1" })], "d1")).toBe(
+      false,
+    );
   });
-});
-
-describe("daemonSupportsLocalWorktree", () => {
-  const capable = { capabilities: ["local-worktree-v1"] };
-  const incapable = { cli_version: "9.9.9" };
 
   // Deregistering only marks a runtime offline; its metadata survives and the
-  // list endpoint still returns it. An any-row match would therefore keep
-  // vouching for a machine that has since downgraded, so the UI would offer a
-  // mode the server refuses at claim time.
+  // list endpoint still returns it. An any-row match would keep preselecting
+  // parallel for a machine that has since downgraded.
   it("ignores a stale capable row once a newer row lacks the capability", () => {
     expect(
-      daemonSupportsLocalWorktree(
-        [
-          { daemon_id: "d1", last_seen_at: "2026-08-01T00:00:00Z", metadata: capable },
-          { daemon_id: "d1", last_seen_at: "2026-08-13T00:00:00Z", metadata: incapable },
-        ],
+      runtimeAdvertisesLocalWorktree(
+        [row(capable, "2026-08-01T00:00:00Z"), row(incapable, "2026-08-13T00:00:00Z")],
         "d1",
       ),
     ).toBe(false);
@@ -143,41 +152,32 @@ describe("daemonSupportsLocalWorktree", () => {
 
   it("recognises an upgrade: newest row advertises it", () => {
     expect(
-      daemonSupportsLocalWorktree(
-        [
-          { daemon_id: "d1", last_seen_at: "2026-08-01T00:00:00Z", metadata: incapable },
-          { daemon_id: "d1", last_seen_at: "2026-08-13T00:00:00Z", metadata: capable },
-        ],
+      runtimeAdvertisesLocalWorktree(
+        [row(incapable, "2026-08-01T00:00:00Z"), row(capable, "2026-08-13T00:00:00Z")],
         "d1",
       ),
     ).toBe(true);
   });
 
   it("does not depend on array order", () => {
-    const rows = [
-      { daemon_id: "d1", last_seen_at: "2026-08-13T00:00:00Z", metadata: incapable },
-      { daemon_id: "d1", last_seen_at: "2026-08-01T00:00:00Z", metadata: capable },
-    ];
-    expect(daemonSupportsLocalWorktree(rows, "d1")).toBe(false);
-    expect(daemonSupportsLocalWorktree([...rows].reverse(), "d1")).toBe(false);
+    const rows = [row(incapable, "2026-08-13T00:00:00Z"), row(capable, "2026-08-01T00:00:00Z")];
+    expect(runtimeAdvertisesLocalWorktree(rows, "d1")).toBe(false);
+    expect(runtimeAdvertisesLocalWorktree([...rows].reverse(), "d1")).toBe(false);
   });
 
   it("a row that never reported loses to one that did", () => {
     expect(
-      daemonSupportsLocalWorktree(
-        [
-          { daemon_id: "d1", last_seen_at: null, metadata: capable },
-          { daemon_id: "d1", last_seen_at: "2026-08-13T00:00:00Z", metadata: incapable },
-        ],
+      runtimeAdvertisesLocalWorktree(
+        [row(capable, null), row(incapable, "2026-08-13T00:00:00Z")],
         "d1",
       ),
     ).toBe(false);
   });
 
-  it("ignores other daemons, and fails closed with no rows or no id", () => {
+  it("ignores other daemons, and answers no with no rows or no id", () => {
     const other = [{ daemon_id: "d2", last_seen_at: "2026-08-13T00:00:00Z", metadata: capable }];
-    expect(daemonSupportsLocalWorktree(other, "d1")).toBe(false);
-    expect(daemonSupportsLocalWorktree([], "d1")).toBe(false);
-    expect(daemonSupportsLocalWorktree(other, null)).toBe(false);
+    expect(runtimeAdvertisesLocalWorktree(other, "d1")).toBe(false);
+    expect(runtimeAdvertisesLocalWorktree([], "d1")).toBe(false);
+    expect(runtimeAdvertisesLocalWorktree(other, null)).toBe(false);
   });
 });

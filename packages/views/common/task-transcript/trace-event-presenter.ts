@@ -1,19 +1,16 @@
 // Trace Event Presenter — the pure readability layer for the execution
-// transcript. Given one timeline event it decides visual kind, label, one-line
-// summary, and default expansion, encoding the reading hierarchy:
+// transcript. Given one timeline event it decides visual kind, label, and
+// one-line summary, encoding the reading hierarchy:
 //
 //   1. Agent text is the primary layer and reads without a click.
 //   2. Errors stand out and also read without a click.
 //   3. Tool calls are compact — provider-native name + most-informative arg.
-//   4. Tool results and thinking are de-emphasized and collapsed by default.
+//   4. Tool results and thinking are de-emphasized; their body opens in the
+//      step inspector rather than in the list.
 //   5. Unknown event types are retained as a generic event, never dropped.
 //
 // This module owns no React and no fetching, so it is unit-testable in
 // isolation and independent of whichever list shell renders the events.
-
-import type { TranscriptDetailDensity } from "@multica/core/agents/stores";
-
-export type { TranscriptDetailDensity };
 
 export interface TraceEvent {
   seq?: number;
@@ -545,6 +542,56 @@ export function traceEventDetail(event: TraceEvent): TraceEventDetail {
   }
 }
 
+/** An image a tool returned, ready to render. */
+export interface TraceImageResult {
+  mediaType: string;
+  base64: string;
+}
+
+/**
+ * A screenshot tool answers with a base64 image block, which the transcript
+ * used to print as a wall of base64 — the single worst thing on the old
+ * surface. Recognise it so the reader gets the picture instead.
+ *
+ * Only JSON that already looks like an image block is parsed: an 8KB command
+ * output should not pay for a `JSON.parse` on every render.
+ */
+export function readImageResult(output: string | undefined): TraceImageResult | null {
+  if (!output) return null;
+  const head = output.slice(0, 200);
+  if (!head.includes('"image"') || !head.includes('"base64"')) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(output);
+  } catch {
+    return null;
+  }
+
+  const blocks = Array.isArray(parsed) ? parsed : [parsed];
+  for (const block of blocks) {
+    if (typeof block !== "object" || block === null) continue;
+    const record = block as Record<string, unknown>;
+    if (record.type !== "image") continue;
+    const source = record.source;
+    if (typeof source !== "object" || source === null) continue;
+    const sourceRecord = source as Record<string, unknown>;
+    const data = sourceRecord.data;
+    if (typeof data !== "string" || data.length === 0) continue;
+    const mediaType =
+      typeof sourceRecord.media_type === "string" ? sourceRecord.media_type : "image/png";
+    return { mediaType, base64: data };
+  }
+
+  return null;
+}
+
+/** Rough decoded size of a base64 payload, for a human-readable label. */
+export function base64ByteLength(base64: string): number {
+  const padding = base64.endsWith("==") ? 2 : base64.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((base64.length * 3) / 4) - padding);
+}
+
 export function traceEventHasDetail(event: TraceEvent): boolean {
   switch (traceEventKind(event)) {
     case "tool_use":
@@ -561,23 +608,3 @@ export function traceEventSummaryIsMono(kind: TraceEventKind): boolean {
   return kind === "tool_use" || kind === "tool_result";
 }
 
-/**
- * Default expansion under the `smart` density: the reading hierarchy itself.
- * Agent text and errors read without a click; process noise stays folded.
- */
-export function traceEventDefaultExpanded(
-  event: TraceEvent,
-  density: TranscriptDetailDensity,
-): boolean {
-  if (!traceEventHasDetail(event)) return false;
-  switch (density) {
-    case "expanded":
-      return true;
-    case "collapsed":
-      return false;
-    case "smart": {
-      const kind = traceEventKind(event);
-      return kind === "agent" || kind === "error";
-    }
-  }
-}

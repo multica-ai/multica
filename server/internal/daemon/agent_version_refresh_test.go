@@ -549,11 +549,12 @@ func TestRefreshAgentVersions_BlankProbeDoesNotWipeAnUnflooredProvidersVersion(t
 	// gate has no floor, so the blank sails through to the payload builder.
 	origDetect := detectAgentVersion
 	t.Cleanup(func() { detectAgentVersion = origDetect })
-	detectAgentVersion = func(ctx context.Context, path string) (string, error) {
+	detectAgentVersion = func(ctx context.Context, runtimeCmd agent.Command) (string, error) {
+		path := runtimeCmd.Path
 		if strings.Contains(path, "claude") {
 			return "", nil
 		}
-		return origDetect(ctx, path)
+		return origDetect(ctx, runtimeCmd)
 	}
 
 	// codex upgrades, which re-registers the whole built-in set — claude rides

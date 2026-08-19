@@ -1,8 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, screen } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { renderWithI18n } from "../../test/i18n";
 import { IssueMentionCard } from "./issue-mention-card";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
+import {
+  CurrentIssueRenderContextProvider,
+  type CurrentIssueRenderContextValue,
+} from "../current-issue-render-context";
 
 vi.mock("@multica/core/paths", () => ({
   useWorkspacePaths: () => ({
@@ -11,8 +17,19 @@ vi.mock("@multica/core/paths", () => ({
 }));
 
 vi.mock("./issue-chip", () => ({
-  IssueChip: ({ fallbackLabel }: { fallbackLabel?: string }) => (
-    <span data-testid="issue-chip">{fallbackLabel ?? "chip"}</span>
+  IssueChip: ({
+    fallbackLabel,
+    children,
+  }: {
+    fallbackLabel?: string;
+    children?: ReactNode;
+  }) => (
+    <span
+      data-testid="issue-chip"
+      data-current={children !== undefined ? "true" : "false"}
+    >
+      {children ?? fallbackLabel ?? "chip"}
+    </span>
   ),
 }));
 
@@ -30,10 +47,23 @@ function makeAdapter(
   };
 }
 
-function renderCard(adapter: NavigationAdapter) {
-  return render(
+function renderCard(
+  adapter: NavigationAdapter,
+  context?: CurrentIssueRenderContextValue,
+  issueId = "issue-1",
+) {
+  const card = (
+    <IssueMentionCard issueId={issueId} fallbackLabel="MUL-7" />
+  );
+  return renderWithI18n(
     <NavigationProvider value={adapter}>
-      <IssueMentionCard issueId="issue-1" fallbackLabel="MUL-7" />
+      {context ? (
+        <CurrentIssueRenderContextProvider value={context}>
+          {card}
+        </CurrentIssueRenderContextProvider>
+      ) : (
+        card
+      )}
     </NavigationProvider>,
   );
 }
@@ -107,5 +137,18 @@ describe("IssueMentionCard", () => {
     );
     expect(defaultNotPrevented).toBe(true);
     expect(push).not.toHaveBeenCalled();
+  });
+
+  it("uses current-issue content when the resolved target matches the current issue id", () => {
+    renderCard(makeAdapter(), { id: "issue-1", identifier: "MUL-7" });
+
+    expect(screen.getByTestId("issue-chip")).toHaveAttribute("data-current", "true");
+    expect(screen.getByTestId("issue-chip")).toHaveTextContent("This issue · MUL-7");
+  });
+
+  it("does not infer current-issue context from the visible fallback label", () => {
+    renderCard(makeAdapter(), { id: "issue-2", identifier: "MUL-7" });
+
+    expect(screen.getByTestId("issue-chip")).toHaveAttribute("data-current", "false");
   });
 });

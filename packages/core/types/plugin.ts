@@ -1,95 +1,107 @@
-export interface PluginBinding {
-  scope_type: string;
-  scope_id: string;
-  enabled: boolean;
-  revision: number;
+/**
+ * A plugin relates to Multica in exactly three ways: Action (plugin calls
+ * Multica), Hook (Multica calls plugin), and Resource (a static contribution
+ * with no call at all). These types mirror the manifest contract the server
+ * parses; the client never re-derives them from anything else.
+ */
+
+export type PluginConfigFieldType = "string" | "number" | "bool" | "enum" | "secret";
+
+export interface PluginConfigField {
+  key: string;
+  type: PluginConfigFieldType | string;
+  label: string;
+  description?: string;
+  required: boolean;
+  options?: string[];
+  placeholder?: string;
+  /** String fields only: render a textarea instead of a single-line input. */
+  multiline?: boolean;
+}
+
+export type PluginSurfaceType = "issue_panel" | "sidebar_panel" | "modal";
+
+export interface PluginSurface {
+  key: string;
+  type: PluginSurfaceType | string;
+  name: string;
+  entry: string;
+  platforms?: string[];
+}
+
+export type PluginHookTrigger = "ui" | "manual" | "agent" | "event";
+
+export interface PluginHook {
+  key: string;
+  name: string;
+  description: string;
+  triggers: (PluginHookTrigger | string)[];
+  events?: string[];
+  transport: string;
+}
+
+export interface PluginResource {
+  type: string;
+  key: string;
+  entry: string;
 }
 
 export interface PluginInstallation {
   id: string;
   plugin_key: string;
-  display_name: string;
-  desired_version: string;
-  active_version?: string;
-  enabled: boolean;
-  desired_generation: number;
-  active_generation: number;
-  lifecycle_status: string;
-  health_state?: string;
-  health_reason?: string;
+  name: string;
   description?: string;
-  publisher: string;
-  publisher_type: string;
-  trust_tier: string;
-  source_kind: string;
-  source_ref: string;
-  uploader_id?: string;
-  manifest_digest: string;
-  archive_digest: string;
-  artifact_digest: string;
-  signature_verified: boolean;
-  requested_capabilities: string[];
-  available_versions: string[];
-  contributions: string[];
-  contribution_details: PluginCatalogContribution[];
-  bindings: PluginBinding[];
-}
-
-export interface PluginCatalogContribution {
-  key: string;
-  type: string;
-  name: string;
-  description: string;
-  entry_path: string;
-  entry_digest: string;
-}
-
-export interface PluginCatalogRelease {
-  plugin_key: string;
-  name: string;
-  description: string;
   version: string;
-  publisher: string;
-  publisher_type: string;
-  trust_tier: string;
-  source_kind: string;
-  source_ref: string;
-  requested_capabilities: string[];
-  host_api: string;
-  required_daemon_features: string[];
-  signature_key_id: string;
-  signature_verified: boolean;
-  manifest_digest: string;
-  archive_digest: string;
-  artifact_digest: string;
-  compatible: boolean;
-  compatibility_reason?: string;
-  contributions: PluginCatalogContribution[];
-  installation?: PluginInstallation;
-}
-
-export interface PluginCatalogDiagnostic {
-  source_ref: string;
-  code: string;
-  message: string;
-}
-
-export interface PluginCatalogResponse {
-  releases: PluginCatalogRelease[];
-  diagnostics: PluginCatalogDiagnostic[];
-  supported: boolean;
+  source_url: string;
+  enabled: boolean;
+  granted_scopes: string[];
+  config_schema: PluginConfigField[];
+  /** Non-secret values only. A secret is never returned by any endpoint. */
+  config: Record<string, unknown>;
+  /** Names of secret fields that hold a value — never the values themselves. */
+  configured_secrets: string[];
+  surfaces: PluginSurface[];
+  hooks: PluginHook[];
+  resources: PluginResource[];
+  created_at: string;
+  updated_at: string;
 }
 
 export interface PluginInstallationListResponse {
   plugins: PluginInstallation[];
 }
 
-export interface PluginReleaseRequest {
-  plugin_key: string;
+export interface PluginManifestSummary {
+  key: string;
+  name: string;
+  description?: string;
   version: string;
+  author: { name: string; url?: string };
 }
 
-export interface PluginBindingRequest {
-  scope_type: "workspace" | "agent";
-  scope_id: string;
+/**
+ * What the consent screen renders. There is no signature and no trust tier in
+ * this model: an administrator reading the scope list IS the trust decision.
+ */
+export interface PluginPreview {
+  manifest: PluginManifestSummary;
+  scopes: string[];
+  config_schema: PluginConfigField[];
+  installed: boolean;
+  installed_version?: string;
+  /** Scopes this install would add on top of what is already granted. */
+  added_scopes?: string[];
+}
+
+export interface PluginPreviewRequest {
+  source_url: string;
+}
+
+export interface PluginInstallRequest {
+  source_url: string;
+  granted_scopes: string[];
+}
+
+export interface PluginConfigRequest {
+  values: Record<string, unknown>;
 }

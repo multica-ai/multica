@@ -40,6 +40,7 @@ oauth_config:
     bot:
       - app_mentions:read
       - channels:history
+      - files:read
       - groups:history
       - im:history
       - mpim:history
@@ -63,6 +64,10 @@ settings:
 ```
 
 만들기 전에 두 `Multica` 값을 에이전트 이름으로 바꿀 수 있습니다. manifest의 권한이나 이벤트를 삭제하지 마세요. 삭제하면 DM, 채널 멘션, 답글, `/issue`가 작동하지 않을 수 있습니다.
+
+<Callout type="warning">
+첨부 파일 지원이 추가되기 전에 이 Slack app을 설치했다면 Bot scope에 `files:read`를 추가하고 workspace에 app을 다시 설치하세요. app을 다시 설치하기 전에는 새 scope가 기존 Bot token에 적용되지 않습니다.
+</Callout>
 
 Bot은 Socket Mode로 Slack에 능동적으로 연결하므로 공개 Request URL이나 OAuth Redirect URL을 설정할 필요가 없습니다.
 
@@ -114,6 +119,12 @@ Slack 사이드바의 **Apps**에서 Bot을 열고 바로 메시지를 보냅니
 
 Bot은 자신을 명시적으로 @멘션한 채널 메시지에만 응답합니다. 실행할 때 권한 범위 안에서 해당 thread의 최근 컨텍스트를 읽습니다.
 
+### 파일 보내기
+
+DM이나 Bot을 @멘션한 채널 메시지에 파일을 그대로 첨부하세요. 파일은 같은 작업의 첨부 파일로 전달되므로 에이전트가 요청 내용과 함께 읽을 수 있습니다.
+
+이 기능에는 `files:read` scope가 필요합니다. 첨부 파일 지원 이전에 설치한 app이라면 1단계의 안내를 참고하세요. 파일 하나는 20 MiB 이하여야 하고 메시지 하나에 최대 10개까지 담깁니다. 용량을 초과했거나 아직 업로드 중이거나 Slack 외부에 있는 파일(예: Google Drive, Dropbox 링크)은 건너뛰며, 메시지 본문은 그대로 에이전트에 전달됩니다.
+
 ### `/issue`로 이슈 만들기
 
 채널이나 DM에서 다음을 입력합니다.
@@ -155,6 +166,7 @@ API 서비스를 다시 시작한 뒤 Slack app을 연결하세요. 이 키는 �
 - **DM 메뉴가 없음**: `app_home.messages_tab_enabled`가 `true`인지 확인합니다.
 - **채널에서 답변이 없음**: Bot이 채널에 초대되었고 메시지에서 @멘션했는지 확인합니다.
 - **`/issue`가 없음**: manifest에 slash command와 `commands` scope가 포함되어 있는지 확인하고 app을 다시 설치합니다.
+- **파일이 에이전트에 도착하지 않음**: manifest에 `files:read`가 포함되어 있는지, scope를 추가한 뒤 app을 다시 설치했는지 확인하고, 파일이 20 MiB 이하인지도 확인합니다.
 - **Bot이 실행되지 않음**: 에이전트가 보관 처리되었는지, 사용하는 [런타임](/daemon-runtimes)이 온라인인지 확인합니다.
 
 ## 다음 단계

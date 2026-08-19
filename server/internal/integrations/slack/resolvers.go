@@ -14,24 +14,21 @@ import (
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
-// This file is the Slack ResolverSet: the platform-specific seams the
-// channel-agnostic engine.Router runs the inbound pipeline through. It mirrors
-// the Feishu ResolverSet but is built entirely on the generic channel_* queries
-// (no new query, no schema change) plus the shared engine.ChatSession — so
-// "adding Slack" stays "implement Channel + register a ResolverSet".
+// Slack resolvers connect the channel-agnostic inbound pipeline to Slack
+// installation routing, identity binding, deduplication, session persistence,
+// auditing, reactions, replies, and attachment ingestion. They store shared
+// channel state through the generic channel tables.
 
 // originSlackChat is the issue.origin_type label for issues created via the
 // Slack /issue command.
 const originSlackChat = "slack_chat"
 
-// NewSlackResolverSet assembles the Slack ResolverSet over the generated
-// queries + a tx starter (for the shared session service). The replier delivers
-// the outbound binding-prompt / status / issue-created notices; pass a nil
-// engine.OutboundReplier to disable them (the inbound pipeline — route,
-// identity, dedup, session, /issue, run trigger — is fully functional without
-// it). typing shows the "processing" reaction on ingest; pass nil to disable it
-// (MUL-3874). (MUL-3666 wired the replier; stage 3 had both nil.)
-func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing *TypingIndicatorManager) engine.ResolverSet {
+// NewSlackResolverSet assembles the Slack implementation of each inbound
+// pipeline stage. The replier sends binding and status notices, typing manages
+// the processing reaction, and media stores inbound attachments. Each optional
+// dependency may be nil to disable only that capability while preserving normal
+// Slack message ingestion.
+func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.OutboundReplier, typing *TypingIndicatorManager, media engine.MediaResolver) engine.ResolverSet {
 	set := engine.ResolverSet{
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
@@ -42,11 +39,12 @@ func NewSlackResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.Outb
 			Fallback: "Slack chat",
 		})},
 		Audit:      &auditor{q: q},
+		Media:      media,
 		Replier:    replier,
 		OriginType: originSlackChat,
 	}
-	// Guard against assigning a nil *TypingIndicatorManager into the interface
-	// field (which would make set.Typing a non-nil typed-nil); mirrors Feishu.
+	// Assign the interface only for a concrete manager. A typed nil would make
+	// the interface compare non-nil and fail when the pipeline invokes it.
 	if typing != nil {
 		set.Typing = &slackTypingNotifier{mgr: typing}
 	}

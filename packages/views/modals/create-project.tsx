@@ -68,11 +68,10 @@ import {
 } from "../platform/local-directory";
 import { useLocalDaemonStatus } from "../platform/use-local-daemon-status";
 import {
-  MIN_LOCAL_WORKTREE_CLI_VERSION,
-  daemonSupportsLocalWorktree,
-  readRuntimeCliVersion,
+  runtimeAdvertisesLocalWorktree,
   runtimeListOptions,
 } from "@multica/core/runtimes";
+import { useConfigStore } from "@multica/core/config";
 import type { LocalDirectoryExecutionMode } from "@multica/core/types";
 import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-dialog";
 
@@ -207,35 +206,40 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   // same call that creates the project, so an un-caught rejection would fail the
   // whole creation — check up front and disable the option instead.
   const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
-  const localDaemonCliVersion = daemonStatus.daemonId
-    ? (runtimes
-        .filter((rt) => rt.daemon_id === daemonStatus.daemonId)
-        .map((rt) => readRuntimeCliVersion(rt.metadata))
-        .find((v) => v && v.length > 0) ?? "")
-    : "";
   // Capability, not version: a dev-built daemon reports a git-describe string
   // that the version floor exempts, so the version check passed for a binary
-  // with no worktree implementation (MUL-5707).
-  const localDaemonSupportsWorktree = daemonSupportsLocalWorktree(
+  // with no worktree implementation (MUL-5707). A backend too old to record the
+  // capability at all is its own answer — blaming this machine for that sent a
+  // user off to update the one piece already on the newest release (#7113).
+  // Preselection only — the server gates the save, including on this bundled
+  // create path, and rejects with a message the modal surfaces.
+  const localAdvertisesWorktree = runtimeAdvertisesLocalWorktree(
     runtimes,
     daemonStatus.daemonId,
   );
+  // One declared boolean from the live server. Servers older than the worktree
+  // save gate drop execution_mode and answer 201, so "the backend will check"
+  // is only true once the backend says it checks (#7113).
+  const serverValidatesWorktree = useConfigStore((state) => state.localWorktreeSupported);
   const worktreeUnavailableReason =
     localIsGitRepo === false
       ? ("not_git" as const)
-      : !localDaemonSupportsWorktree
-        ? ("daemon_outdated" as const)
+      : !serverValidatesWorktree
+        ? ("server_outdated" as const)
         : undefined;
   // Preselection, not a default behavior change: when the folder is a git repo
-  // and the runtime can actually run worktree mode, parallel is the better fit,
-  // so it starts selected — visibly, in a control the user can flip in one
-  // click before creating anything. A plain folder starts on direct.
+  // and the machine has advertised that it can run worktree mode, parallel is
+  // the better fit, so it starts selected — visibly, in a control the user can
+  // flip in one click before creating anything. A plain folder starts on
+  // direct, and so does a machine that has not advertised: it may still be able
+  // to (an old row proves nothing), but choosing it FOR the user is how a
+  // rejected save would turn into a failed project creation.
   //
   // `localIsGitRepo === undefined` (an older desktop build that doesn't report
   // it) preselects direct. The asymmetry is deliberate: permissive about what
   // the user MAY choose, conservative about what we choose FOR them.
   const preselectedLocalMode: LocalDirectoryExecutionMode =
-    localIsGitRepo === true && worktreeUnavailableReason === undefined
+    localIsGitRepo === true && localAdvertisesWorktree && worktreeUnavailableReason === undefined
       ? "worktree"
       : "in_place";
   // Never submit a mode the picker would have blocked — the folder can change
@@ -899,8 +903,6 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                                 setLocalModeOpen(false);
                               }}
                               unavailableReason={worktreeUnavailableReason}
-                              currentVersion={localDaemonCliVersion}
-                              minVersion={MIN_LOCAL_WORKTREE_CLI_VERSION}
                             />
                           </PopoverContent>
                         </Popover>

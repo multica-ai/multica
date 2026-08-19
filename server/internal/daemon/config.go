@@ -14,6 +14,7 @@ import (
 	"github.com/mattn/go-shellwords"
 
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/daemon/execenv"
 	"github.com/multica-ai/multica/server/internal/daemon/repocache"
 	"github.com/multica-ai/multica/server/pkg/agent"
 )
@@ -95,7 +96,7 @@ type Config struct {
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
 	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
-	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
+	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw, mcode (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
 	KeepEnvAfterTask               bool                  // preserve env after task for debugging
 	HealthPort                     int                   // local HTTP port for health checks (default: 19514)
@@ -200,6 +201,8 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	//     binary lookup; pre-existing path.
 	//   - OPENCLAW_STATE_DIR:    OpenClaw's own env var; the daemon already
 	//     forwards it to spawned children via mergeEnv (server/pkg/agent/...).
+	//   - MULTICA_OPENCLAW_CLI_TIMEOUT: read by execenv when it sets the
+	//     deadline on each `openclaw config ...` call during task prep.
 	//
 	// Precedence is "env wins over config wins over default" — same shape
 	// users already get with MULTICA_OPENCLAW_PATH today. We achieve it with
@@ -239,7 +242,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// can re-run the same discovery on a live daemon (MUL-5439).
 	agents := probeAgentCLIs()
 	if len(agents) == 0 && !overrides.AllowNoAgents {
-		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, or qwenpaw and ensure it is on PATH")
+		return Config{}, fmt.Errorf("no agent CLI found: install claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, omp, cursor-agent, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, or mcode and ensure it is on PATH")
 	}
 
 	claudeArgs, err := shellArgsFromEnv("MULTICA_CLAUDE_ARGS")
@@ -839,7 +842,7 @@ func isExecutableFile(path string) bool {
 // doesn't require editing this list by hand.
 var defaultAgentCommandNames = append([]string{
 	"claude", "codex", "opencode", "deveco", "openclaw", "hermes",
-	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "dsh", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw",
+	"pi", "cursor-agent", "copilot", "kimi", "reasonix", "dsh", "kiro-cli", "codebuddy", "agy", "qodercli", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode",
 }, agent.BuiltinRuntimeCommands()...)
 
 // codexDesktopAppBundlePaths returns candidate macOS app-bundle locations for
@@ -1086,7 +1089,8 @@ func openclawOverrideFrom(cfg cli.CLIConfig) *cli.OpenClawOverride {
 //
 // Side-effecting on os.Setenv is intentional and scoped:
 //
-//   - The two vars touched (MULTICA_OPENCLAW_PATH, OPENCLAW_STATE_DIR) are
+//   - The three vars touched (MULTICA_OPENCLAW_PATH, OPENCLAW_STATE_DIR,
+//     MULTICA_OPENCLAW_CLI_TIMEOUT) are
 //     OpenClaw-specific. Other backends do not read them; setting them in the
 //     daemon process has no observable effect on, e.g., Claude Code or Codex
 //     spawn behavior.
@@ -1106,6 +1110,11 @@ func applyOpenclawOverride(oc *cli.OpenClawOverride) {
 	if oc.StateDir != "" {
 		if _, set := os.LookupEnv("OPENCLAW_STATE_DIR"); !set {
 			_ = os.Setenv("OPENCLAW_STATE_DIR", oc.StateDir)
+		}
+	}
+	if oc.CLITimeout != "" {
+		if _, set := os.LookupEnv(execenv.OpenclawCLITimeoutEnv); !set {
+			_ = os.Setenv(execenv.OpenclawCLITimeoutEnv, oc.CLITimeout)
 		}
 	}
 }

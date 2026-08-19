@@ -53,9 +53,11 @@ func backendResumeContinuityNotice(task Task) string {
 // emitted unconditionally from the same branches BuildPrompt uses to pick a
 // path, so the two can never disagree.
 //
-// Reply mode = respond to the triggering comment, do not touch issue status.
-// Ownership mode = an assignment/status change started this run; own the
-// status arc. Applying the wrong one silently changes issue status.
+// Reply mode = respond to the triggering comment; the status arc opens only
+// when the turn does substantive work on an issue assigned to this agent
+// (MUL-6300). Ownership mode = an assignment/status change started this run;
+// own the status arc unconditionally. Applying the wrong one changes when
+// issue status moves.
 const (
 	turnModeReply     = "**Turn mode: Reply.** Follow the Reply-mode block in your runtime workflow file for this turn; the Ownership-mode status steps do not apply.\n\n"
 	turnModeOwnership = "**Turn mode: Ownership.** Follow the Ownership-mode block in your runtime workflow file for this turn; the Reply-mode rules do not apply.\n\n"
@@ -292,7 +294,9 @@ func buildCommentPrompt(task Task, provider string) string {
 	b.WriteString(turnModeReply)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
-		if task.TriggerAuthorType == "agent" {
+		if task.TriggerAuthorType == "system" {
+			authorLabel = "The platform"
+		} else if task.TriggerAuthorType == "agent" {
 			name := task.TriggerAuthorName
 			if name == "" {
 				name = "another agent"
@@ -313,7 +317,9 @@ func buildCommentPrompt(task Task, provider string) string {
 			fmt.Fprintf(&b, "This run also covers %d earlier comment(s) posted before it started — you must read and address them too, not just the one above. They may be in different threads, so each is reproduced here with its own thread:\n\n", len(task.CoalescedComments))
 			for _, cc := range task.CoalescedComments {
 				authorLabel := "A user"
-				if cc.AuthorType == "agent" {
+				if cc.AuthorType == "system" {
+					authorLabel = "The platform"
+				} else if cc.AuthorType == "agent" {
 					name := cc.AuthorName
 					if name == "" {
 						name = "another agent"

@@ -1,3 +1,4 @@
+import { normalizeStatusPatch } from "./status-category";
 import { hashKey, useMutation, useQueryClient, type QueryKey } from "@tanstack/react-query";
 import { api } from "../api";
 import { issueKeys } from "./queries";
@@ -184,7 +185,7 @@ export function useUpdateIssue() {
           (old) =>
             detachedFromParent
               ? old?.filter((c) => c.id !== id)
-              : old?.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+              : old?.map((c) => (c.id === id ? { ...c, ...normalizeStatusPatch(patch) } : c)),
         );
       }
       return { change, prevChildren, parentId, id };
@@ -467,7 +468,7 @@ export function useBatchUpdateIssues() {
         affectedParentIds.add(parentId);
         prevChildren.set(parentId, data);
         qc.setQueryData<Issue[]>(issueKeys.children(wsId, parentId), (old) =>
-          old?.map((c) => (idSet.has(c.id) ? { ...c, ...patch } : c)),
+          old?.map((c) => (idSet.has(c.id) ? { ...c, ...normalizeStatusPatch(patch) } : c)),
         );
       }
 

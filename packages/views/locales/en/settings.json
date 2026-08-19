@@ -1,4 +1,54 @@
 {
+  "issue_statuses": {
+    "title": "Issue Statuses",
+    "description": "Add statuses of your own on top of the seven built-in ones. Every status belongs to a category, and the category is what determines its behavior.",
+    "loading": "Loading statuses…",
+    "add": "Add status",
+    "show_archived": "Show archived ({{count}})",
+    "archived_badge": "Archived",
+    "archived_hint": "Retired from new assignments. Issues already on it keep it.",
+    "built_in_locked": "Built-in status. Name, color and category are fixed.",
+    "flag_off": "Custom statuses are not enabled for this deployment yet. The built-in statuses below work as usual.",
+    "reorder_failed": "Could not save the new order.",
+    "actions": {
+      "open": "Actions for {{name}}",
+      "edit": "Edit",
+      "archive": "Archive",
+      "reorder": "Reorder {{name}}"
+    },
+    "editor": {
+      "create_title": "New status",
+      "edit_title": "Edit status",
+      "behavior_hint": "This status behaves exactly like {{category}}.",
+      "name": "Name",
+      "name_placeholder": "e.g. Code Review",
+      "category": "Category",
+      "category_locked": "Category cannot be changed — issues already on this status depend on it.",
+      "description": "Description",
+      "description_placeholder": "What this status means for your team",
+      "color": "Color",
+      "cancel": "Cancel",
+      "save": "Save",
+      "saving": "Saving…",
+      "save_failed": "Could not save the status."
+    },
+    "archive_dialog": {
+      "title": "Archive this status?",
+      "description": "\"{{name}}\" stops being available for new issues. Issues already on it keep it and keep behaving exactly as they do now.",
+      "cancel": "Cancel",
+      "confirm": "Archive",
+      "failed": "Could not archive the status."
+    },
+    "categories": {
+      "backlog": "Parked. Assigning an issue here never starts an agent run.",
+      "todo": "Queued. Moving an issue here starts the assigned agent.",
+      "in_progress": "Actively being worked on.",
+      "in_review": "Delivered, waiting on human review. Finalizes the autopilot run.",
+      "done": "Completed.",
+      "blocked": "Stalled on an external dependency.",
+      "cancelled": "Decided not to do."
+    }
+  },
   "quick_actions": {
     "title": "Quick Actions",
     "description": "Preset an agent and a prompt once, then trigger it from any issue's sidebar with a single click.",
@@ -135,6 +185,7 @@
     "fixed": {
       "title": "Fixed system shortcuts",
       "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
+      "open_settings": "Open Settings",
       "close_tab": "Close active tab",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",
@@ -204,6 +255,7 @@
       "labs": "Labs",
       "members": "Members",
       "labels": "Labels",
+      "issue_statuses": "Issue Statuses",
       "properties": "Properties",
       "quick_actions": "Quick Actions",
     "plugins": "Plugins",
@@ -213,66 +265,65 @@
   },
   "plugins": {
     "title": "Plugins",
-    "description": "Review, install, scope, and manage signed capabilities delivered by Multica.",
+    "description": "Install plugins by URL and review exactly what each one is allowed to reach.",
     "loading": "Loading Plugins",
     "load_failed": "Plugins couldn't be loaded",
-    "load_failed_description": "Try again. Existing enabled Plugins and pinned runs are unaffected.",
-    "backend_unavailable": "Plugin management isn't available",
-    "backend_unavailable_description": "This server predates the bundled Plugin catalog. Update the backend to manage Plugins here.",
-    "catalog_degraded": "Some bundled releases were isolated",
-    "catalog_degraded_description": "A bundled source failed validation. Healthy signed releases remain available.",
+    "load_failed_description": "Try again. Installed Plugins are unaffected.",
     "read_only": "Read-only access",
-    "read_only_description": "Workspace owners and admins can install or change Plugin bindings.",
-    "empty": "No bundled Plugins are available.",
-    "official": "Official",
-    "private": "Private",
-    "unverified": "Unverified",
-    "signed": "Signature verified",
-    "signature_unverified": "Signature unverified",
-    "incompatible": "Incompatible release",
-    "incompatible_description": "This release requires a newer host API or daemon capability and cannot be activated.",
-    "install_disabled_hint": "Installation is disabled by default. Choose a workspace or agent scope after installing.",
-    "install": "Install",
-    "installed_disabled": "Plugin installed and left disabled",
-    "active_version": "Active version:",
-    "health": "Health:",
-    "bindings": "Enabled scopes",
-    "unknown_agent": "Unknown agent",
-    "unknown_member": "Unknown member",
-    "workspace_scope": "Workspace",
-    "agent_scope": "Agent",
-    "binding_disabled": "Plugin binding disabled",
-    "disable_binding": "Disable",
-    "no_bindings": "No enabled scopes. New runs do not receive this Plugin.",
-    "enable_scope": "Enable scope",
-    "enabled": "Plugin scope enabled",
-    "disable_workspace": "Disable workspace",
-    "disabled": "Plugin disabled for new tasks",
-    "upgraded": "Plugin upgraded",
-    "rolled_back": "Plugin rolled back",
-    "source": "Source and uploader",
-    "private_upload": "Private workspace upload",
-    "uploaded_by": "Uploaded by",
-    "uninstall": "Uninstall",
-    "uninstalled": "Plugin uninstalled for future runs",
-    "upgrade_to": "Upgrade to v{{version}}",
-    "rollback_to": "Rollback to v{{version}}",
+    "read_only_description": "Workspace owners and admins can install, configure, and remove Plugins.",
+    "empty": "No Plugins are installed yet.",
     "action_failed": "Plugin action failed",
-    "none": "None",
+    "enabled": "Plugin enabled",
+    "disabled": "Plugin disabled",
+    "enabled_label": "Enable Plugin",
+    "uninstall": "Uninstall",
+    "uninstalled": "Plugin uninstalled. Its stored data and secrets were removed.",
+    "granted_scopes": "Granted access",
+    "contributes": "Contributes",
+    "version": "v{{version}}",
+    "byline": "{{author}} · v{{version}}",
+    "source": "Source",
     "states": {
-      "disabled": "Disabled",
-      "activating": "Activating",
-      "healthy": "Healthy",
-      "degraded": "Degraded",
-      "failed": "Failed"
+      "disabled": "Disabled"
     },
-    "review": {
-      "contributes": "Contributes",
-      "permissions": "Requested capability",
-      "compatibility": "Compatibility",
-      "host_api": "Host API",
-      "publisher": "Publisher and signing identity",
-      "none": "None"
+    "install": {
+      "title": "Install a Plugin",
+      "description": "Paste the URL of a plugin manifest. You'll see what it asks for before anything is installed.",
+      "placeholder": "https://example.com/multica.plugin.json",
+      "review": "Review"
+    },
+    "installed": {
+      "title": "Installed"
+    },
+    "consent": {
+      "title": "This Plugin is asking for the following access",
+      "description": "Multica never runs plugin code on its servers. A Plugin can only do what these scopes allow, and never more than the person using it can already do.",
+      "cancel": "Cancel",
+      "confirm": "Grant and install",
+      "confirm_upgrade": "Grant and upgrade",
+      "installed": "Plugin installed",
+      "upgrade_from": " · upgrading from v{{version}}",
+      "new_scope": "New"
+    },
+    "config": {
+      "title": "Configuration",
+      "save": "Save",
+      "saved": "Configuration saved",
+      "secret_set": "Saved — enter a new value to replace it"
+    },
+    "scopes": {
+      "issues_read": "Read issues",
+      "issues_write": "Create and edit issues",
+      "comments_read": "Read comments",
+      "comments_write": "Post comments",
+      "tasks_read": "Read agent tasks",
+      "tasks_write": "Start and update agent tasks",
+      "agents_read": "Read the agent list",
+      "members_read": "Read the member list",
+      "storage_user": "Store data for each member individually",
+      "storage_workspace": "Store data shared by the workspace",
+      "net": "Send data to {{domain}}",
+      "unknown": "Unrecognized access — do not install"
     }
   },
   "properties": {
@@ -304,7 +355,9 @@
       "multi_select": "Multi-select",
       "date": "Date",
       "checkbox": "Checkbox",
-      "url": "URL"
+      "url": "URL",
+      "actor": "Member",
+      "multi_actor": "Members"
     },
     "actions": {
       "open": "Actions for {{name}}",
@@ -809,6 +862,7 @@
     "empty_description_suffix": "to install a robot for it.",
     "revoked_badge": "revoked",
     "installed_at_label": "Installed {{when}}",
+    "identity_label": "Linked DingTalk identity: {{identity}}",
     "disconnect": "Disconnect",
     "disconnecting": "Disconnecting…",
     "disconnect_confirm_title": "Disconnect this DingTalk bot?",
@@ -983,6 +1037,26 @@
         "label": "Member",
         "description": "Create and work on issues"
       }
-    }
+    },
+    "share_links_title": "Share links",
+    "role_field": "Role:",
+    "expiry_field": "Expiry:",
+    "share_links_create_title": "Create share link",
+    "share_links_create_button": "Generate",
+    "share_links_creating": "Generating...",
+    "share_link_uses": "{{used}} / {{max}} uses",
+    "share_link_expires": "Expires {{date}}",
+    "share_link_copy_tooltip": "Copy link",
+    "share_link_revoke_tooltip": "Revoke link",
+    "toast_share_link_created": "Share link created",
+    "toast_share_link_failed": "Failed to create share link",
+    "toast_share_link_revoked": "Share link revoked",
+    "toast_share_link_revoke_failed": "Failed to revoke share link",
+    "toast_share_link_copied": "Link copied",
+    "toast_share_link_copy_failed": "Failed to copy link",
+    "expiry_24h": "24 hours",
+    "expiry_7d": "7 days",
+    "expiry_30d": "30 days",
+    "expiry_never": "Never"
   }
 }

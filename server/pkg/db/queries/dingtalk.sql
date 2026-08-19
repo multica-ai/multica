@@ -2,6 +2,17 @@
 -- tables are shared, but these replacement semantics belong to DingTalk's BYO
 -- AppKey model and deliberately stay out of the shared channel query surface.
 
+-- name: ListDingTalkUserBindingsForMember :many
+-- Returns only the requesting Multica member's DingTalk identities. The
+-- installation list is member-visible, so returning every member's staff id
+-- here would expose staff ID values more broadly than necessary.
+SELECT installation_id, channel_user_id
+FROM channel_user_binding
+WHERE workspace_id = sqlc.arg(workspace_id)
+  AND multica_user_id = sqlc.arg(multica_user_id)
+  AND channel_type = 'dingtalk'
+ORDER BY bound_at DESC, id ASC;
+
 -- name: DiscoverDingTalkGroupRoute :one
 -- Persist a group only after the shared inbound router has accepted the @bot
 -- message and validated the sender's identity/workspace membership. The INSERT

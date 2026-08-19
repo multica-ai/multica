@@ -746,7 +746,7 @@ func TestDiscoverGrokModelsWaitsForAdvertisedAuth(t *testing.T) {
 	t.Setenv("GROK_AUTH_METHODS", "api")
 	t.Setenv("XAI_API_KEY", "test-only-key")
 
-	catalog, err := discoverGrokModels(context.Background(), fakePath)
+	catalog, err := discoverGrokModels(context.Background(), Command{Path: fakePath})
 	if err != nil {
 		t.Fatalf("discover grok models: %v", err)
 	}
@@ -792,7 +792,7 @@ func TestDiscoverGrokModelsStopsOnAuthFailures(t *testing.T) {
 			t.Setenv("GROK_AUTH_FAIL", tc.authFail)
 			t.Setenv("XAI_API_KEY", "")
 
-			catalog, err := discoverGrokModels(context.Background(), fakePath)
+			catalog, err := discoverGrokModels(context.Background(), Command{Path: fakePath})
 			if err != nil {
 				t.Fatalf("discover grok models: %v", err)
 			}
@@ -851,7 +851,7 @@ func TestGrokValidateThinkingLevelUsesPerModelCatalog(t *testing.T) {
 		{model: "grok-composer-2.5-fast", level: "low", want: false},
 		{model: "future-grok", level: "high", want: false},
 	} {
-		got, err := ValidateThinkingLevel(context.Background(), "grok", "/nonexistent/grok", tc.model, tc.level)
+		got, err := ValidateThinkingLevel(context.Background(), "grok", Command{Path: "/nonexistent/grok"}, tc.model, tc.level)
 		if err != nil {
 			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
 		}

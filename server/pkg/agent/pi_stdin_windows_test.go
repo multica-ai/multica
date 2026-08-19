@@ -3,6 +3,8 @@
 package agent
 
 import (
+	"bufio"
+	"context"
 	"fmt"
 	"io"
 	"log/slog"
@@ -15,6 +17,7 @@ import (
 
 const (
 	piShimHelperEnv      = "MULTICA_PI_SHIM_HELPER"
+	piShimHelperRPCEnv   = "MULTICA_PI_SHIM_RPC_HELPER"
 	piShimHelperArgvFile = "MULTICA_PI_SHIM_ARGV_FILE"
 	piShimHelperInFile   = "MULTICA_PI_SHIM_STDIN_FILE"
 )
@@ -39,6 +42,10 @@ func TestPiShimHelperProcess(t *testing.T) {
 		fmt.Fprintf(os.Stderr, "helper: write argv: %v\n", err)
 		os.Exit(1)
 	}
+	if os.Getenv(piShimHelperRPCEnv) == "1" {
+		runPiRPCHelper()
+		os.Exit(0)
+	}
 	stdin, err := io.ReadAll(os.Stdin)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "helper: read stdin: %v\n", err)
@@ -52,6 +59,19 @@ func TestPiShimHelperProcess(t *testing.T) {
 	fmt.Println(`{"type":"agent_start"}`)
 	fmt.Println(`{"type":"turn_end","message":{"role":"assistant","model":"test","usage":{"input":1,"output":1,"cacheRead":0,"cacheWrite":0,"totalTokens":2}}}`)
 	os.Exit(0)
+}
+
+func runPiRPCHelper() {
+	scanner := bufio.NewScanner(os.Stdin)
+	for scanner.Scan() {
+		line := scanner.Text()
+		switch {
+		case strings.Contains(line, `"get_state"`):
+			fmt.Println(`{"id":"multica-state","type":"response","command":"get_state","success":true,"data":{"model":{"id":"reasoning-model","provider":"provider","reasoning":true,"thinkingLevelMap":{"xhigh":"xhigh","max":"max"}},"thinkingLevel":"max"}}`)
+		case strings.Contains(line, `"get_available_models"`):
+			fmt.Println(`{"id":"multica-models","type":"response","command":"get_available_models","success":true,"data":{"models":[{"id":"reasoning-model","provider":"provider","reasoning":true,"thinkingLevelMap":{"xhigh":"xhigh","max":"max"}}]}}`)
+		}
+	}
 }
 
 // TestPiExecutePromptSurvivesPowerShellShim exercises the complete Windows
@@ -73,6 +93,82 @@ func TestPiExecutePromptSurvivesPowerShellShim(t *testing.T) {
 			stubPowerShell(t, host, true)
 			assertPiPromptSurvivesShim(t)
 		})
+	}
+}
+
+// TestPiExecutePromptSurvivesPowerShellShimRPCDiscoveryBeforeStdinEOF exercises
+// the complete Windows model discovery boundary:
+//
+//	Go -> powershell -Command pi.ps1 @args -> native child
+//
+// The fake Pi child answers both RPC requests while stdin is still open. A
+// -File entrypoint simulates the npm wrapper behaviour that waits for stdin EOF
+// before forwarding input; the test therefore fails against the old launcher
+// path by timing out and returning the fallback catalog with no Thinking data.
+func TestPiExecutePromptSurvivesPowerShellShimRPCDiscoveryBeforeStdinEOF(t *testing.T) {
+	hosts := availablePowerShellHosts()
+	if len(hosts) == 0 {
+		t.Skip("no PowerShell host available")
+	}
+	for _, host := range hosts {
+		t.Run(filepath.Base(host), func(t *testing.T) {
+			stubPowerShell(t, host, true)
+			assertPiRPCDiscoveryBeforeStdinEOF(t)
+		})
+	}
+}
+
+func assertPiRPCDiscoveryBeforeStdinEOF(t *testing.T) {
+	t.Helper()
+
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatalf("locate test binary: %v", err)
+	}
+	dir := t.TempDir()
+	argvPath := filepath.Join(dir, "rpc-argv.txt")
+
+	cmdPath := filepath.Join(dir, "pi.cmd")
+	writeFile(t, cmdPath, "@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -File \"%~dp0pi.ps1\" %*\r\n")
+	ps1 := fmt.Sprintf(""+
+		"$env:%s = '1'\r\n"+
+		"$env:%s = '1'\r\n"+
+		"$env:%s = '%s'\r\n"+
+		"if ($MyInvocation.Line -notlike '*@args*') { [Console]::In.ReadToEnd() | Out-Null }\r\n"+
+		"& '%s' '-test.run=^TestPiShimHelperProcess$' '--' $args\r\n"+
+		"exit $LASTEXITCODE\r\n",
+		piShimHelperEnv,
+		piShimHelperRPCEnv,
+		piShimHelperArgvFile, argvPath,
+		self)
+	writeFile(t, filepath.Join(dir, "pi.ps1"), ps1)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	models, ok := discoverPiModelsRPC(ctx, Command{Path: cmdPath}, cmdPath)
+	if !ok {
+		t.Fatalf("Pi RPC discovery did not complete before stdin EOF")
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected one discovered model, got %+v", models)
+	}
+	model := models[0]
+	if model.ID != "provider/reasoning-model" || model.Provider != "provider" {
+		t.Fatalf("unexpected model: %+v", model)
+	}
+	if model.Thinking == nil || !piThinkingSupports(model.Thinking, "max") || model.Thinking.DefaultLevel != "max" {
+		t.Fatalf("expected max thinking metadata from RPC, got %+v", model.Thinking)
+	}
+
+	argvRaw, err := os.ReadFile(argvPath)
+	if err != nil {
+		t.Fatalf("native child never recorded RPC argv: %v", err)
+	}
+	gotArgv := string(argvRaw)
+	for _, want := range []string{"--mode", "rpc", "--no-session", "--no-skills", "--no-prompt-templates", "--no-context-files"} {
+		if !strings.Contains(gotArgv, want) {
+			t.Errorf("expected %q to reach native child; argv=%q", want, gotArgv)
+		}
 	}
 }
 

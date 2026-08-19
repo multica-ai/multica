@@ -2,14 +2,13 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { useQuery } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import {
   paths,
   resolvePostAuthDestination,
   useHasOnboarded,
 } from "@multica/core/paths";
-import { workspaceListOptions } from "@multica/core/workspace/queries";
+import { useWorkspaceList } from "@multica/core/workspace";
 import { CliInstallInstructions, OnboardingFlow } from "@multica/views/onboarding";
 
 /**
@@ -30,8 +29,7 @@ export default function OnboardingPage() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const hasOnboarded = useHasOnboarded();
-  const { data: workspaces = [], isFetched: workspacesFetched } = useQuery({
-    ...workspaceListOptions(),
+  const { workspaces, ready: workspacesReady } = useWorkspaceList({
     enabled: !!user,
   });
   // The bootstrap path calls refreshMe() before returning, which flips
@@ -48,7 +46,7 @@ export default function OnboardingPage() {
       if (!isLoading && !user) router.replace(paths.login());
       return;
     }
-    if (!workspacesFetched) return;
+    if (!workspacesReady) return;
     if (completingRef.current) return;
     // Bounce out only when onboarding genuinely doesn't apply: the user is
     // already onboarded. We deliberately don't bounce on `workspaces.length`
@@ -60,7 +58,7 @@ export default function OnboardingPage() {
     if (hasOnboarded) {
       router.replace(resolvePostAuthDestination(workspaces, hasOnboarded));
     }
-  }, [isLoading, user, hasOnboarded, workspacesFetched, workspaces, router]);
+  }, [isLoading, user, hasOnboarded, workspacesReady, workspaces, router]);
 
   if (isLoading || !user || hasOnboarded) return null;
 

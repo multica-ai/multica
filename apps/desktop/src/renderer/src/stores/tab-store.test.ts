@@ -577,6 +577,64 @@ describe("commitScrollMemento", () => {
       view: { "/acme/inbox::highlight:i1": "c1" },
     });
   });
+
+  it("persists contentKey on external-source entries (iframe scroll)", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    store.commitScrollMemento(tabId, "/acme/attachments/x/preview", {
+      "html-iframe": { top: 400, height: 9000, contentKey: "abc123" },
+    });
+
+    expect(
+      useTabStore.getState().byWorkspace.acme.tabs[0].memento.scroll[
+        "/acme/attachments/x/preview::html-iframe"
+      ],
+    ).toEqual({ top: 400, height: 9000, contentKey: "abc123" });
+  });
+
+  it("treats top:0 with a new contentKey as a change so it REPLACES a stale positive offset", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const route = "/acme/attachments/x/preview";
+
+    store.commitScrollMemento(tabId, route, {
+      "html-iframe": { top: 800, height: 9000, contentKey: "v1" },
+    });
+    // Content changed (re-upload): the new document hasn't scrolled yet so
+    // capture reports top:0 with the NEW key. This must overwrite the old
+    // positive offset, otherwise the next visit would wrongly restore 800.
+    store.commitScrollMemento(tabId, route, {
+      "html-iframe": { top: 0, height: 0, contentKey: "v2" },
+    });
+
+    expect(
+      useTabStore.getState().byWorkspace.acme.tabs[0].memento.scroll[
+        `${route}::html-iframe`
+      ],
+    ).toEqual({ top: 0, height: 0, contentKey: "v2" });
+  });
+
+  it("does NOT skip the write when contentKey changes even with identical top/height", () => {
+    const store = useTabStore.getState();
+    store.switchWorkspace("acme");
+    const tabId = useTabStore.getState().byWorkspace.acme.tabs[0].id;
+    const route = "/acme/attachments/x/preview";
+
+    store.commitScrollMemento(tabId, route, {
+      "html-iframe": { top: 100, height: 5000, contentKey: "v1" },
+    });
+    const before = useTabStore.getState().byWorkspace.acme.tabs[0].memento;
+
+    store.commitScrollMemento(tabId, route, {
+      "html-iframe": { top: 100, height: 5000, contentKey: "v2" },
+    });
+
+    const after = useTabStore.getState().byWorkspace.acme.tabs[0].memento;
+    expect(after).not.toBe(before);
+    expect(after.scroll[`${route}::html-iframe`].contentKey).toBe("v2");
+  });
 });
 
 describe("commitViewState", () => {

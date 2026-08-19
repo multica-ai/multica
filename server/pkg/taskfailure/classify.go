@@ -63,7 +63,7 @@ func Classify(rawError string) Reason {
 	trimmed := strings.TrimSpace(rawError)
 	if trimmed == "" {
 		// SQL maps NULL/empty to a separate bucket ("empty_error"),
-		// but that bucket is not part of the canonical 22. In-flight
+		// but that bucket is not part of the canonical taxonomy. In-flight
 		// callers should never hand us empty input — if they do, the
 		// safest landing is the catchall.
 		return ReasonAgentUnknown
@@ -371,6 +371,32 @@ var legacyContextOverflowReasons = map[string]bool{
 	"agent_error":              true,
 }
 
+// legacyOpenclawCLITimeoutWitnesses identify an OpenClaw config-discovery
+// timeout in the wire text of a daemon that predates the sentinel
+// (execenv.ErrOpenclawCLITimeout). Both halves must appear: the prep-stage
+// wrapper naming this exact call site, and the deadline phrase. That pair is
+// only produced by execOpenclawCLI's cancellation branch.
+var legacyOpenclawCLITimeoutWitnesses = []string{
+	"prepare openclaw config",
+	"deadline exceeded",
+}
+
+// legacyOpenclawCLITimeoutReasons are the buckets an older daemon lands that
+// timeout in. provider_network is what its own rule 7 produces from
+// "deadline exceeded" text, and agent_error / agent_error.unknown cover the
+// coarser pre-MUL-1949 shapes.
+//
+// Worth upgrading at the server rather than waiting for the fleet: the stale
+// label is not merely imprecise, it is actively harmful — it puts a
+// deterministic local failure on the retry allowlist (each retry re-pays the
+// same 8-11s and fails identically) and shows "check your network" copy for a
+// stall that has nothing to do with the network (#7112).
+var legacyOpenclawCLITimeoutReasons = map[string]bool{
+	string(ReasonAgentUnknown):         true,
+	string(ReasonAgentProviderNetwork): true,
+	"agent_error":                      true,
+}
+
 // opencodeStreamEndedPrefix opens every failure the OpenCode terminal-signal
 // guard raises (pkg/agent/opencode.go). Exactly one code path emits it, and it
 // is a PREFIX of the whole error rather than a phrase somewhere inside it, so
@@ -438,7 +464,28 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 		strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawError)), opencodeStreamEndedPrefix) {
 		return ReasonAgentProviderNetwork
 	}
+	// #7112: same mixed-version gap. A daemon predating the OpenClaw CLI
+	// timeout sentinel reports provider_network for a local config-discovery
+	// stall, which both misleads the user and burns auto-retries on a failure
+	// that cannot succeed until the host gets faster or the deadline is raised.
+	if legacyOpenclawCLITimeoutReasons[reason] &&
+		containsAll(strings.ToLower(rawError), legacyOpenclawCLITimeoutWitnesses...) {
+		return ReasonRuntimeCLITimeout
+	}
 	return Reason(reason)
+}
+
+// containsAll reports whether s contains every one of the supplied substrings.
+// Used where a single phrase would be ambiguous and only the combination
+// identifies the failure. Caller pre-lowercases s, same contract as
+// containsAny.
+func containsAll(s string, subs ...string) bool {
+	for _, sub := range subs {
+		if !strings.Contains(s, sub) {
+			return false
+		}
+	}
+	return len(subs) > 0
 }
 
 // containsAny reports whether s contains any of the supplied substrings.
