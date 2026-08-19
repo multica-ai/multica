@@ -463,6 +463,49 @@ describe("ApiClient schema fallback", () => {
     });
   });
 
+  describe("Telegram integration", () => {
+    it("falls back to a safe empty installation list when the response is malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listTelegramInstallations("ws-1")).resolves.toEqual({
+        installations: [],
+        configured: false,
+      });
+    });
+
+    it("defaults fields omitted by an older server", async () => {
+      stubFetchJson({
+        installations: [{ id: "tg-1", status: "active" }],
+        configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listTelegramInstallations("ws-1");
+      expect(res.installations[0]).toMatchObject({
+        id: "tg-1",
+        workspace_id: "",
+        agent_id: "",
+        bot_id: "",
+        bot_username: "",
+      });
+      expect(res.install_supported).toBeUndefined();
+    });
+
+    it("falls back safely when register and redeem responses are malformed", async () => {
+      stubFetchJson({ id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.registerTelegramBot("ws-1", "agent-1", { bot_token: "token" }),
+      ).resolves.toMatchObject({ id: "", status: "revoked" });
+
+      stubFetchJson({ workspace_id: 123 });
+      await expect(client.redeemTelegramBindingToken("bind-token")).resolves.toEqual({
+        workspace_id: "",
+        installation_id: "",
+        telegram_user_id: "",
+      });
+    });
+  });
+
   describe("getConfig", () => {
     it("drops malformed daemon setup URLs instead of throwing", async () => {
       stubFetchJson({

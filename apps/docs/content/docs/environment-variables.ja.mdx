@@ -167,6 +167,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | App ID と対になる完全な PEM 秘密鍵。用途は同上 |
 | Lark | `MULTICA_LARK_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 エンコードされた 32 バイトの token 暗号化キー |
+| Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 エンコードされた 32 バイトの Bot token 暗号化キー |
 | Composio | `COMPOSIO_API_KEY` | Composio ツール接続を有効化 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | コールバック API アドレス。`MULTICA_PUBLIC_URL` にフォールバック可能 |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state の署名シークレット。`JWT_SECRET` から派生可能 |
@@ -175,7 +176,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージによる done への遷移は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
 
-設定手順は [GitHub 連携](/github-integration#セルフホスト設定)、[Lark Bot](/lark-bot-integration#セルフホスト設定)、[Slack Bot](/slack-bot-integration#セルフホスト設定)を参照してください。
+設定手順は [GitHub 連携](/github-integration#セルフホスト設定)、[Lark Bot](/lark-bot-integration#セルフホスト設定)、[Slack Bot](/slack-bot-integration#セルフホスト設定)、[Telegram Bot](/telegram-bot-integration#管理とセルフホスティング)を参照してください。
 
 ## サーバーサイド LLM
 

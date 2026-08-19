@@ -167,6 +167,7 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | App ID와 짝을 이루는 전체 PEM private key. 용도는 위와 같음 |
 | Feishu | `MULTICA_LARK_SECRET_KEY` | base64로 인코딩한 32바이트 자격 증명 암호화 키 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64로 인코딩한 32바이트 token 암호화 키 |
+| Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64로 인코딩한 32바이트 Bot token 암호화 키 |
 | Composio | `COMPOSIO_API_KEY` | Composio 도구 연결 활성화 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | callback API 주소. `MULTICA_PUBLIC_URL`로 fallback 가능 |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 서명 키. `JWT_SECRET`에서 파생 가능 |
@@ -175,7 +176,7 @@ reverse proxy 뒤에 배포한다면 실제 proxy 네트워크를 입력해야 �
 
 `GITHUB_APP_ID`와 private key를 설정하지 않아도 PR 연결, 미러링, merge 시 done 전환은 정상적으로 작동합니다. 다만 카드에 CI와 merge 가능 상태가 표시되지 않고 "GitHub에서 선택" 저장소 메뉴도 비활성화됩니다.
 
-설정 단계는 [GitHub 연동](/github-integration#자체-호스팅-설정), [Feishu Bot](/lark-bot-integration#자체-호스팅-설정), [Slack Bot](/slack-bot-integration#자체-호스팅-설정)을 참고하세요.
+설정 단계는 [GitHub 연동](/github-integration#자체-호스팅-설정), [Feishu Bot](/lark-bot-integration#자체-호스팅-설정), [Slack Bot](/slack-bot-integration#자체-호스팅-설정), [Telegram Bot](/telegram-bot-integration#관리-및-자체-호스팅)을 참고하세요.
 
 ## 서버 측 LLM
 

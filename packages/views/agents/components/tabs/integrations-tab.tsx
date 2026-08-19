@@ -8,6 +8,7 @@ import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
 import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
+import { telegramInstallationsOptions } from "@multica/core/telegram";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { LarkMark } from "../../../settings/components/lark-mark";
@@ -17,6 +18,8 @@ import { DingTalkAgentBindButton } from "../../../settings/components/dingtalk-t
 import { DingTalkMark } from "../../../settings/components/dingtalk-mark";
 import { WecomAgentBindButton } from "../../../settings/components/wecom-tab";
 import { WecomMark } from "../../../settings/components/wecom-mark";
+import { TelegramAgentBindButton } from "../../../settings/components/telegram-tab";
+import { TelegramMark } from "../../../settings/components/telegram-mark";
 import { useT } from "../../../i18n";
 
 /**
@@ -57,6 +60,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ...wecomInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: telegramListing } = useQuery({
+    ...telegramInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -77,6 +84,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   const canManageLark = isWorkspaceAdmin || isAgentOwner;
   const canManageSlack = isWorkspaceAdmin;
   const canManageWecom = isWorkspaceAdmin;
+  const canManageTelegram = isWorkspaceAdmin;
   const hasActiveInstall =
     listing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
@@ -101,11 +109,24 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
       (inst) => inst.agent_id === agent.id && inst.status === "active",
     ) ?? false;
 
+  const telegramConfigured = telegramListing?.configured === true;
+  const telegramInstallSupported = telegramListing?.install_supported === true;
+  const telegramHasActiveInstall =
+    telegramListing?.installations.some(
+      (inst) => inst.agent_id === agent.id && inst.status === "active",
+    ) ?? false;
+
   // A member who can manage no platform (not a workspace admin and not this
   // agent's owner) gets the read-only note instead of the sections.
   // Members can still view connected bots in the (member-visible)
   // Settings → Integrations listing.
-  if (!canManageLark && !canManageSlack && !canManageDingtalk && !canManageWecom) {
+  if (
+    !canManageLark &&
+    !canManageSlack &&
+    !canManageDingtalk &&
+    !canManageWecom &&
+    !canManageTelegram
+  ) {
     return (
       <div className="space-y-6">
         <p className="text-caption text-muted-foreground">
@@ -271,6 +292,40 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </div>
           ) : (
             <WecomAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <TelegramMark className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-body font-medium">{ts(($) => $.telegram.section_title)}</h3>
+            <p className="text-caption leading-relaxed text-muted-foreground">
+              {ts(($) => $.telegram.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!canManageTelegram ? (
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.tab_body.integrations.members_note)}
+            </p>
+          ) : !telegramConfigured ? (
+            <p className="text-caption text-muted-foreground">
+              {ts(($) => $.telegram.not_enabled_title)}
+            </p>
+          ) : !telegramInstallSupported && !telegramHasActiveInstall ? (
+            <div className="space-y-1">
+              <p className="text-caption font-medium">{ts(($) => $.telegram.preview_title)}</p>
+              <p className="text-caption text-muted-foreground">
+                {ts(($) => $.telegram.preview_description)}
+              </p>
+            </div>
+          ) : (
+            <TelegramAgentBindButton agentId={agent.id} agentName={agent.name} />
           )}
         </div>
       </section>
