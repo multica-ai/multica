@@ -33,6 +33,6 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-backend-prod
     newTag: "09ee92e1"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
-    newTag: "8532179b"
+    newTag: "09ee92e1"
   - name: ghcr.io/g2crowd/agentfarm-admin-prod
     newTag: "8532179b"
