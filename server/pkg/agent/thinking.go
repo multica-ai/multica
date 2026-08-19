@@ -766,10 +766,9 @@ var providerThinkingEnums = map[string]map[string]bool{
 var thinkingDynamicCatalogProviders = map[string]bool{
 	"codex": true,
 	"dsh":   true,
-	// Grok applies effort with `--effort`, and Grok 4.5's documented values
-	// are low, medium, and high. Newer models advertise their own per-model
-	// catalog through session/new, so the server must leave that vocabulary to
-	// the daemon instead of maintaining a fixed provider-wide enum here.
+	// Grok advertises each model's effort catalog through session/new, so the
+	// server does not maintain a provider-wide fixed enum. The daemon applies
+	// the selected effort with `--effort`, not session/set_config_option.
 	"grok":     true,
 	"opencode": true,
 	"kimi":     true,

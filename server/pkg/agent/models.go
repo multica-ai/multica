@@ -1897,47 +1897,64 @@ func replaceEnvValue(env []string, key, value string) []string {
 // `configOptions` is consulted only when it yields nothing, so no
 // existing provider changes behaviour.
 //
+// acpModelEntry is a raw ACP session/new model entry. The field spellings are
+// shared by generic model discovery and provider-specific vendor metadata.
+type acpModelEntry struct {
+	ModelID      string          `json:"modelId"`
+	ModelIDSnake string          `json:"model_id"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	Meta         json.RawMessage `json:"_meta"`
+}
+
+// parseACPModelEntries returns the raw session/new model entries plus the
+// advertised current model, accepting both camel and snake spellings.
+func parseACPModelEntries(raw json.RawMessage) (entries []acpModelEntry, currentModelID string) {
+	var resp struct {
+		Models struct {
+			AvailableModels      []acpModelEntry `json:"availableModels"`
+			AvailableModelsSnake []acpModelEntry `json:"available_models"`
+			CurrentModelID       string          `json:"currentModelId"`
+			CurrentModelIDSnake  string          `json:"current_model_id"`
+		} `json:"models"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return nil, ""
+	}
+	entries = resp.Models.AvailableModels
+	if len(entries) == 0 && resp.Models.AvailableModelsSnake != nil {
+		entries = resp.Models.AvailableModelsSnake
+	}
+	currentModelID = strings.TrimSpace(resp.Models.CurrentModelID)
+	if currentModelID == "" {
+		currentModelID = strings.TrimSpace(resp.Models.CurrentModelIDSnake)
+	}
+	return entries, currentModelID
+}
+
 // Returns nil (not an empty slice) when the payload is missing so
 // the caller can distinguish "parsed with no models" (valid but
 // empty catalog) from "couldn't find the structure at all".
 func parseACPSessionNewModels(raw json.RawMessage) []Model {
-	type acpModelInfo struct {
-		ModelID      string `json:"modelId"`
-		ModelIDSnake string `json:"model_id"`
-		Name         string `json:"name"`
-		Description  string `json:"description"`
-	}
-	var resp struct {
-		Models struct {
-			AvailableModels      []acpModelInfo `json:"availableModels"`
-			AvailableModelsSnake []acpModelInfo `json:"available_models"`
-			CurrentModelID       string         `json:"currentModelId"`
-			CurrentModelIDSnake  string         `json:"current_model_id"`
-		} `json:"models"`
-	}
-	if err := json.Unmarshal(raw, &resp); err != nil {
+	entries, currentModelID := parseACPModelEntries(raw)
+	if entries == nil {
+		if fromConfig := parseACPConfigOptionModels(raw); len(fromConfig) > 0 {
+			return fromConfig
+		}
 		return nil
 	}
-	availableModels := resp.Models.AvailableModels
-	if len(availableModels) == 0 && resp.Models.AvailableModelsSnake != nil {
-		availableModels = resp.Models.AvailableModelsSnake
-	}
-	currentModelID := strings.TrimSpace(resp.Models.CurrentModelID)
-	if currentModelID == "" {
-		currentModelID = strings.TrimSpace(resp.Models.CurrentModelIDSnake)
-	}
-	models := make([]Model, 0, len(availableModels))
+	models := make([]Model, 0, len(entries))
 	seen := map[string]bool{}
-	for _, m := range availableModels {
-		modelID := strings.TrimSpace(m.ModelID)
+	for _, entry := range entries {
+		modelID := strings.TrimSpace(entry.ModelID)
 		if modelID == "" {
-			modelID = strings.TrimSpace(m.ModelIDSnake)
+			modelID = strings.TrimSpace(entry.ModelIDSnake)
 		}
 		if modelID == "" || seen[modelID] {
 			continue
 		}
 		seen[modelID] = true
-		models = append(models, acpModelEntry(modelID, m.Name, currentModelID))
+		models = append(models, newACPModel(modelID, entry.Name, currentModelID))
 	}
 	if len(models) > 0 {
 		return models
@@ -2015,7 +2032,7 @@ func parseACPConfigOptionModels(raw json.RawMessage) []Model {
 				continue
 			}
 			seen[modelID] = true
-			models = append(models, acpModelEntry(modelID, choice.Name, currentValue))
+			models = append(models, newACPModel(modelID, choice.Name, currentValue))
 		}
 		if len(models) > 0 {
 			return models
@@ -2024,11 +2041,11 @@ func parseACPConfigOptionModels(raw json.RawMessage) []Model {
 	return nil
 }
 
-// acpModelEntry builds one dropdown entry from an ACP-advertised model id
+// newACPModel builds one dropdown entry from an ACP-advertised model id
 // and its display name. Provider is derived from the `provider:model` form
 // only — ids like kimi's `kimi-code/k3` carry no colon and stay ungrouped,
 // which matches how the UI renders a flat catalog.
-func acpModelEntry(modelID, name, currentModelID string) Model {
+func newACPModel(modelID, name, currentModelID string) Model {
 	provider := ""
 	if idx := strings.Index(modelID, ":"); idx > 0 {
 		provider = modelID[:idx]
@@ -2164,6 +2181,23 @@ func discoverGrokModels(ctx context.Context, runtimeCmd Command) (Catalog, error
 	return Catalog{Models: models}, nil
 }
 
+// grokEffortLabels keeps observed static-catalog labels consistent between
+// Grok versions.
+var grokEffortLabels = map[string]string{
+	"xhigh":  "Extra High Effort",
+	"high":   "High Effort",
+	"medium": "Medium Effort",
+	"low":    "Low Effort",
+}
+
+func grokThinking(defaultLevel string, values ...string) *ModelThinking {
+	levels := make([]ThinkingLevel, 0, len(values))
+	for _, value := range values {
+		levels = append(levels, ThinkingLevel{Value: value, Label: grokEffortLabels[value]})
+	}
+	return &ModelThinking{SupportedLevels: levels, DefaultLevel: defaultLevel}
+}
+
 // grokStaticModels is the offline fallback catalog for the Grok Build CLI.
 // The default and effort catalogs come from observed signed-in `session/new`
 // responses. Models without an observed reasoningEfforts list keep Thinking
@@ -2172,26 +2206,11 @@ func grokStaticModels() []Model {
 	return []Model{
 		{
 			ID: "grok-4.6", Label: "Grok 4.6", Provider: "xai", Default: true,
-			Thinking: &ModelThinking{
-				SupportedLevels: []ThinkingLevel{
-					{Value: "xhigh", Label: "Extra High Effort"},
-					{Value: "high", Label: "High Effort"},
-					{Value: "medium", Label: "Medium Effort"},
-					{Value: "low", Label: "Low Effort"},
-				},
-				DefaultLevel: "high",
-			},
+			Thinking: grokThinking("high", "xhigh", "high", "medium", "low"),
 		},
 		{
 			ID: "grok-4.5", Label: "Grok 4.5", Provider: "xai",
-			Thinking: &ModelThinking{
-				SupportedLevels: []ThinkingLevel{
-					{Value: "high", Label: "High Effort"},
-					{Value: "medium", Label: "Medium Effort"},
-					{Value: "low", Label: "Low Effort"},
-				},
-				DefaultLevel: "high",
-			},
+			Thinking: grokThinking("high", "high", "medium", "low"),
 		},
 		{ID: "grok-composer-2.5-fast", Label: "Grok Composer 2.5 Fast", Provider: "xai"},
 	}
@@ -2212,38 +2231,22 @@ func annotateGrokThinkingFromACP(models []Model, raw json.RawMessage) {
 		SupportsReasoningEffort bool              `json:"supportsReasoningEffort"`
 		ReasoningEfforts        []reasoningEffort `json:"reasoningEfforts"`
 	}
-	type modelInfo struct {
-		ModelID      string        `json:"modelId"`
-		ModelIDSnake string        `json:"model_id"`
-		Metadata     modelMetadata `json:"_meta"`
-	}
-	var response struct {
-		Models struct {
-			AvailableModels      []modelInfo `json:"availableModels"`
-			AvailableModelsSnake []modelInfo `json:"available_models"`
-		} `json:"models"`
-	}
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return
-	}
-	availableModels := response.Models.AvailableModels
-	if len(availableModels) == 0 && response.Models.AvailableModelsSnake != nil {
-		availableModels = response.Models.AvailableModelsSnake
-	}
-	thinkingByModel := make(map[string]*ModelThinking, len(availableModels))
-	for _, model := range availableModels {
-		modelID := strings.TrimSpace(model.ModelID)
+	entries, _ := parseACPModelEntries(raw)
+	thinkingByModel := make(map[string]*ModelThinking, len(entries))
+	for _, entry := range entries {
+		modelID := strings.TrimSpace(entry.ModelID)
 		if modelID == "" {
-			modelID = strings.TrimSpace(model.ModelIDSnake)
+			modelID = strings.TrimSpace(entry.ModelIDSnake)
 		}
-		if modelID == "" || !model.Metadata.SupportsReasoningEffort {
+		var metadata modelMetadata
+		if modelID == "" || json.Unmarshal(entry.Meta, &metadata) != nil || !metadata.SupportsReasoningEffort {
 			continue
 		}
 
-		seen := make(map[string]bool, len(model.Metadata.ReasoningEfforts))
-		levels := make([]ThinkingLevel, 0, len(model.Metadata.ReasoningEfforts))
+		seen := make(map[string]bool, len(metadata.ReasoningEfforts))
+		levels := make([]ThinkingLevel, 0, len(metadata.ReasoningEfforts))
 		defaultLevel := ""
-		for _, effort := range model.Metadata.ReasoningEfforts {
+		for _, effort := range metadata.ReasoningEfforts {
 			value := strings.TrimSpace(effort.Value)
 			if value == "" {
 				value = strings.TrimSpace(effort.ID)

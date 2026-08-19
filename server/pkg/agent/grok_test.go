@@ -77,7 +77,7 @@ while IFS= read -r line; do
         printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32000,"message":"authenticate must complete first"}}\n' "$id"
         exit 0
       fi
-		printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_new","models":{"availableModels":[{"modelId":"grok-4.6","name":"Grok 4.6","_meta":{"supportsReasoningEffort":true,"reasoningEfforts":[{"id":"xhigh","value":"xhigh","label":"Extra High Effort","description":"Most deliberate","default":false},{"id":"high","value":"high","label":"High Effort","description":"Balanced","default":true},{"id":"medium","value":"medium","label":"Medium Effort","default":false},{"id":"low","value":"low","label":"Low Effort","default":false}]}},{"modelId":"grok-4.5","name":"Grok 4.5","_meta":{"supportsReasoningEffort":true,"reasoningEfforts":[{"id":"high","value":"high","label":"High Effort","default":true},{"id":"medium","value":"medium","label":"Medium Effort","default":false},{"id":"low","value":"low","label":"Low Effort","default":false}]}},{"modelId":"grok-composer-2.5-fast","name":"Grok Composer 2.5 Fast"}],"currentModelId":"grok-4.6"}}}\n' "$id"
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_new","models":{"availableModels":[{"modelId":"grok-4.6","name":"Grok 4.6","_meta":{"supportsReasoningEffort":true,"reasoningEfforts":[{"id":"xhigh","value":"xhigh","label":"Extra High Effort","description":"Most deliberate","default":false},{"id":"high","value":"high","label":"High Effort","description":"Balanced","default":true},{"id":"medium","value":"medium","label":"Medium Effort","default":false},{"id":"low","value":"low","label":"Low Effort","default":false}]}},{"modelId":"grok-4.5","name":"Grok 4.5","_meta":{"supportsReasoningEffort":true,"reasoningEfforts":[{"id":"high","value":"high","label":"High Effort","default":true},{"id":"medium","value":"medium","label":"Medium Effort","default":false},{"id":"low","value":"low","label":"Low Effort","default":false}]}},{"modelId":"grok-composer-2.5-fast","name":"Grok Composer 2.5 Fast"}],"currentModelId":"grok-4.6"}}}\n' "$id"
       ;;
     *'"method":"session/load"'*)
       if [ -z "$authenticated" ]; then
@@ -843,11 +843,7 @@ func TestGrokThinkingCatalogIsPerModel(t *testing.T) {
 	if models[0].Thinking == nil {
 		t.Fatal("grok-4.6 should advertise its observed effort levels")
 	}
-	got := make([]string, 0, len(models[0].Thinking.SupportedLevels))
-	for _, level := range models[0].Thinking.SupportedLevels {
-		got = append(got, level.Value)
-	}
-	if strings.Join(got, ",") != "xhigh,high,medium,low" || models[0].Thinking.DefaultLevel != "high" {
+	if strings.Join(thinkingLevelValues(models[0].Thinking), ",") != "xhigh,high,medium,low" || models[0].Thinking.DefaultLevel != "high" {
 		t.Fatalf("grok-4.6 thinking = %+v, want xhigh/high/medium/low with high default", models[0].Thinking)
 	}
 	if models[1].Thinking == nil || strings.Join(thinkingLevelValues(models[1].Thinking), ",") != "high,medium,low" {
@@ -903,20 +899,6 @@ func TestGrokSelectAuthMethod(t *testing.T) {
 		if got != tc.wantID || (err != nil) != tc.wantErr {
 			t.Errorf("%s: selectGrokAuthMethod(%v, %v) = (%q, %v), want (%q, err=%v)",
 				tc.name, tc.methods, tc.haveKey, got, err, tc.wantID, tc.wantErr)
-		}
-	}
-}
-
-func TestGrokIsKnownThinkingValue(t *testing.T) {
-	t.Parallel()
-	for _, level := range []string{"", "none", "minimal", "low", "medium", "high", "xhigh", "future-level"} {
-		if !IsKnownThinkingValue("grok", level) {
-			t.Errorf("IsKnownThinkingValue(grok, %q) = false", level)
-		}
-	}
-	for _, level := range []string{".hidden", "bad value"} {
-		if IsKnownThinkingValue("grok", level) {
-			t.Errorf("IsKnownThinkingValue(grok, %q) = true, want rejected", level)
 		}
 	}
 }

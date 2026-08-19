@@ -520,6 +520,8 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		// literal gate opens for both.
 		{"hermes", "low", true},
 		{"grok", "", true},
+		{"grok", "none", true},
+		{"grok", "minimal", true},
 		{"grok", "low", true},
 		{"grok", "medium", true},
 		{"grok", "high", true},
