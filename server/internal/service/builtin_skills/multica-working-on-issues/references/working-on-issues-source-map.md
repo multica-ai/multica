@@ -127,6 +127,7 @@ and is hidden from the PR list.
 | `shouldEnqueueAgentTask` returns false for `backlog` (parking lot) | `server/internal/handler/issue.go:2644-2648` | new citation |
 | Backlog → non-backlog (not done/cancelled) enqueues on update | `server/internal/handler/issue.go:2537-2540` | `:2523` |
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
+| Child → effective `in_review` / `blocked` posts an immediate parent attention handoff; batch groups once per parent | `server/internal/handler/issue_child_done.go` (`notifyParentOfChildAttention`, `notifyParentsOfBatchChildAttention`); hooks in `server/internal/handler/issue.go` (`UpdateIssue`, `BatchUpdateIssues`) | new citation |
 | Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
 | Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
 | `StartTask` / `CompleteTask` do not write issue status (agent CLI owns progress) | `server/internal/service/task.go` (`StartTask` / `CompleteTask` comments) | new citation |
@@ -166,6 +167,7 @@ on those assignments creating their normal queued runs.
 |---|---|
 | `issue.stage` column (nullable, `>= 1`) | `server/migrations/123_issue_stage.up.sql` |
 | Stage barrier: notify+wake fire only when the lowest unfinished stage is all-terminal; unstaged set = one implicit stage | `server/internal/handler/issue_child_done.go:231` (`stageBarrierClosed`) |
+| Review-ready / blocked child handoff is immediate and does not count as stage completion | `server/internal/handler/issue_child_done.go` (`childAttentionTransition`, `notifyParentOfChildAttention`) |
 | Per-stage summary + next stage for the wake comment | `server/internal/handler/issue_child_done.go:254` (`stageProgressSummary`) |
 | `--stage` on `issue create` / `issue update` | `server/cmd/multica/cmd_issue.go:328,350` |
 | `multica issue children <id>` (sub-issues grouped by stage) | `server/cmd/multica/cmd_issue.go:114,678`; stage `done` counting via `isTerminalChildIssue` (reads `status_category`, MUL-6243); route `GET /api/issues/{id}/children` → `ListChildIssues` |

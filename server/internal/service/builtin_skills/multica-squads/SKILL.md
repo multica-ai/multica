@@ -199,6 +199,23 @@ Current behavior: resolve the squad, read `leader_id`, enqueue a leader task,
 and use the current comment as the trigger comment. It does not enqueue every
 squad member.
 
+## Child handoffs to a squad parent
+
+When a sub-issue under a squad-assigned parent first enters `in_review` or
+`blocked`, Multica posts a system handoff on the parent and wakes the parent
+squad's leader. This also applies when the sub-issue itself is assigned directly
+to an ordinary agent: routing follows the parent owner, not the child owner.
+Custom statuses inherit this behavior from their `in_review` / `blocked`
+category, and moving between two custom statuses in the same category does not
+duplicate the handoff.
+
+This attention handoff is not stage completion. It does not mark the child
+`done`, close a stage barrier, or promote later stages. The leader reviews the
+child and decides the next action. If the child later reaches `done` or
+`cancelled`, the existing terminal stage-barrier handoff runs separately. Batch
+updates aggregate attention handoffs to at most one comment and wake per parent;
+pending-task dedup still prevents duplicate leader runs.
+
 ## Autopilot behavior
 
 Autopilots can be assigned to squads. For `assignee_type = "squad"`:

@@ -200,8 +200,12 @@ on it. These are the contracts, not advice:
   `in_progress` step on the first assignment turn, keep the parent there while
   members work, and only move to `in_review` when a later re-trigger confirms
   the overall goal is met.
-- **`in_review`** is an accepted issue status. Some workflows use it while a PR
-  is open and awaiting review; moving to it is an explicit mutation.
+- **`in_review` / `blocked` on a child** immediately posts an attention handoff
+  on its parent. An agent or squad parent assignee gets the existing deduped
+  task wake; a human parent assignee gets an action-required inbox item. This
+  does not mark the child `done` or close its stage. Custom statuses inherit the
+  same behavior from their category, and switching between two statuses in the
+  same category does not emit a second handoff.
 - **`done`** on a child issue posts a system comment on its parent. If a PR
   carries close intent (`Closes MUL-XXXX`), it advances the issue to `done`
   itself on merge — you do not also need to flip it manually.
@@ -263,6 +267,11 @@ status (`done`/`cancelled`). A completion that does not close a stage is silent
 (no comment, no wake). A sibling set with **no** stages is one implicit stage,
 so the parent is woken once when the *last* sub-issue finishes — not on every
 child.
+
+Review-ready and blocked handoffs are separate from this terminal barrier. A
+child entering `in_review` or `blocked` wakes its parent immediately for review,
+but remains non-terminal in stage progress; the leader must accept or unblock it
+and eventually move it to `done`/`cancelled` before the stage can close.
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee, who then decides whether to promote the next stage's

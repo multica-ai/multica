@@ -201,16 +201,28 @@ Contracts:
 - `run_only` creates task directly for leader (autopilot.go:99-106, dispatch via
   `resolveAutopilotLeader` at autopilot.go:284).
 
-## Child-done Parent Trigger
+## Child Parent Handoffs
 
 Source:
 
 ```text
-server/internal/handler/issue_child_done.go       # dispatchParentAssigneeTrigger ~246, triggerChildDoneSquad ~304
+server/internal/handler/issue.go                  # UpdateIssue / BatchUpdateIssues handoff hooks
+server/internal/handler/issue_child_done.go       # notifyParentOfChildAttention, notifyParentOfChildDone, dispatchParentAssigneeTrigger
 ```
 
 Contracts:
 
+- when a child first crosses into the effective `in_review` or `blocked`
+  category, `notifyParentOfChildAttention` posts an immediate system handoff on
+  the parent and routes it to the parent owner. A squad parent therefore wakes
+  its leader even when the child is assigned directly to an ordinary agent;
+- custom status keys are compared through `issuestatus.Effective`, so moving
+  within one category does not duplicate the handoff. Batch updates group the
+  transitions per parent and emit at most one comment/wake, preferring a
+  `blocked` representative;
+- attention does not close the stage barrier, auto-mark the child `done`, or
+  promote later stages. A later terminal transition still follows the separate
+  child-done path;
 - when a child issue closes a stage barrier and the parent is assigned to a
   squad, the parent squad leader is triggered (triggerChildDoneSquad in
   issue_child_done.go);
@@ -221,14 +233,14 @@ Contracts:
   only carrier of the stage-barrier "advance / wrap up" instruction (MUL-3969,
   mirrors the agent path from MUL-2808). Re-triggering is bounded only by
   `HasPendingTaskForIssueAndAgent` (idempotent per parent issue + agent).
-- no leader-invocation gate: child-done does NOT re-check whether the child's
+- no leader-invocation gate: parent handoffs do NOT re-check whether the child's
   completer can invoke the leader. The parent was already permission-checked at
   squad-assign time (`validateAssigneePair`), so waking its own leader is a
   coordination handoff, not a fresh invocation. Re-checking it here failed
   closed for the DEFAULT private leader (the child's completer is an
   agent/system actor with no resolvable human originator), stranding every
   process-squad pipeline after stage 1 while direct-to-leader-agent parents
-  advanced fine (MUL-4063 / GH #4928). Agent and squad child-done now share one
+  advanced fine (MUL-4063 / GH #4928). Agent and squad parent handoffs share one
   ungated path; any future invocation gate must be added to BOTH together.
 - parent status is not auto-advanced by the barrier: the system comment asks the
   leader to continue or — when the overall goal is met — run
