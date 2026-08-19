@@ -3476,6 +3476,7 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 			targetStatus:       statusKeyForGuard,
 			targetAssigneeType: params.AssigneeType,
 			targetAssigneeID:   params.AssigneeID,
+			requireRenewal:     workerReopen,
 		}
 	}
 
@@ -4227,6 +4228,7 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 				targetStatus:       batchStatusKey,
 				targetAssigneeType: params.AssigneeType,
 				targetAssigneeID:   params.AssigneeID,
+				requireRenewal:     workerReopen,
 			}
 		}
 

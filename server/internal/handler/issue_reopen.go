@@ -15,6 +15,7 @@ type workerReopenGuard struct {
 	targetStatus       string
 	targetAssigneeType pgtype.Text
 	targetAssigneeID   pgtype.UUID
+	requireRenewal     bool
 }
 
 type workerReopenDeniedError struct {
@@ -42,6 +43,12 @@ func enforceWorkerReopenOnLockedIssue(
 		return workerReopenDeniedError{status: status, message: message}
 	}
 	if !workerReopen {
+		if guard.requireRenewal {
+			return workerReopenDeniedError{
+				status:  http.StatusConflict,
+				message: "issue changed before worker claim renewal",
+			}
+		}
 		// The guard is also installed for ordinary agent status mutations so a
 		// row that becomes terminal after advisory preflight cannot turn into an
 		// unrenewed reopen. Non-terminal transitions remain on their existing
