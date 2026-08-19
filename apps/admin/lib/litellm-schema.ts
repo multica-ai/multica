@@ -9,6 +9,11 @@ export const LiteLlmKeySchema = z.object({
   key_alias: z.string().nullish(),
   team_alias: z.string().nullish(),
   team_id: z.string().nullish(),
+  metadata: z
+    .object({
+      workspace_slug: z.string().nullish(),
+    })
+    .nullish(),
 });
 
 export const LiteLlmKeyListSchema = z.object({

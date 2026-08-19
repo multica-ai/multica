@@ -19,7 +19,11 @@ import {
  * https://llmproxy.g2.com/v1.
  */
 
-const BASE = (process.env.LITELLM_BASE_URL || "").replace(/\/$/, "");
+// LITELLM_BASE_URL carries a `/v1` suffix for OpenAI-compatible routes
+// (chat/completions etc.), but the admin API (/key/*, /team/*) used here is
+// mounted at the proxy root, not under /v1 — strip it so apiGet() doesn't
+// 404 every call.
+const BASE = (process.env.LITELLM_BASE_URL || "").replace(/\/$/, "").replace(/\/v1$/, "");
 const KEY = process.env.LITELLM_API_KEY || "";
 
 export function litellmConfigured(): boolean {
@@ -68,6 +72,10 @@ export async function listLiteLlmKeys(): Promise<LiteLlmKey[]> {
         size: "1000",
         key_alias: "agentfarm-",
         substring_matching: "true",
+        // Without this, /key/list returns `keys` as an array of hashed
+        // token strings rather than objects — key_alias/metadata would be
+        // unreadable and every parseWithFallback would drop the page.
+        return_full_object: "true",
       });
     } catch (error) {
       console.error(`[admin] LiteLLM /key/list page ${page} failed`, error);
