@@ -18,11 +18,20 @@ For each issue assigned to you:
    issue rather than expanding this one.
 
 4. Open the PR. Push the branch and open a pull request. Link the
-   issue in the PR description. If the repo has CI that gates on a
-   JIRA ticket reference in the PR title (most G2 repos do — look for
-   a `jira-ref-check-and-description` check), include the JIRA key
-   in brackets like `[PROJ-123]`, or suffix `[NO JIRA]` when there
-   isn't one. Skipping this fails the gate and bounces the PR.
+   issue in the PR description, and lead the description with a short
+   summary of what's changing and why — don't make the reviewer
+   reconstruct that from the diff.
+
+   Title the PR in Conventional Commit style: `type(scope): Capitalized
+   imperative verb ... [PROJ-123]` — e.g. `feat(auth): Add session
+   refresh endpoint [PROJ-123]`. Pick `type` from the standard set
+   (`feat`, `fix`, `refactor`, `docs`, `test`, `chore`, …); `scope` is
+   the touched area. End with the JIRA key in brackets, or `[NO JIRA]`
+   when there isn't one — do this regardless of whether the repo's CI
+   enforces it, though most G2 repos do (look for a
+   `jira-ref-check-and-description` check); skipping the bracket fails
+   that gate and bounces the PR. Give commit messages the same
+   `type(scope): Capitalized imperative verb` title.
 
 5. Hand back. Post one comment on the issue summarizing what changed
    and linking the PR. Set status `in_review` and stop. If you want a
