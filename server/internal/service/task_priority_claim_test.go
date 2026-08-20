@@ -214,6 +214,133 @@ func TestBatchClaimPrioritizesAcrossAgentsOnOneRuntime(t *testing.T) {
 	}
 }
 
+type blockedPriorityHeadFixture struct {
+	priorityClaimFixture
+	runningID string
+	highID    string
+	lowID     string
+	mediumID  string
+}
+
+func newBlockedPriorityHeadFixture(t *testing.T) blockedPriorityHeadFixture {
+	t.Helper()
+	f := newPriorityClaimFixture(t, 2)
+	otherAgentID := f.fx.Agent(t, "Eligible Medium Agent", f.runtimeID, dbfx.Cols{
+		"max_concurrent_tasks": 1,
+	})
+	runningIssue := f.issue(t, "running issue X", "high")
+	lowIssue := f.issue(t, "eligible low issue Y", "low")
+	mediumIssueID := f.fx.Issue(t, "eligible medium issue Z", dbfx.Cols{
+		"priority":      "medium",
+		"assignee_type": "agent",
+		"assignee_id":   otherAgentID,
+	})
+
+	return blockedPriorityHeadFixture{
+		priorityClaimFixture: f,
+		runningID: f.fx.Task(t, f.agentID, dbfx.Cols{
+			"runtime_id": f.runtimeID,
+			"issue_id":   util.UUIDToString(runningIssue.ID),
+			"status":     "running",
+			"priority":   3,
+			"started_at": dbfx.Raw("now() - interval '1 minute'"),
+		}),
+		highID: f.fx.Task(t, f.agentID, dbfx.Cols{
+			"runtime_id": f.runtimeID,
+			"issue_id":   util.UUIDToString(runningIssue.ID),
+			"priority":   3,
+		}),
+		lowID: f.fx.Task(t, f.agentID, dbfx.Cols{
+			"runtime_id": f.runtimeID,
+			"issue_id":   util.UUIDToString(lowIssue.ID),
+			"priority":   1,
+		}),
+		mediumID: f.fx.Task(t, otherAgentID, dbfx.Cols{
+			"runtime_id": f.runtimeID,
+			"issue_id":   mediumIssueID,
+			"priority":   2,
+		}),
+	}
+}
+
+func (f blockedPriorityHeadFixture) assertOnlyMediumClaimed(t *testing.T, claimedID string) {
+	t.Helper()
+	if claimedID != f.mediumID {
+		t.Fatalf("claimed task = %s, want globally eligible medium %s", claimedID, f.mediumID)
+	}
+
+	wantStatuses := map[string]string{
+		f.runningID: "running",
+		f.highID:    "queued",
+		f.lowID:     "queued",
+	}
+	for id, want := range wantStatuses {
+		var got string
+		f.fx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, id).Scan(&got)
+		if got != want {
+			t.Fatalf("task %s status = %s, want %s", id, got, want)
+		}
+	}
+}
+
+func TestRuntimeClaimSkipsBlockedPriorityHeadAcrossAgents(t *testing.T) {
+	ctx := context.Background()
+	f := newBlockedPriorityHeadFixture(t)
+
+	claimed, err := f.service.ClaimTaskForRuntime(ctx, util.MustParseUUID(f.runtimeID))
+	if err != nil {
+		t.Fatalf("singular runtime claim: %v", err)
+	}
+	if claimed == nil {
+		t.Fatal("singular runtime claim returned no task")
+	}
+	f.assertOnlyMediumClaimed(t, util.UUIDToString(claimed.ID))
+}
+
+func TestBatchRuntimeClaimSkipsBlockedPriorityHeadAcrossAgents(t *testing.T) {
+	ctx := context.Background()
+	f := newBlockedPriorityHeadFixture(t)
+
+	claimed, err := f.service.ClaimTasksForRuntimes(
+		ctx,
+		[]pgtype.UUID{util.MustParseUUID(f.runtimeID)},
+		1,
+	)
+	if err != nil {
+		t.Fatalf("batch runtime claim: %v", err)
+	}
+	if len(claimed) != 1 {
+		t.Fatalf("batch runtime claim returned %d tasks, want 1", len(claimed))
+	}
+	f.assertOnlyMediumClaimed(t, util.UUIDToString(claimed[0].ID))
+}
+
+func TestRuntimeScopedClaimNeverDowngradesExactCandidate(t *testing.T) {
+	ctx := context.Background()
+	f := newBlockedPriorityHeadFixture(t)
+
+	claimed, err := f.service.claimTask(
+		ctx,
+		util.MustParseUUID(f.agentID),
+		util.MustParseUUID(f.runtimeID),
+		util.MustParseUUID(f.highID),
+	)
+	if err != nil {
+		t.Fatalf("exact candidate claim: %v", err)
+	}
+	if claimed != nil {
+		t.Fatalf("exact blocked candidate downgraded to task %s", util.UUIDToString(claimed.ID))
+	}
+
+	for _, id := range []string{f.highID, f.lowID} {
+		var status string
+		f.fx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, id).Scan(&status)
+		if status != "queued" {
+			t.Fatalf("task %s status = %s, want queued", id, status)
+		}
+	}
+}
+
 // TestSharedIssueDispatchFunnelsPreserveQueuePriority exercises each
 // distinct task-construction funnel. Assignment, status promotion, sub-issue
 // creation, and autopilot create_issue all use EnqueueTaskForIssue; explicit

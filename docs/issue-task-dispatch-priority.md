@@ -14,13 +14,13 @@ Issue priorities map to the task queue as follows:
 | `low` | 1 |
 | `none` or an unknown legacy value | 0 |
 
-The authoritative per-agent claim query is `server/pkg/db/queries/agent.sql::ClaimAgentTask`. It selects only `queued` tasks on the requested healthy runtime, excludes a task when the same agent already has active work for that issue or chat, and orders eligible rows by:
+The runtime candidate queries first exclude tasks when the same agent already has active work for that issue or chat, then order the globally eligible rows by:
 
 1. task priority descending;
 2. task creation time ascending;
 3. task UUID ascending as the deterministic final tie-break.
 
-`server/internal/service/task.go::ClaimTaskForRuntime` and `ClaimTasksForRuntimes` list candidates with the same priority/FIFO order and then call `claimTask`, which uses `ClaimAgentTask` inside the agent capacity transaction. The singular and batch daemon poll APIs therefore share one final selector.
+`server/internal/service/task.go::ClaimTaskForRuntime` and `ClaimTasksForRuntimes` pass each candidate's exact ID to `claimTask`. Inside the agent capacity transaction, `server/pkg/db/queries/agent.sql::ClaimAgentTask` re-checks runtime health and the same serialization predicate for that exact row. If capacity or eligibility changed after the candidate snapshot, the attempt returns no task and the outer loop continues in global priority/FIFO order; it cannot silently substitute a lower-priority row from that agent. The singular and batch daemon poll APIs therefore share one final selector contract.
 
 If the highest-priority candidate's agent has no free slot, the claim loop may select the next eligible agent. Capacity is checked while the agent row is locked. A lower-priority healthy run that already owns a slot stays active; a newly queued high-priority task can only win the next slot that becomes available.
 
@@ -66,5 +66,7 @@ Changing those policies requires a task-kind scheduling contract; it must not be
 - `service.TestIssueTaskClaimUsesPriorityThenFIFO` pins all five ranks and FIFO tie-breaking at the singular runtime claim boundary.
 - `service.TestHighPriorityTakesNextFreeSlotWithoutPreemption` pins the arriving-high case and asserts the healthy low run and queued low successor are unchanged.
 - `service.TestBatchClaimPrioritizesAcrossAgentsOnOneRuntime` pins priority selection across agents sharing one runtime when the batch has one available result slot.
+- `service.TestRuntimeClaimSkipsBlockedPriorityHeadAcrossAgents` and its batch counterpart pin global ordering when one agent's highest queued row is blocked by per-issue serialization.
+- `service.TestRuntimeScopedClaimNeverDowngradesExactCandidate` pins the race re-check: an exact candidate that becomes ineligible cannot silently dispatch a lower-priority row from the same agent.
 - `service.TestSharedIssueDispatchFunnelsPreserveQueuePriority` pins assignment/status/sub-issue/autopilot-create-issue's shared issue funnel, mention/wake-comment's shared mention funnel, manual rerun, and automatic retry before those tasks reach the shared claim boundary.
 - `handler.TestPreviewIssueTrigger_CreateAgentVsBacklog`, `TestPreviewIssueTrigger_MemberNoTrigger`, and `TestPreviewIssueTrigger_MatchesWritePath` pin the handler gates that keep backlog-category and human-assigned issues out of the task queue.

@@ -2985,15 +2985,17 @@ func (s *TaskService) broadcastChatCancelFinalized(ctx context.Context, task db.
 // ClaimTask atomically claims the next queued task for an agent on its current
 // runtime, respecting max_concurrent_tasks.
 func (s *TaskService) ClaimTask(ctx context.Context, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
-	return s.claimTask(ctx, agentID, pgtype.UUID{})
+	return s.claimTask(ctx, agentID, pgtype.UUID{}, pgtype.UUID{})
 }
 
 // claimTask is the runtime-scoped claim primitive used by daemon poll paths.
 // The exported ClaimTask wrapper omits runtimeID and therefore resolves the
 // agent's currently bound runtime. Scoping the SQL claim itself prevents an
 // offline candidate on runtime A from causing the same agent's task on runtime
-// B to be dispatched and then dropped by the caller's runtime guard.
-func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.UUID) (*db.AgentTaskQueue, error) {
+// B to be dispatched and then dropped by the caller's runtime guard. Runtime
+// poll paths also provide candidateTaskID so a failed eligibility re-check can
+// never downgrade the claim to a lower-priority row for the same agent.
+func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID, candidateTaskID pgtype.UUID) (*db.AgentTaskQueue, error) {
 	start := time.Now()
 	outcome := "unknown"
 	var getAgentMs, countRunningMs, claimAgentMs, reanchorMs, updateStatusMs, dispatchMs int64
@@ -3036,6 +3038,7 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		task, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
 			AgentID:          agentID,
 			RuntimeID:        claimRuntimeID,
+			CandidateTaskID:  candidateTaskID,
 			PrepareLeaseSecs: prepareLeaseDuration.Seconds(),
 			RuntimeStaleSecs: RuntimeClaimFreshnessSeconds,
 		})
@@ -3213,7 +3216,7 @@ func (s *TaskService) ClaimTaskForRuntime(ctx context.Context, runtimeID pgtype.
 		triedAgents[agentKey] = struct{}{}
 		tried++
 
-		task, err := s.claimTask(ctx, candidate.AgentID, runtimeID)
+		task, err := s.claimTask(ctx, candidate.AgentID, runtimeID, candidate.ID)
 		if err != nil {
 			loopMs = time.Since(loopStart).Milliseconds()
 			outcome = "error_claim"
@@ -3472,7 +3475,7 @@ func (s *TaskService) ClaimTasksForRuntimes(ctx context.Context, runtimeIDs []pg
 		}
 		triedAgents[agentKey] = struct{}{}
 
-		task, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID)
+		task, err := s.claimTask(ctx, candidates[i].AgentID, candidates[i].RuntimeID, candidates[i].ID)
 		if err != nil {
 			// Each scoped claim commits in its own transaction, so earlier
 			// iterations (and step-2 reclaims) are already dispatched
