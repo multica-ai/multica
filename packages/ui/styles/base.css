@@ -366,6 +366,18 @@ html[data-dnd-dragging="true"] * {
   }
 }
 
+/* Chrome implemented CSS Grid subgrid in 117. Self-hosted clients can remain
+ * on Chromium 116 for a long time, where `grid-template-columns: subgrid` is
+ * discarded and nested list cells collapse into implicit tracks. Repeat the
+ * computed parent tracks and gap through Header -> Body -> Row on those older
+ * engines. Modern browsers keep the native subgrid path. */
+@supports not (grid-template-columns: subgrid) {
+  .list-grid-subgrid {
+    grid-template-columns: inherit;
+    column-gap: inherit;
+  }
+}
+
 /* In-page find (Cmd/Ctrl+F on the issue detail page). Matches are painted with
  * the CSS Custom Highlight API — ranges only, no DOM mutation — so the tint
  * layers cleanly over React-rendered markdown and the contenteditable
