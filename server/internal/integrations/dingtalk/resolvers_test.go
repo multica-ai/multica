@@ -195,10 +195,11 @@ func TestDingTalkP2PSkipsGroupDiscoveryAndUsesDefaultAgentSession(t *testing.T) 
 	msg := channel.InboundMessage{Source: channel.Source{
 		ChatID: "cid-direct", ChatType: channel.ChatTypeP2P, SenderID: "staff-7",
 	}}
+	msg.Raw, _ = json.Marshal(dingtalkRawEvent{})
 	discovery := &fakeValidatedInboundQueries{err: errors.New("must not query group routes for p2p")}
 
 	resolved, err := (&validatedInboundResolver{q: discovery}).ResolveValidatedInbound(
-		context.Background(), inst, engine.ResolvedIdentity{}, msg,
+		context.Background(), inst, engine.ResolvedIdentity{UserID: senderID}, msg,
 	)
 	if err != nil || resolved.AgentID != defaultAgentID || discovery.calls != 0 {
 		t.Fatalf("p2p validated resolution = %+v err=%v discovery calls=%d", resolved, err, discovery.calls)
@@ -242,19 +243,22 @@ func TestDingTalkP2PSkipsGroupDiscoveryAndUsesDefaultAgentSession(t *testing.T) 
 }
 
 func TestValidatedInboundResolverDiscoversGroupAndFinalizesAgent(t *testing.T) {
-	var installationID, workspaceID, defaultAgentID, routeAgentID pgtype.UUID
-	installationID.Bytes[0], workspaceID.Bytes[0], defaultAgentID.Bytes[0], routeAgentID.Bytes[0] = 1, 2, 3, 4
-	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, routeAgentID.Valid = true, true, true, true
+	var installationID, workspaceID, defaultAgentID, routeAgentID, multicaUserID pgtype.UUID
+	installationID.Bytes[0], workspaceID.Bytes[0], defaultAgentID.Bytes[0], routeAgentID.Bytes[0], multicaUserID.Bytes[0] = 1, 2, 3, 4, 5
+	installationID.Valid, workspaceID.Valid, defaultAgentID.Valid, routeAgentID.Valid, multicaUserID.Valid = true, true, true, true, true
 	fake := &fakeValidatedInboundQueries{row: db.DiscoverDingTalkGroupRouteRow{
 		AgentID: routeAgentID, Revision: 7, AgentActive: true,
 	}}
-	raw, _ := json.Marshal(dingtalkRawEvent{ConversationTitle: "Platform team"})
+	raw, _ := json.Marshal(dingtalkRawEvent{
+		ConversationTitle: "Platform team",
+		Sender:            dingtalkSenderProfile{Nickname: "Grace Hopper"},
+	})
 	resolved, err := (&validatedInboundResolver{q: fake}).ResolveValidatedInbound(
 		context.Background(),
 		engine.ResolvedInstallation{ID: installationID, WorkspaceID: workspaceID, AgentID: defaultAgentID},
-		engine.ResolvedIdentity{},
+		engine.ResolvedIdentity{UserID: multicaUserID},
 		channel.InboundMessage{
-			Source: channel.Source{ChatID: "cid-platform", ChatType: channel.ChatTypeGroup},
+			Source: channel.Source{ChatID: "cid-platform", ChatType: channel.ChatTypeGroup, SenderID: "staff-group"},
 			Raw:    raw,
 		},
 	)
@@ -283,6 +287,113 @@ func TestValidatedInboundResolverPreservesArchivedRoute(t *testing.T) {
 	}
 	if resolved.AgentID != routeAgentID {
 		t.Fatalf("archived route agent = %v, want preserved %v", resolved.AgentID, routeAgentID)
+	}
+}
+
+func TestSessionBinderRecordsParticipantInsideAppendTransaction(t *testing.T) {
+	var sessionID, installationID, workspaceID, multicaUserID pgtype.UUID
+	sessionID.Bytes[0], installationID.Bytes[0], workspaceID.Bytes[0], multicaUserID.Bytes[0] = 1, 2, 3, 4
+	sessionID.Valid, installationID.Valid, workspaceID.Valid, multicaUserID.Valid = true, true, true, true
+	raw, _ := json.Marshal(dingtalkRawEvent{Sender: dingtalkSenderProfile{
+		SenderID: "encrypted-open-id", CorpID: "corp-42", Nickname: "Ada Lovelace",
+		IsAdmin: true, MessageCreatedAtMS: 1_777_777_777_000,
+	}})
+	capture := &captureChatSession{runGuard: true}
+	var participantParams db.RecordDingTalkParticipantParams
+	participantCalls := 0
+	binder := &sessionBinder{
+		session: capture,
+		recordParticipantForAppend: func(_ context.Context, _ pgx.Tx, params db.RecordDingTalkParticipantParams) (int64, error) {
+			participantCalls++
+			participantParams = params
+			return 1, nil
+		},
+	}
+
+	_, err := binder.AppendMessage(context.Background(), engine.AppendParams{
+		SessionID: sessionID, Sender: multicaUserID,
+		InstallationID: installationID, WorkspaceID: workspaceID,
+		Message: channel.InboundMessage{
+			Text: "hello", Raw: raw,
+			Source: channel.Source{ChatType: channel.ChatTypeP2P, SenderID: "staff-9"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := db.RecordDingTalkParticipantParams{
+		SenderID: "encrypted-open-id", CorpID: "corp-42", Nickname: "Ada Lovelace",
+		IsAdmin: true, MessageCreatedAtMs: 1_777_777_777_000,
+		InstallationID: installationID, WorkspaceID: workspaceID,
+		MulticaUserID: multicaUserID, DingtalkStaffID: "staff-9",
+	}
+	if participantCalls != 1 || participantParams != want || capture.appended != 1 {
+		t.Fatalf("participant calls=%d params=%+v durable appends=%d", participantCalls, participantParams, capture.appended)
+	}
+}
+
+func TestSessionBinderParticipantFailurePreventsDurableAppend(t *testing.T) {
+	queryErr := errors.New("participant database unavailable")
+	raw, _ := json.Marshal(dingtalkRawEvent{})
+	capture := &captureChatSession{runGuard: true}
+	binder := &sessionBinder{
+		session: capture,
+		recordParticipantForAppend: func(context.Context, pgx.Tx, db.RecordDingTalkParticipantParams) (int64, error) {
+			return 0, queryErr
+		},
+	}
+
+	_, err := binder.AppendMessage(context.Background(), engine.AppendParams{
+		Message: channel.InboundMessage{Raw: raw},
+	})
+	if !errors.Is(err, queryErr) || capture.appended != 0 {
+		t.Fatalf("participant failure err=%v durable appends=%d", err, capture.appended)
+	}
+}
+
+func TestSessionBinderMissingParticipantBindingPreventsDurableAppend(t *testing.T) {
+	raw, _ := json.Marshal(dingtalkRawEvent{})
+	capture := &captureChatSession{runGuard: true}
+	binder := &sessionBinder{
+		session: capture,
+		recordParticipantForAppend: func(context.Context, pgx.Tx, db.RecordDingTalkParticipantParams) (int64, error) {
+			return 0, nil
+		},
+	}
+
+	_, err := binder.AppendMessage(context.Background(), engine.AppendParams{
+		Message: channel.InboundMessage{Raw: raw},
+	})
+	if !errors.Is(err, errDingTalkParticipantBindingUnavailable) || capture.appended != 0 {
+		t.Fatalf("missing participant binding err=%v durable appends=%d", err, capture.appended)
+	}
+}
+
+func TestSessionBinderRouteChangeDoesNotRecordParticipant(t *testing.T) {
+	raw, _ := json.Marshal(dingtalkRawEvent{})
+	capture := &captureChatSession{runGuard: true}
+	participantCalls := 0
+	binder := &sessionBinder{
+		session: capture,
+		lockRouteForAppend: func(context.Context, pgx.Tx, db.LockDingTalkGroupRouteForAppendParams) error {
+			return pgx.ErrNoRows
+		},
+		recordParticipantForAppend: func(context.Context, pgx.Tx, db.RecordDingTalkParticipantParams) (int64, error) {
+			participantCalls++
+			return 1, nil
+		},
+	}
+
+	_, err := binder.AppendMessage(context.Background(), engine.AppendParams{
+		Message: channel.InboundMessage{
+			Raw: raw,
+			Source: channel.Source{
+				ChatType: channel.ChatTypeGroup, ChatID: "group-1", SenderID: "staff-9",
+			},
+		},
+	})
+	if !errors.Is(err, engine.ErrRouteChanged) || participantCalls != 0 || capture.appended != 0 {
+		t.Fatalf("route change err=%v participant calls=%d durable appends=%d", err, participantCalls, capture.appended)
 	}
 }
 

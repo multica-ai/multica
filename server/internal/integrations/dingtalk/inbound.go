@@ -23,7 +23,12 @@ type botCallbackData struct {
 	ConversationId    string          `json:"conversationId"`
 	ConversationTitle string          `json:"conversationTitle"`
 	ConversationType  string          `json:"conversationType"`
+	SenderId          string          `json:"senderId"`
 	SenderStaffId     string          `json:"senderStaffId"`
+	SenderCorpId      string          `json:"senderCorpId"`
+	SenderNick        string          `json:"senderNick"`
+	IsAdmin           bool            `json:"isAdmin"`
+	CreateAt          int64           `json:"createAt"`
 	MsgId             string          `json:"msgId"`
 	Msgtype           string          `json:"msgtype"`
 	IsInAtList        bool            `json:"isInAtList"`
@@ -75,7 +80,21 @@ func refAlt(downloadCode, pictureDownloadCode string) (ref, alt string) {
 type dingtalkRawEvent struct {
 	AppID             string                  `json:"app_id"`
 	ConversationTitle string                  `json:"conversation_title,omitempty"`
+	Sender            dingtalkSenderProfile   `json:"sender"`
 	Media             []dingtalkMediaResource `json:"media,omitempty"`
+}
+
+// dingtalkSenderProfile contains only stable, non-secret sender metadata from
+// the Stream callback. It is carried through the opaque adapter envelope so the
+// append transaction can update the linked member's participant profile beside
+// the durable message and dedup mark. Session webhooks and message bodies
+// deliberately never enter this structure.
+type dingtalkSenderProfile struct {
+	SenderID           string `json:"sender_id,omitempty"`
+	CorpID             string `json:"corp_id,omitempty"`
+	Nickname           string `json:"nickname,omitempty"`
+	IsAdmin            bool   `json:"is_admin"`
+	MessageCreatedAtMS int64  `json:"message_created_at_ms,omitempty"`
 }
 
 type dingtalkMediaResource struct {
@@ -116,7 +135,17 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 	}
 
 	chatType := dingtalkChatType(data.ConversationType)
-	rawEvent := dingtalkRawEvent{AppID: appID, ConversationTitle: strings.TrimSpace(data.ConversationTitle)}
+	rawEvent := dingtalkRawEvent{
+		AppID:             appID,
+		ConversationTitle: strings.TrimSpace(data.ConversationTitle),
+		Sender: dingtalkSenderProfile{
+			SenderID:           strings.TrimSpace(data.SenderId),
+			CorpID:             strings.TrimSpace(data.SenderCorpId),
+			Nickname:           strings.TrimSpace(data.SenderNick),
+			IsAdmin:            data.IsAdmin,
+			MessageCreatedAtMS: data.CreateAt,
+		},
+	}
 	msg := channel.InboundMessage{
 		EventID:        data.MsgId,
 		MessageID:      data.MsgId,

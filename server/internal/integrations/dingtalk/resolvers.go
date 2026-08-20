@@ -21,6 +21,8 @@ import (
 // constraint, like the existing lark_chat and slack_chat channel origins.
 const originDingTalkChat = "dingtalk_chat"
 
+var errDingTalkParticipantBindingUnavailable = errors.New("dingtalk: participant binding is no longer valid")
+
 // This file is the DingTalk ResolverSet: the platform-specific seams the
 // channel-agnostic engine.Router runs the inbound pipeline through. It is built
 // entirely on the generic channel_* queries plus the shared engine.ChatSession,
@@ -38,12 +40,15 @@ func NewDingTalkResolverSet(q *db.Queries, tx engine.TxStarter, replier engine.O
 		_, err := q.WithTx(appendTx).LockDingTalkGroupRouteForAppend(ctx, arg)
 		return err
 	}
+	recordParticipantForAppend := func(ctx context.Context, appendTx pgx.Tx, arg db.RecordDingTalkParticipantParams) (int64, error) {
+		return q.WithTx(appendTx).RecordDingTalkParticipant(ctx, arg)
+	}
 	set := engine.ResolverSet{
 		Installation: &installationResolver{q: q},
 		Identity:     &identityResolver{q: q},
 		Validated:    &validatedInboundResolver{q: q},
 		Dedup:        &deduper{q: q},
-		Session: &sessionBinder{q: q, lockRouteForAppend: lockRouteForAppend, session: engine.NewChatSession(q, tx, TypeDingTalk, engine.SessionTitles{
+		Session: &sessionBinder{q: q, lockRouteForAppend: lockRouteForAppend, recordParticipantForAppend: recordParticipantForAppend, session: engine.NewChatSession(q, tx, TypeDingTalk, engine.SessionTitles{
 			Group:    "DingTalk group",
 			Direct:   "DingTalk direct message",
 			Fallback: "DingTalk chat",
@@ -293,9 +298,10 @@ type sessionQueries interface {
 }
 
 type sessionBinder struct {
-	q                  sessionQueries
-	lockRouteForAppend func(context.Context, pgx.Tx, db.LockDingTalkGroupRouteForAppendParams) error
-	session            chatSession
+	q                          sessionQueries
+	lockRouteForAppend         func(context.Context, pgx.Tx, db.LockDingTalkGroupRouteForAppendParams) error
+	recordParticipantForAppend func(context.Context, pgx.Tx, db.RecordDingTalkParticipantParams) (int64, error)
+	session                    chatSession
 }
 
 func (r *sessionBinder) EnsureSession(ctx context.Context, p engine.EnsureSessionParams) (pgtype.UUID, error) {
@@ -363,6 +369,14 @@ func (r *sessionBinder) MarkPendingFresh(ctx context.Context, sessionID pgtype.U
 }
 
 func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams) (engine.AppendResult, error) {
+	var raw dingtalkRawEvent
+	if r.recordParticipantForAppend != nil {
+		var err error
+		raw, err = decodeDingTalkRaw(p.Message)
+		if err != nil {
+			return engine.AppendResult{}, err
+		}
+	}
 	commandText := p.Message.CommandText
 	if commandText == "" {
 		commandText = p.Message.Text
@@ -379,19 +393,41 @@ func (r *sessionBinder) AppendMessage(ctx context.Context, p engine.AppendParams
 		MediaPendingSeconds: p.MediaPendingSeconds,
 		ForceFresh:          p.Message.ForceFresh,
 	}
-	if p.Message.Source.ChatType == channel.ChatTypeGroup && r.lockRouteForAppend != nil {
-		params := db.LockDingTalkGroupRouteForAppendParams{
+	if r.recordParticipantForAppend != nil || (p.Message.Source.ChatType == channel.ChatTypeGroup && r.lockRouteForAppend != nil) {
+		routeParams := db.LockDingTalkGroupRouteForAppendParams{
 			InstallationID: p.InstallationID,
 			ConversationID: p.Message.Source.ChatID,
 			AgentID:        p.AgentID,
 			RouteRevision:  p.RouteRevision,
 		}
+		participantParams := db.RecordDingTalkParticipantParams{
+			SenderID:           raw.Sender.SenderID,
+			CorpID:             raw.Sender.CorpID,
+			Nickname:           raw.Sender.Nickname,
+			IsAdmin:            raw.Sender.IsAdmin,
+			MessageCreatedAtMs: raw.Sender.MessageCreatedAtMS,
+			InstallationID:     p.InstallationID,
+			WorkspaceID:        p.WorkspaceID,
+			MulticaUserID:      p.Sender,
+			DingtalkStaffID:    p.Message.Source.SenderID,
+		}
 		input.BeforeWrite = func(ctx context.Context, tx pgx.Tx) error {
-			if err := r.lockRouteForAppend(ctx, tx, params); err != nil {
-				if errors.Is(err, pgx.ErrNoRows) {
-					return engine.ErrRouteChanged
+			if p.Message.Source.ChatType == channel.ChatTypeGroup && r.lockRouteForAppend != nil {
+				if err := r.lockRouteForAppend(ctx, tx, routeParams); err != nil {
+					if errors.Is(err, pgx.ErrNoRows) {
+						return engine.ErrRouteChanged
+					}
+					return fmt.Errorf("lock dingtalk group route for append: %w", err)
 				}
-				return fmt.Errorf("lock dingtalk group route for append: %w", err)
+			}
+			if r.recordParticipantForAppend != nil {
+				recorded, err := r.recordParticipantForAppend(ctx, tx, participantParams)
+				if err != nil {
+					return fmt.Errorf("record dingtalk participant: %w", err)
+				}
+				if recorded != 1 {
+					return errDingTalkParticipantBindingUnavailable
+				}
 			}
 			return nil
 		}

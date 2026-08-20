@@ -37,6 +37,31 @@ func TestInboundFromCallback_P2PAddressedAndTrimmed(t *testing.T) {
 	}
 }
 
+func TestInboundFromCallback_CarriesSenderProfileMetadata(t *testing.T) {
+	callback := textCallback(convTypeP2P, false)
+	callback.SenderId = "encrypted-open-id"
+	callback.SenderCorpId = "corp-42"
+	callback.SenderNick = "Ada Lovelace"
+	callback.IsAdmin = true
+	callback.CreateAt = 1_777_777_777_000
+
+	msg, ok := inboundFromCallback(callback, "appkey-A")
+	if !ok {
+		t.Fatal("expected sender profile callback to be ingested")
+	}
+	raw, err := decodeDingTalkRaw(msg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if raw.Sender.SenderID != "encrypted-open-id" ||
+		raw.Sender.CorpID != "corp-42" ||
+		raw.Sender.Nickname != "Ada Lovelace" ||
+		!raw.Sender.IsAdmin ||
+		raw.Sender.MessageCreatedAtMS != 1_777_777_777_000 {
+		t.Fatalf("sender profile metadata = %+v", raw.Sender)
+	}
+}
+
 func TestInboundFromCallback_GroupAddressing(t *testing.T) {
 	callback := textCallback(convTypeGroup, true)
 	callback.ConversationTitle = "Platform team"

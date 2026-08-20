@@ -48,6 +48,24 @@ type DingTalkGroupRouteResponse struct {
 	UpdatedAt         string `json:"updated_at"`
 }
 
+// DingTalkParticipantResponse is the minimal sender profile observed on
+// successfully validated bot messages. The endpoint is admin-only because the
+// platform identifiers must not be disclosed to regular workspace members.
+type DingTalkParticipantResponse struct {
+	InstallationID         string `json:"installation_id"`
+	MulticaUserID          string `json:"multica_user_id"`
+	MulticaUserName        string `json:"multica_user_name"`
+	DingTalkStaffID        string `json:"dingtalk_staff_id"`
+	DingTalkSenderID       string `json:"dingtalk_sender_id"`
+	DingTalkCorpID         string `json:"dingtalk_corp_id"`
+	DingTalkNickname       string `json:"dingtalk_nickname"`
+	IsAdmin                bool   `json:"is_admin"`
+	FirstSeenAt            string `json:"first_seen_at"`
+	LastSeenAt             string `json:"last_seen_at"`
+	MessageCount           int64  `json:"message_count"`
+	LastMessageCreatedAtMS int64  `json:"last_message_created_at_ms,omitempty"`
+}
+
 func dingtalkInstallationToResponse(row db.ChannelInstallation) DingTalkInstallationResponse {
 	return DingTalkInstallationResponse{
 		ID:              uuidToString(row.ID),
@@ -72,6 +90,45 @@ func dingtalkGroupRouteToResponse(row db.DingtalkGroupRoute) DingTalkGroupRouteR
 		DiscoveredAt:      row.DiscoveredAt.Time.UTC().Format(time.RFC3339),
 		UpdatedAt:         row.UpdatedAt.Time.UTC().Format(time.RFC3339),
 	}
+}
+
+func dingtalkParticipantToResponse(row db.ListDingTalkParticipantsByWorkspaceRow) DingTalkParticipantResponse {
+	return DingTalkParticipantResponse{
+		InstallationID:         uuidToString(row.InstallationID),
+		MulticaUserID:          uuidToString(row.MulticaUserID),
+		MulticaUserName:        row.MulticaUserName,
+		DingTalkStaffID:        row.DingtalkStaffID,
+		DingTalkSenderID:       row.DingtalkSenderID,
+		DingTalkCorpID:         row.DingtalkCorpID,
+		DingTalkNickname:       row.DingtalkNickname,
+		IsAdmin:                row.IsAdmin,
+		FirstSeenAt:            row.FirstSeenAt.Time.UTC().Format(time.RFC3339),
+		LastSeenAt:             row.LastSeenAt.Time.UTC().Format(time.RFC3339),
+		MessageCount:           row.MessageCount,
+		LastMessageCreatedAtMS: row.LastMessageCreatedAtMs,
+	}
+}
+
+// ListDingTalkParticipants (GET
+// /api/workspaces/{id}/dingtalk/participants) lists the linked DingTalk members
+// observed on successfully validated bot messages. The route is registered
+// under owner/admin middleware; the query additionally limits rows to current
+// workspace members.
+func (h *Handler) ListDingTalkParticipants(w http.ResponseWriter, r *http.Request) {
+	wsUUID, ok := parseUUIDOrBadRequest(w, chi.URLParam(r, "id"), "workspace id")
+	if !ok {
+		return
+	}
+	rows, err := h.Queries.ListDingTalkParticipantsByWorkspace(r.Context(), wsUUID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to list dingtalk participants")
+		return
+	}
+	out := make([]DingTalkParticipantResponse, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, dingtalkParticipantToResponse(row))
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"participants": out})
 }
 
 // ListDingTalkGroupRoutes (GET /api/workspaces/{id}/dingtalk/group-routes)

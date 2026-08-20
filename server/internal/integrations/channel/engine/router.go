@@ -444,6 +444,7 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			SessionID:           sessionID,
 			Sender:              identity.UserID,
 			InstallationID:      inst.ID,
+			WorkspaceID:         inst.WorkspaceID,
 			AgentID:             inst.AgentID,
 			RouteRevision:       inst.RouteRevision,
 			Message:             msg,

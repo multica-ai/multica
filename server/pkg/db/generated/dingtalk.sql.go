@@ -347,6 +347,96 @@ func (q *Queries) ListDingTalkGroupRoutesByWorkspace(ctx context.Context, worksp
 	return items, nil
 }
 
+const listDingTalkParticipantsByWorkspace = `-- name: ListDingTalkParticipantsByWorkspace :many
+SELECT
+    binding.installation_id,
+    binding.multica_user_id,
+    user_record.name AS multica_user_name,
+    binding.channel_user_id AS dingtalk_staff_id,
+    COALESCE(binding.config #>> '{dingtalk_participant,sender_id}', '')::text AS dingtalk_sender_id,
+    COALESCE(binding.config #>> '{dingtalk_participant,corp_id}', '')::text AS dingtalk_corp_id,
+    COALESCE(binding.config #>> '{dingtalk_participant,nickname}', '')::text AS dingtalk_nickname,
+    COALESCE((binding.config #>> '{dingtalk_participant,is_admin}')::boolean, false)::boolean AS is_admin,
+    COALESCE(
+        (binding.config #>> '{dingtalk_participant,first_seen_at}')::timestamptz,
+        binding.bound_at
+    ) AS first_seen_at,
+    COALESCE(
+        (binding.config #>> '{dingtalk_participant,last_seen_at}')::timestamptz,
+        binding.bound_at
+    ) AS last_seen_at,
+    CASE
+        WHEN jsonb_typeof(binding.config #> '{dingtalk_participant,message_count}') = 'number'
+            THEN (binding.config #>> '{dingtalk_participant,message_count}')::bigint
+        ELSE 0
+    END::bigint AS message_count,
+    CASE
+        WHEN jsonb_typeof(binding.config #> '{dingtalk_participant,last_message_created_at_ms}') = 'number'
+            THEN (binding.config #>> '{dingtalk_participant,last_message_created_at_ms}')::bigint
+        ELSE 0
+    END::bigint AS last_message_created_at_ms
+FROM channel_user_binding binding
+JOIN member current_member
+  ON current_member.workspace_id = binding.workspace_id
+ AND current_member.user_id = binding.multica_user_id
+JOIN "user" user_record ON user_record.id = binding.multica_user_id
+WHERE binding.workspace_id = $1
+  AND binding.channel_type = 'dingtalk'
+  AND binding.config ? 'dingtalk_participant'
+ORDER BY last_seen_at DESC, binding.installation_id ASC, binding.channel_user_id ASC
+`
+
+type ListDingTalkParticipantsByWorkspaceRow struct {
+	InstallationID         pgtype.UUID        `json:"installation_id"`
+	MulticaUserID          pgtype.UUID        `json:"multica_user_id"`
+	MulticaUserName        string             `json:"multica_user_name"`
+	DingtalkStaffID        string             `json:"dingtalk_staff_id"`
+	DingtalkSenderID       string             `json:"dingtalk_sender_id"`
+	DingtalkCorpID         string             `json:"dingtalk_corp_id"`
+	DingtalkNickname       string             `json:"dingtalk_nickname"`
+	IsAdmin                bool               `json:"is_admin"`
+	FirstSeenAt            pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt             pgtype.Timestamptz `json:"last_seen_at"`
+	MessageCount           int64              `json:"message_count"`
+	LastMessageCreatedAtMs int64              `json:"last_message_created_at_ms"`
+}
+
+// Admin-only API query. Join current membership defensively even though member
+// removal prunes the binding in the same application transaction. No email,
+// mobile number, callback credential, or message content is returned.
+func (q *Queries) ListDingTalkParticipantsByWorkspace(ctx context.Context, workspaceID pgtype.UUID) ([]ListDingTalkParticipantsByWorkspaceRow, error) {
+	rows, err := q.db.Query(ctx, listDingTalkParticipantsByWorkspace, workspaceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDingTalkParticipantsByWorkspaceRow{}
+	for rows.Next() {
+		var i ListDingTalkParticipantsByWorkspaceRow
+		if err := rows.Scan(
+			&i.InstallationID,
+			&i.MulticaUserID,
+			&i.MulticaUserName,
+			&i.DingtalkStaffID,
+			&i.DingtalkSenderID,
+			&i.DingtalkCorpID,
+			&i.DingtalkNickname,
+			&i.IsAdmin,
+			&i.FirstSeenAt,
+			&i.LastSeenAt,
+			&i.MessageCount,
+			&i.LastMessageCreatedAtMs,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDingTalkUserBindingsForMember = `-- name: ListDingTalkUserBindingsForMember :many
 
 SELECT installation_id, channel_user_id
@@ -562,4 +652,96 @@ func (q *Queries) ReassignDingTalkGroupRoute(ctx context.Context, arg ReassignDi
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const recordDingTalkParticipant = `-- name: RecordDingTalkParticipant :execrows
+UPDATE channel_user_binding AS binding
+SET config = jsonb_set(
+    binding.config,
+    '{dingtalk_participant}',
+    (
+        CASE
+            WHEN jsonb_typeof(binding.config -> 'dingtalk_participant') = 'object'
+                THEN binding.config -> 'dingtalk_participant'
+            ELSE '{}'::jsonb
+        END
+        || jsonb_strip_nulls(jsonb_build_object(
+            'sender_id', NULLIF($1::text, ''),
+            'corp_id', NULLIF($2::text, ''),
+            'nickname', NULLIF($3::text, ''),
+            'is_admin', $4::boolean,
+            'last_message_created_at_ms', CASE
+                WHEN $5::bigint > 0
+                    THEN to_jsonb($5::bigint)
+                ELSE NULL
+            END
+        ))
+        || jsonb_build_object(
+            'first_seen_at', COALESCE(
+                binding.config #> '{dingtalk_participant,first_seen_at}',
+                to_jsonb(now())
+            ),
+            'last_seen_at', to_jsonb(now()),
+            'message_count', CASE
+                WHEN jsonb_typeof(binding.config #> '{dingtalk_participant,message_count}') = 'number'
+                    THEN (binding.config #>> '{dingtalk_participant,message_count}')::bigint
+                ELSE 0
+            END + 1
+        )
+    ),
+    true
+)
+WHERE binding.installation_id = $6
+  AND binding.workspace_id = $7
+  AND binding.multica_user_id = $8
+  AND binding.channel_type = 'dingtalk'
+  AND binding.channel_user_id = $9
+  AND EXISTS (
+      SELECT 1
+      FROM member current_member
+      WHERE current_member.workspace_id = binding.workspace_id
+        AND current_member.user_id = binding.multica_user_id
+  )
+`
+
+type RecordDingTalkParticipantParams struct {
+	SenderID           string      `json:"sender_id"`
+	CorpID             string      `json:"corp_id"`
+	Nickname           string      `json:"nickname"`
+	IsAdmin            bool        `json:"is_admin"`
+	MessageCreatedAtMs int64       `json:"message_created_at_ms"`
+	InstallationID     pgtype.UUID `json:"installation_id"`
+	WorkspaceID        pgtype.UUID `json:"workspace_id"`
+	MulticaUserID      pgtype.UUID `json:"multica_user_id"`
+	DingtalkStaffID    string      `json:"dingtalk_staff_id"`
+}
+
+// Enrich the already-linked DingTalk identity only after the shared inbound
+// router has validated both account binding and current workspace membership.
+// The binding row is the natural participant record: it is already unique by
+// (installation_id, channel_user_id), and all member/install/workspace cleanup
+// paths already delete it. Keeping the profile under one namespaced config key
+// avoids a second identity table and preserves any unrelated binding config.
+//
+// Empty mutable string fields do not erase a previously observed value. The
+// callback's admin flag is authoritative on every message. Interaction counts
+// use one atomic UPDATE inside the durable message transaction, and malformed
+// legacy JSON falls back to a clean object and zero count instead of aborting
+// inbound processing.
+func (q *Queries) RecordDingTalkParticipant(ctx context.Context, arg RecordDingTalkParticipantParams) (int64, error) {
+	result, err := q.db.Exec(ctx, recordDingTalkParticipant,
+		arg.SenderID,
+		arg.CorpID,
+		arg.Nickname,
+		arg.IsAdmin,
+		arg.MessageCreatedAtMs,
+		arg.InstallationID,
+		arg.WorkspaceID,
+		arg.MulticaUserID,
+		arg.DingtalkStaffID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
