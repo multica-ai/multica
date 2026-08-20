@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
@@ -239,8 +242,138 @@ func backgroundServices(h *handler.Handler) (*service.TaskService, *service.Auto
 	return h.TaskService, h.AutopilotService
 }
 
+// checkFirstRun performs first-run initialization: creates .env from .env.example
+// if missing, creates required data directories, and displays a friendly prompt
+// if no teams exist in the database.
+func checkFirstRun() error {
+	// 1. Check and create .env file
+	if !fileExists(".env") {
+		if fileExists(".env.example") {
+			slog.Info("首次运行：从 .env.example 创建 .env")
+			if err := copyFile(".env.example", ".env"); err != nil {
+				// Another server may win the create race. Its complete file is safe
+				// to reuse, so only unexpected errors abort first-run setup.
+				if !errors.Is(err, os.ErrExist) {
+					return fmt.Errorf("failed to create .env: %w", err)
+				}
+			}
+		}
+	}
+
+	// 2. Create required data directories
+	dirs := []string{
+		"data/.runtime",
+		"data/.runtime/secrets",
+		"data/90_运行数据/teams",
+		"data/00_系统",
+	}
+	for _, dir := range dirs {
+		if err := os.MkdirAll(dir, 0755); err != nil {
+			return fmt.Errorf("failed to create directory %s: %w", dir, err)
+		}
+	}
+
+	// 3. Check if database has teams (only if we can connect)
+	// Note: We do a soft check here - if DB isn't ready yet, we skip this
+	// and let the normal startup continue. The prompt is informational only.
+	if err := checkTeamsAndPrompt(); err != nil {
+		// Log but don't fail - DB might not be ready yet, which is fine
+		slog.Debug("skipping team check", "reason", err.Error())
+	}
+
+	return nil
+}
+
+// checkTeamsAndPrompt attempts to connect to the database and show a
+// friendly first-run prompt if no teams exist. Returns error if DB
+// connection fails (non-fatal for startup).
+func checkTeamsAndPrompt() error {
+	dbURL := os.Getenv("DATABASE_URL")
+	if dbURL == "" {
+		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	pool, err := newDBPool(ctx, dbURL)
+	if err != nil {
+		return fmt.Errorf("database not ready: %w", err)
+	}
+	defer pool.Close()
+
+	if err := pool.Ping(ctx); err != nil {
+		return fmt.Errorf("database ping failed: %w", err)
+	}
+
+	var count int64
+	err = pool.QueryRow(ctx, "SELECT COUNT(*) FROM teams").Scan(&count)
+	if err != nil {
+		// Table might not exist yet (migrations not run)
+		slog.Info("======================================")
+		slog.Info("首次运行检测到，请访问:")
+		slog.Info("  http://localhost:5173/quick-start")
+		slog.Info("完成初始化配置")
+		slog.Info("======================================")
+		return nil
+	}
+
+	if count == 0 {
+		slog.Info("======================================")
+		slog.Info("未检测到 Team，请访问:")
+		slog.Info("  http://localhost:5173/quick-start")
+		slog.Info("完成初始化配置")
+		slog.Info("======================================")
+	}
+
+	return nil
+}
+
+// fileExists checks if a file exists at the given path.
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// copyFile copies a file from src to dst.
+func copyFile(src, dst string) error {
+	if unsafeRelativePath(src) || unsafeRelativePath(dst) {
+		return fmt.Errorf("unsafe path: %q -> %q", src, dst)
+	}
+	sourceFile, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer sourceFile.Close()
+
+	// O_EXCL prevents two server instances from truncating each other's .env.
+	// The restrictive mode avoids exposing copied secrets to other users.
+	destFile, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	defer destFile.Close()
+
+	_, err = io.Copy(destFile, sourceFile)
+	return err
+}
+
+func unsafeRelativePath(path string) bool {
+	if filepath.IsAbs(path) {
+		return true
+	}
+	clean := filepath.Clean(path)
+	return clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator))
+}
+
 func main() {
 	logger.Init()
+
+	// First-run check: create necessary files and directories
+	if err := checkFirstRun(); err != nil {
+		slog.Error("first-run check failed", "error", err)
+		os.Exit(1)
+	}
 
 	// Warn about missing configuration
 	if os.Getenv("JWT_SECRET") == "" {
