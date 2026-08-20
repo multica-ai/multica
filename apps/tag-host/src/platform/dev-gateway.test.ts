@@ -123,6 +123,36 @@ describe('Tag Host unified local gateway', () => {
     }
   });
 
+  it('times out when VIBES accepts the mint connection but never responds', async () => {
+    const server = createServer(() => {});
+    await new Promise<void>((resolve) =>
+      server.listen(0, '127.0.0.1', resolve)
+    );
+
+    try {
+      const address = server.address() as AddressInfo;
+      await expect(
+        mintTagGatewayAssertion(
+          new URL(`http://127.0.0.1:${address.port}`),
+          'better-auth.session_token=vibes',
+          {
+            audience: 'vibes-tag-browser-http-v1',
+            method: 'GET',
+            pathAndQuery: '/api/workspaces',
+            workspaceSlug: 'design-lab',
+            bodySha256: '',
+          },
+          20
+        )
+      ).rejects.toThrow('Tag authority unavailable');
+    } finally {
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) =>
+        server.close((error) => (error ? reject(error) : resolve()))
+      );
+    }
+  });
+
   it('mints fresh authority and injects all three assertion headers for every HTTP forward', async () => {
     const calls: TagGatewayMintRequest[] = [];
     const source = {

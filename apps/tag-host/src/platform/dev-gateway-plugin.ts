@@ -26,6 +26,7 @@ function localOrigin(name: string, value: string) {
 }
 
 const TAG_GATEWAY_ASSERTION_PATH = '/api/tag-gateway/assertion';
+const TAG_GATEWAY_MINT_TIMEOUT_MS = 5_000;
 const TAG_GATEWAY_MAX_BODY_BYTES = 101 << 20;
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS', 'TRACE']);
 
@@ -46,10 +47,20 @@ function singleResponseHeader(
 export function mintTagGatewayAssertion(
   vibesOrigin: URL,
   cookie: string | undefined,
-  input: TagGatewayMintRequest
+  input: TagGatewayMintRequest,
+  timeoutMs = TAG_GATEWAY_MINT_TIMEOUT_MS
 ) {
   const body = JSON.stringify(input);
   return new Promise<TagGatewayMintResponse | null>((resolve, reject) => {
+    let settled = false;
+    const settle = (callback: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      callback();
+    };
+    const unavailable = () =>
+      settle(() => reject(new TagGatewayProxyError(503)));
     const request = httpRequest(
       new URL(TAG_GATEWAY_ASSERTION_PATH, vibesOrigin),
       {
@@ -77,24 +88,36 @@ export function mintTagGatewayAssertion(
           'x-vibes-tag-assertion-key-id'
         );
         response.resume();
+        response.on('aborted', unavailable);
+        response.on('error', unavailable);
         response.on('end', () => {
           if (status !== 204) {
-            reject(
-              new TagGatewayProxyError(
-                status === 401 || status === 403 ? status : 503
+            settle(() =>
+              reject(
+                new TagGatewayProxyError(
+                  status === 401 || status === 403 ? status : 503
+                )
               )
             );
             return;
           }
-          resolve(
-            assertion && signature && keyId
-              ? { assertion, signature, keyId }
-              : null
+          settle(() =>
+            resolve(
+              assertion && signature && keyId
+                ? { assertion, signature, keyId }
+                : null
+            )
           );
         });
       }
     );
-    request.on('error', () => reject(new TagGatewayProxyError(503)));
+    const timeout = setTimeout(() => {
+      request.destroy(new TagGatewayProxyError(503));
+    }, timeoutMs);
+    request.setTimeout(timeoutMs, () => {
+      request.destroy(new TagGatewayProxyError(503));
+    });
+    request.on('error', unavailable);
     request.end(body);
   });
 }
