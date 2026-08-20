@@ -129,7 +129,7 @@ func tryClaim(
 		   AND (
 		        (status = 'FAILED' AND COALESCE(next_retry_at, $2::timestamptz) <= $2::timestamptz)
 		        OR
-		        (status = 'RUNNING' AND stale_after < $2::timestamptz AND $8)
+		        (status = 'RUNNING' AND stale_after < $2::timestamptz)
 		   )
 		RETURNING id, lease_token, attempt
 	`
@@ -137,7 +137,6 @@ func tryClaim(
 		runnerID,
 		dbTime, staleSecs,
 		job.Name, scope.Kind, scope.ID, planTime,
-		job.AllowStaleReentry,
 	).Scan(&c.ID, &c.LeaseToken, &c.Attempt)
 	if err == nil {
 		c.Stole = true
