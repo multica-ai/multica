@@ -41,6 +41,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     restart: unless-stopped
     healthcheck:
       test:
@@ -101,6 +103,9 @@ services:
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
+      HZT_PUBLIC_URL: ${HZT_PUBLIC_URL:-}
+      HZT_SSO_SECRET: ${HZT_SSO_SECRET:-}
       DISABLE_WORKSPACE_CREATION: ${DISABLE_WORKSPACE_CREATION:-}
       # Managed entitlement policy is explicitly opt-in. The false/empty
       # defaults keep self-hosted installs on the legacy path with no Cloud

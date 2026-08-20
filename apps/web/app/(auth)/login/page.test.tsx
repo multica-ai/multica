@@ -7,6 +7,7 @@ import enCommon from "@multica/views/locales/en/common.json";
 import enAuth from "@multica/views/locales/en/auth.json";
 import enSettings from "@multica/views/locales/en/settings.json";
 import type { ReactNode } from "react";
+import { configStore } from "@multica/core/config";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
@@ -102,6 +103,7 @@ describe("LoginPage", () => {
     searchParamsState.params = new URLSearchParams();
     authStateRef.state.user = null;
     authStateRef.state.isLoading = false;
+    configStore.setState({ authConfigLoaded: true, authProvider: "local" });
     mockListWorkspaces.mockResolvedValue([]);
     mockListMyInvitations.mockResolvedValue([]);
   });
@@ -115,6 +117,30 @@ describe("LoginPage", () => {
     expect(
       screen.getByRole("button", { name: "Continue" })
     ).toBeInTheDocument();
+  });
+
+  it("redirects HZT deployments without rendering the local login form", async () => {
+    configStore.setState({ authConfigLoaded: true, authProvider: "hzt_redirect" });
+    searchParamsState.params = new URLSearchParams({ next: "/acme/issues" });
+    const replace = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      configurable: true,
+      value: { ...originalLocation, replace },
+    });
+
+    try {
+      render(<LoginPage />, { wrapper: createWrapper() });
+      await waitFor(() => {
+        expect(replace).toHaveBeenCalledWith("/auth/hzt/login?next=%2Facme%2Fissues");
+      });
+      expect(screen.queryByLabelText("Email")).not.toBeInTheDocument();
+    } finally {
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 
   it("does not call sendCode when email is empty", async () => {

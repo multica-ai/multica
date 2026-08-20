@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/hztauth"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
@@ -341,6 +342,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		AllowSignup:              os.Getenv("ALLOW_SIGNUP") != "false",
 		AllowedEmails:            splitAndTrim(os.Getenv("ALLOWED_EMAILS")),
 		AllowedEmailDomains:      splitAndTrim(os.Getenv("ALLOWED_EMAIL_DOMAINS")),
+		AuthProvider:             strings.TrimSpace(os.Getenv("AUTH_PROVIDER")),
+		HZTDefaultWorkspace:      strings.TrimSpace(os.Getenv("HZT_DEFAULT_WORKSPACE_SLUG")),
 		DisableWorkspaceCreation: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
 		VCSIntegrationEnabled:    os.Getenv("MULTICA_VCS_INTEGRATION_ENABLED") == "true",
 		PublicURL:                strings.TrimRight(strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")), "/"),
@@ -357,6 +360,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		ServerVersion:            normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
+	if signupConfig.AuthProvider == "hzt_redirect" {
+		hztClient, err := hztauth.New(hztauth.Config{
+			PublicURL:    strings.TrimSpace(os.Getenv("HZT_PUBLIC_URL")),
+			InternalURL:  strings.TrimSpace(os.Getenv("HZT_INTERNAL_URL")),
+			FrontendURL:  strings.TrimSpace(os.Getenv("FRONTEND_ORIGIN")),
+			ClientSecret: os.Getenv("HZT_SSO_SECRET"),
+			FlowSecret:   os.Getenv("JWT_SECRET"),
+		})
+		if err != nil {
+			slog.Error("HZT SSO disabled by invalid configuration", "error", err)
+		} else {
+			h.HZTAuth = hztClient
+		}
+	}
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
 	invitationRateLimits.Workspace.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_WORKSPACE_24H", invitationRateLimits.Workspace.Limit)
@@ -1244,9 +1261,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	authRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH", 5), time.Minute, trustedProxies)
 	authVerifyRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_AUTH_VERIFY", 20), time.Minute, trustedProxies)
 	contactSalesRL := middleware.RateLimit(rdb, envPositiveInt("RATE_LIMIT_CONTACT_SALES", 5), time.Hour, trustedProxies)
-	r.With(authRL).Post("/auth/send-code", h.SendCode)
-	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
-	r.With(authRL).Post("/auth/google", h.GoogleLogin)
+	if signupConfig.AuthProvider == "hzt_redirect" {
+		r.With(authRL).Get("/auth/hzt/login", h.BeginHZTLogin)
+		r.With(authVerifyRL).Get("/auth/hzt/callback", h.HZTCallback)
+	} else {
+		r.With(authRL).Post("/auth/send-code", h.SendCode)
+		r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
+		r.With(authRL).Post("/auth/google", h.GoogleLogin)
+	}
 	r.Post("/auth/logout", h.Logout)
 
 	// Public API

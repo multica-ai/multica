@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS hzt_external_identity_subject_uidx;
