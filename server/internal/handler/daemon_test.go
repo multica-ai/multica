@@ -1118,6 +1118,165 @@ func TestHandleDaemonWSHeartbeat_RuntimeGoneReturnsAckNotError(t *testing.T) {
 	}
 }
 
+// A cleanup fence must outlive the daemon token that authenticated an existing
+// WebSocket. Both transports treat the preserved Runtime row as gone and must
+// not let a stale heartbeat turn it online again.
+func TestDaemonHeartbeat_RevokedRuntimeFenceRejectsStaleHTTPAndWebSocket(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, owner_id, last_seen_at
+		) VALUES ($1, 'stale-cleanup-daemon', 'revoked runtime', 'local',
+			'handler_test_runtime', 'offline', 'device', '{}'::jsonb, $2, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET metadata = metadata || '{"member_execution_revoked": true}'::jsonb
+		WHERE id = $1
+	`, runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE workspace_id = $1 AND daemon_id = 'stale-cleanup-daemon'`, testWorkspaceID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	ack, err := testHandler.HandleDaemonWSHeartbeat(ctx,
+		daemonws.ClientIdentity{WorkspaceID: testWorkspaceID}, runtimeID, false)
+	if err != nil || ack == nil || !ack.RuntimeGone || ack.Status != protocol.HeartbeatStatusRuntimeGone {
+		t.Fatalf("stale WS heartbeat ack=%#v err=%v", ack, err)
+	}
+	w := httptest.NewRecorder()
+	req := newDaemonTokenRequest(http.MethodPost, "/api/daemon/heartbeat",
+		map[string]any{"runtime_id": runtimeID}, testWorkspaceID, "stale-cleanup-daemon")
+	testHandler.DaemonHeartbeat(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("stale HTTP heartbeat status=%d body=%s", w.Code, w.Body.String())
+	}
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "offline" {
+		t.Fatalf("stale heartbeat revived revoked runtime: status=%q", status)
+	}
+
+	// Registration is a fresh authenticated public seam. Old mirrored PAT/JWT
+	// fallback and the deleted mdt_ token cannot reach it, while a re-invited
+	// member can. Cleanup releases the stable daemon/provider identity but keeps
+	// the fenced row as history, so this registration mints a fresh Runtime.
+	w = httptest.NewRecorder()
+	req = newRequest(http.MethodPost, "/api/daemon/register", map[string]any{
+		"workspace_id": testWorkspaceID,
+		"daemon_id":    "stale-cleanup-daemon",
+		"device_name":  "reinvited device",
+		"runtimes": []map[string]any{{
+			"name": "revoked runtime", "type": "handler_test_runtime", "status": "online",
+		}},
+	})
+	testHandler.DaemonRegister(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("authorized re-registration status=%d body=%s", w.Code, w.Body.String())
+	}
+	var reregistered struct {
+		Runtimes []struct {
+			ID string `json:"id"`
+		} `json:"runtimes"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &reregistered); err != nil {
+		t.Fatal(err)
+	}
+	if len(reregistered.Runtimes) != 1 || reregistered.Runtimes[0].ID == runtimeID {
+		t.Fatalf("re-registration runtimes=%+v want fresh id distinct from %s", reregistered.Runtimes, runtimeID)
+	}
+	var oldStillFenced bool
+	var oldStatus string
+	var oldDaemonBound bool
+	if err := testPool.QueryRow(ctx, `
+		SELECT metadata @> '{"member_execution_revoked": true}'::jsonb, status, daemon_id IS NOT NULL
+		FROM agent_runtime WHERE id = $1
+	`, runtimeID).Scan(&oldStillFenced, &oldStatus, &oldDaemonBound); err != nil {
+		t.Fatal(err)
+	}
+	if !oldStillFenced || oldStatus != "offline" || oldDaemonBound {
+		t.Fatalf("old runtime history fence=%v status=%q daemon_bound=%v", oldStillFenced, oldStatus, oldDaemonBound)
+	}
+}
+
+func TestHandleDaemonWSHeartbeat_CleanupCommitBetweenCheckAndMutationWins(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_runtime (
+			workspace_id, daemon_id, name, runtime_mode, provider,
+			status, device_info, metadata, owner_id, last_seen_at
+		) VALUES ($1, 'heartbeat-race-daemon', 'heartbeat race runtime', 'local',
+			'handler_test_runtime', 'offline', 'device', '{}'::jsonb, $2, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID).Scan(&runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent_runtime WHERE id = $1`, runtimeID)
+	})
+
+	cleanupTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupTx.Rollback(ctx)
+	if _, err := cleanupTx.Exec(ctx, `SELECT id FROM agent_runtime WHERE id = $1 FOR UPDATE`, runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	type heartbeatResult struct {
+		ack *protocol.DaemonHeartbeatAckPayload
+		err error
+	}
+	resultCh := make(chan heartbeatResult, 1)
+	go func() {
+		ack, err := testHandler.HandleDaemonWSHeartbeat(ctx,
+			daemonws.ClientIdentity{WorkspaceID: testWorkspaceID}, runtimeID, false)
+		resultCh <- heartbeatResult{ack: ack, err: err}
+	}()
+	select {
+	case result := <-resultCh:
+		t.Fatalf("heartbeat mutation did not wait for cleanup row lock: ack=%#v err=%v", result.ack, result.err)
+	case <-time.After(100 * time.Millisecond):
+	}
+	if _, err := cleanupTx.Exec(ctx, `
+		UPDATE agent_runtime
+		SET status = 'offline', metadata = metadata || '{"member_execution_revoked": true}'::jsonb
+		WHERE id = $1
+	`, runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	result := <-resultCh
+	if result.err != nil || result.ack == nil || !result.ack.RuntimeGone {
+		t.Fatalf("heartbeat after cleanup commit ack=%#v err=%v", result.ack, result.err)
+	}
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_runtime WHERE id = $1`, runtimeID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "offline" {
+		t.Fatalf("check-then-act race revived runtime: status=%q", status)
+	}
+}
+
 func TestHandleDaemonWSHeartbeat_AllowsAnyAuthorizedWorkspace(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")

@@ -127,79 +127,6 @@ func (q *Queries) ArchiveAgentsByIDs(ctx context.Context, arg ArchiveAgentsByIDs
 	return items, nil
 }
 
-const archiveAgentsByRuntime = `-- name: ArchiveAgentsByRuntime :many
-UPDATE agent
-SET archived_at = now(), archived_by = $1, updated_at = now()
-WHERE runtime_id = ANY($2::uuid[]) AND archived_at IS NULL
-  AND (system_key IS NULL OR system_key = '')
-RETURNING id, workspace_id, name, avatar_url, runtime_mode, runtime_config, visibility, status, max_concurrent_tasks, owner_id, created_at, updated_at, description, runtime_id, instructions, archived_at, archived_by, custom_env, custom_args, mcp_config, model, thinking_level, composio_toolkit_allowlist, permission_mode, kind, system_key, disabled_runtime_skills, service_tier
-`
-
-type ArchiveAgentsByRuntimeParams struct {
-	ArchivedBy pgtype.UUID   `json:"archived_by"`
-	RuntimeIds []pgtype.UUID `json:"runtime_ids"`
-}
-
-// Bulk-archives every active agent bound to any runtime in the given set.
-// Used when revoking a leaving member's runtimes so agents pinned to those
-// runtimes can no longer be assigned new work. Returns the affected rows so
-// the caller can broadcast agent:archived per agent.
-//
-// System agents are exempt: they belong to the workspace rather than to the
-// member who happened to create them, and the workspace's entry point runs
-// through one. Archiving Mika because a colleague left would take the default
-// agent away from everyone. Its runtime does go offline with the departure, so
-// it needs rebinding — but it stays visible and recoverable instead of
-// vanishing.
-func (q *Queries) ArchiveAgentsByRuntime(ctx context.Context, arg ArchiveAgentsByRuntimeParams) ([]Agent, error) {
-	rows, err := q.db.Query(ctx, archiveAgentsByRuntime, arg.ArchivedBy, arg.RuntimeIds)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	items := []Agent{}
-	for rows.Next() {
-		var i Agent
-		if err := rows.Scan(
-			&i.ID,
-			&i.WorkspaceID,
-			&i.Name,
-			&i.AvatarUrl,
-			&i.RuntimeMode,
-			&i.RuntimeConfig,
-			&i.Visibility,
-			&i.Status,
-			&i.MaxConcurrentTasks,
-			&i.OwnerID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-			&i.Description,
-			&i.RuntimeID,
-			&i.Instructions,
-			&i.ArchivedAt,
-			&i.ArchivedBy,
-			&i.CustomEnv,
-			&i.CustomArgs,
-			&i.McpConfig,
-			&i.Model,
-			&i.ThinkingLevel,
-			&i.ComposioToolkitAllowlist,
-			&i.PermissionMode,
-			&i.Kind,
-			&i.SystemKey,
-			&i.DisabledRuntimeSkills,
-			&i.ServiceTier,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const cancelAgentTask = `-- name: CancelAgentTask :one
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
@@ -1208,6 +1135,11 @@ SET status = 'dispatched',
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND EXISTS (
+          SELECT 1 FROM agent_runtime runtime
+          WHERE runtime.id = atq.runtime_id
+            AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+      )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -4762,6 +4694,11 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, plugin_execution_manifest_id, branch_name FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
+  AND EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = agent_task_queue.runtime_id
+        AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+  )
 ORDER BY priority DESC, created_at ASC
 `
 
@@ -4850,6 +4787,11 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 const listQueuedClaimCandidatesByRuntimes = `-- name: ListQueuedClaimCandidatesByRuntimes :many
 SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, plugin_execution_manifest_id, branch_name FROM agent_task_queue
 WHERE runtime_id = ANY($1::uuid[]) AND status = 'queued'
+  AND EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = agent_task_queue.runtime_id
+        AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+  )
 ORDER BY priority DESC, created_at ASC
 `
 
@@ -5794,6 +5736,11 @@ SET status = 'queued'
 WHERE runtime_id = $1
   AND status = 'deferred'
   AND fire_at <= now()
+  AND EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = agent_task_queue.runtime_id
+        AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, plugin_execution_manifest_id, branch_name
 `
 
@@ -5877,6 +5824,11 @@ SET status = 'queued'
 WHERE runtime_id = ANY($1::uuid[])
   AND status = 'deferred'
   AND fire_at <= now()
+  AND EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = agent_task_queue.runtime_id
+        AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, plugin_execution_manifest_id, branch_name
 `
 
@@ -6037,6 +5989,11 @@ SET dispatched_at = now(),
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = $1
+      AND EXISTS (
+          SELECT 1 FROM agent_runtime runtime
+          WHERE runtime.id = atq.runtime_id
+            AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+      )
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
@@ -6127,6 +6084,11 @@ SET dispatched_at = now(),
 WHERE id IN (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = ANY($2::uuid[])
+      AND EXISTS (
+          SELECT 1 FROM agent_runtime runtime
+          WHERE runtime.id = atq.runtime_id
+            AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+      )
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => $3::double precision)
@@ -6159,6 +6121,102 @@ func (q *Queries) ReclaimStaleDispatchedTasksForRuntimes(ctx context.Context, ar
 		arg.ClaimRecoverySecs,
 		arg.MaxTasks,
 	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentTaskQueue{}
+	for rows.Next() {
+		var i AgentTaskQueue
+		if err := rows.Scan(
+			&i.ID,
+			&i.AgentID,
+			&i.IssueID,
+			&i.Status,
+			&i.Priority,
+			&i.DispatchedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.Result,
+			&i.Error,
+			&i.CreatedAt,
+			&i.Context,
+			&i.RuntimeID,
+			&i.SessionID,
+			&i.WorkDir,
+			&i.TriggerCommentID,
+			&i.ChatSessionID,
+			&i.AutopilotRunID,
+			&i.Attempt,
+			&i.MaxAttempts,
+			&i.ParentTaskID,
+			&i.FailureReason,
+			&i.TriggerSummary,
+			&i.ForceFreshSession,
+			&i.IsLeaderTask,
+			&i.WaitReason,
+			&i.InitiatorUserID,
+			&i.HandoffNote,
+			&i.PrepareLeaseExpiresAt,
+			&i.SquadID,
+			&i.RuntimeMcpOverlay,
+			&i.EscalationForTaskID,
+			&i.FireAt,
+			&i.OriginatorUserID,
+			&i.RuntimeConnectedApps,
+			&i.CoalescedCommentIds,
+			&i.DeliveredCommentIds,
+			&i.ChatInputTaskID,
+			&i.ChatFinalizeDeferredAt,
+			&i.OriginatorSource,
+			&i.DelegatedFromTaskID,
+			&i.RetryOfTaskID,
+			&i.RerunOfTaskID,
+			&i.RuleVersionID,
+			&i.TriggerEvidenceKind,
+			&i.TriggerEvidenceRefID,
+			&i.AccountableUserID,
+			&i.SessionRolloutMissing,
+			&i.RetiredSessionID,
+			&i.QuickActionsDisabled,
+			&i.RegenerateQuickActionsFor,
+			&i.PluginExecutionManifestID,
+			&i.BranchName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recordMemberExecutionDependencyReason = `-- name: RecordMemberExecutionDependencyReason :many
+UPDATE agent_task_queue
+SET failure_reason = 'member_execution_dependency_revoked',
+    error = CASE
+      WHEN runtime_id = ANY($1::uuid[])
+        THEN 'member execution dependency revoked: runtime ' || runtime_id::text
+      ELSE 'member execution dependency revoked: agent ' || agent_id::text
+    END,
+    wait_reason = NULL
+WHERE id = ANY($2::uuid[]) AND status = 'cancelled'
+RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, plugin_execution_manifest_id, branch_name
+`
+
+type RecordMemberExecutionDependencyReasonParams struct {
+	RuntimeIds []pgtype.UUID `json:"runtime_ids"`
+	TaskIds    []pgtype.UUID `json:"task_ids"`
+}
+
+// A restriction-triggered cancellation uses the existing shared cancellation
+// query first, then annotates only those returned rows with a recoverable,
+// machine-readable reason. Runtime/Agent ids are execution references, not
+// secrets, and make the exact revoked dependency visible in Task history.
+func (q *Queries) RecordMemberExecutionDependencyReason(ctx context.Context, arg RecordMemberExecutionDependencyReasonParams) ([]AgentTaskQueue, error) {
+	rows, err := q.db.Query(ctx, recordMemberExecutionDependencyReason, arg.RuntimeIds, arg.TaskIds)
 	if err != nil {
 		return nil, err
 	}

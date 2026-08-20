@@ -167,7 +167,8 @@ WHERE workspace_id = @workspace_id
 -- MarkAgentRuntimeOnline to flip the row back online.
 UPDATE agent_runtime
 SET last_seen_at = now()
-WHERE id = $1 AND status = 'online';
+WHERE id = $1 AND status = 'online'
+  AND NOT (metadata @> '{"member_execution_revoked": true}'::jsonb);
 
 -- name: TouchAgentRuntimesLastSeenBatch :execrows
 -- Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:
@@ -181,7 +182,8 @@ WHERE id = $1 AND status = 'online';
 -- will fall through the recordHeartbeat sync path and call MarkAgentRuntimeOnline.
 UPDATE agent_runtime
 SET last_seen_at = now()
-WHERE id = ANY(@ids::uuid[]) AND status = 'online';
+WHERE id = ANY(@ids::uuid[]) AND status = 'online'
+  AND NOT (metadata @> '{"member_execution_revoked": true}'::jsonb);
 
 -- name: MarkAgentRuntimeOnline :one
 -- Used on the offline→online transition (and on first heartbeat after
@@ -190,6 +192,7 @@ WHERE id = ANY(@ids::uuid[]) AND status = 'online';
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
+  AND NOT (metadata @> '{"member_execution_revoked": true}'::jsonb)
 RETURNING *;
 
 -- name: SetAgentRuntimeOffline :exec
@@ -261,15 +264,19 @@ WHERE workspace_id = $1 AND owner_id = $2
 ORDER BY created_at ASC;
 
 -- name: ForceOfflineRuntimesByIDs :many
--- Unconditionally flips a known set of runtime IDs to offline. Distinct from
+-- Unconditionally fences and flips a known set of runtime IDs to offline. Distinct from
 -- MarkRuntimesOfflineByIDs (which keeps a stale-window predicate so the
 -- sweeper cannot demote a runtime that just heartbeated): this variant is
 -- used by intentional revocation paths — e.g. removing a workspace member —
 -- where the caller has already decided the runtime should be offline
 -- regardless of recent liveness.
 UPDATE agent_runtime
-SET status = 'offline', updated_at = now()
-WHERE id = ANY(@runtime_ids::uuid[]) AND status = 'online'
+SET status = 'offline',
+    metadata = metadata || '{"member_execution_revoked": true}'::jsonb,
+    legacy_daemon_id = COALESCE(legacy_daemon_id, daemon_id),
+    daemon_id = NULL,
+    updated_at = now()
+WHERE id = ANY(@runtime_ids::uuid[])
 RETURNING id, workspace_id, owner_id, daemon_id, provider;
 
 -- name: CancelAgentTasksByRuntimeOrAgent :many

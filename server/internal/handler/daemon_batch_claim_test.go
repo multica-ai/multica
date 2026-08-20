@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
@@ -92,6 +93,125 @@ func TestClaimTasksByRuntime_RoutesAcrossRuntimesAndMintsTokens(t *testing.T) {
 	}
 	if seen[rt1] != 1 || seen[rt2] != 1 {
 		t.Fatalf("runtime distribution = %v, want one task each for rt1/rt2", seen)
+	}
+}
+
+func TestClaimTasksByRuntime_SkipsMemberExecutionRevokedRuntime(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Revoked batch claim runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Revoked batch claim agent")
+	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_runtime
+		SET metadata = metadata || '{"member_execution_revoked": true}'::jsonb
+		WHERE id = $1
+	`, runtimeID); err != nil {
+		t.Fatal(err)
+	}
+
+	w := postBatchClaim(t, testWorkspaceID, []string{runtimeID}, 1)
+	if w.Code != http.StatusOK {
+		t.Fatalf("claim status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp batchClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Tasks) != 0 {
+		t.Fatalf("revoked runtime claimed tasks: %+v", resp.Tasks)
+	}
+	var status string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status != "queued" {
+		t.Fatalf("revoked runtime task status=%q, want queued", status)
+	}
+}
+
+func TestClaimTasksByRuntime_CleanupCommitBeforeFinalizationReturnsNoPayload(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	runtimeID := createClaimReclaimRuntime(t, ctx, "Cleanup race batch runtime")
+	agentID, issueID := createClaimReclaimAgentAndIssue(t, ctx, runtimeID, "Cleanup race batch agent")
+	taskID := seedQueuedIssueTask(t, ctx, agentID, runtimeID, issueID)
+
+	cleanupTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cleanupTx.Rollback(ctx)
+	if _, err := cleanupTx.Exec(ctx, `SELECT id FROM agent_runtime WHERE id = $1 FOR UPDATE`, runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	resultCh := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		req := newDaemonTokenRequest("POST", "/api/daemon/tasks/claim",
+			map[string]any{"daemon_id": batchClaimTestDaemonID, "runtime_ids": []string{runtimeID}, "max_tasks": 1},
+			testWorkspaceID, batchClaimTestDaemonID)
+		testHandler.ClaimTasksByRuntime(w, req)
+		resultCh <- w
+	}()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for {
+		var status string
+		if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status); err != nil {
+			t.Fatal(err)
+		}
+		if status == "dispatched" {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("claim never reached finalization; task status=%q", status)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	select {
+	case w := <-resultCh:
+		t.Fatalf("claim finalized while cleanup held runtime lock: %d %s", w.Code, w.Body.String())
+	default:
+	}
+	if _, err := cleanupTx.Exec(ctx, `
+		UPDATE agent_runtime
+		SET status = 'offline', metadata = metadata || '{"member_execution_revoked": true}'::jsonb
+		WHERE id = $1;
+		UPDATE agent_task_queue
+		SET status = 'cancelled', completed_at = now()
+		WHERE id = $2 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+	`, runtimeID, taskID); err != nil {
+		t.Fatal(err)
+	}
+	if err := cleanupTx.Commit(ctx); err != nil {
+		t.Fatal(err)
+	}
+	w := <-resultCh
+	if w.Code != http.StatusOK {
+		t.Fatalf("claim status=%d body=%s", w.Code, w.Body.String())
+	}
+	var resp batchClaimResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Tasks) != 0 {
+		t.Fatalf("cleanup-raced claim returned execution payload: %+v", resp.Tasks)
+	}
+	var taskStatus string
+	var tokenCount int
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&taskStatus); err != nil {
+		t.Fatal(err)
+	}
+	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM task_token WHERE task_id = $1`, taskID).Scan(&tokenCount); err != nil {
+		t.Fatal(err)
+	}
+	if taskStatus != "cancelled" || tokenCount != 0 {
+		t.Fatalf("cleanup-raced claim task=%q tokens=%d", taskStatus, tokenCount)
 	}
 }
 

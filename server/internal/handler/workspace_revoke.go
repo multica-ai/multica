@@ -9,13 +9,9 @@ import (
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
-// revokeAndRemoveMember converges all server-side state that should follow a
-// member leaving a workspace: every runtime they own becomes unusable, every
-// agent pinned to one of those runtimes is archived, every in-flight task on
-// those runtimes is cancelled (cancelled rather than failed so the daemon's
-// per-task status poller interrupts the running agent gracefully), the
-// daemon_token rows for those runtimes are deleted, and finally the member row
-// itself is removed.
+// revokeAndRemoveMember composes the single execution-cleanup implementation
+// with native Multica membership removal. Mirrored VIBES authority deliveries
+// call applyMemberExecutionCleanup without this final member-row write.
 //
 // All DB writes run inside a single transaction so a partial revocation never
 // leaves the workspace half-converged — e.g. a member who is "gone" but whose
@@ -28,18 +24,13 @@ import (
 // regardless of how the daemon authenticates. Today most daemons fall back to
 // PAT/JWT and `daemon_token` rows are unused in production; deleting them is
 // a no-op for those daemons but takes effect once the mdt_ flow is live.
-// Either way the agent-archive + task-cancel + force-offline writes are the
+// Either way the agent-unbind + task-cancel + force-offline writes are the
 // actual production safety net: even if the daemon races back online with a
-// still-valid PAT, it finds no agent it can run for, no queued task to claim,
-// and the dispatcher (which gates on agent.archived_at IS NULL) won't hand it
-// new work — and the member-row deletion in the same tx means subsequent
+// still-valid PAT, it finds no runnable agent on the revoked Runtime and no
+// dependent queued task to claim — and the member-row deletion in the same tx means subsequent
 // requireWorkspaceMember checks will reject the daemon's PAT-authenticated
 // requests with 404.
-//
-// archivedBy is the actor who triggered the revocation. For DeleteMember it's
-// the requester (the admin doing the kick); for LeaveWorkspace it's the leaver
-// themselves.
-func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID, memberID, archivedBy pgtype.UUID) (revocationResult, error) {
+func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID, memberID pgtype.UUID) (revocationResult, error) {
 	var empty revocationResult
 
 	tx, err := h.TxStarter.Begin(ctx)
@@ -63,92 +54,8 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 		return empty, err
 	}
 
-	runtimes, err := qtx.ListAgentRuntimesByOwner(ctx, db.ListAgentRuntimesByOwnerParams{
-		WorkspaceID: workspaceID,
-		OwnerID:     userID,
-	})
+	result, err := h.applyMemberExecutionCleanup(ctx, qtx, workspaceID, userID)
 	if err != nil {
-		return empty, err
-	}
-
-	result := revocationResult{Runtimes: runtimes}
-
-	if len(runtimes) > 0 {
-		runtimeIDs := make([]pgtype.UUID, len(runtimes))
-		daemonIDs := make([]string, 0, len(runtimes))
-		for i, rt := range runtimes {
-			runtimeIDs[i] = rt.ID
-			if rt.DaemonID.Valid && rt.DaemonID.String != "" {
-				daemonIDs = append(daemonIDs, rt.DaemonID.String)
-			}
-		}
-
-		result.ArchivedAgents, err = qtx.ArchiveAgentsByRuntime(ctx, db.ArchiveAgentsByRuntimeParams{
-			ArchivedBy: archivedBy,
-			RuntimeIds: runtimeIDs,
-		})
-		if err != nil {
-			return empty, err
-		}
-
-		// Cancel by runtime AND by archived agent. agent.runtime_id can be
-		// reassigned via UpdateAgent without rewriting the runtime_id on
-		// historical agent_task_queue rows, so an archived agent may still
-		// have queued/running tasks pinned to a different runtime — and
-		// ClaimAgentTask does not gate on agent.archived_at, so those tasks
-		// would otherwise stay claimable after the agent is gone.
-		archivedAgentIDs := make([]pgtype.UUID, len(result.ArchivedAgents))
-		for i, a := range result.ArchivedAgents {
-			archivedAgentIDs[i] = a.ID
-		}
-		result.CancelledTasks, err = qtx.CancelAgentTasksByRuntimeOrAgent(ctx, db.CancelAgentTasksByRuntimeOrAgentParams{
-			RuntimeIds: runtimeIDs,
-			AgentIds:   archivedAgentIDs,
-		})
-		if err != nil {
-			return empty, err
-		}
-
-		result.OfflineRuntimeIDs, err = qtx.ForceOfflineRuntimesByIDs(ctx, runtimeIDs)
-		if err != nil {
-			return empty, err
-		}
-
-		if len(daemonIDs) > 0 {
-			result.RevokedTokenHashes, err = qtx.DeleteDaemonTokensByWorkspaceAndDaemons(ctx, db.DeleteDaemonTokensByWorkspaceAndDaemonsParams{
-				WorkspaceID: workspaceID,
-				DaemonIds:   daemonIDs,
-			})
-			if err != nil {
-				return empty, err
-			}
-		}
-	}
-
-	// channel_user_binding used to carry a member FK with ON DELETE CASCADE, so
-	// a removed member's IM bindings vanished automatically. MUL-3515 §4 dropped
-	// every channel_* foreign key, moving that integrity rule to the application
-	// layer: prune the bindings here, in the same tx as the member-row delete.
-	// The inbound path also re-checks membership (see ChannelStore.IsWorkspaceMember),
-	// but pruning stops a stale binding from lingering across a remove/re-add.
-	if err := qtx.DeleteChannelUserBindingsByWorkspaceMember(ctx, db.DeleteChannelUserBindingsByWorkspaceMemberParams{
-		WorkspaceID:   workspaceID,
-		MulticaUserID: userID,
-	}); err != nil {
-		return empty, err
-	}
-
-	// agent_invocation_target carries member-target grants with NO database FK
-	// (MUL-3963 keeps the new table FK-free, matching the MUL-3515 channel
-	// generalization). Prune this leaving member's grants in the same tx as the
-	// member-row delete so a re-invited user does not silently reclaim old
-	// invocation permission on agents that had allow-listed them. SCOPED to
-	// this workspace: the same user may belong to other workspaces, and
-	// removing them here must not touch their grants on agents elsewhere.
-	if err := qtx.DeleteAgentInvocationTargetsByMember(ctx, db.DeleteAgentInvocationTargetsByMemberParams{
-		WorkspaceID: workspaceID,
-		TargetID:    userID,
-	}); err != nil {
 		return empty, err
 	}
 
@@ -209,14 +116,122 @@ func (h *Handler) revokeAndRemoveMember(ctx context.Context, workspaceID, userID
 	return result, nil
 }
 
+// applyMemberExecutionCleanup is the one deep implementation shared by native
+// remove/leave and authenticated VIBES restriction delivery. It revokes only
+// personal execution resources. Agents are persistent Workspace objects, so
+// they are unbound for recovery rather than archived; only Tasks whose Runtime
+// or newly-unbound Agent dependency was revoked are cancelled.
+func (h *Handler) applyMemberExecutionCleanup(ctx context.Context, qtx *db.Queries, workspaceID, userID pgtype.UUID) (revocationResult, error) {
+	var result revocationResult
+	runtimes, err := qtx.ListAgentRuntimesByOwner(ctx, db.ListAgentRuntimesByOwnerParams{
+		WorkspaceID: workspaceID,
+		OwnerID:     userID,
+	})
+	if err != nil {
+		return result, err
+	}
+	result.Runtimes = runtimes
+
+	runtimeIDs := make([]pgtype.UUID, len(runtimes))
+	daemonIDs := make([]string, 0, len(runtimes))
+	for index, runtime := range runtimes {
+		runtimeIDs[index] = runtime.ID
+		if runtime.DaemonID.Valid && runtime.DaemonID.String != "" {
+			daemonIDs = append(daemonIDs, runtime.DaemonID.String)
+		}
+	}
+	// Fence Runtime execution before touching Tasks/tokens. Claim finalization
+	// holds a share lock on this same row: if an older claim wins, cleanup waits
+	// and then deletes its token; if cleanup wins, no new claim can finalize.
+	// This ordering prevents a token from being inserted after the cleanup's
+	// delete-by-task statement has already run.
+	if len(runtimeIDs) > 0 {
+		result.OfflineRuntimeIDs, err = qtx.ForceOfflineRuntimesByIDs(ctx, runtimeIDs)
+		if err != nil {
+			return revocationResult{}, err
+		}
+	}
+	for _, runtime := range runtimes {
+		unbound, err := qtx.UnbindUserAgentsFromRuntime(ctx, runtime.ID)
+		if err != nil {
+			return revocationResult{}, err
+		}
+		result.UnboundAgents = append(result.UnboundAgents, unbound...)
+	}
+	unboundAgentIDs := make([]pgtype.UUID, len(result.UnboundAgents))
+	for index, agent := range result.UnboundAgents {
+		unboundAgentIDs[index] = agent.ID
+	}
+	if len(unboundAgentIDs) > 0 {
+		result.PausedAutopilots, err = qtx.PauseAutopilotsByUnboundAgents(ctx, unboundAgentIDs)
+		if err != nil {
+			return revocationResult{}, err
+		}
+	}
+
+	if len(runtimeIDs) > 0 || len(unboundAgentIDs) > 0 {
+		result.CancelledTasks, err = qtx.CancelAgentTasksByRuntimeOrAgent(ctx, db.CancelAgentTasksByRuntimeOrAgentParams{
+			RuntimeIds: runtimeIDs,
+			AgentIds:   unboundAgentIDs,
+		})
+		if err != nil {
+			return revocationResult{}, err
+		}
+		if len(result.CancelledTasks) > 0 {
+			taskIDs := make([]pgtype.UUID, len(result.CancelledTasks))
+			for index, task := range result.CancelledTasks {
+				taskIDs[index] = task.ID
+				if err := qtx.DeleteTaskTokensByTask(ctx, task.ID); err != nil {
+					return revocationResult{}, err
+				}
+			}
+			result.CancelledTasks, err = qtx.RecordMemberExecutionDependencyReason(ctx, db.RecordMemberExecutionDependencyReasonParams{
+				RuntimeIds: runtimeIDs,
+				TaskIds:    taskIDs,
+			})
+			if err != nil {
+				return revocationResult{}, err
+			}
+		}
+
+		if len(daemonIDs) > 0 {
+			result.RevokedTokenHashes, err = qtx.DeleteDaemonTokensByWorkspaceAndDaemons(ctx, db.DeleteDaemonTokensByWorkspaceAndDaemonsParams{
+				WorkspaceID: workspaceID,
+				DaemonIds:   daemonIDs,
+			})
+			if err != nil {
+				return revocationResult{}, err
+			}
+			// Invalidating before commit is safe: a rollback merely forces a DB
+			// lookup, while a commit can never leave a stale cached token alive.
+			for _, hash := range result.RevokedTokenHashes {
+				h.DaemonTokenCache.Invalidate(ctx, hash)
+			}
+		}
+	}
+
+	if err := qtx.DeleteChannelUserBindingsByWorkspaceMember(ctx, db.DeleteChannelUserBindingsByWorkspaceMemberParams{
+		WorkspaceID: workspaceID, MulticaUserID: userID,
+	}); err != nil {
+		return revocationResult{}, err
+	}
+	if err := qtx.DeleteAgentInvocationTargetsByMember(ctx, db.DeleteAgentInvocationTargetsByMemberParams{
+		WorkspaceID: workspaceID, TargetID: userID,
+	}); err != nil {
+		return revocationResult{}, err
+	}
+	return result, nil
+}
+
 // revocationResult captures everything revokeMemberRuntimes touched so the
 // caller can fan out events and analytics after the transaction commits.
 // Publishing inside the transaction would let subscribers observe a state the
 // tx might still roll back (see TaskService.BroadcastCancelledTasks docstring).
 type revocationResult struct {
 	Runtimes           []db.AgentRuntime
-	ArchivedAgents     []db.Agent
+	UnboundAgents      []db.Agent
 	CancelledTasks     []db.AgentTaskQueue
+	PausedAutopilots   []db.Autopilot
 	OfflineRuntimeIDs  []db.ForceOfflineRuntimesByIDsRow
 	RevokedTokenHashes []string
 }
@@ -225,33 +240,41 @@ func (r revocationResult) isEmpty() bool {
 	return len(r.Runtimes) == 0
 }
 
-// publishRevocation runs all post-commit side effects: invalidate daemon token
-// cache, broadcast task:cancelled with per-agent reconciliation, broadcast
-// agent:archived, and signal a runtime-list refresh. Safe to call on an empty
+// publishRevocation runs all post-commit side effects: broadcast task:cancelled
+// with per-agent reconciliation, broadcast agent/autopilot updates, and signal
+// a runtime-list refresh. Safe to call on an empty
 // result — it returns immediately.
 func (h *Handler) publishRevocation(ctx context.Context, result revocationResult, workspaceIDStr, actorType, actorIDStr string) {
 	if result.isEmpty() {
 		return
 	}
-
-	for _, hash := range result.RevokedTokenHashes {
-		h.DaemonTokenCache.Invalidate(ctx, hash)
+	runtimeIDs := make([]pgtype.UUID, 0, len(result.Runtimes))
+	for _, runtime := range result.Runtimes {
+		runtimeIDs = append(runtimeIDs, runtime.ID)
+		if h.LivenessStore != nil {
+			h.LivenessStore.Forget(ctx, uuidToString(runtime.ID))
+		}
+	}
+	if h.HeartbeatScheduler != nil {
+		h.HeartbeatScheduler.Forget(runtimeIDs)
 	}
 
 	// Per-task cancellation: TaskService handles status reconciliation and
-	// per-task event broadcast. Run this before the agent:archived burst so
-	// subscribers see "task cancelled" before the parent agent disappears
-	// from active lists, matching the order ArchiveAgent uses.
+	// per-task event broadcast. Run this before agent status updates so
+	// subscribers see "task cancelled" before its Runtime binding disappears.
 	if h.TaskService != nil && len(result.CancelledTasks) > 0 {
-		// Revocation only archives agents, so a per-task lookup would still
-		// resolve here; the workspace is passed for the same reason as
-		// everywhere else — it is known, and it is the one being revoked.
+		// The workspace is known and is the one being restricted.
 		h.TaskService.BroadcastCancelledTasks(ctx, workspaceIDStr, result.CancelledTasks)
 	}
 
-	for _, agent := range result.ArchivedAgents {
-		h.publish(protocol.EventAgentArchived, workspaceIDStr, actorType, actorIDStr, map[string]any{
-			"agent": h.agentToResponse(agent),
+	for _, agent := range result.UnboundAgents {
+		h.publish(protocol.EventAgentStatus, workspaceIDStr, actorType, actorIDStr, map[string]any{
+			"agent": broadcastAgentResponse(h.agentToResponse(agent)),
+		})
+	}
+	for _, autopilot := range result.PausedAutopilots {
+		h.publish(protocol.EventAutopilotUpdated, workspaceIDStr, actorType, actorIDStr, map[string]any{
+			"autopilot": autopilotToResponse(autopilot, nil),
 		})
 	}
 
@@ -277,8 +300,9 @@ func logRevocation(result revocationResult, workspaceID, userID string, attrs ..
 		"workspace_id", workspaceID,
 		"user_id", userID,
 		"runtimes_revoked", len(result.Runtimes),
-		"agents_archived", len(result.ArchivedAgents),
+		"agents_unbound", len(result.UnboundAgents),
 		"tasks_cancelled", len(result.CancelledTasks),
+		"autopilots_paused", len(result.PausedAutopilots),
 		"runtimes_taken_offline", len(result.OfflineRuntimeIDs),
 		"daemon_tokens_revoked", len(result.RevokedTokenHashes),
 	}

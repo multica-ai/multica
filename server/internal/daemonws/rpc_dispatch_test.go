@@ -80,13 +80,41 @@ func TestRPCDispatch_RoundTrip(t *testing.T) {
 	resp := sendRPCRequest(t, conn, protocol.RPCRequestPayload{
 		RequestID: "req-1",
 		Method:    "tasks.claim",
-		Body:      json.RawMessage(`{"max_tasks":3}`),
+		Body:      json.RawMessage(`{"runtime_ids":["rt-1"],"max_tasks":3}`),
 	})
 	if resp.RequestID != "req-1" || resp.Status != http.StatusOK || string(resp.Body) != `{"ok":true}` {
 		t.Fatalf("resp = %+v, want req-1/200/{ok:true}", resp)
 	}
 	if gotMethod != "tasks.claim" || gotDaemonID != "daemon-1" {
 		t.Fatalf("handler saw method=%q daemon=%q, want tasks.claim/daemon-1", gotMethod, gotDaemonID)
+	}
+}
+
+// A connection's Runtime scope is fixed at authentication. If cleanup fences
+// that Runtime and a re-invite registers a fresh Runtime under the same daemon
+// identity, the old socket must not be able to claim the fresh Runtime's work.
+func TestRPCDispatch_TasksClaimRejectsRuntimeOutsideAuthenticatedScope(t *testing.T) {
+	hub := NewHub()
+	called := false
+	hub.SetRPCHandler(func(context.Context, ClientIdentity, string, json.RawMessage) (int, json.RawMessage, error) {
+		called = true
+		return http.StatusOK, json.RawMessage(`{"tasks":[{"id":"should-not-leak"}]}`), nil
+	})
+	conn := dialRPCTestConn(t, hub, ClientIdentity{
+		DaemonID:   "reinvited-daemon",
+		RuntimeIDs: []string{"revoked-runtime"},
+	})
+
+	resp := sendRPCRequest(t, conn, protocol.RPCRequestPayload{
+		RequestID: "old-socket-fresh-runtime",
+		Method:    "tasks.claim",
+		Body:      json.RawMessage(`{"daemon_id":"reinvited-daemon","runtime_ids":["fresh-runtime"],"max_tasks":1}`),
+	})
+	if resp.Status != http.StatusForbidden || resp.Error == "" || len(resp.Body) != 0 {
+		t.Fatalf("resp=%+v, want 403 with no task payload", resp)
+	}
+	if called {
+		t.Fatal("claim handler called for Runtime outside the connection scope")
 	}
 }
 

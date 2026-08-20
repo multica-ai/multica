@@ -153,12 +153,14 @@ type ConnectionClosePort interface {
 type TwoStageReceipt struct {
 	Apply           DurableApplyReceipt  `json:"apply"`
 	ConnectionClose ConnectionCloseStage `json:"connectionClose"`
+	Cleanup         CleanupStage         `json:"cleanup"`
 }
 
 type AuthorityIngress struct {
-	gate      *Gate
-	keys      map[string][]byte
-	closePort ConnectionClosePort
+	gate        *Gate
+	keys        map[string][]byte
+	closePort   ConnectionClosePort
+	cleanupPort CleanupPort
 }
 
 // AuthenticatedAccess constructs the production-safe pair: callers use Gate
@@ -170,6 +172,22 @@ type AuthenticatedAccess struct {
 	Ingress                 *AuthorityIngress
 	IdentityIngress         *IdentityRestrictionIngress
 	SessionWorkspaceIngress *SessionWorkspaceSupersessionIngress
+}
+
+// AttachCleanupPort completes boot-time wiring after the Handler and its
+// existing cleanup transaction are constructed. Routers attach at most once
+// before serving requests; authority access remains usable without a port, but
+// required cleanup then reports pending rather than fabricating completion.
+func (a *AuthenticatedAccess) AttachCleanupPort(port CleanupPort) error {
+	if a == nil || a.Ingress == nil || a.IdentityIngress == nil || !configuredDependency(port) {
+		return errors.New("Tag authority cleanup port is invalid")
+	}
+	if a.Ingress.cleanupPort != nil || a.IdentityIngress.cleanupPort != nil {
+		return errors.New("Tag authority cleanup port is already attached")
+	}
+	a.Ingress.cleanupPort = port
+	a.IdentityIngress.cleanupPort = port
+	return nil
 }
 
 func NewAuthenticatedAccess(adapter store, clock Clock, keys map[string][]byte, closePort ConnectionClosePort) (*AuthenticatedAccess, error) {
@@ -234,8 +252,12 @@ func (i *AuthorityIngress) Deliver(ctx context.Context, envelope AuthorityEnvelo
 	}
 	first := envelope.Delivery.Projections[0]
 	closeStage := ConnectionCloseStage{Status: ConnectionCloseNotRequired}
+	cleanupStage := CleanupStage{Status: CleanupNotRequired}
 	if len(envelope.ConnectionCloseTargets) > 0 && (result == ApplyApplied || result == ApplyDuplicate) {
 		closeStage = i.closeConnections(ctx, envelope, first)
+	}
+	if result == ApplyApplied || result == ApplyDuplicate {
+		cleanupStage = i.cleanupWorkspace(ctx, envelope, digest)
 	}
 	return TwoStageReceipt{
 		Apply: DurableApplyReceipt{
@@ -247,6 +269,7 @@ func (i *AuthorityIngress) Deliver(ctx context.Context, envelope AuthorityEnvelo
 			Result:           result,
 		},
 		ConnectionClose: closeStage,
+		Cleanup:         cleanupStage,
 	}, nil
 }
 
@@ -257,6 +280,40 @@ func verifyAuthorityMAC(key, observedMAC, canonical []byte) bool {
 	mac := hmac.New(sha256.New, key)
 	_, _ = mac.Write(canonical)
 	return hmac.Equal(observedMAC, mac.Sum(nil))
+}
+
+func (i *AuthorityIngress) cleanupWorkspace(ctx context.Context, envelope AuthorityEnvelope, payloadDigest [32]byte) CleanupStage {
+	targets := make([]CleanupTarget, 0, len(envelope.Delivery.Projections))
+	for _, projection := range envelope.Delivery.Projections {
+		if projection.Status == StatusRemoved || projection.Status == StatusDisabled {
+			targets = append(targets, CleanupTarget{
+				VIBESUserID: projection.VIBESUserID, MembershipGeneration: projection.MembershipGeneration,
+				Status: projection.Status,
+			})
+		}
+	}
+	// Snapshot/reconcile deliveries can remove a member by omission. The
+	// cleanup adapter derives those newly inactive rows from the just-committed
+	// projection version, so an empty explicit target list is still meaningful.
+	if len(targets) == 0 && envelope.Delivery.Kind == DeliveryIncremental {
+		return CleanupStage{Status: CleanupNotRequired}
+	}
+	targets = normalizedCleanupTargets(targets)
+	first := envelope.Delivery.Projections[0]
+	command := CleanupCommand{
+		Source: CleanupWorkspaceProjection, DeliveryID: envelope.DeliveryID, CorrelationID: envelope.CorrelationID,
+		WorkspaceID: first.WorkspaceID, AuthorityVersion: first.AuthorityVersion,
+		PayloadDigest: hex.EncodeToString(payloadDigest[:]), TargetDigest: cleanupTargetDigest(targets), Targets: targets,
+	}
+	stage := CleanupStage{Status: CleanupPending}
+	if i.cleanupPort == nil {
+		return stage
+	}
+	receipt, err := i.cleanupPort.Cleanup(ctx, command)
+	if err != nil || !cleanupReceiptMatches(command, receipt) {
+		return stage
+	}
+	return CleanupStage{Status: CleanupCompleted, ReceiptID: receipt.ReceiptID, CompletedAt: &receipt.CompletedAt}
 }
 
 func (i *AuthorityIngress) closeConnections(ctx context.Context, envelope AuthorityEnvelope, first ProjectionEvent) ConnectionCloseStage {

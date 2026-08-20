@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS tag_member_execution_cleanup_key_uidx;

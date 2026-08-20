@@ -385,8 +385,12 @@ func (q *Queries) FindLegacyRuntimesByDaemonID(ctx context.Context, arg FindLega
 
 const forceOfflineRuntimesByIDs = `-- name: ForceOfflineRuntimesByIDs :many
 UPDATE agent_runtime
-SET status = 'offline', updated_at = now()
-WHERE id = ANY($1::uuid[]) AND status = 'online'
+SET status = 'offline',
+    metadata = metadata || '{"member_execution_revoked": true}'::jsonb,
+    legacy_daemon_id = COALESCE(legacy_daemon_id, daemon_id),
+    daemon_id = NULL,
+    updated_at = now()
+WHERE id = ANY($1::uuid[])
 RETURNING id, workspace_id, owner_id, daemon_id, provider
 `
 
@@ -398,7 +402,7 @@ type ForceOfflineRuntimesByIDsRow struct {
 	Provider    string      `json:"provider"`
 }
 
-// Unconditionally flips a known set of runtime IDs to offline. Distinct from
+// Unconditionally fences and flips a known set of runtime IDs to offline. Distinct from
 // MarkRuntimesOfflineByIDs (which keeps a stale-window predicate so the
 // sweeper cannot demote a runtime that just heartbeated): this variant is
 // used by intentional revocation paths — e.g. removing a workspace member —
@@ -865,6 +869,7 @@ const markAgentRuntimeOnline = `-- name: MarkAgentRuntimeOnline :one
 UPDATE agent_runtime
 SET status = 'online', last_seen_at = now(), updated_at = now()
 WHERE id = $1
+  AND NOT (metadata @> '{"member_execution_revoked": true}'::jsonb)
 RETURNING id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name
 `
 
@@ -1130,6 +1135,7 @@ const touchAgentRuntimeLastSeen = `-- name: TouchAgentRuntimeLastSeen :execrows
 UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = $1 AND status = 'online'
+  AND NOT (metadata @> '{"member_execution_revoked": true}'::jsonb)
 `
 
 // Bumps last_seen_at on an already-online runtime. Deliberately does NOT
@@ -1156,6 +1162,7 @@ const touchAgentRuntimesLastSeenBatch = `-- name: TouchAgentRuntimesLastSeenBatc
 UPDATE agent_runtime
 SET last_seen_at = now()
 WHERE id = ANY($1::uuid[]) AND status = 'online'
+  AND NOT (metadata @> '{"member_execution_revoked": true}'::jsonb)
 `
 
 // Bulk variant of TouchAgentRuntimeLastSeen used by the BatchedHeartbeatScheduler:

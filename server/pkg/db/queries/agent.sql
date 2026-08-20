@@ -195,27 +195,25 @@ SET disabled_runtime_skills = $2, updated_at = now()
 WHERE id = $1
 RETURNING *;
 
+-- name: RecordMemberExecutionDependencyReason :many
+-- A restriction-triggered cancellation uses the existing shared cancellation
+-- query first, then annotates only those returned rows with a recoverable,
+-- machine-readable reason. Runtime/Agent ids are execution references, not
+-- secrets, and make the exact revoked dependency visible in Task history.
+UPDATE agent_task_queue
+SET failure_reason = 'member_execution_dependency_revoked',
+    error = CASE
+      WHEN runtime_id = ANY(@runtime_ids::uuid[])
+        THEN 'member execution dependency revoked: runtime ' || runtime_id::text
+      ELSE 'member execution dependency revoked: agent ' || agent_id::text
+    END,
+    wait_reason = NULL
+WHERE id = ANY(@task_ids::uuid[]) AND status = 'cancelled'
+RETURNING *;
+
 -- name: ArchiveAgent :one
 UPDATE agent SET archived_at = now(), archived_by = $2, updated_at = now()
 WHERE id = $1
-RETURNING *;
-
--- name: ArchiveAgentsByRuntime :many
--- Bulk-archives every active agent bound to any runtime in the given set.
--- Used when revoking a leaving member's runtimes so agents pinned to those
--- runtimes can no longer be assigned new work. Returns the affected rows so
--- the caller can broadcast agent:archived per agent.
---
--- System agents are exempt: they belong to the workspace rather than to the
--- member who happened to create them, and the workspace's entry point runs
--- through one. Archiving Mika because a colleague left would take the default
--- agent away from everyone. Its runtime does go offline with the departure, so
--- it needs rebinding — but it stays visible and recoverable instead of
--- vanishing.
-UPDATE agent
-SET archived_at = now(), archived_by = @archived_by, updated_at = now()
-WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND archived_at IS NULL
-  AND (system_key IS NULL OR system_key = '')
 RETURNING *;
 
 -- name: ArchiveAgentsByIDs :many
@@ -669,6 +667,11 @@ SET status = 'dispatched',
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $1 AND atq.status = 'queued'
+      AND EXISTS (
+          SELECT 1 FROM agent_runtime runtime
+          WHERE runtime.id = atq.runtime_id
+            AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+      )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
           WHERE active.agent_id = atq.agent_id
@@ -747,6 +750,11 @@ SET dispatched_at = now(),
 WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = $1
+      AND EXISTS (
+          SELECT 1 FROM agent_runtime runtime
+          WHERE runtime.id = atq.runtime_id
+            AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+      )
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
@@ -771,6 +779,11 @@ SET dispatched_at = now(),
 WHERE id IN (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.runtime_id = ANY(@runtime_ids::uuid[])
+      AND EXISTS (
+          SELECT 1 FROM agent_runtime runtime
+          WHERE runtime.id = atq.runtime_id
+            AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+      )
       AND atq.status = 'dispatched'
       AND atq.started_at IS NULL
       AND atq.dispatched_at < now() - make_interval(secs => @claim_recovery_secs::double precision)
@@ -1589,6 +1602,11 @@ ORDER BY priority DESC, created_at ASC;
 -- idx_agent_task_queue_claim_candidates so the warm path is cheap.
 SELECT * FROM agent_task_queue
 WHERE runtime_id = $1 AND status = 'queued'
+  AND EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = agent_task_queue.runtime_id
+        AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+  )
 ORDER BY priority DESC, created_at ASC;
 
 -- name: PromoteDueDeferredTasksForRuntime :many
@@ -1597,6 +1615,11 @@ SET status = 'queued'
 WHERE runtime_id = @runtime_id
   AND status = 'deferred'
   AND fire_at <= now()
+  AND EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = agent_task_queue.runtime_id
+        AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+  )
 RETURNING *;
 
 -- name: ListQueuedClaimCandidatesByRuntimes :many
@@ -1612,6 +1635,11 @@ RETURNING *;
 -- candidate set is small, so this is cheap in practice.
 SELECT * FROM agent_task_queue
 WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
+  AND EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = agent_task_queue.runtime_id
+        AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+  )
 ORDER BY priority DESC, created_at ASC;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
@@ -1622,6 +1650,11 @@ SET status = 'queued'
 WHERE runtime_id = ANY(@runtime_ids::uuid[])
   AND status = 'deferred'
   AND fire_at <= now()
+  AND EXISTS (
+      SELECT 1 FROM agent_runtime runtime
+      WHERE runtime.id = agent_task_queue.runtime_id
+        AND NOT (runtime.metadata @> '{"member_execution_revoked": true}'::jsonb)
+  )
 RETURNING *;
 
 -- name: CancelDeferredEscalationsForTask :many

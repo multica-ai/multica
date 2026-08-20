@@ -499,7 +499,6 @@ func TestRevokeMember_ClearsInvocationTargets(t *testing.T) {
 		util.MustParseUUID(testWorkspaceID),
 		util.MustParseUUID(memberX),
 		util.MustParseUUID(memberRowID),
-		util.MustParseUUID(testUserID),
 	); err != nil {
 		t.Fatalf("revokeAndRemoveMember: %v", err)
 	}
@@ -602,7 +601,6 @@ func TestRevokeMember_InvocationTargetCleanupIsWorkspaceScoped(t *testing.T) {
 		util.MustParseUUID(testWorkspaceID),
 		util.MustParseUUID(userX),
 		util.MustParseUUID(memberRowA),
-		util.MustParseUUID(testUserID),
 	); err != nil {
 		t.Fatalf("revokeAndRemoveMember(A): %v", err)
 	}

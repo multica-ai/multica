@@ -7,7 +7,26 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
+
+func TestBatchedHeartbeatScheduler_ForgetDropsRevokedPendingRuntime(t *testing.T) {
+	sched := NewBatchedHeartbeatScheduler(nil, time.Hour)
+	runtimeID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	if err := sched.Schedule(context.Background(), db.AgentRuntime{
+		ID: runtimeID, Status: "online",
+		LastSeenAt: pgtype.Timestamptz{Time: time.Now(), Valid: true},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := sched.PendingCount(); got != 1 {
+		t.Fatalf("pending before Forget=%d want 1", got)
+	}
+	sched.Forget([]pgtype.UUID{runtimeID})
+	if got := sched.PendingCount(); got != 0 {
+		t.Fatalf("pending after Forget=%d want 0", got)
+	}
+}
 
 // TestBatchedHeartbeatScheduler_CoalescesAndFlushes confirms the core P1 win:
 // many Schedule calls for the same id within a tick window collapse to a

@@ -768,6 +768,13 @@ func (c *client) handleRPCFrame(raw json.RawMessage) {
 		slog.Debug("daemon websocket rpc missing request_id", "daemon_id", c.identity.DaemonID)
 		return
 	}
+	if !c.rpcRequestWithinRuntimeScope(req.Method, req.Body) {
+		// Runtime scope is captured when the socket authenticates. In
+		// particular, an old socket must not inherit a fresh Runtime registered
+		// after member cleanup released the daemon identity.
+		c.sendRPCResponse(req.RequestID, http.StatusForbidden, nil, "runtime is outside the authenticated connection scope")
+		return
+	}
 	handler := c.hub.rpcHandler()
 	if handler == nil {
 		c.sendRPCResponse(req.RequestID, http.StatusServiceUnavailable, nil, "rpc handler unavailable")
@@ -805,6 +812,29 @@ func (c *client) handleRPCFrame(raw json.RawMessage) {
 		}
 		c.sendRPCResponse(req.RequestID, status, body, "")
 	}()
+}
+
+func (c *client) rpcRequestWithinRuntimeScope(method string, body json.RawMessage) bool {
+	if method != "tasks.claim" || len(c.runtimes) == 0 {
+		// User-authenticated PAT/cloud sockets may intentionally have no fixed
+		// Runtime set; their handler continues to authorize each workspace via
+		// membership. A daemon socket always arrives with Runtime IDs.
+		return true
+	}
+	var req struct {
+		RuntimeIDs []string `json:"runtime_ids"`
+	}
+	if err := json.Unmarshal(body, &req); err != nil {
+		// Preserve the handler's existing malformed-body response. It cannot
+		// claim work because decoding there fails before database access.
+		return true
+	}
+	for _, runtimeID := range req.RuntimeIDs {
+		if _, ok := c.runtimes[strings.TrimSpace(runtimeID)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func (c *client) sendRPCResponse(requestID string, status int, body json.RawMessage, errMsg string) {

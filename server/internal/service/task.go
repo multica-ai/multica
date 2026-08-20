@@ -3158,6 +3158,9 @@ func (s *TaskService) FinalizeTaskClaim(
 	}
 	receipt := task.DeliveredCommentIds
 	err := s.runInTx(ctx, func(qtx *db.Queries) error {
+		if _, err := qtx.AssertMemberExecutionRuntimeActive(ctx, task.RuntimeID); err != nil {
+			return fmt.Errorf("assert runtime execution access: %w", err)
+		}
 		if _, err := qtx.CreateTaskToken(ctx, token); err != nil {
 			return fmt.Errorf("create task token: %w", err)
 		}

@@ -419,6 +419,8 @@ func openDisposableTagAccessDatabase(t *testing.T) *pgx.Conn {
 		"375_tag_session_ws_event_index.up.sql",
 		"376_tag_session_ws_idempotency_index.up.sql",
 		"377_tag_session_ws_delivery_id_index.up.sql",
+		"380_tag_member_execution_cleanup.up.sql",
+		"381_tag_member_execution_cleanup_key_index.up.sql",
 	} {
 		body, err := os.ReadFile(filepath.Join(migrationsDir(t), migration))
 		if err != nil {

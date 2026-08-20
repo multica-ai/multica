@@ -1042,12 +1042,12 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 		t.Fatalf("expected runtime offline, got %q", runtimeStatus)
 	}
 
-	var archivedAt *string
-	if err := testPool.QueryRow(ctx, `SELECT archived_at::text FROM agent WHERE id = $1`, fx.AgentID).Scan(&archivedAt); err != nil {
+	var archivedAt, runtimeID *string
+	if err := testPool.QueryRow(ctx, `SELECT archived_at::text, runtime_id::text FROM agent WHERE id = $1`, fx.AgentID).Scan(&archivedAt, &runtimeID); err != nil {
 		t.Fatalf("query agent: %v", err)
 	}
-	if archivedAt == nil {
-		t.Fatal("agent was not archived")
+	if archivedAt != nil || runtimeID != nil {
+		t.Fatalf("agent history was not preserved unbound: archived_at=%v runtime_id=%v", archivedAt, runtimeID)
 	}
 
 	var taskStatus string
@@ -1069,7 +1069,7 @@ func assertRevoked(t *testing.T, fx revocationFixture) {
 
 // TestDeleteMember_RevokesTargetRuntimes verifies that when an admin removes
 // another member from a workspace, every runtime owned by the removed member
-// has its agents archived, its in-flight tasks cancelled, its row flipped
+// has its agents preserved but unbound, its dependent tasks cancelled, its row flipped
 // offline, and its daemon_token rows deleted — all atomically with the member
 // row deletion.
 func TestDeleteMember_RevokesTargetRuntimes(t *testing.T) {
@@ -1194,11 +1194,11 @@ func TestLeaveWorkspace_RevokesOwnRuntimes(t *testing.T) {
 // case: an agent's runtime_id can be changed via UpdateAgent, but
 // agent_task_queue.runtime_id keeps the value from when the task was
 // queued. So after a leaving member is removed, an agent currently bound
-// to their runtime gets archived — but tasks that agent queued under a
+// to their runtime gets unbound — but tasks that agent queued under a
 // PRIOR runtime (still owned by another active member) keep their old
 // runtime_id and would not be caught by a runtime-only sweep. Because
-// ClaimAgentTask does not gate on agent.archived_at, those orphaned
-// queued tasks would remain claimable.
+// those queued tasks would otherwise remain claimable through a now-unbound
+// Agent dependency.
 func TestDeleteMember_CancelsTasksFromAgentReassignment(t *testing.T) {
 	fx := setupRevocationFixture(t, "handler-tests-revoke-reassign", "daemon-revoke-reassign")
 	ctx := context.Background()
@@ -1249,7 +1249,7 @@ RETURNING id
 		t.Fatalf("query orphan task: %v", err)
 	}
 	if orphanStatus != "cancelled" {
-		t.Fatalf("expected orphan task cancelled (archived agent leftover on other runtime), got %q", orphanStatus)
+		t.Fatalf("expected task cancelled (unbound Agent dependency on other runtime), got %q", orphanStatus)
 	}
 
 	// And the OTHER runtime — owned by an active member — must still be

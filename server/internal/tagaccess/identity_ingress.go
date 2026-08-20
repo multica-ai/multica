@@ -14,9 +14,10 @@ type IdentityRestrictionEnvelope struct {
 }
 
 type IdentityRestrictionIngress struct {
-	store     store
-	keys      map[string][]byte
-	closePort ConnectionClosePort
+	store       store
+	keys        map[string][]byte
+	closePort   ConnectionClosePort
+	cleanupPort CleanupPort
 }
 
 type IdentityApplyReceipt struct {
@@ -32,6 +33,7 @@ type IdentityApplyReceipt struct {
 type IdentityTwoStageReceipt struct {
 	Apply           IdentityApplyReceipt `json:"apply"`
 	ConnectionClose ConnectionCloseStage `json:"connectionClose"`
+	Cleanup         CleanupStage         `json:"cleanup"`
 }
 
 type canonicalIdentityCloseTarget struct {
@@ -77,8 +79,12 @@ func (i *IdentityRestrictionIngress) Deliver(ctx context.Context, envelope Ident
 		return IdentityTwoStageReceipt{}, err
 	}
 	closeStage := ConnectionCloseStage{Status: ConnectionCloseNotRequired}
+	cleanupStage := CleanupStage{Status: CleanupNotRequired}
 	if result == ApplyApplied || result == ApplyDuplicate {
 		closeStage = i.closeIdentityConnections(ctx, envelope.Delivery)
+		if envelope.Delivery.Kind == IdentityRestrictionAccountBan {
+			cleanupStage = i.cleanupIdentity(ctx, envelope.Delivery, digest)
+		}
 	}
 	return IdentityTwoStageReceipt{
 		Apply: IdentityApplyReceipt{
@@ -87,7 +93,26 @@ func (i *IdentityRestrictionIngress) Deliver(ctx context.Context, envelope Ident
 			AccountEpoch: envelope.Delivery.AccountEpoch, PayloadDigest: hex.EncodeToString(digest[:]), Result: result,
 		},
 		ConnectionClose: closeStage,
+		Cleanup:         cleanupStage,
 	}, nil
+}
+
+func (i *IdentityRestrictionIngress) cleanupIdentity(ctx context.Context, delivery IdentityRestrictionDelivery, payloadDigest [32]byte) CleanupStage {
+	command := CleanupCommand{
+		Source: CleanupIdentityRestriction, DeliveryID: delivery.EventID, CorrelationID: delivery.CorrelationID,
+		VIBESUserID: delivery.VIBESUserID, IdentityRestrictionVersion: delivery.IdentityRestrictionVersion,
+		AccountEpoch: delivery.AccountEpoch, PayloadDigest: hex.EncodeToString(payloadDigest[:]),
+		TargetDigest: cleanupTargetDigest(nil),
+	}
+	stage := CleanupStage{Status: CleanupPending}
+	if i.cleanupPort == nil {
+		return stage
+	}
+	receipt, err := i.cleanupPort.Cleanup(ctx, command)
+	if err != nil || !cleanupReceiptMatches(command, receipt) {
+		return stage
+	}
+	return CleanupStage{Status: CleanupCompleted, ReceiptID: receipt.ReceiptID, CompletedAt: &receipt.CompletedAt}
 }
 
 func (i *IdentityRestrictionIngress) closeIdentityConnections(ctx context.Context, delivery IdentityRestrictionDelivery) ConnectionCloseStage {

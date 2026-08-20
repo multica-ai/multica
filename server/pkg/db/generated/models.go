@@ -1300,6 +1300,31 @@ type TagAccessWorkspaceState struct {
 	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
 }
 
+type TagMemberExecutionCleanup struct {
+	Source                     string             `json:"source"`
+	DeliveryID                 string             `json:"delivery_id"`
+	CorrelationID              string             `json:"correlation_id"`
+	VibesWorkspaceID           pgtype.Text        `json:"vibes_workspace_id"`
+	VibesUserID                pgtype.Text        `json:"vibes_user_id"`
+	AuthorityVersion           pgtype.Int8        `json:"authority_version"`
+	IdentityRestrictionVersion pgtype.Int8        `json:"identity_restriction_version"`
+	AccountEpoch               pgtype.Int8        `json:"account_epoch"`
+	PayloadDigest              []byte             `json:"payload_digest"`
+	TargetDigest               []byte             `json:"target_digest"`
+	Targets                    []byte             `json:"targets"`
+	State                      string             `json:"state"`
+	Outcome                    string             `json:"outcome"`
+	AttemptCount               int32              `json:"attempt_count"`
+	FailureCode                string             `json:"failure_code"`
+	Effects                    []byte             `json:"effects"`
+	ReceiptID                  string             `json:"receipt_id"`
+	RequestedAt                pgtype.Timestamptz `json:"requested_at"`
+	LastRetryAt                pgtype.Timestamptz `json:"last_retry_at"`
+	FailedAt                   pgtype.Timestamptz `json:"failed_at"`
+	AppliedAt                  pgtype.Timestamptz `json:"applied_at"`
+	UpdatedAt                  pgtype.Timestamptz `json:"updated_at"`
+}
+
 type TagSessionWorkspaceGrant struct {
 	TagSessionID         string             `json:"tag_session_id"`
 	VibesWorkspaceID     string             `json:"vibes_workspace_id"`

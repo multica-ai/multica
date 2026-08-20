@@ -96,6 +96,12 @@ func (h *Handler) requireDaemonRuntimeAccess(w http.ResponseWriter, r *http.Requ
 	if !h.requireDaemonWorkspaceAccess(w, r, uuidToString(rt.WorkspaceID)) {
 		return db.AgentRuntime{}, false
 	}
+	if memberExecutionRuntimeRevoked(rt) {
+		// Match the deleted-Runtime contract so a stale daemon drops this
+		// Runtime locally instead of retrying with a revoked identity.
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return db.AgentRuntime{}, false
+	}
 	return rt, true
 }
 
@@ -1039,6 +1045,15 @@ const runtimeLivenessTTL = 90 * time.Second
 // independent of how the per-runtime throttle is tuned.
 const runtimeHeartbeatDBFlushInterval = 60 * time.Second
 
+var errMemberExecutionRuntimeRevoked = errors.New("member execution runtime revoked")
+
+func memberExecutionRuntimeRevoked(runtime db.AgentRuntime) bool {
+	var marker struct {
+		Revoked bool `json:"member_execution_revoked"`
+	}
+	return json.Unmarshal(runtime.Metadata, &marker) == nil && marker.Revoked
+}
+
 func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	authPath := middleware.DaemonAuthPathFromContext(r.Context())
@@ -1106,6 +1121,11 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 		outcome = "workspace_denied"
 		return
 	}
+	if memberExecutionRuntimeRevoked(rt) {
+		outcome = "runtime_revoked"
+		writeError(w, http.StatusNotFound, "runtime not found")
+		return
+	}
 	authMs = time.Since(start).Milliseconds()
 
 	ack, m, err := h.processHeartbeat(r.Context(), rt, req.SupportsBatchImport)
@@ -1120,6 +1140,11 @@ func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	probeSkillsTimedOut = m.ProbeSkillsTimedOut
 	probeImportTimedOut = m.ProbeImportTimedOut
 	if err != nil {
+		if errors.Is(err, errMemberExecutionRuntimeRevoked) {
+			outcome = "runtime_revoked"
+			writeError(w, http.StatusNotFound, "runtime not found")
+			return
+		}
 		outcome = "error_update"
 		writeError(w, http.StatusInternalServerError, "heartbeat failed")
 		return
@@ -1181,7 +1206,21 @@ func (h *Handler) HandleDaemonWSHeartbeat(ctx context.Context, identity daemonws
 	if !identity.AllowsWorkspace(uuidToString(rt.WorkspaceID)) {
 		return nil, fmt.Errorf("runtime not in connection workspace")
 	}
+	if memberExecutionRuntimeRevoked(rt) {
+		return &protocol.DaemonHeartbeatAckPayload{
+			RuntimeID:   runtimeID,
+			Status:      protocol.HeartbeatStatusRuntimeGone,
+			RuntimeGone: true,
+		}, nil
+	}
 	ack, _, err := h.processHeartbeat(ctx, rt, supportsBatchImport)
+	if errors.Is(err, errMemberExecutionRuntimeRevoked) {
+		return &protocol.DaemonHeartbeatAckPayload{
+			RuntimeID:   runtimeID,
+			Status:      protocol.HeartbeatStatusRuntimeGone,
+			RuntimeGone: true,
+		}, nil
+	}
 	return ack, err
 }
 
@@ -1221,14 +1260,44 @@ func (h *Handler) recordHeartbeat(ctx context.Context, rt db.AgentRuntime) error
 		}
 	}
 
-	if !needDBWrite {
-		return nil
+	if needDBWrite {
+		// Either bumps last_seen_at on an already-online row (Touch + race
+		// fallback) or flips status from offline to online. The scheduler
+		// chooses sync vs batched per case; see HeartbeatScheduler doc.
+		if err := h.HeartbeatScheduler.Schedule(ctx, rt); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				revoked, fenceErr := h.Queries.IsMemberExecutionRuntimeRevoked(ctx, rt.ID)
+				if fenceErr == nil && revoked {
+					h.forgetRuntimeHeartbeat(ctx, rt.ID)
+					return errMemberExecutionRuntimeRevoked
+				}
+			}
+			return err
+		}
 	}
 
-	// Either bumps last_seen_at on an already-online row (Touch + race
-	// fallback) or flips status from offline to online. The scheduler
-	// chooses sync vs batched per case; see HeartbeatScheduler doc.
-	return h.HeartbeatScheduler.Schedule(ctx, rt)
+	// Close both sides of the Redis/batched-scheduler race. If cleanup commits
+	// before Touch/Schedule, this final read observes its marker and removes the
+	// just-written volatile state. If cleanup commits after this read, its
+	// post-commit publish path performs the same Forget operations.
+	revoked, err := h.Queries.IsMemberExecutionRuntimeRevoked(ctx, rt.ID)
+	if err != nil {
+		return err
+	}
+	if revoked {
+		h.forgetRuntimeHeartbeat(ctx, rt.ID)
+		return errMemberExecutionRuntimeRevoked
+	}
+	return nil
+}
+
+func (h *Handler) forgetRuntimeHeartbeat(ctx context.Context, runtimeID pgtype.UUID) {
+	if h.LivenessStore != nil {
+		h.LivenessStore.Forget(ctx, uuidToString(runtimeID))
+	}
+	if h.HeartbeatScheduler != nil {
+		h.HeartbeatScheduler.Forget([]pgtype.UUID{runtimeID})
+	}
 }
 
 // heartbeatMetrics carries per-stage timings out of processHeartbeat so the
@@ -1655,6 +1724,9 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 	runtimeByID := make(map[string]db.AgentRuntime, len(runtimes))
 	authorized := make([]pgtype.UUID, 0, len(runtimes))
 	for _, rt := range runtimes {
+		if memberExecutionRuntimeRevoked(rt) {
+			continue
+		}
 		if !h.verifyDaemonWorkspaceAccess(r, uuidToString(rt.WorkspaceID)) {
 			continue
 		}

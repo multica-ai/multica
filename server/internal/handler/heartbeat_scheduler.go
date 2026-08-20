@@ -35,6 +35,11 @@ type HeartbeatScheduler interface {
 	// next beat, which will see status="offline" and take the sync branch in
 	// recordHeartbeat).
 	Schedule(ctx context.Context, rt db.AgentRuntime) error
+
+	// Forget removes queued heartbeat work for runtimes that were durably
+	// revoked. SQL also fences every flush, but eagerly pruning the in-memory
+	// queue avoids carrying known-dead work until the next tick.
+	Forget(runtimeIDs []pgtype.UUID)
 }
 
 // PassthroughHeartbeatScheduler is the synchronous, legacy-behavior scheduler.
@@ -64,6 +69,8 @@ func (p *PassthroughHeartbeatScheduler) Schedule(ctx context.Context, rt db.Agen
 	_, err := p.queries.MarkAgentRuntimeOnline(ctx, rt.ID)
 	return err
 }
+
+func (p *PassthroughHeartbeatScheduler) Forget(_ []pgtype.UUID) {}
 
 // BatchedHeartbeatScheduler coalesces same-id Schedule calls within a tick
 // window into a single bulk UPDATE.
@@ -125,6 +132,14 @@ func (b *BatchedHeartbeatScheduler) Schedule(ctx context.Context, rt db.AgentRun
 	b.pending[rt.ID] = struct{}{}
 	b.mu.Unlock()
 	return nil
+}
+
+func (b *BatchedHeartbeatScheduler) Forget(runtimeIDs []pgtype.UUID) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, runtimeID := range runtimeIDs {
+		delete(b.pending, runtimeID)
+	}
 }
 
 // Run drives periodic bulk flushes. Returns after Stop is called and the

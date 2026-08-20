@@ -1,14 +1,13 @@
 package handler
 
 import (
-	"strings"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
-
 )
 
 func createIssueViewForTest(t *testing.T, body map[string]any) (IssueViewResponse, int, string) {
@@ -513,7 +512,7 @@ func TestRevokeMemberSweepsPrivateViewsAndPreferences(t *testing.T) {
 		t.Fatalf("load member id: %v", err)
 	}
 	if _, err := testHandler.revokeAndRemoveMember(
-		ctx, parseUUID(testWorkspaceID), parseUUID(otherID), parseUUID(memberID), parseUUID(testUserID),
+		ctx, parseUUID(testWorkspaceID), parseUUID(otherID), parseUUID(memberID),
 	); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}

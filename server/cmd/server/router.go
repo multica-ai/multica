@@ -361,6 +361,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.TagAuthorityAccess != nil {
+		if err := opts.TagAuthorityAccess.AttachCleanupPort(h); err != nil {
+			panic(fmt.Sprintf("attach Tag authority cleanup port: %v", err))
+		}
 		h.TagAuthorityEnabled = true
 		h.TagSessionGrantor = opts.TagAuthorityAccess.Gate
 		h.TagAccessGate = opts.TagAuthorityAccess.Gate

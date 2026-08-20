@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY tag_member_execution_cleanup_key_uidx ON tag_member_execution_cleanup(source, delivery_id);
