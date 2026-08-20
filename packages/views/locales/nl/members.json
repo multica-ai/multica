@@ -1,0 +1,21 @@
+{
+  "role": {
+    "owner": "Eigenaar",
+    "admin": "Beheerder",
+    "member": "Lid"
+  },
+  "card": {
+    "unavailable": "Lid niet beschikbaar",
+    "agents_section": "Agents ({{count}})",
+    "detail_link": "Details →",
+    "more_agents_one": "en {{count}} andere agent",
+    "more_agents_other": "en {{count}} andere agents"
+  },
+  "detail": {
+    "workspace_fallback": "Workspace",
+    "members_breadcrumb": "Leden",
+    "breadcrumb_fallback": "Lid",
+    "not_found_title": "Lid niet gevonden",
+    "not_found_description": "Dit lid heeft de workspace mogelijk verlaten."
+  }
+}
