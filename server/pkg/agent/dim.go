@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"os/exec"
 	"strings"
 	"sync"
@@ -168,6 +169,39 @@ func (s *dimMessageStream) close() {
 	close(s.ch)
 }
 
+// dropDimUnsupportedMcpServers removes stdio MCP entries (an entry with a
+// `command` field and no `type` field) from the ACP mcpServers list.
+//
+// Dim's ACP server only declares http/sse in `agentCapabilities.mcpCapabilities`
+// and silently ignores stdio servers: session/new still succeeds, but the
+// server's tools never load and the only trace is an `unsupported_transport`
+// warning on stderr. If Multica forwarded stdio entries verbatim, a user's
+// configured MCP tools would fail silently with no surface error — exactly
+// the class of bug this filter exists to make visible. The dropped server
+// names are logged as warnings so the mismatch is diagnosable from the daemon
+// log.
+func dropDimUnsupportedMcpServers(servers []any, logger *slog.Logger) []any {
+	filtered := make([]any, 0, len(servers))
+	for _, raw := range servers {
+		entry, ok := raw.(map[string]any)
+		if !ok {
+			filtered = append(filtered, raw)
+			continue
+		}
+		if _, hasType := entry["type"]; !hasType {
+			if cmd, _ := entry["command"].(string); cmd != "" {
+				if logger != nil {
+					logger.Warn("dropping stdio MCP server: dim's ACP runtime only supports http/sse MCP transports and ignores stdio servers",
+						"backend", "dim", "name", entry["name"])
+				}
+				continue
+			}
+		}
+		filtered = append(filtered, entry)
+	}
+	return filtered
+}
+
 func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOptions) (*Session, error) {
 	execPath := b.cfg.ExecutablePath
 	if execPath == "" {
@@ -185,6 +219,14 @@ func (b *dimBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	if err != nil {
 		return nil, fmt.Errorf("dim: invalid mcp_config: %w", err)
 	}
+	// Dim's ACP server only advertises http/sse remote transports (see the
+	// dimBackend contract note above) and silently ignores stdio MCP entries
+	// (stderr: "ACP MCP stdio transport is unsupported") while still
+	// succeeding session/new. If we forwarded stdio servers as-is, users would
+	// see "configured" MCP tools that never load, with no error anywhere.
+	// Filter them here, before the wire, and log an explicit warning so the
+	// failure mode is visible instead of silent.
+	mcpServers = dropDimUnsupportedMcpServers(mcpServers, b.cfg.Logger)
 
 	timeout := opts.Timeout
 	runCtx, cancel := runContext(ctx, timeout)

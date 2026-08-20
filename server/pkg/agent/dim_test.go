@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -28,6 +29,66 @@ func TestDimModelSelectionSupported(t *testing.T) {
 	// Dim's session/set_model is session-scoped, so model override works.
 	if !ModelSelectionSupported("dim") {
 		t.Fatal("ModelSelectionSupported(dim) should return true")
+	}
+}
+
+// TestDimDropsStdioMcpServers verifies the full mcp_config pipeline: a
+// Claude-style mcp_config with a stdio entry and an http entry goes through
+// buildACPMcpServers and then dropDimUnsupportedMcpServers, and only the http
+// entry survives.
+//
+// Dim's ACP server only advertises http/sse remote transports and silently
+// ignores stdio servers (stderr: "ACP MCP stdio transport is unsupported")
+// while still succeeding session/new. Forwarding stdio entries verbatim would
+// leave users with "configured" MCP tools that never load and no error
+// anywhere, so the backend drops them before the wire and logs a warning.
+func TestDimDropsStdioMcpServers(t *testing.T) {
+	t.Parallel()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	mcpConfig := json.RawMessage(`{"mcpServers":{
+		"playwright": {"command":"npx","args":["@playwright/mcp@latest","--extension"]},
+		"remote-http": {"type":"http","url":"https://example.com/mcp"}
+	}}`)
+	servers, err := buildACPMcpServers(mcpConfig, logger)
+	if err != nil {
+		t.Fatalf("buildACPMcpServers error: %v", err)
+	}
+	got := dropDimUnsupportedMcpServers(servers, logger)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 server after dropping stdio, got %d: %#v", len(got), got)
+	}
+	entry, ok := got[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected map entry, got %T", got[0])
+	}
+	if entry["name"] != "remote-http" {
+		t.Fatalf("expected remote-http to survive, got %v", entry["name"])
+	}
+	if _, hasCommand := entry["command"]; hasCommand {
+		t.Fatal("stdio entry leaked into the filtered result")
+	}
+}
+
+// TestDimDropDimUnsupportedMcpServers exercises dropDimUnsupportedMcpServers
+// directly: stdio entries (command, no type) are dropped, http/sse entries are
+// kept, and unclassifiable entries are kept.
+func TestDimDropDimUnsupportedMcpServers(t *testing.T) {
+	t.Parallel()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
+	servers := []any{
+		map[string]any{"name": "stdio-a", "command": "node", "args": []string{"a.js"}},
+		map[string]any{"name": "http-a", "type": "http", "url": "https://a.example/mcp"},
+		map[string]any{"name": "sse-a", "type": "sse", "url": "https://s.example/mcp"},
+	}
+	got := dropDimUnsupportedMcpServers(servers, logger)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 servers after dropping stdio, got %d: %#v", len(got), got)
+	}
+	for _, raw := range got {
+		entry := raw.(map[string]any)
+		if entry["name"] == "stdio-a" {
+			t.Fatal("stdio MCP server must be dropped")
+		}
 	}
 }
 
