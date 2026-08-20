@@ -3085,7 +3085,14 @@ func (s *TaskService) claimTask(ctx context.Context, agentID, runtimeID pgtype.U
 		return nil, nil
 	}
 
-	slog.Info("task claimed", "task_id", util.UUIDToString(claimed.ID), "agent_id", util.UUIDToString(agentID))
+	slog.Info("task claimed",
+		"task_id", util.UUIDToString(claimed.ID),
+		"agent_id", util.UUIDToString(agentID),
+		"runtime_id", util.UUIDToString(claimed.RuntimeID),
+		"priority", priorityFromInt(claimed.Priority),
+		"priority_rank", claimed.Priority,
+		"selection_reason", "highest_priority_then_fifo",
+	)
 	s.captureTaskDispatched(ctx, *claimed)
 
 	// Refresh agent status from active tasks. This avoids a stale unconditional
@@ -5921,6 +5928,23 @@ func priorityToInt(p string) int32 {
 		return 1
 	default:
 		return 0
+	}
+}
+
+func priorityFromInt(p int32) string {
+	switch p {
+	case 4:
+		return "urgent"
+	case 3:
+		return "high"
+	case 2:
+		return "medium"
+	case 1:
+		return "low"
+	case 0:
+		return "none"
+	default:
+		return "unknown"
 	}
 }
 
