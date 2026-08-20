@@ -57,6 +57,10 @@ vi.mock("./wecom-tab", () => ({
   WecomTab: () => <div data-testid="wecom-tab" />,
 }));
 
+vi.mock("./telegram-tab", () => ({
+  TelegramTab: () => <div data-testid="telegram-tab" />,
+}));
+
 import { IntegrationsTab } from "./integrations-tab";
 
 afterEach(cleanup);
@@ -99,7 +103,7 @@ describe("Settings IntegrationsTab", () => {
   it("shows each channel description below its icon and title", () => {
     renderTab();
 
-    for (const channel of ["lark", "slack", "dingtalk", "wecom"]) {
+    for (const channel of ["lark", "slack", "dingtalk", "wecom", "telegram"]) {
       const icon = screen.getByTestId(`integration-channel-icon-${channel}`);
       const title = icon.closest("h3");
       const description = title?.nextElementSibling;
@@ -113,12 +117,12 @@ describe("Settings IntegrationsTab", () => {
 
   // Reaching for a generic lucide glyph is how Slack and WeCom ended up sharing
   // one speech bubble, with nothing on the row saying which platform it was
-  // (#6585). Requiring four distinct shapes is the cheap guard against a
+  // (#6585). Requiring five distinct shapes is the cheap guard against a
   // regression to that.
   it("gives every channel its own brand mark", () => {
     renderTab();
 
-    const shapes = ["lark", "slack", "dingtalk", "wecom"].map(
+    const shapes = ["lark", "slack", "dingtalk", "wecom", "telegram"].map(
       (channel) => screen.getByTestId(`integration-channel-icon-${channel}`).innerHTML,
     );
 

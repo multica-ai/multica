@@ -147,3 +147,38 @@ DELETE FROM plugin_invocation WHERE installation_id = $1;
 -- name: DeleteExpiredPluginInvocations :execrows
 -- TTL sweep. This table is operational telemetry, not history to keep.
 DELETE FROM plugin_invocation WHERE created_at < $1;
+
+-- name: UpsertPluginSkill :one
+-- A plugin's skill resource, as an ordinary workspace skill.
+--
+-- Upsert on (workspace_id, name) because that is the table's own uniqueness
+-- rule and an upgrade re-installs the same skill. The WHERE clause is the
+-- important half: it refuses to overwrite a skill a PERSON created, or one
+-- another installation owns. A plugin claiming a name someone already used must
+-- fail the install loudly, not silently replace their work.
+INSERT INTO skill (workspace_id, name, description, content, config, created_by, plugin_installation_id)
+VALUES ($1, $2, $3, $4, '{}'::jsonb, sqlc.narg(created_by), $5)
+ON CONFLICT (workspace_id, name) DO UPDATE SET
+    description = EXCLUDED.description,
+    content = EXCLUDED.content,
+    updated_at = now()
+WHERE skill.plugin_installation_id = EXCLUDED.plugin_installation_id
+RETURNING *;
+
+-- name: ListPluginSkills :many
+SELECT * FROM skill WHERE plugin_installation_id = $1 ORDER BY name ASC;
+
+-- name: DeletePluginSkillsByInstallation :exec
+DELETE FROM skill WHERE plugin_installation_id = $1;
+
+-- name: DeletePluginSkillsNotIn :exec
+-- Upgrade pruning: a skill this installation used to contribute but no longer
+-- declares must go, or a renamed skill leaves its predecessor behind forever.
+DELETE FROM skill
+WHERE plugin_installation_id = $1 AND name <> ALL(@keep_names::text[]);
+
+-- name: SetPluginMCPApprovals :one
+UPDATE plugin_installation
+SET mcp_approvals = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;

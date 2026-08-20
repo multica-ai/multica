@@ -29,7 +29,7 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { PluginHookActivity } from "../../plugins";
+import { mcpHooks, PluginHookActivity, PluginMCPApproval } from "../../plugins";
 import { useT } from "../../i18n";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 
@@ -357,6 +357,10 @@ function InstalledPlugin({
   // failing calls to report.
   const hasHooks = (installation.hooks ?? []).length > 0;
 
+  // An mcp hook is inert until its tools are approved, so the panel appears for
+  // every one of them rather than only when something is already pinned.
+  const mcpContributions = mcpHooks(installation.hooks ?? []);
+
   const contributions = [
     ...installation.surfaces.map((surface) => `${surface.name} (${surface.type})`),
     ...installation.hooks.map((hook) => `${hook.name} (${hook.triggers.join(", ")})`),
@@ -411,6 +415,21 @@ function InstalledPlugin({
           <div className="text-caption font-medium">{t(($) => $.plugins.granted_scopes)}</div>
           <ScopeList scopes={installation.granted_scopes} />
         </div>
+
+        {mcpContributions.length > 0 ? (
+          <div className="space-y-2">
+            <div className="text-caption font-medium">{t(($) => $.plugins.mcp.badge)}</div>
+            {mcpContributions.map((hook) => (
+              <PluginMCPApproval
+                key={hook.key}
+                wsId={wsId}
+                installationId={installation.id}
+                hook={hook}
+                canManage={canManage}
+              />
+            ))}
+          </div>
+        ) : null}
 
         {contributions.length > 0 ? (
           <div className="space-y-1">

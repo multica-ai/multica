@@ -51,6 +51,7 @@ import {
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
+import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { runtimeDisplayName, providerDisplayName } from "@multica/core/runtimes";
 import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { redactSecrets } from "./redact";
@@ -315,6 +316,10 @@ export function AgentTranscriptDialog({
   const [copiedBranch, showCopiedBranch] = useCopyFeedback();
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
+  const workdirCopyTarget = useMemo(
+    () => resolveWorkdirCopyTarget([task]),
+    [task],
+  );
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
   // Filters always persist across opens — a facet a run doesn't have simply
@@ -613,12 +618,12 @@ export function AgentTranscriptDialog({
   );
 
   const handleCopyWorkdir = useCallback(() => {
-    if (!task.relative_work_dir) return;
-    void copyText(task.relative_work_dir).then((ok) => {
+    if (!workdirCopyTarget) return;
+    void copyText(workdirCopyTarget.path).then((ok) => {
       if (!ok) return;
       showCopiedWorkdir();
     });
-  }, [task.relative_work_dir, showCopiedWorkdir]);
+  }, [workdirCopyTarget, showCopiedWorkdir]);
 
   // Worktree-mode runs deliver a branch instead of edits in the working copy,
   // so copying the name is the fastest path to `git diff <branch>`.
@@ -782,7 +787,7 @@ export function AgentTranscriptDialog({
   const usage = summarizeTaskUsage(task.usage);
   const hasRunDetails =
     !!runtimeInfo ||
-    !!task.relative_work_dir ||
+    !!workdirCopyTarget?.relativePath ||
     !!task.branch_name ||
     !!task.error ||
     !!createdLabel ||
@@ -895,14 +900,30 @@ export function AgentTranscriptDialog({
                       {runtimeInfo && (
                         <RunDetailRow label={t(($) => $.transcript.details_mode)} value={runtimeInfo.runtime_mode} />
                       )}
-                      {task.relative_work_dir && (
+                      {workdirCopyTarget?.relativePath && (
                         <RunDetailRow
-                          label={t(($) => $.transcript.details_workdir)}
-                          value={task.relative_work_dir}
+                          label={
+                            workdirCopyTarget.source ===
+                            "durable_project_directory"
+                              ? t(
+                                  ($) =>
+                                    $.transcript.details_project_directory,
+                                )
+                              : t(($) => $.transcript.details_workdir)
+                          }
+                          value={workdirCopyTarget.relativePath}
                           mono
                           onCopy={handleCopyWorkdir}
                           copied={copiedWorkdir}
-                          copyTitle={t(($) => $.transcript.copy_workdir)}
+                          copyTitle={
+                            workdirCopyTarget.source ===
+                            "durable_project_directory"
+                              ? t(
+                                  ($) =>
+                                    $.transcript.copy_project_directory,
+                                )
+                              : t(($) => $.transcript.copy_workdir)
+                          }
                         />
                       )}
                       {task.branch_name && (

@@ -28,3 +28,21 @@ export function pluginInvocationsOptions(wsId: string, installationId: string) {
     staleTime: 5_000,
   });
 }
+
+/**
+ * What an `mcp`-transport hook's server currently offers.
+ *
+ * Reaches the plugin author's MCP server on every read, which is why it is not
+ * prefetched anywhere: it runs when an administrator opens the approval panel
+ * and asks. `staleTime` is short because the reason for opening it is to see
+ * the current tool list, and drift is exactly what it exists to surface.
+ */
+export function pluginMCPToolsOptions(wsId: string, installationId: string, hookKey: string) {
+  return queryOptions({
+    queryKey: [...pluginKeys.all(wsId), installationId, "mcp", hookKey] as const,
+    queryFn: () => api.listPluginMCPTools(wsId, installationId, hookKey),
+    enabled: wsId.length > 0 && installationId.length > 0 && hookKey.length > 0,
+    staleTime: 5_000,
+    retry: false,
+  });
+}

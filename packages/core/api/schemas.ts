@@ -37,6 +37,9 @@ import type {
   WecomInstallation,
   ListWecomInstallationsResponse,
   RedeemWecomBindingTokenResponse,
+  TelegramInstallation,
+  ListTelegramInstallationsResponse,
+  RedeemTelegramBindingTokenResponse,
   GroupedIssuesResponse,
   GitHubConnectResponse,
   GitHubPullRequest,
@@ -197,6 +200,25 @@ export const PluginInvocationListSchema = z.object({
 export const PluginTokenIssueSchema = z.object({
   token: z.string().default(""),
   signing_secret: z.string().default(""),
+}).loose();
+
+/**
+ * Discovered tools for one `mcp`-transport hook.
+ *
+ * Defaults matter here in the usual direction: an unparseable response yields
+ * an EMPTY list and nothing approved, so a drifted backend cannot make the UI
+ * render a tool as already-approved.
+ */
+export const PluginMCPToolSchema = z.object({
+  name: z.string().default(""),
+  description: z.string().default(""),
+  schema_digest: z.string().default(""),
+  approved: z.boolean().default(false),
+  drifted: z.boolean().default(false),
+}).loose();
+
+export const PluginMCPToolListSchema = z.object({
+  tools: z.array(PluginMCPToolSchema).default([]),
 }).loose();
 
 export const PluginManifestSummarySchema = z.object({
@@ -1518,8 +1540,11 @@ export const AgentTaskSchema = z.object({
   trigger_summary: z.string().optional(),
   handoff_note: z.string().optional(),
   kind: z.string().optional(),
-  work_dir: z.string().optional(),
-  relative_work_dir: z.string().optional(),
+  work_dir: z.string().optional().catch(undefined),
+  relative_work_dir: z.string().optional().catch(undefined),
+  durable_work_dir: z.string().optional().catch(undefined),
+  relative_durable_work_dir: z.string().optional().catch(undefined),
+  branch_name: z.string().optional().catch(undefined),
   attribution: TaskAttributionSchema.optional(),
   // Per-run token usage. Same independent-degradation rule as the coverage
   // arrays above: usage is additive display metadata, so one malformed entry
@@ -2646,6 +2671,55 @@ export const EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE: RedeemWecomBindingTokenR
   workspace_id: "",
   installation_id: "",
   wecom_user_id: "",
+};
+
+export const TelegramInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  bot_id: z.string().default(""),
+  bot_username: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_TELEGRAM_INSTALLATION: TelegramInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  bot_id: "",
+  bot_username: "",
+  installer_user_id: "",
+  status: "revoked",
+  installed_at: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListTelegramInstallationsResponseSchema = z.object({
+  installations: z.array(TelegramInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE: ListTelegramInstallationsResponse = {
+  installations: [],
+  configured: false,
+};
+
+export const RedeemTelegramBindingTokenResponseSchema = z.object({
+  workspace_id: z.string().default(""),
+  installation_id: z.string().default(""),
+  telegram_user_id: z.string().default(""),
+}).loose();
+
+export const EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE: RedeemTelegramBindingTokenResponse = {
+  workspace_id: "",
+  installation_id: "",
+  telegram_user_id: "",
 };
 
 // Skills. Introduced for `POST /api/skills/:id/refresh` (update a skill from

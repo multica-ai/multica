@@ -4,9 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
-  ArchiveRestore,
   GripVertical,
-  Lock,
   MoreHorizontal,
   Pencil,
   Plus,
@@ -101,6 +99,11 @@ import { SettingsTab } from "./settings-layout";
  * Built-ins are shown but locked. Each one is its category's canonical
  * definition, and the default workspace has to look identical for every user
  * who never opens this page.
+ *
+ * The chrome is deliberately thin (MUL-6422). A category and its built-in row
+ * are the same concept seen twice, so anything the row already carries — the
+ * glyph, the behavior sentence — is noise on the header above it. What is left
+ * on a header is the label and the one action it owns.
  */
 
 interface StatusDraft {
@@ -160,22 +163,21 @@ export function IssueStatusesTab() {
       title={t(($) => $.issue_statuses.title)}
       description={t(($) => $.issue_statuses.description)}
     >
-      <div className="space-y-5">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <label className="flex items-center gap-2 text-body text-muted-foreground">
-            <Switch
-              checked={showArchived}
-              onCheckedChange={setShowArchived}
-              disabled={archivedCount === 0}
-            />
-            {t(($) => $.issue_statuses.show_archived, { count: archivedCount })}
-          </label>
-        </div>
-
+      <div className="space-y-4">
         {!canCreate && (
           <p className="rounded-lg border border-surface-border bg-muted/20 px-4 py-3 text-caption text-muted-foreground">
             {t(($) => $.issue_statuses.flag_off)}
           </p>
+        )}
+
+        {/* Offered only once the workspace has something archived. A permanently
+            disabled "Show archived (0)" is a control that can never do
+            anything. */}
+        {archivedCount > 0 && (
+          <label className="flex items-center justify-end gap-2 text-caption text-muted-foreground">
+            {t(($) => $.issue_statuses.show_archived, { count: archivedCount })}
+            <Switch checked={showArchived} onCheckedChange={setShowArchived} />
+          </label>
         )}
 
         {isLoading ? (
@@ -183,7 +185,10 @@ export function IssueStatusesTab() {
             {t(($) => $.issue_statuses.loading)}
           </div>
         ) : (
-          <div className="space-y-4">
+          // One list, not seven cards: the categories are sections of a single
+          // workflow, and seven separate borders made them read as seven
+          // unrelated settings.
+          <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
             {groups.map((group) => (
               <CategorySection
                 key={group.category}
@@ -282,23 +287,41 @@ function CategorySection({
   const canReorder = canManage && sortableIds.length > 1;
 
   return (
-    <div className="overflow-hidden rounded-lg border border-surface-border bg-card">
-      <div className="flex items-center gap-2 border-b border-surface-border bg-muted/20 px-4 py-2.5">
-        <StatusIcon status={category} category={category} className="size-3.5" />
-        <span className="text-caption font-medium">{labelOf(category)}</span>
-        <span className="flex-1 text-caption text-muted-foreground">
-          {t(($) => $.issue_statuses.categories[category])}
+    <section className="border-b border-surface-border last:border-b-0">
+      {/* Label plus the one action the header owns. The category glyph is the
+          same glyph the built-in row renders directly below it, so it said
+          nothing the eye had not already read. */}
+      <div className="flex items-center justify-between gap-2 bg-muted/20 px-4 py-1.5">
+        <span className="text-caption font-medium text-muted-foreground">
+          {labelOf(category)}
         </span>
         {canCreate && (
-          <Button variant="ghost" size="sm" className="gap-1.5" onClick={onCreate}>
-            <Plus className="size-3.5" />
-            {t(($) => $.issue_statuses.add)}
-          </Button>
+          <Tooltip>
+            <TooltipTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t(($) => $.issue_statuses.add)}
+                  onClick={onCreate}
+                >
+                  <Plus className="size-4" />
+                </Button>
+              }
+            />
+            <TooltipContent>{t(($) => $.issue_statuses.add)}</TooltipContent>
+          </Tooltip>
         )}
       </div>
 
       <div className="divide-y divide-surface-border">
-        {builtIn && <BuiltInRow entry={builtIn} label={labelOf(builtIn.key)} />}
+        {builtIn && (
+          <BuiltInRow
+            entry={builtIn}
+            label={labelOf(builtIn.key)}
+            behavior={t(($) => $.issue_statuses.categories[category])}
+          />
+        )}
         <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
           <SortableContext items={sortableIds} strategy={verticalListSortingStrategy}>
             {order.map((entry) => (
@@ -314,30 +337,31 @@ function CategorySection({
           </SortableContext>
         </DndContext>
       </div>
-    </div>
+    </section>
   );
 }
 
-function BuiltInRow({ entry, label }: { entry: IssueStatusEntry; label: string }) {
-  const { t } = useT("settings");
+function BuiltInRow({
+  entry,
+  label,
+  behavior,
+}: {
+  entry: IssueStatusEntry;
+  label: string;
+  behavior: string;
+}) {
   return (
-    <div className="flex items-center gap-3 px-4 py-3">
-      <span className="w-4 shrink-0" />
-      <StatusIcon status={entry.key} category={entry.category} className="size-3.5" />
-      <span className="min-w-0 truncate text-body font-medium">{label}</span>
-      <Tooltip>
-        <TooltipTrigger
-          render={
-            <span className="inline-flex items-center text-muted-foreground">
-              <Lock className="size-3.5" />
-            </span>
-          }
-        />
-        <TooltipContent>{t(($) => $.issue_statuses.built_in_locked)}</TooltipContent>
-      </Tooltip>
-      <span className="ml-auto truncate text-caption text-muted-foreground">
-        {entry.description || "—"}
-      </span>
+    <div className="flex min-h-12 items-center gap-3 px-4 py-2">
+      <StatusIcon status={entry.key} category={entry.category} className="size-4" />
+      <div className="min-w-0">
+        <p className="truncate text-body font-medium">{label}</p>
+        {/* The catalog's own description is seeded in English by the server;
+            the category sentence is the translated form of the same fact, so
+            it is the one that ships. No lock icon rides along — a built-in is
+            the row with no actions menu, and seven padlocks said that seven
+            times. */}
+        <p className="truncate text-caption text-muted-foreground">{behavior}</p>
+      </div>
     </div>
   );
 }
@@ -367,39 +391,52 @@ function CustomStatusRow({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`flex items-center gap-3 bg-card px-4 py-3 ${isDragging ? "relative z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
+      className={`group/row relative flex min-h-12 items-center gap-3 bg-card px-4 py-2 ${isDragging ? "z-10 shadow-[var(--surface-shadow)]" : ""} ${archived ? "opacity-60" : ""}`}
     >
-      {canReorder ? (
+      {/* The handle rides inside the row's own left padding instead of taking a
+          column of its own. A reserved gutter indents every status away from
+          the card edge — including the built-in rows, which can never be
+          dragged — and that indent is what the list reads as. (MUL-6422) */}
+      {canReorder && (
         <button
           type="button"
           aria-label={t(($) => $.issue_statuses.actions.reorder, { name: entry.name })}
-          className="w-4 shrink-0 cursor-grab text-muted-foreground active:cursor-grabbing"
+          className="absolute left-0 top-1/2 flex w-4 -translate-y-1/2 cursor-grab justify-center text-faint-foreground opacity-0 transition-opacity group-hover/row:opacity-100 focus-visible:opacity-100 active:cursor-grabbing"
           {...attributes}
           {...listeners}
         >
           <GripVertical className="size-4" />
         </button>
-      ) : (
-        <span className="w-4 shrink-0" />
       )}
       <StatusIcon
         status={entry.key}
         category={entry.category}
         color={entry.color}
-        className="size-3.5"
+        className="size-4"
       />
-      <span className="min-w-0 truncate text-body font-medium">{entry.name}</span>
-      <code className="shrink-0 rounded bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground">
-        {entry.key}
-      </code>
-      {archived && (
-        <span className="shrink-0 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground">
-          {t(($) => $.issue_statuses.archived_badge)}
-        </span>
-      )}
-      <span className="ml-auto min-w-0 flex-1 truncate text-right text-caption text-muted-foreground">
-        {entry.description || "—"}
-      </span>
+      {/* Name over description, the way the row is read. The old layout pinned
+          the description to the far right, which left a column of em dashes on
+          every status nobody had described. */}
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="truncate text-body font-medium">{entry.name}</span>
+          {archived && (
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <span className="shrink-0 rounded-full bg-muted/60 px-1.5 py-0.5 text-micro text-muted-foreground">
+                    {t(($) => $.issue_statuses.archived_badge)}
+                  </span>
+                }
+              />
+              <TooltipContent>{t(($) => $.issue_statuses.archived_hint)}</TooltipContent>
+            </Tooltip>
+          )}
+        </div>
+        {entry.description && (
+          <p className="truncate text-caption text-muted-foreground">{entry.description}</p>
+        )}
+      </div>
       {canManage && !archived && (
         <DropdownMenu>
           <DropdownMenuTrigger
@@ -424,18 +461,6 @@ function CustomStatusRow({
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
-      )}
-      {archived && (
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <span className="inline-flex size-8 items-center justify-center text-muted-foreground">
-                <ArchiveRestore className="size-4" />
-              </span>
-            }
-          />
-          <TooltipContent>{t(($) => $.issue_statuses.archived_hint)}</TooltipContent>
-        </Tooltip>
       )}
     </div>
   );
@@ -544,6 +569,16 @@ function StatusEditorDialog({
               }
               placeholder={t(($) => $.issue_statuses.editor.name_placeholder)}
             />
+            {/* The key is the string the API and the CLI take, and renaming a
+                status does not move it — so it has to be readable somewhere.
+                Here, not as a chip on every row: the list is for scanning
+                names, and a slug beside each one is what turned it into a
+                table of internals. (MUL-6422) */}
+            {status && (
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.issue_statuses.editor.key_hint, { key: status.key })}
+              </p>
+            )}
           </div>
           <div className="space-y-2">
             <FieldLabel>{t(($) => $.issue_statuses.editor.category)}</FieldLabel>

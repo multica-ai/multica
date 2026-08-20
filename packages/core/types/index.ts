@@ -101,6 +101,7 @@ export type {
   PluginConfigRequest,
   PluginHookResult,
   PluginInvocation,
+  PluginMCPTool,
   PluginTokenIssue,
 } from "./plugin";
 export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread } from "./inbox";
@@ -232,6 +233,12 @@ export type {
   RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
 } from "./wecom";
+export type {
+  TelegramInstallation,
+  ListTelegramInstallationsResponse,
+  RegisterTelegramRequest,
+  RedeemTelegramBindingTokenResponse,
+} from "./telegram";
 export type {
   Autopilot,
   AutopilotStatus,

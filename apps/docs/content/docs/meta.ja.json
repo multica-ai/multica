@@ -39,6 +39,7 @@
     "lark-bot-integration",
     "slack-bot-integration",
     "dingtalk-bot-integration",
+    "telegram-bot-integration",
     "github-integration",
     "vcs-integration",
     "---アプリ---",
@@ -52,6 +53,8 @@
     "---リファレンス---",
     "cli",
     "auth-tokens",
+    "---コミュニティ---",
+    "community-maintained",
     "---開発に参加---",
     "developers"
   ]

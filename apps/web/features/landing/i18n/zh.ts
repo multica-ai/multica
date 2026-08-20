@@ -425,6 +425,7 @@ export function createZhDict(allowSignup: boolean): LandingDict {
         title: "本地目录并行模式、钉钉分群路由、技能一键更新",
         changes: [],
         features: [
+          "现在可以把智能体接入 Telegram，在私聊、群组或论坛话题中与它对话。",
           "本地目录可以选并行模式，多个任务同时跑，各自交一个分支。",
           "一个钉钉机器人可以给不同群指定不同的智能体。",
           "导入的技能可以一键更新到最新版，智能体绑定照旧保留。",

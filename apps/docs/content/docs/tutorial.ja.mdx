@@ -23,18 +23,18 @@ Multica は、人と AI エージェントが一緒に働くためのプラッ�
 
 このガイドでは新しいワークスペースを作成して説明します。サイドバー上部のワークスペース名をクリックし、**ワークスペースを作成** を選択します。
 
-![ワークスペース作成の入口](/images/docs/tutorial-create-workspace-menu.png)
+![ワークスペース作成の入口](/images/docs/tutorial-create-workspace-menu.webp)
 
 作成時に入力する項目は 2 つです。
 
 - **ワークスペース名**：メンバーに表示される名前です。後から変更できます。
 - **ワークスペースURL**：ワークスペースのアドレスに使う slug です。たとえば `multica.ai/my-team` の `my-team` の部分で、作成後は変更できません。
 
-![ワークスペース作成ページ](/images/docs/tutorial-create-workspace-form.png)
+![ワークスペース作成ページ](/images/docs/tutorial-create-workspace-form.webp)
 
 作成が完了すると新しいワークスペースに入ります。左側がサイドバーで、以降の操作はすべてここから始めます。中央のイシュー一覧はまだ空です。これからの数ステップで、エージェントにここを埋めてもらいます。
 
-![作成したばかりの空のワークスペース](/images/docs/tutorial-empty-workspace.png)
+![作成したばかりの空のワークスペース](/images/docs/tutorial-empty-workspace.webp)
 
 ## コンピュータを接続する
 
@@ -42,11 +42,11 @@ Multica は、人と AI エージェントが一緒に働くためのプラッ�
 
 このガイドでは [Multica Desktop](https://multica.ai/download) を使って説明します。ダウンロードしてログインすると、このコンピュータが自動的にランタイムとして登録され、インストール済みの AI コーディングツールが検出されます。サイドバー下部の **設定 → ランタイム** を開き、このコンピュータがオンラインになっていることを確認します。
 
-![ランタイム一覧：このコンピュータがオンライン](/images/docs/tutorial-runtimes-list.png)
+![ランタイム一覧：このコンピュータがオンライン](/images/docs/tutorial-runtimes-list.webp)
 
 このコンピュータを開くと、検出されたツールを 1 つずつ確認できます。
 
-![ランタイム詳細：検出された AI コーディングツール](/images/docs/tutorial-runtime-detail.png)
+![ランタイム詳細：検出された AI コーディングツール](/images/docs/tutorial-runtime-detail.webp)
 
 Desktop を使わない方法もあります。ランタイムのページで **コンピュータを追加** をクリックし、案内に従ってコマンドラインからインストールすると、デーモンがバックグラウンドで常駐します。詳しくは[デーモンとランタイム](/daemon-runtimes)を参照してください。
 
@@ -72,11 +72,11 @@ summary of what you did. Do not touch code or repositories. If a
 request is ambiguous, ask before acting.
 ```
 
-![エージェント作成ページ](/images/docs/tutorial-create-agent-form.png)
+![エージェント作成ページ](/images/docs/tutorial-create-agent-form.webp)
 
 残りの項目はデフォルトのまま、作成をクリックします。**エージェント** ページに戻ると、Multica helper はすでにオンラインで、仕事を受けられる状態です。
 
-![エージェント詳細：Multica helper がオンライン](/images/docs/tutorial-agent-detail.png)
+![エージェント詳細：Multica helper がオンライン](/images/docs/tutorial-agent-detail.webp)
 
 ## 2 体目のエージェント：チャットで作成する
 
@@ -84,11 +84,11 @@ request is ambiguous, ask before acting.
 
 サイドバーの **チャット** を開き、Multica helper を選んで指示します。同じランタイム上に Engineer という名前のエージェントを作成し、モデルは Opus、担当は個人サイトの構築と保守、という内容です。Multica helper はこのコンピュータ上で作成を実行し、新しいエージェントの名前とモデルを返します。新しいエージェントは、デフォルトでは作成者だけが実行できます。このガイドではデフォルトのままで構いません。
 
-![チャットで helper に Engineer を作成させる](/images/docs/tutorial-chat-create-engineer.png)
+![チャットで helper に Engineer を作成させる](/images/docs/tutorial-chat-create-engineer.webp)
 
 **エージェント → Engineer** を開いて結果を確認します。モデルは Opus で、指示は Multica helper が生成しています。職責の範囲、リポジトリのコードを取得する方法、変更を提出するときの要件が含まれ、後からいつでも変更できます。
 
-![Engineer の指示](/images/docs/tutorial-engineer-instructions.png)
+![Engineer の指示](/images/docs/tutorial-engineer-instructions.webp)
 
 ## サイトのリポジトリを用意する
 
@@ -96,11 +96,11 @@ request is ambiguous, ask before acting.
 
 **チャット** で Engineer を選び、次のように指示します。自分の GitHub アカウントに `personal-website` という名前の空のリポジトリを作成し（このコンピュータには GitHub CLI があります）、`multica repo add` でこのワークスペースに登録する、という内容です。Engineer はローカルにリポジトリを作成し、ワークスペースに登録して、リポジトリのアドレスを返します。メッセージで公開範囲を指定していないため、Engineer はデフォルトのまま作成し、その内容を返信で説明します。公開でも非公開でも、以降のステップには影響しません。
 
-![チャット：Engineer がリポジトリの作成と登録を報告](/images/docs/tutorial-chat-create-repo.png)
+![チャット：Engineer がリポジトリの作成と登録を報告](/images/docs/tutorial-chat-create-repo.webp)
 
 **設定 → リポジトリ** を開いて確認します。`personal-website` がすでに一覧に入っています。以降、エージェントがタスクを実行するときは、ここからリポジトリを選びます。
 
-![設定内のコードリポジトリ一覧](/images/docs/tutorial-repo-settings.png)
+![設定内のコードリポジトリ一覧](/images/docs/tutorial-repo-settings.webp)
 
 GitHub CLI を使わない場合は、自分で GitHub にリポジトリを作成し、同じページで手動で追加しても結果は同じです。
 
@@ -145,45 +145,45 @@ Open a pull request when it is ready.
 
 この説明には 3 種類の情報が含まれています。制約（指定したテンプレートから始める）、内容の要件（項目ごとに列挙）、余白（スタイルの検討は Engineer に任せる）です。要件には意図と境界を書き、実現方法はエージェントに任せます。
 
-![新規イシューのエージェントモード：作成者に Engineer を選択済み](/images/docs/tutorial-new-issue-agent-mode.png)
+![新規イシューのエージェントモード：作成者に Engineer を選択済み](/images/docs/tutorial-new-issue-agent-mode.webp)
 
 送信すると、Multica がイシューを作成し（番号は `MUL-1`、タイトルは自動生成）、Engineer を担当者に設定します。Engineer はすぐに実行を開始し、ステータスが進行中に変わります。イシューの右側には、そのイシューのすべての動きが表示されます。ステータス、担当者、紐づいた pull request、実行ログです。
 
 実行には数分かかります。進捗を見る入口は 2 つあります。タイトル横の作業ステータスのバッジと、右側の **実行ログ** です。現在の実行を開きます。
 
-![進捗を確認する 2 つの入口](/images/docs/tutorial-issue-engineer-working.png)
+![進捗を確認する 2 つの入口](/images/docs/tutorial-issue-engineer-working.webp)
 
 実行ログには、この実行の一つひとつのステップが記録されています。**Agent** の行はエージェントの説明、**Bash**、**Read**、**Edit** は実行したコマンドと読み書きしたファイルです。このスクリーンショットの時点では、Engineer は作成したページのスクリーンショットを撮って自己確認しており、価格表の区切り線がそろっていないことに気づいたところです。右上の ⓘ をクリックすると、この実行で使ったコンピュータ、AI コーディングツール、作業ディレクトリを確認できます。
 
-![実行ログ：Engineer の一つひとつのステップ](/images/docs/tutorial-execution-log.png)
+![実行ログ：Engineer の一つひとつのステップ](/images/docs/tutorial-execution-log.webp)
 
 ## 受け入れ確認：イシュー内で対話する
 
 実行が終わると、Engineer はステータスをレビュー中に変更し、通知がインボックスに届きます。Engineer はイシューに完了コメントを書き、作成したページのスクリーンショットを添えています。
 
-![Engineer の完了コメント：ページのスクリーンショット付き](/images/docs/tutorial-issue-review-comment.png)
+![Engineer の完了コメント：ページのスクリーンショット付き](/images/docs/tutorial-issue-review-comment.webp)
 
 スクリーンショットでおおよそは分かりますが、受け入れ確認はブラウザで開いて行います。サイトはあなたのコンピュータ上でビルドされているので、Engineer にローカルサーバーを起動させればアクセスできます。また、右側の **Pull requests** の領域はまだ空です。イシューでは PR の提出を明確に求めていたので、この点もそのまま質問します。
 
 今回はコメント欄を使いません。画面右下にチャットボタンがあり、ワークスペースのどのページからでも開けます。サイドバーの **チャット** と同じ機能です。
 
-![右下のチャットボタン](/images/docs/tutorial-chat-fab.png)
+![右下のチャットボタン](/images/docs/tutorial-chat-fab.webp)
 
 開いたら Engineer を選び、`@` を入力して現在のイシューを参照します。会話にこのイシューのコンテキストが加わるので、先ほどの 2 点をそのまま送ります。
 
-![チャットでイシューを参照して質問する](/images/docs/tutorial-chat-ask-in-issue.png)
+![チャットでイシューを参照して質問する](/images/docs/tutorial-chat-ask-in-issue.webp)
 
 Engineer の返信は 2 つに分かれます。1 つは、ローカルサーバーを起動してアクセス用のアドレスを提示したこと。もう 1 つは、PR は実際にはすでに提出されているものの、タイトル、ブランチ名、本文のいずれにも `MUL-1` がなく、自動の紐づけが一致しなかったことです。その後、Engineer は PR のタイトルに番号を追加しました。
 
-![Engineer の返信：ローカルのアドレスと PR が紐づかなかった理由](/images/docs/tutorial-chat-engineer-reply.png)
+![Engineer の返信：ローカルのアドレスと PR が紐づかなかった理由](/images/docs/tutorial-chat-engineer-reply.webp)
 
 提示されたアドレスをブラウザで開くと、サイトが表示されます。
 
-![ローカルで動作しているサイトのトップページ](/images/docs/tutorial-site-localhost.png)
+![ローカルで動作しているサイトのトップページ](/images/docs/tutorial-site-localhost.webp)
 
 イシューに戻ると、右側の **Pull requests** の領域にも PR カードが現れ、ステータスと変更の規模が表示されます。クリックすると GitHub 上の PR が直接開きます。CI を設定したリポジトリでは、check の結果も表示されます。
 
-![イシュー右側に現れた PR カード](/images/docs/tutorial-issue-pr-linked.png)
+![イシュー右側に現れた PR カード](/images/docs/tutorial-issue-pr-linked.webp)
 
 ## フィードバックを指示に書き込む
 
@@ -191,13 +191,13 @@ Engineer の返信は 2 つに分かれます。1 つは、ローカルサーバ
 
 指示を自分で書き換える必要はありません。エージェントは multica CLI で自分の設定を更新できます。先ほどの会話を続けて、Engineer に 2 つのルールを伝えます。完了後にスクリーンショットでの自己確認は不要で、受け入れ確認はブラウザで行うこと。PR のブランチ名かタイトルに必ずイシュー番号を入れること。そのうえで、自分の指示に書き込むよう依頼します。
 
-![Engineer に自分の指示へルールを書き込ませる](/images/docs/tutorial-chat-update-instructions.png)
+![Engineer に自分の指示へルールを書き込ませる](/images/docs/tutorial-chat-update-instructions.webp)
 
 Engineer は `multica agent update` で更新を行い、指示に作業ルールのセクションを追加しました。あわせて 1 つ目のルールの代償も指摘しています。スクリーンショットでの自己確認をやめるため、ページ上の見た目の問題はあなたがブラウザで見つける必要があります。
 
 **エージェント → Engineer** を開くと、指示にこの 2 つが追加されています。
 
-![更新後の Engineer の指示](/images/docs/tutorial-engineer-updated-instructions.png)
+![更新後の Engineer の指示](/images/docs/tutorial-engineer-updated-instructions.webp)
 
 以降の実行では、この 2 つのルールが指示とともに毎回適用されます。これがエージェントを調整する基本の方法です。繰り返し起きる問題を見つけたら、毎回口頭で注意するのではなく、修正内容を指示に書き込みます。
 
@@ -207,25 +207,25 @@ Engineer は最初の版を提出しましたが、自分では気づけない�
 
 作成はやはり Multica helper に任せます。Reviewer という名前のエージェントで、今回は Codex と GPT-5.6 Sol モデルを選び、Engineer が使うツールともモデルとも別にします。レビューだけを行ってコードは変更せず、結論はイシューのコメントとして書きます。指示は今回も helper が生成します。PR の実際の状態を読んでからレビューする、指摘はファイルの位置を添えてコメントに書く、コードは決して変更しない、という内容です。
 
-![Reviewer の設定](/images/docs/tutorial-reviewer-detail.png)
+![Reviewer の設定](/images/docs/tutorial-reviewer-detail.webp)
 
 レビューのために新しいイシューを作る必要も、担当者を変える必要もありません。MUL-1 のコメント欄に戻り、`@Reviewer` と入力して @メンションし、やってほしいことを書いて送信します。コメント欄の下には、送信すると Reviewer が実行を開始する旨が表示されます。
 
-![コメントで @Reviewer してレビューを依頼する](/images/docs/tutorial-comment-mention-reviewer.png)
+![コメントで @Reviewer してレビューを依頼する](/images/docs/tutorial-comment-mention-reviewer.webp)
 
 数分後、レビューのコメントが返ってきました。結論は、マージ前に修正が必要というものです。5 件の指摘は 2 つのグループに分かれます。コーディング規約が 3 件、要件との適合が 2 件で、それぞれにファイルと行番号が付いています。要件との適合の 2 件は、まさに Engineer 自身が気づけなかった問題です。価格表が架空の価格、手付金、税務条項を正式な内容として表示していて、未定であることを示す注記がまったくないこと。連絡先に、確認していない Instagram のリンクが置かれていることです。コメントの末尾では、自分が検証した範囲も説明しています。typecheck、lint、build はいずれも通過しました。
 
 修正にも新しい手順は不要です。コメント欄で @Engineer し、指摘された問題をすべて直すよう伝えます。送信すると Engineer はすぐに実行を開始し、タイトル横のバッジと右側の実行ログの両方で確認できます。
 
-![Reviewer のレビュー結論と、@Engineer への修正依頼](/images/docs/tutorial-reviewer-findings.png)
+![Reviewer のレビュー結論と、@Engineer への修正依頼](/images/docs/tutorial-reviewer-findings.webp)
 
 数分後、Engineer が報告します。5 件すべてを修正し、同じ PR に反映しました。両者は同じタイムラインを共有しているため、報告は指摘に対して 1 件ずつ結果を述べるだけで済み、背景を繰り返す必要はありません。
 
-![Engineer の修正報告](/images/docs/tutorial-engineer-fixed.png)
+![Engineer の修正報告](/images/docs/tutorial-engineer-fixed.webp)
 
 もう一度 Reviewer を @メンションして再確認してもらいます。結論は、5 件の指摘はすべて解消されマージ可能、残るのは優先度の低い今後の提案が 2 件、というものです。
 
-![Reviewer の再確認が通過](/images/docs/tutorial-reviewer-recheck.png)
+![Reviewer の再確認が通過](/images/docs/tutorial-reviewer-recheck.webp)
 
 開発とレビューはこのように往復します。問題を見つけ、問題を直し、1 周ごとにサイトの定義が少しずつ確かになります。1 つのイシューに 2 体のエージェントがいて、Engineer が実装し、Reviewer がレビューします。あなたは短いコメントを数件書くだけで、このサイクル全体を動かせます。
 
@@ -233,7 +233,7 @@ Engineer は最初の版を提出しましたが、自分では気づけない�
 
 マージも同じくコメント 1 件で指示します。Engineer に PR をマージし、イシューを確実に完了へ移すよう伝えます。Engineer はマージし、ブランチを削除し、マージ後の main でチェックを再実行してから報告します。イシューのステータスは完了になり、インボックスに完了通知が届きます。
 
-![マージが終わり、イシューが完了に移った状態](/images/docs/tutorial-issue-done.png)
+![マージが終わり、イシューが完了に移った状態](/images/docs/tutorial-issue-done.webp)
 
 最初のイシューはここで一周しました。要件の記述からマージによる反映まで、実装、レビュー、修正、受け入れ確認、マージのすべてが同じタイムラインに記録されています。
 
@@ -252,11 +252,11 @@ MUL-1 のサイクルは一通り回りましたが、つなぎ目はすべて�
 
 この構成は Multica helper に説明するだけで済みます。スクワッドとリーダーを作成し、メンバーにそれぞれの職責を持たせ、Lead と Engineer にスキルを 1 つずつ紐づけ（次のセクションで説明します）、スクワッドの指示にワークフローを書きます。開発は Engineer に振る、PR がレビューを通ってから提出する、あなたの受け入れ確認のあとに Engineer がマージする、という内容です。helper は CLI で設定を一度にすべて完了します。
 
-![helper がスクワッドの設定を一度にすべて完了する](/images/docs/tutorial-helper-create-squad.png)
+![helper がスクワッドの設定を一度にすべて完了する](/images/docs/tutorial-helper-create-squad.webp)
 
 サイドバーの **スクワッド → Website Team** を開いて結果を確認します。リーダー、メンバー、ロールの説明がそろっています。スクワッドはこのページのフォームからも作成できます。仕組みの全体は[スクワッドのドキュメント](/squads)を参照してください。
 
-![スクワッド詳細ページ：リーダー、メンバー、ロール](/images/docs/tutorial-squad-detail.png)
+![スクワッド詳細ページ：リーダー、メンバー、ロール](/images/docs/tutorial-squad-detail.webp)
 
 ## スキル：再利用できる方法
 
@@ -264,11 +264,11 @@ MUL-1 のサイクルは一通り回りましたが、つなぎ目はすべて�
 
 スキルはエージェントのための知識パッケージです。1 つの `SKILL.md` と任意の補助ファイルで構成され、ある種類の仕事に対してどう考え、どう進めるかをエージェントに伝えます。Multica は Anthropic Agent Skills のオープン標準を採用しており、仕様に沿ったスキルはそのままインポートできます。エージェントに紐づけると、実行時に自動でランタイムへ同期されます。**スキル** ページを開くと、先ほどインポートした 2 つが表示され、右側にはそれぞれ紐づいたエージェントが並びます。
 
-![ワークスペースのスキルページ](/images/docs/tutorial-skills-list.png)
+![ワークスペースのスキルページ](/images/docs/tutorial-skills-list.webp)
 
 開くと、スキルのすべてのファイルを確認できます。
 
-![tdd スキルのファイル構成](/images/docs/tutorial-skill-detail.png)
+![tdd スキルのファイル構成](/images/docs/tutorial-skill-detail.webp)
 
 この 2 つのスキルは、一方が進め方を、もう一方が伝え方を扱います。
 
@@ -277,7 +277,7 @@ MUL-1 のサイクルは一通り回りましたが、つなぎ目はすべて�
 
 チームの進め方をスキルとして蓄積しておけば、新しいエージェントは紐づけるだけで引き継げます。インポートだけが入手方法ではありません。**新規スキル** には、手動で作成する、URL からインポートする、ローカルのランタイムからコピーする、という 3 つの方法があります。ここでは詳しく触れません。[スキルのドキュメント](/skills)を参照してください。
 
-![スキルを作成する 3 つの方法](/images/docs/tutorial-skill-new-modal.png)
+![スキルを作成する 3 つの方法](/images/docs/tutorial-skill-new-modal.webp)
 
 サードパーティのスキルをインポートする前に、そのファイルに一度目を通してください。Multica はサンドボックスによる隔離を行わず、スキルの内容はそのまま AI コーディングツールへ渡されます。
 
@@ -285,19 +285,19 @@ MUL-1 のサイクルは一通り回りましたが、つなぎ目はすべて�
 
 スクワッドに 1 つのまとまった仕事を渡します。サイトを汎用のテンプレートに変える、という内容です。実在の氏名をプレースホルダーの写真家の名前に置き換え、実在のメールアドレスを `hello@example.com` に置き換え、レイアウトと内容の構成は変更しません。今回はイシューを自分で書く必要はありません。チャットで Lead に要件を伝え、**エージェントで作成** でそのまま作成します。担当者はスクワッドです。スクワッドはエージェントやメンバーと同じように、どの担当者の欄にも指定できます。
 
-![チャットで「エージェントで作成」からイシューを作成する](/images/docs/tutorial-create-with-agent.png)
+![チャットで「エージェントで作成」からイシューを作成する](/images/docs/tutorial-create-with-agent.webp)
 
 生成されたイシューでは、要件が構造化された説明に整理されています。タイトル横のバッジは、リーダーがすでに引き受けたことを示しています。
 
-![MUL-2：Lead がイシューを作成して作業を開始](/images/docs/tutorial-issue-squad-created.png)
+![MUL-2：Lead がイシューを作成して作業を開始](/images/docs/tutorial-issue-squad-created.webp)
 
 ここから先はすべてリーダーの仕事です。振り分けのコメントは単なる転送ではありません。イシューにはなかった制約を 2 つ補っています（プレースホルダーの人物情報をサイト全体で統一する、洗い出しの範囲をメタデータと README まで広げる）。そのうえで Engineer に渡します。Engineer は完了後、同じタイムラインに PR を報告します。
 
-![Lead の振り分けと、Engineer の PR 報告](/images/docs/tutorial-squad-dispatch.png)
+![Lead の振り分けと、Engineer の PR 報告](/images/docs/tutorial-squad-dispatch.webp)
 
 レビューでの指摘はゼロで、Lead はすぐに提出します。あなたを @メンションして受け入れ確認を求め、1 行目は結論、その下に PR のリンク、変更の説明、あなたの判断が必要な 2 点が続き、最後に一言、あなたが承認しなければマージしない、と書かれています。
 
-![Lead の提出報告](/images/docs/tutorial-squad-delivery.png)
+![Lead の提出報告](/images/docs/tutorial-squad-delivery.webp)
 
 要件の整理、方針の確認、開発、レビュー、提出報告まで、このイシューではあなたがつなぐ必要のあるステップは 1 つもありません。受け入れ確認の方法は MUL-1 と同じです。ローカルサーバーを起動させてブラウザで確認することもできますが、ここでは詳しく触れません。完了への変更は引き続きあなたに残ります。マージするよう返信するか、手動でステータスを変更します。タイムラインのすべてのステップが記録され、人間のチームのイシューと変わりません。変わるのは実行する側だけです。
 
@@ -307,7 +307,7 @@ MUL-1 のサイクルは一通り回りましたが、つなぎ目はすべて�
 
 設定は一言で済みます。Multica helper に、毎週月曜の朝 9 時に Reviewer がサイトのコードベースを全面的に点検するよう伝えます。冗長なコードやデッドコード、不合理な構造、より規約に沿えるところを対象とし、見つけた内容はイシューのコメントに書き、コードは変更しない、という内容です。
 
-![helper がオートパイロットを作成する](/images/docs/tutorial-autopilot-create.png)
+![helper がオートパイロットを作成する](/images/docs/tutorial-autopilot-create.webp)
 
 **オートパイロット** ページを開くと、実行担当、プロンプト、スケジュール（cron とタイムゾーン）がすべて設定済みです。実行モードは 2 つあります。
 
@@ -316,11 +316,11 @@ MUL-1 のサイクルは一通り回りましたが、つなぎ目はすべて�
 
 定期的な点検には「イシューを作成」モードを使います。月曜まで待たずに試すには、**今すぐ実行** をクリックしてその場で 1 回トリガーします。
 
-![オートパイロット詳細ページ：スケジュールと「今すぐ実行」](/images/docs/tutorial-autopilot-detail.png)
+![オートパイロット詳細ページ：スケジュールと「今すぐ実行」](/images/docs/tutorial-autopilot-detail.webp)
 
 イシューがすぐに作成され、Reviewer が点検を始めます。以降は毎週月曜の時刻になると、同じ点検が新しいイシューを自動で作成し、誰かがトリガーする必要はなくなります。
 
-![オートパイロットが自動作成したイシュー](/images/docs/tutorial-autopilot-issue.png)
+![オートパイロットが自動作成したイシュー](/images/docs/tutorial-autopilot-issue.webp)
 
 トリガーはスケジュールのほかに webhook にも対応し、実行担当をスクワッドにすることもできます。[オートパイロットのドキュメント](/autopilots)を参照してください。
 
@@ -328,7 +328,7 @@ MUL-1 のサイクルは一通り回りましたが、つなぎ目はすべて�
 
 ここまで、ワークスペースの人間のメンバーはあなた 1 人だけでした。**設定 → メンバー** でメールアドレスを使ってほかの人を招待すると、招待された人もあなたと同じようにイシューを作成し、エージェントを @メンションし、スクワッドに参加できます。複数の人と複数のエージェントが、同じイシュー群の上で協働します。
 
-![メールアドレスでメンバーをワークスペースに招待する](/images/docs/tutorial-invite-member.png)
+![メールアドレスでメンバーをワークスペースに招待する](/images/docs/tutorial-invite-member.webp)
 
 ## おわりに
 

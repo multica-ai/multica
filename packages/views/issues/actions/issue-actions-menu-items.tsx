@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -19,7 +19,8 @@ import {
   Unlink,
   UserMinus,
 } from "lucide-react";
-import type { AgentTask, Issue } from "@multica/core/types";
+import type { Issue } from "@multica/core/types";
+import { resolveWorkdirCopyTarget } from "@multica/core/issues";
 import { todayDateOnly, addDaysDateOnly } from "@multica/core/issues/date";
 import { api } from "@multica/core/api";
 import {
@@ -134,6 +135,10 @@ export function IssueActionsMenuItems({
     queryFn: () => api.listTasksByIssue(issue.id),
     staleTime: 30_000,
   });
+  const workdirCopyTarget = useMemo(
+    () => resolveWorkdirCopyTarget(tasks),
+    [tasks],
+  );
 
   // Synchronous click handler — the awaited fetch in the previous version
   // dropped the browser's transient user activation, which made
@@ -141,16 +146,28 @@ export function IssueActionsMenuItems({
   // was cold. We now read straight from the cached query result and write
   // to the clipboard inside the same task as the click.
   const handleCopyWorkdirPath = useCallback(() => {
-    const latestWorkDir = pickLatestWorkDir(tasks);
-    if (!latestWorkDir) {
+    if (!workdirCopyTarget) {
       toast.error(t(($) => $.detail.workdir_path_unavailable));
       return;
     }
-    void copyText(latestWorkDir).then((ok) => {
-      if (ok) toast.success(t(($) => $.detail.workdir_path_copied));
-      else toast.error(t(($) => $.detail.workdir_path_copy_failed));
+    void copyText(workdirCopyTarget.path).then((ok) => {
+      if (!ok) {
+        toast.error(t(($) => $.detail.workdir_path_copy_failed));
+        return;
+      }
+      if (workdirCopyTarget.source === "durable_project_directory") {
+        toast.success(
+          workdirCopyTarget.branchName
+            ? t(($) => $.detail.project_directory_path_copied_with_branch, {
+                branch: workdirCopyTarget.branchName,
+              })
+            : t(($) => $.detail.project_directory_path_copied),
+        );
+        return;
+      }
+      toast.success(t(($) => $.detail.workdir_path_copied));
     });
-  }, [tasks, t]);
+  }, [workdirCopyTarget, t]);
 
   return (
     <>
@@ -300,7 +317,9 @@ export function IssueActionsMenuItems({
       </P.Item>
       <P.Item onClick={handleCopyWorkdirPath}>
         <FolderOpen className="h-3.5 w-3.5" />
-        {t(($) => $.actions.copy_workdir_path)}
+        {workdirCopyTarget?.source === "durable_project_directory"
+          ? t(($) => $.actions.copy_project_directory_path)
+          : t(($) => $.actions.copy_workdir_path)}
       </P.Item>
 
       <P.Separator />
@@ -357,16 +376,4 @@ export function IssueActionsMenuItems({
       </P.Item>
     </>
   );
-}
-
-function pickLatestWorkDir(tasks: AgentTask[] | undefined): string | undefined {
-  if (!tasks?.length) return undefined;
-  let latest: AgentTask | undefined;
-  for (const task of tasks) {
-    if (!task.work_dir) continue;
-    if (!latest || task.created_at > latest.created_at) {
-      latest = task;
-    }
-  }
-  return latest?.work_dir;
 }

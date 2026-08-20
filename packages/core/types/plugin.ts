@@ -144,3 +144,19 @@ export interface PluginTokenIssue {
   token: string;
   signing_secret: string;
 }
+
+/**
+ * One tool an `mcp`-transport hook's server currently offers.
+ *
+ * `approved` is the administrator's pin. `drifted` means the tool IS approved
+ * but its schema no longer matches what was approved — surfaced rather than
+ * silently re-approved, because the administrator approved a specific shape and
+ * a changed one is a new decision.
+ */
+export interface PluginMCPTool {
+  name: string;
+  description: string;
+  schema_digest: string;
+  approved: boolean;
+  drifted: boolean;
+}

@@ -445,7 +445,17 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 		PluginKey:   manifest.Key,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		installation, createErr := s.Queries.CreatePluginInstallation(ctx, db.CreatePluginInstallationParams{
+		// A transaction even though it is one row: the skill resources land in
+		// the same commit. An installation whose skills half-arrived is worse
+		// than one that failed, because the missing half is invisible.
+		tx, txErr := s.TxStarter.Begin(ctx)
+		if txErr != nil {
+			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "begin install", Err: txErr}
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		queries := s.Queries.WithTx(tx)
+
+		installation, createErr := queries.CreatePluginInstallation(ctx, db.CreatePluginInstallationParams{
 			WorkspaceID:   workspaceID,
 			PluginKey:     manifest.Key,
 			SourceUrl:     sourceURL,
@@ -461,6 +471,12 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 				return db.PluginInstallation{}, pluginErrf(PluginErrorConflict, "this plugin is already installed in this workspace")
 			}
 			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "install plugin", Err: createErr}
+		}
+		if skillErr := s.InstallSkillResources(ctx, queries, installation, manifest, sourceURL, userID); skillErr != nil {
+			return db.PluginInstallation{}, skillErr
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "commit install", Err: commitErr}
 		}
 		return installation, nil
 	}
@@ -501,6 +517,12 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 	})
 	if err != nil {
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "upgrade plugin", Err: err}
+	}
+	// Re-run on upgrade so a changed SKILL.md takes effect and a dropped one is
+	// pruned. Same transaction as the manifest snapshot: the two must never
+	// disagree about what this version contributes.
+	if err := s.InstallSkillResources(ctx, queries, updated, manifest, sourceURL, userID); err != nil {
+		return db.PluginInstallation{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "commit upgrade", Err: err}
@@ -769,6 +791,12 @@ func (s *PluginService) Uninstall(ctx context.Context, installation db.PluginIns
 	if err := queries.DeletePluginInvocationsByInstallation(ctx, installation.ID); err != nil {
 		return &PluginError{Kind: PluginErrorUnavailable, Message: "delete plugin invocations", Err: err}
 	}
+	// The skills this installation contributed go with it. Scoped by
+	// plugin_installation_id, so a skill a person wrote is untouched even if it
+	// happens to share a name with something the plugin once provided.
+	if err := queries.DeletePluginSkillsByInstallation(ctx, installation.ID); err != nil {
+		return &PluginError{Kind: PluginErrorUnavailable, Message: "delete plugin skills", Err: err}
+	}
 	if err := queries.DeletePluginInstallation(ctx, installation.ID); err != nil {
 		return &PluginError{Kind: PluginErrorUnavailable, Message: "delete plugin installation", Err: err}
 	}
@@ -796,4 +824,32 @@ func (s *PluginService) InstallationForWorkspace(ctx context.Context, workspaceI
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "load plugin installation", Err: err}
 	}
 	return installation, nil
+}
+
+// readLocalFile reads a file from inside a local plugin directory.
+//
+// Same containment as readLocalManifest, plus one more: the joined path is
+// re-checked against the plugin's own directory after cleaning. `entry` is
+// validated at manifest-parse time to be relative and traversal-free, but this
+// is the layer that touches the filesystem and it does not get to assume that.
+func (s *PluginService) readLocalFile(name, entry string) ([]byte, error) {
+	if s.LocalDir == "" {
+		return nil, pluginErrf(PluginErrorInvalid, "local plugin sources require MULTICA_PLUGIN_DIR")
+	}
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.HasPrefix(name, ".") {
+		return nil, pluginErrf(PluginErrorInvalid, "local plugin source must be a single directory name under MULTICA_PLUGIN_DIR")
+	}
+	root := filepath.Join(s.LocalDir, name)
+	path := filepath.Clean(filepath.Join(root, entry))
+	if path != root && !strings.HasPrefix(path, root+string(os.PathSeparator)) {
+		return nil, pluginErrf(PluginErrorInvalid, "plugin resource %q escapes its directory", entry)
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, pluginErrf(PluginErrorNotFound, "plugin resource %q was not found", entry)
+	}
+	if err != nil {
+		return nil, &PluginError{Kind: PluginErrorInvalid, Message: "read plugin resource", Err: err}
+	}
+	return raw, nil
 }

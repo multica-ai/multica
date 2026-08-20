@@ -45,6 +45,21 @@ export function useSetPluginEnabled(wsId: string) {
   });
 }
 
+/**
+ * Pins the approved tool set for one `mcp` hook.
+ *
+ * `tools` is the complete set the administrator wants approved, never a delta —
+ * unchecking one and saving is what revokes it. An empty array withdraws the
+ * hook, and the next task claim stops offering it to agents.
+ */
+export function useApprovePluginMCPTools(wsId: string, installationId: string, hookKey: string) {
+  const invalidate = useInvalidatePlugins(wsId);
+  return useMutation({
+    mutationFn: (tools: string[]) => api.approvePluginMCPTools(wsId, installationId, hookKey, tools),
+    onSettled: invalidate,
+  });
+}
+
 export function useUninstallPlugin(wsId: string) {
   const invalidate = useInvalidatePlugins(wsId);
   return useMutation({

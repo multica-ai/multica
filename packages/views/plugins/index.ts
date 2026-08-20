@@ -18,3 +18,4 @@ export {
 } from "./plugin-modal-surface";
 export type { PluginModalTarget } from "./plugin-modal-surface";
 export { PluginHookActivity, summarizeInvocations } from "./plugin-hook-activity";
+export { PluginMCPApproval, mcpHooks, initialSelection } from "./plugin-mcp-approval";

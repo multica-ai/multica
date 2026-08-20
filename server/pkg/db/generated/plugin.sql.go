@@ -55,7 +55,7 @@ const createPluginInstallation = `-- name: CreatePluginInstallation :one
 INSERT INTO plugin_installation (
     workspace_id, plugin_key, source_url, version, manifest, granted_scopes, installed_by
 ) VALUES ($1, $2, $3, $4, $5, $6, $7)
-RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at
+RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals
 `
 
 type CreatePluginInstallationParams struct {
@@ -94,6 +94,7 @@ func (q *Queries) CreatePluginInstallation(ctx context.Context, arg CreatePlugin
 		&i.UpdatedAt,
 		&i.TokenHash,
 		&i.TokenRotatedAt,
+		&i.McpApprovals,
 	)
 	return i, err
 }
@@ -203,6 +204,32 @@ func (q *Queries) DeletePluginSecretsByInstallation(ctx context.Context, install
 	return err
 }
 
+const deletePluginSkillsByInstallation = `-- name: DeletePluginSkillsByInstallation :exec
+DELETE FROM skill WHERE plugin_installation_id = $1
+`
+
+func (q *Queries) DeletePluginSkillsByInstallation(ctx context.Context, pluginInstallationID pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, deletePluginSkillsByInstallation, pluginInstallationID)
+	return err
+}
+
+const deletePluginSkillsNotIn = `-- name: DeletePluginSkillsNotIn :exec
+DELETE FROM skill
+WHERE plugin_installation_id = $1 AND name <> ALL($2::text[])
+`
+
+type DeletePluginSkillsNotInParams struct {
+	PluginInstallationID pgtype.UUID `json:"plugin_installation_id"`
+	KeepNames            []string    `json:"keep_names"`
+}
+
+// Upgrade pruning: a skill this installation used to contribute but no longer
+// declares must go, or a renamed skill leaves its predecessor behind forever.
+func (q *Queries) DeletePluginSkillsNotIn(ctx context.Context, arg DeletePluginSkillsNotInParams) error {
+	_, err := q.db.Exec(ctx, deletePluginSkillsNotIn, arg.PluginInstallationID, arg.KeepNames)
+	return err
+}
+
 const deletePluginStorageByInstallation = `-- name: DeletePluginStorageByInstallation :exec
 DELETE FROM plugin_storage WHERE installation_id = $1
 `
@@ -238,7 +265,7 @@ func (q *Queries) DeletePluginStorageValue(ctx context.Context, arg DeletePlugin
 }
 
 const getPluginInstallation = `-- name: GetPluginInstallation :one
-SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation WHERE id = $1
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals FROM plugin_installation WHERE id = $1
 `
 
 func (q *Queries) GetPluginInstallation(ctx context.Context, id pgtype.UUID) (PluginInstallation, error) {
@@ -259,12 +286,13 @@ func (q *Queries) GetPluginInstallation(ctx context.Context, id pgtype.UUID) (Pl
 		&i.UpdatedAt,
 		&i.TokenHash,
 		&i.TokenRotatedAt,
+		&i.McpApprovals,
 	)
 	return i, err
 }
 
 const getPluginInstallationByTokenHash = `-- name: GetPluginInstallationByTokenHash :one
-SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation WHERE token_hash = $1
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals FROM plugin_installation WHERE token_hash = $1
 `
 
 // Looked up by hash, so the plaintext token exists only in the caller's request.
@@ -286,6 +314,7 @@ func (q *Queries) GetPluginInstallationByTokenHash(ctx context.Context, tokenHas
 		&i.UpdatedAt,
 		&i.TokenHash,
 		&i.TokenRotatedAt,
+		&i.McpApprovals,
 	)
 	return i, err
 }
@@ -383,7 +412,7 @@ func (q *Queries) GetPluginStorageValue(ctx context.Context, arg GetPluginStorag
 }
 
 const getWorkspacePluginInstallation = `-- name: GetWorkspacePluginInstallation :one
-SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals FROM plugin_installation
 WHERE workspace_id = $1 AND id = $2
 `
 
@@ -410,12 +439,13 @@ func (q *Queries) GetWorkspacePluginInstallation(ctx context.Context, arg GetWor
 		&i.UpdatedAt,
 		&i.TokenHash,
 		&i.TokenRotatedAt,
+		&i.McpApprovals,
 	)
 	return i, err
 }
 
 const getWorkspacePluginInstallationByKey = `-- name: GetWorkspacePluginInstallationByKey :one
-SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals FROM plugin_installation
 WHERE workspace_id = $1 AND plugin_key = $2
 `
 
@@ -442,6 +472,7 @@ func (q *Queries) GetWorkspacePluginInstallationByKey(ctx context.Context, arg G
 		&i.UpdatedAt,
 		&i.TokenHash,
 		&i.TokenRotatedAt,
+		&i.McpApprovals,
 	)
 	return i, err
 }
@@ -523,6 +554,41 @@ func (q *Queries) ListPluginSecretKeys(ctx context.Context, installationID pgtyp
 	return items, nil
 }
 
+const listPluginSkills = `-- name: ListPluginSkills :many
+SELECT id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id FROM skill WHERE plugin_installation_id = $1 ORDER BY name ASC
+`
+
+func (q *Queries) ListPluginSkills(ctx context.Context, pluginInstallationID pgtype.UUID) ([]Skill, error) {
+	rows, err := q.db.Query(ctx, listPluginSkills, pluginInstallationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Skill{}
+	for rows.Next() {
+		var i Skill
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.Name,
+			&i.Description,
+			&i.Content,
+			&i.Config,
+			&i.CreatedBy,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.PluginInstallationID,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPluginStorageKeys = `-- name: ListPluginStorageKeys :many
 SELECT key, octet_length(value)::bigint AS size_bytes, updated_at
 FROM plugin_storage
@@ -563,7 +629,7 @@ func (q *Queries) ListPluginStorageKeys(ctx context.Context, arg ListPluginStora
 }
 
 const listWorkspacePluginInstallations = `-- name: ListWorkspacePluginInstallations :many
-SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at FROM plugin_installation
+SELECT id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals FROM plugin_installation
 WHERE workspace_id = $1
 ORDER BY created_at ASC
 `
@@ -592,6 +658,7 @@ func (q *Queries) ListWorkspacePluginInstallations(ctx context.Context, workspac
 			&i.UpdatedAt,
 			&i.TokenHash,
 			&i.TokenRotatedAt,
+			&i.McpApprovals,
 		); err != nil {
 			return nil, err
 		}
@@ -608,7 +675,7 @@ UPDATE plugin_installation
 SET enabled = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at
+RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals
 `
 
 type SetPluginInstallationEnabledParams struct {
@@ -634,6 +701,7 @@ func (q *Queries) SetPluginInstallationEnabled(ctx context.Context, arg SetPlugi
 		&i.UpdatedAt,
 		&i.TokenHash,
 		&i.TokenRotatedAt,
+		&i.McpApprovals,
 	)
 	return i, err
 }
@@ -654,12 +722,47 @@ func (q *Queries) SetPluginInstallationToken(ctx context.Context, arg SetPluginI
 	return err
 }
 
+const setPluginMCPApprovals = `-- name: SetPluginMCPApprovals :one
+UPDATE plugin_installation
+SET mcp_approvals = $2, updated_at = now()
+WHERE id = $1
+RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals
+`
+
+type SetPluginMCPApprovalsParams struct {
+	ID           pgtype.UUID `json:"id"`
+	McpApprovals []byte      `json:"mcp_approvals"`
+}
+
+func (q *Queries) SetPluginMCPApprovals(ctx context.Context, arg SetPluginMCPApprovalsParams) (PluginInstallation, error) {
+	row := q.db.QueryRow(ctx, setPluginMCPApprovals, arg.ID, arg.McpApprovals)
+	var i PluginInstallation
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.PluginKey,
+		&i.SourceUrl,
+		&i.Version,
+		&i.Manifest,
+		&i.GrantedScopes,
+		&i.Config,
+		&i.Enabled,
+		&i.InstalledBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.TokenHash,
+		&i.TokenRotatedAt,
+		&i.McpApprovals,
+	)
+	return i, err
+}
+
 const updatePluginInstallationConfig = `-- name: UpdatePluginInstallationConfig :one
 UPDATE plugin_installation
 SET config = $2,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at
+RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals
 `
 
 type UpdatePluginInstallationConfigParams struct {
@@ -685,6 +788,7 @@ func (q *Queries) UpdatePluginInstallationConfig(ctx context.Context, arg Update
 		&i.UpdatedAt,
 		&i.TokenHash,
 		&i.TokenRotatedAt,
+		&i.McpApprovals,
 	)
 	return i, err
 }
@@ -698,7 +802,7 @@ SET source_url = $2,
     config = $6,
     updated_at = now()
 WHERE id = $1
-RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at
+RETURNING id, workspace_id, plugin_key, source_url, version, manifest, granted_scopes, config, enabled, installed_by, created_at, updated_at, token_hash, token_rotated_at, mcp_approvals
 `
 
 type UpdatePluginInstallationManifestParams struct {
@@ -738,6 +842,7 @@ func (q *Queries) UpdatePluginInstallationManifest(ctx context.Context, arg Upda
 		&i.UpdatedAt,
 		&i.TokenHash,
 		&i.TokenRotatedAt,
+		&i.McpApprovals,
 	)
 	return i, err
 }
@@ -758,6 +863,58 @@ type UpsertPluginSecretParams struct {
 func (q *Queries) UpsertPluginSecret(ctx context.Context, arg UpsertPluginSecretParams) error {
 	_, err := q.db.Exec(ctx, upsertPluginSecret, arg.InstallationID, arg.Key, arg.Ciphertext)
 	return err
+}
+
+const upsertPluginSkill = `-- name: UpsertPluginSkill :one
+INSERT INTO skill (workspace_id, name, description, content, config, created_by, plugin_installation_id)
+VALUES ($1, $2, $3, $4, '{}'::jsonb, $6, $5)
+ON CONFLICT (workspace_id, name) DO UPDATE SET
+    description = EXCLUDED.description,
+    content = EXCLUDED.content,
+    updated_at = now()
+WHERE skill.plugin_installation_id = EXCLUDED.plugin_installation_id
+RETURNING id, workspace_id, name, description, content, config, created_by, created_at, updated_at, plugin_installation_id
+`
+
+type UpsertPluginSkillParams struct {
+	WorkspaceID          pgtype.UUID `json:"workspace_id"`
+	Name                 string      `json:"name"`
+	Description          string      `json:"description"`
+	Content              string      `json:"content"`
+	PluginInstallationID pgtype.UUID `json:"plugin_installation_id"`
+	CreatedBy            pgtype.UUID `json:"created_by"`
+}
+
+// A plugin's skill resource, as an ordinary workspace skill.
+//
+// Upsert on (workspace_id, name) because that is the table's own uniqueness
+// rule and an upgrade re-installs the same skill. The WHERE clause is the
+// important half: it refuses to overwrite a skill a PERSON created, or one
+// another installation owns. A plugin claiming a name someone already used must
+// fail the install loudly, not silently replace their work.
+func (q *Queries) UpsertPluginSkill(ctx context.Context, arg UpsertPluginSkillParams) (Skill, error) {
+	row := q.db.QueryRow(ctx, upsertPluginSkill,
+		arg.WorkspaceID,
+		arg.Name,
+		arg.Description,
+		arg.Content,
+		arg.PluginInstallationID,
+		arg.CreatedBy,
+	)
+	var i Skill
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.Name,
+		&i.Description,
+		&i.Content,
+		&i.Config,
+		&i.CreatedBy,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.PluginInstallationID,
+	)
+	return i, err
 }
 
 const upsertPluginStorageValue = `-- name: UpsertPluginStorageValue :one

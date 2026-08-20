@@ -541,6 +541,9 @@ func main() {
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
 	}
+	if h.TelegramOutbound != nil {
+		h.TelegramOutbound.Start(sweepCtx)
+	}
 	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
 	// No-op when unconfigured (no App private key).
 	h.PRRefresh.Start(sweepCtx)
@@ -648,6 +651,9 @@ func main() {
 	heartbeatScheduler.Stop()
 	if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
 		slog.Warn("webhook delivery worker did not exit within shutdown timeout")
+	}
+	if h.TelegramOutbound != nil && !h.TelegramOutbound.WaitWithTimeout(5*time.Second) {
+		slog.Warn("telegram outbound workers did not exit within shutdown timeout")
 	}
 
 	// Join the channel supervisor's per-installation goroutines so the

@@ -960,7 +960,7 @@ function RuntimesVisual() {
 function buildFeatures(t: LandingDict) {
   const keys = ["teammates", "autonomous", "skills", "runtimes"] as const;
   const visuals = [TeammatesVisual, AutonomousVisual, SkillsVisual, RuntimesVisual];
-  const bgImages = [undefined, "/images/feature-bg-2.jpg", "/images/feature-bg-3.jpg", "/images/feature-bg-4.jpg"];
+  const bgImages = [undefined, "/images/feature-bg-2.webp", "/images/feature-bg-3.webp", "/images/feature-bg-4.webp"];
 
   return keys.map((key, i) => ({
     ...t.features[key],
@@ -1060,7 +1060,7 @@ export function FeaturesSection() {
                   {feature.visual ? (
                     <div className="relative overflow-hidden rounded-sm">
                       <Image
-                        src={feature.bgImage ?? "/images/feature-bg.jpg"}
+                        src={feature.bgImage ?? "/images/feature-bg.webp"}
                         alt=""
                         fill
                         className="object-cover object-center"

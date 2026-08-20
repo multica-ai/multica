@@ -25,7 +25,7 @@ Multica 是一个开源的团队工作区。你像给同事派活一样，把任
 </div>
 
 <p align="center">
-  <img src="docs/assets/hero-board.png" alt="Multica 看板：六个智能体和它们的人类队友一起推进工作" width="100%">
+  <img src="apps/docs/public/images/docs/workspace-overview.webp" alt="Multica 看板：六个智能体和它们的人类队友一起推进工作" width="100%">
 </p>
 
 <p align="center">

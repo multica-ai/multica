@@ -116,6 +116,16 @@ type hookRequestBody struct {
 	IssueID string           `json:"issue_id,omitempty"`
 	Actor   hookRequestActor `json:"actor"`
 	Input   json.RawMessage  `json:"input,omitempty"`
+	// Config is the installation's non-secret configuration, the values an
+	// administrator typed into the host-rendered form. Sent because the handler
+	// has no other way to read them — the Action API deliberately has no config
+	// endpoint — and a plugin forced to keep its own second copy would make the
+	// manifest's config block decorative.
+	//
+	// Secret-typed fields are NEVER included. They are the plugin's credentials
+	// for ITS OWN services; it already has them, and putting them on the wire
+	// would hand every value to whoever holds the endpoint.
+	Config map[string]any `json:"config,omitempty"`
 	// CallbackToken lets the handler call the Action API back for the few
 	// minutes it is valid. Narrower than the installation's own token and tied
 	// to this one call, so a handler that leaks it leaks a few minutes of the
@@ -312,6 +322,38 @@ func (s *PluginService) callHookEndpoint(ctx context.Context, invocation HookInv
 	return json.RawMessage(payload), nil
 }
 
+// nonSecretConfig reads the installation's stored configuration and drops
+// anything the manifest declared as a secret.
+//
+// Filtered against the MANIFEST rather than against the stored shape: secrets
+// live in their own table and should never appear in the config column at all,
+// so this is the check that would catch it if one ever did.
+func nonSecretConfig(installation db.PluginInstallation) map[string]any {
+	if len(installation.Config) == 0 {
+		return nil
+	}
+	values := map[string]any{}
+	if err := json.Unmarshal(installation.Config, &values); err != nil {
+		return nil
+	}
+	manifest, err := ParseInstallationManifest(installation)
+	if err != nil {
+		// Without a manifest there is no way to tell which keys are secret, so
+		// send none of them.
+		return nil
+	}
+	for key := range values {
+		field, declared := manifest.Config.Field(key)
+		if !declared || field.Type == plugincontract.ConfigSecret {
+			delete(values, key)
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
 func (s *PluginService) buildHookBody(ctx context.Context, invocation HookInvocation) (hookRequestBody, error) {
 	body := hookRequestBody{
 		Version:      1,
@@ -325,6 +367,7 @@ func (s *PluginService) buildHookBody(ctx context.Context, invocation HookInvoca
 	if invocation.IssueID.Valid {
 		body.IssueID = uuidString(invocation.IssueID)
 	}
+	body.Config = nonSecretConfig(invocation.Installation)
 	if invocation.Input != nil {
 		encoded, err := json.Marshal(invocation.Input)
 		if err != nil {
