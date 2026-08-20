@@ -1,5 +1,6 @@
 import { render, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { documentNavigation } from "@/platform/web-host-path";
 
 const state = vi.hoisted(() => ({
   user: { id: "user-1" } as { id: string } | null,
@@ -15,7 +16,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: (
-    selector: (auth: { user: typeof state.user; isLoading: boolean }) => unknown,
+    selector: (auth: {
+      user: typeof state.user;
+      isLoading: boolean;
+    }) => unknown,
   ) => selector({ user: state.user, isLoading: state.isLoading }),
 }));
 
@@ -39,6 +43,8 @@ vi.mock("@/lib/public-host", () => ({
 import { RedirectIfAuthenticated } from "./redirect-if-authenticated";
 
 beforeEach(() => {
+  vi.spyOn(documentNavigation, "assign").mockImplementation(() => {});
+  vi.spyOn(documentNavigation, "replace").mockImplementation(() => {});
   state.user = { id: "user-1" };
   state.isLoading = false;
   state.workspaces = [];
@@ -60,7 +66,21 @@ describe("RedirectIfAuthenticated", () => {
     render(<RedirectIfAuthenticated />);
 
     await waitFor(() => {
-      expect(state.replace).toHaveBeenCalledWith("/acme/issues");
+      expect(documentNavigation.replace).toHaveBeenCalledWith("/tag/acme/chat");
+      expect(state.replace).not.toHaveBeenCalled();
+    });
+  });
+
+  it("hands an empty Workspace list to the Tag authority create route", async () => {
+    state.ready = true;
+
+    render(<RedirectIfAuthenticated />);
+
+    await waitFor(() => {
+      expect(documentNavigation.replace).toHaveBeenCalledWith(
+        "/tag/workspaces/new",
+      );
+      expect(state.replace).not.toHaveBeenCalled();
     });
   });
 });

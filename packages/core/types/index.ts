@@ -1,4 +1,12 @@
-export type { Issue, IssueStatus, IssuePriority, IssueAssigneeType, IssueMetadata, IssueMetadataValue, IssueReaction } from "./issue";
+export type {
+  Issue,
+  IssueStatus,
+  IssuePriority,
+  IssueAssigneeType,
+  IssueMetadata,
+  IssueMetadataValue,
+  IssueReaction,
+} from "./issue";
 export type {
   IssueStatusCategory,
   IssueStatusEntry,
@@ -73,17 +81,27 @@ export type {
   RuntimeLocalSkillImportAction,
   RuntimeLocalSkillImportConflict,
   RuntimeLocalSkillSummary,
-	RuntimeLocalMcpServerSummary,
+  RuntimeLocalMcpServerSummary,
   RuntimeLocalSkillListRequest,
   CreateRuntimeLocalSkillImportRequest,
   RuntimeLocalSkillImportRequest,
   RuntimeLocalSkillsResult,
   RuntimeLocalSkillImportResult,
   IssueUsageSummary,
-  MikaBootstrapResponse,
 } from "./agent";
 export { RUNTIME_PROFILE_PROTOCOL_FAMILIES } from "./agent";
-export type { Workspace, WorkspaceRepo, WorkspaceMcpServer, Member, MemberRole, User, MemberWithUser, Invitation, ShareLink, ShareLinkInfo } from "./workspace";
+export type {
+  Workspace,
+  WorkspaceRepo,
+  WorkspaceMcpServer,
+  Member,
+  MemberRole,
+  User,
+  MemberWithUser,
+  Invitation,
+  ShareLink,
+  ShareLinkInfo,
+} from "./workspace";
 export type {
   PluginBinding,
   PluginInstallation,
@@ -101,12 +119,66 @@ export type {
   RemoteMCPOAuthStartResponse,
   RemoteMCPTool,
 } from "./plugin";
-export type { InboxItem, InboxSeverity, InboxItemType, InboxWorkspaceUnread } from "./inbox";
-export type { NotificationGroupKey, NotificationGroupValue, NotificationPreferences, NotificationPreferenceResponse, WebPushConfigResponse, WebPushSubscriptionRequest } from "./notification-preference";
-export type { Comment, CommentType, CommentAuthorType, CommentTriggerPreview, CommentTriggerPreviewAgent, CommentTriggerSource, CommentTriggerOutcome, CommentTriggerStatus, Reaction } from "./comment";
-export type { Label, LabelResourceType, CreateLabelRequest, UpdateLabelRequest, ListLabelsResponse, IssueLabelsResponse, ResourceLabelsResponse } from "./label";
-export type { IssueProperty, IssuePropertyType, IssuePropertyOption, IssuePropertyConfig, IssuePropertyValue, IssuePropertyValues, CreatePropertyRequest, UpdatePropertyRequest, ListPropertiesResponse, IssuePropertiesResponse, IssuePropertyActorKind, IssuePropertyActorRef } from "./property";
-export { ISSUE_PROPERTY_TYPES, isKnownPropertyType, ISSUE_PROPERTY_ACTOR_KINDS, MAX_ISSUE_PROPERTY_ACTOR_VALUES, isActorPropertyType, formatActorRef, parseActorRef, actorRefsFromValue, actorRefValuesFromValue, hasUnknownActorRef } from "./property";
+export type {
+  InboxItem,
+  InboxSeverity,
+  InboxItemType,
+  InboxWorkspaceUnread,
+} from "./inbox";
+export type {
+  NotificationGroupKey,
+  NotificationGroupValue,
+  NotificationPreferences,
+  NotificationPreferenceResponse,
+  WebPushConfigResponse,
+  WebPushSubscriptionRequest,
+} from "./notification-preference";
+export type {
+  Comment,
+  CommentType,
+  CommentAuthorType,
+  CommentTriggerPreview,
+  CommentTriggerPreviewAgent,
+  CommentTriggerSource,
+  CommentTriggerOutcome,
+  CommentTriggerStatus,
+  Reaction,
+} from "./comment";
+export type {
+  Label,
+  LabelResourceType,
+  CreateLabelRequest,
+  UpdateLabelRequest,
+  ListLabelsResponse,
+  IssueLabelsResponse,
+  ResourceLabelsResponse,
+} from "./label";
+export type {
+  IssueProperty,
+  IssuePropertyType,
+  IssuePropertyOption,
+  IssuePropertyConfig,
+  IssuePropertyValue,
+  IssuePropertyValues,
+  CreatePropertyRequest,
+  UpdatePropertyRequest,
+  ListPropertiesResponse,
+  IssuePropertiesResponse,
+  IssuePropertyActorKind,
+  IssuePropertyActorRef,
+} from "./property";
+export {
+  ISSUE_PROPERTY_TYPES,
+  isKnownPropertyType,
+  ISSUE_PROPERTY_ACTOR_KINDS,
+  MAX_ISSUE_PROPERTY_ACTOR_VALUES,
+  isActorPropertyType,
+  formatActorRef,
+  parseActorRef,
+  actorRefsFromValue,
+  actorRefValuesFromValue,
+  hasUnknownActorRef,
+} from "./property";
 export type {
   QuickAction,
   QuickActionVisibility,
@@ -121,10 +193,7 @@ export {
   QUICK_ACTION_TEMPLATE_TOKEN_RE,
   findQuickActionTemplateToken,
 } from "./quick-action";
-export type {
-  TimelineEntry,
-  AssigneeFrequencyEntry,
-} from "./activity";
+export type { TimelineEntry, AssigneeFrequencyEntry } from "./activity";
 export type { IssueSubscriber } from "./subscriber";
 export type * from "./events";
 export type * from "./api";
@@ -156,7 +225,6 @@ export type {
   PendingChatTasksResponse,
   HasPendingChatTasksResponse,
   SendChatMessageResponse,
-  StartMikaOnboardingResponse,
   CancelledChatMessage,
   CancelTaskResponse,
   ChatDraftRestore,
@@ -180,7 +248,12 @@ export type {
   UpdateProjectResourceRequest,
   ListProjectResourcesResponse,
 } from "./project";
-export type { PinnedItem, PinnedItemType, CreatePinRequest, ReorderPinsRequest } from "./pin";
+export type {
+  PinnedItem,
+  PinnedItemType,
+  CreatePinRequest,
+  ReorderPinsRequest,
+} from "./pin";
 export type {
   GitHubInstallation,
   GitHubMergeableState,

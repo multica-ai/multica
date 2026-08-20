@@ -14,6 +14,7 @@ import {
 } from "./shared";
 import { useLocale, locales, localeLabels } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
+import { WebHostLink } from "@/platform/web-host-link";
 
 export function LandingFooter() {
   const { t, locale, setLocale } = useLocale();
@@ -65,12 +66,12 @@ export function LandingFooter() {
               </Link>
             </div>
             <div className="mt-6">
-              <Link
+              <WebHostLink
                 href={ctaHref}
                 className="inline-flex items-center justify-center rounded-[11px] bg-white px-5 py-2.5 text-label font-semibold text-[#0a0d12] transition-colors hover:bg-white/88"
               >
                 {user ? t.header.dashboard : t.footer.cta}
-              </Link>
+              </WebHostLink>
             </div>
           </div>
 

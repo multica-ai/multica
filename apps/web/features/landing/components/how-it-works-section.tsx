@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useAuthStore } from "@multica/core/auth";
 import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
+import { WebHostLink } from "@/platform/web-host-link";
 import { GitHubMark, githubUrl, heroButtonClassName } from "./shared";
 
 export function HowItWorksSection() {
@@ -25,10 +26,7 @@ export function HowItWorksSection() {
 
         <div className="mt-20 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 sm:grid-cols-2 lg:grid-cols-4">
           {t.howItWorks.steps.map((step, i) => (
-            <div
-              key={i}
-              className="flex flex-col bg-[#05070b] p-8 lg:p-10"
-            >
+            <div key={i} className="flex flex-col bg-[#05070b] p-8 lg:p-10">
               <span className="text-label font-semibold tabular-nums text-white/28">
                 {String(i + 1).padStart(2, "0")}
               </span>
@@ -43,9 +41,9 @@ export function HowItWorksSection() {
         </div>
 
         <div className="mt-14 flex flex-wrap items-center gap-4">
-          <Link href={ctaHref} className={heroButtonClassName("solid")}>
+          <WebHostLink href={ctaHref} className={heroButtonClassName("solid")}>
             {user ? t.header.dashboard : t.howItWorks.cta}
-          </Link>
+          </WebHostLink>
           <Link
             href={docsHrefForLocale(locale)}
             className={heroButtonClassName("ghost")}

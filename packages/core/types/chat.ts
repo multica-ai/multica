@@ -18,10 +18,7 @@ export interface ChatPinnedAgent {
  *   onboarding starter cards under it instead of quick-action chips.
  */
 export type ChatMessageKind =
-  | "message"
-  | "no_response"
-  | "onboarding_kickoff"
-  | "onboarding_opening";
+  "message" | "no_response" | "onboarding_kickoff" | "onboarding_opening";
 
 /**
  * A concise follow-up offered by an assistant reply. `label` is rendered in
@@ -199,18 +196,6 @@ export interface SendChatMessageResponse {
    * compat with servers that predate the field.
    */
   attachment_ids?: string[];
-}
-
-export interface StartMikaOnboardingResponse {
-  /** True only for the request that wrote the opening. */
-  started: boolean;
-  /**
-   * The opening message, already persisted and final. No agent runs to
-   * produce it, so there is no task to await — a `started` response means the
-   * member's first message from Mika is in the transcript right now.
-   */
-  message_id?: string;
-  created_at?: string;
 }
 
 export interface CancelledChatMessage {

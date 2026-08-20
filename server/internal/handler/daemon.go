@@ -2087,18 +2087,6 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			RuntimeConfig:         runtimeConfig,
 			DisabledRuntimeSkills: disabledRuntimeSkillsFor(agent.DisabledRuntimeSkills, runtimeID, runtime.Provider),
 		}
-		// System agents carry a product-owned instruction layer that ships with
-		// this binary instead of being copied into their row at creation. That
-		// is what makes it hot-updatable: editing the embedded file and
-		// deploying reaches every existing workspace on its next task, with no
-		// migration and no client upgrade. agent.Instructions holds only the
-		// workspace's own notes, so a release can never overwrite them.
-		//
-		// Composing here covers every task kind, because this is the single
-		// place a claimed task's agent payload is assembled.
-		if agent.SystemKey.String == service.MikaSystemKey {
-			resp.Agent.Instructions = service.ComposeMikaInstructions(agent.Name, agent.Instructions)
-		}
 		if useSkillRefs {
 			_, skillRefs := h.TaskService.LoadAgentSkillBundles(r.Context(), task.AgentID)
 			skillRefs = append(skillRefs, pluginSkillRefs...)

@@ -41,16 +41,8 @@ func TestCreateWorkspace_RejectsReservedSlug(t *testing.T) {
 	}
 }
 
-// TestCreateWorkspace_DoesNotMarkOnboarded guards the onboarding
-// contract: creating a workspace MUST leave user.onboarded_at NULL so
-// the route guard in apps/web/app/[workspaceSlug]/layout.tsx (and the
-// desktop App.tsx overlay decision) can redirect the un-onboarded user
-// back to /onboarding to finish Step 3. The previous behavior atomically
-// set onboarded_at inside CreateWorkspace; this test makes the new
-// invariant explicit and regression-protected.
-//
-// CompleteOnboarding (Step 3 exit) and AcceptInvitation are the only
-// remaining handlers that flip onboarded_at.
+// Native Workspace creation must not mutate the historical user-level
+// onboarding field. Workspace admission is owned by VIBES authority instead.
 func TestCreateWorkspace_DoesNotMarkOnboarded(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -82,7 +74,7 @@ func TestCreateWorkspace_DoesNotMarkOnboarded(t *testing.T) {
 		t.Fatalf("lookup user: %v", err)
 	}
 	if onboardedAt != nil {
-		t.Fatalf("CreateWorkspace marked user as onboarded; expected NULL, got %q. The workspace layout hard gate relies on this staying NULL until Step 3 CompleteOnboarding fires.", *onboardedAt)
+		t.Fatalf("CreateWorkspace marked historical onboarded_at; expected NULL, got %q", *onboardedAt)
 	}
 }
 
@@ -1371,9 +1363,8 @@ INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'admin') RETURN
 // cases are the point of the change — under the old name-based derivation
 // every one of them collapsed to "WS".
 //
-// Keep this table in sync with the client-side preview
-// (packages/views/onboarding/steps/step-workspace.tsx). If the two ever
-// disagree, the create screen lies about the identifier the user will get.
+// VIBES authority owns the browser create journey; this table pins only the
+// retained native API rule used by non-browser callers.
 func TestDefaultIssuePrefixFromSlug(t *testing.T) {
 	cases := []struct {
 		slug string

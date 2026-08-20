@@ -73,7 +73,9 @@ describe("ApiClient pull-request response schema", () => {
       ),
     );
 
-    const result = await new ApiClient("https://api.example.test").listIssuePullRequests("issue-1");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).listIssuePullRequests("issue-1");
     expect(result.pull_requests[0]).toMatchObject({
       id: "pr-1",
       failed_check_names: ["backend"],
@@ -98,7 +100,9 @@ describe("ApiClient pull-request response schema", () => {
     );
 
     await expect(
-      new ApiClient("https://api.example.test").listIssuePullRequests("issue-1"),
+      new ApiClient("https://api.example.test").listIssuePullRequests(
+        "issue-1",
+      ),
     ).resolves.toEqual({ pull_requests: [] });
   });
 });
@@ -115,81 +119,87 @@ describe("ApiClient Remote MCP OAuth response schema", () => {
       ),
     );
 
-    await expect(new ApiClient("https://api.example.test").startPluginRemoteMCPOAuth(
-      "workspace-1",
-      "installation-1",
-      "search",
-      { public_config: {}, failure_policy: "required" },
-    )).resolves.toEqual({ authorization_url: "" });
+    await expect(
+      new ApiClient("https://api.example.test").startPluginRemoteMCPOAuth(
+        "workspace-1",
+        "installation-1",
+        "search",
+        { public_config: {}, failure_policy: "required" },
+      ),
+    ).resolves.toEqual({ authorization_url: "" });
   });
 });
 
-describe('ApiClient workspace Files response schema', () => {
-  it('reads the workspace attachment library through the existing attachment API', async () => {
+describe("ApiClient workspace Files response schema", () => {
+  it("reads the workspace attachment library through the existing attachment API", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
       new Response(
         JSON.stringify({
           attachments: [
             {
-              id: 'att-1',
-              workspace_id: 'ws-1',
+              id: "att-1",
+              workspace_id: "ws-1",
               issue_id: null,
               comment_id: null,
-              chat_session_id: 'chat-1',
-              chat_message_id: 'message-1',
-              uploader_type: 'member',
-              uploader_id: 'user-1',
-              filename: 'notes.md',
-              url: 'https://cdn.example/notes.md',
-              download_url: '/api/attachments/att-1/download',
-              markdown_url: '/api/attachments/att-1/download',
-              content_type: 'text/markdown',
+              chat_session_id: "chat-1",
+              chat_message_id: "message-1",
+              uploader_type: "member",
+              uploader_id: "user-1",
+              filename: "notes.md",
+              url: "https://cdn.example/notes.md",
+              download_url: "/api/attachments/att-1/download",
+              markdown_url: "/api/attachments/att-1/download",
+              content_type: "text/markdown",
               size_bytes: 42,
-              created_at: '2026-08-18T20:00:00Z',
-              source_type: 'chat',
-              source_id: 'chat-1',
-              source_title: 'Launch notes',
+              created_at: "2026-08-18T20:00:00Z",
+              source_type: "chat",
+              source_id: "chat-1",
+              source_title: "Launch notes",
             },
           ],
           has_more: false,
           next_offset: null,
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
+        { status: 200, headers: { "Content-Type": "application/json" } },
       ),
     );
-    vi.stubGlobal('fetch', fetchMock);
+    vi.stubGlobal("fetch", fetchMock);
 
-    const result = await new ApiClient('https://api.example.test').listWorkspaceAttachments();
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).listWorkspaceAttachments();
 
     expect(fetchMock).toHaveBeenCalledWith(
-      'https://api.example.test/api/attachments?limit=50&offset=0',
+      "https://api.example.test/api/attachments?limit=50&offset=0",
       expect.any(Object),
     );
     expect(result.attachments[0]).toMatchObject({
-      id: 'att-1',
-      workspaceId: 'ws-1',
-      chatSessionId: 'chat-1',
-      contentType: 'text/markdown',
+      id: "att-1",
+      workspaceId: "ws-1",
+      chatSessionId: "chat-1",
+      contentType: "text/markdown",
       sizeBytes: 42,
-      sourceType: 'chat',
-      sourceTitle: 'Launch notes',
+      sourceType: "chat",
+      sourceTitle: "Launch notes",
     });
     expect(result).toMatchObject({ hasMore: false, nextOffset: null });
   });
 
-  it('fails closed to an empty page when attachment metadata is malformed', async () => {
+  it("fails closed to an empty page when attachment metadata is malformed", async () => {
     vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ attachments: [{ id: 'att-1', filename: 42 }] }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ attachments: [{ id: "att-1", filename: 42 }] }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
         ),
-      ),
     );
 
     await expect(
-      new ApiClient('https://api.example.test').listWorkspaceAttachments(),
+      new ApiClient("https://api.example.test").listWorkspaceAttachments(),
     ).resolves.toEqual({ attachments: [], hasMore: false, nextOffset: null });
   });
 });
@@ -280,7 +290,14 @@ describe("ApiClient server Table query", () => {
       }),
     ).resolves.toMatchObject({
       total: 1001,
-      facets: [{ values: [{ key: "todo", count: 501 }, { key: "done", count: 500 }] }],
+      facets: [
+        {
+          values: [
+            { key: "todo", count: 501 },
+            { key: "done", count: 500 },
+          ],
+        },
+      ],
     });
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
@@ -412,7 +429,9 @@ describe("ApiClient server Table query", () => {
     ).resolves.toMatchObject({
       total: 1,
       groups: [
-        { value: { kind: "assignee", actor: { type: "service", id: "bot-1" } } },
+        {
+          value: { kind: "assignee", actor: { type: "service", id: "bot-1" } },
+        },
       ],
     });
   });
@@ -545,9 +564,9 @@ describe("ApiClient workspace working agents", () => {
     await expect(
       client.getWorkspaceWorkingAgents("issue", "assigned"),
     ).resolves.toEqual(payload);
-    await expect(
-      client.getWorkspaceWorkingAgents("issue"),
-    ).resolves.toEqual(payload);
+    await expect(client.getWorkspaceWorkingAgents("issue")).resolves.toEqual(
+      payload,
+    );
     await expect(client.getWorkspaceWorkingAgents()).resolves.toEqual(payload);
     await expect(
       client.getWorkspaceWorkingAgents("issue", undefined, "parent-1"),
@@ -571,30 +590,48 @@ describe("ApiClient label response schemas", () => {
   it("falls back safely for malformed label catalog, label, and resource responses", async () => {
     const fetchMock = vi.fn().mockImplementation(() =>
       Promise.resolve(
-        new Response(JSON.stringify({ labels: "not-an-array", total: "not-a-number" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ labels: "not-an-array", total: "not-a-number" }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
 
-    await expect(client.listLabels("agent")).resolves.toEqual({ labels: [], total: 0 });
+    await expect(client.listLabels("agent")).resolves.toEqual({
+      labels: [],
+      total: 0,
+    });
     await expect(client.getLabel("label-1")).resolves.toMatchObject({ id: "" });
     await expect(
-      client.createLabel({ resource_type: "agent", name: "Ops", color: "#3b82f6" }),
+      client.createLabel({
+        resource_type: "agent",
+        name: "Ops",
+        color: "#3b82f6",
+      }),
     ).resolves.toMatchObject({ id: "" });
     await expect(
       client.updateLabel("label-1", { name: "Operations" }),
     ).resolves.toMatchObject({ id: "" });
 
-    await expect(client.listLabelsForIssue("issue-1")).resolves.toEqual({ labels: [] });
-    await expect(client.attachLabel("issue-1", "label-1")).resolves.toEqual({ labels: [] });
-    await expect(client.detachLabel("issue-1", "label-1")).resolves.toEqual({ labels: [] });
+    await expect(client.listLabelsForIssue("issue-1")).resolves.toEqual({
+      labels: [],
+    });
+    await expect(client.attachLabel("issue-1", "label-1")).resolves.toEqual({
+      labels: [],
+    });
+    await expect(client.detachLabel("issue-1", "label-1")).resolves.toEqual({
+      labels: [],
+    });
 
-    await expect(client.listLabelsForResource("agent", "agent-1")).resolves.toEqual({ labels: [] });
+    await expect(
+      client.listLabelsForResource("agent", "agent-1"),
+    ).resolves.toEqual({ labels: [] });
     await expect(
       client.attachLabelToResource("agent", "agent-1", "label-1"),
     ).resolves.toEqual({ labels: [] });
@@ -618,13 +655,17 @@ describe("ApiClient agent builder runtime switch", () => {
 
     const client = new ApiClient("https://api.example.test");
     await expect(
-      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
+      client.switchAgentBuilderRuntime("session-1", {
+        runtime_id: "runtime-b",
+      }),
     ).resolves.toEqual({ runtime_id: "runtime-b" });
 
     const call = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(call[0]).toContain("/api/agent-builder/sessions/session-1/runtime");
     expect(call[1].method).toBe("PATCH");
-    expect(JSON.parse(String(call[1].body))).toEqual({ runtime_id: "runtime-b" });
+    expect(JSON.parse(String(call[1].body))).toEqual({
+      runtime_id: "runtime-b",
+    });
   });
 
   it("falls back to the requested runtime id for a malformed success body", async () => {
@@ -642,7 +683,9 @@ describe("ApiClient agent builder runtime switch", () => {
 
     const client = new ApiClient("https://api.example.test");
     await expect(
-      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
+      client.switchAgentBuilderRuntime("session-1", {
+        runtime_id: "runtime-b",
+      }),
     ).resolves.toEqual({ runtime_id: "runtime-b" });
   });
 
@@ -650,16 +693,23 @@ describe("ApiClient agent builder runtime switch", () => {
     // 409 (a reply in flight) means nothing was committed, so the caller must
     // see a rejection and keep the old runtime selected.
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ error: "stop the current reply before switching runtime" }), {
-        status: 409,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify({
+          error: "stop the current reply before switching runtime",
+        }),
+        {
+          status: 409,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
     await expect(
-      client.switchAgentBuilderRuntime("session-1", { runtime_id: "runtime-b" }),
+      client.switchAgentBuilderRuntime("session-1", {
+        runtime_id: "runtime-b",
+      }),
     ).rejects.toBeInstanceOf(ApiError);
   });
 });
@@ -712,12 +762,14 @@ describe("ApiClient notification preferences", () => {
   it("falls back safely when a preference response is malformed", async () => {
     vi.stubGlobal(
       "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({ workspace_id: "workspace-1", preferences: [] }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(
+            JSON.stringify({ workspace_id: "workspace-1", preferences: [] }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
         ),
-      ),
     );
 
     const client = new ApiClient("https://api.example.test");
@@ -733,11 +785,14 @@ describe("ApiClient", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: "workspace slug already exists" }), {
-          status: 409,
-          statusText: "Conflict",
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ error: "workspace slug already exists" }),
+          {
+            status: 409,
+            statusText: "Conflict",
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       ),
     );
 
@@ -779,10 +834,7 @@ describe("ApiClient", () => {
     const tasks = await client.listTasksByIssue("issue-1");
 
     expect(tasks[0]?.trigger_comment_id).toBe("comment-3");
-    expect(tasks[0]?.coalesced_comment_ids).toEqual([
-      "comment-1",
-      "comment-2",
-    ]);
+    expect(tasks[0]?.coalesced_comment_ids).toEqual(["comment-1", "comment-2"]);
     expect(tasks[0]?.delivered_comment_ids).toEqual([
       "comment-1",
       "comment-2",
@@ -819,10 +871,7 @@ describe("ApiClient", () => {
     expect(tasks).toHaveLength(2);
     expect(tasks[0]?.coalesced_comment_ids).toBeUndefined();
     expect(tasks[0]?.delivered_comment_ids).toBeUndefined();
-    expect(tasks[1]?.delivered_comment_ids).toEqual([
-      "comment-2",
-      "comment-3",
-    ]);
+    expect(tasks[1]?.delivered_comment_ids).toEqual(["comment-2", "comment-3"]);
   });
 
   it("parses per-run token usage on task runs", async () => {
@@ -907,12 +956,14 @@ describe("ApiClient", () => {
   });
 
   it("uses the expected HTTP contract for autopilot endpoints", async () => {
-    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
-      new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
-    ));
+    const fetchMock = vi.fn().mockImplementation(() =>
+      Promise.resolve(
+        new Response(JSON.stringify({ autopilots: [], runs: [], total: 0 }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      ),
+    );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
@@ -925,7 +976,10 @@ describe("ApiClient", () => {
       assignee_id: "agent-1",
       execution_mode: "create_issue",
     });
-    await client.updateAutopilot("ap-1", { status: "paused", project_id: null });
+    await client.updateAutopilot("ap-1", {
+      status: "paused",
+      project_id: null,
+    });
     await client.deleteAutopilot("ap-1");
     await client.triggerAutopilot("ap-1");
     await client.listAutopilotRuns("ap-1", { limit: 10, offset: 20 });
@@ -945,7 +999,10 @@ describe("ApiClient", () => {
     }));
 
     expect(calls).toMatchObject([
-      { url: "https://api.example.test/api/autopilots?status=active", method: "GET" },
+      {
+        url: "https://api.example.test/api/autopilots?status=active",
+        method: "GET",
+      },
       { url: "https://api.example.test/api/autopilots/ap-1", method: "GET" },
       {
         url: "https://api.example.test/api/autopilots",
@@ -963,8 +1020,14 @@ describe("ApiClient", () => {
         body: JSON.stringify({ status: "paused", project_id: null }),
       },
       { url: "https://api.example.test/api/autopilots/ap-1", method: "DELETE" },
-      { url: "https://api.example.test/api/autopilots/ap-1/trigger", method: "POST" },
-      { url: "https://api.example.test/api/autopilots/ap-1/runs?limit=10&offset=20", method: "GET" },
+      {
+        url: "https://api.example.test/api/autopilots/ap-1/trigger",
+        method: "POST",
+      },
+      {
+        url: "https://api.example.test/api/autopilots/ap-1/runs?limit=10&offset=20",
+        method: "GET",
+      },
       {
         url: "https://api.example.test/api/autopilots/ap-1/triggers",
         method: "POST",
@@ -979,7 +1042,10 @@ describe("ApiClient", () => {
         method: "PATCH",
         body: JSON.stringify({ enabled: false }),
       },
-      { url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1", method: "DELETE" },
+      {
+        url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1",
+        method: "DELETE",
+      },
       {
         url: "https://api.example.test/api/autopilots/ap-1/triggers/tr-1/rotate-webhook-token",
         method: "POST",
@@ -1001,7 +1067,10 @@ describe("ApiClient", () => {
     });
     await client.listWorkspaces();
 
-    const headers = fetchMock.mock.calls[0]![1]!.headers as Record<string, string>;
+    const headers = fetchMock.mock.calls[0]![1]!.headers as Record<
+      string,
+      string
+    >;
     expect(headers["X-Client-Platform"]).toBe("desktop");
     expect(headers["X-Client-Version"]).toBe("1.2.3");
     expect(headers["X-Client-OS"]).toBe("macos");
@@ -1019,7 +1088,10 @@ describe("ApiClient", () => {
     const client = new ApiClient("https://api.example.test");
     await client.listWorkspaces();
 
-    const headers = fetchMock.mock.calls[0]![1]!.headers as Record<string, string>;
+    const headers = fetchMock.mock.calls[0]![1]!.headers as Record<
+      string,
+      string
+    >;
     expect(headers["X-Client-Platform"]).toBeUndefined();
     expect(headers["X-Client-Version"]).toBeUndefined();
     expect(headers["X-Client-OS"]).toBeUndefined();
@@ -1027,10 +1099,16 @@ describe("ApiClient", () => {
 
   it("posts feedback kind and parses the response through the schema", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ id: "feedback-1", created_at: "2026-06-26T00:00:00Z" }), {
-        status: 201,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify({
+          id: "feedback-1",
+          created_at: "2026-06-26T00:00:00Z",
+        }),
+        {
+          status: 201,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
     );
     vi.stubGlobal("fetch", fetchMock);
 
@@ -1064,10 +1142,13 @@ describe("ApiClient", () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ id: 42, created_at: "2026-06-26T00:00:00Z" }), {
-          status: 201,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({ id: 42, created_at: "2026-06-26T00:00:00Z" }),
+          {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       ),
     );
 
@@ -1079,7 +1160,8 @@ describe("ApiClient", () => {
   });
 
   it("uses the expected HTTP contract for comment trigger preview and suppress", async () => {
-    const fetchMock = vi.fn()
+    const fetchMock = vi
+      .fn()
       .mockResolvedValueOnce(
         new Response(JSON.stringify({ agents: [] }), {
           status: 200,
@@ -1087,45 +1169,56 @@ describe("ApiClient", () => {
         }),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          id: "comment-1",
-          issue_id: "issue-1",
-          author_type: "member",
-          author_id: "user-1",
-          content: "hello",
-          type: "comment",
-          parent_id: null,
-          reactions: [],
-          attachments: [],
-          created_at: "2026-06-05T00:00:00Z",
-          updated_at: "2026-06-05T00:00:00Z",
-        }), {
-          status: 201,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({
+            id: "comment-1",
+            issue_id: "issue-1",
+            author_type: "member",
+            author_id: "user-1",
+            content: "hello",
+            type: "comment",
+            parent_id: null,
+            reactions: [],
+            attachments: [],
+            created_at: "2026-06-05T00:00:00Z",
+            updated_at: "2026-06-05T00:00:00Z",
+          }),
+          {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       )
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({
-          id: "comment-1",
-          issue_id: "issue-1",
-          author_type: "member",
-          author_id: "user-1",
-          content: "updated",
-          type: "comment",
-          parent_id: null,
-          reactions: [],
-          attachments: [],
-          created_at: "2026-06-05T00:00:00Z",
-          updated_at: "2026-06-05T00:01:00Z",
-        }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({
+            id: "comment-1",
+            issue_id: "issue-1",
+            author_type: "member",
+            author_id: "user-1",
+            content: "updated",
+            type: "comment",
+            parent_id: null,
+            reactions: [],
+            attachments: [],
+            created_at: "2026-06-05T00:00:00Z",
+            updated_at: "2026-06-05T00:01:00Z",
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
-    await client.previewCommentTriggers("issue-1", "hello", "parent-1", "comment-1");
+    await client.previewCommentTriggers(
+      "issue-1",
+      "hello",
+      "parent-1",
+      "comment-1",
+    );
     await client.createComment(
       "issue-1",
       "hello",
@@ -1134,17 +1227,28 @@ describe("ApiClient", () => {
       ["attachment-1"],
       ["agent-1"],
     );
-    await client.updateComment("comment-1", "updated", ["attachment-1"], ["agent-1"]);
+    await client.updateComment(
+      "comment-1",
+      "updated",
+      ["attachment-1"],
+      ["agent-1"],
+    );
 
-    expect(fetchMock.mock.calls.map(([url, init]) => ({
-      url,
-      method: init?.method,
-      body: init?.body,
-    }))).toMatchObject([
+    expect(
+      fetchMock.mock.calls.map(([url, init]) => ({
+        url,
+        method: init?.method,
+        body: init?.body,
+      })),
+    ).toMatchObject([
       {
         url: "https://api.example.test/api/issues/issue-1/comments/trigger-preview",
         method: "POST",
-        body: JSON.stringify({ content: "hello", parent_id: "parent-1", editing_comment_id: "comment-1" }),
+        body: JSON.stringify({
+          content: "hello",
+          parent_id: "parent-1",
+          editing_comment_id: "comment-1",
+        }),
       },
       {
         url: "https://api.example.test/api/issues/issue-1/comments",
@@ -1203,9 +1307,10 @@ describe("ApiClient", () => {
 
     const client = new ApiClient("https://api.example.test");
     await client.listCloudRuntimeNodes({ limit: 20, offset: 5 });
-    await client.createCloudRuntimeNode(
-      { instance_type: "g5.xlarge", name: "gpu-dev-01" },
-    );
+    await client.createCloudRuntimeNode({
+      instance_type: "g5.xlarge",
+      name: "gpu-dev-01",
+    });
 
     const listCall = fetchMock.mock.calls[0]!;
     const createCall = fetchMock.mock.calls[1]!;
@@ -1250,9 +1355,9 @@ describe("ApiClient", () => {
   });
 
   it("deleteCloudRuntimeNode sends DELETE with JSON body containing instance id", async () => {
-    const fetchMock = vi.fn().mockResolvedValueOnce(
-      new Response(null, { status: 204 }),
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
     const client = new ApiClient("https://api.example.test");
@@ -1352,30 +1457,37 @@ describe("ApiClient", () => {
       const { PreviewTooLargeError } = await import("./client");
       vi.stubGlobal(
         "fetch",
-        vi.fn().mockResolvedValue(
-          new Response("", { status: 413, statusText: "Payload Too Large" }),
-        ),
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response("", { status: 413, statusText: "Payload Too Large" }),
+          ),
       );
 
       const client = new ApiClient("https://api.example.test");
-      await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
-        PreviewTooLargeError,
-      );
+      await expect(
+        client.getAttachmentTextContent("att-1"),
+      ).rejects.toBeInstanceOf(PreviewTooLargeError);
     });
 
     it("throws PreviewUnsupportedError on 415", async () => {
       const { PreviewUnsupportedError } = await import("./client");
       vi.stubGlobal(
         "fetch",
-        vi.fn().mockResolvedValue(
-          new Response("", { status: 415, statusText: "Unsupported Media Type" }),
-        ),
+        vi
+          .fn()
+          .mockResolvedValue(
+            new Response("", {
+              status: 415,
+              statusText: "Unsupported Media Type",
+            }),
+          ),
       );
 
       const client = new ApiClient("https://api.example.test");
-      await expect(client.getAttachmentTextContent("att-1")).rejects.toBeInstanceOf(
-        PreviewUnsupportedError,
-      );
+      await expect(
+        client.getAttachmentTextContent("att-1"),
+      ).rejects.toBeInstanceOf(PreviewUnsupportedError);
     });
   });
 
@@ -1406,18 +1518,26 @@ describe("ApiClient", () => {
           task_id: "task-1",
           created_at: "2026-06-01T00:00:01Z",
           quick_actions: [
-            { label: "Continue", prompt: "Continue with the next step", primary: true },
+            {
+              label: "Continue",
+              prompt: "Continue with the next step",
+              primary: true,
+            },
           ],
         },
       ];
       const fetchMock = vi
         .fn()
-        .mockResolvedValueOnce(jsonResponse({ error: "not found" }, 404, "Not Found"))
+        .mockResolvedValueOnce(
+          jsonResponse({ error: "not found" }, 404, "Not Found"),
+        )
         .mockResolvedValueOnce(jsonResponse(legacy, 200));
       vi.stubGlobal("fetch", fetchMock);
 
       const client = new ApiClient("https://api.example.test");
-      const page = await client.listChatMessagesPage("session-1", { limit: 50 });
+      const page = await client.listChatMessagesPage("session-1", {
+        limit: 50,
+      });
 
       expect(fetchMock).toHaveBeenCalledTimes(2);
       expect(fetchMock.mock.calls[0]![0]).toBe(
@@ -1426,20 +1546,30 @@ describe("ApiClient", () => {
       expect(fetchMock.mock.calls[1]![0]).toBe(
         "https://api.example.test/api/chat/sessions/session-1/messages",
       );
-      expect(page).toEqual({ messages: legacy, limit: 50, has_more: false, next_cursor: null });
+      expect(page).toEqual({
+        messages: legacy,
+        limit: 50,
+        has_more: false,
+        next_cursor: null,
+      });
     });
 
     it("keeps a valid reply when its optional quick actions are malformed", async () => {
-      const malformed = [{
-        id: "m1",
-        chat_session_id: "session-1",
-        role: "assistant",
-        content: "safe reply",
-        task_id: "task-1",
-        created_at: "2026-06-01T00:00:00Z",
-        quick_actions: [{ label: 42, prompt: false }],
-      }];
-      vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(malformed, 200)));
+      const malformed = [
+        {
+          id: "m1",
+          chat_session_id: "session-1",
+          role: "assistant",
+          content: "safe reply",
+          task_id: "task-1",
+          created_at: "2026-06-01T00:00:00Z",
+          quick_actions: [{ label: 42, prompt: false }],
+        },
+      ];
+      vi.stubGlobal(
+        "fetch",
+        vi.fn().mockResolvedValue(jsonResponse(malformed, 200)),
+      );
 
       const client = new ApiClient("https://api.example.test");
       await expect(client.listChatMessages("session-1")).resolves.toEqual([
@@ -1456,13 +1586,20 @@ describe("ApiClient", () => {
       const client = new ApiClient("https://api.example.test");
       await expect(
         client.listChatMessagesPage("session-1", { limit: 25 }),
-      ).resolves.toEqual({ messages: [], limit: 25, has_more: false, next_cursor: null });
+      ).resolves.toEqual({
+        messages: [],
+        limit: 25,
+        has_more: false,
+        next_cursor: null,
+      });
     });
 
     it("does NOT fall back on a cursor request — a 404 there propagates", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(jsonResponse({ error: "not found" }, 404, "Not Found"));
+        .mockResolvedValue(
+          jsonResponse({ error: "not found" }, 404, "Not Found"),
+        );
       vi.stubGlobal("fetch", fetchMock);
 
       const client = new ApiClient("https://api.example.test");
@@ -1478,11 +1615,15 @@ describe("ApiClient", () => {
     it("propagates non-404 errors instead of masking them with the legacy list", async () => {
       const fetchMock = vi
         .fn()
-        .mockResolvedValue(jsonResponse({ error: "boom" }, 500, "Internal Server Error"));
+        .mockResolvedValue(
+          jsonResponse({ error: "boom" }, 500, "Internal Server Error"),
+        );
       vi.stubGlobal("fetch", fetchMock);
 
       const client = new ApiClient("https://api.example.test");
-      await expect(client.listChatMessagesPage("session-1")).rejects.toMatchObject({
+      await expect(
+        client.listChatMessagesPage("session-1"),
+      ).rejects.toMatchObject({
         status: 500,
       });
       expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -1507,18 +1648,21 @@ describe("ApiClient", () => {
 
     it("parses the cancelled chat message payload", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({
-          ...taskResponse,
-          cancelled_chat_message: {
-            chat_session_id: "session-1",
-            message_id: "message-1",
-            content: "restore me",
-            restore_to_input: true,
+        new Response(
+          JSON.stringify({
+            ...taskResponse,
+            cancelled_chat_message: {
+              chat_session_id: "session-1",
+              message_id: "message-1",
+              content: "restore me",
+              restore_to_input: true,
+            },
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
           },
-        }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
+        ),
       );
       vi.stubGlobal("fetch", fetchMock);
 
@@ -1541,19 +1685,26 @@ describe("ApiClient", () => {
       vi.stubGlobal(
         "fetch",
         vi.fn().mockResolvedValue(
-          new Response(JSON.stringify({
-            ...taskResponse,
-            attribution: {
-              source: "direct_human",
-              precise: true,
-              initiator: { id: "user-1", name: "Ada", avatar_url: "https://x/a.png" },
-              originator: { id: "user-1", name: "Ada" },
-              evidence: { kind: "comment", ref_id: "comment-1" },
+          new Response(
+            JSON.stringify({
+              ...taskResponse,
+              attribution: {
+                source: "direct_human",
+                precise: true,
+                initiator: {
+                  id: "user-1",
+                  name: "Ada",
+                  avatar_url: "https://x/a.png",
+                },
+                originator: { id: "user-1", name: "Ada" },
+                evidence: { kind: "comment", ref_id: "comment-1" },
+              },
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
             },
-          }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
+          ),
         ),
       );
 
@@ -1601,8 +1752,12 @@ describe("ApiClient", () => {
 
       await new ApiClient("https://api.example.test").cancelTaskById("task-1");
 
-      const init = fetchMock.mock.calls[0]?.[1] as { headers: Record<string, string> };
-      expect(init.headers["X-Client-Capabilities"]).toBe(CHAT_DRAFT_RESTORE_CAPABILITY);
+      const init = fetchMock.mock.calls[0]?.[1] as {
+        headers: Record<string, string>;
+      };
+      expect(init.headers["X-Client-Capabilities"]).toBe(
+        CHAT_DRAFT_RESTORE_CAPABILITY,
+      );
     });
 
     it("scopes queued edit cancellation to the expected chat session", async () => {
@@ -1629,13 +1784,16 @@ describe("ApiClient", () => {
       vi.stubGlobal(
         "fetch",
         vi.fn().mockResolvedValue(
-          new Response(JSON.stringify({
-            ...taskResponse,
-            cancelled_chat_message: null,
-          }), {
-            status: 200,
-            headers: { "Content-Type": "application/json" },
-          }),
+          new Response(
+            JSON.stringify({
+              ...taskResponse,
+              cancelled_chat_message: null,
+            }),
+            {
+              status: 200,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
         ),
       );
 
@@ -1681,10 +1839,14 @@ describe("ApiClient", () => {
   });
 
   it("clears a chat queue with one session-scoped request", async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
 
-    await new ApiClient("https://api.example.test").clearQueuedChatTasks("session-1");
+    await new ApiClient("https://api.example.test").clearQueuedChatTasks(
+      "session-1",
+    );
 
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.example.test/api/chat/sessions/session-1/queued-tasks",
@@ -1736,14 +1898,16 @@ describe("ApiClient", () => {
     });
 
     it("rejects with the fetch AbortError when the signal is already aborted", async () => {
-      const fetchMock = vi.fn().mockImplementation((_url, init?: RequestInit) => {
-        if (init?.signal?.aborted) {
-          const err = new Error("The operation was aborted");
-          err.name = "AbortError";
-          return Promise.reject(err);
-        }
-        return Promise.resolve(new Response("{}", { status: 200 }));
-      });
+      const fetchMock = vi
+        .fn()
+        .mockImplementation((_url, init?: RequestInit) => {
+          if (init?.signal?.aborted) {
+            const err = new Error("The operation was aborted");
+            err.name = "AbortError";
+            return Promise.reject(err);
+          }
+          return Promise.resolve(new Response("{}", { status: 200 }));
+        });
       vi.stubGlobal("fetch", fetchMock);
 
       const client = new ApiClient("https://api.example.test");
@@ -1758,10 +1922,17 @@ describe("ApiClient", () => {
 
     it("sendChatMessage serialises attachment_ids onto the JSON body when present", async () => {
       const fetchMock = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "2026-08-01T00:00:00Z" }), {
-          status: 201,
-          headers: { "Content-Type": "application/json" },
-        }),
+        new Response(
+          JSON.stringify({
+            message_id: "m1",
+            task_id: "t1",
+            created_at: "2026-08-01T00:00:00Z",
+          }),
+          {
+            status: 201,
+            headers: { "Content-Type": "application/json" },
+          },
+        ),
       );
       vi.stubGlobal("fetch", fetchMock);
 
@@ -1778,10 +1949,17 @@ describe("ApiClient", () => {
     it("sendChatMessage omits attachment_ids when the list is empty or undefined", async () => {
       const fetchMock = vi.fn().mockImplementation(() =>
         Promise.resolve(
-          new Response(JSON.stringify({ message_id: "m1", task_id: "t1", created_at: "2026-08-01T00:00:00Z" }), {
-            status: 201,
-            headers: { "Content-Type": "application/json" },
-          }),
+          new Response(
+            JSON.stringify({
+              message_id: "m1",
+              task_id: "t1",
+              created_at: "2026-08-01T00:00:00Z",
+            }),
+            {
+              status: 201,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
         ),
       );
       vi.stubGlobal("fetch", fetchMock);
@@ -1790,28 +1968,38 @@ describe("ApiClient", () => {
       await client.sendChatMessage("session-1", "hello");
       await client.sendChatMessage("session-1", "again", []);
 
-      expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({ content: "hello" });
-      expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({ content: "again" });
+      expect(JSON.parse(fetchMock.mock.calls[0]![1]?.body as string)).toEqual({
+        content: "hello",
+      });
+      expect(JSON.parse(fetchMock.mock.calls[1]![1]?.body as string)).toEqual({
+        content: "again",
+      });
     });
 
     it("sendChatMessage accepts the server's null attachment_ids for text-only sends", async () => {
       vi.stubGlobal(
         "fetch",
         vi.fn().mockResolvedValue(
-          new Response(JSON.stringify({
-            message_id: "m1",
-            task_id: "t1",
-            created_at: "2026-08-01T00:00:00Z",
-            attachment_ids: null,
-          }), {
-            status: 201,
-            headers: { "Content-Type": "application/json" },
-          }),
+          new Response(
+            JSON.stringify({
+              message_id: "m1",
+              task_id: "t1",
+              created_at: "2026-08-01T00:00:00Z",
+              attachment_ids: null,
+            }),
+            {
+              status: 201,
+              headers: { "Content-Type": "application/json" },
+            },
+          ),
         ),
       );
 
       await expect(
-        new ApiClient("https://api.example.test").sendChatMessage("session-1", "hello"),
+        new ApiClient("https://api.example.test").sendChatMessage(
+          "session-1",
+          "hello",
+        ),
       ).resolves.toMatchObject({ attachment_ids: undefined });
     });
 
@@ -1827,16 +2015,17 @@ describe("ApiClient", () => {
       );
 
       await expect(
-        new ApiClient("https://api.example.test").sendChatMessage("session-1", "hello"),
+        new ApiClient("https://api.example.test").sendChatMessage(
+          "session-1",
+          "hello",
+        ),
       ).rejects.toThrow();
     });
   });
 });
 
-// The onboarding flow acts on a workspace the app has not navigated to, so
-// these calls pass the slug explicitly. The server reads X-Workspace-Slug
-// before ?workspace_id, so the header — not the param — is what has to carry
-// the target workspace.
+// Workspace-targeted Runtime calls may act before route navigation. The server
+// reads X-Workspace-Slug before ?workspace_id, so the header carries the target.
 describe("ApiClient explicit workspace targeting", () => {
   function stubOk(body: unknown) {
     const fetchMock = vi.fn().mockResolvedValue(
@@ -1853,15 +2042,6 @@ describe("ApiClient explicit workspace targeting", () => {
     const init = fetchMock.mock.calls[0]?.[1] as RequestInit;
     return (init.headers as Record<string, string>)["X-Workspace-Slug"];
   }
-
-  it("sends the given slug on Mika creation", async () => {
-    const fetchMock = stubOk({ id: "agent-1" });
-    await new ApiClient("https://api.example.test").createMikaAgent(
-      { runtime_id: "runtime-1", language: "en" },
-      "proxima-centauri",
-    );
-    expect(slugHeaderOf(fetchMock)).toBe("proxima-centauri");
-  });
 
   it("sends the given slug when listing another workspace's runtimes", async () => {
     const fetchMock = stubOk([]);
@@ -1907,8 +2087,9 @@ describe("ApiClient model discovery response schema", () => {
   it("parses a live completed discovery", async () => {
     stubJSON(completed);
 
-    const result = await new ApiClient("https://api.example.test")
-      .initiateListModels("rt-1");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).initiateListModels("rt-1");
 
     expect(result).toMatchObject({
       status: "completed",
@@ -1920,8 +2101,9 @@ describe("ApiClient model discovery response schema", () => {
   it("keeps the cache markers on a server-cached snapshot", async () => {
     stubJSON({ ...completed, cached: true, cached_at: "2026-07-29T00:00:00Z" });
 
-    const result = await new ApiClient("https://api.example.test")
-      .initiateListModels("rt-1");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).initiateListModels("rt-1");
 
     expect(result.cached).toBe(true);
     expect(result.cached_at).toBe("2026-07-29T00:00:00Z");
@@ -1933,8 +2115,9 @@ describe("ApiClient model discovery response schema", () => {
   it("degrades a malformed initiate response to an explicit failure", async () => {
     stubJSON({ status: 7, models: "nope" });
 
-    const result = await new ApiClient("https://api.example.test")
-      .initiateListModels("rt-1");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).initiateListModels("rt-1");
 
     expect(result.status).toBe("failed");
     expect(result.supported).toBe(true);
@@ -1945,8 +2128,9 @@ describe("ApiClient model discovery response schema", () => {
   it("degrades a malformed poll response to an explicit failure", async () => {
     stubJSON("not-an-object");
 
-    const result = await new ApiClient("https://api.example.test")
-      .getListModelsResult("rt-1", "req-9");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).getListModelsResult("rt-1", "req-9");
 
     expect(result.status).toBe("failed");
     expect(result.id).toBe("req-9");
@@ -1957,8 +2141,9 @@ describe("ApiClient model discovery response schema", () => {
     const { supported: _omitted, ...withoutSupported } = completed;
     stubJSON(withoutSupported);
 
-    const result = await new ApiClient("https://api.example.test")
-      .getListModelsResult("rt-1", "req-1");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).getListModelsResult("rt-1", "req-1");
 
     expect(result.supported).toBe(true);
     expect(result.status).toBe("completed");
@@ -1978,32 +2163,45 @@ describe("ApiClient model discovery response schema", () => {
  */
 describe("ApiClient unsubscribe endpoints", () => {
   function stubOK() {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
     vi.stubGlobal("fetch", fetchMock);
     return fetchMock;
   }
 
   function requestOf(fetchMock: ReturnType<typeof vi.fn>) {
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
-    return { url, body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown> };
+    return {
+      url,
+      body: JSON.parse(String(init.body ?? "{}")) as Record<string, unknown>,
+    };
   }
 
   it("sends the subtree variant to its own endpoint", async () => {
     const fetchMock = stubOK();
 
-    await new ApiClient("https://api.example.test")
-      .unsubscribeFromIssueSubtree("issue-1", "user-1", "member");
+    await new ApiClient("https://api.example.test").unsubscribeFromIssueSubtree(
+      "issue-1",
+      "user-1",
+      "member",
+    );
 
     const { url, body } = requestOf(fetchMock);
-    expect(url).toBe("https://api.example.test/api/issues/issue-1/unsubscribe/subtree");
+    expect(url).toBe(
+      "https://api.example.test/api/issues/issue-1/unsubscribe/subtree",
+    );
     expect(body).toEqual({ user_id: "user-1", user_type: "member" });
   });
 
   it("never encodes subtree as a body field on the shared endpoint", async () => {
     const fetchMock = stubOK();
 
-    await new ApiClient("https://api.example.test")
-      .unsubscribeFromIssue("issue-1", "user-1", "member");
+    await new ApiClient("https://api.example.test").unsubscribeFromIssue(
+      "issue-1",
+      "user-1",
+      "member",
+    );
 
     const { url, body } = requestOf(fetchMock);
     expect(url).toBe("https://api.example.test/api/issues/issue-1/unsubscribe");
@@ -2024,76 +2222,12 @@ describe("ApiClient unsubscribe endpoints", () => {
     );
 
     await expect(
-      new ApiClient("https://api.example.test")
-        .unsubscribeFromIssueSubtree("issue-1", "user-1", "member"),
+      new ApiClient("https://api.example.test").unsubscribeFromIssueSubtree(
+        "issue-1",
+        "user-1",
+        "member",
+      ),
     ).rejects.toBeInstanceOf(ApiError);
-  });
-});
-
-describe("ApiClient startMikaOnboarding", () => {
-  it("returns the opening a well-formed response reports", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(
-          JSON.stringify({
-            started: true,
-            message_id: "message-1",
-            created_at: "2026-01-01T00:00:00Z",
-          }),
-          { status: 200, headers: { "Content-Type": "application/json" } },
-        ),
-      ),
-    );
-
-    await expect(
-      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
-        language: "en",
-      }),
-    ).resolves.toEqual({
-      started: true,
-      message_id: "message-1",
-      created_at: "2026-01-01T00:00:00Z",
-    });
-  });
-
-  it("falls back to started=false when the response is malformed", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ started: "yes" }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-
-    // started=false is the safe reading: the flow treats it as "someone else
-    // already opened this conversation" and navigates, rather than acting on a
-    // body it could not understand.
-    await expect(
-      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
-        language: "en",
-      }),
-    ).resolves.toEqual({ started: false });
-  });
-
-  it("tolerates a backend that omits the optional opening fields", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ started: false }), {
-          status: 200,
-          headers: { "Content-Type": "application/json" },
-        }),
-      ),
-    );
-
-    await expect(
-      new ApiClient("https://api.example.test").startMikaOnboarding("session-1", {
-        language: "en",
-      }),
-    ).resolves.toEqual({ started: false });
   });
 });
 
@@ -2104,7 +2238,9 @@ describe("ApiClient refreshSkill response schema", () => {
     name: "review-helper",
     description: "refreshed",
     content: "# refreshed",
-    config: { origin: { type: "github", source_url: "https://github.com/acme/skills" } },
+    config: {
+      origin: { type: "github", source_url: "https://github.com/acme/skills" },
+    },
     created_by: "user-1",
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-02T00:00:00Z",
@@ -2131,7 +2267,9 @@ describe("ApiClient refreshSkill response schema", () => {
       ),
     );
 
-    const result = await new ApiClient("https://api.example.test").refreshSkill("skill-1");
+    const result = await new ApiClient("https://api.example.test").refreshSkill(
+      "skill-1",
+    );
     expect(result).toMatchObject({
       id: "skill-1",
       name: "review-helper",
@@ -2150,7 +2288,9 @@ describe("ApiClient refreshSkill response schema", () => {
       ),
     );
 
-    const result = await new ApiClient("https://api.example.test").refreshSkill("skill-1");
+    const result = await new ApiClient("https://api.example.test").refreshSkill(
+      "skill-1",
+    );
     expect(result).toMatchObject({ id: "", name: "", files: [] });
   });
 
@@ -2166,7 +2306,9 @@ describe("ApiClient refreshSkill response schema", () => {
       ),
     );
 
-    const result = await new ApiClient("https://api.example.test").refreshSkill("skill-1");
+    const result = await new ApiClient("https://api.example.test").refreshSkill(
+      "skill-1",
+    );
     expect(result).toMatchObject({
       id: "skill-1",
       description: "",
@@ -2200,11 +2342,16 @@ describe("ApiClient workspace MCP servers", () => {
   it("parses the workspace library", async () => {
     stubJSON([server]);
 
-    const result = await new ApiClient("https://api.example.test")
-      .listWorkspaceMcpServers("ws-1");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).listWorkspaceMcpServers("ws-1");
 
     expect(result).toHaveLength(1);
-    expect(result[0]).toMatchObject({ id: "srv-1", name: "linear", transport: "http" });
+    expect(result[0]).toMatchObject({
+      id: "srv-1",
+      name: "linear",
+      transport: "http",
+    });
     // No binding in the library listing, so no toggle to report.
     expect(result[0]?.enabled).toBeUndefined();
   });
@@ -2212,8 +2359,9 @@ describe("ApiClient workspace MCP servers", () => {
   it("falls back safely when the library response is malformed", async () => {
     stubJSON({ nope: true });
 
-    const result = await new ApiClient("https://api.example.test")
-      .listWorkspaceMcpServers("ws-1");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).listWorkspaceMcpServers("ws-1");
 
     expect(result).toEqual([]);
   });
@@ -2222,15 +2370,18 @@ describe("ApiClient workspace MCP servers", () => {
   // regressed to returning the stored entry must not have it land in the
   // parsed object or the query cache.
   it("strips secret-bearing fields the server should never have sent", async () => {
-    stubJSON([{
-      ...server,
-      config: { headers: { Authorization: "Bearer sk-live-doc" } },
-      url: "https://mcp.example/sk-live-url",
-      headers: { Authorization: "Bearer sk-live-header" },
-    }]);
+    stubJSON([
+      {
+        ...server,
+        config: { headers: { Authorization: "Bearer sk-live-doc" } },
+        url: "https://mcp.example/sk-live-url",
+        headers: { Authorization: "Bearer sk-live-header" },
+      },
+    ]);
 
-    const result = await new ApiClient("https://api.example.test")
-      .listWorkspaceMcpServers("ws-1");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).listWorkspaceMcpServers("ws-1");
 
     expect(JSON.stringify(result)).not.toContain("sk-live");
     expect(result[0]).toEqual(server);
@@ -2241,8 +2392,9 @@ describe("ApiClient workspace MCP servers", () => {
     // still renders and the UI's default branch labels it.
     stubJSON([{ ...server, transport: "websocket" }]);
 
-    const result = await new ApiClient("https://api.example.test")
-      .listWorkspaceMcpServers("ws-1");
+    const result = await new ApiClient(
+      "https://api.example.test",
+    ).listWorkspaceMcpServers("ws-1");
 
     expect(result).toHaveLength(1);
     expect(result[0]?.transport).toBe("websocket");
@@ -2251,8 +2403,11 @@ describe("ApiClient workspace MCP servers", () => {
   it("POSTs a name and entry when creating a library server", async () => {
     const fetchMock = stubJSON(server);
 
-    await new ApiClient("https://api.example.test")
-      .createWorkspaceMcpServer("ws-1", "linear", { url: "https://mcp.example" });
+    await new ApiClient("https://api.example.test").createWorkspaceMcpServer(
+      "ws-1",
+      "linear",
+      { url: "https://mcp.example" },
+    );
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/workspaces/ws-1/mcp-servers");
@@ -2266,8 +2421,11 @@ describe("ApiClient workspace MCP servers", () => {
   it("sends only what changed when updating a library server", async () => {
     const fetchMock = stubJSON(server);
 
-    await new ApiClient("https://api.example.test")
-      .updateWorkspaceMcpServer("ws-1", "srv-1", { name: "linear-v2" });
+    await new ApiClient("https://api.example.test").updateWorkspaceMcpServer(
+      "ws-1",
+      "srv-1",
+      { name: "linear-v2" },
+    );
 
     const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/workspaces/ws-1/mcp-servers/srv-1");
@@ -2280,8 +2438,9 @@ describe("ApiClient workspace MCP servers", () => {
     const assigned = [{ ...server, enabled: true }];
     let fetchMock = stubJSON(assigned);
 
-    const added = await new ApiClient("https://api.example.test")
-      .addAgentMcpServer("agent-1", "srv-1");
+    const added = await new ApiClient(
+      "https://api.example.test",
+    ).addAgentMcpServer("agent-1", "srv-1");
     expect(added[0]?.enabled).toBe(true);
     let [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/agents/agent-1/mcp-servers");
@@ -2289,15 +2448,19 @@ describe("ApiClient workspace MCP servers", () => {
     expect(JSON.parse(String(init.body))).toEqual({ server_id: "srv-1" });
 
     fetchMock = stubJSON([{ ...server, enabled: false }]);
-    const toggled = await new ApiClient("https://api.example.test")
-      .setAgentMcpServerEnabled("agent-1", "srv-1", false);
+    const toggled = await new ApiClient(
+      "https://api.example.test",
+    ).setAgentMcpServerEnabled("agent-1", "srv-1", false);
     expect(toggled[0]?.enabled).toBe(false);
     [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/agents/agent-1/mcp-servers/srv-1/enabled");
     expect(init.method).toBe("PUT");
 
     fetchMock = stubJSON([]);
-    await new ApiClient("https://api.example.test").removeAgentMcpServer("agent-1", "srv-1");
+    await new ApiClient("https://api.example.test").removeAgentMcpServer(
+      "agent-1",
+      "srv-1",
+    );
     [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/agents/agent-1/mcp-servers/srv-1");
     expect(init.method).toBe("DELETE");

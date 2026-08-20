@@ -23,15 +23,6 @@
       "try_widening": "试试放宽筛选或清除条件。"
     }
   },
-  "mika_setup": {
-    "title": "运行时已准备好，和 Mika 开始。",
-    "description": "Mika 会把你的目标转化为任务、协调合适的智能体，并在工作流需要时帮你添加可复用的 specialist。",
-    "action": "和 Mika 开始",
-    "failed": "无法启动 Mika",
-    "dialog_title": "让 Mika 在哪台电脑上运行？",
-    "dialog_description": "选择 Mika 使用的运行时。之后可以在设置里更改。",
-    "cancel": "取消"
-  },
   "machine": {
     "search_placeholder": "搜索机器...",
     "filters": {

@@ -439,22 +439,6 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Accepting an invite marks the invitee as onboarded. The web /
-	// desktop workspace layout has a hard onboarded_at gate; without
-	// this mark, an invitee landing on their first workspace would be
-	// redirected back to /onboarding to fill out a questionnaire for a
-	// workspace someone else already set up. Atomic with CreateMember so
-	// `member` and `onboarded_at` can never disagree. COALESCE in
-	// MarkUserOnboarded keeps the call idempotent for users joining
-	// additional workspaces after their first.
-	firstOnboardingCompletion := !user.OnboardedAt.Valid
-	onboardedUser, err := qtx.MarkUserOnboarded(r.Context(), user.ID)
-	if err != nil {
-		slog.Warn("accept invitation: mark user onboarded failed", append(logger.RequestAttrs(r), "error", err, "workspace_id", uuidToString(accepted.WorkspaceID))...)
-		writeError(w, http.StatusInternalServerError, "failed to mark user onboarded")
-		return
-	}
-
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to accept invitation")
 		return
@@ -491,20 +475,6 @@ func (h *Handler) AcceptInvitation(w http.ResponseWriter, r *http.Request) {
 		wsID,
 		daysSinceInvite,
 	))
-	if firstOnboardingCompletion {
-		onboardedAt := ""
-		if onboardedUser.OnboardedAt.Valid {
-			onboardedAt = onboardedUser.OnboardedAt.Time.UTC().Format("2006-01-02T15:04:05Z07:00")
-		}
-		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.OnboardingCompleted(
-			userID,
-			wsID,
-			analytics.OnboardingPathInviteAccept,
-			onboardedAt,
-			onboardedUser.CloudWaitlistEmail.Valid,
-		))
-	}
-
 	writeJSON(w, http.StatusOK, memberResp)
 }
 

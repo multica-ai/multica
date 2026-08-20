@@ -19,11 +19,10 @@ function makeWs(slug: string): Workspace {
   };
 }
 
-const fetched = (workspaces: Workspace[], hasOnboarded = true) => ({
+const fetched = (workspaces: Workspace[]) => ({
   isAuthenticated: true,
   workspaceListReady: true,
   workspaces,
-  hasOnboarded,
 });
 
 describe("resolveDashboardCtaHref", () => {
@@ -33,7 +32,6 @@ describe("resolveDashboardCtaHref", () => {
         isAuthenticated: false,
         workspaceListReady: false,
         workspaces: [],
-        hasOnboarded: false,
       }),
     ).toBe(paths.login());
   });
@@ -41,33 +39,23 @@ describe("resolveDashboardCtaHref", () => {
   // The bug this hook exists to fix: the CTA used to be `/`, which on the
   // public marketing host resolves to the page the visitor is already on, so
   // the click did nothing. It must resolve to a real workspace route.
-  it("sends an onboarded visitor to their workspace, never back to the landing page", () => {
+  it("sends a visitor to their workspace, never back to the landing page", () => {
     const href = resolveDashboardCtaHref(fetched([makeWs("acme")]));
-    expect(href).toBe(paths.workspace("acme").issues());
+    expect(href).toBe("/tag/acme/chat");
     expect(href).not.toBe("/");
   });
 
-  it("sends an un-onboarded visitor to /onboarding", () => {
-    expect(resolveDashboardCtaHref(fetched([makeWs("acme")], false))).toBe(
-      paths.onboarding(),
-    );
+  it("sends a visitor with no workspace to the Tag authority create route", () => {
+    expect(resolveDashboardCtaHref(fetched([]))).toBe("/tag/workspaces/new");
   });
 
-  it("sends an onboarded visitor with no workspace to /workspaces/new", () => {
-    expect(resolveDashboardCtaHref(fetched([]))).toBe(paths.newWorkspace());
-  });
-
-  it("falls back to /issues while the list has not resolved yet", () => {
-    // /issues is a legacy route the proxy rewrites to the last workspace, so
-    // the button still works during hydration. It must not fall back to `/`,
-    // which is what made the CTA dead in the first place.
+  it("falls back to the Tag authority while the list has not resolved yet", () => {
     const href = resolveDashboardCtaHref({
       isAuthenticated: true,
       workspaceListReady: false,
       workspaces: [],
-      hasOnboarded: true,
     });
-    expect(href).toBe("/issues");
+    expect(href).toBe("/tag/workspaces/new");
     expect(href).not.toBe("/");
   });
 });

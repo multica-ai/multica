@@ -56,8 +56,13 @@ describe("proxy legacy workspace route redirects", () => {
     last_workspace_slug: "acme",
   };
 
+  it("hands a legacy Issues deep link to the mounted Tag host", () => {
+    expect(
+      redirectLocation("/issues/ABC-123?tab=activity", sessionCookies),
+    ).toBe("https://app.multica.test/tag/acme/issues/ABC-123?tab=activity");
+  });
+
   it.each([
-    ["issues", "/acme/issues"],
     ["projects", "/acme/projects"],
     ["agents", "/acme/agents"],
     ["squads", "/acme/squads"],
@@ -103,9 +108,9 @@ describe("proxy legacy workspace route redirects", () => {
   it.each(["multica.ai", "www.multica.ai"])(
     "resolves a slugless session off the marketing host %s instead of stranding it",
     (host) => {
-      expect(
-        redirectLocation("/inbox", { multica_logged_in: "1" }, host),
-      ).toBe(`https://${host}/login`);
+      expect(redirectLocation("/inbox", { multica_logged_in: "1" }, host)).toBe(
+        `https://${host}/login`,
+      );
     },
   );
 
@@ -113,9 +118,24 @@ describe("proxy legacy workspace route redirects", () => {
     expect(redirectLocation("/acme/squads", sessionCookies)).toBeNull();
   });
 
+  it("moves a stale workspace-scoped Issues link into the Tag host", () => {
+    expect(redirectLocation("/acme/issues/ABC-123", sessionCookies)).toBe(
+      "https://app.multica.test/tag/acme/issues/ABC-123",
+    );
+  });
+
+  it.each(["/api/issues", "/docs/issues", "/auth/issues"])(
+    "does not treat the reserved path %s as a Workspace slug",
+    (path) => {
+      withoutRuntimeUpstreams(() => {
+        expect(redirectLocation(path, sessionCookies)).toBeNull();
+      });
+    },
+  );
+
   it("redirects app-host root URLs to the last workspace", () => {
     expect(redirectLocation("/", sessionCookies)).toBe(
-      "https://app.multica.test/acme/issues",
+      "https://app.multica.test/tag/acme/chat",
     );
   });
 
@@ -127,9 +147,9 @@ describe("proxy legacy workspace route redirects", () => {
   );
 
   it("still redirects explicit legacy app routes on the public marketing host", () => {
-    expect(redirectLocation("/issues/ABC-123", sessionCookies, "multica.ai")).toBe(
-      "https://multica.ai/acme/issues/ABC-123",
-    );
+    expect(
+      redirectLocation("/issues/ABC-123", sessionCookies, "multica.ai"),
+    ).toBe("https://multica.ai/tag/acme/issues/ABC-123");
   });
 });
 
@@ -231,7 +251,7 @@ describe("proxy root and locale handling", () => {
 
     expect(res.status).toBe(307);
     expect(res.headers.get("location")).toBe(
-      "https://app.multica.test/acme/issues",
+      "https://app.multica.test/tag/acme/chat",
     );
   });
 

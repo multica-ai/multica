@@ -351,9 +351,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         dmHref={`${paths.chat()}?agent=${agent.id}`}
         onDm={handleDm}
         onAssign={handleAssign}
-        onArchive={
-          agent.system_key ? undefined : () => setConfirmArchive(true)
-        }
+        onArchive={() => setConfirmArchive(true)}
       />
 
       {!canEdit.allowed && (

@@ -3,16 +3,11 @@
 import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import { useAuthStore } from "@multica/core/auth";
 import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
-import {
-  paths,
-  resolvePostAuthDestination,
-  useHasOnboarded,
-} from "@multica/core/paths";
+import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { AppLink, useNavigation } from "../navigation";
 import { useLogout } from "../auth";
 import { DragStrip } from "../platform";
@@ -57,23 +52,13 @@ export function InvitePage({ invitationId, onBack }: InvitePageProps) {
   // Workspace list for the fallback "Go to dashboard" destinations. The invite
   // page is a pre-workspace global route so we can't rely on WorkspaceSlugProvider.
   const { data: wsList = [] } = useQuery(workspaceListOptions());
-  const hasOnboarded = useHasOnboarded();
-  const fallbackDest = resolvePostAuthDestination(wsList, hasOnboarded);
+  const fallbackDest = resolvePostAuthDestination(wsList);
 
   const handleAccept = async () => {
     setAccepting(true);
     setError(null);
     try {
       await api.acceptInvitation(invitationId);
-      // Belt to the backend's braces: AcceptInvitation already sets
-      // onboarded_at inside the same transaction, but explicitly calling
-      // markOnboardingComplete + refreshMe here keeps local user state in
-      // sync immediately so downstream guards don't see stale `null`.
-      await api.markOnboardingComplete({
-        completion_path: "invite_accept",
-        workspace_id: invitation?.workspace_id,
-      });
-      await useAuthStore.getState().refreshMe();
       setDone("accepted");
       // Fetch the refreshed workspace list so we know the joined workspace's slug.
       const nextList = await qc.fetchQuery({

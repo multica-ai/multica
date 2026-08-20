@@ -10,6 +10,7 @@ import { docsHrefForLocale, useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
 import { formatStarCount, useGithubStars } from "../utils/use-github-stars";
 import { GitHubMark, githubUrl, headerButtonClassName } from "./shared";
+import { WebHostLink } from "@/platform/web-host-link";
 
 export function LandingHeader({
   variant = "dark",
@@ -105,12 +106,12 @@ export function LandingHeader({
             {t.header.github}
             {starsLabel ? <GitHubStarsBadge label={starsLabel} /> : null}
           </Link>
-          <Link
+          <WebHostLink
             href={ctaHref}
             className={headerButtonClassName("solid", variant)}
           >
             {ctaLabel}
-          </Link>
+          </WebHostLink>
         </div>
       </div>
 

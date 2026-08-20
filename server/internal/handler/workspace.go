@@ -38,9 +38,8 @@ var issuePrefixPattern = regexp.MustCompile(`^[A-Z0-9]{1,10}$`)
 // same "WS" fallback. Slug is validated as `^[a-z0-9]+(-[a-z0-9]+)*$` and
 // required, so it always yields a non-empty, workspace-specific prefix.
 //
-// Kept byte-for-byte in sync with the client-side preview in
-// packages/views/onboarding/steps/step-workspace.tsx — what the user sees on
-// the create screen has to be what the server would derive.
+// This remains the native API's stored-prefix rule for non-browser callers.
+// The VIBES Workspace authority does not preview or derive this Multica field.
 func defaultIssuePrefixFromSlug(slug string) string {
 	head := nonAlphanumeric.ReplaceAllString(slug, "")
 	if head == "" {
@@ -306,14 +305,6 @@ func (h *Handler) CreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to seed issue statuses: "+err.Error())
 		return
 	}
-
-	// NOTE: CreateWorkspace deliberately does NOT mark the user as
-	// onboarded. The `onboarded_at` flag is owned by CompleteOnboarding
-	// (Step 3 of the flow) and by AcceptInvitation (invitee joining an
-	// existing workspace). This decouples "the user has a workspace"
-	// from "the user has finished setup"; the workspace-layer route
-	// gate in each browser host redirects un-onboarded
-	// users back to /onboarding instead.
 
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to create workspace")

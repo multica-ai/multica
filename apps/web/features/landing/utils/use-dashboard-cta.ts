@@ -2,36 +2,29 @@
 
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceList } from "@multica/core/workspace";
-import {
-  paths,
-  resolvePostAuthDestination,
-  useHasOnboarded,
-} from "@multica/core/paths";
+import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import type { Workspace } from "@multica/core/types";
+import { toWebPostAuthPath } from "@/platform/web-host-path";
 
 /**
- * While the workspace list is in flight the CTA points at `/issues`, which the
- * proxy rewrites to the last workspace. That keeps the button working during
- * hydration without hiding or disabling it (which would flicker). A visitor
- * with no workspace history lands back on the landing page in that window and
- * can click again once the list resolves.
+ * While the workspace list is in flight, use the authority-backed Tag entry.
+ * It can list/switch an existing VIBES Workspace or create one, and never
+ * falls through the retired Next Issues/onboarding recovery path.
  */
-const LOADING_FALLBACK_HREF = "/issues";
+const LOADING_FALLBACK_HREF = "/tag/workspaces/new";
 
 export function resolveDashboardCtaHref({
   isAuthenticated,
   workspaceListReady,
   workspaces,
-  hasOnboarded,
 }: {
   isAuthenticated: boolean;
   workspaceListReady: boolean;
   workspaces: Workspace[];
-  hasOnboarded: boolean;
 }): string {
   if (!isAuthenticated) return paths.login();
   if (!workspaceListReady) return LOADING_FALLBACK_HREF;
-  return resolvePostAuthDestination(workspaces, hasOnboarded);
+  return toWebPostAuthPath(resolvePostAuthDestination(workspaces));
 }
 
 /**
@@ -51,7 +44,6 @@ export function resolveDashboardCtaHref({
  */
 export function useDashboardCtaHref(): string {
   const user = useAuthStore((s) => s.user);
-  const hasOnboarded = useHasOnboarded();
 
   const { workspaces, ready } = useWorkspaceList({ enabled: !!user });
 
@@ -59,6 +51,5 @@ export function useDashboardCtaHref(): string {
     isAuthenticated: !!user,
     workspaceListReady: ready,
     workspaces,
-    hasOnboarded,
   });
 }

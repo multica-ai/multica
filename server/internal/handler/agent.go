@@ -47,26 +47,15 @@ type AgentResponse struct {
 	// branch on this rather than on RuntimeID being falsy, and must not confuse
 	// it with a bound-but-offline runtime (a different user story: reconnect the
 	// machine vs. pick a new one).
-	RuntimeBound bool   `json:"runtime_bound"`
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	// Instructions is what this agent's owner wrote. For a system agent it
-	// holds only the workspace's own notes — the product half lives in
-	// SystemInstructions and is never stored on the row.
-	Instructions string `json:"instructions"`
-	// SystemKey identifies a product-defined agent (e.g. "mika"). Empty for
-	// every user- or template-created agent. The UI keys "this is maintained
-	// by Multica" off this rather than off the display name, which owners may
-	// change.
-	SystemKey string `json:"system_key,omitempty"`
-	// SystemInstructions is the read-only product half of a system agent's
-	// prompt, filled from the server binary. Empty for ordinary agents.
-	SystemInstructions string          `json:"system_instructions,omitempty"`
-	AvatarURL          *string         `json:"avatar_url"`
-	RuntimeMode        string          `json:"runtime_mode"`
-	RuntimeConfig      any             `json:"runtime_config"`
-	CustomArgs         []string        `json:"custom_args"`
-	McpConfig          json.RawMessage `json:"mcp_config"`
+	RuntimeBound  bool            `json:"runtime_bound"`
+	Name          string          `json:"name"`
+	Description   string          `json:"description"`
+	Instructions  string          `json:"instructions"`
+	AvatarURL     *string         `json:"avatar_url"`
+	RuntimeMode   string          `json:"runtime_mode"`
+	RuntimeConfig any             `json:"runtime_config"`
+	CustomArgs    []string        `json:"custom_args"`
+	McpConfig     json.RawMessage `json:"mcp_config"`
 	// custom_env is intentionally NOT serialized on agent resources. The
 	// agent_list/get/create/update/archive/restore responses and WS events
 	// only expose coarse metadata (has_custom_env, custom_env_key_count) so
@@ -184,8 +173,6 @@ func (h *Handler) agentToResponse(a db.Agent) AgentResponse {
 		Name:                     a.Name,
 		Description:              a.Description,
 		Instructions:             a.Instructions,
-		SystemKey:                a.SystemKey.String,
-		SystemInstructions:       systemInstructionsFor(a),
 		AvatarURL:                h.resolveAvatarURLPtr(textToPtr(a.AvatarUrl)),
 		RuntimeMode:              a.RuntimeMode,
 		RuntimeConfig:            rc,
@@ -2170,12 +2157,10 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// A system agent belongs to the product, not to the workspace, and the
-	// workspace's whole entry point runs through it. Archiving it would hide
-	// it from every list while leaving the row in place — which also strands
-	// the bootstrap endpoint, since its lookup skips archived rows but the
-	// unique index does not.
-	if agent.SystemKey.Valid && agent.SystemKey.String != "" {
+	// Hidden execution carriers belong to their owning workflow. Historical
+	// visible agents that carried a retired product key are ordinary agents
+	// now and remain manageable until separately-authorized data cleanup.
+	if agent.Kind == "system" {
 		writeError(w, http.StatusBadRequest, "this agent is built into Multica and cannot be archived")
 		return
 	}

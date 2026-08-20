@@ -7,6 +7,7 @@ import enCommon from "@multica/views/locales/en/common.json";
 import enAuth from "@multica/views/locales/en/auth.json";
 import enSettings from "@multica/views/locales/en/settings.json";
 import type { ReactNode } from "react";
+import { documentNavigation } from "@/platform/web-host-path";
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
@@ -44,7 +45,11 @@ const {
     state: {
       sendCode: vi.fn(),
       verifyCode: vi.fn(),
-      user: null as null | { id: string; email: string; onboarded_at?: string | null },
+      user: null as null | {
+        id: string;
+        email: string;
+        onboarded_at?: string | null;
+      },
       isLoading: false,
     },
   },
@@ -98,6 +103,8 @@ import LoginPage from "./page";
 
 describe("LoginPage", () => {
   beforeEach(() => {
+    vi.spyOn(documentNavigation, "assign").mockImplementation(() => {});
+    vi.spyOn(documentNavigation, "replace").mockImplementation(() => {});
     vi.clearAllMocks();
     searchParamsState.params = new URLSearchParams();
     authStateRef.state.user = null;
@@ -110,10 +117,12 @@ describe("LoginPage", () => {
     render(<LoginPage />, { wrapper: createWrapper() });
 
     expect(screen.getByText("Sign in to Multica")).toBeInTheDocument();
-    expect(screen.getByText("Enter your email to get a login code")).toBeInTheDocument();
+    expect(
+      screen.getByText("Enter your email to get a login code"),
+    ).toBeInTheDocument();
     expect(screen.getByLabelText("Email")).toBeInTheDocument();
     expect(
-      screen.getByRole("button", { name: "Continue" })
+      screen.getByRole("button", { name: "Continue" }),
     ).toBeInTheDocument();
   });
 
@@ -192,7 +201,12 @@ describe("LoginPage", () => {
     const originalLocation = window.location;
     Object.defineProperty(window, "location", {
       configurable: true,
-      value: { ...originalLocation, set href(value: string) { hrefSetter(value); } },
+      value: {
+        ...originalLocation,
+        set href(value: string) {
+          hrefSetter(value);
+        },
+      },
     });
 
     try {
@@ -256,9 +270,42 @@ describe("LoginPage", () => {
       render(<LoginPage />, { wrapper: createWrapper() });
 
       await waitFor(() => {
-        expect(mockReplace).toHaveBeenCalledWith("/acme/issues");
+        expect(documentNavigation.replace).toHaveBeenCalledWith(
+          "/tag/acme/chat",
+        );
+        expect(mockReplace).not.toHaveBeenCalled();
       });
       expect(mockListWorkspaces).toHaveBeenCalledTimes(1);
+    });
+
+    it("hands an authenticated visitor with no Workspace to Tag authority", async () => {
+      authStateRef.state.user = onboardedUser;
+      mockListWorkspaces.mockResolvedValue([]);
+
+      render(<LoginPage />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(documentNavigation.replace).toHaveBeenCalledWith(
+          "/tag/workspaces/new",
+        );
+        expect(mockReplace).not.toHaveBeenCalled();
+      });
+    });
+
+    it("hands a safe Workspace-create next target to the Tag host", async () => {
+      authStateRef.state.user = onboardedUser;
+      searchParamsState.params = new URLSearchParams({
+        next: "/workspaces/new",
+      });
+
+      render(<LoginPage />, { wrapper: createWrapper() });
+
+      await waitFor(() => {
+        expect(documentNavigation.replace).toHaveBeenCalledWith(
+          "/tag/workspaces/new",
+        );
+        expect(mockReplace).not.toHaveBeenCalled();
+      });
     });
 
     it("still honors ?next= for a visitor who arrived authenticated", async () => {

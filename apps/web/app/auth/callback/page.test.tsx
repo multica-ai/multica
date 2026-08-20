@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor } from "@testing-library/react";
-import { paths } from "@multica/core/paths";
+import { documentNavigation } from "@/platform/web-host-path";
 
 const {
   mockPush,
@@ -77,6 +77,8 @@ import CallbackPage from "./page";
 
 describe("CallbackPage", () => {
   beforeEach(() => {
+    vi.spyOn(documentNavigation, "assign").mockImplementation(() => {});
+    vi.spyOn(documentNavigation, "replace").mockImplementation(() => {});
     vi.clearAllMocks();
     // Reset the source-backfill dismiss counter so a test that writes
     // it doesn't leak state into the next test (and the next test
@@ -104,20 +106,22 @@ describe("CallbackPage", () => {
     await waitFor(() => {
       expect(mockPush).toHaveBeenCalledWith("/invite/abc123");
     });
-    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
     // nextUrl is a fast path — listMyInvitations should not be queried.
     expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
-  it("unonboarded user with no next= and no pending invitations lands on /onboarding", async () => {
+  it("user with no next and no projected workspace lands on authority creation", async () => {
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(documentNavigation.assign).toHaveBeenCalledWith(
+        "/tag/workspaces/new",
+      );
+      expect(mockPush).not.toHaveBeenCalled();
     });
-    expect(mockListMyInvitations).toHaveBeenCalled();
+    expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
-  it("unonboarded user with pending invitations lands on /invitations", async () => {
+  it("does not force a native invitation wall from Multica login state", async () => {
     mockListMyInvitations.mockResolvedValue([
       {
         id: "inv-1",
@@ -129,12 +133,15 @@ describe("CallbackPage", () => {
     ]);
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.invitations());
+      expect(documentNavigation.assign).toHaveBeenCalledWith(
+        "/tag/workspaces/new",
+      );
+      expect(mockPush).not.toHaveBeenCalled();
     });
-    expect(mockPush).not.toHaveBeenCalledWith(paths.onboarding());
+    expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
-  it("onboarded user with workspace lands in that workspace", async () => {
+  it("user with a projected workspace lands in that workspace", async () => {
     mockLoginWithGoogle.mockResolvedValue(
       makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
     );
@@ -155,10 +162,9 @@ describe("CallbackPage", () => {
     ]);
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
+      expect(documentNavigation.assign).toHaveBeenCalledWith("/tag/acme/chat");
+      expect(mockPush).not.toHaveBeenCalled();
     });
-    // Already-onboarded users skip the listMyInvitations check; new invites
-    // surface in the sidebar instead of the wall.
     expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
@@ -171,7 +177,9 @@ describe("CallbackPage", () => {
     render(<CallbackPage />);
 
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalled();
+      expect(documentNavigation.assign).toHaveBeenCalledWith(
+        "/tag/workspaces/new",
+      );
     });
     expect(mockPush).not.toHaveBeenCalledWith("https://evil.example");
   });
@@ -189,12 +197,32 @@ describe("CallbackPage", () => {
     });
   });
 
-  it("falls through to /onboarding when listMyInvitations errors", async () => {
+  it("hands an OAuth Workspace-create next target to the Tag host", async () => {
+    mockLoginWithGoogle.mockResolvedValue(
+      makeUser({ onboarded_at: "2026-01-01T00:00:00Z" }),
+    );
+    mockSearchParams.set("state", "next:/workspaces/new");
+
+    render(<CallbackPage />);
+
+    await waitFor(() => {
+      expect(documentNavigation.assign).toHaveBeenCalledWith(
+        "/tag/workspaces/new",
+      );
+      expect(mockPush).not.toHaveBeenCalled();
+    });
+  });
+
+  it("does not consult the retired invitation detour", async () => {
     mockListMyInvitations.mockRejectedValue(new Error("network"));
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.onboarding());
+      expect(documentNavigation.assign).toHaveBeenCalledWith(
+        "/tag/workspaces/new",
+      );
+      expect(mockPush).not.toHaveBeenCalled();
     });
+    expect(mockListMyInvitations).not.toHaveBeenCalled();
   });
 
   it("onboarded users with missing source land in the workspace; the source-backfill modal is mounted there", async () => {
@@ -223,7 +251,8 @@ describe("CallbackPage", () => {
     ]);
     render(<CallbackPage />);
     await waitFor(() => {
-      expect(mockPush).toHaveBeenCalledWith(paths.workspace("acme").issues());
+      expect(documentNavigation.assign).toHaveBeenCalledWith("/tag/acme/chat");
+      expect(mockPush).not.toHaveBeenCalled();
     });
   });
 });

@@ -424,13 +424,7 @@ describe("AgentDetailPage DM button", () => {
     expect(screen.queryByRole("button", { name: "DM" })).not.toBeInTheDocument();
   });
 
-  it("hides the more-actions trigger when no menu actions are available", async () => {
-    // The gate must survive a caller who genuinely CAN archive: an admin
-    // passes `canEditAgent`, so `canArchive` is true. The only thing keeping
-    // the menu empty is the system agent's undefined `onArchive`. Assert the
-    // real aria label (locale `detail.more_actions_aria` = "Agent actions"),
-    // so removing the `hasMoreActions` gate would render the empty shell and
-    // fail this test.
+  it("treats a historical Mika system key as an ordinary manageable agent", async () => {
     agentsRef.current = [
       { ...baseAgent, system_key: "mika" },
     ];
@@ -439,8 +433,8 @@ describe("AgentDetailPage DM button", () => {
 
     await screen.findByRole("button", { name: "Assign work" });
     expect(
-      screen.queryByLabelText("Agent actions"),
-    ).not.toBeInTheDocument();
+      screen.getByLabelText("Agent actions"),
+    ).toBeInTheDocument();
   });
 
   it("keeps the more-actions trigger for an editable non-system agent", async () => {

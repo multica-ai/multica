@@ -3,7 +3,6 @@
 import { useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
-import { useAuthStore } from "@multica/core/auth";
 import {
   myInvitationListOptions,
   workspaceKeys,
@@ -26,14 +25,12 @@ import { LogOut, Mail, Users } from "lucide-react";
  * because callback / login detected pending invitations on their email.
  *
  * Design:
- *  - This route is only reachable for un-onboarded users (the entry-point
- *    judgment in callback/login routes already-onboarded users straight
- *    into their workspace; new invites for those users surface in the
- *    sidebar's pending-invitations dropdown instead).
+ *  - This is a legacy Multica invitation surface. Workspace admission no
+ *    longer depends on onboarding state.
  *  - The user picks zero or more invitations to accept. "Submit" then:
- *      • zero selected → continue to /onboarding
- *      • ≥1 selected → accept each, mark onboarding complete, navigate
- *        into the first accepted workspace.
+ *      • zero selected → continue to authority-backed Workspace creation
+ *      • ≥1 selected → accept each and navigate into the first accepted
+ *        workspace.
  *  - Unselected invitations are intentionally left as `pending` in the DB.
  *    The user can later decline them from the sidebar; we don't auto-decline
  *    here because closing/refreshing this page should not be a destructive
@@ -66,10 +63,10 @@ export function InvitationsPage() {
   const handleSubmit = async () => {
     setError(null);
 
-    // Zero selected: hand off to onboarding. Pending invites stay pending and
-    // can be picked up later from the sidebar.
+    // Zero selected: hand off to authority-backed Workspace creation. Pending
+    // legacy invites stay pending and can be picked up later from the sidebar.
     if (selected.size === 0) {
-      push(paths.onboarding());
+      push(paths.newWorkspace());
       return;
     }
 
@@ -84,17 +81,6 @@ export function InvitationsPage() {
       const firstAcceptedInvite = invitations?.find(
         (inv) => inv.id === acceptedIds[0],
       );
-
-      // markOnboardingComplete is a frontend-side belt to the backend braces:
-      // each AcceptInvitation transaction already sets onboarded_at via
-      // MarkUserOnboarded, but calling this from the client makes sure the
-      // returned `User` is freshly written and gives refreshMe something
-      // canonical to read.
-      await api.markOnboardingComplete({
-        completion_path: "invite_accept",
-        workspace_id: firstAcceptedInvite?.workspace_id,
-      });
-      await useAuthStore.getState().refreshMe();
 
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
       const wsList = await qc.fetchQuery({
@@ -120,14 +106,10 @@ export function InvitationsPage() {
           ? e.message
           : t(($) => $.batch.error_generic),
       );
-      // Partial success: any accepts that landed before the failure ALREADY
-      // set onboarded_at on the backend (the AcceptInvitation transaction
-      // is atomic per invite). Refresh local user + workspace state so the
-      // sidebar reflects the partial accept and the user isn't stuck with a
-      // stale `onboarded_at == null` view. The next submit is safe — the
-      // server returns 4xx on re-accept and the catch path will surface that.
+      // Partial success: refresh Workspace state so the sidebar reflects the
+      // accepted memberships. The next submit is safe — the server returns
+      // 4xx on re-accept and the catch path will surface that.
       if (acceptedIds.length > 0) {
-        await useAuthStore.getState().refreshMe().catch(() => {});
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
       }
       qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
@@ -152,7 +134,7 @@ export function InvitationsPage() {
     );
   }
 
-  // Empty / error: send the user on to onboarding so they're never stuck.
+  // Empty / error: send the user to Workspace creation so they're never stuck.
   // Genuine fetch failure is rare; treating it as "no invites" is safer than
   // trapping the user on an error screen they can't act on.
   if (fetchError || !invitations || invitations.length === 0) {
@@ -168,7 +150,7 @@ export function InvitationsPage() {
               {t(($) => $.batch.empty_hint)}
             </p>
             <Button
-              render={<AppLink href={paths.onboarding()} />}
+              render={<AppLink href={paths.newWorkspace()} />}
               nativeButton={false}
             >
               {t(($) => $.batch.empty_continue)}

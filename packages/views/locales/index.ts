@@ -5,7 +5,6 @@ import enSettings from "./en/settings.json";
 import enIssues from "./en/issues.json";
 import enAgents from "./en/agents.json";
 import enEditor from "./en/editor.json";
-import enOnboarding from "./en/onboarding.json";
 import enInvite from "./en/invite.json";
 import enLabels from "./en/labels.json";
 import enMembers from "./en/members.json";
@@ -31,7 +30,6 @@ import zhHansSettings from "./zh-Hans/settings.json";
 import zhHansIssues from "./zh-Hans/issues.json";
 import zhHansAgents from "./zh-Hans/agents.json";
 import zhHansEditor from "./zh-Hans/editor.json";
-import zhHansOnboarding from "./zh-Hans/onboarding.json";
 import zhHansInvite from "./zh-Hans/invite.json";
 import zhHansLabels from "./zh-Hans/labels.json";
 import zhHansMembers from "./zh-Hans/members.json";
@@ -57,7 +55,6 @@ import koSettings from "./ko/settings.json";
 import koIssues from "./ko/issues.json";
 import koAgents from "./ko/agents.json";
 import koEditor from "./ko/editor.json";
-import koOnboarding from "./ko/onboarding.json";
 import koInvite from "./ko/invite.json";
 import koLabels from "./ko/labels.json";
 import koMembers from "./ko/members.json";
@@ -83,7 +80,6 @@ import jaSettings from "./ja/settings.json";
 import jaIssues from "./ja/issues.json";
 import jaAgents from "./ja/agents.json";
 import jaEditor from "./ja/editor.json";
-import jaOnboarding from "./ja/onboarding.json";
 import jaInvite from "./ja/invite.json";
 import jaLabels from "./ja/labels.json";
 import jaMembers from "./ja/members.json";
@@ -115,7 +111,6 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     issues: enIssues,
     agents: enAgents,
     editor: enEditor,
-    onboarding: enOnboarding,
     invite: enInvite,
     labels: enLabels,
     members: enMembers,
@@ -143,7 +138,6 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     issues: zhHansIssues,
     agents: zhHansAgents,
     editor: zhHansEditor,
-    onboarding: zhHansOnboarding,
     invite: zhHansInvite,
     labels: zhHansLabels,
     members: zhHansMembers,
@@ -171,7 +165,6 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     issues: koIssues,
     agents: koAgents,
     editor: koEditor,
-    onboarding: koOnboarding,
     invite: koInvite,
     labels: koLabels,
     members: koMembers,
@@ -199,7 +192,6 @@ export const RESOURCES: Record<SupportedLocale, LocaleResources> = {
     issues: jaIssues,
     agents: jaAgents,
     editor: jaEditor,
-    onboarding: jaOnboarding,
     invite: jaInvite,
     labels: jaLabels,
     members: jaMembers,

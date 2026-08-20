@@ -324,13 +324,6 @@ func (h *Handler) JoinByShareLink(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Mark onboarded. A failure here must roll the whole join back, otherwise a
-	// first-time user could become a member while still blocked by onboarding.
-	if _, err := qtx.MarkUserOnboarded(r.Context(), user.ID); err != nil {
-		writeError(w, http.StatusInternalServerError, "failed to finalize onboarding")
-		return
-	}
-
 	if err := tx.Commit(r.Context()); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to join workspace")
 		return
@@ -393,16 +386,16 @@ func shareLinkListToResponse(row db.ListShareLinksByWorkspaceRow) ShareLinkRespo
 		maxUses = &row.MaxUses.Int32
 	}
 	return ShareLinkResponse{
-		ID:          uuidToString(row.ID),
-		WorkspaceID: uuidToString(row.WorkspaceID),
-		Code:        row.Code,
-		CreatedBy:   uuidToString(row.CreatedBy),
-		Role:        row.Role,
-		ExpiresAt:   expiresAt,
-		MaxUses:     maxUses,
-		UseCount:    row.UseCount,
-		IsActive:    row.IsActive,
-		CreatedAt:   timestampToString(row.CreatedAt),
+		ID:           uuidToString(row.ID),
+		WorkspaceID:  uuidToString(row.WorkspaceID),
+		Code:         row.Code,
+		CreatedBy:    uuidToString(row.CreatedBy),
+		Role:         row.Role,
+		ExpiresAt:    expiresAt,
+		MaxUses:      maxUses,
+		UseCount:     row.UseCount,
+		IsActive:     row.IsActive,
+		CreatedAt:    timestampToString(row.CreatedAt),
 		CreatorName:  row.CreatorName,
 		CreatorEmail: row.CreatorEmail,
 	}

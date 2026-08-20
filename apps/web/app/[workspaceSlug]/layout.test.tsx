@@ -44,7 +44,6 @@ vi.mock("@multica/core/paths", () => ({
   ),
   paths: {
     login: () => "/login",
-    onboarding: () => "/onboarding",
   },
 }));
 
@@ -54,10 +53,6 @@ vi.mock("@multica/core/platform", () => ({
 
 vi.mock("@multica/views/workspace/no-access-page", () => ({
   NoAccessPage: () => <div data-testid="no-access" />,
-}));
-
-vi.mock("@multica/views/workspace/welcome-after-onboarding", () => ({
-  WelcomeAfterOnboarding: () => null,
 }));
 
 vi.mock("@multica/views/workspace/use-workspace-seen", () => ({
@@ -110,6 +105,16 @@ beforeEach(() => {
 });
 
 describe("WorkspaceLayout", () => {
+  it("renders a projected workspace without an onboarded_at gate", async () => {
+    state.user = { id: "user-1", onboarded_at: null };
+    state.workspace = { id: "workspace-1", slug: "acme" };
+
+    renderLayout();
+
+    expect(await screen.findByTestId("workspace-content")).toBeInTheDocument();
+    expect(state.replace).not.toHaveBeenCalledWith("/onboarding");
+  });
+
   it("keeps loading instead of showing NoAccess when the initial list request fails", async () => {
     state.workspaceError = true;
     const { queryClient } = renderLayout();

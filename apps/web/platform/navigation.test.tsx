@@ -8,6 +8,7 @@
  */
 import { describe, expect, it, vi, afterEach, beforeEach } from "vitest";
 import { render } from "@testing-library/react";
+import { documentNavigation } from "./web-host-path";
 
 const router = vi.hoisted(() => ({
   push: vi.fn(),
@@ -23,7 +24,10 @@ vi.mock("next/navigation", () => ({
 }));
 
 import { WebNavigationProvider } from "./navigation";
-import { useNavigation, type NavigationAdapter } from "@multica/views/navigation";
+import {
+  useNavigation,
+  type NavigationAdapter,
+} from "@multica/views/navigation";
 
 function navigate(path: string) {
   window.dispatchEvent(
@@ -47,6 +51,10 @@ function renderAdapter(): () => NavigationAdapter {
 
 beforeEach(() => {
   router.push.mockReset();
+  router.replace.mockReset();
+  router.prefetch.mockReset();
+  vi.spyOn(documentNavigation, "assign").mockImplementation(() => {});
+  vi.spyOn(documentNavigation, "replace").mockImplementation(() => {});
 });
 
 describe("WebNavigationProvider internal link bridge", () => {
@@ -117,6 +125,25 @@ describe("WebNavigationProvider canGoBack", () => {
 
     expect(router.push).toHaveBeenCalledWith("/acme/issues");
     expect(adapter().canGoBack!()).toBe(false);
+  });
+
+  it("hands Workspace creation to the mounted Tag authority host with a document replace", () => {
+    const adapter = renderAdapter();
+
+    adapter().replace("/workspaces/new");
+
+    expect(documentNavigation.replace).toHaveBeenCalledWith(
+      "/tag/workspaces/new",
+    );
+    expect(router.replace).not.toHaveBeenCalled();
+  });
+
+  it("does not ask Next to prefetch a route owned by the Tag host", () => {
+    const adapter = renderAdapter();
+
+    adapter().prefetch?.("/workspaces/new");
+
+    expect(router.prefetch).not.toHaveBeenCalled();
   });
 
   it("reports false where the browser cannot answer, so callers use the fallback", () => {

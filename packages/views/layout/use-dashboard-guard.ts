@@ -7,7 +7,6 @@ import {
   paths,
   resolvePostAuthDestination,
   useCurrentWorkspace,
-  useHasOnboarded,
 } from "@multica/core/paths";
 import { useWorkspaceList } from "@multica/core/workspace";
 import { useRecentIssuesStore } from "@multica/core/issues/stores";
@@ -21,17 +20,8 @@ import { useNavigation } from "../navigation";
  *  - Not logged in → /login
  *  - Logged in but workspace list not yet loaded → wait (don't bounce prematurely)
  *  - Logged in but URL slug doesn't resolve to any workspace →
- *    `resolvePostAuthDestination(list, hasOnboarded)` (workspace-presence first;
- *    see paths/resolve.ts for the full table)
- *
- * This guard only redirects when the URL slug doesn't resolve. Onboarding
- * itself marks the user onboarded before navigating into a workspace, so
- * entering the dashboard no longer depends on a follow-up Helper modal.
- *
- * (Older comment claimed this state was physically impossible because
- * CreateWorkspace and AcceptInvitation atomically marked onboarded.
- * CreateWorkspace no longer marks; AcceptInvitation still does — invitees
- * skip the modal entirely.)
+ *    `resolvePostAuthDestination(list)`, which chooses a projected Workspace
+ *    or the VIBES-authority create journey without consulting onboarding state
  *
  * We read the workspace list query state directly (rather than relying on
  * useCurrentWorkspace's null return) so we can distinguish "list loading"
@@ -43,7 +33,6 @@ export function useDashboardGuard() {
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const workspace = useCurrentWorkspace();
-  const hasOnboarded = useHasOnboarded();
   const { workspaces, ready: workspaceListReady } = useWorkspaceList({
     enabled: !!user,
   });
@@ -56,9 +45,9 @@ export function useDashboardGuard() {
     }
     if (!workspaceListReady) return;
     if (!workspace) {
-      replace(resolvePostAuthDestination(workspaces, hasOnboarded));
+      replace(resolvePostAuthDestination(workspaces));
     }
-  }, [user, isLoading, workspaceListReady, workspace, workspaces, hasOnboarded, replace]);
+  }, [user, isLoading, workspaceListReady, workspace, workspaces, replace]);
 
   useEffect(() => {
     useNavigationStore.getState().onPathChange(pathname);

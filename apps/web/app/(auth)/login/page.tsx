@@ -2,18 +2,14 @@
 
 import { Suspense, useEffect, useRef, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
-import { useQueryClient, type QueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { sanitizeNextUrl, useAuthStore } from "@multica/core/auth";
 import { useConfigStore } from "@multica/core/config";
 import {
   workspaceKeys,
   workspaceListOptions,
 } from "@multica/core/workspace/queries";
-import {
-  paths,
-  resolvePostAuthDestination,
-  useHasOnboarded,
-} from "@multica/core/paths";
+import { paths, resolvePostAuthDestination } from "@multica/core/paths";
 import { api } from "@multica/core/api";
 import type { Workspace } from "@multica/core/types";
 import {
@@ -29,31 +25,20 @@ import { setLoggedInCookie } from "@/features/auth/auth-cookie";
 import Link from "next/link";
 import { LoginPage } from "@multica/views/auth";
 import { useT } from "@multica/views/i18n";
+import {
+  pushWebHostPath,
+  replaceWebHostPath,
+  toWebPostAuthPath,
+} from "@/platform/web-host-path";
 
 /**
  * Pick where a logged-in user with no explicit `?next=` should land.
- * Un-onboarded users with pending invitations on their email get routed to
- * the batch /invitations page; everyone else falls through to the standard
- * resolver. A network blip on listMyInvitations is non-fatal — we fall
- * through rather than trap the user on an error screen.
+ * Workspace admission is owned by the VIBES handoff. With no explicit next
+ * target, enter the first projected Workspace or the authority-backed create
+ * route; do not detour through Multica onboarding or invitation state.
  */
-async function resolveLoggedInDestination(
-  qc: QueryClient,
-  hasOnboarded: boolean,
-  workspaces: Workspace[],
-): Promise<string> {
-  if (!hasOnboarded) {
-    try {
-      const invites = await api.listMyInvitations();
-      if (invites.length > 0) {
-        qc.setQueryData(workspaceKeys.myInvitations(), invites);
-        return paths.invitations();
-      }
-    } catch {
-      // fall through
-    }
-  }
-  return resolvePostAuthDestination(workspaces, hasOnboarded);
+function resolveLoggedInDestination(workspaces: Workspace[]): string {
+  return toWebPostAuthPath(resolvePostAuthDestination(workspaces));
 }
 
 function LoginPageContent() {
@@ -76,7 +61,6 @@ function LoginPageContent() {
 
   const [desktopToken, setDesktopToken] = useState<string | null>(null);
   const [desktopError, setDesktopError] = useState("");
-  const hasOnboarded = useHasOnboarded();
 
   // Latched once auth has been observed settled as logged-out on this page.
   // Any `user` that appears afterwards came from the login form in this
@@ -84,7 +68,8 @@ function LoginPageContent() {
   const settledLoggedOutRef = useRef(false);
 
   // Already authenticated ON ARRIVAL — honor ?next= or fall back to first
-  // workspace (or /onboarding if the user has none). Skip this entire path
+  // workspace (or authority-backed Workspace creation if the user has none).
+  // Skip this entire path
   // when the user arrived to authorize the CLI.
   useEffect(() => {
     if (isLoading) return;
@@ -118,7 +103,7 @@ function LoginPageContent() {
     // this effect only serves visitors who arrived already authenticated.
     if (settledLoggedOutRef.current) return;
     if (nextUrl) {
-      router.replace(nextUrl);
+      replaceWebHostPath(router, nextUrl);
       return;
     }
     // Fetch instead of reading the cache: on a fresh page load the cache is
@@ -129,21 +114,17 @@ function LoginPageContent() {
     void qc
       .ensureQueryData(workspaceListOptions())
       .catch(() => [] as Workspace[])
-      .then((list) => resolveLoggedInDestination(qc, hasOnboarded, list))
-      .then((dest) => router.replace(dest));
-  }, [isLoading, user, router, nextUrl, isDesktopHandoff, hasOnboarded, qc]);
+      .then((list) => resolveLoggedInDestination(list))
+      .then((dest) => replaceWebHostPath(router, dest));
+  }, [isLoading, user, router, nextUrl, isDesktopHandoff, qc, t]);
 
   const handleSuccess = async () => {
-    // Read the latest user snapshot directly — the closure's `hasOnboarded`
-    // was captured before login completed and would be stale here.
-    const currentUser = useAuthStore.getState().user;
-    const onboarded = currentUser?.onboarded_at != null;
     if (nextUrl) {
-      router.push(nextUrl);
+      pushWebHostPath(router, nextUrl);
       return;
     }
     const list = qc.getQueryData<Workspace[]>(workspaceKeys.list()) ?? [];
-    router.push(await resolveLoggedInDestination(qc, onboarded, list));
+    pushWebHostPath(router, resolveLoggedInDestination(list));
   };
 
   // Build Google OAuth state for the remaining web/Desktop destinations.

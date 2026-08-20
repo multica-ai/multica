@@ -30,6 +30,7 @@ describe('Tag Host workspace routes', () => {
         '/join',
       ])
     );
+    expect(fullPaths).not.toContain('/onboarding');
 
     for (const fullPath of fullPaths.filter((path) => path !== '/')) {
       const route = routes.find((candidate) => candidate.fullPath === fullPath);

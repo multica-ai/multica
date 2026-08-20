@@ -6,6 +6,7 @@ import { ArrowRight, Download } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import { useLocale } from "../i18n";
 import { useDashboardCtaHref } from "../utils/use-dashboard-cta";
+import { WebHostLink } from "@/platform/web-host-link";
 import {
   ClaudeCodeLogo,
   CodexLogo,
@@ -41,13 +42,13 @@ export function LandingHero() {
             </p>
 
             <div className="mt-8 flex flex-wrap items-center justify-center gap-3">
-              <Link href={ctaHref} className={heroButtonClassName("solid")}>
-                {user ? t.header.dashboard : t.hero.cta}
-              </Link>
-              <Link
-                href="/download"
-                className={heroButtonClassName("ghost")}
+              <WebHostLink
+                href={ctaHref}
+                className={heroButtonClassName("solid")}
               >
+                {user ? t.header.dashboard : t.hero.cta}
+              </WebHostLink>
+              <Link href="/download" className={heroButtonClassName("ghost")}>
                 <Download className="size-4" aria-hidden />
                 {t.hero.installCli}
               </Link>

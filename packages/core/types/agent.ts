@@ -1,5 +1,3 @@
-import type { ChatSession } from "./chat";
-
 export type AgentStatus = "idle" | "working" | "blocked" | "error" | "offline";
 
 export type AgentRuntimeMode = "local" | "cloud";
@@ -221,10 +219,7 @@ export interface WorkspaceWorkingAgent {
 export type WorkspaceWorkingAgentType = "issue" | "autopilot" | "chat";
 
 export type WorkspaceWorkingAgentMineRelation =
-  | "assigned"
-  | "created"
-  | "involved"
-  | "any";
+  "assigned" | "created" | "involved" | "any";
 
 /**
  * A departed-member-safe user ref resolved from the global user table. `name` /
@@ -430,17 +425,6 @@ export interface TaskUsage {
   cost_usd_ticks?: number;
 }
 
-/**
- * Response of the Mika bootstrap endpoint: the workspace's Mika plus the
- * caller's conversation with it, resolved together server-side so two clients
- * cannot each open their own onboarding session.
- */
-export interface MikaBootstrapResponse extends Agent {
-  /** Absent only when the server could not resolve the session; retry the
-   *  same call rather than creating one client-side. */
-  onboarding_session?: ChatSession;
-}
-
 export interface Agent {
   id: string;
   workspace_id: string;
@@ -599,8 +583,8 @@ export interface AgentSkillSummary {
   id: string;
   name: string;
   description: string;
-	/** Older servers omit this field; consumers must treat that as enabled. */
-	enabled?: boolean;
+  /** Older servers omit this field; consumers must treat that as enabled. */
+  enabled?: boolean;
 }
 
 export interface CreateAgentRequest {
@@ -807,8 +791,8 @@ export interface SkillSummary {
   created_by: string | null;
   created_at: string;
   updated_at: string;
-	/** Present only when returned from an agent-scoped assignment endpoint. */
-	enabled?: boolean;
+  /** Present only when returned from an agent-scoped assignment endpoint. */
+  enabled?: boolean;
 }
 
 export interface Skill extends SkillSummary {
@@ -1028,11 +1012,7 @@ export interface DashboardFailureByAgent {
 }
 
 export type RuntimeUpdateStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "timeout";
+  "pending" | "running" | "completed" | "failed" | "timeout";
 
 export interface RuntimeUpdate {
   id: string;
@@ -1092,11 +1072,7 @@ export interface RuntimeModelThinkingLevel {
 }
 
 export type RuntimeModelListStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "failed"
-  | "timeout";
+  "pending" | "running" | "completed" | "failed" | "timeout";
 
 export interface RuntimeModelListRequest {
   id: string;
@@ -1136,12 +1112,7 @@ export interface RuntimeModelsResult {
 }
 
 export type RuntimeLocalSkillStatus =
-  | "pending"
-  | "running"
-  | "completed"
-  | "conflict"
-  | "failed"
-  | "timeout";
+  "pending" | "running" | "completed" | "conflict" | "failed" | "timeout";
 
 export type RuntimeLocalSkillImportAction = "overwrite";
 
@@ -1173,10 +1144,10 @@ export interface RuntimeLocalSkillSummary {
 }
 
 export interface RuntimeLocalMcpServerSummary {
-	name: string;
-	transport?: "stdio" | "http" | "sse" | "unknown";
-	source?: string;
-	enabled: boolean;
+  name: string;
+  transport?: "stdio" | "http" | "sse" | "unknown";
+  source?: string;
+  enabled: boolean;
 }
 
 export interface RuntimeLocalSkillListRequest {
@@ -1185,8 +1156,8 @@ export interface RuntimeLocalSkillListRequest {
   status: RuntimeLocalSkillStatus;
   skills?: RuntimeLocalSkillSummary[];
   supported: boolean;
-	mcp_servers?: RuntimeLocalMcpServerSummary[];
-	mcp_supported?: boolean;
+  mcp_servers?: RuntimeLocalMcpServerSummary[];
+  mcp_supported?: boolean;
   error?: string;
   created_at: string;
   updated_at: string;
@@ -1221,8 +1192,8 @@ export interface RuntimeLocalSkillImportRequest {
 export interface RuntimeLocalSkillsResult {
   skills: RuntimeLocalSkillSummary[];
   supported: boolean;
-	mcpServers: RuntimeLocalMcpServerSummary[];
-	mcpSupported: boolean;
+  mcpServers: RuntimeLocalMcpServerSummary[];
+  mcpSupported: boolean;
 }
 
 export interface RuntimeLocalSkillImportResult {

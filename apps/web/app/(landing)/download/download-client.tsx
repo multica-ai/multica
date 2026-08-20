@@ -3,7 +3,6 @@
 import { LandingHeader } from "@/features/landing/components/landing-header";
 import { LandingFooter } from "@/features/landing/components/landing-footer";
 import { CliSection } from "@/features/landing/components/download/cli-section";
-import { CloudSection } from "@/features/landing/components/download/cloud-section";
 
 export function DownloadClient() {
   return (
@@ -21,7 +20,6 @@ export function DownloadClient() {
         </div>
       </div>
       <CliSection />
-      <CloudSection />
       <LandingFooter />
     </>
   );

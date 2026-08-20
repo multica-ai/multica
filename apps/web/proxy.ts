@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { LOCALE_COOKIE } from "@multica/core/i18n";
+import { isReservedSlug } from "@multica/core/paths";
 import {
   MULTICA_LOCALE_HEADER,
   resolveLocaleFromSignals,
@@ -57,6 +58,20 @@ export function proxy(req: NextRequest) {
 
   const hasSession = req.cookies.has("multica_logged_in");
   const lastSlug = req.cookies.get("last_workspace_slug")?.value;
+  const segments = pathname.split("/").filter(Boolean);
+
+  // The Tag host owns the canonical Issues surface. Move old workspace-scoped
+  // bookmarks there before Next renders the retired shell; Tag performs the
+  // fresh VIBES admission check after the document handoff.
+  if (
+    segments[1] === "issues" &&
+    segments[0] !== undefined &&
+    !isReservedSlug(segments[0])
+  ) {
+    const url = req.nextUrl.clone();
+    url.pathname = `/tag${pathname}`;
+    return NextResponse.redirect(url);
+  }
 
   // --- Legacy URL redirect: /issues/... → /{slug}/issues/... ---
   // Old bookmarks and clients that hit us before the slug migration would
@@ -71,8 +86,12 @@ export function proxy(req: NextRequest) {
     }
 
     if (lastSlug) {
-      // Preserve deep-link path + query: /issues/abc → /{lastSlug}/issues/abc
-      url.pathname = `/${lastSlug}${pathname}`;
+      // Issues is mounted in Tag. Preserve its deep-link path + query while
+      // leaving unrelated legacy Multica surfaces on their existing routes.
+      url.pathname =
+        firstSegment === "issues"
+          ? `/tag/${lastSlug}${pathname}`
+          : `/${lastSlug}${pathname}`;
       return NextResponse.redirect(url);
     }
 
@@ -102,7 +121,7 @@ export function proxy(req: NextRequest) {
     !isOfficialMarketingHost(req.nextUrl.hostname)
   ) {
     const url = req.nextUrl.clone();
-    url.pathname = `/${lastSlug}/issues`;
+    url.pathname = `/tag/${lastSlug}/chat`;
     return NextResponse.redirect(url);
   }
 

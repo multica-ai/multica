@@ -16,6 +16,7 @@ import {
 } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
 import { Loader2 } from "lucide-react";
+import { pushWebHostPath, toWebPostAuthPath } from "@/platform/web-host-path";
 
 function CallbackContent() {
   const router = useRouter();
@@ -62,49 +63,23 @@ function CallbackContent() {
     } else {
       // Normal web flow
       loginWithGoogle(code, redirectUri)
-        .then(async (loggedInUser) => {
+        .then(async () => {
           const wsList = await api.listWorkspaces();
           qc.setQueryData(workspaceKeys.list(), wsList);
-          const onboarded = loggedInUser.onboarded_at != null;
-
           // 1. nextUrl wins: a `next=/invite/<id>` always survives the OAuth
           //    round-trip — the user clicked a specific link and we should
           //    honor exactly that destination.
           if (nextUrl) {
-            router.push(nextUrl);
+            pushWebHostPath(router, nextUrl);
             return;
           }
 
-          // 2. Un-onboarded users may have pending invitations on their
-          //    email even when no `next=` was carried (came from a fresh
-          //    login on multica.ai instead of clicking the email link,
-          //    or `state` was lost across the round-trip). Look them up by
-          //    email and route to the batch /invitations page if any.
-          //    Already-onboarded users skip this lookup — their new invites
-          //    surface in the sidebar dropdown, not as a forced wall.
-          if (!onboarded) {
-            try {
-              const invites = await api.listMyInvitations();
-              if (invites.length > 0) {
-                qc.setQueryData(workspaceKeys.myInvitations(), invites);
-                router.push(paths.invitations());
-                return;
-              }
-            } catch {
-              // Network blip on the invite lookup is non-fatal — fall through
-              // to the normal post-auth destination so the user isn't stuck
-              // on a blank callback screen. Worst case they land on
-              // /onboarding and the sidebar will surface invites later.
-            }
-          }
-
-          // 3. Default: hand off to the resolver (onboarding for first-timers,
-          //    first workspace for returning users, /workspaces/new for
-          //    onboarded users with zero workspaces). Source-attribution
-          //    backfill for onboarded users with no recorded source is
-          //    handled by `<SourceBackfillModal />` inside the dashboard
-          //    shell — not a route detour, so we route straight to dest.
-          router.push(resolvePostAuthDestination(wsList, onboarded));
+          // Default: enter a projected Workspace or the authority-backed
+          // create route. VIBES owns invitation and Workspace admission.
+          pushWebHostPath(
+            router,
+            toWebPostAuthPath(resolvePostAuthDestination(wsList)),
+          );
         })
         .catch((err) => {
           setError(err instanceof Error ? err.message : "Login failed");
@@ -147,7 +122,10 @@ function CallbackContent() {
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardContent className="flex justify-center">
-            <a href={paths.login()} className="text-primary underline-offset-4 hover:underline">
+            <a
+              href={paths.login()}
+              className="text-primary underline-offset-4 hover:underline"
+            >
               Back to login
             </a>
           </CardContent>
@@ -161,7 +139,9 @@ function CallbackContent() {
       <Card className="w-full max-w-sm">
         <CardHeader className="text-center">
           <CardTitle className="text-display-sm">Signing in...</CardTitle>
-          <CardDescription>Please wait while we complete your login</CardDescription>
+          <CardDescription>
+            Please wait while we complete your login
+          </CardDescription>
         </CardHeader>
         <CardContent className="flex justify-center">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
