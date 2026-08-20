@@ -47,6 +47,11 @@ const SORT_COLUMN_SQL: Record<string, string> = {
   activity: "last_activity",
 };
 
+// Hard backstop for listWorkspaces' unpaged mode (used to sort by keySpend,
+// which is resolved post-query — see SORTABLE_COLUMNS' doc comment in
+// lib/types.ts), mirroring MAX_KEY_PAGES/MAX_TEAM_PAGES in lib/litellm.ts.
+const MAX_UNPAGED_ROWS = 5000;
+
 const STATUS_CASE = `
   CASE
     WHEN EXISTS (
@@ -63,6 +68,7 @@ const STATUS_CASE = `
 
 export async function listWorkspaces(
   params: ListWorkspacesParams,
+  opts: { unpaged?: boolean } = {},
 ): Promise<ListWorkspacesResult> {
   const { search, status, sort, direction, page, pageSize, activityFrom, activityTo } = params;
 
@@ -100,7 +106,11 @@ export async function listWorkspaces(
   const sortColumn = SORT_COLUMN_SQL[sort] ?? "last_activity";
   const sortDir = direction === "asc" ? "ASC" : "DESC";
 
-  values.push(pageSize, (page - 1) * pageSize);
+  // Unpaged mode (sort by keySpend, see SORTABLE_COLUMNS' doc comment):
+  // fetch every matching row up to a hard backstop instead of the requested
+  // page, so the caller can join in LiteLLM spend and sort in memory before
+  // paginating.
+  values.push(opts.unpaged ? MAX_UNPAGED_ROWS : pageSize, opts.unpaged ? 0 : (page - 1) * pageSize);
   const limitIdx = values.length - 1;
   const offsetIdx = values.length;
 

@@ -25,10 +25,11 @@ function parseParams(url: URL): ListWorkspacesParams {
   )
     ? (statusParam as WorkspaceStatus)
     : "all";
-  // Only accept columns the SQL layer can actually ORDER BY (see
-  // SORTABLE_COLUMNS' doc comment in lib/types.ts) — llmKey/team fall back to
-  // "activity" here the same as any other invalid/unknown value, matching
-  // what the UI now enforces by not offering a sort control for them.
+  // llmKey/team fall back to "activity" here the same as any other
+  // invalid/unknown value, matching what the UI enforces by not offering a
+  // sort control for them. keySpend IS accepted, but takes the separate
+  // in-memory sort path in GET below (see SORTABLE_COLUMNS' doc comment in
+  // lib/types.ts) rather than SORT_COLUMN_SQL.
   const sortParam = url.searchParams.get("sort") ?? "activity";
   const sort: SortColumn = SORTABLE_COLUMNS.includes(sortParam as SortColumn)
     ? (sortParam as SortColumn)
@@ -48,6 +49,46 @@ function parseParams(url: URL): ListWorkspacesParams {
 export async function GET(request: NextRequest) {
   const params = parseParams(new URL(request.url));
   try {
+    // keySpend has no DB column to ORDER BY (it's resolved via the LiteLLM
+    // join below) — fetch every matching workspace unpaged, join, sort in
+    // memory, then paginate by slicing. Every other sort column stays on
+    // the normal DB-ordered path. See SORTABLE_COLUMNS' doc comment in
+    // lib/types.ts.
+    //
+    // `result.total` comes from the query's count(*) OVER() window, which
+    // reflects every row matching WHERE regardless of the unpaged LIMIT — use
+    // it as the response's `total`, not allItems.length (that's capped at
+    // MAX_UNPAGED_ROWS in lib/queries.ts and would undercount once the real
+    // match set exceeds the cap). If the cap IS hit, allItems only contains
+    // the DB's default-ordered first MAX_UNPAGED_ROWS rows, so the in-memory
+    // cost sort below is best-effort beyond that boundary — same tradeoff
+    // MAX_KEY_PAGES/MAX_TEAM_PAGES already accept in lib/litellm.ts. Warn so
+    // it's visible rather than silently wrong.
+    if (params.sort === "keySpend") {
+      const result = await listWorkspaces(params, { unpaged: true });
+      const allItems = await attachLiteLlmToList(result.items);
+      if (result.total > allItems.length) {
+        console.warn(
+          `[admin] GET /api/workspaces: keySpend sort covers ${allItems.length}/${result.total} matching workspaces (MAX_UNPAGED_ROWS cap reached)`,
+        );
+      }
+      const dir = params.direction === "asc" ? 1 : -1;
+      const sorted = [...allItems].sort((a, b) => {
+        if (a.keySpend === null && b.keySpend === null) return 0;
+        if (a.keySpend === null) return 1; // nulls last regardless of direction
+        if (b.keySpend === null) return -1;
+        return (a.keySpend - b.keySpend) * dir;
+      });
+      const start = (params.page - 1) * params.pageSize;
+      const items = sorted.slice(start, start + params.pageSize);
+      return NextResponse.json({
+        items,
+        total: result.total,
+        page: params.page,
+        pageSize: params.pageSize,
+      });
+    }
+
     const result = await listWorkspaces(params);
     // attachLiteLlmToList never throws (lib/litellm.ts's listLiteLlmKeys
     // degrades to [] / partial results on any proxy failure) — a flaky or

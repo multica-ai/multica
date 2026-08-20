@@ -7,6 +7,7 @@ import {
   type LiteLlmKey,
   type LiteLlmTeam,
 } from "./litellm-schema";
+import { aggregateTeamUsage } from "./litellm-usage";
 
 /**
  * LiteLLM admin API client. Modeled directly on
@@ -161,29 +162,6 @@ export async function getTeamUsage(teamId: string): Promise<LiteLlmUsage | null>
     endpoint: "/team/daily/activity",
   });
 
-  let cost24h = 0;
-  let cost30d = 0;
-  let tokens24h = 0;
-  let sawAny = false;
   const todayISO = end.toISOString().slice(0, 10);
-
-  for (const day of parsed.results) {
-    const date = day.date || day.group_by_day;
-    const models = day.breakdown?.models ?? {};
-    for (const info of Object.values(models)) {
-      const metrics = info as { spend?: number | null; total_tokens?: number | null };
-      const spend = Number(metrics?.spend ?? 0);
-      const tokens = Number(metrics?.total_tokens ?? 0);
-      if (!spend && !tokens) continue;
-      sawAny = true;
-      cost30d += spend;
-      if (date === todayISO) {
-        cost24h += spend;
-        tokens24h += tokens;
-      }
-    }
-  }
-
-  if (!sawAny) return null;
-  return { cost24h, cost30d, tokens24h };
+  return aggregateTeamUsage(parsed.results, todayISO);
 }

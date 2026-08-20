@@ -86,14 +86,20 @@ export type SortColumn =
   | "activity";
 
 /** Columns the SQL layer can actually order by (see SORT_COLUMN_SQL in
- * lib/queries.ts). `llmKey`/`team`/`keySpend` are excluded on purpose:
- * they're not DB columns — they're resolved via a LiteLLM lookup merged
- * into each page's rows *after* the paginated SQL query runs
- * (lib/litellm-join.ts), so there is no column to ORDER BY without fetching
- * every workspace up front. The UI must not offer a sort control for these,
- * or it would show an "active sort" arrow next to a column that's silently
- * still ordered by something else underneath (queries.ts's real fallback
- * behavior). */
+ * lib/queries.ts). `llmKey`/`team` are excluded on purpose: they're not DB
+ * columns, they're display-only strings resolved via a LiteLLM lookup
+ * merged into each page's rows *after* the paginated SQL query runs
+ * (lib/litellm-join.ts), and there's no meaningful order for them anyway.
+ * The UI must not offer a sort control for these, or it would show an
+ * "active sort" arrow next to a column that's silently still ordered by
+ * something else underneath (queries.ts's real fallback behavior).
+ *
+ * `keySpend` IS sortable despite the same "not a DB column" issue, because
+ * unlike llmKey/team it has a real numeric order users want (cost list). It
+ * takes a different path than SORT_COLUMN_SQL: the route handler
+ * (app/api/workspaces/route.ts) fetches every matching workspace unpaged,
+ * joins in LiteLLM spend, sorts in memory, then paginates — see that file's
+ * `sort === "keySpend"` branch. */
 export const SORTABLE_COLUMNS: SortColumn[] = [
   "status",
   "name",
@@ -101,6 +107,7 @@ export const SORTABLE_COLUMNS: SortColumn[] = [
   "model",
   "issues",
   "activity",
+  "keySpend",
 ];
 
 export type SortDirection = "asc" | "desc";

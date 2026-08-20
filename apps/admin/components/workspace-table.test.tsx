@@ -90,4 +90,17 @@ describe("WorkspaceTable", () => {
     );
     expect(screen.getByText("$12.50")).toBeInTheDocument();
   });
+
+  it("renders the Cost column header as a sort control", () => {
+    render(
+      <WorkspaceTable
+        items={[]}
+        sort="keySpend"
+        direction="desc"
+        onSortChange={vi.fn()}
+        onRowClick={vi.fn()}
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Cost/ })).toBeInTheDocument();
+  });
 });

@@ -19,6 +19,7 @@
     "pg": "^8.20.0",
     "react": "catalog:",
     "react-dom": "catalog:",
+    "recharts": "3.8.0",
     "server-only": "^0.0.1",
     "zod": "catalog:"
   },

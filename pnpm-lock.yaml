@@ -166,6 +166,9 @@ importers:
       react-dom:
         specifier: 'catalog:'
         version: 19.2.3(react@19.2.3)
+      recharts:
+        specifier: 3.8.0
+        version: 3.8.0(@types/react@19.2.14)(react-dom@19.2.3(react@19.2.3))(react-is@19.2.6)(react@19.2.3)(redux@5.0.1)
       server-only:
         specifier: ^0.0.1
         version: 0.0.1

@@ -1,14 +1,27 @@
+import { Bar, BarChart, XAxis } from "recharts";
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@multica/ui/components/ui/chart";
 import type { IssueMetrics } from "@/lib/types";
 
-// A 14-bar trend of real daily issue-creation counts (lib/queries.ts's
-// getIssueMetrics). Hand-rolled with plain divs rather than the shared
-// recharts-based ChartContainer (packages/ui/components/ui/chart.tsx):
-// this is a single fixed-shape sparkline with no interactivity, legend, or
-// tooltip requirement, so pulling in a charting library for it would be
-// speculative generality against a one-off use.
-export function IssueMetricsSection({ issues }: { issues: IssueMetrics }) {
-  const max = Math.max(1, ...issues.dailyOpenCounts.map((d) => d.count));
+// Single-series trend, one consistent color — no per-label breakdown here
+// (that's the pills above), just a real hover tooltip on the day/count bars.
+const issuesChartConfig = {
+  count: { label: "Issues created", color: "var(--chart-1)" },
+} satisfies ChartConfig;
 
+function formatDayLabel(iso: string): string {
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+export function IssueMetricsSection({ issues }: { issues: IssueMetrics }) {
   return (
     <section>
       <h3 className="mb-3 text-label font-medium text-muted-foreground uppercase tracking-wide">
@@ -51,16 +64,21 @@ export function IssueMetricsSection({ issues }: { issues: IssueMetrics }) {
       {issues.dailyOpenCounts.length === 0 ? (
         <p className="text-body text-muted-foreground">No issues created in the last 14 days.</p>
       ) : (
-        <div className="flex h-16 items-end gap-1" role="img" aria-label="Issues created over the last 14 days">
-          {issues.dailyOpenCounts.map((day) => (
-            <div
-              key={day.date}
-              title={`${day.date}: ${day.count}`}
-              className="flex-1 rounded-sm bg-primary/70"
-              style={{ height: `${Math.max(4, (day.count / max) * 100)}%` }}
-            />
-          ))}
-        </div>
+        <ChartContainer
+          config={issuesChartConfig}
+          className="aspect-auto h-16 w-full"
+          role="img"
+          aria-label="Issues created over the last 14 days"
+        >
+          <BarChart
+            data={issues.dailyOpenCounts.map((d) => ({ ...d, label: formatDayLabel(d.date) }))}
+            margin={{ left: 0, right: 0, top: 4, bottom: 0 }}
+          >
+            <XAxis dataKey="label" tickLine={false} axisLine={false} hide />
+            <ChartTooltip content={<ChartTooltipContent hideIndicator />} />
+            <Bar dataKey="count" fill="var(--color-count)" radius={[2, 2, 0, 0]} />
+          </BarChart>
+        </ChartContainer>
       )}
     </section>
   );

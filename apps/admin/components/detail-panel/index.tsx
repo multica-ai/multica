@@ -22,9 +22,17 @@ export function DetailPanel({ workspace, onClose }: DetailPanelProps) {
 
   return (
     <Sheet open={workspace !== null} onOpenChange={(open) => !open && onClose()}>
-      {/* packages/ui's SheetContent caps side="right" at sm:max-w-sm (24rem) —
-          override to the prototype's 50%-viewport-width slide-out panel. */}
-      <SheetContent side="right" className="w-full sm:max-w-none sm:w-1/2 overflow-y-auto p-6">
+      {/* packages/ui's SheetContent sets its side="right" width/max-width
+          under the same [data-side=right] attribute selector — an unscoped
+          override class loses that specificity fight (max-w-sm still caps
+          the panel at 24rem even though w-1/2 is "later" in the className
+          string). Scope the override under the same data-[side=right]:
+          modifier so cn()'s tailwind-merge treats them as the same conflict
+          group and actually replaces them. */}
+      <SheetContent
+        side="right"
+        className="data-[side=right]:w-full data-[side=right]:sm:max-w-none data-[side=right]:sm:w-1/2 overflow-y-auto p-6"
+      >
         {!workspace ? null : isError ? (
           // Plan §5.3: "Panel load error: inline error message with retry button."
           <div className="flex flex-col items-center gap-3 py-10 text-center">
@@ -38,14 +46,14 @@ export function DetailPanel({ workspace, onClose }: DetailPanelProps) {
           <p className="text-muted-foreground">Loading workspace…</p>
         ) : (
           <div className="flex flex-col gap-6">
-            {/* Section order follows plan §2.2 A–F: Header, Activity,
-                Metadata, LiteLLM, Issue Metrics, Derived Insights. */}
+            {/* Recent activity renders last — it's a chronological log, not
+                a summary, so it belongs after the at-a-glance sections. */}
             <DetailHeader workspace={workspace} status={data.status} />
-            <ActivityTimeline events={data.activity} />
             <MetadataGrid metadata={data.metadata} />
             <LiteLlmSection litellm={data.litellm} />
             <IssueMetricsSection issues={data.issues} />
             <DerivedInsights insights={data.insights} />
+            <ActivityTimeline events={data.activity} />
           </div>
         )}
       </SheetContent>
