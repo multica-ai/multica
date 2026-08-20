@@ -679,7 +679,7 @@ function PropertyFilterOptions({
   selected: string[];
   onToggle: (optionId: string) => void;
   /** Replace the property's full filter value set (scalar types only). */
-  onSetValues?: (optionIds: string[]) => void;
+  onSetValues: (optionIds: string[]) => void;
   fixedIds?: Set<string>;
   fixedTitle?: string;
 }) {
@@ -723,13 +723,14 @@ function PropertyFilterOptions({
   };
   // Scalar value state lives at the top level so the hooks stay unconditional
   // (Rules of Hooks): it is only rendered for text / number / date / url, but
-  // must be declared regardless of which branch runs. The draft is NOT synced
-  // back to `scalarValue`: toggling "No value" must keep the typed value so
-  // unchecking it can restore the filter (the input initializes from
-  // `scalarValue` on mount, so a reopened menu always shows the committed one).
+  // must be declared regardless of which branch runs. The draft syncs to the
+  // committed `scalarValue` only when that changes (e.g. an external clear) —
+  // during typing scalarValue is unchanged, so the draft survives long enough
+  // for an in-menu "No value" uncheck to restore it.
   const scalarValue = selected.find((id) => id !== NO_PROPERTY_VALUE) ?? "";
   const hasNoValue = selected.includes(NO_PROPERTY_VALUE);
   const [draft, setDraft] = useState(scalarValue);
+  useEffect(() => setDraft(scalarValue), [scalarValue]);
   const options = [
     ...(actorProperty
       ? actorOptions.map((option) => ({
@@ -754,7 +755,7 @@ function PropertyFilterOptions({
     noValueOption,
   ];
 
-  if (scalarProperty && onSetValues) {
+  if (scalarProperty) {
     const placeholder =
       property.type === "url"
         ? t(($) => $.pickers.custom_property.url_placeholder)
@@ -796,7 +797,16 @@ function PropertyFilterOptions({
               if (!movedToMenuItem) commitValue(draft);
             }}
             onKeyDown={(event) => {
+              // Base UI's menu popup merges typeahead + list-navigation handlers
+              // onto the role="menu" element and stopEvent()s every printable
+              // key — without stopping propagation, the input would swallow no
+              // characters at all (and arrow keys on number/date inputs would
+              // be hijacked). Escape/Tab are left for the menu to close/move
+              // focus; Enter commits and still needs stopPropagation so it does
+              // not bubble up and activate the highlighted "No value" item.
+              if (event.key === "Escape" || event.key === "Tab") return;
               if (event.key === "Enter") commitValue(draft);
+              event.stopPropagation();
             }}
             disabled={locked}
             placeholder={placeholder}

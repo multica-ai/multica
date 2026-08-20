@@ -1267,21 +1267,16 @@ func TestIssuePropertyFacetScalarTypes(t *testing.T) {
 		return counts
 	}
 
-	numCounts := facetCounts(num.ID)
-	if numCounts["3.5"] != 1 || numCounts["__none__"] != 1 {
-		t.Fatalf("number facet counts wrong: %v", numCounts)
-	}
-	textCounts := facetCounts(text.ID)
-	if textCounts["hello"] != 1 || textCounts["__none__"] != 1 {
-		t.Fatalf("text facet counts wrong: %v", textCounts)
-	}
-	dateCounts := facetCounts(date.ID)
-	if dateCounts["2026-08-19"] != 1 || dateCounts["__none__"] != 1 {
-		t.Fatalf("date facet counts wrong: %v", dateCounts)
-	}
-	urlCounts := facetCounts(url.ID)
-	if urlCounts["https://example.com"] != 1 || urlCounts["__none__"] != 1 {
-		t.Fatalf("url facet counts wrong: %v", urlCounts)
+	// Scalar facets collapse to the bounded "__set__"/"__none__" buckets (the
+	// UI only reads the "No value" count for these types).
+	for _, tc := range []struct {
+		name string
+		id   string
+	}{{"number", num.ID}, {"text", text.ID}, {"date", date.ID}, {"url", url.ID}} {
+		counts := facetCounts(tc.id)
+		if counts["__set__"] != 1 || counts["__none__"] != 1 {
+			t.Fatalf("%s facet counts wrong: %v", tc.name, counts)
+		}
 	}
 }
 

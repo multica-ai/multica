@@ -62,7 +62,12 @@ export function isActorPropertyType(type: string): boolean {
   return type === "actor" || type === "multi_actor";
 }
 
-/** Types the issue filter menu exposes for value + "No value" filtering. */
+/**
+ * Types the issue filter menu exposes for value + "No value" filtering.
+ * Kept as an explicit enumeration (rather than delegating to
+ * isKnownPropertyType) so a future property type must opt into filtering —
+ * it should never become filterable by default.
+ */
 export function isFilterablePropertyType(type: string): boolean {
   return (
     type === "select" ||
