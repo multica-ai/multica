@@ -8,6 +8,7 @@ import { z } from "zod";
 export const LiteLlmKeySchema = z.object({
   key_alias: z.string().nullish(),
   team_id: z.string().nullish(),
+  spend: z.number().nullish(),
 });
 
 export const LiteLlmKeyListSchema = z.object({

@@ -13,6 +13,11 @@ export async function attachLiteLlmToList(
   return items.map((item) => {
     const match = findKeyForSlug(keys, item.slug);
     if (!match) return item;
-    return { ...item, llmKey: match.key_alias ?? null, team: resolveTeamName(teams, match.team_id) };
+    return {
+      ...item,
+      llmKey: match.key_alias ?? null,
+      team: resolveTeamName(teams, match.team_id),
+      keySpend: match.spend ?? null,
+    };
   });
 }

@@ -20,6 +20,7 @@ async function buildLiteLlmSection(slug: string): Promise<LiteLlmSection> {
       keyAlias: null,
       teamAlias: null,
       members: [],
+      keySpend: null,
       cost24h: null,
       cost30d: null,
       tokens24h: null,
@@ -36,6 +37,7 @@ async function buildLiteLlmSection(slug: string): Promise<LiteLlmSection> {
     // in lib/litellm-schema.ts. Left empty rather than invented; the UI
     // renders "No members reported" for an empty list.
     members: [],
+    keySpend: match.spend ?? null,
     cost24h: usage?.cost24h ?? null,
     cost30d: usage?.cost30d ?? null,
     tokens24h: usage?.tokens24h ?? null,
@@ -68,6 +70,7 @@ export async function GET(
           keyAlias: null,
           teamAlias: null,
           members: [],
+          keySpend: null,
           cost24h: null,
           cost30d: null,
           tokens24h: null,

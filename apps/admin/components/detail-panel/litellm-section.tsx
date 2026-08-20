@@ -1,13 +1,9 @@
 import { Avatar, AvatarFallback } from "@multica/ui/components/ui/avatar";
+import { formatCost } from "@/lib/format";
 import type { LiteLlmSection as LiteLlmSectionData } from "@/lib/types";
 
 function initials(name: string): string {
   return name.slice(0, 2).toUpperCase();
-}
-
-function formatCost(value: number | null): string {
-  if (value === null) return "—";
-  return `$${value.toFixed(2)}`;
 }
 
 function formatTokens(value: number | null): string {
@@ -35,7 +31,11 @@ export function LiteLlmSection({ litellm }: { litellm: LiteLlmSectionData }) {
               <dd className="mt-0.5 text-body text-foreground">{litellm.teamAlias ?? "—"}</dd>
             </div>
           </dl>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-4 gap-3">
+            <div>
+              <p className="text-title-lg font-medium text-foreground">{formatCost(litellm.keySpend)}</p>
+              <p className="text-caption text-muted-foreground">Key spend</p>
+            </div>
             <div>
               <p className="text-title-lg font-medium text-foreground">{formatCost(litellm.cost24h)}</p>
               <p className="text-caption text-muted-foreground">Spend (24h)</p>

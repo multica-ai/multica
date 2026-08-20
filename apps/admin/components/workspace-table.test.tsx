@@ -48,6 +48,7 @@ describe("WorkspaceTable", () => {
             model: "claude-opus-5",
             llmKey: null,
             team: null,
+            keySpend: null,
             status: "active",
             openIssues: 2,
             lastActivity: null,
@@ -61,5 +62,32 @@ describe("WorkspaceTable", () => {
     );
     expect(screen.getByText("Not linked")).toBeInTheDocument();
     expect(screen.getByText("Never")).toBeInTheDocument();
+  });
+
+  it("renders the Cost column from keySpend", () => {
+    render(
+      <WorkspaceTable
+        items={[
+          {
+            id: "1",
+            name: "Acme",
+            slug: "acme",
+            owner: "Jane",
+            model: "claude-opus-5",
+            llmKey: "agentfarm-acme",
+            team: "Platform",
+            keySpend: 12.5,
+            status: "active",
+            openIssues: 2,
+            lastActivity: null,
+          },
+        ]}
+        sort="activity"
+        direction="desc"
+        onSortChange={vi.fn()}
+        onRowClick={vi.fn()}
+      />,
+    );
+    expect(screen.getByText("$12.50")).toBeInTheDocument();
   });
 });

@@ -18,6 +18,7 @@ import {
 } from "@multica/ui/components/ui/empty";
 import { cn } from "@multica/ui/lib/utils";
 import { StatusBadge } from "./status-badge";
+import { formatCost } from "@/lib/format";
 import { SORTABLE_COLUMNS, type SortColumn, type SortDirection, type WorkspaceListItem } from "@/lib/types";
 
 const COLUMNS: Array<{ key: SortColumn; label: string }> = [
@@ -27,6 +28,7 @@ const COLUMNS: Array<{ key: SortColumn; label: string }> = [
   { key: "model", label: "Model" },
   { key: "llmKey", label: "LLM key" },
   { key: "team", label: "Team" },
+  { key: "keySpend", label: "Cost" },
   { key: "issues", label: "Open issues" },
   { key: "activity", label: "Last activity" },
 ];
@@ -161,6 +163,7 @@ export function WorkspaceTable({
               <TableCell>{item.model ?? <span className="text-muted-foreground">Not set</span>}</TableCell>
               <TableCell>{item.llmKey ?? <span className="text-muted-foreground">Not linked</span>}</TableCell>
               <TableCell>{item.team ?? <span className="text-muted-foreground">—</span>}</TableCell>
+              <TableCell>{formatCost(item.keySpend)}</TableCell>
               <TableCell>{item.openIssues}</TableCell>
               <TableCell>{formatRelativeTime(item.lastActivity)}</TableCell>
             </TableRow>

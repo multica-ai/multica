@@ -38,7 +38,7 @@ describe("LiteLLM schema tolerance (API Response Compatibility boundary)", () =>
     warnSpy.mockRestore();
   });
 
-  it("tolerates keys missing team_id (nullish field)", () => {
+  it("tolerates keys missing team_id/spend (nullish fields)", () => {
     const result = LiteLlmKeyListSchema.safeParse({
       keys: [{ key_alias: "acme-workspace" }],
     });
@@ -46,6 +46,7 @@ describe("LiteLLM schema tolerance (API Response Compatibility boundary)", () =>
     expect(result.data?.keys[0]).toEqual({
       key_alias: "acme-workspace",
       team_id: undefined,
+      spend: undefined,
     });
   });
 

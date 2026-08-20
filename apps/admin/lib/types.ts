@@ -15,6 +15,7 @@ export interface WorkspaceListItem {
   model: string | null;
   llmKey: string | null;
   team: string | null;
+  keySpend: number | null;
   status: WorkspaceStatus;
   openIssues: number;
   lastActivity: string | null; // ISO timestamp; formatted client-side
@@ -58,6 +59,7 @@ export interface LiteLlmSection {
   keyAlias: string | null;
   teamAlias: string | null;
   members: string[];
+  keySpend: number | null;
   cost24h: number | null;
   cost30d: number | null;
   tokens24h: number | null;
@@ -79,17 +81,19 @@ export type SortColumn =
   | "model"
   | "llmKey"
   | "team"
+  | "keySpend"
   | "issues"
   | "activity";
 
 /** Columns the SQL layer can actually order by (see SORT_COLUMN_SQL in
- * lib/queries.ts). `llmKey`/`team` are excluded on purpose: they're not DB
- * columns — they're resolved via a LiteLLM lookup merged into each page's
- * rows *after* the paginated SQL query runs (lib/litellm-join.ts), so there
- * is no column to ORDER BY without fetching every workspace up front. The UI
- * must not offer a sort control for these two, or it would show an "active
- * sort" arrow next to a column that's silently still ordered by something
- * else underneath (queries.ts's real fallback behavior). */
+ * lib/queries.ts). `llmKey`/`team`/`keySpend` are excluded on purpose:
+ * they're not DB columns — they're resolved via a LiteLLM lookup merged
+ * into each page's rows *after* the paginated SQL query runs
+ * (lib/litellm-join.ts), so there is no column to ORDER BY without fetching
+ * every workspace up front. The UI must not offer a sort control for these,
+ * or it would show an "active sort" arrow next to a column that's silently
+ * still ordered by something else underneath (queries.ts's real fallback
+ * behavior). */
 export const SORTABLE_COLUMNS: SortColumn[] = [
   "status",
   "name",

@@ -158,6 +158,7 @@ export async function listWorkspaces(
     model: r.model,
     llmKey: null, // resolved by the caller via lib/litellm.ts, per join strategy
     team: null,
+    keySpend: null,
     status: r.derived_status,
     openIssues: Number(r.open_issues),
     lastActivity: r.last_activity,
