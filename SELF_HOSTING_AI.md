@@ -80,6 +80,29 @@ invoked directly is the reverse again — there the environment outranks `.env`.
 startup output is read back from Docker Compose, so the address it prints is the
 one the stack is actually published on.
 
+## Optional: server-side LLM features
+
+Chat auto-titling and chat follow-up suggestions ("quick actions") are produced
+by a small server-side model call, separate from the agent runtimes. They are
+off until the backend has an upstream configured:
+
+```bash
+# In .env — either the key or the base URL is enough to enable the layer.
+MULTICA_LLM_API_KEY=sk-...
+MULTICA_LLM_BASE_URL=          # optional: any OpenAI-compatible gateway
+MULTICA_LLM_DEFAULT_MODEL=     # optional: defaults to a small built-in model
+```
+
+Both features degrade silently when this is unset — titles stay as the first
+message and no follow-up suggestions appear — so confirm the state from the
+backend's startup log rather than from the UI:
+
+```bash
+docker compose -f docker-compose.selfhost.yml logs backend | grep "llm layer"
+# "llm layer enabled"  -> configured
+# "llm layer disabled" -> unset; the two features above will not appear
+```
+
 ## Troubleshooting
 
 - **Backend not ready:** `docker compose -f docker-compose.selfhost.yml logs backend`

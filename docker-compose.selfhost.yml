@@ -113,6 +113,14 @@ services:
       MULTICA_ENTITLEMENT_EMERGENCY_DISABLED: ${MULTICA_ENTITLEMENT_EMERGENCY_DISABLED:-false}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      # Server-internal LLM layer (MUL-4238). Backs chat auto-titling and chat
+      # follow-up suggestions. Setting either the key or the base URL enables
+      # it; leaving both empty disables those features silently. Without these
+      # three lines the vars in .env never reach the container, so the features
+      # cannot be turned on at all no matter what the operator configures.
+      MULTICA_LLM_API_KEY: ${MULTICA_LLM_API_KEY:-}
+      MULTICA_LLM_BASE_URL: ${MULTICA_LLM_BASE_URL:-}
+      MULTICA_LLM_DEFAULT_MODEL: ${MULTICA_LLM_DEFAULT_MODEL:-}
       # Public URL the API is reachable at from the open internet, no
       # trailing slash. Used to mint absolute webhook URLs for autopilot
       # webhook triggers. Leave unset behind a same-origin reverse proxy

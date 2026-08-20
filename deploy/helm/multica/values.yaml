@@ -45,6 +45,13 @@ images:
 # The chart references this Secret by name; it does not template it, so real
 # values never need to land in git.
 # -----------------------------------------------------------------------------
+# Name of a pre-created Secret mounted onto the backend with envFrom, so any
+# key in it becomes an environment variable. Server-side LLM features (chat
+# auto-titling, chat follow-up suggestions) are configured here rather than in
+# this file, because they are credentials: add MULTICA_LLM_API_KEY (and
+# optionally MULTICA_LLM_BASE_URL / MULTICA_LLM_DEFAULT_MODEL) to this Secret.
+# Without them the backend logs "llm layer disabled" at startup and both
+# features stay silently off.
 existingSecret: multica-secrets
 
 # -----------------------------------------------------------------------------

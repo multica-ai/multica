@@ -413,6 +413,17 @@ func New(queries *db.Queries, txStarter txStarter, hub *realtime.Hub, bus *event
 		"enabled", llmClient.Enabled(),
 	)
 
+	// One boot-time line so an operator can tell configured-and-working apart
+	// from silently-off. Every consumer of this layer degrades quietly by
+	// design (auto-titling keeps the original title, chat follow-up suggestions
+	// simply never appear), which without this log makes an unset key
+	// indistinguishable from a broken feature.
+	if llmClient.Enabled() {
+		slog.Info("llm layer enabled", "default_model", llmClient.DefaultModel())
+	} else {
+		slog.Warn("llm layer disabled: set MULTICA_LLM_API_KEY or MULTICA_LLM_BASE_URL to enable chat auto-titling and chat follow-up suggestions")
+	}
+
 	taskSvc := service.NewTaskService(queries, txStarter, hub, bus, daemonHub)
 	taskSvc.Analytics = analyticsClient
 	// Chat follow-up suggestions run through the same internal LLM layer that

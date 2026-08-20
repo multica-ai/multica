@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
@@ -1000,6 +1001,48 @@ func TestChatQuickActions_ContextAnchorsOnTargetTurn(t *testing.T) {
 	}
 	if len(actions) != 1 || actions[0].Label != "Next" {
 		t.Fatalf("target turn quick actions = %+v", actions)
+	}
+}
+
+// TestChatQuickActions_AutomaticPassEndToEnd exercises the path a real chat
+// turn takes — CompleteTask decides eligibility, broadcasts, and starts the
+// pass — rather than calling the generator directly. Everything between the
+// completion callback and the pills landing on the row is only covered here.
+func TestChatQuickActions_AutomaticPassEndToEnd(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID, sessionID, _, _ := setupDirectChatSession(t, ctx, "quick-actions auto e2e")
+
+	taskID := sendDirectChat(t, ctx, agentID, sessionID, "what should I do next?")
+	markTaskRunning(t, ctx, taskID)
+
+	restore := installStubQuickActions()
+	defer restore()
+
+	if _, err := testHandler.TaskService.CompleteTask(
+		ctx, parseUUID(taskID), completeResult(t, "Here is the plan."), "", "", false, ""); err != nil {
+		t.Fatalf("complete task: %v", err)
+	}
+
+	// The pass runs on a detached goroutine; poll for its write.
+	var actions []protocol.ChatQuickAction
+	for i := 0; i < 100; i++ {
+		rows := assistantRows(t, ctx, sessionID)
+		if len(rows) == 1 {
+			actions = nil
+			if err := json.Unmarshal(rows[0].QuickActions, &actions); err != nil {
+				t.Fatalf("decode quick actions: %v", err)
+			}
+			if len(actions) > 0 {
+				break
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if len(actions) != 1 || actions[0].Label != "Next" {
+		t.Fatalf("automatic pass must attach suggestions to the completed turn, got %+v", actions)
 	}
 }
 
