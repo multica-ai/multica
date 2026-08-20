@@ -63,7 +63,7 @@ INSERT INTO agent (
     $1, $2, $3, $4, $5,
     $6, $7, $8, $9, $10,
     $11, $12, $13, $14, $15, $16,
-    $17, $18,
+    $17, COALESCE(sqlc.narg('starter_prompts')::jsonb, '[]'::jsonb),
     sqlc.narg('composio_toolkit_allowlist')::text[],
     COALESCE(sqlc.narg('permission_mode'), 'private')
 )
