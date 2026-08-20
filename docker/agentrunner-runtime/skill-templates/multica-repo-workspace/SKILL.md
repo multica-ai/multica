@@ -1,6 +1,6 @@
 ---
 name: multica-repo-workspace
-description: Use when adding GitHub repositories to the Multica workspace-level registry (not project-scoped). Key command is `multica repo add --url <github-url>` for workspace-wide registration. Distinct from `multica project resource add`, which only attaches a repo to a specific project.
+description: Use when registering GitHub repos in the Multica workspace (multica repo add vs multica project resource add) OR when an agent suspects GitHub integration/credentials are missing. GitHub auth is provisioned per-pod via a dynamic GitHub App installation-token flow (no static PAT/GITHUB_TOKEN); empty token env vars and 'gh auth status: not logged in' are expected and NOT signs of broken auth — verify with a real git/gh operation instead.
 ---
 
 # Multica Repo Workspace Skill
@@ -56,3 +56,27 @@ multica repo checkout https://github.com/org/repo-name --ref feature-branch
 - `multica repo checkout` creates a git worktree with a dedicated branch for your agent session.
 - Run `multica repo --help` to see all repo subcommands.
 - You do not need to register a repo before checking it out; `multica repo checkout` works for any accessible GitHub URL.
+
+## Common Confusion: "GitHub credentials are missing" (they aren't)
+
+GitHub access here is provisioned **per-pod via a dynamic GitHub App
+installation-token flow** — never a static PAT/`GITHUB_TOKEN`/`GH_TOKEN` env
+var. `git`'s `credential.helper` mints a short-lived installation token per
+repo at the moment git needs it; `gh` is separately wrapped to inject a fresh
+token per invocation the same way. Neither leaves a token sitting in env or
+in `gh auth status`.
+
+Do **not** conclude "GitHub credentials are missing" from:
+
+- An empty `GITHUB_TOKEN`/`GH_TOKEN` env var — intentionally never set statically.
+- `gh auth status` reporting "not logged in" — that command has no repo
+  context to resolve an installation from, so it legitimately falls through
+  to the real, unauthenticated `gh`. It is **not** a signal of actual auth failure.
+
+To check auth is actually usable:
+
+- Run the real operation against the target repo (`git ls-remote <url>`,
+  `git push`, `gh pr create` from inside the checkout) and read the actual
+  error, or
+- Check `git config --get credential.https://github.com.helper` is set to
+  `/usr/local/bin/git-credential-platform-bot`.
