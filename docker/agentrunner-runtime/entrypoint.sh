@@ -356,20 +356,34 @@ fi
 # runs, the same way ~/.multica/config.json is rewritten unconditionally above
 # instead of relying on a one-time image COPY the PVC can defeat.
 #
+# Rewritten unconditionally, not just when absent: a persisted config from a
+# prior boot, an older entrypoint version, or a hand edit can carry a
+# model_provider/openai_http block that no longer points at the proxy, and a
+# presence-only check leaves that silently in place instead of correcting it.
+#
 # model_provider is a bare top-level TOML key: it must appear before the file's
 # first [table] header (git-ai's [features]) or a TOML parser silently attaches
 # it to whichever table is last in the file instead of the document root — so
-# it's prepended, never appended.
+# any existing occurrence is stripped and it's prepended fresh, never appended.
+# [model_providers.openai_http] is stripped as a whole block (its header
+# through the next top-level [table] header or EOF) and re-appended canonically
+# so a stale base_url can't survive under a differently-shaped table.
 codex_config="${HOME}/.codex/config.toml"
 mkdir -p "${HOME}/.codex"
 touch "${codex_config}"
-if ! grep -q '^model_provider' "${codex_config}"; then
-  codex_config_tmp="$(mktemp)"
-  { printf 'model_provider = "openai_http"\n\n'; cat "${codex_config}"; } > "${codex_config_tmp}"
-  mv "${codex_config_tmp}" "${codex_config}"
-fi
-if ! grep -q '^\[model_providers.openai_http\]' "${codex_config}"; then
-  cat >> "${codex_config}" <<'TOML'
+codex_config_tmp="$(mktemp)"
+{
+  printf 'model_provider = "openai_http"\n\n'
+  # `grep -v` exits 1 when it selects zero lines (e.g. an empty file on first
+  # boot); under `pipefail` that would abort the whole entrypoint, so the
+  # group swallows that specific non-match case before piping into awk.
+  { grep -v '^model_provider' "${codex_config}" || true; } | awk '
+    /^\[model_providers\.openai_http\]/ { skip=1; next }
+    /^\[/ { skip=0 }
+    skip { next }
+    { print }
+  '
+  cat <<'TOML'
 
 [model_providers.openai_http]
 base_url = "https://llmproxy.g2.com/v1"
@@ -378,7 +392,37 @@ env_key = "OPENAI_API_KEY"
 supports_websockets = false
 wire_api = "responses"
 TOML
-fi
+} > "${codex_config_tmp}"
+mv "${codex_config_tmp}" "${codex_config}"
+
+# ── Pi LLM proxy extension ────────────────────────────────────────────────────
+# Pi has no *_BASE_URL env var; pi.registerProvider() — an extension file
+# auto-discovered from ~/.pi/agent/extensions/ at startup — is the only
+# override (see docker/agent-runtime-base/llmproxy/pi/llmproxy.ts). Same
+# EFS-shadow problem as Codex above: agent-runtime-base/Dockerfile COPYs this
+# file into the image, but storage.yaml's PVC over all of /home/agent means
+# that image copy never reaches disk on a real pod boot. Rewritten
+# unconditionally on every boot for the same reason as the Codex config above.
+# This file is entirely self-managed (agents have no reason to hand-edit a
+# provider-registration extension), so there's no hand-customized state to
+# preserve — a plain overwrite is safe and simplest.
+pi_ext_dir="${HOME}/.pi/agent/extensions"
+mkdir -p "${pi_ext_dir}"
+cat > "${pi_ext_dir}/llmproxy.ts" <<'TS'
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+const LLM_PROXY = "https://llmproxy.g2.com";
+
+export default function (pi: ExtensionAPI) {
+  pi.registerProvider("anthropic", {
+    baseUrl: LLM_PROXY,
+  });
+
+  pi.registerProvider("openai", {
+    baseUrl: `${LLM_PROXY}/v1`,
+  });
+}
+TS
 
 # ── git-ai setup ──────────────────────────────────────────────────────────────
 # git-ai is baked into the image at /usr/local/bin/git-ai but its user config
