@@ -165,6 +165,12 @@ export const issueKeys = {
     [...issueKeys.subscribersAll(), issueId] as const,
   usageAll: () => ["issues", "usage"] as const,
   usage: (issueId: string) => [...issueKeys.usageAll(), issueId] as const,
+  /** One-time scheduled run (#5927). Workspace-scoped (per CLAUDE.md State
+   *  Rules) so a workspace switch cannot serve another workspace's cached
+   *  schedule for a colliding issue id. */
+  scheduleAll: (wsId: string) => [...issueKeys.all(wsId), "schedule"] as const,
+  schedule: (wsId: string, issueId: string) =>
+    [...issueKeys.scheduleAll(wsId), issueId] as const,
   attachmentsAll: () => ["issues", "attachments"] as const,
   /** Issue-level attachments — used by the description editor so its
    *  inline file-card / image NodeViews can re-sign download URLs at
@@ -598,6 +604,16 @@ export function issueUsageOptions(issueId: string) {
   return queryOptions({
     queryKey: issueKeys.usage(issueId),
     queryFn: () => api.getIssueUsage(issueId),
+  });
+}
+
+/** issueId's pending one-time schedule (#5927), or null when none is set.
+ *  A 404 from the API already resolves to null in the client — see
+ *  api.getIssueSchedule — so this never rejects on the common case. */
+export function issueScheduleOptions(wsId: string, issueId: string) {
+  return queryOptions({
+    queryKey: issueKeys.schedule(wsId, issueId),
+    queryFn: () => api.getIssueSchedule(issueId),
   });
 }
 

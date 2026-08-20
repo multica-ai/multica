@@ -579,6 +579,25 @@
     "keep": "保留运行",
     "confirm": "停止 task"
   },
+  "schedule_dialog": {
+    "trigger_tooltip": "定时运行",
+    "title": "定时运行",
+    "description": "选择日期和时间，负责人会在到点时自动运行一次。",
+    "no_assignee": "请先为该任务指定负责人，再设置定时运行。",
+    "loading": "加载中…",
+    "date_label": "日期",
+    "time_label": "时间",
+    "past_time_error": "请选择一个未来的时间。",
+    "schedule_button": "定时",
+    "cancel_button": "取消",
+    "close_button": "关闭",
+    "pending_description": "该任务已设置为在 {{time}} 自动运行。",
+    "cancel_schedule_button": "取消定时",
+    "toast_scheduled": "已设置定时运行",
+    "toast_cancelled": "已取消定时",
+    "toast_failed": "出错了，请重试。",
+    "toast_conflict": "该任务已有一个待执行的定时"
+  },
   "batch": {
     "selected": "已选择 {{count}} 个",
     "status": "状态",

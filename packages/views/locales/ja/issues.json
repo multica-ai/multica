@@ -579,6 +579,25 @@
     "keep": "実行を続ける",
     "confirm": "作業を停止"
   },
+  "schedule_dialog": {
+    "trigger_tooltip": "実行を予約",
+    "title": "実行を予約",
+    "description": "日時を選択すると、担当者がその時刻に一度だけ自動実行します。",
+    "no_assignee": "実行を予約する前に、このタスクに担当者を割り当ててください。",
+    "loading": "読み込み中…",
+    "date_label": "日付",
+    "time_label": "時刻",
+    "past_time_error": "未来の時刻を選択してください。",
+    "schedule_button": "予約する",
+    "cancel_button": "キャンセル",
+    "close_button": "閉じる",
+    "pending_description": "このタスクは {{time}} に自動実行される予定です。",
+    "cancel_schedule_button": "予約を取り消す",
+    "toast_scheduled": "実行を予約しました",
+    "toast_cancelled": "予約を取り消しました",
+    "toast_failed": "エラーが発生しました。もう一度お試しください。",
+    "toast_conflict": "このタスクにはすでに予約された実行があります"
+  },
   "batch": {
     "selected": "{{count}} 件選択中",
     "status": "ステータス",

@@ -21,6 +21,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleCheck,
+  Clock,
   Milestone,
   MoreHorizontal,
   PanelRight,
@@ -72,6 +73,7 @@ import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
 import { Switch } from "@multica/ui/components/ui/switch";
 import { IssueActionsDropdown, useIssueActions, IssueActionsContextMenu, IssueContextMenuProvider } from "../actions";
+import { ScheduleRunDialog } from "./schedule-run-dialog";
 import { LabelChip } from "../../labels/label-chip";
 import { IssueAgentActivityIndicator } from "./issue-agent-activity-indicator";
 import { SubIssuesAgentWorkingChip } from "./sub-issues-agent-working-chip";
@@ -1175,6 +1177,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     }
   }, [isMobile]);
   const sidebarOpen = isMobile ? mobileSidebarOpen : desktopSidebarOpen;
+  // "Schedule run" dialog (#5927). Lazily mounted below, like AssigneePicker
+  // / SaveViewDialog, so it never subscribes to the schedule query until the
+  // user actually opens it.
+  const [scheduleOpen, setScheduleOpen] = useState(false);
   const [propertiesOpen, setPropertiesOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [parentIssueOpen, setParentIssueOpen] = useState(true);
@@ -2802,6 +2808,21 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                   <Button
                     variant="ghost"
                     size="icon-sm"
+                    className="text-muted-foreground"
+                    onClick={() => setScheduleOpen(true)}
+                  >
+                    <Clock />
+                  </Button>
+                }
+              />
+              <TooltipContent side="bottom">{t(($) => $.schedule_dialog.trigger_tooltip)}</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger
+                render={
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
                     className={cn("text-muted-foreground", actions.isPinned && "text-foreground")}
                     onClick={actions.togglePin}
                   >
@@ -2824,6 +2845,9 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
                 </Button>
               }
             />
+            {scheduleOpen && (
+              <ScheduleRunDialog issue={issue} open={scheduleOpen} onOpenChange={setScheduleOpen} />
+            )}
             <Tooltip>
               <TooltipTrigger
                 render={
