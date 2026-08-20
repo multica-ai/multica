@@ -117,7 +117,7 @@ func TestDshBackendForwardsIssueAndTaskContract(t *testing.T) {
 	}
 	bin := writeDshFixture(t, `
 if [ "$1" != "--profile" ] || [ "$2" != "multica" ] || [ "$3" != "--stdio" ]; then exit 9; fi
-printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{"issue_id":true,"task_contract":true}}'
 IFS= read -r command
 case "$command" in *'"type":"execute"'*) ;; *) exit 8 ;; esac
 case "$command" in *'"issue_id":"issue-1"'*) ;; *) exit 7 ;; esac
@@ -165,6 +165,40 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-empty-contract","status
 	session, err := b.Execute(context.Background(), "ship it", ExecOptions{
 		Cwd:     t.TempDir(),
 		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "ok" {
+		t.Fatalf("bad result: %#v", result)
+	}
+}
+
+func TestDshBackendOmitsIssueAndTaskContractWhenNotAdvertised(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+if [ "$1" != "--profile" ] || [ "$2" != "multica" ] || [ "$3" != "--stdio" ]; then exit 9; fi
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r command
+case "$command" in *'"type":"execute"'*) ;; *) exit 8 ;; esac
+case "$command" in *'"issue_id"'*) exit 7 ;; esac
+case "$command" in *'"task_contract"'*) exit 6 ;; esac
+printf '%s\n' '{"v":1,"type":"result","request_id":"task-not-advertised","status":"completed","session_id":"session-not-advertised","output":"ok","resume_rejected":false}'
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-not-advertised", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "ship it", ExecOptions{
+		Cwd:          t.TempDir(),
+		Timeout:      5 * time.Second,
+		IssueID:      "issue-1",
+		TaskContract: TaskContractInput{Goal: "ship it", RequiredChecks: []string{"true"}},
 	})
 	if err != nil {
 		t.Fatal(err)

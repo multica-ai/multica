@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	dshProfile         = "multica"
-	dshProtocolVersion = 1
-	dshCancelGrace     = 3 * time.Second
-	dshTerminateGrace  = 2 * time.Second
+	dshProfile          = "multica"
+	dshProtocolVersion  = 1
+	dshCancelGrace      = 3 * time.Second
+	dshTerminateGrace   = 2 * time.Second
+	dshHandshakeTimeout = 10 * time.Second
 )
 
 // dshBackend drives the Multica DSH bundle over its versioned JSONL
@@ -46,6 +47,24 @@ type dshMCPServer struct {
 	URL               string            `json:"url,omitempty"`
 	Headers           map[string]string `json:"headers,omitempty"`
 	ToolCallTimeoutMS int               `json:"tool_call_timeout_ms,omitempty"`
+}
+
+// dshCapabilities is the `ready` frame's capabilities object. The runtime
+// advertises which optional execute fields it understands. Both old and new
+// profiles share protocol_version 1, so this is the only safe way to know
+// whether issue_id / task_contract can be sent.
+type dshCapabilities struct {
+	Resume       bool     `json:"resume"`
+	Cancel       bool     `json:"cancel"`
+	Models       bool     `json:"models"`
+	Thinking     bool     `json:"thinking"`
+	Usage        bool     `json:"usage"`
+	Tools        bool     `json:"tools"`
+	Progress     bool     `json:"progress"`
+	Acceptance   bool     `json:"acceptance"`
+	MCP          []string `json:"mcp,omitempty"`
+	IssueID      bool     `json:"issue_id"`
+	TaskContract bool     `json:"task_contract"`
 }
 
 type dshTaskContract struct {
@@ -95,35 +114,36 @@ type dshAcceptance struct {
 }
 
 type dshFrame struct {
-	Version          int             `json:"v"`
-	Type             string          `json:"type"`
-	Runtime          string          `json:"runtime,omitempty"`
-	ProtocolVersion  int             `json:"protocol_version,omitempty"`
-	RequestID        string          `json:"request_id,omitempty"`
-	SessionID        string          `json:"session_id,omitempty"`
-	Resumed          bool            `json:"resumed,omitempty"`
-	Content          string          `json:"content,omitempty"`
-	CallID           string          `json:"call_id,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	Arguments        string          `json:"arguments,omitempty"`
-	Output           string          `json:"output,omitempty"`
-	IsError          bool            `json:"is_error,omitempty"`
-	Provider         string          `json:"provider,omitempty"`
-	Model            string          `json:"model,omitempty"`
-	InputTokens      int64           `json:"input_tokens,omitempty"`
-	OutputTokens     int64           `json:"output_tokens,omitempty"`
-	CacheReadTokens  int64           `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64           `json:"cache_write_tokens,omitempty"`
-	Status           string          `json:"status,omitempty"`
-	StopReason       string          `json:"stop_reason,omitempty"`
-	ResumeRejected   bool            `json:"resume_rejected,omitempty"`
-	Error            *dshWireError   `json:"error,omitempty"`
-	Code             string          `json:"code,omitempty"`
-	Message          string          `json:"message,omitempty"`
-	Phase            string          `json:"phase,omitempty"`
-	Data             map[string]any  `json:"data,omitempty"`
-	Acceptance       *dshAcceptance  `json:"acceptance,omitempty"`
-	Models           []dshModelFrame `json:"models,omitempty"`
+	Version          int              `json:"v"`
+	Type             string           `json:"type"`
+	Runtime          string           `json:"runtime,omitempty"`
+	ProtocolVersion  int              `json:"protocol_version,omitempty"`
+	Capabilities     *dshCapabilities `json:"capabilities,omitempty"`
+	RequestID        string           `json:"request_id,omitempty"`
+	SessionID        string           `json:"session_id,omitempty"`
+	Resumed          bool             `json:"resumed,omitempty"`
+	Content          string           `json:"content,omitempty"`
+	CallID           string           `json:"call_id,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	Arguments        string           `json:"arguments,omitempty"`
+	Output           string           `json:"output,omitempty"`
+	IsError          bool             `json:"is_error,omitempty"`
+	Provider         string           `json:"provider,omitempty"`
+	Model            string           `json:"model,omitempty"`
+	InputTokens      int64            `json:"input_tokens,omitempty"`
+	OutputTokens     int64            `json:"output_tokens,omitempty"`
+	CacheReadTokens  int64            `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64            `json:"cache_write_tokens,omitempty"`
+	Status           string           `json:"status,omitempty"`
+	StopReason       string           `json:"stop_reason,omitempty"`
+	ResumeRejected   bool             `json:"resume_rejected,omitempty"`
+	Error            *dshWireError    `json:"error,omitempty"`
+	Code             string           `json:"code,omitempty"`
+	Message          string           `json:"message,omitempty"`
+	Phase            string           `json:"phase,omitempty"`
+	Data             map[string]any   `json:"data,omitempty"`
+	Acceptance       *dshAcceptance   `json:"acceptance,omitempty"`
+	Models           []dshModelFrame  `json:"models,omitempty"`
 }
 
 type dshThinkingFrame struct {
@@ -284,17 +304,10 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	command := dshExecuteCommand{
 		Version: dshProtocolVersion, Type: "execute", RequestID: requestID,
 		Cwd: opts.Cwd, Prompt: prompt, ResumeSessionID: opts.ResumeSessionID,
-		IssueID: opts.IssueID, Model: model, ReasoningEffort: opts.ThinkingLevel,
+		Model: model, ReasoningEffort: opts.ThinkingLevel,
 		MCPServers: mcpServers,
 	}
-	if hasTaskContract(opts.TaskContract) {
-		command.TaskContract = &dshTaskContract{
-			Goal:           opts.TaskContract.Goal,
-			Acceptance:     opts.TaskContract.Acceptance,
-			StateFile:      opts.TaskContract.StateFile,
-			RequiredChecks: opts.TaskContract.RequiredChecks,
-		}
-	}
+
 	var writeMu sync.Mutex
 	encoder := json.NewEncoder(stdin)
 	writeFrame := func(value any) error {
@@ -302,38 +315,11 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		defer writeMu.Unlock()
 		return encoder.Encode(value)
 	}
-	if err := writeFrame(command); err != nil {
-		signalProcessGroup(cmd, syscall.SIGKILL)
-		_ = cmd.Wait()
-		cancel()
-		return nil, fmt.Errorf("send dsh execute command: %w", err)
-	}
 
-	b.cfg.Logger.Info("dsh started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 	procDone := make(chan struct{})
-
-	go func() {
-		select {
-		case <-procDone:
-			return
-		case <-runCtx.Done():
-		}
-		_ = writeFrame(dshCancelCommand{Version: dshProtocolVersion, Type: "cancel", RequestID: requestID})
-		timer := time.NewTimer(dshCancelGrace)
-		defer timer.Stop()
-		select {
-		case <-procDone:
-			return
-		case <-timer.C:
-		}
-		signalProcessGroup(cmd, syscall.SIGTERM)
-		if !waitProcessGroupGone(cmd, dshTerminateGrace) {
-			signalProcessGroup(cmd, syscall.SIGKILL)
-		}
-		_ = stdout.Close()
-	}()
+	readyCh := make(chan dshCapabilities, 1)
 
 	go func() {
 		defer cancel()
@@ -354,6 +340,16 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				continue
 			}
 			state.frameCount++
+			if frame.Type == "ready" && frame.Version == dshProtocolVersion {
+				var capabilities dshCapabilities
+				if frame.Capabilities != nil {
+					capabilities = *frame.Capabilities
+				}
+				select {
+				case readyCh <- capabilities:
+				default:
+				}
+			}
 			handleDshFrame(frame, requestID, msgCh, &state)
 		}
 		scanErr := scanner.Err()
@@ -393,6 +389,70 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 			"duration", time.Since(started).Round(time.Millisecond).String(), "frames", state.frameCount,
 			"invalid_frames", state.invalidFrames)
 		resCh <- *result
+	}()
+
+	// Wait for the runtime's `ready` frame before sending execute. Old and new
+	// profiles share protocol_version 1, so the capabilities object is the only
+	// safe signal for optional execute fields like issue_id / task_contract.
+	handshakeTimeout := opts.HandshakeTimeout
+	if handshakeTimeout <= 0 {
+		handshakeTimeout = dshHandshakeTimeout
+	}
+	readyTimer := time.NewTimer(handshakeTimeout)
+	defer readyTimer.Stop()
+	var capabilities dshCapabilities
+	select {
+	case capabilities = <-readyCh:
+	case <-runCtx.Done():
+		_ = stdin.Close()
+		cancel()
+		return nil, fmt.Errorf("dsh cancelled before the runtime protocol became ready")
+	case <-readyTimer.C:
+		_ = stdin.Close()
+		cancel()
+		signalProcessGroup(cmd, syscall.SIGKILL)
+		return nil, fmt.Errorf("dsh did not become ready within %s", handshakeTimeout)
+	}
+
+	if capabilities.IssueID && opts.IssueID != "" {
+		command.IssueID = opts.IssueID
+	}
+	if capabilities.TaskContract && hasTaskContract(opts.TaskContract) {
+		command.TaskContract = &dshTaskContract{
+			Goal:           opts.TaskContract.Goal,
+			Acceptance:     opts.TaskContract.Acceptance,
+			StateFile:      opts.TaskContract.StateFile,
+			RequiredChecks: opts.TaskContract.RequiredChecks,
+		}
+	}
+	if err := writeFrame(command); err != nil {
+		signalProcessGroup(cmd, syscall.SIGKILL)
+		_ = stdin.Close()
+		cancel()
+		return nil, fmt.Errorf("send dsh execute command: %w", err)
+	}
+
+	b.cfg.Logger.Info("dsh started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
+
+	go func() {
+		select {
+		case <-procDone:
+			return
+		case <-runCtx.Done():
+		}
+		_ = writeFrame(dshCancelCommand{Version: dshProtocolVersion, Type: "cancel", RequestID: requestID})
+		timer := time.NewTimer(dshCancelGrace)
+		defer timer.Stop()
+		select {
+		case <-procDone:
+			return
+		case <-timer.C:
+		}
+		signalProcessGroup(cmd, syscall.SIGTERM)
+		if !waitProcessGroupGone(cmd, dshTerminateGrace) {
+			signalProcessGroup(cmd, syscall.SIGKILL)
+		}
+		_ = stdout.Close()
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
