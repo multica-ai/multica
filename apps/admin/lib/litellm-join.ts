@@ -1,16 +1,9 @@
 import "server-only";
 import { listLiteLlmKeys } from "./litellm";
-import type { LiteLlmKey } from "./litellm-schema";
+import { findKeyForSlug } from "./litellm-match";
 import type { WorkspaceListItem } from "./types";
 
-/**
- * No DB column links a workspace to a LiteLLM key/team. Gandalf stamps
- * `metadata.workspace_slug` on every key it creates (key_alias is
- * `agentfarm-<slug>`, not the slug itself), so that's the reliable match.
- */
-export function findKeyForSlug(keys: LiteLlmKey[], slug: string): LiteLlmKey | null {
-  return keys.find((k) => k.metadata?.workspace_slug === slug) ?? null;
-}
+export { findKeyForSlug } from "./litellm-match";
 
 export async function attachLiteLlmToList(
   items: WorkspaceListItem[],
