@@ -60,11 +60,13 @@ const (
 	// runtimeGCOperationTimeout prevents one contended or unhealthy runtime from
 	// stalling every later sweeper stage indefinitely.
 	runtimeGCOperationTimeout = 5 * time.Second
-	// dispatchTimeoutSeconds fails tasks stuck in 'dispatched' beyond this.
-	// The dispatched→running transition should be near-instant, so 5 minutes
-	// means something went wrong (e.g. StartTask API call failed silently).
-	dispatchTimeoutSeconds = 300.0
-	// runningTimeoutSeconds fails tasks stuck in 'running' beyond this. It is a
+	// defaultTaskDispatchTimeout fails tasks stuck in 'dispatched' beyond
+	// this. The dispatched→running transition should be near-instant, so 5
+	// minutes means something went wrong (e.g. StartTask API call failed
+	// silently). Overridable per deployment via MULTICA_TASK_DISPATCH_TIMEOUT.
+	defaultTaskDispatchTimeout = 5 * time.Minute
+	// defaultTaskRunningTimeout fails tasks stuck in 'running' beyond this.
+	// It is a
 	// coarse server-side backstop keyed on started_at, AND-gated by daemon
 	// liveness (agent_runtime.last_seen_at freshness within
 	// staleThresholdSeconds): a running task whose runtime is still
@@ -77,9 +79,10 @@ const (
 	// with a stale DB heartbeat for longer than this timeout. The primary
 	// "daemon died" path is `sweepStaleRuntimes` in the same tick (Redis
 	// liveness + DB stale + FailTasksForOfflineRuntimes), which typically
-	// reclaims orphaned tasks within ~180s.
-	runningTimeoutSeconds = 9000.0
-	// queuedTTLSeconds expires tasks that have been sitting in 'queued'
+	// reclaims orphaned tasks within ~180s. Overridable per deployment via
+	// MULTICA_TASK_RUNNING_TIMEOUT.
+	defaultTaskRunningTimeout = 150 * time.Minute
+	// defaultTaskQueuedTTL expires tasks that have been sitting in 'queued'
 	// for longer than this without ever being claimed. This is the cleanup
 	// arm of the MUL-1899 backlog fix: even with the dispatch-time
 	// admission gate that blocks new enqueues against offline runtimes,
@@ -88,8 +91,11 @@ const (
 	// time-bounded exit. 2 hours is conservatively above any reasonable
 	// "queued behind a long-running task" window for an online runtime, so we
 	// don't expire legitimately-pending work, while still draining the historical
-	// 87k autopilot backlog within ~24h once enabled.
-	queuedTTLSeconds = 2 * 3600.0
+	// 87k autopilot backlog within ~24h once enabled. Self-hosted deployments
+	// whose runtimes have low task concurrency can legitimately hold queued
+	// work behind long-running tasks for longer than 2 hours; raise via
+	// MULTICA_TASK_QUEUED_TTL in that case to avoid queued_expired failures.
+	defaultTaskQueuedTTL = 2 * time.Hour
 	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
 	// transitions to failed. Keeps the sweep transaction short even when
 	// the historical backlog is large (~89k at MUL-1899 baseline). At 30s
@@ -109,6 +115,25 @@ const (
 	delegatedFailureRecoveryBatchSize = 100
 )
 
+// sweeperTaskTimeouts holds the task lifecycle windows the sweeper's task
+// failure stages key their wall clocks on. The server entry point builds this
+// once at boot from MULTICA_TASK_DISPATCH_TIMEOUT /
+// MULTICA_TASK_RUNNING_TIMEOUT / MULTICA_TASK_QUEUED_TTL, with each unset or
+// invalid value falling back to the documented constant above.
+type sweeperTaskTimeouts struct {
+	DispatchTimeout time.Duration
+	RunningTimeout  time.Duration
+	QueuedTTL       time.Duration
+}
+
+func defaultSweeperTaskTimeouts() sweeperTaskTimeouts {
+	return sweeperTaskTimeouts{
+		DispatchTimeout: defaultTaskDispatchTimeout,
+		RunningTimeout:  defaultTaskRunningTimeout,
+		QueuedTTL:       defaultTaskQueuedTTL,
+	}
+}
+
 type runtimeGCTxStarter interface {
 	Begin(context.Context) (pgx.Tx, error)
 }
@@ -124,7 +149,7 @@ type runtimeGCTxStarter interface {
 // hot heartbeat path; the DB is allowed to lag up to runtimeHeartbeatDBFlushInterval).
 // When liveness is unavailable or errors, we fall back to trusting the DB
 // stale window — that is the original behavior.
-func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
+func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Queries, liveness handler.LivenessStore, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration, taskTimeouts sweeperTaskTimeouts) {
 	ticker := time.NewTicker(sweepInterval)
 	defer ticker.Stop()
 
@@ -136,8 +161,8 @@ func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, querie
 			sweepStaleRuntimes(ctx, queries, liveness, taskSvc, bus)
 			sweepOfflineRuntimeTasks(ctx, queries, taskSvc, reconnectGrace)
 			sweepExpiredRuntimeReconnectRetries(ctx, queries, taskSvc, reconnectGrace)
-			sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace)
-			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
+			sweepStaleTasks(ctx, queries, taskSvc, bus, reconnectGrace, taskTimeouts)
+			sweepExpiredQueuedTasks(ctx, queries, taskSvc, taskTimeouts)
 			sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
 			gcRuntimes(ctx, txStarter, queries, taskSvc.Metrics, bus)
@@ -496,10 +521,10 @@ func gcRuntime(ctx context.Context, txStarter runtimeGCTxStarter, queries *db.Qu
 // in the same tick; this function is a defensive backstop for the residual
 // edge where a runtime row lingers online-with-stale-heartbeat past the
 // wall clock (MUL-4107).
-func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration) {
+func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, bus *events.Bus, reconnectGrace time.Duration, taskTimeouts sweeperTaskTimeouts) {
 	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
-		DispatchTimeoutSecs: dispatchTimeoutSeconds,
-		RunningTimeoutSecs:  runningTimeoutSeconds,
+		DispatchTimeoutSecs: taskTimeouts.DispatchTimeout.Seconds(),
+		RunningTimeoutSecs:  taskTimeouts.RunningTimeout.Seconds(),
 		// Reuse the runtime stale window so the running-task backstop
 		// exactly matches what sweepStaleRuntimes considers "not alive".
 		RuntimeStaleSecs:          staleThresholdSeconds,
@@ -524,9 +549,9 @@ func sweepStaleTasks(ctx context.Context, queries *db.Queries, taskSvc *service.
 // historical backlog and catches the race where a runtime goes offline AFTER
 // a task is already queued. Capped to queuedExpireBatchSize per tick so a
 // big backlog can't monopolise the DB.
-func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService) {
+func sweepExpiredQueuedTasks(ctx context.Context, queries *db.Queries, taskSvc *service.TaskService, taskTimeouts sweeperTaskTimeouts) {
 	failedTasks, err := queries.ExpireStaleQueuedTasks(ctx, db.ExpireStaleQueuedTasksParams{
-		TtlSecs:    queuedTTLSeconds,
+		TtlSecs:    taskTimeouts.QueuedTTL.Seconds(),
 		MaxPerTick: queuedExpireBatchSize,
 	})
 	if err != nil {

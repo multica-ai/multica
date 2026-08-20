@@ -200,6 +200,22 @@ func envNonNegativeDuration(name string, def time.Duration) time.Duration {
 	return v
 }
 
+// taskSweeperTimeoutsFromEnv builds the task lifecycle windows the runtime
+// sweeper applies (dispatch→running, running wall-clock backstop, and
+// queued-TTL). Each window is overridable by one operator env var so a
+// self-hosted deployment that legitimately holds queued work behind
+// long-running tasks — e.g. a runtime with low task concurrency — is not
+// forced to lose work to the built-in 2h queued TTL. Unset or invalid values
+// keep the server's built-in defaults (via envDuration), and invalid values
+// log a warning at boot.
+func taskSweeperTimeoutsFromEnv() sweeperTaskTimeouts {
+	return sweeperTaskTimeouts{
+		DispatchTimeout: envDuration("MULTICA_TASK_DISPATCH_TIMEOUT", defaultTaskDispatchTimeout),
+		RunningTimeout:  envDuration("MULTICA_TASK_RUNNING_TIMEOUT", defaultTaskRunningTimeout),
+		QueuedTTL:       envDuration("MULTICA_TASK_QUEUED_TTL", defaultTaskQueuedTTL),
+	}
+}
+
 func holdBeforeShutdown(sig os.Signal, signals <-chan os.Signal, duration time.Duration) {
 	if duration <= 0 {
 		return
@@ -531,7 +547,7 @@ func main() {
 		)
 		runtimeReconnectGrace = minimumRuntimeReconnectGrace
 	}
-	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
+	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace, taskSweeperTimeoutsFromEnv())
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
 	if autopilotSvc.QuotaEnabled() {
