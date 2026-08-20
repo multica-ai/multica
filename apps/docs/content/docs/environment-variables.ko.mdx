@@ -50,6 +50,7 @@ Kubernetes에서 shutdown hold를 설정하면 `terminationGracePeriodSeconds`�
 | `FRONTEND_ORIGIN` | 비어 있음 | 사용자가 접근하는 프런트엔드 origin. CORS, cookie, 초대 링크에 사용 |
 | `MULTICA_APP_URL` | `FRONTEND_ORIGIN`으로 fallback | 사용자가 접근할 수 있는 Web 주소. CLI 로그인과 계정 연결 링크에 사용 |
 | `MULTICA_PUBLIC_URL` | 비어 있음 | 공개 API 주소. webhook URL과 런타임 연결 안내에 사용 |
+| `MULTICA_DAEMON_SERVER_URL` | `MULTICA_PUBLIC_URL`, 그다음 `MULTICA_APP_URL` / `FRONTEND_ORIGIN`으로 fallback | API 프로세스가 `multica setup self-host` 명령에 넣는 서버 URL. 데몬이 접근하는 API URL이 공개 webhook URL과 다를 때 설정 |
 | `CORS_ALLOWED_ORIGINS` | 비어 있음 | 추가로 허용할 HTTP origin, 쉼표로 구분 |
 | `ALLOWED_ORIGINS` | CORS 또는 프런트엔드 주소로 fallback | WebSocket origin allowlist, 쉼표로 구분 |
 | `COOKIE_DOMAIN` | 비어 있음 | 프런트엔드와 backend의 host가 다르고 브라우저가 API 도메인에 직접 접근할 때 필수. 단일 도메인 배포에서는 비워 둠 |

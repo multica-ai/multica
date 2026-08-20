@@ -50,6 +50,7 @@ When setting a shutdown hold on Kubernetes, `terminationGracePeriodSeconds` must
 | `FRONTEND_ORIGIN` | empty | Frontend origin users visit; used for CORS, cookies, and invitation links |
 | `MULTICA_APP_URL` | falls back to `FRONTEND_ORIGIN` | User-reachable web URL; CLI sign-in and account-link URLs use it |
 | `MULTICA_PUBLIC_URL` | empty | Public API URL; used for webhook URLs and runtime connection instructions |
+| `MULTICA_DAEMON_SERVER_URL` | falls back to `MULTICA_PUBLIC_URL`, then `MULTICA_APP_URL` / `FRONTEND_ORIGIN` | Server URL the API process inserts into `multica setup self-host`; set it when daemons reach the API at a different URL than the public webhook URL |
 | `CORS_ALLOWED_ORIGINS` | empty | Extra allowed HTTP origins, comma-separated |
 | `ALLOWED_ORIGINS` | falls back to CORS / frontend origins | WebSocket origin allowlist, comma-separated |
 | `COOKIE_DOMAIN` | empty | Required when the frontend and API use different hosts and the browser talks to the API domain directly; keep empty for single-domain deployments |
