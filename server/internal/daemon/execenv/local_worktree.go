@@ -213,7 +213,7 @@ func PrepareLocalWorktree(params LocalWorktreeParams, logger *slog.Logger) (*Loc
 			"so the worktree would not match what you have on disk: %w", gitRoot, stashErr)
 	}
 
-	branch := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), shortID(params.TaskID))
+	branch := fmt.Sprintf("agent/%s/%s", sanitizeName(params.AgentName), taskKey(params.TaskID))
 	actualBranch, err := addLocalWorktree(gitRoot, worktreePath, branch, headSHA)
 	if err != nil {
 		return nil, err

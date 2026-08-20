@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -41,7 +42,7 @@ func TestShortID(t *testing.T) {
 func TestPredictRootDir(t *testing.T) {
 	t.Parallel()
 	got := PredictRootDir("/root", "ws-uuid", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
-	want := filepath.Join("/root", "ws-uuid", "a1b2c3d4")
+	want := filepath.Join("/root", "ws-uuid", "ef1234567890")
 	if got != want {
 		t.Errorf("PredictRootDir = %q, want %q", got, want)
 	}
@@ -6145,5 +6146,318 @@ func TestEnvironmentCleanupStandardModeRemovesWorkdir(t *testing.T) {
 	// output/logs should remain.
 	if _, err := os.Stat(filepath.Join(env.RootDir, "output")); err != nil {
 		t.Fatalf("output/ removed by partial cleanup: %v", err)
+	}
+}
+
+// TestPredictRootDirDistinctForSharedUUIDv7Prefix is the regression guard for
+// #7326. Task ids are UUIDv7: the first 8 hex chars are the high 32 bits of a
+// 48-bit millisecond timestamp, so they only advance once every 2^16 ms
+// (~65.5s). Every task started inside one such window shares that prefix.
+// While the env root used the prefix, the second task's Prepare deleted the
+// first task's live directory — identity files, worktree and all.
+//
+// The three ids below are the ones from the bug report, ~4.7s apart.
+func TestPredictRootDirDistinctForSharedUUIDv7Prefix(t *testing.T) {
+	t.Parallel()
+	ids := []string{
+		"01a01ec0-e69d-7000-8000-000000000001",
+		"01a01ec0-f014-7000-8000-000000000002",
+		"01a01ec0-f927-7000-8000-000000000003",
+	}
+	seen := make(map[string]string, len(ids))
+	for _, id := range ids {
+		root := PredictRootDir("/root", "ws-uuid", id)
+		if prev, dup := seen[root]; dup {
+			t.Fatalf("tasks %s and %s share env root %q — a truncated task id is back", prev, id, root)
+		}
+		seen[root] = id
+	}
+}
+
+// TestLocalWorktreeBranchDistinctForSharedUUIDv7Prefix covers the same
+// truncation in the branch name: two concurrent tasks for one agent would
+// otherwise both ask git for agent/<name>/<same-prefix>.
+func TestLocalWorktreeBranchDistinctForSharedUUIDv7Prefix(t *testing.T) {
+	t.Parallel()
+	a := fmt.Sprintf("agent/%s/%s", sanitizeName("Reviewer"), taskKey("01a01ec0-e69d-7000-8000-000000000001"))
+	b := fmt.Sprintf("agent/%s/%s", sanitizeName("Reviewer"), taskKey("01a01ec0-f014-7000-8000-000000000002"))
+	if a == b {
+		t.Fatalf("both tasks resolved to branch %q", a)
+	}
+}
+
+// TestPrepareDoesNotDeleteConcurrentTaskEnv is the behavioural half of the
+// #7326 regression. Prepare removes an existing env root before recreating it,
+// which is correct only while that path belongs exclusively to the task being
+// prepared. With an 8-char UUIDv7 prefix it did not: task B's Prepare ran
+// os.RemoveAll over task A's *running* env root, destroying its identity
+// files, worktree and task-scoped config while A was still executing.
+func TestPrepareDoesNotDeleteConcurrentTaskEnv(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	// Same first 8 hex chars — i.e. created inside the same ~65.5s window.
+	const (
+		taskA = "01a01ec0-e69d-7000-8000-000000000001"
+		taskB = "01a01ec0-f014-7000-8000-000000000002"
+	)
+
+	envA, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-collision",
+		TaskID:         taskA,
+		AgentName:      "Agent A",
+		Task:           TaskContextForEnv{IssueID: taskA},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare task A: %v", err)
+	}
+	defer envA.Cleanup(true)
+
+	// A marker standing in for everything a live task owns under its env root.
+	marker := filepath.Join(envA.WorkDir, "task-a-work.txt")
+	if err := os.WriteFile(marker, []byte("A"), 0o644); err != nil {
+		t.Fatalf("seed task A work: %v", err)
+	}
+
+	envB, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-collision",
+		TaskID:         taskB,
+		AgentName:      "Agent B",
+		Task:           TaskContextForEnv{IssueID: taskB},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare task B: %v", err)
+	}
+	defer envB.Cleanup(true)
+
+	if envA.RootDir == envB.RootDir {
+		t.Fatalf("both tasks share env root %q", envA.RootDir)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("task B's Prepare destroyed task A's live env root: %v", err)
+	}
+}
+
+// TestTaskKeyReadsTheRandomTail pins the two properties the env-root and
+// branch segments depend on, which pull in opposite directions.
+//
+// Length: the full 32-char id pushed a branch ref past Windows MAX_PATH
+// ("cannot lock ref ...: Filename too long") because the ref is a path under
+// .git/refs/heads/ inside an already-deep task checkout. Keep it bounded.
+//
+// End: the segment must come from the id's random tail. UUIDv7 puts a
+// millisecond timestamp in front, so a leading slice is shared by every task
+// created in the same ~65.5s window (#7326) — short AND leading is the one
+// combination that reintroduces the bug.
+func TestTaskKeyReadsTheRandomTail(t *testing.T) {
+	t.Parallel()
+	const id = "01a01ec0-e69d-7000-8000-0123456789ab"
+	got := taskKey(id)
+	if len(got) != taskKeyLen {
+		t.Fatalf("taskKey(%q) = %q (len %d), want len %d — long segments overflow MAX_PATH on Windows", id, got, len(got), taskKeyLen)
+	}
+	if want := "0123456789ab"; got != want {
+		t.Fatalf("taskKey(%q) = %q, want %q — the segment must come from the random tail, not the timestamp head", id, got, want)
+	}
+	if short := taskKey("abc"); short != "abc" {
+		t.Fatalf("taskKey on a sub-length input = %q, want it returned as-is", short)
+	}
+}
+
+// TestPrepareRefusesEnvRootOwnedByAnotherTask covers the guard that makes the
+// os.RemoveAll in Prepare safe. taskKey makes a shared env root improbable but
+// not impossible, and the cost of being wrong is deleting a running task's
+// work — so a foreign owner must stop Prepare rather than be overwritten.
+func TestPrepareRefusesEnvRootOwnedByAnotherTask(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	envRoot := PredictRootDir(workspacesRoot, "ws-owned", taskID)
+	if err := os.MkdirAll(filepath.Join(envRoot, "workdir"), 0o755); err != nil {
+		t.Fatalf("seed env root: %v", err)
+	}
+	if err := writeEnvRootOwnerExclusive(envRoot, "11111111-2222-3333-4444-555555555555"); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	survivor := filepath.Join(envRoot, "workdir", "other-task-work.txt")
+	if err := os.WriteFile(survivor, []byte("keep me"), 0o644); err != nil {
+		t.Fatalf("seed work: %v", err)
+	}
+
+	_, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-owned",
+		TaskID:         taskID,
+		AgentName:      "Intruder",
+		Task:           TaskContextForEnv{IssueID: taskID},
+	}, testLogger())
+	if err == nil {
+		t.Fatal("Prepare accepted an env root owned by another task")
+	}
+	if !strings.Contains(err.Error(), "belongs to task") {
+		t.Fatalf("error = %v, want it to name the owning task", err)
+	}
+	if _, statErr := os.Stat(survivor); statErr != nil {
+		t.Fatalf("Prepare deleted the other task's work despite failing: %v", statErr)
+	}
+}
+
+// TestPrepareResetsItsOwnEnvRoot is the other half: a rerun of the SAME task
+// owns the path and must still get a clean directory.
+func TestPrepareResetsItsOwnEnvRoot(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	first, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-rerun",
+		TaskID:         taskID,
+		AgentName:      "Rerun",
+		Task:           TaskContextForEnv{IssueID: taskID},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("first Prepare: %v", err)
+	}
+	stale := filepath.Join(first.WorkDir, "stale.txt")
+	if err := os.WriteFile(stale, []byte("from the previous run"), 0o644); err != nil {
+		t.Fatalf("seed stale file: %v", err)
+	}
+
+	second, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-rerun",
+		TaskID:         taskID,
+		AgentName:      "Rerun",
+		Task:           TaskContextForEnv{IssueID: taskID},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("rerun Prepare rejected the task's own env root: %v", err)
+	}
+	defer second.Cleanup(true)
+	if _, statErr := os.Stat(stale); !os.IsNotExist(statErr) {
+		t.Fatalf("rerun did not reset the env root; stale file still present (%v)", statErr)
+	}
+}
+
+// TestPrepareConcurrentSameKeyTasksClaimExclusively is the race the previous
+// ownership check missed. It read the marker, then deleted, then wrote — three
+// steps, so two tasks sharing a taskKey could both observe "no owner", and the
+// slower one would still os.RemoveAll the faster one's live directory.
+//
+// Both ids below end in the same 12 hex chars, so they resolve to one env root.
+// Started together, exactly one must win: the other has to fail without
+// touching the winner's tree.
+func TestPrepareConcurrentSameKeyTasksClaimExclusively(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	ids := []string{
+		"aaaaaaaa-1111-2222-3333-0123456789ab",
+		"bbbbbbbb-4444-5555-6666-0123456789ab",
+	}
+	if taskKey(ids[0]) != taskKey(ids[1]) {
+		t.Fatalf("fixture ids no longer collide: %q vs %q", taskKey(ids[0]), taskKey(ids[1]))
+	}
+
+	var start sync.WaitGroup
+	start.Add(1)
+	var done sync.WaitGroup
+	envs := make([]*Environment, len(ids))
+	errs := make([]error, len(ids))
+	for i, id := range ids {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			start.Wait() // release both goroutines into Prepare together
+			envs[i], errs[i] = Prepare(PrepareParams{
+				WorkspacesRoot: workspacesRoot,
+				WorkspaceID:    "ws-race",
+				TaskID:         id,
+				AgentName:      "Racer",
+				Task:           TaskContextForEnv{IssueID: id},
+			}, testLogger())
+		}()
+	}
+	start.Done()
+	done.Wait()
+
+	winner := -1
+	for i := range ids {
+		if errs[i] == nil {
+			if winner >= 0 {
+				t.Fatalf("both tasks claimed the same env root: %s and %s", ids[winner], ids[i])
+			}
+			winner = i
+		}
+	}
+	if winner < 0 {
+		t.Fatalf("neither task started: %v / %v", errs[0], errs[1])
+	}
+	loser := 1 - winner
+	if !strings.Contains(errs[loser].Error(), "env root") {
+		t.Fatalf("loser failed for an unrelated reason: %v", errs[loser])
+	}
+	defer envs[winner].Cleanup(true)
+
+	// The winner's environment must be intact and still its own.
+	if _, err := os.Stat(envs[winner].WorkDir); err != nil {
+		t.Fatalf("winner %s lost its workdir to the loser: %v", ids[winner], err)
+	}
+	owner, err := readEnvRootOwner(envs[winner].RootDir)
+	if err != nil {
+		t.Fatalf("read owner: %v", err)
+	}
+	if owner != ids[winner] {
+		t.Fatalf("env root owner = %q, want the winning task %q", owner, ids[winner])
+	}
+}
+
+// TestClaimEnvRootRefusesUnownedDirectoryWithContent covers the other way the
+// marker can be missing: a directory that holds files but names no task. The
+// marker is written before any content, so this is not a shape Prepare
+// produces — and guessing that it is abandoned would mean deleting work whose
+// owner we could not identify.
+func TestClaimEnvRootRefusesUnownedDirectoryWithContent(t *testing.T) {
+	t.Parallel()
+	envRoot := filepath.Join(t.TempDir(), "ws", "0123456789ab")
+	if err := os.MkdirAll(filepath.Join(envRoot, "workdir"), 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(envRoot, "workdir", "work.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, err := claimEnvRoot(envRoot, "aaaaaaaa-1111-2222-3333-0123456789ab"); err == nil {
+		t.Fatal("claimEnvRoot took a directory holding files with no owner")
+	} else if !strings.Contains(err.Error(), "names no owning task") {
+		t.Fatalf("error = %v, want it to explain the missing owner", err)
+	}
+	if _, err := os.Stat(filepath.Join(envRoot, "workdir", "work.txt")); err != nil {
+		t.Fatalf("claimEnvRoot deleted the content it refused to claim: %v", err)
+	}
+}
+
+// TestClaimEnvRootAdoptsEmptyDirectory is the self-heal counterpart: a crash
+// between Mkdir and the marker write leaves an empty directory, which holds no
+// work and must not wedge the task forever.
+func TestClaimEnvRootAdoptsEmptyDirectory(t *testing.T) {
+	t.Parallel()
+	envRoot := filepath.Join(t.TempDir(), "ws", "0123456789ab")
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	const id = "aaaaaaaa-1111-2222-3333-0123456789ab"
+	fresh, err := claimEnvRoot(envRoot, id)
+	if err != nil {
+		t.Fatalf("claimEnvRoot on an empty directory: %v", err)
+	}
+	if !fresh {
+		t.Fatal("adopting an empty directory should report a fresh claim")
+	}
+	if owner, _ := readEnvRootOwner(envRoot); owner != id {
+		t.Fatalf("owner = %q, want %q", owner, id)
 	}
 }

@@ -1356,10 +1356,10 @@ func TestPrepareEnvironmentNonOpenclawSkipsConfig(t *testing.T) {
 	stub := installOpenclawStub(t, map[string]openclawResponse{})
 
 	taskIDs := map[string]string{
-		"claude":   "aaaaaaaa-1111-2222-3333-444444444444",
-		"opencode": "bbbbbbbb-1111-2222-3333-444444444444",
-		"hermes":   "cccccccc-1111-2222-3333-444444444444",
-		"kiro":     "dddddddd-1111-2222-3333-444444444444",
+		"claude":   "aaaaaaaa-1111-2222-3333-4444444444aa",
+		"opencode": "bbbbbbbb-1111-2222-3333-4444444444bb",
+		"hermes":   "cccccccc-1111-2222-3333-4444444444cc",
+		"kiro":     "dddddddd-1111-2222-3333-4444444444dd",
 	}
 	for provider, taskID := range taskIDs {
 		t.Run(provider, func(t *testing.T) {
