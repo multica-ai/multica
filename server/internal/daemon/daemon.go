@@ -6004,7 +6004,15 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 	if err := d.skillCache.WithRefLock(task.WorkspaceID, validationRef, func() error {
 		return d.skillCache.Store(task.WorkspaceID, bundle)
 	}); err != nil {
-		return SkillData{}, fmt.Errorf("store skill bundle cache: %w", err)
+		if d.logger != nil {
+			d.logger.Warn("skill bundle cache store failed; continuing with downloaded bundle",
+				"workspace_id", task.WorkspaceID,
+				"skill_id", bundle.ID,
+				"source", bundle.Source,
+				"hash", bundle.Hash,
+				"error", err,
+			)
+		}
 	}
 	return bundle, nil
 }
