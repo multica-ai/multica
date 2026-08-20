@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 const originShareCRMChat = "sharecrm_chat"
@@ -222,6 +223,7 @@ type auditor struct{ q *db.Queries }
 
 func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
 	return r.q.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
+		ID:               dbid.NewV7(),
 		ChannelType:      string(TypeShareCRM),
 		EventType:        "message",
 		DropReason:       string(reason),
