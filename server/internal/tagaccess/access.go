@@ -169,6 +169,7 @@ type accessState struct {
 type store interface {
 	applyProjection(context.Context, ProjectionDelivery, [32]byte) (ApplyResult, error)
 	applyIdentityRestriction(context.Context, IdentityRestrictionDelivery, [32]byte) (ApplyResult, error)
+	applySessionWorkspaceSupersession(context.Context, SessionWorkspaceSupersededDelivery, [32]byte) (ApplyResult, error)
 	createGrant(context.Context, SessionGrant, time.Time) error
 	loadAccess(context.Context, AccessRequest) (accessState, error)
 }

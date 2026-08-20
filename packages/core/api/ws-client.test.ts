@@ -11,7 +11,7 @@ class FakeWebSocket {
   // Fields read by WSClient.connect()/disconnect(), all no-op here.
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: { code: number; reason: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   readyState = 0;
   sent: string[] = [];
@@ -75,6 +75,44 @@ describe("WSClient", () => {
     expect(url.searchParams.get("client_platform")).toBe("cli");
     expect(url.searchParams.has("client_version")).toBe(false);
     expect(url.searchParams.has("client_os")).toBe(false);
+  });
+
+  it.each([4401, 4403])(
+    "does not reconnect stale authorization after close code %d",
+    (code) => {
+      vi.useFakeTimers();
+      const ws = new WSClient("wss://vibes.test/ws/tag", { cookieAuth: true });
+      ws.setAuth(null, "workspace-a");
+      const states: string[] = [];
+      ws.onConnectionState((state) => states.push(state));
+      ws.connect();
+      FakeWebSocket.lastInstance!.onopen?.();
+
+      FakeWebSocket.lastInstance!.onclose?.({
+        code,
+        reason: "fresh_authorization_required",
+      });
+
+      expect(states.at(-1)).toBe("authorization_required");
+      expect(vi.getTimerCount()).toBe(0);
+      vi.useRealTimers();
+    },
+  );
+
+  it("retries after transient authorization-feed loss", () => {
+    vi.useFakeTimers();
+    const ws = new WSClient("wss://vibes.test/ws/tag", { cookieAuth: true });
+    ws.setAuth(null, "workspace-a");
+    ws.connect();
+    FakeWebSocket.lastInstance!.onopen?.();
+
+    FakeWebSocket.lastInstance!.onclose?.({
+      code: 1013,
+      reason: "authorization_feed_unavailable",
+    });
+
+    expect(vi.getTimerCount()).toBe(1);
+    vi.useRealTimers();
   });
 
   it("truncates the logged payload when an unparseable frame is large", () => {
@@ -173,7 +211,11 @@ describe("WSClient", () => {
     FakeWebSocket.lastInstance!.onmessage?.({
       data: JSON.stringify({ type: "issue:updated", payload: { id: "i-1" } }),
     });
-    expect(issueHandler).toHaveBeenCalledWith({ id: "i-1" }, undefined, undefined);
+    expect(issueHandler).toHaveBeenCalledWith(
+      { id: "i-1" },
+      undefined,
+      undefined,
+    );
     expect(anyHandler).toHaveBeenCalledTimes(1);
 
     // The drop is logged at most once per connection despite four bad frames.
@@ -201,11 +243,7 @@ describe("WSClient", () => {
       }),
     });
 
-    expect(handler).toHaveBeenCalledWith(
-      { id: "issue-1" },
-      "user-123",
-      "user",
-    );
+    expect(handler).toHaveBeenCalledWith({ id: "issue-1" }, "user-123", "user");
   });
 
   it("publishes connecting, disconnected, recovered, and idle states", () => {

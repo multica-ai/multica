@@ -25,11 +25,30 @@ type identityHTTPReceipt struct {
 	IdentityTwoStageReceipt
 }
 
+type sessionWorkspaceHTTPReceipt struct {
+	Source string `json:"source"`
+	SessionWorkspaceTwoStageReceipt
+}
+
 func NewHTTPIngress(access *AuthenticatedAccess) (*HTTPIngress, error) {
-	if access == nil || access.Ingress == nil || access.IdentityIngress == nil {
+	if access == nil || access.Ingress == nil || access.IdentityIngress == nil || access.SessionWorkspaceIngress == nil {
 		return nil, errors.New("Tag authority HTTP ingress requires authenticated access")
 	}
 	return &HTTPIngress{access: access}, nil
+}
+
+func (h *HTTPIngress) SessionWorkspace(w http.ResponseWriter, r *http.Request) {
+	var envelope SessionWorkspaceSupersededEnvelope
+	if err := decodeAuthorityRequest(w, r, &envelope); err != nil {
+		writeAuthorityJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid_request"})
+		return
+	}
+	receipt, err := h.access.SessionWorkspaceIngress.Deliver(r.Context(), envelope)
+	if err != nil {
+		authorityError(w, err)
+		return
+	}
+	writeAuthorityJSON(w, http.StatusOK, sessionWorkspaceHTTPReceipt{Source: "session_workspace", SessionWorkspaceTwoStageReceipt: receipt})
 }
 
 func decodeAuthorityRequest(w http.ResponseWriter, r *http.Request, target any) error {

@@ -18,11 +18,24 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/tagaccess"
+	"github.com/oklog/ulid/v2"
 )
 
 // MembershipChecker verifies a user belongs to a workspace.
 type MembershipChecker interface {
 	IsMember(ctx context.Context, userID, workspaceID string) bool
+}
+
+type TagWebSocketAccessGate interface {
+	GrantSession(context.Context, tagaccess.SessionGrant) error
+	Authorize(context.Context, tagaccess.AccessRequest) tagaccess.Decision
+}
+
+type TagWebSocketMirrorResolver interface {
+	MulticaUserID(context.Context, string) (string, bool, error)
+	VIBESUserID(context.Context, string) (string, bool, error)
+	MulticaWorkspaceID(context.Context, string) (string, bool, error)
 }
 
 // SlugResolver translates a workspace slug to its UUID.
@@ -226,6 +239,12 @@ type Client struct {
 	send        chan []byte
 	userID      string
 	workspaceID string
+	metadata    ConnectionMetadata
+	revoked     atomic.Bool
+	sendMu      sync.Mutex
+	sendClosed  bool
+	writeMu     sync.Mutex
+	frameMu     sync.Mutex
 
 	// subscriptions is guarded by hub.mu. Tracks the scopes this client is
 	// currently in. Used to clean up rooms on disconnect.
@@ -273,14 +292,31 @@ func (c *Client) markSeen(eventID string) bool {
 // demand.
 type SubscriptionCallback func(scopeType, scopeID string)
 
+type registrationRequest struct {
+	client   *Client
+	accepted chan bool
+}
+
+type revocationLeaseFence struct {
+	valid func() bool
+}
+
 // Hub manages WebSocket connections organized into scope-based rooms.
 type Hub struct {
 	rooms      map[scopeKey]map[*Client]bool
 	clients    map[*Client]bool // every connected client (used by global Broadcast and snapshots)
 	broadcast  chan []byte
-	register   chan *Client
+	register   chan registrationRequest
 	unregister chan *Client
 	mu         sync.RWMutex
+	authorize  sync.RWMutex
+	instanceID string
+	fences     revocationFences
+
+	// revocationHealthy is installed with the cross-instance close broker.
+	// Tag clients fail closed when this feed cannot be checked.
+	revocationHealthy func(context.Context) bool
+	revocationLease   atomic.Pointer[revocationLeaseFence]
 
 	authorizer ScopeAuthorizer
 
@@ -295,8 +331,10 @@ func NewHub() *Hub {
 		rooms:      make(map[scopeKey]map[*Client]bool),
 		clients:    make(map[*Client]bool),
 		broadcast:  make(chan []byte),
-		register:   make(chan *Client),
+		register:   make(chan registrationRequest),
 		unregister: make(chan *Client),
+		instanceID: ulid.Make().String(),
+		fences:     newRevocationFences(),
 	}
 }
 
@@ -321,19 +359,8 @@ func (h *Hub) SetSubscriptionCallbacks(onFirst, onLast SubscriptionCallback) {
 func (h *Hub) Run() {
 	for {
 		select {
-		case client := <-h.register:
-			h.mu.Lock()
-			h.clients[client] = true
-			total := len(h.clients)
-			h.mu.Unlock()
-			M.ConnectsTotal.Add(1)
-			M.ActiveConnections.Add(1)
-			// Auto-subscribe to the workspace and user scopes.
-			h.subscribe(client, ScopeWorkspace, client.workspaceID)
-			if client.userID != "" {
-				h.subscribe(client, ScopeUser, client.userID)
-			}
-			slog.Info("ws client connected", "workspace_id", client.workspaceID, "user_id", client.userID, "total_clients", total)
+		case request := <-h.register:
+			request.accepted <- h.acceptRegistration(request.client)
 
 		case client := <-h.unregister:
 			h.removeClient(client)
@@ -342,6 +369,57 @@ func (h *Hub) Run() {
 			h.fanoutAll(message, "")
 		}
 	}
+}
+
+func (h *Hub) registerClient(client *Client) bool {
+	accepted := make(chan bool, 1)
+	h.register <- registrationRequest{client: client, accepted: accepted}
+	return <-accepted
+}
+
+// acceptRegistration checks the authorization watermark and installs the
+// client plus its implicit rooms under one lock. A close command therefore
+// cannot finish its scan between an old authorization decision and registry
+// insertion.
+func (h *Hub) acceptRegistration(client *Client) bool {
+	h.mu.Lock()
+	if !h.fences.allows(client.metadata) || !client.authorizationLeaseValid() {
+		client.revoked.Store(true)
+		h.mu.Unlock()
+		return false
+	}
+	h.clients[client] = true
+	if client.subscriptions == nil {
+		client.subscriptions = make(map[scopeKey]bool)
+	}
+	newRooms := make([]scopeKey, 0, 2)
+	for _, key := range []scopeKey{sk(ScopeWorkspace, client.workspaceID), sk(ScopeUser, client.userID)} {
+		if key.ID == "" {
+			continue
+		}
+		room := h.rooms[key]
+		if room == nil {
+			room = make(map[*Client]bool)
+			h.rooms[key] = room
+			newRooms = append(newRooms, key)
+		}
+		room[client] = true
+		client.subscriptions[key] = true
+	}
+	callback := h.onFirstSubscriber
+	total := len(h.clients)
+	h.mu.Unlock()
+
+	M.ConnectsTotal.Add(1)
+	M.ActiveConnections.Add(1)
+	for _, key := range newRooms {
+		M.IncRoom(key.Type)
+		if callback != nil {
+			callback(key.Type, key.ID)
+		}
+	}
+	slog.Info("ws client connected", "workspace_id", client.workspaceID, "user_id", client.userID, "total_clients", total)
+	return true
 }
 
 // removeClient drops a client from all rooms and the global set.
@@ -364,7 +442,10 @@ func (h *Hub) removeClient(client *Client) {
 			}
 		}
 	}
+	client.sendMu.Lock()
+	client.sendClosed = true
 	close(client.send)
+	client.sendMu.Unlock()
 	cb := h.onLastSubscriber
 	total := len(h.clients)
 	h.mu.Unlock()
@@ -392,7 +473,7 @@ func (h *Hub) subscribe(client *Client, scopeType, scopeID string) bool {
 	key := sk(scopeType, scopeID)
 
 	h.mu.Lock()
-	if !h.clients[client] {
+	if !h.clients[client] || client.revoked.Load() || !client.authorizationLeaseValid() {
 		h.mu.Unlock()
 		return false
 	}
@@ -509,10 +590,9 @@ func (h *Hub) BroadcastToScopeDedup(scopeType, scopeID string, message []byte, e
 		if !client.markSeen(eventID) {
 			continue
 		}
-		select {
-		case client.send <- message:
+		if client.trySend(message) {
 			sent++
-		default:
+		} else if !client.revoked.Load() {
 			slow = append(slow, client)
 		}
 	}
@@ -545,10 +625,9 @@ func (h *Hub) fanoutAllDedup(message []byte, excludeWorkspace, eventID string) {
 		if !client.markSeen(eventID) {
 			continue
 		}
-		select {
-		case client.send <- message:
+		if client.trySend(message) {
 			sent++
-		default:
+		} else if !client.revoked.Load() {
 			slow = append(slow, client)
 		}
 	}
@@ -597,10 +676,9 @@ func (h *Hub) fanoutUser(userID string, message []byte, excludeWorkspace, eventI
 		if !client.markSeen(eventID) {
 			continue
 		}
-		select {
-		case client.send <- message:
+		if client.trySend(message) {
 			sent++
-		default:
+		} else if !client.revoked.Load() {
 			slow = append(slow, client)
 		}
 	}
@@ -641,7 +719,10 @@ func (h *Hub) evictSlow(slow []*Client) {
 			}
 		}
 		c.subscriptions = nil
+		c.sendMu.Lock()
+		c.sendClosed = true
 		close(c.send)
+		c.sendMu.Unlock()
 		evicted++
 	}
 	cb := h.onLastSubscriber
@@ -773,6 +854,130 @@ func writeWSAuthErrorAndClose(conn *websocket.Conn, payload []byte, attrs ...any
 // HandleWebSocket upgrades an HTTP connection to WebSocket with cookie or
 // first-message auth.
 func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, w http.ResponseWriter, r *http.Request) {
+	handleWebSocket(hub, mc, pr, resolveSlug, nil, w, r)
+}
+
+// HandleWebSocketWithTagMirrorGuard preserves the native/service admission
+// path while rejecting mirrored VIBES identities that must use #299 instead.
+func HandleWebSocketWithTagMirrorGuard(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, mirrors TagWebSocketMirrorResolver, w http.ResponseWriter, r *http.Request) {
+	handleWebSocket(hub, mc, pr, resolveSlug, mirrors, w, r)
+}
+
+// HandleTagGatewayWebSocket is the browser-only Tag upgrade. Identity is
+// accepted exclusively from a one-use, five-second VIBES Gateway assertion;
+// cookies, PATs, URL identity parameters, Host, and Origin never establish it.
+func HandleTagGatewayWebSocket(hub *Hub, gate TagWebSocketAccessGate, verifier *tagaccess.HTTPAssertionVerifier, replay tagaccess.HTTPAssertionReplayStore, mirrors TagWebSocketMirrorResolver, w http.ResponseWriter, r *http.Request) {
+	if hub == nil || gate == nil || verifier == nil || replay == nil || mirrors == nil {
+		http.Error(w, `{"error":"Tag WebSocket authentication unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	assertion, err := verifier.VerifyRequest(r)
+	if err != nil {
+		http.Error(w, `{"error":"Tag Gateway assertion rejected"}`, http.StatusUnauthorized)
+		return
+	}
+	multicaUserID, found, err := mirrors.MulticaUserID(r.Context(), assertion.UserID)
+	if err != nil {
+		http.Error(w, `{"error":"Tag WebSocket authentication unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	if !found {
+		http.Error(w, `{"error":"Tag access denied"}`, http.StatusForbidden)
+		return
+	}
+	multicaWorkspaceID, found, err := mirrors.MulticaWorkspaceID(r.Context(), assertion.WorkspaceID)
+	if err != nil {
+		http.Error(w, `{"error":"Tag WebSocket authentication unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	if !found {
+		http.Error(w, `{"error":"Tag access denied"}`, http.StatusForbidden)
+		return
+	}
+	consumed, err := replay.Consume(r.Context(), tagaccess.HTTPAssertionReplay{
+		Issuer: assertion.Issuer, Audience: assertion.Audience, RequestID: assertion.RequestID,
+		Nonce: assertion.Nonce, ExpiresAt: time.UnixMilli(assertion.ExpiresAt),
+	})
+	if err != nil {
+		http.Error(w, `{"error":"Tag WebSocket authentication unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	if !consumed {
+		http.Error(w, `{"error":"Tag Gateway assertion rejected"}`, http.StatusUnauthorized)
+		return
+	}
+	tagSessionID := tagaccess.BrowserTagSessionID(assertion.UserID, assertion.SessionID)
+	expiresAt := time.UnixMilli(assertion.ExpiresAt)
+	if err := gate.GrantSession(r.Context(), tagaccess.SessionGrant{
+		TagSessionID: tagSessionID, VIBESSessionID: assertion.SessionID,
+		VIBESUserID: assertion.UserID, WorkspaceID: assertion.WorkspaceID,
+		AccountEpoch: assertion.AccountEpoch, SessionWorkspaceGeneration: assertion.SessionWorkspaceGeneration,
+		MembershipGeneration: assertion.MembershipGeneration, AuthorityVersion: assertion.AuthorityVersion,
+		SessionExpiresAt: expiresAt, GrantExpiresAt: expiresAt, Continuous: true,
+	}); err != nil {
+		if errors.Is(err, tagaccess.ErrGrantDenied) || errors.Is(err, tagaccess.ErrInvalidGrant) {
+			http.Error(w, `{"error":"Tag access denied"}`, http.StatusForbidden)
+		} else {
+			http.Error(w, `{"error":"Tag WebSocket authentication unavailable"}`, http.StatusServiceUnavailable)
+		}
+		return
+	}
+	request := tagaccess.AccessRequest{
+		TagSessionID: tagSessionID, VIBESSessionID: assertion.SessionID,
+		VIBESUserID: assertion.UserID, WorkspaceID: assertion.WorkspaceID,
+		AccountEpoch: assertion.AccountEpoch, SessionWorkspaceGeneration: assertion.SessionWorkspaceGeneration,
+		AuthorityVersion: assertion.AuthorityVersion, MembershipGeneration: assertion.MembershipGeneration,
+	}
+	if !hub.revocationFeedHealthy(r.Context()) {
+		http.Error(w, `{"error":"authorization feed unavailable"}`, http.StatusServiceUnavailable)
+		return
+	}
+	decision := authorizeTagWebSocketAccess(r.Context(), gate, request)
+	if !decision.Allowed {
+		http.Error(w, `{"error":"Tag access denied"}`, http.StatusForbidden)
+		return
+	}
+	conn, err := upgrader.Upgrade(w, r, nil)
+	if err != nil {
+		slog.Error("Tag Gateway websocket upgrade failed", "error", err)
+		return
+	}
+	conn.SetReadLimit(inboundReadLimit)
+
+	// Serialize the last authority read through registry insertion with the
+	// same lock used by targeted close dispatch. A revoke can therefore happen
+	// entirely before this socket registers or entirely after it is visible.
+	hub.authorize.RLock()
+	decision = authorizeTagWebSocketAccess(context.Background(), gate, request)
+	if !decision.Allowed || !hub.authorizationLeaseValidLocked() {
+		hub.authorize.RUnlock()
+		_ = conn.Close()
+		return
+	}
+	metadata := ConnectionMetadata{
+		ConnectionID: ulid.Make().String(), InstanceID: hub.InstanceID(), VIBESUserID: assertion.UserID,
+		WorkspaceID: assertion.WorkspaceID, TagSessionID: tagSessionID, VIBESSessionID: assertion.SessionID,
+		AccountEpoch: assertion.AccountEpoch, SessionWorkspaceGeneration: assertion.SessionWorkspaceGeneration,
+		MembershipGeneration: assertion.MembershipGeneration, AuthorityVersion: assertion.AuthorityVersion,
+	}
+	client := &Client{
+		hub: hub, conn: conn, send: make(chan []byte, 256), userID: multicaUserID,
+		workspaceID: multicaWorkspaceID, metadata: metadata,
+	}
+	if !hub.registerClient(client) {
+		hub.authorize.RUnlock()
+		_ = conn.Close()
+		return
+	}
+	hub.authorize.RUnlock()
+
+	slog.Info("Tag Gateway websocket connected", "user_id", multicaUserID, "workspace_id", multicaWorkspaceID)
+	go client.writePump()
+	go client.readPump()
+	go client.watchWebSocketAccess(gate, request)
+}
+
+func handleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug SlugResolver, mirrors TagWebSocketMirrorResolver, w http.ResponseWriter, r *http.Request) {
 	workspaceID := r.URL.Query().Get("workspace_id")
 	if workspaceID == "" {
 		if slug := r.URL.Query().Get("workspace_slug"); slug != "" && resolveSlug != nil {
@@ -788,8 +993,8 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 		http.Error(w, `{"error":"workspace_id or workspace_slug required"}`, http.StatusBadRequest)
 		return
 	}
-
 	var userID string
+	needsAuthAck := false
 	if cookie, err := r.Cookie(auth.AuthCookieName); err == nil && cookie.Value != "" {
 		uid, errMsg := authenticateToken(cookie.Value, pr, r.Context())
 		if errMsg != "" {
@@ -800,7 +1005,17 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 			http.Error(w, errMsg, status)
 			return
 		}
-		if !mc.IsMember(r.Context(), uid, workspaceID) {
+		if mirrored, unavailable := mirroredTagIdentity(r.Context(), mirrors, uid); mirrored || unavailable {
+			status := http.StatusUnauthorized
+			message := `{"error":"VIBES Gateway assertion required"}`
+			if unavailable {
+				status = http.StatusServiceUnavailable
+				message = `{"error":"Tag authority unavailable"}`
+			}
+			http.Error(w, message, status)
+			return
+		}
+		if mc == nil || !mc.IsMember(r.Context(), uid, workspaceID) {
 			http.Error(w, `{"error":"not a member of this workspace"}`, http.StatusForbidden)
 			return
 		}
@@ -832,7 +1047,15 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 			writeWSAuthErrorAndClose(conn, []byte(errMsg), "workspace_id", workspaceID)
 			return
 		}
-		if !mc.IsMember(r.Context(), uid, workspaceID) {
+		if mirrored, unavailable := mirroredTagIdentity(r.Context(), mirrors, uid); mirrored || unavailable {
+			message := `{"error":"VIBES Gateway assertion required"}`
+			if unavailable {
+				message = `{"error":"Tag authority unavailable"}`
+			}
+			writeWSAuthErrorAndClose(conn, []byte(message), "workspace_id", workspaceID, "user_id", uid)
+			return
+		}
+		if mc == nil || !mc.IsMember(r.Context(), uid, workspaceID) {
 			writeWSAuthErrorAndClose(
 				conn,
 				[]byte(`{"error":"not a member of this workspace"}`),
@@ -843,16 +1066,7 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 		}
 		userID = uid
 
-		if !writeWSAuthFrame(
-			conn,
-			[]byte(`{"type":"auth_ack"}`),
-			"auth_ack",
-			"workspace_id", workspaceID,
-			"user_id", userID,
-		) {
-			conn.Close()
-			return
-		}
+		needsAuthAck = true
 	}
 
 	// Capture client metadata from query params (browsers cannot set custom
@@ -870,17 +1084,124 @@ func HandleWebSocket(hub *Hub, mc MembershipChecker, pr PATResolver, resolveSlug
 		"client_os", clientOS,
 	)
 
+	instanceID := hub.InstanceID()
+	metadata := ConnectionMetadata{
+		ConnectionID: ulid.Make().String(), InstanceID: instanceID,
+	}
 	client := &Client{
 		hub:         hub,
 		conn:        conn,
 		send:        make(chan []byte, 256),
 		userID:      userID,
 		workspaceID: workspaceID,
+		metadata:    metadata,
 	}
-	hub.register <- client
+	if !hub.registerClient(client) {
+		_ = conn.Close()
+		return
+	}
+	if needsAuthAck {
+		client.writeMu.Lock()
+		if client.revoked.Load() {
+			client.writeMu.Unlock()
+			return
+		}
+		_ = conn.SetWriteDeadline(time.Now().Add(client.writeTimeout()))
+		acknowledged := writeWSAuthFrame(
+			conn, []byte(`{"type":"auth_ack"}`), "auth_ack", "workspace_id", workspaceID, "user_id", userID,
+		)
+		client.writeMu.Unlock()
+		if !acknowledged {
+			hub.removeClient(client)
+			_ = conn.Close()
+			return
+		}
+	}
 
 	go client.writePump()
 	go client.readPump()
+}
+
+func mirroredTagIdentity(ctx context.Context, mirrors TagWebSocketMirrorResolver, multicaUserID string) (mirrored, unavailable bool) {
+	if mirrors == nil {
+		return false, false
+	}
+	_, mirrored, err := mirrors.VIBESUserID(ctx, multicaUserID)
+	return mirrored, err != nil
+}
+
+func authorizeTagWebSocketAccess(parent context.Context, gate TagWebSocketAccessGate, request tagaccess.AccessRequest) tagaccess.Decision {
+	ctx, cancel := context.WithTimeout(parent, AuthorizationWatchdogTarget/2)
+	defer cancel()
+	return gate.Authorize(ctx, request)
+}
+
+const (
+	accessWatchdogPeriod       = 250 * time.Millisecond
+	accessWatchdogQueryTimeout = AuthorizationWatchdogTarget - accessWatchdogPeriod
+)
+
+func (c *Client) watchWebSocketAccess(gate TagWebSocketAccessGate, request tagaccess.AccessRequest) {
+	ticker := time.NewTicker(accessWatchdogPeriod)
+	defer ticker.Stop()
+	for range ticker.C {
+		if c.revoked.Load() || !c.hub.hasClient(c) {
+			return
+		}
+		checkCtx, cancel := context.WithTimeout(context.Background(), accessWatchdogQueryTimeout)
+		if !c.hub.revocationFeedHealthy(checkCtx) {
+			cancel()
+			c.hub.revokeClient(c, CloseCodeAuthorizationFeedLost, "authorization_feed_unavailable")
+			return
+		}
+		decision := gate.Authorize(checkCtx, request)
+		cancel()
+		if !decision.Allowed || decision.AuthorityVersion != c.metadata.AuthorityVersion {
+			c.hub.revokeClient(c, CloseCodeAuthorizationChanged, "fresh_authorization_required")
+			return
+		}
+	}
+}
+
+func (h *Hub) hasClient(client *Client) bool {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	return h.clients[client]
+}
+
+func (h *Hub) revocationFeedHealthy(ctx context.Context) bool {
+	h.mu.RLock()
+	healthy := h.revocationHealthy
+	h.mu.RUnlock()
+	return healthy == nil || healthy(ctx)
+}
+
+func (h *Hub) authorizationLeaseValid() bool {
+	lease := h.revocationLease.Load()
+	return lease == nil || lease.valid()
+}
+
+func (h *Hub) authorizationLeaseValidLocked() bool {
+	return h.authorizationLeaseValid()
+}
+
+func (c *Client) requiresAuthorizationFeed() bool {
+	return c != nil && c.metadata.VIBESSessionID != ""
+}
+
+func (c *Client) authorizationLeaseValid() bool {
+	return c == nil || !c.requiresAuthorizationFeed() || c.hub == nil || c.hub.authorizationLeaseValid()
+}
+
+func (h *Hub) revokeClient(client *Client, code int, reason string) bool {
+	if client == nil || !client.revoked.CompareAndSwap(false, true) {
+		return false
+	}
+	client.frameMu.Lock()
+	client.frameMu.Unlock()
+	h.removeClient(client)
+	client.closeTransport(code, reason)
+	return true
 }
 
 // inboundFrame describes the subset of inbound JSON messages the server
@@ -898,7 +1219,9 @@ type subPayload struct {
 func (c *Client) readPump() {
 	defer func() {
 		c.hub.unregister <- c
-		c.conn.Close()
+		if !c.revoked.Load() {
+			c.conn.Close()
+		}
 	}()
 
 	c.conn.SetReadDeadline(time.Now().Add(pongWait))
@@ -925,11 +1248,32 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		c.handleFrame(raw)
+		if !c.authorizationLeaseValid() {
+			c.hub.revokeClient(c, CloseCodeAuthorizationFeedLost, "authorization_feed_unavailable")
+			break
+		}
+		if !c.processInboundFrame(raw) {
+			break
+		}
 	}
 }
 
+func (c *Client) processInboundFrame(raw []byte) bool {
+	c.frameMu.Lock()
+	if c.revoked.Load() || !c.authorizationLeaseValid() {
+		c.frameMu.Unlock()
+		c.hub.revokeClient(c, CloseCodeAuthorizationFeedLost, "authorization_feed_unavailable")
+		return false
+	}
+	c.handleFrame(raw)
+	c.frameMu.Unlock()
+	return true
+}
+
 func (c *Client) handleFrame(raw []byte) {
+	if c.revoked.Load() {
+		return
+	}
 	var f inboundFrame
 	if err := json.Unmarshal(raw, &f); err != nil {
 		slog.Debug("ws inbound: invalid json", "error", err, "user_id", c.userID)
@@ -983,7 +1327,9 @@ func (c *Client) handleSubscribe(scope, id string) {
 	case ScopeTask, ScopeChat:
 		auth := c.hub.authorizer
 		if auth != nil {
-			ok, err := auth.AuthorizeScope(context.Background(), c.userID, c.workspaceID, scope, id)
+			authorizeCtx, cancel := context.WithTimeout(context.Background(), AuthorizationWatchdogTarget/2)
+			ok, err := auth.AuthorizeScope(authorizeCtx, c.userID, c.workspaceID, scope, id)
+			cancel()
 			if err != nil || !ok {
 				M.SubscribeDeniedTotal(scope).Add(1)
 				reason := "forbidden"
@@ -1000,6 +1346,9 @@ func (c *Client) handleSubscribe(scope, id string) {
 				})
 				return
 			}
+		}
+		if c.revoked.Load() || !c.authorizationLeaseValid() {
+			return
 		}
 		c.hub.subscribe(c, scope, id)
 	default:
@@ -1036,34 +1385,67 @@ func (c *Client) sendJSON(v any) {
 	if err != nil {
 		return
 	}
-	select {
-	case c.send <- data:
-	default:
-	}
+	_ = c.trySend(data)
 }
 
 func (c *Client) writePump() {
 	ticker := time.NewTicker(pingPeriod)
 	defer func() {
 		ticker.Stop()
-		c.conn.Close()
+		if !c.revoked.Load() {
+			c.conn.Close()
+		}
 	}()
 
 	for {
 		select {
 		case message, ok := <-c.send:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if !ok {
-				c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+			if !c.authorizationLeaseValid() {
+				c.hub.revokeClient(c, CloseCodeAuthorizationFeedLost, "authorization_feed_unavailable")
 				return
 			}
-			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+			if c.revoked.Load() {
+				return
+			}
+			if !ok {
+				c.writeMu.Lock()
+				if !c.revoked.Load() {
+					_ = c.conn.WriteMessage(websocket.CloseMessage, []byte{})
+				}
+				c.writeMu.Unlock()
+				return
+			}
+			c.writeMu.Lock()
+			if c.revoked.Load() || !c.authorizationLeaseValid() {
+				c.writeMu.Unlock()
+				c.hub.revokeClient(c, CloseCodeAuthorizationFeedLost, "authorization_feed_unavailable")
+				return
+			}
+			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout()))
+			err := c.conn.WriteMessage(websocket.TextMessage, message)
+			c.writeMu.Unlock()
+			if err != nil {
 				slog.Warn("websocket write error", "error", err, "user_id", c.userID, "workspace_id", c.workspaceID)
 				return
 			}
 		case <-ticker.C:
-			c.conn.SetWriteDeadline(time.Now().Add(writeWait))
-			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+			if !c.authorizationLeaseValid() {
+				c.hub.revokeClient(c, CloseCodeAuthorizationFeedLost, "authorization_feed_unavailable")
+				return
+			}
+			if c.revoked.Load() {
+				return
+			}
+			c.writeMu.Lock()
+			if c.revoked.Load() || !c.authorizationLeaseValid() {
+				c.writeMu.Unlock()
+				c.hub.revokeClient(c, CloseCodeAuthorizationFeedLost, "authorization_feed_unavailable")
+				return
+			}
+			c.conn.SetWriteDeadline(time.Now().Add(c.writeTimeout()))
+			err := c.conn.WriteMessage(websocket.PingMessage, nil)
+			c.writeMu.Unlock()
+			if err != nil {
 				return
 			}
 		}

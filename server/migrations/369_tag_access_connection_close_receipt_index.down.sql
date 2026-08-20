@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS tag_access_connection_close_receipt_delivery_uidx;

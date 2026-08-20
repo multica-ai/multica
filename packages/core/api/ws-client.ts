@@ -1,12 +1,19 @@
 import type { WSMessage, WSEventType } from "../types/events";
 import { type Logger, noopLogger } from "../logger";
 
-type EventHandler = (payload: unknown, actorId?: string, actorType?: string) => void;
+type EventHandler = (
+  payload: unknown,
+  actorId?: string,
+  actorType?: string,
+) => void;
 export type WSConnectionState =
   | "idle"
   | "connecting"
   | "connected"
-  | "reconnecting";
+  | "reconnecting"
+  | "authorization_required";
+
+const AUTHORIZATION_CLOSE_CODES = new Set([4401, 4403]);
 
 // Cap how much of an unparseable frame we put into the log. A malformed or
 // rogue server can stream arbitrarily large garbage, and the warn handler may
@@ -93,8 +100,7 @@ export class WSClient {
       url.searchParams.set("client_platform", this.identity.platform);
     if (this.identity?.version)
       url.searchParams.set("client_version", this.identity.version);
-    if (this.identity?.os)
-      url.searchParams.set("client_os", this.identity.os);
+    if (this.identity?.os) url.searchParams.set("client_os", this.identity.os);
 
     this.ws = new WebSocket(url.toString());
 
@@ -155,7 +161,15 @@ export class WSClient {
       }
     };
 
-    this.ws.onclose = () => {
+    this.ws.onclose = (event) => {
+      const code = event?.code ?? 1006;
+      if (AUTHORIZATION_CLOSE_CODES.has(code)) {
+        this.publishConnectionState("authorization_required");
+        this.logger.warn(
+          `ws: authorization closed (${code}); waiting for a fresh Tag grant`,
+        );
+        return;
+      }
       this.scheduleReconnect();
     };
 
@@ -179,9 +193,7 @@ export class WSClient {
     // ±20 % jitter so clients that disconnected at the same time don't
     // reconnect in lockstep.
     const jitter = base * 0.2 * (Math.random() * 2 - 1);
-    const delay = Math.round(
-      Math.min(base + jitter, RECONNECT_MAX_DELAY_MS),
-    );
+    const delay = Math.round(Math.min(base + jitter, RECONNECT_MAX_DELAY_MS));
 
     this.reconnectAttempt++;
     this.logger.warn(
@@ -193,7 +205,8 @@ export class WSClient {
   private onAuthenticated() {
     this.publishConnectionState("connected");
     this.logger.info("connected");
-    const recoveredConnection = this.hasConnectedBefore || this.reconnectAttempt > 0;
+    const recoveredConnection =
+      this.hasConnectedBefore || this.reconnectAttempt > 0;
     this.reconnectAttempt = 0;
     if (recoveredConnection) {
       for (const cb of this.onReconnectCallbacks) {

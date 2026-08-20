@@ -198,6 +198,29 @@ func TestPostgresStoreMatchesAccessGateContract(t *testing.T) {
 	}
 }
 
+func TestPostgresAssertionReplayIsSharedAcrossWebSocketInstances(t *testing.T) {
+	conn := openDisposableTagAccessDatabase(t)
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	instanceA, err := tagaccess.NewPostgresHTTPAssertionReplayStore(conn, fixedClock{now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	instanceB, err := tagaccess.NewPostgresHTTPAssertionReplayStore(conn, fixedClock{now: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := tagaccess.HTTPAssertionReplay{
+		Issuer: tagaccess.HTTPAssertionIssuer, Audience: tagaccess.WebSocketAssertionAudience,
+		RequestID: "request-ws-shared", Nonce: "nonce-ws-shared", ExpiresAt: now.Add(5 * time.Second),
+	}
+	if consumed, err := instanceA.Consume(context.Background(), claim); err != nil || !consumed {
+		t.Fatalf("instance A consume = %v, %v", consumed, err)
+	}
+	if consumed, err := instanceB.Consume(context.Background(), claim); err != nil || consumed {
+		t.Fatalf("instance B replay = %v, %v", consumed, err)
+	}
+}
+
 func TestPostgresAuthorityIngressReceiptSurvivesAdapterRestart(t *testing.T) {
 	conn := openDisposableTagAccessDatabase(t)
 	key := []byte("vibes-authority-test-key-32-bytes-minimum")
@@ -301,6 +324,43 @@ func TestPostgresIdentityRestrictionReceiptSurvivesAdapterRestart(t *testing.T) 
 	}
 }
 
+func TestPostgresSessionWorkspaceSupersessionSurvivesRestartAndFencesOldGrant(t *testing.T) {
+	conn := openDisposableTagAccessDatabase(t)
+	key := []byte("vibes-authority-test-key-32-bytes-minimum")
+	now := time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC)
+	closePort := &echoSessionWorkspaceClosePort{}
+	newAccess := func() *tagaccess.AuthenticatedAccess {
+		access, err := tagaccess.NewAuthenticatedAccess(
+			tagaccess.NewPostgresStore(conn), fixedClock{now: now}, map[string][]byte{"vibes-primary": key}, closePort,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return access
+	}
+	access := newAccess()
+	projectSessionWorkspaceMember(t, access, key, "vibes-primary", "workspace-a", 7, 1, 1)
+	projectSessionWorkspaceMember(t, access, key, "vibes-primary", "workspace-b", 7, 2, 1)
+	tagSessionID := tagaccess.BrowserTagSessionID("user-1", "session-1")
+	grantSessionWorkspace(t, access.Gate, now, tagSessionID, "session-1", "workspace-a", 7, 1, 1, 1)
+	delivery := sessionWorkspaceDelivery("postgres-switch-2", "workspace-a", "workspace-b", 2, 2, 1)
+	first := deliverSessionWorkspace(t, access, key, "vibes-primary", delivery)
+	if first.Apply.Result != tagaccess.ApplyApplied || first.ConnectionClose.Status != tagaccess.ConnectionCloseCompleted {
+		t.Fatalf("first receipt = %#v", first)
+	}
+	restarted := deliverSessionWorkspace(t, newAccess(), key, "vibes-primary", delivery)
+	if restarted.Apply.Result != tagaccess.ApplyDuplicate || restarted.ConnectionClose.Status != tagaccess.ConnectionCloseCompleted {
+		t.Fatalf("restarted receipt = %#v", restarted)
+	}
+	if decision := newAccess().Gate.Authorize(context.Background(), tagaccess.AccessRequest{
+		TagSessionID: tagSessionID, VIBESSessionID: "session-1", VIBESUserID: "user-1", WorkspaceID: "workspace-a",
+		AccountEpoch: 7, SessionWorkspaceGeneration: 1, MembershipGeneration: 1, AuthorityVersion: 1,
+	}); decision.Allowed {
+		t.Fatalf("old persisted grant remained authorized: %#v", decision)
+	}
+	grantSessionWorkspace(t, newAccess().Gate, now, tagSessionID, "session-1", "workspace-b", 7, 2, 1, 2)
+}
+
 func openDisposableTagAccessDatabase(t *testing.T) *pgx.Conn {
 	t.Helper()
 	databaseURL, err := disposableTagAccessDatabaseURL()
@@ -352,6 +412,13 @@ func openDisposableTagAccessDatabase(t *testing.T) *pgx.Conn {
 		"365_tag_http_assertion_replay.up.sql",
 		"366_tag_http_assertion_replay_identity_index.up.sql",
 		"367_tag_http_assertion_replay_expiry_index.up.sql",
+		"371_tag_access_session_workspace_state.up.sql",
+		"372_tag_session_ws_state_index.up.sql",
+		"373_tag_access_session_workspace_delivery.up.sql",
+		"374_tag_session_ws_delivery_key_index.up.sql",
+		"375_tag_session_ws_event_index.up.sql",
+		"376_tag_session_ws_idempotency_index.up.sql",
+		"377_tag_session_ws_delivery_id_index.up.sql",
 	} {
 		body, err := os.ReadFile(filepath.Join(migrationsDir(t), migration))
 		if err != nil {

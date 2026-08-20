@@ -21,6 +21,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/tagaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/redis/go-redis/v9"
@@ -257,7 +258,7 @@ func main() {
 	}
 	slog.Info("connected to database")
 	logPoolConfig(pool)
-	tagAuthorityAccess, err := tagProjectionAccessFromEnv(pool)
+	tagProjectionAuthentication, err := tagProjectionAuthenticationFromEnv()
 	if err != nil {
 		slog.Error("Tag projection ingress configuration failed", "error", err)
 		os.Exit(1)
@@ -265,6 +266,11 @@ func main() {
 	tagHTTPVerifier, err := tagHTTPAssertionVerifierFromEnv()
 	if err != nil {
 		slog.Error("Tag HTTP assertion configuration failed", "error", err)
+		os.Exit(1)
+	}
+	tagWebSocketVerifier, err := tagWebSocketAssertionVerifierFromEnv()
+	if err != nil {
+		slog.Error("Tag WebSocket assertion configuration failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -289,8 +295,14 @@ func main() {
 	var relayReadRedis *redis.Client
 	var shardedReadRedis *redis.Client
 	var legacyReadRedis *redis.Client
+	var revocationWriteRedis *redis.Client
+	var revocationReadRedis *redis.Client
 	var relay realtime.ManagedRelay
+	var closeBroker *realtime.RedisConnectionCloseBroker
 	defer func() {
+		if closeBroker != nil {
+			closeBroker.Stop()
+		}
 		if relay != nil {
 			relay.Stop()
 		}
@@ -301,6 +313,8 @@ func main() {
 		closeRedisClient("realtime-read-legacy", legacyReadRedis)
 		closeRedisClient("realtime-read-sharded", shardedReadRedis)
 		closeRedisClient("realtime-read", relayReadRedis)
+		closeRedisClient("revocation-read", revocationReadRedis)
+		closeRedisClient("revocation-write", revocationWriteRedis)
 		closeRedisClient("realtime-write", relayWriteRedis)
 		closeRedisClient("channel-lease", channelLeaseRedis)
 		closeRedisClient("store", storeRedis)
@@ -355,6 +369,53 @@ func main() {
 		}
 	} else {
 		slog.Info("realtime: REDIS_URL not set — using in-memory hub (single-node mode)")
+	}
+
+	var tagAuthorityAccess *tagaccess.AuthenticatedAccess
+	var tagAssertionReplay tagaccess.HTTPAssertionReplayStore
+	if tagProjectionAuthentication.configured {
+		if relay == nil || relayWriteRedis == nil {
+			slog.Error("Tag projection ingress requires the multi-instance realtime relay")
+			os.Exit(1)
+		}
+		if tagHTTPVerifier == nil || tagWebSocketVerifier == nil {
+			slog.Error("Tag Gateway assertion authentication is required with Tag authority")
+			os.Exit(1)
+		}
+		hub.SetInstanceID(relay.NodeID())
+		revocationOptions, dedicated, revocationErr := tagRevocationRedisOptionsFromEnv(relayWriteRedis.Options())
+		if revocationErr != nil {
+			slog.Error("Tag realtime revocation Redis configuration failed", "error", revocationErr)
+			os.Exit(1)
+		}
+		brokerWriteRedis := relayWriteRedis
+		brokerReadRedis := relayWriteRedis
+		if dedicated {
+			revocationWriteRedis = newNamedRedisClient(revocationOptions, "revocation-write")
+			revocationReadRedis = newNamedRedisClient(revocationOptions, "revocation-read")
+			brokerWriteRedis = revocationWriteRedis
+			brokerReadRedis = revocationReadRedis
+		}
+		closeBroker = realtime.NewRedisConnectionCloseBroker(
+			hub, brokerWriteRedis, brokerReadRedis, hub.InstanceID(), tagProjectionAuthentication.key,
+		)
+		if err := closeBroker.Start(relayCtx); err != nil {
+			slog.Error("Tag realtime revocation broker failed to start", "error", err)
+			os.Exit(1)
+		}
+		closeCoordinator := realtime.NewConnectionCloseCoordinator(
+			hub, closeBroker, realtime.NewPostgresConnectionCloseReceiptStore(pool), time.Now,
+		)
+		tagAuthorityAccess, err = tagProjectionAccessFromEnv(pool, closeCoordinator)
+		if err != nil {
+			slog.Error("Tag projection ingress configuration failed", "error", err)
+			os.Exit(1)
+		}
+		tagAssertionReplay, err = tagaccess.NewPostgresHTTPAssertionReplayStore(pool, tagaccess.SystemClock{})
+		if err != nil {
+			slog.Error("Tag Gateway replay store configuration failed", "error", err)
+			os.Exit(1)
+		}
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_BACKEND")), "redis") {
 		leaseRedisURL := channelLeaseRedisURLFromEnv()
@@ -442,17 +503,19 @@ func main() {
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
-		HTTPMetrics:         httpMetrics,
-		BusinessMetrics:     businessMetrics,
-		ChannelLeaseMetrics: channelLeaseMetrics,
-		ChannelLeaseRedis:   channelLeaseRedis,
-		WecomMetrics:        wecomMetrics,
-		DaemonHub:           daemonHub,
-		DaemonWakeup:        daemonWakeup,
-		FeatureFlags:        flags,
-		HeartbeatScheduler:  heartbeatScheduler,
-		TagAuthorityAccess:  tagAuthorityAccess,
-		TagHTTPVerifier:     tagHTTPVerifier,
+		HTTPMetrics:          httpMetrics,
+		BusinessMetrics:      businessMetrics,
+		ChannelLeaseMetrics:  channelLeaseMetrics,
+		ChannelLeaseRedis:    channelLeaseRedis,
+		WecomMetrics:         wecomMetrics,
+		DaemonHub:            daemonHub,
+		DaemonWakeup:         daemonWakeup,
+		FeatureFlags:         flags,
+		HeartbeatScheduler:   heartbeatScheduler,
+		TagAuthorityAccess:   tagAuthorityAccess,
+		TagHTTPVerifier:      tagHTTPVerifier,
+		TagWebSocketVerifier: tagWebSocketVerifier,
+		TagHTTPReplay:        tagAssertionReplay,
 	})
 
 	srv := &http.Server{

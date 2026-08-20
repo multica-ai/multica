@@ -2,7 +2,6 @@ package tagaccess
 
 import (
 	"context"
-	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -65,12 +64,7 @@ func (i *IdentityRestrictionIngress) Deliver(ctx context.Context, envelope Ident
 		return IdentityTwoStageReceipt{}, err
 	}
 	key, known := i.keys[envelope.Authentication.KeyID]
-	if !known || len(envelope.Authentication.MAC) != sha256.Size {
-		return IdentityTwoStageReceipt{}, ErrUnverifiedDelivery
-	}
-	mac := hmac.New(sha256.New, key)
-	_, _ = mac.Write(payload)
-	if !hmac.Equal(envelope.Authentication.MAC, mac.Sum(nil)) {
+	if !known || !verifyAuthorityMAC(key, envelope.Authentication.MAC, payload) {
 		return IdentityTwoStageReceipt{}, ErrUnverifiedDelivery
 	}
 	authorityPayload, err := canonicalIdentityEnvelopeBytes(envelope, false)

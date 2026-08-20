@@ -53,6 +53,7 @@ func TestVIBESTagProjectionCrossServiceContract(t *testing.T) {
 		mux := http.NewServeMux()
 		mux.HandleFunc("/internal/tag-authority/workspace-projections", ingress.Workspace)
 		mux.HandleFunc("/internal/tag-authority/identity-restrictions", ingress.Identity)
+		mux.HandleFunc("/internal/tag-authority/session-workspace-supersessions", ingress.SessionWorkspace)
 		return mux
 	}
 	var droppedWorkspaceResponse atomic.Bool

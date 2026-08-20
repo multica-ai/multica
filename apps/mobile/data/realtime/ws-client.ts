@@ -62,6 +62,7 @@ export interface WSClientOptions {
 const RECONNECT_BASE_MS = 1_000;
 const RECONNECT_CAP_MS = 30_000;
 const RECONNECT_MAX_EXPONENT = 6; // 1s → 64s ceiling, capped at 30s
+const AUTHORIZATION_CLOSE_CODES = new Set([4401, 4403]);
 
 // React Native does not surface WebSocket control Ping/Pong frames to
 // JavaScript. The server sends control pings, but an iOS/NAT half-open socket
@@ -254,7 +255,7 @@ export class WSClient {
       // reconnect. Logging here adds noise during normal teardown.
     };
 
-    ws.onclose = () => {
+    ws.onclose = (event) => {
       const wasOurs = this.ws === ws;
       // If we already swapped in a new socket, this onclose is from a
       // detached old one — ignore. (We try to detach handlers in
@@ -264,6 +265,14 @@ export class WSClient {
       this.ws = null;
       this.clearHeartbeat();
       this.logger.warn("[ws] socket closed");
+      const code = event?.code ?? 1006;
+      if (AUTHORIZATION_CLOSE_CODES.has(code)) {
+        this.state = "idle";
+        this.logger.warn(
+          `[ws] authorization closed (${code}); waiting for a fresh Tag grant`,
+        );
+        return;
+      }
       if (this.state === "active") this.scheduleReconnect();
     };
   }

@@ -1,0 +1,35 @@
+{
+  "fixtureVersion": 1,
+  "warning": "TEST-ONLY KEY. Never use this fixture key outside contract tests.",
+  "testKeyBase64": "MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=",
+  "keyId": "vibes-projection-test-v1",
+  "unsignedEnvelope": {
+    "schemaVersion": 1,
+    "delivery": {
+      "kind": "session_workspace_superseded",
+      "eventId": "event-switch-0002",
+      "deliveryId": "delivery-switch-0002",
+      "correlationId": "correlation-switch-0002",
+      "idempotencyKey": "session-switch-session-1-generation-2",
+      "vibesUserId": "user-1",
+      "vibesSessionId": "session-1",
+      "previousWorkspaceId": "workspace-alpha",
+      "newWorkspaceId": "workspace-beta",
+      "sessionWorkspaceGeneration": 2,
+      "accountEpoch": 7,
+      "identityRestrictionVersion": 4,
+      "authorityVersion": 11,
+      "membershipGeneration": 3,
+      "closeTarget": {
+        "scope": "session_workspace",
+        "vibesUserId": "user-1",
+        "vibesSessionId": "session-1",
+        "workspaceId": "workspace-alpha"
+      }
+    }
+  },
+  "unsignedCanonical": "{\"schemaVersion\":1,\"delivery\":{\"kind\":\"session_workspace_superseded\",\"eventId\":\"event-switch-0002\",\"deliveryId\":\"delivery-switch-0002\",\"correlationId\":\"correlation-switch-0002\",\"idempotencyKey\":\"session-switch-session-1-generation-2\",\"vibesUserId\":\"user-1\",\"vibesSessionId\":\"session-1\",\"previousWorkspaceId\":\"workspace-alpha\",\"newWorkspaceId\":\"workspace-beta\",\"sessionWorkspaceGeneration\":2,\"accountEpoch\":7,\"identityRestrictionVersion\":4,\"authorityVersion\":11,\"membershipGeneration\":3,\"closeTarget\":{\"scope\":\"session_workspace\",\"vibesUserId\":\"user-1\",\"vibesSessionId\":\"session-1\",\"workspaceId\":\"workspace-alpha\"}}}",
+  "payloadSha256": "ccef84c75be2350a26f48f90ab340d100a9a55faa18ab7d0987d05185d3055db",
+  "authenticatedCanonical": "{\"schemaVersion\":1,\"delivery\":{\"kind\":\"session_workspace_superseded\",\"eventId\":\"event-switch-0002\",\"deliveryId\":\"delivery-switch-0002\",\"correlationId\":\"correlation-switch-0002\",\"idempotencyKey\":\"session-switch-session-1-generation-2\",\"vibesUserId\":\"user-1\",\"vibesSessionId\":\"session-1\",\"previousWorkspaceId\":\"workspace-alpha\",\"newWorkspaceId\":\"workspace-beta\",\"sessionWorkspaceGeneration\":2,\"accountEpoch\":7,\"identityRestrictionVersion\":4,\"authorityVersion\":11,\"membershipGeneration\":3,\"closeTarget\":{\"scope\":\"session_workspace\",\"vibesUserId\":\"user-1\",\"vibesSessionId\":\"session-1\",\"workspaceId\":\"workspace-alpha\"}},\"authentication\":{\"keyId\":\"vibes-projection-test-v1\"}}",
+  "macBase64": "BSsvPSAlw53kZDKbCn74ySxFoUTGvvBzFWgDnRX6vp8="
+}

@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX CONCURRENTLY tag_access_session_workspace_delivery_idempotency_uidx
+    ON tag_access_session_workspace_delivery (idempotency_key);

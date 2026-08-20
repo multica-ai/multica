@@ -103,6 +103,67 @@ func TestHTTPAssertionVerifierBindsIdentityMethodTargetAndBody(t *testing.T) {
 	}
 }
 
+func TestWebSocketAssertionVerifierAcceptsExactSharedVectorAndGETOnly(t *testing.T) {
+	now := time.Date(2026, time.August, 19, 16, 0, 2, 0, time.UTC)
+	key, err := base64.StdEncoding.Strict().DecodeString("MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=")
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := NewWebSocketAssertionVerifier(map[string][]byte{"gateway-test-key": key}, assertionClock{now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertion := fixtureHTTPAssertion(now)
+	assertion.Audience = WebSocketAssertionAudience
+	assertion.KeyID = "gateway-test-key"
+	assertion.Method = http.MethodGet
+	assertion.Path = "/ws"
+	assertion.Query = "workspace_id=workspace-1"
+	assertion.BodySHA256 = ""
+	assertion.UserID = "user-1"
+	assertion.WorkspaceID = "workspace-1"
+	assertion.SessionID = "session-1"
+	assertion.RequestID = "request-ws-1"
+	assertion.Nonce = "nonce-ws-1"
+	assertion.IssuedAt = time.Date(2026, time.August, 19, 16, 0, 0, 0, time.UTC).UnixMilli()
+	assertion.ExpiresAt = time.Date(2026, time.August, 19, 16, 0, 5, 0, time.UTC).UnixMilli()
+	request := httptest.NewRequest(http.MethodGet, "/ws?workspace_id=workspace-1", nil)
+	setSignedHTTPAssertion(t, request, assertion, key)
+
+	verified, err := verifier.VerifyRequest(request)
+	if err != nil {
+		t.Fatalf("VerifyRequest(exact WS vector): %v", err)
+	}
+	if verified.Audience != WebSocketAssertionAudience || verified.SessionWorkspaceGeneration != 5 {
+		t.Fatalf("verified assertion = %#v", verified)
+	}
+
+	wrongMethod := httptest.NewRequest(http.MethodPost, "/ws?workspace_id=workspace-1", nil)
+	wrongMethodAssertion := assertion
+	wrongMethodAssertion.Method = http.MethodPost
+	wrongMethodAssertion.BodySHA256 = hex.EncodeToString(sha256.New().Sum(nil))
+	setSignedHTTPAssertion(t, wrongMethod, wrongMethodAssertion, key)
+	if _, err := verifier.VerifyRequest(wrongMethod); err == nil {
+		t.Fatal("WS verifier accepted a non-GET assertion")
+	}
+	chunked := httptest.NewRequest(http.MethodGet, "/ws?workspace_id=workspace-1", nil)
+	chunked.TransferEncoding = []string{"chunked"}
+	setSignedHTTPAssertion(t, chunked, assertion, key)
+	if _, err := verifier.VerifyRequest(chunked); err == nil {
+		t.Fatal("WS verifier accepted a transfer-encoded upgrade body")
+	}
+
+	httpVerifier, err := NewHTTPAssertionVerifier(map[string][]byte{"gateway-test-key": key}, assertionClock{now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	httpRequest := httptest.NewRequest(http.MethodGet, "/ws?workspace_id=workspace-1", nil)
+	setSignedHTTPAssertion(t, httpRequest, assertion, key)
+	if _, err := httpVerifier.VerifyRequest(httpRequest); err == nil {
+		t.Fatal("HTTP verifier accepted the WS audience")
+	}
+}
+
 func TestHTTPAssertionVerifierFailsClosedOnTimeSignatureTransportAndConfiguration(t *testing.T) {
 	now := time.Date(2026, time.August, 19, 12, 0, 0, 0, time.UTC)
 	key := []byte("dedicated-gateway-assertion-key-32-bytes")

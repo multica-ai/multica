@@ -118,7 +118,7 @@ func (s *postgresHTTPAssertionReplayStore) Consume(ctx context.Context, claim HT
 }
 
 func validHTTPAssertionReplay(claim HTTPAssertionReplay, now time.Time) bool {
-	return claim.Issuer == HTTPAssertionIssuer && claim.Audience == HTTPAssertionAudience &&
+	return claim.Issuer == HTTPAssertionIssuer && validBrowserAssertionAudience(claim.Audience) &&
 		httpAssertionSafeID.MatchString(claim.RequestID) && httpAssertionSafeID.MatchString(claim.Nonce) && claim.ExpiresAt.After(now)
 }
 

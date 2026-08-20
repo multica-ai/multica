@@ -23,6 +23,7 @@ const (
 	HTTPAssertionSchemaVersion   = uint64(1)
 	HTTPAssertionIssuer          = "vibes-tag-gateway-v1"
 	HTTPAssertionAudience        = "vibes-tag-browser-http-v1"
+	WebSocketAssertionAudience   = "vibes-tag-browser-ws-v1"
 	HTTPAssertionMaxLifetime     = 10 * time.Second
 	httpAssertionDomain          = "vibes-tag-gateway-request-v1\n"
 	maxHTTPAssertionBytes        = 16 * 1024
@@ -63,14 +64,30 @@ type HTTPAssertion struct {
 }
 
 type HTTPAssertionVerifier struct {
-	keys  map[string][]byte
-	clock Clock
+	keys           map[string][]byte
+	clock          Clock
+	audience       string
+	requiredMethod string
 }
 
 // NewHTTPAssertionVerifier constructs the HTTP-only consumer. Issuer,
 // audience, and schema are fixed contract constants rather than configuration.
 func NewHTTPAssertionVerifier(keys map[string][]byte, clock Clock) (*HTTPAssertionVerifier, error) {
+	return newHTTPAssertionVerifier(keys, clock, HTTPAssertionAudience, "")
+}
+
+// NewWebSocketAssertionVerifier constructs the browser WebSocket consumer
+// using the same #299 assertion contract and key material as HTTP admission.
+// Its audience is fixed and only a GET upgrade with an empty body is valid.
+func NewWebSocketAssertionVerifier(keys map[string][]byte, clock Clock) (*HTTPAssertionVerifier, error) {
+	return newHTTPAssertionVerifier(keys, clock, WebSocketAssertionAudience, http.MethodGet)
+}
+
+func newHTTPAssertionVerifier(keys map[string][]byte, clock Clock, audience, requiredMethod string) (*HTTPAssertionVerifier, error) {
 	if len(keys) == 0 || !configuredDependency(clock) {
+		return nil, ErrInvalidHTTPAssertion
+	}
+	if audience != HTTPAssertionAudience && audience != WebSocketAssertionAudience {
 		return nil, ErrInvalidHTTPAssertion
 	}
 	cloned := make(map[string][]byte, len(keys))
@@ -80,7 +97,7 @@ func NewHTTPAssertionVerifier(keys map[string][]byte, clock Clock) (*HTTPAsserti
 		}
 		cloned[keyID] = append([]byte(nil), key...)
 	}
-	return &HTTPAssertionVerifier{keys: cloned, clock: clock}, nil
+	return &HTTPAssertionVerifier{keys: cloned, clock: clock, audience: audience, requiredMethod: requiredMethod}, nil
 }
 
 func (v *HTTPAssertionVerifier) configured() bool {
@@ -91,6 +108,9 @@ func (v *HTTPAssertionVerifier) configured() bool {
 // their canonical path, query, method, and raw unsafe body to the request.
 func (v *HTTPAssertionVerifier) VerifyRequest(request *http.Request) (HTTPAssertion, error) {
 	if !v.configured() || request == nil {
+		return HTTPAssertion{}, ErrInvalidHTTPAssertion
+	}
+	if v.requiredMethod == http.MethodGet && (request.ContentLength > 0 || len(request.TransferEncoding) > 0) {
 		return HTTPAssertion{}, ErrInvalidHTTPAssertion
 	}
 	payloadHeader, ok := exactlyOneHeader(request, HTTPAssertionHeader, maxHTTPAssertionBytes)
@@ -125,7 +145,8 @@ func (v *HTTPAssertionVerifier) VerifyRequest(request *http.Request) (HTTPAssert
 		return HTTPAssertion{}, ErrInvalidHTTPAssertion
 	}
 	canonical, err := CanonicalHTTPAssertion(assertion)
-	if err != nil || assertion.KeyID != keyIDHeader {
+	if err != nil || assertion.KeyID != keyIDHeader || assertion.Audience != v.audience ||
+		(v.requiredMethod != "" && assertion.Method != v.requiredMethod) {
 		return HTTPAssertion{}, ErrInvalidHTTPAssertion
 	}
 	canonicalPayload := canonical[len(httpAssertionDomain):]
@@ -173,6 +194,15 @@ func exactlyOneHeader(request *http.Request, name string, maxLength int) (string
 	return returnValue, len(values) == 1 && returnValue != "" && len(returnValue) <= maxLength
 }
 
+// HasGatewayAssertionHeaders reports whether any part of the detached #299
+// transport is present. Adapters use it only to select the browser admission
+// path; the verifier still requires exactly one of all three headers.
+func HasGatewayAssertionHeaders(request *http.Request) bool {
+	return request != nil && (len(request.Header.Values(HTTPAssertionHeader)) > 0 ||
+		len(request.Header.Values(HTTPAssertionSignatureHeader)) > 0 ||
+		len(request.Header.Values(HTTPAssertionKeyIDHeader)) > 0)
+}
+
 // CanonicalHTTPAssertion returns the domain-separated normative HMAC bytes.
 func CanonicalHTTPAssertion(assertion HTTPAssertion) ([]byte, error) {
 	if !validHTTPAssertionShape(assertion) {
@@ -190,7 +220,7 @@ func CanonicalHTTPAssertion(assertion HTTPAssertion) ([]byte, error) {
 
 func validHTTPAssertionShape(assertion HTTPAssertion) bool {
 	if assertion.SchemaVersion != HTTPAssertionSchemaVersion ||
-		assertion.Issuer != HTTPAssertionIssuer || assertion.Audience != HTTPAssertionAudience ||
+		assertion.Issuer != HTTPAssertionIssuer || !validBrowserAssertionAudience(assertion.Audience) ||
 		!httpAssertionSafeID.MatchString(assertion.KeyID) || !httpAssertionMethod.MatchString(assertion.Method) ||
 		!validAssertionPath(assertion.Path) || len(assertion.Query) > maxHTTPAssertionPartBytes || strings.HasPrefix(assertion.Query, "?") ||
 		!httpAssertionSafeID.MatchString(assertion.UserID) || !httpAssertionSafeID.MatchString(assertion.WorkspaceID) ||
@@ -208,6 +238,10 @@ func validHTTPAssertionShape(assertion HTTPAssertion) bool {
 		return assertion.BodySHA256 == ""
 	}
 	return httpAssertionSHA256.MatchString(assertion.BodySHA256)
+}
+
+func validBrowserAssertionAudience(audience string) bool {
+	return audience == HTTPAssertionAudience || audience == WebSocketAssertionAudience
 }
 
 func validAssertionPath(path string) bool {

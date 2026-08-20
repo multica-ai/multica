@@ -95,10 +95,11 @@ type ConnectionCloseStage struct {
 type ConnectionCloseScope string
 
 const (
-	ConnectionCloseSession    ConnectionCloseScope = "session"
-	ConnectionCloseAccount    ConnectionCloseScope = "account"
-	ConnectionCloseMembership ConnectionCloseScope = "membership"
-	ConnectionCloseWorkspace  ConnectionCloseScope = "workspace"
+	ConnectionCloseSession          ConnectionCloseScope = "session"
+	ConnectionCloseSessionWorkspace ConnectionCloseScope = "session_workspace"
+	ConnectionCloseAccount          ConnectionCloseScope = "account"
+	ConnectionCloseMembership       ConnectionCloseScope = "membership"
+	ConnectionCloseWorkspace        ConnectionCloseScope = "workspace"
 )
 
 type ConnectionCloseTarget struct {
@@ -115,6 +116,7 @@ type ConnectionCloseCommand struct {
 	WorkspaceID                string                  `json:"workspaceId,omitempty"`
 	AuthorityVersion           uint64                  `json:"authorityVersion,omitempty"`
 	IdentityRestrictionVersion uint64                  `json:"identityRestrictionVersion,omitempty"`
+	SessionWorkspaceGeneration uint64                  `json:"sessionWorkspaceGeneration,omitempty"`
 	TargetDigest               string                  `json:"targetDigest"`
 	Targets                    []ConnectionCloseTarget `json:"targets"`
 }
@@ -122,8 +124,9 @@ type ConnectionCloseCommand struct {
 type ConnectionCloseSource string
 
 const (
-	ConnectionCloseWorkspaceProjection ConnectionCloseSource = "workspace_projection"
-	ConnectionCloseIdentityRestriction ConnectionCloseSource = "identity_restriction"
+	ConnectionCloseWorkspaceProjection          ConnectionCloseSource = "workspace_projection"
+	ConnectionCloseIdentityRestriction          ConnectionCloseSource = "identity_restriction"
+	ConnectionCloseSessionWorkspaceSupersession ConnectionCloseSource = "session_workspace_supersession"
 )
 
 type ConnectionCloseReceipt struct {
@@ -134,6 +137,7 @@ type ConnectionCloseReceipt struct {
 	WorkspaceID                string                `json:"workspaceId,omitempty"`
 	AuthorityVersion           uint64                `json:"authorityVersion,omitempty"`
 	IdentityRestrictionVersion uint64                `json:"identityRestrictionVersion,omitempty"`
+	SessionWorkspaceGeneration uint64                `json:"sessionWorkspaceGeneration,omitempty"`
 	TargetDigest               string                `json:"targetDigest"`
 	CompletedAt                time.Time             `json:"completedAt"`
 }
@@ -162,9 +166,10 @@ type AuthorityIngress struct {
 // returned Gate has no alternate delivery verifier, so direct Apply calls fail
 // closed instead of bypassing the authenticated envelope.
 type AuthenticatedAccess struct {
-	Gate            *Gate
-	Ingress         *AuthorityIngress
-	IdentityIngress *IdentityRestrictionIngress
+	Gate                    *Gate
+	Ingress                 *AuthorityIngress
+	IdentityIngress         *IdentityRestrictionIngress
+	SessionWorkspaceIngress *SessionWorkspaceSupersessionIngress
 }
 
 func NewAuthenticatedAccess(adapter store, clock Clock, keys map[string][]byte, closePort ConnectionClosePort) (*AuthenticatedAccess, error) {
@@ -181,9 +186,10 @@ func NewAuthenticatedAccess(adapter store, clock Clock, keys map[string][]byte, 
 	}
 	gate := newGate(adapter, clock, nil)
 	return &AuthenticatedAccess{
-		Gate:            gate,
-		Ingress:         &AuthorityIngress{gate: gate, keys: cloned, closePort: closePort},
-		IdentityIngress: &IdentityRestrictionIngress{store: adapter, keys: cloned, closePort: closePort},
+		Gate:                    gate,
+		Ingress:                 &AuthorityIngress{gate: gate, keys: cloned, closePort: closePort},
+		IdentityIngress:         &IdentityRestrictionIngress{store: adapter, keys: cloned, closePort: closePort},
+		SessionWorkspaceIngress: &SessionWorkspaceSupersessionIngress{store: adapter, keys: cloned, closePort: closePort},
 	}, nil
 }
 
@@ -214,12 +220,7 @@ func (i *AuthorityIngress) Deliver(ctx context.Context, envelope AuthorityEnvelo
 		return TwoStageReceipt{}, err
 	}
 	key, knownKey := i.keys[envelope.Authentication.KeyID]
-	if !knownKey || len(envelope.Authentication.MAC) != sha256.Size {
-		return TwoStageReceipt{}, ErrUnverifiedDelivery
-	}
-	mac := hmac.New(sha256.New, key)
-	_, _ = mac.Write(payload)
-	if !hmac.Equal(envelope.Authentication.MAC, mac.Sum(nil)) {
+	if !knownKey || !verifyAuthorityMAC(key, envelope.Authentication.MAC, payload) {
 		return TwoStageReceipt{}, ErrUnverifiedDelivery
 	}
 	authorityPayload, err := canonicalAuthorityPayload(envelope)
@@ -247,6 +248,15 @@ func (i *AuthorityIngress) Deliver(ctx context.Context, envelope AuthorityEnvelo
 		},
 		ConnectionClose: closeStage,
 	}, nil
+}
+
+func verifyAuthorityMAC(key, observedMAC, canonical []byte) bool {
+	if len(key) < sha256.Size || len(observedMAC) != sha256.Size {
+		return false
+	}
+	mac := hmac.New(sha256.New, key)
+	_, _ = mac.Write(canonical)
+	return hmac.Equal(observedMAC, mac.Sum(nil))
 }
 
 func (i *AuthorityIngress) closeConnections(ctx context.Context, envelope AuthorityEnvelope, first ProjectionEvent) ConnectionCloseStage {
@@ -283,6 +293,7 @@ func connectionCloseReceiptMatches(command ConnectionCloseCommand, receipt Conne
 		receipt.DeliveryID == command.DeliveryID && receipt.CorrelationID == command.CorrelationID &&
 		receipt.WorkspaceID == command.WorkspaceID && receipt.AuthorityVersion == command.AuthorityVersion &&
 		receipt.IdentityRestrictionVersion == command.IdentityRestrictionVersion &&
+		receipt.SessionWorkspaceGeneration == command.SessionWorkspaceGeneration &&
 		receipt.TargetDigest == command.TargetDigest && !receipt.CompletedAt.IsZero()
 }
 

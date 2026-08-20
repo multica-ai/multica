@@ -7,16 +7,21 @@ import (
 )
 
 type MemoryStore struct {
-	mu                 sync.RWMutex
-	projections        map[projectionKey]ProjectionEvent
-	workspaces         map[string]workspaceRecord
-	deliveries         map[workspaceDeliveryKey][32]byte
-	identityStates     map[string]identityRecord
-	identityDeliveries map[identityDeliveryKey][32]byte
-	sessionRevocations map[identitySessionKey]struct{}
-	sessions           map[string]memorySession
-	grants             map[workspaceGrantKey]memoryGrant
-	failure            error
+	mu                          sync.RWMutex
+	projections                 map[projectionKey]ProjectionEvent
+	workspaces                  map[string]workspaceRecord
+	deliveries                  map[workspaceDeliveryKey][32]byte
+	identityStates              map[string]identityRecord
+	identityDeliveries          map[identityDeliveryKey][32]byte
+	sessionWorkspaceStates      map[sessionWorkspaceKey]sessionWorkspaceRecord
+	sessionWorkspaceDeliveries  map[sessionWorkspaceDeliveryKey][32]byte
+	sessionWorkspaceEvents      map[string]sessionWorkspaceDeliveryKey
+	sessionWorkspaceDeliveryIDs map[string]sessionWorkspaceDeliveryKey
+	sessionWorkspaceIdempotency map[string]sessionWorkspaceDeliveryKey
+	sessionRevocations          map[identitySessionKey]struct{}
+	sessions                    map[string]memorySession
+	grants                      map[workspaceGrantKey]memoryGrant
+	failure                     error
 }
 
 type projectionKey struct {
@@ -70,14 +75,143 @@ func (s *MemoryStore) SetFailure(err error) {
 // ordering and grant rules as the private PostgreSQL adapter.
 func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
-		projections:        make(map[projectionKey]ProjectionEvent),
-		workspaces:         make(map[string]workspaceRecord),
-		deliveries:         make(map[workspaceDeliveryKey][32]byte),
-		identityStates:     make(map[string]identityRecord),
-		identityDeliveries: make(map[identityDeliveryKey][32]byte),
-		sessionRevocations: make(map[identitySessionKey]struct{}),
-		sessions:           make(map[string]memorySession),
-		grants:             make(map[workspaceGrantKey]memoryGrant),
+		projections:                 make(map[projectionKey]ProjectionEvent),
+		workspaces:                  make(map[string]workspaceRecord),
+		deliveries:                  make(map[workspaceDeliveryKey][32]byte),
+		identityStates:              make(map[string]identityRecord),
+		identityDeliveries:          make(map[identityDeliveryKey][32]byte),
+		sessionWorkspaceStates:      make(map[sessionWorkspaceKey]sessionWorkspaceRecord),
+		sessionWorkspaceDeliveries:  make(map[sessionWorkspaceDeliveryKey][32]byte),
+		sessionWorkspaceEvents:      make(map[string]sessionWorkspaceDeliveryKey),
+		sessionWorkspaceDeliveryIDs: make(map[string]sessionWorkspaceDeliveryKey),
+		sessionWorkspaceIdempotency: make(map[string]sessionWorkspaceDeliveryKey),
+		sessionRevocations:          make(map[identitySessionKey]struct{}),
+		sessions:                    make(map[string]memorySession),
+		grants:                      make(map[workspaceGrantKey]memoryGrant),
+	}
+}
+
+func (s *MemoryStore) applySessionWorkspaceSupersession(_ context.Context, delivery SessionWorkspaceSupersededDelivery, digest [32]byte) (ApplyResult, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.failure != nil {
+		return "", s.failure
+	}
+	key := sessionWorkspaceKey{userID: delivery.VIBESUserID, sessionID: delivery.VIBESSessionID}
+	deliveryKey := sessionWorkspaceDeliveryKey{
+		userID: delivery.VIBESUserID, sessionID: delivery.VIBESSessionID,
+		generation: delivery.SessionWorkspaceGeneration,
+	}
+	observedDigest, observed := s.sessionWorkspaceDeliveries[deliveryKey]
+	current, exists := s.sessionWorkspaceStates[key]
+	eventKey, eventObserved := s.sessionWorkspaceEvents[delivery.EventID]
+	deliveryIDKey, deliveryIDObserved := s.sessionWorkspaceDeliveryIDs[delivery.DeliveryID]
+	idempotencyKey, idempotencyObserved := s.sessionWorkspaceIdempotency[delivery.IdempotencyKey]
+	if eventObserved && eventKey != deliveryKey || deliveryIDObserved && deliveryIDKey != deliveryKey ||
+		idempotencyObserved && idempotencyKey != deliveryKey {
+		if !exists {
+			current = sessionWorkspaceRecord{userID: delivery.VIBESUserID, sessionID: delivery.VIBESSessionID, accountEpoch: delivery.AccountEpoch, generation: 1}
+		}
+		current = blockSessionWorkspaceAdvance(current, digest, true)
+		if delivery.SessionWorkspaceGeneration > current.observedGeneration {
+			current.observedGeneration = delivery.SessionWorkspaceGeneration
+		}
+		s.sessionWorkspaceStates[key] = current
+		return ApplyConflict, nil
+	}
+	next, result, changed, candidate := evolveSessionWorkspace(current, exists, delivery, digest, observedDigest, observed)
+	if !observed {
+		s.sessionWorkspaceDeliveries[deliveryKey] = digest
+		s.sessionWorkspaceEvents[delivery.EventID] = deliveryKey
+		s.sessionWorkspaceDeliveryIDs[delivery.DeliveryID] = deliveryKey
+		s.sessionWorkspaceIdempotency[delivery.IdempotencyKey] = deliveryKey
+	}
+	if result == ApplyDuplicate || result == ApplyStale {
+		if s.sessionWorkspaceIdentityPermanentlyRestricted(delivery) {
+			next = blockSessionWorkspaceAdvance(next, digest, true)
+			result, changed = ApplyConflict, true
+		}
+	}
+	if candidate {
+		permanent, ready := s.sessionWorkspaceDependencies(delivery)
+		switch {
+		case permanent:
+			next = blockSessionWorkspaceAdvance(next, digest, true)
+			result, changed = ApplyConflict, true
+		case !ready:
+			next = blockSessionWorkspaceAdvance(next, digest, false)
+			result, changed = ApplyGap, true
+		default:
+			s.applyMemorySessionWorkspaceFence(delivery)
+			next = completeSessionWorkspaceAdvance(next, delivery)
+			result, changed = ApplyApplied, true
+		}
+	}
+	if changed {
+		s.sessionWorkspaceStates[key] = next
+	}
+	return result, nil
+}
+
+func (s *MemoryStore) sessionWorkspaceIdentityPermanentlyRestricted(delivery SessionWorkspaceSupersededDelivery) bool {
+	if identity, exists := s.identityStates[delivery.VIBESUserID]; exists &&
+		(identity.accountEpoch != 0 && identity.accountEpoch != delivery.AccountEpoch || identity.revokedThrough >= delivery.AccountEpoch) {
+		return true
+	}
+	_, revoked := s.sessionRevocations[identitySessionKey{userID: delivery.VIBESUserID, sessionID: delivery.VIBESSessionID}]
+	return revoked
+}
+
+func (s *MemoryStore) sessionWorkspaceDependencies(delivery SessionWorkspaceSupersededDelivery) (permanent, ready bool) {
+	identity, identityExists := s.identityStates[delivery.VIBESUserID]
+	if delivery.IdentityRestrictionVersion > 0 && (!identityExists || identity.version < delivery.IdentityRestrictionVersion) {
+		return false, false
+	}
+	if identityExists {
+		if identity.integrity != integrityHealthy {
+			return false, false
+		}
+		if identity.accountEpoch != 0 && identity.accountEpoch != delivery.AccountEpoch {
+			return true, false
+		}
+		if identity.revokedThrough >= delivery.AccountEpoch {
+			return true, false
+		}
+	}
+	if s.sessionWorkspaceIdentityPermanentlyRestricted(delivery) {
+		return true, false
+	}
+	workspace, workspaceExists := s.workspaces[delivery.NewWorkspaceID]
+	projection, projectionExists := s.projections[projectionKey{userID: delivery.VIBESUserID, workspaceID: delivery.NewWorkspaceID}]
+	if !workspaceExists || !projectionExists || workspace.integrity != integrityHealthy ||
+		workspace.authorityVersion < delivery.AuthorityVersion || projection.AuthorityVersion < delivery.AuthorityVersion {
+		return false, false
+	}
+	if workspace.authorityVersion != delivery.AuthorityVersion || projection.AuthorityVersion != delivery.AuthorityVersion ||
+		projection.AccountEpoch != delivery.AccountEpoch || projection.MembershipGeneration != delivery.MembershipGeneration ||
+		projection.Status != StatusActive {
+		return true, false
+	}
+	tagSessionID := BrowserTagSessionID(delivery.VIBESUserID, delivery.VIBESSessionID)
+	if session, exists := s.sessions[tagSessionID]; exists {
+		if session.revoked || session.vibesUserID != delivery.VIBESUserID || session.vibesSessionID != delivery.VIBESSessionID ||
+			session.accountEpoch != delivery.AccountEpoch || session.sessionWorkspaceGeneration > delivery.SessionWorkspaceGeneration {
+			return true, false
+		}
+	}
+	return false, true
+}
+
+func (s *MemoryStore) applyMemorySessionWorkspaceFence(delivery SessionWorkspaceSupersededDelivery) {
+	tagSessionID := BrowserTagSessionID(delivery.VIBESUserID, delivery.VIBESSessionID)
+	if session, exists := s.sessions[tagSessionID]; exists {
+		session.sessionWorkspaceGeneration = delivery.SessionWorkspaceGeneration
+		s.sessions[tagSessionID] = session
+		for key := range s.grants {
+			if key.tagSessionID == tagSessionID {
+				delete(s.grants, key)
+			}
+		}
 	}
 }
 
@@ -185,6 +319,11 @@ func (s *MemoryStore) createGrant(_ context.Context, grant SessionGrant, now tim
 		return s.failure
 	}
 	if !grant.SessionExpiresAt.After(now) || !grant.GrantExpiresAt.After(now) {
+		return ErrGrantDenied
+	}
+	if supersession, exists := s.sessionWorkspaceStates[sessionWorkspaceKey{userID: grant.VIBESUserID, sessionID: grant.VIBESSessionID}]; exists &&
+		(supersession.integrity != integrityHealthy || supersession.accountEpoch != grant.AccountEpoch ||
+			supersession.generation != grant.SessionWorkspaceGeneration || supersession.workspaceID != grant.WorkspaceID) {
 		return ErrGrantDenied
 	}
 	workspace, workspaceExists := s.workspaces[grant.WorkspaceID]

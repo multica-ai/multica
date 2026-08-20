@@ -205,7 +205,7 @@ func (a *TagHTTPBrowserAuthenticator) Authenticate(request *http.Request) (TagHT
 func AuthenticateTagHTTPBrowser(authenticator *TagHTTPBrowserAuthenticator) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-			if !hasTagHTTPAssertionHeader(request) {
+			if !tagaccess.HasGatewayAssertionHeaders(request) {
 				stripUntrustedTagIdentityHeaders(request)
 				next.ServeHTTP(w, request)
 				return
@@ -302,12 +302,6 @@ func explicitTagServiceIdentity(request *http.Request) bool {
 	default:
 		return false
 	}
-}
-
-func hasTagHTTPAssertionHeader(request *http.Request) bool {
-	return len(request.Header.Values(tagaccess.HTTPAssertionHeader)) > 0 ||
-		len(request.Header.Values(tagaccess.HTTPAssertionSignatureHeader)) > 0 ||
-		len(request.Header.Values(tagaccess.HTTPAssertionKeyIDHeader)) > 0
 }
 
 func stripUntrustedTagIdentityHeaders(request *http.Request) {

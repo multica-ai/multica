@@ -191,10 +191,11 @@ type RouterOptions struct {
 	// passthrough scheduler on the constructed Handler. main.go injects a
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
-	HeartbeatScheduler handler.HeartbeatScheduler
-	TagAuthorityAccess *tagaccess.AuthenticatedAccess
-	TagHTTPVerifier    *tagaccess.HTTPAssertionVerifier
-	TagHTTPReplay      tagaccess.HTTPAssertionReplayStore
+	HeartbeatScheduler   handler.HeartbeatScheduler
+	TagAuthorityAccess   *tagaccess.AuthenticatedAccess
+	TagHTTPVerifier      *tagaccess.HTTPAssertionVerifier
+	TagWebSocketVerifier *tagaccess.HTTPAssertionVerifier
+	TagHTTPReplay        tagaccess.HTTPAssertionReplayStore
 }
 
 func buildChannelSupervisor(
@@ -1090,6 +1091,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		}
 		r.Post("/internal/tag-authority/workspace-projections", ingress.Workspace)
 		r.Post("/internal/tag-authority/identity-restrictions", ingress.Identity)
+		r.Post("/internal/tag-authority/session-workspace-supersessions", ingress.SessionWorkspace)
 	}
 
 	// Health / readiness checks
@@ -1119,7 +1121,15 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		return util.UUIDToString(ws.ID), nil
 	})
 	r.Get("/ws", func(w http.ResponseWriter, r *http.Request) {
-		realtime.HandleWebSocket(hub, mc, pr, slugResolver, w, r)
+		mirrors := middleware.NewPostgresTagHTTPMirrorResolver(pool)
+		if opts.TagAuthorityAccess != nil && tagaccess.HasGatewayAssertionHeaders(r) {
+			realtime.HandleTagGatewayWebSocket(
+				hub, opts.TagAuthorityAccess.Gate, opts.TagWebSocketVerifier, opts.TagHTTPReplay,
+				mirrors, w, r,
+			)
+			return
+		}
+		realtime.HandleWebSocketWithTagMirrorGuard(hub, mc, pr, slugResolver, mirrors, w, r)
 	})
 
 	// Local file serving (when using local storage). Served through the

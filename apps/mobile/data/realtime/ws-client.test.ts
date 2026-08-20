@@ -12,7 +12,7 @@ class MockWebSocket {
   onopen: (() => void) | null = null;
   onmessage: ((event: { data: string }) => void) | null = null;
   onerror: (() => void) | null = null;
-  onclose: (() => void) | null = null;
+  onclose: ((event?: { code: number; reason: string }) => void) | null = null;
   readonly sent: string[] = [];
 
   constructor(readonly url: string) {
@@ -32,9 +32,9 @@ class MockWebSocket {
     this.sent.push(frame);
   }
 
-  close() {
+  close(event?: { code: number; reason: string }) {
     this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.();
+    this.onclose?.(event);
   }
 }
 
@@ -88,6 +88,33 @@ describe("WSClient application heartbeat", () => {
     vi.advanceTimersByTime(10_000);
 
     expect(MockWebSocket.instances).toHaveLength(1);
+    client.disconnect();
+  });
+
+	it("stops stale-grant reconnects", () => {
+		const client = new WSClient({
+			url: "wss://example.test/ws",
+			token: "token",
+			workspaceSlug: "workspace",
+		});
+		client.connect();
+		const socket = MockWebSocket.instances[0];
+    socket.open();
+    socket.receive({ type: "auth_ack" });
+    socket.close({ code: 4403, reason: "fresh_authorization_required" });
+
+    vi.runOnlyPendingTimers();
+    expect(MockWebSocket.instances).toHaveLength(1);
+    client.disconnect();
+  });
+
+  it("retries after transient authorization-feed loss", () => {
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { client, socket } = connectAuthenticatedClient();
+    socket.close({ code: 1013, reason: "authorization_feed_unavailable" });
+
+    vi.advanceTimersByTime(1);
+    expect(MockWebSocket.instances).toHaveLength(2);
     client.disconnect();
   });
 });

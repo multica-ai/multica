@@ -158,6 +158,14 @@ func (s *postgresStore) createGrant(ctx context.Context, grant SessionGrant, now
 	if identityExists && (identity.integrity != integrityHealthy || grant.AccountEpoch < identity.accountEpoch || grant.AccountEpoch <= identity.revokedThrough) {
 		return ErrGrantDenied
 	}
+	supersession, supersessionExists, err := loadSessionWorkspaceStateForUpdate(ctx, tx, grant.VIBESUserID, grant.VIBESSessionID)
+	if err != nil {
+		return err
+	}
+	if supersessionExists && (supersession.integrity != integrityHealthy || supersession.accountEpoch != grant.AccountEpoch ||
+		supersession.generation != grant.SessionWorkspaceGeneration || supersession.workspaceID != grant.WorkspaceID) {
+		return ErrGrantDenied
+	}
 	revoked, err := identitySessionRevoked(ctx, tx, grant.VIBESUserID, grant.VIBESSessionID)
 	if err != nil {
 		return err

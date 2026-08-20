@@ -38,6 +38,11 @@ func TestAuthorizationMutationIsExposedOnlyByGate(t *testing.T) {
 			want:  []string{"Deliver"},
 		},
 		{
+			name:  "authenticated session Workspace supersession ingress",
+			value: authenticated.SessionWorkspaceIngress,
+			want:  []string{"Deliver"},
+		},
+		{
 			name:  "Postgres adapter",
 			value: tagaccess.NewPostgresStore(nil),
 			want:  nil,

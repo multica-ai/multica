@@ -207,6 +207,15 @@ var concurrentIndexCleanups = map[string]string{
 	"361_tag_access_identity_delivery_key_index":                "tag_access_identity_restriction_delivery_key_uidx",
 	"362_tag_access_identity_event_index":                       "tag_access_identity_restriction_delivery_event_uidx",
 	"363_tag_access_identity_idempotency_index":                 "tag_access_identity_restriction_delivery_idempotency_uidx",
+	"366_tag_http_assertion_replay_identity_index":              "tag_http_assertion_replay_identity_uidx",
+	"367_tag_http_assertion_replay_expiry_index":                "tag_http_assertion_replay_expiry_idx",
+	"369_tag_access_connection_close_receipt_index":             "tag_access_connection_close_receipt_delivery_uidx",
+	"370_tag_close_dispatch_index":                              "tag_access_connection_close_dispatch_command_uidx",
+	"372_tag_session_ws_state_index":                            "tag_access_session_workspace_state_uidx",
+	"374_tag_session_ws_delivery_key_index":                     "tag_access_session_workspace_delivery_key_uidx",
+	"375_tag_session_ws_event_index":                            "tag_access_session_workspace_delivery_event_uidx",
+	"376_tag_session_ws_idempotency_index":                      "tag_access_session_workspace_delivery_idempotency_uidx",
+	"377_tag_session_ws_delivery_id_index":                      "tag_access_session_workspace_delivery_id_uidx",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction

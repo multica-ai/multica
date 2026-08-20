@@ -1,0 +1,2 @@
+CREATE UNIQUE INDEX CONCURRENTLY tag_access_session_workspace_delivery_key_uidx
+    ON tag_access_session_workspace_delivery (vibes_user_id, vibes_session_id, session_workspace_generation);

@@ -53,6 +53,24 @@ func TestMemoryHTTPAssertionReplayStoreAtomicallyConsumesExactTuple(t *testing.T
 	}
 }
 
+func TestMemoryHTTPAssertionReplayStoreSharesAtomicTupleSpaceWithWebSocketAudience(t *testing.T) {
+	now := time.Date(2026, 8, 19, 12, 0, 0, 0, time.UTC)
+	store, err := NewMemoryHTTPAssertionReplayStore(assertionClock{now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claim := HTTPAssertionReplay{
+		Issuer: HTTPAssertionIssuer, Audience: WebSocketAssertionAudience,
+		RequestID: "request-ws-1", Nonce: "nonce-ws-1", ExpiresAt: now.Add(5 * time.Second),
+	}
+	if ok, err := store.Consume(context.Background(), claim); err != nil || !ok {
+		t.Fatalf("first WS consume = %v, %v", ok, err)
+	}
+	if ok, err := store.Consume(context.Background(), claim); err != nil || ok {
+		t.Fatalf("replayed WS consume = %v, %v", ok, err)
+	}
+}
+
 type mutableAssertionClock struct {
 	mu  sync.Mutex
 	now time.Time
