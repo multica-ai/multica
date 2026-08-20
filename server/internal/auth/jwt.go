@@ -38,9 +38,9 @@ var ErrInsecureJWTSecret = errors.New("JWT_SECRET is empty or a known insecure d
 
 // insecureJWTSecrets is the denylist of values that must never reach a
 // production deployment. The empty string is covered by JWTSecret()'s
-// dev-only fallback; "change-me-in-production" is the default baked into
-// docker-compose.selfhost.yml and .env.example. Add any new placeholder a
-// template ships with to this list.
+// dev-only fallback; "change-me-in-production" was historically shipped by
+// docker-compose.selfhost.yml and .env.example. Add any placeholder a template
+// ships with to this list before publishing it.
 var insecureJWTSecrets = map[string]struct{}{
 	"":                        {},
 	defaultJWTSecret:          {},
