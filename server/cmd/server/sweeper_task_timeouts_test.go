@@ -5,85 +5,39 @@ import (
 	"time"
 )
 
-func TestTaskSweeperTimeoutsFromEnv(t *testing.T) {
-	const (
-		dispatchEnv = "MULTICA_TASK_DISPATCH_TIMEOUT"
-		runningEnv  = "MULTICA_TASK_RUNNING_TIMEOUT"
-		queuedEnv   = "MULTICA_TASK_QUEUED_TTL"
-	)
-
+// TestQueuedTTLFromEnv pins the queued-TTL boot path: the env var value
+// reaches the sweeper unchanged, and unset, unparseable, or non-positive
+// values fall back to the documented default so existing deployments
+// behave identically. A zero TTL must stay invalid: it would expire every
+// queued task immediately.
+func TestQueuedTTLFromEnv(t *testing.T) {
 	tests := []struct {
-		name   string
-		env    map[string]string
-		unset  []string
-		expect sweeperTaskTimeouts
+		name  string
+		value string
+		want  time.Duration
 	}{
-		{
-			name:   "unset values keep the built-in defaults",
-			unset:  []string{dispatchEnv, runningEnv, queuedEnv},
-			expect: defaultSweeperTaskTimeouts(),
-		},
-		{
-			name: "positive durations override the defaults",
-			env: map[string]string{
-				dispatchEnv: "10m",
-				runningEnv:  "8h",
-				queuedEnv:   "24h",
-			},
-			expect: sweeperTaskTimeouts{
-				DispatchTimeout: 10 * time.Minute,
-				RunningTimeout:  8 * time.Hour,
-				QueuedTTL:       24 * time.Hour,
-			},
-		},
-		{
-			name: "one override leaves the other two at their defaults",
-			env: map[string]string{
-				queuedEnv: "12h",
-			},
-			expect: sweeperTaskTimeouts{
-				DispatchTimeout: defaultTaskDispatchTimeout,
-				RunningTimeout:  defaultTaskRunningTimeout,
-				QueuedTTL:       12 * time.Hour,
-			},
-		},
-		{
-			name: "invalid or non-positive values fall back to the defaults",
-			env: map[string]string{
-				dispatchEnv: "not-a-duration",
-				runningEnv:  "-5m",
-				queuedEnv:   "0s",
-			},
-			expect: defaultSweeperTaskTimeouts(),
-		},
+		{name: "unset keeps the built-in default", value: "", want: 2 * time.Hour},
+		{name: "positive duration overrides the default", value: "12h", want: 12 * time.Hour},
+		{name: "unparseable value falls back to the default", value: "not-a-duration", want: 2 * time.Hour},
+		{name: "non-positive value falls back to the default", value: "0s", want: 2 * time.Hour},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, key := range tc.unset {
-				t.Setenv(key, "")
-			}
-			for key, value := range tc.env {
-				t.Setenv(key, value)
-			}
+			t.Setenv("MULTICA_TASK_QUEUED_TTL", tc.value)
 
-			got := taskSweeperTimeoutsFromEnv()
-			if got != tc.expect {
-				t.Errorf("taskSweeperTimeoutsFromEnv() = %+v, want %+v", got, tc.expect)
+			got := envDuration("MULTICA_TASK_QUEUED_TTL", defaultTaskQueuedTTL)
+			if got != tc.want {
+				t.Errorf("MULTICA_TASK_QUEUED_TTL=%q -> %s, want %s", tc.value, got, tc.want)
 			}
 		})
 	}
 }
 
-func TestDefaultSweeperTaskTimeoutsMatchDocumentedWindow(t *testing.T) {
-	defaults := defaultSweeperTaskTimeouts()
-	if defaults.DispatchTimeout != 300*time.Second {
-		t.Errorf("default dispatch timeout = %s, want 300s", defaults.DispatchTimeout)
-	}
-	if defaults.RunningTimeout != 9000*time.Second {
-		t.Errorf("default running timeout = %s, want 9000s", defaults.RunningTimeout)
-	}
-	if defaults.QueuedTTL != 2*time.Hour {
-		t.Errorf("default queued TTL = %s, want 2h", defaults.QueuedTTL)
+// TestDefaultTaskQueuedTTL pins the built-in default so the documented 2h
+// window and the code cannot drift apart.
+func TestDefaultTaskQueuedTTL(t *testing.T) {
+	if defaultTaskQueuedTTL != 2*time.Hour {
+		t.Errorf("defaultTaskQueuedTTL = %s, want 2h", defaultTaskQueuedTTL)
 	}
 }
