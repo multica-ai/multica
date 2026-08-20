@@ -41,9 +41,26 @@ func TestShortID(t *testing.T) {
 func TestPredictRootDir(t *testing.T) {
 	t.Parallel()
 	got := PredictRootDir("/root", "ws-uuid", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
-	want := filepath.Join("/root", "ws-uuid", "a1b2c3d4")
+	want := filepath.Join("/root", "ws-uuid", "a1b2c3d4e5f67890abcdef1234567890")
 	if got != want {
 		t.Errorf("PredictRootDir = %q, want %q", got, want)
+	}
+	// ISE-2165: task IDs are UUIDv7, so every task created inside the same
+	// ~65.5s window shares its first 8 hex characters. The env root must still
+	// be distinct for each of them, or Prepare's RemoveAll deletes a live
+	// sibling's codex-home out from under a running agent.
+	sameBucket := []string{
+		"01a01ec3-db81-7120-b599-8f9cbe5d53b4",
+		"01a01ec3-e5a9-76b5-9b60-73259925e1c7",
+		"01a01ec3-ae30-731c-80d3-e032a03d4f40",
+	}
+	seen := map[string]string{}
+	for _, id := range sameBucket {
+		root := PredictRootDir("/root", "ws-uuid", id)
+		if prev, dup := seen[root]; dup {
+			t.Fatalf("PredictRootDir collided: %q and %q both map to %q", prev, id, root)
+		}
+		seen[root] = id
 	}
 	if got := PredictRootDir("", "ws", "task"); got != "" {
 		t.Errorf("expected empty when workspaces root missing, got %q", got)

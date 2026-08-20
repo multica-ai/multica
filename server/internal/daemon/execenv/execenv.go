@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -318,7 +319,18 @@ func PredictRootDir(workspacesRoot, workspaceID, taskID string) string {
 	if workspacesRoot == "" || workspaceID == "" || taskID == "" {
 		return ""
 	}
-	return filepath.Join(workspacesRoot, workspaceID, shortID(taskID))
+	return filepath.Join(workspacesRoot, workspaceID, taskDirName(taskID))
+}
+
+// taskDirName returns the directory name for a task's execution environment.
+// It must be unique per task. Task IDs are UUIDv7, whose first 48 bits are a
+// millisecond timestamp, so the first 8 hex characters are (epoch_ms >> 16) —
+// identical for every task created inside the same ~65.5 second window. Naming
+// the env root after that prefix put concurrent tasks in one directory, and
+// Prepare's defensive RemoveAll below then deleted a live sibling's codex-home,
+// config.toml and sqlite state out from under a running agent (ISE-2165).
+func taskDirName(taskID string) string {
+	return strings.ReplaceAll(taskID, "-", "")
 }
 
 // Prepare creates an isolated execution environment for a task.
@@ -335,7 +347,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: task ID is required")
 	}
 
-	envRoot := filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))
+	envRoot := PredictRootDir(params.WorkspacesRoot, params.WorkspaceID, params.TaskID)
 
 	// Self-heal the root-level daemon marker on every task start so a marker
 	// removed while the daemon runs is restored before the agent spawns. The
@@ -347,7 +359,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		logger.Warn("execenv: workspaces root marker not written; fail-closed guard limited to the task workdir", "error", err)
 	}
 
-	// Remove existing env if present (defensive — task IDs are unique).
+	// Remove existing env if present (defensive — env roots are unique per
+	// task; see taskDirName).
 	if _, err := os.Stat(envRoot); err == nil {
 		if err := os.RemoveAll(envRoot); err != nil {
 			return nil, fmt.Errorf("execenv: remove existing env: %w", err)

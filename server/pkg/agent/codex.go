@@ -1380,10 +1380,19 @@ func (b *codexBackend) executeOnce(ctx context.Context, prompt string, opts Exec
 				// still records bounded byte/truncation metadata.
 				finalError = withAgentStderr(finalError, "codex", sanitizeCodexDiagnostic(stderrBuf.Tail()))
 			}
-			retrySafe := timedOut && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
-			if timedOut && !cleanupConfirmed {
+			// A failed initialize is retry-safe whether the handshake timed out or
+			// the process died outright: in both cases initialize never returned, so
+			// the agent produced no semantic activity and started no thread. Codex
+			// startup crashes caused by a sibling task clobbering its CODEX_HOME
+			// (ISE-2165) land here, and are exactly the case max_attempts exists for.
+			// The parent task deadline/cancellation ending the run is the one case
+			// that must NOT retry — the task itself is over. A handshake timeout also
+			// surfaces as a context error, so it is matched first and stays retryable.
+			parentEnded := !timedOut && contextEnded
+			retrySafe := !parentEnded && !semanticObserved.Load() && cleanupConfirmed && codexInitializeRetrySupported()
+			if !parentEnded && !cleanupConfirmed {
 				finalError += "; retry suppressed: process cleanup/reap not confirmed"
-			} else if timedOut && cleanupConfirmed && !codexInitializeRetrySupported() {
+			} else if !parentEnded && cleanupConfirmed && !codexInitializeRetrySupported() {
 				finalError += "; retry suppressed: process-tree cleanup cannot be confirmed on this platform"
 			}
 			b.cfg.Logger.Warn("codex lifecycle", "phase", "initialize_failure", "task_id", b.cfg.TaskID, "runtime_id", b.cfg.RuntimeID, "pid", cmd.Process.Pid, "attempt", attempt, "latency", initializeLatency.Round(time.Millisecond).String(), "semantic_activity", semanticObserved.Load(), "cleanup_confirmed", cleanupConfirmed, "retry_safe", retrySafe)
