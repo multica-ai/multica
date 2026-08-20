@@ -2,14 +2,93 @@ package vibeshandoff
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 )
+
+func TestGoMatchesVIBESCLIPKCEVector(t *testing.T) {
+	data, err := os.ReadFile("testdata/vibes-cli-exchange-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var vector struct {
+		SchemaVersion                         int `json:"schemaVersion"`
+		Audience, CodeVerifier, CodeChallenge string
+	}
+	if err := json.Unmarshal(data, &vector); err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte(vector.CodeVerifier))
+	if got := base64.RawURLEncoding.EncodeToString(digest[:]); vector.SchemaVersion != CLISchemaVersion || vector.Audience != CLIAudience || got != vector.CodeChallenge {
+		t.Fatalf("Go PKCE vector mismatch: got %q", got)
+	}
+}
+
+func TestCLIClientConsumesPKCEBoundCodeOverTLSContract(t *testing.T) {
+	const secret = "cli-service-secret-at-least-32-bytes"
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/tag-cli/consume" || r.Header.Get("Authorization") != "Bearer "+secret {
+			t.Fatalf("unexpected request")
+		}
+		var body CLIConsumeRequest
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Code == "" || body.CodeVerifier == "" || body.ReceiverID == "" || body.ReceiverURI == "" || body.Audience != CLIAudience {
+			t.Fatalf("missing binding: %#v", body)
+		}
+		_ = json.NewEncoder(w).Encode(CLIIdentity{
+			SchemaVersion:    CLISchemaVersion,
+			Identity:         Identity{UserID: "vibes-user-1", SessionID: "session-1", WorkspaceID: "workspace-1", WorkspaceSlug: "design-lab", WorkspaceName: "Design Lab", Name: "VIBES User", Role: "owner", AccountEpoch: 2, SessionWorkspaceGeneration: 3, AuthorityVersion: 4, MembershipGeneration: 5},
+			SessionExpiresAt: time.Date(2026, 8, 20, 12, 0, 0, 0, time.UTC),
+		})
+	}))
+	defer server.Close()
+	client, err := NewCLIClient(server.URL+"/api/tag-cli/consume", secret)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.httpClient = server.Client()
+	identity, err := client.ConsumeCLI(context.Background(), CLIConsumeRequest{
+		SchemaVersion: CLISchemaVersion, Code: strings.Repeat("a", 43), CodeVerifier: strings.Repeat("b", 43), ReceiverID: strings.Repeat("c", 43),
+		ReceiverURI: "http://127.0.0.1:43123/callback", Audience: CLIAudience,
+	})
+	if err != nil || identity.SessionExpiresAt.IsZero() {
+		t.Fatalf("ConsumeCLI = %#v, %v", identity, err)
+	}
+}
+
+func TestCLIClientRejectsInsecureRemoteConsumeURL(t *testing.T) {
+	if _, err := NewCLIClient("http://vibes.college/api/tag-cli/consume", strings.Repeat("s", 32)); err == nil {
+		t.Fatal("expected insecure remote URL to fail closed")
+	}
+}
+
+func TestValidateCLIConfigAllowsDisabledButRejectsPartialConfiguration(t *testing.T) {
+	if err := ValidateCLIConfig("", ""); err != nil {
+		t.Fatalf("all-empty config should be explicitly disabled: %v", err)
+	}
+	for _, config := range []struct{ url, secret string }{
+		{url: "https://vibes.college/api/tag-cli/consume"},
+		{secret: "cli-exchange-service-secret-32-bytes-minimum"},
+		{url: "http://vibes.college/api/tag-cli/consume", secret: "cli-exchange-service-secret-32-bytes-minimum"},
+		{url: "https://vibes.college/api/tag-handoff/consume", secret: "cli-exchange-service-secret-32-bytes-minimum"},
+		{url: "https://vibes.college/api/tag-cli/consume?debug=1", secret: "cli-exchange-service-secret-32-bytes-minimum"},
+	} {
+		if err := ValidateCLIConfig(config.url, config.secret); err == nil {
+			t.Fatalf("partial/invalid config was accepted: %#v", config)
+		}
+	}
+}
 
 func TestClientConsumesOpaqueCodeOverRestrictedLoopbackContract(t *testing.T) {
 	const secret = "local-service-secret-at-least-32-bytes"

@@ -4,7 +4,9 @@ import (
 	"bufio"
 	"context"
 	"crypto/rand"
-	"encoding/hex"
+	"crypto/sha256"
+	"encoding/base64"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -20,7 +22,113 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cli"
+	"github.com/multica-ai/multica/server/internal/vibeshandoff"
 )
+
+type cliAuthorization struct {
+	State       string
+	Verifier    string
+	ReceiverID  string
+	ReceiverURI string
+}
+
+func randomBase64URL32() (string, error) {
+	value := make([]byte, 32)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(value), nil
+}
+
+func newCLIAuthorization(receiverURI string) (cliAuthorization, error) {
+	state, err := randomBase64URL32()
+	if err != nil {
+		return cliAuthorization{}, err
+	}
+	verifier, err := randomBase64URL32()
+	if err != nil {
+		return cliAuthorization{}, err
+	}
+	receiverID, err := randomBase64URL32()
+	if err != nil {
+		return cliAuthorization{}, err
+	}
+	return cliAuthorization{State: state, Verifier: verifier, ReceiverID: receiverID, ReceiverURI: receiverURI}, nil
+}
+
+func buildVIBESCLIAuthorizeURL(appURL string, authorization cliAuthorization) (string, error) {
+	if err := validateTLSOrLoopbackURL(appURL); err != nil {
+		return "", fmt.Errorf("invalid VIBES authorize URL: %w", err)
+	}
+	base, err := url.Parse(strings.TrimRight(appURL, "/") + "/api/tag-cli/authorize")
+	if err != nil || base.Hostname() == "" {
+		return "", errors.New("invalid VIBES authorize URL")
+	}
+	digest := sha256.Sum256([]byte(authorization.Verifier))
+	query := base.Query()
+	query.Set("audience", vibeshandoff.CLIAudience)
+	query.Set("code_challenge", base64.RawURLEncoding.EncodeToString(digest[:]))
+	query.Set("receiver_id", authorization.ReceiverID)
+	query.Set("receiver_uri", authorization.ReceiverURI)
+	query.Set("state", authorization.State)
+	base.RawQuery = query.Encode()
+	return base.String(), nil
+}
+
+func validateCLIExchangeServerURL(rawURL string) error {
+	if err := validateTLSOrLoopbackURL(rawURL); err != nil {
+		return fmt.Errorf("invalid Multica server URL: %w", err)
+	}
+	return nil
+}
+
+func validateCLICallbackHost(host string) error {
+	host = strings.TrimSpace(strings.ToLower(host))
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.To4() == nil || (!ip.IsLoopback() && !ip.IsPrivate()) {
+		return errors.New("must be localhost, loopback, or a private IPv4 address")
+	}
+	return nil
+}
+
+func validateTLSOrLoopbackURL(rawURL string) error {
+	parsed, err := url.Parse(rawURL)
+	if err != nil || parsed.Hostname() == "" || parsed.User != nil ||
+		(parsed.Path != "" && parsed.Path != "/") || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return errors.New("invalid URL")
+	}
+	if parsed.Scheme == "https" {
+		return nil
+	}
+	if parsed.Scheme != "http" {
+		return errors.New("requires HTTPS")
+	}
+	host := strings.Trim(strings.ToLower(parsed.Hostname()), "[]")
+	if host == "localhost" {
+		return nil
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return errors.New("requires HTTPS except on loopback")
+	}
+	return nil
+}
+
+func parseVIBESCLICallback(r *http.Request, expectedState string) (string, error) {
+	query := r.URL.Query()
+	if r.Method != http.MethodGet || r.URL.Path != "/callback" || len(query) != 2 ||
+		len(query["code"]) != 1 || len(query["state"]) != 1 || query.Get("state") != expectedState {
+		return "", errors.New("invalid CLI authorization callback")
+	}
+	code := query.Get("code")
+	if len(code) != 43 {
+		return "", errors.New("invalid CLI authorization callback")
+	}
+	return code, nil
+}
 
 // loginTokenPrefixes are the token prefixes `multica login --token` accepts.
 // The CLI used to hardcode `mul_` only, which made it impossible to log in
@@ -58,12 +166,12 @@ var authLogoutCmd = &cobra.Command{
 	RunE:  runAuthLogout,
 }
 
-// callbackHostFlag lets users override the host/IP that goes into the OAuth
-// cli_callback URL. Useful when the CLI sits behind a reverse proxy or the
+// callbackHostFlag lets users override the host/IP in the receiver URI.
+// Useful when the CLI sits behind a reverse proxy or the
 // auto-detected LAN IP isn't the one the browser can reach.
 const callbackHostFlag = "callback-host"
 
-const callbackHostFlagHelp = "Host/IP the OAuth callback URL points at when the browser can reach this CLI directly. For SSH-only machines, use the printed tunnel hint instead."
+const callbackHostFlagHelp = "Private IPv4 address for the callback listener when the browser can reach this CLI directly. For SSH-only machines, use the printed tunnel hint instead."
 
 func init() {
 	authCmd.AddCommand(authStatusCmd)
@@ -139,7 +247,7 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 	return runAuthLoginBrowser(cmd)
 }
 
-// resolveCallbackBinding picks the host that goes into the `cli_callback`
+// resolveCallbackBinding picks the host that goes into the receiver URI
 // URL and the interface the CLI should bind its local HTTP listener to.
 //
 // The browser running the login flow is on the *server's* machine (or
@@ -152,8 +260,8 @@ func runAuthLogin(cmd *cobra.Command, args []string) error {
 //   - self-host, CLI on server box: same as above.
 //   - self-host, CLI on a different LAN box: the callback URL must point at
 //     the CLI's own LAN IP, not the server's.
-//   - reverse-proxied / FQDN setups: auto-detection can't know the right
-//     host — the user supplies it via --callback-host.
+//   - unusual private networks: auto-detection can't know the right address —
+//     the user supplies a private IPv4 address via --callback-host.
 //
 // detectOutbound is injected so tests can exercise the routing decisions
 // without real network calls.
@@ -237,10 +345,16 @@ func detectOutboundIP(serverURL string) net.IP {
 
 func runAuthLoginBrowser(cmd *cobra.Command) error {
 	serverURL := resolveHumanServerURL(cmd)
+	if err := validateCLIExchangeServerURL(serverURL); err != nil {
+		return err
+	}
 	appURL := resolveAppURL(cmd)
 
 	flagHost := callbackHostFlagValue(cmd)
 	callbackHost, bindAddr := resolveCallbackBinding(flagHost, serverURL, appURL, detectOutboundIP)
+	if err := validateCLICallbackHost(callbackHost); err != nil {
+		return fmt.Errorf("invalid CLI callback host: %w", err)
+	}
 
 	// Pin to "tcp4" — a bare "tcp" on macOS can produce an IPv6-only socket
 	// that IPv4 clients (including browsers resolving localhost → 127.0.0.1)
@@ -255,37 +369,37 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	port := listener.Addr().(*net.TCPAddr).Port
 	callbackURL := fmt.Sprintf("http://%s:%d/callback", callbackHost, port)
 
-	// Generate a random state parameter for CSRF protection.
-	stateBytes := make([]byte, 16)
-	if _, err := rand.Read(stateBytes); err != nil {
-		return fmt.Errorf("failed to generate state: %w", err)
+	authorization, err := newCLIAuthorization(callbackURL)
+	if err != nil {
+		return fmt.Errorf("failed to create CLI authorization: %w", err)
 	}
-	state := hex.EncodeToString(stateBytes)
+	loginURL, err := buildVIBESCLIAuthorizeURL(appURL, authorization)
+	if err != nil {
+		return err
+	}
 
-	loginURL := fmt.Sprintf("%s/login?cli_callback=%s&cli_state=%s", appURL, url.QueryEscape(callbackURL), url.QueryEscape(state))
-
-	// Channel to receive the JWT from the browser callback.
-	jwtCh := make(chan string, 1)
+	// The browser returns only a short-lived opaque code. The PKCE verifier
+	// remains in this process and is sent only in the TLS exchange body.
+	codeCh := make(chan string, 1)
 	errCh := make(chan error, 1)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/callback", func(w http.ResponseWriter, r *http.Request) {
-		token := r.URL.Query().Get("token")
-		if token == "" {
-			http.Error(w, "missing token", http.StatusBadRequest)
+		code, callbackErr := parseVIBESCLICallback(r, authorization.State)
+		if callbackErr != nil {
+			http.Error(w, "invalid authorization callback", http.StatusBadRequest)
 			return
 		}
-		returnedState := r.URL.Query().Get("state")
-		if returnedState != state {
-			http.Error(w, "invalid state parameter", http.StatusBadRequest)
-			return
-		}
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/html")
-		w.Write([]byte(callbackSuccessHTML))
-		jwtCh <- token
+		_, _ = w.Write([]byte(callbackSuccessHTML))
+		select {
+		case codeCh <- code:
+		default:
+		}
 	})
 
-	srv := &http.Server{Handler: mux}
+	srv := &http.Server{Handler: mux, ReadHeaderTimeout: 5 * time.Second}
 	go func() {
 		if err := srv.Serve(listener); err != nil && err != http.ErrServerClosed {
 			errCh <- err
@@ -300,18 +414,17 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	}
 	fmt.Fprint(os.Stderr, browserLoginInstructions(loginURL, callbackHost, port, runningInSSHSession()))
 
-	// Wait for the JWT from the callback (timeout 5 minutes).
-	var jwtToken string
+	// Wait for the one-time code from the callback (timeout 5 minutes).
+	var code string
 	select {
-	case jwtToken = <-jwtCh:
+	case code = <-codeCh:
 	case err := <-errCh:
 		return fmt.Errorf("local server error: %w", err)
 	case <-time.After(5 * time.Minute):
 		return fmt.Errorf("timed out waiting for authentication")
 	}
 
-	// Use the JWT to create a PAT via the existing API.
-	client := cli.NewAPIClient(serverURL, "", jwtToken)
+	client := cli.NewAPIClient(serverURL, "", "")
 
 	ctx, cancel := cli.APIContext(context.Background())
 	defer cancel()
@@ -320,22 +433,24 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	if hostname == "" {
 		hostname = "unknown"
 	}
-	patName := fmt.Sprintf("CLI (%s)", hostname)
-	expiresInDays := 90
-
-	var patResp struct {
-		Token string `json:"token"`
+	var exchange struct {
+		Token       string `json:"token"`
+		WorkspaceID string `json:"workspace_id"`
 	}
-	err = client.PostJSON(ctx, "/api/tokens", map[string]any{
-		"name":            patName,
-		"expires_in_days": expiresInDays,
-	}, &patResp)
+	err = client.PostJSON(ctx, "/api/auth/vibes-cli-exchange", map[string]any{
+		"code":          code,
+		"code_verifier": authorization.Verifier,
+		"receiver_id":   authorization.ReceiverID,
+		"receiver_uri":  authorization.ReceiverURI,
+		"audience":      vibeshandoff.CLIAudience,
+		"device_name":   fmt.Sprintf("CLI (%s)", hostname),
+	}, &exchange)
 	if err != nil {
-		return cli.WithUserMessage("Sign-in did not complete: the server could not issue an access token for the CLI. Run `multica login` again.", err)
+		return cli.WithUserMessage("Sign-in did not complete: the VIBES authorization could not be exchanged. Run `multica login` again.", err)
 	}
 
 	// Verify the PAT works.
-	patClient := cli.NewAPIClient(serverURL, "", patResp.Token)
+	patClient := cli.NewAPIClient(serverURL, exchange.WorkspaceID, exchange.Token)
 	var me struct {
 		Name  string `json:"name"`
 		Email string `json:"email"`
@@ -348,8 +463,8 @@ func runAuthLoginBrowser(cmd *cobra.Command) error {
 	// server may have changed, so stale workspaces must not persist.
 	profile := resolveProfile(cmd)
 	cfg, _ := cli.LoadCLIConfigForProfile(profile)
-	cfg.WorkspaceID = ""
-	cfg.Token = patResp.Token
+	cfg.WorkspaceID = exchange.WorkspaceID
+	cfg.Token = exchange.Token
 	cfg.ServerURL = serverURL
 	cfg.AppURL = appURL
 	if err := cli.SaveCLIConfigForProfile(cfg, profile); err != nil {

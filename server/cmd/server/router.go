@@ -40,6 +40,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/tagaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
+	"github.com/multica-ai/multica/server/internal/vibeshandoff"
 	composiosdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
@@ -349,11 +350,20 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		ServerVersion:             normalizeServerVersion(version),
 		VIBESHandoffConsumeURL:    strings.TrimSpace(os.Getenv("VIBES_HANDOFF_CONSUME_URL")),
 		VIBESHandoffServiceSecret: strings.TrimSpace(os.Getenv("VIBES_HANDOFF_SERVICE_SECRET")),
+		VIBESCLIConsumeURL:        strings.TrimSpace(os.Getenv("VIBES_CLI_CONSUME_URL")),
+		VIBESCLIServiceSecret:     strings.TrimSpace(os.Getenv("VIBES_CLI_EXCHANGE_SERVICE_SECRET")),
+	}
+	if err := vibeshandoff.ValidateCLIConfig(
+		signupConfig.VIBESCLIConsumeURL,
+		signupConfig.VIBESCLIServiceSecret,
+	); err != nil {
+		panic(fmt.Sprintf("invalid VIBES CLI exchange configuration: %v", err))
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
 	if opts.TagAuthorityAccess != nil {
 		h.TagAuthorityEnabled = true
 		h.TagSessionGrantor = opts.TagAuthorityAccess.Gate
+		h.TagAccessGate = opts.TagAuthorityAccess.Gate
 	}
 	invitationRateLimits := handler.DefaultInvitationRateLimits()
 	invitationRateLimits.Actor.Limit = envNonNegativeInt("RATE_LIMIT_INVITATION_ACTOR_10M", invitationRateLimits.Actor.Limit)
@@ -1173,6 +1183,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	r.With(authRL).Post("/auth/send-code", h.SendCode)
 	r.With(authVerifyRL).Post("/auth/verify-code", h.VerifyCode)
 	r.With(authVerifyRL).Post("/api/auth/vibes-handoff", h.VIBESHandoff)
+	r.With(authVerifyRL).Post("/api/auth/vibes-cli-exchange", h.VIBESCLIExchange)
 	r.With(authRL).Post("/auth/google", h.GoogleLogin)
 	r.Post("/auth/logout", h.Logout)
 
@@ -1229,6 +1240,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			daemonTokenCache,
 			cloudPATVerifier,
 			middleware.NewPostgresTagHTTPMirrorResolver(pool),
+			h.TagAccessGate,
 		))
 
 		r.Post("/register", h.DaemonRegister)
@@ -1297,7 +1309,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			}
 		}
 		r.Use(middleware.AuthenticateTagHTTPBrowser(tagHTTPAuthenticator))
-		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
+		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier, h.TagAccessGate))
 		r.Use(middleware.RequireTagHTTP(mirrors))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
@@ -1538,7 +1550,9 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			r.Get("/", h.ListPersonalAccessTokens)
 			r.With(middleware.DenyMirroredAuthorityWriter).Post("/", h.CreatePersonalAccessToken)
 			r.With(middleware.DenyMirroredAuthorityWriter).Post("/current/renew", h.RenewCurrentPersonalAccessToken)
-			r.With(middleware.DenyMirroredAuthorityWriter).Delete("/{id}", h.RevokePersonalAccessToken)
+			// Multica owns its CLI credential lifecycle. VIBES identities cannot
+			// mint or extend PATs here, but may explicitly revoke an issued PAT.
+			r.Delete("/{id}", h.RevokePersonalAccessToken)
 		})
 
 		// Cloud Billing proxy. Same upstream service / port as

@@ -1,2 +1,2 @@
-export { LoginPage, validateCliCallback, redirectToCliCallback } from "./login-page";
+export { LoginPage } from "./login-page";
 export { useLogout } from "./use-logout";

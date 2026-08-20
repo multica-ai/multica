@@ -322,6 +322,13 @@ func BrowserTagSessionID(vibesUserID, vibesSessionID string) string {
 	return "tag-browser-" + hex.EncodeToString(digest[:])
 }
 
+// CLITagSessionID keeps a CLI receiver's durable grant separate from the
+// browser Gateway session while retaining the exact VIBES session authority.
+func CLITagSessionID(vibesUserID, vibesSessionID, receiverID string) string {
+	digest := sha256.Sum256([]byte(vibesUserID + "\x00" + vibesSessionID + "\x00" + receiverID))
+	return "tag-cli-" + hex.EncodeToString(digest[:])
+}
+
 func validProjection(event ProjectionEvent) bool {
 	if !validStableID(event.EventID) || !validStableID(event.VIBESUserID) || !validStableID(event.WorkspaceID) ||
 		event.AccountEpoch == 0 || event.AccountEpoch > maxDatabaseCounter ||

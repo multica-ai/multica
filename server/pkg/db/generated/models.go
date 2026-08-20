@@ -1484,6 +1484,22 @@ type VerificationCode struct {
 	Attempts  int32              `json:"attempts"`
 }
 
+type VibesCliPatBinding struct {
+	PatID                      pgtype.UUID        `json:"pat_id"`
+	MulticaUserID              pgtype.UUID        `json:"multica_user_id"`
+	MulticaWorkspaceID         pgtype.UUID        `json:"multica_workspace_id"`
+	VibesUserID                string             `json:"vibes_user_id"`
+	VibesSessionID             string             `json:"vibes_session_id"`
+	VibesWorkspaceID           string             `json:"vibes_workspace_id"`
+	TagSessionID               string             `json:"tag_session_id"`
+	AccountEpoch               int64              `json:"account_epoch"`
+	SessionWorkspaceGeneration int64              `json:"session_workspace_generation"`
+	AuthorityVersion           int64              `json:"authority_version"`
+	MembershipGeneration       int64              `json:"membership_generation"`
+	SessionExpiresAt           pgtype.Timestamptz `json:"session_expires_at"`
+	CreatedAt                  pgtype.Timestamptz `json:"created_at"`
+}
+
 type VibesUserMirror struct {
 	VibesUserID   string             `json:"vibes_user_id"`
 	MulticaUserID pgtype.UUID        `json:"multica_user_id"`

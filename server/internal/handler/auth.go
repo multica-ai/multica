@@ -743,9 +743,8 @@ func (h *Handler) GoogleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// IssueCliToken returns a fresh JWT for the authenticated user.
-// This allows cookie-authenticated browser sessions to obtain a bearer token
-// that can be handed off to the CLI via the cli_callback redirect.
+// IssueCliToken is retained only for the Desktop-owned deep-link handoff until
+// #296. The CLI authorization flow never calls this endpoint.
 func (h *Handler) IssueCliToken(w http.ResponseWriter, r *http.Request) {
 	userID, ok := requireUserID(w, r)
 	if !ok {

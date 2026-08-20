@@ -419,7 +419,11 @@ func (h *Handler) DaemonRegister(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusNotFound, "workspace not found")
 			return
 		}
-		// ownerID stays zero — COALESCE keeps the existing owner on upsert.
+		// A VIBES CLI PAT is user-owned even though its workspace is server-bound.
+		// An mdt_ token remains workspace-only and keeps ownerID zero.
+		if r.Header.Get("X-Actor-Source") == "vibes_cli_pat" {
+			ownerID = parseUUID(requestUserID(r))
+		}
 	} else {
 		member, ok := h.requireWorkspaceMember(w, r, req.WorkspaceID, "workspace not found")
 		if !ok {

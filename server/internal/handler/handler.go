@@ -134,6 +134,8 @@ type Config struct {
 	// The URL is required to be an HTTP loopback address by the client itself.
 	VIBESHandoffConsumeURL    string
 	VIBESHandoffServiceSecret string
+	VIBESCLIConsumeURL        string
+	VIBESCLIServiceSecret     string
 }
 
 type cloudRuntimeProxy interface {
@@ -212,6 +214,7 @@ type Handler struct {
 	// projection-backed AccessGate. It is deliberately narrower than the Gate:
 	// handlers may establish a session binding but cannot project authority.
 	TagSessionGrantor            tagSessionGrantor
+	TagAccessGate                *tagaccess.Gate
 	WebhookRateLimiter           WebhookRateLimiter
 	WebhookIPRateLimiter         WebhookRateLimiter
 	WebhookAbsoluteIPRateLimiter WebhookRateLimiter

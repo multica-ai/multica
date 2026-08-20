@@ -168,6 +168,19 @@ func TestResolveWorkspaceIDFromRequest(t *testing.T) {
 			},
 			want: uuidA,
 		},
+		{
+			name: "vibes_cli_pat actor: caller workspace inputs cannot override the VIBES binding",
+			setup: func(r *http.Request) {
+				r.Header.Set("X-Actor-Source", "vibes_cli_pat")
+				r.Header.Set("X-Workspace-ID", uuidA)
+				r.Header.Set("X-Workspace-Slug", testResolverSlug)
+				q := r.URL.Query()
+				q.Set("workspace_slug", testResolverSlug)
+				q.Set("workspace_id", uuidB)
+				r.URL.RawQuery = q.Encode()
+			},
+			want: uuidA,
+		},
 	}
 
 	for _, tc := range cases {

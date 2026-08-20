@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/tagaccess"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -76,11 +77,14 @@ func WithDaemonContext(ctx context.Context, workspaceID, daemonID string) contex
 // branch — same fail-closed contract as the regular Auth middleware.
 //
 // Cache misses fall back to the original DB-backed behavior.
-func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.DaemonTokenCache, cloudPAT *auth.CloudPATVerifier, mirrorResolvers ...TagHTTPMirrorResolver) func(http.Handler) http.Handler {
-	var mirrors TagHTTPMirrorResolver
-	if len(mirrorResolvers) > 0 {
-		mirrors = mirrorResolvers[0]
-	}
+func DaemonAuth(
+	queries *db.Queries,
+	patCache *auth.PATCache,
+	daemonCache *auth.DaemonTokenCache,
+	cloudPAT *auth.CloudPATVerifier,
+	mirrors TagHTTPMirrorResolver,
+	vibesCLIGate *tagaccess.Gate,
+) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — strip any
@@ -196,6 +200,24 @@ func DaemonAuth(queries *db.Queries, patCache *auth.PATCache, daemonCache *auth.
 			// Fallback: PAT tokens ("mul_" prefix).
 			if strings.HasPrefix(tokenString, "mul_") {
 				hash := auth.HashToken(tokenString)
+				cliBinding := authorizeVIBESCLIPAT(r.Context(), queries, vibesCLIGate, hash)
+				if cliBinding.Unavailable {
+					writeError(w, http.StatusServiceUnavailable, "VIBES CLI authority unavailable")
+					return
+				}
+				if cliBinding.Found {
+					if !cliBinding.Allowed {
+						writeError(w, http.StatusForbidden, "VIBES CLI credential denied")
+						return
+					}
+					r.Header.Set("X-User-ID", cliBinding.MulticaUserID)
+					r.Header.Set("X-Workspace-ID", cliBinding.MulticaWorkspaceID)
+					r.Header.Set("X-Actor-Source", "vibes_cli_pat")
+					ctx := context.WithValue(r.Context(), ctxKeyDaemonWorkspaceID, cliBinding.MulticaWorkspaceID)
+					ctx = context.WithValue(ctx, ctxKeyDaemonAuthPath, DaemonAuthPathPAT)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
 
 				if userID, ok := patCache.Get(r.Context(), hash); ok {
 					if rejectTemporarilyDisabledUser(w, r, userID, "", DaemonAuthPathPAT) {

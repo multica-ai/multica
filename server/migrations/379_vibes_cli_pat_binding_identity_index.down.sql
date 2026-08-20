@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS vibes_cli_pat_binding_pat_id_uidx;

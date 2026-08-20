@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, type ReactNode } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Card,
@@ -21,7 +21,6 @@ import {
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { api } from "@multica/core/api";
-import type { User } from "@multica/core/types";
 import { useT } from "../i18n";
 
 // ---------------------------------------------------------------------------
@@ -35,13 +34,6 @@ interface GoogleAuthConfig {
   state?: string;
 }
 
-interface CliCallbackConfig {
-  /** Validated localhost callback URL */
-  url: string;
-  /** Opaque state to pass back to CLI */
-  state: string;
-}
-
 interface LoginPageProps {
   /** Logo element rendered above the title */
   logo?: ReactNode;
@@ -50,8 +42,6 @@ interface LoginPageProps {
   onSuccess: () => void;
   /** Google OAuth config. Omit to disable Google login. */
   google?: GoogleAuthConfig;
-  /** CLI callback config for authorizing CLI tools. */
-  cliCallback?: CliCallbackConfig;
   /** Called after a token is obtained (e.g. to set cookies). */
   onTokenObtained?: () => void;
   /** Override Google login handler (e.g. desktop opens browser externally). When provided, renders the Google button even if `google` config is omitted. */
@@ -67,32 +57,6 @@ interface LoginPageProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-export function redirectToCliCallback(url: string, token: string, state: string) {
-  const separator = url.includes("?") ? "&" : "?";
-  window.location.href = `${url}${separator}token=${encodeURIComponent(token)}&state=${encodeURIComponent(state)}`;
-}
-
-/**
- * Validate that a CLI callback URL points to a safe host over HTTP.
- * Allows localhost and private/LAN IPs (RFC 1918) to support self-hosted setups
- * on local VMs while blocking arbitrary public hosts.
- */
-export function validateCliCallback(cliCallback: string): boolean {
-  try {
-    const cbUrl = new URL(cliCallback);
-    if (cbUrl.protocol !== "http:") return false;
-    const h = cbUrl.hostname;
-    if (h === "localhost" || h === "127.0.0.1") return true;
-    // Allow RFC 1918 private IPs: 10.x.x.x, 172.16-31.x.x, 192.168.x.x
-    if (/^10\./.test(h)) return true;
-    if (/^172\.(1[6-9]|2\d|3[01])\./.test(h)) return true;
-    if (/^192\.168\./.test(h)) return true;
-    return false;
-  } catch {
-    return false;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -101,60 +65,18 @@ export function LoginPage({
   logo,
   onSuccess,
   google,
-  cliCallback,
   onTokenObtained,
   onGoogleLogin,
   extra,
 }: LoginPageProps) {
   const { t } = useT("auth");
   const qc = useQueryClient();
-  const [step, setStep] = useState<"email" | "code" | "cli_confirm">("email");
+  const [step, setStep] = useState<"email" | "code">("email");
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [cooldown, setCooldown] = useState(0);
-  const [existingUser, setExistingUser] = useState<User | null>(null);
-  // Tracks how the existing session was detected so handleCliAuthorize
-  // uses the matching token source (cookie → issueCliToken, localStorage → direct).
-  const authSourceRef = useRef<"cookie" | "localStorage">("cookie");
-
-  // Check for existing session when CLI callback is present.
-  // Prioritises cookie auth (= current browser session) to avoid authorising
-  // the CLI with a stale or mismatched localStorage token.
-  useEffect(() => {
-    if (!cliCallback) return;
-
-    // Ensure no stale bearer token interferes — we want to test the cookie first.
-    api.setToken(null);
-
-    api
-      .getMe()
-      .then((user) => {
-        authSourceRef.current = "cookie";
-        setExistingUser(user);
-        setStep("cli_confirm");
-      })
-      .catch(() => {
-        // Cookie auth failed — fall back to localStorage token
-        const token = localStorage.getItem("multica_token");
-        if (!token) return;
-
-        api.setToken(token);
-        api
-          .getMe()
-          .then((user) => {
-            authSourceRef.current = "localStorage";
-            setExistingUser(user);
-            setStep("cli_confirm");
-          })
-          .catch(() => {
-            api.setToken(null);
-            localStorage.removeItem("multica_token");
-          });
-      });
-  }, [cliCallback]);
-
   // Cooldown timer for resend
   useEffect(() => {
     if (cooldown <= 0) return;
@@ -195,16 +117,6 @@ export function LoginPage({
       setLoading(true);
       setError("");
       try {
-        if (cliCallback) {
-          // CLI path: get token directly for the redirect URL
-          const { token } = await api.verifyCode(email, value);
-          localStorage.setItem("multica_token", token);
-          api.setToken(token);
-          onTokenObtained?.();
-          redirectToCliCallback(cliCallback.url, token, cliCallback.state);
-          return;
-        }
-
         // Normal path: seed the workspace list into the Query cache so the
         // caller's onSuccess can read it synchronously to compute a destination
         // URL (first workspace's slug, or /workspaces/new for zero-workspace
@@ -224,7 +136,7 @@ export function LoginPage({
         setLoading(false);
       }
     },
-    [email, onSuccess, cliCallback, onTokenObtained, qc, t],
+    [email, onSuccess, onTokenObtained, qc, t],
   );
 
   const handleResend = async () => {
@@ -237,34 +149,6 @@ export function LoginPage({
       setError(
         err instanceof Error ? err.message : t(($) => $.errors.resend_failed),
       );
-    }
-  };
-
-  const handleCliAuthorize = async () => {
-    if (!cliCallback) return;
-    setLoading(true);
-
-    try {
-      let token: string;
-
-      if (authSourceRef.current === "localStorage") {
-        // Session was detected via localStorage — reuse that token directly.
-        const stored = localStorage.getItem("multica_token");
-        if (!stored) throw new Error("token missing");
-        token = stored;
-      } else {
-        // Session was detected via cookie — obtain a bearer token from the server.
-        const res = await api.issueCliToken();
-        token = res.token;
-      }
-
-      onTokenObtained?.();
-      redirectToCliCallback(cliCallback.url, token, cliCallback.state);
-    } catch {
-      setError(t(($) => $.errors.cli_auth_failed));
-      setExistingUser(null);
-      setStep("email");
-      setLoading(false);
     }
   };
 
@@ -285,50 +169,6 @@ export function LoginPage({
     if (google.state) params.set("state", google.state);
     window.location.href = `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
   };
-
-  // -------------------------------------------------------------------------
-  // CLI confirm step
-  // -------------------------------------------------------------------------
-
-  if (step === "cli_confirm" && existingUser) {
-    return (
-      <div className="flex min-h-svh items-center justify-center">
-        <Card className="w-full max-w-sm">
-          <CardHeader className="text-center">
-            {logo && <div className="mx-auto mb-4">{logo}</div>}
-            <CardTitle className="text-display-sm">
-              {t(($) => $.cli.title)}
-            </CardTitle>
-            <CardDescription>
-              {t(($) => $.cli.description, { email: existingUser.email })}
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <Button
-              onClick={handleCliAuthorize}
-              disabled={loading}
-              className="w-full"
-              size="lg"
-            >
-              {loading
-                ? t(($) => $.cli.authorizing)
-                : t(($) => $.cli.authorize)}
-            </Button>
-            <Button
-              variant="ghost"
-              className="w-full"
-              onClick={() => {
-                setExistingUser(null);
-                setStep("email");
-              }}
-            >
-              {t(($) => $.cli.different_account)}
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
 
   // -------------------------------------------------------------------------
   // Code verification step

@@ -30,10 +30,6 @@ function renderWithI18n(ui: ReactElement) {
 const mockSendCode = vi.hoisted(() => vi.fn());
 const mockVerifyCode = vi.hoisted(() => vi.fn());
 const mockApiListWorkspaces = vi.hoisted(() => vi.fn());
-const mockApiVerifyCode = vi.hoisted(() => vi.fn());
-const mockApiSetToken = vi.hoisted(() => vi.fn());
-const mockApiGetMe = vi.hoisted(() => vi.fn());
-const mockApiIssueCliToken = vi.hoisted(() => vi.fn());
 const mockSetQueryData = vi.hoisted(() => vi.fn());
 
 vi.mock("@tanstack/react-query", async () => {
@@ -62,10 +58,6 @@ vi.mock("@multica/core/auth", () => ({
 vi.mock("@multica/core/api", () => ({
   api: {
     listWorkspaces: mockApiListWorkspaces,
-    verifyCode: mockApiVerifyCode,
-    setToken: mockApiSetToken,
-    getMe: mockApiGetMe,
-    issueCliToken: mockApiIssueCliToken,
   },
 }));
 
@@ -75,7 +67,7 @@ vi.mock("@multica/core/types", () => ({}));
 // Import after mocks
 // ---------------------------------------------------------------------------
 
-import { LoginPage, validateCliCallback } from "./login-page";
+import { LoginPage } from "./login-page";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -96,8 +88,6 @@ describe("LoginPage", () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    // Default: no existing session (getMe rejects when no auth)
-    mockApiGetMe.mockRejectedValue(new Error("unauthorized"));
     localStorage.clear();
     // Reset window.location for tests that change it
     Object.defineProperty(window, "location", {
@@ -407,217 +397,6 @@ describe("LoginPage", () => {
   });
 
   // -------------------------------------------------------------------------
-  // CLI callback — existing session
-  // -------------------------------------------------------------------------
-
-  it("shows cli_confirm step when existing session + cliCallback", async () => {
-    localStorage.setItem("multica_token", "existing-jwt");
-    // Cookie attempt fails first, then localStorage fallback succeeds
-    mockApiGetMe
-      .mockRejectedValueOnce(new Error("no cookie"))
-      .mockResolvedValueOnce({
-        id: "u-1",
-        email: "user@example.com",
-        name: "Test User",
-      });
-
-    render(
-      <LoginPage
-        onSuccess={onSuccess}
-        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(/authorize cli/i),
-      ).toBeInTheDocument();
-    });
-    expect(screen.getByText(/user@example.com/)).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /authorize/i }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: /use a different account/i }),
-    ).toBeInTheDocument();
-  });
-
-  it("CLI authorize button redirects to callback URL", async () => {
-    localStorage.setItem("multica_token", "existing-jwt");
-    // Cookie attempt fails, localStorage fallback succeeds
-    mockApiGetMe
-      .mockRejectedValueOnce(new Error("no cookie"))
-      .mockResolvedValueOnce({
-        id: "u-1",
-        email: "user@example.com",
-        name: "Test User",
-      });
-    const onTokenObtained = vi.fn();
-
-    render(
-      <LoginPage
-        onSuccess={onSuccess}
-        onTokenObtained={onTokenObtained}
-        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(/authorize cli/i),
-      ).toBeInTheDocument();
-    });
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /^authorize$/i }));
-
-    expect(onTokenObtained).toHaveBeenCalled();
-    expect(window.location.href).toContain(
-      "http://localhost:9876/callback?token=existing-jwt&state=abc",
-    );
-  });
-
-  it("'Use a different account' returns to email step", async () => {
-    localStorage.setItem("multica_token", "existing-jwt");
-    // Cookie attempt fails, localStorage fallback succeeds
-    mockApiGetMe
-      .mockRejectedValueOnce(new Error("no cookie"))
-      .mockResolvedValueOnce({
-        id: "u-1",
-        email: "user@example.com",
-        name: "Test User",
-      });
-
-    render(
-      <LoginPage
-        onSuccess={onSuccess}
-        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(/authorize cli/i),
-      ).toBeInTheDocument();
-    });
-
-    const user = userEvent.setup();
-    await user.click(
-      screen.getByRole("button", { name: /use a different account/i }),
-    );
-
-    expect(
-      screen.getByText(/sign in to multica/i),
-    ).toBeInTheDocument();
-  });
-
-  // -------------------------------------------------------------------------
-  // CLI callback — cookie-based session (no localStorage token)
-  // -------------------------------------------------------------------------
-
-  it("detects cookie-based session and shows cli_confirm when no localStorage token", async () => {
-    // No localStorage token — getMe succeeds via HttpOnly cookie
-    mockApiGetMe.mockResolvedValueOnce({
-      id: "u-1",
-      email: "cookie@example.com",
-      name: "Cookie User",
-    });
-
-    render(
-      <LoginPage
-        onSuccess={onSuccess}
-        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/authorize cli/i)).toBeInTheDocument();
-    });
-    expect(screen.getByText(/cookie@example.com/)).toBeInTheDocument();
-  });
-
-  it("CLI authorize with cookie session calls issueCliToken and redirects", async () => {
-    // No localStorage token — getMe succeeds via cookie
-    mockApiGetMe.mockResolvedValueOnce({
-      id: "u-1",
-      email: "cookie@example.com",
-      name: "Cookie User",
-    });
-    mockApiIssueCliToken.mockResolvedValueOnce({ token: "fresh-jwt" });
-    const onTokenObtained = vi.fn();
-
-    render(
-      <LoginPage
-        onSuccess={onSuccess}
-        onTokenObtained={onTokenObtained}
-        cliCallback={{ url: "http://localhost:9876/callback", state: "abc" }}
-      />,
-    );
-
-    await waitFor(() => {
-      expect(screen.getByText(/authorize cli/i)).toBeInTheDocument();
-    });
-
-    const user = userEvent.setup();
-    await user.click(screen.getByRole("button", { name: /^authorize$/i }));
-
-    await waitFor(() => {
-      expect(mockApiIssueCliToken).toHaveBeenCalled();
-      expect(onTokenObtained).toHaveBeenCalled();
-      expect(window.location.href).toContain(
-        "http://localhost:9876/callback?token=fresh-jwt&state=abc",
-      );
-    });
-  });
-
-  // -------------------------------------------------------------------------
-  // CLI callback — code verification redirects
-  // -------------------------------------------------------------------------
-
-  it("CLI code verification redirects to callback URL", async () => {
-    mockSendCode.mockResolvedValueOnce(undefined);
-    mockApiVerifyCode.mockResolvedValueOnce({ token: "new-jwt-token" });
-    const onTokenObtained = vi.fn();
-
-    render(
-      <LoginPage
-        onSuccess={onSuccess}
-        onTokenObtained={onTokenObtained}
-        cliCallback={{ url: "http://localhost:9876/callback", state: "xyz" }}
-      />,
-    );
-
-    const user = userEvent.setup();
-    await user.type(screen.getByLabelText(/email/i), "cli@example.com");
-    await user.click(screen.getByRole("button", { name: /continue/i }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByText(/check your email/i),
-      ).toBeInTheDocument();
-    });
-
-    const otpInput = getOTPInput();
-    await user.type(otpInput, "654321");
-
-    await waitFor(() => {
-      expect(mockApiVerifyCode).toHaveBeenCalledWith(
-        "cli@example.com",
-        "654321",
-      );
-      expect(onTokenObtained).toHaveBeenCalled();
-      expect(window.location.href).toContain(
-        "http://localhost:9876/callback?token=new-jwt-token&state=xyz",
-      );
-    });
-
-    // Normal verifyCode should NOT be called in CLI path
-    expect(mockVerifyCode).not.toHaveBeenCalled();
-    // onSuccess should NOT be called in CLI path — redirect handles it
-    expect(onSuccess).not.toHaveBeenCalled();
-  });
-
-  // -------------------------------------------------------------------------
   // Logo prop
   // -------------------------------------------------------------------------
 
@@ -697,52 +476,4 @@ describe("LoginPage", () => {
     ).toBeInTheDocument();
   });
 
-});
-
-// ---------------------------------------------------------------------------
-// validateCliCallback (exported helper)
-// ---------------------------------------------------------------------------
-
-describe("validateCliCallback", () => {
-  it("accepts http://localhost", () => {
-    expect(validateCliCallback("http://localhost:9876/callback")).toBe(true);
-  });
-
-  it("accepts http://127.0.0.1", () => {
-    expect(validateCliCallback("http://127.0.0.1:8080/cb")).toBe(true);
-  });
-
-  it("accepts 10.x.x.x private IPs", () => {
-    expect(validateCliCallback("http://10.0.0.5:9876/callback")).toBe(true);
-    expect(validateCliCallback("http://10.255.255.255:1234/cb")).toBe(true);
-  });
-
-  it("accepts 172.16-31.x.x private IPs", () => {
-    expect(validateCliCallback("http://172.16.0.1:9876/callback")).toBe(true);
-    expect(validateCliCallback("http://172.31.255.255:1234/cb")).toBe(true);
-  });
-
-  it("rejects 172.x outside 16-31 range", () => {
-    expect(validateCliCallback("http://172.15.0.1:9876/callback")).toBe(false);
-    expect(validateCliCallback("http://172.32.0.1:9876/callback")).toBe(false);
-  });
-
-  it("accepts 192.168.x.x private IPs", () => {
-    expect(validateCliCallback("http://192.168.1.131:41117/callback")).toBe(true);
-    expect(validateCliCallback("http://192.168.0.1:8080/cb")).toBe(true);
-  });
-
-  it("rejects https:// URLs", () => {
-    expect(validateCliCallback("https://localhost:9876/callback")).toBe(false);
-  });
-
-  it("rejects public IPs and domains", () => {
-    expect(validateCliCallback("http://evil.com:9876/callback")).toBe(false);
-    expect(validateCliCallback("http://8.8.8.8:9876/callback")).toBe(false);
-    expect(validateCliCallback("http://192.169.1.1:9876/callback")).toBe(false);
-  });
-
-  it("rejects invalid URLs", () => {
-    expect(validateCliCallback("not-a-url")).toBe(false);
-  });
 });

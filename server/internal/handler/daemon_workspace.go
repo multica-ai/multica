@@ -21,7 +21,14 @@ type DaemonWorkspaceResponse struct {
 // workspace.
 func (h *Handler) ListDaemonWorkspaces(w http.ResponseWriter, r *http.Request) {
 	var resp []DaemonWorkspaceResponse
-	if userID := requestUserID(r); userID != "" {
+	if workspaceID := middleware.DaemonWorkspaceIDFromContext(r.Context()); workspaceID != "" {
+		row, err := h.Queries.GetDaemonWorkspace(r.Context(), parseUUID(workspaceID))
+		if err != nil {
+			writeError(w, http.StatusNotFound, "workspace not found")
+			return
+		}
+		resp = []DaemonWorkspaceResponse{daemonWorkspaceToResponse(row.ID, row.Name)}
+	} else if userID := requestUserID(r); userID != "" {
 		rows, err := h.Queries.ListDaemonWorkspaces(r.Context(), parseUUID(userID))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to list daemon workspaces")
@@ -32,17 +39,8 @@ func (h *Handler) ListDaemonWorkspaces(w http.ResponseWriter, r *http.Request) {
 			resp[i] = daemonWorkspaceToResponse(row.ID, row.Name)
 		}
 	} else {
-		workspaceID := middleware.DaemonWorkspaceIDFromContext(r.Context())
-		if workspaceID == "" {
-			writeError(w, http.StatusUnauthorized, "daemon workspace identity required")
-			return
-		}
-		row, err := h.Queries.GetDaemonWorkspace(r.Context(), parseUUID(workspaceID))
-		if err != nil {
-			writeError(w, http.StatusNotFound, "workspace not found")
-			return
-		}
-		resp = []DaemonWorkspaceResponse{daemonWorkspaceToResponse(row.ID, row.Name)}
+		writeError(w, http.StatusUnauthorized, "daemon workspace identity required")
+		return
 	}
 
 	etag := daemonWorkspacesETag(resp)

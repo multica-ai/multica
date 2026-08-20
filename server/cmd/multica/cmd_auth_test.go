@@ -1,17 +1,112 @@
 package main
 
 import (
+	"crypto/sha256"
+	"encoding/base64"
 	"encoding/json"
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/spf13/cobra"
+
+	"github.com/multica-ai/multica/server/internal/vibeshandoff"
 )
+
+func TestBuildVIBESCLIAuthorizeURLBindsPKCEAndReceiverWithoutBearer(t *testing.T) {
+	verifier := "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8"
+	wantDigest := sha256.Sum256([]byte(verifier))
+	wantChallenge := base64.RawURLEncoding.EncodeToString(wantDigest[:])
+	authorization := cliAuthorization{
+		State:       "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8",
+		Verifier:    verifier,
+		ReceiverID:  "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+		ReceiverURI: "http://127.0.0.1:43123/callback",
+	}
+	got, err := buildVIBESCLIAuthorizeURL("https://vibes.college", authorization)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parsed, err := url.Parse(got)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if parsed.Path != "/api/tag-cli/authorize" || parsed.Query().Get("code_challenge") != wantChallenge ||
+		parsed.Query().Get("receiver_id") != authorization.ReceiverID || parsed.Query().Get("receiver_uri") != authorization.ReceiverURI ||
+		parsed.Query().Get("state") != authorization.State || parsed.Query().Get("audience") != vibeshandoff.CLIAudience {
+		t.Fatalf("unexpected authorize URL: %s", got)
+	}
+	for _, forbidden := range []string{"token", "jwt", "bearer", "cookie", verifier} {
+		if strings.Contains(strings.ToLower(got), strings.ToLower(forbidden)) {
+			t.Fatalf("authorize URL contains forbidden value %q: %s", forbidden, got)
+		}
+	}
+}
+
+func TestParseVIBESCLICallbackAcceptsOnlyExactOpaqueCodeAndState(t *testing.T) {
+	state := "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8"
+	code := "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA"
+	request := httptest.NewRequest(http.MethodGet, "/callback?code="+code+"&state="+state, nil)
+	if got, err := parseVIBESCLICallback(request, state); err != nil || got != code {
+		t.Fatalf("callback = %q, %v", got, err)
+	}
+	for _, target := range []string{
+		"/callback?token=jwt&state=" + state,
+		"/callback?code=" + code + "&state=wrong",
+		"/other?code=" + code + "&state=" + state,
+		"/callback?code=" + code + "&code=" + code + "&state=" + state,
+		"/callback?code=" + code + "&state=" + state + "&extra=value",
+	} {
+		if _, err := parseVIBESCLICallback(httptest.NewRequest(http.MethodGet, target, nil), state); err == nil {
+			t.Fatalf("expected callback %q to fail closed", target)
+		}
+	}
+}
+
+func TestValidateCLIExchangeServerURLRequiresTLSExceptLoopback(t *testing.T) {
+	for _, accepted := range []string{
+		"https://api.multica.ai",
+		"https://192.168.1.10:8080",
+		"http://localhost:8080",
+		"http://127.0.0.1:8080",
+		"http://[::1]:8080",
+	} {
+		if err := validateCLIExchangeServerURL(accepted); err != nil {
+			t.Fatalf("expected %q to be accepted: %v", accepted, err)
+		}
+	}
+	for _, rejected := range []string{
+		"http://api.multica.ai",
+		"http://192.168.1.10:8080",
+		"ftp://localhost/exchange",
+		"https://user@example.com",
+		"https://api.multica.ai/base-path",
+		"https://api.multica.ai?token=forbidden",
+		"not a URL",
+	} {
+		if err := validateCLIExchangeServerURL(rejected); err == nil {
+			t.Fatalf("expected %q to fail closed", rejected)
+		}
+	}
+}
+
+func TestValidateCLICallbackHostAllowsOnlyTheLocalReceiverModel(t *testing.T) {
+	for _, accepted := range []string{"localhost", "127.0.0.1", "10.0.0.5", "172.16.2.4", "192.168.1.9"} {
+		if err := validateCLICallbackHost(accepted); err != nil {
+			t.Fatalf("expected %q to be accepted: %v", accepted, err)
+		}
+	}
+	for _, rejected := range []string{"attacker.example", "cli.internal.example", "8.8.8.8", "::1", "127.0.0.1:8080"} {
+		if err := validateCLICallbackHost(rejected); err == nil {
+			t.Fatalf("expected %q to fail closed", rejected)
+		}
+	}
+}
 
 func TestMain(m *testing.M) {
 	for _, key := range []string{
@@ -116,12 +211,12 @@ func TestResolveCallbackBinding(t *testing.T) {
 			wantBind:     "0.0.0.0",
 		},
 		{
-			name:         "--callback-host flag overrides everything",
-			flagHost:     "cli.internal.example",
+			name:         "--callback-host private IP overrides everything",
+			flagHost:     "10.0.0.5",
 			appURL:       "https://multica.ai",
 			serverURL:    "https://api.multica.ai",
 			detect:       fixed("10.0.0.5"),
-			wantCallback: "cli.internal.example",
+			wantCallback: "10.0.0.5",
 			wantBind:     "0.0.0.0",
 		},
 	}
@@ -141,7 +236,7 @@ func TestResolveCallbackBinding(t *testing.T) {
 }
 
 func TestBrowserLoginInstructionsSSHRemoteHint(t *testing.T) {
-	const loginURL = "https://multica.ai/login?cli_callback=http%3A%2F%2Flocalhost%3A43689%2Fcallback"
+	const loginURL = "https://vibes.college/api/tag-cli/authorize?receiver_uri=http%3A%2F%2Flocalhost%3A43689%2Fcallback"
 
 	got := browserLoginInstructions(loginURL, "localhost", 43689, true)
 	if !strings.Contains(got, "ssh -L 43689:127.0.0.1:43689 <user>@<remote-host>") {

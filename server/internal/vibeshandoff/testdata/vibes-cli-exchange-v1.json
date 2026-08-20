@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "audience": "vibes-multica-cli-v1",
+  "state": "YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8",
+  "code": "AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA",
+  "codeVerifier": "ICEiIyQlJicoKSorLC0uLzAxMjM0NTY3ODk6Ozw9Pj8",
+  "codeChallenge": "zwkx4Wi0nph1A8rxivb-JTtrPYKoEAjD6OHuZ8fI3FU",
+  "receiverId": "QEFCQ0RFRkdISUpLTE1OT1BRUlNUVVZXWFlaW1xdXl8",
+  "receiverUri": "http://127.0.0.1:43123/callback",
+  "callbackLocation": "http://127.0.0.1:43123/callback?code=AQIDBAUGBwgJCgsMDQ4PEBESExQVFhcYGRobHB0eHyA&state=YGFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6e3x9fn8"
+}

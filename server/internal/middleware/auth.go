@@ -11,6 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/auth"
+	"github.com/multica-ai/multica/server/internal/tagaccess"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -48,7 +49,11 @@ func rejectTemporarilyDisabledUser(w http.ResponseWriter, r *http.Request, userI
 // local DB. When nil (Fleet URL unset) mcn_ tokens are rejected at the
 // prefix branch — we don't fall through to the mul_ / JWT paths, since
 // an mcn_ string is by construction not a valid mul_ PAT or JWT.
-func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier) func(http.Handler) http.Handler {
+func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATVerifier, vibesCLIGates ...*tagaccess.Gate) func(http.Handler) http.Handler {
+	var vibesCLIGate *tagaccess.Gate
+	if len(vibesCLIGates) > 0 {
+		vibesCLIGate = vibesCLIGates[0]
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// X-Actor-Source is server-set only — any value supplied by
@@ -187,6 +192,29 @@ func Auth(queries *db.Queries, patCache *auth.PATCache, cloudPAT *auth.CloudPATV
 			// PAT: tokens starting with "mul_"
 			if strings.HasPrefix(tokenString, "mul_") {
 				hash := auth.HashToken(tokenString)
+				cliBinding := authorizeVIBESCLIPAT(r.Context(), queries, vibesCLIGate, hash)
+				if cliBinding.Unavailable {
+					http.Error(w, `{"error":"VIBES CLI authority unavailable"}`, http.StatusServiceUnavailable)
+					return
+				}
+				if cliBinding.Found {
+					if !cliBinding.Allowed {
+						http.Error(w, `{"error":"VIBES CLI credential denied"}`, http.StatusForbidden)
+						return
+					}
+					r.Header.Set("X-User-ID", cliBinding.MulticaUserID)
+					r.Header.Set("X-Workspace-ID", cliBinding.MulticaWorkspaceID)
+					r.Header.Set("X-Actor-Source", "vibes_cli_pat")
+					identity := TagHTTPIdentity{
+						MulticaUserID:      cliBinding.MulticaUserID,
+						MulticaWorkspaceID: cliBinding.MulticaWorkspaceID,
+						Role:               cliBinding.Role,
+						Mirrored:           true,
+					}
+					ctx := context.WithValue(r.Context(), ctxKeyTagHTTPIdentity, identity)
+					next.ServeHTTP(w, r.WithContext(ctx))
+					return
+				}
 
 				// Cache hit: TTL has not expired, the token was valid the
 				// last time we looked, and nothing has invalidated the
