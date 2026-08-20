@@ -1,14 +1,13 @@
 package handler
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
 	"net/http"
-	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/internal/testutil"
 )
 
 func TestNormaliseAgentStarterPrompts(t *testing.T) {
@@ -51,66 +50,42 @@ func TestAgentStarterPromptsRoundTrip(t *testing.T) {
 		t.Skip("database not available")
 	}
 
-	create := httptest.NewRecorder()
-	testHandler.CreateAgent(create, newRequest(http.MethodPost, "/api/agents", map[string]any{
+	var created AgentResponse
+	testutil.Call(t, testHandler.CreateAgent, newRequest(http.MethodPost, "/api/agents", map[string]any{
 		"name":       fmt.Sprintf("starter-prompts-%d", time.Now().UnixNano()),
 		"runtime_id": handlerTestRuntimeID(t),
 		"starter_prompts": []map[string]string{{
 			"label":  "  Review a PR  ",
 			"prompt": "  Review the most relevant open pull request.  ",
 		}},
-	}))
-	if create.Code != http.StatusCreated {
-		t.Fatalf("create status = %d, want 201: %s", create.Code, create.Body.String())
-	}
-
-	var created AgentResponse
-	if err := json.NewDecoder(create.Body).Decode(&created); err != nil {
-		t.Fatalf("decode create response: %v", err)
-	}
-	t.Cleanup(func() {
-		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
-	})
+	})).Want(http.StatusCreated).JSON(&created)
+	dbfx.Cleanup(t, `DELETE FROM agent WHERE id = $1`, created.ID)
 	if len(created.StarterPrompts) != 1 ||
 		created.StarterPrompts[0].Label != "Review a PR" ||
 		created.StarterPrompts[0].Prompt != "Review the most relevant open pull request." {
 		t.Fatalf("created starter_prompts = %#v", created.StarterPrompts)
 	}
 
-	omitted := httptest.NewRecorder()
-	testHandler.UpdateAgent(omitted, withURLParam(
+	var preserved AgentResponse
+	testutil.Call(t, testHandler.UpdateAgent, withURLParam(
 		newRequest(http.MethodPut, "/api/agents/"+created.ID, map[string]any{
 			"description": "starter prompts unchanged",
 		}),
 		"id",
 		created.ID,
-	))
-	if omitted.Code != http.StatusOK {
-		t.Fatalf("omitted update status = %d, want 200: %s", omitted.Code, omitted.Body.String())
-	}
-	var preserved AgentResponse
-	if err := json.NewDecoder(omitted.Body).Decode(&preserved); err != nil {
-		t.Fatalf("decode omitted update response: %v", err)
-	}
+	)).Want(http.StatusOK).JSON(&preserved)
 	if len(preserved.StarterPrompts) != 1 {
 		t.Fatalf("omitted update starter_prompts = %#v, want preserved prompt", preserved.StarterPrompts)
 	}
 
-	cleared := httptest.NewRecorder()
-	testHandler.UpdateAgent(cleared, withURLParam(
+	var clearedAgent AgentResponse
+	testutil.Call(t, testHandler.UpdateAgent, withURLParam(
 		newRequest(http.MethodPut, "/api/agents/"+created.ID, map[string]any{
 			"starter_prompts": []AgentStarterPrompt{},
 		}),
 		"id",
 		created.ID,
-	))
-	if cleared.Code != http.StatusOK {
-		t.Fatalf("clear status = %d, want 200: %s", cleared.Code, cleared.Body.String())
-	}
-	var clearedAgent AgentResponse
-	if err := json.NewDecoder(cleared.Body).Decode(&clearedAgent); err != nil {
-		t.Fatalf("decode clear response: %v", err)
-	}
+	)).Want(http.StatusOK).JSON(&clearedAgent)
 	if len(clearedAgent.StarterPrompts) != 0 {
 		t.Fatalf("cleared starter_prompts = %#v, want empty", clearedAgent.StarterPrompts)
 	}

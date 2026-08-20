@@ -59,7 +59,7 @@ import {
   useSetChatSessionProject,
   useUpdateChatSession,
 } from "@multica/core/chat/mutations";
-import { DRAFT_NEW_SESSION, useChatStore } from "@multica/core/chat";
+import { useChatStore } from "@multica/core/chat";
 import { upsertChatMessageToCaches } from "@multica/core/chat/message-cache";
 import { chatQuickActionsPendingOptions } from "@multica/core/chat/queries";
 import { useQuickActionsPendingTimeout } from "@multica/core/chat/use-quick-actions-pending-timeout";
@@ -188,13 +188,24 @@ export function ChatWindow() {
   // Nonce handed to ChatInput to pull focus into the compose box: when a new
   // chat starts (⊕ or switching agent), and whenever the window itself opens.
   const { focusRequest, requestInputFocus } = useChatInputFocus(isOpen);
+  const [starterPromptRequest, setStarterPromptRequest] = useState<{
+    id: number;
+    content: string;
+  } | null>(null);
+  const nextStarterPromptRequestIdRef = useRef(0);
   const prefillStarterPrompt = useCallback(
     (prompt: string) => {
-      const draftKey = activeSessionId ?? DRAFT_NEW_SESSION;
-      useChatStore.getState().setInputDraft(draftKey, prompt);
+      setStarterPromptRequest({
+        id: ++nextStarterPromptRequestIdRef.current,
+        content: prompt,
+      });
       requestInputFocus();
     },
-    [activeSessionId, requestInputFocus],
+    [requestInputFocus],
+  );
+  const handleStarterPromptApplied = useCallback(
+    () => setStarterPromptRequest(null),
+    [],
   );
 
   // Legacy archived sessions (the old soft-archive feature was removed but
@@ -973,6 +984,8 @@ export function ChatWindow() {
       <ChatInput
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
+        starterPromptRequest={starterPromptRequest}
+        onStarterPromptApplied={handleStarterPromptApplied}
         onRestoreDraftApplied={handleRestoreDraftApplied}
         uploadEnabled={!!activeAgent && !isAgentAccessRevoked}
         onStop={handleStop}

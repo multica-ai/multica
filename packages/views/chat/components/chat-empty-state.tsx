@@ -67,9 +67,9 @@ export function EmptyState({
           className="w-full max-w-sm space-y-2"
           aria-label={t(($) => $.starter_prompts.aria_label)}
         >
-          {prompts.map((item) => (
+          {prompts.map((item, index) => (
             <button
-              key={`${item.label}:${item.prompt}`}
+              key={index}
               type="button"
               onClick={() => onPickPrompt(item.prompt)}
               className="w-full rounded-lg border border-border bg-card px-3 py-2.5 text-left text-body text-foreground transition-colors hover:border-brand/40 hover:bg-accent"

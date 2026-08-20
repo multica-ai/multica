@@ -67,9 +67,9 @@ export function ChatEmptyState({ hasSessions, agent, onPickPrompt }: Props) {
       </View>
       {agent ? (
         <View className="w-full max-w-xs gap-2">
-          {prompts.map((item) => (
+          {prompts.map((item, index) => (
             <Button
-              key={`${item.label}:${item.prompt}`}
+              key={index}
               variant="outline"
               onPress={() => onPickPrompt(item.prompt)}
               className="h-auto justify-start px-3 py-2.5"
