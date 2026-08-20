@@ -33,9 +33,9 @@ func TestUpdateComment_RequeuesDelegatedFailureRecoverySurvivor(t *testing.T) {
 
 	var workerIssueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, assignee_type, assignee_id, number, position)
 		VALUES (
-			$1, 'delegated recovery worker issue', 'in_progress', 'none', $2, 'member',
+			$1, 'delegated recovery worker issue', 'in_progress', 'none', $2, 'member', 'member', $2,
 			(SELECT COALESCE(MAX(number), 82649) + 1 FROM issue WHERE workspace_id = $1),
 			0
 		)

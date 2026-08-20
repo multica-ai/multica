@@ -626,8 +626,8 @@ func TestCancelTaskByUser_DelegatedFailureRecoveryAcknowledgesSignal(t *testing.
 	agentID := createHandlerTestAgent(t, "CancelRecoveryTaskAgent", []byte("[]"))
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'cancel-recovery-task', 'in_progress', 'medium', $2, 'member', 92004, 0)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, assignee_type, assignee_id, number, position)
+		VALUES ($1, 'cancel-recovery-task', 'in_progress', 'medium', $2, 'member', 'member', $2, 92004, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("create issue: %v", err)

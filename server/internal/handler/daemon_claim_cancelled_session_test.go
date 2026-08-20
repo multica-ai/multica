@@ -141,8 +141,8 @@ func TestClaimTask_IssueResumesCancelledTaskSession(t *testing.T) {
 
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, 'cancelled issue run fixture', 'in_progress', 'none', $2, 'member', 86340, 0)
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, assignee_type, assignee_id, number, position)
+		VALUES ($1, 'cancelled issue run fixture', 'in_progress', 'none', $2, 'member', 'member', $2, 86340, 0)
 		RETURNING id
 	`, testWorkspaceID, testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("setup: create issue: %v", err)

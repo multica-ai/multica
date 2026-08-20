@@ -36,8 +36,8 @@ func seedNULTask(t *testing.T, label string) (agentID, taskID string) {
 	// the handler ever reads the body.
 	var issueID string
 	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, number, position)
-		VALUES ($1, $2, 'in_progress', 'none', $3, 'member',
+		INSERT INTO issue (workspace_id, title, status, priority, creator_id, creator_type, assignee_type, assignee_id, number, position)
+		VALUES ($1, $2, 'in_progress', 'none', $3, 'member', 'member', $3,
 			(SELECT COALESCE(MAX(number), 0) + 1 FROM issue WHERE workspace_id = $1), 0)
 		RETURNING id`, testWorkspaceID, label+" fixture", testUserID).Scan(&issueID); err != nil {
 		t.Fatalf("seed issue: %v", err)
