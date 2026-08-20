@@ -1105,6 +1105,50 @@ func TestGetAutopilotRun_ReturnsFullPayload(t *testing.T) {
 	}
 }
 
+// TestListAutopilotRuns_SurfacesRunResult locks in the read-back path that
+// `autopilot runs` relies on: when a run_only task completes, SyncRunFromTask
+// writes the task result to autopilot_run.result via UpdateAutopilotRunCompleted,
+// and the list endpoint must surface it so the CLI can render a per-row summary.
+func TestListAutopilotRuns_SurfacesRunResult(t *testing.T) {
+	agentID := createWebhookTestAgent(t, "RunsResult Agent")
+	apID := createWebhookTestAutopilot(t, agentID, "active", "run_only")
+
+	run, err := testHandler.Queries.CreateAutopilotRun(context.Background(), db.CreateAutopilotRunParams{
+		AutopilotID: parseUUID(apID),
+		Source:      "manual",
+		Status:      "running",
+	})
+	if err != nil {
+		t.Fatalf("create run: %v", err)
+	}
+
+	// Simulate the run_only task completing. SyncRunFromTask calls exactly
+	// this query with task.Result, which the daemon marshals as
+	// {output, pr_url, session_id, work_dir} (see handler.CompleteTask).
+	resultJSON := []byte(`{"output":"Shipped daily digest (PR #42)","pr_url":"https://example.com/pr/42"}`)
+	if _, err := testHandler.Queries.UpdateAutopilotRunCompleted(context.Background(), db.UpdateAutopilotRunCompletedParams{
+		ID:     run.ID,
+		Result: resultJSON,
+	}); err != nil {
+		t.Fatalf("complete run: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("GET", "/api/autopilots/"+apID+"/runs", nil)
+	req = withURLParam(req, "id", apID)
+	testHandler.ListAutopilotRuns(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"output":"Shipped daily digest (PR #42)"`) {
+		t.Fatalf("list response should surface run result output, body=%s", body)
+	}
+	if !strings.Contains(body, `"status":"completed"`) {
+		t.Fatalf("list response should mark run completed, body=%s", body)
+	}
+}
+
 // NOTE: the cross-workspace paranoia branch in autopilot_webhook.go
 // (uuidToString(autopilot.WorkspaceID) != uuidToString(trigRow.AutopilotWorkspaceID))
 // is defense-in-depth against a TOCTOU race between the joined token

@@ -519,7 +519,7 @@ func runAutopilotRuns(cmd *cobra.Command, args []string) error {
 		return cli.PrintJSON(os.Stdout, resp)
 	}
 
-	headers := []string{"ID", "SOURCE", "STATUS", "ISSUE", "TRIGGERED_AT", "COMPLETED_AT"}
+	headers := []string{"ID", "SOURCE", "STATUS", "ISSUE", "SUMMARY", "TRIGGERED_AT", "COMPLETED_AT"}
 	rows := make([][]string, 0, len(resp.Runs))
 	for _, r := range resp.Runs {
 		rows = append(rows, []string{
@@ -527,6 +527,7 @@ func runAutopilotRuns(cmd *cobra.Command, args []string) error {
 			strVal(r, "source"),
 			strVal(r, "status"),
 			strVal(r, "issue_id"),
+			summarizeRun(r),
 			strVal(r, "triggered_at"),
 			strVal(r, "completed_at"),
 		})
@@ -534,6 +535,61 @@ func runAutopilotRuns(cmd *cobra.Command, args []string) error {
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
 }
+
+// summarizeRun produces a one-line, table-cell preview of a run's outcome so
+// `autopilot runs` can show what each run actually produced without forcing the
+// operator to open each row. For a completed run_only run the agent's final
+// output is shown; for a failed/skipped run the failure_reason is shown; runs
+// with neither (e.g. create_issue runs, which surface their linked issue in the
+// ISSUE column) render empty. The full structured result stays available via
+// `--output json`.
+func summarizeRun(r map[string]any) string {
+	if out := nestedString(r, "result", "output"); out != "" {
+		return truncateRunSummary(out)
+	}
+	if reason := strVal(r, "failure_reason"); reason != "" {
+		return truncateRunSummary(reason)
+	}
+	return ""
+}
+
+// nestedString walks a chain of map keys (e.g. result.output) in JSON-decoded
+// API responses and returns the leaf as a string, or "" if any step is missing
+// or the wrong type.
+func nestedString(m map[string]any, keys ...string) string {
+	cur := m
+	for i, k := range keys {
+		v, ok := cur[k]
+		if !ok || v == nil {
+			return ""
+		}
+		if i == len(keys)-1 {
+			return fmt.Sprintf("%v", v)
+		}
+		next, ok := v.(map[string]any)
+		if !ok {
+			return ""
+		}
+		cur = next
+	}
+	return ""
+}
+
+// truncateRunSummary collapses whitespace so the preview fits a single table
+// cell and caps it to runSummaryMaxLen runes, appending … when truncated.
+func truncateRunSummary(s string) string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return ""
+	}
+	rs := []rune(strings.Join(strings.Fields(s), " "))
+	if len(rs) <= runSummaryMaxLen {
+		return string(rs)
+	}
+	return string(rs[:runSummaryMaxLen]) + "…"
+}
+
+const runSummaryMaxLen = 80
 
 func runAutopilotTriggerAdd(cmd *cobra.Command, args []string) error {
 	client, err := newAPIClient(cmd)
