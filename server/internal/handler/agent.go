@@ -364,7 +364,7 @@ type AgentTaskResponse struct {
 	WorkDir                       string `json:"work_dir,omitempty"` // local working directory pinned for this task; populated once the daemon reports it
 	// RelativeWorkDir is a privacy-safe display form of WorkDir intended for
 	// the UI. For standard tasks it strips the daemon's workspaces root so
-	// the user sees `<wsUUID>/<taskDir>/workdir`; for local_directory
+	// the user sees `<wsUUID>/<taskShort>/workdir`; for local_directory
 	// tasks the absolute path lives outside the envRoot layout, so we strip
 	// recognised home-directory prefixes (`/Users/<name>/`, `/home/<name>/`,
 	// `<drive>:/Users/<name>/`) and otherwise fall back to the basename so
@@ -763,8 +763,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 // screenshots, and recordings, so this function is the only guard.
 //
 //   - For standard tasks (work_dir laid out as `<workspacesRoot>/<wsUUID>/
-//     <taskDir>/workdir` by execenv.Prepare), it strips everything up to and
-//     including the workspaces root, returning `<wsUUID>/<taskDir>/workdir`.
+//     <taskShort>/workdir` by execenv.Prepare), it strips everything up to and
+//     including the workspaces root, returning `<wsUUID>/<taskShort>/workdir`.
 //   - For local_directory tasks the absolute path lives outside the envRoot
 //     layout. We try to recognise common home-directory prefixes
 //     (`/Users/<name>/`, `/home/<name>/`, `<drive>:/Users/<name>/`) and strip
@@ -775,8 +775,8 @@ func taskToResponse(t db.AgentTaskQueue, workspaceID string) AgentTaskResponse {
 //
 // Returns empty when work_dir is empty, or when stripping leaves nothing
 // (i.e. work_dir was exactly the user's home — rendering nothing is
-// preferable to a chip that says `<name>`). taskDirName() must stay in
-// lock-step with server/internal/daemon/execenv/execenv.go:taskDirName — both
+// preferable to a chip that says `<name>`). taskDirSegment() must stay in
+// lock-step with server/internal/daemon/execenv/git.go:taskKey — both
 // consume the same task UUID; if that helper changes, this one must too
 // or the envRoot match silently degrades to the local_directory fallback.
 func relativeWorkDir(workDir, workspaceID, taskID string) string {
@@ -788,7 +788,7 @@ func relativeWorkDir(workDir, workspaceID, taskID string) string {
 	normalized := strings.ReplaceAll(workDir, "\\", "/")
 
 	if workspaceID != "" && taskID != "" {
-		envRootSuffix := workspaceID + "/" + taskDirName(taskID)
+		envRootSuffix := workspaceID + "/" + taskDirSegment(taskID)
 		if idx := strings.Index(normalized, envRootSuffix); idx >= 0 {
 			return normalized[idx:]
 		}
@@ -801,13 +801,23 @@ func relativeWorkDir(workDir, workspaceID, taskID string) string {
 	return basename(normalized)
 }
 
-// taskDirName mirrors execenv.taskDirName — the full task UUID with dashes
-// stripped. Kept inline here so the agent handler has zero imports from the
-// daemon package (which would create an unwanted cycle between handler and
-// daemon). The full UUID is required because UUIDv7 task IDs can share their
-// first eight hex characters for roughly 65 seconds.
-func taskDirName(taskID string) string {
-	return strings.ReplaceAll(taskID, "-", "")
+// taskDirSegmentLen and taskDirSegment mirror execenv.taskKeyLen /
+// execenv.taskKey — the LAST 12 hex chars of the task id. Kept inline here so
+// the agent handler has zero imports from the daemon package (which would
+// create an unwanted cycle between handler and daemon).
+//
+// It must keep taking the TAIL. A UUIDv7's leading hex chars are timestamp
+// bits shared by every task created within ~65.5s (#7326); the daemon stopped
+// reading from that end, and this reconstruction only matches while both sides
+// agree.
+const taskDirSegmentLen = 12
+
+func taskDirSegment(uuid string) string {
+	s := strings.ReplaceAll(uuid, "-", "")
+	if len(s) > taskDirSegmentLen {
+		return s[len(s)-taskDirSegmentLen:]
+	}
+	return s
 }
 
 // homeDirPattern matches the well-known per-user home layouts on macOS,
