@@ -83,9 +83,10 @@ func TestCompleteTaskCallbackWithNULSucceeds(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := daemonTaskRequest(t, "/api/daemon/tasks/"+taskID+"/complete", taskID, map[string]any{
-		"output":     "done\x00 summary text",
-		"work_dir":   "/tmp/work\x00dir",
-		"session_id": "sess-nul-complete",
+		"output":           "done\x00 summary text",
+		"work_dir":         "/tmp/work\x00dir",
+		"durable_work_dir": "/Users/dev/pro\x00ject",
+		"session_id":       "sess-nul-complete",
 	})
 
 	testHandler.CompleteTask(w, req)
@@ -120,6 +121,9 @@ func TestCompleteTaskCallbackWithNULSucceeds(t *testing.T) {
 	}
 	if stored.WorkDir != "/tmp/workdir" {
 		t.Fatalf("stored work_dir = %q, want %q", stored.WorkDir, "/tmp/workdir")
+	}
+	if stored.DurableWorkDir != "/Users/dev/project" {
+		t.Fatalf("stored durable_work_dir = %q, want %q", stored.DurableWorkDir, "/Users/dev/project")
 	}
 }
 

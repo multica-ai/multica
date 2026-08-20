@@ -49,7 +49,7 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
   const { getActorName } = useActorName();
   // Inbox is a cross-workspace surface, so the catalog is read per item's own
   // workspace rather than from the route. (MUL-6243)
-  const { categoryOf, entryOf } = useIssueStatuses(item.workspace_id);
+  const { categoryOf, entryOf, colorOf } = useIssueStatuses(item.workspace_id);
   const details = item.details ?? {};
 
   switch (item.type) {
@@ -62,7 +62,7 @@ export function InboxDetailLabel({ item }: { item: InboxItem }) {
           <StatusIcon
             status={details.to as IssueStatus}
             category={categoryOf(details.to)}
-            color={entry?.is_system === true ? null : entry?.color}
+            color={colorOf(details.to)}
             className="h-3 w-3"
           />
           {entry?.name ?? details.to}

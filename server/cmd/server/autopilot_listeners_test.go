@@ -37,7 +37,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 		{
 			name: "completed",
 			finalize: func(task db.AgentTaskQueue) {
-				if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", "", "", false, ""); err != nil {
+				if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"done"}`), "", "", "", false, "", ""); err != nil {
 					t.Fatalf("CompleteTask: %v", err)
 				}
 			},
@@ -47,7 +47,7 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 		{
 			name: "failed",
 			finalize: func(task db.AgentTaskQueue) {
-				if _, err := taskSvc.FailTask(ctx, task.ID, "boom", "", "", "", "agent_error", false, ""); err != nil {
+				if _, err := taskSvc.FailTask(ctx, task.ID, "boom", "", "", "", "agent_error", false, "", ""); err != nil {
 					t.Fatalf("FailTask: %v", err)
 				}
 			},
@@ -230,7 +230,7 @@ func TestAutopilotCreateIssueTaskNoProgressFailureUpdatesRun(t *testing.T) {
 	runTaskWithBudget(t, f.queries, f.taskID, 1)
 
 	const errMsg = "codex app-server no progress timeout after 30s"
-	if _, err := f.taskSvc.FailTask(ctx, f.taskID, errMsg, "", "", "", "codex_semantic_inactivity", false, ""); err != nil {
+	if _, err := f.taskSvc.FailTask(ctx, f.taskID, errMsg, "", "", "", "codex_semantic_inactivity", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
@@ -258,7 +258,7 @@ func TestAutopilotCreateIssueTaskAgentErrorFailureUpdatesRun(t *testing.T) {
 	// agent_error is not in retryableReasons, so the first terminal failure is
 	// final — the run must fail carrying the agent's error text.
 	const errMsg = "build failed: ./pkg/foo: undefined: Bar"
-	if _, err := f.taskSvc.FailTask(ctx, f.taskID, errMsg, "", "", "", "agent_error", false, ""); err != nil {
+	if _, err := f.taskSvc.FailTask(ctx, f.taskID, errMsg, "", "", "", "agent_error", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
@@ -287,7 +287,7 @@ func TestAutopilotCreateIssueTaskRetryPendingKeepsRunOpen(t *testing.T) {
 
 	// timeout is retryable, so FailTask enqueues a fresh attempt before it
 	// broadcasts the failure event.
-	if _, err := f.taskSvc.FailTask(ctx, f.taskID, "runtime went offline", "", "", "", "timeout", false, ""); err != nil {
+	if _, err := f.taskSvc.FailTask(ctx, f.taskID, "runtime went offline", "", "", "", "timeout", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 

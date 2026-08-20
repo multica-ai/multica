@@ -3,7 +3,7 @@ import { render, screen, act } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { I18nProvider } from "@multica/core/i18n/react";
-import type { Issue, IssueStatus } from "@multica/core/types";
+import type { Issue, IssueStatus, IssueStatusCategory } from "@multica/core/types";
 import { ListView } from "./list-view";
 import { IssueContextMenuProvider } from "../actions";
 import { ScrollRestorationProvider } from "../../platform";
@@ -176,19 +176,24 @@ const ISSUES: Issue[] = [
   } as Issue,
 ];
 
+const emptyPage = {
+  hasMore: false,
+  isLoading: false,
+  isFetching: false,
+  isError: false,
+  loadMore: vi.fn(),
+  retry: vi.fn(),
+};
+
 const PAGINATION = {
-  todo: {
-    hasMore: false,
-    isLoading: false,
-    isFetching: false,
-    isError: false,
-    total: 2,
-    loadMore: vi.fn(),
-    retry: vi.fn(),
-  },
+  todo: { ...emptyPage, total: 2 },
+  in_review: { ...emptyPage, total: 1 },
 } as unknown as IssueStatusPagination;
 
-function renderListView() {
+function renderListView(
+  issues: Issue[] = ISSUES,
+  visibleStatuses: IssueStatusCategory[] = ["todo"],
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 } },
   });
@@ -198,8 +203,8 @@ function renderListView() {
         <IssueContextMenuProvider>
           <ScrollRestorationProvider adapter={{ get: () => undefined }}>
             <ListView
-              issues={ISSUES}
-              visibleStatuses={["todo"]}
+              issues={issues}
+              visibleStatuses={visibleStatuses}
               statusPagination={PAGINATION}
               onMoveIssue={vi.fn()}
             />
@@ -247,5 +252,27 @@ describe("ListView status header collapse", () => {
     await user.click(trigger);
 
     expect(mockViewState.listCollapsedStatuses).toEqual(["todo"]);
+  });
+});
+
+// Sections are CATEGORIES, cards carry concrete status KEYS. Bucketing a card
+// by its key gave a custom status a section id no section has, so the card was
+// dropped: filtering the surface down to that status left the section rendering
+// "no issues" beside a non-zero header count (MUL-6409). The category mapping
+// itself is covered in utils/drag-utils.test.ts.
+describe("ListView custom statuses", () => {
+  it("renders a custom-status issue in its category's section", () => {
+    const custom = {
+      ...ISSUES[0]!,
+      id: "issue-custom",
+      identifier: "MUL-3",
+      title: "Waiting on the reporter",
+      status: "awaiting_response",
+      status_category: "in_review",
+    } as Issue;
+
+    renderListView([custom], ["in_review"]);
+
+    expect(screen.getByText("Waiting on the reporter")).toBeInTheDocument();
   });
 });

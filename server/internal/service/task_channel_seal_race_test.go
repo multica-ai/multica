@@ -60,7 +60,7 @@ func TestEnqueueChatTaskSealsMessageStrandedByPredecessorReply(t *testing.T) {
 
 	// Turn 1 completes inside that window: its reply row is NEWER than the
 	// waiting message, but it answers turn 1's batch, not this message.
-	if _, err := svc.CompleteTask(ctx, first.ID, []byte(`{"output":"通了。"}`), "", "", "", false, ""); err != nil {
+	if _, err := svc.CompleteTask(ctx, first.ID, []byte(`{"output":"通了。"}`), "", "", "", false, "", ""); err != nil {
 		t.Fatalf("complete turn 1: %v", err)
 	}
 

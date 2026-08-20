@@ -32,9 +32,9 @@ When a non-Backlog issue is assigned to a squad, Multica immediately enqueues a 
 
 1. **Leader claims the task.** The agent runtime picks up the task on its next poll, same as any other agent assignment.
 2. **Leader is briefed.** On claim, Multica appends three sections to the leader's system prompt — see [What the leader sees on every turn](#what-the-leader-sees-on-every-turn) below.
-3. **Leader moves the parent to `in_progress`.** Same agent-managed status contract as a direct agent assignment: the first turn should leave `todo` / leave `backlog`-promoted work as `in_progress`. Dispatching members is not completion — the parent stays `in_progress` while the squad works.
-4. **Leader posts one delegation comment.** The comment `@`-mentions the chosen member(s) using the exact mention markdown from the roster — that mention triggers a new `task` for each mentioned agent.
-5. **Leader records its evaluation** via `multica squad activity <issue-id> action --reason "..."`. This writes an entry to the issue's activity timeline so humans can see the leader actually evaluated the trigger.
+3. **Leader posts one delegation comment.** The comment `@`-mentions the chosen member(s) using the exact mention markdown from the roster — that mention triggers a new `task` for each mentioned agent.
+4. **Leader records its evaluation** via `multica squad activity <issue-id> action --reason "..."`. This writes an entry to the issue's activity timeline so humans can see the leader actually evaluated the trigger.
+5. **The dispatch turn ends with the parent `in_progress`.** Same agent-managed status contract as a direct agent assignment — status is judged at the end of the turn, and dispatching members is not delivery, so the parent leaves `todo` for `in_progress` and stays there while the squad works.
 6. **Leader stops.** The leader does not do the implementation itself. When the delegated member posts back — or when a sub-issue / stage barrier closes — the leader is re-triggered to read the update and either delegate the next step, escalate, move the parent to `in_review` once the overall goal is met, or stay silent. `done` is left to a human reviewer or existing integrations (for example a PR with close intent that merges).
 
 If the issue is in **Backlog**, the leader is not triggered — Backlog is a parking lot, same rule as for direct agent assignment.
@@ -43,7 +43,7 @@ If the issue is in **Backlog**, the leader is not triggered — Backlog is a par
 
 On each squad-leader run, three blocks are appended to the leader's instructions:
 
-- **Squad Operating Protocol** — a hard-coded rule set: read the issue, move the parent to `in_progress` on the first turn, delegate by `@`-mention, be terse (don't restate the issue body — the assignee can read it), record an evaluation every turn, **stop after dispatching**, and only move the parent to `in_review` once the overall goal is met. This protocol is system-managed and not editable.
+- **Squad Operating Protocol** — a hard-coded rule set: read the issue, delegate by `@`-mention, be terse (don't restate the issue body — the assignee can read it), record an evaluation every turn, **stop after dispatching** — the dispatch turn ends with the parent `in_progress` — and only move the parent to `in_review` once the overall goal is met. This protocol is system-managed and not editable.
 
   The status half of that protocol is **scoped to issues actually assigned to this squad**. A leader woken by an `@squad` mention on someone else's issue gets the same roster and delegation rules, but is told explicitly **not** to touch that issue's status — status stays with the issue's own assignee.
 - **Squad Roster** — the leader's self-row plus one row per non-archived member. Each row carries the exact mention markdown (`[@Name](mention://agent/<uuid>)` or `[@Name](mention://member/<uuid>)`) the leader should paste — typing a plain `@name` won't trigger anyone.

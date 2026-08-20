@@ -32,9 +32,9 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 1. **队长的运行时领走 task**，和普通智能体的分配流程一样。
 2. **队长拿到 briefing。** 领走的瞬间，Multica 会在队长的指令后面追加三段内容，见下文[队长每次执行看到的内容](#队长每次执行看到的内容)。
-3. **队长把父 issue 推到 `in_progress`。** 和直接分配给智能体同一套状态约定：首次接单应离开 `todo`，进入 `in_progress`。分发成员不等于完成——小队干活期间父 issue 保持 `in_progress`。
-4. **队长发一条派活评论。** 评论里用花名册给好的 mention markdown `@` 选中的成员——这个 `@` 会触发被派的成员入队新 task。
-5. **队长记录 evaluation**：`multica squad activity <issue-id> <outcome> --reason "..."`。这一行会写进 issue 的 activity 时间线，方便人类回溯队长的每次评估。
+3. **队长发一条派活评论。** 评论里用花名册给好的 mention markdown `@` 选中的成员——这个 `@` 会触发被派的成员入队新 task。
+4. **队长记录 evaluation**：`multica squad activity <issue-id> <outcome> --reason "..."`。这一行会写进 issue 的 activity 时间线，方便人类回溯队长的每次评估。
+5. **派活轮结束时父 issue 处于 `in_progress`。** 和直接分配给智能体同一套状态约定：状态在每轮结束时按实际进展判断，派活不等于交付——所以父 issue 离开 `todo` 进入 `in_progress`，小队干活期间保持不变。
 6. **队长停下。** 派完活，队长不亲自动手。被派成员有回复时，队长会被自动唤醒，决定下一步：继续派活、上抛给人类、在整体目标达成后把父 issue 推到 `in_review`，或保持沉默。`done` 留给人工确认或既有集成（例如带 close intent 的 PR merge）。
 
 如果 issue 仍在 `backlog`，分配本身不会触发队长。移出 `backlog` 后才会开始执行。
@@ -43,7 +43,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 每次队长被触发，三段内容会附加到它的指令上：
 
-- **Squad Operating Protocol（小队工作规范）**——一段硬编码的规则集：读 issue → 首次接单把父 issue 推到 `in_progress` → 用 `@` 派活 → 保持简洁（不复述 issue 内容，被派的成员自己能读）→ 每次记 evaluation → 派完就停 → 整体目标达成后才推 `in_review`。这段由系统管理，不可编辑。
+- **Squad Operating Protocol（小队工作规范）**——一段硬编码的规则集：读 issue → 用 `@` 派活 → 保持简洁（不复述 issue 内容，被派的成员自己能读）→ 每次记 evaluation → 派完就停（派活轮结束时父 issue 处于 `in_progress`）→ 整体目标达成后才推 `in_review`。这段由系统管理，不可编辑。
 
   其中状态相关的规则只对"确实分配给本小队"的 issue 生效。队长被别人 issue 里的 `@小队` 唤醒时，同样拿到花名册和派活规则，但会被明确告知不要改动那条 issue 的状态——状态仍归它自己的负责人。
 - **Squad Roster（小队花名册）**——队长一行 + 每个未归档成员一行，每行带可直接复制的 mention markdown（`[@Name](mention://agent/<uuid>)`）。纯文本 `@name` 不会触发任何人。

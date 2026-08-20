@@ -278,7 +278,7 @@ function ListViewImpl({
         onMoveIssue(
           activeId,
           {
-            ...getMoveUpdates(finalGroup, currentIssue.position),
+            ...getMoveUpdates(finalGroup, currentIssue.position, currentIssue),
             ...getMoveAnchors(targetIds, activeId),
           },
           beginSettle(),
@@ -304,7 +304,7 @@ function ListViewImpl({
       onMoveIssue(
         activeId,
         {
-          ...getMoveUpdates(finalGroup, newPosition),
+          ...getMoveUpdates(finalGroup, newPosition, currentIssue),
           ...getMoveAnchors(finalIds, activeId),
         },
         beginSettle(),

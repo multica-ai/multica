@@ -429,6 +429,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Parallel local-folder mode, per-group DingTalk routing, and one-click skill updates",
         changes: [],
         features: [
+          "Your agents can now live in Telegram — DM them or @-mention them in a group or forum topic.",
           "A local folder can now run tasks in parallel, each delivering its own branch.",
           "One DingTalk bot can now serve each group with its own agent.",
           "Imported skills can now be updated from their source in one click.",

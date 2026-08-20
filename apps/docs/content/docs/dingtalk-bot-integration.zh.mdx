@@ -7,7 +7,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 把任意[智能体](/agents)接入一个钉钉 Bot，团队就能在钉钉里直接使用它——私聊 Bot、在群里 @ 它、发截图给它，或者输入 `/issue` 直接创建一个 [Multica issue](/issues)，不用打开应用。
 
-钉钉集成由社区维护：每个版本都会随包发布，但不附带官方支持 SLA。遇到问题请提到 [GitHub issues](https://github.com/multica-ai/multica/issues)。
+钉钉集成[由社区维护](/community-maintained)：每个版本都会随包发布，但不附带官方支持 SLA。遇到问题请提到 [GitHub issues](https://github.com/multica-ai/multica/issues)。
 
 钉钉走的是**自带应用（bring-your-own-app，BYO）**模式：工作区管理员创建一个钉钉 app，给它加一个 Stream 模式的机器人，再把凭证粘贴进 Multica。设置时选择的智能体是机器人的默认智能体，负责私聊和刚发现的群聊。同一个机器人可以加入多个群，每个群之后都能分别路由到不同智能体。（这一点和 [Lark](/lark-bot-integration) 不同，Lark 的绑定是扫码安装流程。）
 

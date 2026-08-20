@@ -18,7 +18,7 @@ An issue is Multica's basic unit for organizing work: a feature, a bug, an inves
 | **Project and parent-child relationships** | Fits into a larger body of work, or splits into sub-issues. |
 | **Activity and execution log** | Comments, status changes, tasks, and results returned by agents. |
 
-![Issue detail: description, discussion, properties on the right, and the execution log](/images/docs/quickstart-run-result.png)
+![Issue detail: description, discussion, properties on the right, and the execution log](/images/docs/quickstart-run-result.webp)
 
 ## Create an issue
 
@@ -52,7 +52,7 @@ Assignment does not bypass an agent's Access; when assigning to a squad, the lea
 
 There is no fixed flow between statuses — members and agents can change them directly.
 
-Once an issue is assigned to an agent, the agent is expected to move the status from `backlog` / `todo` to `in_progress` when it starts, then to `in_review` when it has delivered. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a task starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or an integration such as a PR with close intent that merges.
+Agents judge status at the end of a turn, from what the work changed about the issue: delivering what the issue asks for moves it to `in_review`; work that continues beyond the turn keeps it `in_progress`; research, answers, or discussion leave the status untouched. There is no automatic `in_progress` write when a run starts — an in-flight run is already visible on the issue. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a task starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or an integration such as a PR with close intent that merges.
 
 <Callout type="info">
 Two changes are made by the system:

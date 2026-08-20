@@ -2,10 +2,13 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -19,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/util"
 	"github.com/multica-ai/multica/server/internal/util/secretbox"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/featureflag"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
@@ -46,15 +50,80 @@ type PluginService struct {
 	DevOrigins []string
 	// Host gates which declared contributions this build can actually run.
 	Host plugincontract.Capabilities
+	// DeploymentKey is the raw MULTICA_PLUGIN_SECRET_KEY, used to derive each
+	// installation's hook signing secret. Held separately from Secrets because
+	// signing needs a key it can reproduce, not a sealed box.
+	DeploymentKey []byte
+	// Callbacks issues the short-lived tokens a hook handler uses to call back.
+	// Nil means hooks go out without one.
+	Callbacks *CallbackTokens
+	// CallbackBaseURL is the Action API root a hook handler should call, sent
+	// alongside the callback token so a plugin does not hardcode our hostname.
+	CallbackBaseURL string
+	// FeatureFlags gates the hook engine. Held here because the EVENT path has
+	// no request to read the flag from: it runs on a worker, so the check has to
+	// live with the service rather than in a handler. Nil reads as disabled,
+	// which is the safe direction for the one path that reaches a third party.
+	FeatureFlags *featureflag.Service
+	// HookClient overrides the outbound client, and ONLY for an endpoint whose
+	// origin the operator already named in DevOrigins. Nil everywhere else, so
+	// a public endpoint always goes through the SSRF-guarded client and this
+	// field cannot widen what a deployment can reach.
+	HookClient *http.Client
 }
 
 func NewPluginService(queries *db.Queries, txStarter TxStarter) *PluginService {
-	return &PluginService{
+	service := &PluginService{
 		Queries:    queries,
 		TxStarter:  txStarter,
 		LocalDir:   strings.TrimSpace(os.Getenv("MULTICA_PLUGIN_DIR")),
 		DevOrigins: parseDevOrigins(os.Getenv("MULTICA_PLUGIN_DEV_ORIGINS")),
 		Host:       plugincontract.HostCapabilities(),
+	}
+	service.HookClient = devHookClient(service.DevOrigins, os.Getenv("MULTICA_PLUGIN_DEV_CA"))
+	return service
+}
+
+// devHookClient trusts an additional CA for dev-origin hook endpoints only.
+//
+// A hook URL must be HTTPS — the manifest requires it — so an author testing
+// against a local server needs its certificate trusted by something. This adds
+// a named CA file rather than turning verification off: the failure mode of
+// InsecureSkipVerify is that it survives into production behind a config flag
+// somebody forgot, and there is no way to tell from the code whether it is
+// active. A CA that has to be supplied by path cannot silently apply to
+// anything else.
+//
+// Nil unless BOTH an origin allowlist and a CA path are set, and it is only
+// ever consulted for an endpoint already inside that allowlist.
+func devHookClient(devOrigins []string, caPath string) *http.Client {
+	if len(devOrigins) == 0 || strings.TrimSpace(caPath) == "" {
+		return nil
+	}
+	pem, err := os.ReadFile(caPath)
+	if err != nil {
+		slog.Warn("plugins: MULTICA_PLUGIN_DEV_CA could not be read; dev hook endpoints will not be trusted", "path", caPath, "error", err)
+		return nil
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		slog.Warn("plugins: MULTICA_PLUGIN_DEV_CA contained no certificates", "path", caPath)
+		return nil
+	}
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.Proxy = nil
+	transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
+	slog.Info("plugins: dev hook endpoints will trust an additional CA", "path", caPath, "origins", devOrigins)
+	return &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: transport,
+		// Refuse redirects, matching the secure client. A 302 from a dev
+		// endpoint would replay the SIGNED body and the callback token to
+		// wherever it pointed — the one destination check this path skipped is
+		// exactly the one a redirect would need.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return errors.New("hook endpoints must not redirect")
+		},
 	}
 }
 
@@ -376,7 +445,17 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 		PluginKey:   manifest.Key,
 	})
 	if errors.Is(err, pgx.ErrNoRows) {
-		installation, createErr := s.Queries.CreatePluginInstallation(ctx, db.CreatePluginInstallationParams{
+		// A transaction even though it is one row: the skill resources land in
+		// the same commit. An installation whose skills half-arrived is worse
+		// than one that failed, because the missing half is invisible.
+		tx, txErr := s.TxStarter.Begin(ctx)
+		if txErr != nil {
+			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "begin install", Err: txErr}
+		}
+		defer func() { _ = tx.Rollback(ctx) }()
+		queries := s.Queries.WithTx(tx)
+
+		installation, createErr := queries.CreatePluginInstallation(ctx, db.CreatePluginInstallationParams{
 			WorkspaceID:   workspaceID,
 			PluginKey:     manifest.Key,
 			SourceUrl:     sourceURL,
@@ -392,6 +471,12 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 				return db.PluginInstallation{}, pluginErrf(PluginErrorConflict, "this plugin is already installed in this workspace")
 			}
 			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "install plugin", Err: createErr}
+		}
+		if skillErr := s.InstallSkillResources(ctx, queries, installation, manifest, sourceURL, userID); skillErr != nil {
+			return db.PluginInstallation{}, skillErr
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "commit install", Err: commitErr}
 		}
 		return installation, nil
 	}
@@ -432,6 +517,12 @@ func (s *PluginService) InstallPlugin(ctx context.Context, workspaceID, userID p
 	})
 	if err != nil {
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "upgrade plugin", Err: err}
+	}
+	// Re-run on upgrade so a changed SKILL.md takes effect and a dropped one is
+	// pruned. Same transaction as the manifest snapshot: the two must never
+	// disagree about what this version contributes.
+	if err := s.InstallSkillResources(ctx, queries, updated, manifest, sourceURL, userID); err != nil {
+		return db.PluginInstallation{}, err
 	}
 	if err := tx.Commit(ctx); err != nil {
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "commit upgrade", Err: err}
@@ -694,6 +785,18 @@ func (s *PluginService) Uninstall(ctx context.Context, installation db.PluginIns
 	if err := queries.DeletePluginSecretsByInstallation(ctx, installation.ID); err != nil {
 		return &PluginError{Kind: PluginErrorUnavailable, Message: "delete plugin secrets", Err: err}
 	}
+	// Hook records go too. They name an installation that is about to stop
+	// existing, and keeping them would leave rows nothing can attribute — the
+	// same reason storage and secrets are cleared here rather than swept later.
+	if err := queries.DeletePluginInvocationsByInstallation(ctx, installation.ID); err != nil {
+		return &PluginError{Kind: PluginErrorUnavailable, Message: "delete plugin invocations", Err: err}
+	}
+	// The skills this installation contributed go with it. Scoped by
+	// plugin_installation_id, so a skill a person wrote is untouched even if it
+	// happens to share a name with something the plugin once provided.
+	if err := queries.DeletePluginSkillsByInstallation(ctx, installation.ID); err != nil {
+		return &PluginError{Kind: PluginErrorUnavailable, Message: "delete plugin skills", Err: err}
+	}
 	if err := queries.DeletePluginInstallation(ctx, installation.ID); err != nil {
 		return &PluginError{Kind: PluginErrorUnavailable, Message: "delete plugin installation", Err: err}
 	}
@@ -721,4 +824,32 @@ func (s *PluginService) InstallationForWorkspace(ctx context.Context, workspaceI
 		return db.PluginInstallation{}, &PluginError{Kind: PluginErrorUnavailable, Message: "load plugin installation", Err: err}
 	}
 	return installation, nil
+}
+
+// readLocalFile reads a file from inside a local plugin directory.
+//
+// Same containment as readLocalManifest, plus one more: the joined path is
+// re-checked against the plugin's own directory after cleaning. `entry` is
+// validated at manifest-parse time to be relative and traversal-free, but this
+// is the layer that touches the filesystem and it does not get to assume that.
+func (s *PluginService) readLocalFile(name, entry string) ([]byte, error) {
+	if s.LocalDir == "" {
+		return nil, pluginErrf(PluginErrorInvalid, "local plugin sources require MULTICA_PLUGIN_DIR")
+	}
+	if name == "" || strings.ContainsAny(name, `/\`) || strings.HasPrefix(name, ".") {
+		return nil, pluginErrf(PluginErrorInvalid, "local plugin source must be a single directory name under MULTICA_PLUGIN_DIR")
+	}
+	root := filepath.Join(s.LocalDir, name)
+	path := filepath.Clean(filepath.Join(root, entry))
+	if path != root && !strings.HasPrefix(path, root+string(os.PathSeparator)) {
+		return nil, pluginErrf(PluginErrorInvalid, "plugin resource %q escapes its directory", entry)
+	}
+	raw, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, pluginErrf(PluginErrorNotFound, "plugin resource %q was not found", entry)
+	}
+	if err != nil {
+		return nil, &PluginError{Kind: PluginErrorInvalid, Message: "read plugin resource", Err: err}
+	}
+	return raw, nil
 }

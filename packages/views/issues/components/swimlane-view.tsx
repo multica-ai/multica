@@ -1,6 +1,6 @@
 "use client";
 
-import { issueStatusCategory, statusCategoryOfKey } from "@multica/core/issues";
+import { issueColumnCategory, issueStatusCategory, statusCategoryOfKey } from "@multica/core/issues";
 import { memo, useState, useCallback, useMemo, useEffect, useRef } from "react";
 import {
   DndContext,
@@ -886,7 +886,10 @@ function SwimLaneViewImpl({
             placed = true;
             break;
           }
-          const status = issue.status;
+          // Cells are CATEGORIES: a custom status belongs to the column it
+          // behaves as, and keying the cell by the raw status key dropped
+          // those cards out of the grid entirely (MUL-6409).
+          const status = issueColumnCategory(issue);
           if (result[lane.key]?.[status]) {
             result[lane.key]![status]!.push(issue.id);
             placed = true;
@@ -897,7 +900,7 @@ function SwimLaneViewImpl({
       // Parent grouping: a child whose parent isn't a header here falls
       // into the orphan fallback so it doesn't silently disappear.
       if (!placed && orphanLane && issue.parent_issue_id !== null) {
-        const status = issue.status;
+        const status = issueColumnCategory(issue);
         if (result[orphanLane.key]?.[status]) {
           result[orphanLane.key]![status]!.push(issue.id);
         }
@@ -1267,10 +1270,19 @@ function SwimLaneViewImpl({
         return;
       }
 
+      // The cell names a CATEGORY, so "already here" is a category question.
+      const staysInCell =
+        currentIssue !== undefined &&
+        issueColumnCategory(currentIssue) === finalOverCell.status;
+      // ...and a card already here on a CUSTOM status keeps it: writing the
+      // cell's canonical key would rewrite `awaiting_response` to `in_review`
+      // — a real status change, which starts an agent run (MUL-6409).
+      const keepsStatus =
+        staysInCell && currentIssue?.status !== finalOverCell.status;
       if (
         currentIssue &&
         targetLane.matches(currentIssue) &&
-        currentIssue.status === (finalOverCell.status as IssueStatus) &&
+        staysInCell &&
         currentIssue.position === newPosition
       ) {
         return;
@@ -1281,7 +1293,7 @@ function SwimLaneViewImpl({
         activeId,
         {
           ...targetLane.moveUpdates,
-          status: finalOverCell.status as IssueStatus,
+          ...(keepsStatus ? {} : { status: finalOverCell.status as IssueStatus }),
           position: newPosition,
           ...getMoveAnchors(finalIds, activeId),
         },

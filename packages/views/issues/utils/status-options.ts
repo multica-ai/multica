@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { ALL_STATUSES } from "@multica/core/issues/config";
 import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { issueStatusColor } from "@multica/core/issue-statuses/queries";
 import type { IssueStatus, IssueStatusCategory } from "@multica/core/types";
 import { useStatusLabel } from "./status-label";
 
@@ -49,7 +50,7 @@ export function useStatusOptions(wsId: string): StatusOption[] {
           key: e.key as IssueStatus,
           category,
           label: labelOf(e.key),
-          color: e.is_system ? null : e.color,
+          color: issueStatusColor(e),
         }));
       }),
     [activeStatuses, labelOf],

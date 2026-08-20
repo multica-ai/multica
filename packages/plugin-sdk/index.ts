@@ -54,6 +54,17 @@ export interface Comment {
   created_at: string;
 }
 
+/** One completed hook call. `status` is the host's verdict, not the endpoint's. */
+export interface HookResult {
+  status: string;
+  output?: unknown;
+  error?: string;
+  latency_ms: number;
+  hook_key: string;
+  trigger: string;
+  attempts: number;
+}
+
 export interface StorageKey {
   key: string;
   size_bytes: number;
@@ -273,6 +284,29 @@ export const multica = {
   storage: {
     workspace: storageApi("workspace"),
     user: storageApi("user"),
+  },
+
+  hooks: {
+    /**
+     * Invokes one of THIS plugin's hooks — the `ui` trigger.
+     *
+     * The surface does not call its own backend directly, and this is not a
+     * detour for its own sake: routing through the host is what makes the call
+     * signed, rate limited, bounded to the granted `net:` domains, and issued a
+     * short-lived callback token. A surface that fetched its own server would
+     * have none of that, and the user would have no record it happened.
+     *
+     * The host refuses any hook this plugin's manifest did not declare with the
+     * `ui` trigger.
+     */
+    async invoke(hookKey: string, input?: unknown): Promise<HookResult> {
+      const issue = (await multica.context.get()).issue;
+      return bridge.request<HookResult>("POST", `/hooks/${encodeURIComponent(hookKey)}`, {
+        trigger: "ui",
+        issue_id: issue?.id,
+        input,
+      });
+    },
   },
 
   ui: {

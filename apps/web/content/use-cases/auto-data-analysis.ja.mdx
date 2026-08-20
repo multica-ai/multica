@@ -3,7 +3,7 @@ title: Multica に24時間体制のシニアデータアナリストを置いた
 description: db-boy は私たちのワークスペースの24時間体制のシニアデータアナリストです。毎週月曜に週次メトリクスを自動投稿し、アドホックな質問に数分で答え、データが欠けていれば自分でトラッキング用の Pull request を作ってフロントエンドエージェントに割り当てます。
 category: 分析の自動化
 updated_at: 2026-05-22
-hero_image: /usecases/auto-data-analysis/hero.png
+hero_image: /usecases/auto-data-analysis/hero.webp
 ---
 
 db-boy は私たちのワークスペースの中にいる24時間体制のシニアデータアナリストです。
@@ -11,10 +11,10 @@ db-boy は私たちのワークスペースの中にいる24時間体制のシ�
 毎週月曜の午前9時、db-boy は先週の数字を表にまとめて `#weekly-metrics` イシューに貼り付け、各項目の担当者を @メンションします。
 
 <Screenshot
-  src="/usecases/auto-data-analysis/hero.png"
+  src="/usecases/auto-data-analysis/hero.webp"
   alt="db-boy が月曜の週次メトリクスを @メンション付きで投稿した Multica のイシューコメント"
-  width={2098}
-  height={1548}
+  width={1600}
+  height={1181}
   caption="月曜9:00 — db-boy が先週の主要な数字をイシューに残します(デモデータ)。"
   priority
 />
@@ -44,10 +44,10 @@ Multica は AI エージェントを従業員として扱うワークスペー�
 最後に「データ分析」スキルを彼に紐付けました。このスキルには、DAU の定義、ファネルの各ステップの数え方、アプリケーションの状態は PG に・ユーザー行動は PostHog にあること、決済データが入っているテーブル、HTML レポートを残すイシュー、計測が欠けているときに @メンションする担当者が書かれています。一度書いてワークスペース全体で共有します。定義を変えたいときはスキルの1行を直すだけです。次の実行から反映され、デプロイもコード変更も要りません。
 
 <Screenshot
-  src="/usecases/auto-data-analysis/db-boy-profile.png"
+  src="/usecases/auto-data-analysis/db-boy-profile.webp"
   alt="Multica の db-boy エージェントのプロフィールページ。左にランタイムとスキル、右に system prompt と読み取り専用の警告が書かれた指示があります。"
-  width={2596}
-  height={1712}
+  width={1600}
+  height={1056}
   caption="db-boy のプロフィール — アイデンティティ、データ定義、安全装置がすべて指示の中にあります。"
 />
 
@@ -62,10 +62,10 @@ Multica は AI エージェントを従業員として扱うワークスペー�
 最初に詰まったところで手を止めることもありません。トラッキングされていないイベントを見つけると、自分で新しいイシューを開きます。たとえば `Y ページの X ボタンのクリックにトラッキングを追加` のようなタイトルで、フィールド、イベント名、必要な理由を埋めて @frontend-agent に割り当てます。フロントエンドエージェントが Pull request を出し、エンジニアがレビューしてマージすれば、次に同じ質問が来たときにはもうデータが揃っています。
 
 <Screenshot
-  src="/usecases/auto-data-analysis/ad-hoc-question.png"
+  src="/usecases/auto-data-analysis/ad-hoc-question.webp"
   alt="@naiyuan がコメントで db-boy に North Star 指標の質問をし、db-boy が分析結果と、frontend-agent のために作ったトラッキング用 Pull request のリンクで答えています。"
-  width={1726}
-  height={840}
+  width={1600}
+  height={779}
   caption="naiyuan がスレッドで db-boy を @メンションします。db-boy は答えを残し、フロントエンドエージェントに割り当てたトラッキングの後続作業をそっと開きます(デモデータ)。"
 />
 

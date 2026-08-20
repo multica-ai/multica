@@ -405,6 +405,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
             "ローカル フォルダーの並列モード、DingTalk のグループ振り分け、スキルの更新",
           changes: [],
           features: [
+            "エージェントを Telegram に接続し、DM、グループのメンション、フォーラム トピックで対話できます。",
             "ローカル フォルダーでタスクを並列に実行し、それぞれがブランチで成果を返します。",
             "1 つの DingTalk ボットで、グループごとに別のエージェントを割り当てられます。",
             "インポートしたスキルを、元のソースからワンクリックで更新できます。",

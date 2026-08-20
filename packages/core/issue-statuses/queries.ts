@@ -56,6 +56,18 @@ export interface IssueStatusCatalog {
   labelOf: (statusKey: string) => string;
   /** Catalog entry for a status key, when the catalog knows it. */
   entryOf: (statusKey: string) => IssueStatusEntry | undefined;
+  /**
+   * The `#rrggbb` a surface must paint a status with, or null when it keeps
+   * its category's semantic token.
+   *
+   * ALWAYS null for a built-in. The 7 built-ins carry a seeded hex in the
+   * catalog, but they are not recolorable (the server rejects any edit to a
+   * system row) and every surface renders them from the token — `text-success`
+   * and friends, which is what makes them follow the theme into dark mode. A
+   * caller that reaches for `entryOf(key)?.color` instead paints the raw seed
+   * and drifts from the same status two pixels away. (MUL-6440)
+   */
+  colorOf: (statusKey: string) => string | null;
   /** ACTIVE statuses belonging to one category, in display order. */
   inCategory: (category: IssueStatusCategory) => IssueStatusEntry[];
   /** True once the catalog has loaded; false while it is still in flight. */
@@ -128,6 +140,18 @@ export function isIssueStatusCategory(value: string): value is IssueStatusCatego
 }
 
 /**
+ * The color to paint one catalog entry with — its own hex for a custom status,
+ * null for a built-in or an entry this client has not resolved yet.
+ *
+ * The pure form of {@link IssueStatusCatalog.colorOf}, for callers that already
+ * hold the entry (a list they are mapping over) instead of just its key.
+ */
+export function issueStatusColor(entry: IssueStatusEntry | undefined): string | null {
+  if (!entry || entry.is_system === true) return null;
+  return entry.color;
+}
+
+/**
  * Builds the resolved catalog from a raw entry list. Pure, so the store and
  * other non-React callers can use it with a list they already hold.
  */
@@ -154,6 +178,7 @@ export function buildIssueStatusCatalog(
     activeStatuses: list.filter((e) => !e.archived_at),
     categoryOf,
     entryOf: (statusKey) => byKey.get(statusKey),
+    colorOf: (statusKey) => issueStatusColor(byKey.get(statusKey)),
     labelOf: (statusKey) => {
       const entry = byKey.get(statusKey);
       if (entry) return entry.name;
