@@ -2,6 +2,8 @@ package handler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -18,24 +20,27 @@ func newTestHandler(cfg Config) *Handler {
 
 func TestSignupGating(t *testing.T) {
 	tests := []struct {
-		name    string
-		cfg     Config
-		email   string
-		isNew   bool
-		wantErr bool
+		name              string
+		cfg               Config
+		email             string
+		isNew             bool
+		pendingInvitation bool
+		wantErr           bool
 	}{
-		{"allow_signup_true_new", Config{AllowSignup: true}, "a@x.com", true, false},
-		{"allow_signup_false_new", Config{AllowSignup: false}, "a@x.com", true, true},
-		{"allow_signup_false_existing", Config{AllowSignup: false}, "a@x.com", false, false},
-		{"domain_allowlist_match", Config{AllowSignup: false, AllowedEmailDomains: []string{"company.com"}}, "user@company.com", true, false},
-		{"domain_allowlist_mismatch", Config{AllowSignup: false, AllowedEmailDomains: []string{"company.com"}}, "user@other.com", true, true},
-		{"email_allowlist_match", Config{AllowSignup: false, AllowedEmails: []string{"boss@x.com"}}, "boss@x.com", true, false},
+		{name: "allow_signup_true_new", cfg: Config{AllowSignup: true}, email: "a@x.com", isNew: true},
+		{name: "allow_signup_false_new", cfg: Config{AllowSignup: false}, email: "a@x.com", isNew: true, wantErr: true},
+		{name: "allow_signup_false_existing", cfg: Config{AllowSignup: false}, email: "a@x.com"},
+		{name: "domain_allowlist_match", cfg: Config{AllowSignup: false, AllowedEmailDomains: []string{"company.com"}}, email: "user@company.com", isNew: true},
+		{name: "domain_allowlist_mismatch", cfg: Config{AllowSignup: false, AllowedEmailDomains: []string{"company.com"}}, email: "user@other.com", isNew: true, wantErr: true},
+		{name: "email_allowlist_match", cfg: Config{AllowSignup: false, AllowedEmails: []string{"boss@x.com"}}, email: "boss@x.com", isNew: true},
+		{name: "pending_invitation_match", cfg: Config{AllowSignup: false}, email: "invited@x.com", isNew: true, pendingInvitation: true},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			h := newTestHandler(tt.cfg)
-			err := h.checkSignupAllowed(tt.email, tt.isNew)
+			h.Queries = db.New(&mockDB{pendingInvitation: tt.pendingInvitation})
+			err := h.checkSignupAllowed(context.Background(), tt.email, tt.isNew)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("got err=%v wantErr=%v", err, tt.wantErr)
 			}
@@ -43,12 +48,27 @@ func TestSignupGating(t *testing.T) {
 	}
 }
 
+func TestSignupGatingReturnsPendingInvitationLookupError(t *testing.T) {
+	h := newTestHandler(Config{AllowSignup: false})
+	h.Queries = db.New(&mockDB{pendingInvitationErr: context.Canceled})
+
+	err := h.checkSignupAllowed(context.Background(), "invited@x.com", true)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("got err=%v, want context canceled", err)
+	}
+}
+
 type mockDB struct {
 	db.DBTX
-	getUserErr error
+	getUserErr           error
+	pendingInvitation    bool
+	pendingInvitationErr error
 }
 
 func (m *mockDB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
+	if strings.Contains(sql, "FROM workspace_invitation") {
+		return &mockRow{err: m.pendingInvitationErr, boolValue: &m.pendingInvitation}
+	}
 	return &mockRow{err: m.getUserErr}
 }
 
@@ -58,10 +78,21 @@ func (m *mockDB) Exec(ctx context.Context, sql string, args ...interface{}) (pgc
 
 type mockRow struct {
 	pgx.Row
-	err error
+	err       error
+	boolValue *bool
 }
 
 func (m *mockRow) Scan(dest ...interface{}) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.boolValue != nil {
+		value, ok := dest[0].(*bool)
+		if !ok {
+			return fmt.Errorf("expected *bool destination, got %T", dest[0])
+		}
+		*value = *m.boolValue
+	}
 	return m.err
 }
 

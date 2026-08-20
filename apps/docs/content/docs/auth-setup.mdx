@@ -132,12 +132,13 @@ Both allowlists also work as an explicit exception list when `ALLOW_SIGNUP=false
 
 ## Invitations and signup restrictions
 
-Invitations do not automatically bypass signup restrictions:
+A live pending workspace invitation is an implicit per-email signup allowance. With `ALLOW_SIGNUP=false`:
 
-- If the invitee already has a Multica account, they can sign in and accept the invitation.
-- If they do not, their email must satisfy the signup rules above.
+- Existing users can continue to sign in.
+- A new user can request a login code and create an account with the email address on a pending, unexpired invitation.
+- Uninvited users and users whose invitations are expired, accepted, declined, or revoked remain blocked.
 
-To invite a new member on an instance with open signup disabled, add their email to `ALLOWED_EMAILS` first. Once the account is created and the invitation accepted, you can remove the entry again.
+You do not need to add ordinary invitees to `ALLOWED_EMAILS` or restart the server. The invitation must still be accepted through the normal invitation flow.
 
 ## Session lifetime
 

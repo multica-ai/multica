@@ -2134,6 +2134,41 @@ func TestSendCode(t *testing.T) {
 	})
 }
 
+func TestSendCodeInvitationSignupGate(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    string
+		expiresAt time.Time
+		want      int
+	}{
+		{name: "pending invitation", status: "pending", expiresAt: time.Now().Add(time.Hour), want: http.StatusOK},
+		{name: "expired invitation", status: "pending", expiresAt: time.Now().Add(-time.Hour), want: http.StatusForbidden},
+		{name: "accepted invitation", status: "accepted", expiresAt: time.Now().Add(time.Hour), want: http.StatusForbidden},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			email := "invite-signup-" + strings.ReplaceAll(tt.name, " ", "-") + "@multica.ai"
+			dbfx.Insert(t, "workspace_invitation", testutil.Cols{
+				"workspace_id":  parseUUID(testWorkspaceID),
+				"inviter_id":    parseUUID(testUserID),
+				"invitee_email": email,
+				"role":          "member",
+				"status":        tt.status,
+				"expires_at":    tt.expiresAt,
+			})
+			t.Cleanup(func() {
+				testPool.Exec(context.Background(), `DELETE FROM verification_code WHERE email = $1`, email)
+			})
+
+			restrictedHandler := *testHandler
+			restrictedHandler.cfg = Config{AllowSignup: false}
+			req := newRequest(http.MethodPost, "/auth/send-code", map[string]string{"email": email})
+			testutil.Call(t, restrictedHandler.SendCode, req).Want(tt.want)
+		})
+	}
+}
+
 func TestSendCodeDbError(t *testing.T) {
 	// We can't easily mock the DB here without changing architecture,
 	// but we can simulate a DB error by closing the pool temporarily or

@@ -49,6 +49,15 @@ WHERE id = $1 AND status = 'pending';
 SELECT * FROM workspace_invitation
 WHERE workspace_id = $1 AND invitee_email = $2 AND status = 'pending' AND expires_at > now();
 
+-- name: HasPendingInvitationForEmail :one
+SELECT EXISTS (
+    SELECT 1
+    FROM workspace_invitation
+    WHERE invitee_email = $1
+      AND status = 'pending'
+      AND expires_at > now()
+);
+
 -- name: ExpireStalePendingInvitations :exec
 -- Mark any past-due pending invitations for (workspace_id, invitee_email) as expired,
 -- so the next CreateInvitation does not collide with the partial unique index
