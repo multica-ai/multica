@@ -56,7 +56,7 @@ function readCookie(cookieHeader: string | undefined, name: string) {
   }
 }
 
-function safeWorkspaceSlug(value: string | null | undefined) {
+export function safeWorkspaceSlug(value: string | null | undefined) {
   return value && WORKSPACE_SLUG.test(value) ? value : null;
 }
 
