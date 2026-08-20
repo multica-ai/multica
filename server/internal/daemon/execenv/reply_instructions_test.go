@@ -177,6 +177,31 @@ func TestBuildCommentReplyInstructionsEmptyWhenNoTrigger(t *testing.T) {
 	}
 }
 
+// Not parallel: mutates the package-level runtimeGOOS.
+func TestBuildCommentBranchResultInstructions(t *testing.T) {
+	saved := runtimeGOOS
+	t.Cleanup(func() { runtimeGOOS = saved })
+
+	for _, host := range []string{"linux", "windows"} {
+		t.Run(host, func(t *testing.T) {
+			runtimeGOOS = host
+			got := BuildCommentBranchResultInstructions("codex", "issue-1")
+			for _, want := range []string{
+				"Post exactly one result as a new top-level comment",
+				"multica issue comment add issue-1 --content-file ./reply.md",
+				"Do not pass --parent",
+			} {
+				if !strings.Contains(got, want) {
+					t.Fatalf("%s branch result instructions missing %q:\n%s", host, want, got)
+				}
+			}
+			if strings.Contains(got, " --parent ") {
+				t.Fatalf("%s branch result instructions contain a parent flag:\n%s", host, got)
+			}
+		})
+	}
+}
+
 // The brief must never carry this turn's trigger comment id; it points the
 // agent at the per-turn user message instead (MUL-5377).
 func TestInjectRuntimeConfigKeepsTriggerCommentOutOfBrief(t *testing.T) {

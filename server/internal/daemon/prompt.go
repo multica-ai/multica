@@ -1,6 +1,8 @@
 package daemon
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -62,7 +64,13 @@ func backendResumeContinuityNotice(task Task) string {
 // Returns "" when none of the blocks apply.
 func perTurnContextBlocks(task Task) string {
 	var b strings.Builder
-	b.WriteString(buildActiveSiblingRunsBlock(task.IssueID, task.ActiveSiblingRuns))
+	// A comment branch is defined by its frozen root-to-selected ancestry.
+	// Ordinary sibling-run guidance asks the agent to inspect the live issue
+	// timeline, which would escape that snapshot and can expose later or
+	// unrelated comments to the branch run.
+	if len(task.BranchContext) == 0 {
+		b.WriteString(buildActiveSiblingRunsBlock(task.IssueID, task.ActiveSiblingRuns))
+	}
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
@@ -130,6 +138,9 @@ func buildPromptBody(task Task, provider string) string {
 	if task.ChatSessionID != "" {
 		return buildChatPrompt(task)
 	}
+	if len(task.BranchContext) > 0 {
+		return buildCommentBranchPrompt(task, provider)
+	}
 	if task.TriggerCommentID != "" {
 		return buildCommentPrompt(task, provider)
 	}
@@ -161,6 +172,91 @@ func buildPromptBody(task Task, provider string) string {
 // would produce a better issue. No issue exists yet, so the agent must NOT
 // call `multica issue get` or attempt to comment — there's nothing to read
 // or reply to.
+type commentBranchPromptSnapshot struct {
+	Version              int    `json:"version"`
+	CapturedAt           string `json:"captured_at"`
+	BranchPointCommentID string `json:"branch_point_comment_id"`
+	Issue                struct {
+		ID          string `json:"id"`
+		Identifier  string `json:"identifier"`
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Revision    int64  `json:"revision"`
+	} `json:"issue"`
+	Comments []struct {
+		ID         string  `json:"id"`
+		ParentID   *string `json:"parent_id"`
+		AuthorType string  `json:"author_type"`
+		AuthorName string  `json:"author_name"`
+		Content    string  `json:"content"`
+		CreatedAt  string  `json:"created_at"`
+	} `json:"comments"`
+}
+
+func validCommentBranchPromptSnapshot(snapshot commentBranchPromptSnapshot, task Task) bool {
+	if snapshot.Version != 1 ||
+		snapshot.Issue.ID != task.IssueID ||
+		strings.TrimSpace(snapshot.Issue.Identifier) == "" ||
+		strings.TrimSpace(snapshot.Issue.Title) == "" ||
+		snapshot.Issue.Revision <= 0 ||
+		snapshot.BranchPointCommentID != task.BranchPointCommentID ||
+		len(snapshot.Comments) == 0 {
+		return false
+	}
+	seen := make(map[string]struct{}, len(snapshot.Comments))
+	for i, comment := range snapshot.Comments {
+		if strings.TrimSpace(comment.ID) == "" {
+			return false
+		}
+		if _, exists := seen[comment.ID]; exists {
+			return false
+		}
+		seen[comment.ID] = struct{}{}
+		if i == 0 {
+			if comment.ParentID != nil {
+				return false
+			}
+		} else if comment.ParentID == nil || *comment.ParentID != snapshot.Comments[i-1].ID {
+			return false
+		}
+	}
+	return snapshot.Comments[len(snapshot.Comments)-1].ID == snapshot.BranchPointCommentID
+}
+
+func buildCommentBranchPrompt(task Task, provider string) string {
+	var snapshot commentBranchPromptSnapshot
+	if err := json.Unmarshal(task.BranchContext, &snapshot); err != nil || !validCommentBranchPromptSnapshot(snapshot, task) {
+		return "The comment branch snapshot is invalid. Stop without changing the issue."
+	}
+	var b strings.Builder
+	b.WriteString("You are starting an independent execution from a frozen historical comment branch.\n\n")
+	fmt.Fprintf(&b, "Issue snapshot: %s — %s (revision %d)\n\n", snapshot.Issue.Identifier, snapshot.Issue.Title, snapshot.Issue.Revision)
+	if strings.TrimSpace(snapshot.Issue.Description) != "" {
+		b.WriteString("Frozen issue description:\n\n> ")
+		b.WriteString(strings.ReplaceAll(strings.TrimSpace(snapshot.Issue.Description), "\n", "\n> "))
+		b.WriteString("\n\n")
+	}
+	b.WriteString("Frozen comment ancestry (root to selected branch point):\n\n")
+	for _, comment := range snapshot.Comments {
+		name := comment.AuthorName
+		if name == "" {
+			name = comment.AuthorType
+		}
+		fmt.Fprintf(&b, "- %s (%s, %s):\n  > %s\n", comment.ID, name, comment.CreatedAt, strings.ReplaceAll(strings.TrimSpace(comment.Content), "\n", "\n  > "))
+	}
+	b.WriteString("\nUse this frozen snapshot as the conversational context. Do not scan the issue timeline or fetch comments created outside this ancestry path unless the user explicitly asks you to do so inside this branch. You may inspect the repository and other task metadata needed to perform the work.\n\n")
+	b.WriteString(execenv.BuildCommentBranchResultInstructions(provider, task.IssueID))
+	return b.String()
+}
+
+// buildQuickCreatePrompt constructs a prompt for quick-create tasks. The
+// user typed a single natural-language sentence in the create-issue modal;
+// the agent's job is to translate it into one `multica issue create` CLI
+// invocation, using its judgment to decide whether fetching referenced URLs
+// would produce a better issue. No issue exists yet, so the agent must NOT
+// call `multica issue get` or attempt to comment — there's nothing to read
+// or reply to.
+
 func buildQuickCreatePrompt(task Task) string {
 	var b strings.Builder
 	b.WriteString("You are running as a quick-create assistant for a Multica workspace.\n\n")
@@ -679,6 +775,9 @@ const squadBriefingMarker = "## Squad Operating Protocol"
 // groups — is the only correct read. Drop this branch once a minimum server
 // version is enforced (MUL-5811).
 func taskIsSquadLeader(task Task) bool {
+	if len(bytes.TrimSpace(task.BranchContext)) > 0 {
+		return false
+	}
 	if !task.LeaderRoleResolved {
 		return task.Agent != nil && strings.Contains(task.Agent.Instructions, squadBriefingMarker)
 	}

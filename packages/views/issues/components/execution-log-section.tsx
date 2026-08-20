@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { ChevronRight, Loader2, RotateCcw, Square } from "lucide-react";
+import { ChevronRight, GitBranch, Loader2, RotateCcw, Square } from "lucide-react";
 import { toast } from "sonner";
 import { api, dispatchReasonCode } from "@multica/core/api";
 import { issueKeys } from "@multica/core/issues/queries";
@@ -58,6 +58,8 @@ interface ExecutionLogSectionProps {
   issueId: string;
   /** Shown in the usage dialog's subtitle so the panel names what it totals. */
   identifier?: string;
+  onCommentFocus?: (commentId: string) => void;
+  availableCommentIds?: ReadonlySet<string>;
 }
 
 // Past-runs sort priority: newest first by timestamp. When two runs
@@ -69,11 +71,21 @@ const PAST_STATUS_RANK: Record<string, number> = {
   completed: 2,
 };
 
-export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSectionProps) {
+const FOCUS_EXECUTION_TASK_EVENT = "multica:focus-execution-task";
+
+export function focusIssueExecutionTask(issueId: string, taskId: string) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(FOCUS_EXECUTION_TASK_EVENT, {
+    detail: { issueId, taskId },
+  }));
+}
+
+export function ExecutionLogSection({ issueId, identifier, onCommentFocus, availableCommentIds }: ExecutionLogSectionProps) {
   const { t } = useT("issues");
   const [open, setOpen] = useState(true);
   const [showPast, setShowPast] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [focusedTaskId, setFocusedTaskId] = useState<string | null>(null);
 
   // Cache key registered in `issueKeys.tasks` (packages/core/issues/queries.ts)
   // so the global useRealtimeSync `task:` prefix path invalidates it via
@@ -92,6 +104,7 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
       tasks.filter(
         (t) =>
           t.status === "queued" ||
+          (t.status === "deferred" && Boolean(t.branch_point_comment_id)) ||
           t.status === "dispatched" ||
           // Daemon-parked task on a busy local_directory — still active
           // (waiting on a path lock), not terminal. Surfacing it here is
@@ -120,6 +133,33 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
       );
     });
   }, [tasks]);
+
+  useEffect(() => {
+    const focusTask = (event: Event) => {
+      const detail = (event as CustomEvent<{ issueId: string; taskId: string }>).detail;
+      if (!detail || detail.issueId !== issueId || !detail.taskId) return;
+      setOpen(true);
+      const target = tasks.find((task) => task.id === detail.taskId);
+      if (!target || PAST_STATUS_RANK[target.status] !== undefined) setShowPast(true);
+      setFocusedTaskId(detail.taskId);
+    };
+    window.addEventListener(FOCUS_EXECUTION_TASK_EVENT, focusTask);
+    return () => window.removeEventListener(FOCUS_EXECUTION_TASK_EVENT, focusTask);
+  }, [issueId, tasks]);
+
+  useEffect(() => {
+    if (!focusedTaskId || !open) return;
+    const targetTask = tasks.find((task) => task.id === focusedTaskId);
+    if (!targetTask) return;
+    if (PAST_STATUS_RANK[targetTask.status] !== undefined && !showPast) return;
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(`execution-log-task-${focusedTaskId}`);
+      if (!target) return;
+      target.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      setFocusedTaskId(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [focusedTaskId, open, showPast, tasks]);
 
   if (activeTasks.length === 0 && pastTasks.length === 0) return null;
 
@@ -169,9 +209,15 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
       </div>
       {open && (
         <div className="space-y-0.5 pl-2">
-          {activeTasks.map((task) => (
-            <ActiveTaskRow key={task.id} task={task} issueId={issueId} />
-          ))}
+          {activeTasks.map((task) => {
+            const queuePosition = task.status === "deferred" && task.branch_point_comment_id
+              ? activeTasks
+                  .filter((candidate) => candidate.status === "deferred" && candidate.branch_point_comment_id && candidate.agent_id === task.agent_id)
+                  .toSorted((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id))
+                  .findIndex((candidate) => candidate.id === task.id) + 1
+              : undefined;
+            return <ActiveTaskRow key={task.id} task={task} issueId={issueId} queuePosition={queuePosition} onCommentFocus={task.branch_point_comment_id && (!availableCommentIds || availableCommentIds.has(task.branch_point_comment_id)) ? onCommentFocus : undefined} />;
+          })}
 
           {pastTasks.length > 0 && (
             <>
@@ -195,7 +241,7 @@ export function ExecutionLogSection({ issueId, identifier }: ExecutionLogSection
               {showPast && (
                 <div className="mt-0.5 space-y-0.5">
                   {pastTasks.map((task) => (
-                    <PastRow key={task.id} task={task} issueId={issueId} />
+                    <PastRow key={task.id} task={task} issueId={issueId} onCommentFocus={task.branch_point_comment_id && (!availableCommentIds || availableCommentIds.has(task.branch_point_comment_id)) ? onCommentFocus : undefined} />
                   ))}
                 </div>
               )}
@@ -287,6 +333,7 @@ export function IssueUsageTotal({
 // ─── Row visual config ─────────────────────────────────────────────────────
 
 const STATUS_TONE: Record<AgentTask["status"], string> = {
+  deferred: "text-warning",
   queued: "text-warning",
   dispatched: "text-warning",
   // Same tone as queued/dispatched — visually "stopped" so users see the
@@ -307,17 +354,26 @@ const STATUS_TONE: Record<AgentTask["status"], string> = {
 export function ActiveTaskRow({
   task,
   issueId,
+  queuePosition,
   onTranscriptOpenChange,
+  onCommentFocus,
 }: {
   task: AgentTask;
   issueId: string;
+  queuePosition?: number;
   onTranscriptOpenChange?: (open: boolean) => void;
+  onCommentFocus?: (commentId: string) => void;
 }) {
   const { t } = useT("issues");
   const [cancelling, setCancelling] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const tone = STATUS_TONE[task.status];
-  const label = useStatusLabel(task.status);
+  const baseLabel = useStatusLabel(task.status);
+  const label = task.status === "deferred" && task.branch_point_comment_id
+    ? queuePosition
+      ? t(($) => $.branch.queue_position, { position: queuePosition })
+      : t(($) => $.branch.status_deferred)
+    : baseLabel;
   const trigger = useTriggerText(task);
 
   // Running rows show a live-ticking elapsed timer (the ticking digits carry
@@ -339,7 +395,7 @@ export function ActiveTaskRow({
   // Transcript only meaningful once messages exist — pure-queued and
   // waiting_local_directory tasks haven't streamed any agent output yet.
   const showTranscript =
-    task.status !== "queued" && task.status !== "waiting_local_directory";
+    task.status !== "queued" && task.status !== "deferred" && task.status !== "waiting_local_directory";
 
   const handleCancel = async () => {
     if (cancelling) return;
@@ -366,6 +422,7 @@ export function ActiveTaskRow({
   // same change that adds incremental reporting + cache invalidation.
   return (
     <RowShell task={task}>
+      <CommentBranchMarker task={task} onCommentFocus={onCommentFocus} />
       <TriggerText text={trigger} />
       <TaskCommentCoverage task={task} />
       <RowStatus title={label}>
@@ -425,7 +482,7 @@ export function ActiveTaskRow({
 
 // ─── Past row ──────────────────────────────────────────────────────────────
 
-function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
+function PastRow({ task, issueId, onCommentFocus }: { task: AgentTask; issueId: string; onCommentFocus?: (commentId: string) => void }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const [retrying, setRetrying] = useState(false);
@@ -472,7 +529,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
   // endpoint would fall back to the issue's current assignee and the
   // wrong agent would fire on rows whose agent has since been displaced
   // (e.g. reassignment, squad worker, or a one-off @-mention agent).
-  const canRetry = task.status === "failed" || task.status === "cancelled";
+  const canRetry = !task.branch_point_comment_id && (task.status === "failed" || task.status === "cancelled");
 
   const handleRetry = async () => {
     if (retrying) return;
@@ -500,6 +557,7 @@ function PastRow({ task, issueId }: { task: AgentTask; issueId: string }) {
 
   return (
     <RowShell task={task} title={rowTitle}>
+      <CommentBranchMarker task={task} onCommentFocus={onCommentFocus} />
       <TriggerText text={trigger} />
       <TaskCommentCoverage task={task} />
       <RowStatus title={statusTitle}>
@@ -559,6 +617,7 @@ function RowShell({
 }) {
   return (
     <div
+      id={`execution-log-task-${task.id}`}
       title={title || undefined}
       className="group/execution-log-row flex items-center gap-2 overflow-hidden rounded px-1 py-1.5 transition-colors hover:bg-accent/40"
     >
@@ -577,12 +636,35 @@ function RowShell({
   );
 }
 
+function CommentBranchMarker({ task, onCommentFocus }: { task: AgentTask; onCommentFocus?: (commentId: string) => void }) {
+  const { t } = useT("issues");
+  if (!task.branch_point_comment_id || !onCommentFocus) return null;
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            className="inline-flex shrink-0 rounded text-muted-foreground hover:text-foreground"
+            onClick={() => onCommentFocus?.(task.branch_point_comment_id!)}
+            aria-label={t(($) => $.branch.source)}
+          />
+        }
+      >
+        <GitBranch className="h-3.5 w-3.5" />
+      </TooltipTrigger>
+      <TooltipContent>{t(($) => $.branch.source)}</TooltipContent>
+    </Tooltip>
+  );
+}
+
 function TriggerText({ text }: { text: string }) {
   return <span className="min-w-0 flex-1 truncate text-caption text-muted-foreground">{text}</span>;
 }
 
 function supportsCommentCoverage(status: AgentTask["status"]): boolean {
   switch (status) {
+    case "deferred":
     case "queued":
     case "dispatched":
     case "waiting_local_directory":

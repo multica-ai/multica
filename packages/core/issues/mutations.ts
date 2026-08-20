@@ -879,6 +879,28 @@ export function useDeleteComment(issueId: string) {
   });
 }
 
+export function useBranchComment(issueId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (vars: {
+      commentId: string;
+      requestId: string;
+      agentId?: string;
+      contentBase: string;
+    }) =>
+      api.branchComment(
+        vars.commentId,
+        {
+          ...(vars.agentId ? { agent_id: vars.agentId } : {}),
+          content_base: vars.contentBase,
+        },
+        vars.requestId,
+      ),
+    onSuccess: () =>
+      qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
+  });
+}
+
 // Every comment id in the same thread as `commentId` — the thread root plus
 // every descendant. Mirrors the server's thread walk in
 // ClearOtherThreadResolutions so the resolve optimistic update can clear sibling

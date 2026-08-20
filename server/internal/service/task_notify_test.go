@@ -121,7 +121,7 @@ func TestNotifyTaskFinished_BumpsBeforeRuntimeWakeup(t *testing.T) {
 		t.Fatal("precondition: cache should report empty")
 	}
 
-	svc.NotifyTaskFinished(db.AgentTaskQueue{ID: testUUID(11), RuntimeID: runtimeID})
+	svc.NotifyTaskFinished(ctx, db.AgentTaskQueue{ID: testUUID(11), RuntimeID: runtimeID})
 
 	if cache.IsEmpty(ctx, runtimeKey) {
 		t.Fatal("terminal wakeup must invalidate the prior empty verdict")
@@ -143,7 +143,7 @@ func TestNotifyTasksFinished_CoalescesByRuntime(t *testing.T) {
 	runtimeA := testUUID(12)
 	runtimeB := testUUID(13)
 
-	svc.notifyTasksFinished([]db.AgentTaskQueue{
+	svc.notifyTasksFinished(context.Background(), []db.AgentTaskQueue{
 		{ID: testUUID(14), RuntimeID: runtimeA},
 		{ID: testUUID(15), RuntimeID: runtimeA},
 		{ID: testUUID(16), RuntimeID: runtimeB},

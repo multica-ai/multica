@@ -1,4 +1,4 @@
-import { CheckCircle2, ChevronRight } from "lucide-react";
+import { CheckCircle2, ChevronRight, GitBranch } from "lucide-react";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { Card } from "@multica/ui/components/ui/card";
 import type { TimelineEntry } from "@multica/core/types";
@@ -15,6 +15,8 @@ interface ResolvedThreadBarProps {
    */
   replies: TimelineEntry[];
   onExpand: () => void;
+  branchPointCommentId?: string;
+  onCommentFocus?: (commentId: string) => void;
 }
 
 const MAX_NAMED_AUTHORS = 2;
@@ -48,13 +50,19 @@ function useAuthorsLabel(entries: TimelineEntry[]): string {
  * Whole-thread fold — the ROOT comment is resolved ("Resolve thread"). The
  * entire thread (root + every reply) collapses into this one bar.
  */
-export function ResolvedThreadBar({ entry, replies, onExpand }: ResolvedThreadBarProps) {
+export function ResolvedThreadBar({
+  entry,
+  replies,
+  onExpand,
+  branchPointCommentId,
+  onCommentFocus,
+}: ResolvedThreadBarProps) {
   const { t } = useT("issues");
   const authorsLabel = useAuthorsLabel([entry, ...replies]);
   const count = 1 + replies.length;
 
   return (
-    <Card className="!py-0 !gap-0 overflow-hidden">
+    <Card className="!py-0 !gap-0 flex-row overflow-hidden">
       <button
         type="button"
         onClick={onExpand}
@@ -68,6 +76,17 @@ export function ResolvedThreadBar({ entry, replies, onExpand }: ResolvedThreadBa
         </span>
         <ChevronRight className="h-3.5 w-3.5 rotate-90 shrink-0 text-muted-foreground" />
       </button>
+      {branchPointCommentId && onCommentFocus ? (
+        <button
+          type="button"
+          onClick={() => onCommentFocus(branchPointCommentId)}
+          className="shrink-0 border-l border-border/50 px-3 text-muted-foreground transition-colors hover:bg-muted/50 hover:text-foreground"
+          aria-label={t(($) => $.branch.result_source)}
+          title={t(($) => $.branch.result_source)}
+        >
+          <GitBranch className="h-3.5 w-3.5" />
+        </button>
+      ) : null}
     </Card>
   );
 }

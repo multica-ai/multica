@@ -103,3 +103,7 @@ export interface Issue {
    */
   last_activity_at?: string | null;
 }
+
+export interface ServerCapabilities {
+  comment_branch_v1: boolean;
+}

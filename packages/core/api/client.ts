@@ -210,6 +210,8 @@ import type {
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
   CreateWorkspaceSubscriptionPortalResponse,
+  CommentBranchResponse,
+  ServerCapabilities,
 } from "../types";
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
@@ -228,6 +230,8 @@ import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
   AgentTaskListSchema,
+  CommentBranchResponseSchema,
+  ServerCapabilitiesSchema,
   AttachmentResponseSchema,
   CancelTaskResponseSchema,
   ChatDraftRestoresResponseSchema,
@@ -2816,6 +2820,43 @@ export class ApiClient {
 			body: JSON.stringify({ enabled }),
 		});
 	}
+
+  async getCapabilities(): Promise<ServerCapabilities> {
+    try {
+      const raw = await this.fetch<unknown>("/api/capabilities");
+      return parseWithFallback(
+        raw,
+        ServerCapabilitiesSchema,
+        { comment_branch_v1: false },
+        { endpoint: "GET /api/capabilities" },
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        return { comment_branch_v1: false };
+      }
+      throw error;
+    }
+  }
+
+  async branchComment(
+    commentId: string,
+    data: { agent_id?: string; content_base: string },
+    requestId: string,
+  ): Promise<CommentBranchResponse> {
+    const raw = await this.fetch<unknown>(`/api/comments/${commentId}/branch`, {
+      method: "POST",
+      headers: { "Idempotency-Key": requestId },
+      body: JSON.stringify(data),
+    });
+    const response = parseWithFallback<CommentBranchResponse | null>(
+      raw,
+      CommentBranchResponseSchema,
+      null,
+      { endpoint: "POST /api/comments/:id/branch" },
+    );
+    if (!response) throw new Error("invalid comment branch response");
+    return response;
+  }
 
   async setAgentRuntimeSkillEnabled(
     agentId: string,

@@ -188,6 +188,19 @@ describe("deriveWorkloadDetail", () => {
     expect(r.queuedCount).toBe(1);
   });
 
+  it("counts deferred comment branches but not unrelated deferred work", () => {
+    const r = deriveWorkloadDetail([
+      makeTask({
+        id: "branch",
+        status: "deferred",
+        branch_point_comment_id: "comment-1",
+      }),
+      makeTask({ id: "other-deferred", status: "deferred" }),
+    ]);
+    expect(r.workload).toBe("queued");
+    expect(r.queuedCount).toBe(1);
+  });
+
   it("returns working when running coexists with queued (overflow)", () => {
     // Capacity-saturated agent: still running, but with a queue building.
     // The chip says "Working" with the queue expressed as a `+Nq` badge.

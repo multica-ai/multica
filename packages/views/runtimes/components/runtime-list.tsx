@@ -177,7 +177,11 @@ export function buildWorkloadIndex(
     const entry = result.get(rid);
     if (!entry) continue;
     if (t.status === "running") entry.runningCount += 1;
-    else if (t.status === "queued" || t.status === "dispatched")
+    else if (
+      (t.status === "deferred" && Boolean(t.branch_point_comment_id)) ||
+      t.status === "queued" ||
+      t.status === "dispatched"
+    )
       entry.queuedCount += 1;
   }
   return result;

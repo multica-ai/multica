@@ -27,6 +27,11 @@ const (
 	// everyone else keeps using the HTTP claim endpoint.
 	DaemonCapabilityRPCV1 = "rpc-v1"
 
+	// DaemonCapabilityCommentBranchV1 guarantees that the daemon executes a
+	// frozen root-to-comment snapshot without restoring or scanning normal
+	// issue history.
+	DaemonCapabilityCommentBranchV1 = "comment-branch-v1"
+
 	// AppCapabilityChatDraftRestoreV1 is advertised (X-Client-Capabilities) by
 	// app clients that understand the durable draft-restore recovery path:
 	// chat:cancel_finalized as an invalidation hint plus the draft-restores

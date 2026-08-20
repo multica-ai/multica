@@ -70,4 +70,23 @@ describe("buildWorkloadIndex", () => {
       queuedCount: 0,
     });
   });
+
+  it("counts deferred comment branches without surfacing other deferred work", () => {
+    const agent = makeAgent({ id: "active-agent" });
+    const workload = buildWorkloadIndex([agent], [
+      makeTask({
+        id: "branch",
+        agent_id: agent.id,
+        status: "deferred",
+        branch_point_comment_id: "comment-1",
+      }),
+      makeTask({
+        id: "other-deferred",
+        agent_id: agent.id,
+        status: "deferred",
+      }),
+    ]).get("runtime-1");
+
+    expect(workload?.queuedCount).toBe(1);
+  });
 });

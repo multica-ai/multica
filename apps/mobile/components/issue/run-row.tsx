@@ -11,6 +11,7 @@
  * ok-plan-linked-taco.md.
  */
 import { Alert, Pressable, View } from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import type { AgentTask } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
@@ -21,15 +22,17 @@ import { timeAgo } from "@/lib/time-ago";
 interface Props {
   task: AgentTask;
   issueId: string;
+  onCommentFocus?: (commentId: string) => void;
 }
 
 const ACTIVE_STATUSES: readonly AgentTask["status"][] = [
   "queued",
+  "deferred",
   "dispatched",
   "running",
 ];
 
-export function RunRow({ task, issueId }: Props) {
+export function RunRow({ task, issueId, onCommentFocus }: Props) {
   const { getName } = useActorLookup();
   const isActive = ACTIVE_STATUSES.includes(task.status);
   const summary = task.trigger_summary?.trim() || fallbackSummary(task);
@@ -56,6 +59,17 @@ export function RunRow({ task, issueId }: Props) {
           </Text>
         </View>
       </View>
+      {task.branch_point_comment_id && onCommentFocus ? (
+        <Pressable
+          onPress={() => onCommentFocus(task.branch_point_comment_id!)}
+          hitSlop={10}
+          accessibilityRole="button"
+          accessibilityLabel="Show source comment"
+          className="p-1.5 active:opacity-60"
+        >
+          <Ionicons name="git-branch-outline" size={17} />
+        </Pressable>
+      ) : null}
       {isActive ? <CancelButton taskId={task.id} issueId={issueId} /> : null}
     </View>
   );
@@ -131,6 +145,7 @@ function fallbackSummary(task: AgentTask): string {
 }
 
 const STATUS_LABEL: Record<AgentTask["status"], string> = {
+  deferred: "Queued",
   queued: "Queued",
   dispatched: "Starting",
   waiting_local_directory: "Waiting for directory",
@@ -141,6 +156,7 @@ const STATUS_LABEL: Record<AgentTask["status"], string> = {
 };
 
 const STATUS_CLASS: Record<AgentTask["status"], string> = {
+  deferred: "text-muted-foreground",
   queued: "text-muted-foreground",
   dispatched: "text-brand",
   waiting_local_directory: "text-muted-foreground",

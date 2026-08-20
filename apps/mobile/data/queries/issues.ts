@@ -34,6 +34,14 @@ export const issueListOptions = (wsId: string | null) =>
     enabled: !!wsId,
   });
 
+export const serverCapabilitiesOptions = (wsId: string | null) =>
+  queryOptions({
+    queryKey: issueKeys.capabilities(wsId),
+    queryFn: ({ signal }) => api.getCapabilities({ signal }),
+    enabled: !!wsId,
+    staleTime: 5 * 60_000,
+  });
+
 export const issueDetailOptions = (wsId: string | null, id: string) =>
   queryOptions({
     queryKey: issueKeys.detail(wsId, id),

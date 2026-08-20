@@ -1716,6 +1716,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 
 			// Assignee frequency
 			r.Get("/api/assignee-frequency", h.GetAssigneeFrequency)
+			r.Get("/api/capabilities", h.GetCapabilities)
 
 			// Issues
 			r.Route("/api/issues", func(r chi.Router) {
@@ -1917,6 +1918,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 			// Comments
 			r.Route("/api/comments/{commentId}", func(r chi.Router) {
 				r.Put("/", h.UpdateComment)
+				r.With(handler.RequireHumanActor).Post("/branch", h.CreateCommentBranch)
 				r.Delete("/", h.DeleteComment)
 				r.Post("/resolve", h.ResolveComment)
 				r.Delete("/resolve", h.UnresolveComment)

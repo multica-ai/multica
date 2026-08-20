@@ -806,6 +806,21 @@
     "visible_toggle": "Show in view bar",
     "more_label": "More views"
   },
+  "branch": {
+    "action": "Start independent run",
+    "title": "Start an independent run?",
+    "description": "Starts a new agent run from a snapshot of the issue and only the path from the root to this comment. Sibling and later comments are excluded, and the current agent session is not continued. If the agent is busy, the run is queued.",
+    "confirm": "Start run",
+    "success": "Independent run started",
+    "failed": "Could not start the independent run",
+    "conflict": "This comment changed. Review the latest version and try again.",
+    "agent_label": "Agent",
+    "agent_automatic": "Automatic (source agent or issue assignee)",
+    "source": "Run started from a comment",
+    "result_source": "View source comment",
+    "status_deferred": "Queued",
+    "queue_position": "Queued · #{{position}}"
+  },
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}} could not load its interface.",

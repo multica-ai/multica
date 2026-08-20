@@ -133,6 +133,10 @@ type Task struct {
 	QuickCreateAttachmentIDs      []string               `json:"quick_create_attachment_ids,omitempty"`      // attachments uploaded in the quick-create prompt and bound by issue create
 	HandoffNote                   string                 `json:"handoff_note,omitempty"`                     // assignment handoff instruction; rendered into the opening prompt + issue_context.md
 
+	BranchPointCommentID string          `json:"branch_point_comment_id,omitempty"`
+	BranchSourceTaskID   string          `json:"branch_source_task_id,omitempty"`
+	BranchContext        json.RawMessage `json:"branch_context,omitempty"`
+
 	SquadID               string `json:"squad_id,omitempty"`                // when the picker was a squad, the squad's UUID; Agent is still the resolved leader
 	SquadName             string `json:"squad_name,omitempty"`              // display name for the picker squad, used in prompt text
 	ParentIssueID         string `json:"parent_issue_id,omitempty"`         // for quick-create tasks opened from "Add sub issue" — UUID of the parent issue the new issue should be filed under

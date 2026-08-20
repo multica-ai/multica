@@ -775,6 +775,21 @@
     "visible_toggle": "在视图栏显示",
     "more_label": "更多视图"
   },
+  "branch": {
+    "action": "从此评论启动独立执行",
+    "title": "开始独立执行？",
+    "description": "将使用当前任务的快照，以及从根评论到此评论的路径，启动一次新的智能体执行。同级或后续评论不会包含在内，也不会延续当前智能体会话。若智能体正忙，此执行会进入队列。",
+    "confirm": "开始执行",
+    "success": "已开始独立执行",
+    "failed": "无法开始独立执行",
+    "conflict": "此评论已更新，请查看最新内容后重试。",
+    "agent_label": "智能体",
+    "agent_automatic": "自动（来源智能体或任务负责人）",
+    "source": "从评论开始的独立执行",
+    "result_source": "查看来源评论",
+    "status_deferred": "排队中",
+    "queue_position": "排队中 · 第 {{position}} 位"
+  },
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}} 的界面加载失败。",

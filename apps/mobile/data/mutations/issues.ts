@@ -16,6 +16,7 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import type {
   AgentTask,
+  CommentBranchResponse,
   CreateIssueRequest,
   Issue,
   IssueReaction,
@@ -762,6 +763,36 @@ export function useCancelTask(issueId: string) {
       if (ctx?.prev) qc.setQueryData(ctx.activeKey, ctx.prev);
     },
     onSettled: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.activeTasks(wsId, issueId) });
+      qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
+    },
+  });
+}
+
+export function useBranchComment(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+
+  return useMutation<
+    CommentBranchResponse,
+    Error,
+    {
+      commentId: string;
+      agentId?: string;
+      contentBase: string;
+      requestId: string;
+    }
+  >({
+    mutationFn: ({ commentId, agentId, contentBase, requestId }) =>
+      api.branchComment(
+        commentId,
+        {
+          ...(agentId ? { agent_id: agentId } : {}),
+          content_base: contentBase,
+        },
+        requestId,
+      ),
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: issueKeys.activeTasks(wsId, issueId) });
       qc.invalidateQueries({ queryKey: issueKeys.tasks(wsId, issueId) });
     },

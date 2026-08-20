@@ -1543,6 +1543,8 @@ export const AgentTaskSchema = z.object({
   parent_task_id: z.string().optional(),
   attempt: z.number().optional(),
   trigger_comment_id: z.string().optional(),
+  branch_point_comment_id: z.string().optional(),
+  branch_source_task_id: z.string().optional(),
   // Coverage is additive display metadata. A mixed-version or partially
   // upgraded server must not make one malformed optional field erase the
   // entire execution log, so degrade that field to "absent" independently.
@@ -1566,6 +1568,16 @@ export const AgentTaskSchema = z.object({
 }).loose();
 
 export const AgentTaskListSchema = z.array(AgentTaskSchema);
+
+export const CommentBranchResponseSchema = z.object({
+  task: AgentTaskSchema.extend({ id: z.string().min(1) }),
+  branch_point_comment_id: z.string().min(1),
+  source_task_id: z.string().nullable().optional(),
+}).loose();
+
+export const ServerCapabilitiesSchema = z.object({
+  comment_branch_v1: z.boolean().default(false),
+}).loose();
 
 // Task cancellation (`POST /api/tasks/:id/cancel`) is consumed directly by
 // chat recovery. Its optional message payload must be well-formed before the

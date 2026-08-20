@@ -727,6 +727,83 @@ func (q *Queries) ListChildCommentsForParents(ctx context.Context, arg ListChild
 	return items, nil
 }
 
+const listCommentBranchPathForUpdate = `-- name: ListCommentBranchPathForUpdate :many
+WITH RECURSIVE ancestors(id, parent_id, depth, trail) AS (
+    SELECT c.id, c.parent_id, 0, ARRAY[c.id]
+    FROM comment c
+    WHERE c.id = $1
+      AND c.issue_id = $2
+      AND c.workspace_id = $3
+    UNION ALL
+    SELECT parent.id, parent.parent_id, ancestors.depth + 1, ancestors.trail || parent.id
+    FROM comment parent
+    JOIN ancestors ON parent.id = ancestors.parent_id
+    WHERE parent.issue_id = $2
+      AND parent.workspace_id = $3
+      AND NOT parent.id = ANY(ancestors.trail)
+      AND ancestors.depth < $4::int
+)
+SELECT comment.id, comment.issue_id, comment.author_type, comment.author_id, comment.content, comment.type, comment.created_at, comment.updated_at, comment.parent_id, comment.workspace_id, comment.resolved_at, comment.resolved_by_type, comment.resolved_by_id, comment.source_task_id, comment.quick_action_id, comment.via_plugin_id, comment.revision
+FROM ancestors
+JOIN comment ON comment.id = ancestors.id
+ORDER BY ancestors.depth DESC
+FOR UPDATE OF comment
+`
+
+type ListCommentBranchPathForUpdateParams struct {
+	CommentID   pgtype.UUID `json:"comment_id"`
+	IssueID     pgtype.UUID `json:"issue_id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	MaxDepth    int32       `json:"max_depth"`
+}
+
+// Walk only from the selected comment toward its structural root. trail keeps
+// the query cycle-safe even if legacy data bypassed the parent validation. The
+// final SELECT locks every row copied into the immutable branch snapshot so an
+// ancestor edit cannot interleave with capture.
+func (q *Queries) ListCommentBranchPathForUpdate(ctx context.Context, arg ListCommentBranchPathForUpdateParams) ([]Comment, error) {
+	rows, err := q.db.Query(ctx, listCommentBranchPathForUpdate,
+		arg.CommentID,
+		arg.IssueID,
+		arg.WorkspaceID,
+		arg.MaxDepth,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []Comment{}
+	for rows.Next() {
+		var i Comment
+		if err := rows.Scan(
+			&i.ID,
+			&i.IssueID,
+			&i.AuthorType,
+			&i.AuthorID,
+			&i.Content,
+			&i.Type,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.ParentID,
+			&i.WorkspaceID,
+			&i.ResolvedAt,
+			&i.ResolvedByType,
+			&i.ResolvedByID,
+			&i.SourceTaskID,
+			&i.QuickActionID,
+			&i.ViaPluginID,
+			&i.Revision,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCommentsByIDsForIssue = `-- name: ListCommentsByIDsForIssue :many
 SELECT id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision FROM comment
 WHERE id = ANY($1::uuid[])
@@ -1547,6 +1624,37 @@ func (q *Queries) ListThreadCommentsForIssuePaged(ctx context.Context, arg ListT
 		return nil, err
 	}
 	return items, nil
+}
+
+const lockCommentForDelete = `-- name: LockCommentForDelete :one
+WITH locked_issue AS MATERIALIZED (
+    SELECT issue.id
+    FROM issue
+    JOIN comment ON comment.issue_id = issue.id
+                AND comment.workspace_id = issue.workspace_id
+    WHERE comment.id = $1 AND comment.workspace_id = $2
+    FOR UPDATE OF issue
+)
+SELECT comment.id
+FROM comment
+JOIN locked_issue ON locked_issue.id = comment.issue_id
+WHERE comment.id = $1 AND comment.workspace_id = $2
+FOR UPDATE OF comment
+`
+
+type LockCommentForDeleteParams struct {
+	ID          pgtype.UUID `json:"id"`
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+}
+
+// Serialize comment deletion in the repository-wide aggregate lock order:
+// issue first, then comment. The handler can then cancel comment-backed tasks
+// in the same transaction without racing a concurrent issue/comment delete.
+func (q *Queries) LockCommentForDelete(ctx context.Context, arg LockCommentForDeleteParams) (pgtype.UUID, error) {
+	row := q.db.QueryRow(ctx, lockCommentForDelete, arg.ID, arg.WorkspaceID)
+	var id pgtype.UUID
+	err := row.Scan(&id)
+	return id, err
 }
 
 const resolveComment = `-- name: ResolveComment :one

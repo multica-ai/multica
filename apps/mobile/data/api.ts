@@ -21,6 +21,7 @@ import type {
   ChatPendingTask,
   ChatSession,
   Comment,
+  CommentBranchResponse,
   CreateIssueRequest,
   CreateLabelRequest,
   CreateProjectRequest,
@@ -43,6 +44,7 @@ import type {
   Reaction,
   ReorderPinsRequest,
   RuntimeDevice,
+  ServerCapabilities,
   SearchIssuesResponse,
   SearchProjectsResponse,
   ListIssueStatusesResponse,
@@ -75,6 +77,7 @@ import {
   AttachmentSchema,
   ChatMessageListSchema,
   CommentSchema,
+  CommentBranchResponseSchema,
   ChatPendingTaskSchema,
   ChatSessionListSchema,
   ChatSessionSchema,
@@ -111,6 +114,7 @@ import {
   PinnedItemSchema,
   ProjectSchema,
   RuntimeListSchema,
+  ServerCapabilitiesSchema,
   SearchIssuesResponseSchema,
   SearchProjectsResponseSchema,
   SendChatMessageResponseSchema,
@@ -641,6 +645,44 @@ class ApiClient {
       EMPTY_TIMELINE_ENTRIES,
       { ...opts, endpoint: "GET /api/issues/:id/timeline" },
     );
+  }
+
+  async getCapabilities(
+    opts?: { signal?: AbortSignal },
+  ): Promise<ServerCapabilities> {
+    try {
+      return await this.fetchValidated(
+        "/api/capabilities",
+        ServerCapabilitiesSchema,
+        { comment_branch_v1: false },
+        { ...opts, endpoint: "GET /api/capabilities" },
+      );
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 404) {
+        return { comment_branch_v1: false };
+      }
+      throw error;
+    }
+  }
+
+  async branchComment(
+    commentId: string,
+    input: { agent_id?: string; content_base: string },
+    requestId: string,
+  ): Promise<CommentBranchResponse> {
+    const response = await this.fetchValidatedWith<CommentBranchResponse | null>(
+      `/api/comments/${commentId}/branch`,
+      CommentBranchResponseSchema,
+      null,
+      {
+        method: "POST",
+        headers: { "Idempotency-Key": requestId },
+        body: JSON.stringify(input),
+      },
+      { endpoint: "POST /api/comments/:id/branch" },
+    );
+    if (!response) throw new Error("invalid comment branch response");
+    return response;
   }
 
   // GET /api/issues/:id/attachments — list of file attachments hooked to

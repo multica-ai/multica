@@ -140,8 +140,18 @@ func runRuntimeSweeper(ctx context.Context, txStarter runtimeGCTxStarter, querie
 			sweepExpiredQueuedTasks(ctx, queries, taskSvc)
 			sweepPendingDelegatedFailureRecoveries(ctx, taskSvc)
 			sweepDeferredChatFinalizations(ctx, queries, taskSvc)
+			sweepDeferredCommentBranches(ctx, taskSvc)
 			gcRuntimes(ctx, txStarter, queries, taskSvc.Metrics, bus)
 		}
+	}
+}
+
+func sweepDeferredCommentBranches(ctx context.Context, taskSvc *service.TaskService) {
+	if taskSvc == nil {
+		return
+	}
+	if err := taskSvc.SweepDeferredCommentBranches(ctx); err != nil {
+		slog.Warn("comment branch sweeper: promote deferred task failed", "error", err)
 	}
 }
 

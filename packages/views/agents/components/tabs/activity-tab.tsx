@@ -96,6 +96,7 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
       dispatched: 1,
       waiting_local_directory: 2,
       queued: 3,
+      deferred: 4,
     };
     return snapshot
       .filter(
@@ -103,6 +104,7 @@ export function ActivityTab({ agent, showPerformance = true }: ActivityTabProps)
           t.agent_id === agent.id &&
           isWorkflowTask(t) &&
           (t.status === "running" ||
+            (t.status === "deferred" && Boolean(t.branch_point_comment_id)) ||
             t.status === "queued" ||
             t.status === "dispatched" ||
             t.status === "waiting_local_directory"),
@@ -522,12 +524,13 @@ function TaskRow({
   const isRunning = task.status === "running";
   // Queued tasks have no messages yet — hiding the transcript button avoids
   // a guaranteed "No execution data recorded." dialog open.
-  const showTranscript = task.status !== "queued";
+  const showTranscript = task.status !== "queued" && task.status !== "deferred";
   // Cancel only makes sense for the three active states. Terminal rows
   // (completed / failed / cancelled) hide the button entirely.
   const showCancel =
     timeMode === "active" &&
-    (task.status === "queued" ||
+    ((task.status === "deferred" && Boolean(task.branch_point_comment_id)) ||
+      task.status === "queued" ||
       task.status === "dispatched" ||
       task.status === "running");
 
@@ -795,6 +798,8 @@ type TimeAgoFn = (dateStr: string) => string;
 
 function taskStatusLabel(status: AgentTask["status"], t: AgentsT): string {
   switch (status) {
+    case "deferred":
+      return t(($) => $.tab_body.activity.status.queued);
     case "queued":
       return t(($) => $.tab_body.activity.status.queued);
     case "dispatched":

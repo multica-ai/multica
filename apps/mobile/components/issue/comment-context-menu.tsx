@@ -17,12 +17,19 @@
  * inline, because iOS will refuse to present a second ActionSheet while the
  * first is still dismissing — the callback runs after dismissal completes.
  */
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { ActionSheetIOS, Alert } from "react-native";
+import { useQuery } from "@tanstack/react-query";
 import { router } from "expo-router";
 import * as Clipboard from "expo-clipboard";
 import * as Haptics from "expo-haptics";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
+import {
+  ensureCommentBranchRequest,
+  shouldRetainCommentBranchRequest,
+  type CommentBranchRequestState,
+} from "@multica/core/issues/comment-branch";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
@@ -30,10 +37,16 @@ import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useActorLookup } from "@/data/use-actor-name";
 import {
   useDeleteComment,
+  useBranchComment,
   useResolveComment,
   useToggleCommentReaction,
 } from "@/data/mutations/issues";
 import { QUICK_EMOJIS } from "@/lib/quick-emojis";
+import { agentListOptions } from "@/data/queries/agents";
+import { memberListOptions } from "@/data/queries/members";
+import { ApiError } from "@/data/api";
+import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
+import { randomUUID } from "@/lib/uuid";
 
 const QUICK_ROW_SIZE = 5;
 
@@ -41,14 +54,20 @@ export function useCommentLongPress(
   entry: TimelineEntry,
   issueId: string,
   issueIdentifier: string | undefined,
+  branchEnabled = false,
 ): { onLongPress: () => void; isPressed: boolean } {
   const [isPressed, setIsPressed] = useState(false);
+  const branchRequestRef = useRef<CommentBranchRequestState | null>(null);
   const wsSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const userId = useAuthStore((s) => s.user?.id);
   const toggleReaction = useToggleCommentReaction(issueId);
   const deleteComment = useDeleteComment(issueId);
   const resolveComment = useResolveComment(issueId);
+  const branchComment = useBranchComment(issueId);
   const { getName } = useActorLookup();
+  const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
+  const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: members = [] } = useQuery(memberListOptions(wsId));
 
   const onLongPress = useCallback(() => {
     const isOwn = entry.actor_type === "member" && entry.actor_id === userId;
@@ -68,6 +87,7 @@ export function useCommentLongPress(
       | { kind: "copy" }
       | { kind: "select" }
       | { kind: "copyLink" }
+      | { kind: "branch" }
       | { kind: "resolve" }
       | { kind: "delete" }
       | { kind: "cancel" };
@@ -86,6 +106,9 @@ export function useCommentLongPress(
       push("Select Text", { kind: "select" });
     }
     if (canCopyLink) push("Copy Link", { kind: "copyLink" });
+    if (branchEnabled && !entry.id.startsWith("optimistic-")) {
+      push("Start independent run here", { kind: "branch" });
+    }
     if (isRoot) {
       push(resolved ? "Unresolve Thread" : "Resolve Thread", {
         kind: "resolve",
@@ -166,6 +189,110 @@ export function useCommentLongPress(
             ).catch(() => {});
             return;
           }
+          case "branch": {
+            const memberRole =
+              members.find((member) => member.user_id === userId)?.role ?? null;
+            const selectableAgents = agents
+              .filter(
+                (agent) =>
+                  !agent.archived_at &&
+                  isAgentRuntimeBound(agent) &&
+                  canAssignAgentToIssue(agent, {
+                    userId: userId ?? null,
+                    role: memberRole,
+                  }).allowed,
+              )
+              .sort((a, b) => a.name.localeCompare(b.name));
+            const branchOptions = [
+              "Automatic",
+              ...selectableAgents.map((agent) => agent.name),
+              "Cancel",
+            ];
+            const cancelIndex = branchOptions.length - 1;
+            ActionSheetIOS.showActionSheetWithOptions(
+              {
+                title: "Start independent run",
+                message:
+                  "The run receives the issue snapshot and only this comment's ancestor path.",
+                options: branchOptions,
+                cancelButtonIndex: cancelIndex,
+              },
+              (agentIndex) => {
+                if (agentIndex === cancelIndex) {
+                  branchRequestRef.current = null;
+                  return;
+                }
+                const selectedAgent =
+                  agentIndex === 0 ? undefined : selectableAgents[agentIndex - 1];
+                Alert.alert(
+                  "Start independent run?",
+                  selectedAgent
+                    ? `Run with ${selectedAgent.name}.`
+                    : "Use the source task agent, the issue's assigned agent, or its squad leader.",
+                  [
+                    {
+                      text: "Cancel",
+                      style: "cancel",
+                      onPress: () => {
+                        branchRequestRef.current = null;
+                      },
+                    },
+                    {
+                      text: "Start",
+                      onPress: () => {
+                        const request = ensureCommentBranchRequest(
+                          branchRequestRef.current,
+                          {
+                            commentId: entry.id,
+                            agentId: selectedAgent?.id,
+                            contentBase: entry.content ?? "",
+                          },
+                          randomUUID,
+                        );
+                        branchRequestRef.current = request;
+                        branchComment.mutate(
+                          {
+                            commentId: entry.id,
+                            agentId: selectedAgent?.id,
+                            contentBase: entry.content ?? "",
+                            requestId: request.requestId,
+                          },
+                          {
+                            onSuccess: () => {
+                              if (
+                                branchRequestRef.current?.requestId ===
+                                request.requestId
+                              ) {
+                                branchRequestRef.current = null;
+                              }
+                              Haptics.notificationAsync(
+                                Haptics.NotificationFeedbackType.Success,
+                              ).catch(() => {});
+                            },
+                            onError: (error) => {
+                              if (
+                                !shouldRetainCommentBranchRequest(
+                                  error instanceof ApiError ? error.status : undefined,
+                                ) &&
+                                branchRequestRef.current?.requestId === request.requestId
+                              ) {
+                                branchRequestRef.current = null;
+                              }
+                              Alert.alert(
+                                "Could not start run",
+                                error.message || "Try again.",
+                              );
+                            },
+                          },
+                        );
+                      },
+                    },
+                  ],
+                );
+              },
+            );
+            return;
+          }
           case "resolve":
             resolveComment.mutate({
               commentId: entry.id,
@@ -181,7 +308,14 @@ export function useCommentLongPress(
                 {
                   text: "Delete",
                   style: "destructive",
-                  onPress: () => deleteComment.mutate(entry.id),
+                  onPress: () =>
+                    deleteComment.mutate(entry.id, {
+                      onError: (error) =>
+                        Alert.alert(
+                          "Could not delete comment",
+                          error.message || "Try again.",
+                        ),
+                    }),
                 },
               ],
             );
@@ -198,6 +332,11 @@ export function useCommentLongPress(
     toggleReaction,
     deleteComment,
     resolveComment,
+    branchComment,
+    branchEnabled,
+    agents,
+    members,
+    getName,
   ]);
 
   return { onLongPress, isPressed };

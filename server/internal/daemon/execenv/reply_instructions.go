@@ -169,6 +169,34 @@ func BuildCommentReplyInstructions(provider, issueID, triggerCommentID string, s
 	return buildCommentReplyInstructionsSlim(provider, issueID, triggerCommentID, squadLeader)
 }
 
+// BuildCommentBranchResultInstructions returns the posting cookbook for an
+// independent comment-branch run. Branch results are deliberately new
+// top-level comments: the persisted source_task_id links the result back to
+// the branch task, whose branch_point_comment_id preserves the exact source
+// comment without forcing the result into the source comment's visually-flat
+// reply thread.
+func BuildCommentBranchResultInstructions(_ string, issueID string) string {
+	lead := "Post exactly one result as a new top-level comment. Do not pass --parent; the server records the selected source comment through this run."
+	if runtimeGOOS == "windows" {
+		return fmt.Sprintf(
+			lead+"\n\n"+
+				"Write the body file first — never pipe via `--content-stdin` (PowerShell drops non-ASCII; full rules: ## Comment Formatting above):\n\n"+
+				"    multica issue comment add %s --content-file ./reply.md\n"+
+				"    Remove-Item ./reply.md\n\n"+
+				"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
+			issueID,
+		)
+	}
+	return fmt.Sprintf(
+		lead+"\n\n"+
+			"Write the body file first (rules: ## Comment Formatting above — MUL-2904 / #4182):\n\n"+
+			"    multica issue comment add %s --content-file ./reply.md\n"+
+			"    rm ./reply.md\n\n"+
+			"Do NOT write literal `\\n` escapes to simulate line breaks; the file preserves real newlines.\n",
+		issueID,
+	)
+}
+
 // buildCommentReplyInstructionsSlim is the compressed reply-instructions
 // block used by BuildCommentReplyInstructions. It was introduced in
 // MUL-3560 as the slim alternative to a legacy verbose form; the

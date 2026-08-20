@@ -13,13 +13,14 @@
  */
 import { useMemo } from "react";
 import { ScrollView, View } from "react-native";
-import { useLocalSearchParams } from "expo-router";
+import { router, useLocalSearchParams } from "expo-router";
 import { useQuery } from "@tanstack/react-query";
 import type { AgentTask } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { RunRow } from "@/components/issue/run-row";
 import {
   issueActiveTasksOptions,
+  issueTimelineOptions,
   issueTasksOptions,
 } from "@/data/queries/issues";
 import { useWorkspaceStore } from "@/data/workspace-store";
@@ -29,18 +30,43 @@ const PAST_STATUS_ORDER: Record<AgentTask["status"], number> = {
   cancelled: 1,
   completed: 2,
   queued: 99,
+  deferred: 99,
   dispatched: 99,
   waiting_local_directory: 99,
   running: 99,
 };
 
 export default function IssueRunsRoute() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id, workspace } = useLocalSearchParams<{
+    id: string;
+    workspace: string;
+  }>();
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const { data: activeTasks = [] } = useQuery(
     issueActiveTasksOptions(wsId, id),
   );
   const { data: allTasks = [] } = useQuery(issueTasksOptions(wsId, id));
+  const { data: timeline = [] } = useQuery(issueTimelineOptions(wsId, id));
+  const availableCommentIds = useMemo(
+    () =>
+      new Set(
+        timeline
+          .filter((entry) => entry.type === "comment")
+          .map((entry) => entry.id),
+      ),
+    [timeline],
+  );
+  const focusComment = (commentId: string) => {
+    router.dismissTo({
+      pathname: "/[workspace]/issue/[id]",
+      params: {
+        workspace,
+        id,
+        highlight: commentId,
+        h: `${Date.now()}`,
+      },
+    });
+  };
 
   const active = useMemo(
     () =>
@@ -76,14 +102,34 @@ export default function IssueRunsRoute() {
           {active.length > 0 ? (
             <Section title="Active">
               {active.map((task) => (
-                <RunRow key={task.id} task={task} issueId={id} />
+                <RunRow
+                  key={task.id}
+                  task={task}
+                  issueId={id}
+                  onCommentFocus={
+                    task.branch_point_comment_id &&
+                    availableCommentIds.has(task.branch_point_comment_id)
+                      ? focusComment
+                      : undefined
+                  }
+                />
               ))}
             </Section>
           ) : null}
           {past.length > 0 ? (
             <Section title="Past">
               {past.map((task) => (
-                <RunRow key={task.id} task={task} issueId={id} />
+                <RunRow
+                  key={task.id}
+                  task={task}
+                  issueId={id}
+                  onCommentFocus={
+                    task.branch_point_comment_id &&
+                    availableCommentIds.has(task.branch_point_comment_id)
+                      ? focusComment
+                      : undefined
+                  }
+                />
               ))}
             </Section>
           ) : null}

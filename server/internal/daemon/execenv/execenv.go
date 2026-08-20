@@ -120,6 +120,7 @@ type TaskContextForEnv struct {
 	IssueID          string
 	TriggerCommentID string // comment that triggered this task (empty for on_assign)
 	TriggerThreadID  string // root comment ID for the triggering thread; falls back to TriggerCommentID when empty
+	BranchContext    string // immutable comment-branch snapshot JSON
 	// CommentReplyTargets is set for a comment run that coalesced comments
 	// spanning MORE THAN ONE root thread (MUL-4348). When it has >=2 entries the
 	// workflow's reply step fans out — one reply per thread — instead of the

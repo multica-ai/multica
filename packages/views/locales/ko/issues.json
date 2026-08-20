@@ -775,6 +775,21 @@
     "visible_toggle": "뷰 바에 표시",
     "more_label": "더 많은 뷰"
   },
+  "branch": {
+    "action": "이 댓글에서 독립 작업 시작",
+    "title": "독립 작업을 시작할까요?",
+    "description": "현재 태스크의 스냅샷과 루트부터 이 댓글까지의 경로만 사용해 에이전트의 새 작업을 시작합니다. 같은 단계의 댓글과 이후 댓글은 포함하지 않으며, 현재 에이전트 세션도 이어받지 않습니다. 에이전트가 작업 중이면 대기열에 추가됩니다.",
+    "confirm": "작업 시작",
+    "success": "독립 작업을 시작했습니다",
+    "failed": "독립 작업을 시작할 수 없습니다",
+    "conflict": "이 댓글이 업데이트되었습니다. 최신 내용을 확인한 뒤 다시 시도하세요.",
+    "agent_label": "에이전트",
+    "agent_automatic": "자동(원본 에이전트 또는 태스크 담당자)",
+    "source": "댓글에서 시작한 독립 작업",
+    "result_source": "원본 댓글 보기",
+    "status_deferred": "대기 중",
+    "queue_position": "대기 중 · {{position}}번째"
+  },
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}}의 인터페이스를 불러오지 못했습니다.",

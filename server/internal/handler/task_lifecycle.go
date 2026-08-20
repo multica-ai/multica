@@ -213,6 +213,15 @@ func (h *Handler) RerunIssue(w http.ResponseWriter, r *http.Request) {
 		h.writeDispatchBlocked(w, http.StatusForbidden, ReasonInvocationNotAllowed)
 		return
 	}
+	if errors.Is(err, service.ErrCommentBranchRerunUnsupported) {
+		writeErrorCode(
+			w,
+			http.StatusConflict,
+			"comment_branch_rerun_unsupported",
+			"create a new independent run from the source comment instead",
+		)
+		return
+	}
 	if err != nil {
 		slog.Warn("issue rerun failed", "issue_id", id, "error", err)
 		writeError(w, http.StatusBadRequest, err.Error())

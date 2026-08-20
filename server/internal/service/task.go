@@ -2200,7 +2200,7 @@ func (s *TaskService) CancelTasksForIssue(ctx context.Context, issueID pgtype.UU
 	for _, agentID := range distinctAgentIDs(cancelled) {
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
-	s.notifyTasksFinished(cancelled)
+	s.notifyTasksFinished(ctx, cancelled)
 	return nil
 }
 
@@ -2241,7 +2241,7 @@ func (s *TaskService) CancelTasksForAgent(ctx context.Context, agentID pgtype.UU
 	// working→available based on remaining task counts, no need to call
 	// per row (the rows we just cancelled all belong to the same agent).
 	s.ReconcileAgentStatus(ctx, agentID)
-	s.notifyTasksFinished(cancelled)
+	s.notifyTasksFinished(ctx, cancelled)
 	return cancelled, nil
 }
 
@@ -2264,7 +2264,26 @@ func (s *TaskService) CancelTasksByTriggerComment(ctx context.Context, commentID
 	for _, agentID := range distinctAgentIDs(cancelled) {
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
-	s.notifyTasksFinished(cancelled)
+	s.notifyTasksFinished(ctx, cancelled)
+	return cancelled, nil
+}
+
+// CancelOrdinaryTasksByCommentChange invalidates ordinary tasks that captured
+// a mutable comment body while preserving independent branch tasks, whose
+// snapshot is immutable by design.
+func (s *TaskService) CancelOrdinaryTasksByCommentChange(ctx context.Context, commentID pgtype.UUID) ([]db.AgentTaskQueue, error) {
+	cancelled, err := s.Queries.CancelOrdinaryAgentTasksByCommentChange(ctx, commentID)
+	if err != nil {
+		return nil, err
+	}
+	for _, task := range cancelled {
+		s.captureTaskCancelled(ctx, task)
+		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
+	}
+	for _, agentID := range distinctAgentIDs(cancelled) {
+		s.ReconcileAgentStatus(ctx, agentID)
+	}
+	s.notifyTasksFinished(ctx, cancelled)
 	return cancelled, nil
 }
 
@@ -2290,7 +2309,7 @@ func (s *TaskService) BroadcastCancelledTasks(ctx context.Context, workspaceID s
 		s.ReconcileAgentStatus(ctx, t.AgentID)
 		s.publishTaskEvent(protocol.EventTaskCancelled, workspaceID, t)
 	}
-	s.notifyTasksFinished(cancelled)
+	s.notifyTasksFinished(ctx, cancelled)
 }
 
 // BroadcastTaskQueued emits a post-commit queue invalidation for clients.
@@ -2498,7 +2517,7 @@ func (s *TaskService) CancelTaskWithResult(ctx context.Context, taskID pgtype.UU
 
 	// Broadcast cancellation as a task:failed event so frontends clear the live card
 	s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
-	s.NotifyTaskFinished(task)
+	s.NotifyTaskFinished(ctx, task)
 
 	return &CancelTaskResult{
 		Task:                 task,
@@ -2546,7 +2565,7 @@ func (s *TaskService) CancelQueuedChatTasks(ctx context.Context, sessionID, agen
 	for _, task := range tasks {
 		s.broadcastTaskEvent(ctx, protocol.EventTaskCancelled, task)
 	}
-	s.notifyTasksFinished(tasks)
+	s.notifyTasksFinished(ctx, tasks)
 	return nil
 }
 
@@ -4598,6 +4617,7 @@ func ResumeUnsafeFailure(failureReason, errorText string) bool {
 // so both agree on which failures re-run.
 func retryEligible(failureReason string, t db.AgentTaskQueue) bool {
 	return retryableReasons[failureReason] &&
+		len(t.BranchContext) == 0 &&
 		t.Attempt < retryAttemptCeiling(failureReason, t.MaxAttempts) &&
 		!t.AutopilotRunID.Valid &&
 		(t.IssueID.Valid || t.ChatSessionID.Valid)
@@ -4623,7 +4643,15 @@ func hasRunnableSuccessor(ctx context.Context, q *db.Queries, task db.AgentTaskQ
 	if !task.IssueID.Valid {
 		return false, nil
 	}
-	return q.HasPendingTaskForIssueAndAgent(ctx, db.HasPendingTaskForIssueAndAgentParams{
+	params := db.HasPendingTaskForIssueAndAgentParams{
+		IssueID: task.IssueID,
+		AgentID: task.AgentID,
+	}
+	pending, err := q.HasPendingTaskForIssueAndAgent(ctx, params)
+	if err != nil || pending {
+		return pending, err
+	}
+	return q.HasDeferredCommentBranchForIssueAndAgent(ctx, db.HasDeferredCommentBranchForIssueAndAgentParams{
 		IssueID: task.IssueID,
 		AgentID: task.AgentID,
 	})
@@ -4791,6 +4819,8 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 // to a structured 403 (no task was cancelled or created).
 var ErrRerunInvokeNotAllowed = errors.New("rerun: operator not allowed to invoke target agent")
 
+var ErrCommentBranchRerunUnsupported = errors.New("comment branch tasks cannot be rerun; create a new independent execution from the source comment")
+
 // Only tasks belonging to the target agent on this issue are cancelled.
 // Tasks owned by other agents on the same issue (e.g. a parallel
 // @-mention agent) are left alone — rerun must not collateral-cancel
@@ -4823,6 +4853,9 @@ func (s *TaskService) RerunIssue(ctx context.Context, issueID pgtype.UUID, sourc
 		}
 		if !sourceTask.IssueID.Valid || util.UUIDToString(sourceTask.IssueID) != util.UUIDToString(issueID) {
 			return nil, fmt.Errorf("source task does not belong to this issue")
+		}
+		if len(sourceTask.BranchContext) > 0 {
+			return nil, ErrCommentBranchRerunUnsupported
 		}
 		agentID = sourceTask.AgentID
 		isLeader = sourceTask.IsLeaderTask
@@ -5125,7 +5158,7 @@ func (s *TaskService) HandleFailedTasks(ctx context.Context, tasks []db.AgentTas
 	for _, agentID := range affectedAgents {
 		s.ReconcileAgentStatus(ctx, agentID)
 	}
-	s.notifyTasksFinished(tasks)
+	s.notifyTasksFinished(ctx, tasks)
 	return retried
 }
 
@@ -5934,21 +5967,115 @@ func (s *TaskService) NotifyTaskEnqueued(ctx context.Context, task db.AgentTaskQ
 	s.notifyTaskAvailable(task)
 }
 
+// AnnounceQueuedTask preserves the lifecycle ordering used by normal enqueue:
+// realtime event first, daemon wakeup second.
+func (s *TaskService) AnnounceQueuedTask(ctx context.Context, task db.AgentTaskQueue) {
+	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
+	s.NotifyTaskEnqueued(ctx, task)
+}
+
+// AnnounceTerminalFailure publishes a failure that was persisted outside the
+// normal daemon failure endpoint. It deliberately does not create comments or
+// retries: capability rejection is a terminal protocol mismatch, not an agent
+// execution failure.
+func (s *TaskService) AnnounceTerminalFailure(ctx context.Context, task db.AgentTaskQueue) {
+	s.captureTaskFailed(ctx, task)
+	s.ReconcileAgentStatus(ctx, task.AgentID)
+	s.broadcastTaskFailedEvent(ctx, task, task.Error.String, taskFailureReason(task), false)
+	s.NotifyTaskFinished(ctx, task)
+}
+
+// PromoteDeferredCommentBranch serializes promotion for one issue/agent pair.
+// A nil task means the pair is still busy or has no deferred branch.
+func (s *TaskService) PromoteDeferredCommentBranch(ctx context.Context, issueID, agentID pgtype.UUID) (*db.AgentTaskQueue, error) {
+	if s.TxStarter == nil {
+		return nil, errors.New("comment branch promotion requires transaction starter")
+	}
+	tx, err := s.TxStarter.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.Queries.WithTx(tx)
+	if err := qtx.LockCommentBranchQueue(ctx, db.LockCommentBranchQueueParams{
+		IssueID: util.UUIDToString(issueID), AgentID: util.UUIDToString(agentID),
+	}); err != nil {
+		return nil, err
+	}
+	promotionTx, err := tx.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	task, err := s.Queries.WithTx(promotionTx).PromoteNextDeferredCommentBranch(ctx, db.PromoteNextDeferredCommentBranchParams{IssueID: issueID, AgentID: agentID})
+	if err == nil {
+		err = promotionTx.Commit(ctx)
+	} else {
+		_ = promotionTx.Rollback(ctx)
+		var pgErr *pgconn.PgError
+		if errors.Is(err, pgx.ErrNoRows) || (errors.As(err, &pgErr) && pgErr.Code == "23505") {
+			err = nil
+		}
+	}
+	if err != nil {
+		return nil, err
+	}
+	if !task.ID.Valid {
+		return nil, tx.Commit(ctx)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return nil, err
+	}
+	s.AnnounceQueuedTask(ctx, task)
+	return &task, nil
+}
+
+// SweepDeferredCommentBranches repairs promotions missed by a process restart
+// or a terminal callback failure. Advisory locks keep concurrent sweeps safe.
+func (s *TaskService) SweepDeferredCommentBranches(ctx context.Context) error {
+	const maxPairsPerSweep = 128
+	pairs, err := s.Queries.ListDeferredCommentBranchPairs(ctx, maxPairsPerSweep)
+	if err != nil {
+		return err
+	}
+	var sweepErrs []error
+	for _, pair := range pairs {
+		if _, err := s.PromoteDeferredCommentBranch(ctx, pair.IssueID, pair.AgentID); err != nil {
+			sweepErrs = append(sweepErrs, fmt.Errorf("promote issue %s agent %s: %w", util.UUIDToString(pair.IssueID), util.UUIDToString(pair.AgentID), err))
+		}
+	}
+	return errors.Join(sweepErrs...)
+}
+
 // NotifyTaskFinished invalidates a runtime's empty-claim verdict and emits a
 // best-effort daemon wakeup after a task reaches a terminal state. The task ID
 // is deliberately omitted from the wakeup payload: the completed task itself
 // is not available; the hint only means that a queued successor may have
 // become claimable because an agent-capacity or serialization barrier cleared.
-func (s *TaskService) NotifyTaskFinished(task db.AgentTaskQueue) {
+func (s *TaskService) NotifyTaskFinished(ctx context.Context, task db.AgentTaskQueue) {
+	if task.IssueID.Valid && task.AgentID.Valid {
+		if _, err := s.PromoteDeferredCommentBranch(ctx, task.IssueID, task.AgentID); err != nil {
+			slog.Warn("promote deferred comment branch after terminal task", "task_id", util.UUIDToString(task.ID), "error", err)
+		}
+	}
 	s.notifyRuntimeMayHaveWork(task.RuntimeID, "")
 }
 
 // notifyTasksFinished is the batch form used by bulk terminal transitions.
 // Coalesce by runtime so cancelling many tasks on one machine produces one
 // cache bump and one websocket hint rather than a burst of identical work.
-func (s *TaskService) notifyTasksFinished(tasks []db.AgentTaskQueue) {
+func (s *TaskService) notifyTasksFinished(ctx context.Context, tasks []db.AgentTaskQueue) {
 	seen := make(map[string]struct{}, len(tasks))
+	promotedPairs := make(map[string]struct{}, len(tasks))
 	for _, task := range tasks {
+		if task.IssueID.Valid && task.AgentID.Valid {
+			pairKey := util.UUIDToString(task.IssueID) + ":" + util.UUIDToString(task.AgentID)
+			if _, ok := promotedPairs[pairKey]; !ok {
+				promotedPairs[pairKey] = struct{}{}
+				if _, err := s.PromoteDeferredCommentBranch(ctx, task.IssueID, task.AgentID); err != nil {
+					slog.Warn("promote deferred comment branch after bulk terminal tasks", "pair", pairKey, "error", err)
+				}
+			}
+		}
 		if !task.RuntimeID.Valid {
 			continue
 		}

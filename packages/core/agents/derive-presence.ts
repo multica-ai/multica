@@ -63,6 +63,7 @@ export function deriveWorkloadDetail(tasks: readonly AgentTask[]): WorkloadDetai
     if (t.status === "running") {
       runningCount += 1;
     } else if (
+      (t.status === "deferred" && Boolean(t.branch_point_comment_id)) ||
       t.status === "queued" ||
       t.status === "dispatched" ||
       // The daemon parked this task on a busy local_directory path. It's

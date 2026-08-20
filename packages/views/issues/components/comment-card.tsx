@@ -1,7 +1,8 @@
 "use client";
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { CheckCircle2, ChevronRight, ListChevronsDownUp, Copy, GitBranch, Loader2, MoreHorizontal, Pencil, RotateCcw, Trash2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Card } from "@multica/ui/components/ui/card";
 import { Button } from "@multica/ui/components/ui/button";
@@ -32,11 +33,11 @@ import { useTimeAgo } from "../../i18n";
 import { ContentEditor, type ContentEditorRef, ReadonlyContent, useFileDropZone, FileDropOverlay, Attachment as AttachmentRenderer, AttachmentDownloadProvider, useUploadGate, useComposerSubmit } from "../../editor";
 import { useCommentUploads } from "./use-comment-uploads";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { api, dispatchReasonCode, errorCode } from "@multica/core/api";
+import { api, ApiError, dispatchReasonCode, errorCode } from "@multica/core/api";
 import { ReplyInput } from "./reply-input";
 import { CommentTriggerChips } from "./comment-trigger-chips";
 import { useCommentTriggerPreview } from "../hooks/use-comment-trigger-preview";
-import type { TimelineEntry, Attachment } from "@multica/core/types";
+import type { TimelineEntry, Attachment, Agent, AgentTask, Issue, MemberRole, Squad } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import { selectStandaloneAttachments } from "@multica/core/attachments/image-sequence";
 import { useCommentCollapseStore, useCommentDraftStore } from "@multica/core/issues/stores";
@@ -44,6 +45,24 @@ import { useT } from "../../i18n";
 import { CommentsFoldBar } from "./resolved-thread-bar";
 import { deriveThreadResolution } from "./thread-utils";
 import { RevisionConflictCompare } from "./revision-conflict-compare";
+import { useBranchComment } from "@multica/core/issues/mutations";
+import { issueKeys } from "@multica/core/issues/queries";
+import { useCurrentWorkspace } from "@multica/core/paths";
+import { canAssignAgentToIssue } from "@multica/core/permissions";
+import { isAgentRuntimeBound } from "@multica/core/agents";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@multica/ui/components/ui/select";
+import { focusIssueExecutionTask } from "./execution-log-section";
+import {
+  ensureCommentBranchRequest,
+  shouldRetainCommentBranchRequest,
+  type CommentBranchRequestState,
+} from "@multica/core/issues/comment-branch";
 
 const highlightedCommentBackgroundClass =
   "bg-[color-mix(in_srgb,var(--card)_95%,var(--brand)_5%)]";
@@ -54,16 +73,18 @@ function StickyHeaderShell({
   className,
   sticky = true,
   highlighted,
+  commentId,
   children,
 }: {
   className?: string;
   sticky?: boolean;
   highlighted?: boolean;
+  commentId?: string;
   children: ReactNode;
 }) {
   if (!sticky) {
     return (
-      <div className={cn(highlighted && highlightedCommentBackgroundClass, className)}>
+      <div data-comment-focus-anchor={commentId} className={cn(highlighted && highlightedCommentBackgroundClass, className)}>
         {children}
       </div>
     );
@@ -71,6 +92,7 @@ function StickyHeaderShell({
 
   return (
     <div
+      data-comment-focus-anchor={commentId}
       className={cn(
         "sticky top-0 z-10 transition-colors duration-700",
         !highlighted && stickyHeaderFadeClass,
@@ -129,6 +151,43 @@ interface CommentCardProps {
   onResolvedExpandChange?: (rootId: string, expand: boolean) => void;
   /** ID of the comment to highlight (flash animation). */
   highlightedCommentId?: string | null;
+  branchEnabled?: boolean;
+  branchAgents?: Agent[];
+  branchSquads?: Squad[];
+  branchMemberRole?: MemberRole | null;
+  branchPointCommentId?: string;
+  onCommentFocus?: (commentId: string) => void;
+}
+
+function CommentBranchSourceButton({
+  commentId,
+  onCommentFocus,
+}: {
+  commentId?: string;
+  onCommentFocus?: (commentId: string) => void;
+}) {
+  const { t } = useT("issues");
+  if (!commentId || !onCommentFocus) return null;
+  const label = t(($) => $.branch.result_source);
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground"
+            aria-label={label}
+            onClick={() => onCommentFocus(commentId)}
+          >
+            <GitBranch className="h-4 w-4" />
+          </Button>
+        }
+      />
+      <TooltipContent side="top">{label}</TooltipContent>
+    </Tooltip>
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -579,6 +638,211 @@ function CommentRevisionConflict({
 // Single comment row (used for both parent and replies within the same Card)
 // ---------------------------------------------------------------------------
 
+function useCommentBranchAction({
+  issueId,
+  entry,
+  currentUserId,
+  enabled,
+  agents,
+  squads,
+  memberRole,
+}: {
+  issueId: string;
+  entry: TimelineEntry;
+  currentUserId?: string;
+  enabled: boolean;
+  agents: Agent[];
+  squads: Squad[];
+  memberRole: MemberRole | null;
+}) {
+  const { t } = useT("issues");
+  const [confirmBranch, setConfirmBranch] = useState(false);
+  const [selectedAgentId, setSelectedAgentId] = useState("");
+  const [automaticAgentId, setAutomaticAgentId] = useState("");
+  const branchRequestRef = useRef<CommentBranchRequestState | null>(null);
+  const wsId = useCurrentWorkspace()?.id ?? "";
+  const qc = useQueryClient();
+  const branchComment = useBranchComment(issueId);
+  const selectableAgents = agents.filter(
+    (agent) =>
+      !agent.archived_at &&
+      isAgentRuntimeBound(agent) &&
+      canAssignAgentToIssue(agent, {
+        userId: currentUserId ?? null,
+        role: memberRole,
+      }).allowed,
+  );
+  const agentSelectItems = [
+    {
+      value: "__automatic",
+      label: t(($) => $.branch.agent_automatic),
+    },
+    ...selectableAgents.map((agent) => ({ value: agent.id, label: agent.name })),
+  ];
+
+  const openBranchDialog = useCallback(async () => {
+    let defaultAgentId = "";
+    let tasks: AgentTask[] = [];
+    try {
+      tasks = await qc.ensureQueryData<AgentTask[]>({
+        queryKey: issueKeys.tasks(issueId),
+        queryFn: () => api.listTasksByIssue(issueId),
+        staleTime: 30_000,
+      });
+      defaultAgentId =
+        tasks.find((task) => task.id === entry.source_task_id)?.agent_id ?? "";
+    } catch {
+      // The server remains authoritative for the source-task fallback.
+    }
+    if (!defaultAgentId) {
+      const cachedIssue = qc.getQueryData<Issue>(issueKeys.detail(wsId, issueId));
+      if (cachedIssue?.assignee_type === "agent") {
+        defaultAgentId = cachedIssue.assignee_id ?? "";
+      } else if (cachedIssue?.assignee_type === "squad") {
+        defaultAgentId =
+          squads.find((squad) => squad.id === cachedIssue.assignee_id)?.leader_id ?? "";
+      }
+    }
+    setAutomaticAgentId(defaultAgentId);
+    // Empty means "keep the server's source/assignee/squad fallback". Showing
+    // the resolved agent without sending it as an override lets the transaction
+    // revalidate a changed source while the resulting branch stays a direct run.
+    setSelectedAgentId("");
+    branchRequestRef.current = null;
+    setConfirmBranch(true);
+  }, [entry.source_task_id, issueId, qc, squads, wsId]);
+
+  const createBranch = useCallback(async () => {
+    const request = ensureCommentBranchRequest(
+      branchRequestRef.current,
+      {
+        commentId: entry.id,
+        agentId: selectedAgentId || undefined,
+        contentBase: entry.content ?? "",
+      },
+      () => crypto.randomUUID(),
+    );
+    branchRequestRef.current = request;
+    try {
+      const result = await branchComment.mutateAsync({
+        commentId: entry.id,
+        requestId: request.requestId,
+        agentId: selectedAgentId || undefined,
+        contentBase: entry.content ?? "",
+      });
+      await qc.refetchQueries({ queryKey: issueKeys.tasks(issueId) });
+      toast.success(t(($) => $.branch.success));
+      if (branchRequestRef.current?.requestId === request.requestId) {
+        branchRequestRef.current = null;
+      }
+      setConfirmBranch(false);
+      if (result.task.id) focusIssueExecutionTask(issueId, result.task.id);
+    } catch (error) {
+      if (
+        !shouldRetainCommentBranchRequest(
+          error instanceof ApiError ? error.status : undefined,
+        ) &&
+        branchRequestRef.current?.requestId === request.requestId
+      ) {
+        branchRequestRef.current = null;
+      }
+      if (errorCode(error) === "revision_conflict") {
+        await Promise.all([
+          qc.invalidateQueries({ queryKey: issueKeys.timeline(issueId) }),
+          qc.invalidateQueries({ queryKey: issueKeys.detail(wsId, issueId) }),
+          qc.invalidateQueries({ queryKey: issueKeys.tasks(issueId) }),
+        ]);
+        toast.error(t(($) => $.branch.conflict));
+        setConfirmBranch(false);
+        return;
+      }
+      toast.error(
+        error instanceof Error && error.message
+          ? error.message
+          : t(($) => $.branch.failed),
+      );
+    }
+  }, [
+    branchComment,
+    entry.content,
+    entry.id,
+    issueId,
+    qc,
+    selectedAgentId,
+    t,
+    wsId,
+  ]);
+
+  const branchActionEnabled = enabled && !entry.id.startsWith("optimistic-");
+  return {
+    menuItem: branchActionEnabled ? (
+      <DropdownMenuItem onClick={() => void openBranchDialog()}>
+        <GitBranch className="h-3.5 w-3.5" />
+        {t(($) => $.branch.action)}
+      </DropdownMenuItem>
+    ) : null,
+    dialog: branchActionEnabled ? (
+      <AlertDialog open={confirmBranch} onOpenChange={setConfirmBranch}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t(($) => $.branch.title)}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t(($) => $.branch.description)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-1.5">
+            <div className="text-caption font-medium">
+              {t(($) => $.branch.agent_label)}
+            </div>
+            <Select
+              items={agentSelectItems}
+              value={selectedAgentId || "__automatic"}
+              onValueChange={(value) =>
+                setSelectedAgentId(!value || value === "__automatic" ? "" : value)
+              }
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue>
+                  {selectedAgentId
+                    ? selectableAgents.find((agent) => agent.id === selectedAgentId)
+                        ?.name
+                    : agents.find((agent) => agent.id === automaticAgentId)?.name ??
+                      t(($) => $.branch.agent_automatic)}
+                </SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__automatic">
+                  {t(($) => $.branch.agent_automatic)}
+                </SelectItem>
+                {selectableAgents.map((agent) => (
+                  <SelectItem key={agent.id} value={agent.id}>
+                    {agent.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t(($) => $.comment.cancel_action)}</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(event) => {
+                event.preventDefault();
+                void createBranch();
+              }}
+              disabled={branchComment.isPending}
+            >
+              {branchComment.isPending ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : null}
+              {t(($) => $.branch.confirm)}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    ) : null,
+  };
+}
+
 function CommentRow({
   issueId,
   entry,
@@ -590,6 +854,10 @@ function CommentRow({
   onDelete,
   onToggleReaction,
   onResolveToggle,
+  branchEnabled = false,
+  branchAgents = [],
+  branchSquads = [],
+  branchMemberRole = null,
 }: {
   issueId: string;
   entry: TimelineEntry;
@@ -603,12 +871,25 @@ function CommentRow({
   onDelete: (commentId: string) => void;
   onToggleReaction: (commentId: string, emoji: string) => void;
   onResolveToggle?: (commentId: string, resolved: boolean) => void;
+  branchEnabled?: boolean;
+  branchAgents?: Agent[];
+  branchSquads?: Squad[];
+  branchMemberRole?: MemberRole | null;
 }) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
   const { getActorName } = useActorName();
 
   const edit = useEditAttachmentState(issueId, entry, onEdit);
+  const commentBranch = useCommentBranchAction({
+    issueId,
+    entry,
+    currentUserId,
+    enabled: branchEnabled,
+    agents: branchAgents,
+    squads: branchSquads,
+    memberRole: branchMemberRole,
+  });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
@@ -625,6 +906,7 @@ function CommentRow({
           this reply ends. The header stays opaque and matches this comment's
           highlight state while it occludes the body scrolling underneath. */}
       <StickyHeaderShell
+        commentId={entry.id}
         highlighted={isHighlighted}
         className="flex items-center gap-2.5 px-4 max-md:px-3 pt-1 pb-1.5"
       >
@@ -669,6 +951,8 @@ function CommentRow({
                 <Copy className="h-3.5 w-3.5" />
                 {t(($) => $.comment.copy_action)}
               </DropdownMenuItem>
+              {commentBranch.menuItem ? <DropdownMenuSeparator /> : null}
+              {commentBranch.menuItem}
               {onResolveToggle && (
                 <>
                   <DropdownMenuSeparator />
@@ -710,6 +994,7 @@ function CommentRow({
             onOpenChange={setConfirmDelete}
             onConfirm={() => onDelete(entry.id)}
           />
+          {commentBranch.dialog}
         </div>
       </StickyHeaderShell>
 
@@ -844,6 +1129,12 @@ function CommentCardImpl({
   expandedResolvedIds,
   onResolvedExpandChange,
   highlightedCommentId,
+  branchEnabled = false,
+  branchAgents = [],
+  branchSquads = [],
+  branchMemberRole = null,
+  branchPointCommentId,
+  onCommentFocus,
 }: CommentCardProps) {
   const { t } = useT("issues");
   const timeAgo = useTimeAgo();
@@ -857,6 +1148,15 @@ function CommentCardImpl({
   );
 
   const edit = useEditAttachmentState(issueId, entry, onEdit);
+  const commentBranch = useCommentBranchAction({
+    issueId,
+    entry,
+    currentUserId,
+    enabled: branchEnabled,
+    agents: branchAgents,
+    squads: branchSquads,
+    memberRole: branchMemberRole,
+  });
 
   const isOwn = entry.actor_type === "member" && entry.actor_id === currentUserId;
   const canEditEntry = isOwn || (canModerate && entry.actor_type === "member");
@@ -924,6 +1224,7 @@ function CommentCardImpl({
         <div className={cn("transition-colors duration-700", isHighlighted && highlightedCommentBackgroundClass)}>
           {/* Header — always visible, acts as toggle */}
           <StickyHeaderShell
+            commentId={entry.id}
             sticky={stickyHeader}
             highlighted={isHighlighted}
             className="px-4 max-md:px-3 py-3"
@@ -968,6 +1269,10 @@ function CommentCardImpl({
 
               {open && (
                 <div className="ml-auto flex items-center gap-0.5">
+                  <CommentBranchSourceButton
+                    commentId={branchPointCommentId}
+                    onCommentFocus={onCommentFocus}
+                  />
                   <DropdownMenu>
                     <DropdownMenuTrigger
                       render={
@@ -985,6 +1290,8 @@ function CommentCardImpl({
                         <Copy className="h-3.5 w-3.5" />
                         {t(($) => $.comment.copy_action)}
                       </DropdownMenuItem>
+                      {commentBranch.menuItem ? <DropdownMenuSeparator /> : null}
+                      {commentBranch.menuItem}
                       {onResolveToggle && (
                         <>
                           <DropdownMenuSeparator />
@@ -1029,6 +1336,7 @@ function CommentCardImpl({
                     onConfirm={() => onDelete(entry.id)}
                     hasReplies
                   />
+                  {commentBranch.dialog}
                 </div>
               )}
             </div>
@@ -1178,6 +1486,10 @@ function CommentCardImpl({
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
                     onResolveToggle={onResolveToggle}
+                    branchEnabled={branchEnabled}
+                    branchAgents={branchAgents}
+                    branchSquads={branchSquads}
+                    branchMemberRole={branchMemberRole}
                   />
                 </div>
               )}
@@ -1217,6 +1529,10 @@ function CommentCardImpl({
                     onDelete={onDelete}
                     onToggleReaction={onToggleReaction}
                     onResolveToggle={onResolveToggle}
+                    branchEnabled={branchEnabled}
+                    branchAgents={branchAgents}
+                    branchSquads={branchSquads}
+                    branchMemberRole={branchMemberRole}
                   />
                 </div>
               ))}

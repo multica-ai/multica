@@ -414,7 +414,7 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   runtime_id: z.string().default(""),
   issue_id: z.string().default(""),
   status: z
-    .enum(["queued", "dispatched", "running", "completed", "failed", "cancelled"])
+    .enum(["deferred", "queued", "dispatched", "waiting_local_directory", "running", "completed", "failed", "cancelled"])
     .catch("queued"),
   priority: z.number().default(0),
   dispatched_at: z.string().nullable().default(null),
@@ -438,6 +438,8 @@ export const AgentTaskSchema: z.ZodType<AgentTask> = z.object({
   attempt: z.number().optional(),
   trigger_comment_id: z.string().optional(),
   trigger_summary: z.string().optional(),
+  branch_point_comment_id: z.string().optional(),
+  branch_source_task_id: z.string().optional(),
   kind: z.enum(["comment", "autopilot", "chat", "quick_create", "direct"]).optional().catch("direct"),
   work_dir: z.string().optional(),
 }).loose();
@@ -454,6 +456,18 @@ export interface ActiveTasksResponse {
 
 export const EMPTY_AGENT_TASK_LIST: AgentTask[] = [];
 export const EMPTY_ACTIVE_TASKS_RESPONSE: ActiveTasksResponse = { tasks: [] };
+
+export const CommentBranchResponseSchema = z.object({
+  task: AgentTaskSchema.refine((task) => task.id.length > 0, {
+    message: "task id is required",
+  }),
+  branch_point_comment_id: z.string().min(1),
+  source_task_id: z.string().nullable().optional(),
+}).loose();
+
+export const ServerCapabilitiesSchema = z.object({
+  comment_branch_v1: z.boolean().default(false),
+}).loose();
 
 // =====================================================
 // User / Workspace / Inbox / Member / Agent

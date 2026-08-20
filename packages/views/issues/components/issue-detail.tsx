@@ -66,7 +66,7 @@ import { STATUS_CONFIG, PRIORITY_CONFIG } from "@multica/core/issues/config";
 import { formatDateOnly, isPastDateOnly } from "@multica/core/issues/date";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
 import { toast } from "sonner";
-import { errorCode } from "@multica/core/api";
+import { api, errorCode } from "@multica/core/api";
 import { StatusIcon, PriorityIcon, StatusPicker, PriorityPicker, StagePicker, StartDatePicker, DueDatePicker, AssigneePicker, LabelPicker } from ".";
 import { maxSiblingStage } from "./pickers/stage-picker";
 import { CustomPropertyValueEditor, CustomPropertyValueDisplay } from "./pickers/custom-property-picker";
@@ -89,6 +89,10 @@ import { ThreadNavPanel, mentionsUser, type ThreadNavThread } from "./thread-nav
 import { collectThreadReplies, deriveThreadResolution } from "./thread-utils";
 import { IssueAgentHeaderChip } from "./issue-agent-header-chip";
 import { ExecutionLogSection } from "./execution-log-section";
+import {
+  findCommentFocusAnchor,
+  resolveCommentFocusTarget,
+} from "./comment-focus";
 import { QuickActionsSection } from "./quick-actions-section";
 import { PluginPanelSection } from "../../plugins";
 import { PullRequestList } from "./pull-request-list";
@@ -99,14 +103,17 @@ import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useRecentContextStore } from "@multica/core/chat";
-import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions } from "@multica/core/issues/queries";
+import { commentBranchPointsByTaskId } from "@multica/core/issues/comment-branch";
+import { issueKeys } from "@multica/core/issues/queries";
+import { issueListOptions, issueDetailOptions, childIssuesOptions, childIssueProgressOptions, issueAttachmentsOptions, serverCapabilitiesOptions } from "@multica/core/issues/queries";
 import { projectDetailOptions } from "@multica/core/projects/queries";
 import { ProjectIcon } from "../../projects/components/project-icon";
 import { issueLabelsOptions } from "@multica/core/labels";
 import { propertyListOptions } from "@multica/core/properties";
-import { memberListOptions, agentListOptions } from "@multica/core/workspace/queries";
+import { memberListOptions, agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import {
   selectExpandedResolved,
+  useCommentCollapseStore,
   useRecentIssuesStore,
   useResolvedExpandStore,
   useSubIssuesCollapseStore,
@@ -1128,6 +1135,11 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
   const wsId = useWorkspaceId();
   const { data: members = [] } = useQuery(memberListOptions(wsId));
   const { data: agents = [] } = useQuery(agentListOptions(wsId));
+  const { data: squads = [] } = useQuery(squadListOptions(wsId));
+  const { data: serverCapabilities } = useQuery({
+    ...serverCapabilitiesOptions(wsId),
+    enabled: Boolean(wsId),
+  });
   // Workspace owners and admins moderate any comment authored by anyone
   // (mirrors backend `comment.go:507-512`). Computed here so per-comment
   // rendering doesn't have to re-derive it for every row.
@@ -1343,7 +1355,10 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       return cached?.description != null ? cached : undefined;
     },
   });
-
+  const { data: issueTasks = [] } = useQuery({
+    queryKey: issueKeys.tasks(id),
+    queryFn: () => api.listTasksByIssue(id),
+  });
   // Record recent visit
   const recordVisit = useRecentIssuesStore((s) => s.recordVisit);
   const recordRecentContext = useRecentContextStore((s) => s.recordVisit);
@@ -1390,6 +1405,14 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     submitComment, submitReply,
     editComment, deleteComment, toggleResolveComment, toggleReaction: handleToggleReaction,
   } = useIssueTimeline(id, user?.id);
+  const availableCommentIds = useMemo(
+    () => new Set(timeline.filter((entry) => entry.type === "comment").map((entry) => entry.id)),
+    [timeline],
+  );
+  const branchPointsByTaskId = useMemo(
+    () => commentBranchPointsByTaskId(issueTasks, availableCommentIds),
+    [availableCommentIds, issueTasks],
+  );
 
   // Resolve / unresolve must always clear the per-session expand entry so
   // re-resolving an already-expanded thread folds it back to the bar (the
@@ -1669,9 +1692,13 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
     return () => cancelAnimationFrame(rafId);
   }, [pendingPostedCommentId, items, replyToRoot, isFlatTimeline, scrollContainerEl]);
   const jumpFlashTimerRef = useRef<number | null>(null);
+  const commentFocusRafRef = useRef<number | null>(null);
   useEffect(
     () => () => {
       if (jumpFlashTimerRef.current !== null) window.clearTimeout(jumpFlashTimerRef.current);
+      if (commentFocusRafRef.current !== null) {
+        window.cancelAnimationFrame(commentFocusRafRef.current);
+      }
     },
     [],
   );
@@ -1702,6 +1729,109 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
       jumpFlashTimerRef.current = window.setTimeout(() => setHighlightedId(null), 2000);
     },
     [isFlatTimeline, items, scrollContainerEl],
+  );
+
+  const focusCommentFromExecutionLog = useCallback(
+    (commentId: string) => {
+      const focusTarget = resolveCommentFocusTarget(
+        commentId,
+        items.map((item) => item.id),
+        replyToRoot,
+      );
+      const container = scrollContainerEl;
+      if (!focusTarget || !container) return;
+
+      const { rootId, index } = focusTarget;
+      const rootItem = items[index];
+
+      if (commentId !== rootId) {
+        const collapseState = useCommentCollapseStore.getState();
+        if (collapseState.isCollapsed(id, rootId)) {
+          collapseState.toggle(id, rootId);
+        }
+      }
+
+      if (rootItem?.kind === "resolved-bar") {
+        toggleResolvedExpand(rootId, true);
+      } else if (
+        commentId !== rootId &&
+        rootItem?.kind === "comment" &&
+        !expandedResolved.has(rootId)
+      ) {
+        const resolution = deriveThreadResolution(
+          rootItem.entry,
+          timelineView.threadReplies.get(rootId) ?? EMPTY_REPLIES,
+        );
+        if (resolution.kind === "reply" && resolution.resolutionId !== commentId) {
+          toggleResolvedExpand(rootId, true);
+        }
+      }
+
+      if (!isFlatTimeline) {
+        virtuosoRef.current?.scrollToIndex({ index, align: "center" });
+      }
+
+      if (commentFocusRafRef.current !== null) {
+        window.cancelAnimationFrame(commentFocusRafRef.current);
+      }
+      if (jumpFlashTimerRef.current !== null) {
+        window.clearTimeout(jumpFlashTimerRef.current);
+      }
+      setHighlightedId(null);
+
+      let frames = 0;
+      let lastTarget = -1;
+      let landed = false;
+      const centerTarget = () => {
+        const wrapper = document.getElementById(`comment-${commentId}`);
+        if (!wrapper) {
+          if (++frames < 60) {
+            commentFocusRafRef.current = window.requestAnimationFrame(centerTarget);
+          } else {
+            commentFocusRafRef.current = null;
+          }
+          return;
+        }
+        const element = findCommentFocusAnchor(wrapper, commentId);
+
+        if (!landed) {
+          landed = true;
+          setHighlightedId(commentId);
+          jumpFlashTimerRef.current = window.setTimeout(() => {
+            setHighlightedId(null);
+            jumpFlashTimerRef.current = null;
+          }, 2500);
+        }
+
+        const containerRect = container.getBoundingClientRect();
+        const elementRect = element.getBoundingClientRect();
+        const target = Math.max(
+          0,
+          container.scrollTop +
+            (elementRect.top - containerRect.top) -
+            (container.clientHeight - elementRect.height) / 2,
+        );
+        container.scrollTop = target;
+
+        if (Math.abs(target - lastTarget) > 1 && ++frames < 30) {
+          lastTarget = target;
+          commentFocusRafRef.current = window.requestAnimationFrame(centerTarget);
+        } else {
+          commentFocusRafRef.current = null;
+        }
+      };
+      commentFocusRafRef.current = window.requestAnimationFrame(centerTarget);
+    },
+    [
+      expandedResolved,
+      id,
+      isFlatTimeline,
+      items,
+      replyToRoot,
+      scrollContainerEl,
+      timelineView.threadReplies,
+      toggleResolvedExpand,
+    ],
   );
 
   // Header thread navigator. `open` and `pinned` live here rather than inside
@@ -2549,7 +2679,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
           own token spend, with the issue total on the section header.
           Self-contained; owns its own collapse state and WS subscriptions.
           Hides itself when there are no runs to show. */}
-      <ExecutionLogSection issueId={id} identifier={issue.identifier} />
+      <ExecutionLogSection
+        issueId={id}
+        identifier={issue.identifier}
+        onCommentFocus={focusCommentFromExecutionLog}
+        availableCommentIds={availableCommentIds}
+      />
 
       {/* Details — creator and timestamps. Sits below the execution log
           because it is the least-read block in the sidebar: the values
@@ -2629,6 +2764,12 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             entry={item.entry}
             replies={timelineView.threadReplies.get(item.id) ?? EMPTY_REPLIES}
             onExpand={() => toggleResolvedExpand(item.id, true)}
+            branchPointCommentId={
+              item.entry.source_task_id
+                ? branchPointsByTaskId.get(item.entry.source_task_id)
+                : undefined
+            }
+            onCommentFocus={focusCommentFromExecutionLog}
           />
         </div>
       );
@@ -2653,6 +2794,16 @@ export function IssueDetail({ issueId, onDelete, onDone, defaultSidebarOpen = tr
             expandedResolvedIds={expandedResolved}
             onResolvedExpandChange={toggleResolvedExpand}
             highlightedCommentId={highlightedId}
+            branchEnabled={serverCapabilities?.comment_branch_v1 === true}
+            branchAgents={agents}
+            branchSquads={squads}
+            branchMemberRole={currentUserRole}
+            branchPointCommentId={
+              item.entry.source_task_id
+                ? branchPointsByTaskId.get(item.entry.source_task_id)
+                : undefined
+            }
+            onCommentFocus={focusCommentFromExecutionLog}
           />
         </div>
       );

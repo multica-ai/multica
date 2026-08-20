@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/util"
@@ -111,12 +110,22 @@ type failNthBegin struct {
 	calls    int
 }
 
-type failDeleteCommentDB struct {
-	delegate db.DBTX
+type deleteCommentTxStarter struct {
+	inner txStarter
+	fail  bool
 }
 
-type zeroDeleteCommentDB struct {
-	delegate db.DBTX
+func (s deleteCommentTxStarter) Begin(ctx context.Context) (pgx.Tx, error) {
+	tx, err := s.inner.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &deleteCommentTx{Tx: tx, fail: s.fail}, nil
+}
+
+type deleteCommentTx struct {
+	pgx.Tx
+	fail bool
 }
 
 type deleteCommentResultRow struct {
@@ -133,40 +142,14 @@ func (r deleteCommentResultRow) Scan(dest ...interface{}) error {
 	return nil
 }
 
-func (f *failDeleteCommentDB) Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
+func (tx *deleteCommentTx) QueryRow(ctx context.Context, query string, args ...any) pgx.Row {
 	if strings.Contains(query, "-- name: DeleteComment") {
-		return pgconn.CommandTag{}, errors.New("injected comment deletion failure")
-	}
-	return f.delegate.Exec(ctx, query, args...)
-}
-
-func (f *failDeleteCommentDB) Query(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error) {
-	return f.delegate.Query(ctx, query, args...)
-}
-
-func (f *failDeleteCommentDB) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
-	if strings.Contains(query, "-- name: DeleteComment") {
-		return deleteCommentResultRow{err: errors.New("injected comment deletion failure")}
-	}
-	return f.delegate.QueryRow(ctx, query, args...)
-}
-
-func (z *zeroDeleteCommentDB) Exec(ctx context.Context, query string, args ...interface{}) (pgconn.CommandTag, error) {
-	if strings.Contains(query, "-- name: DeleteComment") {
-		return pgconn.NewCommandTag("DELETE 0"), nil
-	}
-	return z.delegate.Exec(ctx, query, args...)
-}
-
-func (z *zeroDeleteCommentDB) Query(ctx context.Context, query string, args ...interface{}) (pgx.Rows, error) {
-	return z.delegate.Query(ctx, query, args...)
-}
-
-func (z *zeroDeleteCommentDB) QueryRow(ctx context.Context, query string, args ...interface{}) pgx.Row {
-	if strings.Contains(query, "-- name: DeleteComment") {
+		if tx.fail {
+			return deleteCommentResultRow{err: errors.New("injected comment deletion failure")}
+		}
 		return deleteCommentResultRow{changed: false}
 	}
-	return z.delegate.QueryRow(ctx, query, args...)
+	return tx.Tx.QueryRow(ctx, query, args...)
 }
 
 func (f *failNthBegin) Begin(ctx context.Context) (pgx.Tx, error) {
@@ -472,7 +455,7 @@ func TestDeleteComment_CancelsAndRequeuesWhenDeletedInputIsCoalesced(t *testing.
 	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[1:2])
 }
 
-func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
+func TestDeleteComment_FailureRollsBackTaskCancellation(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -482,7 +465,7 @@ func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
 	}
 
 	failingHandler := *testHandler
-	failingHandler.Queries = db.New(&failDeleteCommentDB{delegate: testPool})
+	failingHandler.TxStarter = deleteCommentTxStarter{inner: testHandler.TxStarter, fail: true}
 	w := httptest.NewRecorder()
 	req := newRequest(http.MethodDelete, "/api/comments/"+fixture.commentID[2], nil)
 	req = withURLParam(req, "commentId", fixture.commentID[2])
@@ -498,10 +481,10 @@ func TestDeleteComment_FailureRestoresCancelledCompleteBatch(t *testing.T) {
 	if existing != 1 {
 		t.Fatalf("failed delete unexpectedly removed trigger")
 	}
-	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
+	assertOriginalCommentBatch(t, fixture)
 }
 
-func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *testing.T) {
+func TestDeleteComment_ConcurrentNoOpRollsBackTaskCancellation(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
@@ -511,7 +494,7 @@ func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *test
 	}
 
 	zeroHandler := *testHandler
-	zeroHandler.Queries = db.New(&zeroDeleteCommentDB{delegate: testPool})
+	zeroHandler.TxStarter = deleteCommentTxStarter{inner: testHandler.TxStarter}
 	w := httptest.NewRecorder()
 	req := newRequest(http.MethodDelete, "/api/comments/"+fixture.commentID[2], nil)
 	req = withURLParam(req, "commentId", fixture.commentID[2])
@@ -520,7 +503,42 @@ func TestDeleteComment_ConcurrentNoOpIsReportedAndRestoresCancelledBatch(t *test
 		t.Fatalf("DeleteComment no-op: got %d: %s", w.Code, w.Body.String())
 	}
 
-	assertRepairedCommentBatch(t, fixture, fixture.commentID[2], fixture.commentID[:2])
+	assertOriginalCommentBatch(t, fixture)
+}
+
+func assertOriginalCommentBatch(t *testing.T, fixture commentDeliveryFixture) {
+	t.Helper()
+	var status, trigger string
+	var coalesced []string
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT status, trigger_comment_id::text, coalesced_comment_ids::text[]
+		FROM agent_task_queue
+		WHERE id = $1
+	`, fixture.taskID).Scan(&status, &trigger, &coalesced); err != nil {
+		t.Fatalf("load original task after rolled-back delete: %v", err)
+	}
+	if status != "queued" {
+		t.Fatalf("original task status = %s, want queued", status)
+	}
+	if trigger != fixture.commentID[2] {
+		t.Fatalf("original trigger = %s, want %s", trigger, fixture.commentID[2])
+	}
+	gotCoalesced := append([]string{}, coalesced...)
+	wantCoalesced := append([]string{}, fixture.commentID[:2]...)
+	slices.Sort(gotCoalesced)
+	slices.Sort(wantCoalesced)
+	if !slices.Equal(gotCoalesced, wantCoalesced) {
+		t.Fatalf("original coalesced ids = %v, want %v", gotCoalesced, wantCoalesced)
+	}
+	var taskCount int
+	if err := testPool.QueryRow(context.Background(), `
+		SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2
+	`, fixture.issueID, fixture.agentID).Scan(&taskCount); err != nil {
+		t.Fatalf("count tasks after rolled-back delete: %v", err)
+	}
+	if taskCount != 1 {
+		t.Fatalf("task count after rolled-back delete = %d, want 1", taskCount)
+	}
 }
 
 func assertRepairedCommentBatch(t *testing.T, fixture commentDeliveryFixture, wantTrigger string, wantCoalesced []string) {

@@ -404,6 +404,146 @@ SELECT
 WHERE lock_task_owner_rows($1, $3, $2)
 RETURNING *;
 
+-- name: CreateDeferredCommentBranchTask :one
+-- A user-created comment branch is durable immediately but remains inert until
+-- PromoteNextDeferredCommentBranch confirms that no task for the same issue and
+-- agent is active. Branch provenance is deliberately stored outside context so
+-- ordinary head_sha dedup remains independent from the frozen branch snapshot.
+-- The selected agent may happen to lead the issue's squad, but the branch is a
+-- direct execution, never a coordinator run; keep role fields hard-coded here
+-- so callers cannot accidentally restore squad no_action semantics.
+INSERT INTO agent_task_queue (
+    agent_id, runtime_id, issue_id, status, priority, trigger_comment_id,
+    trigger_summary, force_fresh_session, is_leader_task, squad_id, context,
+    originator_user_id, accountable_user_id, runtime_mcp_overlay, runtime_connected_apps,
+    originator_source, delegated_from_task_id, rule_version_id,
+    trigger_evidence_kind, trigger_evidence_ref_id,
+    branch_point_comment_id, branch_source_task_id, branch_context, branch_request_id
+)
+SELECT
+    @agent_id, @runtime_id, @issue_id, 'deferred', @priority, @trigger_comment_id,
+    sqlc.narg('trigger_summary'), TRUE, FALSE,
+    NULL,
+    CASE
+        WHEN COALESCE(sqlc.narg('head_sha')::text, '') <> ''
+        THEN jsonb_build_object('head_sha', sqlc.narg('head_sha')::text)
+        ELSE NULL
+    END,
+    sqlc.narg('originator_user_id'), @accountable_user_id,
+    sqlc.narg('runtime_mcp_overlay'), sqlc.narg('runtime_connected_apps'),
+    @originator_source, sqlc.narg('delegated_from_task_id'), sqlc.narg('rule_version_id'),
+    @trigger_evidence_kind, @trigger_evidence_ref_id,
+    @branch_point_comment_id, sqlc.narg('branch_source_task_id'), @branch_context,
+    @branch_request_id
+WHERE lock_task_owner_rows(@agent_id, @issue_id, @runtime_id)
+  AND EXISTS (
+    SELECT 1
+    FROM agent current_agent
+    WHERE current_agent.id = @agent_id
+      AND current_agent.runtime_id = @runtime_id
+      AND current_agent.kind = 'user'
+      AND current_agent.archived_at IS NULL
+  )
+RETURNING *;
+
+-- name: LockCommentBranchWorkspace :exec
+-- First lock in comment-branch creation. Matches lock_task_owner_rows' fixed
+-- workspace -> agent -> issue -> runtime order and fences workspace teardown
+-- without serializing independent task writers.
+SELECT 1 FROM workspace WHERE id = @workspace_id FOR KEY SHARE;
+
+-- name: GetCommentBranchTaskByRequest :one
+SELECT * FROM agent_task_queue
+WHERE issue_id = @issue_id
+  AND branch_request_id = @branch_request_id;
+
+-- name: FailUnsupportedCommentBranchTask :one
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL,
+    failure_reason = 'daemon_capability_unsupported',
+    error = 'runtime does not support comment branch snapshots'
+WHERE id = @id
+  AND status = 'dispatched'
+  AND branch_context IS NOT NULL
+RETURNING *;
+
+-- name: FailInvalidCommentBranchTask :one
+UPDATE agent_task_queue
+SET status = 'failed',
+    completed_at = now(),
+    prepare_lease_expires_at = NULL,
+    failure_reason = 'comment_branch_context_invalid',
+    error = 'comment branch snapshot is invalid'
+WHERE id = @id
+  AND status = 'dispatched'
+  AND branch_context IS NOT NULL
+RETURNING *;
+
+-- name: LockCommentBranchQueue :exec
+SELECT pg_advisory_xact_lock(hashtextextended(
+    sqlc.arg('issue_id')::text || ':' || sqlc.arg('agent_id')::text,
+    0
+));
+
+-- name: PromoteNextDeferredCommentBranch :one
+WITH next_branch AS (
+    SELECT candidate.id
+    FROM agent_task_queue candidate
+    WHERE candidate.issue_id = @issue_id
+      AND candidate.agent_id = @agent_id
+      AND candidate.status = 'deferred'
+      AND candidate.branch_context IS NOT NULL
+    ORDER BY candidate.created_at ASC, candidate.id ASC
+    LIMIT 1
+), promotable AS (
+    SELECT next_branch.id
+    FROM next_branch
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM agent_task_queue active
+        WHERE active.issue_id = @issue_id
+          AND active.agent_id = @agent_id
+          AND active.id <> next_branch.id
+          AND (
+              active.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+              OR (active.status = 'deferred'
+                  AND active.context->>'channel_issue_media_pending' = 'true')
+          )
+    )
+)
+UPDATE agent_task_queue task
+SET status = 'queued'
+WHERE task.id = (SELECT id FROM promotable)
+  AND task.status = 'deferred'
+RETURNING task.*;
+
+-- name: ListDeferredCommentBranchPairs :many
+WITH promotable_pairs AS (
+    SELECT branch.issue_id, branch.agent_id, MIN(branch.created_at) AS oldest_branch_at
+    FROM agent_task_queue branch
+    WHERE branch.status = 'deferred'
+      AND branch.branch_context IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM agent_task_queue active
+        WHERE active.issue_id = branch.issue_id
+          AND active.agent_id = branch.agent_id
+          AND active.id <> branch.id
+          AND (
+            active.status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+            OR (active.status = 'deferred'
+                AND active.context->>'channel_issue_media_pending' = 'true')
+          )
+      )
+    GROUP BY branch.issue_id, branch.agent_id
+)
+SELECT issue_id, agent_id
+FROM promotable_pairs
+ORDER BY oldest_branch_at, issue_id, agent_id
+LIMIT @max_pairs;
+
 -- name: PromoteDeferredChannelIssueTask :one
 -- Early promotion is idempotent at the service layer: a task already promoted
 -- by the fire_at sweeper no longer matches and is treated as settled.
@@ -673,6 +813,18 @@ RETURNING *;
 UPDATE agent_task_queue
 SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
 WHERE (trigger_comment_id = $1 OR $1 = ANY(coalesced_comment_ids))
+  AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
+RETURNING *;
+
+-- name: CancelOrdinaryAgentTasksByCommentChange :many
+-- Editing or deleting a comment invalidates ordinary tasks that captured its
+-- mutable body. A comment branch is different: branch_context is an immutable
+-- snapshot and its result is a new top-level comment, so source changes must
+-- not cancel or rewrite the independent run.
+UPDATE agent_task_queue
+SET status = 'cancelled', completed_at = now(), prepare_lease_expires_at = NULL
+WHERE (trigger_comment_id = $1 OR $1 = ANY(coalesced_comment_ids))
+  AND branch_context IS NULL
   AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory', 'deferred')
 RETURNING *;
 
@@ -1638,10 +1790,21 @@ WHERE issue_id = $1 AND agent_id = $2
     OR context->>'head_sha' = sqlc.narg('head_sha')::text
   );
 
+-- name: HasDeferredCommentBranchForIssueAndAgent :one
+-- A user-created branch waiting behind the current run is already the intended
+-- successor. Automatic retry must not jump ahead of it when that run fails.
+SELECT count(*) > 0 AS has_deferred_branch
+FROM agent_task_queue
+WHERE issue_id = @issue_id
+  AND agent_id = @agent_id
+  AND status = 'deferred'
+  AND branch_context IS NOT NULL;
+
 -- name: HasPendingTaskForIssueAndAgentExcludingTriggerComment :one
 -- Same as HasPendingTaskForIssueAndAgent, but ignores tasks triggered by the
 -- current comment being edited. Edit preview needs this because save cancels
--- that comment's old queued/dispatched tasks before re-computing triggers.
+-- that comment's old queued/dispatched tasks before re-computing triggers. A
+-- frozen comment branch survives edits and remains a pending blocker.
 -- Carries the same head_sha dedup key as HasPendingTaskForIssueAndAgent (TEN-356).
 SELECT count(*) > 0 AS has_pending FROM agent_task_queue
 WHERE issue_id = @issue_id
@@ -1650,7 +1813,10 @@ WHERE issue_id = @issue_id
     status IN ('queued', 'dispatched')
     OR (status = 'deferred' AND context->>'channel_issue_media_pending' = 'true')
   )
-  AND trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid
+  AND (
+    branch_context IS NOT NULL
+    OR trigger_comment_id IS DISTINCT FROM @exclude_trigger_comment_id::uuid
+  )
   AND (
     COALESCE(sqlc.narg('head_sha')::text, '') = ''
     OR context->>'head_sha' = sqlc.narg('head_sha')::text
@@ -1727,6 +1893,7 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      AND t.branch_context IS NULL
       AND (
           t.status = 'queued'
           OR (t.status = 'deferred' AND t.context->>'channel_issue_media_pending' = 'true')
@@ -1779,6 +1946,7 @@ WHERE id = (
     SELECT t.id FROM agent_task_queue t
     WHERE t.issue_id = @issue_id
       AND t.agent_id = @agent_id
+      AND t.branch_context IS NULL
       AND t.status IN ('dispatched', 'running', 'waiting_local_directory')
       AND (
           COALESCE(sqlc.narg('head_sha')::text, '') = ''
@@ -2155,7 +2323,11 @@ SELECT * FROM cancelled;
 -- busy on a prior task, and a silent UI during that window looks like the
 -- platform never received the trigger.
 SELECT * FROM agent_task_queue
-WHERE issue_id = $1 AND status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+WHERE issue_id = $1
+  AND (
+      status IN ('queued', 'dispatched', 'running', 'waiting_local_directory')
+      OR (status = 'deferred' AND branch_context IS NOT NULL)
+  )
 ORDER BY created_at DESC;
 
 -- name: GetWorkspaceAgentRunCounts :many

@@ -75,6 +75,93 @@ describe("ApiClient edit guards", () => {
   });
 });
 
+describe("ApiClient comment branch negotiation", () => {
+  it("uses a disabled capability fallback for old and malformed servers", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ error: "not found" }), {
+          status: 404,
+          statusText: "Not Found",
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ comment_branch_v1: "yes" }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ comment_branch_v1: true }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        }),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(client.getCapabilities()).resolves.toEqual({
+      comment_branch_v1: false,
+    });
+    await expect(client.getCapabilities()).resolves.toEqual({
+      comment_branch_v1: false,
+    });
+    await expect(client.getCapabilities()).resolves.toEqual({
+      comment_branch_v1: true,
+    });
+  });
+
+  it("validates branch responses before exposing the created task", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            task: { id: "task-1", status: "queued" },
+            branch_point_comment_id: "comment-1",
+            source_task_id: null,
+          }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({ task: {}, branch_point_comment_id: "" }),
+          { status: 201, headers: { "Content-Type": "application/json" } },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await expect(
+      client.branchComment(
+        "comment-1",
+        { content_base: "frozen" },
+        "request-1",
+      ),
+    ).resolves.toMatchObject({
+      task: { id: "task-1", status: "queued" },
+      branch_point_comment_id: "comment-1",
+    });
+    await expect(
+      client.branchComment(
+        "comment-1",
+        { content_base: "frozen" },
+        "request-2",
+      ),
+    ).rejects.toThrow("invalid comment branch response");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "https://api.example.test/api/comments/comment-1/branch",
+    );
+    expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({
+      method: "POST",
+      headers: expect.objectContaining({ "Idempotency-Key": "request-1" }),
+    });
+  });
+});
+
 describe("ApiClient pull-request response schema", () => {
   const validPR = {
     id: "pr-1",

@@ -1011,6 +1011,9 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 	if ctx.QuickCreatePrompt != "" {
 		return renderQuickCreateContext(ctx)
 	}
+	if ctx.BranchContext != "" {
+		return renderCommentBranchContext(ctx)
+	}
 
 	var b strings.Builder
 
@@ -1043,6 +1046,52 @@ func renderIssueContext(provider string, ctx TaskContextForEnv) string {
 // guardrails live in AGENTS.md (runtime config) and the per-turn prompt to
 // avoid redundancy and conflicting instructions; the skill index lives in the
 // runtime brief like every other kind (MUL-5529).
+func renderCommentBranchContext(ctx TaskContextForEnv) string {
+	var snapshot struct {
+		Version int `json:"version"`
+		Issue   struct {
+			Identifier  string `json:"identifier"`
+			Title       string `json:"title"`
+			Description string `json:"description"`
+			Revision    int64  `json:"revision"`
+		} `json:"issue"`
+		Comments []struct {
+			ID         string `json:"id"`
+			AuthorType string `json:"author_type"`
+			AuthorName string `json:"author_name"`
+			Content    string `json:"content"`
+			CreatedAt  string `json:"created_at"`
+		} `json:"comments"`
+	}
+	if err := json.Unmarshal([]byte(ctx.BranchContext), &snapshot); err != nil || snapshot.Version != 1 {
+		return "# Comment Branch\n\nThe frozen snapshot is invalid.\n"
+	}
+	var b strings.Builder
+	b.WriteString("# Comment Branch Snapshot\n\n")
+	fmt.Fprintf(&b, "**Issue:** %s — %s\n\n**Captured revision:** %d\n\n", snapshot.Issue.Identifier, snapshot.Issue.Title, snapshot.Issue.Revision)
+	if strings.TrimSpace(snapshot.Issue.Description) != "" {
+		b.WriteString("## Frozen Description\n\n")
+		b.WriteString(snapshot.Issue.Description)
+		b.WriteString("\n\n")
+	}
+	b.WriteString("## Comment Ancestry\n\n")
+	for _, comment := range snapshot.Comments {
+		name := comment.AuthorName
+		if name == "" {
+			name = comment.AuthorType
+		}
+		fmt.Fprintf(&b, "### %s — %s\n\n%s\n\n", name, comment.CreatedAt, comment.Content)
+	}
+	b.WriteString("This file is an immutable historical snapshot. Do not replace it with the issue's current description or later comments.\n")
+	return b.String()
+}
+
+// renderQuickCreateContext renders issue_context.md for quick-create tasks.
+// This file carries only task data (the user input). Behavioral rules and
+// guardrails live in AGENTS.md (runtime config) and the per-turn prompt to
+// avoid redundancy and conflicting instructions; the skill index lives in the
+// runtime brief like every other kind (MUL-5529).
+
 func renderQuickCreateContext(ctx TaskContextForEnv) string {
 	var b strings.Builder
 	b.WriteString("# Quick Create\n\n")

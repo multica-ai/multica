@@ -1809,7 +1809,12 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 			if parseErr == nil {
 				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
-					if task.TriggerCommentID.Valid {
+					if task.BranchPointCommentID.Valid {
+						if parentID.Valid {
+							writeError(w, http.StatusConflict, "comment branch tasks must create a top-level result comment; omit parent_id (--parent)")
+							return
+						}
+					} else if task.TriggerCommentID.Valid {
 						if !taskCoversReplyParent(task, parentID) {
 							// Keep this error actionable for agents (MUL-4417 / GH #5266).
 							// The two rejections need different copy. A resumed
@@ -3320,7 +3325,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		// revision writes defer cancellation until the conditional UPDATE wins,
 		// so a race that returns 409 cannot mutate the task queue.
 		if !strictContentEdit {
-			cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
+			cancelled, err = h.TaskService.CancelOrdinaryTasksByCommentChange(r.Context(), existing.ID)
 			if err != nil {
 				slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
 				writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
@@ -3363,7 +3368,7 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 			issueRevision = updated.IssueRevision
 		}
 		if err == nil && oldContent != req.Content && strictContentEdit {
-			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
+			cancelled, err = qtx.CancelOrdinaryAgentTasksByCommentChange(r.Context(), existing.ID)
 		}
 		if err == nil && replaceAttachments {
 			var changed int64
@@ -3513,30 +3518,42 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		slog.Info("comment parent issue no longer exists", "issue_id", uuidToString(comment.IssueID), "comment_id", commentId)
 	}
 
-	// Collect attachment URLs before CASCADE delete removes them.
-	attachmentURLs, _ := h.Queries.ListAttachmentURLsByCommentID(r.Context(), comment.ID)
-
-	// Cancel any active task whose planned batch contains this comment so the
-	// agent does not run with the now-deleted content already embedded. Must
-	// run before DeleteComment because the FK ON DELETE SET NULL would
-	// otherwise nullify trigger_comment_id and orphan those tasks in queued.
-	cancelled, cancelErr := h.TaskService.CancelTasksByTriggerComment(r.Context(), comment.ID)
-	if cancelErr != nil {
-		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", cancelErr, "comment_id", commentId)...)
+	// Lock the aggregate owner and comment before touching task rows, then make
+	// ordinary-task cancellation and deletion one outcome. Independent branch
+	// tasks are excluded because their immutable snapshot survives source edits
+	// and deletion. Events and task accounting are emitted only after commit.
+	tx, err := h.TxStarter.Begin(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to prepare comment deletion")
+		return
+	}
+	defer tx.Rollback(r.Context())
+	qtx := h.Queries.WithTx(tx)
+	if _, err = qtx.LockCommentForDelete(r.Context(), db.LockCommentForDeleteParams{
+		ID:          comment.ID,
+		WorkspaceID: comment.WorkspaceID,
+	}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "comment not found")
+		} else {
+			writeError(w, http.StatusInternalServerError, "failed to prepare comment deletion")
+		}
+		return
+	}
+	attachmentURLs, _ := qtx.ListAttachmentURLsByCommentID(r.Context(), comment.ID)
+	cancelled, err := qtx.CancelOrdinaryAgentTasksByCommentChange(r.Context(), comment.ID)
+	if err != nil {
+		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
+		writeError(w, http.StatusInternalServerError, "failed to prepare comment deletion")
+		return
 	}
 
-	deleted, err := h.Queries.DeleteComment(r.Context(), db.DeleteCommentParams{
+	deleted, err := qtx.DeleteComment(r.Context(), db.DeleteCommentParams{
 		ID:          comment.ID,
 		WorkspaceID: comment.WorkspaceID,
 	})
 	if err != nil || !deleted.Changed {
 		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "changed", deleted.Changed, "comment_id", commentId)...)
-		// Cancellation already committed but deletion did not. If the parent
-		// issue still exists, rebuild the complete cancelled batch (including
-		// this trigger) before reporting the storage error or concurrent no-op.
-		if hasIssue {
-			h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
-		}
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to delete comment")
 		} else {
@@ -3544,7 +3561,13 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+	if err = tx.Commit(r.Context()); err != nil {
+		slog.Warn("commit comment deletion failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
+		writeError(w, http.StatusInternalServerError, "failed to delete comment")
+		return
+	}
 
+	h.TaskService.BroadcastCancelledTasks(r.Context(), workspaceID, cancelled)
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
 	eventPayload := map[string]any{

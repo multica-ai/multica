@@ -10,7 +10,7 @@
  * Stack.Screen with title "Issue". We override that here once the data
  * lands so the navigation bar shows `MUL-123` (Linear-style).
  */
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import {
   ActionSheetIOS,
   ActivityIndicator,
@@ -22,6 +22,7 @@ import { Stack, router, useLocalSearchParams } from "expo-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import * as Clipboard from "expo-clipboard";
 import type { Issue } from "@multica/core/types";
+import { commentBranchPointsByTaskId } from "@multica/core/issues/comment-branch";
 import { Text } from "@/components/ui/text";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -32,6 +33,8 @@ import {
   issueDetailOptions,
   issueKeys,
   issueTimelineOptions,
+  issueTasksOptions,
+  serverCapabilitiesOptions,
 } from "@/data/queries/issues";
 import { useDeleteIssue } from "@/data/mutations/issues";
 import { pinListOptions } from "@/data/queries/pins";
@@ -59,6 +62,23 @@ export default function IssueDetail() {
 
   const detail = useQuery(issueDetailOptions(wsId, id));
   const timeline = useQuery(issueTimelineOptions(wsId, id));
+  const { data: issueTasks = [] } = useQuery(issueTasksOptions(wsId, id));
+  const availableCommentIds = useMemo(
+    () =>
+      new Set(
+        (timeline.data ?? [])
+          .filter((entry) => entry.type === "comment")
+          .map((entry) => entry.id),
+      ),
+    [timeline.data],
+  );
+  const branchPointsByTaskId = useMemo(
+    () => commentBranchPointsByTaskId(issueTasks, availableCommentIds),
+    [availableCommentIds, issueTasks],
+  );
+  const { data: serverCapabilities } = useQuery(
+    serverCapabilitiesOptions(wsId),
+  );
 
   // Subscribe to per-issue WS events: status/priority/assignee/label
   // changes, comments, activity, reactions, agent task progress.
@@ -94,6 +114,12 @@ export default function IssueDetail() {
       qc.invalidateQueries({ queryKey: issueKeys.timeline(wsId, id) }),
     ]);
   }, [detail, qc, wsId, id]);
+  const focusComment = useCallback(
+    (commentId: string) => {
+      router.setParams({ highlight: commentId, h: `${Date.now()}` });
+    },
+    [],
+  );
 
   const issue = detail.data;
   const deleteIssue = useDeleteIssue();
@@ -202,6 +228,9 @@ export default function IssueDetail() {
             onRefresh={onRefresh}
             highlightCommentId={highlight}
             highlightNonce={h}
+            branchEnabled={serverCapabilities?.comment_branch_v1 === true}
+            branchPointsByTaskId={branchPointsByTaskId}
+            onCommentFocus={focusComment}
           />
           <InlineCommentComposer issueId={id} />
         </View>

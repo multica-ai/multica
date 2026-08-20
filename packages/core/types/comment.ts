@@ -45,6 +45,12 @@ export interface Comment {
   trigger_outcomes?: CommentTriggerOutcome[];
 }
 
+export interface CommentBranchResponse {
+  task: import("./agent").AgentTask;
+  branch_point_comment_id: string;
+  source_task_id?: string | null;
+}
+
 // The domain result of one explicitly-mentioned trigger target. Success-shaped
 // statuses (queued/coalesced/deferred) mean the mention was handled; `blocked`
 // means it was refused with an enumeration-safe reason_code.

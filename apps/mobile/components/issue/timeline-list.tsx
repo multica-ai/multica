@@ -105,6 +105,10 @@ import type { ImageSequenceBlock } from "@multica/core/attachments/image-sequenc
 import { useColorScheme } from "@/lib/use-color-scheme";
 import { THEME } from "@/lib/theme";
 import { useCommentSelectStore } from "@/data/comment-select-store";
+import {
+  findCommentFocusRowIndex,
+  getCommentFocusOffset,
+} from "@/lib/issue-comment-focus";
 
 interface Props {
   issue: Issue;
@@ -120,6 +124,9 @@ interface Props {
    *  `highlightCommentId` but a fresh nonce, which re-triggers the
    *  scroll-and-flash effect (without this, identical props short-circuit). */
   highlightNonce?: string;
+  branchEnabled?: boolean;
+  branchPointsByTaskId?: ReadonlyMap<string, string>;
+  onCommentFocus?: (commentId: string) => void;
 }
 
 /** How long the flash stays "claimed" before we let a new highlight take
@@ -147,6 +154,9 @@ export function TimelineList({
   onRefresh,
   highlightCommentId,
   highlightNonce,
+  branchEnabled = false,
+  branchPointsByTaskId,
+  onCommentFocus,
 }: Props) {
   // Top-level selection subscription gates the outer "tap-outside-to-dismiss"
   // Pressable below. When null, the Pressable stays disabled and every tap
@@ -192,6 +202,16 @@ export function TimelineList({
   }, [issue.description, issueAttachments, data]);
 
   const listRef = useRef<FlashListRef<TimelineRow>>(null);
+  const viewportRef = useRef<View>(null);
+  const scrollOffsetRef = useRef(0);
+  const commentRefsRef = useRef(new Map<string, View>());
+  const registerCommentRef = useCallback(
+    (commentId: string, node: View | null) => {
+      if (node) commentRefsRef.current.set(commentId, node);
+      else commentRefsRef.current.delete(commentId);
+    },
+    [],
+  );
   // Gates single-shot per (commentId, nonce) tuple. Re-tap from inbox
   // bumps the nonce → ref no longer matches → effect re-fires.
   const lastStampRef = useRef<string | null>(null);
@@ -252,6 +272,7 @@ export function TimelineList({
   const handleScroll = useCallback(
     (e: NativeSyntheticEvent<NativeScrollEvent>) => {
       const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      scrollOffsetRef.current = contentOffset.y;
       const distFromBottom =
         contentSize.height - (contentOffset.y + layoutMeasurement.height);
       const wasAtBottom = isAtBottomRef.current;
@@ -292,6 +313,62 @@ export function TimelineList({
     };
     return [...data.slice(0, anchorIdx), divider, ...data.slice(anchorIdx)];
   }, [data, dividerAnchorId]);
+
+  // Execution-log source jumps use two phases. First materialize the owning
+  // root thread. Replies are nested inside that row, so once it mounts we can
+  // measure the exact native reply wrapper and correct the scroll offset until
+  // that comment (not merely its root row) is inside the viewport.
+  useEffect(() => {
+    if (!highlightCommentId || dataWithDivider.length === 0) return;
+    const index = findCommentFocusRowIndex(dataWithDivider, highlightCommentId);
+    if (index < 0) return;
+
+    let cancelled = false;
+    const timers: ReturnType<typeof setTimeout>[] = [];
+    const center = () => {
+      listRef.current?.scrollToIndex({
+        index,
+        animated: true,
+        viewPosition: 0.5,
+      });
+    };
+    const revealExactComment = (attempt: number) => {
+      if (cancelled) return;
+      const target = commentRefsRef.current.get(highlightCommentId);
+      const viewport = viewportRef.current;
+      if (!target || !viewport) {
+        if (attempt < 6) {
+          timers.push(
+            setTimeout(() => revealExactComment(attempt + 1), 120),
+          );
+        }
+        return;
+      }
+
+      viewport.measureInWindow((_x, viewportTop, _width, viewportHeight) => {
+        target.measureInWindow((_tx, targetTop, _tw, targetHeight) => {
+          if (cancelled || viewportHeight <= 0 || targetHeight <= 0) return;
+          const offset = getCommentFocusOffset({
+            currentOffset: scrollOffsetRef.current,
+            targetTop,
+            targetHeight,
+            viewportTop,
+            viewportHeight,
+          });
+          if (offset == null) return;
+          listRef.current?.scrollToOffset({ offset, animated: true });
+        });
+      });
+    };
+    const frame = requestAnimationFrame(center);
+    timers.push(setTimeout(center, 180));
+    timers.push(setTimeout(() => revealExactComment(0), 300));
+    return () => {
+      cancelled = true;
+      cancelAnimationFrame(frame);
+      timers.forEach(clearTimeout);
+    };
+  }, [dataWithDivider, highlightCommentId, highlightNonce]);
 
   // Mark "scrolled past" once the divider row leaves the viewport — used
   // by the unmount effect below to decide whether to bump last-viewed.
@@ -390,7 +467,7 @@ export function TimelineList({
 
   return (
     <ImageSequenceProvider blocks={imageBlocks}>
-    <View className="flex-1">
+    <View ref={viewportRef} className="flex-1">
       {/* Outer Pressable owns the "tap anywhere outside the selected
           comment to exit text-selection mode" gesture. Disabled when
           no comment is selected → layout-only wrapper, every tap passes
@@ -451,6 +528,14 @@ export function TimelineList({
               issueId={issue.id}
               issueIdentifier={issue.identifier}
               highlightedCommentId={highlightedId}
+              branchEnabled={branchEnabled}
+              branchPointCommentId={
+                item.entry.source_task_id
+                  ? branchPointsByTaskId?.get(item.entry.source_task_id)
+                  : undefined
+              }
+              onCommentFocus={onCommentFocus}
+              registerCommentRef={registerCommentRef}
             />
           ) : (
             <ActivityRow entry={item.entry} />

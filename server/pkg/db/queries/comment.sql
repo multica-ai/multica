@@ -403,6 +403,50 @@ WHERE id = $1;
 SELECT * FROM comment
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockCommentForDelete :one
+-- Serialize comment deletion in the repository-wide aggregate lock order:
+-- issue first, then comment. The handler can then cancel comment-backed tasks
+-- in the same transaction without racing a concurrent issue/comment delete.
+WITH locked_issue AS MATERIALIZED (
+    SELECT issue.id
+    FROM issue
+    JOIN comment ON comment.issue_id = issue.id
+                AND comment.workspace_id = issue.workspace_id
+    WHERE comment.id = $1 AND comment.workspace_id = $2
+    FOR UPDATE OF issue
+)
+SELECT comment.id
+FROM comment
+JOIN locked_issue ON locked_issue.id = comment.issue_id
+WHERE comment.id = $1 AND comment.workspace_id = $2
+FOR UPDATE OF comment;
+
+-- name: ListCommentBranchPathForUpdate :many
+-- Walk only from the selected comment toward its structural root. trail keeps
+-- the query cycle-safe even if legacy data bypassed the parent validation. The
+-- final SELECT locks every row copied into the immutable branch snapshot so an
+-- ancestor edit cannot interleave with capture.
+WITH RECURSIVE ancestors(id, parent_id, depth, trail) AS (
+    SELECT c.id, c.parent_id, 0, ARRAY[c.id]
+    FROM comment c
+    WHERE c.id = @comment_id
+      AND c.issue_id = @issue_id
+      AND c.workspace_id = @workspace_id
+    UNION ALL
+    SELECT parent.id, parent.parent_id, ancestors.depth + 1, ancestors.trail || parent.id
+    FROM comment parent
+    JOIN ancestors ON parent.id = ancestors.parent_id
+    WHERE parent.issue_id = @issue_id
+      AND parent.workspace_id = @workspace_id
+      AND NOT parent.id = ANY(ancestors.trail)
+      AND ancestors.depth < @max_depth::int
+)
+SELECT comment.*
+FROM ancestors
+JOIN comment ON comment.id = ancestors.id
+ORDER BY ancestors.depth DESC
+FOR UPDATE OF comment;
+
 -- name: GetThreadRoot :one
 -- Returns the thread-root comment for @comment_id by walking parent_id up to
 -- the row whose parent_id IS NULL. For a root comment it returns that comment

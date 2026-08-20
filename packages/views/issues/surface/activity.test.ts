@@ -29,6 +29,13 @@ describe("deriveIssueSurfaceActivity", () => {
       task({ id: "queue-1", issue_id: "i-2", status: "queued" }),
       task({ id: "dispatch-1", issue_id: "i-2", status: "dispatched" }),
       task({ id: "wait-1", issue_id: "i-3", status: "waiting_local_directory" }),
+      task({
+        id: "branch-1",
+        issue_id: "i-5",
+        status: "deferred",
+        branch_point_comment_id: "comment-1",
+      }),
+      task({ id: "other-deferred", issue_id: "i-6", status: "deferred" }),
       task({ id: "done-1", issue_id: "i-4", status: "completed" }),
       task({ id: "no-issue", issue_id: undefined, status: "running" }),
     ]);
@@ -47,6 +54,11 @@ describe("deriveIssueSurfaceActivity", () => {
       isQueued: true,
     });
     expect(activity.activityByIssueId.has("i-4")).toBe(false);
+    expect(activity.activityByIssueId.get("i-5")).toMatchObject({
+      isWorking: false,
+      isQueued: true,
+    });
+    expect(activity.activityByIssueId.has("i-6")).toBe(false);
   });
 });
 
@@ -58,6 +70,13 @@ describe("selectIssueTasks", () => {
     task({ id: "other-run", issue_id: "i-2", status: "running" }),
     task({ id: "wait-1", issue_id: "i-3", status: "waiting_local_directory" }),
     task({ id: "dispatch-1", issue_id: "i-3", status: "dispatched" }),
+    task({
+      id: "branch-1",
+      issue_id: "i-3",
+      status: "deferred",
+      branch_point_comment_id: "comment-1",
+    }),
+    task({ id: "other-deferred", issue_id: "i-3", status: "deferred" }),
     task({ id: "done-1", issue_id: "i-1", status: "completed" }),
     task({ id: "no-issue", issue_id: undefined, status: "running" }),
   ];
@@ -71,7 +90,11 @@ describe("selectIssueTasks", () => {
   it("treats dispatched and waiting_local_directory as queued", () => {
     const groups = selectIssueTasks(snapshot, "i-3");
     expect(groups.running).toEqual([]);
-    expect(groups.queued.map((t) => t.id)).toEqual(["wait-1", "dispatch-1"]);
+    expect(groups.queued.map((t) => t.id)).toEqual([
+      "wait-1",
+      "dispatch-1",
+      "branch-1",
+    ]);
   });
 
   it("drops terminal statuses and tasks without an issue", () => {

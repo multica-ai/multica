@@ -195,6 +195,7 @@ func daemonClientCapabilities() string {
 		protocol.DaemonCapabilityRemoteMCPV1,
 		protocol.DaemonCapabilityLocalWorktreeV1,
 		protocol.DaemonCapabilityRPCV1,
+		protocol.DaemonCapabilityCommentBranchV1,
 	}, ",")
 }
 

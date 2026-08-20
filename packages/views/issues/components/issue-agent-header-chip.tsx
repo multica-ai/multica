@@ -64,6 +64,7 @@ export const IssueAgentHeaderChip = memo(function IssueAgentHeaderChip({
     for (const task of tasks) {
       if (task.status === "running") running.push(task);
       else if (
+        (task.status === "deferred" && Boolean(task.branch_point_comment_id)) ||
         task.status === "queued" ||
         task.status === "dispatched" ||
         // Daemon-parked on a busy local_directory — still active, just

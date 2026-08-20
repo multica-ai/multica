@@ -6322,6 +6322,9 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.WorkspaceID == "" {
 		return TaskResult{}, fmt.Errorf("refusing to spawn agent: task has no workspace_id (task_id=%s)", task.ID)
 	}
+	if len(task.BranchContext) > 0 && task.PriorSessionID != "" {
+		return TaskResult{}, fmt.Errorf("refusing comment branch task with prior session (task_id=%s)", task.ID)
+	}
 
 	prepareTimeout := d.effectiveTaskPrepareTimeout()
 	prepareCtx, cancelPrepare := context.WithTimeoutCause(ctx, prepareTimeout, errTaskPrepareTimeout)
@@ -6415,6 +6418,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		IssueID:             task.IssueID,
 		TriggerCommentID:    task.TriggerCommentID,
 		TriggerThreadID:     task.TriggerThreadID,
+		BranchContext:       strings.TrimSpace(string(task.BranchContext)),
 		CommentReplyTargets: commentReplyThreads(task),
 		NewCommentCount:     task.NewCommentCount,
 		NewCommentsSince:    task.NewCommentsSince,

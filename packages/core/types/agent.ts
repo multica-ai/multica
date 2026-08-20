@@ -287,6 +287,7 @@ export interface AgentTask {
   // Treated as an active (non-terminal) state alongside queued/dispatched/
   // running by every consumer that buckets tasks into "active vs done".
   status:
+    | "deferred"
     | "queued"
     | "dispatched"
     | "waiting_local_directory"
@@ -321,6 +322,9 @@ export interface AgentTask {
   attempt?: number;
   /** Set when an issue comment triggered this task (@mention or assignee comment). */
   trigger_comment_id?: string;
+  /** Marks a fresh run created from an immutable historical comment path. */
+  branch_point_comment_id?: string;
+  branch_source_task_id?: string;
   /**
    * Earlier comment IDs folded into this run before it was claimed. This does
    * not include `trigger_comment_id`, which remains the run's newest trigger.

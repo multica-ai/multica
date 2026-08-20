@@ -1745,7 +1745,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		// token and the comment-delivery receipt (delivered_comment_ids for
 		// comment/coalesced-comment tasks) are persisted atomically; on failure
 		// the exact claim is requeued and omitted from this batch.
-		commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
+		commentBackedTask := len(task.BranchContext) == 0 && (task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0)
 		receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), task, db.CreateTaskTokenParams{
 			ID:          dbid.NewV7(),
 			TokenHash:   auth.HashToken(tokenStr),
@@ -1920,6 +1920,34 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				h.recordIssueWindow(policy.action, "agent_context", "allowed")
 			}
 		}
+	}
+	branchTask := len(bytes.TrimSpace(task.BranchContext)) > 0
+	if branchTask {
+		// A comment branch is always a direct run, even when its resolved agent
+		// also happens to lead the issue's assigned squad.
+		resp.IsLeaderTask = false
+		resp.SquadID = ""
+		if !validCommentBranchSnapshot(task.BranchContext, *task) {
+			terminal, failErr := h.Queries.FailInvalidCommentBranchTask(r.Context(), task.ID)
+			if failErr != nil {
+				slog.Error("daemon claim: fail invalid comment branch", "task_id", uuidToString(task.ID), "error", failErr)
+			} else {
+				h.TaskService.AnnounceTerminalFailure(r.Context(), terminal)
+			}
+			return resp, nil, 0, 0, &claimBuildFailure{outcome: "invalid_comment_branch", status: http.StatusConflict, message: "comment branch snapshot is invalid"}
+		}
+		if !requestHasClientCapability(r, protocol.DaemonCapabilityCommentBranchV1) {
+			terminal, failErr := h.Queries.FailUnsupportedCommentBranchTask(r.Context(), task.ID)
+			if failErr != nil {
+				slog.Error("daemon claim: fail unsupported comment branch", "task_id", uuidToString(task.ID), "error", failErr)
+			} else {
+				h.TaskService.AnnounceTerminalFailure(r.Context(), terminal)
+			}
+			return resp, nil, 0, 0, &claimBuildFailure{outcome: "unsupported_comment_branch", status: http.StatusConflict, message: "runtime does not support comment branch snapshots"}
+		}
+		// Frozen bodies are daemon-only execution input; user-facing task APIs
+		// expose only the provenance ids.
+		resp.BranchContext = json.RawMessage(task.BranchContext)
 	}
 	// Claim-only capability: this server resolves the squad-leader role on the
 	// wire (is_leader_task / squad_id), so the daemon must not re-derive it
@@ -2179,7 +2207,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			// (No FK on squad_id — see migration 127.) We append (not replace)
 			// so per-agent instructions stay authoritative; the squad briefing
 			// stacks on top as task-specific squad context.
-			if task.IsLeaderTask {
+			if resp.IsLeaderTask {
 				injected := false
 				if resp.Agent != nil && task.SquadID.Valid {
 					if squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
@@ -2289,8 +2317,11 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// first prefix of additional comments; overflow is reconciled later.
 		// Workspace-scoped load (MUL-4252) so a foreign comment UUID resolves to
 		// "missing" instead of leaking another tenant's text into the prompt.
-		plannedCommentIDs := append([]pgtype.UUID{}, task.CoalescedCommentIds...)
-		if task.TriggerCommentID.Valid {
+		plannedCommentIDs := []pgtype.UUID{}
+		if !branchTask {
+			plannedCommentIDs = append(plannedCommentIDs, task.CoalescedCommentIds...)
+		}
+		if !branchTask && task.TriggerCommentID.Valid {
 			plannedCommentIDs = append(plannedCommentIDs, task.TriggerCommentID)
 		}
 		loadedComments := h.buildCoalescedCommentData(r.Context(), runtime.WorkspaceID, plannedCommentIDs)
@@ -2341,7 +2372,10 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		// comment author's kind and display name so the agent knows whether it
 		// was triggered by a human or by another agent — a signal used by the
 		// harness instructions to avoid mention loops between agents.
-		effectiveTriggerUUID := task.TriggerCommentID
+		effectiveTriggerUUID := pgtype.UUID{}
+		if !branchTask {
+			effectiveTriggerUUID = task.TriggerCommentID
+		}
 		if effectiveTriggerUUID.Valid {
 			// Scope by the runtime's workspace so a task row carrying a foreign
 			// comment UUID can never pull another workspace's comment text into
@@ -3211,7 +3245,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		writeError(w, failure.status, failure.message)
 		return
 	}
-	commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
+	commentBackedTask := len(task.BranchContext) == 0 && (task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0)
 	requeueFailedClaim := func(reason string) {
 		if _, err := h.TaskService.RequeueTaskAfterClaimFailure(r.Context(), *task); err != nil {
 			slog.Error("task claim: failed to requeue after finalization error",
@@ -3697,7 +3731,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// The terminal transaction and completion reconciliation are committed.
 	// Wake the owning runtime now so queued work that was blocked by this
 	// task's agent capacity or serialization key is re-claimed immediately.
-	h.TaskService.NotifyTaskFinished(*task)
+	h.TaskService.NotifyTaskFinished(r.Context(), *task)
 
 	// Best-effort revoke of any agent task token minted at claim time.
 	// The token would naturally expire at the 24h watermark and is also
@@ -3832,6 +3866,18 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		if id.Valid {
 			delivered[uuidToString(id)] = struct{}{}
 		}
+	}
+	branchPointReplanned := false
+	if len(task.BranchContext) > 0 && task.BranchPointCommentID.Valid {
+		for _, id := range task.CoalescedCommentIds {
+			if id.Valid && id == task.BranchPointCommentID {
+				branchPointReplanned = true
+				break
+			}
+		}
+	}
+	if len(task.BranchContext) > 0 && task.BranchPointCommentID.Valid && !branchPointReplanned {
+		delivered[uuidToString(task.BranchPointCommentID)] = struct{}{}
 	}
 	issue, err := h.Queries.GetIssue(ctx, task.IssueID)
 	if err != nil {
@@ -4382,7 +4428,7 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	h.TaskService.NotifyTaskFinished(*task)
+	h.TaskService.NotifyTaskFinished(r.Context(), *task)
 
 	// Best-effort revoke of the mat_ task token minted at claim. Same
 	// rationale as CompleteTask — eager deletion shrinks the post-

@@ -165,6 +165,8 @@ export const issueKeys = {
     [...issueKeys.subscribersAll(), issueId] as const,
   usageAll: () => ["issues", "usage"] as const,
   usage: (issueId: string) => [...issueKeys.usageAll(), issueId] as const,
+  capabilities: (wsId: string) =>
+    [...issueKeys.all(wsId), "capabilities"] as const,
   attachmentsAll: () => ["issues", "attachments"] as const,
   /** Issue-level attachments — used by the description editor so its
    *  inline file-card / image NodeViews can re-sign download URLs at
@@ -178,6 +180,14 @@ export const issueKeys = {
   /** Per-issue task list (issue-detail Execution log section). */
   tasks: (issueId: string) => [...issueKeys.tasksAll(), issueId] as const,
 };
+
+export function serverCapabilitiesOptions(wsId: string) {
+  return queryOptions({
+    queryKey: issueKeys.capabilities(wsId),
+    queryFn: () => api.getCapabilities(),
+    staleTime: 60_000,
+  });
+}
 
 export type MyIssuesFilter = Pick<
   ListIssuesParams,

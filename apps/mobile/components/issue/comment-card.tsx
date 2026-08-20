@@ -73,6 +73,11 @@ interface Props {
    *  flash that reply's wrapper (bg only). Mirrors web's distinction at
    *  packages/views/issues/components/comment-card.tsx:498-682. */
   highlightedCommentId?: string | null;
+  branchEnabled?: boolean;
+  branchPointCommentId?: string;
+  onCommentFocus?: (commentId: string) => void;
+  /** Register the native wrapper for exact execution-log focus correction. */
+  registerCommentRef?: (commentId: string, node: View | null) => void;
 }
 
 export function CommentCard({
@@ -81,6 +86,10 @@ export function CommentCard({
   issueId,
   issueIdentifier,
   highlightedCommentId,
+  branchEnabled = false,
+  branchPointCommentId,
+  onCommentFocus,
+  registerCommentRef,
 }: Props) {
   // Resolved threads default to a single-line bar; tap expands in place for
   // the current session. Unmount (scroll out of viewport) resets — same
@@ -131,6 +140,8 @@ export function CommentCard({
         entry={entry}
         replies={replies}
         onExpand={() => setExpanded(true)}
+        branchPointCommentId={branchPointCommentId}
+        onCommentFocus={onCommentFocus}
       />
     );
   }
@@ -165,18 +176,28 @@ export function CommentCard({
               onCollapse={() => setExpanded(false)}
             />
           ) : null}
-          <CommentBody
-            entry={entry}
-            issueId={issueId}
-            issueIdentifier={issueIdentifier}
-            onPressChange={handlePressChange}
-          />
+          <View ref={(node) => registerCommentRef?.(entry.id, node)}>
+            <CommentBody
+              entry={entry}
+              issueId={issueId}
+              issueIdentifier={issueIdentifier}
+              branchEnabled={branchEnabled}
+              branchPointCommentId={branchPointCommentId}
+              onCommentFocus={onCommentFocus}
+              onPressChange={handlePressChange}
+            />
+          </View>
           {replies.map((reply) => (
-            <View key={reply.id} className="border-t border-border/60 pt-3">
+            <View
+              key={reply.id}
+              ref={(node) => registerCommentRef?.(reply.id, node)}
+              className="border-t border-border/60 pt-3"
+            >
               <CommentBody
                 entry={reply}
                 issueId={issueId}
                 issueIdentifier={issueIdentifier}
+                branchEnabled={branchEnabled}
                 onPressChange={handlePressChange}
               />
               <ReplyHighlightOverlay
@@ -205,10 +226,14 @@ function ResolvedThreadBar({
   entry,
   replies,
   onExpand,
+  branchPointCommentId,
+  onCommentFocus,
 }: {
   entry: TimelineEntry;
   replies: TimelineEntry[];
   onExpand: () => void;
+  branchPointCommentId?: string;
+  onCommentFocus?: (commentId: string) => void;
 }) {
   const { getName } = useActorLookup();
   const { colorScheme } = useColorScheme();
@@ -241,22 +266,34 @@ function ResolvedThreadBar({
 
   return (
     <View className="px-4">
-      <Pressable
-        onPress={onExpand}
-        className="flex-row items-center gap-2.5 px-4 py-3 rounded-2xl bg-surface-1 active:opacity-70"
-        accessibilityRole="button"
-        accessibilityLabel={`Resolved thread by ${authorsLabel}, ${total} ${total === 1 ? "message" : "messages"}. Tap to expand.`}
-      >
-        <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
-        <Text
-          className="flex-1 text-sm text-muted-foreground"
-          numberOfLines={1}
+      <View className="flex-row rounded-2xl bg-surface-1 overflow-hidden">
+        <Pressable
+          onPress={onExpand}
+          className="flex-1 flex-row items-center gap-2.5 px-4 py-3 active:opacity-70"
+          accessibilityRole="button"
+          accessibilityLabel={`Resolved thread by ${authorsLabel}, ${total} ${total === 1 ? "message" : "messages"}. Tap to expand.`}
         >
-          Resolved · {total} {total === 1 ? "message" : "messages"} by{" "}
-          {authorsLabel}
-        </Text>
-        <Ionicons name="chevron-down" size={14} color={mutedFg} />
-      </Pressable>
+          <Ionicons name="checkmark-circle" size={18} color={mutedFg} />
+          <Text
+            className="flex-1 text-sm text-muted-foreground"
+            numberOfLines={1}
+          >
+            Resolved · {total} {total === 1 ? "message" : "messages"} by{" "}
+            {authorsLabel}
+          </Text>
+          <Ionicons name="chevron-down" size={14} color={mutedFg} />
+        </Pressable>
+        {branchPointCommentId && onCommentFocus ? (
+          <Pressable
+            onPress={() => onCommentFocus(branchPointCommentId)}
+            className="items-center justify-center border-l border-border/60 px-3 active:opacity-60"
+            accessibilityRole="button"
+            accessibilityLabel="Show source comment"
+          >
+            <Ionicons name="git-branch-outline" size={17} color={mutedFg} />
+          </Pressable>
+        ) : null}
+      </View>
     </View>
   );
 }
@@ -375,11 +412,17 @@ function CommentBody({
   entry,
   issueId,
   issueIdentifier,
+  branchEnabled,
+  branchPointCommentId,
+  onCommentFocus,
   onPressChange,
 }: {
   entry: TimelineEntry;
   issueId: string;
   issueIdentifier: string | undefined;
+  branchEnabled: boolean;
+  branchPointCommentId?: string;
+  onCommentFocus?: (commentId: string) => void;
   onPressChange?: (entryId: string, pressed: boolean) => void;
 }) {
   // When this comment is the active selection target, drop the long-press
@@ -391,6 +434,8 @@ function CommentBody({
     (s) => s.selectingId === entry.id,
   );
   const { getName } = useActorLookup();
+  const { colorScheme } = useColorScheme();
+  const mutedFg = THEME[colorScheme].mutedForeground;
   const userId = useAuthStore((s) => s.user?.id);
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const toggle = useToggleCommentReaction(issueId);
@@ -470,7 +515,12 @@ function CommentBody({
   // + handles + Copy/Look Up callout. The outer bubble shell carries a
   // translucent primary-tint background as the mode cue (no Done pill).
   // Exit: scroll the timeline, leave the issue, or long-press another body.
-  const longPress = useCommentLongPress(entry, issueId, issueIdentifier);
+  const longPress = useCommentLongPress(
+    entry,
+    issueId,
+    issueIdentifier,
+    branchEnabled,
+  );
 
   useEffect(() => {
     if (isSelecting) return;
@@ -498,6 +548,19 @@ function CommentBody({
           attachments={attachments}
           selectable={isSelecting}
         />
+      ) : null}
+      {branchPointCommentId && onCommentFocus ? (
+        <Pressable
+          onPress={() => onCommentFocus(branchPointCommentId)}
+          className="self-start flex-row items-center gap-1.5 active:opacity-60"
+          accessibilityRole="button"
+          accessibilityLabel="Show source comment"
+        >
+          <Ionicons name="git-branch-outline" size={14} color={mutedFg} />
+          <Text className="text-xs text-muted-foreground">
+            Branched from source comment
+          </Text>
+        </Pressable>
       ) : null}
       <CommentAttachmentList
         attachments={entry.attachments}

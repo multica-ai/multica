@@ -170,6 +170,10 @@ type AgentTaskQueue struct {
 	RegenerateQuickActionsFor pgtype.UUID `json:"regenerate_quick_actions_for"`
 	BranchName                pgtype.Text `json:"branch_name"`
 	DurableWorkDir            pgtype.Text `json:"durable_work_dir"`
+	BranchPointCommentID      pgtype.UUID `json:"branch_point_comment_id"`
+	BranchSourceTaskID        pgtype.UUID `json:"branch_source_task_id"`
+	BranchContext             []byte      `json:"branch_context"`
+	BranchRequestID           pgtype.UUID `json:"branch_request_id"`
 }
 
 type AgentToLabel struct {

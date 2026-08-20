@@ -301,6 +301,8 @@ const mockApiObj = vi.hoisted(() => ({
   unsubscribeFromIssueSubtree: vi.fn().mockResolvedValue(undefined),
   getActiveTasksForIssue: vi.fn().mockResolvedValue({ tasks: [] }),
   listTasksByIssue: vi.fn().mockResolvedValue([]),
+  getCapabilities: vi.fn().mockResolvedValue({ comment_branch_v1: false }),
+  branchComment: vi.fn(),
   rerunIssue: vi.fn(),
   listTaskMessages: vi.fn().mockResolvedValue([]),
   listChildIssues: vi.fn().mockResolvedValue({ issues: [] }),
@@ -324,6 +326,13 @@ const mockApiObj = vi.hoisted(() => ({
 }));
 
 vi.mock("@multica/core/api", () => ({
+  ApiError: class ApiError extends Error {
+    status: number;
+    constructor(message: string, status: number) {
+      super(message);
+      this.status = status;
+    }
+  },
   api: mockApiObj,
   getApi: () => mockApiObj,
   setApiInstance: vi.fn(),
@@ -700,6 +709,7 @@ describe("IssueDetail (shared)", () => {
     mockApiObj.listIssues.mockResolvedValue({ issues: [], total: 0 });
     mockApiObj.getActiveTasksForIssue.mockResolvedValue({ tasks: [] });
     mockApiObj.listTasksByIssue.mockResolvedValue([]);
+    mockApiObj.getCapabilities.mockResolvedValue({ comment_branch_v1: false });
     mockApiObj.rerunIssue.mockResolvedValue({ id: "task-rerun" });
     mockApiObj.listMembers.mockResolvedValue([
       { user_id: "user-1", name: "Test User", email: "test@test.com", role: "admin" },
@@ -1115,6 +1125,99 @@ describe("IssueDetail (shared)", () => {
     expect(
       executionLog.compareDocumentPosition(details) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy();
+  });
+
+  it("links a top-level branch result back to its exact source comment", async () => {
+    mockApiObj.listTimeline.mockResolvedValue([
+      {
+        type: "comment",
+        id: "source-comment",
+        actor_type: "member",
+        actor_id: "user-1",
+        content: "Source comment",
+        parent_id: null,
+        created_at: "2026-06-08T08:00:00Z",
+      },
+      {
+        type: "comment",
+        id: "branch-result",
+        actor_type: "agent",
+        actor_id: "agent-1",
+        content: "Independent result",
+        parent_id: null,
+        source_task_id: "branch-task",
+        created_at: "2026-06-08T08:05:00Z",
+      },
+    ] as TimelineEntry[]);
+    mockApiObj.listTasksByIssue.mockResolvedValue([
+      {
+        id: "branch-task",
+        agent_id: "agent-1",
+        runtime_id: "runtime-1",
+        issue_id: "issue-1",
+        status: "completed",
+        priority: 0,
+        dispatched_at: null,
+        started_at: "2026-06-08T08:01:00Z",
+        completed_at: "2026-06-08T08:05:00Z",
+        result: null,
+        error: null,
+        created_at: "2026-06-08T08:01:00Z",
+        branch_point_comment_id: "source-comment",
+      },
+    ]);
+
+    renderIssueDetail();
+
+    const sourceLink = await screen.findByRole("button", {
+      name: "View source comment",
+    });
+    fireEvent.click(sourceLink);
+
+    await waitFor(() => {
+      expect(
+        hasHighlightedCommentBackground(
+          document.getElementById("comment-source-comment"),
+        ),
+      ).toBe(true);
+    });
+  });
+
+  it("starts an independent run from a comment through the production menu", async () => {
+    const requestId = "11111111-2222-4333-8444-555555555555";
+    vi.spyOn(globalThis.crypto, "randomUUID").mockReturnValue(requestId);
+    mockApiObj.getCapabilities.mockResolvedValue({ comment_branch_v1: true });
+    mockApiObj.branchComment.mockResolvedValue({
+      task: { id: "branch-task" },
+      branch_point_comment_id: "comment-1",
+    });
+
+    renderIssueDetail();
+
+    const comment = await waitFor(() => {
+      const element = document.getElementById("comment-comment-1");
+      expect(element).toBeTruthy();
+      expect(
+        element?.querySelector('button[aria-haspopup="menu"]'),
+      ).toBeTruthy();
+      return element!;
+    });
+    fireEvent.click(comment.querySelector('button[aria-haspopup="menu"]')!);
+    fireEvent.click(
+      await screen.findByRole("menuitem", { name: "Start independent run" }),
+    );
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Start run" }),
+    );
+
+    await waitFor(() =>
+      expect(mockApiObj.branchComment).toHaveBeenCalledWith(
+        "comment-1",
+        { content_base: "Started working on this" },
+        requestId,
+      ),
+    );
+    expect(toast.success).toHaveBeenCalledWith("Independent run started");
   });
 
   it("shows 'not found' message when issue does not exist", async () => {

@@ -118,3 +118,36 @@ func TestRerunIssueReplacesNotYetStartedTask(t *testing.T) {
 		})
 	}
 }
+
+// A deferred independent branch is still a not-yet-started plan. The latest
+// explicit human rerun remains authoritative and replaces it, matching the
+// ordinary queued/dispatched rule without cancelling work that is executing.
+func TestRerunIssueReplacesDeferredCommentBranch(t *testing.T) {
+	svc, pool, creatorID, agentID, issueID, runtimeID := rerunQueueFixture(t)
+	ctx := context.Background()
+	var branchID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			branch_point_comment_id, branch_context, branch_request_id
+		)
+		VALUES ($1, $2, $3, 'deferred', 0, gen_random_uuid(), '{"version":1}'::jsonb, gen_random_uuid())
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&branchID); err != nil {
+		t.Fatalf("insert deferred comment branch: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, branchID) })
+
+	task, err := svc.RerunIssue(ctx, util.MustParseUUID(issueID), pgtype.UUID{}, pgtype.UUID{}, util.MustParseUUID(creatorID), nil)
+	if err != nil {
+		t.Fatalf("RerunIssue: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, task.ID) })
+
+	if got := taskStatus(t, pool, branchID); got != "cancelled" {
+		t.Fatalf("deferred comment branch status = %q, want cancelled", got)
+	}
+	if task.Status != "queued" || len(task.BranchContext) != 0 || task.BranchPointCommentID.Valid {
+		t.Fatalf("replacement must be an ordinary queued rerun, got status=%q branch_context=%q branch_point=%v", task.Status, task.BranchContext, task.BranchPointCommentID)
+	}
+}
