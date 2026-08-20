@@ -1,0 +1,1 @@
+DROP INDEX CONCURRENTLY IF EXISTS idx_autopilot_quota_reservation_state;

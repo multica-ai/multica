@@ -2,12 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { hashKey, keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { QueryKey } from "@tanstack/react-query";
 import { api } from "@multica/core/api";
 import type {
   Issue,
-  IssueAssigneeGroup,
-  IssueStatus,
+  IssueStatusCategory,
   IssueTableFacetSpec,
   IssueTableFacetsResponse,
   IssueTableGroupsRequest,
@@ -18,18 +16,19 @@ import type {
 import { workspaceWorkingAgentsOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { ALL_STATUSES } from "@multica/core/issues/config";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { statusFilterColumns } from "@multica/core/issues";
 import { dateOnlyToLocalDate } from "@multica/core/issues/date";
-import type {
-  AssigneeGroupedIssuesFilter,
-  IssueSortParam,
-  MyIssuesFilter,
-} from "@multica/core/issues/queries";
+import type { IssueSortParam } from "@multica/core/issues/queries";
 import { issueTableFacetsOptions } from "@multica/core/issues/queries";
 import {
   buildIssueSurfaceQueryPlan,
   type IssueSurfaceQueryPlan,
 } from "@multica/core/issues/surface/query-plan";
-import type { IssueScope } from "@multica/core/issues/surface/scope";
+import {
+  assigneeTypesForActorKind,
+  type IssueScope,
+} from "@multica/core/issues/surface/scope";
 import type { IssueDateFilter, SortField } from "@multica/core/issues/stores/view-store";
 import { propertyListOptions } from "@multica/core/properties";
 import { propertyIdFromViewKey } from "@multica/core/issues/stores/view-store";
@@ -82,16 +81,10 @@ export interface IssueSurfaceController {
    *  number it cannot stand behind. */
   workingAgents: WorkingAgentSummary[] | undefined;
   filteredGanttIssues: Issue[];
-  assigneeGroups?: IssueAssigneeGroup[];
-  assigneeGroupQueryKey?: QueryKey;
-  assigneeGroupFilter?: AssigneeGroupedIssuesFilter;
-  filter: MyIssuesFilter;
-  loadMoreScope?: string;
-  loadMoreFilter?: MyIssuesFilter;
   sort: IssueSortParam;
   ganttIssues: Issue[];
-  visibleStatuses: IssueStatus[];
-  hiddenStatuses: IssueStatus[];
+  visibleStatuses: IssueStatusCategory[];
+  hiddenStatuses: IssueStatusCategory[];
   /** Exact server counts plus cursor controls for List/status Board. */
   statusPagination?: IssueStatusPagination;
   /** Exact group catalog plus independent row cursors for Assignee/Property
@@ -127,6 +120,14 @@ export interface IssueSurfaceController {
   /** See IssueSurfaceData.isRefreshing — placeholder-backed revalidation. */
   isRefreshing: boolean;
   isEmpty: boolean;
+  /**
+   * The status catalog a CUSTOM status filter depends on failed to load. The
+   * filter cannot be honoured, so the surface shows a retryable error rather
+   * than an unexplained empty board. (MUL-6243)
+   */
+  isStatusCatalogError: boolean;
+  /** Re-runs the failed catalog request behind {@link isStatusCatalogError}. */
+  retryStatusCatalog: () => void;
   openCreateIssue: (defaults?: IssueCreateDefaults) => void;
   moveIssue: (
     issueId: string,
@@ -233,6 +234,9 @@ export function useIssueSurfaceController({
   const swimlaneGrouping = useViewStore((s) => s.swimlaneGrouping);
   const tableColumns = useViewStore((s) => s.tableColumns);
   const listCollapsedStatuses = useViewStore((s) => s.listCollapsedStatuses);
+  const hiddenStatusCategories = useViewStore((s) => s.hiddenStatusCategories);
+  const catalog = useIssueStatuses(wsId);
+  const { hasCustomStatuses } = catalog;
   const [tableSearch, setTableSearch] = useState("");
 
   const allowedModes = useMemo(() => new Set<IssueSurfaceMode>(modes), [modes]);
@@ -316,8 +320,6 @@ export function useIssueSurfaceController({
     groupingPropertyId && catalogSettled && !activeGroupingProperty
       ? "status"
       : grouping;
-  const usesAssigneeBoard =
-    effectiveViewMode === "board" && effectiveGrouping === "assignee";
   const usesGantt = effectiveViewMode === "gantt" && !!projectId;
   const usesTable = effectiveViewMode === "table";
   const activeSearch = usesTable ? tableSearch : search;
@@ -330,17 +332,54 @@ export function useIssueSurfaceController({
     effectiveViewMode === "swimlane";
   const usesServerFacets =
     usesTable || usesServerStatusSurface || usesServerGroupSurface;
-  const serverStatuses = useMemo<IssueStatus[]>(
+  const statusColumnsForFilters = useMemo(
+    () => statusFilterColumns(statusFilters, catalog),
+    [catalog, statusFilters],
+  );
+  /**
+   * A custom-status filter cannot be routed until the catalog answers. While it
+   * is pending the surface must HOLD ITS LOADING STATE, and on failure it must
+   * surface a retryable error — not fetch zero branches and render an empty
+   * board, which is what "return no columns" alone produced. (MUL-6243)
+   */
+  const statusFilterPending = statusColumnsForFilters.state === "pending";
+  const statusFilterError = statusColumnsForFilters.state === "error";
+  /**
+   * Fetching is suspended until the filter resolves. Not just "narrow to
+   * nothing": with the filter unresolved the visible column set falls back to
+   * ALL categories, so fetching anyway would briefly show the UNFILTERED board
+   * to someone who opened a saved `qa` view. Holding both the request and the
+   * loading state is the only honest option.
+   */
+  const statusFilterUnresolved = statusFilterPending || statusFilterError;
+
+  // Columns are CATEGORIES. Two independent things narrow them, and conflating
+  // them is what let "hide the Backlog column" also drop every custom status in
+  // other categories: `hiddenStatusCategories` is display state, `statusFilters`
+  // is a filter over concrete status KEYS which we map back to the columns those
+  // keys land in. (MUL-6243)
+  const serverStatuses = useMemo<IssueStatusCategory[]>(
     () => {
-      const visible =
-        statusFilters.length > 0
-          ? ALL_STATUSES.filter((status) => statusFilters.includes(status))
-          : [...ALL_STATUSES];
+      const selected =
+        statusFilters.length > 0 && statusColumnsForFilters.state === "resolved"
+          ? statusColumnsForFilters.columns
+          : null;
+      const visible = ALL_STATUSES.filter(
+        (category) =>
+          !hiddenStatusCategories.includes(category) &&
+          (selected === null || selected.has(category)),
+      );
       return effectiveViewMode === "list"
         ? visible.filter((status) => !listCollapsedStatuses.includes(status))
         : visible;
     },
-    [effectiveViewMode, listCollapsedStatuses, statusFilters],
+    [
+      effectiveViewMode,
+      hiddenStatusCategories,
+      listCollapsedStatuses,
+      statusColumnsForFilters,
+      statusFilters,
+    ],
   );
 
   const projectFilterState = useMemo(
@@ -391,19 +430,23 @@ export function useIssueSurfaceController({
   const derivedTableQuerySpec = useMemo<IssueTableQuerySpec>(() => {
     let queryScope: IssueTableQuerySpec["scope"];
     switch (scope.type) {
-      case "workspace":
+      case "workspace": {
+        const assigneeTypes = assigneeTypesForActorKind(scope.actorKind);
         queryScope = {
           kind: "workspace",
-          ...(scope.actorKind === "members"
-            ? { assignee_types: ["member" as const] }
-            : scope.actorKind === "agents"
-              ? { assignee_types: ["agent" as const, "squad" as const] }
-              : {}),
+          ...(assigneeTypes ? { assignee_types: assigneeTypes } : {}),
         };
         break;
-      case "project":
-        queryScope = { kind: "project", project_id: scope.projectId };
+      }
+      case "project": {
+        const assigneeTypes = assigneeTypesForActorKind(scope.actorKind);
+        queryScope = {
+          kind: "project",
+          project_id: scope.projectId,
+          ...(assigneeTypes ? { assignee_types: assigneeTypes } : {}),
+        };
         break;
+      }
       case "my":
         queryScope = {
           kind: "my",
@@ -581,14 +624,19 @@ export function useIssueSurfaceController({
     facets: tableFacetsQuery.data,
     facetsPending: tableFacetsQuery.isPending,
     facetsFetching: tableFacetsQuery.isFetching,
-    enabled: usesServerStatusSurface,
+    enabled: usesServerStatusSurface && !statusFilterUnresolved,
   });
   const serverGroupSpec = useMemo<IssueTableGroupsRequest["group"]>(() => {
     if (effectiveViewMode === "swimlane") {
       return {
         kind: "compound",
         primary: swimlaneGrouping,
-        secondary: "status",
+        // Same rollout switch as the board/list branches: `status_category` is
+        // a contract this feature introduced, so it is only sent once the
+        // catalog confirms this workspace HAS a custom status — which can only
+        // be true if the fleet already serves this version. Otherwise the
+        // swimlane keeps the exact request it made before. (MUL-6243)
+        secondary: hasCustomStatuses ? "status_category" : "status",
         secondary_values: serverStatuses,
       };
     }
@@ -604,6 +652,7 @@ export function useIssueSurfaceController({
   }, [
     effectiveGrouping,
     effectiveViewMode,
+    hasCustomStatuses,
     serverStatuses,
     swimlaneGrouping,
   ]);
@@ -621,7 +670,7 @@ export function useIssueSurfaceController({
     observeEmptyBranches:
       effectiveViewMode === "swimlane" ||
       (effectiveViewMode === "board" && activeGroupingProperty !== null),
-    enabled: usesServerGroupSurface,
+    enabled: usesServerGroupSurface && !statusFilterUnresolved,
   });
 
   // Selection is only meaningful within the current membership window: batch
@@ -674,14 +723,15 @@ export function useIssueSurfaceController({
     wsId,
     queryPlan,
     projectId,
-    usesAssigneeBoard,
     usesGantt,
     usesTable,
     serverStatusBranches,
     serverGroupBranches,
     ganttShowCompleted,
-    sort,
     statusFilters,
+    hiddenStatusCategories,
+    statusFilterPending,
+    statusFilterError,
     priorityFilters,
     assigneeFilters,
     includeNoAssignee,
@@ -799,6 +849,8 @@ export function useIssueSurfaceController({
       data.isEmpty &&
       !data.isRefreshing &&
       !(usesTable && (tableSearch.trim() || debouncedActiveSearch)),
+    isStatusCatalogError: data.isStatusCatalogError,
+    retryStatusCatalog: catalog.retry,
     sort,
     actions,
     selection,

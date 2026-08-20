@@ -5,6 +5,22 @@ import "encoding/json"
 const (
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
 	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
+	DaemonCapabilityExecutionManifestV1 = "execution-manifest-v1"
+	DaemonCapabilityAgentSkillV1        = "agent-skill-v1"
+	DaemonCapabilityRemoteMCPV1         = "remote-mcp-v1"
+	// DaemonCapabilityLocalWorktreeV1 advertises that the daemon implements
+	// worktree mode for local_directory resources (execution_mode=worktree).
+	//
+	// This is a CAPABILITY rather than a version check on purpose. The failure
+	// mode of getting it wrong is not a missing field — a daemon without the
+	// implementation json-skips execution_mode and runs the task IN PLACE,
+	// editing the working copy the user asked to isolate. Version strings
+	// cannot answer that reliably: a git-describe dev build ("v0.4.21-24-g…")
+	// is deliberately exempted from the version floor so `make daemon` stays
+	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
+	// that implements the mode says so; one that does not, cannot.
+	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+
 	// DaemonCapabilityRPCV1 advertises that the daemon can carry
 	// request/response RPCs over the WebSocket control connection (MUL-4257).
 	// Gated so only daemons+servers that both support it route claim over WS;
@@ -190,6 +206,16 @@ const (
 	// without any text reply — a visible, deliberate terminal outcome rather
 	// than a silently-dropped turn (MUL-4351).
 	ChatMessageKindNoResponse = "no_response"
+	// ChatMessageKindOnboardingKickoff is the server-authored, hidden first
+	// turn used to start Mika's onboarding conversation. It is persisted so
+	// the runtime receives a normal immutable chat input batch. User-facing
+	// APIs filter it out; clients also ignore the kind defensively.
+	ChatMessageKindOnboardingKickoff = "onboarding_kickoff"
+	// ChatMessageKindOnboardingOpening marks the assistant reply produced by
+	// the onboarding kickoff. The kickoff row itself never reaches clients, so
+	// the opening self-describes: chat renders the starter cards under this
+	// kind instead of quick-action chips (MUL-5765).
+	ChatMessageKindOnboardingOpening = "onboarding_opening"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat

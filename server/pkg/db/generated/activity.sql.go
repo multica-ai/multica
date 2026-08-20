@@ -60,8 +60,8 @@ func (q *Queries) CountAssigneeChangesByActor(ctx context.Context, arg CountAssi
 
 const createActivity = `-- name: CreateActivity :one
 INSERT INTO activity_log (
-    workspace_id, issue_id, actor_type, actor_id, action, details
-) VALUES ($1, $2, $3, $4, $5, $6)
+    workspace_id, issue_id, actor_type, actor_id, action, details, id
+) VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7::uuid, gen_random_uuid()))
 RETURNING id, workspace_id, issue_id, actor_type, actor_id, action, details, created_at
 `
 
@@ -72,6 +72,7 @@ type CreateActivityParams struct {
 	ActorID     pgtype.UUID `json:"actor_id"`
 	Action      string      `json:"action"`
 	Details     []byte      `json:"details"`
+	ID          pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) (ActivityLog, error) {
@@ -82,6 +83,7 @@ func (q *Queries) CreateActivity(ctx context.Context, arg CreateActivityParams) 
 		arg.ActorID,
 		arg.Action,
 		arg.Details,
+		arg.ID,
 	)
 	var i ActivityLog
 	err := row.Scan(

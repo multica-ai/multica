@@ -1,21 +1,32 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import type { ClipboardEvent } from "react";
 import {
   Eye,
   EyeOff,
+  List,
   Loader2,
   Lock,
   Plus,
   Save,
   Trash2,
+  WrapText,
 } from "lucide-react";
 import { api } from "@multica/core/api";
 import type { Agent } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
+import { Textarea } from "@multica/ui/components/ui/textarea";
 import { toast } from "sonner";
 import { useT } from "../../../i18n";
+import type { EnvParseError } from "./env-file";
+import {
+  formatEnvFile,
+  isEnvFilePaste,
+  parseEnvFile,
+  parseEnvFileResult,
+} from "./env-file";
 
 // Env values never reach this component until the user clicks
 // "Reveal & edit" — the agent resource feed no longer carries
@@ -33,16 +44,30 @@ interface EnvEntry {
 }
 
 function envMapToEntries(env: Record<string, string>): EnvEntry[] {
-  return Object.entries(env).map(([key, value]) => ({
+  const entries = Object.entries(env).map(([key, value]) => ({
     id: nextEnvId++,
     key,
     value,
     visible: false,
   }));
+
+  return entries.length > 0
+    ? entries
+    : [{ id: nextEnvId++, key: "", value: "", visible: true }];
+}
+
+// Bulk mode round-trips through the same parser the paste path uses, so the
+// two entry points can never disagree about what a line means.
+function entriesToBulkText(entries: EnvEntry[]) {
+  return formatEnvFile(
+    entries
+      .filter((entry) => entry.key.trim() !== "")
+      .map((entry) => ({ key: entry.key.trim(), value: entry.value })),
+  );
 }
 
 function entriesToEnvMap(entries: EnvEntry[]): Record<string, string> {
-  const map: Record<string, string> = {};
+  const map = Object.create(null) as Record<string, string>;
   for (const entry of entries) {
     const key = entry.key.trim();
     if (key) {
@@ -78,6 +103,16 @@ export function EnvTab({
   const [revealing, setRevealing] = useState(false);
   const [saving, setSaving] = useState(false);
 
+  // Bulk mode is a second editor over the same `revealed` state rather than a
+  // staging buffer: every keystroke that parses is written straight through,
+  // so dirty tracking and Save behave identically in both modes. A keystroke
+  // that does not parse leaves `revealed` on its last good value and raises
+  // `bulkError`, which disables Save so the user can never ship the stale
+  // state that is no longer on screen.
+  const [bulkEditing, setBulkEditing] = useState(false);
+  const [bulkText, setBulkText] = useState("");
+  const [bulkError, setBulkError] = useState<EnvParseError | null>(null);
+
   const keyCount = agent.custom_env_key_count ?? 0;
 
   const currentEnvMap = revealed ? entriesToEnvMap(revealed) : originalMap;
@@ -85,9 +120,14 @@ export function EnvTab({
     revealed !== null &&
     JSON.stringify(currentEnvMap) !== JSON.stringify(originalMap);
 
+  // Bulk text that does not parse never reaches `revealed`, so `dirty` alone
+  // would report a clean tab while the textarea still holds the user's work —
+  // and the parent's discard guard would let a tab switch drop it silently.
+  const hasUnsavedWork = dirty || (bulkEditing && bulkError !== null);
+
   useEffect(() => {
-    onDirtyChange?.(dirty);
-  }, [dirty, onDirtyChange]);
+    onDirtyChange?.(hasUnsavedWork);
+  }, [hasUnsavedWork, onDirtyChange]);
 
   const handleReveal = useCallback(async () => {
     setRevealing(true);
@@ -115,7 +155,12 @@ export function EnvTab({
   };
 
   const removeEnvEntry = (index: number) => {
-    setRevealed((prev) => (prev ?? []).filter((_, i) => i !== index));
+    setRevealed((prev) => {
+      const entries = (prev ?? []).filter((_, i) => i !== index);
+      return entries.length > 0
+        ? entries
+        : [{ id: nextEnvId++, key: "", value: "", visible: true }];
+    });
   };
 
   const updateEnvEntry = (
@@ -127,6 +172,99 @@ export function EnvTab({
       (prev ?? []).map((entry, i) =>
         i === index ? { ...entry, [field]: val } : entry,
       ),
+    );
+  };
+
+  const describeParseError = (error: EnvParseError) =>
+    error.kind === "duplicate"
+      ? t(($) => $.tab_body.env.parse_error_duplicate, {
+          line: error.line,
+          key: error.key,
+        })
+      : t(($) => $.tab_body.env.parse_error_malformed, { line: error.line });
+
+  const handleEnvPaste = (
+    index: number,
+    event: ClipboardEvent<HTMLInputElement>,
+  ) => {
+    const text = event.clipboardData.getData("text/plain");
+    const assignments = parseEnvFile(text);
+    if (!assignments) {
+      if (isEnvFilePaste(text)) {
+        event.preventDefault();
+        const result = parseEnvFileResult(text);
+        toast.error(
+          result.ok
+            ? t(($) => $.tab_body.env.paste_invalid_toast)
+            : describeParseError(result.error),
+        );
+      }
+      return;
+    }
+
+    event.preventDefault();
+    setRevealed((prev) => {
+      const currentEntries = prev ?? [];
+      const currentEntry = currentEntries[index];
+      const pastedEntries = assignments.map(({ key, value }, pasteIndex) => ({
+        id: pasteIndex === 0 && currentEntry ? currentEntry.id : nextEnvId++,
+        key,
+        value,
+        visible: false,
+      }));
+
+      return [
+        ...currentEntries.slice(0, index),
+        ...pastedEntries,
+        ...currentEntries.slice(index + 1),
+      ];
+    });
+  };
+
+  const enterBulkEditing = () => {
+    const formatted = entriesToBulkText(revealed ?? []);
+    if (!formatted.ok) {
+      // Refuse rather than hand back text that cannot be read again — the
+      // user would edit an unrelated line and silently truncate this one.
+      toast.error(
+        formatted.reason === "duplicate"
+          ? t(($) => $.tab_body.env.duplicate_keys_toast)
+          : t(($) => $.tab_body.env.bulk_unsupported_toast, {
+              key: formatted.key,
+            }),
+      );
+      return;
+    }
+
+    setBulkText(formatted.text);
+    setBulkError(null);
+    setBulkEditing(true);
+  };
+
+  const leaveBulkEditing = () => {
+    setBulkEditing(false);
+    setBulkError(null);
+  };
+
+  const handleBulkTextChange = (text: string) => {
+    setBulkText(text);
+
+    const result = parseEnvFileResult(text);
+    if (!result.ok) {
+      setBulkError(result.error);
+      return;
+    }
+
+    setBulkError(null);
+    setRevealed(
+      result.assignments.length > 0
+        ? result.assignments.map(({ key, value }) => ({
+            id: nextEnvId++,
+            key,
+            value,
+            visible: false,
+          }))
+        : [{ id: nextEnvId++, key: "", value: "", visible: true }],
     );
   };
 
@@ -153,8 +291,21 @@ export function EnvTab({
         custom_env: currentEnvMap,
       });
       const env = resp.custom_env ?? {};
+      const savedEntries = envMapToEntries(env);
       setOriginalMap(env);
-      setRevealed(envMapToEntries(env));
+      setRevealed(savedEntries);
+      // Keep the textarea in step with what the server accepted rather than
+      // dropping the user out of bulk mode on every save. If the server hands
+      // back something bulk text cannot express, fall back to rows — the data
+      // is already saved, so the only wrong move would be showing lossy text.
+      if (bulkEditing) {
+        const formatted = entriesToBulkText(savedEntries);
+        if (formatted.ok) {
+          setBulkText(formatted.text);
+        } else {
+          leaveBulkEditing();
+        }
+      }
       toast.success(t(($) => $.tab_body.env.saved_toast));
       onSaved?.();
     } catch (err) {
@@ -214,36 +365,79 @@ export function EnvTab({
   return (
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
-        <p className="text-caption text-muted-foreground">
-          {t(($) => $.tab_body.env.intro_prefix)}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
-            {"ANTHROPIC_API_KEY"}
-          </code>
-          {t(($) => $.tab_body.env.intro_separator)}
-          <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
-            {"ANTHROPIC_BASE_URL"}
-          </code>
-          {t(($) => $.tab_body.env.intro_suffix)}
-        </p>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={addEnvEntry}
-          className="shrink-0"
-        >
-          <Plus className="h-3 w-3" />
-          {t(($) => $.tab_body.common.add)}
-        </Button>
+        <div className="space-y-1 text-caption text-muted-foreground">
+          <p>
+            {t(($) => $.tab_body.env.intro_prefix)}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
+              {"ANTHROPIC_API_KEY"}
+            </code>
+            {t(($) => $.tab_body.env.intro_separator)}
+            <code className="rounded bg-muted px-1 py-0.5 font-mono text-micro">
+              {"ANTHROPIC_BASE_URL"}
+            </code>
+            {t(($) => $.tab_body.env.intro_suffix)}
+          </p>
+        </div>
+        <div className="flex shrink-0 items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={bulkEditing ? leaveBulkEditing : enterBulkEditing}
+            disabled={bulkEditing && bulkError !== null}
+          >
+            {bulkEditing ? (
+              <List className="h-3 w-3" />
+            ) : (
+              <WrapText className="h-3 w-3" />
+            )}
+            {bulkEditing
+              ? t(($) => $.tab_body.env.row_edit_action)
+              : t(($) => $.tab_body.env.bulk_edit_action)}
+          </Button>
+          {!bulkEditing && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={addEnvEntry}
+            >
+              <Plus className="h-3 w-3" />
+              {t(($) => $.tab_body.common.add)}
+            </Button>
+          )}
+        </div>
       </div>
 
-      {revealed.length > 0 ? (
+      {bulkEditing ? (
+        <div className="space-y-2">
+          <Textarea
+            value={bulkText}
+            onChange={(e) => handleBulkTextChange(e.target.value)}
+            placeholder={t(($) => $.tab_body.env.bulk_placeholder)}
+            aria-label={t(($) => $.tab_body.env.bulk_edit_action)}
+            aria-invalid={bulkError !== null}
+            spellCheck={false}
+            className="min-h-48 font-mono text-caption"
+          />
+          {bulkError ? (
+            <p className="text-caption text-destructive">
+              {describeParseError(bulkError)}
+            </p>
+          ) : (
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.tab_body.env.bulk_plaintext_notice)}
+            </p>
+          )}
+        </div>
+      ) : revealed.length > 0 ? (
         <div className="space-y-2">
           {revealed.map((entry, index) => (
             <div key={entry.id} className="flex items-center gap-2">
               <Input
                 value={entry.key}
                 onChange={(e) => updateEnvEntry(index, "key", e.target.value)}
+                onPaste={(event) => handleEnvPaste(index, event)}
                 placeholder={t(($) => $.tab_body.env.key_placeholder)}
                 className="w-[40%] font-mono text-caption"
               />
@@ -254,6 +448,9 @@ export function EnvTab({
                   onChange={(e) =>
                     updateEnvEntry(index, "value", e.target.value)
                   }
+                  // Deliberately no paste interception here: a value is
+                  // arbitrary text, and `foo=bar` pasted as a value is a value,
+                  // not an assignment. Bulk edit is the entry point for files.
                   placeholder={t(($) => $.tab_body.env.value_placeholder)}
                   className="pr-8 font-mono text-caption"
                 />
@@ -261,7 +458,11 @@ export function EnvTab({
                   type="button"
                   onClick={() => toggleEnvVisibility(index)}
                   className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
-                  aria-label={entry.visible ? t(($) => $.tab_body.env.hide_value_aria) : t(($) => $.tab_body.env.show_value_aria)}
+                  aria-label={
+                    entry.visible
+                      ? t(($) => $.tab_body.env.hide_value_aria)
+                      : t(($) => $.tab_body.env.show_value_aria)
+                  }
                 >
                   {entry.visible ? (
                     <EyeOff className="h-3.5 w-3.5" />
@@ -289,10 +490,16 @@ export function EnvTab({
       )}
 
       <div className="flex items-center justify-end gap-3">
-        {dirty && (
-          <span className="text-caption text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+        {hasUnsavedWork && (
+          <span className="text-caption text-muted-foreground">
+            {t(($) => $.tab_body.common.unsaved_changes)}
+          </span>
         )}
-        <Button onClick={handleSave} disabled={!dirty || saving} size="sm">
+        <Button
+          onClick={handleSave}
+          disabled={!dirty || saving || bulkError !== null}
+          size="sm"
+        >
           {saving ? (
             <Loader2 className="h-3.5 w-3.5 animate-spin" />
           ) : (

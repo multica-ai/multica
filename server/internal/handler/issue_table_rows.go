@@ -35,12 +35,16 @@ type resolvedIssueTableSort struct {
 	direction  string
 	castType   string
 	nullsLast  bool
+	idOnlyTie  bool
 }
 
 func (sort resolvedIssueTableSort) orderBy() string {
 	orderBy := sort.expression + " " + strings.ToUpper(sort.direction)
 	if sort.nullsLast {
 		orderBy += " NULLS LAST"
+	}
+	if sort.idOnlyTie {
+		return orderBy + ", i.id DESC"
 	}
 	return orderBy + ", i.created_at DESC, i.id DESC"
 }
@@ -49,8 +53,7 @@ func (sort resolvedIssueTableSort) cursorPredicate(w http.ResponseWriter, cursor
 	if cursor == nil {
 		return "TRUE", true
 	}
-	createdAt, err := time.Parse(time.RFC3339Nano, cursor.RowCreatedAt)
-	if err != nil || cursor.RowID == "" {
+	if cursor.RowID == "" {
 		writeError(w, http.StatusBadRequest, "invalid cursor")
 		return "", false
 	}
@@ -59,9 +62,17 @@ func (sort resolvedIssueTableSort) cursorPredicate(w http.ResponseWriter, cursor
 		writeError(w, http.StatusBadRequest, "invalid cursor")
 		return "", false
 	}
-	createdRef := addArg(createdAt)
 	idRef := addArg(rowID)
-	tie := fmt.Sprintf("(i.created_at < %s::timestamptz OR (i.created_at = %s::timestamptz AND i.id < %s::uuid))", createdRef, createdRef, idRef)
+	tie := fmt.Sprintf("i.id < %s::uuid", idRef)
+	if !sort.idOnlyTie {
+		createdAt, err := time.Parse(time.RFC3339Nano, cursor.RowCreatedAt)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid cursor")
+			return "", false
+		}
+		createdRef := addArg(createdAt)
+		tie = fmt.Sprintf("(i.created_at < %s::timestamptz OR (i.created_at = %s::timestamptz AND i.id < %s::uuid))", createdRef, createdRef, idRef)
+	}
 	if cursor.SortIsNull {
 		if !sort.nullsLast || cursor.SortValue != nil {
 			writeError(w, http.StatusBadRequest, "invalid cursor")
@@ -134,6 +145,11 @@ func (h *Handler) issueTableOrderBy(w http.ResponseWriter, r *http.Request, work
 	case "created_at", "updated_at":
 		resolved.expression = "i." + sortField
 		resolved.castType = "timestamptz"
+	case "last_activity":
+		resolved.expression = "i.last_activity_at"
+		resolved.castType = "timestamptz"
+		resolved.nullsLast = true
+		resolved.idOnlyTie = true
 	case "start_date", "due_date":
 		resolved.expression = "i." + sortField
 		resolved.castType = "date"
@@ -172,6 +188,9 @@ func (h *Handler) issueTableOrderBy(w http.ResponseWriter, r *http.Request, work
 	direction := strings.ToLower(strings.TrimSpace(sortRequest.Direction))
 	if direction == "" {
 		direction = "asc"
+		if resolved.idOnlyTie {
+			direction = "desc"
+		}
 	}
 	if direction != "asc" && direction != "desc" {
 		writeError(w, http.StatusBadRequest, "invalid query.sort.direction")
@@ -349,7 +368,8 @@ func (h *Handler) ListIssueTableRows(w http.ResponseWriter, r *http.Request) {
 SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
        i.assignee_type, i.assignee_id, i.creator_type, i.creator_id,
        i.parent_issue_id, i.position, i.start_date, i.due_date, i.created_at,
-	       i.updated_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+	       i.updated_at, i.last_activity_at, i.number, i.project_id, i.metadata, i.stage, i.properties,
+	       i.revision,
 	       %s AS direct_child_count, i.table_sort_key
 	FROM page i
 	ORDER BY %s`, cte, childCountExpr, resolvedSort.orderBy())
@@ -387,11 +407,13 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 			&row.issue.DueDate,
 			&row.issue.CreatedAt,
 			&row.issue.UpdatedAt,
+			&row.issue.LastActivityAt,
 			&row.issue.Number,
 			&row.issue.ProjectID,
 			&row.issue.Metadata,
 			&row.issue.Stage,
 			&row.issue.Properties,
+			&row.issue.Revision,
 			&row.childCount,
 			&row.sortKey,
 		); err != nil {
@@ -458,9 +480,12 @@ SELECT i.id, i.workspace_id, i.title, i.description, i.status, i.priority,
 		issueIDs[index] = row.issue.ID
 	}
 	labelsByIssue := baseHandler.labelsByIssue(r.Context(), compiled.workspaceID, issueIDs)
+	// One Resolver for the page — see newStatusCategoryFiller. (MUL-6243)
+	fillTableRow := baseHandler.newStatusCategoryFiller(r.Context(), compiled.workspaceID)
 	responseRows := make([]issueTableRowResponse, len(scanned))
 	for index, row := range scanned {
 		issue := issueListRowToResponse(row.issue, prefix)
+		fillTableRow(&issue)
 		labels := labelsByIssue[issue.ID]
 		if labels == nil {
 			labels = []LabelResponse{}

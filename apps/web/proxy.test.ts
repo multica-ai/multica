@@ -89,11 +89,25 @@ describe("proxy legacy workspace route redirects", () => {
     );
   });
 
-  it("sends logged-in legacy URLs without a last workspace cookie to root", () => {
+  it("sends logged-in legacy URLs without a last workspace cookie to login", () => {
+    // Not root: the root-path rule below leaves "/" on the public site for the
+    // official marketing hosts even with a session, so bouncing there would
+    // dead-end on the landing page. /login resolves against the workspace list
+    // instead. The deep-link query is dropped because feeding a legacy path
+    // back through `next` would return here and loop.
     expect(
-      redirectLocation("/squads", { multica_logged_in: "1" }),
-    ).toBe("https://app.multica.test/");
+      redirectLocation("/squads?view=members", { multica_logged_in: "1" }),
+    ).toBe("https://app.multica.test/login");
   });
+
+  it.each(["multica.ai", "www.multica.ai"])(
+    "resolves a slugless session off the marketing host %s instead of stranding it",
+    (host) => {
+      expect(
+        redirectLocation("/inbox", { multica_logged_in: "1" }, host),
+      ).toBe(`https://${host}/login`);
+    },
+  );
 
   it("does not redirect workspace-scoped URLs whose first segment is already a slug", () => {
     expect(redirectLocation("/acme/squads", sessionCookies)).toBeNull();

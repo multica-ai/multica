@@ -74,13 +74,19 @@ Your responsibilities, in order:
 // leader was woken on is assigned to THIS squad. Only then does the leader own
 // the parent's status arc.
 //
-// The "even when no comment asked you to" clause is load-bearing: the comment
-// workflow's default rule is "do not change status unless the comment asks",
-// and a member's delivery comment never asks. Without an explicit standing
-// grant here, the @mention-dispatch squad shape (no child issues, so no
-// child-done system comment carrying an explicit ask) would leave the parent
-// stuck in in_progress forever. The comment workflow defers to this section by
-// name — keep the heading text in sync with writeWorkflowComment.
+// Since MUL-6417 the runtime brief has no grant routing that consumes this
+// section by name: the unified workflow writes status as the work changes it
+// (in_progress when a turn starts advancing the issue's ask, the reached
+// state at turn end), and the leader's only brief-side special case is that a
+// dispatch turn leaves the parent in_progress. This section's
+// job is the owning/guest permission boundary, drawn at the Agent Identity
+// layer (Instruction Precedence puts it above the workflow). The owning
+// leader needs the standing wrap-up instruction below — the @mention-dispatch
+// shape (no child issues, so no child-done system comment) never produces a
+// comment that asks for in_review, so without it the parent would sit in
+// in_progress forever; the guest leader gets the prohibition instead
+// (squadParentStatusNotOwned). Both compositions are pinned by
+// handler/squad_parent_status_contract_test.go.
 const squadParentStatusOwned = `6. **Own the parent issue status.** This issue is assigned to your squad,
    so its status is yours to manage (unless Agent Identity forbids status
    changes). On the first assignment turn, move the parent to

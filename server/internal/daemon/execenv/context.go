@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/pkg/agent"
 	"gopkg.in/yaml.v3"
 )
 
@@ -23,9 +24,10 @@ const TaskContextMarkerRelPath = ".multica/daemon_task_context.json"
 const TaskContextMarkerManagedBy = "multica-daemon-task"
 
 type taskContextMarkerFile struct {
-	ManagedBy string `json:"managed_by"`
-	AgentID   string `json:"agent_id,omitempty"`
-	IssueID   string `json:"issue_id,omitempty"`
+	ManagedBy     string `json:"managed_by"`
+	AgentID       string `json:"agent_id,omitempty"`
+	IssueID       string `json:"issue_id,omitempty"`
+	ChatSessionID string `json:"chat_session_id,omitempty"`
 }
 
 // EnsureWorkspacesRootMarker writes a persistent daemon-task marker at
@@ -129,10 +131,13 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // Pi:          skills → {workDir}/.pi/skills/{name}/SKILL.md  (native discovery)
 // Cursor:      skills → {workDir}/.cursor/skills/{name}/SKILL.md  (native discovery)
 // Kimi:        skills → {workDir}/.kimi/skills/{name}/SKILL.md  (native discovery)
+// Reasonix:    skills → {workDir}/.reasonix/skills/{name}/SKILL.md  (native discovery)
+// DSH:         skills → {workDir}/.dsh/skills/{name}/SKILL.md  (native discovery)
 // Kiro:        skills → {workDir}/.kiro/skills/{name}/SKILL.md  (native discovery)
 // Qoder/Qoder CN: skills → {workDir}/.qoder/skills/{name}/SKILL.md  (project-level; see the provider docs)
 // Qwen Code:    skills → {workDir}/.qwen/skills/{name}/SKILL.md  (native project-level discovery)
 // QwenPaw:      skills → {workDir}/.qwenpaw/skills/{name}/SKILL.md  (native project-level discovery)
+// MiniMax Code: skills → {workDir}/.minimax/skills/{name}/SKILL.md  (native project-level discovery)
 // Antigravity: skills → {workDir}/.agents/skills/{name}/SKILL.md  (native discovery — see https://antigravity.google/docs/gcli-migration "Workspace skills")
 // Default:     skills → {workDir}/.agent_context/skills/{name}/SKILL.md
 //
@@ -208,9 +213,10 @@ func writeTaskContextMarker(workDir string, ctx TaskContextForEnv, manifest *sid
 	// cleanup. If a crash leaves it behind, the CLI intentionally treats it
 	// as daemon context and fails closed instead of using a user PAT.
 	payload := taskContextMarkerFile{
-		ManagedBy: TaskContextMarkerManagedBy,
-		AgentID:   ctx.AgentID,
-		IssueID:   ctx.IssueID,
+		ManagedBy:     TaskContextMarkerManagedBy,
+		AgentID:       ctx.AgentID,
+		IssueID:       ctx.IssueID,
+		ChatSessionID: ctx.ChatSessionID,
 	}
 	data, err := json.MarshalIndent(payload, "", "  ")
 	if err != nil {
@@ -332,6 +338,11 @@ func resolveSkillsDir(workDir, provider string, manifest *sidecarManifest) (stri
 // (removeReusedManagedSkillDirs) needs the bare path with no side effects so
 // it can match the managed skill roots the prior manifest recorded.
 func skillsDirPath(workDir, provider string) string {
+	// Built-in runtime identities (e.g. "omp") declare their skills dir in
+	// the descriptor; resolve generically before the protocol-family switch.
+	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
+		return filepath.Join(workDir, desc.SkillsDir)
+	}
 	switch provider {
 	case "claude":
 		// Claude Code natively discovers skills from .claude/skills/ in the workdir.
@@ -382,6 +393,14 @@ func skillsDirPath(workDir, provider string) string {
 		// Kimi Code CLI auto-discovers project-level skills from .kimi/skills/
 		// in the workdir. See https://moonshotai.github.io/kimi-cli/en/customization/skills.html
 		return filepath.Join(workDir, ".kimi", "skills")
+	case "reasonix":
+		// Reasonix discovers project skills from .reasonix/skills/ and loads
+		// AGENTS.md independently, so repository memory and task skills coexist.
+		return filepath.Join(workDir, ".reasonix", "skills")
+	case "dsh":
+		// DSH scans both .dsh/skills and .agents/skills. Prefer its branded
+		// project root so runtime-specific skills stay isolated.
+		return filepath.Join(workDir, ".dsh", "skills")
 	case "kiro":
 		// Kiro CLI auto-discovers project-level skills from .kiro/skills/
 		// in the workdir.
@@ -398,6 +417,9 @@ func skillsDirPath(workDir, provider string) string {
 		// QwenPaw discovers workspace-level skills from <workDir>/skill_pool/.
 		// See get_workspace_skills_dir in QwenPaw's skill_system/store.py.
 		return filepath.Join(workDir, "skill_pool")
+	case "mcode":
+		// MiniMax Code discovers project-level skills from .minimax/skills/.
+		return filepath.Join(workDir, ".minimax", "skills")
 	case "traecli":
 		// Official TRAE CLI discovers project-level skills from .traecli/skills/
 		// in the workdir (global skills live in ~/.traecli/skills). See

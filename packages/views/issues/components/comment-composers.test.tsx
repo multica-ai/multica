@@ -217,11 +217,13 @@ function renderCommentInput(onSubmit = vi.fn().mockResolvedValue(true)) {
 }
 
 function renderReplyInput({
-  onSubmit = vi.fn().mockResolvedValue(true),
+  onSubmit = vi.fn().mockResolvedValue("reply-new"),
+  onAccepted,
   size = "sm",
   draftKey,
 }: {
-  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<boolean>;
+  onSubmit?: (content: string, attachmentIds?: string[], suppressAgentIds?: string[]) => Promise<string | boolean>;
+  onAccepted?: (commentId: string) => void;
   size?: "sm" | "default";
   draftKey?: `reply:${string}:${string}`;
 } = {}) {
@@ -232,6 +234,7 @@ function renderReplyInput({
       avatarType="member"
       avatarId="user-1"
       onSubmit={onSubmit}
+      onAccepted={onAccepted}
       size={size}
       draftKey={draftKey}
     />,
@@ -265,6 +268,9 @@ beforeEach(() => {
   insertMarkdownBehavior.succeed = true;
   localStorage.clear();
   useCommentComposerStore.setState({ sticky: true });
+  // The composer's pinning (and the height cap that follows it) is viewport
+  // dependent, so a narrow-viewport test must not leak into the next one.
+  Object.defineProperty(window, "innerWidth", { configurable: true, value: 1280 });
   // The draft store is a module singleton — a draft left by a previous test
   // (e.g. the failed-send case) would trip the composers' draft-direct-mount
   // path and hide the shell the next test expects.
@@ -505,6 +511,18 @@ describe("comment composers", () => {
 
     await waitFor(() => expect(focusCalls.focused).toBeGreaterThan(0));
     expect(focusCalls.blurred).toBe(0);
+  });
+
+  it("reports the new reply id as the accepted scroll target", async () => {
+    const onAccepted = vi.fn();
+    const { container } = renderReplyInput({ onAccepted });
+
+    activateComposer("reply-composer-shell");
+    fireEvent.change(screen.getByTestId("editor"), { target: { value: "replied" } });
+    fireEvent.click(getSubmitButton(container));
+
+    await waitFor(() => expect(onAccepted).toHaveBeenCalledTimes(1));
+    expect(onAccepted).toHaveBeenCalledWith("reply-new");
   });
 
   it("does not refocus the reply box when the send fails", async () => {
@@ -1092,6 +1110,18 @@ describe("sticky composer preference", () => {
 
   it("lets the editor grow when the preference is off", () => {
     useCommentComposerStore.setState({ sticky: false });
+    renderCommentInput();
+
+    activateComposer("comment-composer-shell");
+    expect(screen.getByTestId("editor").parentElement?.className).not.toContain("max-h-[40vh]");
+  });
+
+  // The cap only earns its keep while the composer is pinned: it stops a long
+  // draft from swallowing the timeline it floats over. Below the mobile
+  // breakpoint nothing is pinned (see `useStickyComposer`), so a capped
+  // composer would just be a scroll-inside-a-scroll for no reason.
+  it("lets the editor grow below the mobile breakpoint, where nothing is pinned", () => {
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 390 });
     renderCommentInput();
 
     activateComposer("comment-composer-shell");

@@ -144,3 +144,93 @@ func TestUnresumableHistoryIsStatusAndProviderAgnostic(t *testing.T) {
 		}
 	}
 }
+
+// TestAuthMethodUnresolved pins the GH #6777 predicate. The positives are the
+// provider phrase as it reaches us through each ACP lifecycle step; the
+// negatives are every other authentication-shaped failure, which a fresh
+// session cannot cure and which must therefore keep its session pointer.
+func TestAuthMethodUnresolved(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name   string
+		errMsg string
+		want   bool
+	}{
+		{
+			// Verbatim from the reporter, as the ACP provider-error sniffer
+			// wraps it (GH #6777).
+			name:   "gh6777 sniffer-wrapped provider error",
+			errMsg: `hermes provider error: "Could not resolve authentication method. Expected either api_key or auth_token to be set. Or for one of the X-Api-Key or Authorization headers to be explicitly omitted"`,
+			want:   true,
+		},
+		{
+			// Same failure one step earlier: the adapter wraps the runtime
+			// message with %v instead of replacing it, so the phrase survives.
+			name:   "set_model wrapper keeps the phrase",
+			errMsg: `hermes could not switch to model "custom:deepseek-v4-pro": session/set_model: Could not resolve authentication method. Expected either api_key or auth_token to be set.`,
+			want:   true,
+		},
+		{
+			name:   "case differences do not matter",
+			errMsg: "COULD NOT RESOLVE AUTHENTICATION METHOD",
+			want:   true,
+		},
+		{
+			name:   "empty error",
+			errMsg: "",
+			want:   false,
+		},
+
+		// --- Negatives: authentication-shaped, but not session-shaped. A new
+		// session replays these verbatim, so matching them would cost a wasted
+		// run AND the conversation pointer. ---
+		{
+			name:   "rejected api key",
+			errMsg: `hermes provider error: "401 authentication_error: invalid x-api-key"`,
+			want:   false,
+		},
+		{
+			name:   "revoked oauth token",
+			errMsg: "OAuth access token has been revoked",
+			want:   false,
+		},
+		{
+			name:   "missing credential env var",
+			errMsg: "missing environment variable: ANTHROPIC_API_KEY",
+			want:   false,
+		},
+		{
+			// Talks about resolving and about auth, but is a DNS failure.
+			name:   "unresolved host is not unresolved auth",
+			errMsg: "dial tcp: lookup auth.example.com: no such host",
+			want:   false,
+		},
+	}
+
+	for _, tt := range cases {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			if got := AuthMethodUnresolved(tt.errMsg); got != tt.want {
+				t.Errorf("AuthMethodUnresolved(%q) = %v, want %v", tt.errMsg, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestAuthMethodUnresolvedMatchesResumeQueryGuard asserts the Go predicate and
+// the SQL guard in GetLastTaskSession / GetLastChatTaskSession agree on the
+// phrase. They are two independent implementations of the same rule — the
+// daemon's in-turn retry reads this one, and rows written by a daemon too old
+// to have it are caught by the SQL one — so a drift would leave one layer
+// resuming a session the other considers dead.
+func TestAuthMethodUnresolvedMatchesResumeQueryGuard(t *testing.T) {
+	t.Parallel()
+
+	// The ILIKE pattern the queries apply, minus the wildcards.
+	const sqlGuardPhrase = "could not resolve authentication method"
+
+	if !AuthMethodUnresolved("prefix " + sqlGuardPhrase + " suffix") {
+		t.Fatalf("predicate does not match the SQL guard phrase %q — pkg/db/queries and pkg/taskfailure have drifted", sqlGuardPhrase)
+	}
+}

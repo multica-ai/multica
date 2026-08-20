@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
+	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -121,7 +123,7 @@ func TestCreateAgentBuilderSessionCreatesIsolatedHiddenBuilder(t *testing.T) {
 	}
 }
 
-func TestCreateAgentAttachesSkillsInCreateTransaction(t *testing.T) {
+func TestCreateAgentAttachesSkillsWithoutCreatingAWelcomeChat(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
 	}
@@ -155,14 +157,14 @@ func TestCreateAgentAttachesSkillsInCreateTransaction(t *testing.T) {
 	if len(response.Skills) != 1 || response.Skills[0].ID != skillID {
 		t.Fatalf("create response did not include attached skill: %+v", response.Skills)
 	}
-	var introSessions int
+	var chatSessions int
 	if err := testPool.QueryRow(ctx, `
-		SELECT count(*) FROM chat_session WHERE agent_id = $1 AND is_agent_intro = true
-	`, response.ID).Scan(&introSessions); err != nil {
-		t.Fatalf("count welcome chat sessions: %v", err)
+		SELECT count(*) FROM chat_session WHERE agent_id = $1
+	`, response.ID).Scan(&chatSessions); err != nil {
+		t.Fatalf("count chat sessions: %v", err)
 	}
-	if introSessions != 1 {
-		t.Fatalf("welcome chat sessions = %d, want 1", introSessions)
+	if chatSessions != 0 {
+		t.Fatalf("chat sessions after agent create = %d, want 0", chatSessions)
 	}
 }
 
@@ -994,6 +996,140 @@ func TestSendDirectChatMessageWaitsForUncommittedRebind(t *testing.T) {
 	}
 }
 
+func TestSendDirectChatMessageRejectsSessionArchivedWhileWaitingForLock(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	agentID := createHandlerTestAgent(t, "Chat Send Archive Race", []byte("[]"))
+	sessionID := createHandlerTestChatSession(t, agentID)
+	session, err := testHandler.Queries.GetChatSession(ctx, parseUUID(sessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	agent, err := testHandler.Queries.GetAgent(ctx, parseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load chat agent: %v", err)
+	}
+
+	tx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin archive tx: %v", err)
+	}
+	defer tx.Rollback(context.Background())
+	holderPID := holderBackendPID(t, ctx, tx)
+	if _, err := tx.Exec(ctx, `
+		UPDATE chat_session SET status = 'archived' WHERE id = $1
+	`, sessionID); err != nil {
+		t.Fatalf("archive chat session: %v", err)
+	}
+
+	results := make(chan error, 1)
+	go func() {
+		_, err := testHandler.TaskService.SendDirectChatMessage(
+			context.Background(), session, agent, parseUUID(testUserID),
+			"must not enqueue after archive", nil, "member", parseUUID(testUserID),
+		)
+		results <- err
+	}()
+
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		t.Fatal("send did not wait for the session archive transaction")
+	}
+	if err := tx.Commit(ctx); err != nil {
+		t.Fatalf("commit archive: %v", err)
+	}
+
+	select {
+	case err := <-results:
+		if !errors.Is(err, service.ErrChatSessionArchived) {
+			t.Fatalf("send after archive error = %v, want ErrChatSessionArchived", err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("send did not return after archive committed")
+	}
+
+	var taskCount, messageCount int
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM agent_task_queue WHERE chat_session_id = $1
+	`, sessionID).Scan(&taskCount); err != nil {
+		t.Fatalf("count chat tasks: %v", err)
+	}
+	if err := testPool.QueryRow(ctx, `
+		SELECT count(*) FROM chat_message WHERE chat_session_id = $1
+	`, sessionID).Scan(&messageCount); err != nil {
+		t.Fatalf("count chat messages: %v", err)
+	}
+	if taskCount != 0 || messageCount != 0 {
+		t.Fatalf("archived send persisted tasks=%d messages=%d, want zero", taskCount, messageCount)
+	}
+}
+
+func TestDeleteBuilderSessionLocksAgentBeforeTasks(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	ctx := context.Background()
+	created := newBuilderSession(t)
+	taskID := insertPendingChatTask(t, created.BuilderAgentID, created.SessionID, "queued")
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET status = 'online', last_seen_at = now() WHERE id = $1`, testRuntimeID); err != nil {
+		t.Fatalf("refresh builder runtime heartbeat: %v", err)
+	}
+
+	claimTx, err := testPool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin claim tx: %v", err)
+	}
+	defer claimTx.Rollback(context.Background())
+	qtx := testHandler.Queries.WithTx(claimTx)
+	agent, err := qtx.GetAgentForClaimUpdate(ctx, parseUUID(created.BuilderAgentID))
+	if err != nil {
+		t.Fatalf("lock builder agent: %v", err)
+	}
+	holderPID := holderBackendPID(t, ctx, claimTx)
+
+	deleteReq := withURLParam(
+		newRequestAs(testUserID, http.MethodDelete, "/api/chat/sessions/"+created.SessionID, nil),
+		"sessionId",
+		created.SessionID,
+	)
+	deleteReq = withChatTestWorkspaceCtx(t, deleteReq)
+	deleteCodes := make(chan int, 1)
+	go func() {
+		w := httptest.NewRecorder()
+		testHandler.DeleteChatSession(w, deleteReq)
+		deleteCodes <- w.Code
+	}()
+
+	if !waitForWaiterBlockedBy(t, holderPID, 10*time.Second) {
+		t.Fatal("delete did not wait for the builder agent lock")
+	}
+	claimed, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
+		AgentID:          agent.ID,
+		RuntimeID:        agent.RuntimeID,
+		PrepareLeaseSecs: 30,
+		RuntimeStaleSecs: service.RuntimeClaimFreshnessSeconds,
+	})
+	if err != nil {
+		t.Fatalf("claim while delete waits for agent lock: %v", err)
+	}
+	if got := uuidToString(claimed.ID); got != taskID {
+		t.Fatalf("claimed task = %q, want %q", got, taskID)
+	}
+	if err := claimTx.Rollback(ctx); err != nil {
+		t.Fatalf("release claim transaction: %v", err)
+	}
+
+	select {
+	case code := <-deleteCodes:
+		if code != http.StatusNoContent {
+			t.Fatalf("delete returned %d, want 204", code)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("delete did not complete after agent lock released")
+	}
+}
+
 // The mirror image: a send that has not committed yet must hold off a rebind,
 // and the rebind must then see the now-visible pending task and refuse. Without
 // the lock on the switch side, GetPendingChatTask cannot see the uncommitted
@@ -1080,9 +1216,8 @@ func TestSwitchAgentBuilderRuntimeEnforcesRuntimeAndSessionOwnership(t *testing.
 	}
 	ctx := context.Background()
 
-	// A plain member, so canUseRuntimeForAgent's owner/admin bypass does not
-	// apply — the fixture user is the workspace owner and may legitimately use
-	// anyone's private runtime.
+	// A plain member who owns none of the runtimes below — the fixture user
+	// owns them, and a private runtime is usable only by its owner.
 	var plainMemberID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email) VALUES ('Builder Switch Plain Member', 'builder-switch-plain@multica.ai')

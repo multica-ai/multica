@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -20,6 +21,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { setApiInstance } from "@multica/core/api";
+import { useModalStore } from "@multica/core/modals";
 import type { ApiClient } from "@multica/core/api/client";
 import { issueKeys } from "@multica/core/issues/queries";
 import { ViewStoreProvider } from "@multica/core/issues/stores/view-store-context";
@@ -67,6 +69,13 @@ vi.mock("@multica/core/workspace/hooks", () => ({
   buildActorNameResolver: () => () => "Someone",
 }));
 
+// The assignee cell's avatar only renders for a row that HAS an assignee (the
+// run-confirm case below) and pulls in presence, images and the rest of the
+// workspace-hooks surface. None of that is under test here.
+vi.mock("../../common/actor-avatar", () => ({
+  ActorAvatar: () => <span data-testid="actor-avatar" />,
+}));
+
 const mockAuthUser = { id: "user-1", email: "t@t.co", name: "Tester" };
 vi.mock("@multica/core/auth", () => ({
   useAuthStore: Object.assign(
@@ -85,19 +94,49 @@ const navigationMocks = vi.hoisted(() => ({
 }));
 const navigationState = vi.hoisted(() => ({ hasOpenInNewTab: true }));
 
-vi.mock("../../navigation", () => ({
-  AppLink: ({ children, ...props }: React.ComponentProps<"a">) => (
-    <a {...props}>{children}</a>
-  ),
-  useNavigation: () => ({
-    push: navigationMocks.push,
-    openInNewTab: navigationState.hasOpenInNewTab
-      ? navigationMocks.openInNewTab
-      : undefined,
-    getShareableUrl: navigationMocks.getShareableUrl,
-    pathname: "/",
-  }),
-}));
+vi.mock("../../navigation", async () => {
+  // Real resolver — pure, no React context.
+  const { resolveClickIntent } = await vi.importActual<
+    typeof import("../../navigation/click-intent")
+  >("../../navigation/click-intent");
+  return {
+    AppLink: ({ children, ...props }: React.ComponentProps<"a">) => (
+      <a {...props}>{children}</a>
+    ),
+    resolveClickIntent,
+    useNavigation: () => ({
+      push: navigationMocks.push,
+      openInNewTab: navigationState.hasOpenInNewTab
+        ? navigationMocks.openInNewTab
+        : undefined,
+      getShareableUrl: navigationMocks.getShareableUrl,
+      pathname: "/",
+    }),
+    // Mirrors the real hook's adapter semantics against the mocks above.
+    useIntentNavigate:
+      () => (href: string, intent: string, newTabTitle?: string) => {
+        if (intent === "push") {
+          navigationMocks.push(href);
+          return;
+        }
+        if (navigationState.hasOpenInNewTab) {
+          if (intent === "foreground-tab") {
+            navigationMocks.openInNewTab(href, newTabTitle, {
+              activate: true,
+            });
+          } else {
+            navigationMocks.openInNewTab(href, newTabTitle);
+          }
+          return;
+        }
+        window.open(
+          navigationMocks.getShareableUrl(href),
+          "_blank",
+          "noopener,noreferrer",
+        );
+      },
+  };
+});
 
 vi.mock("@multica/core/paths", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/paths")>(
@@ -195,6 +234,47 @@ function Harness({
 }
 
 describe("TableView cell editors under data refresh", () => {
+  // The table's inline pickers are single-issue writes like the issue detail's,
+  // so they route on the same run-confirm gate: promoting an agent-owned issue
+  // out of backlog starts a run and must confirm first (MUL-6463). The gate's
+  // own matrix lives in ../actions/run-confirm-gate.test.ts; this only proves
+  // the table asks it instead of writing straight through.
+  it("confirms a status change that would start an agent run instead of applying it", async () => {
+    const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
+    serverIssues = [
+      {
+        ...makeIssue("c", "Parked task", "backlog"),
+        assignee_type: "agent",
+        assignee_id: "agent-1",
+      },
+    ];
+    useModalStore.getState().close();
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map<string, ChildProgress>()}
+          surfaceKey={`test-surface-${Math.floor(Math.random() * 1e9)}`}
+        />
+      </QueryClientProvider>,
+    );
+
+    await screen.findByText("MUL-c");
+    const row = screen.getByText("MUL-c").closest("tr")!;
+    await user.click(within(row).getByRole("button", { name: /Backlog/ }));
+    await user.click(screen.getByRole("button", { name: /^Todo$/ }));
+
+    const { modal, data } = useModalStore.getState();
+    expect(modal).toBe("issue-run-confirm");
+    expect(data).toMatchObject({
+      mode: "promote",
+      status: "todo",
+      assigneeType: "agent",
+      assigneeId: "agent-1",
+    });
+    useModalStore.getState().close();
+  });
+
   let queryClient: QueryClient;
 
   beforeEach(() => {
@@ -216,6 +296,7 @@ describe("TableView cell editors under data refresh", () => {
       listAgents: async () => [],
       listSquads: async () => [],
       getAssigneeFrequency: async () => [],
+      listIssueStatuses: async () => ({ statuses: [] }),
       listIssueTableRows: async () => ({
         query_fingerprint: "test",
         group_key: null,
@@ -350,7 +431,7 @@ describe("TableView cell editors under data refresh", () => {
     });
   });
 
-  it("opens title and row clicks in a foreground Desktop tab", async () => {
+  it("navigates in place on plain title and row clicks; modifiers open tabs", async () => {
     const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
     serverIssues = [makeIssue("a", "Alpha task", "todo")];
 
@@ -364,16 +445,26 @@ describe("TableView cell editors under data refresh", () => {
     );
 
     const row = (await screen.findByText("MUL-a")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: "Alpha task" }));
+    const title = within(row).getByRole("button", { name: "Alpha task" });
+
+    await user.click(title);
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
+
+    navigationMocks.push.mockClear();
+    await user.click(row);
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
+
+    navigationMocks.push.mockClear();
+    fireEvent.click(title, { metaKey: true });
     expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
       "/test/issues/a",
       "MUL-a",
-      { activate: true },
     );
-    expect(navigationMocks.push).not.toHaveBeenCalled();
 
     navigationMocks.openInNewTab.mockClear();
-    await user.click(row);
+    fireEvent.click(row, { metaKey: true, shiftKey: true });
     expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
       "/test/issues/a",
       "MUL-a",
@@ -382,7 +473,42 @@ describe("TableView cell editors under data refresh", () => {
     expect(navigationMocks.push).not.toHaveBeenCalled();
   });
 
-  it("opens a real browser tab when the platform has no tab adapter", async () => {
+  it("middle click on an interactive cell does not trigger row navigation", async () => {
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-aux-cells-${Math.floor(Math.random() * 1e9)}`}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    const auxClick = (el: HTMLElement) =>
+      el.dispatchEvent(
+        new MouseEvent("auxclick", { bubbles: true, button: 1, cancelable: true }),
+      );
+
+    // Status cell trigger (interactive) — must NOT bubble into a row open.
+    auxClick(within(row).getByRole("button", { name: /Todo/ }));
+    expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
+    expect(navigationMocks.push).not.toHaveBeenCalled();
+
+    // Row checkbox — same.
+    auxClick(within(row).getByRole("checkbox"));
+    expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
+
+    // Dead space on the row still opens a background tab on middle click.
+    auxClick(row);
+    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
+      "/test/issues/a",
+      "MUL-a",
+    );
+  });
+
+  it("without a tab adapter (web), plain click pushes and a modifier click opens a browser tab", async () => {
     const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
     const windowOpen = vi.fn();
     vi.stubGlobal("open", windowOpen);
@@ -399,8 +525,13 @@ describe("TableView cell editors under data refresh", () => {
     );
 
     const row = (await screen.findByText("MUL-a")).closest("tr")!;
-    await user.click(within(row).getByRole("button", { name: "Alpha task" }));
+    const title = within(row).getByRole("button", { name: "Alpha task" });
 
+    await user.click(title);
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(windowOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(title, { metaKey: true });
     expect(navigationMocks.getShareableUrl).toHaveBeenCalledWith(
       "/test/issues/a",
     );
@@ -409,7 +540,6 @@ describe("TableView cell editors under data refresh", () => {
       "_blank",
       "noopener,noreferrer",
     );
-    expect(navigationMocks.push).not.toHaveBeenCalled();
   });
 });
 

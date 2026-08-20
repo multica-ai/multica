@@ -7,7 +7,7 @@
 // failed tasks no longer have a top-level workload state; failure context
 // is purely a detail-page concern now.
 //
-// Covers the canonical taxonomy in server/pkg/taskfailure — 7 platform-side
+// Covers the canonical taxonomy in server/pkg/taskfailure — platform-side
 // reasons plus 14 `agent_error.*` sub-reasons — and the pre-MUL-1949 coarse
 // values still present on historical rows. This used to be a
 // `Record<TaskFailureReason, string>` indexed with a cast, which silently
@@ -18,12 +18,14 @@ const REASON_LABEL: Record<string, string> = {
   // Platform / scheduler side.
   queued_expired: "Expired in queue",
   runtime_offline: "Daemon offline",
+  runtime_reconnect_timeout: "Daemon did not reconnect in time",
   runtime_recovery: "Daemon restarted",
   timeout: "Task timed out",
   iteration_limit: "Hit the iteration limit",
   agent_blocked: "Waiting on human input",
   api_invalid_request: "Rejected by the model API",
   skill_bundle_unavailable: "Couldn't download the agent's skills",
+  runtime_cli_timeout: "Local runtime CLI timed out",
 
   // Agent process side — provider.
   "agent_error.provider_auth_or_access": "Provider auth failed",
@@ -42,6 +44,10 @@ const REASON_LABEL: Record<string, string> = {
   "agent_error.runtime_version_unsupported": "Runner CLI version unsupported",
   "agent_error.runtime_missing_executable": "Runner CLI not installed",
   "agent_error.unknown": "Agent execution error",
+
+  // Provider-specific operational reasons, outside the canonical taxonomy.
+  codex_resume_oversized: "Session too large to resume",
+  local_directory_error: "Local directory error",
 
   // Pre-MUL-1949 coarse values, still present on historical rows.
   agent_error: "Agent execution error",
@@ -63,4 +69,25 @@ export function failureReasonLabel(
 ): string | null {
   if (!reason) return null;
   return REASON_LABEL[reason] ?? reason;
+}
+
+/**
+ * Label for a cancelled task the SERVER cancelled for a persisted reason —
+ * the worktree claim gate refusing a too-old daemon, or a cancel-ack carrying
+ * a preserved-work error. Those are conditions only the user can fix, so the
+ * row must explain itself like a failed row does.
+ *
+ * Returns `null` for a user-initiated cancel (no persisted reason): the user
+ * knows why they clicked, and stamping a label on every ordinary cancel would
+ * bury the rows that actually need attention.
+ */
+export function cancelReasonLabel(task: {
+  status: string;
+  error?: string | null;
+  failure_reason?: string | null;
+}): string | null {
+  if (task.status !== "cancelled") return null;
+  const reason = failureReasonLabel(task.failure_reason);
+  if (reason) return reason;
+  return task.error ? "Cancelled by the system" : null;
 }

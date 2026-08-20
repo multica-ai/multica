@@ -70,7 +70,15 @@ Desktop 会为每个工作区单独保存标签页。例如，你在工作区 A 
 
 ## 连接自托管实例
 
-Desktop 默认连接 Multica Cloud。连接自托管实例时，在用户目录创建 `~/.multica/desktop.json`：
+Desktop 默认连接 Multica Cloud。连接自托管实例时，在用户目录的 `.multica` 下创建 `desktop.json`：
+
+| 平台 | 路径 |
+| --- | --- |
+| macOS | `/Users/<你>/.multica/desktop.json` |
+| Linux | `/home/<你>/.multica/desktop.json` |
+| Windows | `C:\Users\<你>\.multica\desktop.json` |
+
+以上是默认位置。用户目录被迁移或重定向过的话，用实际路径。
 
 ```json
 {
@@ -78,6 +86,10 @@ Desktop 默认连接 Multica Cloud。连接自托管实例时，在用户目录�
   "apiUrl": "https://api.example.com"
 }
 ```
+
+<Callout type="warning">
+这个文件**不是** CLI 的 `~/.multica/config.json`，字段名也不同：CLI 用 `server_url`，Desktop 用 `apiUrl`。Desktop 不会读取 CLI 的配置，它在 `~/.multica/profiles/desktop-<host>/` 下管理独立的 daemon profile。改 `config.json` 不会影响 Desktop 连接哪个服务。
+</Callout>
 
 `apiUrl` 是 backend 的公开地址，必须填写，且必须使用 `http` 或 `https`。另外两个地址可以省略，Desktop 会自动推导：
 
@@ -99,11 +111,37 @@ Desktop 默认连接 Multica Cloud。连接自托管实例时，在用户目录�
 }
 ```
 
-保存后重启 Desktop。配置文件存在但 JSON、版本或 URL 无效时，应用会显示配置错误，不会自动连接 Cloud。删除该文件并重启即可恢复默认的 Cloud 配置。
+保存后重启 Desktop，配置只在启动时读取一次。两种失败的表现不同，据此可以快速区分：
+
+- **文件没找到**（目录不对，或文件名不是 `desktop.json`）：Desktop 使用默认的 Cloud 配置，不报错。所以如果 Desktop 仍然显示 Cloud 地址且没有任何配置错误，说明文件不在 Desktop 查找的位置。
+- **文件找到但无效**（JSON、版本或 URL 有问题）：Desktop 显示配置错误，不会自动回退到 Cloud。
+
+删除该文件并重启即可恢复默认的 Cloud 配置。
 
 <Callout type="warning">
 Desktop 只能连接浏览器和执行电脑都能访问的地址。远程自托管实例未使用 HTTPS 或未代理 WebSocket 时，Desktop 无法建立连接；完整配置见[自托管快速上手](/self-host-quickstart#3-选择访问方式)。
 </Callout>
+
+### Windows：检查文件名和编码
+
+Windows 上两个编辑器默认行为会悄悄生成 Desktop 用不了的文件：
+
+- **记事本会补 `.txt` 后缀**。存成 `desktop.json` 可能实际得到 `desktop.json.txt`，Desktop 会当作没找到。在资源管理器里打开文件扩展名显示，或在保存对话框里选*所有文件*。想确认真实文件名，在 PowerShell 里运行 `Get-ChildItem "$env:USERPROFILE\.multica" -Filter "desktop.json*"`，`Name` 一列必须正好是 `desktop.json`。
+- **PowerShell 重定向会写成 UTF-16 或带 BOM**。`> desktop.json` 和 `Out-File` 可能生成无法解析的编码，表现为配置错误。
+
+用 PowerShell 一步创建可以同时避开这两个坑：
+
+```powershell
+$dir = "$env:USERPROFILE\.multica"
+New-Item -ItemType Directory -Force $dir | Out-Null
+$json = @'
+{
+  "schemaVersion": 1,
+  "apiUrl": "https://api.example.com"
+}
+'@
+[System.IO.File]::WriteAllText("$dir\desktop.json", $json)
+```
 
 ## Windows Defender 把 Multica 报成病毒
 

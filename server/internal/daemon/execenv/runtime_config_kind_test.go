@@ -269,45 +269,45 @@ func TestBackgroundTaskSafetySlimHardPins(t *testing.T) {
 
 	for _, want := range []string{
 		"## Background Task Safety",
-		"Do NOT end your turn while background tasks",
-		"wait for a future notification/reminder",
-		"run the work synchronously instead",
+		// MUL-5442 judgment rewrite (owner-authorized pin renegotiation): the
+		// section now states the one platform fact, the external-systems/CI
+		// boundary with its single exception, and the review-locked
+		// persistent-service contract. Enforcement-detail pins that only
+		// restated derivations of the platform fact were retired with the
+		// prose. What stays pinned: the fact, each boundary, each exception,
+		// and the handoff triple — the things an agent cannot infer.
+		"any run-owned work still active is orphaned",
+		"no background-completion wakeup",
+		"whatever a tool response promises",
 		"Never background-and-yield",
-		"foreground tool call that blocks",
-		// MUL-5274: an explicitly requested persistent local service is a
-		// completed handoff, not unfinished run-owned work. Pin the narrow
-		// exception and its readiness / cleanup / honesty requirements.
+		"foreground tool calls that block",
+		"run unobservable work synchronously",
+		"standing by",
+		"are not run-owned: do not wait",
+		// The full compound ban, not its first item — MUL-5223 made this a
+		// non-derivable boundary, so no member may be silently dropped.
+		"do not run `gh pr checks --watch`, `gh run watch`, or sleep/retry polls",
+		"GitHub Actions after a successful push",
+		"NOT your delivery acceptance criteria",
+		"CI running: <PR link>",
+		"The one exception",
+		"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
 		"persistent service handoff",
 		"running service itself is the requested deliverable",
-		// MUL-5442: pin the handoff concepts, not the operational phrasing.
-		// The cleanup handle stays general and the user-facing reply keeps the
-		// full URL/logs/stop triple (see the execenv_test.go pins).
 		"durable logs",
 		"cleanup handle such as PID/profile",
 		"verify readiness",
 		"URL, logs, and stop instructions",
 		"survival as best-effort, not guaranteed",
-		"does not cover tests, builds, CI polling",
-		"are not agent-owned background tasks",
-		"GitHub Actions after a successful push",
-		"Do not wait for them by default",
-		// MUL-5223 pins: named tool-shape bans, merge requirements
-		// denied as acceptance criteria, replacement hand-off phrasing,
-		// and the scoped escape hatch that keeps an explicitly requested
-		// CI result both permitted and executable.
-		"do NOT run `gh pr checks --watch`",
-		"any sleep / retry loop that polls check status",
-		"NOT your delivery acceptance criteria",
-		"CI running: <PR link>",
-		"unless the explicit exception below applies",
-		"The one exception",
-		"ONE foreground blocking call (`gh pr checks <pr> --watch`)",
-		"running in the background so you can keep working",
-		"standing by",
 	} {
 		if !strings.Contains(out, want) {
 			t.Errorf("slim Background Task Safety missing hardened pin %q\n---\n%s", want, out)
 		}
+	}
+	// Exactly one exception (see the execenv provider-agnostic test for
+	// the incident this guards).
+	if got := strings.Count(out, "The one exception"); got != 1 {
+		t.Errorf("slim brief must state the CI exception exactly once, got %d\n---\n%s", got, out)
 	}
 	// `gh run watch` may only appear as a banned command, never as the
 	// section's example of how to wait properly.

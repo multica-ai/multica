@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -28,6 +29,11 @@ var testPool *pgxpool.Pool
 var testUserID string
 var testWorkspaceID string
 var testRuntimeID string
+
+// dbfx builds the rows these tests act on and removes them again when the test
+// that asked for them ends. New tests build fixtures through it rather than
+// writing an INSERT and a matching DELETE by hand; see internal/testutil.
+var dbfx *testutil.Fixture
 
 const (
 	handlerTestEmail         = "handler-test@multica.ai"
@@ -69,6 +75,11 @@ func TestMain(m *testing.M) {
 	testHandler.WebhookRateLimiter = NewMemoryWebhookRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	testHandler.WebhookIPRateLimiter = NewMemoryWebhookIPRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
 	testHandler.WebhookAbsoluteIPRateLimiter = NewMemoryWebhookAbsoluteIPRateLimiter(WebhookRateLimit{Limit: 1_000_000, Window: time.Minute})
+	testHandler.InvitationRateLimiters = NewMemoryInvitationRateLimiters(InvitationRateLimits{
+		Actor:     SlidingWindowRateLimit{Limit: 1_000_000, Window: time.Minute},
+		Workspace: SlidingWindowRateLimit{Limit: 1_000_000, Window: time.Minute},
+		Recipient: SlidingWindowRateLimit{Limit: 1_000_000, Window: time.Minute},
+	})
 	testPool = pool
 
 	testUserID, testWorkspaceID, err = setupHandlerTestFixture(ctx, pool)
@@ -77,6 +88,7 @@ func TestMain(m *testing.M) {
 		pool.Close()
 		os.Exit(1)
 	}
+	dbfx = testutil.New(pool, testWorkspaceID, testUserID)
 
 	code := m.Run()
 	if err := cleanupHandlerTestFixture(context.Background(), pool); err != nil {
@@ -195,14 +207,9 @@ func withURLParam(req *http.Request, key, value string) *http.Request {
 func setWorkspaceIssuePrefixForTest(t *testing.T, prefix string) {
 	t.Helper()
 
-	ctx := context.Background()
 	var previous string
-	if err := testPool.QueryRow(ctx, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previous); err != nil {
-		t.Fatalf("load workspace prefix: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `UPDATE workspace SET issue_prefix = $1 WHERE id = $2`, prefix, testWorkspaceID); err != nil {
-		t.Fatalf("set workspace prefix: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT issue_prefix FROM workspace WHERE id = $1`, testWorkspaceID).Scan(&previous)
+	dbfx.Exec(t, `UPDATE workspace SET issue_prefix = $1 WHERE id = $2`, prefix, testWorkspaceID)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `UPDATE workspace SET issue_prefix = $1 WHERE id = $2`, previous, testWorkspaceID)
 	})
@@ -212,12 +219,10 @@ func handlerTestRuntimeID(t *testing.T) string {
 	t.Helper()
 
 	var runtimeID string
-	if err := testPool.QueryRow(context.Background(),
+	dbfx.QueryRow(t,
 		`SELECT id FROM agent_runtime WHERE workspace_id = $1 ORDER BY created_at ASC LIMIT 1`,
 		testWorkspaceID,
-	).Scan(&runtimeID); err != nil {
-		t.Fatalf("failed to load handler test runtime: %v", err)
-	}
+	).Scan(&runtimeID)
 
 	return runtimeID
 }
@@ -225,30 +230,24 @@ func handlerTestRuntimeID(t *testing.T) string {
 func createHandlerTestAgent(t *testing.T, name string, mcpConfig []byte) string {
 	t.Helper()
 
-	var agentID string
-	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent (
-			workspace_id, name, description, runtime_mode, runtime_config,
-			runtime_id, visibility, permission_mode, max_concurrent_tasks, owner_id,
-			instructions, custom_env, custom_args, mcp_config
-		)
-		VALUES ($1, $2, '', 'cloud', '{}'::jsonb, $3, 'workspace', 'public_to', 1, $4, '', '{}'::jsonb, '[]'::jsonb, $5)
-		RETURNING id
-	`, testWorkspaceID, name, handlerTestRuntimeID(t), testUserID, mcpConfig).Scan(&agentID); err != nil {
-		t.Fatalf("failed to create handler test agent: %v", err)
-	}
+	agentID := dbfx.Agent(t, name, handlerTestRuntimeID(t), testutil.Cols{
+		"visibility":      "workspace",
+		"permission_mode": "public_to",
+		"instructions":    "",
+		"custom_env":      testutil.Raw("'{}'::jsonb"),
+		"custom_args":     testutil.Raw("'[]'::jsonb"),
+		"mcp_config":      mcpConfig,
+	})
 	// Generic test agents are workspace-invocable (MUL-3963): seed the
 	// matching workspace invocation target so canInvokeAgent admits workspace
 	// members and A2A triggers, mirroring the pre-permission-model behavior
 	// where a workspace-visible agent could be triggered by anyone in the
 	// workspace. Dedicated private-agent tests use privateAgentTestFixture.
-	if _, err := testPool.Exec(context.Background(), `
+	dbfx.Exec(t, `
 		INSERT INTO agent_invocation_target (agent_id, target_type, target_id)
 		VALUES ($1, 'workspace', $2)
 		ON CONFLICT (agent_id, target_type, target_id) DO NOTHING
-	`, agentID, testWorkspaceID); err != nil {
-		t.Fatalf("failed to seed workspace invocation target: %v", err)
-	}
+	`, agentID, testWorkspaceID)
 
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, agentID)
@@ -288,16 +287,11 @@ func createHandlerTestTaskForAgentOnIssue(t *testing.T, agentID, issueID string)
 		issueArg = issueID
 	}
 
-	var taskID string
-	if err := testPool.QueryRow(context.Background(), `
-		INSERT INTO agent_task_queue (agent_id, runtime_id, status, priority, issue_id, started_at)
-		VALUES ($1, $2, 'running', 0, $3, now())
-		RETURNING id
-	`, agentID, handlerTestRuntimeID(t), issueArg).Scan(&taskID); err != nil {
-		t.Fatalf("failed to create handler test task: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE id = $1`, taskID)
+	taskID := dbfx.Task(t, agentID, testutil.Cols{
+		"runtime_id": handlerTestRuntimeID(t),
+		"status":     "running",
+		"issue_id":   issueArg,
+		"started_at": testutil.Raw("now()"),
 	})
 	return taskID
 }
@@ -306,9 +300,7 @@ func fetchAgentMcpConfig(t *testing.T, agentID string) []byte {
 	t.Helper()
 
 	var mcpConfig []byte
-	if err := testPool.QueryRow(context.Background(), `SELECT mcp_config FROM agent WHERE id = $1`, agentID).Scan(&mcpConfig); err != nil {
-		t.Fatalf("failed to load agent mcp_config: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT mcp_config FROM agent WHERE id = $1`, agentID).Scan(&mcpConfig)
 
 	return mcpConfig
 }
@@ -446,16 +438,12 @@ func TestIssueCRUD(t *testing.T) {
 // not the raw identifier — frontend caches key by UUID and would otherwise
 // leave stale entries on other clients after an identifier-path delete.
 func TestDeleteIssueByIdentifier(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":    "Issue to delete by identifier",
 		"status":   "todo",
 		"priority": "medium",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 	if created.Identifier == "" {
@@ -474,22 +462,16 @@ func TestDeleteIssueByIdentifier(t *testing.T) {
 	})
 
 	// Delete using the human-readable identifier (e.g. "HAN-1") rather than the UUID.
-	w = httptest.NewRecorder()
 	req = newRequest("DELETE", "/api/issues/"+created.Identifier, nil)
 	req = withURLParam(req, "id", created.Identifier)
-	testHandler.DeleteIssue(w, req)
-	if w.Code != http.StatusNoContent {
-		t.Fatalf("DeleteIssue by identifier: expected 204, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.DeleteIssue, req).Want(http.StatusNoContent)
 
 	// Verify the row is actually gone — the silent-data-loss bug would have
 	// returned 204 here too, but the row would still exist.
 	var count int
-	if err := testPool.QueryRow(context.Background(),
+	dbfx.QueryRow(t,
 		`SELECT COUNT(*) FROM issue WHERE id = $1`, created.ID,
-	).Scan(&count); err != nil {
-		t.Fatalf("count query: %v", err)
-	}
+	).Scan(&count)
 	if count != 0 {
 		t.Fatalf("DeleteIssue by identifier returned 204 but row still exists (count=%d) — silent-data-loss regression", count)
 	}
@@ -513,16 +495,12 @@ func TestDeleteIssueByIdentifier(t *testing.T) {
 // identifier URL could be treated as canonical, and a mistyped or stale prefix
 // silently opened someone else's link target.
 func TestGetIssueByIdentifierEnforcesPrefix(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":    "Issue addressed by identifier",
 		"status":   "todo",
 		"priority": "medium",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 
@@ -535,10 +513,9 @@ func TestGetIssueByIdentifierEnforcesPrefix(t *testing.T) {
 	// The workspace's own prefix resolves, in either case — a hand-typed
 	// lowercase key from a chat message must open the same issue.
 	for _, id := range []string{created.Identifier, strings.ToLower(created.Identifier)} {
-		w = httptest.NewRecorder()
 		req = newRequest("GET", "/api/issues/"+id, nil)
 		req = withURLParam(req, "id", id)
-		testHandler.GetIssue(w, req)
+		w = testutil.Call(t, testHandler.GetIssue, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("GetIssue(%q): expected 200, got %d: %s", id, w.Code, w.Body.String())
 		}
@@ -551,10 +528,9 @@ func TestGetIssueByIdentifierEnforcesPrefix(t *testing.T) {
 
 	// A foreign prefix carrying the right number must not resolve.
 	foreign := prefix + "X-" + number
-	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/issues/"+foreign, nil)
 	req = withURLParam(req, "id", foreign)
-	testHandler.GetIssue(w, req)
+	w = testutil.Call(t, testHandler.GetIssue, req)
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("GetIssue(%q): expected 404 for a foreign prefix, got %d: %s", foreign, w.Code, w.Body.String())
 	}
@@ -564,10 +540,9 @@ func TestGetIssueByIdentifierEnforcesPrefix(t *testing.T) {
 // neither a valid UUID nor a valid identifier returns 404 (not 204) — the
 // handler must never silently succeed on malformed input.
 func TestDeleteIssueRejectsInvalidUUID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/issues/not-a-uuid-or-identifier", nil)
 	req = withURLParam(req, "id", "not-a-uuid-or-identifier")
-	testHandler.DeleteIssue(w, req)
+	w := testutil.Call(t, testHandler.DeleteIssue, req)
 	if w.Code == http.StatusNoContent {
 		t.Fatalf("DeleteIssue with invalid id: must not return 204; got %d", w.Code)
 	}
@@ -580,14 +555,10 @@ func TestDeleteIssueRejectsInvalidUUID(t *testing.T) {
 // explicit status default to "todo" so the daemon picks them up immediately.
 // Before this fix the default was "backlog", which daemons ignore.
 func TestCreateIssueDefaultStatusIsTodo(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Issue with no explicit status",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
@@ -604,15 +575,11 @@ func TestCreateIssueDefaultStatusIsTodo(t *testing.T) {
 // TestCreateIssueExplicitBacklogPreserved verifies that explicitly requesting
 // "backlog" status is still respected — only the implicit default changed.
 func TestCreateIssueExplicitBacklogPreserved(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "Explicit backlog issue",
 		"status": "backlog",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
@@ -634,49 +601,33 @@ func TestCreateIssueExplicitBacklogPreserved(t *testing.T) {
 // inserts a foreign workspace + issue directly via SQL, then drives the
 // request through the regular handler entry point.
 func TestCreateIssueRejectsCrossWorkspaceParent(t *testing.T) {
-	ctx := context.Background()
 
-	var otherWorkspaceID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, "Cross-workspace parent test", "xwp-parent-test", "Foreign workspace", "XWP").Scan(&otherWorkspaceID); err != nil {
-		t.Fatalf("insert foreign workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID)
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Cross-workspace parent test",
+		"slug":         "xwp-parent-test",
+		"description":  "Foreign workspace",
+		"issue_prefix": "XWP",
 	})
 
-	var foreignParentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, title, status, priority, creator_type, creator_id, number)
-		VALUES ($1, $2, 'todo', 'none', 'member', $3, 1)
-		RETURNING id
-	`, otherWorkspaceID, "Foreign parent", testUserID).Scan(&foreignParentID); err != nil {
-		t.Fatalf("insert foreign parent: %v", err)
-	}
+	foreignParentID := dbfx.Issue(t, "Foreign parent", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+		"number":       1,
+	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           "Should be rejected",
 		"parent_issue_id": foreignParentID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue with foreign parent: expected 400, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusBadRequest)
 	if !strings.Contains(w.Body.String(), "parent issue not found in this workspace") {
 		t.Fatalf("CreateIssue with foreign parent: expected boundary error message, got %s", w.Body.String())
 	}
 
 	var count int
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT COUNT(*) FROM issue WHERE workspace_id = $1 AND title = $2`,
 		testWorkspaceID, "Should be rejected",
-	).Scan(&count); err != nil {
-		t.Fatalf("count query: %v", err)
-	}
+	).Scan(&count)
 	if count != 0 {
 		t.Fatalf("rejected create still wrote a row (count=%d) — service-layer boundary check failed", count)
 	}
@@ -687,49 +638,32 @@ func TestCreateIssueRejectsCrossWorkspaceParent(t *testing.T) {
 // (Lark /issue, MCP, API keys) must inherit this guard from the service
 // without re-implementing it.
 func TestCreateIssueRejectsCrossWorkspaceProject(t *testing.T) {
-	ctx := context.Background()
 
-	var otherWorkspaceID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, "Cross-workspace project test", "xwp-project-test", "Foreign workspace", "XWP").Scan(&otherWorkspaceID); err != nil {
-		t.Fatalf("insert foreign workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(ctx, `DELETE FROM workspace WHERE id = $1`, otherWorkspaceID)
+	otherWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Cross-workspace project test",
+		"slug":         "xwp-project-test",
+		"description":  "Foreign workspace",
+		"issue_prefix": "XWP",
 	})
 
-	var foreignProjectID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO project (workspace_id, title, status, priority)
-		VALUES ($1, $2, 'planned', 'none')
-		RETURNING id
-	`, otherWorkspaceID, "Foreign project").Scan(&foreignProjectID); err != nil {
-		t.Fatalf("insert foreign project: %v", err)
-	}
+	foreignProjectID := dbfx.Project(t, "Foreign project", testutil.Cols{
+		"workspace_id": otherWorkspaceID,
+	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":      "Should be rejected",
 		"project_id": foreignProjectID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue with foreign project: expected 400, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusBadRequest)
 	if !strings.Contains(w.Body.String(), "project not found in this workspace") {
 		t.Fatalf("CreateIssue with foreign project: expected boundary error message, got %s", w.Body.String())
 	}
 
 	var count int
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT COUNT(*) FROM issue WHERE workspace_id = $1 AND title = $2`,
 		testWorkspaceID, "Should be rejected",
-	).Scan(&count); err != nil {
-		t.Fatalf("count query: %v", err)
-	}
+	).Scan(&count)
 	if count != 0 {
 		t.Fatalf("rejected create still wrote a row (count=%d) — service-layer boundary check failed", count)
 	}
@@ -753,27 +687,19 @@ func TestCreateSubIssueInheritsParentProject(t *testing.T) {
 		}
 	}()
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Sub-issue inheritance project",
 	})
-	testHandler.CreateProject(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateProject: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateProject, req).Want(http.StatusCreated)
 	var project ProjectResponse
 	json.NewDecoder(w.Body).Decode(&project)
 	projectID = project.ID
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":      "Parent with project",
 		"project_id": projectID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue parent: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var parent IssueResponse
 	json.NewDecoder(w.Body).Decode(&parent)
 	parentID = parent.ID
@@ -781,15 +707,11 @@ func TestCreateSubIssueInheritsParentProject(t *testing.T) {
 		t.Fatalf("CreateIssue parent: expected project_id %q, got %v", projectID, parent.ProjectID)
 	}
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           "Child without explicit project",
 		"parent_issue_id": parentID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue child: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var child IssueResponse
 	json.NewDecoder(w.Body).Decode(&child)
 	childID = child.ID
@@ -823,39 +745,27 @@ func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 		}
 	}()
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Parent project",
 	})
-	testHandler.CreateProject(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateProject parent: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateProject, req).Want(http.StatusCreated)
 	var parentProject ProjectResponse
 	json.NewDecoder(w.Body).Decode(&parentProject)
 	parentProjectID = parentProject.ID
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Child explicit project",
 	})
-	testHandler.CreateProject(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateProject child: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateProject, req).Want(http.StatusCreated)
 	var childProject ProjectResponse
 	json.NewDecoder(w.Body).Decode(&childProject)
 	childProjectID = childProject.ID
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":      "Parent with project",
 		"project_id": parentProjectID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue parent: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var parent IssueResponse
 	json.NewDecoder(w.Body).Decode(&parent)
 	parentID = parent.ID
@@ -863,16 +773,12 @@ func TestCreateSubIssueUsesExplicitProjectOverParentProject(t *testing.T) {
 		t.Fatalf("CreateIssue parent: expected project_id %q, got %v", parentProjectID, parent.ProjectID)
 	}
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           "Child with explicit project",
 		"parent_issue_id": parentID,
 		"project_id":      childProjectID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue child: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var child IssueResponse
 	json.NewDecoder(w.Body).Decode(&child)
 	childID = child.ID
@@ -900,64 +806,44 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 		}
 	}()
 
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO project (workspace_id, title)
 		VALUES ($1, $2)
 		RETURNING id
-	`, testWorkspaceID, "Duplicate guard project "+suffix).Scan(&projectID); err != nil {
-		t.Fatalf("create project fixture: %v", err)
-	}
+	`, testWorkspaceID, "Duplicate guard project "+suffix).Scan(&projectID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Duplicate guard parent " + suffix,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue parent: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var parent IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&parent); err != nil {
-		t.Fatalf("decode parent: %v", err)
-	}
+	w.JSON(&parent)
 	parentID = parent.ID
 
 	title := "SH-PM-SYNTH-01 Synthesize recommendation-to-shortlist planning outputs " + suffix
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           title,
 		"status":          "in_progress",
 		"parent_issue_id": parentID,
 		"project_id":      projectID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue original: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var original IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&original); err != nil {
-		t.Fatalf("decode original: %v", err)
-	}
+	w.JSON(&original)
 	issueID = original.ID
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           "  sh-pm-synth-01   synthesize recommendation-to-shortlist planning outputs " + suffix + "  ",
 		"parent_issue_id": parentID,
 		"project_id":      projectID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("CreateIssue duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusConflict)
 	var conflict struct {
 		Code  string        `json:"code"`
 		Error string        `json:"error"`
 		Issue IssueResponse `json:"issue"`
 	}
-	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
-		t.Fatalf("decode conflict: %v", err)
-	}
+	w.JSON(&conflict)
 	if conflict.Code != "active_duplicate_issue" {
 		t.Fatalf("code = %q, want active_duplicate_issue", conflict.Code)
 	}
@@ -968,39 +854,27 @@ func TestCreateIssueRejectsActiveDuplicate(t *testing.T) {
 		t.Fatalf("unexpected duplicate message: %q", conflict.Error)
 	}
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           title,
 		"parent_issue_id": parentID,
 		"project_id":      projectID,
 		"allow_duplicate": true,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue allow duplicate: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var duplicate IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&duplicate); err != nil {
-		t.Fatalf("decode duplicate: %v", err)
-	}
+	w.JSON(&duplicate)
 	duplicateID = duplicate.ID
 	if duplicateID == issueID {
 		t.Fatalf("allow duplicate returned original issue id %s", duplicateID)
 	}
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":           title,
 		"parent_issue_id": parentID,
 		"project_id":      projectID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("CreateIssue duplicate after allow-duplicate: expected 409, got %d: %s", w.Code, w.Body.String())
-	}
-	if err := json.NewDecoder(w.Body).Decode(&conflict); err != nil {
-		t.Fatalf("decode second conflict: %v", err)
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusConflict)
+	w.JSON(&conflict)
 	if conflict.Issue.ID != issueID {
 		t.Fatalf("conflict issue = %s, want oldest active issue %s", conflict.Issue.ID, issueID)
 	}
@@ -1018,33 +892,21 @@ func TestCreateIssueAllowsDuplicateAfterCancelled(t *testing.T) {
 		}
 	}()
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  title,
 		"status": "cancelled",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue cancelled: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var first IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&first); err != nil {
-		t.Fatalf("decode cancelled: %v", err)
-	}
+	w.JSON(&first)
 	firstID = first.ID
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": title,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue after cancelled: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var second IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&second); err != nil {
-		t.Fatalf("decode second: %v", err)
-	}
+	w.JSON(&second)
 	secondID = second.ID
 	if secondID == firstID {
 		t.Fatalf("new issue reused cancelled issue id %s", secondID)
@@ -1063,33 +925,21 @@ func TestCreateIssueAllowsDuplicateAfterDone(t *testing.T) {
 		}
 	}()
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  title,
 		"status": "done",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue done: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var first IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&first); err != nil {
-		t.Fatalf("decode done: %v", err)
-	}
+	w.JSON(&first)
 	firstID = first.ID
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": title,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue after done: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var second IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&second); err != nil {
-		t.Fatalf("decode second: %v", err)
-	}
+	w.JSON(&second)
 	secondID = second.ID
 	if secondID == firstID {
 		t.Fatalf("new issue reused done issue id %s", secondID)
@@ -1108,52 +958,32 @@ func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	}()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("load test agent: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  title,
 		"status": "todo",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue existing: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var existing IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
-		t.Fatalf("decode existing issue: %v", err)
-	}
+	w.JSON(&existing)
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":                "Duplicate title autopilot",
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
 	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateAutopilot, req).Want(http.StatusCreated)
 	var autopilot AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
-		t.Fatalf("decode autopilot: %v", err)
-	}
+	w.JSON(&autopilot)
 	autopilotID = autopilot.ID
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/autopilots/"+autopilotID+"/trigger?workspace_id="+testWorkspaceID, nil)
 	req = withURLParam(req, "id", autopilotID)
-	testHandler.TriggerAutopilot(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("TriggerAutopilot duplicate title: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.TriggerAutopilot, req).Want(http.StatusOK)
 	var run AutopilotRunResponse
-	if err := json.NewDecoder(w.Body).Decode(&run); err != nil {
-		t.Fatalf("decode autopilot run: %v", err)
-	}
+	w.JSON(&run)
 	if run.Status != "issue_created" {
 		t.Fatalf("run status = %q, want issue_created", run.Status)
 	}
@@ -1168,9 +998,7 @@ func TestTriggerAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	}
 
 	var count int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
-		t.Fatalf("count issues: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count)
 	if count != 2 {
 		t.Fatalf("autopilot should create a new same-title issue, got %d matching issues", count)
 	}
@@ -1188,39 +1016,25 @@ func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	}()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("load test agent: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  title,
 		"status": "todo",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue existing: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var existing IssueResponse
-	if err := json.NewDecoder(w.Body).Decode(&existing); err != nil {
-		t.Fatalf("decode existing issue: %v", err)
-	}
+	w.JSON(&existing)
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":                "Scheduled duplicate title autopilot",
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
 	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateAutopilot, req).Want(http.StatusCreated)
 	var autopilot AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
-		t.Fatalf("decode autopilot: %v", err)
-	}
+	w.JSON(&autopilot)
 	autopilotID = autopilot.ID
 
 	queries := db.New(testPool)
@@ -1247,9 +1061,7 @@ func TestScheduledAutopilotAllowsActiveDuplicateIssue(t *testing.T) {
 	}
 
 	var count int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count); err != nil {
-		t.Fatalf("count issues: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM issue WHERE workspace_id = $1 AND title = $2`, testWorkspaceID, title).Scan(&count)
 	if count != 2 {
 		t.Fatalf("autopilot should create a new same-title issue, got %d matching issues", count)
 	}
@@ -1274,25 +1086,17 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	}()
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("load test agent: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":                "Creator attribution autopilot",
 		"assignee_id":          agentID,
 		"execution_mode":       "create_issue",
 		"issue_title_template": title,
 	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateAutopilot, req).Want(http.StatusCreated)
 	var autopilot AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
-		t.Fatalf("decode autopilot: %v", err)
-	}
+	w.JSON(&autopilot)
 	autopilotID = autopilot.ID
 	if autopilot.CreatedByType != "member" || autopilot.CreatedByID != testUserID {
 		t.Fatalf("autopilot created_by = %s/%s, want member/%s", autopilot.CreatedByType, autopilot.CreatedByID, testUserID)
@@ -1320,15 +1124,13 @@ func TestAutopilotCreatedIssueCreatorIsAssigneeAgent(t *testing.T) {
 	}
 
 	var creatorType, creatorID string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT id, creator_type, creator_id
 		FROM issue
 		WHERE workspace_id = $1 AND title = $2
 		ORDER BY created_at DESC
 		LIMIT 1
-	`, testWorkspaceID, title).Scan(&issueID, &creatorType, &creatorID); err != nil {
-		t.Fatalf("load autopilot-created issue: %v", err)
-	}
+	`, testWorkspaceID, title).Scan(&issueID, &creatorType, &creatorID)
 	if creatorType != "agent" {
 		t.Fatalf("issue creator_type = %q, want agent", creatorType)
 	}
@@ -1365,20 +1167,15 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 		}
 	}()
 
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO project (workspace_id, title)
 		VALUES ($1, $2)
 		RETURNING id::text
-	`, testWorkspaceID, "Autopilot project target").Scan(&projectID); err != nil {
-		t.Fatalf("create project fixture: %v", err)
-	}
+	`, testWorkspaceID, "Autopilot project target").Scan(&projectID)
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("load test agent: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":                "Project-linked autopilot",
 		"assignee_id":          agentID,
@@ -1386,14 +1183,9 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 		"issue_title_template": title,
 		"project_id":           projectID,
 	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateAutopilot, req).Want(http.StatusCreated)
 	var autopilot AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&autopilot); err != nil {
-		t.Fatalf("decode autopilot: %v", err)
-	}
+	w.JSON(&autopilot)
 	autopilotID = autopilot.ID
 	if autopilot.ProjectID == nil || *autopilot.ProjectID != projectID {
 		t.Fatalf("autopilot project_id = %v, want %q", autopilot.ProjectID, projectID)
@@ -1414,13 +1206,11 @@ func TestAutopilotCreateIssueAssociatesConfiguredProject(t *testing.T) {
 	issueID = uuidToString(run.IssueID)
 
 	var issueProjectID *string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT project_id::text
 		FROM issue
 		WHERE id = $1
-	`, issueID).Scan(&issueProjectID); err != nil {
-		t.Fatalf("load created issue project: %v", err)
-	}
+	`, issueID).Scan(&issueProjectID)
 	if issueProjectID == nil || *issueProjectID != projectID {
 		t.Fatalf("created issue project_id = %v, want %q", issueProjectID, projectID)
 	}
@@ -1445,27 +1235,20 @@ func TestAutopilotDispatchUsesCurrentProjectBinding(t *testing.T) {
 		}
 	}()
 
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO project (workspace_id, title)
 		VALUES ($1, $2)
 		RETURNING id::text
-	`, testWorkspaceID, "Autopilot stale project A").Scan(&projectAID); err != nil {
-		t.Fatalf("create project A fixture: %v", err)
-	}
-	if err := testPool.QueryRow(ctx, `
+	`, testWorkspaceID, "Autopilot stale project A").Scan(&projectAID)
+	dbfx.QueryRow(t, `
 		INSERT INTO project (workspace_id, title)
 		VALUES ($1, $2)
 		RETURNING id::text
-	`, testWorkspaceID, "Autopilot stale project B").Scan(&projectBID); err != nil {
-		t.Fatalf("create project B fixture: %v", err)
-	}
+	`, testWorkspaceID, "Autopilot stale project B").Scan(&projectBID)
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("load test agent: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":                "Stale-project autopilot",
 		"assignee_id":          agentID,
@@ -1473,14 +1256,9 @@ func TestAutopilotDispatchUsesCurrentProjectBinding(t *testing.T) {
 		"issue_title_template": title,
 		"project_id":           projectAID,
 	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateAutopilot, req).Want(http.StatusCreated)
 	var created AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("decode autopilot: %v", err)
-	}
+	w.JSON(&created)
 	autopilotID = created.ID
 
 	queries := db.New(testPool)
@@ -1489,15 +1267,11 @@ func TestAutopilotDispatchUsesCurrentProjectBinding(t *testing.T) {
 		t.Fatalf("GetAutopilot: %v", err)
 	}
 
-	w = httptest.NewRecorder()
 	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
 		"project_id": projectBID,
 	})
 	req = withURLParam(req, "id", autopilotID)
-	testHandler.UpdateAutopilot(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAutopilot: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateAutopilot, req).Want(http.StatusOK)
 
 	run, err := testHandler.AutopilotService.DispatchAutopilot(ctx, ap, pgtype.UUID{}, "manual", nil)
 	if err != nil {
@@ -1509,13 +1283,11 @@ func TestAutopilotDispatchUsesCurrentProjectBinding(t *testing.T) {
 	issueID = uuidToString(run.IssueID)
 
 	var issueProjectID *string
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		SELECT project_id::text
 		FROM issue
 		WHERE id = $1
-	`, issueID).Scan(&issueProjectID); err != nil {
-		t.Fatalf("load created issue project: %v", err)
-	}
+	`, issueID).Scan(&issueProjectID)
 	if issueProjectID == nil || *issueProjectID != projectBID {
 		t.Fatalf("created issue project_id = %v, want refreshed %q", issueProjectID, projectBID)
 	}
@@ -1533,68 +1305,46 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 		}
 	}()
 
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		INSERT INTO project (workspace_id, title)
 		VALUES ($1, $2)
 		RETURNING id::text
-	`, testWorkspaceID, "Autopilot update project target").Scan(&projectID); err != nil {
-		t.Fatalf("create project fixture: %v", err)
-	}
+	`, testWorkspaceID, "Autopilot update project target").Scan(&projectID)
 
 	var agentID string
-	if err := testPool.QueryRow(ctx, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID); err != nil {
-		t.Fatalf("load test agent: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT id FROM agent WHERE workspace_id = $1 LIMIT 1`, testWorkspaceID).Scan(&agentID)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/autopilots?workspace_id="+testWorkspaceID, map[string]any{
 		"title":          "Project update autopilot",
 		"assignee_id":    agentID,
 		"execution_mode": "create_issue",
 	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAutopilot: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateAutopilot, req).Want(http.StatusCreated)
 	var created AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("decode created autopilot: %v", err)
-	}
+	w.JSON(&created)
 	autopilotID = created.ID
 	if created.ProjectID != nil {
 		t.Fatalf("new autopilot project_id = %v, want nil", created.ProjectID)
 	}
 
-	w = httptest.NewRecorder()
 	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
 		"project_id": projectID,
 	})
 	req = withURLParam(req, "id", autopilotID)
-	testHandler.UpdateAutopilot(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAutopilot set project: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateAutopilot, req).Want(http.StatusOK)
 	var updated AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
-		t.Fatalf("decode updated autopilot: %v", err)
-	}
+	w.JSON(&updated)
 	if updated.ProjectID == nil || *updated.ProjectID != projectID {
 		t.Fatalf("updated project_id = %v, want %q", updated.ProjectID, projectID)
 	}
 
-	w = httptest.NewRecorder()
 	req = newRequest("PATCH", "/api/autopilots/"+autopilotID+"?workspace_id="+testWorkspaceID, map[string]any{
 		"project_id": nil,
 	})
 	req = withURLParam(req, "id", autopilotID)
-	testHandler.UpdateAutopilot(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAutopilot clear project: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateAutopilot, req).Want(http.StatusOK)
 	var cleared AutopilotResponse
-	if err := json.NewDecoder(w.Body).Decode(&cleared); err != nil {
-		t.Fatalf("decode cleared autopilot: %v", err)
-	}
+	w.JSON(&cleared)
 	if cleared.ProjectID != nil {
 		t.Fatalf("cleared project_id = %v, want nil", cleared.ProjectID)
 	}
@@ -1604,90 +1354,66 @@ func TestUpdateAutopilotCanSetAndClearProject(t *testing.T) {
 // well-formed UUID was accepted as assignee_id without checking workspace
 // membership.
 func TestCreateIssueRejectsNonexistentMemberAssignee(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Ghost member assignee",
 		"assignee_type": "member",
 		"assignee_id":   "00000000-0000-0000-0000-000000000000",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue: expected 400 for nonexistent member, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusBadRequest)
 }
 
 // TestCreateIssueRejectsNonexistentAgentAssignee verifies the same check on
 // the agent branch — previously rejected with 403 "agent not found"; we want a
 // consistent 400 from the new validator.
 func TestCreateIssueRejectsNonexistentAgentAssignee(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Ghost agent assignee",
 		"assignee_type": "agent",
 		"assignee_id":   "00000000-0000-0000-0000-000000000000",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue: expected 400 for nonexistent agent, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusBadRequest)
 }
 
 // TestCreateIssueRejectsAssigneeTypeWithoutID rejects requests where only one
 // of the two fields was supplied — historically this would create an issue
 // with an inconsistent state.
 func TestCreateIssueRejectsAssigneeTypeWithoutID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Lone assignee_type",
 		"assignee_type": "member",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue: expected 400 when only assignee_type is set, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusBadRequest)
 }
 
 // TestCreateIssueRejectsAssigneeIDWithoutType is the symmetric case.
 func TestCreateIssueRejectsAssigneeIDWithoutType(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":       "Lone assignee_id",
 		"assignee_id": testUserID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue: expected 400 when only assignee_id is set, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusBadRequest)
 }
 
 // TestCreateIssueRejectsUnknownAssigneeType guards against typos like
 // "members" or "user" that previously sneaked through.
 func TestCreateIssueRejectsUnknownAssigneeType(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Bogus assignee_type",
 		"assignee_type": "user",
 		"assignee_id":   testUserID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue: expected 400 for unknown assignee_type, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusBadRequest)
 }
 
 // TestCreateIssueAcceptsValidMemberAssignee is the positive control — the
 // validator must not block legitimate workspace members.
 func TestCreateIssueAcceptsValidMemberAssignee(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Valid member assignee",
 		"assignee_type": "member",
 		"assignee_id":   testUserID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201 for valid member assignee, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
@@ -1700,37 +1426,25 @@ func TestCreateIssueAcceptsValidMemberAssignee(t *testing.T) {
 // silently produces an invalid pgtype.UUID and the validator would otherwise
 // treat (no type + unparseable id) as "no assignee" and accept the request.
 func TestCreateIssueRejectsMalformedAssigneeID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":       "Malformed assignee_id only",
 		"assignee_id": "not-a-uuid",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue: expected 400 for malformed assignee_id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusBadRequest)
 }
 
 func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 	var before int
-	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before); err != nil {
-		t.Fatalf("count issues before: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&before)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":          "Malformed attachment issue",
 		"attachment_ids": []string{"not-a-uuid"},
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateIssue: expected 400 for malformed attachment_ids, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusBadRequest)
 
 	var after int
-	if err := testPool.QueryRow(context.Background(), `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after); err != nil {
-		t.Fatalf("count issues after: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM issue WHERE workspace_id = $1`, testWorkspaceID).Scan(&after)
 	if after != before {
 		t.Fatalf("CreateIssue: malformed attachment_ids should not create issue, count before=%d after=%d", before, after)
 	}
@@ -1740,14 +1454,10 @@ func TestCreateIssueRejectsMalformedAttachmentIDBeforeWrite(t *testing.T) {
 // path, where the same parseUUID-shaped gap existed on a previously-unassigned
 // issue.
 func TestUpdateIssueRejectsMalformedAssigneeID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Update malformed assignee target",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 	defer func() {
@@ -1756,28 +1466,20 @@ func TestUpdateIssueRejectsMalformedAssigneeID(t *testing.T) {
 		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
 	}()
 
-	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
 		"assignee_id": "not-a-uuid",
 	})
 	req = withURLParam(req, "id", created.ID)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateIssue: expected 400 for malformed assignee_id, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusBadRequest)
 }
 
 // TestUpdateIssueRejectsNonexistentMemberAssignee verifies the same gap is
 // closed on the update path — UpdateIssue previously only validated agents.
 func TestUpdateIssueRejectsNonexistentMemberAssignee(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Update assignee target",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 	defer func() {
@@ -1786,32 +1488,24 @@ func TestUpdateIssueRejectsNonexistentMemberAssignee(t *testing.T) {
 		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
 	}()
 
-	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
 		"assignee_type": "member",
 		"assignee_id":   "00000000-0000-0000-0000-000000000000",
 	})
 	req = withURLParam(req, "id", created.ID)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateIssue: expected 400 for nonexistent member, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusBadRequest)
 }
 
 // TestUpdateIssueAllowsExplicitUnassign verifies that sending null for both
 // fields still works after the new validator landed — clearing the assignee
 // must not be misclassified as a mismatched pair.
 func TestUpdateIssueAllowsExplicitUnassign(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Issue to unassign",
 		"assignee_type": "member",
 		"assignee_id":   testUserID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 	defer func() {
@@ -1820,16 +1514,12 @@ func TestUpdateIssueAllowsExplicitUnassign(t *testing.T) {
 		testHandler.DeleteIssue(httptest.NewRecorder(), cleanupReq)
 	}()
 
-	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
 		"assignee_type": nil,
 		"assignee_id":   nil,
 	})
 	req = withURLParam(req, "id", created.ID)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue: expected 200 for unassign, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 	var updated IssueResponse
 	json.NewDecoder(w.Body).Decode(&updated)
 	if updated.AssigneeType != nil || updated.AssigneeID != nil {
@@ -1839,34 +1529,25 @@ func TestUpdateIssueAllowsExplicitUnassign(t *testing.T) {
 
 func TestCommentCRUD(t *testing.T) {
 	// Create an issue first
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Comment test issue",
 	})
-	testHandler.CreateIssue(w, req)
+	w := testutil.Call(t, testHandler.CreateIssue, req)
 	var issue IssueResponse
 	json.NewDecoder(w.Body).Decode(&issue)
 	issueID := issue.ID
 
 	// Create comment
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
 		"content": "Test comment from Go test",
 	})
 	req = withURLParam(req, "id", issueID)
-	testHandler.CreateComment(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateComment, req).Want(http.StatusCreated)
 
 	// List comments
-	w = httptest.NewRecorder()
 	req = newRequest("GET", "/api/issues/"+issueID+"/comments", nil)
 	req = withURLParam(req, "id", issueID)
-	testHandler.ListComments(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ListComments: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.ListComments, req).Want(http.StatusOK)
 
 	var comments []CommentResponse
 	json.NewDecoder(w.Body).Decode(&comments)
@@ -1878,10 +1559,9 @@ func TestCommentCRUD(t *testing.T) {
 	}
 
 	// Cleanup
-	w = httptest.NewRecorder()
 	req = newRequest("DELETE", "/api/issues/"+issueID, nil)
 	req = withURLParam(req, "id", issueID)
-	testHandler.DeleteIssue(w, req)
+	w = testutil.Call(t, testHandler.DeleteIssue, req)
 }
 
 func TestCommentWritePathsPreserveIssueIdentifiers(t *testing.T) {
@@ -1889,19 +1569,14 @@ func TestCommentWritePathsPreserveIssueIdentifiers(t *testing.T) {
 		t.Skip("requires DB")
 	}
 
-	ctx := context.Background()
 	setWorkspaceIssuePrefixForTest(t, "MUL")
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, number)
-		VALUES ($1, 'member', $2, $3, 3310)
-		RETURNING id
-	`, testWorkspaceID, testUserID, "preserve bare issue identifiers").Scan(&issueID); err != nil {
-		t.Fatalf("create issue fixture: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM issue WHERE id = $1`, issueID)
+	issueID := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id": testWorkspaceID,
+		"creator_type": "member",
+		"creator_id":   testUserID,
+		"title":        "preserve bare issue identifiers",
+		"number":       3310,
 	})
 
 	explicitMention := fmt.Sprintf("[MUL-3310](mention://issue/%s)", issueID)
@@ -1914,20 +1589,17 @@ func TestCommentWritePathsPreserveIssueIdentifiers(t *testing.T) {
 
 	var firstCommentID string
 	for _, content := range createCases {
-		w := httptest.NewRecorder()
 		req := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
 			"content": content,
 		})
 		req = withURLParam(req, "id", issueID)
-		testHandler.CreateComment(w, req)
+		w := testutil.Call(t, testHandler.CreateComment, req)
 		if w.Code != http.StatusCreated {
 			t.Fatalf("CreateComment(%q): expected 201, got %d: %s", content, w.Code, w.Body.String())
 		}
 
 		var created CommentResponse
-		if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-			t.Fatalf("decode created comment: %v", err)
-		}
+		w.JSON(&created)
 		if created.Content != content {
 			t.Fatalf("CreateComment(%q) stored %q", content, created.Content)
 		}
@@ -1937,225 +1609,150 @@ func TestCommentWritePathsPreserveIssueIdentifiers(t *testing.T) {
 	}
 
 	updatedContent := "updated MUL-3310 issue/MUL-3310 feature/MUL-3310 " + explicitMention
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/comments/"+firstCommentID, map[string]any{
 		"content": updatedContent,
 	})
 	req = withURLParam(req, "commentId", firstCommentID)
-	testHandler.UpdateComment(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateComment: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.UpdateComment, req).Want(http.StatusOK)
 
 	var updated CommentResponse
-	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
-		t.Fatalf("decode updated comment: %v", err)
-	}
+	w.JSON(&updated)
 	if updated.Content != updatedContent {
 		t.Fatalf("UpdateComment stored %q, want %q", updated.Content, updatedContent)
 	}
 }
 
 func TestCreateCommentRejectsMalformedParentID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title": "Comment malformed parent issue",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var issue IssueResponse
 	json.NewDecoder(w.Body).Decode(&issue)
 
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues/"+issue.ID+"/comments", map[string]any{
 		"content":   "bad parent",
 		"parent_id": "not-a-uuid",
 	})
 	req = withURLParam(req, "id", issue.ID)
-	testHandler.CreateComment(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateComment: expected 400 for malformed parent_id, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateComment, req).Want(http.StatusBadRequest)
 
-	w = httptest.NewRecorder()
 	req = newRequest("DELETE", "/api/issues/"+issue.ID, nil)
 	req = withURLParam(req, "id", issue.ID)
-	testHandler.DeleteIssue(w, req)
+	w = testutil.Call(t, testHandler.DeleteIssue, req)
 }
 
 func TestGetChatSessionRejectsMalformedSessionID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("GET", "/api/chat/sessions/not-a-uuid", nil)
 	req = withURLParam(req, "sessionId", "not-a-uuid")
-	testHandler.GetChatSession(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("GetChatSession: expected 400 for malformed sessionId, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.GetChatSession, req).Want(http.StatusBadRequest)
 }
 
 func TestCreateAutopilotRejectsMalformedAssigneeID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/autopilots", map[string]any{
 		"title":          "Malformed assignee autopilot",
 		"assignee_id":    "not-a-uuid",
 		"execution_mode": "run_only",
 	})
-	testHandler.CreateAutopilot(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateAutopilot: expected 400 for malformed assignee_id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateAutopilot, req).Want(http.StatusBadRequest)
 }
 
 func TestUpdateAutopilotRejectsMalformedID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/autopilots/not-a-uuid", map[string]any{
 		"title": "Malformed autopilot id",
 	})
 	req = withURLParam(req, "id", "not-a-uuid")
-	testHandler.UpdateAutopilot(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateAutopilot: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.UpdateAutopilot, req).Want(http.StatusBadRequest)
 }
 
 func TestUpdateAgentRejectsMalformedAgentID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/not-a-uuid", map[string]any{
 		"name": "Malformed agent id",
 	})
 	req = withURLParam(req, "id", "not-a-uuid")
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateAgent: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusBadRequest)
 }
 
 func TestCreateAgentRejectsMalformedRuntimeID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/agents", map[string]any{
 		"name":       "Malformed runtime agent",
 		"runtime_id": "not-a-uuid",
 	})
-	testHandler.CreateAgent(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateAgent: expected 400 for malformed runtime_id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateAgent, req).Want(http.StatusBadRequest)
 }
 
 func TestUpdateAgentRejectsMalformedRuntimeID(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Handler Malformed Runtime Update", nil)
 
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
 		"runtime_id": "not-a-uuid",
 	})
 	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateAgent: expected 400 for malformed runtime_id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusBadRequest)
 }
 
 func TestCreatePinRejectsMalformedItemID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/pins", map[string]any{
 		"item_type": "issue",
 		"item_id":   "not-a-uuid",
 	})
-	testHandler.CreatePin(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreatePin: expected 400 for malformed item_id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreatePin, req).Want(http.StatusBadRequest)
 }
 
 func TestUpdateWorkspaceRejectsMalformedID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/workspaces/not-a-uuid", map[string]any{
 		"name": "Malformed workspace id",
 	})
 	req = withURLParam(req, "id", "not-a-uuid")
-	testHandler.UpdateWorkspace(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateWorkspace: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.UpdateWorkspace, req).Want(http.StatusBadRequest)
 }
 
 func TestUpdateMemberRejectsMalformedMemberID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("PATCH", "/api/workspaces/"+testWorkspaceID+"/members/not-a-uuid", map[string]any{
 		"role": "member",
 	})
 	req = withURLParams(req, "id", testWorkspaceID, "memberId", "not-a-uuid")
-	testHandler.UpdateMember(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateMember: expected 400 for malformed memberId, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.UpdateMember, req).Want(http.StatusBadRequest)
 }
 
 func TestRevokeInvitationRejectsMalformedInvitationID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/workspaces/"+testWorkspaceID+"/invitations/not-a-uuid", nil)
 	req = withURLParams(req, "id", testWorkspaceID, "invitationId", "not-a-uuid")
-	testHandler.RevokeInvitation(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("RevokeInvitation: expected 400 for malformed invitationId, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.RevokeInvitation, req).Want(http.StatusBadRequest)
 }
 
 func TestGetMyInvitationRejectsMalformedID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("GET", "/api/invitations/not-a-uuid", nil)
 	req = withURLParam(req, "id", "not-a-uuid")
-	testHandler.GetMyInvitation(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("GetMyInvitation: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.GetMyInvitation, req).Want(http.StatusBadRequest)
 }
 
 func TestAddReactionRejectsMalformedCommentID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/comments/not-a-uuid/reactions", map[string]any{
 		"emoji": "thumbs_up",
 	})
 	req = withURLParam(req, "commentId", "not-a-uuid")
-	testHandler.AddReaction(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("AddReaction: expected 400 for malformed commentId, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.AddReaction, req).Want(http.StatusBadRequest)
 }
 
 func TestUpdateCommentRejectsMalformedCommentID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/comments/not-a-uuid", map[string]any{
 		"content": "updated",
 	})
 	req = withURLParam(req, "commentId", "not-a-uuid")
-	testHandler.UpdateComment(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("UpdateComment: expected 400 for malformed commentId, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.UpdateComment, req).Want(http.StatusBadRequest)
 }
 
 func TestMarkInboxReadRejectsMalformedItemID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/inbox/not-a-uuid/read", nil)
 	req = withURLParam(req, "id", "not-a-uuid")
-	testHandler.MarkInboxRead(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("MarkInboxRead: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.MarkInboxRead, req).Want(http.StatusBadRequest)
 }
 
 func TestRevokePersonalAccessTokenRejectsMalformedID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("DELETE", "/api/tokens/not-a-uuid", nil)
 	req = withURLParam(req, "id", "not-a-uuid")
-	testHandler.RevokePersonalAccessToken(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("RevokePersonalAccessToken: expected 400 for malformed id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.RevokePersonalAccessToken, req).Want(http.StatusBadRequest)
 }
 
 func TestRequestBodyUUIDFieldsRejectMalformed(t *testing.T) {
@@ -2189,24 +1786,16 @@ func TestRequestBodyUUIDFieldsRejectMalformed(t *testing.T) {
 }
 
 func TestDaemonDeregisterRejectsMalformedRuntimeID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/daemon/deregister", map[string]any{
 		"runtime_ids": []string{"not-a-uuid"},
 	})
-	testHandler.DaemonDeregister(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("DaemonDeregister: expected 400 for malformed runtime_ids, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.DaemonDeregister, req).Want(http.StatusBadRequest)
 }
 
 func TestGetIssueGCCheckRejectsMalformedIssueID(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("GET", "/api/daemon/issues/not-a-uuid/gc-check", nil)
 	req = withURLParam(req, "issueId", "not-a-uuid")
-	testHandler.GetIssueGCCheck(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("GetIssueGCCheck: expected 400 for malformed issueId, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.GetIssueGCCheck, req).Want(http.StatusBadRequest)
 }
 
 func TestBatchIssueGCCheckRejectsInvalidRequests(t *testing.T) {
@@ -2229,14 +1818,10 @@ func TestBatchIssueGCCheckRejectsInvalidRequests(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			w := httptest.NewRecorder()
 			req := newDaemonTokenRequest("POST", "/api/daemon/workspaces/"+tt.workspaceID+"/issues/gc-check", tt.body,
 				tt.workspaceID, "test-daemon")
 			req = withURLParam(req, "workspaceId", tt.workspaceID)
-			h.BatchIssueGCCheck(w, req)
-			if w.Code != http.StatusBadRequest {
-				t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
-			}
+			testutil.Call(t, h.BatchIssueGCCheck, req).Want(http.StatusBadRequest)
 		})
 	}
 }
@@ -2244,15 +1829,11 @@ func TestBatchIssueGCCheckRejectsInvalidRequests(t *testing.T) {
 func TestSetAgentSkillsRejectsMalformedSkillID(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Handler Malformed Skill Assignment", nil)
 
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID+"/skills", map[string]any{
 		"skill_ids": []string{"not-a-uuid"},
 	})
 	req = withURLParam(req, "id", agentID)
-	testHandler.SetAgentSkills(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("SetAgentSkills: expected 400 for malformed skill_ids, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.SetAgentSkills, req).Want(http.StatusBadRequest)
 }
 
 func TestAddAgentSkillsPreservesExistingAssignments(t *testing.T) {
@@ -2260,27 +1841,19 @@ func TestAddAgentSkillsPreservesExistingAssignments(t *testing.T) {
 	existingSkillID := insertHandlerTestSkill(t, "add-preserve-existing", "existing body")
 	newSkillID := insertHandlerTestSkill(t, "add-preserve-new", "new body")
 
-	if _, err := testPool.Exec(context.Background(),
+	dbfx.Exec(t,
 		`INSERT INTO agent_skill (agent_id, skill_id) VALUES ($1, $2)`,
 		agentID, existingSkillID,
-	); err != nil {
-		t.Fatalf("seed existing skill assignment: %v", err)
-	}
+	)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/agents/"+agentID+"/skills/add", map[string]any{
 		"skill_ids": []string{newSkillID},
 	})
 	req = withURLParam(req, "id", agentID)
-	testHandler.AddAgentSkills(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("AddAgentSkills: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.AddAgentSkills, req).Want(http.StatusOK)
 
 	var resp []SkillSummaryResponse
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
+	w.JSON(&resp)
 	assertSkillIDsPresent(t, resp, existingSkillID, newSkillID)
 	assertAgentSkillRowCount(t, agentID, 2)
 }
@@ -2291,12 +1864,11 @@ func TestAddAgentSkillsAddsMultipleAndIsIdempotent(t *testing.T) {
 	skillB := insertHandlerTestSkill(t, "add-multiple-b", "b body")
 
 	for attempt := 0; attempt < 2; attempt++ {
-		w := httptest.NewRecorder()
 		req := newRequest("POST", "/api/agents/"+agentID+"/skills/add", map[string]any{
 			"skill_ids": []string{skillA, skillB},
 		})
 		req = withURLParam(req, "id", agentID)
-		testHandler.AddAgentSkills(w, req)
+		w := testutil.Call(t, testHandler.AddAgentSkills, req)
 		if w.Code != http.StatusOK {
 			t.Fatalf("AddAgentSkills attempt %d: expected 200, got %d: %s", attempt+1, w.Code, w.Body.String())
 		}
@@ -2308,61 +1880,44 @@ func TestAddAgentSkillsAddsMultipleAndIsIdempotent(t *testing.T) {
 func TestAddAgentSkillsRejectsMalformedSkillID(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Handler Add Malformed Skill Assignment", nil)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/agents/"+agentID+"/skills/add", map[string]any{
 		"skill_ids": []string{"not-a-uuid"},
 	})
 	req = withURLParam(req, "id", agentID)
-	testHandler.AddAgentSkills(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("AddAgentSkills: expected 400 for malformed skill_ids, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.AddAgentSkills, req).Want(http.StatusBadRequest)
 }
 
 func TestAddAgentSkillsRejectsCrossWorkspaceSkillID(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Handler Add Cross Workspace Skill", nil)
 	foreignSkillID := insertHandlerTestSkillInForeignWorkspace(t, "add-cross-workspace", "foreign body")
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/agents/"+agentID+"/skills/add", map[string]any{
 		"skill_ids": []string{foreignSkillID},
 	})
 	req = withURLParam(req, "id", agentID)
-	testHandler.AddAgentSkills(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("AddAgentSkills: expected 404 for cross-workspace skill_id, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.AddAgentSkills, req).Want(http.StatusNotFound)
 	assertAgentSkillRowCount(t, agentID, 0)
 }
 
 func insertHandlerTestSkillInForeignWorkspace(t *testing.T, namePrefix, content string) string {
 	t.Helper()
-	ctx := context.Background()
 	slug := "foreign-skill-" + strings.ToLower(strings.ReplaceAll(t.Name(), "_", "-"))
 
-	var workspaceID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO workspace (name, slug, description, issue_prefix)
-		VALUES ($1, $2, $3, $4)
-		RETURNING id
-	`, "Foreign Skill Workspace "+t.Name(), slug, "", "FSW").Scan(&workspaceID); err != nil {
-		t.Fatalf("insert foreign workspace: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, workspaceID)
+	workspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Foreign Skill Workspace " + t.Name(),
+		"slug":         slug,
+		"description":  "",
+		"issue_prefix": "FSW",
 	})
 
 	name := namePrefix + "-" + t.Name()
-	var skillID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO skill (workspace_id, name, description, content, config, created_by)
-		VALUES ($1, $2, $3, $4, '{}'::jsonb, $5)
-		RETURNING id
-	`, workspaceID, name, "fixture", content, testUserID).Scan(&skillID); err != nil {
-		t.Fatalf("insert foreign skill: %v", err)
-	}
-	t.Cleanup(func() {
-		testPool.Exec(context.Background(), `DELETE FROM skill WHERE id = $1`, skillID)
+	skillID := dbfx.Insert(t, "skill", testutil.Cols{
+		"workspace_id": workspaceID,
+		"name":         name,
+		"description":  "fixture",
+		"content":      content,
+		"config":       testutil.Raw("'{}'::jsonb"),
+		"created_by":   testUserID,
 	})
 	return skillID
 }
@@ -2383,12 +1938,10 @@ func assertSkillIDsPresent(t *testing.T, skills []SkillSummaryResponse, wantIDs 
 func assertAgentSkillRowCount(t *testing.T, agentID string, want int) {
 	t.Helper()
 	var got int
-	if err := testPool.QueryRow(context.Background(),
+	dbfx.QueryRow(t,
 		`SELECT COUNT(*) FROM agent_skill WHERE agent_id = $1`,
 		agentID,
-	).Scan(&got); err != nil {
-		t.Fatalf("count agent_skill: %v", err)
-	}
+	).Scan(&got)
 	if got != want {
 		t.Fatalf("agent_skill row count: got %d, want %d", got, want)
 	}
@@ -2396,12 +1949,7 @@ func assertAgentSkillRowCount(t *testing.T, agentID string, want int) {
 
 func TestAgentCRUD(t *testing.T) {
 	// List agents
-	w := httptest.NewRecorder()
-	req := newRequest("GET", "/api/agents?workspace_id="+testWorkspaceID, nil)
-	testHandler.ListAgents(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ListAgents: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ListAgents, newRequest("GET", "/api/agents?workspace_id="+testWorkspaceID, nil)).Want(http.StatusOK)
 
 	var agents []AgentResponse
 	json.NewDecoder(w.Body).Decode(&agents)
@@ -2411,15 +1959,11 @@ func TestAgentCRUD(t *testing.T) {
 
 	// Update agent status
 	agentID := agents[0].ID
-	w = httptest.NewRecorder()
-	req = newRequest("PUT", "/api/agents/"+agentID, map[string]any{
+	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
 		"status": "idle",
 	})
 	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusOK)
 
 	var updated AgentResponse
 	json.NewDecoder(w.Body).Decode(&updated)
@@ -2434,20 +1978,14 @@ func TestAgentCRUD(t *testing.T) {
 func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Handler Mcp Preserve", []byte(`{"preset":"keep"}`))
 
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
 		"name": "Handler Mcp Preserve Updated",
 	})
 	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusOK)
 
 	var updated AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
-		t.Fatalf("UpdateAgent: decode response: %v", err)
-	}
+	w.JSON(&updated)
 	assertJSONEqual(t, updated.McpConfig, `{"preset":"keep"}`)
 	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"keep"}`)
 }
@@ -2455,20 +1993,14 @@ func TestUpdateAgentMcpConfigAbsentPreservesValue(t *testing.T) {
 func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Handler Mcp Clear", []byte(`{"preset":"clear"}`))
 
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
 		"mcp_config": nil,
 	})
 	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusOK)
 
 	var updated AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
-		t.Fatalf("UpdateAgent: decode response: %v", err)
-	}
+	w.JSON(&updated)
 	assertJSONEqual(t, updated.McpConfig, `null`)
 	if fetchAgentMcpConfig(t, agentID) != nil {
 		t.Fatalf("UpdateAgent: expected DB mcp_config to be SQL NULL")
@@ -2478,26 +2010,19 @@ func TestUpdateAgentMcpConfigNullClearsValue(t *testing.T) {
 func TestUpdateAgentMcpConfigObjectUpdatesValue(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Handler Mcp Update", []byte(`{"preset":"old"}`))
 
-	w := httptest.NewRecorder()
 	req := newRequest("PUT", "/api/agents/"+agentID, map[string]any{
 		"mcp_config": map[string]any{"preset": "new"},
 	})
 	req = withURLParam(req, "id", agentID)
-	testHandler.UpdateAgent(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateAgent: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.UpdateAgent, req).Want(http.StatusOK)
 
 	var updated AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&updated); err != nil {
-		t.Fatalf("UpdateAgent: decode response: %v", err)
-	}
+	w.JSON(&updated)
 	assertJSONEqual(t, updated.McpConfig, `{"preset":"new"}`)
 	assertJSONEqual(t, fetchAgentMcpConfig(t, agentID), `{"preset":"new"}`)
 }
 
 func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/agents", map[string]any{
 		"name":        "Handler Mcp Create Null",
 		"runtime_id":  handlerTestRuntimeID(t),
@@ -2505,15 +2030,10 @@ func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 		"custom_env":  map[string]string{},
 		"custom_args": []string{},
 	})
-	testHandler.CreateAgent(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateAgent: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateAgent, req).Want(http.StatusCreated)
 
 	var created AgentResponse
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("CreateAgent: decode response: %v", err)
-	}
+	w.JSON(&created)
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, created.ID)
 	})
@@ -2526,12 +2046,7 @@ func TestCreateAgentMcpConfigNullStoresSQLNull(t *testing.T) {
 
 func TestWorkspaceCRUD(t *testing.T) {
 	// List workspaces
-	w := httptest.NewRecorder()
-	req := newRequest("GET", "/api/workspaces", nil)
-	testHandler.ListWorkspaces(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("ListWorkspaces: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.ListWorkspaces, newRequest("GET", "/api/workspaces", nil)).Want(http.StatusOK)
 
 	var workspaces []WorkspaceResponse
 	json.NewDecoder(w.Body).Decode(&workspaces)
@@ -2541,13 +2056,9 @@ func TestWorkspaceCRUD(t *testing.T) {
 
 	// Get workspace
 	wsID := workspaces[0].ID
-	w = httptest.NewRecorder()
-	req = newRequest("GET", "/api/workspaces/"+wsID, nil)
+	req := newRequest("GET", "/api/workspaces/"+wsID, nil)
 	req = withURLParam(req, "id", wsID)
-	testHandler.GetWorkspace(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("GetWorkspace: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.GetWorkspace, req).Want(http.StatusOK)
 }
 
 func TestCreateWorkspaceUsesRequestedSlug(t *testing.T) {
@@ -2558,20 +2069,14 @@ func TestCreateWorkspaceUsesRequestedSlug(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, slug)
 	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/workspaces", map[string]string{
 		"name": "Handler Create Workspace Requested",
 		"slug": slug,
 	})
-	testHandler.CreateWorkspace(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateWorkspace: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateWorkspace, req).Want(http.StatusCreated)
 
 	var created WorkspaceResponse
-	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
-		t.Fatalf("CreateWorkspace: decode response: %v", err)
-	}
+	w.JSON(&created)
 	if created.Slug != slug {
 		t.Fatalf("CreateWorkspace: expected slug %q, got %q", slug, created.Slug)
 	}
@@ -2585,35 +2090,25 @@ func TestCreateWorkspaceSlugConflictReturnsConflict(t *testing.T) {
 		testPool.Exec(ctx, `DELETE FROM workspace WHERE slug = $1`, retriedSlug)
 	})
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/workspaces", map[string]string{
 		"name": "Duplicate Handler Workspace",
 		"slug": handlerTestWorkspaceSlug,
 	})
-	testHandler.CreateWorkspace(w, req)
-	if w.Code != http.StatusConflict {
-		t.Fatalf("CreateWorkspace: expected 409, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateWorkspace, req).Want(http.StatusConflict)
 
 	var count int
-	if err := testPool.QueryRow(ctx, `SELECT count(*) FROM workspace WHERE slug = $1`, retriedSlug).Scan(&count); err != nil {
-		t.Fatalf("CreateWorkspace: check retried slug: %v", err)
-	}
+	dbfx.QueryRow(t, `SELECT count(*) FROM workspace WHERE slug = $1`, retriedSlug).Scan(&count)
 	if count != 0 {
 		t.Fatalf("CreateWorkspace: expected no fallback slug %q, got %d rows", retriedSlug, count)
 	}
 }
 
 func TestCreateWorkspaceInvalidSlugReturnsBadRequest(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/workspaces", map[string]string{
 		"name": "Invalid Slug Workspace",
 		"slug": "invalid slug",
 	})
-	testHandler.CreateWorkspace(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Fatalf("CreateWorkspace: expected 400, got %d: %s", w.Code, w.Body.String())
-	}
+	testutil.Call(t, testHandler.CreateWorkspace, req).Want(http.StatusBadRequest)
 }
 
 func TestSendCode(t *testing.T) {
@@ -3103,17 +2598,13 @@ func TestBacklogNoTriggerOnCreate(t *testing.T) {
 		t.Fatalf("failed to find test agent: %v", err)
 	}
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Backlog no-trigger test",
 		"status":        "backlog",
 		"assignee_type": "agent",
 		"assignee_id":   agentID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
@@ -3152,31 +2643,23 @@ func TestBacklogToTodoTriggersAgent(t *testing.T) {
 	}
 
 	// Create a backlog issue assigned to the agent — should NOT trigger.
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Backlog trigger test",
 		"status":        "backlog",
 		"assignee_type": "agent",
 		"assignee_id":   agentID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 
 	// Move the issue from backlog to todo — should trigger.
-	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{
 		"status": "todo",
 	})
 	req = withURLParam(req, "id", created.ID)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	// Verify exactly one task was enqueued (from the status transition, not creation).
 	var taskCount int
@@ -3217,17 +2700,13 @@ func TestBacklogToTodoByAgentTriggersDifferentAssignee(t *testing.T) {
 
 	// Create a backlog issue assigned to the child agent — should NOT trigger
 	// on creation (backlog parking-lot rule).
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Serial sub-task Step 2",
 		"status":        "backlog",
 		"assignee_type": "agent",
 		"assignee_id":   childAgent,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 	t.Cleanup(func() {
@@ -3237,23 +2716,17 @@ func TestBacklogToTodoByAgentTriggersDifferentAssignee(t *testing.T) {
 
 	// Parent agent promotes backlog → todo on behalf of the X-Task it is
 	// currently running. Must enqueue exactly one task for the child agent.
-	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{"status": "todo"})
 	req = withURLParam(req, "id", created.ID)
 	req.Header.Set("X-Agent-ID", parentAgent)
 	req.Header.Set("X-Task-ID", parentTask)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var childTasks int
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 		created.ID, childAgent,
-	).Scan(&childTasks); err != nil {
-		t.Fatalf("failed to count child tasks: %v", err)
-	}
+	).Scan(&childTasks)
 	if childTasks != 1 {
 		t.Fatalf("expected exactly 1 task enqueued for child agent after agent-driven backlog→todo, got %d", childTasks)
 	}
@@ -3278,17 +2751,13 @@ func TestBacklogToTodoByAgentSameIssueDoesNotSelfTrigger(t *testing.T) {
 
 	selfAgent := createHandlerTestAgent(t, "Backlog Self Agent", nil)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Self-promoted backlog",
 		"status":        "backlog",
 		"assignee_type": "agent",
 		"assignee_id":   selfAgent,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 	t.Cleanup(func() {
@@ -3299,23 +2768,17 @@ func TestBacklogToTodoByAgentSameIssueDoesNotSelfTrigger(t *testing.T) {
 	// Task bound to the SAME issue being promoted — true self-loop.
 	selfTask := createHandlerTestTaskForAgentOnIssue(t, selfAgent, created.ID)
 
-	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{"status": "todo"})
 	req = withURLParam(req, "id", created.ID)
 	req.Header.Set("X-Agent-ID", selfAgent)
 	req.Header.Set("X-Task-ID", selfTask)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var tasks int
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 		created.ID, selfAgent,
-	).Scan(&tasks); err != nil {
-		t.Fatalf("failed to count tasks: %v", err)
-	}
+	).Scan(&tasks)
 	if tasks != 0 {
 		t.Fatalf("expected no self-trigger when agent promotes the same issue its task is running on, got %d queued tasks", tasks)
 	}
@@ -3336,17 +2799,13 @@ func TestBacklogToTodoByAgentSameAgentDifferentIssue(t *testing.T) {
 	agentID := createHandlerTestAgent(t, "Backlog Same-Agent Chain", nil)
 
 	// Step 1 issue — the one the agent is currently working on.
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Step 1 (running)",
 		"status":        "in_progress",
 		"assignee_type": "agent",
 		"assignee_id":   agentID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue step1: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var step1 IssueResponse
 	json.NewDecoder(w.Body).Decode(&step1)
 	t.Cleanup(func() {
@@ -3355,17 +2814,13 @@ func TestBacklogToTodoByAgentSameAgentDifferentIssue(t *testing.T) {
 	})
 
 	// Step 2 issue — backlog, also assigned to the same agent.
-	w = httptest.NewRecorder()
 	req = newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Step 2 (backlog)",
 		"status":        "backlog",
 		"assignee_type": "agent",
 		"assignee_id":   agentID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue step2: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var step2 IssueResponse
 	json.NewDecoder(w.Body).Decode(&step2)
 	t.Cleanup(func() {
@@ -3376,25 +2831,162 @@ func TestBacklogToTodoByAgentSameAgentDifferentIssue(t *testing.T) {
 	// Task is running on step1 — promoting step2 is NOT a self-loop.
 	step1Task := createHandlerTestTaskForAgentOnIssue(t, agentID, step1.ID)
 
-	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+step2.ID, map[string]any{"status": "todo"})
 	req = withURLParam(req, "id", step2.ID)
 	req.Header.Set("X-Agent-ID", agentID)
 	req.Header.Set("X-Task-ID", step1Task)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue step2: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var step2Tasks int
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 		step2.ID, agentID,
-	).Scan(&step2Tasks); err != nil {
-		t.Fatalf("failed to count step2 tasks: %v", err)
-	}
+	).Scan(&step2Tasks)
 	if step2Tasks != 1 {
 		t.Fatalf("expected exactly 1 task enqueued on step2 for same-agent serial chain, got %d", step2Tasks)
+	}
+}
+
+// TestAssignIssueToSelfWithActiveTargetRunDoesNotDuplicate covers the direct
+// assignment form of #6947: an agent already working on an issue may claim its
+// ownership, but that ownership write must not enqueue a second run for the
+// same (issue, agent) pair.
+func TestAssignIssueToSelfWithActiveTargetRunDoesNotDuplicate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "Self Assign Active Target", nil)
+
+	issue := createIssueForTest(t, map[string]any{"title": "self-assign active target", "status": "todo"})
+	runningTask := createHandlerTestTaskForAgentOnIssue(t, agentID, issue.ID)
+
+	previewReq := newRequest("POST", "/api/issues/preview-trigger?workspace_id="+testWorkspaceID, map[string]any{
+		"issue_ids":     []string{issue.ID},
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	})
+	previewReq.Header.Set("X-Agent-ID", agentID)
+	previewReq.Header.Set("X-Task-ID", runningTask)
+	previewRecorder := testutil.Call(t, testHandler.PreviewIssueTrigger, previewReq).Want(http.StatusOK)
+	var preview IssueTriggerPreviewResponse
+	previewRecorder.JSON(&preview)
+	if preview.TotalCount != 0 {
+		t.Fatalf("preview promised a duplicate self-assignment run: %+v", preview)
+	}
+
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	}), "id", issue.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", runningTask)
+	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
+	if got := queuedTaskCountFor(t, issue.ID, agentID); got != 0 {
+		t.Fatalf("self-assignment duplicated an active target run: got %d queued task(s)", got)
+	}
+	if got := taskStatus(t, runningTask); got != "running" {
+		t.Fatalf("existing target run must survive ownership claim, got status %q", got)
+	}
+}
+
+func TestShouldSuppressActiveSelfAssignmentFailsClosedOnLookupError(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	const agentID = "1c331d0b-94fd-412a-a7cc-6a209add00a1"
+	const issueID = "34c44eb2-bd85-455f-b47c-f39cc7b0b913"
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	if !testHandler.shouldSuppressActiveSelfAssignment(
+		ctx,
+		"agent",
+		agentID,
+		parseUUID(issueID),
+		parseUUID(agentID),
+	) {
+		t.Fatal("lookup failure must fail closed and suppress duplicate enqueue")
+	}
+}
+
+// TestAssignDifferentIssueToSelfStillEnqueues locks in the intentional
+// cross-issue handoff behavior: an agent working on I1 may assign fresh I2 to
+// itself, and I2 still gets a queued run.
+func TestAssignDifferentIssueToSelfStillEnqueues(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "Cross Issue Self Assign", nil)
+	source := createIssueForTest(t, map[string]any{"title": "cross-issue source", "status": "todo"})
+	target := createIssueForTest(t, map[string]any{"title": "cross-issue target", "status": "todo"})
+	sourceTask := createHandlerTestTaskForAgentOnIssue(t, agentID, source.ID)
+
+	req := withURLParam(newRequest("PUT", "/api/issues/"+target.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   agentID,
+	}), "id", target.ID)
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", sourceTask)
+	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
+	if got := queuedTaskCountFor(t, target.ID, agentID); got != 1 {
+		t.Fatalf("cross-issue self-assignment should enqueue one run, got %d", got)
+	}
+}
+
+// TestBatchAssignFreshIssuesToSelfEnqueuesEach protects triage/autopilot
+// batches: being busy on a source issue is not a global self-assignment ban.
+// Every fresh target keeps the existing enqueue behavior.
+func TestBatchAssignFreshIssuesToSelfEnqueuesEach(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	agentID := createHandlerTestAgent(t, "Batch Fresh Self Assign", nil)
+	source := createIssueForTest(t, map[string]any{"title": "batch source", "status": "todo"})
+	target1 := createIssueForTest(t, map[string]any{"title": "batch target one", "status": "todo"})
+	target2 := createIssueForTest(t, map[string]any{"title": "batch target two", "status": "todo"})
+	sourceTask := createHandlerTestTaskForAgentOnIssue(t, agentID, source.ID)
+
+	req := newRequest("PATCH", "/api/issues/batch?workspace_id="+testWorkspaceID, map[string]any{
+		"issue_ids": []string{target1.ID, target2.ID},
+		"updates": map[string]any{
+			"assignee_type": "agent",
+			"assignee_id":   agentID,
+		},
+	})
+	req.Header.Set("X-Agent-ID", agentID)
+	req.Header.Set("X-Task-ID", sourceTask)
+	testutil.Call(t, testHandler.BatchUpdateIssues, req).Want(http.StatusOK)
+	for _, target := range []IssueResponse{target1, target2} {
+		if got := queuedTaskCountFor(t, target.ID, agentID); got != 1 {
+			t.Fatalf("fresh target %s should enqueue one run, got %d", target.ID, got)
+		}
+	}
+}
+
+// TestAssignActiveIssueToDifferentAgentStillEnqueues verifies the duplicate
+// guard never turns a real agent-to-agent transfer into an ownership-only
+// update. The old task survives per #4963 and the new assignee gets a run.
+func TestAssignActiveIssueToDifferentAgentStillEnqueues(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	actorAgent := createHandlerTestAgent(t, "Active Transfer Actor", nil)
+	targetAgent := createHandlerTestAgent(t, "Active Transfer Target", nil)
+	issue := createIssueForTest(t, map[string]any{"title": "active transfer", "status": "todo"})
+	actorTask := createHandlerTestTaskForAgentOnIssue(t, actorAgent, issue.ID)
+
+	req := withURLParam(newRequest("PUT", "/api/issues/"+issue.ID, map[string]any{
+		"assignee_type": "agent",
+		"assignee_id":   targetAgent,
+	}), "id", issue.ID)
+	req.Header.Set("X-Agent-ID", actorAgent)
+	req.Header.Set("X-Task-ID", actorTask)
+	testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
+	if got := queuedTaskCountFor(t, issue.ID, targetAgent); got != 1 {
+		t.Fatalf("new assignee should get one queued run, got %d", got)
+	}
+	if got := taskStatus(t, actorTask); got != "running" {
+		t.Fatalf("old active task must survive transfer, got status %q", got)
 	}
 }
 
@@ -3413,17 +3005,13 @@ func TestBatchBacklogToTodoByAgentTriggersAssignee(t *testing.T) {
 	childAgent := createHandlerTestAgent(t, "Batch Child Agent", nil)
 	parentTask := createHandlerTestTaskForAgent(t, parentAgent)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Batch backlog child",
 		"status":        "backlog",
 		"assignee_type": "agent",
 		"assignee_id":   childAgent,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 	t.Cleanup(func() {
@@ -3432,25 +3020,19 @@ func TestBatchBacklogToTodoByAgentTriggersAssignee(t *testing.T) {
 	})
 
 	// Drive the batch endpoint with the same agent identity headers.
-	w = httptest.NewRecorder()
 	req = newRequest("PATCH", "/api/issues/batch?workspace_id="+testWorkspaceID, map[string]any{
 		"issue_ids": []string{created.ID},
 		"updates":   map[string]any{"status": "todo"},
 	})
 	req.Header.Set("X-Agent-ID", parentAgent)
 	req.Header.Set("X-Task-ID", parentTask)
-	testHandler.BatchUpdateIssues(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("BatchUpdateIssues: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.BatchUpdateIssues, req).Want(http.StatusOK)
 
 	var childTasks int
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 		created.ID, childAgent,
-	).Scan(&childTasks); err != nil {
-		t.Fatalf("failed to count child tasks: %v", err)
-	}
+	).Scan(&childTasks)
 	if childTasks != 1 {
 		t.Fatalf("expected exactly 1 task enqueued for child agent after batch agent-driven backlog→todo, got %d", childTasks)
 	}
@@ -3472,27 +3054,15 @@ func TestBacklogToTodoByAgentTriggersSquadLeader(t *testing.T) {
 	driverAgent := createHandlerTestAgent(t, "Backlog Squad Driver", nil)
 	driverTask := createHandlerTestTaskForAgent(t, driverAgent)
 
-	var squadID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO squad (workspace_id, name, description, leader_id, creator_id)
-		VALUES ($1, $2, '', $3, $4)
-		RETURNING id
-	`, testWorkspaceID, "Backlog Trigger Squad", leaderAgent, testUserID).Scan(&squadID); err != nil {
-		t.Fatalf("create squad: %v", err)
-	}
-	t.Cleanup(func() { testPool.Exec(ctx, `DELETE FROM squad WHERE id = $1`, squadID) })
+	squadID := dbfx.Squad(t, "Backlog Trigger Squad", leaderAgent)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":         "Squad backlog issue",
 		"status":        "backlog",
 		"assignee_type": "squad",
 		"assignee_id":   squadID,
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var created IssueResponse
 	json.NewDecoder(w.Body).Decode(&created)
 	t.Cleanup(func() {
@@ -3502,30 +3072,23 @@ func TestBacklogToTodoByAgentTriggersSquadLeader(t *testing.T) {
 
 	// Driver agent (not the leader, task is on no specific issue) promotes
 	// the squad-assigned backlog issue. Squad leader must be enqueued.
-	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/issues/"+created.ID, map[string]any{"status": "todo"})
 	req = withURLParam(req, "id", created.ID)
 	req.Header.Set("X-Agent-ID", driverAgent)
 	req.Header.Set("X-Task-ID", driverTask)
-	testHandler.UpdateIssue(w, req)
-	if w.Code != http.StatusOK {
-		t.Fatalf("UpdateIssue: expected 200, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.UpdateIssue, req).Want(http.StatusOK)
 
 	var leaderTasks int
-	if err := testPool.QueryRow(ctx,
+	dbfx.QueryRow(t,
 		`SELECT count(*) FROM agent_task_queue WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'`,
 		created.ID, leaderAgent,
-	).Scan(&leaderTasks); err != nil {
-		t.Fatalf("failed to count leader tasks: %v", err)
-	}
+	).Scan(&leaderTasks)
 	if leaderTasks != 1 {
 		t.Fatalf("expected exactly 1 squad-leader task after agent-driven backlog→todo on squad issue, got %d", leaderTasks)
 	}
 }
 
 func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
-	w := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/api/daemon/register", bytes.NewBufferString(`{
 		"workspace_id":"00000000-0000-0000-0000-000000000001",
 		"daemon_id":"local-daemon",
@@ -3534,11 +3097,7 @@ func TestDaemonRegisterMissingWorkspaceReturns404(t *testing.T) {
 	}`))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("X-User-ID", testUserID)
-
-	testHandler.DaemonRegister(w, req)
-	if w.Code != http.StatusNotFound {
-		t.Fatalf("DaemonRegister: expected 404, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.DaemonRegister, req).Want(http.StatusNotFound)
 	if !strings.Contains(w.Body.String(), "workspace not found") {
 		t.Fatalf("DaemonRegister: expected workspace not found error, got %s", w.Body.String())
 	}
@@ -3678,15 +3237,11 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 	jAgent := createHandlerTestAgent(t, "J", nil)
 	reviewerAgent := createHandlerTestAgent(t, "Reviewer", nil)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "PR review delegation no-leak test",
 		"status": "todo",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var issue IssueResponse
 	json.NewDecoder(w.Body).Decode(&issue)
 	issueID := issue.ID
@@ -3714,17 +3269,13 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 	// X-Task-ID is required alongside X-Agent-ID for resolveActor to grant
 	// the "agent" actor identity (defense against header forgery).
 	jAgentTask := createHandlerTestTaskForAgent(t, jAgent)
-	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
 		"content": fmt.Sprintf("PR ready. [@Reviewer](mention://agent/%s) please review this.", reviewerAgent),
 	})
 	r = withURLParam(r, "id", issueID)
 	r.Header.Set("X-Agent-ID", jAgent)
 	r.Header.Set("X-Task-ID", jAgentTask)
-	testHandler.CreateComment(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("J PR completion: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated)
 	var rootComment CommentResponse
 	json.NewDecoder(w.Body).Decode(&rootComment)
 	if got := countTasks(reviewerAgent); got != 1 {
@@ -3732,28 +3283,22 @@ func TestMemberReplyToAgentRootDoesNotInheritParentMentions(t *testing.T) {
 	}
 
 	// Cancel reviewer's task so it's free to be re-triggered if the bug returns.
-	if _, err := testPool.Exec(ctx,
+	dbfx.Exec(t,
 		`UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1 AND agent_id = $2`,
 		issueID, reviewerAgent,
-	); err != nil {
-		t.Fatalf("cancel reviewer task: %v", err)
-	}
+	)
 
 	// 2. Member posts a plain follow-up reply under J's PR comment, with no
 	// explicit mentions. The pre-fix code path inherited mentions from the
 	// parent regardless of the parent author, which re-triggered Reviewer.
 	// With the fix, the reply must NOT inherit because the parent was
 	// authored by an agent.
-	w = httptest.NewRecorder()
 	r = newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
 		"content":   "How do I test this after merging?",
 		"parent_id": rootComment.ID,
 	})
 	r = withURLParam(r, "id", issueID)
-	testHandler.CreateComment(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("member follow-up: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated)
 	if got := countTasks(reviewerAgent); got != 0 {
 		t.Fatalf("expected 0 tasks for Reviewer after plain member reply (no inheritance from agent root), got %d", got)
 	}
@@ -3767,29 +3312,27 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
 
 	assigneeAgent := createHandlerTestAgent(t, "Nested Mention Assignee", nil)
 	mentionedAgent := createHandlerTestAgent(t, "Nested Mention Target", nil)
 	parentAgent := createHandlerTestAgent(t, "Nested Direct Parent", nil)
 
 	var number int
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		UPDATE workspace
 		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
 		WHERE id = $1 RETURNING issue_counter
-	`, testWorkspaceID).Scan(&number); err != nil {
-		t.Fatalf("next issue number: %v", err)
-	}
+	`, testWorkspaceID).Scan(&number)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
-		VALUES ($1, 'member', $2, $3, 'agent', $4, $5)
-		RETURNING id
-	`, testWorkspaceID, testUserID, "nested mention inheritance regression", assigneeAgent, number).Scan(&issueID); err != nil {
-		t.Fatalf("create issue: %v", err)
-	}
+	issueID := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id":  testWorkspaceID,
+		"creator_type":  "member",
+		"creator_id":    testUserID,
+		"title":         "nested mention inheritance regression",
+		"assignee_type": "agent",
+		"assignee_id":   assigneeAgent,
+		"number":        number,
+	})
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
@@ -3799,27 +3342,19 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	countQueued := func(agentID string) int {
 		t.Helper()
 		var n int
-		if err := testPool.QueryRow(ctx, `
+		dbfx.QueryRow(t, `
 			SELECT count(*) FROM agent_task_queue
 			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
-		`, issueID, agentID).Scan(&n); err != nil {
-			t.Fatalf("count queued tasks: %v", err)
-		}
+		`, issueID, agentID).Scan(&n)
 		return n
 	}
 	postMemberComment := func(body map[string]any) CommentResponse {
 		t.Helper()
-		w := httptest.NewRecorder()
 		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
 		r = withURLParam(r, "id", issueID)
-		testHandler.CreateComment(w, r)
-		if w.Code != http.StatusCreated {
-			t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
-		}
+		w := testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated)
 		var resp CommentResponse
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode comment response: %v", err)
-		}
+		w.JSON(&resp)
 		return resp
 	}
 
@@ -3829,18 +3364,13 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	if got := countQueued(mentionedAgent); got != 1 {
 		t.Fatalf("expected root mention to queue mentioned agent once, got %d", got)
 	}
-	if _, err := testPool.Exec(ctx, `UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1`, issueID); err != nil {
-		t.Fatalf("cancel root mention task: %v", err)
-	}
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'cancelled' WHERE issue_id = $1`, issueID)
 
-	var directParentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, parent_id)
-		VALUES ($1, $2, 'agent', $3, $4, $5)
-		RETURNING id
-	`, testWorkspaceID, issueID, parentAgent, "looks like redirect config", root.ID).Scan(&directParentID); err != nil {
-		t.Fatalf("insert direct parent reply: %v", err)
-	}
+	directParentID := dbfx.Comment(t, issueID, "looks like redirect config", testutil.Cols{
+		"author_type": "agent",
+		"author_id":   parentAgent,
+		"parent_id":   root.ID,
+	})
 
 	nested := postMemberComment(map[string]any{
 		"content":   "can you also check session expiry?",
@@ -3857,34 +3387,33 @@ func TestNestedMemberReplyUsesDirectParentForMentionInheritance(t *testing.T) {
 	}
 }
 
-// TestNestedMemberReplyWithMemberParentFallsBackToAssignee verifies that a
-// nested reply whose direct parent is human-owned does not route to a sibling
-// agent reply. It falls through to the issue assignee instead.
-func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T) {
+// TestNestedMemberReplyUnderMemberSkipsAssigneeFallback verifies that a nested
+// reply whose direct parent is human-owned neither routes to a sibling agent
+// reply nor falls back to the issue assignee. A sibling agent comment alone
+// does not establish a conversation owner for the member-authored root.
+func TestNestedMemberReplyUnderMemberSkipsAssigneeFallback(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
 	}
-	ctx := context.Background()
 
 	assigneeAgent := createHandlerTestAgent(t, "Nested Participation Assignee", nil)
 
 	var number int
-	if err := testPool.QueryRow(ctx, `
+	dbfx.QueryRow(t, `
 		UPDATE workspace
 		SET issue_counter = GREATEST(issue_counter, (SELECT COALESCE(MAX(number), 0) FROM issue WHERE workspace_id = $1)) + 1
 		WHERE id = $1 RETURNING issue_counter
-	`, testWorkspaceID).Scan(&number); err != nil {
-		t.Fatalf("next issue number: %v", err)
-	}
+	`, testWorkspaceID).Scan(&number)
 
-	var issueID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO issue (workspace_id, creator_type, creator_id, title, assignee_type, assignee_id, number)
-		VALUES ($1, 'member', $2, $3, 'agent', $4, $5)
-		RETURNING id
-	`, testWorkspaceID, testUserID, "nested participation regression", assigneeAgent, number).Scan(&issueID); err != nil {
-		t.Fatalf("create issue: %v", err)
-	}
+	issueID := dbfx.Insert(t, "issue", testutil.Cols{
+		"workspace_id":  testWorkspaceID,
+		"creator_type":  "member",
+		"creator_id":    testUserID,
+		"title":         "nested participation regression",
+		"assignee_type": "agent",
+		"assignee_id":   assigneeAgent,
+		"number":        number,
+	})
 	t.Cleanup(func() {
 		testPool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE issue_id = $1`, issueID)
 		testPool.Exec(context.Background(), `DELETE FROM comment WHERE issue_id = $1`, issueID)
@@ -3894,52 +3423,30 @@ func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T)
 	countAssigneeQueued := func() int {
 		t.Helper()
 		var n int
-		if err := testPool.QueryRow(ctx, `
+		dbfx.QueryRow(t, `
 			SELECT count(*) FROM agent_task_queue
 			WHERE issue_id = $1 AND agent_id = $2 AND status = 'queued'
-		`, issueID, assigneeAgent).Scan(&n); err != nil {
-			t.Fatalf("count queued tasks: %v", err)
-		}
+		`, issueID, assigneeAgent).Scan(&n)
 		return n
 	}
 	postMemberComment := func(body map[string]any) CommentResponse {
 		t.Helper()
-		w := httptest.NewRecorder()
 		r := newRequest("POST", "/api/issues/"+issueID+"/comments", body)
 		r = withURLParam(r, "id", issueID)
-		testHandler.CreateComment(w, r)
-		if w.Code != http.StatusCreated {
-			t.Fatalf("CreateComment: expected 201, got %d: %s", w.Code, w.Body.String())
-		}
+		w := testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated)
 		var resp CommentResponse
-		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-			t.Fatalf("decode comment response: %v", err)
-		}
+		w.JSON(&resp)
 		return resp
 	}
 
-	var rootID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content)
-		VALUES ($1, $2, 'member', $3, 'this cache question is for humans')
-		RETURNING id
-	`, testWorkspaceID, issueID, testUserID).Scan(&rootID); err != nil {
-		t.Fatalf("insert root comment: %v", err)
-	}
-	if _, err := testPool.Exec(ctx, `
+	rootID := dbfx.Comment(t, issueID, "this cache question is for humans")
+	dbfx.Exec(t, `
 		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, parent_id)
 		VALUES ($1, $2, 'agent', $3, 'expiration policy is the issue', $4)
-	`, testWorkspaceID, issueID, assigneeAgent, rootID); err != nil {
-		t.Fatalf("insert assignee reply: %v", err)
-	}
-	var humanParentID string
-	if err := testPool.QueryRow(ctx, `
-		INSERT INTO comment (workspace_id, issue_id, author_type, author_id, content, parent_id)
-		VALUES ($1, $2, 'member', $3, 'I have seen this too', $4)
-		RETURNING id
-	`, testWorkspaceID, issueID, testUserID, rootID).Scan(&humanParentID); err != nil {
-		t.Fatalf("insert human direct parent: %v", err)
-	}
+	`, testWorkspaceID, issueID, assigneeAgent, rootID)
+	humanParentID := dbfx.Comment(t, issueID, "I have seen this too", testutil.Cols{
+		"parent_id": rootID,
+	})
 
 	nested := postMemberComment(map[string]any{
 		"content":   "what should the expiration be?",
@@ -3948,8 +3455,8 @@ func TestNestedMemberReplyUsesDirectParentForAssigneeParticipation(t *testing.T)
 	if nested.ParentID == nil || *nested.ParentID != humanParentID {
 		t.Fatalf("stored nested reply parent_id should keep direct parent %s, got %v", humanParentID, nested.ParentID)
 	}
-	if got := countAssigneeQueued(); got != 1 {
-		t.Fatalf("plain nested human reply should fall back to assignee; got %d queued tasks", got)
+	if got := countAssigneeQueued(); got != 0 {
+		t.Fatalf("plain nested human reply queued assignee tasks = %d, want 0", got)
 	}
 }
 
@@ -3967,15 +3474,11 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	agentA := createHandlerTestAgent(t, "Handoff Agent A", nil)
 	agentB := createHandlerTestAgent(t, "Handoff Agent B", nil)
 
-	w := httptest.NewRecorder()
 	req := newRequest("POST", "/api/issues?workspace_id="+testWorkspaceID, map[string]any{
 		"title":  "Agent explicit handoff test",
 		"status": "todo",
 	})
-	testHandler.CreateIssue(w, req)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("CreateIssue: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w := testutil.Call(t, testHandler.CreateIssue, req).Want(http.StatusCreated)
 	var issue IssueResponse
 	json.NewDecoder(w.Body).Decode(&issue)
 	issueID := issue.ID
@@ -4005,17 +3508,13 @@ func TestAgentExplicitMentionStillTriggers(t *testing.T) {
 	// suppression (authorType=="agent") would not fire.
 	agentATask := createHandlerTestTaskForAgent(t, agentA)
 	explicitMention := fmt.Sprintf("[@Agent B](mention://agent/%s) please take it from here", agentB)
-	w = httptest.NewRecorder()
 	r := newRequest("POST", "/api/issues/"+issueID+"/comments", map[string]any{
 		"content": explicitMention,
 	})
 	r = withURLParam(r, "id", issueID)
 	r.Header.Set("X-Agent-ID", agentA)
 	r.Header.Set("X-Task-ID", agentATask)
-	testHandler.CreateComment(w, r)
-	if w.Code != http.StatusCreated {
-		t.Fatalf("agent A handoff: expected 201, got %d: %s", w.Code, w.Body.String())
-	}
+	w = testutil.Call(t, testHandler.CreateComment, r).Want(http.StatusCreated)
 	if got := countTasks(agentB); got != 1 {
 		t.Fatalf("expected 1 task for Agent B after explicit mention by Agent A, got %d", got)
 	}

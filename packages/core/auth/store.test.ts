@@ -1,6 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "../api/client";
-import { ApiError } from "../api/client";
 import type { StorageAdapter, User } from "../types";
 import { createAuthStore } from "./store";
 
@@ -27,67 +26,38 @@ function makeStorage(initial: Record<string, string> = {}): StorageAdapter & {
   };
 }
 
-function makeApi(getMe: () => Promise<User>): ApiClient {
+function makeApi(): ApiClient {
   return {
     setToken: vi.fn(),
-    getMe,
-    // Only the methods touched by store.initialize are needed. Cast to
-    // ApiClient for type compatibility — the store treats it opaquely.
   } as unknown as ApiClient;
 }
 
-describe("authStore.initialize — token mode", () => {
-  it("keeps the stored token when getMe fails with a non-401 ApiError (e.g. 500)", async () => {
+describe("authStore", () => {
+  it("publishes a retry request instead of silently ignoring it", () => {
     const storage = makeStorage({ multica_token: "t" });
-    const api = makeApi(() =>
-      Promise.reject(new ApiError("server error", 500, "Internal Server Error")),
-    );
+    const api = makeApi();
     const store = createAuthStore({ api, storage });
 
-    await store.getState().initialize();
+    store.setState({ isLoading: true, status: "recovering" });
+    store.getState().retryAuthentication();
 
-    expect(store.getState().user).toBeNull();
-    expect(store.getState().isLoading).toBe(false);
-    expect(storage.snapshot().multica_token).toBe("t");
+    expect(store.getState().status).toBe("authenticating");
+    expect(store.getState().retryGeneration).toBe(1);
   });
 
-  it("keeps the stored token on a network failure (non-ApiError throw)", async () => {
+  it("explicit logout still clears credentials and publishes unauthenticated state", () => {
     const storage = makeStorage({ multica_token: "t" });
-    const api = makeApi(() => Promise.reject(new TypeError("fetch failed")));
-    const store = createAuthStore({ api, storage });
+    const api = makeApi();
+    const onLogout = vi.fn();
+    const store = createAuthStore({ api, storage, onLogout });
 
-    await store.getState().initialize();
+    store.setState({ user: fakeUser, status: "authenticated", isLoading: false });
+    store.getState().logout();
 
-    expect(store.getState().user).toBeNull();
-    expect(storage.snapshot().multica_token).toBe("t");
-  });
-
-  it("on 401, leaves storage cleanup to ApiClient.onUnauthorized and resets state", async () => {
-    // Simulate the real path: ApiClient fires onUnauthorized on 401, which
-    // removes the token from storage. The store's catch block must not
-    // duplicate or short-circuit this — it should only reset in-memory
-    // auth state.
-    const storage = makeStorage({ multica_token: "t" });
-    const api = makeApi(() => {
-      storage.removeItem("multica_token"); // stand-in for onUnauthorized
-      return Promise.reject(new ApiError("unauthorized", 401, "Unauthorized"));
-    });
-    const store = createAuthStore({ api, storage });
-
-    await store.getState().initialize();
-
-    expect(store.getState().user).toBeNull();
     expect(storage.snapshot().multica_token).toBeUndefined();
-  });
-
-  it("populates user when getMe succeeds", async () => {
-    const storage = makeStorage({ multica_token: "t" });
-    const api = makeApi(() => Promise.resolve(fakeUser));
-    const store = createAuthStore({ api, storage });
-
-    await store.getState().initialize();
-
-    expect(store.getState().user).toEqual(fakeUser);
-    expect(storage.snapshot().multica_token).toBe("t");
+    expect(api.setToken).toHaveBeenCalledWith(null);
+    expect(onLogout).toHaveBeenCalledOnce();
+    expect(store.getState().user).toBeNull();
+    expect(store.getState().status).toBe("unauthenticated");
   });
 });

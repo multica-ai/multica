@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -349,11 +348,9 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 	runCtx, cancel := runContext(ctx, timeout)
 
 	args := buildCopilotArgs(prompt, opts, b.cfg.Logger)
-	argv0, cmdArgs := chooseCopilotInvocation(execName, lookedUp, args, b.cfg.Logger)
-
-	cmd := exec.CommandContext(runCtx, argv0, cmdArgs...)
+	cmd, _, _ := b.cfg.commandAt(execName).execVia(runCtx, chooseCopilotInvocation, lookedUp, args, b.cfg.Logger)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", argv0, "args", cmdArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(args))
 	cmd.WaitDelay = 10 * time.Second
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
@@ -395,8 +392,7 @@ func (b *copilotBackend) Execute(ctx context.Context, prompt string, opts ExecOp
 			_ = stdout.Close()
 		}()
 
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())

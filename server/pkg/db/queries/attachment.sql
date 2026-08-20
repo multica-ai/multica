@@ -1,13 +1,29 @@
 -- name: CreateAttachment :one
-INSERT INTO attachment (
-  id, workspace_id, issue_id, comment_id, chat_session_id, task_id,
-  uploader_type, uploader_id, filename, url, content_type, size_bytes
+WITH inserted AS (
+  INSERT INTO attachment (
+    id, workspace_id, issue_id, comment_id, chat_session_id, task_id,
+    uploader_type, uploader_id, filename, url, content_type, size_bytes
+  )
+  VALUES (
+    $1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), sqlc.narg(chat_session_id), sqlc.narg(task_id),
+    $3, $4, $5, $6, $7, $8
+  )
+  RETURNING *
+), bumped_issue AS (
+  UPDATE issue
+  SET revision = revision + 1
+  WHERE id IN (SELECT issue_id FROM inserted WHERE issue_id IS NOT NULL)
+  RETURNING revision
+), bumped_comment AS (
+  UPDATE comment
+  SET revision = revision + 1
+  WHERE id IN (SELECT comment_id FROM inserted WHERE comment_id IS NOT NULL)
+  RETURNING revision
 )
-VALUES (
-  $1, $2, sqlc.narg(issue_id), sqlc.narg(comment_id), sqlc.narg(chat_session_id), sqlc.narg(task_id),
-  $3, $4, $5, $6, $7, $8
-)
-RETURNING *;
+SELECT inserted.*,
+       COALESCE((SELECT revision FROM bumped_issue), 0)::bigint AS issue_revision,
+       COALESCE((SELECT revision FROM bumped_comment), 0)::bigint AS comment_revision
+FROM inserted;
 
 -- name: ListAttachmentsByIssue :many
 SELECT * FROM attachment
@@ -54,7 +70,7 @@ WHERE issue_id = $2
   AND comment_id IS NULL
   AND id = ANY($3::uuid[]);
 
--- name: ReplaceCommentAttachments :exec
+-- name: ReplaceCommentAttachments :execrows
 UPDATE attachment
 SET comment_id = CASE
   WHEN id = ANY(sqlc.arg(attachment_ids)::uuid[]) THEN $1
@@ -62,7 +78,7 @@ SET comment_id = CASE
 END
 WHERE issue_id = $2
   AND (
-    comment_id = $1
+    (comment_id = $1 AND NOT id = ANY(sqlc.arg(attachment_ids)::uuid[]))
     OR (comment_id IS NULL AND id = ANY(sqlc.arg(attachment_ids)::uuid[]))
   );
 
@@ -131,15 +147,57 @@ SELECT * FROM attachment
 WHERE chat_message_id = ANY($1::uuid[]) AND workspace_id = $2
 ORDER BY created_at ASC;
 
--- name: LinkAttachmentsToIssue :exec
-UPDATE attachment
-SET issue_id = $1
-WHERE workspace_id = $2
+-- name: LockAttachmentsForIssueLink :many
+-- Issue updates bind attachments and then touch the owner row. Lock eligible
+-- attachment rows first so every attachment -> issue mutation uses the same
+-- lock order as DeleteAttachment and cannot deadlock with it.
+SELECT id FROM attachment
+WHERE workspace_id = sqlc.arg(workspace_id)
   AND issue_id IS NULL
-  AND id = ANY($3::uuid[]);
+  AND id = ANY(sqlc.arg(attachment_ids)::uuid[])
+ORDER BY id
+FOR UPDATE;
 
--- name: DeleteAttachment :exec
-DELETE FROM attachment WHERE id = $1 AND workspace_id = $2;
+-- name: LinkAttachmentsToIssue :one
+WITH linked AS (
+  UPDATE attachment
+  SET issue_id = sqlc.arg(issue_id)
+  WHERE attachment.workspace_id = sqlc.arg(workspace_id)
+    AND attachment.issue_id IS NULL
+    AND attachment.id = ANY(sqlc.arg(attachment_ids)::uuid[])
+  RETURNING attachment.issue_id
+), bumped_issue AS (
+  UPDATE issue
+  SET revision = revision + 1,
+      updated_at = now()
+  WHERE id = sqlc.arg(issue_id)
+    AND sqlc.arg(bump_revision)::boolean
+    AND EXISTS (SELECT 1 FROM linked)
+  RETURNING revision
+)
+SELECT COUNT(*)::bigint AS linked_count,
+       COALESCE((SELECT revision FROM bumped_issue), 0)::bigint AS issue_revision
+FROM linked;
+
+-- name: DeleteAttachment :one
+WITH deleted AS (
+  DELETE FROM attachment
+  WHERE attachment.id = $1 AND attachment.workspace_id = $2
+  RETURNING issue_id, comment_id
+), bumped_issue AS (
+  UPDATE issue
+  SET revision = revision + 1
+  WHERE id IN (SELECT issue_id FROM deleted WHERE issue_id IS NOT NULL)
+  RETURNING revision
+), bumped_comment AS (
+  UPDATE comment
+  SET revision = revision + 1
+  WHERE id IN (SELECT comment_id FROM deleted WHERE comment_id IS NOT NULL)
+  RETURNING revision
+)
+SELECT EXISTS(SELECT 1 FROM deleted) AS changed,
+       COALESCE((SELECT revision FROM bumped_issue), 0)::bigint AS issue_revision,
+       COALESCE((SELECT revision FROM bumped_comment), 0)::bigint AS comment_revision;
 
 -- name: ListAttachmentsByIDs :many
 SELECT * FROM attachment

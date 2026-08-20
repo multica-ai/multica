@@ -460,3 +460,85 @@ func TestRunSkillInlineEmptyContentKeepsExistingBehavior(t *testing.T) {
 		t.Fatalf("upsert inline empty error = %v", err)
 	}
 }
+
+func TestRunSkillRefreshPostsToRefreshEndpointAndPrintsTable(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/skills/skill-123/refresh" {
+			t.Fatalf("path = %q, want /api/skills/skill-123/refresh", r.URL.Path)
+		}
+		if r.Header.Get("X-Workspace-ID") != "workspace-123" {
+			t.Fatalf("X-Workspace-ID = %q, want workspace-123", r.Header.Get("X-Workspace-ID"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":          "skill-123",
+			"name":        "review-helper",
+			"description": "refreshed",
+			"content":     "# refreshed",
+			"files":       []any{},
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := &cobra.Command{Use: "refresh"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("output", "table", "")
+
+	out, err := captureStdout(t, func() error {
+		return runSkillRefresh(cmd, []string{"skill-123"})
+	})
+	if err != nil {
+		t.Fatalf("runSkillRefresh: %v", err)
+	}
+	if !strings.Contains(out, "review-helper") || !strings.Contains(out, "skill-123") {
+		t.Fatalf("table output %q must contain skill name and id", out)
+	}
+}
+
+func TestRunSkillRefreshJsonPrintsSkill(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("MULTICA_TOKEN", "test-token")
+	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"id":   "skill-123",
+			"name": "review-helper",
+		})
+	}))
+	defer srv.Close()
+	t.Setenv("MULTICA_SERVER_URL", srv.URL)
+
+	cmd := &cobra.Command{Use: "refresh"}
+	cmd.Flags().String("server-url", "", "")
+	cmd.Flags().String("workspace-id", "", "")
+	cmd.Flags().String("profile", "", "")
+	cmd.Flags().String("output", "json", "")
+
+	out, err := captureStdout(t, func() error {
+		return runSkillRefresh(cmd, []string{"skill-123"})
+	})
+	if err != nil {
+		t.Fatalf("runSkillRefresh: %v", err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("decode stdout JSON %q: %v", out, err)
+	}
+	if got["id"] != "skill-123" || got["name"] != "review-helper" {
+		t.Fatalf("got = %#v", got)
+	}
+}

@@ -152,6 +152,103 @@ describe("slash command suggestion items", () => {
     expect(items(qc, "pull").map((i) => i.id)).toEqual(["s2"]);
   });
 
+  it("ranks name prefix matches above description-only matches", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        agent({
+          id: "agent-1",
+          skills: [
+            { id: "s1", name: "grilling", description: "Grill the user about a plan" },
+            { id: "s2", name: "prototype", description: "Build a throwaway prototype" },
+            { id: "s3", name: "wayfinder", description: "Plan a huge chunk of work" },
+          ],
+        }),
+      ],
+    });
+
+    expect(items(qc, "wa").map((i) => i.id)).toEqual(["s3", "s2"]);
+  });
+
+  it("ranks an exact name match ahead of a longer prefix match", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        agent({
+          id: "agent-1",
+          skills: [
+            { id: "s1", name: "reviewer", description: "" },
+            { id: "s2", name: "review", description: "" },
+          ],
+        }),
+      ],
+    });
+
+    expect(items(qc, "review").map((i) => i.id)).toEqual(["s2", "s1"]);
+  });
+
+  it("ranks a name prefix above a mid-name match", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        agent({
+          id: "agent-1",
+          skills: [
+            { id: "s1", name: "pr-review", description: "" },
+            { id: "s2", name: "review", description: "" },
+          ],
+        }),
+      ],
+    });
+
+    expect(items(qc, "rev").map((i) => i.id)).toEqual(["s2", "s1"]);
+  });
+
+  it("keeps the configured skill order within a match tier", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        agent({
+          id: "agent-1",
+          skills: [
+            { id: "s1", name: "deploy-web", description: "" },
+            { id: "s2", name: "deploy-api", description: "" },
+          ],
+        }),
+      ],
+    });
+
+    expect(items(qc, "deploy").map((i) => i.id)).toEqual(["s1", "s2"]);
+  });
+
+  it("keeps a name match inside the 20-item cap when description hits fill it", () => {
+    chatState.selectedAgentId = "agent-1";
+    const qc = fakeQc({
+      members: [{ user_id: "u1", name: "Alice", role: "member" }],
+      agents: [
+        agent({
+          id: "agent-1",
+          skills: [
+            ...Array.from({ length: 25 }, (_, i) => ({
+              id: `d${i}`,
+              name: `skill-${i}`,
+              description: "Build a throwaway prototype",
+            })),
+            { id: "s-named", name: "wayfinder", description: "" },
+          ],
+        }),
+      ],
+    });
+
+    const result = items(qc, "wa");
+    expect(result).toHaveLength(20);
+    expect(result[0]?.id).toBe("s-named");
+  });
+
   it("tolerates skills with missing descriptions from cached API data", () => {
     chatState.selectedAgentId = "agent-1";
     const qc = fakeQc({

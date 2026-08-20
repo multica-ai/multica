@@ -139,6 +139,9 @@ func formatURLChange(oldVal, newVal string) string {
 }
 
 func runSetupCloud(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("setup"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 
 	cfg := cli.CLIConfig{
@@ -178,6 +181,9 @@ func runSetupCloud(cmd *cobra.Command, args []string) error {
 }
 
 func runSetupSelfHost(cmd *cobra.Command, args []string) error {
+	if err := requireHumanLocalCommand("setup"); err != nil {
+		return err
+	}
 	profile := resolveProfile(cmd)
 
 	// Resolve the target URLs before confirming the overwrite so the prompt can

@@ -95,6 +95,8 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -121,27 +123,6 @@ vi.mock("@multica/core/issues/config", () => ({
     none: { label: "No priority", bars: 0, color: "text-muted-foreground" },
   },
 }));
-
-// Default mock returns hasMore=false so the load-more sentinels render
-// as no-op divs and don't pull IntersectionObserver into JSDOM.
-const mockLoadMore = vi.fn();
-const useLoadMoreByStatusMock = vi.fn(
-  (_status: string, _opts?: unknown, _sort?: unknown) => ({
-    total: 0,
-    loaded: 0,
-    hasMore: false,
-    isLoading: false,
-    loadMore: mockLoadMore,
-  }),
-);
-vi.mock("@multica/core/issues/mutations", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@multica/core/issues/mutations")>();
-  return {
-    ...actual,
-    useLoadMoreByStatus: (status: string, opts?: unknown, sort?: unknown) =>
-      useLoadMoreByStatusMock(status, opts, sort),
-  };
-});
 
 type SwimlaneGroupingMock = "parent" | "project" | "assignee";
 
@@ -421,13 +402,6 @@ describe("SwimLaneView", () => {
     mockViewState.agentRunningFilter = false;
     mockListChildrenByParents.mockResolvedValue({ issues: [] });
     mockGetAgentTaskSnapshot.mockResolvedValue([]);
-    useLoadMoreByStatusMock.mockImplementation(() => ({
-      total: 0,
-      loaded: 0,
-      hasMore: false,
-      isLoading: false,
-      loadMore: mockLoadMore,
-    }));
   });
 
   it("renders status columns as headers", () => {
@@ -483,6 +457,30 @@ describe("SwimLaneView", () => {
 
     expect(screen.getByText("Cancelled")).toBeInTheDocument();
     expect(screen.getByText("Cancelled Orphan")).toBeInTheDocument();
+  });
+
+  // Cells are CATEGORIES, cards carry concrete status KEYS. Keying the cell by
+  // the raw key gave a custom status a cell that does not exist, and the card
+  // fell out of the grid entirely (MUL-6409).
+  const customStatusOrphan: Issue = {
+    ...cancelledOrphan,
+    id: "custom-orphan",
+    number: 10,
+    identifier: "PROJ-10",
+    title: "Awaiting Reporter",
+    status: "awaiting_response",
+    status_category: "in_review",
+  };
+
+  it("renders a custom-status card in its category's column", () => {
+    renderWithI18n(
+      <SwimLaneView
+        issues={[...mockIssues, customStatusOrphan]}
+        onMoveIssue={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText("Awaiting Reporter")).toBeInTheDocument();
   });
 
   it("omits the Cancelled column when the status filter narrows to a subset without cancelled", () => {

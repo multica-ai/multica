@@ -387,6 +387,20 @@ describe("WSClient", () => {
       expect(lastTimerDelay()).toBe(1000);
     });
 
+    it("notifies reconnect when the initial connection succeeds only after a retry", () => {
+      const ws = new WSClient("ws://example.test/ws");
+      ws.setAuth("tok", "acme");
+      const onReconnect = vi.fn();
+      ws.onReconnect(onReconnect);
+      ws.connect();
+
+      simulateDisconnect();
+      vi.runOnlyPendingTimers();
+      simulateAuthAck();
+
+      expect(onReconnect).toHaveBeenCalledTimes(1);
+    });
+
     it("keeps retrying indefinitely with capped delay", () => {
       vi.stubGlobal(
         "Math",

@@ -10,6 +10,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // stubAgentProbe replaces CLI discovery for the duration of a test. The returned
@@ -396,7 +398,7 @@ func TestDiscovery_BelowMinVersionRecoversAfterUpgrade(t *testing.T) {
 	t.Cleanup(func() { checkAgentMinVersion = origCheck })
 	checkAgentMinVersion = func(provider, _ string) error {
 		if provider == "antigravity" && tooOld {
-			return errors.New("antigravity version 1.0.0 is below minimum required 1.1.0")
+			return &agent.BelowMinimumError{AgentType: provider, Detected: "1.0.0", Minimum: "1.1.0"}
 		}
 		return nil
 	}
@@ -572,7 +574,7 @@ func TestMergeBuiltinRegisterResponse_ReplacesRotatedRuntimeID(t *testing.T) {
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", []string{"rt-old"}, "", nil, nil)
 	d.runtimeIndex["rt-old"] = Runtime{ID: "rt-old", Provider: "codex"}
 
-	newIDs, ok := d.mergeBuiltinRegisterResponse("ws-1", &RegisterResponse{
+	newIDs, _, ok := d.mergeBuiltinRegisterResponse("ws-1", &RegisterResponse{
 		Runtimes: []Runtime{{ID: "rt-new", Provider: "codex"}},
 	})
 	if !ok {
@@ -596,7 +598,7 @@ func TestMergeBuiltinRegisterResponse_IgnoresCustomProfileRuntimes(t *testing.T)
 	d := freshDaemon("http://localhost:0")
 	d.workspaces["ws-1"] = newWorkspaceState("ws-1", nil, "", nil, nil)
 
-	newIDs, ok := d.mergeBuiltinRegisterResponse("ws-1", &RegisterResponse{
+	newIDs, _, ok := d.mergeBuiltinRegisterResponse("ws-1", &RegisterResponse{
 		Runtimes: []Runtime{
 			{ID: "rt-builtin", Provider: "codex"},
 			{ID: "rt-custom", Provider: "codex", ProfileID: "prof-1"},
@@ -621,7 +623,7 @@ func TestMergeBuiltinRegisterResponse_NeverTouchesProfileSignature(t *testing.T)
 	ws.profileSetSig = "sig-before"
 	d.workspaces["ws-1"] = ws
 
-	if _, ok := d.mergeBuiltinRegisterResponse("ws-1", &RegisterResponse{
+	if _, _, ok := d.mergeBuiltinRegisterResponse("ws-1", &RegisterResponse{
 		Runtimes: []Runtime{{ID: "rt-1", Provider: "codex"}},
 	}); !ok {
 		t.Fatal("merge reported the workspace as untracked")

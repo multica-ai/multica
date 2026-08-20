@@ -37,7 +37,9 @@ describe("resolveTabPresentation — direct resources", () => {
         issue: { identifier: "MUL-1", title: "Fix", status: "in_progress" },
       }),
     ).toEqual({
-      visual: { kind: "issue-status", status: "in_progress" },
+      // `category` travels with the visual so the tab strip never has to guess
+      // the glyph for a custom status key. (MUL-6243)
+      visual: { kind: "issue-status", status: "in_progress", category: "in_progress" },
       title: { kind: "text", text: "MUL-1: Fix" },
     });
   });

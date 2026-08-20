@@ -113,6 +113,14 @@ func TestClassifyRules(t *testing.T) {
 		{"context deadline exceeded", "context deadline exceeded", ReasonAgentProviderNetwork},
 		{"wrapped context deadline", `Post "https://api.example.com/v1": context deadline exceeded`, ReasonAgentProviderNetwork},
 		{"http client timeout", `Get "https://api.example.com": net/http: request canceled (Client.Timeout exceeded while awaiting headers)`, ReasonAgentProviderNetwork},
+		// #6522: all three OpenCode terminal-signal guard failures are silent
+		// provider stream cuts. The two "terminal signal" variants used to hit
+		// rule 13 by accident (the word "signal") and the empty-step one fell
+		// to agent_error.unknown; neither bucket is retryable.
+		{"opencode step open at EOF", "opencode stream ended without a terminal signal (step still open at EOF)", ReasonAgentProviderNetwork},
+		{"opencode continuation never started", "opencode stream ended without a terminal signal (last step required a continuation that never started)", ReasonAgentProviderNetwork},
+		{"opencode empty final step", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing", ReasonAgentProviderNetwork},
+		{"opencode empty step with process exit appended", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing; opencode exited with error: exit status 1", ReasonAgentProviderNetwork},
 
 		// 8. Model not found / unavailable.
 		{"model not found", "Error: model claude-3-opus-99 not found", ReasonAgentModelNotFoundOrUnavailable},
@@ -131,6 +139,7 @@ func TestClassifyRules(t *testing.T) {
 
 		// 11. Runtime missing executable.
 		{"executable not found", "executable not found in $PATH", ReasonAgentRuntimeMissingExecutable},
+		{"exec format error", "start claude: fork/exec /usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe: exec format error", ReasonAgentRuntimeMissingExecutable},
 
 		// 12. Runtime version unsupported.
 		{"below the minimum supported version", "claude CLI 0.1.0 is below the minimum supported version 0.5.0", ReasonAgentRuntimeVersionUnsupported},
@@ -206,6 +215,7 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		// — the upstream classification should win because the
 		// process_failure rule is checked last.
 		{"exit status with 401 upstream", "exit status 1: API Error: 401 Unauthorized", ReasonAgentProviderAuthOrAccess},
+		{"windows codex process start", "start codex: fork/exec C:\\invalid\\codex.exe: %1 is not a valid Win32 application.", ReasonAgentProcessFailure},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -431,5 +441,129 @@ func TestNormalizeDaemonReason_UpgradedReasonIsPlatformSide(t *testing.T) {
 	got := NormalizeDaemonReason(string(ReasonAgentUnknown), "resolve skill bundles: context deadline exceeded")
 	if got.IsAgentError() {
 		t.Errorf("%q must be platform-side: the agent process never started", got)
+	}
+}
+
+// TestProviderUnconfigured pins the predicate the daemon uses to decide whether
+// a failure is worth annotating with the HERMES_HOME it actually read (GH
+// #6872). The wrapped fixture is the shape the error really arrives in — the
+// runtime's message nested inside the ACP transport's JSON-RPC framing — so a
+// future refactor to equality matching fails here rather than in production.
+func TestProviderUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{
+			"wrapped acp error as the daemon receives it",
+			`hermes session/new failed: session/new: Internal error (code=-32603, ` +
+				`data={"details":"No LLM provider configured. Run ` + "`hermes model`" + ` to select a provider."})`,
+			true,
+		},
+		{"bare runtime message", "No LLM provider configured. Run `hermes model` to select a provider.", true},
+		{"lowercased by a forwarder", "error: no llm provider configured", true},
+		// A credential that exists but was rejected is a different failure with
+		// a different fix; the annotation would misdirect the user.
+		{"rejected credential", "401 unauthorized: invalid api key", false},
+		// The provider WAS resolved — it just could not be reached.
+		{"provider unreachable", "connection refused: https://example.invalid/v1", false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ProviderUnconfigured(tc.in); got != tc.want {
+				t.Errorf("ProviderUnconfigured(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestProviderUnconfiguredAgreesWithClassify keeps the shared phrase honest:
+// the predicate and rule 2 read the same const, so anything the predicate
+// recognises must still be filed as a config problem. If these two ever
+// disagree, the daemon would be annotating failures the platform files as
+// something else entirely.
+func TestProviderUnconfiguredAgreesWithClassify(t *testing.T) {
+	t.Parallel()
+
+	const errText = "No LLM provider configured. Run `hermes model` to select a provider."
+	if !ProviderUnconfigured(errText) {
+		t.Fatal("precondition: the predicate should match its own phrase")
+	}
+	if got := Classify(errText); got != ReasonAgentMissingConfig {
+		t.Errorf("Classify(%q) = %q, want %q", errText, got, ReasonAgentMissingConfig)
+	}
+}
+
+// TestNormalizeDaemonReasonUpgradesOpenclawCLITimeout covers the mixed-version
+// window for #7112. A daemon that predates the timeout sentinel classifies the
+// failure from its text and lands on agent_error.provider_network, which is
+// worse than merely imprecise: that reason is on the auto-retry allowlist, so
+// every attempt re-pays the same 8-11s stall and fails identically, and the
+// chat bubble tells the user to check a network that was never involved.
+// Recognising the wire shape fixes both the moment the server deploys.
+func TestNormalizeDaemonReasonUpgradesOpenclawCLITimeout(t *testing.T) {
+	t.Parallel()
+
+	const rawError = "prepare execution environment: execenv: prepare openclaw config: " +
+		"locate openclaw active config: openclaw config file: context deadline exceeded " +
+		"(process: signal: killed)"
+
+	for _, legacy := range []string{
+		string(ReasonAgentProviderNetwork),
+		string(ReasonAgentUnknown),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(legacy, rawError); got != ReasonRuntimeCLITimeout {
+			t.Errorf("NormalizeDaemonReason(%q, openclaw timeout) = %q, want %q", legacy, got, ReasonRuntimeCLITimeout)
+		}
+	}
+
+	// A current daemon already reports the precise reason; normalization must
+	// leave it alone.
+	if got := NormalizeDaemonReason(string(ReasonRuntimeCLITimeout), rawError); got != ReasonRuntimeCLITimeout {
+		t.Errorf("NormalizeDaemonReason(runtime_cli_timeout) = %q, want it preserved", got)
+	}
+
+	// Both witnesses are required. A real provider-side deadline, and an
+	// openclaw prep failure that is not a timeout, must keep their own
+	// classification — the global "deadline exceeded" rule still belongs to
+	// genuine network stalls.
+	unrelated := map[string]struct {
+		reason   string
+		rawError string
+		want     Reason
+	}{
+		"provider deadline stays provider_network": {
+			reason:   string(ReasonAgentProviderNetwork),
+			rawError: "API Error: context deadline exceeded while streaming from provider",
+			want:     ReasonAgentProviderNetwork,
+		},
+		"openclaw prep failure without a timeout is untouched": {
+			reason:   string(ReasonAgentUnknown),
+			rawError: "execenv: prepare openclaw config: read openclaw agents.list: exit status 1",
+			want:     ReasonAgentUnknown,
+		},
+	}
+	for name, tc := range unrelated {
+		if got := NormalizeDaemonReason(tc.reason, tc.rawError); got != tc.want {
+			t.Errorf("%s: NormalizeDaemonReason = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// TestClassifyKeepsDeadlineExceededAsProviderNetwork pins the rule the fix
+// deliberately did NOT touch. Local runtime CLI timeouts are recognised
+// structurally, upstream of Classify; the text rule still has to serve real
+// provider stalls, which are transient and retryable.
+func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
+	t.Parallel()
+
+	if got := Classify("post to provider: context deadline exceeded"); got != ReasonAgentProviderNetwork {
+		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
 	}
 }

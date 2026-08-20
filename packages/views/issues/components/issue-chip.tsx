@@ -1,5 +1,7 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
+import type { ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { issueListOptions, issueDetailOptions } from "@multica/core/issues/queries";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -7,13 +9,23 @@ import { StatusIcon } from "./status-icon";
 
 /**
  * Compact, presentation-only representation of an issue —
- * `<StatusIcon> <identifier> <title>`, bordered, capped at the container width
- * (`max-w-full`) with the title truncating to an ellipsis. As an atomic inline
- * box it wraps to the next line as a unit when it doesn't fit at the current
- * position; the ellipsis only kicks in once a whole line can't hold it. The cap
- * lives here (single source of truth) — wrappers must NOT add their own flex
- * container around it, or a percentage cap gets dropped during the wrapper's
- * intrinsic sizing and the clickable box diverges from the truncated chip.
+ * `<StatusIcon> <identifier> <title>`, bordered, with the title truncating to
+ * an ellipsis once the chip hits its width cap.
+ *
+ * The cap is `min(18rem, 100%)` — two limits doing two different jobs:
+ *   - `18rem` bounds the chip against the *content*, so a long title can never
+ *     grow the chip wide enough to dominate a line of prose. Without it a chip
+ *     is an atomic inline box that wraps to the next line as a unit whenever it
+ *     doesn't fit at the current position, leaving a ragged gap on the line
+ *     above — the reference-dense-prose problem from #6732.
+ *   - `100%` bounds it against the *container*, keeping the chip inside narrow
+ *     parents such as a chat bubble.
+ * `ProjectChip` carries the identical cap; the two must not drift.
+ *
+ * The cap lives here (single source of truth) — wrappers must NOT add their own
+ * flex container around it, or a percentage cap gets dropped during the
+ * wrapper's intrinsic sizing and the clickable box diverges from the truncated
+ * chip.
  *
  * This is the single source of truth for the "issue-mention card" look.
  * It is intentionally **not** a link or button: callers wrap it in whatever
@@ -28,15 +40,22 @@ export interface IssueChipProps {
   issueId: string;
   /** Shown when the issue can't be resolved (deleted, other workspace, …). */
   fallbackLabel?: string;
+  /** Optional content override for callers that need the shared chip shell. */
+  children?: ReactNode;
   /** Extra classes — callers layer interaction hints here
    *  (e.g. `hover:bg-accent cursor-pointer` for navigable variants). */
   className?: string;
 }
 
 const BASE_CLASS =
-  "issue-mention inline-flex min-w-0 max-w-full items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption";
+  "issue-mention inline-flex min-w-0 max-w-[min(18rem,100%)] items-center gap-1.5 rounded-md border mx-0.5 px-2 py-0.5 text-caption";
 
-export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps) {
+export function IssueChip({
+  issueId,
+  fallbackLabel,
+  children,
+  className,
+}: IssueChipProps) {
   const wsId = useWorkspaceId();
   const { data: issues = [] } = useQuery(issueListOptions(wsId));
   const listIssue = issues.find((i) => i.id === issueId);
@@ -50,6 +69,10 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
   const issue = listIssue ?? detailIssue;
   const cls = className ? `${BASE_CLASS} ${className}` : BASE_CLASS;
 
+  if (children !== undefined) {
+    return <span className={cls}>{children}</span>;
+  }
+
   if (!issue) {
     return (
       <span className={cls}>
@@ -62,7 +85,11 @@ export function IssueChip({ issueId, fallbackLabel, className }: IssueChipProps)
 
   return (
     <span className={cls}>
-      <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+      <StatusIcon
+        status={issue.status}
+        category={issueStatusCategory(issue) ?? undefined}
+        className="h-3.5 w-3.5 shrink-0"
+      />
       <span className="font-medium text-muted-foreground shrink-0">
         {issue.identifier}
       </span>

@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { ReactNode, SyntheticEvent } from "react";
 import { ArrowUp, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -39,6 +39,11 @@ interface SubmitButtonProps {
   stopAriaLabel?: string;
 }
 
+/** Keep the composer focused so Send and Stop do not dismiss Android's keyboard. */
+function keepFocusInComposer(event: SyntheticEvent<HTMLButtonElement>) {
+  event.preventDefault();
+}
+
 function SubmitButton({
   onClick,
   disabled,
@@ -56,19 +61,20 @@ function SubmitButton({
       <Button
         size="icon-sm"
         className="rounded-full"
+        onPointerDown={keepFocusInComposer}
+        onMouseDown={keepFocusInComposer}
         onClick={onStop}
         aria-label={stopAriaLabel}
       >
         <Square className="fill-current" aria-hidden="true" />
       </Button>
     );
-    if (!stopTooltip) return stopButton;
-    return (
+    return stopTooltip ? (
       <Tooltip>
         <TooltipTrigger render={stopButton} />
         <TooltipContent side="top">{stopTooltip}</TooltipContent>
       </Tooltip>
-    );
+    ) : stopButton;
   }
 
   const submitButton = (
@@ -77,7 +83,9 @@ function SubmitButton({
       className="rounded-full"
       disabled={disabled || loading || busy}
       aria-disabled={busy || undefined}
-      aria-busy={busy || undefined}
+      aria-busy={loading || busy || undefined}
+      onPointerDown={keepFocusInComposer}
+      onMouseDown={keepFocusInComposer}
       onClick={onClick}
       aria-label={ariaLabel}
     >
@@ -93,13 +101,15 @@ function SubmitButton({
       )}
     </Button>
   );
-  if (!tooltip) return submitButton;
-  return (
-    <Tooltip>
-      <TooltipTrigger render={submitButton} />
-      <TooltipContent side="top">{tooltip}</TooltipContent>
-    </Tooltip>
-  );
+  const submitControl = !tooltip
+    ? submitButton
+    : (
+        <Tooltip>
+          <TooltipTrigger render={submitButton} />
+          <TooltipContent side="top">{tooltip}</TooltipContent>
+        </Tooltip>
+      );
+  return submitControl;
 }
 
 export { SubmitButton, type SubmitButtonProps };

@@ -1,32 +1,40 @@
 ---
 title: チャット連携
-description: Multica のエージェントを Feishu、Lark、Slack に接続し、チームが普段使っているチャットツールから利用する方法を説明します。
+description: Multica のエージェントを Feishu、Lark、Slack、DingTalk、WeCom、Telegram に接続し、チームが普段使っているチャットツールから利用する方法を説明します。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 チャット連携を使うと、Multica を開かなくても、エージェントへの質問、グループチャットでの @メンション、チャット画面からのイシュー作成ができます。
 
-現在は Feishu/Lark と Slack に対応しています。どちらもセッション、ユーザー識別、実行の仕組みは共通ですが、インストール方法が異なります。
+現在は Feishu/Lark、Slack、DingTalk、WeCom、Telegram に対応しています。セッション、ユーザー識別、実行の仕組みは共通ですが、インストール方法が異なります。
 
 ## プラットフォームを選ぶ
 
-| | Feishu / Lark | Slack |
-|---|---|---|
-| インストール | Multica で QR コードを生成し、Feishu でスキャンして認証 | Slack でアプリを作成し、2 つのトークンを Multica に入力 |
-| エージェントとの DM | 対応 | 対応 |
-| グループまたはチャンネル | Bot を @メンションするとトリガー | Bot を @メンションするとトリガー |
-| イシューの作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 | `/issue` スラッシュコマンド。エージェントが説明を整理してから作成 |
-| 接続方式 | プラットフォームの常時接続 | Socket Mode |
+| | Feishu / Lark | Slack | DingTalk | WeCom | Telegram |
+|---|---|---|---|---|---|
+| インストール | Multica で QR コードを生成し、Feishu でスキャンして認証 | Slack でアプリを作成し、2 つのトークンを Multica に入力 | 社内アプリと Stream モードのロボットを作成し、AppKey と AppSecret を Multica に入力 | WeCom 管理コンソールで常時接続を有効にしたスマートボットを作成し、Bot ID と Secret を Multica に入力 | @BotFather で Bot を作成し、token を Multica に入力 |
+| エージェントとの DM | 対応 | 対応 | 対応 | 対応 | 対応 |
+| グループまたはチャンネル | Bot を @メンションするとトリガー | Bot を @メンションするとトリガー | Bot を @メンションするとトリガー | Bot を @メンションするとトリガー | Bot を @メンション、または Bot に返信するとトリガー |
+| イシューの作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 | `/issue` スラッシュコマンド。エージェントが説明を整理してから作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 | `/issue` メッセージコマンド。入力内容からそのまま作成 |
+| 接続方式 | プラットフォームの常時接続 | Socket Mode | Stream モード | プラットフォームの常時接続 | `getUpdates` long polling |
 
 新規接続は現在、中国本土版の Feishu でのみ利用できます。既存の国際版 Lark 接続は、引き続き利用および管理できます。
 
 各 Bot は 1 つの Multica エージェントに紐づきます。同じチャットプラットフォームで複数のエージェントを使う場合は、エージェントごとに Bot を接続してください。
 
+DingTalk、WeCom、Telegram は[コミュニティメンテナンス](/community-maintained)です。各リリースに含まれますが、公式サポート SLA はありません。問題は [GitHub issues](https://github.com/multica-ai/multica/issues) で報告してください。
+
+WeCom が現在扱えるのはテキストメッセージのみです。音声、画像、ファイルのメッセージにはその旨の短い返信が返り、エージェントには渡されません。
+
+Telegram が現在扱えるのはテキストメッセージのみです。未対応のメディアにはその旨の短い返信が返り、エージェントには渡されません。
+
 詳しい手順:
 
 - [Feishu / Lark Bot 連携](/lark-bot-integration)
 - [Slack Bot 連携](/slack-bot-integration)
+- [DingTalk Bot 連携](/dingtalk-bot-integration)
+- [Telegram Bot 連携](/telegram-bot-integration)
 
 ## メッセージが処理される流れ
 
@@ -38,10 +46,15 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Bot を @メンションしていないチャンネルメッセージは、エージェントをトリガーせず、会話コンテキストにも追加されません。
 
+通常のメッセージはこの流れで処理されます。`/issue` はコマンドであり、チャットのターンではありません。Multica は元のプラットフォームに結果を返しますが、コマンド自体は Multica Chat に追加しません。Slack のネイティブスラッシュコマンドは、独立した非同期のタスク作成フローで処理されます。
+
 ## セッションの分離
 
 - Feishu/Lark はチャットごとにセッションを分けます。同じチャットの後続メッセージは同じセッションを継続します。
 - Slack は DM をチャンネルごとに分けます。チャンネル内では、スレッドごとに独立したセッションが保持されます。
+- DingTalk は conversation ごとにセッションを分けます。DM とグループはそれぞれのセッションを継続します。
+- WeCom はチャットごとにセッションを分けます。DM とグループチャットはそれぞれのセッションを継続します。
+- Telegram はチャットごとにセッションを分け、forum topic は topic ごとに分離します。
 
 チャンネルで追加の依頼を送る場合も、Bot を再度 @メンションする必要があります。エージェントが受け取るのは自分宛てのメッセージだけで、チャンネルの履歴全体を自動的に読み取ることはありません。
 
@@ -68,12 +81,19 @@ Multica がエージェントを実行するのは、アカウント連携が完
 ```dotenv
 MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
 これらのキーは、保存された Bot の認証情報を暗号化します。生成、保管、ローテーションの方法は[環境変数](/environment-variables)を参照してください。Multica Cloud ではすでに設定済みです。
+
+WeCom はさらにバックエンドを**単一レプリカ**で運用する必要があります。送信経路が 1 つのプロセスが保持する WebSocket だけのため、他のレプリカで生成された返信は破棄されます。レプリカ間の送信ルーティングが実装されるまで、WeCom を有効にしたバックエンドは多重化しないでください。
 
 ## 次のステップ
 
 - [Feishu / Lark Bot 連携](/lark-bot-integration)
 - [Slack Bot 連携](/slack-bot-integration)
+- [DingTalk Bot 連携](/dingtalk-bot-integration)
+- [Telegram Bot 連携](/telegram-bot-integration)
 - [エージェントとチャットする](/chat)

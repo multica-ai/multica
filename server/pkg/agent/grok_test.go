@@ -109,7 +109,7 @@ while IFS= read -r line; do
       if [ -n "$GROK_USAGE" ]; then
         # Match live Grok Build ACP (0.2.x): metering lives under result._meta,
         # not a top-level usage field or sessionUpdate=usage_update.
-        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","_meta":{"sessionId":"ses_new","modelId":"grok-4.5","inputTokens":120,"outputTokens":30,"cachedReadTokens":20,"usage":{"inputTokens":120,"outputTokens":30,"totalTokens":150,"cachedReadTokens":20,"modelCalls":1,"costUsdTicks":98765}}}}\n' "$id"
+        printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","_meta":{"sessionId":"ses_new","modelId":"grok-4.5","inputTokens":120,"outputTokens":30,"cachedReadTokens":20,"cachedWriteTokens":5,"usage":{"inputTokens":120,"outputTokens":30,"totalTokens":150,"cachedReadTokens":20,"cachedWriteTokens":5,"modelCalls":1,"costUsdTicks":98765}}}}\n' "$id"
       else
         printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
       fi
@@ -613,7 +613,7 @@ func TestGrokPropagatesMCPAndUsage(t *testing.T) {
 	// The fixture's totalTokens (150) equals input + output, so its 20 cached
 	// reads sit inside inputTokens and are billed once: input is stored as the
 	// uncached remainder 120 - 20 = 100.
-	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 {
+	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 || usage.CacheWriteTokens != 5 {
 		t.Fatalf("unexpected usage: %+v", usage)
 	}
 	// xAI's own price for the turn has to survive the whole backend, not just
@@ -667,8 +667,11 @@ func TestGrokAttributesUsageOnResumeWithoutConfiguredModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("usage missing grok-4.5 key: %+v", result.Usage)
 	}
-	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 {
+	if usage.InputTokens != 100 || usage.OutputTokens != 30 || usage.CacheReadTokens != 20 || usage.CacheWriteTokens != 5 {
 		t.Fatalf("unexpected usage: %+v", usage)
+	}
+	if usage.CostUSDTicks != 98765 {
+		t.Fatalf("cost ticks = %d, want 98765", usage.CostUSDTicks)
 	}
 }
 
@@ -743,7 +746,7 @@ func TestDiscoverGrokModelsWaitsForAdvertisedAuth(t *testing.T) {
 	t.Setenv("GROK_AUTH_METHODS", "api")
 	t.Setenv("XAI_API_KEY", "test-only-key")
 
-	catalog, err := discoverGrokModels(context.Background(), fakePath)
+	catalog, err := discoverGrokModels(context.Background(), Command{Path: fakePath})
 	if err != nil {
 		t.Fatalf("discover grok models: %v", err)
 	}
@@ -789,7 +792,7 @@ func TestDiscoverGrokModelsStopsOnAuthFailures(t *testing.T) {
 			t.Setenv("GROK_AUTH_FAIL", tc.authFail)
 			t.Setenv("XAI_API_KEY", "")
 
-			catalog, err := discoverGrokModels(context.Background(), fakePath)
+			catalog, err := discoverGrokModels(context.Background(), Command{Path: fakePath})
 			if err != nil {
 				t.Fatalf("discover grok models: %v", err)
 			}
@@ -848,7 +851,7 @@ func TestGrokValidateThinkingLevelUsesPerModelCatalog(t *testing.T) {
 		{model: "grok-composer-2.5-fast", level: "low", want: false},
 		{model: "future-grok", level: "high", want: false},
 	} {
-		got, err := ValidateThinkingLevel(context.Background(), "grok", "/nonexistent/grok", tc.model, tc.level)
+		got, err := ValidateThinkingLevel(context.Background(), "grok", Command{Path: "/nonexistent/grok"}, tc.model, tc.level)
 		if err != nil {
 			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
 		}

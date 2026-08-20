@@ -3,12 +3,16 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
+	"github.com/multica-ai/multica/server/internal/featureflags"
+	"github.com/multica-ai/multica/server/internal/middleware"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // proxyExpectation captures the assertions every standard
@@ -244,6 +248,320 @@ func TestCloudBillingDisabledReturnsUnavailable(t *testing.T) {
 	}
 }
 
+func withCloudSubscriptionWorkspace(req *http.Request, role string) *http.Request {
+	ctx := middleware.SetMemberContext(req.Context(), testWorkspaceID, db.Member{Role: role})
+	return req.WithContext(ctx)
+}
+
+func TestCloudWorkspaceSubscriptionsDisabledByDefault(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, false)
+
+	reads := map[string]func(http.ResponseWriter, *http.Request){
+		"/api/cloud-subscriptions/entitlements": testHandler.GetCloudWorkspaceEntitlements,
+		"/api/cloud-subscriptions/summary":      testHandler.GetCloudWorkspaceSubscriptionSummary,
+		"/api/cloud-subscriptions/prices":       testHandler.GetCloudWorkspaceSubscriptionPrices,
+	}
+	for path, invoke := range reads {
+		t.Run(path, func(t *testing.T) {
+			proxy := &fakeCloudRuntimeProxy{enabled: true}
+			useCloudRuntimeProxy(t, proxy)
+
+			req := withCloudSubscriptionWorkspace(newRequest(http.MethodGet, path, nil), "member")
+			w := httptest.NewRecorder()
+			invoke(w, req)
+
+			if w.Code != http.StatusServiceUnavailable {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+			}
+			if proxy.called {
+				t.Fatal("upstream must not be called while the feature flag is off")
+			}
+		})
+	}
+}
+
+func TestCloudWorkspaceSubscriptionReadAndWritesUseScopedPaths(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+
+	cases := []struct {
+		name       string
+		method     string
+		path       string
+		role       string
+		wantStatus int
+		wantPath   string
+		invoke     func(http.ResponseWriter, *http.Request)
+	}{
+		{
+			name:       "member reads entitlements",
+			method:     http.MethodGet,
+			path:       "/api/cloud-subscriptions/entitlements",
+			role:       "member",
+			wantStatus: http.StatusOK,
+			wantPath:   "/api/v1/entitlements/" + testWorkspaceID,
+			invoke:     testHandler.GetCloudWorkspaceEntitlements,
+		},
+		{
+			name:       "member reads billing summary",
+			method:     http.MethodGet,
+			path:       "/api/cloud-subscriptions/summary",
+			role:       "member",
+			wantStatus: http.StatusOK,
+			wantPath:   "/api/v1/subscriptions/" + testWorkspaceID + "/summary",
+			invoke:     testHandler.GetCloudWorkspaceSubscriptionSummary,
+		},
+		{
+			name:       "member reads seat prices",
+			method:     http.MethodGet,
+			path:       "/api/cloud-subscriptions/prices",
+			role:       "member",
+			wantStatus: http.StatusOK,
+			wantPath:   "/api/v1/subscriptions/" + testWorkspaceID + "/prices",
+			invoke:     testHandler.GetCloudWorkspaceSubscriptionPrices,
+		},
+		{
+			name:       "admin reconciles seats",
+			method:     http.MethodPost,
+			path:       "/api/cloud-subscriptions/seats/reconcile",
+			role:       "admin",
+			wantStatus: http.StatusOK,
+			wantPath:   "/api/v1/subscriptions/" + testWorkspaceID + "/seats/reconcile",
+			invoke:     testHandler.ReconcileCloudWorkspaceSubscriptionSeats,
+		},
+		{
+			name:       "owner opens portal",
+			method:     http.MethodPost,
+			path:       "/api/cloud-subscriptions/portal-sessions",
+			role:       "owner",
+			wantStatus: http.StatusOK,
+			wantPath:   "/api/v1/subscriptions/" + testWorkspaceID + "/portal-sessions",
+			invoke:     testHandler.CreateCloudWorkspaceSubscriptionPortal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy := &fakeCloudRuntimeProxy{
+				enabled: true,
+				resp: &cloudruntime.Response{
+					StatusCode: tc.wantStatus,
+					Body:       []byte(`{"ok":true}`),
+				},
+			}
+			useCloudRuntimeProxy(t, proxy)
+
+			req := withCloudSubscriptionWorkspace(newRequest(tc.method, tc.path, nil), tc.role)
+			if strings.Contains(tc.path, "portal-sessions") {
+				req.Header.Set(idempotencyKeyHeader, "portal-request-1")
+			}
+			w := httptest.NewRecorder()
+			tc.invoke(w, req)
+
+			if w.Code != tc.wantStatus {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+			}
+			if proxy.req.Method != tc.method || proxy.req.Path != tc.wantPath {
+				t.Fatalf("upstream = %s %s, want %s %s", proxy.req.Method, proxy.req.Path, tc.method, tc.wantPath)
+			}
+			if proxy.req.UserID != testUserID {
+				t.Fatalf("upstream user_id = %q, want %q", proxy.req.UserID, testUserID)
+			}
+			if proxy.req.Op != "billing" {
+				t.Fatalf("upstream op = %q, want billing", proxy.req.Op)
+			}
+			if strings.Contains(tc.path, "portal-sessions") && proxy.req.Headers.Get(idempotencyKeyHeader) != "portal-request-1" {
+				t.Fatalf("upstream idempotency key = %q", proxy.req.Headers.Get(idempotencyKeyHeader))
+			}
+		})
+	}
+}
+
+func TestCreateCloudWorkspaceSubscriptionCheckoutInjectsAuthoritativeWorkspace(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{
+		enabled: true,
+		resp: &cloudruntime.Response{
+			StatusCode: http.StatusCreated,
+			Body:       []byte(`{"url":"https://checkout.stripe.test/session"}`),
+		},
+	}
+	useCloudRuntimeProxy(t, proxy)
+
+	req := newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{
+		"workspace_id":    "00000000-0000-0000-0000-000000000001",
+		"interval":        "year",
+		"idempotency_key": "checkout-request-1",
+		"customer_email":  "payer@example.com",
+	})
+	req.Header.Set(idempotencyKeyHeader, "checkout-header-1")
+	req = withCloudSubscriptionWorkspace(req, "owner")
+	w := httptest.NewRecorder()
+	testHandler.CreateCloudWorkspaceSubscriptionCheckout(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if proxy.req.Path != "/api/v1/subscriptions/checkout-sessions" || proxy.req.Method != http.MethodPost {
+		t.Fatalf("upstream = %s %s", proxy.req.Method, proxy.req.Path)
+	}
+	var body cloudSubscriptionCheckoutUpstreamRequest
+	if err := json.Unmarshal(proxy.req.Body, &body); err != nil {
+		t.Fatalf("decode upstream body: %v", err)
+	}
+	if body.WorkspaceID != testWorkspaceID {
+		t.Fatalf("upstream workspace_id = %q, want middleware workspace %q", body.WorkspaceID, testWorkspaceID)
+	}
+	if body.Interval != "year" || body.IdempotencyKey != "checkout-request-1" || body.CustomerEmail != "payer@example.com" {
+		t.Fatalf("upstream body = %+v", body)
+	}
+	if got := proxy.req.Headers.Get(idempotencyKeyHeader); got != "checkout-header-1" {
+		t.Fatalf("upstream idempotency key = %q", got)
+	}
+}
+
+func TestCreateCloudWorkspaceSubscriptionCheckoutAcceptsHeaderIdempotencyKey(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{
+		enabled: true,
+		resp: &cloudruntime.Response{
+			StatusCode: http.StatusCreated,
+			Body:       []byte(`{"url":"https://checkout.stripe.test/session"}`),
+		},
+	}
+	useCloudRuntimeProxy(t, proxy)
+
+	req := withCloudSubscriptionWorkspace(
+		newRequest(http.MethodPost, "/api/cloud-subscriptions/checkout-sessions", map[string]any{"interval": "month"}),
+		"admin",
+	)
+	req.Header.Set(idempotencyKeyHeader, "checkout-header-only")
+	w := httptest.NewRecorder()
+	testHandler.CreateCloudWorkspaceSubscriptionCheckout(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var body cloudSubscriptionCheckoutUpstreamRequest
+	if err := json.Unmarshal(proxy.req.Body, &body); err != nil {
+		t.Fatalf("decode upstream body: %v", err)
+	}
+	if body.IdempotencyKey != "checkout-header-only" {
+		t.Fatalf("upstream body idempotency_key = %q", body.IdempotencyKey)
+	}
+}
+
+func TestCloudWorkspaceSubscriptionWritesRequireManagerRole(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{enabled: true}
+	useCloudRuntimeProxy(t, proxy)
+
+	req := withCloudSubscriptionWorkspace(
+		newRequest(http.MethodPost, "/api/cloud-subscriptions/portal-sessions", nil),
+		"member",
+	)
+	w := httptest.NewRecorder()
+	testHandler.CreateCloudWorkspaceSubscriptionPortal(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if proxy.called {
+		t.Fatal("upstream must not be called for a non-manager member")
+	}
+}
+
+func TestCloudWorkspaceSubscriptionsRejectMachineActorsAtHandler(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+
+	for _, actorSource := range []string{"task_token", "cloud_pat"} {
+		t.Run(actorSource, func(t *testing.T) {
+			proxy := &fakeCloudRuntimeProxy{enabled: true}
+			useCloudRuntimeProxy(t, proxy)
+
+			req := withCloudSubscriptionWorkspace(
+				newRequest(http.MethodPost, "/api/cloud-subscriptions/portal-sessions", nil),
+				"owner",
+			)
+			req.Header.Set("X-Actor-Source", actorSource)
+			req.Header.Set(idempotencyKeyHeader, "portal-request-1")
+			w := httptest.NewRecorder()
+			testHandler.CreateCloudWorkspaceSubscriptionPortal(w, req)
+
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+			}
+			if proxy.called {
+				t.Fatal("upstream must not be called for a machine actor")
+			}
+		})
+	}
+}
+
+func TestCloudWorkspaceSubscriptionMutationsValidateLocally(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+
+	cases := []struct {
+		name      string
+		path      string
+		body      any
+		header    string
+		wantError string
+		invoke    func(http.ResponseWriter, *http.Request)
+	}{
+		{
+			name:      "checkout missing idempotency key",
+			path:      "/api/cloud-subscriptions/checkout-sessions",
+			body:      map[string]any{"interval": "month"},
+			wantError: "Idempotency-Key or idempotency_key is required",
+			invoke:    testHandler.CreateCloudWorkspaceSubscriptionCheckout,
+		},
+		{
+			name:      "checkout invalid interval",
+			path:      "/api/cloud-subscriptions/checkout-sessions",
+			body:      map[string]any{"interval": "weekly", "idempotency_key": "checkout-request-1"},
+			wantError: "interval must be month or year",
+			invoke:    testHandler.CreateCloudWorkspaceSubscriptionCheckout,
+		},
+		{
+			name:      "portal missing idempotency key",
+			path:      "/api/cloud-subscriptions/portal-sessions",
+			wantError: "Idempotency-Key or idempotency_key is required",
+			invoke:    testHandler.CreateCloudWorkspaceSubscriptionPortal,
+		},
+		{
+			name:      "portal oversized idempotency key",
+			path:      "/api/cloud-subscriptions/portal-sessions",
+			header:    strings.Repeat("a", maxCloudSubscriptionIdempotencyKeyLength+1),
+			wantError: "idempotency key must be at most 255 bytes",
+			invoke:    testHandler.CreateCloudWorkspaceSubscriptionPortal,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy := &fakeCloudRuntimeProxy{enabled: true}
+			useCloudRuntimeProxy(t, proxy)
+
+			req := withCloudSubscriptionWorkspace(newRequest(http.MethodPost, tc.path, tc.body), "owner")
+			if tc.header != "" {
+				req.Header.Set(idempotencyKeyHeader, tc.header)
+			}
+			w := httptest.NewRecorder()
+			tc.invoke(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+			}
+			if !strings.Contains(w.Body.String(), tc.wantError) {
+				t.Fatalf("body = %s, want error containing %q", w.Body.String(), tc.wantError)
+			}
+			if proxy.called {
+				t.Fatal("upstream must not be called for a locally invalid request")
+			}
+		})
+	}
+}
+
 // --- Stripe webhook ---
 
 // TestStripeWebhookForwardsRawBodyAndSignature is the critical
@@ -301,6 +619,9 @@ func TestStripeWebhookForwardsRawBodyAndSignature(t *testing.T) {
 	}
 	if proxy.req.UserID != "" {
 		t.Errorf("upstream user_id should be empty for webhook, got %q", proxy.req.UserID)
+	}
+	if proxy.req.Op != "billing" {
+		t.Errorf("upstream op = %q, want billing", proxy.req.Op)
 	}
 }
 
@@ -399,7 +720,6 @@ func TestStripeWebhookDisabledReturnsUnavailable(t *testing.T) {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
 }
-
 
 // TestStripeWebhookRateLimited pins the per-IP rate-limit fast
 // path. With a denying limiter installed the handler must 429

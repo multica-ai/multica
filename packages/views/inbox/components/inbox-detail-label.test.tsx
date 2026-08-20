@@ -11,6 +11,19 @@ vi.mock("../../issues/components", () => ({
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({ getActorName: () => "Someone" }),
 }));
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  // Leaf render test: stub the catalog the same way the other data hooks are
+  // stubbed, so the component can be mounted without a QueryClientProvider.
+  useIssueStatuses: () => ({
+    statuses: [],
+    activeStatuses: [],
+    categoryOf: (key: string) => key,
+    labelOf: (key: string) => key,
+    entryOf: () => undefined,
+    inCategory: () => [],
+    isLoaded: true,
+  }),
+}));
 
 // Resolve accessors against the REAL en locale rather than a stub, so this
 // test fails if the unconfirmed case is ever re-pointed at a label that

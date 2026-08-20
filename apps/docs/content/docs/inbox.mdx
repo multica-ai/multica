@@ -45,7 +45,7 @@ The inbox is only for workspace members. Even when an agent is the assignee or a
 
 ## Handle notifications
 
-Selecting a notification marks it as read. Archive it when you're done; archiving doesn't modify or delete the corresponding issue. Once an issue reaches `in_review`, `done`, or `cancelled`, its run-failure notifications archive automatically.
+Selecting a notification marks it as read. Archive it when you're done; archiving doesn't modify or delete the corresponding issue. Once an issue reaches a status in the `in_review`, `done`, or `cancelled` category, its run-failure notifications archive automatically.
 
 Right-click a notification for **Mark as read** / **Mark as unread** and **Archive** (**Unarchive** in the Archived view). Mark as unread is the "I looked, but I'm not done with this" action: the notification goes back to unread and raises the unread count again, and it stays unread even while you keep it open — opening it again later marks it read as usual. Archived notifications keep their read state, so restoring one brings it back exactly as you left it.
 
@@ -62,11 +62,12 @@ Open **Settings → Notifications** to toggle each group separately:
 
 - assignments;
 - status changes;
-- comments and mentions;
+- comments;
+- mentions;
 - priority and dates;
 - agent activity.
 
-Turning a group off doesn't stop the changes from being recorded on the issue — it only stops the inbox notifications. A few types, such as reactions, quick-create results, and autopilot pauses, sit outside these five groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
+Turning a group off doesn't stop the changes from being recorded on the issue — it only stops the inbox notifications. A few types, such as reactions, quick-create results, and autopilot pauses, sit outside these six groups and are always delivered. System and browser notifications control desktop banners and don't change the inbox itself.
 
 ## Next steps
 

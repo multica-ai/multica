@@ -31,7 +31,9 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useModalStore } from "@multica/core/modals";
 import { useWorkspacePaths } from "@multica/core/paths";
 import {
+  agentDetailOptions,
   agentListOptions,
+  cacheAgentResponse,
   memberListOptions,
   workspaceKeys,
 } from "@multica/core/workspace/queries";
@@ -88,22 +90,29 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // The hook owns the 30s tick so the failed-window auto-clears here too.
   const { byAgent: presenceMap } = useWorkspacePresenceMap(wsId);
 
-  const agent = agents.find((a) => a.id === agentId) ?? null;
-  const presence: AgentPresenceDetail | null =
-    agent ? presenceMap.get(agent.id) ?? null : null;
+  const listAgent = agents.find((a) => a.id === agentId) ?? null;
 
-  // Fallback fetch: when the agent is missing from the workspace list, hit
-  // GET /api/agents/{id} directly to disambiguate "doesn't exist" (404) from
-  // "you can't see this private agent" (403). Only fires after the list has
-  // settled, so the common path makes zero extra requests.
-  const { error: detailError } = useQuery({
-    queryKey: ["agent-detail-probe", wsId, agentId],
-    queryFn: () => api.getAgent(agentId),
-    enabled: !agentsLoading && !agent && !!agentId,
-    retry: false,
+  // The list remains the zero-request common path. When it has settled
+  // without the requested agent, use the canonical detail query to resolve
+  // direct links and distinguish 403/404 from transient failures. Creation
+  // hydrates this same key, so a newly-created agent renders immediately.
+  const detailQuery = useQuery({
+    ...agentDetailOptions(wsId, agentId),
+    enabled: !agentsLoading && !listAgent && !!agentId,
   });
+  const detailError = detailQuery.error;
   const isForbidden =
     detailError instanceof ApiError && detailError.status === 403;
+  const isNotFound =
+    detailError instanceof ApiError && detailError.status === 404;
+  // TanStack intentionally keeps successful data when a refetch fails. Do not
+  // let that stale snapshot mask a later 403/404 after access is revoked or the
+  // agent is deleted, but preserve it through transient network failures. A
+  // still-visible list response remains authoritative in either case.
+  const agent =
+    listAgent ?? (isForbidden || isNotFound ? null : detailQuery.data) ?? null;
+  const presence: AgentPresenceDetail | null =
+    agent ? presenceMap.get(agent.id) ?? null : null;
 
   // Permission hook MUST be called unconditionally — its `agent | null`
   // signature handles the not-found / loading case internally so the early
@@ -140,32 +149,52 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         ? { ...data, runtime_bound: data.runtime_id.trim().length > 0 }
         : data;
     const queryKey = workspaceKeys.agents(wsId);
+    const detailQueryKey = workspaceKeys.agent(wsId, id);
     const prevAgents = qc.getQueryData<Agent[]>(queryKey);
-    const prevAgent = prevAgents?.find((a) => a.id === id);
-    const prevFields: Record<string, unknown> = {};
-    if (prevAgent) {
+    const prevListAgent = prevAgents?.find((a) => a.id === id);
+    const prevDetailAgent = qc.getQueryData<Agent>(detailQueryKey);
+    const previousFields = (previousAgent: Agent | undefined) => {
+      const fields: Record<string, unknown> = {};
+      if (!previousAgent) return fields;
       for (const key of Object.keys(optimisticData)) {
-        prevFields[key] = (prevAgent as unknown as Record<string, unknown>)[key];
+        fields[key] = (
+          previousAgent as unknown as Record<string, unknown>
+        )[key];
       }
-    }
+      return fields;
+    };
+    const prevListFields = previousFields(prevListAgent);
+    const prevDetailFields = previousFields(prevDetailAgent);
     qc.setQueryData<Agent[]>(queryKey, (old) =>
       old?.map((a) =>
         a.id === id ? ({ ...a, ...optimisticData } as Agent) : a,
       ),
     );
+    qc.setQueryData<Agent>(detailQueryKey, (old) =>
+      old ? ({ ...old, ...optimisticData } as Agent) : old,
+    );
     try {
-      await api.updateAgent(id, data as UpdateAgentRequest);
-      qc.invalidateQueries({ queryKey });
+      const updatedAgent = await api.updateAgent(
+        id,
+        data as UpdateAgentRequest,
+      );
+      cacheAgentResponse(qc, wsId, updatedAgent, { insertIntoList: false });
+      void qc.invalidateQueries({ queryKey });
       toast.success(t(($) => $.detail.agent_updated_toast));
     } catch (e) {
-      if (prevAgent) {
+      if (prevListAgent) {
         qc.setQueryData<Agent[]>(queryKey, (old) =>
           old?.map((a) =>
-            a.id === id ? ({ ...a, ...prevFields } as Agent) : a,
+            a.id === id ? ({ ...a, ...prevListFields } as Agent) : a,
           ),
         );
       }
-      qc.invalidateQueries({ queryKey });
+      if (prevDetailAgent) {
+        qc.setQueryData<Agent>(detailQueryKey, (old) =>
+          old ? ({ ...old, ...prevDetailFields } as Agent) : old,
+        );
+      }
+      void qc.invalidateQueries({ queryKey });
       toast.error(e instanceof Error ? e.message : t(($) => $.detail.update_failed_toast));
       throw e;
     }
@@ -192,7 +221,7 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   };
 
   // --- Loading ---
-  if (agentsLoading && !agent) {
+  if (!agent && (agentsLoading || detailQuery.isPending)) {
     return <DetailLoadingSkeleton />;
   }
 
@@ -210,9 +239,9 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
             </p>
           </div>
           <Button
-            type="button"
             size="sm"
-            onClick={() => navigation.push(paths.agents())}
+            render={<AppLink href={paths.agents()} />}
+            nativeButton={false}
           >
             {t(($) => $.detail.back_to_agents_full)}
           </Button>
@@ -223,17 +252,24 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
 
   // --- Not found / error ---
   if (!agent) {
+    const loadError = detailError ?? agentsError;
     return (
       <div className="flex flex-1 min-h-0 flex-col">
         <BackHeader paths={paths.agents()} title={t(($) => $.detail.back_to_agents)} />
         <div className="flex flex-1 flex-col items-center justify-center gap-3 px-6 py-16 text-center">
           <AlertCircle className="h-8 w-8 text-destructive" />
           <div>
-            <p className="text-body font-medium">{t(($) => $.detail.not_found_title)}</p>
+            <p className="text-body font-medium">
+              {isNotFound
+                ? t(($) => $.detail.not_found_title)
+                : t(($) => $.detail.load_failed_title)}
+            </p>
             <p className="mt-1 text-caption text-muted-foreground">
-              {agentsError instanceof Error
-                ? agentsError.message
-                : t(($) => $.detail.not_found_default)}
+              {isNotFound
+                ? t(($) => $.detail.not_found_default)
+                : loadError instanceof Error
+                  ? loadError.message
+                  : t(($) => $.detail.load_failed_default)}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -241,14 +277,16 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => refetchAgents()}
+              onClick={() => {
+                void Promise.all([refetchAgents(), detailQuery.refetch()]);
+              }}
             >
               {t(($) => $.detail.try_again)}
             </Button>
             <Button
-              type="button"
               size="sm"
-              onClick={() => navigation.push(paths.agents())}
+              render={<AppLink href={paths.agents()} />}
+              nativeButton={false}
             >
               {t(($) => $.detail.back_to_agents_full)}
             </Button>
@@ -272,17 +310,23 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
   // click explains itself instead of the affordance silently missing. While
   // membership is still resolving the decision is undetermined, so the button
   // is disabled rather than toasting a false "no access" at a real member.
-  const handleDm = () => {
-    if (permissionsLoading) return;
+  //
+  // The control is a real link, so a failed gate has to cancel the navigation
+  // AppLink would otherwise perform — preventDefault is that cancel.
+  const handleDm = (e: React.MouseEvent<HTMLAnchorElement>) => {
+    if (permissionsLoading) {
+      e.preventDefault();
+      return;
+    }
     if (!canAssign.allowed) {
+      e.preventDefault();
       toast.error(t(($) => $.detail.dm_no_permission_toast));
       return;
     }
     if (!runtimeBound) {
+      e.preventDefault();
       toast.error(t(($) => $.detail.runtime_required_toast));
-      return;
     }
-    navigation.push(`${paths.chat()}?agent=${agent.id}`);
   };
   const handleAssign = () => {
     if (!runtimeBound) {
@@ -304,9 +348,12 @@ export function AgentDetailPage({ agentId }: AgentDetailPageProps) {
         canAssign={canAssign.allowed}
         canArchive={canEdit.allowed}
         dmPending={permissionsLoading}
+        dmHref={`${paths.chat()}?agent=${agent.id}`}
         onDm={handleDm}
         onAssign={handleAssign}
-        onArchive={() => setConfirmArchive(true)}
+        onArchive={
+          agent.system_key ? undefined : () => setConfirmArchive(true)
+        }
       />
 
       {!canEdit.allowed && (
@@ -426,6 +473,7 @@ function DetailHeader({
   canAssign,
   canArchive,
   dmPending,
+  dmHref,
   onDm,
   onAssign,
   onArchive,
@@ -437,13 +485,19 @@ function DetailHeader({
   canAssign: boolean;
   canArchive: boolean;
   dmPending: boolean;
-  onDm: () => void;
+  dmHref: string;
+  /** Runs before the link navigates; calls preventDefault when a gate denies
+   *  the chat, which is what stops AppLink from pushing. */
+  onDm: (e: React.MouseEvent<HTMLAnchorElement>) => void;
   onAssign: () => void;
-  onArchive: () => void;
+  /** Absent for Multica's built-in agents, which the server refuses to
+   *  archive — the menu hides the action rather than offering a failure. */
+  onArchive?: () => void;
 }) {
   const { t } = useT("agents");
   const timeAgo = useTimeAgo();
   const isArchived = !!agent.archived_at;
+  const hasMoreActions = !!onArchive;
 
   return (
     <header className="shrink-0 border-b bg-background px-4 pb-5 pt-3 sm:px-6">
@@ -504,11 +558,15 @@ function DetailHeader({
           <div className="flex shrink-0 items-center gap-2 self-end lg:self-start">
             {!isArchived && (
               <Button
-                type="button"
                 variant="outline"
                 size="sm"
                 disabled={dmPending}
-                onClick={onDm}
+                // An anchor never matches `:disabled`, so the base variant's
+                // `disabled:` rules never fire here — Base UI's data-disabled
+                // is what carries the dimmed, inert look.
+                className="data-disabled:pointer-events-none data-disabled:opacity-50"
+                render={<AppLink href={dmHref} onClick={onDm} />}
+                nativeButton={false}
               >
                 <MessageSquare className="h-4 w-4" aria-hidden="true" />
                 {t(($) => $.detail.dm)}
@@ -520,27 +578,26 @@ function DetailHeader({
                 {t(($) => $.detail.assign_work)}
               </Button>
             )}
-            {!isArchived && canArchive ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger
-              render={<Button variant="ghost" size="icon-sm" />}
-              aria-label={t(($) => $.detail.more_actions_aria)}
-            >
-              <MoreHorizontal
-                className="h-4 w-4 text-muted-foreground"
-                aria-hidden="true"
-              />
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-auto">
-              <DropdownMenuItem
-                variant="destructive"
-                onClick={onArchive}
-              >
-                <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
-                {t(($) => $.detail.more_archive)}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+            {!isArchived && canArchive && hasMoreActions ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  render={<Button variant="ghost" size="icon-sm" />}
+                  aria-label={t(($) => $.detail.more_actions_aria)}
+                >
+                  <MoreHorizontal
+                    className="h-4 w-4 text-muted-foreground"
+                    aria-hidden="true"
+                  />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-auto">
+                  {onArchive && (
+                    <DropdownMenuItem variant="destructive" onClick={onArchive}>
+                      <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />
+                      {t(($) => $.detail.more_archive)}
+                    </DropdownMenuItem>
+                  )}
+                </DropdownMenuContent>
+              </DropdownMenu>
             ) : null}
           </div>
         </div>
@@ -551,16 +608,14 @@ function DetailHeader({
 
 function BackHeader({ paths, title }: { paths: string; title: string }) {
   return (
-    <PageHeader className="justify-between px-5">
-      <div className="flex items-center gap-2">
-        <AppLink
-          href={paths}
-          className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          {title}
-        </AppLink>
-      </div>
+    <PageHeader>
+      <AppLink
+        href={paths}
+        className="inline-flex h-7 items-center gap-1 rounded-md px-2 text-caption text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" />
+        {title}
+      </AppLink>
     </PageHeader>
   );
 }

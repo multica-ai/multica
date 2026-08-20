@@ -6,9 +6,58 @@ import (
 	"testing"
 	"unicode"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
+
+func TestSelectChatQuickActionsContextExcludesFutureTurnAfterItCompletes(t *testing.T) {
+	previousID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	targetID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	futureID := pgtype.UUID{Bytes: [16]byte{3}, Valid: true}
+	rows := []db.ChatMessage{
+		{Role: "user", Content: "future queued prompt", TaskID: futureID, MessageKind: protocol.ChatMessageKindMessage},
+		{Role: "user", Content: "target prompt", TaskID: targetID, MessageKind: protocol.ChatMessageKindMessage},
+		{Role: "assistant", Content: "previous reply", TaskID: previousID, MessageKind: protocol.ChatMessageKindMessage},
+		{Role: "user", Content: "previous prompt", TaskID: previousID, MessageKind: protocol.ChatMessageKindMessage},
+	}
+	target := db.ChatMessage{
+		Role:        "assistant",
+		Content:     "target reply",
+		TaskID:      targetID,
+		MessageKind: protocol.ChatMessageKindMessage,
+	}
+
+	selected := selectChatQuickActionsContext(rows, target, targetID)
+	if len(selected) != 4 {
+		t.Fatalf("selected %d messages, want previous turn + target turn", len(selected))
+	}
+	for _, msg := range selected {
+		if msg.Content == "future queued prompt" {
+			t.Fatal("a later turn must stay out even if its task completed before generation")
+		}
+	}
+}
+
+func TestSelectChatQuickActionsContextIncludesAutoRetryInputOwner(t *testing.T) {
+	rootID := pgtype.UUID{Bytes: [16]byte{1}, Valid: true}
+	retryID := pgtype.UUID{Bytes: [16]byte{2}, Valid: true}
+	rows := []db.ChatMessage{
+		{Role: "user", Content: "root prompt", TaskID: rootID, MessageKind: protocol.ChatMessageKindMessage},
+	}
+	target := db.ChatMessage{
+		Role:        "assistant",
+		Content:     "retry reply",
+		TaskID:      retryID,
+		MessageKind: protocol.ChatMessageKindMessage,
+	}
+
+	selected := selectChatQuickActionsContext(rows, target, rootID)
+	if len(selected) != 2 || selected[0].Content != "root prompt" {
+		t.Fatalf("selected messages = %+v, want retry input followed by its reply", selected)
+	}
+}
 
 func chatMsg(role, content string, actions ...protocol.ChatQuickAction) db.ChatMessage {
 	msg := db.ChatMessage{

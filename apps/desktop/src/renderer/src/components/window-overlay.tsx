@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query";
-import { NewWorkspacePage } from "@multica/views/workspace/new-workspace-page";
 import { InvitePage } from "@multica/views/invite";
 import { InvitationsPage } from "@multica/views/invitations";
 import { OnboardingFlow } from "@multica/views/onboarding";
@@ -49,12 +48,35 @@ function WindowOverlayInner() {
   // complete the flow.
   const onBack = wsList.length > 0 ? close : undefined;
 
+  // The daemon's PATH probe runs once at boot, so a newly-installed CLI
+  // (Claude / Codex / Cursor) does not show up until the daemon is bounced.
+  // Both onboarding entries need this — creating a second workspace hits the
+  // same runtime step.
+  const restartDaemon = async () => {
+    await window.daemonAPI?.restart?.();
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex flex-col overflow-auto bg-background">
+      {/* Creating a workspace is the onboarding flow entered at the
+          workspace step: a second workspace still needs its own runtime and
+          its own Mika, so running one flow keeps the two from drifting. */}
       {overlay.type === "new-workspace" && (
-        <NewWorkspacePage
-          onSuccess={(ws) => push(paths.workspace(ws.slug).issues())}
-          onBack={onBack}
+        <OnboardingFlow
+          mode="new_workspace"
+          onCancel={onBack}
+          onRuntimeRefresh={restartDaemon}
+          runtimesPending={runtimesPending}
+          onComplete={(ws, destination) => {
+            close();
+            if (ws && destination?.kind === "chat") {
+              push(paths.workspace(ws.slug).chatSession(destination.sessionId));
+            } else if (ws && destination?.kind === "issue") {
+              push(paths.workspace(ws.slug).issueDetail(destination.issueId));
+            } else if (ws) {
+              push(paths.workspace(ws.slug).issues());
+            }
+          }}
         />
       )}
       {overlay.type === "invite" && (
@@ -66,12 +88,16 @@ function WindowOverlayInner() {
       {overlay.type === "invitations" && <InvitationsPage />}
       {overlay.type === "onboarding" && (
         <OnboardingFlow
-          onComplete={(ws, issueId) => {
+          onComplete={(ws, destination) => {
             close();
-            // Runtime-connected onboarding lands on its single guide
-            // issue. Runtime-less exits still land on the issues list.
-            if (ws && issueId) {
-              push(paths.workspace(ws.slug).issueDetail(issueId));
+            if (ws && destination?.kind === "chat") {
+              push(
+                paths.workspace(ws.slug).chatSession(destination.sessionId),
+              );
+            } else if (ws && destination?.kind === "issue") {
+              push(
+                paths.workspace(ws.slug).issueDetail(destination.issueId),
+              );
             } else if (ws) {
               push(paths.workspace(ws.slug).issues());
             } else {
@@ -79,12 +105,7 @@ function WindowOverlayInner() {
             }
           }}
           // Restart the bundled daemon when the user hits Refresh on
-          // Step 3. The daemon's PATH probe runs once at boot, so a
-          // newly-installed CLI (Claude / Codex / Cursor) doesn't show
-          // up until the daemon is bounced.
-          onRuntimeRefresh={async () => {
-            await window.daemonAPI?.restart?.();
-          }}
+          onRuntimeRefresh={restartDaemon}
           runtimesPending={runtimesPending}
         />
       )}

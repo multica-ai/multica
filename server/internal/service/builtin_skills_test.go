@@ -377,6 +377,7 @@ func TestCreatingAgentsSkillCoversAgentCreationContracts(t *testing.T) {
 		"multica agent create --name <name> --runtime-id <runtime-id>",
 		"`model` is a first-class persisted column",
 		"custom_env",
+		"Never put credentials or other secrets in `custom_args`",
 		"--custom-env-stdin",
 		"--custom-env-file",
 		"multica agent skills add <agent-id> --skill-ids <skill-id> --output json",
@@ -529,6 +530,11 @@ func TestRuntimesAndReposSkillCoversClaimAndCheckoutChain(t *testing.T) {
 		"local_directory",
 		"Runtime and repo commands affect active agent execution",
 		"references/runtimes-and-repos-source-map.md",
+		// An agent reads this to know whether its checkout can be committed to.
+		// Codex on Linux and Windows gets task-local Git metadata; every other
+		// runtime gets a linked worktree (multica-ai/multica#2925, #6449).
+		"Linux and Windows Codex",
+		"task-local Git metadata",
 	}
 	for _, want := range mustContain {
 		if !strings.Contains(body, want) {

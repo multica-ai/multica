@@ -1,5 +1,5 @@
 /**
- * Skip path, issue 1/2: "Connect a runtime to start using agents".
+ * Skip path: "Connect a runtime to start with Mika".
  *
  * Written to a new issue (assigned to the user themselves) by the welcome
  * hook when the user took the Skip exit on Step 3. Content is the
@@ -12,8 +12,9 @@
  */
 
 /**
- * Step 1 of the skip-path bundle. Localized so users see the title in
- * their current supported locale on the board.
+ * Localized so users see the title in their current supported locale on the
+ * board. The Runtimes page owns the follow-up Mika bootstrap once a runtime
+ * appears, so this guide does not ask the member to copy an agent prompt.
  *
  * Note: server's deprecation shim (`onboarding_shim.go:noRuntimeIssueTitle`)
  * still uses the bare English string for its title-based dedupe — that
@@ -21,10 +22,10 @@
  * the v3 frontend population, so the two title-spaces drifting is fine.
  */
 export const INSTALL_RUNTIME_ISSUE_TITLE = {
-  en: "Step 1 — Connect a runtime to start using agents",
-  zh: "第 1 步 —— 连接运行时,开始使用 agent",
-  ko: "1단계 — agent를 사용하려면 runtime 연결하기",
-  ja: "ステップ1 — agent を使うために runtime を接続する",
+  en: "Connect a runtime to start with Mika",
+  zh: "连接运行时，和 Mika 开始",
+  ko: "runtime을 연결하고 Mika와 시작하기",
+  ja: "runtime を接続して Mika と始める",
 } as const;
 
 const en = `Welcome to Multica.
@@ -63,11 +64,11 @@ For English users, the fastest first path is Codex:
    In the desktop app, open any local runtime and click Restart. Quitting and
    reopening the app is NOT enough — the daemon keeps running in the background.
 6. Return to Runtimes and refresh. You should see a Codex runtime online.
-7. Create your first agent from that runtime, then assign an issue to the agent and set status to todo.
+7. Open Runtimes. The page will offer **Start with Mika**; use it to create Mika and open the guided first chat.
 
 Codex reference: https://developers.openai.com/codex/cli
 
-When the runtime is connected, you can create Multica Helper for a guided first run.`;
+Mika will turn one real goal into an issue, start it with the right agent, and suggest reusable specialists when your workflow needs them.`;
 
 const zh = `欢迎来到 Multica。
 
@@ -78,11 +79,11 @@ const zh = `欢迎来到 Multica。
 运行时安装前,你可以先做这些事:
 
 1. 为当前工作创建一个项目。
-2. 新建几个 issue,并在 backlog、todo、in_progress、done 之间流转。
-3. 给 issue 加优先级、标签、评论和订阅。
+2. 新建几个任务,并在 backlog、todo、in_progress、done 之间流转。
+3. 给任务加优先级、标签、评论和订阅。
 4. 用收件箱追踪分配给你的事项和 @mention。
 
-这样你先熟悉项目管理层。连上运行时后,智能体会直接在这些 issue 上开始工作。
+这样你先熟悉项目管理层。连上运行时后,智能体会直接在这些任务上开始工作。
 
 ## 安装第一个 Agent 运行时
 
@@ -104,11 +105,11 @@ const zh = `欢迎来到 Multica。
    multica daemon restart
    桌面端请打开任意一个本机 runtime 并点 Restart。退出再打开 app 是不够的 —— 守护进程会继续在后台运行。
 6. 回到 Runtimes 页面刷新。你应该能看到一个在线的 Kimi 运行时。
-7. 用这个运行时创建第一个智能体,再把一个 issue 分配给它,并把状态切到 todo。
+7. 打开"运行时"页面。页面会显示 **和 Mika 开始**；点击后会创建 Mika，并进入引导式的首次对话。
 
 Kimi CLI 官方文档:https://moonshotai.github.io/kimi-cli/zh/guides/getting-started.html
 
-运行时连上后,你就可以创建 Multica Helper,开始一次有智能体参与的上手引导。`;
+Mika 会把一个真实目标转化为任务，交给合适的智能体启动执行，并在工作流需要时建议添加可复用的 specialist。`;
 
 const ko = `Multica에 오신 것을 환영합니다.
 
@@ -119,11 +120,11 @@ agent가 작업을 실행하려면 먼저 runtime이 필요합니다. runtime을
 runtime이 준비되기 전에는 다음을 해볼 수 있습니다:
 
 1. 현재 작업을 위한 project를 만듭니다.
-2. issue 몇 개를 만들고 backlog, todo, in_progress, done 사이에서 이동해 봅니다.
+2. 태스크 몇 개를 만들고 backlog, todo, in_progress, done 사이에서 이동해 봅니다.
 3. priority, label, comment, subscription을 추가합니다.
 4. Inbox에서 나에게 배정된 작업과 mention을 확인합니다.
 
-이렇게 프로젝트 관리 계층을 먼저 익힐 수 있습니다. runtime이 연결되면 agent가 같은 issue에서 바로 작업을 시작합니다.
+이렇게 프로젝트 관리 계층을 먼저 익힐 수 있습니다. runtime이 연결되면 agent가 같은 태스크에서 바로 작업을 시작합니다.
 
 ## 첫 agent runtime 설치하기
 
@@ -146,11 +147,11 @@ runtime이 준비되기 전에는 다음을 해볼 수 있습니다:
    데스크톱 앱에서는 아무 로컬 runtime을 열고 Restart를 누르세요. 앱을 종료하고 다시 여는
    것만으로는 충분하지 않습니다 — daemon은 백그라운드에서 계속 실행됩니다.
 6. Runtimes로 돌아가 새로고침합니다. Codex runtime이 online으로 보여야 합니다.
-7. 해당 runtime으로 첫 agent를 만든 뒤 issue를 agent에게 배정하고 status를 todo로 바꿉니다.
+7. Runtimes를 엽니다. **Mika와 시작**을 눌러 Mika를 만들고 안내되는 첫 채팅을 시작합니다.
 
 Codex 참고 문서: https://developers.openai.com/codex/cli
 
-runtime이 연결되면 Multica Helper를 만들어 안내를 받으며 첫 실행을 시작할 수 있습니다.`;
+Mika가 실제 목표 하나를 태스크로 만들고 적합한 에이전트와 실행을 시작하며, 워크플로에 필요할 때 재사용 가능한 specialist를 제안합니다.`;
 
 const ja = `Multica へようこそ。
 
@@ -161,11 +162,11 @@ agent が作業を実行するには、まず runtime が必要です。runtime 
 runtime が準備できる前に、次のことを試せます:
 
 1. いまの仕事のための project を作る。
-2. issue をいくつか作り、backlog、todo、in_progress、done の間で動かしてみる。
+2. タスクをいくつか作り、backlog、todo、in_progress、done の間で動かしてみる。
 3. priority、label、comment、subscription を追加する。
 4. Inbox で自分への割り当てや mention を確認する。
 
-これでまずプロジェクト管理のレイヤーに慣れることができます。runtime を接続すると、agent が同じ issue から作業を始められます。
+これでまずプロジェクト管理のレイヤーに慣れることができます。runtime を接続すると、agent が同じタスクから作業を始められます。
 
 ## 最初の agent runtime をインストールする
 
@@ -188,26 +189,10 @@ runtime が準備できる前に、次のことを試せます:
    デスクトップアプリではローカル runtime を開いて Restart を押してください。アプリを終了して
    開き直すだけでは不十分です — daemon はバックグラウンドで動き続けます。
 6. Runtimes に戻って再読み込みします。Codex runtime が online と表示されるはずです。
-7. その runtime から最初の agent を作り、issue を agent に割り当てて status を todo にします。
+7. Runtimes を開き、**Mika と始める**を選びます。Mika が作成され、案内付きの最初のチャットが開きます。
 
 Codex のリファレンス: https://developers.openai.com/codex/cli
 
-runtime が接続されたら、Multica Helper を作成して、案内付きの最初の実行を始められます。`;
+Mika は実際の目標を 1 つのタスクにし、適切なエージェントで実行を開始し、ワークフローに必要なときは再利用可能な specialist を提案します。`;
 
 export const INSTALL_RUNTIME_ISSUE_BODY = { en, zh, ko, ja } as const;
-
-/**
- * Prefix sentence for the follow-up comment posted on this issue (the one
- * that links to the create-agent-guide issue via a mention chip). Kept
- * here as a TS const rather than an i18n JSON key because anything that
- * gets persisted to the DB must be available at write time without
- * depending on an i18n bundle having loaded the new key — otherwise a
- * cold dev server / stale build writes the raw key string into
- * `comment.content` and the comment is permanently broken.
- */
-export const FOLLOWUP_COMMENT_PREFIX = {
-  en: "Your next step:",
-  zh: "完成后的下一步：",
-  ko: "다음 단계:",
-  ja: "次のステップ:",
-} as const;

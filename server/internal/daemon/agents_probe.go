@@ -1,10 +1,15 @@
 package daemon
 
 import (
+	"context"
+	"encoding/json"
 	"os"
+	"os/exec"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 // shellResolveTTL bounds how long one login-shell PATH resolution is reused
@@ -168,6 +173,18 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_PI_PATH", "pi", "MULTICA_PI_MODEL"); ok {
 		agents["pi"] = e
 	}
+	// Built-in runtime identities (e.g. omp) are derived from the descriptor
+	// registry in server/pkg/agent/builtin_runtimes.go. Each one probes a
+	// separate CLI independently so a host with both pi and omp installed gets
+	// two runtimes. The env prefix and default command come from the
+	// descriptor, so adding a new fork is a descriptor entry, not a probe edit.
+	for _, desc := range agent.BuiltinRuntimes {
+		pathEnv := desc.EnvPrefix + "_PATH"
+		modelEnv := desc.EnvPrefix + "_MODEL"
+		if e, ok := probe(pathEnv, desc.DefaultCommand, modelEnv); ok {
+			agents[desc.ID] = e
+		}
+	}
 	if e, ok := probe("MULTICA_CURSOR_PATH", "cursor-agent", "MULTICA_CURSOR_MODEL"); ok {
 		agents["cursor"] = e
 	}
@@ -176,6 +193,15 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	}
 	if e, ok := probe("MULTICA_KIMI_PATH", "kimi", "MULTICA_KIMI_MODEL"); ok {
 		agents["kimi"] = e
+	}
+	if e, ok := probe("MULTICA_REASONIX_PATH", "reasonix", "MULTICA_REASONIX_MODEL"); ok {
+		agents["reasonix"] = e
+	}
+	// DSH is registered only when its Multica runtime profile is installed.
+	// A bare dsh binary is not enough: without the bundle it has no --stdio
+	// protocol and every task would fail after being advertised as healthy.
+	if e, ok := probe("MULTICA_DSH_PATH", "dsh", "MULTICA_DSH_MODEL"); ok && probeDshMulticaProfile(e.Path) {
+		agents["dsh"] = e
 	}
 	if e, ok := probe("MULTICA_KIRO_PATH", "kiro-cli", "MULTICA_KIRO_MODEL"); ok {
 		agents["kiro"] = e
@@ -225,9 +251,46 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 		agents["qwen"] = e
 	}
 	// QwenPaw (`qwenpaw`) is the QwenPaw CLI agent, driven over ACP via
-	// `qwenpaw acp serve`. MULTICA_QWENPAW_MODEL seeds the daemon-wide default.
-	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", "MULTICA_QWENPAW_MODEL"); ok {
+	// `qwenpaw acp`. It takes no model env var: the backend never calls
+	// session/set_model (it would rewrite QwenPaw's shared agent config), so
+	// ExecOptions.Model is ignored — see ModelSelectionSupported. Reading one
+	// here would only advertise a knob that silently does nothing.
+	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
+	// Dim (`dim`) is the DimCode CLI agent, driven over ACP via `dim acp`.
+	// MULTICA_DIM_MODEL seeds the daemon-wide default (a model id from the
+	// user's logged-in dim catalog).
+	if e, ok := probe("MULTICA_DIM_PATH", "dim", "MULTICA_DIM_MODEL"); ok {
+		agents["dim"] = e
+	}
+	// MiniMax Code (`mcode`) exposes an ACP v1 server through `mcode acp`.
+	// Model selection is owned by the MCode runtime, so there is no model env.
+	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
+		agents["mcode"] = e
+	}
 	return agents
+}
+
+func probeDshMulticaProfile(executablePath string) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, executablePath, "--profile", "multica", "--probe")
+	cmd.WaitDelay = time.Second
+	output, err := cmd.Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(string(output), "\n") {
+		var frame struct {
+			Version         int    `json:"v"`
+			Type            string `json:"type"`
+			Runtime         string `json:"runtime"`
+			ProtocolVersion int    `json:"protocol_version"`
+		}
+		if json.Unmarshal([]byte(line), &frame) == nil && frame.Version == 1 && frame.Type == "probe" && frame.Runtime == "dsh" && frame.ProtocolVersion == 1 {
+			return true
+		}
+	}
+	return false
 }

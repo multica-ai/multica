@@ -58,13 +58,10 @@ func prepareQwenpawWorkspace(qwenpawWorkspace string, workspaceSkills []SkillCon
 	}
 
 	skillNames := make([]string, 0, len(workspaceSkills))
-	for _, skill := range workspaceSkills {
-		slug := sanitizeSkillName(skill.Name)
+	slugs := resolveSkillSlugs(workspaceSkills)
+	for i, skill := range workspaceSkills {
+		slug := slugs[i]
 		skillDir := filepath.Join(skillsDir, slug)
-
-		// No collision guard needed: we just removed the entire skills dir
-		// above, so every slug is available. The per-task workspace is
-		// daemon-owned and never coexists with user files.
 
 		if err := os.MkdirAll(skillDir, 0o755); err != nil {
 			return fmt.Errorf("create skill dir for %q: %w", skill.Name, err)
@@ -98,9 +95,9 @@ func prepareQwenpawWorkspace(qwenpawWorkspace string, workspaceSkills []SkillCon
 	skills := make(map[string]any, len(skillNames))
 	for _, slug := range skillNames {
 		skills[slug] = map[string]any{
-			"enabled":   true,
-			"channels":  []string{"all"},
-			"source":    "customized",
+			"enabled":  true,
+			"channels": []string{"all"},
+			"source":   "customized",
 			"metadata": map[string]any{
 				"name":        slug,
 				"description": "",

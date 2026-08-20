@@ -107,16 +107,44 @@ export function isVersionNewer(latest: string, current: string): boolean {
   return false;
 }
 
+const TOKEN_UNITS = [
+  { divisor: 1, suffix: "" },
+  { divisor: 1_000, suffix: "K" },
+  { divisor: 1_000_000, suffix: "M" },
+  { divisor: 1_000_000_000, suffix: "B" },
+  { divisor: 1_000_000_000_000, suffix: "T" },
+] as const;
+
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return m % 1 < 0.05 ? `${Math.round(m)}M` : `${m.toFixed(1)}M`;
+  const magnitude = Math.abs(n);
+  let unitIndex = TOKEN_UNITS.findLastIndex(
+    ({ divisor }) => magnitude >= divisor,
+  );
+  unitIndex = Math.max(unitIndex, 0);
+
+  if (unitIndex === 0) return n.toLocaleString();
+
+  let unit = TOKEN_UNITS[unitIndex]!;
+  let scaled = n / unit.divisor;
+
+  // Promote values that round across a unit boundary (999,999 -> 1M), so a
+  // compact label never renders as 1000K / 1000M and grows unnecessarily.
+  if (
+    Math.abs(Number(scaled.toFixed(1))) >= 1_000 &&
+    unitIndex < TOKEN_UNITS.length - 1
+  ) {
+    unit = TOKEN_UNITS[unitIndex + 1]!;
+    scaled = n / unit.divisor;
   }
-  if (n >= 1_000) {
-    const k = n / 1_000;
-    return k % 1 < 0.05 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`;
-  }
-  return n.toLocaleString();
+
+  return `${Number(scaled.toFixed(1))}${unit.suffix}`;
+}
+
+// Cents below $100, whole dollars above — two decimals on a four-figure spend
+// is noise, and dropping them below $100 would round most single runs to $0.
+export function formatUsd(n: number): string {
+  if (n >= 100) return `$${n.toFixed(0)}`;
+  return `$${n.toFixed(2)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -502,7 +530,7 @@ export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
 // test fixtures) still type-check; when present it disambiguates generic
 // model ids during pricing. RuntimeUsage / RuntimeUsageByAgent /
 // DashboardUsageDaily / DashboardUsageByAgent all carry it on the wire.
-type Priceable = Pick<
+export type Priceable = Pick<
   RuntimeUsage,
   | "model"
   | "input_tokens"
@@ -649,6 +677,75 @@ export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Per-run usage
+// ---------------------------------------------------------------------------
+
+/** Collapsed usage for one agent run, or for a set of runs. */
+export interface TaskUsageSummary {
+  /** input + output + cacheRead + cacheWrite, matching the usage page's headline. */
+  tokens: number;
+  cost: number;
+  cacheSavings: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Distinct models this run touched, in first-seen order. Usually one. */
+  models: string[];
+}
+
+/**
+ * Collapse a run's per-model usage slices into one summary.
+ *
+ * Cost is summed per slice rather than computed from the totals, because each
+ * slice may be priced by a different rate — a run that spilled from Sonnet to
+ * Opus has two rows and pricing their sum at either rate would be wrong. This
+ * is the same reason the wire format keeps the model dimension at all.
+ *
+ * Returns `null` for both `undefined` and `[]`: neither means "this run was
+ * free", they mean "we have no figure", and the UI must render an em dash. A
+ * caller that summed to 0 instead would silently claim a run cost nothing.
+ */
+export function summarizeTaskUsage(
+  usage: readonly Priceable[] | undefined,
+): TaskUsageSummary | null {
+  if (!usage || usage.length === 0) return null;
+
+  const models: string[] = [];
+  const summary: TaskUsageSummary = {
+    tokens: 0, cost: 0, cacheSavings: 0,
+    input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+    models,
+  };
+
+  for (const slice of usage) {
+    summary.input += slice.input_tokens;
+    summary.output += slice.output_tokens;
+    summary.cacheRead += slice.cache_read_tokens;
+    summary.cacheWrite += slice.cache_write_tokens;
+    summary.cost += estimateCost(slice);
+    summary.cacheSavings += estimateCacheSavings(slice);
+    if (slice.model && !models.includes(slice.model)) models.push(slice.model);
+  }
+  summary.tokens =
+    summary.input + summary.output + summary.cacheRead + summary.cacheWrite;
+
+  return summary;
+}
+
+/**
+ * Sum many runs' usage into one figure — the issue-level total shown on the
+ * execution-log header. Runs with no recorded usage contribute nothing and do
+ * not make the total null; the total is null only when NO run has usage, i.e.
+ * when there is genuinely nothing to show.
+ */
+export function summarizeTaskUsageAcross(
+  runs: readonly (readonly Priceable[] | undefined)[],
+): TaskUsageSummary | null {
+  return summarizeTaskUsage(runs.flatMap((u) => u ?? []));
+}
+
 // Cache savings: what cache *reads* would have cost at full input pricing
 // minus what they actually cost at the discounted cache-hit rate. This is a
 // reconstruction of "money the cache saved you", not real-world spend.
@@ -679,14 +776,25 @@ export interface DailyCostData {
   cost: number;
 }
 
-// Stacked variant — splits the daily $ figure into the three components that
-// drive billing (cache reads excluded; their cost is tracked separately as
-// "savings" since they're typically dominated by the cached-input discount).
+// Stacked variant — splits the daily $ figure into the four components that
+// drive billing. Every component `estimateCost` charges for has to be here:
+// `total` is what the tooltip and the empty-state check read, so a component
+// missing from the stack is money missing from the user's cost figure.
+//
+// Cache reads were once excluded on the theory that their rate was too small
+// to see. It isn't: across the current rate table cached input is ~10x cheaper
+// than uncached, not ~100x, and agent sessions routinely read tens of times
+// more cached tokens than uncached ones — so cache read is often the LARGEST
+// segment, and dropping it understated some buckets by >50% (MUL-6334).
+//
+// Cache *savings* — a reconstruction of what the discount avoided — is a
+// separate KPI and deliberately not part of this stack; savings is not spend.
 export interface DailyCostStackData {
   date: string;
   label: string;
   input: number;
   output: number;
+  cacheRead: number;
   cacheWrite: number;
   total: number;
 }
@@ -724,6 +832,7 @@ export interface WeeklyCostStackData {
   daysCovered: number;
   input: number;
   output: number;
+  cacheRead: number;
   cacheWrite: number;
   total: number;
 }
@@ -738,7 +847,7 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
   const costMap = new Map<string, number>();
   const stackMap = new Map<
     string,
-    { input: number; output: number; cacheWrite: number }
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
   >();
   const modelMap = new Map<string, { tokens: number; cost: number }>();
 
@@ -763,10 +872,12 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
     const stack = stackMap.get(u.date) ?? {
       input: 0,
       output: 0,
+      cacheRead: 0,
       cacheWrite: 0,
     };
     stack.input += breakdown.input;
     stack.output += breakdown.output;
+    stack.cacheRead += breakdown.cacheRead;
     stack.cacheWrite += breakdown.cacheWrite;
     stackMap.set(u.date, stack);
 
@@ -801,14 +912,19 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
       const round = (n: number) => Math.round(n * 100) / 100;
       const input = round(s.input);
       const output = round(s.output);
+      const cacheRead = round(s.cacheRead);
       const cacheWrite = round(s.cacheWrite);
       return {
         date,
         label: formatLabel(date),
         input,
         output,
+        cacheRead,
         cacheWrite,
-        total: round(input + output + cacheWrite),
+        // Rounded components, not round(sum) — the tooltip's Total is the sum
+        // of the segments it draws, so totalling the rounded parts is what
+        // keeps the footer agreeing with the bars it sits under.
+        total: round(input + output + cacheRead + cacheWrite),
       };
     });
 
@@ -861,7 +977,10 @@ export function aggregateByWeek(
 
   type TokenAgg = Omit<WeeklyTokenData, "label" | "rangeLabel" | "partial" | "daysCovered" | "weekEnd">;
   const tokenMap = new Map<string, TokenAgg>();
-  const stackMap = new Map<string, { input: number; output: number; cacheWrite: number }>();
+  const stackMap = new Map<
+    string,
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
+  >();
 
   // Pre-seed every trailing calendar week in the window so sparse / empty
   // weeks still render as zero bars instead of being dropped.
@@ -874,7 +993,7 @@ export function aggregateByWeek(
       cacheRead: 0,
       cacheWrite: 0,
     });
-    stackMap.set(wkStart, { input: 0, output: 0, cacheWrite: 0 });
+    stackMap.set(wkStart, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   }
 
   for (const u of usage) {
@@ -892,6 +1011,7 @@ export function aggregateByWeek(
     if (!stack) continue;
     stack.input += breakdown.input;
     stack.output += breakdown.output;
+    stack.cacheRead += breakdown.cacheRead;
     stack.cacheWrite += breakdown.cacheWrite;
   }
 
@@ -928,13 +1048,15 @@ export function aggregateByWeek(
       const round = (n: number) => Math.round(n * 100) / 100;
       const input = round(s.input);
       const output = round(s.output);
+      const cacheRead = round(s.cacheRead);
       const cacheWrite = round(s.cacheWrite);
       return {
         ...decorate(weekStart),
         input,
         output,
+        cacheRead,
         cacheWrite,
-        total: round(input + output + cacheWrite),
+        total: round(input + output + cacheRead + cacheWrite),
       };
     });
 

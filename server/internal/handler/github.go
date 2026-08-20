@@ -24,6 +24,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -1279,14 +1280,152 @@ func (h *Handler) handlePullRequestEvent(ctx context.Context, body []byte) {
 	// authorized the installation for; we deliberately don't gate on the
 	// workspace.repos registry — that list is "code the agent clones", not a
 	// webhook subscription (MUL-4343).
+	//
+	// Fanning out means an identifier can resolve in more than one workspace at
+	// once (issue prefixes are not globally unique and issue numbers restart at
+	// 1 per workspace, so two bound workspaces can both own a real "ABC-100").
+	// Settle who — if anyone — may act on a closing keyword BEFORE any workspace
+	// links, and treat that verdict as authoritative for the whole delivery, so
+	// the mirror pass cannot re-derive a different answer. See closeIntentPolicy.
+	closePolicy := h.resolveCloseIntentPolicy(ctx, insts, &p)
 	for _, inst := range insts {
-		h.mirrorPullRequestForWorkspace(ctx, inst.WorkspaceID, inst.InstallationID, &p)
+		h.mirrorPullRequestForWorkspace(ctx, inst.WorkspaceID, inst.InstallationID, &p, closePolicy)
 	}
 	// The PR row(s) now carry the new head; ask the API pipeline for the
 	// authoritative CI + mergeability snapshot for that head. The webhook is
 	// only the doorbell — its own mergeable/checks payload is not used for
 	// display anymore (MUL-5265).
 	h.PRRefresh.Enqueue(p.Installation.ID, p.Repository.Owner.Login, p.Repository.Name, p.PullRequest.Number)
+}
+
+// closeIntentPolicy decides which (closing identifier, workspace) pairs this
+// delivery is allowed to act on, and is the single authority for that decision:
+// the per-workspace mirror pass consults it instead of re-deriving the answer
+// from its own reads.
+//
+// It is an allowlist, not a denylist, so it fails closed by construction — an
+// identifier we could not positively attribute to exactly one workspace is
+// simply absent, and absence denies. The zero value therefore permits nothing,
+// which is what every indeterminate read returns.
+type closeIntentPolicy struct {
+	// unrestricted marks the single-binding case: cross-workspace ambiguity is
+	// impossible with one bound workspace, so every closing identifier keeps
+	// its pre-#6804 behavior and the scan does no reads at all.
+	unrestricted bool
+	// owner maps a closing identifier to the one workspace proven to resolve
+	// it. Recording the winner (rather than a bare "allowed") also closes the
+	// window between the scan and the mirror pass: if a second workspace grows
+	// a same-numbered issue in between, it is not the recorded owner, so it
+	// still cannot act.
+	owner map[string]string
+}
+
+// permits reports whether workspaceID may carry close intent for identifier.
+func (c closeIntentPolicy) permits(identifier, workspaceID string) bool {
+	if c.unrestricted {
+		return true
+	}
+	owner, ok := c.owner[identifier]
+	return ok && owner == workspaceID
+}
+
+// resolveCloseIntentPolicy determines, before any workspace links, which
+// closing identifiers on this PR may advance an issue and in which workspace.
+//
+// Issue prefixes are deliberately not globally unique (#2797) and issue numbers
+// restart at 1 in every workspace, so once #5183 fanned PR webhooks out to every
+// bound workspace, "Closes ABC-100" could resolve to a genuine — but different —
+// issue in each of them. Linking in both is recoverable noise; auto-advancing
+// both to done is not, because it silently rewrites the status of an issue in a
+// workspace that has nothing to do with this PR (#6804).
+//
+// An identifier is allowed only when exactly one bound workspace was *proven*
+// to resolve it. Anything else — two resolvers, or a read we could not complete
+// — leaves it out, so no workspace acts on it. That asymmetry is deliberate:
+// misjudging "unique" as "ambiguous" costs an auto-complete a human can perform,
+// while misjudging "ambiguous" as "unique" silently closes someone else's issue.
+//
+// Only closing identifiers are examined, and only when the installation has more
+// than one binding, so a PR without a closing keyword — or the overwhelmingly
+// common single-workspace installation — does no extra work.
+func (h *Handler) resolveCloseIntentPolicy(ctx context.Context, insts []db.GithubInstallation, p *ghPullRequestPayload) closeIntentPolicy {
+	if len(insts) < 2 {
+		return closeIntentPolicy{unrestricted: true}
+	}
+	idents := extractClosingIdentifiers(p.PullRequest.Title, p.PullRequest.Body)
+	if len(idents) == 0 {
+		return closeIntentPolicy{}
+	}
+	prNumber := p.PullRequest.Number
+	repo := p.Repository.Owner.Login + "/" + p.Repository.Name
+
+	// Collect every workspace that resolves each identifier. Any read we cannot
+	// complete abandons the whole event: a workspace we failed to inspect might
+	// be a second resolver, and without ruling that out we cannot call any other
+	// workspace the unique one.
+	resolvers := make(map[string][]string, len(idents))
+	for _, inst := range insts {
+		ws, err := h.Queries.GetWorkspace(ctx, inst.WorkspaceID)
+		if err != nil {
+			slog.Warn("github: cannot load bound workspace, withholding close intent for this delivery",
+				"err", err, "installation_id", p.Installation.ID, "repo", repo, "pr_number", prNumber)
+			return closeIntentPolicy{}
+		}
+		// A workspace with auto-link off never writes a link row, so it is not a
+		// competing claimant and must not suppress one that would legitimately
+		// act. A settings blob we cannot parse is not evidence of either, so it
+		// fails closed rather than defaulting to "enabled".
+		autoLink, err := autoLinkPRsEnabledForWorkspace(ws)
+		if err != nil {
+			slog.Warn("github: cannot read workspace auto-link setting, withholding close intent for this delivery",
+				"err", err, "workspace_id", uuidToString(inst.WorkspaceID),
+				"installation_id", p.Installation.ID, "repo", repo, "pr_number", prNumber)
+			return closeIntentPolicy{}
+		}
+		if !autoLink {
+			continue
+		}
+		prefix := issuePrefixForWorkspace(ws)
+		for _, id := range idents {
+			number, ok := issueNumberForPrefix(id, prefix)
+			if !ok {
+				continue
+			}
+			if _, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
+				WorkspaceID: inst.WorkspaceID,
+				Number:      number,
+			}); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					// Proven miss: this workspace has no such issue.
+					continue
+				}
+				slog.Warn("github: cannot resolve identifier in bound workspace, withholding close intent for this delivery",
+					"err", err, "identifier", id, "workspace_id", uuidToString(inst.WorkspaceID),
+					"installation_id", p.Installation.ID, "repo", repo, "pr_number", prNumber)
+				return closeIntentPolicy{}
+			}
+			resolvers[id] = append(resolvers[id], uuidToString(inst.WorkspaceID))
+		}
+	}
+
+	policy := closeIntentPolicy{owner: make(map[string]string, len(resolvers))}
+	for id, wss := range resolvers {
+		if len(wss) == 1 {
+			policy.owner[id] = wss[0]
+			continue
+		}
+		// The symptom this prevents (an issue advancing to done for no visible
+		// reason) is otherwise untraceable back to GitHub, so leave a breadcrumb
+		// naming the collision an operator has to resolve by changing a prefix.
+		slog.Warn("github: ambiguous closing identifier across bound workspaces, withholding close intent",
+			"identifier", id,
+			"workspaces", len(wss),
+			"installation_id", p.Installation.ID,
+			"repo", repo,
+			"pr_number", prNumber,
+		)
+	}
+	return policy
 }
 
 // ghCIEventPayload captures the shared shape of the check_suite / check_run /
@@ -1386,7 +1525,13 @@ func (h *Handler) triggerPRRefreshFromCIEvent(ctx context.Context, body []byte) 
 // the workspace's github toggles), advances issues on terminal events, and
 // broadcasts the change. Invoked once per workspace bound to the delivering
 // installation.
-func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload) {
+//
+// closePolicy is the delivery-wide verdict on which closing identifiers this
+// workspace may act on; identifiers it does not permit still link, but never
+// carry close_intent, so they can never advance an issue to done. This function
+// only ever narrows that verdict — it cannot grant close intent the policy
+// withheld.
+func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype.UUID, installationID int64, p *ghPullRequestPayload, closePolicy closeIntentPolicy) {
 	state := derivePRState(p.PullRequest.State, p.PullRequest.Draft, p.PullRequest.Merged)
 	mergeable, clearMergeable := derivePRMergeableState(p.Action, p.PullRequest.MergeableState, baseRefChanged(p.Changes))
 	pr, err := h.Queries.UpsertGitHubPullRequest(ctx, db.UpsertGitHubPullRequestParams{
@@ -1481,6 +1626,14 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 				continue
 			}
 			_, declared := closingIdents[id]
+			if declared && !closePolicy.permits(id, workspaceID) {
+				// The delivery-wide scan did not prove this workspace is the one
+				// this closing keyword refers to, so it does not act on it.
+				// Falling through with declared=false also clears close_intent
+				// on a row a pre-#6804 delivery had already set, so a re-fired
+				// webhook heals the stored decision.
+				declared = false
+			}
 			closeIntent := declared && !preserveCloseIntent
 			_, qualifies := qualifyingIdents[id]
 			referenceOnly := !qualifies
@@ -1516,7 +1669,8 @@ func (h *Handler) mirrorPullRequestForWorkspace(ctx context.Context, wsID pgtype
 		// intent was ever delivered, the user should decide manually.
 		if state == "merged" || state == "closed" {
 			for _, issue := range reevalIssues {
-				if issue.Status == "done" || issue.Status == "cancelled" {
+				// A custom terminal status counts as terminal here. (MUL-6243)
+				if s := issuestatus.Effective(ctx, h.Queries, issue.WorkspaceID, issue.Status); s == "done" || s == "cancelled" {
 					continue
 				}
 				// Combined across providers: an issue may also carry a still-open
@@ -1662,51 +1816,76 @@ func extractClosingIdentifiers(parts ...string) []string {
 	return out
 }
 
-// lookupIssueByIdentifier looks up an issue in the given workspace by its
-// "PREFIX-NUMBER" identifier. Returns the row + true if the prefix matches
-// workspaceAutoLinkPRsEnabled reports whether the workspace allows the
+// autoLinkPRsEnabledForWorkspace reports whether the workspace allows the
 // GitHub webhook to create issue ↔ PR link rows. Defaults to true so that
 // workspaces predating RFC MUL-2414 keep the historical "auto-link on"
 // behavior, and short-circuits to false whenever the master GitHub switch
 // is explicitly off — mirroring the precedence used on the client side.
-func (h *Handler) workspaceAutoLinkPRsEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
-	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
-	if err != nil || len(ws.Settings) == 0 {
-		return true
+//
+// An unparseable settings blob is surfaced as an error instead of being folded
+// into the permissive default. Callers deciding whether to write a link row
+// keep taking the default, but the close-intent scan has to tell "auto-link is
+// on" apart from "we could not find out" — see closeIntentPolicy.
+func autoLinkPRsEnabledForWorkspace(ws db.Workspace) (bool, error) {
+	if len(ws.Settings) == 0 {
+		return true, nil
 	}
 	var s struct {
 		GitHubEnabled            *bool `json:"github_enabled"`
 		GitHubAutoLinkPRsEnabled *bool `json:"github_auto_link_prs_enabled"`
 	}
 	if err := json.Unmarshal(ws.Settings, &s); err != nil {
-		return true
+		return true, err
 	}
 	if s.GitHubEnabled != nil && !*s.GitHubEnabled {
-		return false
+		return false, nil
 	}
 	if s.GitHubAutoLinkPRsEnabled == nil {
-		return true
+		return true, nil
 	}
-	return *s.GitHubAutoLinkPRsEnabled
+	return *s.GitHubAutoLinkPRsEnabled, nil
 }
 
-// the workspace's configured prefix and the number resolves to a real issue.
-func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
+func (h *Handler) workspaceAutoLinkPRsEnabled(ctx context.Context, workspaceID pgtype.UUID) bool {
+	ws, err := h.Queries.GetWorkspace(ctx, workspaceID)
+	if err != nil {
+		return true
+	}
+	enabled, _ := autoLinkPRsEnabledForWorkspace(ws)
+	return enabled
+}
+
+// issueNumberForPrefix returns the issue number encoded in a "PREFIX-NUMBER"
+// identifier, and false when the identifier is malformed or carries a prefix
+// that is not the workspace's. Case-insensitive: branch names are
+// conventionally lowercase while issue prefixes are uppercase.
+func issueNumberForPrefix(identifier, prefix string) (int32, bool) {
 	idx := strings.LastIndex(identifier, "-")
 	if idx < 0 {
-		return db.Issue{}, false
+		return 0, false
 	}
 	gotPrefix, numStr := identifier[:idx], identifier[idx+1:]
 	if !strings.EqualFold(gotPrefix, prefix) {
-		return db.Issue{}, false
+		return 0, false
 	}
 	n, err := strconv.Atoi(numStr)
 	if err != nil {
+		return 0, false
+	}
+	return int32(n), true
+}
+
+// lookupIssueByIdentifier looks up an issue in the given workspace by its
+// "PREFIX-NUMBER" identifier. Returns the row + true if the prefix matches
+// the workspace's configured prefix and the number resolves to a real issue.
+func (h *Handler) lookupIssueByIdentifier(ctx context.Context, workspaceID pgtype.UUID, prefix, identifier string) (db.Issue, bool) {
+	number, ok := issueNumberForPrefix(identifier, prefix)
+	if !ok {
 		return db.Issue{}, false
 	}
 	issue, err := h.Queries.GetIssueByNumber(ctx, db.GetIssueByNumberParams{
 		WorkspaceID: workspaceID,
-		Number:      int32(n),
+		Number:      number,
 	})
 	if err != nil {
 		return db.Issue{}, false
@@ -1735,6 +1914,7 @@ func (h *Handler) advanceIssueToDone(ctx context.Context, issue db.Issue, worksp
 
 	prefix := h.getIssuePrefix(ctx, issue.WorkspaceID)
 	resp := issueToResponse(updated, prefix)
+	h.fillStatusCategory(ctx, updated.WorkspaceID, &resp)
 	h.publish(protocol.EventIssueUpdated, workspaceID, "system", "", map[string]any{
 		"issue":          resp,
 		"status_changed": true,

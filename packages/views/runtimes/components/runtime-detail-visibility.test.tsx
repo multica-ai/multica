@@ -267,6 +267,21 @@ describe("RuntimeDetail visibility section", () => {
     expect(screen.queryByText("Private")).not.toBeInTheDocument();
   });
 
+  // MUL-6126: a workspace admin may rename or delete someone else's runtime,
+  // but not share it — sharing is the owner's consent to lend their machine,
+  // and the PATCH refuses an admin regardless of what this UI renders.
+  it("keeps visibility read-only for a workspace admin who does not own the runtime", () => {
+    mockQueryData.members = [
+      { user_id: "user-me", role: "admin" },
+      { user_id: "someone-else", role: "member" },
+    ];
+    renderDetail(
+      makeRuntime({ owner_id: "someone-else", visibility: "private" }),
+    );
+    expect(screen.getByText("Private")).toBeInTheDocument();
+    expect(screen.queryByText("Public")).not.toBeInTheDocument();
+  });
+
   // MUL-3352: an owner viewing an online local (self-healing) runtime
   // used to see a disabled Delete button with only a hover tooltip
   // explaining why. The new contract: the button is always clickable

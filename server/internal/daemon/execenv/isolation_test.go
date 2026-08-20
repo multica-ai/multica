@@ -4,10 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"testing"
 	"time"
 )
@@ -189,5 +194,67 @@ func TestPreparationRequestPreservesOpenclawGatewayForHelper(t *testing.T) {
 				t.Fatal("gateway pin fields did not survive the helper protocol")
 			}
 		})
+	}
+}
+
+// TestPreparationHelperPreservesOpenclawTimeoutKind covers the boundary that
+// makes structural classification possible. Prepare runs in a one-shot helper
+// process and its error reaches the daemon as JSON text, so an
+// errors.Is-based check would silently degrade to "unknown error" — and the
+// daemon would fall back to matching "deadline exceeded" in the message, which
+// is exactly the misclassification this change removes (#7112).
+func TestPreparationHelperPreservesOpenclawTimeoutKind(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell shim shape is covered by the windows-tagged tests")
+	}
+	sleepBin, err := exec.LookPath("sleep")
+	if err != nil {
+		t.Skipf("no sleep binary available to build a slow shim: %v", err)
+	}
+	// A CLI slower than the deadline, which the child process inherits through
+	// the environment. openclawCLIMinTimeout is the floor, so the shim has to
+	// outlast a full second.
+	shim := writeShim(t, t.TempDir(), "#!/bin/sh\n"+sleepBin+" 5\n", "")
+	t.Setenv(OpenclawCLITimeoutEnv, "1s")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err = PrepareIsolated(ctx, preparationHelperTestCommand(), PrepareParams{
+		WorkspacesRoot: t.TempDir(),
+		WorkspaceID:    "ws-helper-openclaw-timeout",
+		TaskID:         "11111111-2222-3333-4444-555555555555",
+		Provider:       "openclaw",
+		OpenclawBin:    shim,
+		Task:           TaskContextForEnv{IssueID: "issue-helper-openclaw-timeout"},
+	}, logger)
+	if err == nil {
+		t.Fatal("expected preparation to fail when the openclaw CLI outlasts its deadline")
+	}
+	if !errors.Is(err, ErrOpenclawCLITimeout) {
+		t.Errorf("the timeout sentinel must survive the helper boundary\ngot: %s", err)
+	}
+	if !strings.Contains(err.Error(), "openclaw config file") {
+		t.Errorf("the original diagnostic must survive too\ngot: %s", err)
+	}
+}
+
+// TestRehydratePreparationErrorUnknownKind pins the mixed-version direction of
+// the same wire: a helper newer than the daemon may name a kind this build has
+// never heard of, and the error must still arrive with its message intact
+// rather than being dropped or mislabelled.
+func TestRehydratePreparationErrorUnknownKind(t *testing.T) {
+	err := rehydratePreparationError("prepare failed somehow", "some_future_kind")
+	if err == nil || err.Error() != "prepare failed somehow" {
+		t.Fatalf("rehydratePreparationError dropped the message: %v", err)
+	}
+	if errors.Is(err, ErrOpenclawCLITimeout) {
+		t.Error("an unknown kind must not be reported as an openclaw CLI timeout")
+	}
+	if kind := preparationErrorKind(errors.New("plain failure")); kind != "" {
+		t.Errorf("preparationErrorKind(plain) = %q, want empty", kind)
+	}
+	if kind := preparationErrorKind(fmt.Errorf("wrapped: %w", ErrOpenclawCLITimeout)); kind != preparationErrorKindOpenclawCLITimeout {
+		t.Errorf("preparationErrorKind(timeout) = %q, want %q", kind, preparationErrorKindOpenclawCLITimeout)
 	}
 }

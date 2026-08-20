@@ -5,7 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import { agentBuilderSessionListOptions } from "@multica/core/agents";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
-import { useNavigation } from "../../navigation";
+import { useBackOrReplace, useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { BuilderWorkspace } from "./builder-workspace";
 import { AgentCreateChip, AgentCreateShell } from "./create-shell";
@@ -24,6 +24,7 @@ export function AiBuilderSessionPage({ sessionId }: { sessionId: string }) {
   const wsId = useWorkspaceId();
   const paths = useWorkspacePaths();
   const navigation = useNavigation();
+  const backOrReplace = useBackOrReplace();
   const squadId = navigation.searchParams.get("squad");
   // The runtime this conversation was just started on. It cannot be read back
   // for the first turn — a conversation joins the list only once it has a
@@ -55,7 +56,7 @@ export function AiBuilderSessionPage({ sessionId }: { sessionId: string }) {
           : t(($) => $.creation_studio.title)
       }
       step={t(($) => $.creation_studio.step_ai)}
-      onBack={() => navigation.push(paths.newAgent())}
+      onBack={() => backOrReplace(paths.newAgent())}
       chips={
         <>
           <AgentCreateChip>

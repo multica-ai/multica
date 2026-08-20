@@ -1,4 +1,12 @@
-import { forwardRef, useImperativeHandle, useRef, useState, type ReactNode } from "react";
+import {
+  cloneElement,
+  forwardRef,
+  useImperativeHandle,
+  useRef,
+  useState,
+  type ReactElement,
+  type ReactNode,
+} from "react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -139,7 +147,9 @@ const mockCreateSettingsStore = {
 // the same or the two records drift apart only in tests.
 let mockUploadIdSeq = 0;
 
-vi.mock("../navigation", () => ({
+// Mocked at the context module rather than the barrel so <AppLink> stays the
+// real component and its click contract is what the test exercises.
+vi.mock("../navigation/context", () => ({
   useNavigation: () => ({ push: mockPush }),
 }));
 
@@ -454,9 +464,23 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", () => ({
   DropdownMenu: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuTrigger: ({ render }: { render: React.ReactNode }) => <>{render}</>,
   DropdownMenuContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-  DropdownMenuItem: ({ children, onClick }: { children: React.ReactNode; onClick?: () => void }) => (
-    <button type="button" onClick={onClick}>{children}</button>
-  ),
+  // `render` mirrors Base UI: an item can BE another element (an <AppLink>).
+  // The real Item gives that element role="button", which is what the queries
+  // below match on.
+  DropdownMenuItem: ({
+    children,
+    onClick,
+    render,
+  }: {
+    children: React.ReactNode;
+    onClick?: () => void;
+    render?: ReactElement<{ role?: string; children?: ReactNode }>;
+  }) =>
+    render ? (
+      cloneElement(render, { role: "button" }, children)
+    ) : (
+      <button type="button" onClick={onClick}>{children}</button>
+    ),
   DropdownMenuSeparator: () => null,
   DropdownMenuSub: ({ children }: { children: React.ReactNode }) => <>{children}</>,
   DropdownMenuSubTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
@@ -533,7 +557,11 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { CreateIssueModal, ManualCreatePanel } from "./create-issue";
+import {
+  CreateIssueModal,
+  ManualCreatePanel,
+  manualDialogContentClass,
+} from "./create-issue";
 
 function renderModal(element: React.ReactElement) {
   const qc = new QueryClient({
@@ -999,9 +1027,6 @@ describe("CreateIssueModal", () => {
     expect(onSwitchMode.mock.calls[0]?.[0]).toBeNull();
   });
 
-  // Manual → agent must forward the picked project so the new modal pins to
-  // the same target. Without this the agent panel re-seeds from its own
-  // persisted `lastProjectId` and silently routes the issue to a stale one.
   // Reporter scenario: backend rejects same-titled create with a 409 +
   // structured duplicate body. The user should land on a duplicate toast
   // pointing at the existing issue, not a generic "create failed" message.
@@ -1639,6 +1664,37 @@ describe("CreateIssueModal", () => {
       expect(createButton.className).toContain("aria-disabled:cursor-not-allowed");
       expect(createButton.className).toContain("aria-disabled:active:translate-y-0");
       expect(createButton.className).not.toContain("aria-disabled:pointer-events-none");
+    });
+  });
+
+  // MUL-6236 — the manual panel shares the agent panel's phone treatment; it
+  // is one tap away behind "Switch to Manual", so it hit the same bugs.
+  describe("phone layout", () => {
+    it("caps the dialog inside the viewport on phones", () => {
+      for (const isExpanded of [false, true]) {
+        const className = manualDialogContentClass(isExpanded);
+
+        // Without this the `!important` widths below also override
+        // DialogContent's own `max-w-[calc(100%-2rem)]` and the card runs
+        // edge to edge on a phone.
+        expect(className).toContain("!max-w-[calc(100vw-1.5rem)]");
+        expect(className).toContain(isExpanded ? "sm:!max-w-4xl" : "sm:!max-w-2xl");
+      }
+    });
+
+    it("keeps every footer control a direct child of the grid container", () => {
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+      const switchToAgent = screen.getByRole("button", { name: /Switch to Agent/i });
+      const create = screen.getByRole("button", { name: "Create Issue" });
+
+      // Grid placement only sees direct children — re-wrapping either control
+      // collapses the 2x2 phone footer back to one jammed row.
+      const footer = switchToAgent.parentElement;
+      expect(footer?.className).toContain("grid-cols-[auto_1fr]");
+      expect(footer?.className).toContain("sm:flex");
+      expect(create.parentElement).toBe(footer);
+      expect(create.className).toContain("justify-self-end");
     });
   });
 });

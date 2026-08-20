@@ -25,6 +25,7 @@ interface Stage {
 type StageKey =
   | "offline"
   | "reconnecting"
+  | "retrying"
   | "queued"
   | "waiting_local_directory"
   | "starting_up"
@@ -62,6 +63,10 @@ export function pickStageKeys(
   taskMessages: readonly TaskMessagePayload[],
   availability: AgentAvailability | undefined,
 ): { stageKey: StageKey; toolKey?: ToolKey; static?: boolean } {
+  // A deferred chat task is an older turn waiting for its retry backoff, not
+  // active model work. Keep this ahead of availability hints so the specific
+  // retry state never degrades to a misleading queued/thinking label.
+  if (status === "deferred") return { stageKey: "retrying" };
   if (
     (status === "queued" || status === "dispatched") &&
     availability === "offline"
@@ -106,6 +111,16 @@ export function pickStageKeys(
     return { stageKey: "thinking", toolKey };
   }
   return { stageKey: "thinking" };
+}
+
+export function effectiveTaskStatus(
+  status: string | undefined,
+  taskMessages: readonly TaskMessagePayload[],
+): string | undefined {
+  // A retry keeps the task's earlier stream history. Deferred is the newer,
+  // server-authoritative state and must win over that stale running evidence.
+  if (status === "deferred") return status;
+  return taskMessages.length > 0 ? "running" : status;
 }
 
 function useResolveStage(): (
@@ -155,10 +170,9 @@ export function TaskStatusPill({
     return () => clearInterval(timer);
   }, []);
 
-  // Effective status — defense-in-depth derive on top of the cache. If any
-  // task_message has streamed in, the daemon has by definition started
-  // running; we trust that observation over a stale cache.
-  const status = taskMessages.length > 0 ? "running" : pendingTask.status;
+  // Effective status — streamed messages prove a task has started, except
+  // when the server has since moved that same task into retry backoff.
+  const status = effectiveTaskStatus(pendingTask.status, taskMessages);
   const elapsedSecs = Math.max(0, Math.floor((now - anchor) / 1000));
   const stage = resolveStage(status, taskMessages, availability);
 

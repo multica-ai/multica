@@ -7,18 +7,40 @@ import (
 )
 
 const (
+	// BillingWorkspaceSubscriptions gates the workspace-scoped entitlement,
+	// Stripe Checkout, seat reconcile, and Billing Portal proxy surface. It is
+	// deliberately off by default so the main repository can ship before the
+	// managed cloud enables its matching billing.subscriptions capability.
+	BillingWorkspaceSubscriptions = "billing_workspace_subscriptions"
 	// ComposioMCPApps gates the Composio app management UI and — together with
 	// the MUL-3963 permission_mode / invocation_targets access model it depends
 	// on — the aligned Private / Public-to picker in the agent create flow.
 	// The access model exists to gate Composio sharing, so the two ship on the
 	// same switch.
 	ComposioMCPApps = "composio_mcp_apps"
-	// DesktopHangStackCapture gates reading a JS call stack out of a hung
-	// desktop renderer (MUL-5345). Capture holds a debugger channel open on
-	// every renderer, so the desktop client is fail-closed: it stays off unless
-	// this key arrives as an explicit true. That makes publishing the key here
-	// mandatory — a key the client never receives can never be turned on.
-	DesktopHangStackCapture = "desktop_hang_stack_capture"
+	// PluginsV1 gates the user-facing Plugin catalog and lifecycle management
+	// APIs while the first product slice is dogfooded. It deliberately does not
+	// gate pinned Task/Run execution: disabling discovery and management must not
+	// mutate an immutable execution manifest that is already in flight.
+	PluginsV1 = "plugins_v1"
+	// CustomIssueStatuses gates CREATING a custom issue status (MUL-6243). It is
+	// a rollout gate, not a behavior switch, and it is deliberately one-way.
+	//
+	// The readers ship unconditionally and are safe to: issuestatus.Effective is
+	// the identity function on the 7 built-in keys, so a pod running this code
+	// behaves exactly as before until a custom status exists. The hazard is the
+	// other direction — the first custom status written by a new pod is a value
+	// an OLD pod cannot interpret, and old pods would fall back to literal
+	// comparisons and mishandle the issue's events and tasks. Gating creation
+	// means that value cannot come into existence until the whole fleet can read
+	// it, which removes the need for a coordinated restart.
+	//
+	// Enable only after every pod is running this version or later. Once a
+	// workspace has custom statuses, turning it back off stops new ones being
+	// created but does NOT make the existing ones safe for an older binary; a
+	// true rollback requires migrating those issues back to built-in statuses
+	// first (migration 337's down direction refuses precisely because of this).
+	CustomIssueStatuses = "custom_issue_statuses"
 	// agentBuilderCompat is no longer a release flag. Keep publishing the key
 	// as enabled so installed desktop clients that still gate the AI creation
 	// entry on this config decision receive the permanently enabled behavior.
@@ -37,16 +59,31 @@ const (
 )
 
 var frontendPublicFlags = []string{
+	BillingWorkspaceSubscriptions,
 	ComposioMCPApps,
-	DesktopHangStackCapture,
+	PluginsV1,
+	// The settings UI needs this to decide whether to offer status creation at
+	// all. Without it the tab would show a "New status" button that 403s.
+	CustomIssueStatuses,
+}
+
+func BillingWorkspaceSubscriptionsEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, BillingWorkspaceSubscriptions, false)
 }
 
 func ComposioMCPAppsEnabled(ctx context.Context, flags *featureflag.Service) bool {
 	return flags.IsEnabled(ctx, ComposioMCPApps, false)
 }
 
-func DesktopHangStackCaptureEnabled(ctx context.Context, flags *featureflag.Service) bool {
-	return flags.IsEnabled(ctx, DesktopHangStackCapture, false)
+func PluginsV1Enabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, PluginsV1, false)
+}
+
+// CustomIssueStatusesEnabled reports whether creating custom issue statuses is
+// allowed. Default false: a fleet mid-rollout must not be able to mint a status
+// value its older pods cannot interpret.
+func CustomIssueStatusesEnabled(ctx context.Context, flags *featureflag.Service) bool {
+	return flags.IsEnabled(ctx, CustomIssueStatuses, false)
 }
 
 func EvaluateFrontendPublicFlags(ctx context.Context, flags *featureflag.Service) map[string]bool {

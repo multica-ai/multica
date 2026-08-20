@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -369,6 +370,10 @@ var issueSearchCmd = &cobra.Command{
 	RunE: runIssueSearch,
 }
 
+// validIssueStatuses are the 7 BUILT-IN status keys, present in every
+// workspace. Since MUL-6243 a workspace may define additional custom statuses,
+// so this is the list shown in help text and error messages, not the set of
+// accepted values — see validateIssueStatus.
 var validIssueStatuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
 }
@@ -398,9 +403,30 @@ var directionalIssueSortColumns = func() []string {
 	return cols
 }()
 
+// validateIssueStatus checks the shape of a status key, not its membership.
+//
+// Since MUL-6243 a workspace can define custom statuses, so the CLI cannot know
+// the valid set without a round trip. It validates the format locally — that
+// still catches the common typo classes instantly and offline — and lets the
+// server reject an unknown key, which it does with a 400 listing that
+// workspace's actual statuses. Keeping a hard-coded list here would reject the
+// custom statuses the feature exists to enable.
 func validateIssueStatus(status string) error {
-	return validateIssueEnum("status", status, validIssueStatuses)
+	trimmed := strings.ToLower(strings.TrimSpace(status))
+	if trimmed == "" {
+		return fmt.Errorf("invalid status %q; valid values: %s",
+			status, strings.Join(validIssueStatuses, ", "))
+	}
+	if !issueStatusKeyPattern.MatchString(trimmed) {
+		return fmt.Errorf(
+			"invalid status %q; a status key is 1-32 characters of lowercase letters, digits or underscore. Built-in values: %s",
+			status, strings.Join(validIssueStatuses, ", "))
+	}
+	return nil
 }
+
+// issueStatusKeyPattern mirrors the issue_status.key storage constraint.
+var issueStatusKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,31}$`)
 
 func validateIssuePriority(priority string) error {
 	return validateIssueEnum("priority", priority, validIssuePriorities)
@@ -503,9 +529,11 @@ func init() {
 	issueUpdateCmd.Flags().String("parent", "", "Parent issue ID (use --parent \"\" to clear)")
 	issueUpdateCmd.Flags().Int("stage", 0, "Stage ordinal (>=1) for this sub-issue; see `issue create --stage`")
 	issueUpdateCmd.Flags().Float64("position", 0, "Ordering position within the board column (lower sorts first); prefer `issue reorder` for relative moves")
+	issueUpdateCmd.Flags().Bool("no-start", false, "Apply the update without starting an agent run")
 	issueUpdateCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue status
+	issueStatusCmd.Flags().Bool("no-start", false, "Change status without starting an agent run")
 	issueStatusCmd.Flags().String("output", "table", "Output format: table or json")
 
 	// issue reorder
@@ -515,6 +543,7 @@ func init() {
 	issueAssignCmd.Flags().String("to", "", "Assignee name (member, agent, or squad; fuzzy match)")
 	issueAssignCmd.Flags().String("to-id", "", "Assignee UUID — member, agent, or squad (mutually exclusive with --to)")
 	issueAssignCmd.Flags().Bool("unassign", false, "Remove current assignee")
+	issueAssignCmd.Flags().Bool("no-start", false, "Assign ownership without starting an agent run")
 	issueAssignCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// issue comment list
@@ -524,6 +553,7 @@ func init() {
 	issueCommentListCmd.Flags().Int("tail", 0, "Only valid with --thread. Cap reply count to the N most recent replies; the thread root is always included (even with --tail 0). Use --before/--before-id to scroll to older replies.")
 	issueCommentListCmd.Flags().Int("recent", 0, "Return the N most recently active threads. N caps THREADS, not comments: every thread carries its root plus EVERY descendant with no per-thread cap, so on an issue with fewer than N root threads this returns the entire history (minus folded resolved threads). Prefer two bounded reads: scan with --roots-only --summary, then open selected threads with --thread <id> --tail N. Use --before/--before-id from the previous response to scroll to older threads.")
 	issueCommentListCmd.Flags().Bool("roots-only", false, "Only return top-level comments (parent_id is null). Each root also carries reply_count + last_activity_at so you can triage which thread to open.")
+	issueCommentListCmd.Flags().Bool("compact", false, "JSON output only: drop response fields that carry no information for a reader — the issue_id echoed from the request path, source_task_id, updated_at when identical to created_at, null-valued fields, and empty arrays. Content and identity fields pass through untouched. Recommended for agent reads; composes with any mode.")
 	issueCommentListCmd.Flags().Bool("summary", false, "Clip each comment's content to a short preview (sets content_truncated) so you can scan a list without pulling full bodies. Composes with any mode.")
 	issueCommentListCmd.Flags().Bool("full", false, "Escape hatch: return every comment in resolved threads verbatim. By default the complete-thread reads (default list, --recent, --thread without --tail) are folded — a resolved thread collapses to its root + conclusion, with the dropped count reported on the root — so you do not pay tokens for settled discussion. Pass --full when you need the folded discussion. No effect on --since/--tail/--roots-only reads, which are never folded.")
 	issueCommentListCmd.Flags().String("before", "", "Cursor (RFC3339Nano timestamp). With --recent: thread cursor (last_activity_at). With --thread + --tail: reply cursor (reply created_at). Read from the X-Multica-Next-Before response header, printed on stderr as \"Next thread cursor\" / \"Next reply cursor\"; must be paired with --before-id.")
@@ -951,7 +981,7 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 		}
 		stages[gi].Issues = append(stages[gi].Issues, c)
 		stages[gi].Total++
-		if st := strVal(c, "status"); st == "done" || st == "cancelled" {
+		if isTerminalChildIssue(c) {
 			stages[gi].Done++
 		}
 	}
@@ -960,6 +990,22 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 		"stages":   stages,
 		"unstaged": unstaged,
 	})
+}
+
+// isTerminalChildIssue reports whether a child issue counts as finished for
+// stage progress.
+//
+// Prefers `status_category`, which the server resolves for custom statuses: a
+// workspace can define its own statuses, and one in the `done` category must
+// count as done here or an agent reads the wrong progress. Falls back to the
+// raw status when the field is absent, so an older backend still reports the
+// built-in statuses correctly. (MUL-6243)
+func isTerminalChildIssue(c map[string]any) bool {
+	status := strVal(c, "status_category")
+	if status == "" {
+		status = strVal(c, "status")
+	}
+	return status == "done" || status == "cancelled"
 }
 
 // isHTTPURL reports whether path is an http:// or https:// URL.
@@ -1238,6 +1284,7 @@ func activeDuplicateIssueCreateMessage(err error) (string, bool) {
 }
 
 func runIssueUpdate(cmd *cobra.Command, args []string) error {
+	noStart, _ := cmd.Flags().GetBool("no-start")
 	statusChanged := cmd.Flags().Changed("status")
 	statusFlag, _ := cmd.Flags().GetString("status")
 	if statusChanged {
@@ -1348,6 +1395,9 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 	if len(body) == 0 {
 		return fmt.Errorf("no fields to update; use flags like --title, --status, --priority, --assignee, etc.")
 	}
+	if noStart {
+		body["suppress_run"] = true
+	}
 
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
@@ -1373,6 +1423,7 @@ func runIssueUpdate(cmd *cobra.Command, args []string) error {
 func runIssueAssign(cmd *cobra.Command, args []string) error {
 	toName, _ := cmd.Flags().GetString("to")
 	unassign, _ := cmd.Flags().GetBool("unassign")
+	noStart, _ := cmd.Flags().GetBool("no-start")
 	toNameSet := cmd.Flags().Changed("to")
 	toIDSet := cmd.Flags().Changed("to-id")
 
@@ -1381,6 +1432,9 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 	}
 	if (toNameSet || toIDSet) && unassign {
 		return fmt.Errorf("--to/--to-id and --unassign are mutually exclusive")
+	}
+	if noStart && unassign {
+		return fmt.Errorf("--no-start cannot be used with --unassign")
 	}
 
 	client, err := newAPIClient(cmd)
@@ -1411,6 +1465,9 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 		if displayTarget == "" {
 			displayTarget = loadActorDisplayLookup(ctx, client).actor(aType, aID)
 		}
+		if noStart {
+			body["suppress_run"] = true
+		}
 	}
 
 	var result map[string]any
@@ -1434,6 +1491,7 @@ func runIssueAssign(cmd *cobra.Command, args []string) error {
 func runIssueStatus(cmd *cobra.Command, args []string) error {
 	id := args[0]
 	status := args[1]
+	noStart, _ := cmd.Flags().GetBool("no-start")
 
 	if err := validateIssueStatus(status); err != nil {
 		return err
@@ -1453,6 +1511,9 @@ func runIssueStatus(cmd *cobra.Command, args []string) error {
 	}
 
 	body := map[string]any{"status": status}
+	if noStart {
+		body["suppress_run"] = true
+	}
 	var result map[string]any
 	if err := client.PutJSON(ctx, "/api/issues/"+issueRef.ID, body, &result); err != nil {
 		return fmt.Errorf("update status: %w", err)
@@ -1895,6 +1956,9 @@ func runIssueCommentList(cmd *cobra.Command, args []string) error {
 
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
+		if compact, _ := cmd.Flags().GetBool("compact"); compact {
+			compactComments(comments)
+		}
 		return cli.PrintJSON(os.Stdout, comments)
 	}
 
@@ -2482,6 +2546,8 @@ type assigneeKinds struct {
 var (
 	issueAssigneeKinds = assigneeKinds{member: true, agent: true, squad: true}
 	memberOrAgentKinds = assigneeKinds{member: true, agent: true}
+	// Actor property values are members only (MUL-6286).
+	memberOnlyKinds = assigneeKinds{member: true}
 )
 
 var assigneeResolveRetrySleep = func(ctx context.Context, d time.Duration) bool {
@@ -2559,11 +2625,21 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	var errs []error
 	var fetchAttempts int
 
-	classify := func(entityType, id, displayName string) {
+	// exactAliases are additional unique identifiers that select a candidate
+	// outright, ranked with id matches rather than name matches — a member's
+	// email is as unambiguous as their id, and is what people actually have to
+	// hand. Without it, `--value bohan@example.com` fails to resolve.
+	classify := func(entityType, id, displayName string, exactAliases ...string) {
 		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
 		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
 			idMatches = append(idMatches, match)
 			return
+		}
+		for _, alias := range exactAliases {
+			if alias != "" && strings.EqualFold(alias, input) {
+				idMatches = append(idMatches, match)
+				return
+			}
 		}
 		if strings.EqualFold(displayName, input) {
 			exactMatches = append(exactMatches, match)
@@ -2582,7 +2658,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
 			for _, m := range members {
-				classify("member", strVal(m, "user_id"), strVal(m, "name"))
+				classify("member", strVal(m, "user_id"), strVal(m, "name"), strVal(m, "email"))
 			}
 		}
 	}
@@ -2792,4 +2868,34 @@ func truncateID(id string) string {
 		return string(runes[:8])
 	}
 	return id
+}
+
+// compactComments strips response fields that carry no information for a
+// reader: the issue_id echoed from the request path, per-run bookkeeping
+// (source_task_id), updated_at when identical to created_at, null-valued
+// keys, and empty arrays. Everything else — content, identity, thread
+// summary fields — passes through untouched. Opt-in via --compact and
+// applied to JSON output only: the two bounded reads the agent workflow
+// prescribes are dominated by exactly this metadata (56% of a
+// --roots-only --summary scan, 21% of a --thread --tail read, measured on
+// a production issue), and it compounds through the prompt-cache prefix
+// (#5999 follow-up, MUL-5442).
+func compactComments(comments []map[string]any) {
+	for _, c := range comments {
+		delete(c, "issue_id")
+		delete(c, "source_task_id")
+		if ua, ok := c["updated_at"]; ok && ua == c["created_at"] {
+			delete(c, "updated_at")
+		}
+		for k, v := range c {
+			switch vv := v.(type) {
+			case nil:
+				delete(c, k)
+			case []any:
+				if len(vv) == 0 {
+					delete(c, k)
+				}
+			}
+		}
+	}
 }

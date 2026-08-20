@@ -120,6 +120,24 @@ that omit `on_conflict` still receive a bare `SkillWithFilesResponse`.
 | `runAgentSkillsSet` → `PUT .../skills` | `server/cmd/multica/cmd_agent.go:772`; PUT `:790` |
 | CLI `agent skills list` | `server/cmd/multica/cmd_agent.go:740`; GET `:750` |
 
+## Updating an imported skill (`POST /api/skills/{id}/refresh`)
+
+| Behavior | File:line |
+|---|---|
+| `RefreshSkill` handler | `server/internal/handler/skill_refresh.go:120` |
+| Route `r.Post("/refresh", h.RefreshSkill)` | `server/cmd/server/router.go:1594` |
+| Reads stored provenance `config.origin.{type,source_url}` | `parseSkillOrigin`, `server/internal/handler/skill_refresh.go:32` |
+| Refreshable origins are `github` / `skills_sh` / `clawhub` only | `refreshableOriginSource`, `server/internal/handler/skill_refresh.go:57` |
+| Re-runs the matching import fetcher from the stored `source_url` | `fetchImportedSkillFromOrigin`, `server/internal/handler/skill_refresh.go:75` |
+| Non-refreshable origin → 422 | `errSkillNotRefreshable`, `server/internal/handler/skill_refresh.go:22` |
+| Permission: creator or workspace owner/admin, checked before the fetch | `server/internal/handler/skill_refresh.go:120` (body) — broader than import-overwrite's creator-only rule |
+| Merges only `config.origin`, preserving other config keys | `mergeSkillConfigOrigin`, `server/internal/handler/skill_refresh.go:99` |
+| In-place overwrite preserving id/creator/bindings, adopting upstream rename | `overwriteSkillWithFiles` with `NewName` + `AllowOverwrite`, `server/internal/handler/skill_create.go:119-122`, tx helper `:133` |
+| Upstream rename colliding with another skill → 409 | `errSkillOverwriteNameConflict`, `server/internal/handler/skill_create.go:104` |
+| Fetch failures map like import (413/502/503/504) | `importFetchErrorResponse` (grep in `server/internal/handler/skill.go`) |
+| CLI `skill refresh <id>` def / runner | `server/cmd/multica/cmd_skill.go:66`, `runSkillRefresh` at `:425` |
+| Handler tests | `server/internal/handler/skill_refresh_test.go` |
+
 ## Reserved primary-content filename (`SKILL.md`)
 
 | Behavior | File:line |

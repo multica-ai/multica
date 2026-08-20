@@ -246,12 +246,14 @@ GROUP BY a.id`, compiled.where)
 		}
 		propertyKey := "'" + util.UUIDToString(property.ID) + "'"
 		switch property.Type {
-		case "select":
-			query = fmt.Sprintf(`SELECT i.properties ->> %s, COUNT(*)::bigint FROM issue i WHERE %s AND jsonb_typeof(i.properties -> %s) = 'string' GROUP BY 1`, propertyKey, compiled.where, propertyKey)
-		case "multi_select":
-			query = fmt.Sprintf(`SELECT property_value.value, COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS property_value(value) ON TRUE WHERE %s GROUP BY property_value.value`, propertyKey, propertyKey, compiled.where)
+		case "select", "actor":
+			// Unset issues count under the "__none__" bucket so the filter menu's
+			// "No value" option carries a real count (issues without the key).
+			query = fmt.Sprintf(`SELECT COALESCE(i.properties ->> %s, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s AND (jsonb_typeof(i.properties -> %s) = 'string' OR NOT (i.properties ? %s)) GROUP BY 1`, propertyKey, compiled.where, propertyKey, propertyKey)
+		case "multi_select", "multi_actor":
+			query = fmt.Sprintf(`SELECT COALESCE(property_value.value, '__none__'), COUNT(DISTINCT i.id)::bigint FROM issue i JOIN LATERAL (SELECT jsonb_array_elements_text(CASE WHEN jsonb_typeof(i.properties -> %s) = 'array' THEN i.properties -> %s ELSE '[]'::jsonb END) AS value UNION ALL SELECT NULL WHERE NOT (i.properties ? %s)) property_value(value) ON TRUE WHERE %s GROUP BY 1`, propertyKey, propertyKey, propertyKey, compiled.where)
 		case "checkbox":
-			query = fmt.Sprintf(`SELECT i.properties ->> %s, COUNT(*)::bigint FROM issue i WHERE %s AND jsonb_typeof(i.properties -> %s) = 'boolean' GROUP BY 1`, propertyKey, compiled.where, propertyKey)
+			query = fmt.Sprintf(`SELECT COALESCE(i.properties ->> %s, '__none__'), COUNT(*)::bigint FROM issue i WHERE %s AND (jsonb_typeof(i.properties -> %s) = 'boolean' OR NOT (i.properties ? %s)) GROUP BY 1`, propertyKey, compiled.where, propertyKey, propertyKey)
 		default:
 			writeIssueTableUnsupportedGroup(w, "property_type_unsupported", "This property type cannot be used as a filter facet.")
 			return response, false

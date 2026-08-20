@@ -17,10 +17,9 @@ import { StatusIcon } from "@/components/ui/status-icon";
 import { PriorityIcon } from "@/components/ui/priority-icon";
 import { useIssuesViewStore } from "@/data/stores/issues-view-store";
 import { useMyIssuesViewStore } from "@/data/stores/my-issues-view-store";
-import { BOARD_STATUSES, STATUS_LABEL } from "@/lib/issue-status";
+import { statusOptions } from "@/lib/issue-status";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { cn } from "@/lib/utils";
-
-const ALL_STATUSES: IssueStatus[] = [...BOARD_STATUSES, "cancelled"];
 
 // Mirrors PRIORITY_ORDER in packages/core/issues/config/priority.ts.
 const PRIORITY_ORDER: IssuePriority[] = [
@@ -49,6 +48,10 @@ export default function IssuesFilterRoute() {
 
   const statusFilters = useScopedFilters(resolvedScope, "status");
   const priorityFilters = useScopedFilters(resolvedScope, "priority");
+  // Same option list the status picker offers, so every status a user can set
+  // is also a status they can filter by. (MUL-6243)
+  const catalog = useIssueStatuses();
+  const statusChoices = statusOptions(catalog);
 
   const onToggleStatus = (s: IssueStatus) => {
     if (resolvedScope === "all") {
@@ -90,20 +93,25 @@ export default function IssuesFilterRoute() {
       </View>
       <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
         <SectionLabel>Status</SectionLabel>
-        {ALL_STATUSES.map((status) => {
-          const checked = statusFilters.includes(status);
+        {statusChoices.map((option) => {
+          const checked = statusFilters.includes(option.key);
           return (
             <Pressable
-              key={status}
-              onPress={() => onToggleStatus(status)}
+              key={option.key}
+              onPress={() => onToggleStatus(option.key)}
               className={cn(
                 "flex-row items-center gap-3 px-4 py-2.5 active:bg-secondary",
                 checked && "bg-secondary/60",
               )}
             >
-              <StatusIcon status={status} size={16} />
+              <StatusIcon
+                status={option.key}
+                category={option.category}
+                color={option.color}
+                size={16}
+              />
               <Text className="flex-1 text-sm text-foreground">
-                {STATUS_LABEL[status]}
+                {option.label}
               </Text>
               <CheckMark checked={checked} />
             </Pressable>

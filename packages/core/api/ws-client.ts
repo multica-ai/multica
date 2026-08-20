@@ -181,8 +181,9 @@ export class WSClient {
 
   private onAuthenticated() {
     this.logger.info("connected");
+    const recoveredConnection = this.hasConnectedBefore || this.reconnectAttempt > 0;
     this.reconnectAttempt = 0;
-    if (this.hasConnectedBefore) {
+    if (recoveredConnection) {
       for (const cb of this.onReconnectCallbacks) {
         try {
           cb();

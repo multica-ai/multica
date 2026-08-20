@@ -6,8 +6,9 @@
  * workspace switching in Settings, so a command-palette here would
  * duplicate them (see feedback_mobile_ia_main_vs_more).
  *
- * Result categories, ordering (projects first, issues second), debounce
- * (300ms), abort policy, and Recent rendering mirror the web source.
+ * Result categories, ordering (live projects, then live issues, then a
+ * trailing Cancelled section — see lib/search-rows.ts), debounce (300ms),
+ * abort policy, and Recent rendering mirror the web source.
  * Highlight + snippet line for `match_source` matches preserves the
  * "why did this match" signal users rely on when scanning results.
  */
@@ -28,7 +29,7 @@ import { router } from "expo-router";
 import { Ionicons } from "@expo/vector-icons";
 import type {
   Issue,
-  IssueStatus,
+  IssueStatusCategory,
   SearchIssueResult,
   SearchProjectResult,
 } from "@multica/core/types";
@@ -44,8 +45,10 @@ import {
   useViewedIssuesStore,
 } from "@/data/viewed-issues-store";
 import { issueDetailOptions } from "@/data/queries/issues";
-import { STATUS_LABEL } from "@/lib/issue-status";
+import { issueColumnCategory } from "@/lib/issue-status";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { projectStatusLabel } from "@/lib/project-status";
+import { buildSearchRows, type RowItem } from "@/lib/search-rows";
 
 const DEBOUNCE_MS = 300;
 const ISSUE_LIMIT = 20;
@@ -115,18 +118,15 @@ function HighlightText({
 // =====================================================
 // Row item types — drives the single FlatList render
 // =====================================================
+// RowItem + buildSearchRows live in lib/search-rows.ts so the ordering rules
+// (including the cancelled partition) are testable without mounting the screen.
 
-type RowItem =
-  | { kind: "header"; key: string; title: string }
-  | { kind: "issue"; key: string; issue: SearchIssueResult; query: string }
-  | { kind: "project"; key: string; project: SearchProjectResult; query: string }
-  | { kind: "recent"; key: string; issue: Issue };
-
-function issueIconColor(status: IssueStatus): string {
+function issueIconColor(category: IssueStatusCategory): string {
   // Tag color for the status label at the end of an issue row.
-  // Mirrors STATUS_CONFIG.iconColor (status-icon.tsx STATUS_COLOR) so the
-  // text tint matches the leading status icon visually.
-  switch (status) {
+  // Mirrors STATUS_CONFIG.iconColor (status-icon.tsx CATEGORY_COLOR) so the
+  // text tint matches the leading status icon visually. Keyed on CATEGORY: a
+  // custom status inherits its category's tint, exactly as its glyph does.
+  switch (category) {
     case "in_progress":
       return "text-warning";
     case "in_review":
@@ -163,14 +163,21 @@ function SearchIssueRow({ item, query, slug }: SearchIssueRowProps) {
   // (server/internal/handler/issue.go:592). Keep mobile strictly aligned.
   const showSnippet =
     item.match_source === "comment" && !!item.matched_snippet;
-  const statusLabel = STATUS_LABEL[item.status as IssueStatus] ?? item.status;
+  const { colorOf, labelOf } = useIssueStatuses();
+  const category = issueColumnCategory(item);
+  const statusLabel = labelOf(item.status);
   return (
     <Pressable
       onPress={() => navigateOnTap(slug, `/${slug}/issue/${item.id}`)}
       className="active:bg-secondary px-4 py-3"
     >
       <View className="flex-row items-center gap-3">
-        <StatusIcon status={item.status as IssueStatus} size={14} />
+        <StatusIcon
+          status={item.status}
+          category={category}
+          color={colorOf(item.status)}
+          size={14}
+        />
         <PriorityIcon priority={item.priority} size={14} />
         <Text className="text-xs text-muted-foreground shrink-0 w-16">
           {item.identifier}
@@ -183,7 +190,7 @@ function SearchIssueRow({ item, query, slug }: SearchIssueRowProps) {
             numberOfLines={1}
           />
         </View>
-        <Text className={`text-xs shrink-0 ${issueIconColor(item.status as IssueStatus)}`}>
+        <Text className={`text-xs shrink-0 ${issueIconColor(category)}`}>
           {statusLabel}
         </Text>
       </View>
@@ -262,21 +269,28 @@ interface RecentRowProps {
 }
 
 function RecentRow({ item, slug }: RecentRowProps) {
-  const statusLabel = STATUS_LABEL[item.status as IssueStatus] ?? item.status;
+  const { colorOf, labelOf } = useIssueStatuses();
+  const category = issueColumnCategory(item);
+  const statusLabel = labelOf(item.status);
   return (
     <Pressable
       onPress={() => navigateOnTap(slug, `/${slug}/issue/${item.id}`)}
       className="active:bg-secondary px-4 py-3"
     >
       <View className="flex-row items-center gap-3">
-        <StatusIcon status={item.status as IssueStatus} size={14} />
+        <StatusIcon
+          status={item.status}
+          category={category}
+          color={colorOf(item.status)}
+          size={14}
+        />
         <Text className="text-xs text-muted-foreground shrink-0 w-16">
           {item.identifier}
         </Text>
         <Text className="flex-1 text-sm text-foreground" numberOfLines={1}>
           {item.title}
         </Text>
-        <Text className={`text-xs shrink-0 ${issueIconColor(item.status as IssueStatus)}`}>
+        <Text className={`text-xs shrink-0 ${issueIconColor(category)}`}>
           {statusLabel}
         </Text>
       </View>
@@ -389,35 +403,19 @@ export default function SearchModal() {
     results.issues.length > 0 || results.projects.length > 0;
 
   // Build the FlatList data. One flat array of discriminated rows means a
-  // single virtualised list covers Recent (empty-state) and (Projects +
-  // Issues) results without nesting SectionList inside another scroller.
-  const data = useMemo<RowItem[]>(() => {
-    if (!trimmedQuery) {
-      if (recentIssues.length === 0) return [];
-      return [
-        { kind: "header", key: "h-recent", title: "Recent" },
-        ...recentIssues.map<RowItem>((issue) => ({
-          kind: "recent",
-          key: `r-${issue.id}`,
-          issue,
-        })),
-      ];
-    }
-    const items: RowItem[] = [];
-    if (results.projects.length > 0) {
-      items.push({ kind: "header", key: "h-projects", title: "Projects" });
-      for (const p of results.projects) {
-        items.push({ kind: "project", key: `p-${p.id}`, project: p, query: trimmedQuery });
-      }
-    }
-    if (results.issues.length > 0) {
-      items.push({ kind: "header", key: "h-issues", title: "Issues" });
-      for (const it of results.issues) {
-        items.push({ kind: "issue", key: `i-${it.id}`, issue: it, query: trimmedQuery });
-      }
-    }
-    return items;
-  }, [trimmedQuery, recentIssues, results]);
+  // single virtualised list covers Recent (empty-state) and the search results
+  // without nesting SectionList inside another scroller. Ordering lives in
+  // buildSearchRows (lib/search-rows.ts).
+  const data = useMemo<RowItem[]>(
+    () =>
+      buildSearchRows({
+        query,
+        issues: results.issues,
+        projects: results.projects,
+        recentIssues,
+      }),
+    [query, results, recentIssues],
+  );
 
   const renderItem = useCallback<ListRenderItem<RowItem>>(
     ({ item }) => {

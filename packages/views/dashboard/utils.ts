@@ -43,11 +43,15 @@ import type {
 // side.
 // ---------------------------------------------------------------------------
 
+// Mirrors `DailyCostStackData` in the runtimes utils, including its cache-read
+// segment — the dashboard feeds the very same DailyCostChart, so a category
+// missing here is a category missing from the chart's total (MUL-6334).
 export interface DailyCostStack {
   date: string;
   label: string;
   input: number;
   output: number;
+  cacheRead: number;
   cacheWrite: number;
   total: number;
 }
@@ -61,16 +65,25 @@ function formatDateLabel(d: string): string {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-// Per-(date, model) rows → 1 row per date with cost broken into the three
+// Per-(date, model) rows → 1 row per date with cost broken into the four
 // segments the stacked bar chart consumes. Stable sort by date asc so the
 // chart x-axis is left-to-right oldest-to-newest.
 export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack[] {
-  const map = new Map<string, { input: number; output: number; cacheWrite: number }>();
+  const map = new Map<
+    string,
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
+  >();
   for (const u of usage) {
     const b = estimateCostBreakdown(u);
-    const entry = map.get(u.date) ?? { input: 0, output: 0, cacheWrite: 0 };
+    const entry = map.get(u.date) ?? {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
     entry.input += b.input;
     entry.output += b.output;
+    entry.cacheRead += b.cacheRead;
     entry.cacheWrite += b.cacheWrite;
     map.set(u.date, entry);
   }
@@ -80,14 +93,16 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
     .map(([date, s]) => {
       const input = round(s.input);
       const output = round(s.output);
+      const cacheRead = round(s.cacheRead);
       const cacheWrite = round(s.cacheWrite);
       return {
         date,
         label: formatDateLabel(date),
         input,
         output,
+        cacheRead,
         cacheWrite,
-        total: round(input + output + cacheWrite),
+        total: round(input + output + cacheRead + cacheWrite),
       };
     });
 }
@@ -390,21 +405,32 @@ export function aggregateWeeklyTasks(
   weekCount: number,
 ): WeeklyTasksData[] {
   const shells = buildWeekShells(tz, weekCount);
-  const buckets = new Map<string, { completed: number; failed: number }>();
+  const buckets = new Map<
+    string,
+    { completed: number; failed: number; cancelled: number }
+  >();
   for (const shell of shells)
-    buckets.set(shell.weekStart, { completed: 0, failed: 0 });
+    buckets.set(shell.weekStart, { completed: 0, failed: 0, cancelled: 0 });
   for (const r of rows) {
     const wkStart = weekStartIso(r.date);
     const bucket = buckets.get(wkStart);
     if (!bucket) continue;
     const failed = r.failed_count;
-    const completed = Math.max(0, r.task_count - failed);
+    const cancelled = r.cancelled_count;
+    const completed = Math.max(0, r.task_count - failed - cancelled);
     bucket.completed += completed;
     bucket.failed += failed;
+    bucket.cancelled += cancelled;
   }
   return shells.map((s) => {
-    const b = buckets.get(s.weekStart) ?? { completed: 0, failed: 0 };
-    return { ...s, completed: b.completed, failed: b.failed };
+    const b =
+      buckets.get(s.weekStart) ?? { completed: 0, failed: 0, cancelled: 0 };
+    return {
+      ...s,
+      completed: b.completed,
+      failed: b.failed,
+      cancelled: b.cancelled,
+    };
   });
 }
 
@@ -420,19 +446,23 @@ export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData
     }));
 }
 
-// Per-date run-time rows → one row per date with `completed` and `failed`
-// counts for the DailyTasksChart's stacked bar (failed_count is a subset
-// of task_count, so completed = task_count - failed_count).
+// Per-date run-time rows → one row per date with `completed`, `failed` and
+// `cancelled` counts for the DailyTasksChart's stacked bar. failed_count and
+// cancelled_count are disjoint subsets of task_count, so the succeeded count
+// is the remainder. Subtracting cancelled matters: without it a run the user
+// stopped would render in the green "completed" segment.
 export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
   return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => {
       const failed = r.failed_count;
-      const completed = Math.max(0, r.task_count - failed);
+      const cancelled = r.cancelled_count;
+      const completed = Math.max(0, r.task_count - failed - cancelled);
       return {
         date: r.date,
         label: formatDateLabel(r.date),
         completed,
         failed,
+        cancelled,
       };
     });
 }
