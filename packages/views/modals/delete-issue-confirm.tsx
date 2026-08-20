@@ -13,7 +13,7 @@ import {
   AlertDialogTitle,
 } from "@multica/ui/components/ui/alert-dialog";
 import { useDeleteIssue } from "@multica/core/issues/mutations";
-import { useNavigation } from "../navigation";
+import { useBackOrReplace } from "../navigation";
 import { useT } from "../i18n";
 
 export function DeleteIssueConfirmModal({
@@ -25,10 +25,12 @@ export function DeleteIssueConfirmModal({
 }) {
   const { t } = useT("modals");
   const issueId = (data?.issueId as string) || "";
-  const navigateTo = (data?.onDeletedNavigateTo as string | undefined) || undefined;
+  // Set only by callers that are rendering the issue we are about to delete
+  // (the detail page). List surfaces leave it undefined and simply stay put.
+  const fallbackPath = (data?.onDeletedFallbackPath as string | undefined) || undefined;
   const [deleting, setDeleting] = useState(false);
   const deleteIssue = useDeleteIssue();
-  const navigation = useNavigation();
+  const backOrReplace = useBackOrReplace();
 
   const handleDelete = async () => {
     if (!issueId) return;
@@ -37,7 +39,9 @@ export function DeleteIssueConfirmModal({
       await deleteIssue.mutateAsync(issueId);
       toast.success(t(($) => $.delete_issue.toast_deleted));
       onClose();
-      if (navigateTo) navigation.push(navigateTo);
+      // Back to whichever list the user opened this issue from; `fallbackPath`
+      // only kicks in when there is no in-app history to step back into.
+      if (fallbackPath) backOrReplace(fallbackPath);
     } catch (err) {
       toast.error(
         err instanceof Error && err.message
@@ -55,7 +59,7 @@ export function DeleteIssueConfirmModal({
           <AlertDialogTitle>{t(($) => $.delete_issue.title)}</AlertDialogTitle>
           <AlertDialogDescription>
             {t(($) => $.delete_issue.description)}
-            <span className="mt-2 block text-xs text-muted-foreground/80">
+            <span className="mt-2 block text-caption text-muted-foreground">
               {t(($) => $.delete_issue.hint)}
             </span>
           </AlertDialogDescription>

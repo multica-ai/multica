@@ -27,6 +27,10 @@ archives:
   # looks for `multica_{os}_{arch}.{ext}`) can keep self-updating. Remove
   # once those versions are no longer in use.
   - id: legacy
+    files:
+      - LICENSE*
+      - README*
+      - NOTICE
     formats:
       - tar.gz
     format_overrides:
@@ -37,6 +41,10 @@ archives:
   # Versioned archive name used by current CLI / install scripts /
   # desktop bootstrap going forward.
   - id: versioned
+    files:
+      - LICENSE*
+      - README*
+      - NOTICE
     formats:
       - tar.gz
     format_overrides:
@@ -68,7 +76,9 @@ brews:
     directory: Formula
     homepage: "https://github.com/multica-ai/multica"
     description: "Multica CLI — local agent runtime and management tool for the Multica platform"
-    license: "Apache-2.0"
+    # No license stanza: Multica ships under the Multica License (Apache 2.0
+    # terms with additional conditions, see LICENSE), which has no SPDX
+    # identifier, so declaring "Apache-2.0" here would be a false claim.
     install: |
       bin.install "multica"
     test: |

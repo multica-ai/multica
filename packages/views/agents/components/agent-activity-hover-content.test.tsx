@@ -221,7 +221,8 @@ describe("WorkspaceAgentActivityHoverContent", () => {
       { locale: "zh-Hans" },
     );
 
-    // task / issue stay lowercase English in UI strings (conventions.zh.mdx).
-    expect(screen.getByText("1 个 issue · 2 个 task")).toBeInTheDocument();
+    // issue is 任务 in Chinese; the agent run stays lowercase `task` so the two
+    // counted units never collapse into one word (conventions.zh.mdx).
+    expect(screen.getByText("1 个任务 · 2 个 task")).toBeInTheDocument();
   });
 });

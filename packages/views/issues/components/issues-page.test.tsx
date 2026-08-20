@@ -51,6 +51,8 @@ vi.mock("../../navigation", () => ({
     </a>
   ),
   useNavigation: () => ({ push: vi.fn(), pathname: "/issues" }),
+  resolveClickIntent: () => "push",
+  useIntentNavigate: () => () => {},
   NavigationProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
 
@@ -62,6 +64,134 @@ vi.mock("../../workspace/workspace-avatar", () => ({
 // Mock api (queries use api internally)
 const mockListIssues = vi.hoisted(() => vi.fn().mockResolvedValue({ issues: [], total: 0 }));
 const mockListGroupedIssues = vi.hoisted(() => vi.fn().mockResolvedValue({ groups: [] }));
+const mockListIssueTableGroups = vi.hoisted(() =>
+  vi.fn(async (request: any) => {
+    if (request.group.kind !== "assignee") {
+      return {
+        query_fingerprint: "test",
+        total: 0,
+        groups: [],
+        next_cursor: null,
+      };
+    }
+    const response = await mockListGroupedIssues();
+    return {
+      query_fingerprint: "test",
+      total: response.groups.reduce(
+        (total: number, group: any) => total + group.total,
+        0,
+      ),
+      groups: response.groups.map((group: any) => ({
+        key: group.id,
+        value: {
+          kind: "assignee" as const,
+          actor:
+            group.assignee_type && group.assignee_id
+              ? { type: group.assignee_type, id: group.assignee_id }
+              : null,
+        },
+        count: group.total,
+      })),
+      next_cursor: null,
+    };
+  }),
+);
+const mockListIssueTableRows = vi.hoisted(() =>
+  vi.fn(async (request: any) => {
+    if (request.group.kind === "assignee") {
+      const response = await mockListGroupedIssues();
+      const group = response.groups.find(
+        (candidate: any) => candidate.id === request.group_key,
+      );
+      const issues = group?.issues ?? [];
+      return {
+        query_fingerprint: "test",
+        group_key: request.group_key,
+        parent_id: null,
+        total: 0,
+        rows: issues.map((issue: Issue) => ({
+          issue,
+          direct_child_count: 0,
+        })),
+        branch_total: issues.length,
+        next_cursor: null,
+      };
+    }
+    // Board / list surfaces page by CATEGORY since MUL-6243. This fixture
+    // holds only built-in statuses, where a key IS its own category.
+    const status = request.group_key?.replace(/^status(_category)?:/, "");
+    const response = await mockListIssues({
+      status,
+      limit: 50,
+      offset: 0,
+      ...(request.query.scope.assignee_types
+        ? { assignee_types: request.query.scope.assignee_types }
+        : {}),
+    });
+    return {
+      query_fingerprint: "test",
+      group_key: request.group_key,
+      parent_id: null,
+      total: 0,
+      rows: response.issues.map((issue: Issue) => ({
+        issue,
+        direct_child_count: 0,
+      })),
+      branch_total: response.issues.length,
+      next_cursor: null,
+    };
+  }),
+);
+const mockListIssueTableFacets = vi.hoisted(() =>
+  vi.fn(async (request: any) => {
+    const statuses = [
+      "backlog",
+      "todo",
+      "in_progress",
+      "in_review",
+      "done",
+      "blocked",
+      "cancelled",
+    ];
+    // Only sweep the legacy endpoint for a status facet. Every surface also
+    // requests an always-on `working_agents` facet to label its activity chip,
+    // and that must not look like the legacy status sweep these tests forbid.
+    const wantsStatus = request.facets.some(
+      (facet: any) => facet.kind === "status",
+    );
+    const groups = wantsStatus
+      ? await Promise.all(
+          statuses.map(async (status) => ({
+            status,
+            response: await mockListIssues({
+              status,
+              limit: 50,
+              offset: 0,
+              ...(request.query.scope.assignee_types
+                ? { assignee_types: request.query.scope.assignee_types }
+                : {}),
+            }),
+          })),
+        )
+      : [];
+    return {
+      query_fingerprint: "test",
+      total: groups.reduce((sum, group) => sum + group.response.issues.length, 0),
+      facets: request.facets.map((facet: any) => ({
+        ...facet,
+        values:
+          facet.kind === "status"
+            ? groups
+                .filter((group) => group.response.issues.length > 0)
+                .map((group) => ({
+                  key: group.status,
+                  count: group.response.issues.length,
+                }))
+            : [],
+      })),
+    };
+  }),
+);
 const mockListMembers = vi.hoisted(() =>
   vi.fn().mockResolvedValue([
     {
@@ -118,6 +248,9 @@ vi.mock("@multica/core/api", () => ({
     getBaseUrl: () => "http://127.0.0.1:8080",
     listIssues: (...args: any[]) => mockListIssues(...args),
     listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
+    listIssueTableGroups: (request: any) => mockListIssueTableGroups(request),
+    listIssueTableRows: (request: any) => mockListIssueTableRows(request),
+    listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
@@ -126,6 +259,9 @@ vi.mock("@multica/core/api", () => ({
   getApi: () => ({
     listIssues: (...args: any[]) => mockListIssues(...args),
     listGroupedIssues: (...args: any[]) => mockListGroupedIssues(...args),
+    listIssueTableGroups: (request: any) => mockListIssueTableGroups(request),
+    listIssueTableRows: (request: any) => mockListIssueTableRows(request),
+    listIssueTableFacets: (request: any) => mockListIssueTableFacets(request),
     updateIssue: vi.fn(),
     listMembers: (...args: any[]) => mockListMembers(...args),
     listAgents: (...args: any[]) => mockListAgents(...args),
@@ -148,6 +284,7 @@ vi.mock("@multica/core/issues/config", () => ({
     cancelled: { label: "Cancelled", iconColor: "text-muted-foreground", hoverBg: "hover:bg-accent" },
   },
   PRIORITY_ORDER: ["urgent", "high", "medium", "low", "none"],
+  PRIORITY_DISPLAY_ORDER: ["none", "urgent", "high", "medium", "low"],
   PRIORITY_CONFIG: {
     urgent: { label: "Urgent", bars: 4, color: "text-destructive" },
     high: { label: "High", bars: 3, color: "text-warning" },
@@ -183,6 +320,7 @@ const mockViewState = {
     { key: "labels", width: 220 },
   ],
   listCollapsedStatuses: [] as string[],
+  hiddenStatusCategories: [] as string[],
   setViewMode: vi.fn(),
   setGrouping: vi.fn(),
   toggleStatusFilter: vi.fn(),
@@ -254,11 +392,12 @@ let mockScope = "all";
 vi.mock("@multica/core/issues/stores/issues-scope-store", () => ({
   useIssuesScopeStore: Object.assign(
     (selector?: any) => {
-      const state = { scope: mockScope, setScope: vi.fn() };
+      const state = { scopes: { issues: mockScope }, setScope: vi.fn() };
       return selector ? selector(state) : state;
     },
-    { getState: () => ({ scope: mockScope, setScope: vi.fn() }) },
+    { getState: () => ({ scopes: { issues: mockScope }, setScope: vi.fn() }) },
   ),
+  useIssuesScope: () => mockScope,
 }));
 
 vi.mock("@multica/core/issues/stores/selection-store", () => ({
@@ -322,6 +461,7 @@ vi.mock("@dnd-kit/core", () => {
 vi.mock("@dnd-kit/sortable", () => ({
   SortableContext: ({ children }: any) => children,
   verticalListSortingStrategy: {},
+  horizontalListSortingStrategy: {},
   arrayMove: vi.fn(),
   useSortable: () => ({
     attributes: {},
@@ -334,7 +474,10 @@ vi.mock("@dnd-kit/sortable", () => ({
 }));
 
 vi.mock("@dnd-kit/utilities", () => ({
-  CSS: { Transform: { toString: () => undefined } },
+  CSS: {
+    Transform: { toString: () => undefined },
+    Translate: { toString: () => undefined },
+  },
 }));
 
 // Mock @base-ui/react/accordion (used by ListView)
@@ -518,6 +661,29 @@ function renderWithQuery(ui: React.ReactElement) {
 describe("IssuesPage (shared)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.stubGlobal(
+      "IntersectionObserver",
+      class {
+        private callback: IntersectionObserverCallback;
+        constructor(callback: IntersectionObserverCallback) {
+          this.callback = callback;
+        }
+        observe(target: Element) {
+          this.callback(
+            [{ isIntersecting: true, target } as IntersectionObserverEntry],
+            this as unknown as IntersectionObserver,
+          );
+        }
+        unobserve() {}
+        disconnect() {}
+        takeRecords() {
+          return [];
+        }
+        root = null;
+        rootMargin = "0px";
+        thresholds = [0];
+      },
+    );
     mockListIssues.mockResolvedValue({ issues: [], total: 0 });
     mockListGroupedIssues.mockResolvedValue({ groups: [] });
     mockViewState.viewMode = "board";
@@ -579,19 +745,23 @@ describe("IssuesPage (shared)", () => {
     expect(screen.getByText("No assignee")).toBeInTheDocument();
   });
 
-  it("uses grouped assignee endpoint instead of status page sweep", async () => {
+  it("uses table group/row branches instead of the legacy status sweep", async () => {
     mockViewState.grouping = "assignee";
     mockListGroupedIssues.mockResolvedValue(mockAssigneeGroups(mockIssues));
 
     renderWithQuery(<IssuesPage />);
 
     await screen.findByText("Implement auth");
-    expect(mockListGroupedIssues).toHaveBeenCalledWith(
+    expect(mockListIssueTableGroups).toHaveBeenCalledWith(
       expect.objectContaining({
-        group_by: "assignee",
-        limit: 50,
-        offset: 0,
-        statuses: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+        group: { kind: "assignee" },
+        page: { limit: 100, cursor: null },
+      }),
+    );
+    expect(mockListIssueTableRows).toHaveBeenCalledWith(
+      expect.objectContaining({
+        group: { kind: "assignee" },
+        page: { limit: 50, cursor: null },
       }),
     );
     expect(mockListIssues).not.toHaveBeenCalled();

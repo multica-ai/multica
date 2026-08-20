@@ -190,7 +190,7 @@ func (h *Handler) SetAgentRuntimeSkillEnabled(w http.ResponseWriter, r *http.Req
 	// "agent:status" event to invalidate workspaceKeys.agents. Without this only
 	// the initiating tab refreshes and other clients keep showing stale toggles.
 	locked.DisabledRuntimeSkills = payload
-	resp := agentToResponse(locked)
+	resp := h.agentToResponse(locked)
 	if err := h.enrichAgentResponseWithTargets(r.Context(), &resp, locked.ID); err != nil {
 		slog.Warn("runtime skill toggle: load invocation targets for broadcast failed",
 			append(logger.RequestAttrs(r), "error", err, "agent_id", agentID)...)

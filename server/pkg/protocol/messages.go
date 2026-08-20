@@ -5,6 +5,22 @@ import "encoding/json"
 const (
 	DaemonCapabilitySkillBundlesV1      = "skill-bundles-v1"
 	DaemonCapabilityCoalescedCommentsV1 = "coalesced-comments-v1"
+	DaemonCapabilityExecutionManifestV1 = "execution-manifest-v1"
+	DaemonCapabilityAgentSkillV1        = "agent-skill-v1"
+	DaemonCapabilityRemoteMCPV1         = "remote-mcp-v1"
+	// DaemonCapabilityLocalWorktreeV1 advertises that the daemon implements
+	// worktree mode for local_directory resources (execution_mode=worktree).
+	//
+	// This is a CAPABILITY rather than a version check on purpose. The failure
+	// mode of getting it wrong is not a missing field — a daemon without the
+	// implementation json-skips execution_mode and runs the task IN PLACE,
+	// editing the working copy the user asked to isolate. Version strings
+	// cannot answer that reliably: a git-describe dev build ("v0.4.21-24-g…")
+	// is deliberately exempted from the version floor so `make daemon` stays
+	// unblocked, which let exactly such a daemon through (MUL-5707). A daemon
+	// that implements the mode says so; one that does not, cannot.
+	DaemonCapabilityLocalWorktreeV1 = "local-worktree-v1"
+
 	// DaemonCapabilityRPCV1 advertises that the daemon can carry
 	// request/response RPCs over the WebSocket control connection (MUL-4257).
 	// Gated so only daemons+servers that both support it route claim over WS;
@@ -20,6 +36,14 @@ const (
 	// drop the user's prompt, and keeps the legacy synchronous restore instead.
 	AppCapabilityChatDraftRestoreV1 = "chat-draft-restore-v1"
 )
+
+// ChatQuickAction is a server-validated follow-up attached to one assistant
+// reply. Label is the concise chip text; Prompt is the full next user turn.
+type ChatQuickAction struct {
+	Label   string `json:"label"`
+	Prompt  string `json:"prompt"`
+	Primary bool   `json:"primary,omitempty"`
+}
 
 // RPCRequestPayload is the generic daemon→server request envelope carried in a
 // protocol.Message of type EventDaemonRPCRequest. RequestID correlates the
@@ -84,6 +108,25 @@ type RuntimeProfilesChangedPayload struct {
 // no workspace data is embedded in the event.
 type WorkspacesChangedPayload struct{}
 
+// PendingWorkKind values carried by PendingWorkPayload.Kind. The kind is
+// advisory only — the daemon reacts identically to every kind (one immediate
+// heartbeat, which claims whatever is queued) — so an unknown value from a
+// newer server stays safe on an older daemon.
+const (
+	PendingWorkKindModelList = "model_list"
+)
+
+// PendingWorkPayload is sent from server to daemon as a wakeup hint when a
+// heartbeat-carried request is enqueued for a runtime. The daemon responds by
+// sending one immediate heartbeat for RuntimeID instead of waiting for its next
+// scheduled tick; the request itself is still claimed through the normal
+// heartbeat path, so this event carries no work and is safe to lose, duplicate,
+// or ignore (MUL-5444).
+type PendingWorkPayload struct {
+	RuntimeID string `json:"runtime_id"`
+	Kind      string `json:"kind,omitempty"`
+}
+
 // TaskProgressPayload is sent from daemon to server during task execution.
 type TaskProgressPayload struct {
 	TaskID  string `json:"task_id"`
@@ -99,6 +142,24 @@ type TaskCompletedPayload struct {
 	Output string `json:"output,omitempty"`
 }
 
+// ChatQuickActionsPayload supplements one completed chat turn with the
+// sanitized follow-up actions from the daemon's suggestion pass. An empty
+// QuickActions list is a meaningful terminal state — it resolves the
+// pending skeleton with "no suggestions this turn".
+type ChatQuickActionsPayload struct {
+	ChatSessionID string            `json:"chat_session_id"`
+	TaskID        string            `json:"task_id"`
+	MessageID     string            `json:"message_id"`
+	QuickActions  []ChatQuickAction `json:"quick_actions"`
+	// Failed marks a supplement that resolves the client's refresh spinner
+	// because the regeneration FAILED (the provider pass or its delivery), not
+	// because it produced new suggestions. QuickActions then carries the turn's
+	// unchanged pills; the client shows a "couldn't refresh" notice instead of
+	// treating unchanged content as a silent success (MUL-5149). Omitted (false)
+	// on the normal success path and for the automatic best-effort pass.
+	Failed bool `json:"failed,omitempty"`
+}
+
 // TaskMessagePayload represents a single agent execution message (tool call, text, etc.)
 type TaskMessagePayload struct {
 	TaskID    string         `json:"task_id"`
@@ -110,6 +171,13 @@ type TaskMessagePayload struct {
 	Input     map[string]any `json:"input,omitempty"`   // tool input (tool_use only)
 	Output    string         `json:"output,omitempty"`  // tool output (tool_result only)
 	CreatedAt string         `json:"created_at,omitempty"`
+
+	// Truncated marks a payload whose Input/Output were clipped for the
+	// realtime fanout (MUL-6396). The REST list endpoints never set it — they
+	// always return the full persisted row — so a client that sees it knows
+	// the authoritative content is one GET away. Clients render the clipped
+	// text immediately and backfill the full row in the background.
+	Truncated bool `json:"truncated,omitempty"`
 }
 
 // DaemonRegisterPayload is sent from daemon to server on connection.
@@ -145,6 +213,16 @@ const (
 	// without any text reply — a visible, deliberate terminal outcome rather
 	// than a silently-dropped turn (MUL-4351).
 	ChatMessageKindNoResponse = "no_response"
+	// ChatMessageKindOnboardingKickoff is the server-authored, hidden first
+	// turn used to start Mika's onboarding conversation. It is persisted so
+	// the runtime receives a normal immutable chat input batch. User-facing
+	// APIs filter it out; clients also ignore the kind defensively.
+	ChatMessageKindOnboardingKickoff = "onboarding_kickoff"
+	// ChatMessageKindOnboardingOpening marks the assistant reply produced by
+	// the onboarding kickoff. The kickoff row itself never reaches clients, so
+	// the opening self-describes: chat renders the starter cards under this
+	// kind instead of quick-action chips (MUL-5765).
+	ChatMessageKindOnboardingOpening = "onboarding_opening"
 )
 
 // ChatDonePayload is broadcast when an agent finishes responding to a chat
@@ -161,13 +239,18 @@ const (
 // the omitempty tags only elide fields for the legacy paths that broadcast
 // without a row.
 type ChatDonePayload struct {
-	ChatSessionID string `json:"chat_session_id"`
-	TaskID        string `json:"task_id"`
-	MessageID     string `json:"message_id,omitempty"`
-	Content       string `json:"content,omitempty"`
-	ElapsedMs     int64  `json:"elapsed_ms,omitempty"`
-	CreatedAt     string `json:"created_at,omitempty"`
-	MessageKind   string `json:"message_kind,omitempty"`
+	ChatSessionID string            `json:"chat_session_id"`
+	TaskID        string            `json:"task_id"`
+	MessageID     string            `json:"message_id,omitempty"`
+	Content       string            `json:"content,omitempty"`
+	ElapsedMs     int64             `json:"elapsed_ms,omitempty"`
+	CreatedAt     string            `json:"created_at,omitempty"`
+	MessageKind   string            `json:"message_kind,omitempty"`
+	QuickActions  []ChatQuickAction `json:"quick_actions,omitempty"`
+	// QuickActionsPending tells clients a chat:quick_actions supplement will
+	// follow for this turn (render a placeholder). Never true when
+	// QuickActions is already populated.
+	QuickActionsPending bool `json:"quick_actions_pending,omitempty"`
 }
 
 // Outcome values carried by ChatCancelFinalizedPayload.
@@ -229,6 +312,9 @@ type ChatSessionDeletedPayload struct {
 type ChatSessionUpdatedPayload struct {
 	ChatSessionID string `json:"chat_session_id"`
 	Title         string `json:"title"`
+	// ProjectID is set only by the project-context update path. The double
+	// pointer distinguishes an omitted field from an explicit JSON null.
+	ProjectID **string `json:"project_id,omitempty"`
 	// Pinned is set only by the pin/unpin path; nil on a plain rename so a
 	// receiver leaves the existing pin state untouched.
 	Pinned *bool `json:"pinned,omitempty"`

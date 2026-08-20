@@ -1118,7 +1118,10 @@ func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError(t *testing.T) {
 	stub := installOpenclawStub(t, map[string]openclawResponse{
 		"config file":                   {stdout: userCfgPath},
 		"config get agents.list --json": {stdout: "null"},
-		"config get --json":             {err: errors.New("openclaw: schema validation failed")},
+		"config get --json": {
+			stdout: `{"error":"schema validation failed","resolved":{"apiKey":"must-not-leak"}}`,
+			err:    errors.New("openclaw config get --json: exit status 1"),
+		},
 	})
 	mcpConfig := json.RawMessage(`{"mcpServers": {"context7": {"command": "uvx"}}}`)
 
@@ -1131,6 +1134,12 @@ func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "resolved config") {
 		t.Errorf("error %q does not name the resolved-config step", err.Error())
+	}
+	if !strings.Contains(err.Error(), "json error: schema validation failed") {
+		t.Errorf("error %q omits the structured CLI diagnostic", err.Error())
+	}
+	if strings.Contains(err.Error(), "must-not-leak") {
+		t.Errorf("error leaked a non-diagnostic JSON field: %q", err.Error())
 	}
 	// No stale wrapper / snapshot left behind.
 	if _, err := os.Stat(filepath.Join(envRoot, openclawConfigFile)); !os.IsNotExist(err) {
@@ -1494,10 +1503,127 @@ func TestIsOpenclawKeyMissing(t *testing.T) {
 	}
 }
 
+// TestIsOpenclawKeyMissingResult covers the JSON error contract observed in
+// OpenClaw 2026.7.2-beta.7. In JSON mode the CLI writes the missing-path error
+// to stdout and leaves stderr empty, so the process error alone contains only
+// "exit status 1". Only a structured missing-path envelope may trigger the
+// registry fallback; other failures must preserve the preparer's fail-closed
+// posture.
+func TestIsOpenclawKeyMissingResult(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		stdout string
+		err    error
+		want   bool
+	}{
+		{
+			name:   "2026.7.2-beta.7 stdout json missing path",
+			stdout: `{"error":"Config path not found: agents.list"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   true,
+		},
+		{
+			name: "2026.6.x stderr missing path remains supported",
+			err:  errors.New("openclaw config get agents.list --json: exit status 1 (stderr: Config path not found: agents.list)"),
+			want: true,
+		},
+		{
+			name:   "other json error stays an error",
+			stdout: `{"error":"OpenClaw config is invalid"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   false,
+		},
+		{
+			name:   "unrelated not-set json error stays an error",
+			stdout: `{"error":"OPENAI_API_KEY is not set"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   false,
+		},
+		{
+			name:   "agents-list not-set json error remains compatible",
+			stdout: `{"error":"agents.list is not set"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   true,
+		},
+		{
+			name:   "malformed json stays an error",
+			stdout: `{"error":`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+			want:   false,
+		},
+		{
+			name:   "successful output is never reclassified",
+			stdout: `{"error":"Config path not found: agents.list"}`,
+			want:   false,
+		},
+		{
+			name:   "timeout remains a timeout",
+			stdout: `{"error":"Config path not found: agents.list"}`,
+			err:    fmt.Errorf("openclaw config get agents.list --json: %w (stderr: Config path not found: agents.list)", context.DeadlineExceeded),
+			want:   false,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := isOpenclawKeyMissingResult(tc.stdout, tc.err); got != tc.want {
+				t.Errorf("isOpenclawKeyMissingResult(%q, %v) = %v, want %v", tc.stdout, tc.err, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestAnnotateOpenclawJSONError(t *testing.T) {
+	t.Parallel()
+	t.Run("keeps only a normalized error field and the cause", func(t *testing.T) {
+		t.Parallel()
+		cause := errors.New("exit status 1")
+		got := annotateOpenclawJSONError(
+			cause,
+			`{"error":"  schema\nvalidation failed  ","resolved":{"apiKey":"must-not-leak"}}`,
+		)
+		if !errors.Is(got, cause) {
+			t.Fatalf("annotated error lost its cause: %v", got)
+		}
+		if !strings.Contains(got.Error(), "json error: schema validation failed") {
+			t.Fatalf("annotated error omitted or failed to normalize the diagnostic: %v", got)
+		}
+		if strings.Contains(got.Error(), "must-not-leak") {
+			t.Fatalf("annotated error leaked a sibling JSON field: %v", got)
+		}
+	})
+
+	t.Run("bounds the diagnostic", func(t *testing.T) {
+		t.Parallel()
+		cause := errors.New("exit status 1")
+		prefix := strings.Repeat("界", openclawJSONErrorMaxRunes)
+		got := annotateOpenclawJSONError(
+			cause,
+			`{"error":"`+prefix+`extra"}`,
+		)
+		if !strings.Contains(got.Error(), "json error: "+prefix+"…") {
+			t.Fatalf("annotated error was not truncated at the rune limit: %v", got)
+		}
+		if strings.Contains(got.Error(), "extra") {
+			t.Fatalf("annotated error exceeded its bound: %v", got)
+		}
+	})
+
+	t.Run("ignores malformed envelopes", func(t *testing.T) {
+		t.Parallel()
+		cause := errors.New("exit status 1")
+		if got := annotateOpenclawJSONError(cause, `{"error":`); got != cause {
+			t.Fatalf("malformed JSON changed the original error: %v", got)
+		}
+	})
+}
+
 // TestPrepareOpenclawConfigNewSchemaOmitsAgentsList — OpenClaw 2026.6.x
-// removed the `agents.list` config path; `config get agents.list` exits
-// non-zero with "Config path not found" and the agents live in a sqlite
-// registry reachable via the `openclaw agents list --json` subcommand.
+// removed the `agents.list` config path and OpenClaw 2026.7.2-beta.7 reports
+// that missing path as a JSON error on stdout. In both versions the agents
+// live in a sqlite registry reachable via the `openclaw agents list --json`
+// subcommand.
 //
 // The preparer must (a) treat the config-path error as "missing, fall back"
 // (read-side, #3028 first half) and (b) NOT write the registry-sourced agents
@@ -1524,8 +1650,13 @@ func TestPrepareOpenclawConfigNewSchemaOmitsAgentsList(t *testing.T) {
 	registry := `[{"id":"main","identityName":"Beau","identitySource":"identity","workspace":"/Users/cob/.openclaw/workspace","agentDir":"/Users/cob/.openclaw/agents/main/agent","model":"anthropic/claude-sonnet-4-6","bindings":0,"isDefault":true}]`
 	stub := installOpenclawStub(t, map[string]openclawResponse{
 		"config file": {stdout: userConfigPath},
-		// New-schema error, verbatim #3028 string.
-		"config get agents.list --json": {err: errors.New("openclaw config get agents.list --json: exit status 1 (stderr: Config path not found: agents.list. Run openclaw config validate to inspect config shape.)")},
+		// OpenClaw 2026.7.2-beta.7 writes this JSON error to stdout and
+		// leaves stderr empty, so the process error carries no missing-path
+		// text of its own (#7130).
+		"config get agents.list --json": {
+			stdout: `{"error":"Config path not found: agents.list"}`,
+			err:    errors.New("openclaw config get agents.list --json: exit status 1"),
+		},
 		// Registry subcommand returns the real agents.
 		"agents list --json": {stdout: registry},
 	})
@@ -1575,5 +1706,128 @@ func TestPrepareOpenclawConfigNewSchemaEmptyRegistry(t *testing.T) {
 	}
 	if agents["defaults"].(map[string]any)["workspace"] != workDir {
 		t.Errorf("defaults.workspace not set")
+	}
+}
+
+// TestExpandOpenclawPathTildeSeparators — `openclaw config file` shortens the
+// home prefix using its host OS's separator, so Windows reports
+// `~\.openclaw\openclaw.json`. Matching only `~/` left that form unexpanded;
+// because `~\...` is not absolute it was then joined onto the daemon's working
+// directory, yielding a path that could never exist. The resulting stat miss
+// was indistinguishable from a fresh install, so the wrapper dropped the
+// user's $include and every task lost its model providers and auth profiles
+// (issue #6630).
+func TestExpandOpenclawPathTildeSeparators(t *testing.T) {
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("USERPROFILE", fakeHome)
+
+	cases := []struct {
+		name string
+		in   string
+	}{
+		{name: "posix separator", in: "~/.openclaw/openclaw.json"},
+		{name: "windows separator", in: `~\.openclaw\openclaw.json`},
+		{name: "bare tilde", in: "~"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, err := expandOpenclawPath(tc.in)
+			if err != nil {
+				t.Fatalf("expandOpenclawPath(%q): %v", tc.in, err)
+			}
+			if strings.Contains(got, "~") {
+				t.Errorf("expandOpenclawPath(%q) = %q, want the tilde expanded (a literal ~ can never stat)", tc.in, got)
+			}
+			if !strings.HasPrefix(got, fakeHome) {
+				t.Errorf("expandOpenclawPath(%q) = %q, want it rooted at the home dir %q", tc.in, got, fakeHome)
+			}
+		})
+	}
+}
+
+// TestPrepareOpenclawConfigExpandsWindowsTilde — end-to-end guard for #6630:
+// the reporter's exact `openclaw config file` output (a config-warning banner
+// followed by a Windows-shortened path) must still produce a wrapper that
+// $includes the user's config.
+func TestPrepareOpenclawConfigExpandsWindowsTilde(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.MkdirAll(workDir, 0o755); err != nil {
+		t.Fatalf("mkdir workdir: %v", err)
+	}
+
+	fakeHome := t.TempDir()
+	t.Setenv("HOME", fakeHome)
+	t.Setenv("USERPROFILE", fakeHome)
+
+	// filepath.Join normalizes the reported remainder to the host separator,
+	// so build the expected target the same way the production path does and
+	// materialize it. On non-Windows hosts that is a single oddly-named file;
+	// the assertion under test is the tilde expansion, not the separator.
+	wantPath := filepath.Join(fakeHome, `.openclaw\openclaw.json`)
+	if err := os.MkdirAll(filepath.Dir(wantPath), 0o755); err != nil {
+		t.Fatalf("mkdir user cfg dir: %v", err)
+	}
+	if err := os.WriteFile(wantPath, []byte(`{}`), 0o600); err != nil {
+		t.Fatalf("write user cfg: %v", err)
+	}
+
+	banner := "|\no  Config warnings ---------------------------------+\n" +
+		"|  - plugins.entries.duckduckgo: plugin not found  |\n" +
+		"+--------------------------------------------------+\n" +
+		`~\.openclaw\openclaw.json` + "\n"
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file":                   {stdout: banner},
+		"config get agents.list --json": {stdout: "null"},
+	})
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	got := mustReadJSON(t, result.ConfigPath)
+	include, ok := got["$include"].([]any)
+	if !ok {
+		t.Fatalf("wrapper has no $include — the user's models and auth profiles would be lost: %#v", got)
+	}
+	if include[0] != wantPath {
+		t.Errorf("$include[0] = %v, want %q", include[0], wantPath)
+	}
+	if result.IncludeRoot != filepath.Dir(wantPath) {
+		t.Errorf("IncludeRoot = %q, want %q", result.IncludeRoot, filepath.Dir(wantPath))
+	}
+}
+
+// TestPrepareOpenclawConfigWarnsWhenActiveConfigMissing — discovery used to be
+// silent, so a wrapper written without $include left no trace in the daemon
+// log and could only be diagnosed by reading the generated file. A fresh
+// install legitimately lands here too, but the consequence (no user models or
+// auth profiles for this task) is worth a warning either way.
+func TestPrepareOpenclawConfigWarnsWhenActiveConfigMissing(t *testing.T) {
+	envRoot := t.TempDir()
+	workDir := t.TempDir()
+	missing := filepath.Join(t.TempDir(), "absent", "openclaw.json")
+
+	stub := installOpenclawStub(t, map[string]openclawResponse{
+		"config file": {stdout: missing + "\n"},
+	})
+
+	var logs strings.Builder
+	logger := slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{OpenclawBin: stub.bin, Logger: logger})
+	if err != nil {
+		t.Fatalf("prepareOpenclawConfig: %v", err)
+	}
+	out := logs.String()
+	if !strings.Contains(out, "openclaw active config not found") {
+		t.Errorf("missing active config was not warned about; log was:\n%s", out)
+	}
+	if !strings.Contains(out, "include_target=none") {
+		t.Errorf("prepared-config log should record include_target=none; log was:\n%s", out)
+	}
+	if result.IncludeRoot != "" {
+		t.Errorf("IncludeRoot = %q, want empty", result.IncludeRoot)
 	}
 }

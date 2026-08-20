@@ -5,8 +5,8 @@
  * sheet and goes straight to the blank state for that agent.
  *
  * Filtering is delegated to the caller (the screen passes a pre-filtered
- * `agents` list) so the same filter logic — archived + canAssignAgent +
- * order — stays in one place.
+ * `agents` list) so the same filter logic — archived + canAssignAgentToIssue
+ * + order — stays in one place.
  *
  * Layout mirrors `components/issue/my-issues-filter-sheet.tsx`: transparent
  * Modal + dimmed backdrop + centered card. Bottom-sheet anchoring would be
@@ -18,6 +18,7 @@ import type { Agent } from "@multica/core/types";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { cn } from "@/lib/utils";
+import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
 
 interface Props {
   visible: boolean;
@@ -61,9 +62,11 @@ export function AgentPickerSheet({
                 ) : (
                   agents.map((agent) => {
                     const selected = agent.id === currentAgentId;
+                    const runtimeBound = isAgentRuntimeBound(agent);
                     return (
                       <Pressable
                         key={agent.id}
+                        disabled={!runtimeBound}
                         onPress={() => {
                           onPick(agent);
                           onClose();
@@ -71,6 +74,7 @@ export function AgentPickerSheet({
                         className={cn(
                           "flex-row items-center gap-3 px-4 py-3 active:bg-secondary",
                           selected && "bg-secondary/60",
+                          !runtimeBound && "opacity-50",
                         )}
                       >
                         <ActorAvatar type="agent" id={agent.id} size={32} showPresence />
@@ -90,6 +94,11 @@ export function AgentPickerSheet({
                             </Text>
                           ) : null}
                         </View>
+                        {!runtimeBound ? (
+                          <Text className="text-xs font-medium text-warning">
+                            Needs runtime
+                          </Text>
+                        ) : null}
                         {selected ? (
                           <Text className="text-sm text-primary font-semibold">
                             ✓

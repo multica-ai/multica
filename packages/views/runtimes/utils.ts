@@ -107,16 +107,44 @@ export function isVersionNewer(latest: string, current: string): boolean {
   return false;
 }
 
+const TOKEN_UNITS = [
+  { divisor: 1, suffix: "" },
+  { divisor: 1_000, suffix: "K" },
+  { divisor: 1_000_000, suffix: "M" },
+  { divisor: 1_000_000_000, suffix: "B" },
+  { divisor: 1_000_000_000_000, suffix: "T" },
+] as const;
+
 export function formatTokens(n: number): string {
-  if (n >= 1_000_000) {
-    const m = n / 1_000_000;
-    return m % 1 < 0.05 ? `${Math.round(m)}M` : `${m.toFixed(1)}M`;
+  const magnitude = Math.abs(n);
+  let unitIndex = TOKEN_UNITS.findLastIndex(
+    ({ divisor }) => magnitude >= divisor,
+  );
+  unitIndex = Math.max(unitIndex, 0);
+
+  if (unitIndex === 0) return n.toLocaleString();
+
+  let unit = TOKEN_UNITS[unitIndex]!;
+  let scaled = n / unit.divisor;
+
+  // Promote values that round across a unit boundary (999,999 -> 1M), so a
+  // compact label never renders as 1000K / 1000M and grows unnecessarily.
+  if (
+    Math.abs(Number(scaled.toFixed(1))) >= 1_000 &&
+    unitIndex < TOKEN_UNITS.length - 1
+  ) {
+    unit = TOKEN_UNITS[unitIndex + 1]!;
+    scaled = n / unit.divisor;
   }
-  if (n >= 1_000) {
-    const k = n / 1_000;
-    return k % 1 < 0.05 ? `${Math.round(k)}K` : `${k.toFixed(1)}K`;
-  }
-  return n.toLocaleString();
+
+  return `${Number(scaled.toFixed(1))}${unit.suffix}`;
+}
+
+// Cents below $100, whole dollars above — two decimals on a four-figure spend
+// is noise, and dropping them below $100 would round most single runs to $0.
+export function formatUsd(n: number): string {
+  if (n >= 100) return `$${n.toFixed(0)}`;
+  return `$${n.toFixed(2)}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -132,12 +160,13 @@ export function formatTokens(n: number): string {
 //   DeepSeek:  https://api-docs.deepseek.com/quick_start/pricing
 //   Moonshot:  https://www.kimi.com/resources/kimi-k2-6-pricing
 //   Zhipu:     https://docs.z.ai/guides/overview/pricing
+//   xAI:       https://docs.x.ai/developers/pricing
 //
 // Anthropic's cacheWrite reflects the 5-minute cache TTL (1.25× input); the
 // daemon reports cache_creation_input_tokens without TTL metadata, so 5m is
 // the safest / cheapest assumption (matches the API default). DeepSeek,
-// Moonshot and Zhipu do not bill cache writes separately (cached input is
-// just discounted on subsequent reads), so cacheWrite mirrors input there.
+// Moonshot, Zhipu and xAI do not bill cache writes separately (cached input
+// is just discounted on subsequent reads), so cacheWrite mirrors input there.
 // OpenAI historically did the same, but its GPT-5.6+ generation bills cache
 // writes at 1.25× input (cache reads still get the 90% cached-input
 // discount), so those rows carry a distinct cacheWrite. Codex usage doesn't
@@ -152,7 +181,8 @@ export function formatTokens(n: number): string {
 // `server/pkg/agent/models.go` so the catalog and pricing stay in sync.
 //
 // Provider-qualified keys: a model id that is NOT vendor-prefixed
-// (`claude-*`, `gpt-*`, `o3*`/`o4*`, `glm-*`, `deepseek-*`, `kimi-*`) and is
+// (`claude-*`, `gpt-*`, `o3*`/`o4*`, `glm-*`, `deepseek-*`, `kimi-*`,
+// `grok-*`) and is
 // not the provider name itself can collide across providers — more than one
 // provider may report the same generic id like `auto`. Such generic ids MUST be keyed as
 // `${provider}/${model}` (e.g. `cursor/auto`). `resolvePricing` tries the
@@ -166,9 +196,10 @@ const MODEL_PRICING: Record<
   //    intro launch rate ($2 / $10 through 2026-08-31). This static map has
   //    no future-dated pricing support yet, so update the row when the
   //    post-intro $3 / $15 rate takes effect. Fable 5 is a Mythos-class SKU
-  //    at 10/50; Opus 4.5+ stays on the lower 5/25 Opus tier. --
+  //    at 10/50; Opus 4.5 through Opus 5 stay on the lower 5/25 Opus tier. --
   "claude-sonnet-5":     { input: 2,    output: 10,   cacheRead: 0.20, cacheWrite: 2.50 },
   "claude-fable-5":     { input: 10,   output: 50,   cacheRead: 1.00, cacheWrite: 12.50 },
+  "claude-opus-5":      { input: 5,    output: 25,   cacheRead: 0.50, cacheWrite: 6.25 },
   "claude-haiku-4-5":   { input: 1,    output: 5,    cacheRead: 0.10, cacheWrite: 1.25 },
   "claude-sonnet-4-5":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
   "claude-sonnet-4-6":  { input: 3,    output: 15,   cacheRead: 0.30, cacheWrite: 3.75 },
@@ -252,6 +283,31 @@ const MODEL_PRICING: Record<
   "glm-4.5-air":        { input: 0.2,  output: 1.1,  cacheRead: 0.03,   cacheWrite: 0.2 },
   "glm-4.5-airx":       { input: 1.1,  output: 4.5,  cacheRead: 0.22,   cacheWrite: 1.1 },
   "glm-4.5-flash":      { input: 0,    output: 0,    cacheRead: 0,      cacheWrite: 0 },
+
+  // -- xAI Grok (docs.x.ai/developers/pricing). Rates below are the
+  //    short-context tier, and are now only a FALLBACK for Grok: xAI reports
+  //    its own price per turn and `estimateCost` prefers it. That matters
+  //    because xAI bills a request at 2x once its prompt reaches 200K tokens,
+  //    and a usage row aggregates every model call in a turn — so these rates
+  //    cannot tell which tier a request hit, while xAI's own figure already
+  //    has it priced in. These rows still apply to Grok usage recorded by a
+  //    daemon too old to report cost (the same trade-off the Anthropic `[1m]`
+  //    context tag takes, see `resolvePricing`).
+  //    `cacheRead` is xAI's published "Cached" input rate; there is no
+  //    separate cache-write rate on the page (writes bill as normal input),
+  //    so cacheWrite mirrors input per the header note. Grok ids are
+  //    vendor-prefixed, so these keys stay unqualified — which is what makes
+  //    them resolve at all, since the daemon tags the rows with the runtime
+  //    provider `grok`, not `xai`.
+  //    `grok-composer-*` ships in the Grok Build catalog
+  //    (server/pkg/agent/models.go) but is absent from the price sheet; it
+  //    deliberately stays unmapped rather than inheriting a guessed rate. --
+  "grok-4.5":                     { input: 2,    output: 6,    cacheRead: 0.30, cacheWrite: 2 },
+  "grok-4.3":                     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+  "grok-build-0.1":               { input: 1,    output: 2,    cacheRead: 0.20, cacheWrite: 1 },
+  "grok-4.20-multi-agent-0309":   { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+  "grok-4.20-0309-reasoning":     { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
+  "grok-4.20-0309-non-reasoning": { input: 1.25, output: 2.50, cacheRead: 0.20, cacheWrite: 1.25 },
 
   // -- Cursor Composer / Auto (cursor.com/docs/models-and-pricing,
   //    cursor.com/docs/models/cursor-composer-2,
@@ -446,12 +502,22 @@ export function isModelPriced(model: string, provider?: string): boolean {
 // the row carries a provider, so the same bare model id reported by two
 // providers surfaces as two distinct entries the user can price separately.
 // Empty when everything's priced or there are no rows.
+// A row the provider priced in full needs no rate-table entry, so it must not
+// raise the "we can't price this model" warning — its cost is already exact,
+// and asking the user to supply a rate for it would be asking them to override
+// a real bill with a guess.
 export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
   const set = new Set<string>();
   for (const r of rows) {
-    if (r.model && !isModelPriced(r.model, r.provider)) {
-      set.add(pricingKey(r.model, r.provider));
-    }
+    if (!r.model || isModelPriced(r.model, r.provider)) continue;
+    const uncosted = uncostedTokens(r);
+    const needsEstimate =
+      uncosted.input > 0 ||
+      uncosted.output > 0 ||
+      uncosted.cacheRead > 0 ||
+      uncosted.cacheWrite > 0;
+    if (!needsEstimate && (r.cost_usd_ticks ?? 0) > 0) continue;
+    set.add(pricingKey(r.model, r.provider));
   }
   return Array.from(set).toSorted();
 }
@@ -464,20 +530,87 @@ export function collectUnmappedModels(rows: readonly Priceable[]): string[] {
 // test fixtures) still type-check; when present it disambiguates generic
 // model ids during pricing. RuntimeUsage / RuntimeUsageByAgent /
 // DashboardUsageDaily / DashboardUsageByAgent all carry it on the wire.
-type Priceable = Pick<
+export type Priceable = Pick<
   RuntimeUsage,
-  "model" | "input_tokens" | "output_tokens" | "cache_read_tokens" | "cache_write_tokens"
-> & { provider?: string };
+  | "model"
+  | "input_tokens"
+  | "output_tokens"
+  | "cache_read_tokens"
+  | "cache_write_tokens"
+> & {
+  provider?: string;
+  cost_usd_ticks?: number;
+  uncosted_input_tokens?: number;
+  uncosted_output_tokens?: number;
+  uncosted_cache_read_tokens?: number;
+  uncosted_cache_write_tokens?: number;
+};
 
+// Providers report cost in ticks of 1e-10 USD (xAI's unit), which keeps
+// sub-cent turn costs exact as integers all the way from the agent to here.
+const COST_USD_TICKS_PER_USD = 10_000_000_000;
+
+// The tokens in a row that still need pricing from the table above, i.e. the
+// ones no provider priced for us.
+//
+// A backend older than the cost split sends no `uncosted_*` at all. Treating
+// that as "0 tokens left to estimate" would report $0 for every row, so
+// `undefined` falls back to the full token counts — exactly the pre-split
+// behaviour. The one exception is a row that DOES carry an authoritative cost
+// without the split: adding a full-token estimate on top would double-charge
+// it, so the authoritative figure stands alone. A current backend always sends
+// both, so this only guards against version drift.
+function uncostedTokens(usage: Priceable): {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+} {
+  if (usage.uncosted_input_tokens === undefined) {
+    if ((usage.cost_usd_ticks ?? 0) > 0) {
+      return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    }
+    return {
+      input: usage.input_tokens,
+      output: usage.output_tokens,
+      cacheRead: usage.cache_read_tokens,
+      cacheWrite: usage.cache_write_tokens,
+    };
+  }
+  return {
+    input: usage.uncosted_input_tokens,
+    output: usage.uncosted_output_tokens ?? 0,
+    cacheRead: usage.uncosted_cache_read_tokens ?? 0,
+    cacheWrite: usage.uncosted_cache_write_tokens ?? 0,
+  };
+}
+
+// Cost of a usage row: what the provider actually charged, plus a rate-table
+// estimate for whatever it didn't charge for.
+//
+// The rate table cannot express request-level pricing rules — xAI bills a Grok
+// request at 2x once its prompt reaches 200K tokens, and these rows aggregate
+// every model call in a turn, so the token counts genuinely cannot say which
+// tier a given request hit. Where the provider tells us its own price, that
+// number is the bill and no estimate can improve on it.
+//
+// Both halves are summed rather than one winning outright because a single row
+// can aggregate both kinds of source row (two providers in a bucket, or Grok
+// either side of a CLI upgrade). Custom pricing overrides still apply — but
+// only to the estimated half, since they are a user's guess at a rate and the
+// authoritative half is not a guess.
 export function estimateCost(usage: Priceable): number {
+  const authoritative = (usage.cost_usd_ticks ?? 0) / COST_USD_TICKS_PER_USD;
   const pricing = resolvePricing(usage.model, usage.provider);
-  if (!pricing) return 0;
+  if (!pricing) return authoritative;
+  const uncosted = uncostedTokens(usage);
   return (
-    (usage.input_tokens * pricing.input +
-      usage.output_tokens * pricing.output +
-      usage.cache_read_tokens * pricing.cacheRead +
-      usage.cache_write_tokens * pricing.cacheWrite) /
-    1_000_000
+    authoritative +
+    (uncosted.input * pricing.input +
+      uncosted.output * pricing.output +
+      uncosted.cacheRead * pricing.cacheRead +
+      uncosted.cacheWrite * pricing.cacheWrite) /
+      1_000_000
   );
 }
 
@@ -488,17 +621,129 @@ export interface CostBreakdown {
   cacheWrite: number;
 }
 
+// Per-token-type split of `estimateCost`. The estimated half splits naturally;
+// the authoritative half arrives as one number per row, so it is distributed
+// across the buckets in the same proportions the rate table would have charged.
+// Only the total is authoritative — the split is presentation, and doing it
+// this way keeps the stacked chart summing to the headline figure instead of
+// silently under-drawing every Grok row.
 export function estimateCostBreakdown(usage: Priceable): CostBreakdown {
   const pricing = resolvePricing(usage.model, usage.provider);
   if (!pricing) {
-    return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
+    // No rates to split by, but the provider may still have priced the turn
+    // itself. Returning zeros here would make the stacked chart disagree with
+    // the headline `estimateCost` on exactly the rows whose cost is EXACT, so
+    // the charge lands whole in one bucket instead.
+    return {
+      input: (usage.cost_usd_ticks ?? 0) / COST_USD_TICKS_PER_USD,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
   }
-  return {
-    input: (usage.input_tokens * pricing.input) / 1_000_000,
-    output: (usage.output_tokens * pricing.output) / 1_000_000,
-    cacheRead: (usage.cache_read_tokens * pricing.cacheRead) / 1_000_000,
-    cacheWrite: (usage.cache_write_tokens * pricing.cacheWrite) / 1_000_000,
+  const uncosted = uncostedTokens(usage);
+  const breakdown: CostBreakdown = {
+    input: (uncosted.input * pricing.input) / 1_000_000,
+    output: (uncosted.output * pricing.output) / 1_000_000,
+    cacheRead: (uncosted.cacheRead * pricing.cacheRead) / 1_000_000,
+    cacheWrite: (uncosted.cacheWrite * pricing.cacheWrite) / 1_000_000,
   };
+
+  const authoritative = (usage.cost_usd_ticks ?? 0) / COST_USD_TICKS_PER_USD;
+  if (authoritative <= 0) return breakdown;
+
+  // Shape the authoritative charge like the rate table would have priced the
+  // tokens it covers — the row's full tokens minus the estimated ones.
+  const shape = {
+    input: ((usage.input_tokens - uncosted.input) * pricing.input) / 1_000_000,
+    output: ((usage.output_tokens - uncosted.output) * pricing.output) / 1_000_000,
+    cacheRead:
+      ((usage.cache_read_tokens - uncosted.cacheRead) * pricing.cacheRead) / 1_000_000,
+    cacheWrite:
+      ((usage.cache_write_tokens - uncosted.cacheWrite) * pricing.cacheWrite) / 1_000_000,
+  };
+  const shapeTotal = shape.input + shape.output + shape.cacheRead + shape.cacheWrite;
+  if (shapeTotal <= 0) {
+    // Nothing to shape it with (unpriced tokens, or a row carrying cost but no
+    // tokens). Keep the money in the total rather than dropping it.
+    return { ...breakdown, input: breakdown.input + authoritative };
+  }
+  const scale = authoritative / shapeTotal;
+  return {
+    input: breakdown.input + shape.input * scale,
+    output: breakdown.output + shape.output * scale,
+    cacheRead: breakdown.cacheRead + shape.cacheRead * scale,
+    cacheWrite: breakdown.cacheWrite + shape.cacheWrite * scale,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Per-run usage
+// ---------------------------------------------------------------------------
+
+/** Collapsed usage for one agent run, or for a set of runs. */
+export interface TaskUsageSummary {
+  /** input + output + cacheRead + cacheWrite, matching the usage page's headline. */
+  tokens: number;
+  cost: number;
+  cacheSavings: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  /** Distinct models this run touched, in first-seen order. Usually one. */
+  models: string[];
+}
+
+/**
+ * Collapse a run's per-model usage slices into one summary.
+ *
+ * Cost is summed per slice rather than computed from the totals, because each
+ * slice may be priced by a different rate — a run that spilled from Sonnet to
+ * Opus has two rows and pricing their sum at either rate would be wrong. This
+ * is the same reason the wire format keeps the model dimension at all.
+ *
+ * Returns `null` for both `undefined` and `[]`: neither means "this run was
+ * free", they mean "we have no figure", and the UI must render an em dash. A
+ * caller that summed to 0 instead would silently claim a run cost nothing.
+ */
+export function summarizeTaskUsage(
+  usage: readonly Priceable[] | undefined,
+): TaskUsageSummary | null {
+  if (!usage || usage.length === 0) return null;
+
+  const models: string[] = [];
+  const summary: TaskUsageSummary = {
+    tokens: 0, cost: 0, cacheSavings: 0,
+    input: 0, output: 0, cacheRead: 0, cacheWrite: 0,
+    models,
+  };
+
+  for (const slice of usage) {
+    summary.input += slice.input_tokens;
+    summary.output += slice.output_tokens;
+    summary.cacheRead += slice.cache_read_tokens;
+    summary.cacheWrite += slice.cache_write_tokens;
+    summary.cost += estimateCost(slice);
+    summary.cacheSavings += estimateCacheSavings(slice);
+    if (slice.model && !models.includes(slice.model)) models.push(slice.model);
+  }
+  summary.tokens =
+    summary.input + summary.output + summary.cacheRead + summary.cacheWrite;
+
+  return summary;
+}
+
+/**
+ * Sum many runs' usage into one figure — the issue-level total shown on the
+ * execution-log header. Runs with no recorded usage contribute nothing and do
+ * not make the total null; the total is null only when NO run has usage, i.e.
+ * when there is genuinely nothing to show.
+ */
+export function summarizeTaskUsageAcross(
+  runs: readonly (readonly Priceable[] | undefined)[],
+): TaskUsageSummary | null {
+  return summarizeTaskUsage(runs.flatMap((u) => u ?? []));
 }
 
 // Cache savings: what cache *reads* would have cost at full input pricing
@@ -531,14 +776,25 @@ export interface DailyCostData {
   cost: number;
 }
 
-// Stacked variant — splits the daily $ figure into the three components that
-// drive billing (cache reads excluded; their cost is tracked separately as
-// "savings" since they're typically dominated by the cached-input discount).
+// Stacked variant — splits the daily $ figure into the four components that
+// drive billing. Every component `estimateCost` charges for has to be here:
+// `total` is what the tooltip and the empty-state check read, so a component
+// missing from the stack is money missing from the user's cost figure.
+//
+// Cache reads were once excluded on the theory that their rate was too small
+// to see. It isn't: across the current rate table cached input is ~10x cheaper
+// than uncached, not ~100x, and agent sessions routinely read tens of times
+// more cached tokens than uncached ones — so cache read is often the LARGEST
+// segment, and dropping it understated some buckets by >50% (MUL-6334).
+//
+// Cache *savings* — a reconstruction of what the discount avoided — is a
+// separate KPI and deliberately not part of this stack; savings is not spend.
 export interface DailyCostStackData {
   date: string;
   label: string;
   input: number;
   output: number;
+  cacheRead: number;
   cacheWrite: number;
   total: number;
 }
@@ -576,6 +832,7 @@ export interface WeeklyCostStackData {
   daysCovered: number;
   input: number;
   output: number;
+  cacheRead: number;
   cacheWrite: number;
   total: number;
 }
@@ -590,7 +847,7 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
   const costMap = new Map<string, number>();
   const stackMap = new Map<
     string,
-    { input: number; output: number; cacheWrite: number }
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
   >();
   const modelMap = new Map<string, { tokens: number; cost: number }>();
 
@@ -615,10 +872,12 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
     const stack = stackMap.get(u.date) ?? {
       input: 0,
       output: 0,
+      cacheRead: 0,
       cacheWrite: 0,
     };
     stack.input += breakdown.input;
     stack.output += breakdown.output;
+    stack.cacheRead += breakdown.cacheRead;
     stack.cacheWrite += breakdown.cacheWrite;
     stackMap.set(u.date, stack);
 
@@ -653,14 +912,19 @@ export function aggregateByDate(usage: RuntimeUsage[]): {
       const round = (n: number) => Math.round(n * 100) / 100;
       const input = round(s.input);
       const output = round(s.output);
+      const cacheRead = round(s.cacheRead);
       const cacheWrite = round(s.cacheWrite);
       return {
         date,
         label: formatLabel(date),
         input,
         output,
+        cacheRead,
         cacheWrite,
-        total: round(input + output + cacheWrite),
+        // Rounded components, not round(sum) — the tooltip's Total is the sum
+        // of the segments it draws, so totalling the rounded parts is what
+        // keeps the footer agreeing with the bars it sits under.
+        total: round(input + output + cacheRead + cacheWrite),
       };
     });
 
@@ -713,7 +977,10 @@ export function aggregateByWeek(
 
   type TokenAgg = Omit<WeeklyTokenData, "label" | "rangeLabel" | "partial" | "daysCovered" | "weekEnd">;
   const tokenMap = new Map<string, TokenAgg>();
-  const stackMap = new Map<string, { input: number; output: number; cacheWrite: number }>();
+  const stackMap = new Map<
+    string,
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
+  >();
 
   // Pre-seed every trailing calendar week in the window so sparse / empty
   // weeks still render as zero bars instead of being dropped.
@@ -726,7 +993,7 @@ export function aggregateByWeek(
       cacheRead: 0,
       cacheWrite: 0,
     });
-    stackMap.set(wkStart, { input: 0, output: 0, cacheWrite: 0 });
+    stackMap.set(wkStart, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
   }
 
   for (const u of usage) {
@@ -744,6 +1011,7 @@ export function aggregateByWeek(
     if (!stack) continue;
     stack.input += breakdown.input;
     stack.output += breakdown.output;
+    stack.cacheRead += breakdown.cacheRead;
     stack.cacheWrite += breakdown.cacheWrite;
   }
 
@@ -780,13 +1048,15 @@ export function aggregateByWeek(
       const round = (n: number) => Math.round(n * 100) / 100;
       const input = round(s.input);
       const output = round(s.output);
+      const cacheRead = round(s.cacheRead);
       const cacheWrite = round(s.cacheWrite);
       return {
         ...decorate(weekStart),
         input,
         output,
+        cacheRead,
         cacheWrite,
-        total: round(input + output + cacheWrite),
+        total: round(input + output + cacheRead + cacheWrite),
       };
     });
 

@@ -56,11 +56,17 @@ import {
 } from "./utils/parse-markdown-chunked";
 import type { MentionItem } from "./extensions/mention-suggestion";
 import type { IssueIdentifierResolver } from "./extensions/issue-identifier-autolink";
+import type { BuiltinCommandSuggestionOptions } from "./extensions/slash-command-suggestion";
 import { createEditorExtensions } from "./extensions";
-import { uploadAndInsertFile } from "./extensions/file-upload";
+import {
+  uploadAndInsertFile,
+  insertUploadPlaceholder,
+  settleUploadNode,
+} from "./extensions/file-upload";
 import { configStore } from "@multica/core/config";
 import { preprocessMarkdown } from "./utils/preprocess";
 import { repairEmptyListItems } from "./utils/repair-list-items";
+import { resolveClickIntent, useAppOrigin } from "../navigation";
 import { openLink, isMentionHref } from "./utils/link-handler";
 import { EditorBubbleMenu } from "./bubble-menu";
 import { posFromAnchor, type TextAnchor } from "./text-anchor";
@@ -73,21 +79,22 @@ import "./styles/index.css";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Blob URLs (blob:http://…) are process-local and expire on reload. Strip them
- *  from serialised markdown so they never reach the database. */
-const BLOB_IMAGE_RE = /!\[[^\]]*\]\(blob:[^)]*\)\n?/g;
-
-function stripBlobUrls(md: string): string {
-  return md.replace(BLOB_IMAGE_RE, "");
-}
-
-/** Canonical comparison form for a markdown string: drop process-local blob
- *  URLs and trailing blank lines so both sides of a dirty check compare
- *  like-for-like. One definition for the normalization rule — a future tweak
- *  (e.g. stripping another ephemeral token) lands here instead of in the
- *  several call sites it used to be copy-pasted across. */
+/** Canonical comparison form for a markdown string: drop the blank lines a
+ *  block leaves behind at either end, so both sides of a dirty check compare
+ *  like-for-like.
+ *
+ *  This used to also strip `blob:` image lines with a regex, because an
+ *  in-flight image serialised its process-local blob URL into the body. That
+ *  is now impossible at the source: the image and fileCard `renderMarkdown`
+ *  implementations emit nothing while `attrs.uploading` is set, so a
+ *  placeholder never becomes text that has to be scrubbed back out.
+ *
+ *  Leading blank lines are trimmed too, not just trailing: a placeholder in
+ *  the FIRST block leaves its blank line at the head of the document, and a
+ *  draft that opens with an empty line is the same content as one that does
+ *  not. (The old regex left one such newline behind for the same reason.) */
 function normalizeMarkdown(md: string): string {
-  return stripBlobUrls(md).trimEnd();
+  return md.trim();
 }
 
 /** `normalizeMarkdown` applied to the live editor's serialized content. */
@@ -113,13 +120,39 @@ function hasUploadingNode(editor: Editor): boolean {
 // ---------------------------------------------------------------------------
 
 interface ContentEditorBaseProps {
-  onUpdate?: (markdown: string) => void;
+  /**
+   * `baseMarkdown` is the last authoritative controlled value this editor
+   * actually adopted before producing `markdown`. A dirty-editor realtime
+   * guard may intentionally skip newer server content, so callers must not
+   * substitute the latest prop value for this base.
+   */
+  onUpdate?: (markdown: string, baseMarkdown: string) => void;
   placeholder?: string;
   className?: string;
   debounceMs?: number;
   onSubmit?: () => void;
   onBlur?: () => void;
-  onUploadFile?: (file: File) => Promise<UploadResult | null>;
+  /**
+   * Upload transport. `uploadId` is minted by the editor when it inserts the
+   * placeholder node; a host backed by a draft store MUST adopt it as the
+   * upload's `clientUploadId` so both records share one identity — that is
+   * what lets a settle find its placeholder in a document a later mount
+   * rebuilt. Hosts with no persistence may ignore it.
+   */
+  onUploadFile?: (file: File, uploadId: string) => Promise<UploadResult | null>;
+  /**
+   * Character count above which a plain-text paste is uploaded as a
+   * `pasted-text.txt` attachment instead of being inserted as body text.
+   * Requires `onUploadFile`; without an uploader the paste stays text.
+   *
+   * Opt-in ON PURPOSE, and today only chat passes it: a wall of pasted text
+   * there is context handed to an agent for one turn, and reads better as an
+   * attachment than as a body nobody scrolls. Every other editor keeps the
+   * paste inline — in issue and project descriptions a long paste IS the
+   * content, and in issue comments it is prose a human reader is expected to
+   * see in the thread.
+   */
+  pasteAsFileThreshold?: number;
   /**
    * Fired whenever this editor's "any attachment still uploading" answer
    * flips. The document IS the upload queue — every path (paste, drop, the
@@ -163,6 +196,12 @@ interface ContentEditorBaseProps {
    * command menu (issue comments), e.g. /note.
    */
   slashCommandMode?: "skill" | "command";
+  /**
+   * Quick actions to offer in the "command" `/` menu, plus the resolver that
+   * turns a pick into the text it would post (MUL-5465). Read through
+   * functions so a newly created action appears without remounting the editor.
+   */
+  quickActionMenu?: BuiltinCommandSuggestionOptions;
   /**
    * Attachments referenced by this content. The download buttons on file
    * cards and images inside the editor look up an attachment by `url` and
@@ -232,13 +271,51 @@ interface ContentEditorRef {
    * long documents.
    */
   focusAtAnchor: (anchor: TextAnchor) => void;
-  /** Drop focus from the editor — used by chat after send so the caret
-   *  stops competing with the StatusPill / streaming reply for the user's
-   *  attention. */
+  /** Drop focus from the editor. Used by `useComposerSubmit`'s
+   *  `afterAccepted: "blur"` on surfaces where a send ends the turn, so the
+   *  composer stops reading as "still writing". */
   blur: () => void;
   uploadFile: (file: File) => void;
   /** True when file uploads are still in progress. */
   hasActiveUploads: () => boolean;
+  /**
+   * Append a markdown fragment to the end of the document (parsed, not raw
+   * text), firing the normal `onUpdate` pipeline. For the upload write-back
+   * path (MUL-5181): an upload that outlived the mount that started it settles
+   * while a NEW editor instance is showing the same draft — that editor never
+   * owned the upload's promise, so this is how the finished attachment's link
+   * lands in the visible document instead of only in the persisted draft.
+   *
+   * Returns whether the insert actually landed. The imperative handle exists
+   * from the component's first commit, but the Tiptap instance is created in a
+   * passive effect — in that window (and after destroy) this is a no-op and
+   * returns false so the caller can fall back or retry instead of silently
+   * losing the fragment.
+   */
+  insertMarkdownAtEnd: (markdown: string) => boolean;
+  /**
+   * Draw a placeholder for an upload this document is not showing yet, and
+   * report whether it landed.
+   *
+   * A composer that reopens over an upload a previous mount started has the
+   * draft's record of it but no node — placeholders are never serialised, so
+   * they die with the document that drew them. Without this the user faces a
+   * composer that looks idle while a send gate quietly blocks on the upload.
+   * Returns false when the Tiptap instance is not up yet (the handle exists
+   * from first commit, the instance arrives a passive effect later), so the
+   * caller can retry rather than assume.
+   */
+  insertUploadPlaceholder: (upload: {
+    uploadId: string;
+    filename: string;
+    size?: number;
+  }) => boolean;
+  /**
+   * Turn a placeholder into the finished attachment, in place. False when this
+   * document holds no node for the id — the caller then falls back to
+   * appending the link.
+   */
+  settleUploadPlaceholder: (uploadId: string, result: UploadResult) => boolean;
   /**
    * Cancel the pending debounced `onUpdate` and hand its markdown back to the
    * caller instead of firing it. Returns null when nothing is pending.
@@ -289,6 +366,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       onSubmit,
       onBlur,
       onUploadFile,
+      pasteAsFileThreshold,
       onUploadingChange,
       showBubbleMenu = true,
       currentIssueId,
@@ -297,6 +375,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
       mentionContextItems,
       enableSlashCommands = false,
       slashCommandMode = "skill",
+      quickActionMenu,
       attachments,
       flushPendingOnUnmount = false,
       onReady,
@@ -309,20 +388,34 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // unmount flush emits this cached copy — it runs mid-teardown and can't
     // assume the editor instance is still readable.
     const pendingFlushRef = useRef<string | null>(null);
+    const pendingBaseRef = useRef<string | null>(null);
     const onUpdateRef = useRef(onUpdate);
     const onSubmitRef = useRef(onSubmit);
     const onBlurRef = useRef(onBlur);
     const onReadyRef = useRef(onReady);
     const onUploadingChangeRef = useRef(onUploadingChange);
     const onUploadFileRef = useRef<
-      ((file: File) => Promise<UploadResult | null>) | undefined
+      ((file: File, uploadId: string) => Promise<UploadResult | null>) | undefined
     >(undefined);
+    // Same reasoning as placeholderRef below: the extension array is built once
+    // at mount, so the paste-as-file threshold is read through a ref to stay
+    // live without remounting the editor.
+    const pasteAsFileThresholdRef = useRef<number | undefined>(pasteAsFileThreshold);
     const mentionContextItemsRef = useRef<MentionItem[]>(mentionContextItems ?? []);
+    // Kept in a ref for the same reason as mentionContextItems: the extension
+    // set is built once at mount, so a directly-captured options object would
+    // freeze whatever closures existed then and stop seeing new quick actions.
+    const quickActionMenuRef = useRef<BuiltinCommandSuggestionOptions | undefined>(quickActionMenu);
     const lastEmittedRef = useRef<string | null>(null);
     // `content` already consumes the initial synchronized value when Tiptap
     // mounts. Track later changes separately so the sync effect does not parse
     // the initial document twice when Markdown serialization canonicalizes it.
     const lastSyncedValueRef = useRef(value);
+    // Authoritative Markdown behind the document the user is editing. Keep the
+    // raw controlled value rather than the editor serialization: Tiptap may
+    // omit invisible channel-media provenance comments while retaining the
+    // visible image, and the server needs those comments in the merge base.
+    const documentBaseRef = useRef(normalizeMarkdown(value ?? defaultValue ?? ""));
     // Live placeholder text. Passed into the Placeholder extension as a getter
     // (not a static string) so the plugin re-reads it on every decoration pass —
     // the sync effect below updates this ref and nudges a repaint. Tiptap
@@ -345,8 +438,8 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // stable across renders the way the original passthrough did.
     const wrappedOnUploadFile = useMemo(() => {
       if (!onUploadFile) return undefined;
-      return async (file: File): Promise<UploadResult | null> => {
-        const result = await onUploadFile(file);
+      return async (file: File, uploadId: string): Promise<UploadResult | null> => {
+        const result = await onUploadFile(file, uploadId);
         // Only track attachments that carry a persisted id — the no-workspace
         // avatar branch returns an id-less record that the resolver can't key
         // off of, and tracking it would just bloat memory without helping
@@ -397,6 +490,13 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const workspaceSlugRef = useRef(workspaceSlug);
     workspaceSlugRef.current = workspaceSlug;
 
+    // Same reasoning for this deployment's app origin: it tells openLink which
+    // absolute URLs address this app and must route in-app instead of opening
+    // the system browser.
+    const appOrigin = useAppOrigin();
+    const appOriginRef = useRef(appOrigin);
+    appOriginRef.current = appOrigin;
+
     // Keep refs in sync without recreating editor
     onUpdateRef.current = onUpdate;
     onSubmitRef.current = onSubmit;
@@ -404,7 +504,9 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     onReadyRef.current = onReady;
     onUploadingChangeRef.current = onUploadingChange;
     onUploadFileRef.current = wrappedOnUploadFile;
+    pasteAsFileThresholdRef.current = pasteAsFileThreshold;
     mentionContextItemsRef.current = mentionContextItems ?? [];
+    quickActionMenuRef.current = quickActionMenu;
     flushPendingOnUnmountRef.current = flushPendingOnUnmount;
 
     const queryClient = useQueryClient();
@@ -501,15 +603,24 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         queryClient,
         onSubmitRef,
         onUploadFileRef,
+        pasteAsFileThresholdRef,
         disableMentions,
         mentionMode,
         getMentionContextItems: () => mentionContextItemsRef.current,
         enableSlashCommands,
         slashCommandMode,
+        quickActionMenu: {
+          getQuickActions: () => quickActionMenuRef.current?.getQuickActions?.() ?? [],
+          renderQuickAction: (id: string) =>
+            quickActionMenuRef.current?.renderQuickAction?.(id) ?? Promise.resolve(""),
+          onRenderError: (error: unknown) =>
+            quickActionMenuRef.current?.onRenderError?.(error),
+        },
         resolveIssueIdentifierRef,
       }),
       onUpdate: ({ editor: ed }) => {
         if (!onUpdateRef.current) return;
+        pendingBaseRef.current = documentBaseRef.current;
         if (flushPendingOnUnmountRef.current) {
           pendingFlushRef.current = normalizeEditorMarkdown(ed);
         }
@@ -517,10 +628,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         debounceRef.current = setTimeout(() => {
           debounceRef.current = undefined;
           pendingFlushRef.current = null;
+          const base = pendingBaseRef.current ?? documentBaseRef.current;
+          pendingBaseRef.current = null;
           const md = normalizeEditorMarkdown(ed);
           if (md === lastEmittedRef.current) return;
           lastEmittedRef.current = md;
-          onUpdateRef.current?.(md);
+          onUpdateRef.current?.(md, base);
         }, debounceMs);
       },
       onBlur: () => {
@@ -538,12 +651,35 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
             if (!href || isMentionHref(href)) return false;
 
             event.preventDefault();
-            openLink(href, workspaceSlugRef.current);
+            openLink(
+              href,
+              workspaceSlugRef.current,
+              appOriginRef.current,
+              resolveClickIntent(event),
+            );
+            return true;
+          },
+          // Middle click never produces a `click` event. Route it through the
+          // same path as a cmd-click (background tab) — on desktop the native
+          // window-open request dead-ends against the shell's deny handler.
+          auxclick(_view, event) {
+            if (event.button !== 1) return false;
+            const target = event.target as HTMLElement;
+            if (target.closest("[data-node-view-wrapper]")) return false;
+            const href = target.closest("a")?.getAttribute("href");
+            if (!href || isMentionHref(href)) return false;
+            event.preventDefault();
+            openLink(
+              href,
+              workspaceSlugRef.current,
+              appOriginRef.current,
+              "background-tab",
+            );
             return true;
           },
         },
         attributes: {
-          class: cn("flex-1 rich-text-editor text-sm outline-none", className),
+          class: cn("flex-1 rich-text-editor text-body outline-none", className),
         },
       },
     });
@@ -607,10 +743,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         debounceRef.current = undefined;
         if (!flushPendingOnUnmountRef.current) return;
         const pending = pendingFlushRef.current;
+        const base = pendingBaseRef.current ?? documentBaseRef.current;
         pendingFlushRef.current = null;
+        pendingBaseRef.current = null;
         if (pending === null || pending === lastEmittedRef.current) return;
         lastEmittedRef.current = pending;
-        onUpdateRef.current?.(pending);
+        onUpdateRef.current?.(pending, base);
       };
     }, []);
 
@@ -622,6 +760,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     const applyExternalContent = useCallback(
       (markdown: string) => {
         if (!editor || editor.isDestroyed) return;
+        documentBaseRef.current = normalizeMarkdown(markdown);
         const before = normalizeEditorMarkdown(editor);
 
         // A controlled host commonly echoes the exact Markdown this editor
@@ -755,9 +894,12 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     }, [editor, placeholderText]);
 
     useImperativeHandle(ref, () => ({
-      // Intentionally NOT routed through `normalizeMarkdown` — this refactor
-      // must preserve the exact current return value (no `trimEnd`).
-      getMarkdown: () => stripBlobUrls(editor?.getMarkdown() ?? ""),
+      // Intentionally NOT routed through `normalizeMarkdown` — see the "stays
+      // untrimmed" safety net in content-editor.test.tsx. It used to also pass
+      // through `stripBlobUrls`; that wrapper is gone because an in-flight
+      // placeholder no longer serialises at all, which is strictly stronger
+      // than scrubbing it back out afterwards.
+      getMarkdown: () => editor?.getMarkdown() ?? "",
       clearContent: () => {
         editor?.commands.clearContent();
       },
@@ -793,6 +935,21 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         uploadAndInsertFile(editor, file, onUploadFileRef.current, endPos);
       },
       hasActiveUploads: () => (editor ? hasUploadingNode(editor) : false),
+      insertUploadPlaceholder: (upload) => {
+        if (!editor || editor.isDestroyed) return false;
+        return insertUploadPlaceholder(editor, upload);
+      },
+      settleUploadPlaceholder: (uploadId, result) => {
+        if (!editor || editor.isDestroyed) return false;
+        return settleUploadNode(editor, uploadId, result);
+      },
+      insertMarkdownAtEnd: (markdown: string) => {
+        if (!editor || editor.isDestroyed) return false;
+        editor.commands.insertContentAt(editor.state.doc.content.size, markdown, {
+          contentType: "markdown",
+        });
+        return true;
+      },
       flushPendingUpdate: () => {
         // No armed timer = nothing typed since the last emit. The editor is
         // already clean, so the host has nothing to re-route.
@@ -800,6 +957,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
         clearTimeout(debounceRef.current);
         debounceRef.current = undefined;
         pendingFlushRef.current = null;
+        pendingBaseRef.current = null;
         if (!editor || editor.isDestroyed) return null;
         // Read the live document: unlike the unmount flush, the instance is
         // still alive here, so this is the freshest possible copy.

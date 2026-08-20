@@ -1,0 +1,89 @@
+---
+title: Self-hosted Git providers
+description: Connect a self-hosted Forgejo, Gitea, or GitLab instance per workspace so pull/merge requests that reference an issue identifier auto-attach to that issue, move it to Done on merge, and show CI status.
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+<Callout type="warn">
+**Self-hosted Multica only.** This integration is available only when you run
+Multica yourself; it is not offered on Multica Cloud. "Self-hosted" here means
+**Multica** is self-hosted — typically so it can reach a Git instance on your own
+network. A server operator must enable it (`MULTICA_VCS_INTEGRATION_ENABLED=true`)
+and set `MULTICA_VCS_SECRET_KEY`; until then the section does not appear in
+Settings → Integrations.
+</Callout>
+
+Multica connects to a self-hosted Git provider per workspace: **Forgejo**, **Gitea**, or **GitLab**. Once connected, any pull request (GitLab: merge request) whose branch name, title, or body contains an issue identifier (for example `MUL-123`) is **auto-linked** to that [issue](/issues), appears under **Pull requests** in the issue sidebar, and — when merged with a closing keyword — moves the issue to **Done**. CI for the head commit shows as a checks bar on the card.
+
+These providers run alongside GitHub: a workspace can use any combination.
+
+<Callout type="info">
+Unlike GitHub, these providers have no "App" model. Each workspace stores its own instance URL plus an access token, and registers a webhook on its repository or organisation. The token and webhook secret are encrypted at rest.
+</Callout>
+
+## Prerequisites (server)
+
+Turn the integration on for this deployment. It is off by default, so the section stays hidden until you set:
+
+```sh
+MULTICA_VCS_INTEGRATION_ENABLED=true
+```
+
+The official self-hosted `docker compose` file (`docker-compose.selfhost.yml`) sets this for you.
+
+Then set a base64-encoded 32-byte key so the server can encrypt stored credentials. Without it, the connect form is disabled.
+
+```sh
+openssl rand -base64 32
+```
+
+```sh
+MULTICA_VCS_SECRET_KEY=<base64 32-byte key>
+```
+
+Both are required: the switch decides whether the feature is offered, and the key encrypts the stored token and webhook secret. Connect, webhook, and rotate all require both.
+
+Set `MULTICA_PUBLIC_URL` to the server's public base URL so Multica can show a ready-to-paste webhook URL. Without it, the UI shows only the webhook path and you prepend your own origin.
+
+## Connect a workspace
+
+1. Create an access token in your provider with read access to the repositories you want mirrored:
+   - **Forgejo / Gitea**: Settings → Applications.
+   - **GitLab**: a personal (or group/project) access token with the `read_api` scope.
+2. In Multica, open **Settings → Integrations → Git providers**.
+3. Choose the **provider**, enter the instance URL (for example `https://forgejo.example.com`) and the access token, then **Connect**. Multica validates the token against the instance before saving.
+4. Copy the **webhook URL** and **webhook secret** shown after connecting.
+
+<Callout type="warn">
+The webhook secret is shown only once. Copy it before leaving the page. Reconnecting the same instance rotates the token and secret.
+</Callout>
+
+## Register the webhook
+
+On the repository (or organisation/group, to cover every repo):
+
+**Forgejo / Gitea** — Settings → Webhooks → Add Webhook → Forgejo/Gitea:
+
+- **Target URL**: the webhook URL from the previous step.
+- **HTTP method** `POST`, **content type** `application/json`.
+- **Secret**: the webhook secret (used to verify the `X-Gitea-Signature` HMAC).
+- **Trigger events**: select **Pull Request**, and **Commit Status** to mirror CI.
+
+**GitLab** — Settings → Webhooks:
+
+- **URL**: the webhook URL.
+- **Secret token**: the webhook secret (sent as `X-Gitlab-Token` and compared verbatim).
+- **Triggers**: enable **Merge request events**, and **Pipeline events** to mirror CI.
+
+Multica authenticates every delivery against the stored secret, so a webhook without the matching secret is rejected.
+
+## What gets mirrored
+
+- **Pull / merge requests** — open, closed, merged, and draft state, author, branch, and (where the provider supplies them) diff stats.
+- **Issue links** — identifiers in the title, body, or branch link the PR to the issue. A closing keyword (`Closes`/`Fixes`/`Resolves MUL-123`) on a merged PR moves the issue to **Done** once no linked PR is still open.
+- **CI** — Forgejo/Gitea commit statuses and GitLab pipelines aggregate into a passed/failed/pending checks bar for the head commit.
+
+## Agents opening pull requests
+
+Creating PRs needs no provider configuration in Multica. Agents check out repositories in the runtime and push branches and open PRs using the runtime host's own Git credentials. To let agents work against a provider, ensure the daemon host can authenticate to it — for example an SSH deploy key, or a token in the host's Git credential helper — and add the repository URL as usual. Repository checkout works with any Git URL, so no provider-specific wiring is required.

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render as rtlRender, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactElement } from "react";
+import { useState, type ReactElement } from "react";
 import type { Attachment } from "@multica/core/types";
 
 const openExternalMock = vi.hoisted(() => vi.fn());
@@ -100,7 +100,16 @@ vi.mock("../i18n", () => ({
   useT: () => ({
     t: (sel: (s: Record<string, Record<string, string>>) => string) =>
       sel({
-        image: { download: "Download" },
+        image: {
+          download: "Download",
+          canvas_label: "Image canvas",
+        },
+        canvas: {
+          zoom_in: "Zoom in",
+          zoom_out: "Zoom out",
+          zoom_fit: "Fit to view",
+          zoom_actual: "Actual size",
+        },
         attachment: {
           preview: "Preview",
           preview_loading: "Loading preview…",
@@ -149,6 +158,17 @@ function makeAttachment(overrides: Partial<Attachment> = {}): Attachment {
     created_at: "2026-05-13T00:00:00Z",
     ...overrides,
   };
+}
+
+function ClosablePreview({ attachment }: { attachment: Attachment }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <AttachmentPreviewModal
+      source={{ kind: "full", attachment }}
+      open={open}
+      onClose={() => setOpen(false)}
+    />
+  );
 }
 
 beforeEach(() => {
@@ -457,6 +477,21 @@ describe("AttachmentPreviewModal — controls", () => {
     fireEvent.click(dialog);
     expect(onClose).toHaveBeenCalled();
   });
+
+  it("keeps the dialog mounted for its exit and then removes it", async () => {
+    const att = makeAttachment({
+      filename: "manual.pdf",
+      content_type: "application/pdf",
+    });
+    render(<ClosablePreview attachment={att} />);
+
+    fireEvent.click(screen.getByTitle("Close"));
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+  });
 });
 
 describe("AttachmentPreviewModal — URL-only source", () => {
@@ -677,5 +712,284 @@ describe("useAttachmentPreview — tryOpen gate", () => {
       });
     });
     expect(opened).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Image zoom canvas
+// ---------------------------------------------------------------------------
+
+// jsdom has no layout and never decodes images, so both inputs the canvas
+// needs — its own size and the image's intrinsic size — have to be pinned.
+const CANVAS_VIEWPORT = { width: 800, height: 400 };
+
+function stubCanvasViewport() {
+  vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(
+    CANVAS_VIEWPORT.width,
+  );
+  vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(
+    CANVAS_VIEWPORT.height,
+  );
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue({
+    bottom: CANVAS_VIEWPORT.height,
+    height: CANVAS_VIEWPORT.height,
+    left: 0,
+    right: CANVAS_VIEWPORT.width,
+    top: 0,
+    width: CANVAS_VIEWPORT.width,
+    x: 0,
+    y: 0,
+    toJSON: () => ({}),
+  });
+}
+
+function stubNaturalSize(size: { width: number; height: number }) {
+  vi.spyOn(HTMLImageElement.prototype, "naturalWidth", "get").mockReturnValue(
+    size.width,
+  );
+  vi.spyOn(HTMLImageElement.prototype, "naturalHeight", "get").mockReturnValue(
+    size.height,
+  );
+}
+
+function imageAttachment(): Attachment {
+  return makeAttachment({ filename: "shot.png", content_type: "image/png" });
+}
+
+function zoomCanvas(): HTMLElement {
+  return screen.getByRole("application");
+}
+
+function canvasContent(): HTMLElement {
+  return document.querySelector<HTMLElement>(".zoom-canvas-content")!;
+}
+
+function currentScale(): number {
+  const match = /scale\(([\d.]+)\)/.exec(canvasContent().style.transform);
+  return Number.parseFloat(match![1]!);
+}
+
+function renderImagePreview(attachment: Attachment = imageAttachment()) {
+  return render(
+    <AttachmentPreviewModal
+      source={{ kind: "full", attachment }}
+      open
+      onClose={() => {}}
+    />,
+  );
+}
+
+describe("AttachmentPreviewModal — image zoom", () => {
+  beforeEach(() => {
+    stubCanvasViewport();
+  });
+
+  it("fits an oversized image to the canvas on open", () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    renderImagePreview();
+
+    // 1600x800 in an 800x400 canvas fits at exactly 50%.
+    expect(currentScale()).toBeCloseTo(0.5, 5);
+    expect(screen.getByText("50%")).toBeInTheDocument();
+  });
+
+  it("opens a small image at 100% instead of magnifying it", () => {
+    stubNaturalSize({ width: 200, height: 100 });
+    renderImagePreview();
+
+    expect(currentScale()).toBe(1);
+  });
+
+  it("shows a long screenshot in full, below the 25% floor", () => {
+    // The regression this pins: with a hard MIN_SCALE floor the fit snapped
+    // back up to 25% and a full-page screenshot opened cropped, with no zoom
+    // level that showed all of it.
+    stubNaturalSize({ width: 1600, height: 8000 });
+    renderImagePreview();
+
+    const scale = currentScale();
+    expect(scale).toBeLessThan(0.25);
+    expect(8000 * scale).toBeLessThanOrEqual(CANVAS_VIEWPORT.height + 0.001);
+  });
+
+  it("zooms in and out from the toolbar", () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    renderImagePreview();
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+    expect(currentScale()).toBeCloseTo(0.5 * 1.2, 5);
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom out" }));
+    expect(currentScale()).toBeCloseTo(0.5, 5);
+  });
+
+  it("jumps to natural size and back to fit", () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    renderImagePreview();
+
+    fireEvent.click(screen.getByRole("button", { name: "Actual size" }));
+    expect(currentScale()).toBe(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fit to view" }));
+    expect(currentScale()).toBeCloseTo(0.5, 5);
+  });
+
+  it("zooms on wheel without scrolling the page behind the modal", () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    renderImagePreview();
+
+    const wheel = new WheelEvent("wheel", {
+      deltaY: -100,
+      clientX: 400,
+      clientY: 200,
+      bubbles: true,
+      cancelable: true,
+    });
+    // Dispatched raw rather than via fireEvent.wheel so the test can assert
+    // preventDefault — the thing that stops the page behind from scrolling.
+    act(() => {
+      zoomCanvas().dispatchEvent(wheel);
+    });
+
+    expect(currentScale()).toBeGreaterThan(0.5);
+    expect(wheel.defaultPrevented).toBe(true);
+  });
+
+  it("pans on drag", () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    renderImagePreview();
+    const before = canvasContent().style.transform;
+
+    fireEvent.pointerDown(zoomCanvas(), { pointerId: 1, clientX: 400, clientY: 200 });
+    fireEvent.pointerMove(zoomCanvas(), { pointerId: 1, clientX: 340, clientY: 170 });
+    fireEvent.pointerUp(zoomCanvas(), { pointerId: 1 });
+
+    expect(canvasContent().style.transform).not.toBe(before);
+  });
+
+  it("toggles between fit and 100% on double-click", () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    renderImagePreview();
+
+    fireEvent.doubleClick(zoomCanvas(), { clientX: 400, clientY: 200 });
+    expect(currentScale()).toBe(1);
+
+    fireEvent.doubleClick(zoomCanvas(), { clientX: 400, clientY: 200 });
+    expect(currentScale()).toBeCloseTo(0.5, 5);
+  });
+
+  it("focuses the canvas on open so the keyboard controls work without a click first", () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    renderImagePreview();
+
+    expect(document.activeElement).toBe(zoomCanvas());
+
+    fireEvent.keyDown(zoomCanvas(), { key: "+" });
+    expect(currentScale()).toBeCloseTo(0.5 * 1.2, 5);
+  });
+
+  it("re-fits on reopen instead of restoring the previous zoom", async () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    const att = imageAttachment();
+    render(<ClosablePreview attachment={att} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Actual size" }));
+    expect(currentScale()).toBe(1);
+
+    fireEvent.click(screen.getByTitle("Close"));
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    });
+
+    renderImagePreview(att);
+    expect(currentScale()).toBeCloseTo(0.5, 5);
+  });
+
+  it("letterboxes an image with no intrinsic size and hides the zoom controls", () => {
+    // An SVG that declares only a viewBox has no intrinsic size in Chromium,
+    // so there is nothing to build a transform against. It must still render.
+    stubNaturalSize({ width: 0, height: 0 });
+    renderImagePreview(
+      makeAttachment({ filename: "chart.svg", content_type: "image/svg+xml" }),
+    );
+
+    expect(document.querySelector(".zoom-canvas-content")).toBeNull();
+    expect(document.querySelector(".zoom-canvas-fit")).not.toBeNull();
+    expect(document.querySelector("img")?.className).toContain("object-contain");
+    expect(screen.queryByRole("button", { name: "Zoom in" })).toBeNull();
+  });
+
+  it("keeps a pan that ends over the backdrop from closing the modal", () => {
+    stubNaturalSize({ width: 1600, height: 800 });
+    const onClose = vi.fn();
+    render(
+      <AttachmentPreviewModal
+        source={{ kind: "full", attachment: imageAttachment() }}
+        open
+        onClose={onClose}
+      />,
+    );
+
+    // A drag released outside the panel bubbles its click to the backdrop.
+    fireEvent.click(zoomCanvas());
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("dialog"));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the canvas a flex-column parent so it can claim the modal body height", () => {
+    // jsdom has no layout, so this is asserted structurally: `.zoom-canvas`
+    // sizes itself with `flex: 1 1 auto` and positions its content
+    // absolutely. In a plain block parent it collapses to zero height and the
+    // image disappears entirely.
+    stubNaturalSize({ width: 1600, height: 800 });
+    renderImagePreview();
+
+    const body = zoomCanvas().parentElement!;
+    expect(body.className).toContain("flex-col");
+    expect(body.className).toContain("flex-1");
+    expect(body.className).toContain("overflow-hidden");
+  });
+
+  it("keeps the scrolling block body for non-image kinds", () => {
+    render(
+      <AttachmentPreviewModal
+        source={{
+          kind: "full",
+          attachment: makeAttachment({
+            filename: "notes.md",
+            content_type: "text/markdown",
+          }),
+        }}
+        open
+        onClose={() => {}}
+      />,
+    );
+
+    // A flex column here would let a tall markdown preview shrink to fit
+    // instead of scrolling.
+    const body = document.querySelector(".min-h-0.flex-1")!;
+    expect(body.className).toContain("overflow-auto");
+    expect(body.className).not.toContain("flex-col");
+  });
+
+  it("shows no zoom controls for non-image kinds", () => {
+    render(
+      <AttachmentPreviewModal
+        source={{
+          kind: "full",
+          attachment: makeAttachment({
+            filename: "manual.pdf",
+            content_type: "application/pdf",
+          }),
+        }}
+        open
+        onClose={() => {}}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "Zoom in" })).toBeNull();
+    expect(screen.queryByRole("application")).toBeNull();
   });
 });

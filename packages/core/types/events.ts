@@ -12,6 +12,7 @@ import type { Label } from "./label";
 export type WSEventType =
   | "issue:created"
   | "issue:updated"
+  | "issue_attachments:changed"
   | "issue:deleted"
   | "comment:created"
   | "comment:updated"
@@ -33,6 +34,7 @@ export type WSEventType =
   | "task:cancelled"
   | "inbox:new"
   | "inbox:read"
+  | "inbox:unread"
   | "inbox:archived"
   | "inbox:unarchived"
   | "inbox:batch-read"
@@ -56,6 +58,7 @@ export type WSEventType =
   | "issue_reaction:removed"
   | "chat:message"
   | "chat:done"
+  | "chat:quick_actions"
   | "chat:cancel_finalized"
   | "chat:session_read"
   | "chat:session_deleted"
@@ -74,6 +77,7 @@ export type WSEventType =
   | "issue_properties:changed"
   | "property:created"
   | "property:updated"
+  | "issue_status:changed"
   | "pin:created"
   | "pin:deleted"
   | "pin:reordered"
@@ -121,20 +125,44 @@ export interface IssueDeletedPayload {
 export interface IssueLabelsChangedPayload {
   issue_id: string;
   labels: Label[];
+  issue_revision?: number;
+}
+
+export interface IssueAttachmentsChangedPayload {
+  issue_id: string;
+  issue_revision?: number;
 }
 
 export interface IssueMetadataChangedPayload {
   issue_id: string;
   metadata: IssueMetadata;
+  issue_revision?: number;
 }
 
 export interface IssuePropertiesChangedPayload {
   issue_id: string;
   properties: IssuePropertyValues;
+  issue_revision?: number;
 }
 
 export interface PropertyChangedPayload {
   property: IssueProperty;
+}
+
+/**
+ * The workspace issue status catalog changed (MUL-6243).
+ *
+ * One event covers all four writes because clients answer them the same way:
+ * re-read the catalog. It deliberately carries no entry — merging a row out of
+ * an event would have to be reconciled against writes this client never saw,
+ * and the catalog is small enough that a refetch is both simpler and safer.
+ *
+ * `action` is advisory: it makes the frame self-describing in devtools. Nothing
+ * routes on it, so a future write verb this client has never heard of still
+ * refreshes the catalog correctly.
+ */
+export interface IssueStatusChangedPayload {
+  action?: "created" | "updated" | "archived" | "reordered";
 }
 
 export interface AgentStatusPayload {
@@ -162,6 +190,12 @@ export interface InboxReadPayload {
   recipient_id: string;
 }
 
+/** Emitted when a recipient flips a notification back to unread. */
+export interface InboxUnreadPayload {
+  item_id: string;
+  recipient_id: string;
+}
+
 export interface InboxArchivedPayload {
   item_id: string;
   recipient_id: string;
@@ -185,15 +219,18 @@ export interface InboxBatchArchivedPayload {
 
 export interface CommentCreatedPayload {
   comment: Comment;
+  issue_revision?: number;
 }
 
 export interface CommentUpdatedPayload {
   comment: Comment;
+  issue_revision?: number;
 }
 
 export interface CommentDeletedPayload {
   comment_id: string;
   issue_id: string;
+  issue_revision?: number;
 }
 
 export interface CommentResolvedPayload {
@@ -257,6 +294,13 @@ export interface TaskMessagePayload {
   input?: Record<string, unknown>;
   output?: string;
   created_at?: string;
+  /**
+   * Set when the server clipped `input` / `output` for the realtime fanout
+   * (MUL-6396). The persisted row is untouched — a client that needs the full
+   * text refetches it from the task-messages endpoint. Never set on REST
+   * responses.
+   */
+  truncated?: boolean;
 }
 
 export interface TaskQueuedPayload {
@@ -311,6 +355,8 @@ export interface TaskFailedPayload {
   issue_id: string;
   chat_session_id?: string;
   status: string;
+  failure_reason?: string;
+  retry_pending?: boolean;
 }
 
 export interface TaskCancelledPayload {
@@ -324,6 +370,7 @@ export interface TaskCancelledPayload {
 export interface ReactionAddedPayload {
   reaction: Reaction;
   issue_id: string;
+  comment_revision?: number;
 }
 
 export interface ReactionRemovedPayload {
@@ -332,11 +379,13 @@ export interface ReactionRemovedPayload {
   emoji: string;
   actor_type: string;
   actor_id: string;
+  comment_revision?: number;
 }
 
 export interface IssueReactionAddedPayload {
   reaction: IssueReaction;
   issue_id: string;
+  issue_revision?: number;
 }
 
 export interface IssueReactionRemovedPayload {
@@ -344,6 +393,7 @@ export interface IssueReactionRemovedPayload {
   emoji: string;
   actor_type: string;
   actor_id: string;
+  issue_revision?: number;
 }
 
 export interface ChatMessageEventPayload {
@@ -376,6 +426,34 @@ export interface ChatDonePayload {
    * populated alongside this even for a no_response turn.
    */
   message_kind?: import("./chat").ChatMessageKind;
+  /** Server-validated follow-ups attached to the persisted assistant reply. */
+  quick_actions?: import("./chat").ChatQuickAction[];
+  /**
+   * The daemon will follow up with a chat:quick_actions supplement for this
+   * turn — render a placeholder. Never true alongside populated
+   * quick_actions; absent on older servers/daemons.
+   */
+  quick_actions_pending?: boolean;
+}
+
+/**
+ * chat:quick_actions — supplements a finished turn with the follow-up
+ * suggestions from the daemon's background pass. An empty list is terminal:
+ * "no suggestions this turn", resolve any placeholder.
+ */
+export interface ChatQuickActionsPayload {
+  chat_session_id: string;
+  task_id: string;
+  message_id: string;
+  quick_actions?: import("./chat").ChatQuickAction[];
+  /**
+   * The regeneration behind an explicit refresh failed: the actions carried
+   * here are the turn's UNCHANGED prior pills, sent only to resolve the pending
+   * spinner. Clients surface a "couldn't refresh" notice rather than treating
+   * them as freshly generated. Absent/false on the normal success path and on
+   * older servers.
+   */
+  failed?: boolean;
 }
 
 /**
@@ -465,10 +543,12 @@ export interface WSEventPayloadMap {
   "issue:created": IssueCreatedPayload;
   "issue:updated": IssueUpdatedPayload;
   "issue:deleted": IssueDeletedPayload;
+  "issue_attachments:changed": IssueAttachmentsChangedPayload;
   "issue_labels:changed": IssueLabelsChangedPayload;
   "issue_properties:changed": IssuePropertiesChangedPayload;
   "property:created": PropertyChangedPayload;
   "property:updated": PropertyChangedPayload;
+  "issue_status:changed": IssueStatusChangedPayload;
   "issue_reaction:added": IssueReactionAddedPayload;
   "issue_reaction:removed": IssueReactionRemovedPayload;
   "comment:created": CommentCreatedPayload;
@@ -493,6 +573,7 @@ export interface WSEventPayloadMap {
   "task:progress": unknown;
   "inbox:new": InboxNewPayload;
   "inbox:read": InboxReadPayload;
+  "inbox:unread": InboxUnreadPayload;
   "inbox:archived": InboxArchivedPayload;
   "inbox:unarchived": InboxUnarchivedPayload;
   "inbox:batch-read": InboxBatchReadPayload;
@@ -507,6 +588,7 @@ export interface WSEventPayloadMap {
   "activity:created": ActivityCreatedPayload;
   "chat:message": ChatMessageEventPayload;
   "chat:done": ChatDonePayload;
+  "chat:quick_actions": ChatQuickActionsPayload;
   "chat:cancel_finalized": ChatCancelFinalizedPayload;
   "chat:session_read": ChatSessionReadPayload;
   "chat:session_deleted": ChatSessionDeletedPayload;

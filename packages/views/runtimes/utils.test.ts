@@ -4,15 +4,19 @@ import type { AgentRuntime, RuntimeUsage } from "@multica/core/types";
 
 import {
   addDaysIso,
+  aggregateByDate,
   aggregateByWeek,
   aggregateCostByModel,
   collectUnmappedModels,
   computeCostInWindow,
   estimateCost,
   estimateCostBreakdown,
+  formatTokens,
   isModelPriced,
   isSelfHealingRuntime,
   sliceWindow,
+  summarizeTaskUsage,
+  summarizeTaskUsageAcross,
   todayIso,
   weekStartIso,
 } from "./utils";
@@ -207,6 +211,28 @@ describe("estimateCost", () => {
     });
     expect(cost).toBeCloseTo(5 + 25, 5);
     expect(isModelPriced("claude-opus-4-7[1m]")).toBe(true);
+  });
+
+  it("prices Opus 5 on the standard Opus tier across its transport spellings", () => {
+    // Opus 5 is a 5/25 SKU like Opus 4.5-4.8. Claude Code reports the
+    // 1M-context window with a bracketed suffix and openclaw/opencode prefix
+    // the id with the provider, so all three spellings reach the cost
+    // estimator and must land on the same row.
+    for (const model of [
+      "claude-opus-5",
+      "claude-opus-5[1m]",
+      "anthropic/claude-opus-5",
+    ]) {
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          model,
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(5 + 25, 5);
+      expect(isModelPriced(model)).toBe(true);
+    }
   });
 
   it("prices each dotted Codex catalog SKU at its own tier, not gpt-5", () => {
@@ -459,6 +485,274 @@ describe("estimateCost", () => {
         output_tokens: 1_000_000,
       }),
     ).toBe(0);
+  });
+
+  it("prices grok-4.5 at xAI's short-context $2.00 / $6.00 tier", () => {
+    // 1M input × $2.00 + 1M output × $6.00 + 1M cached-read × $0.30.
+    // Short context on purpose: the long-context (≥200K prompt) tier is 2x,
+    // but aggregated rows carry no per-request prompt sizes.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-4.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8.3, 5);
+  });
+
+  it("prices the rest of the published Grok catalog", () => {
+    // grok-4.3 and the 4.20 snapshots share one $1.25 / $2.50 tier;
+    // grok-build-0.1 is its own $1.00 / $2.00 row.
+    for (const model of [
+      "grok-4.3",
+      "grok-4.20-multi-agent-0309",
+      "grok-4.20-0309-reasoning",
+      "grok-4.20-0309-non-reasoning",
+    ]) {
+      expect(
+        estimateCost({
+          ...zeroUsage,
+          provider: "xai",
+          model,
+          input_tokens: 1_000_000,
+          output_tokens: 1_000_000,
+        }),
+      ).toBeCloseTo(3.75, 5);
+    }
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-build-0.1",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(3, 5);
+  });
+
+  // -------------------------------------------------------------------------
+  // Provider-reported cost. `cost_usd_ticks` is what the provider actually
+  // charged (1e-10 USD) for the rows behind an aggregate; `uncosted_*` are the
+  // tokens it did not price and which therefore still need the rate table.
+  // -------------------------------------------------------------------------
+
+  it("uses the provider's own cost instead of the rate table when it reports one", () => {
+    // Real grok 0.2.106 turn: 2049 uncached input + 10880 cache read + 29
+    // output, costUsdTicks 75360000 = $0.007536. Here the rate table would
+    // agree, which is what makes it a clean check that the authoritative
+    // number is the one being used rather than added to an estimate.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-4.5",
+        input_tokens: 2049,
+        cache_read_tokens: 10880,
+        output_tokens: 29,
+        cost_usd_ticks: 75_360_000,
+        uncosted_input_tokens: 0,
+        uncosted_output_tokens: 0,
+        uncosted_cache_read_tokens: 0,
+        uncosted_cache_write_tokens: 0,
+      }),
+    ).toBeCloseTo(0.007536, 10);
+  });
+
+  it("keeps the long-context surcharge the rate table cannot express", () => {
+    // xAI bills a request at 2x once its prompt reaches 200K tokens. The same
+    // tokens priced from the table give the short-context figure; the
+    // provider's own number carries the surcharge, and must not be quietly
+    // replaced by the cheaper local estimate.
+    const tokens = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-4.5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+    };
+    const shortContext = estimateCost(tokens);
+    expect(shortContext).toBeCloseTo(8, 5);
+
+    const longContext = estimateCost({
+      ...tokens,
+      cost_usd_ticks: 16 * 10_000_000_000, // $16 — the 2x tier
+      uncosted_input_tokens: 0,
+      uncosted_output_tokens: 0,
+      uncosted_cache_read_tokens: 0,
+      uncosted_cache_write_tokens: 0,
+    });
+    expect(longContext).toBeCloseTo(16, 5);
+  });
+
+  it("adds an estimate for the tokens the provider did not price", () => {
+    // A bucket can mix rows that carry a provider cost with rows that don't —
+    // two providers in one aggregate, or Grok either side of a CLI upgrade.
+    // Reporting only the authoritative half would under-report the bucket.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-4.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cost_usd_ticks: 4 * 10_000_000_000, // $4 for the priced half
+        uncosted_input_tokens: 1_000_000, // $2 at the table rate
+        uncosted_output_tokens: 1_000_000, // $6 at the table rate
+        uncosted_cache_read_tokens: 0,
+        uncosted_cache_write_tokens: 0,
+      }),
+    ).toBeCloseTo(12, 5);
+  });
+
+  it("falls back to estimating the full row when the backend omits the split", () => {
+    // A backend older than the cost split sends no `uncosted_*` fields.
+    // Treating that as "nothing left to estimate" would report $0 for every
+    // row, so an absent split must estimate the full token counts.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-4.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8, 5);
+  });
+
+  it("does not double-charge a cost that arrives without its token split", () => {
+    // Defensive: an authoritative cost with no `uncosted_*` must not also get
+    // a full-row estimate stacked on top.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-4.5",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cost_usd_ticks: 16 * 10_000_000_000,
+      }),
+    ).toBeCloseTo(16, 5);
+  });
+
+  it("reports provider cost even for a model with no rate-table row", () => {
+    // `grok-composer-*` has no published rate, but a turn the provider priced
+    // itself needs no rate — the money is known exactly.
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "grok",
+        model: "grok-composer-2.5-fast",
+        input_tokens: 500,
+        output_tokens: 100,
+        cost_usd_ticks: 12_345_678_900,
+        uncosted_input_tokens: 0,
+        uncosted_output_tokens: 0,
+        uncosted_cache_read_tokens: 0,
+        uncosted_cache_write_tokens: 0,
+      }),
+    ).toBeCloseTo(1.23456789, 8);
+  });
+
+  it("keeps the breakdown and the headline agreeing on an unpriced model", () => {
+    // `grok-composer-*` has no rate row, so there is nothing to split by — but
+    // the provider priced the turn. If the breakdown returned zeros here the
+    // stacked chart would read $0 while the headline read the real cost, and
+    // the unmapped banner (correctly) would not be shown to explain it.
+    const usage = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-composer-2.5-fast",
+      input_tokens: 500,
+      output_tokens: 100,
+      cost_usd_ticks: 12_345_678_900,
+      uncosted_input_tokens: 0,
+      uncosted_output_tokens: 0,
+      uncosted_cache_read_tokens: 0,
+      uncosted_cache_write_tokens: 0,
+    };
+    const b = estimateCostBreakdown(usage);
+    expect(b.input + b.output + b.cacheRead + b.cacheWrite).toBeCloseTo(
+      estimateCost(usage),
+      8,
+    );
+    expect(b.input).toBeCloseTo(1.23456789, 8);
+  });
+
+  it("reports no cost for an unpriced model the provider did not price either", () => {
+    // The control for the case above: no rates and no provider cost must stay
+    // at zero rather than inventing a figure.
+    const usage = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-composer-2.5-fast",
+      input_tokens: 500,
+      output_tokens: 100,
+    };
+    expect(estimateCost(usage)).toBe(0);
+    const b = estimateCostBreakdown(usage);
+    expect(b.input + b.output + b.cacheRead + b.cacheWrite).toBe(0);
+    // ...and it still asks the user for a rate, because one would help here.
+    expect(collectUnmappedModels([usage])).toEqual(["grok/grok-composer-2.5-fast"]);
+  });
+
+  it("keeps the cost breakdown summing to the total on provider-priced rows", () => {
+    // The stacked chart is drawn from the breakdown while the headline uses
+    // estimateCost; if the authoritative charge were dropped from the split
+    // the two would silently disagree on every Grok row.
+    const usage = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-4.5",
+      input_tokens: 1_000_000,
+      output_tokens: 1_000_000,
+      cost_usd_ticks: 16 * 10_000_000_000,
+      uncosted_input_tokens: 0,
+      uncosted_output_tokens: 0,
+      uncosted_cache_read_tokens: 0,
+      uncosted_cache_write_tokens: 0,
+    };
+    const b = estimateCostBreakdown(usage);
+    expect(b.input + b.output + b.cacheRead + b.cacheWrite).toBeCloseTo(
+      estimateCost(usage),
+      5,
+    );
+    // Split follows the rate table's own proportions ($2 input : $6 output).
+    expect(b.input).toBeCloseTo(4, 5);
+    expect(b.output).toBeCloseTo(12, 5);
+  });
+
+  it("drops a fully provider-priced model from the unmapped diagnostic", () => {
+    // The banner asks the user to supply a missing rate. A row the provider
+    // priced in full needs no rate, so prompting for one would invite
+    // overriding a real bill with a guess.
+    const row = {
+      ...zeroUsage,
+      provider: "grok",
+      model: "grok-composer-2.5-fast",
+      input_tokens: 500,
+      cost_usd_ticks: 12_345_678_900,
+      uncosted_input_tokens: 0,
+      uncosted_output_tokens: 0,
+      uncosted_cache_read_tokens: 0,
+      uncosted_cache_write_tokens: 0,
+    };
+    expect(collectUnmappedModels([row])).toEqual([]);
+    // ...but the same model still surfaces while any of its tokens are
+    // unpriced, because those genuinely need a rate.
+    expect(
+      collectUnmappedModels([{ ...row, uncosted_input_tokens: 500 }]),
+    ).toEqual(["grok/grok-composer-2.5-fast"]);
+  });
+
+  it("leaves Grok SKUs that xAI does not publish a price for unmapped", () => {
+    // No startsWith fallback: `grok-composer-2.5-fast` is in the Grok Build
+    // catalog but absent from docs.x.ai/developers/pricing, so it must NOT
+    // inherit grok-4.5's rate — it surfaces in the unmapped diagnostic
+    // instead, where the user can supply their own rate.
+    expect(isModelPriced("grok-composer-2.5-fast", "xai")).toBe(false);
   });
 
   it("recognises the provider-prefixed forms emitted by OpenRouter-style runtimes", () => {
@@ -802,6 +1096,109 @@ describe("sliceWindow (timezone-aware)", () => {
   });
 });
 
+describe("aggregateByDate", () => {
+  // MUL-6334: the daily cost stack computed `estimateCostBreakdown` and then
+  // summed only three of its four components, silently dropping cache-read
+  // spend from every bar and from the tooltip Total that sums them.
+  function makeUsage(
+    date: string,
+    tokens: Partial<{
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+    }>,
+    model = "gpt-5.6-sol",
+  ): RuntimeUsage {
+    return {
+      runtime_id: "r",
+      date,
+      provider: "openai",
+      model,
+      input_tokens: tokens.input ?? 0,
+      output_tokens: tokens.output ?? 0,
+      cache_read_tokens: tokens.cacheRead ?? 0,
+      cache_write_tokens: tokens.cacheWrite ?? 0,
+    };
+  }
+
+  it("bills cache reads in the daily stack and its total", () => {
+    // gpt-5.6-sol: input $5/M, output $30/M, cacheRead $0.50/M.
+    const rows = [
+      makeUsage("2026-05-11", { input: 1_000_000, cacheRead: 10_000_000 }),
+    ];
+    const { dailyCostStack } = aggregateByDate(rows);
+    const day = dailyCostStack[0];
+    expect(day?.cacheRead).toBeCloseTo(5, 2);
+    expect(day?.total).toBeCloseTo(10, 2);
+  });
+
+  it("keeps every daily bucket's total equal to the sum of estimateCost", () => {
+    // The invariant the reporter asked for. A cache-read-dominated workload is
+    // the only shape that catches the regression: with zero cache reads the
+    // broken and fixed totals are identical.
+    const rows = [
+      makeUsage("2026-05-11", {
+        input: 4_300_000,
+        output: 456_400,
+        cacheRead: 79_300_000,
+      }),
+      makeUsage("2026-05-11", { input: 1_000, output: 500 }),
+      makeUsage("2026-05-12", { cacheRead: 50_000_000 }),
+      // Anthropic rows exercise the cache-write segment too.
+      makeUsage(
+        "2026-05-12",
+        { input: 200_000, output: 20_000, cacheRead: 8_000_000, cacheWrite: 400_000 },
+        "claude-sonnet-4-6",
+      ),
+    ];
+    const { dailyCostStack } = aggregateByDate(rows);
+    expect(dailyCostStack).toHaveLength(2);
+    for (const day of dailyCostStack) {
+      const expected = rows
+        .filter((r) => r.date === day.date)
+        .reduce((sum, r) => sum + estimateCost(r), 0);
+      // Each of the four segments is rounded to cents before being summed —
+      // that is what keeps the tooltip footer equal to the bars above it — so
+      // the bucket can sit up to half a cent per segment off the exact figure.
+      // The tolerance is the rounding, not slack for a dropped category: a
+      // missing segment shows up as dollars, not cents.
+      expect(Math.abs(day.total - expected)).toBeLessThanOrEqual(0.02);
+      // Total is what the tooltip footer prints; the segments are what it
+      // sums to get there. They have to be exactly the same number.
+      expect(day.input + day.output + day.cacheRead + day.cacheWrite).toBeCloseTo(
+        day.total,
+        10,
+      );
+    }
+  });
+
+  it("reproduces the reported gpt-5.6-sol undercount", () => {
+    // The exact workload from the bug report: the chart showed $35.19 against
+    // a true $74.84, hiding $39.65 (53%) of spend.
+    const rows = [
+      makeUsage("2026-05-11", {
+        input: 4_300_000,
+        output: 456_400,
+        cacheRead: 79_300_000,
+      }),
+    ];
+    const { dailyCostStack, dailyCost } = aggregateByDate(rows);
+    expect(dailyCostStack[0]?.total).toBeCloseTo(74.84, 2);
+    // The non-stacked series always included cache reads; the stack now agrees
+    // with it, which is what makes the chart agree with the Cost KPI.
+    expect(dailyCostStack[0]?.total).toBeCloseTo(dailyCost[0]?.cost ?? 0, 2);
+  });
+
+  it("still reports a non-zero total when spend is entirely cache reads", () => {
+    // `total` gates the chart's empty state, which blames an unmapped model
+    // when it reads 0. A cache-read-only bucket used to trip that.
+    const rows = [makeUsage("2026-05-11", { cacheRead: 20_000_000 })];
+    const { dailyCostStack } = aggregateByDate(rows);
+    expect(dailyCostStack[0]?.total).toBeCloseTo(10, 2);
+  });
+});
+
 describe("aggregateByWeek", () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -814,6 +1211,8 @@ describe("aggregateByWeek", () => {
     date: string,
     input: number,
     output: number,
+    cacheRead = 0,
+    cacheWrite = 0,
   ): RuntimeUsage {
     return {
       runtime_id: "r",
@@ -822,8 +1221,8 @@ describe("aggregateByWeek", () => {
       model: "claude-sonnet-4-6",
       input_tokens: input,
       output_tokens: output,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
+      cache_read_tokens: cacheRead,
+      cache_write_tokens: cacheWrite,
     };
   }
 
@@ -884,6 +1283,24 @@ describe("aggregateByWeek", () => {
     const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
     expect(weeklyCostStack).toHaveLength(1);
     expect(weeklyCostStack[0]?.total).toBeCloseTo(36, 2);
+  });
+
+  it("bills cache reads in the weekly stack and its total (MUL-6334)", () => {
+    vi.setSystemTime(new Date("2026-05-17T12:00:00Z"));
+    // claude-sonnet-4-6: input $3/M, output $15/M, cacheRead $0.30/M,
+    // cacheWrite $3.75/M. Row: $3 + $15 + $6 (20M cache reads) + $3.75 = $27.75.
+    const rows = [
+      makeUsage("2026-05-11", 1_000_000, 1_000_000, 20_000_000, 1_000_000),
+    ];
+    const { weeklyCostStack } = aggregateByWeek(rows, "UTC", 1);
+    const week = weeklyCostStack[0];
+    expect(week?.cacheRead).toBeCloseTo(6, 2);
+    expect(week?.total).toBeCloseTo(27.75, 2);
+    // Same invariant the daily stack holds: bucket total === sum of estimateCost.
+    expect(week?.total).toBeCloseTo(
+      rows.reduce((sum, r) => sum + estimateCost(r), 0),
+      2,
+    );
   });
 
   it("emits trailing calendar weeks pinned to today, dropping older populated weeks", () => {
@@ -1015,5 +1432,107 @@ describe("computeCostInWindow", () => {
   it("returns 0 for an empty row set", () => {
     vi.setSystemTime(new Date("2026-05-20T12:00:00Z"));
     expect(computeCostInWindow([], 7, "UTC")).toBe(0);
+  });
+});
+
+describe("summarizeTaskUsage", () => {
+  // claude-opus-5: 5 / 25 / 0.50 / 6.25 per million.
+  const opus = {
+    provider: "anthropic",
+    model: "claude-opus-5",
+    input_tokens: 96_000,
+    output_tokens: 34_000,
+    cache_read_tokens: 712_000,
+    cache_write_tokens: 50_000,
+  };
+  // gpt-5.6-terra: 2.50 / 15 / 0.25 / 3.125 per million.
+  const terra = {
+    provider: "openai",
+    model: "gpt-5.6-terra",
+    input_tokens: 31_000,
+    output_tokens: 12_000,
+    cache_read_tokens: 158_000,
+    cache_write_tokens: 11_000,
+  };
+
+  it("sums every token bucket into the headline figure", () => {
+    const s = summarizeTaskUsage([opus]);
+    expect(s?.tokens).toBe(96_000 + 34_000 + 712_000 + 50_000);
+    expect(s?.input).toBe(96_000);
+    expect(s?.cacheWrite).toBe(50_000);
+    expect(s?.models).toEqual(["claude-opus-5"]);
+  });
+
+  it("prices each model slice at its own rate, not the combined total", () => {
+    // Priced separately: 1.9985 (opus) + 0.331375 (terra).
+    // Priced as one blob at either rate, the answer would be wrong.
+    const s = summarizeTaskUsage([opus, terra]);
+    expect(s?.cost).toBeCloseTo(1.9985 + 0.331375, 5);
+    expect(s?.models).toEqual(["claude-opus-5", "gpt-5.6-terra"]);
+  });
+
+  it("prefers the provider's own cost over the rate table", () => {
+    // 3e10 ticks = $3.00, well above what the rate table would charge, so a
+    // rate-table result would be visibly different.
+    const s = summarizeTaskUsage([{ ...opus, cost_usd_ticks: 30_000_000_000 }]);
+    expect(s?.cost).toBeCloseTo(3, 5);
+  });
+
+  it("returns null for no usage rather than a zeroed summary", () => {
+    // Both must be null: a run with no recorded usage was not free, and a
+    // 0 here would render as "$0.00" and assert that it was.
+    expect(summarizeTaskUsage(undefined)).toBeNull();
+    expect(summarizeTaskUsage([])).toBeNull();
+  });
+
+  it("counts tokens for an unpriced model but leaves its cost at 0", () => {
+    const s = summarizeTaskUsage([{ ...opus, model: "totally-made-up-model" }]);
+    expect(s?.tokens).toBe(892_000);
+    expect(s?.cost).toBe(0);
+  });
+
+  it("reports cache savings against full input pricing", () => {
+    // 712K cache reads at opus: would have cost 5/M, actually cost 0.50/M.
+    const s = summarizeTaskUsage([opus]);
+    expect(s?.cacheSavings).toBeCloseTo((712_000 * (5 - 0.5)) / 1_000_000, 5);
+  });
+});
+
+describe("summarizeTaskUsageAcross", () => {
+  const slice = {
+    model: "claude-opus-5",
+    input_tokens: 1_000_000,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    cache_write_tokens: 0,
+  };
+
+  it("skips runs with no usage instead of nulling the whole total", () => {
+    const total = summarizeTaskUsageAcross([[slice], undefined, [], [slice]]);
+    expect(total?.tokens).toBe(2_000_000);
+    expect(total?.cost).toBeCloseTo(10, 5);
+  });
+
+  it("is null only when no run has any usage", () => {
+    expect(summarizeTaskUsageAcross([undefined, [], undefined])).toBeNull();
+    expect(summarizeTaskUsageAcross([])).toBeNull();
+  });
+});
+
+describe("formatTokens", () => {
+  it("uses a compact unit ladder for large token counts", () => {
+    expect(formatTokens(999)).toBe("999");
+    expect(formatTokens(1_000)).toBe("1K");
+    expect(formatTokens(1_050)).toBe("1.1K");
+    expect(formatTokens(1_000_000)).toBe("1M");
+    expect(formatTokens(2_200_000_000)).toBe("2.2B");
+    expect(formatTokens(29_513_100_000)).toBe("29.5B");
+    expect(formatTokens(1_000_000_000_000)).toBe("1T");
+  });
+
+  it("promotes values that round across a unit boundary", () => {
+    expect(formatTokens(999_949)).toBe("999.9K");
+    expect(formatTokens(999_950)).toBe("1M");
+    expect(formatTokens(999_999_999)).toBe("1B");
   });
 });

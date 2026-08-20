@@ -50,7 +50,11 @@ func (q *Queries) ArchiveAllReadInbox(ctx context.Context, arg ArchiveAllReadInb
 const archiveCompletedInbox = `-- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
-  AND i.issue_id IN (SELECT id FROM issue WHERE status IN ('done', 'cancelled'))
+  AND i.issue_id IN (
+    SELECT id FROM issue
+    WHERE workspace_id = $1
+      AND issue_effective_status(workspace_id, status) IN ('done', 'cancelled')
+  )
 `
 
 type ArchiveCompletedInboxParams struct {
@@ -230,8 +234,8 @@ const createInboxItem = `-- name: CreateInboxItem :one
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    actor_type, actor_id, details, id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE($12::uuid, gen_random_uuid()))
 RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
 `
 
@@ -247,6 +251,7 @@ type CreateInboxItemParams struct {
 	ActorType     pgtype.Text `json:"actor_type"`
 	ActorID       pgtype.UUID `json:"actor_id"`
 	Details       []byte      `json:"details"`
+	ID            pgtype.UUID `json:"id"`
 }
 
 func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams) (InboxItem, error) {
@@ -262,6 +267,7 @@ func (q *Queries) CreateInboxItem(ctx context.Context, arg CreateInboxItemParams
 		arg.ActorType,
 		arg.ActorID,
 		arg.Details,
+		arg.ID,
 	)
 	var i InboxItem
 	err := row.Scan(
@@ -538,6 +544,41 @@ RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_
 
 func (q *Queries) MarkInboxRead(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
 	row := q.db.QueryRow(ctx, markInboxRead, id)
+	var i InboxItem
+	err := row.Scan(
+		&i.ID,
+		&i.WorkspaceID,
+		&i.RecipientType,
+		&i.RecipientID,
+		&i.Type,
+		&i.Severity,
+		&i.IssueID,
+		&i.Title,
+		&i.Body,
+		&i.Read,
+		&i.Archived,
+		&i.CreatedAt,
+		&i.ActorType,
+		&i.ActorID,
+		&i.Details,
+	)
+	return i, err
+}
+
+const markInboxUnread = `-- name: MarkInboxUnread :one
+UPDATE inbox_item SET read = false
+WHERE id = $1
+RETURNING id, workspace_id, recipient_type, recipient_id, type, severity, issue_id, title, body, read, archived, created_at, actor_type, actor_id, details
+`
+
+// Exact inverse of MarkInboxRead, and item-level for the same reason it is:
+// the inbox renders one row per issue carrying that group's NEWEST item, and
+// the group's read state is that item's read state. Flipping the whole group
+// unread would resurrect older siblings the user already dealt with and
+// inflate CountUnreadInbox (which counts raw rows), while changing nothing the
+// UI shows.
+func (q *Queries) MarkInboxUnread(ctx context.Context, id pgtype.UUID) (InboxItem, error) {
+	row := q.db.QueryRow(ctx, markInboxUnread, id)
 	var i InboxItem
 	err := row.Scan(
 		&i.ID,

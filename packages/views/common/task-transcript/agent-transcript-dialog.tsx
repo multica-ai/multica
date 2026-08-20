@@ -1,11 +1,11 @@
 "use client";
 
-import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+import { useState, useRef, useCallback, useEffect, useLayoutEffect, useMemo, forwardRef } from "react";
+import { Virtuoso, type VirtuosoHandle, type Components } from "react-virtuoso";
 import {
   Bot,
-  ChevronRight,
   Brain,
-  AlertCircle,
+  CircleAlert,
   CheckCircle2,
   XCircle,
   X,
@@ -13,18 +13,25 @@ import {
   Clock,
   Copy,
   Check,
-  Monitor,
-  Cloud,
-  Cpu,
+  ChevronRight,
   Filter,
-  Folder,
+  FilePen,
+  FileText,
+  Search,
+  Terminal,
+  Wrench,
+  MoreHorizontal,
   ArrowDownNarrowWide,
   ArrowUpNarrowWide,
+  Info,
+  Coins,
+  GitBranch,
 } from "lucide-react";
 import { cn } from "@multica/ui/lib/utils";
 import { copyText } from "@multica/ui/lib/clipboard";
+import { Button } from "@multica/ui/components/ui/button";
 import { Dialog, DialogContent, DialogTitle } from "@multica/ui/components/ui/dialog";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@multica/ui/components/ui/collapsible";
+import { Popover, PopoverContent, PopoverTrigger } from "@multica/ui/components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -35,6 +42,8 @@ import {
 } from "@multica/ui/components/ui/dropdown-menu";
 import { ActorAvatar } from "../actor-avatar";
 import { AttributionBadge } from "../../issues/components/attribution-badge";
+import { cancelReasonLabel } from "../../agents/components/tabs/task-failure";
+import { RichContent } from "../../rich-content";
 import { api } from "@multica/core/api";
 import {
   useTranscriptViewStore,
@@ -42,9 +51,63 @@ import {
   type TranscriptSortDirection,
 } from "@multica/core/agents/stores";
 import type { AgentTask, Agent, AgentRuntime } from "@multica/core/types/agent";
+import { resolveWorkdirCopyTarget } from "@multica/core/issues";
+import { runtimeDisplayName, providerDisplayName } from "@multica/core/runtimes";
+import { useCustomPricingStore } from "@multica/core/runtimes/custom-pricing-store";
 import { redactSecrets } from "./redact";
+import {
+  createNewestFirstFollow,
+  FOLLOW_EDGE_THRESHOLD,
+  LINE_SCROLL_PX,
+} from "./transcript-follow";
 import type { TimelineItem } from "./build-timeline";
+import {
+  buildLanes,
+  buildSteps,
+  groupSteps,
+  isCallStep,
+  isGroupRow,
+  rowCalls,
+  shouldShowTimeline,
+  toolKindTotals,
+  type TraceCallStep,
+  type TraceGroupRow,
+  type TraceMessageStep,
+  type TraceRow,
+  type TraceStep,
+} from "./build-steps";
+import { buildRunOutcome } from "./run-outcome";
+import { RunTimeline } from "./run-timeline";
+import {
+  base64ByteLength,
+  readImageResult,
+  traceEventCopyText,
+  traceEventDetail,
+  traceEventLabel,
+  traceEventSummary,
+  traceToolArgSummary,
+} from "./trace-event-presenter";
+import type { TraceSummaryLabels } from "./trace-event-presenter";
+import {
+  DiffDetailSurface,
+  FileWriteSurface,
+  PatchDetailSurface,
+  ToolDetailSurface,
+} from "./detail-surfaces";
+import { languageForPath } from "./diff-highlight";
 import { useT } from "../../i18n";
+import {
+  formatTokens,
+  formatUsd,
+  summarizeTaskUsage,
+} from "../../runtimes/utils";
+import "../../editor/styles/code.css";
+import "./task-transcript.css";
+
+// The run surface, read in four layers: what happened (header), what it
+// produced (outcome), where the time went (timeline), and the evidence (steps).
+// Only one layer is expanded at a time — the inspector opens on demand rather
+// than splitting the surface in two before the reader has asked anything.
 
 interface AgentTranscriptDialogProps {
   open: boolean;
@@ -62,120 +125,11 @@ interface AgentTranscriptDialogProps {
   headerSlot?: React.ReactNode;
 }
 
-// ─── Color mapping for timeline segments ────────────────────────────────────
-
-type EventColor = "agent" | "thinking" | "tool" | "result" | "error";
-
-function getEventColor(item: TimelineItem): EventColor {
-  switch (item.type) {
-    case "text":
-      return "agent";
-    case "thinking":
-      return "thinking";
-    case "tool_use":
-      return "tool";
-    case "tool_result":
-      return "result";
-    case "error":
-      return "error";
-    default:
-      return "result";
-  }
-}
-
-const colorClasses: Record<EventColor, { bg: string; bgActive: string; label: string }> = {
-  agent: { bg: "bg-emerald-400/60", bgActive: "bg-emerald-500", label: "bg-emerald-500" },
-  thinking: { bg: "bg-violet-400/60", bgActive: "bg-violet-500", label: "bg-violet-500/20 text-violet-700 dark:text-violet-300" },
-  tool: { bg: "bg-blue-400/60", bgActive: "bg-blue-500", label: "bg-blue-500/20 text-blue-700 dark:text-blue-300" },
-  result: { bg: "bg-slate-300/60 dark:bg-slate-600/60", bgActive: "bg-slate-400 dark:bg-slate-500", label: "bg-muted text-muted-foreground" },
-  error: { bg: "bg-red-400/60", bgActive: "bg-red-500", label: "bg-red-500/20 text-red-700 dark:text-red-300" },
-};
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
-
-function getEventLabel(item: TimelineItem): string {
-  switch (item.type) {
-    case "text":
-      return "Agent";
-    case "thinking":
-      return "Thinking";
-    case "tool_use":
-      return item.tool ?? "Tool";
-    case "tool_result":
-      return item.tool ? `${item.tool}` : "Result";
-    case "error":
-      return "Error";
-    default:
-      return "Event";
-  }
-}
-
-function getItemFilterKey(item: TimelineItem): TranscriptFilterKey {
-  return item.tool && (item.type === "tool_use" || item.type === "tool_result")
-    ? `tool:${item.tool}`
-    : item.type;
-}
-
-function getEventSummary(item: TimelineItem): string {
-  switch (item.type) {
-    case "text":
-      return item.content?.split("\n").find((l) => l.trim().length > 0) ?? "";
-    case "thinking":
-      return item.content?.slice(0, 200) ?? "";
-    case "tool_use": {
-      if (!item.input) return "";
-      const inp = item.input as Record<string, string>;
-      if (inp.query) return inp.query;
-      if (inp.file_path) return shortenPath(inp.file_path);
-      if (inp.path) return shortenPath(inp.path);
-      if (inp.pattern) return inp.pattern;
-      if (inp.description) return String(inp.description);
-      if (inp.command) {
-        const cmd = String(inp.command);
-        return cmd.length > 120 ? cmd.slice(0, 120) + "..." : cmd;
-      }
-      if (inp.prompt) {
-        const p = String(inp.prompt);
-        return p.length > 120 ? p.slice(0, 120) + "..." : p;
-      }
-      if (inp.skill) return String(inp.skill);
-      for (const v of Object.values(inp)) {
-        if (typeof v === "string" && v.length > 0 && v.length < 120) return v;
-      }
-      return "";
-    }
-    case "tool_result":
-      return item.output?.slice(0, 200) ?? "";
-    case "error":
-      return item.content ?? "";
-    default:
-      return "";
-  }
-}
-
-function hasEventDetail(item: TimelineItem): boolean {
-  return (
-    (item.type === "tool_use" && !!item.input && Object.keys(item.input).length > 0) ||
-    (item.type === "tool_result" && !!item.output && item.output.length > 0) ||
-    (item.type === "thinking" && !!item.content && item.content.length > 0) ||
-    (item.type === "text" && !!item.content && item.content.length > 0) ||
-    (item.type === "error" && !!item.content && item.content.length > 0)
-  );
-}
-
-function shortenPath(p: string): string {
-  const parts = p.split("/");
-  if (parts.length <= 3) return p;
-  return ".../" + parts.slice(-2).join("/");
-}
 
 function formatDuration(start: string, end: string): string {
   const ms = new Date(end).getTime() - new Date(start).getTime();
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return `${minutes}m ${secs}s`;
+  return formatElapsedMs(ms);
 }
 
 function formatElapsedMs(ms: number): string {
@@ -186,7 +140,162 @@ function formatElapsedMs(ms: number): string {
   return `${minutes}m ${secs}s`;
 }
 
+/** A step's own duration, in the compact form the right column carries. */
+function formatStepDuration(ms: number): string {
+  if (ms < 1000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)}s`;
+  const minutes = Math.floor(ms / 60_000);
+  const seconds = Math.round((ms % 60_000) / 1000);
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+/** Offset from the run's start, which is what a step's position means. */
+function formatOffset(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  if (minutes < 60) return `+${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  const hours = Math.floor(minutes / 60);
+  return `+${hours}:${String(minutes % 60).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function formatRunTime(iso: string): string {
+  return new Date(iso).toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function timeMs(iso: string | undefined): number | undefined {
+  if (!iso) return undefined;
+  const ms = new Date(iso).getTime();
+  return Number.isFinite(ms) ? ms : undefined;
+}
+
+function stepFilterKey(step: TraceStep): TranscriptFilterKey {
+  return step.kind === "call" ? `tool:${step.tool}` : step.kind;
+}
+
+/** Lowercased haystack for the in-run search. Outputs are clipped: a match
+ *  past 4KB of command output is not one anybody is scanning for. */
+function stepHaystack(step: TraceStep): string {
+  if (step.kind !== "call") return (step.item.content ?? "").toLowerCase();
+  const input = step.call?.input ? JSON.stringify(step.call.input) : "";
+  return `${step.tool} ${input} ${(step.result?.output ?? "").slice(0, 4000)}`.toLowerCase();
+}
+
+function StepIcon({ step, className }: { step: TraceStep; className?: string }) {
+  if (!isCallStep(step)) {
+    if (step.kind === "thinking") return <Brain className={className} />;
+    if (step.kind === "error") return <CircleAlert className={className} />;
+    return <Bot className={className} />;
+  }
+
+  // Tool names differ per provider, so the input's shape picks the glyph.
+  const input = step.call?.input;
+  if (input) {
+    if (typeof input.command === "string") return <Terminal className={className} />;
+    if (typeof input.old_string === "string" || typeof input.content === "string" || input.changes)
+      return <FilePen className={className} />;
+    if (typeof input.query === "string" || typeof input.pattern === "string")
+      return <Search className={className} />;
+    if (typeof input.file_path === "string" || typeof input.path === "string")
+      return <FileText className={className} />;
+  }
+  return <Wrench className={className} />;
+}
+
+// ─── Run detail row (ⓘ popover) ─────────────────────────────────────────────
+// One labeled fact in the diagnostic popover. When `onCopy` is given the whole
+// row is a copy button (used for the workdir path).
+function RunDetailRow({
+  label,
+  value,
+  mono,
+  onCopy,
+  copied,
+  copyTitle,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+  onCopy?: () => void;
+  copied?: boolean;
+  copyTitle?: string;
+}) {
+  const valueClass = cn("min-w-0 select-text break-all text-foreground", mono && "font-mono");
+  if (onCopy) {
+    return (
+      <button
+        type="button"
+        onClick={onCopy}
+        title={copyTitle}
+        className="group -mx-1 grid w-[calc(100%+0.5rem)] grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3 rounded px-1 py-0.5 text-left transition-colors hover:bg-accent/60"
+      >
+        <span className="text-muted-foreground">{label}</span>
+        <span className="flex min-w-0 items-start gap-1.5">
+          <span className={cn(valueClass, "flex-1")}>{value}</span>
+          {copied ? (
+            <Check className="mt-0.5 h-3 w-3 shrink-0 text-success" />
+          ) : (
+            <Copy className="mt-0.5 h-3 w-3 shrink-0 opacity-0 transition-opacity group-hover:opacity-100" />
+          )}
+        </span>
+      </button>
+    );
+  }
+  return (
+    <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] items-start gap-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={valueClass}>{value}</span>
+    </div>
+  );
+}
+
 // ─── Main dialog ────────────────────────────────────────────────────────────
+
+// Virtuoso mounts rows as direct children of its List element; carry the
+// divider styling the plain list container used to provide. Defined at module
+// scope — an inline `components` object would remount the list every render.
+const VirtuosoList = forwardRef<HTMLDivElement, React.HTMLAttributes<HTMLDivElement>>(
+  function VirtuosoList(props, ref) {
+    return <div ref={ref} {...props} className="divide-y" />;
+  },
+);
+const LIST_COMPONENTS: Components<TraceRow> = { List: VirtuosoList };
+const COPY_FEEDBACK_DURATION_MS = 2000;
+
+function useCopyFeedback() {
+  const [copied, setCopied] = useState(false);
+  const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+      if (resetTimerRef.current !== null) {
+        clearTimeout(resetTimerRef.current);
+        resetTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const showCopied = useCallback(() => {
+    if (!mountedRef.current) return;
+    setCopied(true);
+    if (resetTimerRef.current !== null) clearTimeout(resetTimerRef.current);
+    resetTimerRef.current = setTimeout(() => {
+      resetTimerRef.current = null;
+      if (mountedRef.current) setCopied(false);
+    }, COPY_FEEDBACK_DURATION_MS);
+  }, []);
+
+  return [copied, showCopied] as const;
+}
 
 export function AgentTranscriptDialog({
   open,
@@ -199,47 +308,140 @@ export function AgentTranscriptDialog({
 }: AgentTranscriptDialogProps) {
   const { t } = useT("agents");
   const [selectedSeq, setSelectedSeq] = useState<number | null>(null);
+  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(() => new Set());
+  const [query, setQuery] = useState("");
   const [elapsed, setElapsed] = useState("");
-  const [copied, setCopied] = useState(false);
-  const [copiedWorkdir, setCopiedWorkdir] = useState(false);
+  const [copied, showCopied] = useCopyFeedback();
+  const [copiedWorkdir, showCopiedWorkdir] = useCopyFeedback();
+  const [copiedBranch, showCopiedBranch] = useCopyFeedback();
   const [agentInfo, setAgentInfo] = useState<Agent | null>(null);
   const [runtimeInfo, setRuntimeInfo] = useState<AgentRuntime | null>(null);
-  const [sessionFilterKeys, setSessionFilterKeys] = useState<TranscriptFilterKey[]>([]);
-  const [expandedSeqs, setExpandedSeqs] = useState<Set<number>>(() => new Set());
+  const workdirCopyTarget = useMemo(
+    () => resolveWorkdirCopyTarget([task]),
+    [task],
+  );
   const sortDirection = useTranscriptViewStore((s) => s.sortDirection);
   const setSortDirection = useTranscriptViewStore((s) => s.setSortDirection);
-  const preserveFilters = useTranscriptViewStore((s) => s.preserveFilters);
-  const setPreserveFilters = useTranscriptViewStore((s) => s.setPreserveFilters);
-  const persistedFilterKeys = useTranscriptViewStore((s) => s.selectedFilterKeys);
-  const setPersistedFilterKeys = useTranscriptViewStore((s) => s.setSelectedFilterKeys);
-  const togglePersistedFilterKey = useTranscriptViewStore((s) => s.toggleFilterKey);
-  const clearPersistedFilterKeys = useTranscriptViewStore((s) => s.clearFilterKeys);
-  const defaultExpanded = useTranscriptViewStore((s) => s.defaultExpanded);
-  const setDefaultExpanded = useTranscriptViewStore((s) => s.setDefaultExpanded);
-  const eventRefs = useRef<Map<number, HTMLDivElement>>(new Map());
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const autoExpandedSeqsRef = useRef<Set<number>>(new Set());
-  const initializedTaskRef = useRef<string | null>(null);
-  const previousDefaultExpandedRef = useRef(defaultExpanded);
-  const selectedFilterKeys = preserveFilters ? persistedFilterKeys : sessionFilterKeys;
+  // Filters always persist across opens — a facet a run doesn't have simply
+  // no-ops (see activeFilterKeys), so there is no reason to make persistence a
+  // user-facing toggle.
+  const selectedFilterKeys = useTranscriptViewStore((s) => s.selectedFilterKeys);
+  const toggleFilterKey = useTranscriptViewStore((s) => s.toggleFilterKey);
+  const clearFilters = useTranscriptViewStore((s) => s.clearFilterKeys);
+  const virtuosoRef = useRef<VirtuosoHandle>(null);
+  // Newest-first live follow (#5921): all latch decisions live in the pure
+  // controller (see transcript-follow.ts for the model); this component only
+  // wires DOM events to it. A stable instance, never re-rendered by scroll
+  // traffic.
+  const followCtl = useMemo(() => createNewestFirstFollow(), []);
+  const detachScrollerRef = useRef<(() => void) | null>(null);
 
-  // Derive filter options from each item:
-  //   tool_use / tool_result → filter value = tool, display = "tool:Bash"
-  //   other types → display from getEventLabel
+  const handleScrollerRef = useCallback(
+    (el: HTMLElement | Window | null) => {
+      detachScrollerRef.current?.();
+      detachScrollerRef.current = null;
+      if (!(el instanceof HTMLElement)) return;
+      const onWheel = (e: WheelEvent) => {
+        const scale =
+          e.deltaMode === 1 ? LINE_SCROLL_PX : e.deltaMode === 2 ? el.clientHeight : 1;
+        followCtl.input(e.deltaY * scale);
+      };
+      let lastTouchY: number | null = null;
+      const onTouchStart = (e: TouchEvent) => {
+        lastTouchY = e.touches[0]?.clientY ?? null;
+      };
+      const onTouchMove = (e: TouchEvent) => {
+        const y = e.touches[0]?.clientY;
+        if (y === undefined) return;
+        // Finger moving up scrolls the content down (away from the live end).
+        if (lastTouchY !== null) followCtl.input(lastTouchY - y);
+        lastTouchY = y;
+      };
+      const onKeyDown = (e: KeyboardEvent) => {
+        // Only keys aimed at the scroller itself; Space/arrows bubbling from
+        // row controls are not scroll intent.
+        if (e.target !== el) return;
+        if (e.key === "ArrowDown") followCtl.input(LINE_SCROLL_PX);
+        else if (e.key === "ArrowUp") followCtl.input(-LINE_SCROLL_PX);
+        else if (e.key === "PageDown" || e.key === " ") followCtl.input(el.clientHeight);
+        else if (e.key === "PageUp") followCtl.input(-el.clientHeight);
+        else if (e.key === "End") followCtl.disengage();
+      };
+      // Scrollbar drags hit the scroller element itself; clicks on row
+      // content hit children (tracked too — enforcement must not fight text
+      // selection autoscroll while the button is held).
+      const onPointerDown = (e: MouseEvent) => {
+        followCtl.pointerDown(e.target === el);
+      };
+      const onPointerUp = () => {
+        followCtl.pointerUp();
+      };
+      const onScroll = () => {
+        // Enforce the follow here, on the scroll event itself: Virtuoso's
+        // prepend compensation lands after React effects, so an effect-timed
+        // snap alone stays one flush behind. NOTE: this direct write staying
+        // ahead of Virtuoso's own state relies on react-virtuoso registering
+        // its scroll listener after calling scrollerRef (true in 4.18.7); if
+        // that inverts, route the write through virtuosoRef.scrollTo instead.
+        if (followCtl.onScroll(el.scrollTop)) el.scrollTop = 0;
+      };
+      el.addEventListener("wheel", onWheel, { passive: true });
+      el.addEventListener("touchstart", onTouchStart, { passive: true });
+      el.addEventListener("touchmove", onTouchMove, { passive: true });
+      el.addEventListener("keydown", onKeyDown);
+      el.addEventListener("mousedown", onPointerDown);
+      window.addEventListener("mouseup", onPointerUp, { capture: true });
+      el.addEventListener("scroll", onScroll, { passive: true });
+      detachScrollerRef.current = () => {
+        el.removeEventListener("wheel", onWheel);
+        el.removeEventListener("touchstart", onTouchStart);
+        el.removeEventListener("touchmove", onTouchMove);
+        el.removeEventListener("keydown", onKeyDown);
+        el.removeEventListener("mousedown", onPointerDown);
+        window.removeEventListener("mouseup", onPointerUp, { capture: true });
+        el.removeEventListener("scroll", onScroll);
+        // The scroller can detach mid-drag (listEpoch remount); a stuck
+        // held-mouse flag would suppress enforcement forever.
+        followCtl.pointerUp();
+      };
+    },
+    [followCtl],
+  );
+
+  useEffect(() => () => detachScrollerRef.current?.(), []);
+
+  // A different run is a different reading position: drop the selection and
+  // any group the reader had opened.
+  useEffect(() => {
+    setSelectedSeq(null);
+    setExpandedGroups(new Set());
+  }, [task.id]);
+
+  // ── Derived model ────────────────────────────────────────────────────────
+
+  // One step per tool call, with its result folded in — see build-steps.ts for
+  // why the pairing is positional.
+  const steps = useMemo(() => buildSteps(items), [items]);
+
+  // A facet reads as what its rows look like: the glyph the rows carry, and the
+  // name the rows print. The first step of a kind stands in for the glyph. The
+  // `tool:` prefix stays in the key (it is what gets persisted) but never
+  // reaches the menu — the rows say `Bash`, so the facet says `Bash` too.
   const filterOptions = useMemo(() => {
-    const options = new Map<string, string>();
-    for (const item of items) {
-      const key = getItemFilterKey(item);
-      if (item.tool && (item.type === "tool_use" || item.type === "tool_result")) {
-        if (!options.has(key)) options.set(key, key);
-      } else {
-        if (!options.has(key)) {
-          options.set(key, getEventLabel(item));
-        }
-      }
+    const options = new Map<string, { label: string; step: TraceStep }>();
+    for (const step of steps) {
+      const key = stepFilterKey(step);
+      if (options.has(key)) continue;
+      options.set(key, {
+        label:
+          step.kind === "call"
+            ? step.tool || t(($) => $.transcript.kind_tool)
+            : traceEventLabel({ type: step.item.type, tool: step.item.tool }),
+        step,
+      });
     }
-    return Array.from(options.entries()).sort((a, b) => a[1].localeCompare(b[1]));
-  }, [items]);
+    return Array.from(options.entries()).sort((a, b) => a[1].label.localeCompare(b[1].label));
+  }, [steps, t]);
 
   const filterOptionKeys = useMemo(
     () => new Set(filterOptions.map(([value]) => value)),
@@ -253,64 +455,104 @@ export function AgentTranscriptDialog({
 
   const activeFilterSet = useMemo(() => new Set(activeFilterKeys), [activeFilterKeys]);
 
-  // Strict filter
-  const filteredItems = useMemo(() => {
-    if (activeFilterSet.size === 0) return items;
-    return items.filter((item) => activeFilterSet.has(getItemFilterKey(item)));
-  }, [items, activeFilterSet]);
+  const trimmedQuery = query.trim().toLowerCase();
+
+  const filteredSteps = useMemo(() => {
+    if (activeFilterSet.size === 0 && trimmedQuery.length === 0) return steps;
+    return steps.filter((step) => {
+      if (activeFilterSet.size > 0 && !activeFilterSet.has(stepFilterKey(step))) return false;
+      if (trimmedQuery.length > 0 && !stepHaystack(step).includes(trimmedQuery)) return false;
+      return true;
+    });
+  }, [steps, activeFilterSet, trimmedQuery]);
+
+  // Grouping runs on what the reader is looking at: filtering breaks adjacency,
+  // and a group that spans a hidden step would be a lie about what ran.
+  const rows = useMemo(() => groupSteps(filteredSteps), [filteredSteps]);
 
   // Apply user-chosen sort direction. Reverse is a pure presentation concern —
-  // the underlying timeline (and its seq numbers) is untouched, so copy/filter
-  // and segment navigation continue to work against the same data.
-  const displayItems = useMemo(
-    () => (sortDirection === "newest_first" ? [...filteredItems].reverse() : filteredItems),
-    [filteredItems, sortDirection],
+  // the underlying steps (and their seq numbers) are untouched.
+  const displayRows = useMemo(
+    () => (sortDirection === "newest_first" ? [...rows].reverse() : rows),
+    [rows, sortDirection],
   );
+
+  const runStart = task.started_at ?? task.dispatched_at ?? steps[0]?.startedAt;
+  const runStartMs = timeMs(runStart);
+  const lastStamp = useMemo(() => {
+    for (let i = steps.length - 1; i >= 0; i--) {
+      const step = steps[i]!;
+      const stamp = step.kind === "call" ? (step.endedAt ?? step.startedAt) : step.startedAt;
+      if (stamp) return stamp;
+    }
+    return undefined;
+  }, [steps]);
+  const runEnd = task.completed_at ?? lastStamp;
+
+  const lanes = useMemo(() => buildLanes(steps, runStart, runEnd), [steps, runStart, runEnd]);
+  // A short run's timeline says less than the durations already on each row,
+  // so it does not render at all.
+  const showTimeline = shouldShowTimeline(steps, lanes);
+  const toolKinds = useMemo(() => toolKindTotals(steps), [steps]);
+  const outcome = useMemo(() => buildRunOutcome(steps), [steps]);
+
+  const selectedStep = useMemo(() => {
+    if (selectedSeq === null) return null;
+    return steps.find((step) => step.seq === selectedSeq) ?? null;
+  }, [steps, selectedSeq]);
+
+  const selectedOffsetMs =
+    selectedStep && runStartMs !== undefined
+      ? Math.max(0, (timeMs(selectedStep.startedAt) ?? runStartMs) - runStartMs)
+      : undefined;
+
+  // Keyed on the run having produced nothing at all, not on the filtered view
+  // being empty — a filter that hides every step is not a runtime limitation.
   const isAntigravityLiveEmpty =
-    isLive && displayItems.length === 0 && runtimeInfo?.provider === "antigravity";
+    isLive && steps.length === 0 && runtimeInfo?.provider === "antigravity";
 
-  const detailSeqs = useMemo(
-    () => displayItems.filter(hasEventDetail).map((item) => item.seq),
-    [displayItems],
-  );
+  // Newest-first shows live events as PREPENDS, and Virtuoso items opt out of
+  // native scroll anchoring (`overflow-anchor: none`), so without compensation
+  // every 500ms flush shifts the reading position. Virtuoso's contract: a
+  // decrease of firstItemIndex by N anchors the viewport across an N-item
+  // prepend, and the value must never increase within an instance — counting
+  // down from a large base satisfies that while the list only grows. Sort,
+  // filter, or task changes can shrink the list, so `listEpoch` remounts the
+  // instance (fresh at top) instead of letting firstItemIndex climb.
+  const firstItemIndex =
+    sortDirection === "newest_first" ? 1_000_000 - displayRows.length : 0;
+  const listEpoch = `${task.id}:${sortDirection}:${activeFilterKeys.join(",")}:${trimmedQuery}`;
 
-  const allVisibleDetailsExpanded =
-    detailSeqs.length > 0 && detailSeqs.every((seq) => expandedSeqs.has(seq));
-
-  useEffect(() => {
-    const switchedDefaultOn =
-      defaultExpanded && previousDefaultExpandedRef.current !== defaultExpanded;
-    previousDefaultExpandedRef.current = defaultExpanded;
-
-    if (initializedTaskRef.current !== task.id || switchedDefaultOn) {
-      initializedTaskRef.current = task.id;
-      autoExpandedSeqsRef.current = new Set(defaultExpanded ? detailSeqs : []);
-      setExpandedSeqs(defaultExpanded ? new Set(detailSeqs) : new Set());
-      return;
-    }
-
-    if (!defaultExpanded) return;
-
-    const unseen = detailSeqs.filter((seq) => !autoExpandedSeqsRef.current.has(seq));
-    if (unseen.length === 0) return;
-
-    for (const seq of unseen) {
-      autoExpandedSeqsRef.current.add(seq);
-    }
-    setExpandedSeqs((prev) => new Set([...prev, ...unseen]));
-  }, [task.id, defaultExpanded, detailSeqs]);
-
-  // Toggling direction is a manual user action; jump the scroll container back
-  // to the top so the newest end of the timeline (per the chosen direction) is
-  // immediately visible. Avoids stranding the user mid-scroll on the wrong end.
   const handleSortDirectionChange = useCallback(
-    (dir: typeof sortDirection) => {
+    (dir: TranscriptSortDirection) => {
       if (dir === sortDirection) return;
       setSortDirection(dir);
-      scrollContainerRef.current?.scrollTo({ top: 0 });
+      virtuosoRef.current?.scrollTo({ top: 0 });
     },
     [sortDirection, setSortDirection],
   );
+
+  useLayoutEffect(() => {
+    followCtl.setActive(isLive && sortDirection === "newest_first");
+  }, [followCtl, isLive, sortDirection]);
+
+  // A new list instance (task/sort/filter change) mounts at its live end with
+  // the follow engaged — the same contract as first open.
+  useLayoutEffect(() => {
+    followCtl.reset();
+  }, [followCtl, listEpoch]);
+
+  // Live follow for newest-first (#5921): while the latch is engaged, every
+  // flush snaps back to the newest row — prepend anchoring would otherwise
+  // hold the viewport on the previous first row. Instant (not smooth): a
+  // smooth animation spans multiple flushes and its in-flight position reads
+  // as user displacement. The scroll-event enforcement in handleScrollerRef
+  // is the authoritative pin; this effect just shortens the first-paint gap.
+  const displayCount = displayRows.length;
+  useLayoutEffect(() => {
+    if (!followCtl.isFollowing()) return;
+    virtuosoRef.current?.scrollToIndex({ index: 0, align: "start", behavior: "auto" });
+  }, [followCtl, displayCount]);
 
   // Fetch agent and runtime metadata when dialog opens
   useEffect(() => {
@@ -344,104 +586,91 @@ export function AgentTranscriptDialog({
     return () => clearInterval(interval);
   }, [isLive, task.started_at, task.dispatched_at]);
 
-  const handleSegmentClick = useCallback((seq: number) => {
-    setSelectedSeq(seq);
-    eventRefs.current.get(seq)?.scrollIntoView({ behavior: "smooth", block: "center" });
-  }, []);
+  const scrollToStep = useCallback(
+    (seq: number) => {
+      const index = displayRows.findIndex((row) => row.seq === seq || rowCalls(row).some((c) => c.seq === seq));
+      if (index < 0) return;
+      // Explicit navigation away from the live end unlatches the newest-first
+      // follow — otherwise the scroll-event enforcement would pin the viewport
+      // straight back to the top. Scrolling back re-engages it as usual.
+      if (index > 0) followCtl.disengage();
+      virtuosoRef.current?.scrollToIndex({ index, align: "center", behavior: "smooth" });
+    },
+    [displayRows, followCtl],
+  );
 
-  // Copy all events as text. Use the displayed order so users get the same
-  // sequence they see on screen — matters when sort is set to newest-first.
+  // Clicking the timeline lands on the first step at or after that offset.
+  const handleSeek = useCallback(
+    (offsetMs: number) => {
+      if (runStartMs === undefined) return;
+      const target = runStartMs + offsetMs;
+      let best: TraceStep | null = null;
+      for (const step of steps) {
+        const at = timeMs(step.startedAt);
+        if (at === undefined || at < target) continue;
+        if (!best || at < (timeMs(best.startedAt) ?? Infinity)) best = step;
+      }
+      if (!best) return;
+      setSelectedSeq(best.seq);
+      scrollToStep(best.seq);
+    },
+    [steps, runStartMs, scrollToStep],
+  );
+
   const handleCopyWorkdir = useCallback(() => {
-    if (!task.relative_work_dir) return;
-    void copyText(task.relative_work_dir).then((ok) => {
+    if (!workdirCopyTarget) return;
+    void copyText(workdirCopyTarget.path).then((ok) => {
       if (!ok) return;
-      setCopiedWorkdir(true);
-      setTimeout(() => setCopiedWorkdir(false), 2000);
+      showCopiedWorkdir();
     });
-  }, [task.relative_work_dir]);
+  }, [workdirCopyTarget, showCopiedWorkdir]);
+
+  // Worktree-mode runs deliver a branch instead of edits in the working copy,
+  // so copying the name is the fastest path to `git diff <branch>`.
+  const handleCopyBranch = useCallback(() => {
+    if (!task.branch_name) return;
+    void copyText(task.branch_name).then((ok) => {
+      if (!ok) return;
+      showCopiedBranch();
+    });
+  }, [task.branch_name, showCopiedBranch]);
 
   const handleCopyAll = useCallback(() => {
-    const text = displayItems
-      .map((item) => {
-        const label = getEventLabel(item);
-        const summary = getEventSummary(item);
-        return `[${label}] ${summary}`;
-      })
-      .join("\n");
+    // Copy the full body of each event (not the truncated row summary), with
+    // the same secret redaction the detail view applies. A step copies as its
+    // call followed by its result, which is the order it happened in.
+    const events: TimelineItem[] = [];
+    for (const row of displayRows) {
+      if (row.kind === "group") {
+        for (const call of row.steps) {
+          if (call.call) events.push(call.call);
+          if (call.result) events.push(call.result);
+        }
+        continue;
+      }
+      if (row.kind === "call") {
+        if (row.call) events.push(row.call);
+        if (row.result) events.push(row.result);
+        continue;
+      }
+      events.push(row.item);
+    }
+    const text = events.map((event) => redactSecrets(traceEventCopyText(event))).join("\n\n");
     void copyText(text).then((ok) => {
       if (!ok) return;
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      showCopied();
     });
-  }, [displayItems]);
+  }, [displayRows, showCopied]);
 
-  const toggleSessionFilterKey = useCallback((key: TranscriptFilterKey) => {
-    setSessionFilterKeys((prev) => {
+  const handleToggleGroup = useCallback((seq: number) => {
+    setExpandedGroups((prev) => {
       const next = new Set(prev);
-      if (next.has(key)) next.delete(key);
-      else next.add(key);
-      return Array.from(next);
-    });
-  }, []);
-
-  const clearFilters = useCallback(() => {
-    if (preserveFilters) {
-      clearPersistedFilterKeys();
-      return;
-    }
-    setSessionFilterKeys([]);
-  }, [clearPersistedFilterKeys, preserveFilters]);
-
-  const toggleFilterKey = useCallback(
-    (key: TranscriptFilterKey) => {
-      if (preserveFilters) {
-        togglePersistedFilterKey(key);
-        return;
-      }
-      toggleSessionFilterKey(key);
-    },
-    [preserveFilters, togglePersistedFilterKey, toggleSessionFilterKey],
-  );
-
-  const handlePreserveFiltersChange = useCallback(
-    (next: boolean) => {
-      if (next) {
-        setPersistedFilterKeys(sessionFilterKeys);
-      } else {
-        setSessionFilterKeys(persistedFilterKeys);
-      }
-      setPreserveFilters(next);
-    },
-    [persistedFilterKeys, sessionFilterKeys, setPersistedFilterKeys, setPreserveFilters],
-  );
-
-  const handleToggleVisibleExpanded = useCallback(() => {
-    for (const seq of detailSeqs) {
-      autoExpandedSeqsRef.current.add(seq);
-    }
-    setExpandedSeqs((prev) => {
-      if (allVisibleDetailsExpanded) {
-        const next = new Set(prev);
-        for (const seq of detailSeqs) {
-          next.delete(seq);
-        }
-        return next;
-      }
-      return new Set([...prev, ...detailSeqs]);
-    });
-  }, [allVisibleDetailsExpanded, detailSeqs]);
-
-  const handleRowExpandedChange = useCallback((seq: number, expanded: boolean) => {
-    autoExpandedSeqsRef.current.add(seq);
-    setExpandedSeqs((prev) => {
-      const next = new Set(prev);
-      if (expanded) next.add(seq);
-      else next.delete(seq);
+      if (next.has(seq)) next.delete(seq);
+      else next.add(seq);
       return next;
     });
   }, []);
 
-  // Duration
   const duration =
     task.started_at && task.completed_at
       ? formatDuration(task.started_at, task.completed_at)
@@ -449,262 +678,340 @@ export function AgentTranscriptDialog({
         ? elapsed
         : null;
 
-  const toolCount = items.filter((i) => i.type === "tool_use").length;
   const copyTranscriptLabel = copied
     ? t(($) => $.transcript.copied)
-    : activeFilterKeys.length > 0
+    : activeFilterKeys.length > 0 || trimmedQuery.length > 0
       ? t(($) => $.transcript.copy_filtered)
       : t(($) => $.transcript.copy_all);
 
-  // Status display
-  const statusBadge = isLive ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-info/15 px-2 py-0.5 text-xs font-medium text-info">
-      <Loader2 className="h-3 w-3 animate-spin" />
-      {t(($) => $.transcript.status_running)}
-    </span>
-  ) : task.status === "completed" ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-success/15 px-2 py-0.5 text-xs font-medium text-success">
-      <CheckCircle2 className="h-3 w-3" />
-      {t(($) => $.transcript.status_completed)}
-    </span>
-  ) : task.status === "failed" ? (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-destructive/15 px-2 py-0.5 text-xs font-medium text-destructive">
-      <XCircle className="h-3 w-3" />
-      {t(($) => $.transcript.status_failed)}
-    </span>
-  ) : (
-    <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground capitalize">
-      {task.status}
-    </span>
-  );
+  // Status badge — full state machine, so queued/dispatched/cancelled render as
+  // proper labels instead of raw enum text.
+  const effectiveStatus = isLive ? "running" : task.status;
+  const statusBadge = (() => {
+    const base = "inline-flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-caption font-medium";
+    switch (effectiveStatus) {
+      case "running":
+        return (
+          <span className={cn(base, "bg-info/15 text-info")}>
+            <Loader2 className="h-3 w-3 animate-spin" />
+            {t(($) => $.transcript.status_running)}
+          </span>
+        );
+      case "completed":
+        return (
+          <span className={cn(base, "bg-success/15 text-success")}>
+            <CheckCircle2 className="h-3 w-3" />
+            {t(($) => $.transcript.status_completed)}
+          </span>
+        );
+      case "failed":
+        return (
+          <span className={cn(base, "bg-destructive/15 text-destructive")}>
+            <XCircle className="h-3 w-3" />
+            {t(($) => $.transcript.status_failed)}
+          </span>
+        );
+      case "cancelled": {
+        // A server-cancelled run (worktree claim gate, preserved-work
+        // delivery) carries a persisted reason the user must act on; surface
+        // it on the badge instead of a bare "Cancelled". User-initiated
+        // cancels have no reason and keep the plain label.
+        const cancelReason = cancelReasonLabel(task);
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")} title={task.error ?? undefined}>
+            <XCircle className="h-3 w-3" />
+            {cancelReason
+              ? `${t(($) => $.transcript.status_cancelled)} · ${cancelReason}`
+              : t(($) => $.transcript.status_cancelled)}
+          </span>
+        );
+      }
+      case "queued":
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
+            {t(($) => $.transcript.status_queued)}
+          </span>
+        );
+      case "dispatched":
+        return (
+          <span className={cn(base, "bg-info/15 text-info")}>
+            {t(($) => $.transcript.status_dispatched)}
+          </span>
+        );
+      case "waiting_local_directory":
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground")}>
+            {t(($) => $.transcript.status_waiting)}
+          </span>
+        );
+      default:
+        return (
+          <span className={cn(base, "bg-muted text-muted-foreground capitalize")}>
+            {task.status}
+          </span>
+        );
+    }
+  })();
+
+  // Trigger source: one word answering "why does this run exist" — more useful
+  // up front than the runtime/provider diagnostics, which live in the ⓘ popover.
+  const triggerLabel = task.parent_task_id
+    ? t(($) => $.transcript.trigger_retry)
+    : task.kind === "comment" || task.trigger_comment_id
+      ? t(($) => $.transcript.trigger_comment)
+      : task.kind === "autopilot" || task.autopilot_run_id
+        ? t(($) => $.transcript.trigger_autopilot)
+        : task.kind === "chat" || task.chat_session_id
+          ? t(($) => $.transcript.trigger_chat)
+          : task.kind === "quick_create"
+            ? t(($) => $.transcript.trigger_quick_create)
+            : task.kind === "direct" || task.handoff_note
+              ? t(($) => $.transcript.trigger_direct)
+              : t(($) => $.transcript.trigger_initial);
+
+  // Diagnostic detail for the ⓘ popover: everything a reader needs only when
+  // debugging this specific run, kept off the always-visible surface.
+  const providerLabel = runtimeInfo?.provider ? transcriptProviderLabel(runtimeInfo.provider) : null;
+  const createdLabel = task.created_at ? formatRunTime(task.created_at) : null;
+  const startedLabel = task.started_at ? formatRunTime(task.started_at) : null;
+  const completedLabel = task.completed_at ? formatRunTime(task.completed_at) : null;
+  const hasTriggeredBy = !!task.attribution?.initiator;
+  // This run's own spend. Present on transcripts opened from the issue
+  // execution log (the endpoint that hydrates usage); absent elsewhere, where
+  // the chip and the usage rows below simply don't render.
+  //
+  // `summarizeTaskUsage` prices through the custom-rate store, which it reads
+  // imperatively — subscribing here is what makes a saved rate change reach
+  // this figure, same as on the other usage surfaces.
+  useCustomPricingStore((s) => s.pricings);
+  const usage = summarizeTaskUsage(task.usage);
+  const hasRunDetails =
+    !!runtimeInfo ||
+    !!workdirCopyTarget?.relativePath ||
+    !!task.branch_name ||
+    !!task.error ||
+    !!createdLabel ||
+    !!startedLabel ||
+    !!completedLabel ||
+    !!usage;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        className="!max-w-4xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
+        className="!max-w-5xl !w-[calc(100vw-4rem)] !max-h-[calc(100vh-4rem)] !h-[calc(100vh-4rem)] flex flex-col !p-0 !gap-0 overflow-hidden"
         showCloseButton={false}
       >
         <DialogTitle className="sr-only">{t(($) => $.transcript.dialog_title)}</DialogTitle>
 
-        {/* ── Header ─────────────────────────────────────────────── */}
-        <div className="border-b px-4 py-3 shrink-0 space-y-2">
-          {/* Top row: agent name, status, actions */}
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+        {/* ── Header: outcome, identity, spend ─────────────────────────
+            Everything a viewer needs BEFORE reading: how it ended, who ran
+            it, why it exists, how long it took and what it cost. Diagnostics
+            stay in the ⓘ popover. */}
+        <div className="border-b px-4 py-3 shrink-0">
+          <div className="flex min-w-0 items-center gap-3">
+            {statusBadge}
+            {/* Primary identity: the agent that ran this. It is the one
+                foreground entity — avatar + medium weight. */}
             <div className="flex min-w-0 items-center gap-2">
               {task.agent_id ? (
-                <ActorAvatar actorType="agent" actorId={task.agent_id} size="md" />
+                <ActorAvatar actorType="agent" actorId={task.agent_id} size="sm" enableHoverCard />
               ) : (
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
-                  <Bot className="h-3.5 w-3.5" />
+                <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-info/10 text-info">
+                  <Bot className="h-3 w-3" />
                 </div>
               )}
-              <span className="truncate font-medium text-sm">{agentName}</span>
+              <span className="truncate font-medium text-body">
+                {agentName || agentInfo?.name || ""}
+              </span>
+            </div>
+            {/* Provenance, one muted secondary unit set apart from the agent:
+                who triggered the run and how — reads as "<person> · <how>",
+                not three peer entities. The person's avatar is dropped here so
+                two same-size faces don't read as two agents. */}
+            <div className="flex min-w-0 flex-1 items-center gap-x-1.5 overflow-hidden text-caption text-muted-foreground">
+              {hasTriggeredBy && (
+                <>
+                  <AttributionBadge
+                    attribution={task.attribution}
+                    variant="inline"
+                    hideAvatar
+                    className="min-w-0"
+                  />
+                  <FactDot />
+                </>
+              )}
+              <span className="shrink-0">{triggerLabel}</span>
+              {duration && (
+                <>
+                  <FactDot />
+                  <span className="shrink-0 tabular-nums">
+                    {t(($) => $.transcript.fact_took, { duration })}
+                  </span>
+                </>
+              )}
             </div>
 
-            {statusBadge}
-
-            {/* Accountable member (MUL-4302 §9): whose behalf this run is on. */}
-            <AttributionBadge attribution={task.attribution} className="shrink-0" />
-
-            <div className="flex w-full max-w-full flex-wrap items-center justify-end gap-1 sm:ml-auto sm:w-auto">
-              {detailSeqs.length > 0 && (
-                <button
-                  type="button"
-                  onClick={handleToggleVisibleExpanded}
-                  aria-label={
-                    allVisibleDetailsExpanded
-                      ? t(($) => $.transcript.collapse_visible)
-                      : t(($) => $.transcript.expand_visible)
-                  }
-                  className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-                >
-                  <ChevronRight
-                    className={cn(
-                      "h-3 w-3 transition-transform",
-                      !allVisibleDetailsExpanded && "rotate-90",
-                    )}
-                  />
-                  <span className="hidden sm:inline">
-                    {allVisibleDetailsExpanded
-                      ? t(($) => $.transcript.collapse_visible)
-                      : t(($) => $.transcript.expand_visible)}
-                  </span>
-                </button>
-              )}
-              {items.length > 1 && (
-                <SortDirectionToggle
-                  value={sortDirection}
-                  onChange={handleSortDirectionChange}
-                  labels={{
-                    chronological: t(($) => $.transcript.sort_chronological),
-                    newestFirst: t(($) => $.transcript.sort_newest_first),
-                    ariaLabel: t(($) => $.transcript.sort_label),
-                  }}
-                />
-              )}
-              {filterOptions.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger
-                    aria-label={t(($) => $.transcript.filter)}
-                    className={cn(
-                      "flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs transition-colors",
-                      activeFilterKeys.length > 0
-                        ? "text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/20"
-                        : "text-muted-foreground hover:text-foreground hover:bg-accent",
-                    )}
-                  >
-                    <Filter className="h-3 w-3" />
-                    <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
-                    {activeFilterKeys.length > 0 && (
-                      <span className="ml-0.5 rounded-full bg-blue-500/20 px-1.5 py-0 text-[10px] font-medium">
-                        {activeFilterKeys.length}
-                      </span>
-                    )}
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-auto">
-                    {filterOptions.map(([value, label]) => (
-                      <DropdownMenuCheckboxItem
-                        key={value}
-                        checked={selectedFilterKeys.includes(value)}
-                        onCheckedChange={() => toggleFilterKey(value)}
-                      >
-                        {label}
-                      </DropdownMenuCheckboxItem>
-                    ))}
-                    <DropdownMenuSeparator />
-                    <DropdownMenuCheckboxItem
-                      checked={preserveFilters}
-                      onCheckedChange={(checked) => handlePreserveFiltersChange(checked === true)}
-                    >
-                      {t(($) => $.transcript.preserve_filters)}
-                    </DropdownMenuCheckboxItem>
-                    <DropdownMenuCheckboxItem
-                      checked={defaultExpanded}
-                      onCheckedChange={(checked) => setDefaultExpanded(checked === true)}
-                    >
-                      {t(($) => $.transcript.default_expanded)}
-                    </DropdownMenuCheckboxItem>
-                    {selectedFilterKeys.length > 0 && (
-                      <>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
-                          {t(($) => $.transcript.clear_filters)}
-                        </DropdownMenuItem>
-                      </>
-                    )}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              <button
-                type="button"
-                onClick={handleCopyAll}
-                aria-label={copyTranscriptLabel}
-                className="flex shrink-0 items-center gap-1 rounded px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+            {/* What this run cost, in the header of the run you are reading —
+                so "why was this one expensive" is answerable without going
+                back to the list. The split lives one click away in the ⓘ
+                popover. */}
+            {usage && (
+              <span
+                className="flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-micro tabular-nums"
+                title={t(($) => $.transcript.usage_chip_title)}
               >
-                {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
-                <span className="hidden sm:inline">{copyTranscriptLabel}</span>
-              </button>
-              <button
-                type="button"
+                <Coins aria-hidden="true" className="h-3 w-3 text-muted-foreground" />
+                <span className="font-medium">{formatTokens(usage.tokens)}</span>
+                <span className="text-faint-foreground">·</span>
+                <span className="text-muted-foreground">{formatUsd(usage.cost)}</span>
+              </span>
+            )}
+
+            <div className="flex shrink-0 items-center gap-0.5">
+              {hasRunDetails && (
+                <Popover>
+                  <PopoverTrigger
+                    render={
+                      <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label={t(($) => $.transcript.run_info)}
+                        title={t(($) => $.transcript.run_info)}
+                        className="text-muted-foreground"
+                      />
+                    }
+                  >
+                    <Info className="h-3.5 w-3.5" />
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] p-3">
+                    <div className="mb-2 text-caption font-medium text-foreground">
+                      {t(($) => $.transcript.run_info)}
+                    </div>
+                    <div className="space-y-1 text-caption">
+                      {runtimeInfo && (
+                        <RunDetailRow
+                          label={t(($) => $.transcript.details_runtime)}
+                          value={runtimeDisplayName(runtimeInfo)}
+                        />
+                      )}
+                      {providerLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_provider)} value={providerLabel} />
+                      )}
+                      {runtimeInfo && (
+                        <RunDetailRow label={t(($) => $.transcript.details_mode)} value={runtimeInfo.runtime_mode} />
+                      )}
+                      {workdirCopyTarget?.relativePath && (
+                        <RunDetailRow
+                          label={
+                            workdirCopyTarget.source ===
+                            "durable_project_directory"
+                              ? t(
+                                  ($) =>
+                                    $.transcript.details_project_directory,
+                                )
+                              : t(($) => $.transcript.details_workdir)
+                          }
+                          value={workdirCopyTarget.relativePath}
+                          mono
+                          onCopy={handleCopyWorkdir}
+                          copied={copiedWorkdir}
+                          copyTitle={
+                            workdirCopyTarget.source ===
+                            "durable_project_directory"
+                              ? t(
+                                  ($) =>
+                                    $.transcript.copy_project_directory,
+                                )
+                              : t(($) => $.transcript.copy_workdir)
+                          }
+                        />
+                      )}
+                      {task.branch_name && (
+                        <RunDetailRow
+                          label={t(($) => $.transcript.details_branch)}
+                          value={task.branch_name}
+                          mono
+                          onCopy={handleCopyBranch}
+                          copied={copiedBranch}
+                          copyTitle={t(($) => $.transcript.copy_branch)}
+                        />
+                      )}
+                      {/* The full persisted error, for failed AND
+                          server-cancelled runs — this is where "which
+                          worktree holds my preserved work" and "which
+                          machine needs upgrading" are actually readable. */}
+                      {task.error && (
+                        <RunDetailRow
+                          label={t(($) => $.transcript.details_reason)}
+                          value={task.error}
+                        />
+                      )}
+                      {createdLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_created)} value={createdLabel} />
+                      )}
+                      {startedLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_started)} value={startedLabel} />
+                      )}
+                      {completedLabel && (
+                        <RunDetailRow label={t(($) => $.transcript.details_completed)} value={completedLabel} />
+                      )}
+                      {usage && (
+                        <>
+                          <div className="my-2 h-px bg-border" />
+                          <RunDetailRow
+                            label={t(($) => $.transcript.details_input)}
+                            value={formatTokens(usage.input)}
+                          />
+                          <RunDetailRow
+                            label={t(($) => $.transcript.details_output)}
+                            value={formatTokens(usage.output)}
+                          />
+                          {usage.cacheRead > 0 && (
+                            <RunDetailRow
+                              label={t(($) => $.transcript.details_cache_read)}
+                              value={formatTokens(usage.cacheRead)}
+                            />
+                          )}
+                          {usage.cacheWrite > 0 && (
+                            <RunDetailRow
+                              label={t(($) => $.transcript.details_cache_write)}
+                              value={formatTokens(usage.cacheWrite)}
+                            />
+                          )}
+                          <RunDetailRow
+                            label={t(($) => $.transcript.details_cost)}
+                            value={formatUsd(usage.cost)}
+                          />
+                        </>
+                      )}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )}
+              <Button
+                variant="ghost"
+                size="icon-sm"
                 onClick={() => onOpenChange(false)}
-                className="flex shrink-0 items-center justify-center rounded p-1 text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                aria-label={t(($) => $.transcript.close)}
+                className="text-muted-foreground"
               >
                 <X className="h-4 w-4" />
-              </button>
+              </Button>
             </div>
-          </div>
-
-          {/* Metadata chips row */}
-          <div className="flex items-center gap-2 flex-wrap text-xs">
-            {/* Runtime provider */}
-            {runtimeInfo?.provider && (
-              <MetadataChip icon={<Cpu className="h-3 w-3" />}>
-                {formatProvider(runtimeInfo.provider)}
-              </MetadataChip>
-            )}
-
-            {/* Runtime environment */}
-            {runtimeInfo && (
-              <MetadataChip
-                icon={runtimeInfo.runtime_mode === "cloud" ? <Cloud className="h-3 w-3" /> : <Monitor className="h-3 w-3" />}
-              >
-                {runtimeInfo.name}
-                <span className="text-muted-foreground/60 ml-0.5">({runtimeInfo.runtime_mode})</span>
-              </MetadataChip>
-            )}
-
-            {/* Agent type / description */}
-            {agentInfo?.description && (
-              <MetadataChip icon={<Bot className="h-3 w-3" />}>
-                {agentInfo.description.length > 40 ? agentInfo.description.slice(0, 40) + "..." : agentInfo.description}
-              </MetadataChip>
-            )}
-
-            {/* Duration */}
-            {duration && (
-              <MetadataChip icon={<Clock className="h-3 w-3" />}>
-                {duration}
-              </MetadataChip>
-            )}
-
-            {/* Event counts */}
-            {toolCount > 0 && (
-              <MetadataChip>{t(($) => $.transcript.tool_calls, { count: toolCount })}</MetadataChip>
-            )}
-            <MetadataChip>
-              {activeFilterKeys.length > 0
-                ? t(($) => $.transcript.events_filtered, { shown: filteredItems.length, total: items.length })
-                : t(($) => $.transcript.events, { count: items.length })}
-            </MetadataChip>
-
-            {/* Working directory — server-derived display path. Falls back to
-                nothing when older backends omit the field rather than rendering
-                `work_dir` raw and leaking the user's home directory. The
-                absolute `task.work_dir` deliberately never reaches the DOM
-                anywhere — only `relative_work_dir` is safe to render / put in
-                title / copy to clipboard, because the server has already
-                stripped $HOME and the username out of it. The button
-                truncates because real workdir paths are routinely long
-                enough to push every other chip off the row. */}
-            {task.relative_work_dir && (
-              <button
-                type="button"
-                onClick={handleCopyWorkdir}
-                title={task.relative_work_dir}
-                className="inline-flex max-w-[16rem] items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-              >
-                {copiedWorkdir ? (
-                  <Check className="h-3 w-3 shrink-0 text-emerald-500" />
-                ) : (
-                  <Folder className="h-3 w-3 shrink-0" />
-                )}
-                <span className="truncate font-mono">{task.relative_work_dir}</span>
-              </button>
-            )}
-
-            {/* Created time */}
-            {task.created_at && (
-              <MetadataChip>
-                {new Date(task.created_at).toLocaleString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })}
-              </MetadataChip>
-            )}
           </div>
         </div>
 
-        {/* ── Timeline progress bar ─────────────────────────────── */}
-        {displayItems.length > 0 && (
-          <div className="border-b px-4 py-2.5 shrink-0">
-            <TimelineBar
-              items={displayItems}
-              selectedSeq={selectedSeq}
-              onSegmentClick={handleSegmentClick}
-            />
-          </div>
+        {/* ── What the run produced ──────────────────────────────────── */}
+        <RunOutcomeRow outcome={outcome} branch={task.branch_name} />
+
+        {/* ── Where the time went ────────────────────────────────────── */}
+        {showTimeline && lanes && (
+          <RunTimeline
+            lanes={lanes}
+            toolKinds={toolKinds}
+            selectedOffsetMs={selectedOffsetMs}
+            onSeek={handleSeek}
+          />
         )}
 
         {/* ── Optional header slot (e.g. webhook payload preview) ── */}
@@ -714,43 +1021,181 @@ export function AgentTranscriptDialog({
           </div>
         )}
 
-        {/* ── Event list ─────────────────────────────────────────── */}
-        <div
-          ref={scrollContainerRef}
-          className="flex-1 overflow-y-auto min-h-0"
-        >
-          {displayItems.length === 0 ? (
-            <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
-              {isAntigravityLiveEmpty ? (
-                <div className="flex max-w-md items-center gap-2 px-4 text-center">
-                  <Clock className="h-4 w-4 shrink-0" />
-                  {t(($) => $.transcript.antigravity_live_unavailable)}
-                </div>
-              ) : isLive ? (
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  {t(($) => $.transcript.waiting_events)}
-                </div>
-              ) : (
-                t(($) => $.transcript.no_data)
-              )}
-            </div>
-          ) : (
-            <div className="divide-y">
-              {displayItems.map((item) => (
-                <TranscriptEventRow
-                  key={item.seq}
-                  ref={(el) => {
-                    if (el) eventRefs.current.set(item.seq, el);
-                    else eventRefs.current.delete(item.seq);
-                  }}
-                  item={item}
-                  isSelected={selectedSeq === item.seq}
-                  expanded={expandedSeqs.has(item.seq)}
-                  onExpandedChange={(expanded) => handleRowExpandedChange(item.seq, expanded)}
+        {/* ── List toolbar: search left, the two menus right ── */}
+        <div className="flex items-center gap-2 border-b px-4 py-1.5 shrink-0">
+          <label className="flex h-7 min-w-0 max-w-xs flex-1 items-center gap-1.5 rounded-md bg-muted px-2 text-caption">
+            <Search aria-hidden className="h-3 w-3 shrink-0 text-faint-foreground" />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={t(($) => $.transcript.search_placeholder)}
+              aria-label={t(($) => $.transcript.search_placeholder)}
+              className="min-w-0 flex-1 bg-transparent text-caption outline-none placeholder:text-faint-foreground"
+            />
+          </label>
+          <span className="ml-auto shrink-0 whitespace-nowrap text-caption text-muted-foreground">
+            {activeFilterKeys.length > 0 || trimmedQuery.length > 0
+              ? t(($) => $.transcript.steps_filtered, {
+                  shown: filteredSteps.length,
+                  total: steps.length,
+                })
+              : t(($) => $.transcript.steps_count, { count: steps.length })}
+          </span>
+          {filterOptions.length > 0 && (
+            <DropdownMenu>
+              <DropdownMenuTrigger
+                render={
+                  <Button
+                    variant={activeFilterKeys.length > 0 ? "brand" : "ghost"}
+                    size="sm"
+                    aria-label={t(($) => $.transcript.filter)}
+                    className={activeFilterKeys.length > 0 ? undefined : "text-muted-foreground"}
+                  />
+                }
+              >
+                <Filter className="h-3 w-3" />
+                <span className="hidden sm:inline">{t(($) => $.transcript.filter)}</span>
+                {activeFilterKeys.length > 0 && (
+                  <span className="ml-0.5 rounded-full bg-brand-foreground/20 px-1.5 py-0 text-micro font-medium tabular-nums">
+                    {activeFilterKeys.length}
+                  </span>
+                )}
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-auto">
+                {filterOptions.map(([value, option]) => (
+                  <DropdownMenuCheckboxItem
+                    key={value}
+                    checked={selectedFilterKeys.includes(value)}
+                    onCheckedChange={() => toggleFilterKey(value)}
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <StepIcon
+                        step={option.step}
+                        className="h-3 w-3 shrink-0 text-muted-foreground"
+                      />
+                      {option.label}
+                    </span>
+                  </DropdownMenuCheckboxItem>
+                ))}
+                {selectedFilterKeys.length > 0 && (
+                  <>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onClick={clearFilters} className="text-muted-foreground">
+                      {t(($) => $.transcript.clear_filters)}
+                    </DropdownMenuItem>
+                  </>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {/* Sort and copy are the run-level actions nobody needs on the way
+              in, so they live behind one overflow control instead of two
+              permanent buttons. */}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              render={
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label={t(($) => $.transcript.more_actions)}
+                  className="text-muted-foreground"
                 />
-              ))}
-            </div>
+              }
+            >
+              <MoreHorizontal className="h-3.5 w-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-56">
+              <DropdownMenuItem
+                onClick={() =>
+                  handleSortDirectionChange(
+                    sortDirection === "chronological" ? "newest_first" : "chronological",
+                  )
+                }
+              >
+                {sortDirection === "chronological" ? (
+                  <ArrowUpNarrowWide className="h-3.5 w-3.5" />
+                ) : (
+                  <ArrowDownNarrowWide className="h-3.5 w-3.5" />
+                )}
+                {sortDirection === "chronological"
+                  ? t(($) => $.transcript.sort_newest_first)
+                  : t(($) => $.transcript.sort_chronological)}
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={handleCopyAll}>
+                {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+                {copyTranscriptLabel}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* ── Steps, and the inspector when one is selected ───────────── */}
+        <div className="flex min-h-0 flex-1">
+          <div className="flex min-w-0 flex-1 flex-col">
+            {displayRows.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-body text-muted-foreground">
+                {isAntigravityLiveEmpty ? (
+                  <div className="flex max-w-md items-center gap-2 px-4 text-center">
+                    <Clock className="h-4 w-4 shrink-0" />
+                    {t(($) => $.transcript.antigravity_live_unavailable)}
+                  </div>
+                ) : isLive && steps.length === 0 ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    {t(($) => $.transcript.waiting_events)}
+                  </div>
+                ) : steps.length === 0 ? (
+                  t(($) => $.transcript.no_data)
+                ) : (
+                  t(($) => $.transcript.no_matches)
+                )}
+              </div>
+            ) : (
+              // Virtualized so a multi-thousand-step run mounts a bounded
+              // number of DOM rows (#5733).
+              <Virtuoso
+                key={listEpoch}
+                ref={virtuosoRef}
+                style={{ height: "100%" }}
+                data={displayRows}
+                firstItemIndex={firstItemIndex}
+                // Open a live chronological transcript pinned to the newest
+                // step (#5921); the per-listEpoch remount re-applies this after
+                // task / sort / filter changes.
+                initialTopMostItemIndex={
+                  isLive && sortDirection !== "newest_first"
+                    ? { index: "LAST", align: "end" }
+                    : 0
+                }
+                followOutput={(atBottom) =>
+                  isLive && sortDirection !== "newest_first" && atBottom ? "auto" : false
+                }
+                atBottomThreshold={FOLLOW_EDGE_THRESHOLD}
+                atTopThreshold={FOLLOW_EDGE_THRESHOLD}
+                atTopStateChange={(atTop) => followCtl.onAtTopChange(atTop)}
+                scrollerRef={handleScrollerRef}
+                computeItemKey={(_, row) => row.seq}
+                components={LIST_COMPONENTS}
+                itemContent={(_, row) => (
+                  <TranscriptRow
+                    row={row}
+                    runStartMs={runStartMs}
+                    isLive={isLive}
+                    selectedSeq={selectedSeq}
+                    expanded={row.kind === "group" && expandedGroups.has(row.seq)}
+                    onToggleGroup={handleToggleGroup}
+                    onSelect={setSelectedSeq}
+                  />
+                )}
+              />
+            )}
+          </div>
+          {selectedStep && (
+            <StepInspector
+              step={selectedStep}
+              runStartMs={runStartMs}
+              onClose={() => setSelectedSeq(null)}
+            />
           )}
         </div>
       </DialogContent>
@@ -758,280 +1203,516 @@ export function AgentTranscriptDialog({
   );
 }
 
-// ─── Sort direction toggle ──────────────────────────────────────────────────
+// Provider slugs this view names differently from the runtime list. The daemon
+// has no display-name override for Claude, so the shared formatter answers
+// "Claude" — but a run's diagnostics have always named the tool "Claude Code",
+// and `claude-code` is a legacy provider value still present on older tasks
+// (title-casing it alone would read as "Claude-code"). Every other provider
+// defers to the shared formatter so this row cannot drift from the runtime
+// list the way it did before (#5260).
+const TRANSCRIPT_PROVIDER_LABELS: Record<string, string> = {
+  claude: "Claude Code",
+  "claude-code": "Claude Code",
+};
 
-interface SortDirectionToggleProps {
-  value: TranscriptSortDirection;
-  onChange: (dir: TranscriptSortDirection) => void;
-  labels: { chronological: string; newestFirst: string; ariaLabel: string };
+function transcriptProviderLabel(provider: string): string {
+  return TRANSCRIPT_PROVIDER_LABELS[provider.toLowerCase()] ?? providerDisplayName(provider);
 }
 
-function SortDirectionToggle({ value, onChange, labels }: SortDirectionToggleProps) {
-  return (
-    <div
-      role="group"
-      aria-label={labels.ariaLabel}
-      className="inline-flex shrink-0 items-center rounded border bg-muted/40 p-0.5 text-xs"
-    >
-      <button
-        type="button"
-        aria-pressed={value === "chronological"}
-        title={labels.chronological}
-        onClick={() => onChange("chronological")}
-        className={cn(
-          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
-          value === "chronological"
-            ? "bg-background text-foreground shadow-sm"
-            : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        <ArrowDownNarrowWide className="h-3 w-3" />
-        <span className="hidden sm:inline">{labels.chronological}</span>
-      </button>
-      <button
-        type="button"
-        aria-pressed={value === "newest_first"}
-        title={labels.newestFirst}
-        onClick={() => onChange("newest_first")}
-        className={cn(
-          "flex items-center gap-1 rounded px-1.5 py-0.5 transition-colors",
-          value === "newest_first"
-            ? "bg-background text-foreground shadow-sm"
-            : "text-muted-foreground hover:text-foreground",
-        )}
-      >
-        <ArrowUpNarrowWide className="h-3 w-3" />
-        <span className="hidden sm:inline">{labels.newestFirst}</span>
-      </button>
-    </div>
-  );
-}
+// ─── Facts line separator ───────────────────────────────────────────────────
 
-// ─── Metadata chip ──────────────────────────────────────────────────────────
-
-function MetadataChip({ icon, children }: { icon?: React.ReactNode; children: React.ReactNode }) {
+function FactDot() {
   return (
-    <span className="inline-flex items-center gap-1 rounded-md border bg-muted/50 px-2 py-0.5 text-[11px] text-muted-foreground">
-      {icon}
-      {children}
+    <span aria-hidden className="text-faint-foreground">
+      ·
     </span>
   );
 }
 
-function formatProvider(provider: string): string {
-  const map: Record<string, string> = {
-    claude: "Claude Code",
-    "claude-code": "Claude Code",
-    codex: "Codex",
-    pi: "Pi",
-  };
-  return map[provider.toLowerCase()] ?? provider;
-}
+// ─── Outcome row ────────────────────────────────────────────────────────────
 
-// ─── Timeline bar (colored segments) ────────────────────────────────────────
-
-function TimelineBar({
-  items,
-  selectedSeq,
-  onSegmentClick,
+/**
+ * What the run produced, above the evidence for it. For most readers this is
+ * the whole answer — "it touched these files and ran these commands" settles
+ * "can I trust this" without opening a single step.
+ *
+ * Renders nothing when the run produced nothing nameable; a row of zeroes
+ * would read as "it did nothing" rather than "we have nothing to summarize".
+ */
+function RunOutcomeRow({
+  outcome,
+  branch,
 }: {
-  items: TimelineItem[];
-  selectedSeq: number | null;
-  onSegmentClick: (seq: number) => void;
+  outcome: ReturnType<typeof buildRunOutcome>;
+  branch?: string | null;
 }) {
-  const segments: { startIdx: number; endIdx: number; color: EventColor; count: number }[] = [];
-  let currentColor: EventColor | null = null;
-  let currentStart = 0;
+  const { t } = useT("agents");
+  if (!outcome) return null;
 
-  for (let i = 0; i < items.length; i++) {
-    const item = items[i]!;
-    const color = getEventColor(item);
-    if (color !== currentColor) {
-      if (currentColor !== null) {
-        segments.push({ startIdx: currentStart, endIdx: i - 1, color: currentColor, count: i - currentStart });
-      }
-      currentColor = color;
-      currentStart = i;
-    }
-  }
-  if (currentColor !== null) {
-    segments.push({ startIdx: currentStart, endIdx: items.length - 1, color: currentColor, count: items.length - currentStart });
-  }
-
+  const chip = "inline-flex shrink-0 items-center gap-1.5 rounded-md border bg-surface px-2 py-1 text-caption";
   return (
-    <div className="flex gap-0.5 h-5 rounded overflow-hidden" role="navigation" aria-label="Timeline">
-      {segments.map((seg) => {
-        const isSelected = selectedSeq !== null && items.slice(seg.startIdx, seg.endIdx + 1).some((i) => i.seq === selectedSeq);
-        const color = colorClasses[seg.color];
-        const widthPercent = (seg.count / items.length) * 100;
-
-        return (
-          <button
-            type="button"
-            key={seg.startIdx}
-            className={cn(
-              "h-full transition-all duration-150 hover:opacity-80 relative group",
-              isSelected ? color.bgActive : color.bg,
-              "min-w-[4px]",
-            )}
-            style={{ width: `${Math.max(widthPercent, 0.5)}%` }}
-            onClick={() => onSegmentClick(items[seg.startIdx]!.seq)}
-            title={`${getEventLabel(items[seg.startIdx]!)}${seg.count > 1 ? ` (+${seg.count - 1} more)` : ""}`}
-          >
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block z-10 pointer-events-none">
-              <div className="rounded bg-popover border px-2 py-1 text-[10px] text-popover-foreground shadow-md whitespace-nowrap">
-                {getEventLabel(items[seg.startIdx]!)}
-                {seg.count > 1 && <span className="text-muted-foreground ml-1">+{seg.count - 1}</span>}
-              </div>
-            </div>
-          </button>
-        );
-      })}
+    <div className="flex shrink-0 items-center gap-2 overflow-hidden border-b bg-muted/40 px-4 py-1.5">
+      <span className="shrink-0 text-micro text-faint-foreground">
+        {t(($) => $.transcript.outcome_label)}
+      </span>
+      {outcome.paths.length > 0 && (
+        <span className={chip} title={outcome.paths.join("\n")}>
+          <FilePen aria-hidden className="h-3 w-3 text-muted-foreground" />
+          <span className="font-medium">
+            {t(($) => $.transcript.outcome_files, { count: outcome.paths.length })}
+          </span>
+          {outcome.addedLines > 0 && (
+            <span className="tabular-nums text-success">+{outcome.addedLines}</span>
+          )}
+          {outcome.removedLines > 0 && (
+            <span className="tabular-nums text-destructive">−{outcome.removedLines}</span>
+          )}
+        </span>
+      )}
+      {outcome.commandCount > 0 && (
+        <span className={chip}>
+          <Terminal aria-hidden className="h-3 w-3 text-muted-foreground" />
+          <span className="font-medium">
+            {t(($) => $.transcript.outcome_commands, { count: outcome.commandCount })}
+          </span>
+        </span>
+      )}
+      {branch && (
+        <span className={cn(chip, "min-w-0")}>
+          <GitBranch aria-hidden className="h-3 w-3 shrink-0 text-muted-foreground" />
+          <span className="truncate font-mono text-micro">{branch}</span>
+        </span>
+      )}
     </div>
   );
 }
 
-// ─── Transcript event row ───────────────────────────────────────────────────
+// ─── Rows ───────────────────────────────────────────────────────────────────
 
-interface TranscriptEventRowProps {
-  item: TimelineItem;
-  isSelected: boolean;
+interface TranscriptRowProps {
+  row: TraceRow;
+  runStartMs?: number;
+  isLive: boolean;
+  selectedSeq: number | null;
   expanded: boolean;
-  onExpandedChange: (expanded: boolean) => void;
+  onToggleGroup: (seq: number) => void;
+  onSelect: (seq: number) => void;
 }
 
-const TranscriptEventRow = ({
-  ref,
-  item,
-  isSelected,
-  expanded,
-  onExpandedChange,
-}: TranscriptEventRowProps & { ref?: React.Ref<HTMLDivElement> }) => {
-  const color = getEventColor(item);
-  const label = getEventLabel(item);
-  const summary = getEventSummary(item);
-  const date = useMemo(
-    () => (item.created_at ? new Date(item.created_at) : null),
-    [item.created_at],
+function TranscriptRow(props: TranscriptRowProps) {
+  const { row } = props;
+  if (isGroupRow(row)) return <GroupRow {...props} row={row} />;
+  if (!isCallStep(row) && row.kind === "text") return <ProseRow {...props} row={row} />;
+  return <StepRow {...props} row={row} />;
+}
+
+/** The offset column: where in the run this happened. */
+function OffsetCell({ startedAt, runStartMs }: { startedAt?: string; runStartMs?: number }) {
+  const at = timeMs(startedAt);
+  const label = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : "";
+  return (
+    <span
+      className="w-11 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground"
+      title={startedAt ? new Date(startedAt).toLocaleString() : undefined}
+    >
+      {label}
+    </span>
+  );
+}
+
+function DurationCell({ ms, pending }: { ms?: number; pending?: boolean }) {
+  const { t } = useT("agents");
+  if (pending) {
+    return (
+      <span className="shrink-0 pt-0.5 text-micro text-info" title={t(($) => $.transcript.step_running)}>
+        <Loader2 aria-hidden className="h-3 w-3 animate-spin" />
+        <span className="sr-only">{t(($) => $.transcript.step_running)}</span>
+      </span>
+    );
+  }
+  if (ms === undefined) return <span className="w-12 shrink-0" />;
+  return (
+    <span className="w-12 shrink-0 pt-0.5 text-right font-mono text-micro tabular-nums text-faint-foreground">
+      {formatStepDuration(ms)}
+    </span>
+  );
+}
+
+/**
+ * The agent's own words, at body size and in reading measure.
+ *
+ * This is the layer inversion the redesign turns on: the report used to look
+ * exactly like a `Read`, so the one thing worth reading was the hardest thing
+ * to find. Prose is content and stays open; tool calls are evidence and fold.
+ *
+ * Identity is deliberately absent here. A transcript is one run by one agent —
+ * `TraceMessageStep` carries no per-step actor, so an avatar and name on the
+ * row would be the same two values repeated for every step, and the header
+ * already states them. Repeating them cost a semibold 12px line above 12px
+ * body text, which on a run of short steps made the row's heaviest element its
+ * least informative one.
+ *
+ * What the row does keep is its kind: the same `StepIcon` column every other
+ * row carries, so "Agent" in the filter has something to point at. Kind, not
+ * identity — the glyph says "the agent's own words", which is what the facet
+ * selects, and it says it in 12px without a repeated string.
+ */
+function ProseRow({ row, runStartMs }: TranscriptRowProps & { row: TraceMessageStep }) {
+  return (
+    <div className="group flex items-start gap-2 px-4 py-2.5">
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <span aria-hidden className="mt-1 w-0.5 self-stretch rounded-full bg-success" />
+      <StepIcon step={row} className="mt-1 h-3 w-3 shrink-0 text-muted-foreground" />
+      <div className="min-w-0 flex-1 pr-2">
+        <RichContent
+          content={row.item.content ?? ""}
+          density="compact"
+          className="transcript-prose max-w-[62rem]"
+        />
+      </div>
+    </div>
+  );
+}
+
+/** One call, one thinking block, or one error: a line, with its detail one
+ *  click away in the inspector. */
+function StepRow({
+  row,
+  runStartMs,
+  isLive,
+  selectedSeq,
+  onSelect,
+}: TranscriptRowProps & { row: TraceStep }) {
+  const { t } = useT("agents");
+  const summaryLabels = useMemo<TraceSummaryLabels>(
+    () => ({
+      morePaths: (path, extraCount) =>
+        t(($) => $.transcript.patch_summary_more, { path, extra: extraCount }),
+    }),
+    [t],
   );
 
-  const hasDetail = hasEventDetail(item);
+  const call = isCallStep(row) ? row : null;
+  const label = call
+    ? call.tool || t(($) => $.transcript.kind_tool)
+    : row.kind === "thinking"
+      ? t(($) => $.transcript.kind_thinking)
+      : t(($) => $.transcript.kind_error);
+  const summary = call
+    ? callSummary(call, summaryLabels)
+    : firstLineOf((row as TraceMessageStep).item.content);
+  const pending = call !== null && isLive && !call.result;
+  const selected = selectedSeq === row.seq;
 
   return (
-    <div
-      ref={ref}
+    <button
+      type="button"
+      onClick={() => onSelect(row.seq)}
+      aria-current={selected ? "true" : undefined}
       className={cn(
-        "group transition-colors",
-        isSelected && "bg-accent/50",
+        "group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors",
+        selected ? "bg-brand/8" : "hover:bg-accent/40",
+        row.kind === "error" && "bg-destructive/5",
       )}
     >
-      <Collapsible open={expanded} onOpenChange={onExpandedChange}>
-        <div className="flex items-start gap-2 px-4 py-2">
-          {/* Type label badge */}
-          <span
-            className={cn(
-              "inline-flex items-center shrink-0 rounded px-1.5 py-0.5 text-[11px] font-medium mt-0.5 min-w-[60px] justify-center",
-              colorClasses[color].label,
-            )}
-          >
-            {item.type === "thinking" && <Brain className="h-3 w-3 mr-1 shrink-0" />}
-            {item.type === "error" && <AlertCircle className="h-3 w-3 mr-1 shrink-0" />}
-            {label}
-          </span>
-
-          {/* Summary */}
-          <CollapsibleTrigger
-            className={cn(
-              "flex-1 text-left text-xs min-w-0 py-0.5 transition-colors",
-              hasDetail ? "cursor-pointer hover:text-foreground" : "cursor-default",
-              item.type === "error" ? "text-destructive" : "text-muted-foreground",
-            )}
-            disabled={!hasDetail}
-          >
-            <div className="flex items-start gap-1.5">
-              {hasDetail && (
-                <ChevronRight
-                  className={cn(
-                    "h-3 w-3 shrink-0 mt-0.5 text-muted-foreground/50 transition-transform",
-                    expanded && "rotate-90",
-                  )}
-                />
-              )}
-              <span className="truncate">{summary || "(empty)"}</span>
-            </div>
-          </CollapsibleTrigger>
-
-          {/* Seq number / index */}
-          <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1">
-            #{item.seq}
-          </span>
-
-          {/* Timestamp */}
-          {date && (
-            <span className="shrink-0 text-[10px] text-muted-foreground/50 tabular-nums mt-1" title={date.toLocaleString()}>
-              {date.toLocaleTimeString(undefined, {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              })}
-            </span>
-          )}
-        </div>
-
-        {/* Expanded detail */}
-        {hasDetail && (
-          <CollapsibleContent>
-            <div className="px-4 pb-3">
-              <div className="ml-[72px] rounded bg-muted/40 border">
-                <EventDetailContent item={item} />
-              </div>
-            </div>
-          </CollapsibleContent>
+      <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+      <span
+        aria-hidden
+        className={cn(
+          "mt-0.5 w-0.5 self-stretch rounded-full",
+          selected ? "bg-brand" : row.kind === "error" ? "bg-destructive" : "bg-border",
         )}
-      </Collapsible>
+      />
+      <StepIcon
+        step={row}
+        className={cn(
+          "mt-1 h-3 w-3 shrink-0",
+          row.kind === "error" ? "text-destructive" : "text-muted-foreground",
+        )}
+      />
+      <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+        <span
+          className={cn(
+            "shrink-0 text-caption font-medium",
+            row.kind === "error" ? "text-destructive" : "text-foreground",
+          )}
+        >
+          {label}
+        </span>
+        <span
+          className={cn(
+            "truncate text-micro text-muted-foreground",
+            call && "font-mono",
+          )}
+        >
+          {summary}
+        </span>
+      </span>
+      <DurationCell ms={call?.durationMs} pending={pending} />
+    </button>
+  );
+}
+
+/** Consecutive same-tool calls, folded to one line until asked. */
+function GroupRow({
+  row,
+  runStartMs,
+  selectedSeq,
+  expanded,
+  onToggleGroup,
+  onSelect,
+}: TranscriptRowProps & { row: TraceGroupRow }) {
+  const { t } = useT("agents");
+  const summaryLabels = useMemo<TraceSummaryLabels>(
+    () => ({
+      morePaths: (path, extraCount) =>
+        t(($) => $.transcript.patch_summary_more, { path, extra: extraCount }),
+    }),
+    [t],
+  );
+
+  return (
+    <div className={cn(selectedSeq !== null && row.steps.some((s) => s.seq === selectedSeq) && "bg-brand/5")}>
+      <button
+        type="button"
+        onClick={() => onToggleGroup(row.seq)}
+        aria-expanded={expanded}
+        className="group flex w-full items-start gap-2 px-4 py-1.5 text-left transition-colors hover:bg-accent/40"
+      >
+        <OffsetCell startedAt={row.startedAt} runStartMs={runStartMs} />
+        <span aria-hidden className="mt-0.5 w-0.5 self-stretch rounded-full bg-border" />
+        <ChevronRight
+          aria-hidden
+          className={cn(
+            "mt-1 h-3 w-3 shrink-0 text-faint-foreground transition-transform",
+            expanded && "rotate-90",
+          )}
+        />
+        <span className="flex min-w-0 flex-1 items-baseline gap-1.5">
+          <span className="shrink-0 text-caption font-medium">{row.tool}</span>
+          {/* Name the first thing it touched, not just how many: "Read · 4
+              calls" hides the one detail that makes a folded group scannable. */}
+          <span className="truncate font-mono text-micro text-muted-foreground">
+            {callSummary(row.steps[0]!, summaryLabels)}
+          </span>
+          <span className="shrink-0 text-micro text-faint-foreground">
+            {t(($) => $.transcript.group_calls, { count: row.steps.length })}
+          </span>
+        </span>
+        <DurationCell ms={row.durationMs} />
+      </button>
+      {expanded && (
+        <div className="ml-[4.4rem] border-l pl-3">
+          {row.steps.map((step) => (
+            <button
+              key={step.seq}
+              type="button"
+              onClick={() => onSelect(step.seq)}
+              className={cn(
+                "flex w-full items-baseline gap-2 rounded px-2 py-1 text-left text-micro transition-colors",
+                selectedSeq === step.seq ? "bg-brand/10" : "hover:bg-accent/40",
+              )}
+            >
+              <span className="truncate font-mono text-muted-foreground">
+                {callSummary(step, summaryLabels) || step.tool}
+              </span>
+              <span className="ml-auto shrink-0 font-mono tabular-nums text-faint-foreground">
+                {step.durationMs === undefined ? "" : formatStepDuration(step.durationMs)}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
-};
+}
 
-// ─── Event detail content ───────────────────────────────────────────────────
-
-function EventDetailContent({ item }: { item: TimelineItem }) {
-  switch (item.type) {
-    case "tool_use":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {item.input ? redactSecrets(JSON.stringify(item.input, null, 2)) : ""}
-        </pre>
-      );
-    case "tool_result":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-all">
-          {item.output
-            ? item.output.length > 4000
-              ? redactSecrets(item.output.slice(0, 4000)) + "\n... (truncated)"
-              : redactSecrets(item.output)
-            : ""}
-        </pre>
-      );
-    case "thinking":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    case "text":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-muted-foreground whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    case "error":
-      return (
-        <pre className="max-h-60 overflow-auto p-3 text-[11px] text-destructive whitespace-pre-wrap break-words">
-          {item.content ?? ""}
-        </pre>
-      );
-    default:
-      return null;
+/**
+ * The one line a call is worth in the list: what it was asked to do.
+ *
+ * Deliberately the call's argument, never the result — the result row is where
+ * base64 screenshots and 8KB command dumps used to land in the middle of the
+ * list. Only a call we never saw falls back to its output.
+ */
+function callSummary(step: TraceCallStep, labels: TraceSummaryLabels): string {
+  if (step.call) {
+    const summary = traceToolArgSummary(step.call.input, labels);
+    if (summary) return summary;
   }
+  if (!step.result) return "";
+  if (readImageResult(step.result.output)) return "";
+  return traceEventSummary({ type: "tool_result", output: step.result.output });
+}
+
+function firstLineOf(value: string | undefined): string {
+  return value?.split("\n").find((line) => line.trim().length > 0) ?? "";
+}
+
+// ─── Inspector ──────────────────────────────────────────────────────────────
+
+/**
+ * The evidence for one step, opened on demand.
+ *
+ * Input and result are stacked rather than tabbed: at this width both fit, and
+ * a tab would hide half the evidence behind a click to save nothing.
+ */
+function StepInspector({
+  step,
+  runStartMs,
+  onClose,
+}: {
+  step: TraceStep;
+  runStartMs?: number;
+  onClose: () => void;
+}) {
+  const { t } = useT("agents");
+  const [copied, showCopied] = useCopyFeedback();
+
+  const at = timeMs(step.startedAt);
+  const offset = at !== undefined && runStartMs !== undefined ? formatOffset(at - runStartMs) : null;
+
+  const call = isCallStep(step) ? step : null;
+  const message = call ? null : (step as TraceMessageStep);
+
+  const handleCopy = useCallback(() => {
+    const parts: string[] = [];
+    if (call) {
+      if (call.call) parts.push(traceEventCopyText(call.call));
+      if (call.result) parts.push(traceEventCopyText(call.result));
+    } else if (message) {
+      parts.push(traceEventCopyText(message.item));
+    }
+    void copyText(redactSecrets(parts.join("\n\n"))).then((ok) => {
+      if (!ok) return;
+      showCopied();
+    });
+  }, [call, message, showCopied]);
+
+  const title =
+    call
+      ? call.tool || t(($) => $.transcript.kind_tool)
+      : step.kind === "thinking"
+        ? t(($) => $.transcript.kind_thinking)
+        : t(($) => $.transcript.kind_error);
+
+  return (
+    <aside className="flex w-[26rem] shrink-0 flex-col border-l bg-muted/25">
+      <div className="flex items-center gap-2 border-b px-3 py-2">
+        <StepIcon step={step} className="h-4 w-4 shrink-0 text-muted-foreground" />
+        <span className="shrink-0 text-label font-semibold">{title}</span>
+        <span className="flex min-w-0 flex-1 items-center gap-1.5 text-micro text-muted-foreground">
+          {offset && <span className="font-mono tabular-nums">{offset}</span>}
+          {call?.durationMs !== undefined && (
+            <>
+              <FactDot />
+              <span className="font-mono tabular-nums">{formatStepDuration(call.durationMs)}</span>
+            </>
+          )}
+        </span>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={handleCopy}
+          aria-label={t(($) => $.transcript.copy_step)}
+          title={t(($) => $.transcript.copy_step)}
+          className="shrink-0 text-muted-foreground"
+        >
+          {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        </Button>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          onClick={onClose}
+          aria-label={t(($) => $.transcript.close_step)}
+          className="shrink-0 text-muted-foreground"
+        >
+          <X className="h-3.5 w-3.5" />
+        </Button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        {call ? (
+          <>
+            {call.call && (
+              <InspectorSection label={t(($) => $.transcript.step_input)}>
+                <StepBody item={call.call} />
+              </InspectorSection>
+            )}
+            {call.result && (
+              <InspectorSection label={t(($) => $.transcript.step_result)}>
+                <StepBody item={call.result} />
+              </InspectorSection>
+            )}
+          </>
+        ) : (
+          <InspectorSection label={title}>
+            <ToolDetailSurface text={redactSecrets(message?.item.content ?? "")} />
+          </InspectorSection>
+        )}
+      </div>
+    </aside>
+  );
+}
+
+function InspectorSection({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <section className="border-b last:border-b-0">
+      <h3 className="px-3 pt-2 text-micro font-medium uppercase tracking-wide text-faint-foreground">
+        {label}
+      </h3>
+      <div className="px-1 pb-2">{children}</div>
+    </section>
+  );
+}
+
+/** One payload, rendered as what it is. */
+function StepBody({ item }: { item: TimelineItem }) {
+  const { t } = useT("agents");
+  const detail = useMemo(() => traceEventDetail(item), [item]);
+  const image = useMemo(() => readImageResult(item.output), [item.output]);
+
+  // A screenshot is a picture, not a 200KB base64 string in a <pre>.
+  if (image) {
+    return (
+      <figure className="px-2 py-1">
+        <img
+          src={`data:${image.mediaType};base64,${image.base64}`}
+          alt={t(($) => $.transcript.image_result)}
+          className="max-h-80 w-full rounded-md border object-contain"
+        />
+        <figcaption className="pt-1 text-micro text-faint-foreground">
+          {t(($) => $.transcript.image_result)} · {formatBytes(base64ByteLength(image.base64))}
+        </figcaption>
+      </figure>
+    );
+  }
+
+  switch (detail.kind) {
+    case "diff":
+      return <DiffDetailSurface lines={detail.lines} path={detail.path} />;
+    case "patch":
+      return <PatchDetailSurface files={detail.files} truncated={detail.truncated} />;
+    case "file":
+      return (
+        <FileWriteSurface text={detail.text} lineCount={detail.lineCount} path={detail.path} />
+      );
+    default: {
+      const text = detail.text;
+      const clipped =
+        text.length > 8000 ? `${redactSecrets(text.slice(0, 8000))}\n... (truncated)` : redactSecrets(text);
+      const path = item.type === "tool_use" ? readPathFromInput(item.input) : undefined;
+      return <ToolDetailSurface text={clipped} language={path ? languageForPath(path) : undefined} />;
+    }
+  }
+}
+
+function readPathFromInput(input: Record<string, unknown> | undefined): string | undefined {
+  if (!input) return undefined;
+  const path = input.file_path ?? input.path;
+  return typeof path === "string" ? path : undefined;
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }

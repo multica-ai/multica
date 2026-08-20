@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2 } from "lucide-react";
 import type { TimelineEntry } from "@multica/core/types";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { cn } from "@multica/ui/lib/utils";
@@ -8,14 +9,21 @@ import { useT } from "../../i18n";
 // ThreadMinimap — Linear-style quick-jump rail for comment threads
 // ---------------------------------------------------------------------------
 //
-// A vertical column of tick marks overlaid on the left edge of the issue
-// detail scroll area, one tick per top-level comment thread (folded resolved
-// bars included — they are jump targets too). Ticks whose thread is currently
-// inside the scroll viewport render darker, so the rail doubles as a "you are
-// here" minimap. Hovering magnifies ticks in a Dock-style wave around the
-// cursor (the hovered tick peaks, neighbours taper off) and shows a preview
-// card (bold first line + muted body excerpt); clicking jumps the timeline
-// to that thread.
+// A vertical column of tick marks overlaid on the right edge of the issue
+// detail scroll area, just inside the scrollbar, one tick per top-level
+// comment thread (folded resolved bars included — they are jump targets too).
+// Ticks whose thread is currently inside the scroll viewport render darker, so
+// the rail doubles as a "you are here" minimap. Hovering magnifies ticks in a
+// Dock-style wave around the cursor (the hovered tick peaks, neighbours taper
+// off) and shows a preview card (bold first line + muted body excerpt, plus a
+// "Resolved" badge when the thread carries a resolution — the rail is the one
+// place a folded resolved thread is otherwise indistinguishable from an open
+// one); clicking jumps the timeline to that thread.
+//
+// It rides the scrollbar side on purpose: it looks and behaves like a scroll
+// affordance, and every precedent for that (the scrollbar itself, editor
+// minimaps, floating outlines) lives on the right — so the pointer is already
+// there, and the travel from scrolling to jumping is short (MUL-4522).
 //
 // The preview is ONE card owned by the rail, not a popover per tick: the
 // open-intent delay is paid once when the pointer enters the rail, and while
@@ -104,6 +112,13 @@ export interface ThreadMinimapThread {
   id: string;
   /** The thread's root comment entry (preview text + author fallback). */
   entry: TimelineEntry;
+  /**
+   * Whether the thread carries a resolution — derived by the caller with
+   * `deriveThreadResolution`, so it covers both "Resolve thread" (root) and
+   * "Resolve thread with comment" (reply), and stays true while the user has
+   * a folded resolved thread expanded.
+   */
+  resolved: boolean;
 }
 
 interface ThreadMinimapProps {
@@ -111,9 +126,29 @@ interface ThreadMinimapProps {
   /** The issue detail scroll container; null until its callback ref populates. */
   scrollContainerEl: HTMLElement | null;
   onJump: (threadId: string) => void;
-  /** Positioning within the page (e.g. `absolute left-2 top-12 bottom-0`) — owned by the caller, like FindBar. */
+  /**
+   * Thread the header panel's pointer is currently resting on. The rail lights
+   * that tick in the brand colour so the two navigators read as one coordinate
+   * system rather than two competing lists (MUL-5755).
+   */
+  highlightedThreadId?: string | null;
+  /** Positioning within the page (e.g. `absolute right-3 top-12 bottom-0`) — owned by the caller, like FindBar. */
   className?: string;
 }
+
+// ---------------------------------------------------------------------------
+// useVisibleThreadIds — "which comment threads are on screen right now"
+// ---------------------------------------------------------------------------
+//
+// Which threads intersect the scroll viewport, so the rail can darken their
+// ticks. Deliberately the rail's alone: "on screen" is a set, not a point, and
+// only a column of ticks can show a span honestly — the header panel tried to
+// render the same set as list rows and it read as a broken multi-select.
+//
+// Computed from DOM rects on scroll/resize instead of an IntersectionObserver
+// because Virtuoso mounts/unmounts rows while scrolling — an observer would
+// lose its targets. Unmounted rows are by definition outside the (overscanned)
+// viewport, so "no element" correctly counts as not visible.
 
 function sameIdSet(a: Set<string>, b: Set<string>): boolean {
   if (a.size !== b.size) return false;
@@ -121,15 +156,8 @@ function sameIdSet(a: Set<string>, b: Set<string>): boolean {
   return true;
 }
 
-/**
- * Which threads currently intersect the scroll viewport. Computed from DOM
- * rects on scroll/resize instead of an IntersectionObserver because Virtuoso
- * mounts/unmounts rows while scrolling — an observer would lose its targets.
- * Unmounted rows are by definition outside the (overscanned) viewport, so
- * "no element" correctly counts as not visible.
- */
 function useVisibleThreadIds(
-  threads: ThreadMinimapThread[],
+  threadIds: readonly string[],
   scrollContainerEl: HTMLElement | null,
 ): Set<string> {
   const [visibleIds, setVisibleIds] = useState<Set<string>>(() => new Set());
@@ -143,11 +171,11 @@ function useVisibleThreadIds(
       raf = 0;
       const rect = container.getBoundingClientRect();
       const next = new Set<string>();
-      for (const t of threads) {
-        const el = document.getElementById(`comment-${t.id}`);
+      for (const id of threadIds) {
+        const el = document.getElementById(`comment-${id}`);
         if (!el) continue;
         const r = el.getBoundingClientRect();
-        if (r.bottom > rect.top && r.top < rect.bottom) next.add(t.id);
+        if (r.bottom > rect.top && r.top < rect.bottom) next.add(id);
       }
       setVisibleIds((prev) => (sameIdSet(prev, next) ? prev : next));
     };
@@ -167,7 +195,7 @@ function useVisibleThreadIds(
       ro.disconnect();
       if (raf) cancelAnimationFrame(raf);
     };
-  }, [threads, scrollContainerEl]);
+  }, [threadIds, scrollContainerEl]);
 
   return visibleIds;
 }
@@ -182,12 +210,15 @@ function MinimapTick({
   label,
   inViewport,
   isPreviewOpen,
+  isHighlighted,
   onClick,
 }: {
   label: string;
   inViewport: boolean;
   /** This tick's preview is the open card — hold the grown state even when the pointer is on the card. */
   isPreviewOpen: boolean;
+  /** The header panel is hovering this thread's row. */
+  isHighlighted: boolean;
   onClick: () => void;
 }) {
   return (
@@ -195,14 +226,21 @@ function MinimapTick({
       type="button"
       aria-label={label}
       onClick={onClick}
-      className="group/tick flex min-h-[5px] w-6 flex-[0_1_0.875rem] cursor-pointer items-center focus-visible:outline-none"
+      // 20px wide, tick flushed to the right end: with the rail inset 12px
+      // (see the caller's className) the strip spans 12–32px from the panel
+      // edge, which clears a classic scrollbar's ~11px gutter on one side and
+      // stops exactly at the content column's 32px padding on the other — so
+      // it never sits on the scrollbar nor on body text, in either scrollbar
+      // mode.
+      className="group/tick flex min-h-[5px] w-5 flex-[0_1_0.875rem] cursor-pointer items-center justify-end focus-visible:outline-none"
     >
       <span
         className={cn(
-          // Enlargement is a left-anchored `scale` (compositor-friendly, and
-          // what the JS wave writes inline). The 100ms ease-out doubles as
-          // smoothing between pointer samples and as the settle on leave.
-          "h-0.5 w-3 origin-left rounded-full transition-[scale,background-color] duration-100 ease-out",
+          // Enlargement is a right-anchored `scale` (compositor-friendly, and
+          // what the JS wave writes inline), so ticks grow inward, away from
+          // the scrollbar. The 100ms ease-out doubles as smoothing between
+          // pointer samples and as the settle on leave.
+          "h-0.5 w-3 origin-right rounded-full transition-[scale,background-color] duration-100 ease-out",
           inViewport ? "bg-foreground/70" : "bg-muted-foreground/30",
           "group-hover/tick:bg-foreground",
           // CSS floor states for when no inline wave value is present:
@@ -210,6 +248,12 @@ function MinimapTick({
           // card, keyboard focus grows without a pointer, and reduced-motion
           // swaps the wave for a plain hover grow.
           isPreviewOpen && "scale-x-[1.7] bg-foreground",
+          // Panel-driven highlight. Brand colour, not foreground: it marks
+          // "the panel is pointing here", which is a different statement from
+          // the rail's own hover/viewport greys and must stay distinguishable
+          // from both. Wins over `inViewport` because it is the more specific,
+          // user-driven state.
+          isHighlighted && "scale-x-[1.7] bg-brand",
           "group-focus-visible/tick:scale-x-[1.7] group-focus-visible/tick:bg-foreground",
           "motion-reduce:group-hover/tick:scale-x-[1.7]",
         )}
@@ -218,10 +262,17 @@ function MinimapTick({
   );
 }
 
-export function ThreadMinimap({ threads, scrollContainerEl, onJump, className }: ThreadMinimapProps) {
+export function ThreadMinimap({
+  threads,
+  scrollContainerEl,
+  onJump,
+  highlightedThreadId,
+  className,
+}: ThreadMinimapProps) {
   const { t } = useT("issues");
   const { getActorName } = useActorName();
-  const visibleIds = useVisibleThreadIds(threads, scrollContainerEl);
+  const threadIds = useMemo(() => threads.map((th) => th.id), [threads]);
+  const visibleIds = useVisibleThreadIds(threadIds, scrollContainerEl);
 
   // Flattened previews, cached per thread by content so an unrelated timeline
   // update (reaction, new reply elsewhere) doesn't re-flatten every comment.
@@ -412,36 +463,56 @@ export function ThreadMinimap({ threads, scrollContainerEl, onJump, className }:
         // flex compresses the spacing (down to min-h) instead of overflowing.
         className="pointer-events-auto flex max-h-full flex-col overflow-hidden"
       >
-        {threads.map((thread, i) => (
-          <MinimapTick
-            key={thread.id}
-            label={
-              previews[i]!.title ||
-              getActorName(thread.entry.actor_type, thread.entry.actor_id)
-            }
-            inViewport={visibleIds.has(thread.id)}
-            isPreviewOpen={preview?.index === i}
-            onClick={() => onJump(thread.id)}
-          />
-        ))}
+        {threads.map((thread, i) => {
+          const title =
+            previews[i]!.title ||
+            getActorName(thread.entry.actor_type, thread.entry.actor_id);
+          return (
+            <MinimapTick
+              key={thread.id}
+              // The card is the visual channel for the resolved state, but a
+              // screen reader never sees it — the tick's name is the only
+              // thing announced on focus, so it carries the state too.
+              label={
+                thread.resolved
+                  ? t(($) => $.detail.thread_nav_resolved_label, { title })
+                  : title
+              }
+              inViewport={visibleIds.has(thread.id)}
+              isPreviewOpen={preview?.index === i}
+              isHighlighted={highlightedThreadId === thread.id}
+              onClick={() => onJump(thread.id)}
+            />
+          );
+        })}
       </nav>
 
       {/* The rail's single preview card. Mounted without an enter animation
           (the open-intent delay already gates accidental flashes; once the
           user waited, showing content instantly is the responsive choice)
           and slid between ticks with a short transform transition. Hovering
-          the card keeps it open so its text stays selectable. */}
+          the card keeps it open so its text stays selectable. It opens
+          inward (leftward, over the content) — the only direction with room
+          next to the scrollbar. The resolved badge leads so the state is read
+          before the content, in the same `text-success` CommentCard uses for
+          its Resolution badge. */}
       {preview && activeThread && activePreview && (
         <div
           ref={cardRef}
           onPointerEnter={cancelClose}
           onPointerLeave={scheduleClose}
-          className="pointer-events-auto absolute left-9 top-0 w-72 rounded-lg bg-popover p-2.5 text-sm text-popover-foreground shadow-md ring-1 ring-foreground/10 transition-transform duration-150 ease-out motion-reduce:transition-none"
+          className="pointer-events-auto absolute right-8 top-0 w-72 rounded-lg bg-popover p-2.5 text-body text-popover-foreground shadow-md ring-1 ring-foreground/10 transition-transform duration-150 ease-out motion-reduce:transition-none"
           style={{ transform: `translateY(${preview.y}px) translateY(-50%)` }}
         >
-          <p className="truncate text-sm font-semibold text-foreground">{activeTitle}</p>
+          {activeThread.resolved && (
+            <p className="mb-1 flex items-center gap-1.5 text-caption font-medium text-success">
+              <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />
+              {t(($) => $.comment.resolve.thread_resolved_badge)}
+            </p>
+          )}
+          <p className="truncate text-body font-semibold text-foreground">{activeTitle}</p>
           {activePreview.body && (
-            <p className="mt-1 line-clamp-3 text-sm text-muted-foreground">{activePreview.body}</p>
+            <p className="mt-1 line-clamp-3 text-body text-muted-foreground">{activePreview.body}</p>
           )}
         </div>
       )}

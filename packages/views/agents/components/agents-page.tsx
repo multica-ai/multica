@@ -18,6 +18,7 @@ import {
   type AgentActivity,
   agentRunCounts30dOptions,
   effectiveAccessScope,
+  isAgentRuntimeBound,
   useWorkspaceActivityMap,
   useWorkspacePresenceMap,
   VISIBILITY_TOOLTIP,
@@ -60,6 +61,7 @@ import {
 } from "@multica/ui/components/ui/tooltip";
 import { useNavigation, useRowLink } from "../../navigation";
 import { ActorAvatar } from "../../common/actor-avatar";
+import { ProviderLogo } from "../../runtimes/components/provider-logo";
 import {
   CollectionPageHeader,
   CollectionPageHeaderAction,
@@ -380,7 +382,7 @@ function NameCell({ row }: { row: AgentListRow }) {
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-2">
           <span
-            className={`min-w-0 truncate text-sm font-medium ${
+            className={`min-w-0 truncate text-body font-medium ${
               isArchived ? "text-muted-foreground" : ""
             }`}
           >
@@ -390,20 +392,20 @@ function NameCell({ row }: { row: AgentListRow }) {
             <Tooltip>
               <TooltipTrigger
                 render={
-                  <Lock className="h-3 w-3 shrink-0 text-muted-foreground/60" />
+                  <Lock className="h-3 w-3 shrink-0 text-faint-foreground" />
                 }
               />
               <TooltipContent>{VISIBILITY_TOOLTIP.private}</TooltipContent>
             </Tooltip>
           )}
           {isOwnedByMe && (
-            <span className="shrink-0 rounded bg-muted px-1 text-[10px] font-medium text-muted-foreground">
+            <span className="shrink-0 rounded bg-muted px-1 text-micro font-medium text-muted-foreground">
               {t(($) => $.row.you)}
             </span>
           )}
         </div>
         {agent.description ? (
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">
+          <div className="mt-0.5 truncate text-caption text-muted-foreground">
             {agent.description}
           </div>
         ) : null}
@@ -420,8 +422,18 @@ function StatusCell({ row }: { row: AgentListRow }) {
   if (agent.archived_at) {
     return (
       <ListGridCell>
-        <span className="text-xs text-muted-foreground/60">
+        <span className="text-caption text-muted-foreground">
           {t(($) => $.row.archived)}
+        </span>
+      </ListGridCell>
+    );
+  }
+  if (!isAgentRuntimeBound(agent)) {
+    return (
+      <ListGridCell className="gap-1.5">
+        <AlertCircle className="size-3.5 shrink-0 text-amber-500" />
+        <span className="truncate text-caption text-amber-600 dark:text-amber-400">
+          {t(($) => $.row.needs_runtime)}
         </span>
       </ListGridCell>
     );
@@ -429,7 +441,7 @@ function StatusCell({ row }: { row: AgentListRow }) {
   if (!presence) {
     return (
       <ListGridCell>
-        <span className="text-xs text-muted-foreground/40">—</span>
+        <span className="text-caption text-faint-foreground">—</span>
       </ListGridCell>
     );
   }
@@ -438,7 +450,7 @@ function StatusCell({ row }: { row: AgentListRow }) {
   return (
     <ListGridCell className="gap-1.5">
       <span className={`size-1.5 shrink-0 rounded-full ${visual.dotClass}`} />
-      <span className={`truncate text-xs ${visual.textClass}`}>
+      <span className={`truncate text-caption ${visual.textClass}`}>
         {t(($) => $.availability[presence.availability])}
         {active > 0 && (
           <span className="text-muted-foreground">
@@ -459,14 +471,14 @@ function OwnerCell({ row }: { row: AgentListRow }) {
   if (!agent.owner_id) {
     return (
       <ListGridCell className="hidden @2xl:flex">
-        <span className="text-xs text-muted-foreground/40">—</span>
+        <span className="text-caption text-faint-foreground">—</span>
       </ListGridCell>
     );
   }
   return (
     <ListGridCell className="hidden gap-1.5 @2xl:flex">
       <ActorAvatar actorType="member" actorId={agent.owner_id} size="sm" />
-      <span className="min-w-0 truncate text-xs text-muted-foreground">
+      <span className="min-w-0 truncate text-caption text-muted-foreground">
         {owner?.name ?? agent.owner_id.slice(0, 8)}
       </span>
     </ListGridCell>
@@ -495,7 +507,7 @@ export function AccessCell({ row }: { row: AgentListRow }) {
   );
   return (
     <ListGridCell className="hidden @2xl:flex">
-      <span className="min-w-0 truncate text-xs text-muted-foreground">
+      <span className="min-w-0 truncate text-caption text-muted-foreground">
         {label}
       </span>
     </ListGridCell>
@@ -503,15 +515,33 @@ export function AccessCell({ row }: { row: AgentListRow }) {
 }
 
 function RuntimeCell({ row }: { row: AgentListRow }) {
+  const { t } = useT("agents");
+  if (!isAgentRuntimeBound(row.agent)) {
+    return (
+      <ListGridCell className="hidden @2xl:flex">
+        <span className="truncate text-caption text-amber-600 dark:text-amber-400">
+          {t(($) => $.row.needs_runtime)}
+        </span>
+      </ListGridCell>
+    );
+  }
   const runtime = row.runtime;
   return (
     <ListGridCell className="hidden @2xl:flex">
       {runtime ? (
-        <span className="min-w-0 truncate text-xs text-muted-foreground">
-          {runtimeDisplayLabel(runtime)}
+        // Provider mark before the label: scanning this column for "which of
+        // these run on Codex" is a shape match, not a read.
+        <span className="inline-flex min-w-0 items-center gap-1.5">
+          <ProviderLogo
+            provider={runtime.provider}
+            className="h-3.5 w-3.5 shrink-0"
+          />
+          <span className="min-w-0 truncate text-caption text-muted-foreground">
+            {runtimeDisplayLabel(runtime)}
+          </span>
         </span>
       ) : (
-        <span className="text-xs text-muted-foreground/40">—</span>
+        <span className="text-caption text-faint-foreground">—</span>
       )}
     </ListGridCell>
   );
@@ -523,11 +553,11 @@ function LastActiveCell({ row }: { row: AgentListRow }) {
   return (
     <ListGridCell className="hidden @2xl:flex">
       {days === null ? (
-        <span className="truncate text-xs text-muted-foreground/40">
+        <span className="truncate text-caption text-muted-foreground">
           {row.agent.archived_at ? "—" : t(($) => $.last_active.none)}
         </span>
       ) : (
-        <span className="whitespace-nowrap text-xs tabular-nums text-muted-foreground">
+        <span className="whitespace-nowrap text-caption tabular-nums text-muted-foreground">
           {days === 0
             ? t(($) => $.last_active.today)
             : t(($) => $.last_active.days_ago, { count: days })}
@@ -939,9 +969,13 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
     overscan: 10,
   });
 
-  const handleDuplicate = useCallback((agent: Agent) => {
-    navigation.push(`${paths.newAgent()}?duplicate=${encodeURIComponent(agent.id)}`);
-  }, [navigation, paths]);
+  // Straight to the manual form: a duplicate already has every field decided,
+  // so the method chooser would be a step with nothing to choose.
+  const duplicateHref = useCallback(
+    (agent: Agent) =>
+      `${paths.newAgentManual()}?duplicate=${encodeURIComponent(agent.id)}`,
+    [paths],
+  );
 
   const selectedRows = rows.filter((row) => selectedIds.has(row.agent.id));
   const allSelected = rows.length > 0 && selectedRows.length === rows.length;
@@ -1059,7 +1093,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                 }}
               >
                 {rows.length === 0 && (
-                  <div className="col-span-full py-16 text-center text-sm text-muted-foreground">
+                  <div className="col-span-full py-16 text-center text-body text-muted-foreground">
                     {noMatchText}
                   </div>
                 )}
@@ -1072,7 +1106,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       className={`h-16 cursor-pointer ${
                         selectedIds.has(row.agent.id) ? "bg-accent/30" : ""
                       }`}
-                      {...rowLink(paths.agentDetail(row.agent.id))}
+                      {...rowLink(paths.agentDetail(row.agent.id), row.agent.name)}
                     >
                       <CheckboxCell
                         checked={selectedIds.has(row.agent.id)}
@@ -1105,7 +1139,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                         <ListGridCell className="hidden px-0 @2xl:flex" />
                       )}
                       {isColVisible("runs") ? (
-                        <ListGridCell className="hidden justify-end font-mono text-xs tabular-nums text-muted-foreground @2xl:flex">
+                        <ListGridCell className="hidden justify-end font-mono text-caption tabular-nums text-muted-foreground @2xl:flex">
                           {row.runCount.toLocaleString()}
                         </ListGridCell>
                       ) : (
@@ -1113,7 +1147,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                       )}
                       {isColVisible("model") ? (
                         <ListGridCell className="hidden @2xl:flex">
-                          <span className="min-w-0 truncate text-xs text-muted-foreground">
+                          <span className="min-w-0 truncate text-caption text-muted-foreground">
                             {row.agent.model || "—"}
                           </span>
                         </ListGridCell>
@@ -1121,7 +1155,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                         <ListGridCell className="hidden px-0 @2xl:flex" />
                       )}
                       {isColVisible("created") ? (
-                        <ListGridCell className="hidden whitespace-nowrap text-xs tabular-nums text-muted-foreground @2xl:flex">
+                        <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
                           {new Date(
                             row.agent.created_at,
                           ).toLocaleDateString()}
@@ -1138,7 +1172,7 @@ export function AgentsPage(_props: AgentsPageProps = {}) {
                             agent={row.agent}
                             presence={row.presence}
                             canManage={row.canManage}
-                            onDuplicate={handleDuplicate}
+                            duplicateHref={duplicateHref(row.agent)}
                           />
                         </span>
                       </ListGridCell>

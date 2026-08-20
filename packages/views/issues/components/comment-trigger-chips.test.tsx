@@ -139,9 +139,10 @@ describe("CommentTriggerChips", () => {
     );
 
     // The name the user typed (not a "1 mention won't trigger" count) plus the
-    // short no-permission reason.
+    // short reason, which must not assert a permission cause the server never
+    // gave: invocation_not_allowed also covers an unresolved id (MUL-5548).
     expect(screen.getByText("Go")).toBeInTheDocument();
-    expect(screen.getByText("No permission")).toBeInTheDocument();
+    expect(screen.getByText("Not found or no permission")).toBeInTheDocument();
     expect(screen.queryByText(/won't trigger/i)).not.toBeInTheDocument();
   });
 
@@ -164,7 +165,7 @@ describe("CommentTriggerChips", () => {
       />,
     );
 
-    expect(screen.getByText("No permission")).toBeInTheDocument();
+    expect(screen.getByText("Not found or no permission")).toBeInTheDocument();
     expect(screen.queryByText("Go")).not.toBeInTheDocument();
   });
 
@@ -183,7 +184,7 @@ describe("CommentTriggerChips", () => {
     );
 
     expect(screen.getByText("Go")).toBeInTheDocument();
-    expect(screen.getByText("No permission")).toBeInTheDocument();
+    expect(screen.getByText("Not found or no permission")).toBeInTheDocument();
     expect(screen.getByText("Ops")).toBeInTheDocument();
     expect(screen.getByText("Runtime offline")).toBeInTheDocument();
   });

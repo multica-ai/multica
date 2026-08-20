@@ -1,10 +1,26 @@
 -- name: ListActivitiesForIssue :many
--- All activities for an issue in chronological order, capped at $2 (DB safety
--- net to bound the response).
-SELECT * FROM activity_log
-WHERE issue_id = $1
-ORDER BY created_at ASC, id ASC
-LIMIT $2;
+-- The NEWEST $2 activities for an issue, returned in chronological order.
+--
+-- The cap has to bite at the OLD end, not the new one. The inner query takes
+-- the window with the keyset ordering (created_at DESC, id DESC), which
+-- idx_activity_log_issue_keyset (migration 068) satisfies without a sort step —
+-- it is not an index-only scan, since the index does not cover the columns
+-- SELECT * needs, so the heap is still read for the rows in the window. The
+-- outer query re-sorts ascending so every caller keeps the chronological
+-- contract it already had.
+--
+-- Capping with ORDER BY created_at ASC instead discards the newest rows, which
+-- made a busy issue's timeline appear to stop at some point in the past with no
+-- indication anything was missing. Activity is machine-paced (description
+-- autosave, every agent run, status/assignee changes), so this was reachable in
+-- normal use, not only on pathological issues (MUL-5492).
+SELECT * FROM (
+    SELECT * FROM activity_log
+    WHERE issue_id = $1
+    ORDER BY created_at DESC, id DESC
+    LIMIT $2
+) AS recent
+ORDER BY created_at ASC, id ASC;
 
 -- name: GetActivity :one
 SELECT * FROM activity_log
@@ -12,8 +28,8 @@ WHERE id = $1;
 
 -- name: CreateActivity :one
 INSERT INTO activity_log (
-    workspace_id, issue_id, actor_type, actor_id, action, details
-) VALUES ($1, $2, $3, $4, $5, $6)
+    workspace_id, issue_id, actor_type, actor_id, action, details, id
+) VALUES ($1, $2, $3, $4, $5, $6, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()))
 RETURNING *;
 
 -- name: HasSquadLeaderNoActionEvaluationForTask :one

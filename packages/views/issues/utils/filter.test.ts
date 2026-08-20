@@ -1,9 +1,11 @@
+// @vitest-environment node
 import { describe, it, expect } from "vitest";
 import type { Issue, IssueAssigneeGroup } from "@multica/core/types";
 import {
   applyIssueFilters,
   filterAssigneeGroups,
   filterIssues,
+  NO_PROPERTY_VALUE,
   type IssueFilters,
 } from "./filter";
 
@@ -91,6 +93,14 @@ describe("filterIssues", () => {
       includeNoAssignee: true,
     });
     expect(result.map((i) => i.id)).toEqual(["2", "3"]);
+  });
+
+  it("treats an explicitly active empty assignee predicate as match-none", () => {
+    const result = filterIssues(issues, {
+      ...NO_FILTER,
+      assigneeFilterActive: true,
+    });
+    expect(result).toEqual([]);
   });
 
   it("hides assigned issues when only 'No assignee' is selected", () => {
@@ -424,6 +434,32 @@ describe("property filters", () => {
       propertyFilters: { [doneId]: ["true"] },
     });
     expect(result.map((i) => i.id)).toEqual(["P4"]);
+  });
+
+  it("no-value matches issues where the property is unset", () => {
+    // P1/P2/P3 have no `doneId` at all; P4 has it set to true.
+    const result = filterIssues([critical, minor, unset, checked], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: [NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2", "P3"]);
+  });
+
+  it("no-value ORs with a value within the definition", () => {
+    const result = filterIssues([critical, minor, unset, checked], {
+      ...NO_FILTER,
+      propertyFilters: { [doneId]: ["true", NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P1", "P2", "P3", "P4"]);
+  });
+
+  it("no-value ANDs across definitions", () => {
+    // Only P2 carries `sevId=opt-minor` and leaves `doneId` unset.
+    const result = filterIssues([critical, minor, unset, checked], {
+      ...NO_FILTER,
+      propertyFilters: { [sevId]: ["opt-minor"], [doneId]: [NO_PROPERTY_VALUE] },
+    });
+    expect(result.map((i) => i.id)).toEqual(["P2"]);
   });
 
   it("ANDs across definitions", () => {

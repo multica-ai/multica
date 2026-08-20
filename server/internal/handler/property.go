@@ -44,9 +44,13 @@ const (
 	maxPropertyDescriptionLen       = 500
 	maxPropertyTextValueLen         = 2000
 	maxPropertyURLValueLen          = 2048
+	// multi_actor is capped well below the select cap: the whole properties
+	// bag shares one 16KB row budget, and a property holding hundreds of
+	// actors would crowd out every other property on the same issue.
+	maxPropertyActorValues = 20
 )
 
-var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url"}
+var validPropertyTypes = []string{"text", "number", "select", "multi_select", "date", "checkbox", "url", "actor", "multi_actor"}
 
 // Property icons use stable catalog keys that the Web client maps to Lucide
 // glyphs. Keeping this allowlist at the API boundary prevents arbitrary text
@@ -297,6 +301,157 @@ func selectOptionsHint(cfg PropertyConfig) string {
 	return strings.Join(parts, ", ")
 }
 
+// ---------------------------------------------------------------------------
+// Actor values (MUL-6286)
+// ---------------------------------------------------------------------------
+
+// actorPropertyKinds is the V1 value range for actor properties: workspace
+// members only. The issue assignee also accepts "agent" and "squad", but
+// neither belongs in a passive reference yet — an agent reference drags in the
+// whole agent-visibility question (private / non-allow-listed agents must not
+// become discoverable by id) for no demonstrated use case, and a squad is a
+// routing target rather than a person.
+//
+// The stored form is "<kind>:<uuid>", so widening this list is a one-line
+// change: no migration, no new property type, and existing definitions gain
+// the new kind in place. Anything added here that is NOT universally visible
+// to every workspace member (an agent, for one) must also restore a visibility
+// gate on both the write path and the table-facet read path.
+var actorPropertyKinds = []string{"member"}
+
+// actorRef is a parsed "<kind>:<uuid>" property value.
+type actorRef struct {
+	Kind string
+	ID   string
+}
+
+func (a actorRef) String() string { return a.Kind + ":" + a.ID }
+
+func propertyTypeIsActor(t string) bool {
+	return t == "actor" || t == "multi_actor"
+}
+
+func actorKindsHint() string {
+	return strings.Join(actorPropertyKinds, " / ")
+}
+
+// parseActorRef splits a stored actor value. Members are referenced by
+// user_id — the same id the assignee pair uses — so "who is this" resolves
+// identically everywhere in the product.
+func parseActorRef(s string) (actorRef, error) {
+	kind, id, found := strings.Cut(s, ":")
+	if !found {
+		return actorRef{}, fmt.Errorf("value must look like \"<kind>:<uuid>\" where kind is one of: %s", actorKindsHint())
+	}
+	valid := false
+	for _, k := range actorPropertyKinds {
+		if kind == k {
+			valid = true
+			break
+		}
+	}
+	if !valid {
+		return actorRef{}, fmt.Errorf("unknown actor kind %q; valid kinds: %s", kind, actorKindsHint())
+	}
+	parsed, err := uuid.Parse(id)
+	if err != nil {
+		return actorRef{}, fmt.Errorf("actor id in %q must be a UUID", s)
+	}
+	// Store the canonical lowercase-hyphenated form. uuid.Parse also accepts
+	// uppercase, braces and the urn: prefix; every consumer downstream (the
+	// member directory lookup in the client, the "= me" filter, @> containment)
+	// compares reference strings exactly, so an unnormalized id would store
+	// fine and then render as Unknown and never match a filter.
+	return actorRef{Kind: kind, ID: parsed.String()}, nil
+}
+
+// parseActorRefList validates a multi_actor array: every element must parse,
+// duplicates are dropped, and the caller's order is preserved. Unlike
+// multi_select there is no config order to canonicalize against, and sorting
+// by id would make the avatar row reshuffle on every edit. @> containment is
+// order-insensitive, so filtering is unaffected either way.
+func parseActorRefList(items []any) ([]actorRef, error) {
+	if len(items) == 0 {
+		return nil, errors.New("value must be a non-empty array of actor references")
+	}
+	if len(items) > maxPropertyActorValues {
+		return nil, fmt.Errorf("value cannot list more than %d actors", maxPropertyActorValues)
+	}
+	seen := make(map[string]struct{}, len(items))
+	refs := make([]actorRef, 0, len(items))
+	for _, item := range items {
+		s, ok := item.(string)
+		if !ok {
+			return nil, errors.New("value must be an array of actor reference strings")
+		}
+		ref, err := parseActorRef(s)
+		if err != nil {
+			return nil, err
+		}
+		if _, dup := seen[ref.String()]; dup {
+			continue
+		}
+		seen[ref.String()] = struct{}{}
+		refs = append(refs, ref)
+	}
+	return refs, nil
+}
+
+// actorRefsInValue re-reads the canonical stored JSON for an actor property.
+// SetIssueProperty uses it to resolve references against the workspace after
+// the pure shape validation has run.
+func actorRefsInValue(propType string, stored []byte) ([]actorRef, error) {
+	if propType == "actor" {
+		var s string
+		if err := json.Unmarshal(stored, &s); err != nil {
+			return nil, err
+		}
+		ref, err := parseActorRef(s)
+		if err != nil {
+			return nil, err
+		}
+		return []actorRef{ref}, nil
+	}
+	var list []string
+	if err := json.Unmarshal(stored, &list); err != nil {
+		return nil, err
+	}
+	refs := make([]actorRef, 0, len(list))
+	for _, s := range list {
+		ref, err := parseActorRef(s)
+		if err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	return refs, nil
+}
+
+// resolveActorRefs checks that every reference points at a real member of this
+// workspace. No visibility gate is needed while members are the only kind:
+// workspace membership is already visible to every member. Adding a kind that
+// is not (an agent) means adding that gate back — see actorPropertyKinds.
+func (h *Handler) resolveActorRefs(r *http.Request, workspaceID string, refs []actorRef) (int, string) {
+	ctx := r.Context()
+	wsUUID, err := util.ParseUUID(workspaceID)
+	if err != nil {
+		return http.StatusBadRequest, "invalid workspace_id"
+	}
+	for _, ref := range refs {
+		refUUID, err := util.ParseUUID(ref.ID)
+		if err != nil {
+			return http.StatusBadRequest, fmt.Sprintf("actor id in %q must be a UUID", ref)
+		}
+		if _, err := h.Queries.GetMemberByUserAndWorkspace(ctx, db.GetMemberByUserAndWorkspaceParams{
+			UserID:      refUUID,
+			WorkspaceID: wsUUID,
+		}); err != nil {
+			return http.StatusBadRequest, fmt.Sprintf("%q does not refer to a member of this workspace", ref)
+		}
+	}
+	return 0, ""
+}
+
 // validatePropertyValue checks a raw JSON value against the definition's type
 // and returns the canonical JSON to store. Error strings enumerate the legal
 // values where possible — agents consume these directly to self-correct.
@@ -394,6 +549,30 @@ func validatePropertyValue(def db.IssueProperty, raw json.RawMessage) ([]byte, e
 		// (stable @> containment filtering and change detection).
 		sort.SliceStable(ids, func(a, b int) bool { return order[ids[a]] < order[ids[b]] })
 		return json.Marshal(ids)
+	case "actor":
+		s, ok := v.(string)
+		if !ok {
+			return nil, fmt.Errorf("value must be an actor reference string like \"member:<uuid>\" (kinds: %s)", actorKindsHint())
+		}
+		ref, err := parseActorRef(s)
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal(ref.String())
+	case "multi_actor":
+		items, ok := v.([]any)
+		if !ok {
+			return nil, fmt.Errorf("value must be an array of actor reference strings like \"member:<uuid>\" (kinds: %s)", actorKindsHint())
+		}
+		refs, err := parseActorRefList(items)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]string, len(refs))
+		for i, ref := range refs {
+			out[i] = ref.String()
+		}
+		return json.Marshal(out)
 	default:
 		return nil, fmt.Errorf("unsupported property type %q", def.Type)
 	}
@@ -434,14 +613,7 @@ func describeOptionsInUse(existingConfig []byte, rows []db.CountIssuesUsingPrope
 
 // parseIssueProperties mirrors parseIssueMetadata for the properties bag.
 func parseIssueProperties(raw []byte) map[string]any {
-	if len(raw) == 0 {
-		return map[string]any{}
-	}
-	var out map[string]any
-	if err := json.Unmarshal(raw, &out); err != nil || out == nil {
-		return map[string]any{}
-	}
-	return out
+	return util.JSONObjectOrEmpty(raw)
 }
 
 // ---------------------------------------------------------------------------
@@ -770,6 +942,18 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return fail(http.StatusBadRequest, err.Error())
 		}
+		// Actor values point at another entity, so shape validation isn't
+		// enough: resolve each reference against this workspace before the
+		// write, and reject references the caller isn't allowed to see.
+		if propertyTypeIsActor(def.Type) {
+			refs, err := actorRefsInValue(def.Type, value)
+			if err != nil {
+				return fail(http.StatusBadRequest, err.Error())
+			}
+			if status, msg := h.resolveActorRefs(r, uuidToString(issue.WorkspaceID), refs); status != 0 {
+				return fail(status, msg)
+			}
+		}
 		updated, err = q.SetIssuePropertyValue(r.Context(), db.SetIssuePropertyValueParams{
 			ID:          issue.ID,
 			WorkspaceID: issue.WorkspaceID,
@@ -798,10 +982,11 @@ func (h *Handler) SetIssueProperty(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
 	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id":   uuidToString(updated.ID),
-		"properties": properties,
+		"issue_id":       uuidToString(updated.ID),
+		"properties":     properties,
+		"issue_revision": updated.Revision,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
+	writeJSON(w, http.StatusOK, map[string]any{"properties": properties, "issue_revision": updated.Revision})
 }
 
 func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
@@ -848,10 +1033,11 @@ func (h *Handler) DeleteIssueProperty(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	properties := parseIssueProperties(updated.Properties)
 	h.publish(protocol.EventIssuePropertiesChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id":   uuidToString(updated.ID),
-		"properties": properties,
+		"issue_id":       uuidToString(updated.ID),
+		"properties":     properties,
+		"issue_revision": updated.Revision,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"properties": properties})
+	writeJSON(w, http.StatusOK, map[string]any{"properties": properties, "issue_revision": updated.Revision})
 }
 
 // withPropertyLock runs fn inside a transaction holding the advisory lock
@@ -886,6 +1072,11 @@ func (h *Handler) withPropertyLock(r *http.Request, lockKeys []string, fn func(q
 const (
 	maxPropertiesFilterDefinitions = 20
 	maxPropertiesFilterValues      = 50
+	// noPropertyValue is the filter value that means "unset" — it compiles to a
+	// key-absence predicate instead of a jsonb containment pattern. The string
+	// cannot collide with a real option id (select option ids are UUIDs and
+	// checkbox uses "true"/"false").
+	noPropertyValue = "__none__"
 )
 
 // parsePropertiesFilterParam reads the `properties` query parameter — a JSON
@@ -896,6 +1087,10 @@ const (
 // checkbox. The stored value shape differs per type (string, array element,
 // boolean), so each value expands to every containment form it could match;
 // forms that can't match are simply never satisfied.
+//
+// The special value noPropertyValue ("__none__") means "unset": it emits the
+// marker object {"__none__": "<definitionId>"} that parseNoPropertyValuePattern
+// and the static ListOpenIssues unroll both recognize as a key-absence check.
 //
 // Returns (nil, true) when the parameter is empty.
 func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.RawMessage, bool) {
@@ -935,10 +1130,24 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 			alternatives = append(alternatives, buf)
 			return true
 		}
+		hasNoValue := false
 		for _, value := range values {
 			if value == "" {
 				writeError(w, http.StatusBadRequest, "properties filter values cannot be empty")
 				return nil, false
+			}
+			if value == noPropertyValue {
+				if hasNoValue {
+					continue
+				}
+				marker, err := json.Marshal(map[string]string{noPropertyValue: definitionID})
+				if err != nil {
+					writeError(w, http.StatusBadRequest, "properties filter is invalid")
+					return nil, false
+				}
+				alternatives = append(alternatives, marker)
+				hasNoValue = true
+				continue
 			}
 			if !appendAlt(value) || !appendAlt([]string{value}) { // select string / multi_select element
 				return nil, false
@@ -964,16 +1173,36 @@ func parsePropertiesFilterParam(w http.ResponseWriter, raw string) ([][]json.Raw
 	return groups, true
 }
 
+// parseNoPropertyValuePattern reports whether an alternative is the synthesized
+// "no value" marker — the jsonb object {"__none__": "<definitionId>"} — and
+// returns the definition id whose key-absence the predicate must test.
+func parseNoPropertyValuePattern(alt json.RawMessage) (string, bool) {
+	var marker map[string]string
+	if err := json.Unmarshal(alt, &marker); err != nil {
+		return "", false
+	}
+	defID, ok := marker[noPropertyValue]
+	return defID, ok
+}
+
 // propertiesFilterPredicate renders the AND-of-ORs containment check for a
 // compiled filter as plain `i.properties @> $n` disjunctions with one bind
 // parameter per alternative. Constant containment operands are what lets the
 // planner drive the jsonb_path_ops GIN index (a correlated
 // jsonb_array_elements form defeats it — verified via EXPLAIN in review).
+//
+// A "no value" marker alternative renders as a key-absence disjunction —
+// `NOT (i.properties ? $m)` — which cannot use the GIN index but is exact for
+// the unset state (property values are never null; DELETE unsets).
 func propertiesFilterPredicate(groups [][]json.RawMessage, addArg func(any) string) string {
 	groupSQL := make([]string, 0, len(groups))
 	for _, alternatives := range groups {
 		ors := make([]string, 0, len(alternatives))
 		for _, alt := range alternatives {
+			if defID, ok := parseNoPropertyValuePattern(alt); ok {
+				ors = append(ors, fmt.Sprintf("NOT (i.properties ? %s)", addArg(defID)))
+				continue
+			}
 			ors = append(ors, fmt.Sprintf("i.properties @> %s::jsonb", addArg(string(alt))))
 		}
 		groupSQL = append(groupSQL, "("+strings.Join(ors, " OR ")+")")

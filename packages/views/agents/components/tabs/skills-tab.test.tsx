@@ -51,14 +51,21 @@ vi.mock("@multica/core/api", () => ({
   ApiError,
 }));
 
-vi.mock("@multica/core/runtimes", () => ({
-  runtimeCapabilitiesOptions: (runtimeId: string | null) => ({
-    queryKey: ["runtime-capabilities", runtimeId],
-    queryFn: () => mockRuntimeCapabilities(runtimeId),
-    enabled: Boolean(runtimeId),
-    retry: false,
-  }),
-}));
+vi.mock("@multica/core/runtimes", async () => {
+  const actual =
+    await vi.importActual<typeof import("@multica/core/runtimes")>(
+      "@multica/core/runtimes",
+    );
+  return {
+    ...actual,
+    runtimeCapabilitiesOptions: (runtimeId: string | null) => ({
+      queryKey: ["runtime-capabilities", runtimeId],
+      queryFn: () => mockRuntimeCapabilities(runtimeId),
+      enabled: Boolean(runtimeId),
+      retry: false,
+    }),
+  };
+});
 
 vi.mock("sonner", () => ({
   toast: {

@@ -17,14 +17,12 @@ import {
 import { SortableContext, verticalListSortingStrategy, arrayMove } from "@dnd-kit/sortable";
 import { Virtuoso } from "react-virtuoso";
 import { Button } from "@multica/ui/components/ui/button";
-import type { Issue, IssueStatus, Project } from "@multica/core/types";
-import { useLoadMoreByStatus } from "@multica/core/issues/mutations";
-import type { IssueSortParam, MyIssuesFilter } from "@multica/core/issues/queries";
+import type { Issue, IssueStatusCategory, Project } from "@multica/core/types";
 import { useViewStore } from "@multica/core/issues/stores/view-store-context";
 import { StatusHeading } from "./status-heading";
 import { ListRow, DraggableListRow, type ChildProgress } from "./list-row";
 import { useDragSettle } from "./use-drag-settle";
-import { InfiniteScrollSentinel } from "./infinite-scroll-sentinel";
+import { ListLoadMoreFooter } from "./list-load-more-footer";
 import { useT } from "../../i18n";
 import {
   type DragMoveUpdates,
@@ -33,6 +31,7 @@ import {
   buildColumns,
   computePosition,
   findColumn,
+  getMoveAnchors,
   insertIdByPosition,
   issueMatchesGroup,
   getMoveUpdates,
@@ -40,6 +39,10 @@ import {
 import type { BoardColumnGroup } from "./board-column";
 import { useIssueSurfaceSelection } from "../surface/selection-context";
 import type { IssueCreateDefaults } from "../surface/types";
+import type {
+  IssueStatusPageState,
+  IssueStatusPagination,
+} from "../surface/use-issue-status-branches";
 import { VirtuosoSeed, VIRTUOSO_SEED_COUNT } from "../../common/virtuoso-seed";
 import { DeferredTooltip } from "../../common/deferred-tooltip";
 import { useRestoredScrollRef } from "../../platform";
@@ -53,13 +56,8 @@ const LIST_ROW_ESTIMATED_HEIGHT = 36;
 
 const EMPTY_PROGRESS_MAP = new Map<string, ChildProgress>();
 const EMPTY_IDS: string[] = [];
-// Passed to <Virtuoso components> when there is no Footer. Must be a STABLE
-// object, never `undefined`: react-virtuoso seeds `components` with an internal
-// `{}` default, and an explicit `undefined` prop overwrites that default, so
-// its startup destructure of `EmptyPlaceholder`/`Footer` throws (MUL-4474).
-const EMPTY_VIRTUOSO_COMPONENTS = {};
 
-function buildListGroups(visibleStatuses: IssueStatus[]): BoardColumnGroup[] {
+function buildListGroups(visibleStatuses: IssueStatusCategory[]): BoardColumnGroup[] {
   return visibleStatuses.map((status) => ({
     id: statusGroupId(status),
     title: status,
@@ -73,23 +71,19 @@ function ListViewImpl({
   visibleStatuses,
   childProgressMap = EMPTY_PROGRESS_MAP,
   projectMap,
-  myIssuesScope,
-  myIssuesFilter,
+  statusPagination,
   projectId,
   onMoveIssue,
   onCreateIssue,
-  sort,
 }: {
   issues: Issue[];
-  visibleStatuses: IssueStatus[];
+  visibleStatuses: IssueStatusCategory[];
   childProgressMap?: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  myIssuesScope?: string;
-  myIssuesFilter?: MyIssuesFilter;
+  statusPagination: IssueStatusPagination;
   projectId?: string;
   onMoveIssue?: (issueId: string, updates: DragMoveUpdates, onSettled?: () => void) => void;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
-  sort?: IssueSortParam;
 }) {
   const listCollapsedStatuses = useViewStore(
     (s) => s.listCollapsedStatuses
@@ -112,10 +106,6 @@ function ListViewImpl({
       ),
     [visibleStatuses, listCollapsedStatuses]
   );
-
-  const myIssuesOpts = myIssuesScope
-    ? { scope: myIssuesScope, filter: myIssuesFilter ?? {} }
-    : undefined;
 
   const dragEnabled = !!onMoveIssue;
 
@@ -275,17 +265,24 @@ function ListViewImpl({
         // jumped across when the mutation settled — the same "snaps back, then
         // moves" glitch the board view had. Placement mirrors the cache
         // (insertIdByPosition) so the settle rebuild is a visual no-op.
+        const targetIds = insertIdByPosition(
+          (cols[finalCol] ?? []).filter((id) => id !== activeId),
+          activeId,
+          currentIssue.position,
+          map,
+        );
         setColumns((prev) => {
           const fromIds = (prev[activeCol] ?? []).filter((cid) => cid !== activeId);
-          const toIds = insertIdByPosition(
-            prev[finalCol] ?? [],
-            activeId,
-            currentIssue.position,
-            map,
-          );
-          return { ...prev, [activeCol]: fromIds, [finalCol]: toIds };
+          return { ...prev, [activeCol]: fromIds, [finalCol]: targetIds };
         });
-        onMoveIssue(activeId, getMoveUpdates(finalGroup, currentIssue.position), beginSettle());
+        onMoveIssue(
+          activeId,
+          {
+            ...getMoveUpdates(finalGroup, currentIssue.position, currentIssue),
+            ...getMoveAnchors(targetIds, activeId),
+          },
+          beginSettle(),
+        );
         return;
       }
 
@@ -304,10 +301,32 @@ function ListViewImpl({
       // beginSettle() also bumps settleVersion on settle (board-view did, this
       // branch did not) so a failed position move reverts instead of stranding
       // the row at the drop target.
-      onMoveIssue(activeId, getMoveUpdates(finalGroup, newPosition), beginSettle());
+      onMoveIssue(
+        activeId,
+        {
+          ...getMoveUpdates(finalGroup, newPosition, currentIssue),
+          ...getMoveAnchors(finalIds, activeId),
+        },
+        beginSettle(),
+      );
     },
     [issues, groups, onMoveIssue, groupIds, groupMap, sortBy, beginSettle, setColumns, columnsRef, isDraggingRef],
   );
+
+  // dnd-kit fires onDragCancel — never onDragEnd — when an active drag is
+  // aborted: pointercancel, window resize, tab hide, or Escape. Touch browsers
+  // hit that path constantly, because a scroll gesture that starts on a row
+  // moves past the 5px activation distance and *then* the browser takes the
+  // gesture over for native scrolling and cancels the pointer. Without this
+  // handler `isDraggingRef` stayed true for the rest of the session, which
+  // froze the column mirror against cache updates and — because the accordion's
+  // onValueChange is guarded by the same ref — made tapping a status header a
+  // no-op, so groups could no longer be collapsed at all (MUL-6240).
+  const handleDragCancel = useCallback(() => {
+    isDraggingRef.current = false;
+    setActiveIssue(null);
+    setColumns(buildColumns(issues, groups, "status"));
+  }, [issues, groups, setColumns, isDraggingRef]);
 
   // The single scroll container is shared by every status panel's Virtuoso as
   // its customScrollParent, so a callback ref hands the element to the panels
@@ -338,7 +357,7 @@ function ListViewImpl({
           const wasExpanded = expandedStatuses.includes(status);
           const isExpanded = value.includes(status);
           if (wasExpanded !== isExpanded) {
-            toggleListCollapsed(status as IssueStatus);
+            toggleListCollapsed(status as IssueStatusCategory);
           }
         }
       }}
@@ -353,13 +372,12 @@ function ListViewImpl({
             issueMap={issueMapRef.current}
             childProgressMap={childProgressMap}
             projectMap={projectMap}
-            myIssuesOpts={myIssuesOpts}
+            page={statusPagination[status]}
             projectId={projectId}
             onCreateIssue={onCreateIssue}
             dragEnabled={dragEnabled}
             isExpanded={isExpanded}
             sortLabel={sortLabel}
-            sort={sort}
             scrollParent={scrollEl}
           />
         );
@@ -382,6 +400,7 @@ function ListViewImpl({
       onDragStart={handleDragStart}
       onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
+      onDragCancel={handleDragCancel}
     >
       <div ref={attachScroller} data-tab-scroll-root="list" className="flex-1 min-h-0 overflow-y-auto p-2 pt-0">
         {content}
@@ -390,8 +409,8 @@ function ListViewImpl({
       <DragOverlay dropAnimation={null}>
         {activeIssue ? (
           <div className="max-w-2xl rotate-1 cursor-grabbing opacity-90 shadow-lg shadow-black/10 rounded-md border border-border bg-card px-4 py-2">
-            <span className="text-xs text-muted-foreground mr-2">{activeIssue.identifier}</span>
-            <span className="text-sm">{activeIssue.title}</span>
+            <span className="text-caption text-muted-foreground mr-2">{activeIssue.identifier}</span>
+            <span className="text-body">{activeIssue.title}</span>
           </div>
         ) : null}
       </DragOverlay>
@@ -405,27 +424,25 @@ function StatusAccordionItem({
   issueMap,
   childProgressMap,
   projectMap,
-  myIssuesOpts,
+  page,
   projectId,
   onCreateIssue,
   dragEnabled,
   isExpanded,
   sortLabel,
-  sort,
   scrollParent,
 }: {
-  status: IssueStatus;
+  status: IssueStatusCategory;
   issueIds: string[];
   issueMap: Map<string, Issue>;
   childProgressMap: Map<string, ChildProgress>;
   projectMap?: Map<string, Project>;
-  myIssuesOpts?: { scope: string; filter: MyIssuesFilter };
+  page: IssueStatusPageState;
   projectId?: string;
   onCreateIssue?: (defaults: IssueCreateDefaults) => void;
   dragEnabled: boolean;
   isExpanded: boolean;
   sortLabel: string | null;
-  sort?: IssueSortParam;
   scrollParent: HTMLElement | null;
 }) {
   const { t } = useT("issues");
@@ -433,11 +450,6 @@ function StatusAccordionItem({
   const selectedIds = selection.selectedIds;
   const select = selection.select;
   const deselect = selection.deselect;
-  const { loadMore, hasMore, isLoading, total } = useLoadMoreByStatus(
-    status,
-    myIssuesOpts,
-    sort,
-  );
 
   const issues = useMemo(
     () => issueIds.flatMap((id) => {
@@ -461,11 +473,22 @@ function StatusAccordionItem({
   // The infinite-scroll sentinel rides Virtuoso's Footer so it sits at the true
   // end of the virtualized rows and still fires loadMore when scrolled to it.
   const listComponents = useMemo(
-    () =>
-      hasMore
-        ? { Footer: () => <InfiniteScrollSentinel onVisible={loadMore} loading={isLoading} /> }
-        : EMPTY_VIRTUOSO_COMPONENTS,
-    [hasMore, loadMore, isLoading],
+    () => ({
+      // Always a non-undefined object: react-virtuoso throws if `components`
+      // is ever undefined (MUL-4474). The footer itself renders null for a
+      // short, non-paginated section.
+      Footer: () => (
+        <ListLoadMoreFooter
+          hasMore={page.hasMore}
+          isLoading={page.isLoading || page.isFetching}
+          total={page.total}
+          onLoadMore={page.loadMore}
+          isError={page.isError}
+          onRetry={page.retry}
+        />
+      ),
+    }),
+    [page],
   );
 
   const computeItemKey = (_index: number, issue: Issue) => issue.id;
@@ -549,7 +572,7 @@ function StatusAccordionItem({
         </div>
         <Accordion.Trigger className="group/trigger flex flex-1 items-center gap-2 px-2 h-full text-left outline-none cursor-pointer">
           <ChevronRight className="size-3.5 shrink-0 text-muted-foreground transition-transform group-aria-expanded/trigger:rotate-90" />
-          <StatusHeading status={status} count={total} />
+          <StatusHeading status={status} count={page.total} />
         </Accordion.Trigger>
         {onCreateIssue && (
           <div className="pr-2">
@@ -586,7 +609,7 @@ function StatusAccordionItem({
             rows
           )
         ) : (
-          <p className="py-6 text-center text-xs text-muted-foreground">
+          <p className="py-6 text-center text-caption text-muted-foreground">
             {t(($) => $.list.empty_status)}
           </p>
         )}

@@ -41,15 +41,29 @@ vi.mock("@multica/core/hooks", () => ({
 
 // custom-pricing-store is consumed two ways: usage-section reads the store
 // hook, and runtimes/utils reads getCustomPricing(). The hook must be both
-// callable and expose getState(), mirroring a real Zustand store.
+// callable and expose getState(), mirroring a real Zustand store. Backed by
+// a mutable holder so a test can seed saved overrides — with a hard-coded
+// empty store, `collectUnmappedModels` can never see an override and the
+// "saved rates stay editable" path below would be untestable.
+const pricingState = vi.hoisted(() => ({
+  pricings: {} as Record<string, unknown>,
+}));
+
 vi.mock("@multica/core/runtimes/custom-pricing-store", () => {
-  const state = { pricings: {} as Record<string, unknown> };
   const useCustomPricingStore = Object.assign(
-    (sel?: (s: typeof state) => unknown) => (sel ? sel(state) : state),
-    { getState: () => state },
+    (sel?: (s: typeof pricingState) => unknown) =>
+      sel ? sel(pricingState) : pricingState,
+    { getState: () => pricingState },
   );
-  return { useCustomPricingStore, getCustomPricing: () => undefined };
+  return {
+    useCustomPricingStore,
+    getCustomPricing: (model: string) => pricingState.pricings[model],
+  };
 });
+
+// Lets a test swap in its own usage rows (e.g. an unpriced model) without
+// re-mocking the whole query layer. `null` keeps the default fixture.
+const usageOverride = vi.hoisted(() => ({ rows: null as unknown[] | null }));
 
 // useQuery is mocked so the component renders synchronously with canned
 // data — the `kind` tag on each query-options object routes the response.
@@ -88,7 +102,7 @@ vi.mock("@tanstack/react-query", async () => {
   return {
     ...actual,
     useQuery: (opts: { kind?: string }) => ({
-      data: opts?.kind === "usage" ? usageRows : [],
+      data: opts?.kind === "usage" ? (usageOverride.rows ?? usageRows) : [],
       isLoading: false,
     }),
   };
@@ -179,5 +193,69 @@ describe("UsageSection — Viewing timezone wiring", () => {
     fireEvent.click(screen.getByRole("button", { name: "7d" }));
 
     expect(flows.at(-1)).toHaveAttribute("aria-label", "1K");
+  });
+});
+
+describe("UsageSection — custom-pricing entry point", () => {
+  // A model that no maintained row prices, so it lands in the unmapped
+  // diagnostic. `collectUnmappedModels` keys it by provider, so the saved
+  // override below must use the same `acme/…` key the dialog would store.
+  const UNPRICED_KEY = "acme/made-up-model-9";
+  const unpricedRows = [
+    {
+      runtime_id: "r-1",
+      date: new Date().toISOString().slice(0, 10),
+      provider: "acme",
+      model: "made-up-model-9",
+      input_tokens: 1_000,
+      output_tokens: 500,
+      cache_read_tokens: 0,
+      cache_write_tokens: 0,
+    },
+  ];
+
+  beforeEach(() => {
+    usageOverride.rows = null;
+    pricingState.pricings = {};
+  });
+
+  it("stays hidden when every model resolves and nothing is overridden", () => {
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(
+      screen.queryByRole("button", { name: "Set custom prices" }),
+    ).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Edit custom prices" }),
+    ).toBeNull();
+  });
+
+  it("warns and offers the dialog while a model is unpriced", () => {
+    usageOverride.rows = unpricedRows;
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.getByRole("alert")).toHaveTextContent(UNPRICED_KEY);
+    expect(
+      screen.getByRole("button", { name: "Set custom prices" }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps the dialog reachable after the last override is saved", () => {
+    // Regression: a saved override makes the model resolve, so the window
+    // has nothing unmapped left. Gating the bar on "something is unmapped"
+    // used to remove the only entry point here, stranding the user with
+    // rates they could no longer edit or delete.
+    usageOverride.rows = unpricedRows;
+    pricingState.pricings = {
+      [UNPRICED_KEY]: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1 },
+    };
+
+    render(<UsageSection runtime={RUNTIME} />, { wrapper: Wrapper });
+
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(
+      screen.getByRole("button", { name: "Edit custom prices" }),
+    ).toBeInTheDocument();
   });
 });

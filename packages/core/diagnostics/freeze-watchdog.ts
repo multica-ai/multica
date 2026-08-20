@@ -18,6 +18,7 @@
 // platform branch here.
 
 import { captureEvent } from "../analytics";
+import { getDiagnosticRoute } from "./diagnostic-context";
 
 // 2s is well above the normal switch/render cost (measured 50–600ms) and just
 // under Electron's renderer-hang threshold, so an event here means "the user
@@ -59,7 +60,7 @@ export function installFreezeWatchdog(): void {
         captureEvent("client_unresponsive", {
           source: "longtask",
           duration_ms: Math.round(entry.duration),
-          path: typeof location !== "undefined" ? location.pathname : undefined,
+          path: resolveDiagnosticPath(),
         });
       }
     });
@@ -69,4 +70,18 @@ export function installFreezeWatchdog(): void {
   } catch {
     // longtask entry type unsupported on this engine — nothing else to do.
   }
+}
+
+/**
+ * Which page the freeze happened on.
+ *
+ * The desktop shell publishes its memory-router route, because
+ * `location.pathname` there is the packaged `index.html` path and identifies
+ * nothing. Web publishes no route and falls back to the real URL, which is
+ * already the right answer.
+ */
+function resolveDiagnosticPath(): string | undefined {
+  const route = getDiagnosticRoute();
+  if (route) return route;
+  return typeof location !== "undefined" ? location.pathname : undefined;
 }

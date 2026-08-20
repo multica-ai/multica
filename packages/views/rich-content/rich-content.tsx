@@ -34,12 +34,13 @@ import ReactMarkdown, {
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 import rehypeKatex from "rehype-katex";
 import remarkBreaks from "remark-breaks";
+import remarkCjkFriendly from "remark-cjk-friendly/parseOnly";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeRaw from "rehype-raw";
 import rehypeSanitize from "rehype-sanitize";
 import { cn } from "@multica/ui/lib/utils";
-import { useWorkspacePaths, useWorkspaceSlug } from "@multica/core/paths";
+import { useWorkspaceSlug } from "@multica/core/paths";
 import { useConfigStore } from "@multica/core/config";
 import type { Attachment } from "@multica/core/types";
 import {
@@ -48,17 +49,27 @@ import {
   markdownSanitizeSchema,
   markdownUrlTransform,
 } from "@multica/ui/markdown";
-import { AppLink } from "../navigation";
+import {
+  resolveClickIntent,
+  useAppOrigin,
+  useOptionalNavigation,
+} from "../navigation";
 import { IssueMentionCard } from "../issues/components/issue-mention-card";
 import { useResolveIssueIdentifier } from "../issues/hooks";
-import { ProjectChip } from "../projects/components/project-chip";
+import { ProjectMentionCard } from "../projects/components/project-mention-card";
 import { useLinkHover, LinkHoverCard } from "../editor/link-hover-card";
-import { openLink, isMentionHref } from "../editor/utils/link-handler";
+import {
+  openLink,
+  isMentionHref,
+  parseWorkspaceEntityLink,
+  type WorkspaceEntityRef,
+} from "../editor/utils/link-handler";
 import { preprocessMarkdown } from "../editor/utils/preprocess";
 import { highlightToHtml } from "../editor/utils/highlight-markdown";
 import { AttachmentDownloadProvider } from "../editor/attachment-download-context";
 import { Attachment as AttachmentRenderer } from "../editor/attachment";
 import { computeClosedFenceOffsets } from "./streaming-fence";
+import { remarkRepairCjkStrongTrailingWhitespace } from "./cjk-emphasis";
 import {
   CodeBlockShell,
   RichFenceBlock,
@@ -111,46 +122,43 @@ function IssueMentionLink({ issueId, label }: { issueId: string; label?: string 
 }
 
 /**
- * Autolinked bare identifier (e.g. `MUL-123`) routed through
- * `mention://issue/<identifier>` by the preprocessor. Resolves to a real issue
- * in the current workspace; renders a navigable mention on a hit, plain text on
- * a miss / while loading / cross-workspace.
+ * An issue addressed by identifier (e.g. `MUL-123`) rather than by UUID.
+ * Resolves it against the current workspace and renders a navigable mention on
+ * a hit.
+ *
+ * Two entry points reach this, and they need DIFFERENT misses, which is why the
+ * fallback is a prop rather than baked in:
+ *   - the autolink preprocessor, which routes bare prose through
+ *     `mention://issue/<identifier>` — a miss must go back to being the plain
+ *     text the author typed;
+ *   - a bare in-app issue URL, whose miss must stay the original anchor. The
+ *     author wrote a link; degrading it to text would strip a working link off
+ *     an issue this workspace simply cannot see.
+ *
+ * A miss covers not-found, still-loading, and cross-workspace alike.
  */
-function AutolinkedIssueMentionLink({ identifier }: { identifier: string }) {
+function IdentifierIssueMentionLink({
+  identifier,
+  fallback,
+}: {
+  identifier: string;
+  fallback: ReactNode;
+}) {
   const issue = useResolveIssueIdentifier(identifier);
-  if (!issue) return <>{identifier}</>;
+  if (!issue) return <>{fallback}</>;
   return <IssueMentionLink issueId={issue.id} label={identifier} />;
 }
 
 /**
- * Project mention chip.
- *
- * Rendered as a real anchor via AppLink, matching IssueMentionCard: a mention is
- * a link, so it must be reachable by Tab and activatable by Enter, and expose a
- * URL to copy / open in a new tab. A `<span onClick>` looks identical and works
- * for a mouse, which is exactly why the regression is easy to miss — the readonly
- * renderer used one, and unifying the surfaces would have propagated it to Chat,
- * which previously had the accessible version.
- *
- * AppLink also owns plain-click, modifier-click and the desktop new-tab adapter,
- * so none of that is reimplemented here. The wrapper only shields surrounding
- * click handlers (e.g. collapsed-comment expanders) from mention clicks.
+ * Project mention chip. Navigation and accessibility are owned by the AppLink
+ * inside ProjectMentionCard; the wrapper only shields surrounding click
+ * handlers (e.g. collapsed-comment expanders) from mention clicks — the same
+ * shape as IssueMentionLink above.
  */
 function ProjectMentionLink({ projectId, label }: { projectId: string; label?: string }) {
-  const p = useWorkspacePaths();
   return (
     <span className="inline align-middle" onClick={(e) => e.stopPropagation()}>
-      <AppLink
-        href={p.projectDetail(projectId)}
-        newTabTitle={label}
-        className="project-mention not-prose inline-flex"
-      >
-        <ProjectChip
-          projectId={projectId}
-          fallbackLabel={label}
-          className="cursor-pointer hover:bg-accent transition-colors"
-        />
-      </AppLink>
+      <ProjectMentionCard projectId={projectId} fallbackLabel={label} />
     </span>
   );
 }
@@ -161,8 +169,48 @@ function childrenToLabel(children: ReactNode): string | undefined {
   return undefined;
 }
 
+/**
+ * Decide whether a link should render as an entity chip instead of a raw URL.
+ *
+ * Pasting a link copied out of the app is how people reference a project:
+ * projects carry only a UUID and a free-text title, so unlike an issue they have
+ * no `MUL-123` shorthand for the autolink preprocessor to detect — the URL IS
+ * the reference. Rendering it as the same chip the `mention://project/<uuid>`
+ * form produces closes that gap without inventing a new text form. Issue URLs
+ * go through the same path for symmetry.
+ *
+ * Three conditions, each load-bearing:
+ *   - BARE: the visible text is the URL itself, which is what the linkify
+ *     preprocessor emits for a pasted URL. `[路线图](…/projects/<id>)` carries a
+ *     label the author chose, and replacing it with a chip would discard it.
+ *   - SAME WORKSPACE: a chip resolves its title against the CURRENT workspace,
+ *     so unfurling a link into another workspace would turn a working link into
+ *     a permanently empty chip. A slug-less path is current-workspace already.
+ *   - Whatever `parseWorkspaceEntityLink` enforces: an exact entity route, an id
+ *     that addresses one entity (a UUID, or an issue identifier), and no query
+ *     string or fragment.
+ */
+function unfurlableEntityLink(
+  href: string,
+  children: ReactNode,
+  currentSlug: string | null,
+  appOrigin: string | null,
+): WorkspaceEntityRef | null {
+  if (childrenToLabel(children) !== href) return null;
+  const entity = parseWorkspaceEntityLink(href, appOrigin);
+  if (!entity) return null;
+  if (entity.slug !== null && entity.slug !== currentSlug) return null;
+  return entity;
+}
+
 function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
   const slug = useWorkspaceSlug();
+  const appOrigin = useAppOrigin();
+  // Platform probe only: `openInNewTab` present means desktop, where native
+  // anchor behavior is a dead end and every click must be intercepted. Absent
+  // (web), modified clicks are left to the browser — the only way to get a
+  // real background tab.
+  const desktopTabs = !!useOptionalNavigation()?.openInNewTab;
 
   if (href?.startsWith("slash://skill/")) {
     return <span className="slash-command">{children}</span>;
@@ -174,7 +222,12 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
       // A bare identifier (from the autolink preprocessor) is carried as the id
       // segment; a real mention carries a UUID. Dispatch on the id shape.
       if (isIssueIdentifier(match[2])) {
-        return <AutolinkedIssueMentionLink identifier={match[2]} />;
+        return (
+          <IdentifierIssueMentionLink
+            identifier={match[2]}
+            fallback={match[2]}
+          />
+        );
       }
       return <IssueMentionLink issueId={match[2]} label={childrenToLabel(children)} />;
     }
@@ -185,18 +238,54 @@ function RichLink({ href, children }: { href?: string; children?: ReactNode }) {
     return <span className="mention">{children}</span>;
   }
 
-  // Regular links — open directly on click
-  return (
+  // Regular link — open directly on click. A URL pointing back at this
+  // deployment routes in-app rather than out to the browser. Built first
+  // because it is also what an unfurl falls back to when the entity behind the
+  // URL cannot be resolved.
+  const plainLink = (
     <a
       href={href}
       onClick={(e) => {
+        if (!href) {
+          e.preventDefault();
+          return;
+        }
+        if (!desktopTabs && (e.metaKey || e.ctrlKey || e.shiftKey)) return;
         e.preventDefault();
-        if (href) openLink(href, slug);
+        openLink(href, slug, appOrigin, resolveClickIntent(e));
+      }}
+      onAuxClick={(e) => {
+        if (e.button !== 1 || !href) return;
+        // Web: native middle click on a real anchor already opens a
+        // background tab. Desktop: the native window-open request dead-ends
+        // (denied, then dropped by the http/https allowlist), so route it.
+        if (!desktopTabs) return;
+        e.preventDefault();
+        openLink(href, slug, appOrigin, "background-tab");
       }}
     >
       {children}
     </a>
   );
+
+  // A bare in-app entity URL renders as the chip its mention form would.
+  const entity = href
+    ? unfurlableEntityLink(href, children, slug, appOrigin)
+    : null;
+  if (entity?.kind === "issue") {
+    // `MUL-123` is the shape "Copy link" produces, so it is the shape most
+    // pasted issue URLs carry; it needs a lookup, and keeps the link on a miss.
+    return isIssueIdentifier(entity.id) ? (
+      <IdentifierIssueMentionLink identifier={entity.id} fallback={plainLink} />
+    ) : (
+      <IssueMentionLink issueId={entity.id} />
+    );
+  }
+  if (entity?.kind === "project") {
+    return <ProjectMentionLink projectId={entity.id} />;
+  }
+
+  return plainLink;
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +466,8 @@ const REMARK_PLUGINS = [
   [remarkMath, { singleDollarTextMath: false }],
   remarkBreaks,
   [remarkGfm, { singleTilde: false }],
+  remarkCjkFriendly,
+  remarkRepairCjkStrongTrailingWhitespace,
 ] satisfies NonNullable<ReactMarkdownOptions["remarkPlugins"]>;
 
 const REHYPE_PLUGINS = [
@@ -473,7 +564,7 @@ export const RichContent = memo(function RichContent({
         data-density={density}
         data-phase={phase}
         className={cn(
-          "rich-text-editor readonly text-sm",
+          "rich-text-editor readonly text-body",
           density === "compact" && "rich-content-compact",
           className,
         )}

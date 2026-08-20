@@ -33,5 +33,5 @@
 // which is already a server-level dependency.
 //
 // See server/pkg/featureflag/service.go for the public Service API and
-// docs/feature-flags.md for end-to-end usage examples.
+// the package tests for end-to-end usage examples.
 package featureflag

@@ -9,6 +9,13 @@
     "archive_all_read": "Archive all read",
     "archive_completed": "Archive completed"
   },
+  "context_menu": {
+    "mark_read": "Mark as read",
+    "mark_unread": "Mark as unread",
+    "archive": "Archive",
+    "unarchive": "Unarchive",
+    "open_in_new_tab": "Open in new tab"
+  },
   "list": {
     "empty": "No notifications",
     "mark_done_tooltip": "Mark as done",
@@ -21,7 +28,8 @@
     },
     "archived_title": "Archived",
     "archived_empty": "No archived notifications",
-    "unarchive_tooltip": "Unarchive"
+    "unarchive_tooltip": "Unarchive",
+    "actions_aria": "Notification actions"
   },
   "detail": {
     "select_prompt": "Select a notification to view details",
@@ -49,7 +57,8 @@
     "agent_completed": "Agent completed",
     "reaction_added": "Reacted",
     "quick_create_done": "Created with agent",
-    "quick_create_failed": "Create with agent failed"
+    "quick_create_failed": "Create with agent failed",
+    "quick_create_unconfirmed": "Create with agent unconfirmed"
   },
   "labels": {
     "set_status_to": "Set status to",
@@ -64,8 +73,13 @@
     "created_with_agent": "Created with agent: {{identifier}}",
     "failed_with_detail": "Failed: {{detail}}"
   },
+  "toasts": {
+    "archived": "Notification archived",
+    "unarchived": "Notification restored"
+  },
   "errors": {
     "mark_read_failed": "Failed to mark as read",
+    "mark_unread_failed": "Failed to mark as unread",
     "archive_failed": "Failed to archive",
     "mark_done_failed": "Failed to mark as done",
     "mark_all_read_failed": "Failed to mark all as read",

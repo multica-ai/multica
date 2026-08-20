@@ -1,0 +1,20 @@
+{
+  "manifest_version": 1,
+  "key": "ai.multica.hello-panel",
+  "name": "Hello Panel",
+  "description": "The reference surface: reads the current issue, posts a comment, and stores a per-member note.",
+  "version": "1.0.0",
+  "author": { "name": "multica", "url": "https://multica.ai" },
+  "scopes": ["issues:read", "comments:write", "storage:user"],
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "hello",
+        "type": "issue_panel",
+        "name": "Hello",
+        "entry": "ui/main.js",
+        "platforms": ["web", "desktop"]
+      }
+    ]
+  }
+}

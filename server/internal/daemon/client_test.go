@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"time"
 
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -36,6 +38,11 @@ func TestClient_IdentityHeaders_PostJSON(t *testing.T) {
 		for _, want := range []string{
 			protocol.DaemonCapabilitySkillBundlesV1,
 			protocol.DaemonCapabilityCoalescedCommentsV1,
+			// The worktree gate is decided entirely from this header: if the
+			// daemon stops advertising it, every worktree task on this machine
+			// is cancelled with an upgrade prompt (MUL-5707). Pin it here so
+			// dropping it from the list can never be a silent change.
+			protocol.DaemonCapabilityLocalWorktreeV1,
 		} {
 			if !capabilities[want] {
 				t.Errorf("X-Client-Capabilities missing %q: %v", want, capabilities)
@@ -78,6 +85,65 @@ func TestClient_IdentityHeaders_GetJSON(t *testing.T) {
 	var out map[string]any
 	if err := c.getJSON(context.Background(), "/api/daemon/test", &out); err != nil {
 		t.Fatalf("getJSON: %v", err)
+	}
+}
+
+func TestClient_ResolveRemoteMCPCredentialUsesExplicitDaemonToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer mdt_task_broker" {
+			t.Errorf("Authorization = %q, want short-lived daemon token", got)
+		}
+		if got := r.URL.Path; got != "/api/daemon/tasks/task-1/remote-mcp/contribution-1/credential" {
+			t.Errorf("path = %q", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"credential_header":"Authorization","credential":"Bearer upstream"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	c.SetToken("mul_owner_pat")
+	headers, err := c.ResolveRemoteMCPCredential(context.Background(), "mdt_task_broker", "task-1", "contribution-1")
+	if err != nil {
+		t.Fatalf("ResolveRemoteMCPCredential: %v", err)
+	}
+	if got := headers.Get("Authorization"); got != "Bearer upstream" {
+		t.Fatalf("resolved credential = %q", got)
+	}
+	if got := c.Token(); got != "mul_owner_pat" {
+		t.Fatalf("client PAT was mutated to %q", got)
+	}
+}
+
+// A Plugin's mcp hook shares this resolver and this broker with a workspace's
+// own Remote MCP connections, but its credential lives in the Plugin's secret
+// storage and a different route serves it. The contribution id is all the
+// broker hands back at dial time, so the id carries the marker — and a
+// connection without it must keep going to the original route.
+func TestClient_ResolveRemoteMCPCredentialRoutesPluginContributions(t *testing.T) {
+	var seen []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"credential_header":"Authorization","credential":"Bearer upstream"}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	for _, contribution := range []string{"contribution-1", remotemcp.PluginContributionPrefix + "install-1:toolbox"} {
+		if _, err := c.ResolveRemoteMCPCredential(context.Background(), "mdt_task_broker", "task-1", contribution); err != nil {
+			t.Fatalf("resolve %q: %v", contribution, err)
+		}
+	}
+
+	want := []string{
+		"/api/daemon/tasks/task-1/remote-mcp/contribution-1/credential",
+		"/api/daemon/tasks/task-1/plugin-mcp/plugin:install-1:toolbox/credential",
+	}
+	for i, path := range want {
+		if seen[i] != path {
+			t.Fatalf("request %d went to %q, want %q", i, seen[i], path)
+		}
 	}
 }
 
@@ -270,6 +336,34 @@ func TestPostJSONWithRetry_TransientThenSuccess(t *testing.T) {
 	}
 }
 
+// TestFailTask_RetriesOnTransient5xxThenSucceeds pins the callback half of
+// MUL-5305 Must-fix 1: FailTask's terminal transaction is now the sole
+// persistence point for the withheld session and continuity-gap flag, so if the
+// server returns a transient 5xx (the terminal tx rolled back), the daemon MUST
+// retry until it lands — a 400 would make it bail immediately
+// (TestPostJSONWithRetry_PermanentBailsImmediately) and drop the gap forever.
+func TestFailTask_RetriesOnTransient5xxThenSucceeds(t *testing.T) {
+	defer noSleepRetry(t)()
+
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) < 3 {
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	if err := c.FailTask(context.Background(), "task-1", "boom", "", "", "", "timeout", true, "", ""); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+	if got := calls.Load(); got != 3 {
+		t.Fatalf("expected 3 attempts (2 transient 5xx + 1 success), got %d", got)
+	}
+}
+
 func TestPostJSONWithRetry_TransientExhausts(t *testing.T) {
 	defer noSleepRetry(t)()
 
@@ -373,5 +467,115 @@ func TestNormalizeGOOS(t *testing.T) {
 		if got := normalizeGOOS(in); got != want {
 			t.Errorf("normalizeGOOS(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// TestTerminalReportsCarryRetiredSessionID pins the daemon half of the
+// retire-session contract (GH #6066). Before it, a terminal report could only
+// say "here is a session" or say nothing — and saying nothing was how a
+// recovered turn silently left the poisoned id selectable. The completed path
+// matters most: that is exactly the case where a fresh-session retry SUCCEEDED
+// and the abandoned transcript would otherwise survive on an older row.
+func TestTerminalReportsCarryRetiredSessionID(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		endpoint string
+		call     func(*Client) error
+	}{
+		{
+			name:     "complete",
+			endpoint: "/api/daemon/tasks/task-1/complete",
+			call: func(c *Client) error {
+				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "POISONED-S", "")
+			},
+		},
+		{
+			name:     "fail",
+			endpoint: "/api/daemon/tasks/task-1/fail",
+			call: func(c *Client) error {
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "api_invalid_request", false, "POISONED-S", "")
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != tc.endpoint {
+					t.Errorf("unexpected path %q", r.URL.Path)
+				}
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			if err := tc.call(NewClient(srv.URL)); err != nil {
+				t.Fatalf("terminal report: %v", err)
+			}
+			if got, _ := body["retired_session_id"].(string); got != "POISONED-S" {
+				t.Fatalf("retired_session_id = %v, want POISONED-S (body: %v)", body["retired_session_id"], body)
+			}
+		})
+	}
+}
+
+// TestTerminalReportsOmitEmptyRetiredSessionID keeps the common case off the
+// wire: nearly every run retires nothing, and an empty field would be
+// indistinguishable from "retire the empty session".
+func TestTerminalReportsOmitEmptyRetiredSessionID(t *testing.T) {
+	var body map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	if err := NewClient(srv.URL).CompleteTask(context.Background(), "task-1", "done", "", "sess-1", "/tmp/wd", false, "", ""); err != nil {
+		t.Fatalf("CompleteTask: %v", err)
+	}
+	if _, present := body["retired_session_id"]; present {
+		t.Fatalf("retired_session_id must be omitted when nothing was retired, got %v", body)
+	}
+}
+
+func TestTerminalReportsCarryDurableWorkDir(t *testing.T) {
+	const durableWorkDir = "/Users/dev/project"
+	for _, tc := range []struct {
+		name string
+		call func(*Client) error
+	}{
+		{
+			name: "complete",
+			call: func(c *Client) error {
+				return c.CompleteTask(context.Background(), "task-1", "done", "", "", "/tmp/wd", false, "", durableWorkDir)
+			},
+		},
+		{
+			name: "fail",
+			call: func(c *Client) error {
+				return c.FailTask(context.Background(), "task-1", "boom", "", "/tmp/wd", "", "agent_error", false, "", durableWorkDir)
+			},
+		},
+		{
+			name: "cancel ack",
+			call: func(c *Client) error {
+				return c.AckTaskCancelled(context.Background(), "task-1", TaskCancelAck{DurableWorkDir: durableWorkDir})
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var body map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_ = json.NewDecoder(r.Body).Decode(&body)
+				w.WriteHeader(http.StatusOK)
+			}))
+			defer srv.Close()
+
+			if err := tc.call(NewClient(srv.URL)); err != nil {
+				t.Fatalf("terminal report: %v", err)
+			}
+			if got := body["durable_work_dir"]; got != durableWorkDir {
+				t.Fatalf("durable_work_dir = %v, want %q (body: %v)", got, durableWorkDir, body)
+			}
+		})
 	}
 }

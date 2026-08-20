@@ -328,6 +328,14 @@ func (h *Hub) NotifyWorkspacesChanged(userID string) {
 	h.notifyWorkspacesChanged(userID, "")
 }
 
+// NotifyPendingWork tells daemons watching runtimeID that a heartbeat-carried
+// request is queued, so they can heartbeat now instead of waiting for the next
+// scheduled tick (MUL-5444). Best-effort like every other hub notification: the
+// daemon's own heartbeat schedule remains the correctness path.
+func (h *Hub) NotifyPendingWork(runtimeID, kind string) {
+	h.notifyPendingWork(runtimeID, kind, "")
+}
+
 func (h *Hub) notifyTaskAvailable(runtimeID, taskID, eventID string) {
 	if h == nil || runtimeID == "" {
 		return
@@ -364,6 +372,22 @@ func (h *Hub) notifyWorkspacesChanged(userID, eventID string) {
 		return
 	}
 	h.notifyUserFrame(userID, data, eventID)
+}
+
+func (h *Hub) notifyPendingWork(runtimeID, kind, eventID string) {
+	if h == nil || runtimeID == "" {
+		return
+	}
+	data, err := pendingWorkFrame(runtimeID, kind)
+	if err != nil {
+		return
+	}
+	delivered, deduped := h.notifyFrame(runtimeID, data, eventID)
+	if delivered {
+		M.WakeupDeliveredHit.Add(1)
+	} else if !deduped {
+		M.WakeupDeliveredMiss.Add(1)
+	}
 }
 
 func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string) {
@@ -406,6 +430,19 @@ func (h *Hub) DeliverDaemonRuntime(scopeID string, frame []byte, eventID string)
 		}
 	case protocol.EventDaemonWorkspacesChanged:
 		delivered, deduped := h.notifyUserFrame(scopeID, frame, eventID)
+		if delivered {
+			M.WakeupDeliveredHit.Add(1)
+		} else if !deduped {
+			M.WakeupDeliveredMiss.Add(1)
+		}
+	case protocol.EventDaemonPendingWork:
+		var payload protocol.PendingWorkPayload
+		if err := json.Unmarshal(msg.Payload, &payload); err != nil || payload.RuntimeID == "" {
+			slog.Debug("daemon websocket relay: invalid pending_work payload", "error", err, "scope_id", scopeID, "event_id", eventID)
+			M.WakeupDeliveredMiss.Add(1)
+			return
+		}
+		delivered, deduped := h.notifyFrame(payload.RuntimeID, frame, eventID)
 		if delivered {
 			M.WakeupDeliveredHit.Add(1)
 		} else if !deduped {
@@ -525,6 +562,16 @@ func workspacesChangedFrame() ([]byte, error) {
 	return json.Marshal(protocol.Message{
 		Type:    protocol.EventDaemonWorkspacesChanged,
 		Payload: mustMarshalRaw(protocol.WorkspacesChangedPayload{}),
+	})
+}
+
+func pendingWorkFrame(runtimeID, kind string) ([]byte, error) {
+	return json.Marshal(protocol.Message{
+		Type: protocol.EventDaemonPendingWork,
+		Payload: mustMarshalRaw(protocol.PendingWorkPayload{
+			RuntimeID: runtimeID,
+			Kind:      kind,
+		}),
 	})
 }
 

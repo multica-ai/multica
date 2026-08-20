@@ -2,58 +2,40 @@
 
 import { cleanup, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AgentTask, Issue } from "@multica/core/types";
+import type { WorkingAgentSummary } from "@multica/core/types";
 import { renderWithI18n } from "../../test/i18n";
 
 const mockState = vi.hoisted(() => ({
-  snapshot: [] as unknown[],
-  // Captures what the chip hands its children so a test can assert the
-  // avatar stack, the hover card and the colour tier without reaching into
-  // their internals.
-  avatarAgentIds: undefined as string[] | undefined,
-  avatarOverflow: undefined as string | undefined,
+  avatarAgentIds: undefined as readonly string[] | undefined,
   buttonVariant: undefined as string | undefined,
-  hoverProps: undefined as
-    | { issues: readonly Issue[]; taskCount: number }
-    | undefined,
 }));
 
-vi.mock("@multica/core/hooks", () => ({
-  useWorkspaceId: () => "ws-1",
-}));
-
-vi.mock("@multica/core/agents", () => ({
-  agentTaskSnapshotOptions: (wsId: string) => ({
-    queryKey: ["agents", "task-snapshot", wsId],
+vi.mock("@multica/core/workspace/hooks", () => ({
+  useActorName: () => ({
+    getActorName: (_type: string, id: string) => `Agent ${id}`,
+    getActorInitials: () => "AG",
+    getActorAvatarUrl: () => null,
   }),
 }));
 
 vi.mock("../../agents/components/agent-avatar-stack", () => ({
-  AgentAvatarStack: ({
-    agentIds,
-    overflow,
-  }: {
-    agentIds: string[];
-    overflow?: string;
-  }) => {
+  AgentAvatarStack: ({ agentIds }: { agentIds: readonly string[] }) => {
     mockState.avatarAgentIds = agentIds;
-    mockState.avatarOverflow = overflow;
     return <div data-testid="agent-avatar-stack">{agentIds.length}</div>;
   },
 }));
 
-vi.mock("../../agents/components/agent-activity-hover-content", () => ({
-  WorkspaceAgentActivityHoverContent: (props: {
-    issues: readonly Issue[];
-    taskCount: number;
-  }) => {
-    mockState.hoverProps = props;
-    return <div data-testid="activity-hover">{props.taskCount}</div>;
-  },
+// The real hover card renders its body only while open. Render it inline so the
+// chip's own wiring to the hover body is observable: the MUL-5525 follow-up bug
+// was in that wiring (`agents ?? []`), not in the body's rendering.
+vi.mock("@multica/ui/components/ui/hover-card", () => ({
+  HoverCard: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  HoverCardTrigger: ({ render }: { render: React.ReactElement }) => render,
+  HoverCardContent: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="hover-content">{children}</div>
+  ),
 }));
 
-// Record the variant the chip picks. The colour tier lives entirely in the
-// Button variant now, so this is the assertable surface.
 vi.mock("@multica/ui/components/ui/button", async () => {
   const actual =
     await vi.importActual<typeof import("@multica/ui/components/ui/button")>(
@@ -68,330 +50,184 @@ vi.mock("@multica/ui/components/ui/button", async () => {
   };
 });
 
-vi.mock("@tanstack/react-query", async () => {
-  const actual =
-    await vi.importActual<typeof import("@tanstack/react-query")>(
-      "@tanstack/react-query",
-    );
-  return {
-    ...actual,
-    useQuery: (opts: { queryKey?: readonly unknown[] }) => {
-      if (opts.queryKey?.[1] === "task-snapshot") {
-        return { data: mockState.snapshot };
-      }
-      return { data: undefined };
-    },
-  };
-});
-
 import {
+  WorkingAgentsHoverContent,
   WorkspaceAgentWorkingChip,
+  chipActivity,
   chipAppearance,
-  deriveWorkingChipView,
 } from "./workspace-agent-working-chip";
 
-function makeTask(overrides: Partial<AgentTask>): AgentTask {
-  return {
-    id: "task-1",
-    agent_id: "agent-1",
-    runtime_id: "runtime-1",
-    issue_id: "issue-1",
-    status: "running",
-    priority: 0,
-    dispatched_at: null,
-    started_at: "2026-06-08T08:00:00Z",
-    completed_at: null,
-    result: null,
-    error: null,
-    created_at: "2026-06-08T08:00:00Z",
-    ...overrides,
-  };
+function makeAgent(id: string, runningTaskCount = 1): WorkingAgentSummary {
+  return { id, running_task_count: runningTaskCount };
 }
 
-function makeIssue(id: string): Issue {
-  return {
-    id,
-    workspace_id: "ws-1",
-    number: 1,
-    identifier: `MUL-${id}`,
-    title: `Issue ${id}`,
-    description: null,
-    status: "in_progress",
-    priority: "none",
-    assignee_type: null,
-    assignee_id: null,
-    creator_type: "member",
-    creator_id: "user-1",
-    parent_issue_id: null,
-    project_id: null,
-    position: 1,
-    stage: null,
-    start_date: null,
-    due_date: null,
-    metadata: {},
-    properties: {},
-    created_at: "2026-06-08T08:00:00Z",
-    updated_at: "2026-06-08T08:00:00Z",
-  };
-}
+const UNKNOWN_HOVER = "Agents working: not loaded yet";
+const EMPTY_HOVER = "No agents working right now";
 
 beforeEach(() => {
   cleanup();
   vi.clearAllMocks();
-  mockState.snapshot = [];
   mockState.avatarAgentIds = undefined;
-  mockState.avatarOverflow = undefined;
   mockState.buttonVariant = undefined;
-  mockState.hoverProps = undefined;
 });
 
 describe("WorkspaceAgentWorkingChip", () => {
-  it("counts agents — the same list the avatar stack shows", () => {
-    // The screenshot case from MUL-4884: 4 running tasks, 4 distinct agents,
-    // 3 issues on screen. The chip counts the agents, so its number and the
-    // heads beside it are one unit and cannot contradict each other.
-    mockState.snapshot = [
-      makeTask({ id: "t-1", agent_id: "agent-1", issue_id: "issue-1" }),
-      makeTask({ id: "t-2", agent_id: "agent-2", issue_id: "issue-2" }),
-      makeTask({ id: "t-3", agent_id: "agent-3", issue_id: "issue-3" }),
-      makeTask({ id: "t-4", agent_id: "agent-4", issue_id: "issue-3" }),
-    ];
-
+  it("counts exactly the agents the surface projection supplies", () => {
     renderWithI18n(
       <WorkspaceAgentWorkingChip
         value={false}
         onToggle={() => {}}
-        workingIssues={["issue-1", "issue-2", "issue-3"].map(makeIssue)}
+        agents={[makeAgent("agent-1"), makeAgent("agent-2", 3), makeAgent("agent-3")]}
       />,
     );
 
     expect(
-      screen.getByRole("button", { name: "4 agents working" }),
+      screen.getByRole("button", { name: "3 agents working" }),
     ).toBeTruthy();
     expect(mockState.avatarAgentIds).toEqual([
       "agent-1",
       "agent-2",
       "agent-3",
-      "agent-4",
     ]);
-    // Overflow is the component's standard +N badge again: with an
-    // agent-anchored number, "3 shown + 1 = 4" corroborates the text instead
-    // of competing with it.
-    expect(mockState.avatarOverflow).toBeUndefined();
+    expect(mockState.buttonVariant).toBe("brandSubtle");
   });
 
-  it("counts one agent once, however many issues it is working", () => {
-    // The accepted trade-off: the number no longer predicts the row count.
-    // One agent across two issues reads "1 agent working" and opens 2 rows —
-    // WHO vs WHERE, different questions.
-    mockState.snapshot = [
-      makeTask({ id: "t-1", agent_id: "agent-1", issue_id: "issue-1" }),
-      makeTask({ id: "t-2", agent_id: "agent-1", issue_id: "issue-2" }),
-    ];
-
+  // The whole point of MUL-5525: the chip must not invent a count of its own.
+  // A surface whose filters leave no working rows has to read zero even while
+  // other agents are busy elsewhere in the workspace.
+  it("shows a known zero for a surface with no working rows", () => {
     renderWithI18n(
-      <WorkspaceAgentWorkingChip
-        value
-        onToggle={() => {}}
-        workingIssues={["issue-1", "issue-2"].map(makeIssue)}
-      />,
-    );
-
-    expect(
-      screen.getByRole("button", { name: "1 agent working" }),
-    ).toBeTruthy();
-  });
-
-  it("renders an indeterminate state when the scope is unknown, never a number", () => {
-    // 3 agents ARE running workspace-wide, but the surface could not resolve
-    // which of them belong to the current window (table window resolving /
-    // failed / too large). Publishing any count here — 0 from an empty
-    // fallback or 3 from the workspace — would be a precise-looking wrong
-    // answer (round-5 review P2). The chip must say "unknown" instead.
-    mockState.snapshot = [
-      makeTask({ id: "t-1", agent_id: "agent-1", issue_id: "issue-1" }),
-      makeTask({ id: "t-2", agent_id: "agent-2", issue_id: "issue-2" }),
-      makeTask({ id: "t-3", agent_id: "agent-3", issue_id: "issue-3" }),
-    ];
-
-    renderWithI18n(
-      <WorkspaceAgentWorkingChip
-        value={false}
-        onToggle={() => {}}
-        workingIssues={undefined}
-      />,
-    );
-
-    expect(
-      screen.getByRole("button", { name: "Agents working: —" }),
-    ).toBeTruthy();
-    // No avatar stack: heads next to an unknown label would still read as a
-    // claim about who is in scope.
-    expect(mockState.avatarAgentIds).toBeUndefined();
-  });
-
-  it("shows 0 when nothing is running", () => {
-    mockState.snapshot = [];
-
-    renderWithI18n(
-      <WorkspaceAgentWorkingChip
-        value={false}
-        onToggle={() => {}}
-        workingIssues={[]}
-      />,
+      <WorkspaceAgentWorkingChip value={false} onToggle={() => {}} agents={[]} />,
     );
 
     expect(
       screen.getByRole("button", { name: "0 agents working" }),
     ).toBeTruthy();
     expect(screen.queryByTestId("agent-avatar-stack")).toBeNull();
-  });
-
-  // Colour is carried by three self-contained Button variants. The tier
-  // rules are unit-tested against `chipAppearance` below; these two cover
-  // the wiring.
-  it("uses the filled brand variant only while the filter is on", () => {
-    mockState.snapshot = [makeTask({ id: "t-1", issue_id: "issue-1" })];
-
-    const { rerender } = renderWithI18n(
-      <WorkspaceAgentWorkingChip
-        value={false}
-        onToggle={() => {}}
-        workingIssues={[makeIssue("issue-1")]}
-      />,
-    );
-
-    // Activity, filter off → the tint variant.
-    expect(mockState.buttonVariant).toBe("brandSubtle");
-
-    rerender(
-      <WorkspaceAgentWorkingChip
-        value
-        onToggle={() => {}}
-        workingIssues={[makeIssue("issue-1")]}
-      />,
-    );
-
-    expect(mockState.buttonVariant).toBe("brand");
-  });
-
-  it("stays a plain control when nothing is running", () => {
-    mockState.snapshot = [];
-
-    renderWithI18n(
-      <WorkspaceAgentWorkingChip
-        value={false}
-        onToggle={() => {}}
-        workingIssues={[]}
-      />,
-    );
-
     expect(mockState.buttonVariant).toBe("outline");
+    expect(screen.getByText(EMPTY_HOVER)).toBeTruthy();
   });
 
-  it("keeps issue-less tasks out of the agent count", () => {
-    // Chat / autopilot tasks carry issue_id === "" (core/types/agent.ts).
-    // Their agents are not working on any issue, so they must not join the
-    // count or the stack.
-    mockState.snapshot = [
-      makeTask({ id: "t-1", agent_id: "agent-1", issue_id: "issue-1" }),
-      makeTask({ id: "t-2", agent_id: "agent-2", issue_id: "" }),
-      makeTask({ id: "t-3", agent_id: "agent-3", issue_id: "" }),
-    ];
-
+  it("renders an indeterminate label while the projection is unresolved", () => {
     renderWithI18n(
       <WorkspaceAgentWorkingChip
         value={false}
         onToggle={() => {}}
-        workingIssues={[makeIssue("issue-1")]}
+        agents={undefined}
       />,
     );
 
     expect(
-      screen.getByRole("button", { name: "1 agent working" }),
+      screen.getByRole("button", { name: "Agents working: —" }),
     ).toBeTruthy();
-    expect(mockState.avatarAgentIds).toEqual(["agent-1"]);
+    expect(screen.queryByTestId("agent-avatar-stack")).toBeNull();
+  });
+
+  // Regression: the chip passed `agents ?? []` to the hover body, so an
+  // unresolved projection rendered "No agents working right now" — an assertion
+  // of zero on no evidence, from the one surface with room to say otherwise.
+  it("does not let the hover body downgrade an unresolved projection to zero", () => {
+    renderWithI18n(
+      <WorkspaceAgentWorkingChip
+        value={false}
+        onToggle={() => {}}
+        agents={undefined}
+      />,
+    );
+
+    expect(screen.getByTestId("hover-content").textContent).toBe(UNKNOWN_HOVER);
+    expect(screen.queryByText(EMPTY_HOVER)).toBeNull();
+  });
+
+  // The neutral tier's muted text is what reads as "idle", so it must not be
+  // worn while the answer is still unknown.
+  it("does not dim the chip while the projection is unresolved", () => {
+    renderWithI18n(
+      <WorkspaceAgentWorkingChip
+        value={false}
+        onToggle={() => {}}
+        agents={undefined}
+      />,
+    );
+
+    const button = screen.getByRole("button", { name: "Agents working: —" });
+    expect(mockState.buttonVariant).toBe("outline");
+    expect(button.className).not.toContain("text-muted-foreground");
+  });
+
+  it("keeps the active filter visually selected after the final agent stops", () => {
+    renderWithI18n(
+      <WorkspaceAgentWorkingChip value onToggle={() => {}} agents={[]} />,
+    );
+
+    expect(mockState.buttonVariant).toBe("brand");
   });
 });
 
-describe("deriveWorkingChipView", () => {
-  it("counts only running tasks whose issue is on screen", () => {
-    const view = deriveWorkingChipView(
-      [
-        makeTask({ id: "t-1", agent_id: "a1", issue_id: "issue-1" }),
-        makeTask({ id: "t-2", agent_id: "a2", issue_id: "issue-1" }),
-        // chat/autopilot run — no linked issue
-        makeTask({ id: "t-3", agent_id: "a3", issue_id: "" }),
-        // running, but its issue is filtered out / past the loaded page
-        makeTask({ id: "t-4", agent_id: "a4", issue_id: "issue-offscreen" }),
-        makeTask({
-          id: "t-5",
-          agent_id: "a5",
-          issue_id: "issue-1",
-          status: "queued",
-        }),
-      ],
-      [makeIssue("issue-1")],
-    );
+describe("WorkingAgentsHoverContent", () => {
+  it("says the answer is not loaded yet when the projection is unresolved", () => {
+    renderWithI18n(<WorkingAgentsHoverContent agents={undefined} />);
 
-    expect(view.agentIds).toEqual(["a1", "a2"]);
-    expect(view.taskCount).toBe(2);
-    expect(view.tasksByIssueId.get("issue-1")?.map((t) => t.id)).toEqual([
-      "t-1",
-      "t-2",
-    ]);
+    expect(screen.getByText(UNKNOWN_HOVER)).toBeTruthy();
+    expect(screen.queryByText(EMPTY_HOVER)).toBeNull();
   });
 
-  it("dedupes agents that run several tasks at once", () => {
-    const view = deriveWorkingChipView(
-      [
-        makeTask({ id: "t-1", agent_id: "a1", issue_id: "issue-1" }),
-        makeTask({ id: "t-2", agent_id: "a1", issue_id: "issue-2" }),
-      ],
-      [makeIssue("issue-1"), makeIssue("issue-2")],
+  it("says nobody is working only for a resolved empty projection", () => {
+    renderWithI18n(<WorkingAgentsHoverContent agents={[]} />);
+
+    expect(screen.getByText(EMPTY_HOVER)).toBeTruthy();
+    expect(screen.queryByText(UNKNOWN_HOVER)).toBeNull();
+  });
+
+  it("lists the roster with each agent's running task count", () => {
+    renderWithI18n(
+      <WorkingAgentsHoverContent
+        agents={[makeAgent("a1"), makeAgent("a2", 3)]}
+      />,
     );
 
-    // Two issues, two tasks, but one agent — this is the number the chip
-    // shows.
-    expect(view.agentIds).toEqual(["a1"]);
-    expect(view.taskCount).toBe(2);
+    expect(screen.getByText("2 agents working")).toBeTruthy();
+    expect(screen.getByText("Agent a1")).toBeTruthy();
+    expect(screen.getByText("1 task")).toBeTruthy();
+    expect(screen.getByText("Agent a2")).toBeTruthy();
+    expect(screen.getByText("3 tasks")).toBeTruthy();
+    expect(screen.queryByText(UNKNOWN_HOVER)).toBeNull();
+    expect(screen.queryByText(EMPTY_HOVER)).toBeNull();
   });
 });
 
-// The chip's colour must come from its Button variant and nothing else. A
-// colour class in `className` is appended AFTER the variant, so
-// tailwind-merge keeps it and it beats the variant — the opposite of what
-// "the variant owns the colour" implies. These pin the tier rules including
-// the state that already got this wrong.
+describe("chipActivity", () => {
+  it("keeps unresolved, resolved-empty and non-empty strictly apart", () => {
+    expect(chipActivity(undefined)).toBe("unknown");
+    expect(chipActivity([])).toBe("none");
+    expect(chipActivity([makeAgent("a1")])).toBe("some");
+  });
+});
+
 describe("chipAppearance", () => {
   it("wears the filled brand tier while the filter is on", () => {
-    expect(chipAppearance(true, true).variant).toBe("brand");
+    expect(chipAppearance(true, "some").variant).toBe("brand");
   });
 
   it("wears the tint tier for activity without the filter", () => {
-    expect(chipAppearance(false, true).variant).toBe("brandSubtle");
+    expect(chipAppearance(false, "some").variant).toBe("brandSubtle");
   });
 
   it("wears the plain tier with muted text when nothing is running", () => {
-    const a = chipAppearance(false, false);
-    expect(a.variant).toBe("outline");
-    // `outline` sets no text colour, so this tier supplies its own.
-    expect(a.className).toContain("text-muted-foreground");
+    const appearance = chipAppearance(false, "none");
+    expect(appearance.variant).toBe("outline");
+    expect(appearance.className).toContain("text-muted-foreground");
   });
 
-  it("does not mute the text when the filter is on with 0 agents", () => {
-    // Real state: the filter stays on after the last agent finishes. The
-    // variant is `brand` here, so appending `text-muted-foreground` would
-    // WIN over the variant's `text-brand-foreground` and paint grey text on
-    // a brand-blue fill.
-    const a = chipAppearance(true, false);
-    expect(a.variant).toBe("brand");
-    expect(a.className).not.toContain("text-muted-foreground");
+  it("stays neutral but undimmed while the projection is unknown", () => {
+    const appearance = chipAppearance(false, "unknown");
+    expect(appearance.variant).toBe("outline");
+    expect(appearance.className).not.toContain("text-muted-foreground");
   });
 
-  it("never carries a colour class for either brand tier", () => {
-    for (const a of [chipAppearance(true, true), chipAppearance(false, true)]) {
-      expect(a.className).not.toMatch(/(^|\s)(text|bg|border)-/);
-    }
+  it("does not mute the active zero state", () => {
+    const appearance = chipAppearance(true, "none");
+    expect(appearance.variant).toBe("brand");
+    expect(appearance.className).not.toContain("text-muted-foreground");
   });
 });

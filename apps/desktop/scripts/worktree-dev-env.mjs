@@ -22,6 +22,21 @@ import { basename, join } from "node:path";
 const RENDERER_PORT_BASE = 5174;
 const OFFSET_MODULO = 1000;
 
+// Chromium refuses to navigate to a URL on its restricted-port list and fails
+// the load with ERR_UNSAFE_PORT, so a worktree whose derived port lands on one
+// gets a blank Electron window instead of the renderer -- the Vite server is
+// up and healthy, which makes it read as a renderer bug rather than a port one.
+// Exactly one restricted port falls inside 5174-6173: 6000 (X11). Those ports
+// are remapped, in list order, into the block immediately above the range, so
+// the offset -> port mapping stays injective and two worktrees still cannot
+// collide. Keep this sorted and in sync with net::kRestrictedPorts.
+const RESTRICTED_PORTS_IN_RANGE = [6000];
+
+function avoidRestrictedPort(port) {
+  const index = RESTRICTED_PORTS_IN_RANGE.indexOf(port);
+  return index === -1 ? port : RENDERER_PORT_BASE + OFFSET_MODULO + index;
+}
+
 // POSIX cksum (CRC-32), kept byte-compatible with `cksum(1)` so the offset
 // matches scripts/init-worktree-env.sh — a worktree's backend (18080+offset),
 // frontend (13000+offset) and desktop renderer (5174+offset) ports all share
@@ -60,7 +75,7 @@ export function offsetForPath(path) {
 }
 
 export function rendererPortForPath(path) {
-  return RENDERER_PORT_BASE + offsetForPath(path);
+  return avoidRestrictedPort(RENDERER_PORT_BASE + offsetForPath(path));
 }
 
 // Worktree → a readable, unique, filesystem-safe suffix "<folder>-<offset>".

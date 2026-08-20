@@ -37,6 +37,15 @@ type AppConfig struct {
 	DaemonServerURL string `json:"daemon_server_url,omitempty"`
 	DaemonAppURL    string `json:"daemon_app_url,omitempty"`
 
+	// VCSIntegrationAvailable mirrors the MULTICA_VCS_INTEGRATION_ENABLED
+	// deployment switch so the Settings UI can hide the whole self-hosted Git
+	// provider section on deployments where it is off (the managed cloud),
+	// instead of rendering it and surfacing an operator-only "missing
+	// MULTICA_VCS_SECRET_KEY" hint a cloud user cannot resolve. Omitted when
+	// false so the managed-cloud response keeps its previous shape; the UI
+	// defaults absent to false (hidden).
+	VCSIntegrationAvailable bool `json:"vcs_integration_available,omitempty"`
+
 	// PostHog public config for the frontend. The key is the same Project
 	// API Key the backend uses; returning it here (instead of baking it
 	// into the frontend bundle via NEXT_PUBLIC_*) means self-hosted
@@ -49,6 +58,22 @@ type AppConfig struct {
 	// FeatureFlags exposes only frontend-safe boolean decisions. Do not dump
 	// raw rules here: /api/config is public and may be called anonymously.
 	FeatureFlags map[string]bool `json:"feature_flags,omitempty"`
+
+	// LocalWorktreeSupported tells clients this server understands
+	// local_directory `execution_mode` and enforces the worktree capability
+	// gate when a resource is saved.
+	//
+	// Load-bearing for CLIENTS, not for this server. Releases before v0.4.25
+	// unmarshalled the ref into a struct without the field and re-marshalled
+	// it, so `execution_mode: "worktree"` was silently DROPPED and answered
+	// 201 — the resource then ran in_place, editing the working copy the user
+	// asked to isolate, with no gate anywhere to catch it. A new client cannot
+	// tell that from success, so it has to ask first, and absent has to read as
+	// "cannot honour it": every release that drops the field also omits this
+	// one. Releases between that fix and this signal do gate the save but say
+	// nothing, so they are treated the same way — the client cannot distinguish
+	// them, and only one of the two guesses is safe.
+	LocalWorktreeSupported bool `json:"local_worktree_supported"`
 
 	// ServerVersion is the running API build version, so self-hosted
 	// operators can confirm what's deployed and include it in bug reports.
@@ -64,6 +89,9 @@ type AppConfig struct {
 // to anonymous callers — never user- or tenant-scoped data.
 func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	config := AppConfig{
+		// A property of this build, not of the deployment: if this code is
+		// running, the save gate is running with it.
+		LocalWorktreeSupported:    true,
 		AllowSignup:               os.Getenv("ALLOW_SIGNUP") != "false",
 		GoogleClientID:            os.Getenv("GOOGLE_CLIENT_ID"),
 		WorkspaceCreationDisabled: os.Getenv("DISABLE_WORKSPACE_CREATION") == "true",
@@ -73,6 +101,7 @@ func (h *Handler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	config.CdnSigned = h.CFSigner != nil
 	config.DaemonServerURL, config.DaemonAppURL = daemonSetupURLsFromEnv()
+	config.VCSIntegrationAvailable = h.cfg.VCSIntegrationEnabled
 	config.FeatureFlags = featureflags.EvaluateFrontendPublicFlags(r.Context(), h.FeatureFlags)
 	// Only surface the build version on self-hosted deployments. The managed
 	// cloud is continuously deployed and its users can't choose the build, so

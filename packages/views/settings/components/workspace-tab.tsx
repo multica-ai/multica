@@ -457,7 +457,7 @@ export function WorkspaceTab() {
           </SettingsRow>
 
             {!canManageWorkspace && (
-              <div className="px-4 py-3 text-xs text-muted-foreground">
+              <div className="px-4 py-3 text-caption text-muted-foreground">
                 {t(($) => $.workspace.manage_hint)}
               </div>
             )}

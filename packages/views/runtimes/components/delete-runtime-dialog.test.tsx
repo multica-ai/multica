@@ -18,7 +18,7 @@ const TEST_RESOURCES = {
 // mocked api throws. vi.hoisted is required because vi.mock is hoisted above
 // imports — a top-level class declaration would not be visible to the mock
 // factory at hoist time.
-const { ApiError, apiDeleteRuntime, apiArchiveAgentsAndDeleteRuntime } = vi.hoisted(() => {
+const { ApiError, apiDeleteRuntime, apiUnbindAgentsAndDeleteRuntime } = vi.hoisted(() => {
   class ApiError extends Error {
     status: number;
     body: unknown;
@@ -31,15 +31,15 @@ const { ApiError, apiDeleteRuntime, apiArchiveAgentsAndDeleteRuntime } = vi.hois
   return {
     ApiError,
     apiDeleteRuntime: vi.fn(),
-    apiArchiveAgentsAndDeleteRuntime: vi.fn(),
+    apiUnbindAgentsAndDeleteRuntime: vi.fn(),
   };
 });
 
 vi.mock("@multica/core/api", () => ({
   api: {
     deleteRuntime: (...args: unknown[]) => apiDeleteRuntime(...args),
-    archiveAgentsAndDeleteRuntime: (...args: unknown[]) =>
-      apiArchiveAgentsAndDeleteRuntime(...args),
+    unbindAgentsAndDeleteRuntime: (...args: unknown[]) =>
+      apiUnbindAgentsAndDeleteRuntime(...args),
     listAgents: vi.fn(),
     listMembers: vi.fn(),
   },
@@ -55,11 +55,11 @@ vi.mock("@multica/core/runtimes/mutations", () => ({
     mutate: vi.fn(),
     mutateAsync: (...args: unknown[]) => apiDeleteRuntime(...args),
   }),
-  useArchiveAgentsAndDeleteRuntime: () => ({
+  useUnbindAgentsAndDeleteRuntime: () => ({
     isPending: false,
     mutate: vi.fn(),
     mutateAsync: (vars: { runtimeId: string; expectedActiveAgentIds: string[] }) =>
-      apiArchiveAgentsAndDeleteRuntime(vars.runtimeId, vars.expectedActiveAgentIds),
+      apiUnbindAgentsAndDeleteRuntime(vars.runtimeId, vars.expectedActiveAgentIds),
   }),
 }));
 
@@ -209,7 +209,7 @@ describe("DeleteRuntimeDialog", () => {
     expect(screen.getByText("Delete runtime")).toBeInTheDocument();
     // No checkbox, no agent table in light mode.
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
-    expect(screen.queryByText(/Archive .* and delete this Runtime/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Unbind .* and delete this Runtime/)).not.toBeInTheDocument();
   });
 
   it("opens directly in cascade mode when local cache shows bound agents, with the destructive button gated by the checkbox", async () => {
@@ -221,11 +221,11 @@ describe("DeleteRuntimeDialog", () => {
     });
 
     expect(
-      screen.getByText(/Archive 2 agents and delete this Runtime/),
+      screen.getByText(/Unbind 2 agents and delete this Runtime/),
     ).toBeInTheDocument();
     // Destructive confirm starts disabled until the user ticks the checkbox.
     const confirm = screen.getByRole("button", {
-      name: /Archive 2 agents and delete runtime/,
+      name: /Unbind 2 agents and delete runtime/,
     }) as HTMLButtonElement;
     expect(confirm.disabled).toBe(true);
 
@@ -233,14 +233,14 @@ describe("DeleteRuntimeDialog", () => {
     fireEvent.click(checkbox);
     await waitFor(() => expect(confirm.disabled).toBe(false));
 
-    apiArchiveAgentsAndDeleteRuntime.mockResolvedValueOnce({
+    apiUnbindAgentsAndDeleteRuntime.mockResolvedValueOnce({
       status: "ok",
-      agents_archived: 2,
+      agents_unbound: 2,
       tasks_cancelled: 0,
     });
     fireEvent.click(confirm);
     await waitFor(() =>
-      expect(apiArchiveAgentsAndDeleteRuntime).toHaveBeenCalledWith("rt-1", [
+      expect(apiUnbindAgentsAndDeleteRuntime).toHaveBeenCalledWith("rt-1", [
         "a-1",
         "a-2",
       ]),
@@ -265,7 +265,7 @@ describe("DeleteRuntimeDialog", () => {
 
     await waitFor(() =>
       expect(
-        screen.getByText(/Archive 1 agent and delete this Runtime/),
+        screen.getByText(/Unbind 1 agent and delete this Runtime/),
       ).toBeInTheDocument(),
     );
     expect(screen.getByText("FreshAgent")).toBeInTheDocument();
@@ -276,7 +276,7 @@ describe("DeleteRuntimeDialog", () => {
   });
 
   it("re-prompts when the cascade returns runtime_delete_plan_changed", async () => {
-    apiArchiveAgentsAndDeleteRuntime.mockRejectedValueOnce(
+    apiUnbindAgentsAndDeleteRuntime.mockRejectedValueOnce(
       new ApiError("plan changed", 409, {
         code: "runtime_delete_plan_changed",
         active_agents: [
@@ -298,13 +298,13 @@ describe("DeleteRuntimeDialog", () => {
     fireEvent.click(screen.getByRole("checkbox"));
     fireEvent.click(
       screen.getByRole("button", {
-        name: /Archive 2 agents and delete runtime/,
+        name: /Unbind 2 agents and delete runtime/,
       }),
     );
 
     await waitFor(() =>
       expect(
-        screen.getByText(/Archive 3 agents and delete this Runtime/),
+        screen.getByText(/Unbind 3 agents and delete this Runtime/),
       ).toBeInTheDocument(),
     );
     // The new third agent shows in the plan.
@@ -367,7 +367,7 @@ describe("DeleteRuntimeDialog", () => {
       screen.getByText(/registered from a custom runtime profile/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Archive 1 agent and delete this Runtime/),
+      screen.getByText(/Unbind 1 agent and delete this Runtime/),
     ).toBeInTheDocument();
   });
 
@@ -383,7 +383,7 @@ describe("DeleteRuntimeDialog", () => {
       screen.getByText(/managed by a running local daemon/i),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Archive 1 agent and delete this Runtime/),
+      screen.getByText(/Unbind 1 agent and delete this Runtime/),
     ).toBeInTheDocument();
   });
 

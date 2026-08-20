@@ -12,12 +12,13 @@ import (
 )
 
 const createTaskMessage = `-- name: CreateTaskMessage :one
-INSERT INTO task_message (task_id, seq, type, tool, content, input, output)
-VALUES ($1, $2, $3, $4, $5, $6, $7)
+INSERT INTO task_message (id, task_id, seq, type, tool, content, input, output)
+VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 RETURNING id, task_id, seq, type, tool, content, input, output, created_at
 `
 
 type CreateTaskMessageParams struct {
+	ID      pgtype.UUID `json:"id"`
 	TaskID  pgtype.UUID `json:"task_id"`
 	Seq     int32       `json:"seq"`
 	Type    string      `json:"type"`
@@ -29,6 +30,7 @@ type CreateTaskMessageParams struct {
 
 func (q *Queries) CreateTaskMessage(ctx context.Context, arg CreateTaskMessageParams) (TaskMessage, error) {
 	row := q.db.QueryRow(ctx, createTaskMessage,
+		arg.ID,
 		arg.TaskID,
 		arg.Seq,
 		arg.Type,

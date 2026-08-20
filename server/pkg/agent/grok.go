@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -144,9 +143,12 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	grokArgs = append(grokArgs, filterCustomArgs(opts.CustomArgs, grokBlockedArgs, b.cfg.Logger)...)
 	grokArgs = append(grokArgs, "stdio")
 
-	cmd := exec.CommandContext(runCtx, execPath, grokArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, grokArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", grokArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(grokArgs,
+		trustAgentCommandPositional(1, "agent"),
+		trustAgentCommandPositional(len(grokArgs)-1, "stdio"),
+	))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -190,8 +192,10 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	msgStream := newGrokMessageStream(256)
 	resCh := make(chan Result, 1)
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Grok streams interim narration and the final answer as the same
+	// agent_message_chunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool
 
 	promptDone := make(chan hermesPromptResult, 1)
@@ -220,11 +224,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 				// kimi/traecli do so the UI sees consistent snake_case names.
 				msg.Tool = kimiToolNameFromTitle(msg.Tool)
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
-			}
+			deliverable.observe(msg)
 			msgStream.send(msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -241,8 +241,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -316,7 +315,7 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 
 		// Drop MCP entries whose remote transport the runtime didn't advertise.
 		// See hermes.go for why sending an unsupported transport tanks session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "grok", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "grok", b.cfg)
 
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -443,11 +442,19 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finalStatus = "aborted"
 					finalError = "grok cancelled the prompt"
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usageMu.Unlock()
+				// `session/load` carries no model id (only `session/new`
+				// does), so a resumed session with no configured model would
+				// otherwise bucket its whole spend under "unknown" — which
+				// prices at $0 because no pricing row matches. The turn's
+				// own `_meta.modelId` is authoritative; use it.
+				if effectiveModel == "" {
+					effectiveModel = pr.modelID
+				}
+				// xAI prices the turn itself and reports the result here.
+				// Carrying it through is the only way the ≥200K long-context
+				// surcharge reaches the bill — token counts alone cannot
+				// reconstruct which tier a request hit.
+				c.mergeUsage(pr.usage)
 			default:
 			}
 			waitForGrokNotificationQuiescence(runCtx, activity, readerDone)
@@ -473,20 +480,18 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		drainCancel()
 		streamingCurrentTurn.Store(false)
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Promote completed→failed when stderr or the agent text stream show a
-		// terminal upstream-LLM failure (auth / rate-limit / HTTP 4xx).
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// terminal upstream-LLM failure (auth / rate-limit / HTTP 4xx). It reads
+		// the full text stream, not the deliverable, so a give-up turn that
+		// lands before a tool call stays visible.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"
@@ -554,31 +559,7 @@ func selectGrokAuthMethod(methods []string, haveAPIKey bool) (string, error) {
 // session/prompt response. Without this window, cancelling the process at the
 // response boundary can truncate the final text or usage update.
 func waitForGrokNotificationQuiescence(ctx context.Context, activity <-chan struct{}, readerDone <-chan struct{}) {
-	quiet := time.NewTimer(grokNotificationQuietTime)
-	defer quiet.Stop()
-	hard := time.NewTimer(grokReaderDrainGrace)
-	defer hard.Stop()
-
-	for {
-		select {
-		case <-activity:
-			if !quiet.Stop() {
-				select {
-				case <-quiet.C:
-				default:
-				}
-			}
-			quiet.Reset(grokNotificationQuietTime)
-		case <-quiet.C:
-			return
-		case <-readerDone:
-			return
-		case <-hard.C:
-			return
-		case <-ctx.Done():
-			return
-		}
-	}
+	waitForACPNotificationQuiescence(ctx, activity, readerDone, grokNotificationQuietTime, grokReaderDrainGrace)
 }
 
 // envHasNonEmpty reports whether an `os/exec`-style env slice

@@ -13,11 +13,10 @@ import (
 // TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellFile is the core
 // Windows test: when LookPath resolves pi to the npm-installed .cmd
 // launcher and a sibling pi.ps1 exists, we should invoke PowerShell with
-// -File <ps1> and forward every original arg unchanged — including the
-// multi-line positional prompt that would otherwise be mangled by the
-// cmd.exe %* re-expansion inside pi.cmd. This is the regression test for
-// #3306: daemon argv carried the full prompt, but Pi's session JSONL only
-// recorded the first line.
+// -File <ps1> and forward every original arg unchanged — including a synthetic
+// multi-line value that cmd.exe %* would otherwise mangle. The task prompt now
+// travels on stdin (#6457), but this preserves the #3306 launcher guarantee for
+// custom option values and keeps the historical failure mode covered.
 func TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellFile(t *testing.T) {
 	dir := t.TempDir()
 	cmdPath := filepath.Join(dir, "pi.cmd")
@@ -60,6 +59,48 @@ func TestPlatformPiInvocation_RewritesCmdLauncherToPowerShellFile(t *testing.T) 
 	// concrete property #3306 violates when cmd.exe re-tokenises %*.
 	if gotArgs[len(gotArgs)-1] != multiLinePrompt {
 		t.Errorf("multi-line prompt was mangled:\n got  %q\n want %q", gotArgs[len(gotArgs)-1], multiLinePrompt)
+	}
+}
+
+// TestPlatformPiInvocation_RPCRoutesThroughPowerShellCommand pins the model
+// discovery path. Pi RPC keeps stdin open for bidirectional JSON-RPC, while the
+// npm pi.ps1 -File wrapper can wait for EOF before forwarding stdin. Use
+// -Command with @args only for RPC so ordinary task execution keeps the
+// established -File launcher behaviour above.
+func TestPlatformPiInvocation_RPCRoutesThroughPowerShellCommand(t *testing.T) {
+	dir := t.TempDir()
+	cmdPath := filepath.Join(dir, "pi.cmd")
+	ps1Path := filepath.Join(dir, "pi.ps1")
+	writeFile(t, cmdPath, "@echo off\r\npowershell -NoProfile -ExecutionPolicy Bypass -File \"%~dp0pi.ps1\" %*\r\n")
+	writeFile(t, ps1Path, "# fake pi.ps1\r\n")
+
+	fakePS := filepath.Join(dir, "powershell.exe")
+	writeFile(t, fakePS, "")
+	stubPowerShell(t, fakePS, true)
+
+	args := []string{"--mode", "rpc", "--no-session", "--no-skills"}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	gotExec, gotArgs, ok := platformPiInvocation(cmdPath, args, logger)
+	if !ok {
+		t.Fatalf("expected platform rewrite to be applied, got ok=false")
+	}
+	if gotExec != fakePS {
+		t.Errorf("argv0: got %q want %q", gotExec, fakePS)
+	}
+
+	wantArgs := append([]string{
+		"-NoProfile",
+		"-ExecutionPolicy", "Bypass",
+		"-Command", "& '" + ps1Path + "' @args",
+	}, args...)
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Errorf("argv mismatch:\n got  %#v\n want %#v", gotArgs, wantArgs)
+	}
+	for _, arg := range gotArgs {
+		if arg == "-File" {
+			t.Fatalf("RPC model discovery must not use powershell -File: %#v", gotArgs)
+		}
 	}
 }
 

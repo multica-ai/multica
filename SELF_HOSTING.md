@@ -14,7 +14,12 @@ Each user who runs AI agents locally also installs the **`multica` CLI** and run
 
 ## Quick Install (Recommended)
 
-Two commands to set up everything — server, CLI, and configuration:
+Two commands to set up everything — server, CLI, and configuration.
+
+<details open>
+<summary><b>macOS / Linux</b></summary>
+
+<br/>
 
 ```bash
 # 1. Install CLI + provision the self-host server
@@ -23,6 +28,20 @@ curl -fsSL https://raw.githubusercontent.com/multica-ai/multica/main/scripts/ins
 # 2. Configure CLI, authenticate, and start the daemon
 multica setup self-host
 ```
+</details>
+<details>
+<summary><b>Windows (PowerShell)</b></summary>
+
+<br/>
+
+```powershell
+# 1. Install CLI + provision the self-host server
+$env:MULTICA_MODE="with-server"; irm https://raw.githubusercontent.com/multica-ai/multica/main/scripts/install.ps1 | iex
+
+# 2. Configure CLI, authenticate, and start the daemon
+multica setup self-host
+```
+</details>
 
 This installs the `multica` CLI, checks out the latest self-host assets, pulls the official Multica images from GHCR, and configures everything for localhost.
 
@@ -91,6 +110,9 @@ brew install multica-ai/tap/multica
 
 You also need at least one AI agent CLI installed:
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` on PATH)
+- [Antigravity CLI](https://antigravity.google/docs/cli-install) (`agy` on PATH)
+- [CodeBuddy Code](https://www.codebuddy.ai/docs/cli/quickstart) (`codebuddy` on PATH)
+- [DevEco Code](https://gitcode.com/openharmony-sig/deveco-code) (`deveco` on PATH)
 - [Codex](https://github.com/openai/codex) (`codex` on PATH)
 - [GitHub Copilot CLI](https://docs.github.com/en/copilot) (`copilot` on PATH)
 - [OpenClaw](https://github.com/openclaw/openclaw) (`openclaw` on PATH)
@@ -99,11 +121,17 @@ You also need at least one AI agent CLI installed:
 - [Pi](https://pi.dev/) (`pi` on PATH)
 - [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
 - Kimi (`kimi` on PATH)
+- [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) (`reasonix` on PATH; run `reasonix setup` first)
+- Dim (`dim` on PATH)
 - Kiro CLI (`kiro-cli` on PATH)
 - Qoder CLI (`qodercli` on PATH)
+- Qoder CN CLI (`qoderclicn` on PATH)
 - Trae CLI (`traecli` on PATH)
 - [Grok Build CLI](https://docs.x.ai/) (`grok` on PATH)
 - Qwen Code (`qwen` on PATH)
+- [QwenPaw](https://github.com/agentscope-ai/QwenPaw) (`qwenpaw` on PATH; pick its model in QwenPaw's own configuration)
+- [MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) (`mcode` 0.1.2+ on PATH). Install a supported Node.js release (`>=22.19 <23` or `>=24 <27`), run `npm install --global @minimax-ai/code@latest`, then `mcode login`.
+- [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness) (`dsh` on PATH with the Multica runtime profile installed; set `DEEPSEEK_API_KEY`)
 
 ### b) One-command setup
 
@@ -154,7 +182,7 @@ The chart creates the following resources in the target namespace:
 
 The `multica-secrets` Secret is **not** managed by the chart — you create it once with `kubectl` so real values never need to land in git.
 
-> **One release per namespace:** the prebuilt `multica-web` image bakes `REMOTE_API_URL=http://backend:8080` at build time, so the chart ships an ExternalName Service literally named `backend`. Because that name is unprefixed, you can run only one Multica release per namespace, and `helm install` will fail if a `Service/backend` already exists there (pass `--take-ownership`, or use a dedicated namespace). If you build a web image with a patched `REMOTE_API_URL`, set `frontend.compatibility.backendAlias: false` to drop the alias.
+> **Runtime frontend upstreams:** current `multica-web` images read `REMOTE_API_URL` and `DOCS_URL` when the Next.js server runs, so API/docs upstream changes do not require a web rebuild. The chart defaults `REMOTE_API_URL` to this release's backend Service. `frontend.compatibility.backendAlias` exists only for legacy images that still baked `REMOTE_API_URL=http://backend:8080` at build time.
 
 > **Prerequisites:** `kubectl` and `helm` (v3.13+ for `--take-ownership`, or v4+) configured for the target cluster, an Ingress controller (Traefik / NGINX), and a default StorageClass.
 
@@ -349,6 +377,8 @@ The Usage / Runtime dashboards read from a derived `task_usage_hourly` table pop
 
 Multiple backend replicas are safe: each replica ticks every 30 seconds and tries to claim the current 5-minute UTC plan, but the unique key `(job_name, scope_kind, scope_id, plan_time)` means only one wins each plan. Inspect steady-state operation:
 
+> **Exception — WeCom (企业微信) smart bot must run single-replica.** Unlike Slack and Lark, whose outbound is stateless HTTP that any replica can perform, the WeCom smart bot's only outbound path is an in-process WebSocket long connection. Agent replies and inbox pushes are delivered only by the replica currently holding a given bot's connection lease. If you run more than one backend replica with WeCom enabled (`MULTICA_WECOM_SECRET_KEY` set), responses produced on a replica that does not hold the lease are silently dropped and the WeCom user sees nothing. Until cross-replica outbound routing lands, run the WeCom-enabled backend as a single replica. Everything else (including the rollup scheduler above) is multi-replica safe.
+
 ```sql
 SELECT plan_time, status, attempt, runner_id,
        error_code, error_msg, started_at, finished_at
@@ -444,7 +474,9 @@ cd multica
 cp .env.example .env
 ```
 
-Edit `.env` — at minimum, change `JWT_SECRET`:
+Edit `.env` — set `JWT_SECRET` (required): docker compose refuses to start without
+it, and a production backend refuses to boot on the dev default or any known
+placeholder.
 
 ```bash
 JWT_SECRET=$(openssl rand -hex 32)

@@ -4,17 +4,13 @@ import { useStore } from "zustand";
 import { ListTodo } from "lucide-react";
 import { useAuthStore } from "@multica/core/auth";
 import {
+  myIssuesRelationFromScope,
   myIssuesViewStore,
-  type MyIssuesScope,
 } from "@multica/core/issues/stores/my-issues-view-store";
 import { PageHeader } from "../../layout/page-header";
 import { IssueSurface } from "../../issues/surface/issue-surface";
 import { useT } from "../../i18n";
 import { MyIssuesHeader } from "./my-issues-header";
-
-function relationFromScope(scope: MyIssuesScope) {
-  return scope === "agents" ? "involved" : scope;
-}
 
 export function MyIssuesPage() {
   const { t } = useT("my-issues");
@@ -24,9 +20,9 @@ export function MyIssuesPage() {
 
   return (
     <div className="flex flex-1 min-h-0 flex-col">
-      <PageHeader className="gap-2">
+      <PageHeader>
         <ListTodo className="h-4 w-4 text-muted-foreground" />
-        <h1 className="text-sm font-medium">{t(($) => $.page.breadcrumb)}</h1>
+        <h1 className="text-body font-medium">{t(($) => $.page.breadcrumb)}</h1>
       </PageHeader>
 
       {user ? (
@@ -34,27 +30,27 @@ export function MyIssuesPage() {
           scope={{
             type: "my",
             userId: user.id,
-            relation: relationFromScope(scope),
+            relation: myIssuesRelationFromScope(scope),
           }}
           modes={["board", "list", "table", "swimlane"]}
           batchToolbar="list"
-          renderHeader={({ controller, workingIssues }) => (
+          renderHeader={({ controller }) => (
             <MyIssuesHeader
               allIssues={controller.surfaceIssues}
-              workingIssues={workingIssues}
+              workingAgents={controller.workingAgents}
               scope={scope}
               onScopeChange={setScope}
               isRefreshing={controller.isRefreshing}
-              facetCountsExact={controller.viewMode !== "table"}
+              facetCountsExact={controller.facetCountsExact}
               tableFacetCounts={controller.tableFacetCounts}
               onTableFacetChange={controller.setActiveTableFacet}
             />
           )}
           renderEmpty={() => (
             <div className="flex flex-1 min-h-0 flex-col items-center justify-center gap-2 text-muted-foreground">
-              <ListTodo className="h-10 w-10 text-muted-foreground/40" />
-              <p className="text-sm">{t(($) => $.page.empty_title)}</p>
-              <p className="text-xs">{t(($) => $.page.empty_description)}</p>
+              <ListTodo className="h-10 w-10 text-faint-foreground" />
+              <p className="text-body">{t(($) => $.page.empty_title)}</p>
+              <p className="text-caption">{t(($) => $.page.empty_description)}</p>
             </div>
           )}
         />

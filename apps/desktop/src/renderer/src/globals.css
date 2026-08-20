@@ -41,8 +41,8 @@
                "Noto Sans CJK KR", sans-serif;
   --font-serif: "Source Serif 4 Variable", "Source Serif 4", "Iowan Old Style",
                 "Apple Garamond", Baskerville, "Times New Roman", serif;
-  --font-mono: "Geist Mono", ui-monospace, SFMono-Regular, Menlo, Consolas,
-               monospace;
+  --font-mono: "Geist Mono Variable", "Geist Mono", ui-monospace, SFMono-Regular,
+               Menlo, Consolas, monospace;
 }
 
 /* Japanese-scoped CJK override. Japanese Kanji share the Han Unicode block

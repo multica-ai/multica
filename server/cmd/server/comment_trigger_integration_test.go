@@ -340,7 +340,7 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		}
 	})
 
-	t.Run("reply to member thread without mentions falls back to assignee", func(t *testing.T) {
+	t.Run("reply to unowned member thread without mentions does not trigger assignee", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Member starts a thread.
 		threadID := postComment(t, issueID, "Hey team, what do you think?", nil)
@@ -348,22 +348,30 @@ func TestCommentTriggerOnComment(t *testing.T) {
 		clearTasks(t, issueID)
 		// Another member reply (same user in this test, but the key is parent is by member).
 		postComment(t, issueID, "I agree with you", strPtr(threadID))
-		if n := countPendingTasks(t, issueID); n != 1 {
-			t.Errorf("expected 1 pending task (assignee fallback), got %d", n)
+		if n := countPendingTasks(t, issueID); n != 0 {
+			t.Errorf("expected 0 pending tasks (unowned member thread), got %d", n)
 		}
 	})
 
-	t.Run("reply to member thread after agent replied triggers agent", func(t *testing.T) {
+	t.Run("reply to member thread after agent handled root continues agent", func(t *testing.T) {
 		clearTasks(t, issueID)
 		// Member starts a thread (top-level comment).
 		threadID := postComment(t, issueID, "Please fix this bug", nil)
-		clearTasks(t, issueID)
+		// Complete, but retain, the root-triggered task so the thread keeps its
+		// conversation owner without leaving pending work behind.
+		if _, err := testPool.Exec(context.Background(), `
+			UPDATE agent_task_queue
+			SET status = 'completed', completed_at = now()
+			WHERE issue_id = $1 AND trigger_comment_id = $2
+		`, issueID, threadID); err != nil {
+			t.Fatalf("failed to complete root-triggered task: %v", err)
+		}
 		// Agent replies in the thread.
 		postCommentAsAgent(t, issueID, "Working on it, found the root cause.", agentID, strPtr(threadID))
 		// Member follows up in the same thread without @mentioning the agent.
 		postComment(t, issueID, "Great, please also check the edge case", strPtr(threadID))
 		if n := countPendingTasks(t, issueID); n != 1 {
-			t.Errorf("expected 1 pending task (agent participated in thread), got %d", n)
+			t.Errorf("expected 1 pending task (conversation continuation), got %d", n)
 		}
 	})
 
@@ -429,6 +437,17 @@ func TestCommentTriggerAtAllSuppression(t *testing.T) {
 		postComment(t, issueID, "[@All](mention://all/all) FYI for the team", strPtr(threadID))
 		if n := countPendingTasks(t, issueID); n != 0 {
 			t.Errorf("expected 0 pending tasks (@all in agent thread), got %d", n)
+		}
+	})
+
+	// MUL-5411: @all suppresses only the IMPLICIT routes. An explicit @agent in
+	// the same comment is a direct request and must still enqueue that agent.
+	t.Run("@all with explicit @agent still triggers the agent", func(t *testing.T) {
+		clearTasks(t, issueID)
+		content := fmt.Sprintf("[@All](mention://all/all) heads up — [@Agent](mention://agent/%s) please take this", agentID)
+		postComment(t, issueID, content, nil)
+		if n := countPendingTasks(t, issueID); n != 1 {
+			t.Errorf("expected 1 pending task (@all must not swallow the explicit @agent), got %d", n)
 		}
 	})
 }

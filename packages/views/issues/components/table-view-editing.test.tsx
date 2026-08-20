@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   act,
   cleanup,
+  fireEvent,
   render,
   screen,
   waitFor,
@@ -78,12 +79,56 @@ vi.mock("@multica/core/auth", () => ({
   ),
 }));
 
-vi.mock("../../navigation", () => ({
-  AppLink: ({ children, ...props }: React.ComponentProps<"a">) => (
-    <a {...props}>{children}</a>
-  ),
-  useNavigation: () => ({ push: vi.fn(), pathname: "/" }),
+const navigationMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  openInNewTab: vi.fn(),
+  getShareableUrl: vi.fn((path: string) => `https://app.example${path}`),
 }));
+const navigationState = vi.hoisted(() => ({ hasOpenInNewTab: true }));
+
+vi.mock("../../navigation", async () => {
+  // Real resolver — pure, no React context.
+  const { resolveClickIntent } = await vi.importActual<
+    typeof import("../../navigation/click-intent")
+  >("../../navigation/click-intent");
+  return {
+    AppLink: ({ children, ...props }: React.ComponentProps<"a">) => (
+      <a {...props}>{children}</a>
+    ),
+    resolveClickIntent,
+    useNavigation: () => ({
+      push: navigationMocks.push,
+      openInNewTab: navigationState.hasOpenInNewTab
+        ? navigationMocks.openInNewTab
+        : undefined,
+      getShareableUrl: navigationMocks.getShareableUrl,
+      pathname: "/",
+    }),
+    // Mirrors the real hook's adapter semantics against the mocks above.
+    useIntentNavigate:
+      () => (href: string, intent: string, newTabTitle?: string) => {
+        if (intent === "push") {
+          navigationMocks.push(href);
+          return;
+        }
+        if (navigationState.hasOpenInNewTab) {
+          if (intent === "foreground-tab") {
+            navigationMocks.openInNewTab(href, newTabTitle, {
+              activate: true,
+            });
+          } else {
+            navigationMocks.openInNewTab(href, newTabTitle);
+          }
+          return;
+        }
+        window.open(
+          navigationMocks.getShareableUrl(href),
+          "_blank",
+          "noopener,noreferrer",
+        );
+      },
+  };
+});
 
 vi.mock("@multica/core/paths", async () => {
   const actual = await vi.importActual<typeof import("@multica/core/paths")>(
@@ -184,6 +229,13 @@ describe("TableView cell editors under data refresh", () => {
   let queryClient: QueryClient;
 
   beforeEach(() => {
+    navigationMocks.push.mockReset();
+    navigationMocks.openInNewTab.mockReset();
+    navigationMocks.getShareableUrl.mockReset();
+    navigationMocks.getShareableUrl.mockImplementation(
+      (path: string) => `https://app.example${path}`,
+    );
+    navigationState.hasOpenInNewTab = true;
     vi.stubGlobal("IntersectionObserver", ObserverStub);
     vi.stubGlobal("ResizeObserver", ObserverStub);
     queryClient = new QueryClient({
@@ -216,10 +268,16 @@ describe("TableView cell editors under data refresh", () => {
   });
 
   // Explicit timeout: this mounts the full TableView with every picker + a
-  // QueryClient, so it is heavier than a unit test. `delay: null` drives
-  // userEvent off fake-synchronous timing instead of the default real-timer
-  // gaps between events, which were what let the whole gesture blow past the
-  // 5s default under concurrent CI worker load (MUL-5108 review R1#1).
+  // QueryClient and drives three realistic userEvent click gestures, each
+  // re-rendering the whole table — far heavier than a unit test. `delay: null`
+  // strips the default real-timer gaps between events (MUL-5108 review R1#1).
+  // Even so, the frontend CI job runs the entire `turbo build typecheck lint
+  // test` pipeline on a 2-core runner, so builds/lints/typechecks and 258
+  // vitest files all oversubscribe both cores at once; at the worst-case
+  // scheduling peak this test's wall clock blew past the earlier 20s cap
+  // (MUL-5326). It runs in ~1s in isolation, so the generous 60s ceiling
+  // (matching the repo's heaviest FE tests) only absorbs CI CPU starvation —
+  // it never masks a real hang.
   it("keeps the status picker open and the row order frozen across a refresh, then catches up on close", async () => {
     const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
     const issueA = makeIssue("a", "Alpha task", "todo");
@@ -290,7 +348,7 @@ describe("TableView cell editors under data refresh", () => {
     await user.click(screen.getByRole("button", { name: /Backlog/ }));
     expect(screen.queryByRole("button", { name: /Backlog/ })).toBeNull();
     expect(identifiers()).toEqual(["MUL-b", "MUL-a"]);
-  }, 20_000);
+  }, 60_000);
 
   it("opens creation with the row as parent and inherits its project", async () => {
     const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
@@ -321,6 +379,117 @@ describe("TableView cell editors under data refresh", () => {
       parent_issue_identifier: "MUL-a",
       project_id: "project-1",
     });
+  });
+
+  it("navigates in place on plain title and row clicks; modifiers open tabs", async () => {
+    const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-new-tab-${Math.floor(Math.random() * 1e9)}`}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    const title = within(row).getByRole("button", { name: "Alpha task" });
+
+    await user.click(title);
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
+
+    navigationMocks.push.mockClear();
+    await user.click(row);
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
+
+    navigationMocks.push.mockClear();
+    fireEvent.click(title, { metaKey: true });
+    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
+      "/test/issues/a",
+      "MUL-a",
+    );
+
+    navigationMocks.openInNewTab.mockClear();
+    fireEvent.click(row, { metaKey: true, shiftKey: true });
+    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
+      "/test/issues/a",
+      "MUL-a",
+      { activate: true },
+    );
+    expect(navigationMocks.push).not.toHaveBeenCalled();
+  });
+
+  it("middle click on an interactive cell does not trigger row navigation", async () => {
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-aux-cells-${Math.floor(Math.random() * 1e9)}`}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    const auxClick = (el: HTMLElement) =>
+      el.dispatchEvent(
+        new MouseEvent("auxclick", { bubbles: true, button: 1, cancelable: true }),
+      );
+
+    // Status cell trigger (interactive) — must NOT bubble into a row open.
+    auxClick(within(row).getByRole("button", { name: /Todo/ }));
+    expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
+    expect(navigationMocks.push).not.toHaveBeenCalled();
+
+    // Row checkbox — same.
+    auxClick(within(row).getByRole("checkbox"));
+    expect(navigationMocks.openInNewTab).not.toHaveBeenCalled();
+
+    // Dead space on the row still opens a background tab on middle click.
+    auxClick(row);
+    expect(navigationMocks.openInNewTab).toHaveBeenCalledWith(
+      "/test/issues/a",
+      "MUL-a",
+    );
+  });
+
+  it("without a tab adapter (web), plain click pushes and a modifier click opens a browser tab", async () => {
+    const user = userEvent.setup({ delay: null, pointerEventsCheck: 0 });
+    const windowOpen = vi.fn();
+    vi.stubGlobal("open", windowOpen);
+    navigationState.hasOpenInNewTab = false;
+    serverIssues = [makeIssue("a", "Alpha task", "todo")];
+
+    renderWithI18n(
+      <QueryClientProvider client={queryClient}>
+        <Harness
+          childProgressMap={new Map()}
+          surfaceKey={`test-browser-tab-${Math.floor(Math.random() * 1e9)}`}
+        />
+      </QueryClientProvider>,
+    );
+
+    const row = (await screen.findByText("MUL-a")).closest("tr")!;
+    const title = within(row).getByRole("button", { name: "Alpha task" });
+
+    await user.click(title);
+    expect(navigationMocks.push).toHaveBeenCalledWith("/test/issues/a");
+    expect(windowOpen).not.toHaveBeenCalled();
+
+    fireEvent.click(title, { metaKey: true });
+    expect(navigationMocks.getShareableUrl).toHaveBeenCalledWith(
+      "/test/issues/a",
+    );
+    expect(windowOpen).toHaveBeenCalledWith(
+      "https://app.example/test/issues/a",
+      "_blank",
+      "noopener,noreferrer",
+    );
   });
 });
 

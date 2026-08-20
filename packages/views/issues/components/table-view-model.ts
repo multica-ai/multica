@@ -34,12 +34,22 @@ export type IssueTableDisplayRow =
       hasChildren: boolean;
       collapsed: boolean;
     }
+  // Stands in for a row that has not arrived yet. Cold loads render these in
+  // the table's own grid rather than swapping the surface for a generic
+  // placeholder: columns, widths and the header are known before any data is,
+  // so only the rows need standing in for, and the layout does not shift when
+  // they are replaced.
+  | { kind: "skeleton"; key: string }
+  // Carries the state rather than a finished label: the row renders through
+  // ListLoadMoreFooter, the same footer Board / List / Swimlane use, which owns
+  // the wording and the styling for each state.
   | {
       kind: "load_more";
       key: string;
-      label: string;
-      loading: boolean;
-      autoLoad?: boolean;
+      state: "loading" | "has_more" | "error" | "end";
+      // Rows past this many mean the branch actually paginated, which is what
+      // decides whether reaching the end is worth marking.
+      total: number;
       onLoad?: () => void;
     };
 

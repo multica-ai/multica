@@ -17,6 +17,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -245,6 +246,7 @@ func emitAutopilotPausedNotifications(
 		emitted[key] = true
 
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   autopilot.WorkspaceID,
 			RecipientType: r.Type,
 			RecipientID:   r.ID,

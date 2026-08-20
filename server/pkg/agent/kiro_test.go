@@ -106,7 +106,11 @@ while IFS= read -r line; do
       esac
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"ToolCallUpdate","toolCallId":"tc-current","status":"completed","name":"Shell","parameters":{"command":"echo current"},"output":"current tool output\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":"loaded"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":2,"outputTokens":1,"cacheReadTokens":7,"cacheWriteTokens":3,"costUsdTicks":900}}}\n' "$id"
+      if [ -n "$KIRO_LATE_CHUNK" ]; then
+        sleep 0.05
+        printf '{"jsonrpc":"2.0","method":"session/notification","params":{"sessionId":"ses_loaded","update":{"type":"AgentMessageChunk","content":{"type":"text","text":" tail"}}}}\n'
+      fi
       exit 0
       ;;
   esac
@@ -198,8 +202,8 @@ func TestKiroBackendAttributesUsageToCurrentModel(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected usage under current model auto, got %+v", result.Usage)
 	}
-	if usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
+	if usage != (TokenUsage{InputTokens: 2, OutputTokens: 1, CacheReadTokens: 7, CacheWriteTokens: 3, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 }
 
@@ -1006,8 +1010,8 @@ func TestKiroBackendUsesSessionLoadForResume(t *testing.T) {
 	if result.Output != "loaded" {
 		t.Fatalf("output = %q, want loaded", result.Output)
 	}
-	if usage := result.Usage["unknown"]; usage.InputTokens != 2 || usage.OutputTokens != 1 || usage.CacheReadTokens != 7 || usage.CacheWriteTokens != 3 {
-		t.Fatalf("usage = %+v, want input=2 output=1 cache_read=7 cache_write=3", usage)
+	if usage := result.Usage["unknown"]; usage != (TokenUsage{InputTokens: 2, OutputTokens: 1, CacheReadTokens: 7, CacheWriteTokens: 3, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 	if len(messages) != 3 {
 		t.Fatalf("messages = %+v, want current tool use, tool result, and text only", messages)
@@ -1101,5 +1105,219 @@ func TestKiroLoadIncludesMcpServersFromConfig(t *testing.T) {
 	}
 	if len(servers) != 1 || servers[0].(map[string]any)["name"] != "fetch" {
 		t.Fatalf("session/load.mcpServers: got %v, want one entry named fetch", servers)
+	}
+}
+
+// TestIsKiroOversizedHistoryImage pins the detector for the GH #5975 shape: a
+// resumed conversation whose history replays an image exceeding the provider's
+// max pixel dimensions, rejected at session/prompt as a -32603 that names the
+// image-content path AND the dimension limit. Both markers are required so an
+// ordinary -32603 (the "failed to generate a response" close, a mid-command
+// crash) is never misread as a permanent history incompatibility.
+func TestIsKiroOversizedHistoryImage(t *testing.T) {
+	t.Parallel()
+
+	const oversizedData = "Encountered an error in the response stream: messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels"
+
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "oversized history image at session/prompt",
+			err:  &acpRPCError{Method: "session/prompt", Code: -32603, Message: "Internal error", Data: oversizedData},
+			want: true,
+		},
+		{
+			name: "goal-complete close error is not this",
+			err:  &acpRPCError{Method: "session/prompt", Code: -32603, Message: "Internal error", Data: "Kiro failed to generate a response"},
+			want: false,
+		},
+		{
+			name: "session not found is not this",
+			err:  &acpRPCError{Method: "session/prompt", Code: -32603, Message: "Internal error", Data: "No session found with id ses_x"},
+			want: false,
+		},
+		{
+			name: "dimension phrase without the image-content marker does not match",
+			err:  &acpRPCError{Method: "session/prompt", Code: -32603, Message: "Internal error", Data: "image dimensions exceed max allowed size: 8000 pixels"},
+			want: false,
+		},
+		{
+			name: "wrong method does not match",
+			err:  &acpRPCError{Method: "session/load", Code: -32603, Message: "Internal error", Data: oversizedData},
+			want: false,
+		},
+		{
+			name: "wrong code does not match",
+			err:  &acpRPCError{Method: "session/prompt", Code: -32602, Message: "Invalid params", Data: oversizedData},
+			want: false,
+		},
+		{
+			name: "non-acp error does not match",
+			err:  os.ErrNotExist,
+			want: false,
+		},
+		{
+			name: "nil error does not match",
+			err:  nil,
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isKiroOversizedHistoryImage(tt.err); got != tt.want {
+				t.Fatalf("isKiroOversizedHistoryImage(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+// fakeKiroACPOversizedHistoryImageScript answers initialize + session/new +
+// session/load, then rejects every session/prompt with the GH #5975 oversized
+// historical-image -32603.
+func fakeKiroACPOversizedHistoryImageScript() string {
+	return `#!/bin/sh
+while IFS= read -r line; do
+  id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
+  case "$line" in
+    *'"method":"initialize"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      ;;
+    *'"method":"session/new"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_fresh"}}\n' "$id"
+      ;;
+    *'"method":"session/load"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/prompt"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"error":{"code":-32603,"message":"Internal error","data":"Encountered an error in the response stream: messages.14.content.0.image.source.base64.data: At least one of the image dimensions exceed max allowed size: 8000 pixels"}}\n' "$id"
+      exit 0
+      ;;
+  esac
+done
+`
+}
+
+func runKiroScriptWithOpts(t *testing.T, script string, opts ExecOptions) Result {
+	t.Helper()
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	backend, err := New("kiro", Config{ExecutablePath: fakePath, Logger: slog.Default()})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if opts.Timeout == 0 {
+		opts.Timeout = 5 * time.Second
+	}
+	session, err := backend.Execute(ctx, "prompt-ignored", opts)
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	select {
+	case result, ok := <-session.Result:
+		if !ok {
+			t.Fatal("result channel closed without a value")
+		}
+		return result
+	case <-time.After(10 * time.Second):
+		t.Fatal("timeout waiting for result")
+		return Result{}
+	}
+}
+
+// TestKiroResumedOversizedHistoryImageSignalsResumeRejected asserts a RESUMED
+// session that hits the oversized historical-image rejection fails, reports
+// ResumeRejected=true so the daemon retries once from a fresh session, and
+// keeps the poisoned session id for auditing/persistent invalidation.
+func TestKiroResumedOversizedHistoryImageSignalsResumeRejected(t *testing.T) {
+	t.Parallel()
+
+	result := runKiroScriptWithOpts(t, fakeKiroACPOversizedHistoryImageScript(), ExecOptions{
+		ResumeSessionID: "ses_poisoned",
+	})
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if !result.ResumeRejected {
+		t.Fatalf("expected ResumeRejected=true for oversized-history-image resume failure, got false (error=%q)", result.Error)
+	}
+	if result.SessionID != "ses_poisoned" {
+		t.Fatalf("expected the poisoned session id to be preserved for auditing, got %q", result.SessionID)
+	}
+	if !strings.Contains(result.Error, "image dimensions exceed max allowed size") {
+		t.Fatalf("expected the offending-image error to be surfaced, got %q", result.Error)
+	}
+}
+
+// TestKiroFreshOversizedHistoryImageDoesNotSignalResumeRejected asserts the
+// SAME error on a fresh (non-resumed) session does NOT set ResumeRejected — a
+// fresh session cannot itself be "resume rejected", and retrying it again would
+// be pointless. This guards the opts.ResumeSessionID gate on the branch.
+func TestKiroFreshOversizedHistoryImageDoesNotSignalResumeRejected(t *testing.T) {
+	t.Parallel()
+
+	result := runKiroScriptWithOpts(t, fakeKiroACPOversizedHistoryImageScript(), ExecOptions{})
+
+	if result.Status != "failed" {
+		t.Fatalf("expected status=failed, got %q (error=%q)", result.Status, result.Error)
+	}
+	if result.ResumeRejected {
+		t.Fatal("expected ResumeRejected=false on a fresh session, got true")
+	}
+	if result.SessionID != "ses_fresh" {
+		t.Fatalf("expected the fresh session id, got %q", result.SessionID)
+	}
+}
+
+// TestKiroDrainsNotificationsAfterPromptResponse pins the trailing-notification
+// drain. kiro ACP can emit a final session update just after the
+// session/prompt response returns; closing stdin and cancelling the context at
+// that boundary raced the stdout reader and silently truncated the last chunk.
+// The same defect was fixed for the sibling ACP backends in #5440 (grok) and
+// #5675 (hermes).
+func TestKiroDrainsNotificationsAfterPromptResponse(t *testing.T) {
+	t.Parallel()
+
+	fakePath := filepath.Join(t.TempDir(), "kiro-cli")
+	writeTestExecutable(t, fakePath, []byte(fakeKiroACPScript()))
+
+	backend, err := New("kiro", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"KIRO_LATE_CHUNK": "1"},
+	})
+	if err != nil {
+		t.Fatalf("new kiro backend: %v", err)
+	}
+
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
+	if err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+
+	go func() {
+		for range session.Messages {
+		}
+	}()
+
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "loaded tail") {
+		t.Fatalf("late output was truncated: %q", result.Output)
 	}
 }

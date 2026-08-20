@@ -13,6 +13,20 @@ WHERE id = $1;
 SELECT * FROM project
 WHERE id = $1 AND workspace_id = $2;
 
+-- name: LockProjectForChatSessionCreate :one
+-- Conflicts with project deletion so a chat session cannot commit a soft
+-- project reference after the delete transaction has swept existing sessions.
+SELECT id FROM project
+WHERE id = $1 AND workspace_id = $2
+FOR KEY SHARE;
+
+-- name: LockProjectForDelete :one
+-- Serializes project deletion with chat-session creation. The handler locks,
+-- clears every soft chat reference, and deletes the project in one transaction.
+SELECT id FROM project
+WHERE id = $1 AND workspace_id = $2
+FOR UPDATE;
+
 -- name: CreateProject :one
 INSERT INTO project (
     workspace_id, title, description, icon, status,
@@ -47,7 +61,7 @@ WHERE project_id = $1;
 -- name: GetProjectIssueStats :many
 SELECT project_id,
        count(*)::bigint AS total_count,
-       count(*) FILTER (WHERE status IN ('done', 'cancelled'))::bigint AS done_count
+       count(*) FILTER (WHERE issue_effective_status(workspace_id, status) IN ('done', 'cancelled'))::bigint AS done_count
 FROM issue
 WHERE project_id = ANY(sqlc.arg('project_ids')::uuid[])
 GROUP BY project_id;

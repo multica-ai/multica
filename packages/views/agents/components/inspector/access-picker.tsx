@@ -223,8 +223,8 @@ export function AccessPicker({
           <Lock className="size-4" aria-hidden="true" />
         </span>
         <div className="min-w-0">
-          <p className="text-sm font-medium">{summaryLabel}</p>
-          <p className="mt-0.5 text-xs leading-5 text-muted-foreground">
+          <p className="text-body font-medium">{summaryLabel}</p>
+          <p className="mt-0.5 text-caption leading-5 text-muted-foreground">
             {t(($) => $.access.owner_only_readonly)}
           </p>
         </div>
@@ -270,7 +270,7 @@ export function AccessPicker({
         <div className="border-t border-surface-border bg-muted/20 px-4 py-5 sm:px-6">
           <div>
             {editableMembers.length === 0 ? (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-caption text-muted-foreground">
                 {t(($) => $.access.members_empty)}
               </p>
             ) : (
@@ -298,7 +298,7 @@ export function AccessPicker({
                           actorId={member.user_id}
                           size="sm"
                         />
-                        <span className="min-w-0 flex-1 truncate text-sm">
+                        <span className="min-w-0 flex-1 truncate text-body">
                           {member.name}
                         </span>
                       </label>
@@ -310,7 +310,7 @@ export function AccessPicker({
           </div>
 
           {!hasMemberTarget ? (
-            <p className="mt-3 text-xs text-destructive" role="alert">
+            <p className="mt-3 text-caption text-destructive" role="alert">
               {t(($) => $.access.shared_target_required)}
             </p>
           ) : null}
@@ -319,7 +319,7 @@ export function AccessPicker({
 
       {hasComposioAllowlist && persistedPrivate && draftScope !== "private" ? (
         <div className="border-t border-surface-border bg-muted/20 px-4 py-4 sm:px-6">
-          <p className="border-l-2 border-warning pl-3 text-xs leading-5 text-muted-foreground">
+          <p className="border-l-2 border-warning pl-3 text-caption leading-5 text-muted-foreground">
             {t(($) => $.access.composio_switch_hint)}
           </p>
         </div>
@@ -379,8 +379,8 @@ function AccessChoice({
         <Icon className="size-4" aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block text-sm font-medium">{title}</span>
-        <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+        <span className="block text-body font-medium">{title}</span>
+        <span className="mt-0.5 block text-caption leading-5 text-muted-foreground">
           {description}
         </span>
       </span>

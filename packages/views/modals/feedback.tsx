@@ -22,6 +22,7 @@ import {
   useCreateFeedback,
   useFeedbackDraftStore,
   FEEDBACK_KINDS,
+  isFeedbackContext,
   type FeedbackKind,
 } from "@multica/core/feedback";
 import { useCurrentWorkspace } from "@multica/core/paths";
@@ -69,6 +70,7 @@ export function FeedbackModal({
   const kind = typeof data?.kind === "string" && FEEDBACK_KIND_SET.has(data.kind as FeedbackKind)
     ? (data.kind as FeedbackKind)
     : undefined;
+  const context = isFeedbackContext(data?.context) ? data.context : undefined;
   const seededMessage = composeFeedbackInitialMessage(draft.message, incomingInitialMessage);
   const [message, setMessage] = useState(seededMessage);
   const { isDragOver, dropZoneProps } = useFileDropZone({
@@ -112,6 +114,7 @@ export function FeedbackModal({
         url: typeof window !== "undefined" ? window.location.href : undefined,
         workspace_id: workspace?.id,
         kind,
+        context,
       });
       clearDraft();
       toast.success(t(($) => $.feedback.toast_sent));
@@ -130,7 +133,7 @@ export function FeedbackModal({
       <DialogContent className="sm:max-w-2xl !h-[28rem] p-0 gap-0 flex flex-col overflow-hidden">
         <DialogHeader className="px-5 pt-4 pb-2 shrink-0">
           <DialogTitle>{t(($) => $.feedback.title)}</DialogTitle>
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.feedback.github_hint_prefix)}
             <a
               href="https://github.com/multica-ai/multica/issues"
@@ -153,7 +156,7 @@ export function FeedbackModal({
               defaultValue={seededMessage}
               placeholder={t(($) => $.feedback.placeholder)}
               onUpdate={(md) => { setMessage(md); setDraft({ message: md }); }}
-              onUploadFile={uploadWithToast}
+              onUploadFile={(file) => uploadWithToast(file)}
               onUploadingChange={uploadGate.onUploadingChange}
               onSubmit={handleSubmit}
               debounceMs={150}

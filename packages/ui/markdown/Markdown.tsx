@@ -118,7 +118,7 @@ function createComponents(
           <div className="my-1 flex items-center gap-2 rounded-md border border-border bg-muted/50 px-2.5 py-1 transition-colors hover:bg-muted">
             <FileText className="size-4 shrink-0 text-muted-foreground" />
             <div className="min-w-0 flex-1">
-              <p className="truncate text-sm">{filename}</p>
+              <p className="truncate text-body">{filename}</p>
             </div>
             {href && (
               <button
@@ -232,7 +232,7 @@ function createComponents(
       ol: ({ children }) => <ol className="list-decimal list-inside my-1">{children}</ol>,
       li: ({ children }) => <li className="my-0.5">{children}</li>,
       // Plain tables
-      table: ({ children }) => <table className="my-2 font-mono text-sm">{children}</table>,
+      table: ({ children }) => <table className="my-2 font-mono text-body">{children}</table>,
       th: ({ children }) => <th className="text-left pr-4">{children}</th>,
       td: ({ children }) => <td className="pr-4">{children}</td>
     }
@@ -271,7 +271,7 @@ function createComponents(
       // Clean tables
       table: ({ children }) => (
         <div className="my-3 overflow-x-auto">
-          <table className="min-w-full text-sm">{children}</table>
+          <table className="min-w-full text-body">{children}</table>
         </div>
       ),
       thead: ({ children }) => <thead className="border-b">{children}</thead>,
@@ -280,12 +280,12 @@ function createComponents(
       ),
       td: ({ children }) => <td className="py-2 px-3 border-b border-border/50">{children}</td>,
       // Headings - H1/H2 same size, differentiated by weight
-      h1: ({ children }) => <h1 className="font-sans text-base font-bold mt-5 mb-3">{children}</h1>,
+      h1: ({ children }) => <h1 className="font-sans text-title-sm font-bold mt-5 mb-3">{children}</h1>,
       h2: ({ children }) => (
-        <h2 className="font-sans text-base font-semibold mt-4 mb-3">{children}</h2>
+        <h2 className="font-sans text-title-sm font-semibold mt-4 mb-3">{children}</h2>
       ),
       h3: ({ children }) => (
-        <h3 className="font-sans text-sm font-semibold mt-4 mb-2">{children}</h3>
+        <h3 className="font-sans text-body font-semibold mt-4 mb-2">{children}</h3>
       ),
       // Blockquotes
       blockquote: ({ children }) => (
@@ -336,16 +336,16 @@ function createComponents(
     ),
     thead: ({ children }) => <thead className="bg-muted/50">{children}</thead>,
     tbody: ({ children }) => <tbody className="divide-y divide-border">{children}</tbody>,
-    th: ({ children }) => <th className="text-left py-3 px-4 font-semibold text-sm">{children}</th>,
-    td: ({ children }) => <td className="py-3 px-4 text-sm">{children}</td>,
+    th: ({ children }) => <th className="text-left py-3 px-4 font-semibold text-body">{children}</th>,
+    td: ({ children }) => <td className="py-3 px-4 text-body">{children}</td>,
     tr: ({ children }) => <tr className="hover:bg-muted/30 transition-colors">{children}</tr>,
     // Rich headings
-    h1: ({ children }) => <h1 className="font-sans text-base font-bold mt-7 mb-4">{children}</h1>,
+    h1: ({ children }) => <h1 className="font-sans text-title-sm font-bold mt-7 mb-4">{children}</h1>,
     h2: ({ children }) => (
-      <h2 className="font-sans text-base font-semibold mt-6 mb-3">{children}</h2>
+      <h2 className="font-sans text-title-sm font-semibold mt-6 mb-3">{children}</h2>
     ),
-    h3: ({ children }) => <h3 className="font-sans text-sm font-semibold mt-5 mb-3">{children}</h3>,
-    h4: ({ children }) => <h4 className="text-sm font-semibold mt-3 mb-1">{children}</h4>,
+    h3: ({ children }) => <h3 className="font-sans text-body font-semibold mt-5 mb-3">{children}</h3>,
+    h4: ({ children }) => <h4 className="text-body font-semibold mt-3 mb-1">{children}</h4>,
     // Styled blockquotes
     blockquote: ({ children }) => (
       <blockquote className="border-l-4 border-foreground/30 bg-muted/30 pl-4 pr-3 py-2 my-3 rounded-r-md">

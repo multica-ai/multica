@@ -36,6 +36,7 @@ type businessEventMetrics struct {
 	teamInviteAccepted              *prometheus.CounterVec
 	onboardingStarted               *prometheus.CounterVec
 	onboardingQuestionnaireSubmit   *prometheus.CounterVec
+	onboardingSourceSubmit          *prometheus.CounterVec
 	onboardingCompleted             *prometheus.CounterVec
 	cloudWaitlistJoined             *prometheus.CounterVec
 	issueCreated                    *prometheus.CounterVec
@@ -55,6 +56,7 @@ type businessEventMetrics struct {
 	autopilotRunSkipped             *prometheus.CounterVec
 	webhookDelivery                 *prometheus.CounterVec
 	webhookRateLimited              *prometheus.CounterVec
+	emailRateLimited                *prometheus.CounterVec
 	githubEventReceived             *prometheus.CounterVec
 	githubPRReview                  *prometheus.CounterVec
 	githubPRMergeSeconds            prometheus.Histogram
@@ -91,6 +93,10 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_onboarding_questionnaire_submitted_total",
 			Help: "Total onboarding questionnaires submitted.",
 		}, metricLabels("multica_onboarding_questionnaire_submitted_total")),
+		onboardingSourceSubmit: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "multica_onboarding_source_submitted_total",
+			Help: "Total acquisition-source answers or declines recorded (workspace backfill prompt).",
+		}, metricLabels("multica_onboarding_source_submitted_total")),
 		onboardingCompleted: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_onboarding_completed_total",
 			Help: "Total onboarding flows completed.",
@@ -168,6 +174,10 @@ func newBusinessEventMetrics() *businessEventMetrics {
 			Name: "multica_webhook_rate_limited_total",
 			Help: "Total webhook admissions or worker dispatches delayed by a bounded safety gate.",
 		}, metricLabels("multica_webhook_rate_limited_total")),
+		emailRateLimited: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Name: "multica_email_rate_limited_total",
+			Help: "Total email-producing actions rejected by a bounded safety gate.",
+		}, metricLabels("multica_email_rate_limited_total")),
 		githubEventReceived: prometheus.NewCounterVec(prometheus.CounterOpts{
 			Name: "multica_github_event_received_total",
 			Help: "Total GitHub webhook events received by event kind and action.",
@@ -216,6 +226,7 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.teamInviteAccepted,
 		e.onboardingStarted,
 		e.onboardingQuestionnaireSubmit,
+		e.onboardingSourceSubmit,
 		e.onboardingCompleted,
 		e.cloudWaitlistJoined,
 		e.issueCreated,
@@ -235,6 +246,7 @@ func (e *businessEventMetrics) collectors() []prometheus.Collector {
 		e.autopilotRunSkipped,
 		e.webhookDelivery,
 		e.webhookRateLimited,
+		e.emailRateLimited,
 		e.githubEventReceived,
 		e.githubPRReview,
 		e.githubPRMergeSeconds,
@@ -290,6 +302,8 @@ func (m *BusinessMetrics) IncForEvent(ev analytics.Event) {
 		m.events.onboardingStarted.WithLabelValues(NormalizePlatform(stringProp(ev.Properties, "platform"))).Inc()
 	case analytics.EventOnboardingQuestionnaireSubmit:
 		m.events.onboardingQuestionnaireSubmit.WithLabelValues().Inc()
+	case analytics.EventOnboardingSourceSubmit:
+		m.events.onboardingSourceSubmit.WithLabelValues().Inc()
 	case analytics.EventOnboardingCompleted:
 		m.events.onboardingCompleted.WithLabelValues(NormalizeOnboardingPath(stringProp(ev.Properties, "completion_path"))).Inc()
 	case analytics.EventCloudWaitlistJoined:
@@ -398,6 +412,16 @@ func (m *BusinessMetrics) RecordWebhookRateLimited(gate string) {
 		return
 	}
 	m.events.webhookRateLimited.WithLabelValues(NormalizeWebhookRateLimitGate(gate)).Inc()
+}
+
+func (m *BusinessMetrics) RecordEmailRateLimited(action, gate string) {
+	if m == nil || m.events == nil {
+		return
+	}
+	m.events.emailRateLimited.WithLabelValues(
+		NormalizeEmailRateLimitAction(action),
+		NormalizeEmailRateLimitGate(gate),
+	).Inc()
 }
 
 // RecordGithubEventReceived counts a GitHub webhook event by event kind / action.

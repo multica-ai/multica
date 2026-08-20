@@ -2,13 +2,13 @@
 
 import { useState } from "react";
 import {
-  FileText,
   Loader2,
   Plus,
   RefreshCw,
   Server,
   Trash2,
 } from "lucide-react";
+import { SkillIcon } from "../../../skills/lib/skill-icon";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import type {
@@ -19,7 +19,10 @@ import type {
 } from "@multica/core/types";
 import { api, ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { runtimeCapabilitiesOptions } from "@multica/core/runtimes";
+import {
+  runtimeCapabilitiesOptions,
+  runtimeDisplayLabel,
+} from "@multica/core/runtimes";
 import {
   skillDetailOptions,
   skillListOptions,
@@ -136,7 +139,7 @@ export function SkillsTab({
 
   return (
     <div className="space-y-8">
-      <p className="text-sm leading-6 text-muted-foreground">
+      <p className="text-body leading-6 text-muted-foreground">
         {t(($) => $.tab_body.skills.intro)}
       </p>
 
@@ -159,7 +162,7 @@ export function SkillsTab({
       >
         {agent.skills.length === 0 ? (
           <EmptyState
-            icon={<FileText className="h-6 w-6" />}
+            icon={<SkillIcon className="h-6 w-6" />}
             title={t(($) => $.tab_body.skills.empty_title)}
             hint={t(($) => $.tab_body.skills.empty_hint)}
           />
@@ -178,16 +181,16 @@ export function SkillsTab({
                     <span
                       className={cn(
                         "flex size-9 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground",
-                        !enabled && "opacity-50",
+                        !enabled && "text-faint-foreground",
                       )}
                     >
-                      <FileText className="h-4 w-4" />
+                      <SkillIcon className="h-4 w-4" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className={cn("block text-sm font-medium", !enabled && "text-muted-foreground")}>
+                      <span className={cn("block text-body font-medium", !enabled && "text-muted-foreground")}>
                         {skill.name}
                       </span>
-                      <span className="block truncate text-xs text-muted-foreground">
+                      <span className="block truncate text-caption text-muted-foreground">
                         {skill.description || t(($) => $.tab_body.skills.no_description)}
                       </span>
                     </span>
@@ -229,7 +232,7 @@ export function SkillsTab({
       <CapabilitySection
         title={t(($) => $.tab_body.skills.runtime_title)}
         description={t(($) => $.tab_body.skills.runtime_hint, {
-          runtime: runtime?.custom_name || runtime?.name || "Runtime",
+          runtime: runtime ? runtimeDisplayLabel(runtime) : "Runtime",
         })}
         action={
           runtimeId ? (
@@ -303,13 +306,13 @@ export function SkillsTab({
                     <span className="min-w-0 flex-1">
                       <span
                         className={cn(
-                          "block text-sm font-medium",
+                          "block text-body font-medium",
                           disabled && "text-muted-foreground",
                         )}
                       >
                         {skill.name}
                       </span>
-                      <span className="block truncate text-xs text-muted-foreground">
+                      <span className="block truncate text-caption text-muted-foreground">
                         {skill.description || skill.source_path}
                       </span>
                     </span>
@@ -384,8 +387,8 @@ function CapabilitySection({
     <section className="space-y-3">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h3 className="text-sm font-medium">{title}</h3>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
+          <h3 className="text-body font-medium">{title}</h3>
+          <p className="mt-1 text-caption leading-5 text-muted-foreground">{description}</p>
         </div>
         {action}
       </div>
@@ -398,15 +401,15 @@ function EmptyState({ icon, title, hint }: { icon: React.ReactNode; title: strin
   return (
     <div className="flex flex-col items-center justify-center rounded-lg border border-dashed py-10 text-muted-foreground">
       <span className="opacity-50">{icon}</span>
-      <p className="mt-3 text-sm">{title}</p>
-      <p className="mt-1 max-w-sm text-center text-xs">{hint}</p>
+      <p className="mt-3 text-body">{title}</p>
+      <p className="mt-1 max-w-sm text-center text-caption">{hint}</p>
     </div>
   );
 }
 
 function RuntimeNotice({ text, loading = false }: { text: string; loading?: boolean }) {
   return (
-    <div className="flex items-center gap-2 rounded-lg border border-dashed px-4 py-6 text-xs text-muted-foreground">
+    <div className="flex items-center gap-2 rounded-lg border border-dashed px-4 py-6 text-caption text-muted-foreground">
       {loading ? (
         <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />
       ) : (
@@ -453,7 +456,7 @@ function SkillDetailDialog({
             {t(($) => $.tab_body.skills.detail_loading)}
           </div>
         ) : runtimeSkill ? (
-          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 rounded-lg border p-4 text-xs">
+          <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-3 rounded-lg border p-4 text-caption">
             <dt className="text-muted-foreground">{t(($) => $.tab_body.skills.detail_source)}</dt>
             <dd className="break-all">{runtimeSkill.source_path}</dd>
             <dt className="text-muted-foreground">{t(($) => $.tab_body.skills.detail_provider)}</dt>
@@ -470,13 +473,13 @@ function SkillDetailDialog({
         ) : workspaceSkill ? (
           <div className="space-y-4">
             <div className="max-h-96 overflow-auto rounded-lg border bg-muted/30 p-4">
-              <pre className="whitespace-pre-wrap break-words font-mono text-xs leading-5">
+              <pre className="whitespace-pre-wrap break-words font-mono text-caption leading-5">
                 {workspaceSkill.content}
               </pre>
             </div>
             {(workspaceSkill.files ?? []).length > 0 && (
               <div>
-                <h4 className="text-xs font-medium">{t(($) => $.tab_body.skills.detail_supporting_files)}</h4>
+                <h4 className="text-caption font-medium">{t(($) => $.tab_body.skills.detail_supporting_files)}</h4>
                 <div className="mt-2 flex flex-wrap gap-2">
                   {(workspaceSkill.files ?? []).map((file) => (
                     <Badge key={file.id} variant="outline">{file.path}</Badge>

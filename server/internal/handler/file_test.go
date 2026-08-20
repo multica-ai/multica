@@ -74,7 +74,14 @@ func (m *mockStorage) Delete(_ context.Context, key string) {
 	defer m.mu.Unlock()
 	delete(m.files, key)
 }
+func (m *mockStorage) DeleteObject(ctx context.Context, key string) error {
+	m.Delete(ctx, key)
+	return nil
+}
 func (m *mockStorage) DeleteKeys(_ context.Context, _ []string) {}
+func (m *mockStorage) ObjectURL(key string) string {
+	return "https://cdn.example.com/" + key
+}
 func (m *mockStorage) KeyFromURL(rawURL string) string {
 	for _, prefix := range []string{
 		"https://cdn.example.com/",
@@ -633,12 +640,161 @@ func TestAttachmentToResponse_NonCloudFrontUsesDownloadEndpoint(t *testing.T) {
 		t.Fatalf("GetAttachment: %v", err)
 	}
 
-	resp := testHandler.attachmentToResponse(att)
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
 	if resp.URL != "http://rustfs:9000/test-bucket/private.txt" {
 		t.Fatalf("stored url changed: %q", resp.URL)
 	}
 	if resp.DownloadURL != "/api/attachments/"+id+"/download" {
 		t.Fatalf("download_url = %q, want unified endpoint", resp.DownloadURL)
+	}
+}
+
+func TestGetAttachmentByID_AutoPublicEndpointReturnsPresignedDownloadURL(t *testing.T) {
+	store := &mockStorageNoCdn{}
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = store
+	testHandler.cfg.AttachmentDownloadMode = "auto"
+	testHandler.CFSigner = nil
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	key := "downloads/desktop-inline.png"
+	id := seedAttachmentURL(
+		t,
+		"https://s3.example.com/test-bucket/"+key,
+		"desktop-inline.png",
+		"image/png",
+		10,
+	)
+
+	req := httptest.NewRequest("GET", "/api/attachments/"+id, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+
+	testHandler.GetAttachmentByID(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, w.Body.String())
+	}
+	parsed, err := url.Parse(resp.DownloadURL)
+	if err != nil {
+		t.Fatalf("parse download_url: %v", err)
+	}
+	if got := parsed.Query().Get("X-Amz-Signature"); got != "mock" {
+		t.Fatalf("download_url = %q, want S3 presigned URL", resp.DownloadURL)
+	}
+	if got := parsed.Query().Get("response-content-disposition"); got != "" {
+		t.Fatalf("response-content-disposition = %q, want inline-loadable URL", got)
+	}
+	if want := "/api/attachments/" + id + "/download"; resp.MarkdownURL != want {
+		t.Fatalf("markdown_url = %q, want stable URL %q", resp.MarkdownURL, want)
+	}
+	// The single-attachment endpoint presigns the object twice: once inline for
+	// download_url (asserted above) and once with a forced attachment disposition
+	// for attachment_download_url.
+	if len(store.presignCalls) != 2 || store.presignCalls[0] != key || store.presignCalls[1] != key {
+		t.Fatalf("presign calls = %v, want [%s %s]", store.presignCalls, key, key)
+	}
+	dl, err := url.Parse(resp.AttachmentDownloadURL)
+	if err != nil {
+		t.Fatalf("parse attachment_download_url: %v", err)
+	}
+	if got := dl.Query().Get("X-Amz-Signature"); got != "mock" {
+		t.Fatalf("attachment_download_url = %q, want an S3 presigned URL", resp.AttachmentDownloadURL)
+	}
+	if got := dl.Query().Get("response-content-disposition"); !strings.HasPrefix(got, "attachment") {
+		t.Fatalf("attachment_download_url response-content-disposition = %q, want a forced attachment disposition", got)
+	}
+}
+
+// TestGetAttachmentByID_CloudFrontModeSignsForcedAttachmentDownloadURL pins the
+// CloudFront arm of GetAttachmentByID's download-URL switch — the one storage
+// mode still unexercised at this layer. It asserts attachment_download_url is a
+// CloudFront-signed URL carrying response-content-disposition=attachment, which
+// SignedURLWithContentDisposition sets on the URL BEFORE signing, so the
+// disposition is folded into the signed Resource (a client cannot strip or alter
+// it without invalidating the Signature — that property is unit-tested in
+// cloudfront_test.go). It also asserts the load-intent download_url sibling does
+// NOT force an attachment, so the two intents stay distinct.
+func TestGetAttachmentByID_CloudFrontModeSignsForcedAttachmentDownloadURL(t *testing.T) {
+	origStorage := testHandler.Storage
+	origCfg := testHandler.cfg
+	origSigner := testHandler.CFSigner
+	testHandler.Storage = &mockStorage{}
+	testHandler.cfg.AttachmentDownloadMode = "cloudfront"
+	testHandler.CFSigner = testCloudFrontSigner(t)
+	t.Cleanup(func() {
+		testHandler.Storage = origStorage
+		testHandler.cfg = origCfg
+		testHandler.CFSigner = origSigner
+	})
+
+	id := seedAttachmentURL(
+		t,
+		"https://static.example.test/downloads/cf-report.md",
+		"cf report.md",
+		"text/markdown",
+		12,
+	)
+
+	req := httptest.NewRequest("GET", "/api/attachments/"+id, nil)
+	req.Header.Set("X-User-ID", testUserID)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	rctx := chi.NewRouteContext()
+	rctx.URLParams.Add("id", id)
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+	w := httptest.NewRecorder()
+
+	testHandler.GetAttachmentByID(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	var resp AttachmentResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode response: %v; body=%s", err, w.Body.String())
+	}
+
+	dl, err := url.Parse(resp.AttachmentDownloadURL)
+	if err != nil {
+		t.Fatalf("parse attachment_download_url: %v", err)
+	}
+	if dl.Host != "static.example.test" {
+		t.Fatalf("attachment_download_url host = %q, want the CloudFront domain", dl.Host)
+	}
+	if got := dl.Query().Get("response-content-disposition"); got != `attachment; filename="cf report.md"` {
+		t.Fatalf("attachment_download_url response-content-disposition = %q, want a forced attachment disposition", got)
+	}
+	// Signed as a whole: Key-Pair-Id + Signature present. Because the disposition
+	// was set before signing, it is inside the signed Resource, so a client cannot
+	// strip or alter it without invalidating this Signature.
+	if got := dl.Query().Get("Key-Pair-Id"); got != "KTEST" {
+		t.Fatalf("attachment_download_url Key-Pair-Id = %q, want KTEST (CloudFront-signed)", got)
+	}
+	if dl.Query().Get("Signature") == "" {
+		t.Fatalf("attachment_download_url missing CloudFront Signature: %q", resp.AttachmentDownloadURL)
+	}
+
+	// The load-intent sibling must NOT force an attachment, or inline preview breaks.
+	inline, err := url.Parse(resp.DownloadURL)
+	if err != nil {
+		t.Fatalf("parse download_url: %v", err)
+	}
+	if got := inline.Query().Get("response-content-disposition"); strings.HasPrefix(got, "attachment") {
+		t.Fatalf("download_url must stay load-intent, got forced attachment disposition %q", got)
 	}
 }
 
@@ -1527,7 +1683,7 @@ func TestBuildMarkdownURL_PublicCdnAbsoluteURLReusedVerbatim(t *testing.T) {
 		t.Fatalf("GetAttachment: %v", err)
 	}
 
-	resp := testHandler.attachmentToResponse(att)
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
 	if resp.MarkdownURL != "https://cdn.multica.test/uploads/abc.png" {
 		t.Fatalf("markdown_url = %q, want raw a.Url passthrough", resp.MarkdownURL)
 	}
@@ -1561,7 +1717,7 @@ func TestBuildMarkdownURL_PrivateBucketWithoutCdnDomainRoutesThroughAPIEndpoint(
 		t.Fatalf("GetAttachment: %v", err)
 	}
 
-	resp := testHandler.attachmentToResponse(att)
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
 	want := "https://api.multica.test/api/attachments/" + id + "/download"
 	if resp.MarkdownURL != want {
 		t.Fatalf("markdown_url = %q, want absolute API endpoint %q (private bucket without explicit CDN must not persist raw S3 URL)", resp.MarkdownURL, want)
@@ -1588,7 +1744,7 @@ func TestBuildMarkdownURL_CloudFrontSignedModeNeverPersistsRawStorageURL(t *test
 		t.Fatalf("GetAttachment: %v", err)
 	}
 
-	resp := testHandler.attachmentToResponse(att)
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
 	want := "https://api.multica.test/api/attachments/" + id + "/download"
 	if resp.MarkdownURL != want {
 		t.Fatalf("markdown_url = %q, want absolute API endpoint %q", resp.MarkdownURL, want)
@@ -1621,7 +1777,7 @@ func TestBuildMarkdownURL_RelativeStorageURLPrefixedWithPublicURL(t *testing.T) 
 		t.Fatalf("GetAttachment: %v", err)
 	}
 
-	resp := testHandler.attachmentToResponse(att)
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
 	want := "https://api.multica.test/api/attachments/" + id + "/download"
 	if resp.MarkdownURL != want {
 		t.Fatalf("markdown_url = %q, want absolute API endpoint %q", resp.MarkdownURL, want)
@@ -1647,7 +1803,7 @@ func TestBuildMarkdownURL_PublicURLUnsetFallsBackToSiteRelative(t *testing.T) {
 		t.Fatalf("GetAttachment: %v", err)
 	}
 
-	resp := testHandler.attachmentToResponse(att)
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
 	want := "/api/attachments/" + id + "/download"
 	if resp.MarkdownURL != want {
 		t.Fatalf("markdown_url = %q, want site-relative fallback %q", resp.MarkdownURL, want)
@@ -1673,7 +1829,7 @@ func TestBuildMarkdownURL_StripsTrailingSlashOnPublicURL(t *testing.T) {
 		t.Fatalf("GetAttachment: %v", err)
 	}
 
-	resp := testHandler.attachmentToResponse(att)
+	resp := testHandler.attachmentToResponse(att, attachmentURLModeSigned)
 	want := "https://api.multica.test/api/attachments/" + id + "/download"
 	if resp.MarkdownURL != want {
 		t.Fatalf("markdown_url = %q, want exactly one separator %q", resp.MarkdownURL, want)

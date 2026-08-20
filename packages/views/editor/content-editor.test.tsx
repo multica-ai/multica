@@ -360,6 +360,33 @@ describe("ContentEditor", () => {
     expect(mockSetContent).not.toHaveBeenCalled();
   });
 
+  it("emits the adopted base when a dirty editor skips a newer server value", () => {
+    vi.useFakeTimers();
+    const onUpdate = vi.fn();
+    editorState.markdown = "old content";
+    const { rerender } = render(
+      <ContentEditor value="old content" onUpdate={onUpdate} debounceMs={100} />,
+    );
+
+    editorState.isFocused = true;
+    editorState.markdown = "local edit";
+    rerender(
+      <ContentEditor
+        value="old content\n\nremote channel image"
+        onUpdate={onUpdate}
+        debounceMs={100}
+      />,
+    );
+    expect(mockSetContent).not.toHaveBeenCalled();
+
+    act(() => {
+      latestEditorOptions.current?.onUpdate?.({ editor: editorRef.current });
+      vi.advanceTimersByTime(100);
+    });
+
+    expect(onUpdate).toHaveBeenCalledWith("local edit", "old content");
+  });
+
   // flushPendingUpdate exists for hosts that re-point ONE editor instance at a
   // different destination mid-debounce (chat swapping draftKey between
   // sessions). Without it the armed debounce fires after the switch and, since
@@ -460,8 +487,9 @@ describe("ContentEditor", () => {
     // `normalizeMarkdown` (which would `trimEnd()`). This pins down that the
     // F2a/F3 dedupe refactor preserved the method's exact return value —
     // trailing blank lines included — instead of folding it into the trimming
-    // helper. `stripBlobUrls` (unmocked here) only strips blob image markdown,
-    // so the trailing newlines survive untouched.
+    // helper. It used to also pass through `stripBlobUrls`; that wrapper is
+    // gone (an in-flight placeholder no longer serialises at all), and the
+    // trailing newlines still survive untouched.
     editorState.markdown = "kept body\n\n";
 
     const ref = createRef<ContentEditorRef>();
@@ -502,6 +530,7 @@ describe("ContentEditor", () => {
     expect(onUpdate).toHaveBeenCalledTimes(1);
     expect(onUpdate).toHaveBeenCalledWith(
       "old content\n\n![shot](/api/attachments/att-1/download)",
+      "old content",
     );
     act(() => {
       vi.advanceTimersByTime(1500);

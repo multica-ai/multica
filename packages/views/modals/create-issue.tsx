@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { issueStatusCategory } from "@multica/core/issues";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useNavigation } from "../navigation";
+import { AppLink, resolveClickIntent, useNavigation } from "../navigation";
 import {
   AlertTriangle,
   ArrowDown,
@@ -30,7 +31,6 @@ import type {
   IssuePriority,
   IssueAssigneeType,
   IssuePropertyValue,
-  Attachment,
 } from "@multica/core/types";
 import { contentReferencesAttachment } from "@multica/core/types";
 import {
@@ -50,7 +50,8 @@ import {
 import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@multica/ui/components/ui/tooltip";
 import { Button } from "@multica/ui/components/ui/button";
 import { Switch } from "@multica/ui/components/ui/switch";
-import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useUploadGate, useEditorUpload } from "../editor";
+import { ContentEditor, type ContentEditorRef, TitleEditor, type TitleEditorRef, useFileDropZone, FileDropOverlay, useUploadGate, useComposerSubmit } from "../editor";
+import { useIssueCreateUploads } from "./use-issue-create-uploads";
 import { useShortcut } from "@multica/core/shortcuts";
 import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { StatusIcon, StatusPicker, PriorityIcon, PriorityPicker, StagePicker, AssigneePicker, StartDatePicker, DueDatePicker, LabelPicker } from "../issues/components";
@@ -60,7 +61,8 @@ import { useIssueTriggerPreview } from "../issues/hooks/use-issue-trigger-previe
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useCurrentWorkspace, useWorkspacePaths } from "@multica/core/paths";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { useIssueDraftStore } from "@multica/core/issues/stores/draft-store";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useIssueDraftStore, type IssueCreateDraft } from "@multica/core/issues/stores/draft-store";
 import { useCreateModeStore } from "@multica/core/issues/stores/create-mode-store";
 import { useQuickCreateStore } from "@multica/core/issues/stores/quick-create-store";
 import {
@@ -81,7 +83,7 @@ import {
   parseWithFallback,
 } from "@multica/core/api";
 import { FileUploadButton } from "@multica/ui/components/common/file-upload-button";
-import { PillButton } from "../common/pill-button";
+import { ClearablePillButton, PillButton } from "../common/pill-button";
 import { ActorAvatar } from "../common/actor-avatar";
 import { PropertyIcon } from "../common/property-icon";
 import {
@@ -90,17 +92,6 @@ import {
 } from "../issues/components/pickers/custom-property-picker";
 import { IssuePickerModal } from "./issue-picker-modal";
 import { useT } from "../i18n";
-
-function toDraftAttachment(attachment: Attachment): Attachment {
-  return {
-    ...attachment,
-    // `download_url` is minted for the current API response and may be a
-    // short-lived signed URL. Drafts survive across dialog closes and app
-    // restarts, so persist only durable fields and let render/download paths
-    // re-resolve through id/markdown_url when needed.
-    download_url: "",
-  };
-}
 
 // ---------------------------------------------------------------------------
 // ManualCreatePanel — manual-mode body of the create-issue dialog. Renders
@@ -183,7 +174,7 @@ function CreateRunHint({
       <div className="overflow-hidden">
         <div
           aria-live="polite"
-          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-[0.6875rem] text-muted-foreground"
+          className="flex items-center gap-1.5 px-4 pb-1 pt-0.5 text-micro text-muted-foreground"
         >
           {avatarId && (
             <ActorAvatar
@@ -219,12 +210,16 @@ export function ManualCreatePanel({
 }) {
   const { t } = useT("modals");
   const { t: tEditor } = useT("editor");
+  const { t: tProjects } = useT("projects");
   const router = useNavigation();
   const p = useWorkspacePaths();
   const workspaceName = useCurrentWorkspace()?.name;
 
   const draft = useIssueDraftStore((s) => s.draft);
-  const setDraft = useIssueDraftStore((s) => s.setDraft);
+  const setManual = useIssueDraftStore((s) => s.setManual);
+  const setShared = useIssueDraftStore((s) => s.setShared);
+  const setAgent = useIssueDraftStore((s) => s.setAgent);
+  const setActiveMode = useIssueDraftStore((s) => s.setActiveMode);
   const clearDraft = useIssueDraftStore((s) => s.clearDraft);
   const setLastAssignee = useIssueDraftStore((s) => s.setLastAssignee);
   const setLastMode = useCreateModeStore((s) => s.setLastMode);
@@ -233,41 +228,42 @@ export function ManualCreatePanel({
   const manualFields = useIssueCreateSettingsStore((s) => s.manualCreateFields);
 
   const sendShortcut = useShortcut("send");
-  const [title, setTitle] = useState(draft.title);
+  const [title, setTitle] = useState(draft.manual.title);
   const [formResetKey, setFormResetKey] = useState(0);
   const titleEditorRef = useRef<TitleEditorRef>(null);
   const descEditorRef = useRef<ContentEditorRef>(null);
   const { isDragOver: descDragOver, dropZoneProps: descDropZoneProps } = useFileDropZone({
     onDrop: (files) => files.forEach((f) => descEditorRef.current?.uploadFile(f)),
   });
-  const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.status);
+  const [status, setStatus] = useState<IssueStatus>((data?.status as IssueStatus) || draft.manual.status);
   const [priority, setPriority] = useState<IssuePriority>(
-    (data?.priority as IssuePriority | undefined) ?? draft.priority,
+    (data?.priority as IssuePriority | undefined) ?? draft.shared.priority,
   );
-  const [submitting, setSubmitting] = useState(false);
-  const submittingRef = useRef(false);
   const [assigneeType, setAssigneeType] = useState<IssueAssigneeType | undefined>(() => {
     if (data && "assignee_type" in data) {
       return (data.assignee_type as IssueAssigneeType | null) ?? undefined;
     }
-    return draft.assigneeType;
+    return draft.manual.assigneeType;
   });
   const [assigneeId, setAssigneeId] = useState<string | undefined>(() => {
     if (data && "assignee_id" in data) {
       return (data.assignee_id as string | null) ?? undefined;
     }
-    return draft.assigneeId;
+    return draft.manual.assigneeId;
   });
-  const [startDate, setStartDate] = useState<string | null>(draft.startDate);
+  const [startDate, setStartDate] = useState<string | null>(draft.manual.startDate);
   const [dueDate, setDueDate] = useState<string | null>(
-    (data?.due_date as string | undefined) ?? draft.dueDate,
+    (data?.due_date as string | undefined) ?? draft.shared.dueDate,
   );
-  const [labelIds, setLabelIds] = useState<string[]>(draft.labelIds);
-  const [propertyValues, setPropertyValues] = useState(draft.propertyValues ?? {});
+  const [labelIds, setLabelIds] = useState<string[]>(draft.manual.labelIds);
+  const [propertyValues, setPropertyValues] = useState(draft.manual.propertyValues ?? {});
   const [customPropertyPickerId, setCustomPropertyPickerId] = useState<string | null>(null);
-  const [projectId, setProjectId] = useState<string | undefined>(
-    (data?.project_id as string) || undefined,
-  );
+  const [projectId, setProjectId] = useState<string | undefined>(() => {
+    if (data && "project_id" in data) {
+      return (data.project_id as string | null) ?? undefined;
+    }
+    return draft.shared.projectId;
+  });
   const [parentIssueId, setParentIssueId] = useState<string | undefined>(
     (data?.parent_issue_id as string) || undefined,
   );
@@ -302,6 +298,7 @@ export function ManualCreatePanel({
   // Fetch parent issue details for the chip (status/identifier/title).
   // List cache usually has it already, so this resolves synchronously.
   const wsId = useWorkspaceId();
+  const { categoryOf: draftStatusCategory } = useIssueStatuses(wsId);
   const { data: workspaceProperties = [] } = useQuery(propertyListOptions(wsId));
   const { data: parentIssue } = useQuery({
     ...issueDetailOptions(wsId, parentIssueId ?? ""),
@@ -314,59 +311,66 @@ export function ManualCreatePanel({
     enabled: !!parentIssueId,
   });
 
-  const draftAttachments = draft.attachments ?? [];
+  // Set the persisted draft's active mode so a later reopen (and any reader of
+  // the unified draft) knows which form the user is editing in.
+  useEffect(() => {
+    setActiveMode("manual");
+  }, [setActiveMode]);
 
-  // Prune draft attachments whose markdown reference was deleted in an
+  // Prune completed uploads whose markdown reference was deleted in an
   // earlier editing session. Runs once on mount: at that point the persisted
-  // description IS the draft body (no editor edits have happened yet), so
-  // dropping unreferenced records is safe. Don't prune on description updates
-  // — an onUpdate flush can race a just-finished upload whose markdown link
-  // hasn't been inserted yet, and pruning there would drop a live attachment.
+  // manual description / agent prompt ARE the draft bodies (no editor edits
+  // have happened yet), so dropping `uploaded` records referenced by neither
+  // is safe. Placeholders (uploading / failed / interrupted) are always kept —
+  // they have no body reference yet and the status chips are their only UI.
+  // Don't prune on description updates — an onUpdate flush can race a
+  // just-finished upload whose markdown link hasn't been inserted yet, and
+  // pruning there would drop a live attachment.
   useEffect(() => {
     const { draft: current } = useIssueDraftStore.getState();
-    const attachments = current.attachments ?? [];
-    const kept = attachments.filter((a) =>
-      contentReferencesAttachment(current.description, a),
+    const uploads = current.shared.attachments ?? [];
+    const kept = uploads.filter(
+      (u) =>
+        u.status !== "uploaded" ||
+        contentReferencesAttachment(current.manual.description, u.attachment) ||
+        contentReferencesAttachment(current.agent.prompt, u.attachment),
     );
-    if (kept.length !== attachments.length) setDraft({ attachments: kept });
+    if (kept.length !== uploads.length) setShared({ attachments: kept });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const { uploadWithToast } = useEditorUpload();
   // Gate every action that fixes this draft: Create and the switch to agent
-  // mode (which re-serializes the description into a
-  // prompt and would carry a stripped body across).
+  // mode (which assist-inits the agent prompt from the description and would
+  // carry a stripped body across).
   const uploadGate = useUploadGate(descEditorRef);
-  const handleUpload = async (file: File) => {
-    const result = await uploadWithToast(file);
-    if (result) {
-      const currentAttachments =
-        useIssueDraftStore.getState().draft.attachments ?? [];
-      const attachments = currentAttachments.some((a) => a.id === result.id)
-        ? currentAttachments
-        : [...currentAttachments, toDraftAttachment(result)];
-      setDraft({ attachments });
-    }
-    return result;
-  };
+  // Coordinator-owned uploads in the shared pool (MUL-5181, L2): a file picked
+  // here survives dialog close, aborts on logout, and is dropped after a
+  // reload. `gate` widens the editor gate with the pool's placeholders.
+  const {
+    attachments: draftAttachments,
+    handleUpload,
+    gate,
+  } = useIssueCreateUploads("manual", uploadGate, descEditorRef);
 
-  // Sync field changes to draft store
-  const updateTitle = (v: string) => { setTitle(v); setDraft({ title: v }); };
-  const updateStatus = (v: IssueStatus) => { setStatus(v); setDraft({ status: v }); };
-  const updatePriority = (v: IssuePriority) => { setPriority(v); setDraft({ priority: v }); };
+  // Sync field changes to the draft store — manual-only fields to the manual
+  // slot, project / priority / due date to the shared slot.
+  const updateTitle = (v: string) => { setTitle(v); setManual({ title: v }); };
+  const updateStatus = (v: IssueStatus) => { setStatus(v); setManual({ status: v }); };
+  const updatePriority = (v: IssuePriority) => { setPriority(v); setShared({ priority: v }); };
   const updateAssignee = (type?: IssueAssigneeType, id?: string) => {
     setAssigneeType(type); setAssigneeId(id);
-    setDraft({ assigneeType: type, assigneeId: id });
+    setManual({ assigneeType: type, assigneeId: id });
   };
-  const updateStartDate = (v: string | null) => { setStartDate(v); setDraft({ startDate: v }); };
-  const updateDueDate = (v: string | null) => { setDueDate(v); setDraft({ dueDate: v }); };
-  const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setDraft({ labelIds: ids }); };
+  const updateProject = (id?: string) => { setProjectId(id); setShared({ projectId: id }); };
+  const updateStartDate = (v: string | null) => { setStartDate(v); setManual({ startDate: v }); };
+  const updateDueDate = (v: string | null) => { setDueDate(v); setShared({ dueDate: v }); };
+  const updateLabelIds = (ids: string[]) => { setLabelIds(ids); setManual({ labelIds: ids }); };
   const updatePropertyValue = (propertyId: string, value: IssuePropertyValue | undefined) => {
     const next = { ...propertyValues };
     if (value === undefined) delete next[propertyId];
     else next[propertyId] = value;
     setPropertyValues(next);
-    setDraft({ propertyValues: next });
+    setManual({ propertyValues: next });
   };
 
   // Inline pill reveal per toolbar field: kept by Settings → Issue, holding a
@@ -381,14 +385,6 @@ export function ManualCreatePanel({
     project: manualFields.includes("project") || projectId != null || fieldPickerOpen === "project",
     due_date: manualFields.includes("due_date") || dueDate !== null || dueDatePickerOpen,
     start_date: manualFields.includes("start_date") || startDate !== null || startDatePickerOpen,
-  };
-
-  // Field visibility lives in Settings → Issue; the modal closes first so the
-  // dialog doesn't linger over the settings page. The draft store already
-  // holds everything typed, so nothing is lost across the round-trip.
-  const openFieldSettings = () => {
-    onClose();
-    router.push(`${p.settings()}?tab=issue`);
   };
 
   const createIssueMutation = useCreateIssue();
@@ -408,39 +404,59 @@ export function ManualCreatePanel({
     setParentIssueId(undefined);
     setStage(null);
     setChildIssues([]);
-    setDraft({
+    // Keep the just-used assignee for the next issue in the batch; reset
+    // everything else across the manual + shared slots.
+    setManual({
       title: "",
       description: "",
       status: "todo",
-      priority: "none",
       assigneeType,
       assigneeId,
       startDate: null,
-      dueDate: null,
       labelIds: [],
       propertyValues: {},
+    });
+    setShared({
+      priority: "none",
+      projectId: undefined,
+      dueDate: null,
       attachments: [],
     });
     descEditorRef.current?.clearContent();
     setFormResetKey((key) => key + 1);
   };
 
-  const handleSubmit = async () => {
-    // Single-flight on a ref, not `submitting`: two shortcut presses in one
-    // tick both read the pre-update state and would each fire a create. The
-    // ref flips synchronously, so the second press loses the race.
-    if (submittingRef.current) return;
-    if (!title.trim()) {
-      // The shortcut paths bypass the button entirely, so an empty title would
-      // otherwise be a silent no-op. Put the caret where the fix is; the
-      // button's tooltip says the rest.
-      titleEditorRef.current?.focus();
-      return;
-    }
-    if (uploadGate.isBlocked()) return;
-    submittingRef.current = true;
-    setSubmitting(true);
-    try {
+  // Manual create runs through the shared await-then-render composer contract
+  // (single-flight ref, submit-time upload re-check, lock+spin, await→boolean,
+  // clear only on acceptance). Manual is gated on the TITLE rather than the
+  // editor body — a title-only issue is valid — so `normalize` ignores the
+  // description markdown and feeds the title through as the empty-guard/content;
+  // the body is read separately inside onSubmit.
+  // Stale-submit guard (MUL-5181 P0): the issue draft is a SINGLETON store
+  // and the editors stay interactive during a request. Snapshot the draft's
+  // object identity at submit; success clears ONLY an untouched draft —
+  // whether the edit came mid-flight or from a reopened dialog.
+  const mountedRef = useRef(true);
+  useLayoutEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+  const submittedDraftRef = useRef<IssueCreateDraft | null>(null);
+
+  const composer = useComposerSubmit({
+    editorRef: descEditorRef,
+    uploadGate: gate,
+    normalize: () => title.trim(),
+    onSubmit: async (): Promise<boolean> => {
+      // Flush the description editor's pending debounce into the store BEFORE
+      // snapshotting, so a late flush of pre-submit typing cannot masquerade
+      // as an edit made during the request.
+      const pendingDesc = descEditorRef.current?.flushPendingUpdate?.();
+      if (pendingDesc != null) setManual({ description: pendingDesc });
+      submittedDraftRef.current = useIssueDraftStore.getState().draft;
+      try {
       const description = descEditorRef.current?.getMarkdown()?.trim() || undefined;
       const activeAttachmentIds = draftAttachments
         .filter((a) => contentReferencesAttachment(description ?? "", a))
@@ -555,18 +571,9 @@ export function ManualCreatePanel({
         }
       }
 
-      setLastAssignee(assigneeType, assigneeId);
-      setLastMode("manual");
-      clearDraft();
       // The old post-create "agent paused in Backlog" blocking panel is gone —
-      // a passive inline hint now warns before submit (MUL-3375). Just close or
-      // reset and confirm the create.
-      if (keepOpen) {
-        resetForNextIssue();
-      } else {
-        onClose();
-      }
-
+      // a passive inline hint now warns before submit (MUL-3375). The draft
+      // reset + close/keep-open happens in onAccepted once we report success.
       {
         toast.custom((toastId) => (
           <div className="bg-popover text-popover-foreground border rounded-lg shadow-lg p-4 w-[360px]">
@@ -574,15 +581,22 @@ export function ManualCreatePanel({
               <div className="flex items-center justify-center size-5 rounded-full bg-emerald-500/15 text-emerald-500">
                 <Check className="size-3" />
               </div>
-              <span className="text-sm font-medium">{t(($) => $.create_issue.toast_created)}</span>
+              <span className="text-body font-medium">{t(($) => $.create_issue.toast_created)}</span>
             </div>
-            <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
-              <StatusIcon status={issue.status} className="size-3.5 shrink-0" />
+            <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
+              <StatusIcon
+                status={issue.status}
+                category={issueStatusCategory(issue) ?? undefined}
+                className="size-3.5 shrink-0"
+              />
               <span className="truncate">{issue.identifier} – {issue.title}</span>
             </div>
+            {/* Not an AppLink: sonner renders toast content under <Toaster />,
+                which is mounted outside NavigationProvider, so useNavigation()
+                would throw here. */}
             <button
               type="button"
-              className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
+              className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
               onClick={() => {
                 router.push(p.issueDetail(issue.id));
                 toast.dismiss(toastId);
@@ -593,6 +607,7 @@ export function ManualCreatePanel({
           </div>
         ), { duration: 5000 });
       }
+      return true;
     } catch (err) {
       // Duplicate-issue is the only structured 409 the create endpoint
       // returns. We schema-guard the body (ApiError.body is `unknown`) so a
@@ -613,16 +628,18 @@ export function ManualCreatePanel({
                   <div className="flex items-center justify-center size-5 rounded-full bg-amber-500/15 text-amber-500">
                     <AlertTriangle className="size-3" />
                   </div>
-                  <span className="text-sm font-medium">
+                  <span className="text-body font-medium">
                     {t(($) => $.create_issue.toast_duplicate_title)}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 text-sm text-muted-foreground ml-7">
+                <div className="flex items-center gap-2 text-body text-muted-foreground ml-7">
                   <span className="truncate">{dup.issue.identifier} – {dup.issue.title}</span>
                 </div>
+                {/* See the created-issue toast above: toast content lives
+                    outside NavigationProvider, so this stays a button. */}
                 <button
                   type="button"
-                  className="ml-7 mt-2 text-sm text-primary hover:underline cursor-pointer"
+                  className="ml-7 mt-2 text-body text-primary hover:underline cursor-pointer"
                   onClick={() => {
                     router.push(p.issueDetail(dup.issue.id));
                     toast.dismiss(toastId);
@@ -634,7 +651,7 @@ export function ManualCreatePanel({
             ),
             { duration: 5000 },
           );
-          return;
+          return false;
         }
       }
       toast.error(
@@ -642,40 +659,82 @@ export function ManualCreatePanel({
           ? err.message
           : t(($) => $.create_issue.toast_failed),
       );
-    } finally {
-      submittingRef.current = false;
-      setSubmitting(false);
+      return false;
     }
-  };
+  },
+    onAccepted: () => {
+      // These preferences derive from the SUBMITTED values, not the live
+      // draft — an issue was created, so record them regardless of the guard.
+      setLastAssignee(assigneeType, assigneeId);
+      setLastMode("manual");
+      // Success may only consume the draft it submitted (MUL-5181 P0): any
+      // edit after the submit snapshot — typing while the request is in
+      // flight, or a reopened dialog — survives, and the dialog then stays
+      // open on the newer draft instead of closing/resetting over it. Flush
+      // the editor's pending debounce first so mid-flight typing still inside
+      // the debounce window is judged correctly.
+      const lateDesc = descEditorRef.current?.flushPendingUpdate?.();
+      if (lateDesc != null) setManual({ description: lateDesc });
+      const untouched =
+        useIssueDraftStore.getState().draft === submittedDraftRef.current;
+      if (untouched) clearDraft();
+      if (!mountedRef.current || !untouched) return;
+      if (keepOpen) {
+        resetForNextIssue();
+      } else {
+        onClose();
+      }
+    },
+  });
 
-  // Switch to agent mode. Hand the typed text up to the shell as the carry
-  // payload; the shell stores it as the next panel's `data` so the agent
-  // panel reads `data.prompt` on mount. Concatenate title + description so
-  // nothing the user typed is lost — the agent derives a fresh title from
-  // the combined text. Persist the mode flip so the next `c` lands in agent.
-  // Also forward the picked project so the agent panel pins the new issue
-  // to it; without this the agent panel would fall back to its persisted
-  // `lastProjectId`, silently routing the issue to the wrong project.
-  // Forward squad picks alongside agent picks so the agent panel honors
-  // the actor the user already chose — otherwise a squad selection silently
-  // falls back to the persisted actor / first visible agent on flip.
-  // parent_issue_id rides through the same carry channel: the modal opener
-  // (openCreateSubIssue) seeded it on the manual panel, and the agent panel
-  // needs it so the new issue is still created as a sub-issue when the user
-  // flips from "Add sub issue" → "Create with agent".
+  // Button + shortcut entry point. The title-empty case can't rely on the
+  // button tooltip (shortcuts bypass the button), so focus the title to point
+  // at the fix; otherwise hand off to the composer (single-flight + gate live
+  // there).
+  const handleSubmit = () => {
+    if (!title.trim()) {
+      titleEditorRef.current?.focus();
+      return;
+    }
+    void composer.submit();
+  };
+  const submitting = composer.submitting;
+
+  // Switch to agent mode WITHOUT destroying the manual draft. The manual slot
+  // (title, description, …) is left untouched so a later agent→manual flip
+  // restores it verbatim. Project / priority / due date already live in the
+  // shared slot, so they carry across for free. Only two things are handed to
+  // the agent panel:
+  //   1. A one-time assist-init of the agent prompt / actor: when the agent
+  //      draft is still empty, seed the prompt from title + description and the
+  //      actor from the manual assignee (if agent-like). An existing agent
+  //      draft is preserved — no repeated concatenate-then-clobber.
+  //   2. The parent-issue context, which is not persisted in the draft (it is a
+  //      per-invocation intent from "Add sub issue"), so it rides the carry.
   const switchToAgent = () => {
     // Serializing mid-upload packs a description that has already lost the
-    // pending image into the agent prompt, and the draft it came from is
-    // cleared below — the file would be unrecoverable.
-    if (uploadGate.isBlocked()) return;
-    const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
-    const prompt = [title.trim(), desc].filter(Boolean).join("\n\n");
-    // Title + description have been packed into the agent prompt — clear them
-    // from the shared draft so a later agent→manual switch doesn't surface
-    // stale manual state on top of the prompt-as-description, which would
-    // duplicate content on every round-trip.
-    setDraft({ title: "", description: "" });
+    // pending image into the agent prompt, so gate the switch too.
+    if (gate.isBlocked()) return;
+    // Commit the shared fields to the draft so the agent panel reads them from
+    // there. Local state can hold a value seeded from `data` (e.g. an opener's
+    // project) that was never written through a picker, so a plain flip would
+    // otherwise drop it.
+    setShared({ projectId, priority, dueDate });
+    const existingPrompt = draft.agent.prompt;
+    if (!existingPrompt.trim()) {
+      const desc = descEditorRef.current?.getMarkdown()?.trim() ?? "";
+      const seeded = [title.trim(), desc].filter(Boolean).join("\n\n");
+      if (seeded) setAgent({ prompt: seeded });
+    }
+    if (
+      !draft.agent.actorId &&
+      assigneeId &&
+      (assigneeType === "agent" || assigneeType === "squad")
+    ) {
+      setAgent({ actorType: assigneeType, actorId: assigneeId });
+    }
     setLastMode("agent");
+    setActiveMode("agent");
     // Prefer the hydrated identifier from `parentIssue`, but fall back to the
     // identifier the modal opener seeded on `data`. Without the fallback, a
     // flip that happens before the issue detail query resolves drops the
@@ -684,19 +743,10 @@ export function ManualCreatePanel({
     // this only affects the display affordance.
     const carryParentIdentifier =
       parentIssue?.identifier ?? (data?.parent_issue_identifier as string | undefined);
-    onSwitchMode?.({
-      prompt,
-      ...(assigneeId && assigneeType === "agent"
-        ? { agent_id: assigneeId }
-        : assigneeId && assigneeType === "squad"
-          ? { squad_id: assigneeId }
-          : {}),
-      ...(projectId ? { project_id: projectId } : {}),
-      ...(priority !== "none" ? { priority } : {}),
-      ...(dueDate ? { due_date: dueDate } : {}),
-      ...(parentIssueId ? { parent_issue_id: parentIssueId } : {}),
-      ...(carryParentIdentifier ? { parent_issue_identifier: carryParentIdentifier } : {}),
-    });
+    const carry: Record<string, unknown> = {};
+    if (parentIssueId) carry.parent_issue_id = parentIssueId;
+    if (carryParentIdentifier) carry.parent_issue_identifier = carryParentIdentifier;
+    onSwitchMode?.(Object.keys(carry).length > 0 ? carry : null);
   };
 
   // One state for the button and the keyboard paths, so a rendered affordance
@@ -704,7 +754,7 @@ export function ManualCreatePanel({
   const submitState: "submitting" | "uploading" | "missing_title" | "ready" =
     submitting
       ? "submitting"
-      : uploadGate.uploading
+      : gate.uploading
         ? "uploading"
         : !title.trim()
           ? "missing_title"
@@ -728,7 +778,7 @@ export function ManualCreatePanel({
       // would otherwise stay a fully lit, pressable-looking primary button.
       // Deliberately no `pointer-events-none`: this control still has to hover
       // its tooltip and take the click that focuses the title.
-      className="aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
+      className="justify-self-end aria-disabled:opacity-50 aria-disabled:cursor-not-allowed aria-disabled:active:translate-y-0"
     >
       {submitState === "submitting" ? (
         t(($) => $.create_issue.submitting)
@@ -738,12 +788,14 @@ export function ManualCreatePanel({
         <>
           {t(($) => $.create_issue.submit)}
           {/* Decorative: the accessible name must stay "Create Issue", not
-              "Create Issue Command Enter". Absent when `send` is unbound. */}
+              "Create Issue Command Enter". Absent when `send` is unbound.
+              Hidden on phones — no ⌘ key there, and the footer row is at its
+              tightest. */}
           {sendShortcut ? (
             <ShortcutKeycaps
               shortcut={sendShortcut}
               decorative
-              className="ml-1"
+              className="ml-1 max-sm:hidden"
               keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
             />
           ) : null}
@@ -758,9 +810,9 @@ export function ManualCreatePanel({
 
             {/* Header */}
             <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-              <div className="flex items-center gap-1.5 text-xs">
+              <div className="flex items-center gap-1.5 text-caption">
                 <span className="text-muted-foreground">{workspaceName}</span>
-                <ChevronRight className="size-3 text-muted-foreground/50" />
+                <ChevronRight className="size-3 text-faint-foreground" />
                 <span className="font-medium">{t(($) => $.create_issue.manual_breadcrumb)}</span>
               </div>
               <div className="flex items-center gap-1">
@@ -805,9 +857,9 @@ export function ManualCreatePanel({
                 key={formResetKey}
                 ref={titleEditorRef}
                 autoFocus
-                defaultValue={draft.title}
+                defaultValue={draft.manual.title}
                 placeholder={t(($) => $.create_issue.title_placeholder)}
-                className="text-lg font-semibold"
+                className="text-title font-semibold"
                 onChange={(v) => updateTitle(v)}
                 // Chord only — plain Enter still just ends title editing (#5532).
                 onSubmitShortcut={handleSubmit}
@@ -818,9 +870,9 @@ export function ManualCreatePanel({
             <div {...descDropZoneProps} className="relative flex flex-1 min-h-0 overflow-y-auto px-5">
               <ContentEditor
                 ref={descEditorRef}
-                defaultValue={draft.description}
+                defaultValue={draft.manual.description}
                 placeholder={t(($) => $.create_issue.description_placeholder)}
-                onUpdate={(md) => setDraft({ description: md })}
+                onUpdate={(md) => setManual({ description: md })}
                 onSubmit={handleSubmit}
                 onUploadFile={handleUpload}
                 onUploadingChange={uploadGate.onUploadingChange}
@@ -829,6 +881,7 @@ export function ManualCreatePanel({
               />
               {descDragOver && <FileDropOverlay />}
             </div>
+
 
             {/* Pre-trigger preview — a passive caption above the toolbar; reveals
                 when an agent assignee will pick the issue up. */}
@@ -896,8 +949,13 @@ export function ManualCreatePanel({
               {showField.project && (
                 <ProjectPicker
                   projectId={projectId ?? null}
-                  onUpdate={(u) => setProjectId(u.project_id ?? undefined)}
-                  triggerRender={<PillButton />}
+                  onUpdate={(u) => updateProject(u.project_id ?? undefined)}
+                  triggerRender={
+                    <ClearablePillButton
+                      onClear={projectId ? () => updateProject(undefined) : undefined}
+                      clearLabel={tProjects(($) => $.picker.clear_aria)}
+                    />
+                  }
                   align="start"
                   open={fieldPickerOpen === "project" ? true : undefined}
                   onOpenChange={(open) => setFieldPickerOpen(open ? "project" : null)}
@@ -969,7 +1027,7 @@ export function ManualCreatePanel({
                       triggerRender={<PillButton />}
                       trigger={
                         <>
-                          <PropertyIcon property={property} className="size-3.5 text-xs" />
+                          <PropertyIcon property={property} className="size-3.5 text-caption" />
                           <span className="max-w-32 truncate">{property.name}</span>
                           {value !== undefined && (
                             <span className="max-w-40 truncate text-muted-foreground">
@@ -986,7 +1044,7 @@ export function ManualCreatePanel({
                   Placed before the ⋯ so it wraps to a new line with ⋯ if
                   space is tight, but ⋯ always stays last in DOM order. */}
               {parentIssueId && parentIssue && (
-                <div className="inline-flex items-center rounded-full border text-xs transition-colors hover:bg-accent/60">
+                <div className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60">
                   <button
                     type="button"
                     onClick={() => setParentPickerOpen(true)}
@@ -1013,7 +1071,7 @@ export function ManualCreatePanel({
               {childIssues.map((c) => (
                 <div
                   key={c.id}
-                  className="inline-flex items-center rounded-full border text-xs transition-colors hover:bg-accent/60"
+                  className="inline-flex items-center rounded-full border text-caption transition-colors hover:bg-accent/60"
                 >
                   <div className="flex items-center gap-1.5 py-1 pl-2.5">
                     <ArrowDown className="size-3 text-muted-foreground" />
@@ -1048,7 +1106,11 @@ export function ManualCreatePanel({
                       the picker inline (mounting the pill as its anchor). */}
                   {!showField.status && (
                     <DropdownMenuItem onClick={() => setFieldPickerOpen("status")}>
-                      <StatusIcon status={status} className="h-3.5 w-3.5" />
+                      <StatusIcon
+                        status={status}
+                        category={draftStatusCategory(status)}
+                        className="h-3.5 w-3.5"
+                      />
                       {t(($) => $.create_issue.set_status)}
                     </DropdownMenuItem>
                   )}
@@ -1119,7 +1181,7 @@ export function ManualCreatePanel({
                             )}
                             onClick={() => setCustomPropertyPickerId(property.id)}
                           >
-                            <PropertyIcon property={property} className="size-3.5 text-xs" />
+                            <PropertyIcon property={property} className="size-3.5 text-caption" />
                             <span className="truncate">{property.name}</span>
                             {Object.prototype.hasOwnProperty.call(
                               propertyValues,
@@ -1131,7 +1193,24 @@ export function ManualCreatePanel({
                     </DropdownMenuSub>
                   )}
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={openFieldSettings}>
+                  {/* Field visibility lives in Settings → Issue; the modal
+                      closes first so the dialog doesn't linger over the
+                      settings page. The draft store already holds everything
+                      typed, so nothing is lost across the round-trip. */}
+                  <DropdownMenuItem
+                    render={
+                      <AppLink
+                        href={`${p.settings()}?tab=issue`}
+                        onClick={(e) => {
+                          // A modifier click opens Settings in another tab —
+                          // the modal (and the draft in it) stays put. Only
+                          // an in-place navigation closes it.
+                          if (resolveClickIntent(e) !== "push") return;
+                          onClose();
+                        }}
+                      />
+                    }
+                  >
                     <Settings2 className="h-3.5 w-3.5" />
                     {t(($) => $.create_issue.customize_fields)}
                   </DropdownMenuItem>
@@ -1182,49 +1261,51 @@ export function ManualCreatePanel({
               }}
             />
 
-            {/* Footer */}
-            <div className="flex flex-col gap-2 border-t px-4 py-3 shrink-0 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex min-h-7 items-center gap-2">
+            {/* Footer — same 2x2-grid-on-phones / single-row-from-`sm` shape
+                as the agent panel; see the note on AgentCreatePanel's footer
+                for why (MUL-6236). TooltipProvider/Tooltip render no DOM and
+                TooltipContent is portaled, so the Create button stays a direct
+                grid child in both branches below. */}
+            <div className="grid grid-cols-[auto_1fr] items-center gap-x-2 gap-y-2.5 border-t px-4 py-3 shrink-0 sm:flex sm:flex-wrap">
+              <div className="flex min-h-7 items-center gap-2 sm:mr-auto">
                 <FileUploadButton
                   multiple
                   onSelect={(file) => descEditorRef.current?.uploadFile(file)}
                 />
               </div>
-              <div className="flex flex-wrap items-center justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={switchToAgent}
-                  disabled={uploadGate.uploading}
-                  aria-disabled={uploadGate.uploading || undefined}
-                  aria-busy={uploadGate.uploading || undefined}
-                  title={t(($) => $.create_issue.switch_to_agent_tooltip)}
-                  className="border-beam group flex shrink-0 items-center gap-1.5 text-xs px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                >
-                  <ArrowLeftRight className="size-3.5 text-brand/80 transition-transform duration-300 group-hover:rotate-180" />
-                  {t(($) => $.create_issue.switch_to_agent)}
-                </button>
-                <label className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none">
-                  <Switch
-                    size="sm"
-                    checked={keepOpen}
-                    onCheckedChange={setKeepOpen}
-                  />
-                  {t(($) => $.create_issue.create_another)}
-                </label>
-                {submitState === "missing_title" ? (
-                  <TooltipProvider delay={200}>
-                    <Tooltip>
-                      {/* No `<span>` wrapper needed now: aria-disabled leaves the
-                          button focusable and hoverable, so it can anchor its own
-                          tooltip. */}
-                      <TooltipTrigger render={createButton} />
-                      <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
-                    </Tooltip>
-                  </TooltipProvider>
-                ) : (
-                  createButton
-                )}
-              </div>
+              <button
+                type="button"
+                onClick={switchToAgent}
+                disabled={gate.uploading}
+                aria-disabled={gate.uploading || undefined}
+                aria-busy={gate.uploading || undefined}
+                title={t(($) => $.create_issue.switch_to_agent_tooltip)}
+                className="border-beam group flex shrink-0 items-center gap-1.5 justify-self-end text-caption px-2 py-1 rounded-sm text-muted-foreground bg-brand/5 hover:bg-brand/10 hover:text-foreground transition-colors cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <ArrowLeftRight className="size-3.5 text-brand transition-transform duration-300 group-hover:rotate-180" />
+                {t(($) => $.create_issue.switch_to_agent)}
+              </button>
+              <label className="flex shrink-0 items-center gap-1.5 text-caption text-muted-foreground cursor-pointer select-none">
+                <Switch
+                  size="sm"
+                  checked={keepOpen}
+                  onCheckedChange={setKeepOpen}
+                />
+                {t(($) => $.create_issue.create_another)}
+              </label>
+              {submitState === "missing_title" ? (
+                <TooltipProvider delay={200}>
+                  <Tooltip>
+                    {/* No `<span>` wrapper needed now: aria-disabled leaves the
+                        button focusable and hoverable, so it can anchor its own
+                        tooltip. */}
+                    <TooltipTrigger render={createButton} />
+                    <TooltipContent side="top">{t(($) => $.create_issue.title_required)}</TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              ) : (
+                createButton
+              )}
             </div>
     </>
   );
@@ -1238,9 +1319,15 @@ export function manualDialogContentClass(isExpanded: boolean) {
     "p-0 gap-0 flex flex-col overflow-hidden",
     "!top-1/2 !left-1/2 !-translate-x-1/2",
     "!transition-all !duration-300 !ease-out",
+    // Phone gutter — see the matching note in create-issue-dialog.tsx: the
+    // `!important` widths below also override DialogContent's
+    // `max-w-[calc(100%-2rem)]`, leaving the card edge to edge on a phone
+    // (MUL-6236). `!h-96` stays a hard height; it already fits the shortest
+    // phone we support.
+    "!w-full !max-w-[calc(100vw-1.5rem)]",
     isExpanded
-      ? "!max-w-4xl !w-full !h-5/6 !-translate-y-1/2"
-      : "!max-w-2xl !w-full !h-96 !-translate-y-1/2",
+      ? "!h-5/6 !-translate-y-1/2 sm:!max-w-4xl"
+      : "!h-96 !-translate-y-1/2 sm:!max-w-2xl",
   );
 }
 

@@ -1,6 +1,6 @@
 // Frontend analytics glue. Thin wrapper over posthog-js.
 //
-// The source-of-truth event catalog is `docs/analytics.md`. This module only
+// The source-of-truth event catalog is `server/internal/analytics/events.go`. This module only
 // handles the two things the backend can't do itself: attribution capture on
 // first anonymous pageview, and person-identity merge on login. Every funnel
 // event (signup, workspace_created, runtime_registered, issue_executed,
@@ -47,7 +47,12 @@ let analyticsEnvironment = "dev";
 // only ever carry user-triggered signals on identified users, so the
 // buffer stays small (~one step-transition worth).
 type PendingOp =
-  | { kind: "event"; name: string; props?: Record<string, unknown> }
+  | {
+      kind: "event";
+      name: string;
+      props?: Record<string, unknown>;
+      options?: CaptureEventOptions;
+    }
   | { kind: "set"; props: Record<string, unknown> }
   | { kind: "exception"; error: unknown; props?: Record<string, unknown> };
 const pendingOps: PendingOp[] = [];
@@ -112,7 +117,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
     // our funnel is set up: signup is the first real funnel step.
     person_profiles: "identified_only",
     // Turn off every on-by-default auto-capture surface. Our funnel is
-    // narrow and explicit (the events in docs/analytics.md + a manual
+    // narrow and explicit (the events in server/internal/analytics/events.go + a manual
     // $pageview). Autocapture floods the Activity view with anonymous
     // "clicked button" / "clicked link" noise, burns the billed event
     // budget, and risks capturing user-typed content in input values.
@@ -186,7 +191,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
   while (pendingOps.length > 0) {
     const op = pendingOps.shift()!;
     if (op.kind === "event") {
-      posthog.capture(op.name, withClientEventProperties(op.props));
+      captureNow(op.name, op.props, op.options);
     } else if (op.kind === "exception") {
       posthog.captureException(op.error, withClientEventProperties(op.props));
     } else {
@@ -242,15 +247,53 @@ export function resetAnalytics(): void {
  * Calls before initAnalytics() buffer in order so a late-arriving config
  * doesn't silently swallow a step transition.
  */
+export interface CaptureEventOptions {
+  /**
+   * Bypass posthog-js's batching timer and put the event on the wire now.
+   * Batching is a JS timer in the same thread that is about to freeze or be
+   * killed, so a failure report queued normally can be lost exactly when it
+   * matters (MUL-4115: three deterministic hangs, zero events delivered).
+   * Reserve this for failure telemetry — routine events should batch.
+   */
+  sendInstantly?: boolean;
+  /**
+   * Fired once the event has been handed to posthog.capture.
+   *
+   * This is HAND-OFF, not delivery: the request may still be in flight, and
+   * posthog-js exposes no delivery callback to wait on. Never treat it as
+   * permission to discard the only copy of something — a caller that deletes
+   * persisted state here loses it whenever the app dies between hand-off and
+   * the wire (see freeze-flush.ts, which waits out a grace window instead).
+   *
+   * It also never fires on a build with analytics disabled, so anything
+   * waiting on it needs an expiry path of its own.
+   */
+  onCaptured?: () => void;
+}
+
 export function captureEvent(
   name: string,
   props?: Record<string, unknown>,
+  options?: CaptureEventOptions,
 ): void {
   if (!initialized) {
-    pendingOps.push({ kind: "event", name, props });
+    pendingOps.push({ kind: "event", name, props, options });
     return;
   }
-  posthog.capture(name, withClientEventProperties(props));
+  captureNow(name, props, options);
+}
+
+function captureNow(
+  name: string,
+  props?: Record<string, unknown>,
+  options?: CaptureEventOptions,
+): void {
+  posthog.capture(
+    name,
+    withClientEventProperties(props),
+    options?.sendInstantly ? { send_instantly: true } : undefined,
+  );
+  options?.onCaptured?.();
 }
 
 /**

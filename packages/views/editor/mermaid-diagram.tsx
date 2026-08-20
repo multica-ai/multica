@@ -33,7 +33,7 @@ import { copyText } from "@multica/ui/lib/clipboard";
 import { useT } from "../i18n";
 import { useDragToScroll } from "./hooks/use-drag-to-scroll";
 import { MermaidViewer } from "./mermaid-viewer";
-import type { Size } from "./utils/diagram-transform";
+import type { Size } from "./utils/zoom-transform";
 
 type MermaidAPI = typeof import("mermaid").default;
 

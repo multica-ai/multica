@@ -7,6 +7,10 @@ export interface IssueFilters {
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
+  /** Keeps an explicitly active assignee predicate distinct from the normal
+   *  empty-array = no-filter state. When true with no selected assignees and
+   *  includeNoAssignee=false, the predicate intentionally matches nothing. */
+  assigneeFilterActive?: boolean;
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
@@ -15,9 +19,8 @@ export interface IssueFilters {
    *  a definition, AND across definitions; checkbox uses "true"/"false"). */
   propertyFilters?: Record<string, string[]>;
   // When `agentRunningFilter` is true, only keep issues whose id is in
-  // `runningIssueIds`. The set is derived by the caller from
-  // `agentTaskSnapshot` (one pass over running tasks) so filter.ts stays
-  // free of any data-fetching dependency.
+  // `runningIssueIds`. The surface derives this set from the independent
+  // `/api/working-agents` projection so filter.ts stays free of fetching.
   agentRunningFilter?: boolean;
   runningIssueIds?: ReadonlySet<string>;
   // "Show sub-issues" display toggle. When explicitly `false`, hide issues
@@ -32,6 +35,8 @@ export interface IssueFilterState {
   priorityFilters: IssuePriority[];
   assigneeFilters: ActorFilterValue[];
   includeNoAssignee: boolean;
+  /** See IssueFilters.assigneeFilterActive. */
+  assigneeFilterActive?: boolean;
   creatorFilters: ActorFilterValue[];
   projectFilters: string[];
   includeNoProject: boolean;
@@ -48,10 +53,19 @@ export interface IssueFilterContext {
 }
 
 /**
+ * Filter value that selects issues where a custom property is UNSET ("No
+ * value"). Mirrors the backend sentinel in `parsePropertiesFilterParam`
+ * (`server/internal/handler/property.go`); cannot collide with a real option id
+ * (select options are UUIDs, checkbox uses "true"/"false").
+ */
+export const NO_PROPERTY_VALUE = "__none__";
+
+/**
  * Match one issue against the property filters. Select values are single
  * option-id strings, multi_select values are option-id arrays, checkbox
  * values are booleans compared against the "true"/"false" pseudo-options.
- * An issue with no value for a filtered definition never matches it.
+ * An issue with no value for a filtered definition matches only when the
+ * "No value" (NO_PROPERTY_VALUE) pseudo-option is selected for it.
  */
 export function issueMatchesPropertyFilters(
   issue: Issue,
@@ -61,7 +75,10 @@ export function issueMatchesPropertyFilters(
   for (const [propertyId, selected] of Object.entries(propertyFilters)) {
     if (selected.length === 0) continue;
     const value = issue.properties?.[propertyId];
-    if (value === undefined) return false;
+    if (value === undefined) {
+      if (selected.includes(NO_PROPERTY_VALUE)) continue;
+      return false;
+    }
     if (typeof value === "string") {
       if (!selected.includes(value)) return false;
     } else if (Array.isArray(value)) {
@@ -97,7 +114,10 @@ export function applyIssueFilters(
   context: IssueFilterContext = {},
 ): Issue[] {
   const { statusFilters, priorityFilters, assigneeFilters, includeNoAssignee, creatorFilters, projectFilters, includeNoProject, labelFilters, workingOnly } = filters;
-  const hasAssigneeFilter = assigneeFilters.length > 0 || includeNoAssignee;
+  const hasAssigneeFilter =
+    filters.assigneeFilterActive === true ||
+    assigneeFilters.length > 0 ||
+    includeNoAssignee;
   const hasProjectFilter = projectFilters.length > 0 || includeNoProject;
   // Empty set passed without `agentRunningFilter` is a no-op. When the
   // filter is on but the set is missing/empty, hide everything — the
@@ -174,6 +194,7 @@ export function filterIssues(issues: Issue[], filters: IssueFilters): Issue[] {
       priorityFilters: filters.priorityFilters,
       assigneeFilters: filters.assigneeFilters,
       includeNoAssignee: filters.includeNoAssignee,
+      assigneeFilterActive: filters.assigneeFilterActive,
       creatorFilters: filters.creatorFilters,
       projectFilters: filters.projectFilters,
       includeNoProject: filters.includeNoProject,

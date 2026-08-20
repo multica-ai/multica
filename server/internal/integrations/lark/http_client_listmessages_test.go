@@ -104,6 +104,64 @@ func TestHTTPClient_ListChatMessagesClampsPageSize(t *testing.T) {
 	}
 }
 
+// TestHTTPClient_ListChatMessagesThreadScoped pins the #5835 topic path:
+// when ThreadID is set the request switches to container_id_type=thread
+// with the topic id as container_id, and end_time is omitted even if the
+// caller passes one (the thread container rejects it). The returned items'
+// thread_id is normalized onto LarkMessage so the enricher can fail-close
+// on it.
+func TestHTTPClient_ListChatMessagesThreadScoped(t *testing.T) {
+	fake := newLarkFake(t)
+	fake.stubToken("tok", 7200)
+	fake.mux.HandleFunc("/open-apis/im/v1/messages", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("container_id_type") != "thread" {
+			t.Errorf("container_id_type = %q, want thread", q.Get("container_id_type"))
+		}
+		if q.Get("container_id") != "th_topic" {
+			t.Errorf("container_id = %q, want th_topic", q.Get("container_id"))
+		}
+		// The thread container rejects end_time; it must be dropped even
+		// though the caller passed EndTime.
+		if q.Has("end_time") {
+			t.Errorf("end_time must be absent on the thread container, got %q", q.Get("end_time"))
+		}
+		if q.Get("sort_type") != "ByCreateTimeDesc" {
+			t.Errorf("sort_type = %q", q.Get("sort_type"))
+		}
+		if q.Get("page_size") != "10" {
+			t.Errorf("page_size = %q", q.Get("page_size"))
+		}
+		writeJSON(w, map[string]any{
+			"code": 0, "msg": "ok",
+			"data": map[string]any{
+				"items": []any{
+					map[string]any{
+						"message_id":  "om_1",
+						"msg_type":    "text",
+						"create_time": "1000",
+						"thread_id":   "th_topic",
+						"sender":      map[string]any{"id": "ou_a", "id_type": "open_id", "sender_type": "user"},
+						"body":        map[string]any{"content": `{"text":"hi"}`},
+					},
+				},
+			},
+		})
+	})
+
+	c := newTestClient(fake, time.Now)
+	items, err := c.ListChatMessages(context.Background(), testCreds(), ListMessagesParams{ChatID: "oc_chat", ThreadID: "th_topic", PageSize: 10, EndTime: 1700000000})
+	if err != nil {
+		t.Fatalf("ListChatMessages: %v", err)
+	}
+	if len(items) != 1 {
+		t.Fatalf("items = %d, want 1", len(items))
+	}
+	if items[0].ThreadID != "th_topic" {
+		t.Errorf("normalized ThreadID = %q, want th_topic", items[0].ThreadID)
+	}
+}
+
 // TestHTTPClient_ListChatMessagesMissingChatID fails fast (no token, no
 // network call) when the chat id is empty.
 func TestHTTPClient_ListChatMessagesMissingChatID(t *testing.T) {

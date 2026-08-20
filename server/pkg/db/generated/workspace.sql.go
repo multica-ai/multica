@@ -72,6 +72,9 @@ cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id
 ),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
+),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
     -- chat_session rows cascade away with the workspace, so reach the cards through
@@ -113,17 +116,71 @@ cleared_installations AS (
 cleared_issue_properties AS (
     DELETE FROM issue_property WHERE workspace_id = $1
 ),
+cleared_quick_actions AS (
+    DELETE FROM quick_action WHERE workspace_id = $1
+),
+ws_mcp_servers AS (
+    SELECT id FROM workspace_mcp_server WHERE workspace_id = $1
+),
+cleared_agent_mcp_bindings AS (
+    -- agent_mcp_server carries no FK in either direction, so sweep it from
+    -- both sides: the workspace's own servers, and any binding held by an
+    -- agent that is about to be removed with the workspace.
+    DELETE FROM agent_mcp_server
+    WHERE server_id IN (SELECT id FROM ws_mcp_servers)
+       OR agent_id IN (SELECT id FROM ws_agents)
+),
+cleared_workspace_mcp_servers AS (
+    DELETE FROM workspace_mcp_server WHERE workspace_id = $1
+),
 deleted_pending_check_suites AS (
     DELETE FROM github_pending_check_suite WHERE workspace_id = $1
+),
+ws_github_prs AS (
+    SELECT id FROM github_pull_request WHERE workspace_id = $1
+),
+cleared_github_pr_check_runs AS (
+    -- github_pull_request_check_run intentionally has no FK. Remove its rows
+    -- before the workspace delete cascades away the parent PR mirrors.
+    DELETE FROM github_pull_request_check_run
+    WHERE pr_id IN (SELECT id FROM ws_github_prs)
+),
+ws_vcs_prs AS (
+    SELECT id FROM vcs_pull_request WHERE workspace_id = $1
+),
+ws_vcs_connections AS (
+    SELECT id FROM vcs_connection WHERE workspace_id = $1
+),
+cleared_vcs_pr_links AS (
+    DELETE FROM issue_vcs_pull_request
+    WHERE pull_request_id IN (SELECT id FROM ws_vcs_prs)
+),
+cleared_vcs_commit_statuses AS (
+    DELETE FROM vcs_commit_status
+    WHERE connection_id IN (SELECT id FROM ws_vcs_connections)
+),
+cleared_vcs_prs AS (
+    DELETE FROM vcs_pull_request WHERE workspace_id = $1
+),
+cleared_vcs_connections AS (
+    DELETE FROM vcs_connection WHERE workspace_id = $1
+),
+cleared_client_usage_workspace AS (
+    UPDATE client_usage_daily SET workspace_id = NULL WHERE workspace_id = $1
 )
 DELETE FROM workspace WHERE workspace.id = $1
 `
 
-// The channel_* tables (MUL-3515 §4), resource-label junctions, and custom issue
-// property definitions carry NO FK to workspace, so — unlike the CASCADE-backed
+// The channel_* tables (MUL-3515 §4), resource-label junctions, custom issue
+// property definitions, and quick actions carry NO FK to workspace, so — unlike the CASCADE-backed
 // tables the DELETE below sweeps — they are not cleaned up implicitly. Remove
 // their workspace-owned rows here so they commit or roll back atomically with
 // the workspace row.
+// VCS tables (migration 213) carry no FK to workspace, so they are not cascaded
+// away by the DELETE below. Sweep the workspace's connections, mirrored PRs,
+// their issue links, and CI statuses here. issue_vcs_pull_request has no
+// workspace_id, so reach it through the workspace's PRs; vcs_commit_status has
+// none either, so reach it through the workspace's connections.
 func (q *Queries) DeleteWorkspace(ctx context.Context, id pgtype.UUID) error {
 	_, err := q.db.Exec(ctx, deleteWorkspace, id)
 	return err

@@ -9,7 +9,7 @@ import type { ReactNode } from "react";
 import { setApiInstance } from "../api";
 import type { ApiClient } from "../api/client";
 import type { InboxItem } from "../types";
-import { useUnarchiveInbox } from "./mutations";
+import { useMarkInboxUnread, useUnarchiveInbox } from "./mutations";
 import { inboxKeys } from "./queries";
 
 vi.mock("../hooks", () => ({
@@ -51,6 +51,85 @@ function createWrapper(queryClient: QueryClient) {
 function archivedCache(qc: QueryClient) {
   return qc.getQueryData<InboxItem[]>(inboxKeys.archived(WORKSPACE_ID)) ?? [];
 }
+
+function listCache(qc: QueryClient) {
+  return qc.getQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID)) ?? [];
+}
+
+describe("useMarkInboxUnread", () => {
+  let queryClient: QueryClient;
+  let markInboxUnread: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    markInboxUnread = vi.fn(async (id: string) => item({ id, read: false }));
+    setApiInstance({ markInboxUnread } as unknown as ApiClient);
+  });
+
+  it("flips only the targeted item unread, in both lists", async () => {
+    // Item-level, mirroring mark-read: the list shows one row per issue
+    // carrying that group's newest item, so flipping siblings would resurrect
+    // notifications the user already dealt with without changing the row.
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "inbox-1", read: true, archived: false }),
+      item({ id: "sibling", issue_id: "issue-1", read: true, archived: false }),
+    ]);
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.archived(WORKSPACE_ID), [
+      item({ id: "inbox-1", read: true }),
+    ]);
+
+    const { result } = renderHook(() => useMarkInboxUnread(), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("inbox-1");
+
+    await waitFor(() => {
+      expect(
+        listCache(queryClient).find((i) => i.id === "inbox-1")?.read,
+      ).toBe(false);
+    });
+    expect(listCache(queryClient).find((i) => i.id === "sibling")?.read).toBe(true);
+    // Actioned from either list, patched in both — otherwise a view switch
+    // shows two different read states for one notification.
+    expect(archivedCache(queryClient)[0]?.read).toBe(false);
+  });
+
+  it("refreshes the cross-workspace summary so the switcher dot lights again", async () => {
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), [
+      item({ id: "inbox-1", read: true, archived: false }),
+    ]);
+    const invalidate = vi.spyOn(queryClient, "invalidateQueries");
+
+    const { result } = renderHook(() => useMarkInboxUnread(), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("inbox-1");
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(invalidate).toHaveBeenCalledWith({
+      queryKey: inboxKeys.unreadSummary(),
+    });
+  });
+
+  it("rolls both lists back when the request fails", async () => {
+    markInboxUnread.mockRejectedValue(new Error("boom"));
+    const active = [item({ id: "inbox-1", read: true, archived: false })];
+    const archived = [item({ id: "inbox-1", read: true })];
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.list(WORKSPACE_ID), active);
+    queryClient.setQueryData<InboxItem[]>(inboxKeys.archived(WORKSPACE_ID), archived);
+
+    const { result } = renderHook(() => useMarkInboxUnread(), {
+      wrapper: createWrapper(queryClient),
+    });
+    result.current.mutate("inbox-1");
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(listCache(queryClient)).toEqual(active);
+    expect(archivedCache(queryClient)).toEqual(archived);
+  });
+});
 
 describe("useUnarchiveInbox", () => {
   let queryClient: QueryClient;

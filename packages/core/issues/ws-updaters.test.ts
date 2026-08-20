@@ -175,6 +175,36 @@ describe("onIssueLabelsChanged", () => {
     ).toEqual({ labels: [labelB] });
   });
 
+  it("uses the picker cache revision to reject an older label snapshot", () => {
+    const labelKey = labelKeys.byIssue(WS_ID, ISSUE_ID);
+    qc.setQueryData<IssueLabelsResponse>(labelKey, {
+      labels: [labelA],
+      issue_revision: 3,
+    });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 2);
+
+    expect(qc.getQueryData<IssueLabelsResponse>(labelKey)).toEqual({
+      labels: [labelA],
+      issue_revision: 3,
+    });
+  });
+
+  it("advances the picker cache labels and revision together", () => {
+    const labelKey = labelKeys.byIssue(WS_ID, ISSUE_ID);
+    qc.setQueryData<IssueLabelsResponse>(labelKey, {
+      labels: [labelA],
+      issue_revision: 3,
+    });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 4);
+
+    expect(qc.getQueryData<IssueLabelsResponse>(labelKey)).toEqual({
+      labels: [labelB],
+      issue_revision: 4,
+    });
+  });
+
   it("leaves the per-issue label cache untouched when the picker has not fetched", () => {
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
 
@@ -237,6 +267,44 @@ describe("onIssueLabelsChanged", () => {
 
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
     expectInvalidated(qc, flatKey);
+  });
+
+  it("patches the parent's children cache so the sub-issues panel stays fresh", () => {
+    const child = { ...baseIssue, parent_issue_id: PARENT_ISSUE_ID };
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    qc.setQueryData<Issue[]>(childrenKey, [
+      child,
+      otherIssue,
+    ]);
+    // A children cache that does NOT hold the issue must keep its reference
+    // (no pointless rerender of unrelated sub-issue panels).
+    const unrelated = [otherIssue];
+    qc.setQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"), unrelated);
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    const children = qc.getQueryData<Issue[]>(
+      issueKeys.children(WS_ID, PARENT_ISSUE_ID),
+    );
+    expect(children?.find((i) => i.id === ISSUE_ID)?.labels).toEqual([labelB]);
+    expect(children?.find((i) => i.id === OTHER_ISSUE_ID)?.labels).toEqual([
+      labelA,
+    ]);
+    expect(qc.getQueryData<Issue[]>(issueKeys.children(WS_ID, "parent-9"))).toBe(
+      unrelated,
+    );
+    // The committed WS/mutation snapshot also marks active children queries
+    // stale, preventing an older in-flight response from overwriting the patch.
+    expectInvalidated(qc, childrenKey);
+  });
+
+  it("invalidates batched children caches (Map-shaped, not patchable)", () => {
+    const batchedKey = issueKeys.childrenByParents(WS_ID, [PARENT_ISSUE_ID]);
+    qc.setQueryData(batchedKey, new Map([[PARENT_ISSUE_ID, [baseIssue]]]));
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
+
+    expectInvalidated(qc, batchedKey);
   });
 });
 
@@ -303,6 +371,50 @@ describe("onIssueMetadataChanged", () => {
 });
 
 describe("issue property snapshots", () => {
+  it("patches per-parent children and invalidates every children projection on commit", () => {
+    const qc = new QueryClient();
+    const childrenKey = issueKeys.children(WS_ID, PARENT_ISSUE_ID);
+    const unrelatedKey = issueKeys.children(WS_ID, "parent-9");
+    const batchedKey = issueKeys.childrenByParents(WS_ID, [PARENT_ISSUE_ID]);
+    const child = {
+      ...parentedIssue,
+      properties: { estimate: 1, environment: "staging" },
+    };
+    const unrelated = [otherIssue];
+    qc.setQueryData<Issue[]>(childrenKey, [child, otherIssue]);
+    qc.setQueryData<Issue[]>(unrelatedKey, unrelated);
+    qc.setQueryData(batchedKey, new Map([[PARENT_ISSUE_ID, [child]]]));
+
+    // The optimistic leg is deterministic: patch immediately without a
+    // premature refetch that could still return the pre-mutation value.
+    patchIssueProperties(qc, WS_ID, ISSUE_ID, {
+      estimate: 2,
+      environment: "staging",
+    });
+
+    expect(
+      qc.getQueryData<Issue[]>(childrenKey)?.find((candidate) => candidate.id === ISSUE_ID)
+        ?.properties,
+    ).toEqual({ estimate: 2, environment: "staging" });
+    expect(qc.getQueryState(childrenKey)?.isInvalidated).toBe(false);
+    expect(qc.getQueryData<Issue[]>(unrelatedKey)).toBe(unrelated);
+
+    // The committed response/event keeps the immediate patch, then marks both
+    // per-parent and batched projections stale for authoritative convergence.
+    onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, {
+      estimate: 3,
+      environment: "staging",
+    });
+
+    expect(
+      qc.getQueryData<Issue[]>(childrenKey)?.find((candidate) => candidate.id === ISSUE_ID)
+        ?.properties,
+    ).toEqual({ estimate: 3, environment: "staging" });
+    expectInvalidated(qc, childrenKey);
+    expectInvalidated(qc, batchedKey);
+    expect(qc.getQueryData<Issue[]>(unrelatedKey)).toBe(unrelated);
+  });
+
   it("keeps optimistic patches local, then invalidates property windows after commit", () => {
     const qc = new QueryClient();
     const flatKey = issueKeys.flat(
@@ -355,6 +467,29 @@ describe("issue property snapshots", () => {
 
     expectInvalidated(qc, boardUpdatedKey);
     expect(qc.getQueryState(boardPositionKey)?.isInvalidated).toBe(false);
+  });
+});
+
+describe("auxiliary issue activity ordering", () => {
+  it.each([
+    ["labels", (qc: QueryClient) => onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB])],
+    ["metadata", (qc: QueryClient) => onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { state: "changed" })],
+    ["properties", (qc: QueryClient) => onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 5 })],
+  ])("re-sorts last_activity after committed %s changes", (_kind, apply) => {
+    const qc = new QueryClient();
+    const activityKey = issueKeys.listSorted(WS_ID, {
+      sort_by: "last_activity",
+      sort_direction: "desc",
+    });
+    const positionKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+    qc.setQueryData<ListIssuesCache>(activityKey, makeListCache(baseIssue));
+    qc.setQueryData<ListIssuesCache>(positionKey, makeListCache(baseIssue));
+
+    apply(qc);
+
+    expectInvalidated(qc, activityKey);
+    expect(qc.getQueryState(positionKey)?.isInvalidated).toBe(false);
+    qc.clear();
   });
 });
 

@@ -279,17 +279,45 @@ export const ChatMessageSchema: z.ZodType<ChatMessage> = z.object({
   attachments: z.array(AttachmentSchema).optional(),
   failure_reason: z.string().nullable().optional(),
   elapsed_ms: z.number().nullable().optional(),
+  message_kind: z.enum(["message", "no_response"]).catch("message").optional(),
+  // One malformed optional suggestion must not erase an otherwise valid
+  // conversation. The server validates these too; this is mixed-version and
+  // corrupted-cache defense at the mobile boundary.
+  quick_actions: z.array(z.object({
+    label: z.string(),
+    prompt: z.string(),
+    primary: z.boolean().optional(),
+  }).loose()).catch([]).optional().default([]),
 }).loose();
 
 export const ChatMessageListSchema = z.array(ChatMessageSchema).default([]);
 
 export const EMPTY_CHAT_MESSAGE_LIST: ChatMessage[] = [];
 
-// All fields optional — server returns an empty object when no in-flight task.
+const ChatQueuedTaskSchema = z.object({
+  task_id: z.string(),
+  status: z.string().default("queued"),
+  created_at: z.string().default(""),
+  message_id: z.string().optional(),
+  content: z.string().optional(),
+}).loose();
+
+const ChatQueuedTasksSchema = z.array(z.unknown()).transform((tasks) =>
+  tasks.flatMap((task) => {
+    const parsed = ChatQueuedTaskSchema.safeParse(task);
+    return parsed.success ? [parsed.data] : [];
+  }),
+);
+
+// All root fields are optional — server returns an empty object when no
+// task is in flight. Ignore malformed queue rows without discarding a valid
+// head, matching packages/core/api/schemas.ts.
 export const ChatPendingTaskSchema: z.ZodType<ChatPendingTask> = z.object({
   task_id: z.string().optional(),
   status: z.string().optional(),
   created_at: z.string().optional(),
+  supports_queue: z.boolean().optional(),
+  queued_tasks: ChatQueuedTasksSchema.optional(),
 }).loose();
 
 export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
@@ -297,6 +325,8 @@ export const EMPTY_CHAT_PENDING_TASK: ChatPendingTask = {};
 export const SendChatMessageResponseSchema: z.ZodType<SendChatMessageResponse> = z.object({
   message_id: z.string(),
   task_id: z.string(),
+  supports_queue: z.boolean().optional(),
+  queued: z.boolean().optional().catch(undefined),
   created_at: z.string().default(""),
 }).loose();
 
@@ -320,6 +350,9 @@ export const TaskMessagePayloadSchema: z.ZodType<TaskMessagePayload> = z.object(
   input: z.record(z.string(), z.unknown()).optional(),
   output: z.string().optional(),
   created_at: z.string().optional(),
+  // Set on the WS copy when the server clipped input/output for the fanout
+  // (MUL-6396); never present on the REST list response.
+  truncated: z.boolean().optional(),
 }).loose();
 
 export const TaskMessageListSchema = z.array(TaskMessagePayloadSchema).default([]);
@@ -577,6 +610,7 @@ export const AgentSchema: z.ZodType<Agent> = z.object({
   id: z.string(),
   workspace_id: z.string().default(""),
   runtime_id: z.string().default(""),
+  runtime_bound: z.boolean().optional(),
   name: z.string().default(""),
   description: z.string().default(""),
   instructions: z.string().default(""),

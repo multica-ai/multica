@@ -3,7 +3,9 @@ package handler
 import (
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/daemon/execenv"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // TestRelativeWorkDir covers the privacy-safe display derivation that
@@ -182,6 +184,22 @@ func TestRelativeWorkDir(t *testing.T) {
 					tc.workDir, tc.wsID, tc.taskID, got, tc.expected)
 			}
 		})
+	}
+}
+
+func TestTaskToResponseDerivesPrivateDurableWorkDir(t *testing.T) {
+	response := taskToResponse(db.AgentTaskQueue{
+		DurableWorkDir: pgtype.Text{
+			String: "/Users/alice/repos/multica",
+			Valid:  true,
+		},
+	}, "")
+
+	if response.DurableWorkDir != "/Users/alice/repos/multica" {
+		t.Fatalf("durable_work_dir = %q, want absolute clipboard value", response.DurableWorkDir)
+	}
+	if response.RelativeDurableWorkDir != "repos/multica" {
+		t.Fatalf("relative_durable_work_dir = %q, want privacy-safe display value", response.RelativeDurableWorkDir)
 	}
 }
 

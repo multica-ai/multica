@@ -1,9 +1,17 @@
-import type { ReactNode } from "react";
+import { cloneElement, type ReactElement, type ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { configStore } from "@multica/core/config";
 import enLayout from "../locales/en/layout.json";
+import { isDesktopShell } from "../platform/local-directory";
 import { HelpLauncher } from "./help-launcher";
+
+// The download entry is gated on the desktop-shell probe, which reads a
+// preload-injected bridge that jsdom never has. Mock it so both platforms are
+// reachable from the same suite.
+vi.mock("../platform/local-directory", () => ({
+  isDesktopShell: vi.fn(() => false),
+}));
 
 // react-i18next isn't initialised in the views test env, so resolve the
 // selector against the real en/layout.json to assert on actual copy.
@@ -38,7 +46,17 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
   return {
     DropdownMenu: ({ children }: { children: ReactNode }) => <>{children}</>,
     DropdownMenuContent: ({ children }: { children: ReactNode }) => <>{children}</>,
-    DropdownMenuItem: ({ children }: { children: ReactNode }) => <>{children}</>,
+    // Base UI's `render` prop swaps in a caller-supplied element (here the
+    // <a>) and adopts the item's children. Flattening it to a bare fragment —
+    // as this mock originally did — would drop the anchor entirely and make an
+    // href assertion silently unfalsifiable.
+    DropdownMenuItem: ({
+      children,
+      render,
+    }: {
+      children: ReactNode;
+      render?: ReactElement;
+    }) => (render ? cloneElement(render, undefined, children) : <>{children}</>),
     DropdownMenuGroup: ({ children }: { children: ReactNode }) => (
       <GroupContext.Provider value={true}>{children}</GroupContext.Provider>
     ),
@@ -53,6 +71,10 @@ vi.mock("@multica/ui/components/ui/dropdown-menu", async () => {
     DropdownMenuSeparator: () => null,
     DropdownMenuTrigger: ({ children }: { children: ReactNode }) => <>{children}</>,
   };
+});
+
+beforeEach(() => {
+  vi.mocked(isDesktopShell).mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -79,5 +101,24 @@ describe("HelpLauncher", () => {
     configStore.getState().setServerVersion("9.9.9");
     expect(() => render(<HelpLauncher />)).not.toThrow();
     expect(screen.getByText("Server version 9.9.9")).toBeInTheDocument();
+  });
+
+  // MUL-6462: after web onboarding the desktop download CTA was unreachable —
+  // no entry anywhere in the app, so users had to remember the URL or detour
+  // through the marketing site. The Help menu is the persistent home for it.
+  it("links to the download page on web", () => {
+    render(<HelpLauncher />);
+    const link = screen.getByRole("link", { name: /Desktop app/ });
+    expect(link).toHaveAttribute("href", "https://multica.ai/download");
+  });
+
+  // AppSidebar is shared: apps/desktop renders the same component tree. Without
+  // this gate the desktop app would offer to download the desktop app.
+  it("hides the download entry inside the desktop shell", () => {
+    vi.mocked(isDesktopShell).mockReturnValue(true);
+    render(<HelpLauncher />);
+    expect(screen.queryByText("Desktop app")).not.toBeInTheDocument();
+    // The rest of the menu is unaffected by the gate.
+    expect(screen.getByText("Docs")).toBeInTheDocument();
   });
 });

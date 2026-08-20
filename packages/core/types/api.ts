@@ -1,4 +1,4 @@
-import type { Issue, IssueMetadata, IssueStatus, IssuePriority, IssueAssigneeType } from "./issue";
+import type { Issue, IssueMetadata, IssueStatus, IssueStatusCategory, IssuePriority, IssueAssigneeType } from "./issue";
 import type { MemberRole } from "./workspace";
 import type { Project } from "./project";
 
@@ -23,8 +23,16 @@ export interface CreateIssueRequest {
 }
 
 export interface UpdateIssueRequest {
+  /** Legacy aggregate compare-and-swap token. New text editors use field
+   * baselines so unrelated issue activity does not reject their edits. */
+  expected_revision?: number;
   title?: string;
+  /** Authoritative title the editor adopted before producing this update. */
+  title_base?: string;
   description?: string;
+  /** Authoritative description the editor had adopted before producing this
+   * update. The server uses it to merge channel media that landed meanwhile. */
+  description_base?: string;
   status?: IssueStatus;
   priority?: IssuePriority;
   assignee_type?: IssueAssigneeType | null;
@@ -48,6 +56,24 @@ export interface UpdateIssueRequest {
    *  context (MUL-3375). Only consumed when a run actually starts. Control
    *  field — strip from optimistic cache patches. */
   handoff_note?: string;
+}
+
+/**
+ * Server-owned drag intent. The client may use a provisional position for its
+ * optimistic animation, but the canonical position is derived from these
+ * workspace-scoped neighbors by `POST /api/issues/:id/move`.
+ */
+export interface MoveIssueRequest
+  extends Pick<
+    UpdateIssueRequest,
+    | "status"
+    | "assignee_type"
+    | "assignee_id"
+    | "parent_issue_id"
+    | "project_id"
+  > {
+  before_id: string | null;
+  after_id: string | null;
 }
 
 /** Inputs to `POST /api/issues/preview-trigger`. A nil prospective field means
@@ -85,6 +111,15 @@ export interface ListIssuesParams {
   status?: IssueStatus;
   /** Multi-value table facet. OR within the field. */
   statuses?: IssueStatus[];
+  /**
+   * Filter by status CATEGORY rather than by exact key, so one bucket holds a
+   * category's canonical status plus every custom status that inherits it.
+   * This is what keeps the board's fan-out fixed at 7 requests however many
+   * custom statuses a workspace defines. (MUL-6243)
+   */
+  status_category?: IssueStatusCategory;
+  /** Multi-value form of `status_category`. OR within the field. */
+  status_categories?: IssueStatusCategory[];
   priority?: IssuePriority;
   /** Multi-value table facet. OR within the field. */
   priorities?: IssuePriority[];
@@ -146,6 +181,7 @@ export interface ListIssuesParams {
     | "title"
     | "created_at"
     | "updated_at"
+    | "last_activity"
     | "start_date"
     | "due_date"
     | `property:${string}`;
@@ -194,6 +230,7 @@ export interface ListGroupedIssuesParams {
     | "title"
     | "created_at"
     | "updated_at"
+    | "last_activity"
     | "start_date"
     | "due_date"
     | `property:${string}`;
@@ -224,7 +261,7 @@ export interface GroupedIssuesResponse {
 // state such as collapsed groups/parents.
 export type IssueTableScope =
   | { kind: "workspace"; assignee_types?: IssueAssigneeType[] }
-  | { kind: "project"; project_id: string }
+  | { kind: "project"; project_id: string; assignee_types?: IssueAssigneeType[] }
   | { kind: "assignee"; actor: IssueActorRef }
   | { kind: "creator"; actor: IssueActorRef }
   | { kind: "my"; relation: "assigned" | "created" | "involved" | "any" };
@@ -245,6 +282,9 @@ export interface IssueTableFilters {
     end: string;
   };
   working_only?: boolean;
+  /** Match the running-task issue projection returned by
+   *  `/api/working-agents`. An explicit empty list matches nothing. */
+  working_issue_ids?: string[];
   include_sub_issues?: boolean;
 }
 
@@ -255,6 +295,7 @@ export type IssueTableSortField =
   | "title"
   | "created_at"
   | "updated_at"
+  | "last_activity"
   | "start_date"
   | "due_date"
   | `property:${string}`;
@@ -272,8 +313,32 @@ export interface IssueTableQuerySpec {
 export type IssueTableGroupSpec =
   | { kind: "none" }
   | { kind: "status" }
+  /**
+   * Group by the CATEGORY a status behaves as, not by the status key.
+   *
+   * Board columns, list sections and swimlane cells are categories, so a custom
+   * status folds into the column it behaves as instead of getting one of its
+   * own — which is what keeps the surface's fan-out pinned at 7 no matter how
+   * many statuses a workspace defines. The descriptor still reports
+   * `value.kind === "status"` because a category's value IS its canonical
+   * status key; the group KEY is what distinguishes the two contracts.
+   * (MUL-6243)
+   */
+  | { kind: "status_category" }
   | { kind: "assignee" }
-  | { kind: "property"; property_id: string };
+  | { kind: "project" }
+  | { kind: "parent" }
+  | {
+      kind: "compound";
+      primary: "assignee" | "project" | "parent";
+      /** `status_category` folds custom statuses into their category's cell. */
+      secondary: "status" | "status_category";
+      /** Optional visible secondary buckets. When present, the server pages
+       * only primary groups that contain at least one matching card and
+       * returns `total` for that complete visible result set. */
+      secondary_values?: IssueStatus[] | IssueStatusCategory[];
+    }
+  | { kind: "property"; property_id: string; include_empty?: boolean };
 
 /** Response-side actor reference. Kept open for forward compatibility: an
  * installed desktop client may receive a new actor kind from a newer server. */
@@ -282,9 +347,24 @@ export interface IssueTableActorRef {
   id: string;
 }
 
+export interface IssueTableParentRef {
+  id: string;
+  number: number;
+  identifier: string;
+  title: string;
+  status: string;
+}
+
 export type IssueTableGroupValue =
   | { kind: "status"; status: string }
   | { kind: "assignee"; actor: IssueTableActorRef | null }
+  | { kind: "project"; project_id: string | null }
+  | {
+      kind: "parent";
+      parent_id: string | null;
+      parent: IssueTableParentRef | null;
+      value_state: "value" | "unavailable" | "unset";
+    }
   | {
       kind: "property";
       property_id: string;
@@ -296,6 +376,9 @@ export interface IssueTableGroupDescriptor {
   key: string;
   value: IssueTableGroupValue;
   count: number;
+  /** Present for compound groups. These opaque keys can be passed straight
+   * back to `/table/rows`; clients must not reconstruct them. */
+  secondary_groups?: IssueTableGroupDescriptor[];
 }
 
 export interface IssueTablePageRequest {
@@ -347,7 +430,11 @@ export type IssueTableFacetSpec =
   | { kind: "creator" }
   | { kind: "project" }
   | { kind: "label" }
-  | { kind: "property"; property_id: string };
+  | { kind: "property"; property_id: string }
+  /** Agents running issue work inside this surface. `key` is the agent id,
+   *  `count` its running-task count. Evaluated against the surface's own scope
+   *  and filters, so the header chip counts the same rows the list shows. */
+  | { kind: "working_agents" };
 
 export interface IssueTableFacetsRequest {
   query: IssueTableQuerySpec;
@@ -373,6 +460,15 @@ export interface IssueTableFacetsResponse {
   facets: IssueTableFacet[];
 }
 
+/** One agent running issue work inside a single issue surface. Projected from
+ *  the `working_agents` facet, so the count is already narrowed by that
+ *  surface's scope and every active filter. Name/avatar are resolved from the
+ *  workspace agent directory, not carried here. */
+export interface WorkingAgentSummary {
+  id: string;
+  running_task_count: number;
+}
+
 /** Per-status bucket in the paginated issue cache. `total` is the server count (all pages), not the length of `issues`. */
 export interface IssueStatusBucket {
   issues: Issue[];
@@ -385,7 +481,8 @@ export interface IssueStatusBucket {
  * `api.listIssues` responses by the query functions in `issues/queries.ts`.
  */
 export interface ListIssuesCache {
-  byStatus: Partial<Record<IssueStatus, IssueStatusBucket>>;
+  /** Bucketed by status CATEGORY — see PAGINATED_CATEGORIES. (MUL-6243) */
+  byStatus: Partial<Record<IssueStatusCategory, IssueStatusBucket>>;
 }
 
 export interface SearchIssueResult extends Issue {

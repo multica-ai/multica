@@ -13,6 +13,19 @@ import (
 	"github.com/openai/openai-go/v3/shared"
 )
 
+// retries builds a Config.MaxRetries value, failing loudly on a budget Retries
+// rejects. Tests that assert an exact upstream request count pass retries(0) to
+// take SDK retries out of the picture; before MUL-6364 that required the
+// negative -1, because a plain 0 was indistinguishable from unset and quietly
+// restored the default budget.
+func retries(n int) *RetryOverride {
+	override, err := Retries(n)
+	if err != nil {
+		panic(err)
+	}
+	return override
+}
+
 // stubUpstream returns an httptest server that mimics the OpenAI
 // chat-completions endpoint. handler receives the decoded request body.
 func stubUpstream(t *testing.T, handler func(w http.ResponseWriter, body map[string]any)) *httptest.Server {
@@ -130,6 +143,195 @@ func TestGenerateText(t *testing.T) {
 	if !sawSystem {
 		t.Fatal("expected system message to be sent")
 	}
+}
+
+func TestGenerateJSONUsesGPT56CompatibleParameters(t *testing.T) {
+	var gotBody map[string]any
+	srv := stubUpstream(t, func(w http.ResponseWriter, body map[string]any) {
+		gotBody = body
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"actions\":[]}"},"finish_reason":"stop"}]}`)
+	})
+
+	c := New(Config{APIKey: "k", BaseURL: srv.URL, DefaultModel: "gpt-5.6-luna"})
+	out, err := c.GenerateJSON(context.Background(), "", "Return JSON.", "Generate actions.", 0.3, 2048)
+	if err != nil {
+		t.Fatalf("GenerateJSON failed: %v", err)
+	}
+	if out != `{"actions":[]}` {
+		t.Fatalf("unexpected output %q", out)
+	}
+	if gotBody["max_completion_tokens"] != float64(2048) {
+		t.Fatalf("expected max_completion_tokens=2048, got %#v", gotBody["max_completion_tokens"])
+	}
+	if _, ok := gotBody["max_tokens"]; ok {
+		t.Fatalf("deprecated max_tokens must be omitted, got body %#v", gotBody)
+	}
+	if gotBody["reasoning_effort"] != "none" {
+		t.Fatalf("expected reasoning_effort=none, got body %#v", gotBody)
+	}
+	if _, ok := gotBody["temperature"]; ok {
+		t.Fatalf("temperature must be omitted for reasoning-model compatibility, got body %#v", gotBody)
+	}
+	if gotBody["model"] != "gpt-5.6-luna" {
+		t.Fatalf("expected configured GPT-5.6 model, got body %#v", gotBody)
+	}
+}
+
+func TestGenerateJSONFallsBackToLegacyMaxTokens(t *testing.T) {
+	var bodies []map[string]any
+	srv := stubUpstream(t, func(w http.ResponseWriter, body map[string]any) {
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		if len(bodies) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"Unsupported parameter: max_completion_tokens","type":"invalid_request_error","param":"max_completion_tokens","code":"unsupported_parameter"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"actions\":[]}"},"finish_reason":"stop"}]}`)
+	})
+
+	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: retries(0)})
+	if _, err := c.GenerateJSON(context.Background(), "legacy-model", "Return JSON.", "Generate actions.", 0.3, 800); err != nil {
+		t.Fatalf("GenerateJSON failed: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected one compatibility retry, got %d requests", len(bodies))
+	}
+	if bodies[0]["max_completion_tokens"] != float64(800) {
+		t.Fatalf("first request must use max_completion_tokens, got %#v", bodies[0])
+	}
+	if _, ok := bodies[0]["max_tokens"]; ok {
+		t.Fatalf("first request must omit max_tokens, got %#v", bodies[0])
+	}
+	if bodies[1]["max_tokens"] != float64(800) {
+		t.Fatalf("fallback request must use max_tokens, got %#v", bodies[1])
+	}
+	if _, ok := bodies[1]["max_completion_tokens"]; ok {
+		t.Fatalf("fallback request must omit max_completion_tokens, got %#v", bodies[1])
+	}
+	if bodies[1]["temperature"] != 0.3 {
+		t.Fatalf("non-GPT-5.6 models must preserve temperature, got %#v", bodies[1])
+	}
+}
+
+func TestGenerateJSONFallsBackFromUnsupportedReasoningEffort(t *testing.T) {
+	var bodies []map[string]any
+	srv := stubUpstream(t, func(w http.ResponseWriter, body map[string]any) {
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		if len(bodies) == 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"Unsupported parameter: reasoning_effort","type":"invalid_request_error","param":"reasoning_effort","code":"unsupported_parameter"}}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"actions\":[]}"},"finish_reason":"stop"}]}`)
+	})
+
+	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: retries(0)})
+	if _, err := c.GenerateJSON(context.Background(), "gpt-5.6-luna", "Return JSON.", "Generate actions.", 0.3, 800); err != nil {
+		t.Fatalf("GenerateJSON failed: %v", err)
+	}
+	if len(bodies) != 2 {
+		t.Fatalf("expected one compatibility retry, got %d requests", len(bodies))
+	}
+	if bodies[0]["reasoning_effort"] != "none" {
+		t.Fatalf("first request must disable reasoning, got %#v", bodies[0])
+	}
+	if _, ok := bodies[1]["reasoning_effort"]; ok {
+		t.Fatalf("fallback request must omit reasoning_effort, got %#v", bodies[1])
+	}
+	if bodies[1]["max_completion_tokens"] != float64(800) {
+		t.Fatalf("fallback must preserve the preferred token field, got %#v", bodies[1])
+	}
+}
+
+func TestGenerateJSONNegotiatesBothLegacyParameters(t *testing.T) {
+	var bodies []map[string]any
+	srv := stubUpstream(t, func(w http.ResponseWriter, body map[string]any) {
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		switch len(bodies) {
+		case 1:
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"Unsupported parameter: max_completion_tokens","type":"invalid_request_error","param":"max_completion_tokens","code":"unsupported_parameter"}}`)
+		case 2:
+			w.WriteHeader(http.StatusBadRequest)
+			_, _ = io.WriteString(w, `{"error":{"message":"Unsupported parameter: reasoning_effort","type":"invalid_request_error","param":"reasoning_effort","code":"unsupported_parameter"}}`)
+		default:
+			_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":"{\"actions\":[]}"},"finish_reason":"stop"}]}`)
+		}
+	})
+
+	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: retries(0)})
+	if _, err := c.GenerateJSON(context.Background(), "gpt-5.6-luna", "Return JSON.", "Generate actions.", 0.3, 800); err != nil {
+		t.Fatalf("GenerateJSON failed: %v", err)
+	}
+	if len(bodies) != 3 {
+		t.Fatalf("expected two bounded compatibility retries, got %d requests", len(bodies))
+	}
+	last := bodies[2]
+	if last["max_tokens"] != float64(800) {
+		t.Fatalf("final request must use max_tokens, got %#v", last)
+	}
+	if _, ok := last["max_completion_tokens"]; ok {
+		t.Fatalf("final request must omit max_completion_tokens, got %#v", last)
+	}
+	if _, ok := last["reasoning_effort"]; ok {
+		t.Fatalf("final request must omit reasoning_effort, got %#v", last)
+	}
+}
+
+func TestGenerateJSONDoesNotRetryInvalidTokenLimit(t *testing.T) {
+	requests := 0
+	srv := stubUpstream(t, func(w http.ResponseWriter, _ map[string]any) {
+		requests++
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = io.WriteString(w, `{"error":{"message":"Invalid max_completion_tokens value","type":"invalid_request_error","param":"max_completion_tokens","code":"invalid_value"}}`)
+	})
+
+	c := New(Config{APIKey: "k", BaseURL: srv.URL, MaxRetries: retries(0)})
+	if _, err := c.GenerateJSON(context.Background(), "gpt-5.6-luna", "Return JSON.", "Generate actions.", 0.3, 800); err == nil {
+		t.Fatal("expected invalid token limit error")
+	}
+	if requests != 1 {
+		t.Fatalf("invalid values must not trigger a compatibility retry, got %d requests", requests)
+	}
+}
+
+func TestGenerateJSONRejectsIncompleteOrEmptyOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name         string
+		content      string
+		finishReason string
+		wantError    string
+	}{
+		{name: "token limit", content: "", finishReason: "length", wantError: "max completion token limit"},
+		{name: "empty content", content: " ", finishReason: "stop", wantError: "empty JSON content"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := stubUpstream(t, func(w http.ResponseWriter, _ map[string]any) {
+				w.Header().Set("Content-Type", "application/json")
+				_, _ = io.WriteString(w, `{"id":"cmpl-1","object":"chat.completion","choices":[{"index":0,"message":{"role":"assistant","content":`+mustJSON(t, tc.content)+`},"finish_reason":`+mustJSON(t, tc.finishReason)+`}]}`)
+			})
+
+			c := New(Config{APIKey: "k", BaseURL: srv.URL})
+			_, err := c.GenerateJSON(context.Background(), "gpt-5.6-luna", "Return JSON.", "Generate actions.", 0.3, 800)
+			if err == nil || !strings.Contains(err.Error(), tc.wantError) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantError)
+			}
+		})
+	}
+}
+
+func mustJSON(t *testing.T, value string) string {
+	t.Helper()
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("marshal test value: %v", err)
+	}
+	return string(raw)
 }
 
 func TestChatStream(t *testing.T) {

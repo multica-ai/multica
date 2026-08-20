@@ -14,8 +14,8 @@ at the bottom before relying on an exact line.
 | `runIssuePullRequests` handler | `server/cmd/multica/cmd_issue.go:507` | new citation |
 | Calls `GET /api/issues/<id>/pull-requests` | `server/cmd/multica/cmd_issue.go:522` | `:522` (unchanged) |
 | API route registration | `server/cmd/server/router.go:480` | `:480` (unchanged) |
-| Handler `ListPullRequestsForIssue` → `Queries.ListPullRequestsByIssue` | `server/internal/handler/github.go:466,471` | `:466` (unchanged) |
-| Row → response mapper `issuePullRequestRowToResponse` | `server/internal/handler/github.go:149` | new citation |
+| Handler `ListPullRequestsForIssue` → `Queries.ListPullRequestsByIssue` | `server/internal/handler/github.go:687,692` | `:466` |
+| Row → response mapper `issuePullRequestRowToResponse` | `server/internal/handler/github.go:205` | `:149` |
 
 The CLI resolves the issue ref, GETs the endpoint, and (for `--output json`)
 prints the raw `{"pull_requests": [...]}` body. Only `--output` is accepted; the
@@ -23,25 +23,33 @@ default `table` shows `NUMBER STATE TITLE URL`.
 
 ## PR response shape
 
-`GitHubPullRequestResponse` struct: `server/internal/handler/github.go:51`. JSON
+`GitHubPullRequestResponse` struct: `server/internal/handler/github.go:58`. JSON
 fields the agent can read off each element of `pull_requests`:
 
-- `number` (`json:"number"`, line 56)
-- `html_url` (`json:"html_url"`, line 59)
-- `title` (`json:"title"`, line 57)
-- `state` (`json:"state"`, line 58) — the folded lifecycle enum (see below)
-- `merged_at` (`json:"merged_at"`, line 63), `closed_at` (line 64)
-- `mergeable_state` (`json:"mergeable_state"`, line 70) — mirrors GitHub; UI only
+- `provider` (`json:"provider"`, line 63)
+- `number` (`json:"number"`, line 67)
+- `html_url` (`json:"html_url"`, line 70)
+- `title` (`json:"title"`, line 68)
+- `state` (`json:"state"`, line 69) — the folded lifecycle enum (see below)
+- `merged_at` (`json:"merged_at"`, line 74), `closed_at` (line 75)
+- `mergeable_state` (`json:"mergeable_state"`, line 80) — mirrors GitHub; UI only
   surfaces `clean`/`dirty`, other values round-trip as unknown
-- `checks_conclusion` (`json:"checks_conclusion"`, line 74) — aggregated
-  `"passed"`/`"failed"`/`"pending"` or `null` (no observed suite)
-- `checks_passed` / `checks_failed` / `checks_pending` (lines 78-80) — per-suite
-  counts; `aggregateChecksConclusion` (line 183) folds them into
-  `checks_conclusion`
+- `snapshot_available` (`json:"snapshot_available"`, line 100) — for GitHub,
+  true only when the App snapshot feature is enabled and the snapshot head
+  matches the current PR head (`currentGitHubSnapshotAvailable`, lines 258-265)
+- `mergeable` / `merge_state_status` (lines 90, 94) — conflict-only verdict vs
+  the complete merge gate; "ready" requires `merge_state_status == "clean"`
+- `checks_rollup` (`json:"checks_rollup"`, line 105) and run-level
+  `checks_total` / `checks_passed` / `checks_failed` / `checks_running`
+  (lines 111-114), plus `failed_check_names` (line 118)
+- `checks_conclusion` (`json:"checks_conclusion"`, line 108) — coarse
+  `"passed"`/`"failed"`/`"pending"` or `null`; GitHub derives it only from an
+  available current-head snapshot (mapper lines 242-254), while self-hosted VCS
+  providers use `aggregateChecksConclusion` (line 275)
 
 There is **no** standalone `draft` or `merged` boolean in the response. The
 PR lifecycle is encoded in the single `state` string by `derivePRState`
-(`server/internal/handler/github.go:994`):
+(`server/internal/handler/github.go:1317`):
 
 ```
 merged   → if PullRequest.Merged
@@ -51,7 +59,7 @@ open     → otherwise
 ```
 
 `derivePRState` is called when the webhook upserts the row
-(`server/internal/handler/github.go:682`), so `state` is what the list endpoint
+(`server/internal/handler/github.go:1115`), so `state` is what the list endpoint
 returns. "Is it merged?" = `state == "merged"` (or `merged_at != null`); "is it a
 draft?" = `state == "draft"`. Combine with `checks_conclusion` for CI status.
 
@@ -121,6 +129,9 @@ and is hidden from the PR list.
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
 | Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
 | Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
+| `StartTask` / `CompleteTask` do not write issue status (agent CLI owns progress) | `server/internal/service/task.go` (`StartTask` / `CompleteTask` comments) | new citation |
+| Runtime brief: status written when the work changes it — starting the issue's own ask → `in_progress` immediately; at turn end delivery → `in_review`, continuing → `in_progress`, stuck → `blocked`; research/conversation → no write at either moment; no assignee gate; squad leader dispatch is not delivery (MUL-6417) | `server/internal/daemon/execenv/runtime_config_sections.go` (`writeWorkflowIssue`) | new citation |
+| Failed task may roll `in_progress` → `todo` when no active task remains | `server/internal/service/task.go` (`HandleFailedTasks`) | new citation |
 
 Creation with `--status todo` (or any non-backlog status) on an agent-assigned
 issue fires the agent immediately; `--status backlog` parks it with the assignee
@@ -134,6 +145,21 @@ never cancels tasks now. `CancelTasksForIssue` fires only from the issue-deletio
 paths (`DeleteIssue` / `BatchDeleteIssues`), where the owning issue row is going
 away, so no task is left orphaned.
 
+## Ownership-only assignment and duplicate-run awareness
+
+| Behavior | Source |
+|---|---|
+| `issue assign --no-start`, `issue update --no-start`, and `issue status --no-start` send `suppress_run=true` | `server/cmd/multica/cmd_issue.go` (`runIssueAssign`, `runIssueUpdate`, `runIssueStatus`) |
+| Update and batch-update apply ownership while skipping dispatch when `suppress_run` is true | `server/internal/handler/issue.go` (`UpdateIssue`, `BatchUpdateIssues`) |
+| Trusted direct self-assignment suppresses enqueue only when the target `(issue, agent)` already has a non-terminal task | `server/internal/service/issue_trigger.go` (`WillEnqueueRun`), `server/internal/handler/issue_trigger.go` (`shouldSuppressActiveSelfAssignment`) |
+| Claim responses expose a bounded, workspace-scoped snapshot of the same agent's other dispatched/running/waiting issue tasks; queued tasks are excluded | `server/pkg/db/queries/agent.sql` (`ListActiveSiblingIssueTasks`), `server/internal/handler/daemon.go` (`buildClaimedTaskResponse`) |
+| Daemon prompts point to the target's comment history and concrete sibling `run-messages` commands | `server/internal/daemon/prompt.go` (`buildActiveSiblingRunsBlock`) |
+
+The self-assignment guard is intentionally pair-scoped. It does not treat
+"this agent is busy on some other issue" as a reason to suppress a fresh
+cross-issue handoff, because serial sub-issue promotion and triage batches rely
+on those assignments creating their normal queued runs.
+
 ## Sub-issue stages (barrier wake)
 
 | Behavior | File:line |
@@ -142,11 +168,15 @@ away, so no task is left orphaned.
 | Stage barrier: notify+wake fire only when the lowest unfinished stage is all-terminal; unstaged set = one implicit stage | `server/internal/handler/issue_child_done.go:231` (`stageBarrierClosed`) |
 | Per-stage summary + next stage for the wake comment | `server/internal/handler/issue_child_done.go:254` (`stageProgressSummary`) |
 | `--stage` on `issue create` / `issue update` | `server/cmd/multica/cmd_issue.go:328,350` |
-| `multica issue children <id>` (sub-issues grouped by stage) | `server/cmd/multica/cmd_issue.go:114,678`; route `GET /api/issues/{id}/children` → `ListChildIssues` |
+| `multica issue children <id>` (sub-issues grouped by stage) | `server/cmd/multica/cmd_issue.go:114,678`; stage `done` counting via `isTerminalChildIssue` (reads `status_category`, MUL-6243); route `GET /api/issues/{id}/children` → `ListChildIssues` |
 
 Advancement is agent-driven: the server only detects the closed barrier and
 wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
-`todo` is the woken agent's decision, not a server side effect.
+`todo` is the woken agent's decision, not a server side effect. When the woken
+assignee (often a squad leader) decides the parent is complete, the system
+comment explicitly asks for `multica issue status <parent-id> in_review`. Any
+turn may move the status on its own too, judged from what the work changes
+about the issue — there is no assignee gate (MUL-6417).
 
 ## Metadata CLI
 
@@ -168,6 +198,10 @@ wakes the parent assignee. Promoting the next stage's `backlog` sub-issues to
 | Definition CRUD, admin gate, agent-actor rejection | `server/internal/handler/property.go` (`requirePropertyAdmin`) |
 | Optional catalog icon field and allowlist validation | `server/internal/handler/property.go` (`PropertyResponse`, `validatePropertyIcon`) |
 | Per-type value validation (self-correcting errors) | `server/internal/handler/property.go` (`validatePropertyValue`) |
+| `actor` / `multi_actor` reference parsing, `member` as the only kind, 20-value cap | `server/internal/handler/property.go` (`actorPropertyKinds`, `parseActorRef`, `parseActorRefList`, `maxPropertyActorValues`) |
+| Actor references are checked for workspace membership only | `server/internal/handler/property.go` (`resolveActorRefs`) |
+| `--value` name / email / id → `member:<uuid>` resolution (same member lookup as `--assignee`) | `server/cmd/multica/cmd_property.go` (`resolveActorPropertyRef`, `memberOnlyKinds`) |
+| Shared actor-reference types and helpers | `packages/core/types/property.ts` (`parseActorRef`, `actorRefsFromValue`, `MAX_ISSUE_PROPERTY_ACTOR_VALUES`) |
 | API routes (`/api/properties`, PUT/DELETE `/api/issues/{id}/properties/{propertyId}`) | `server/cmd/server/router.go` |
 
 ## Verification command

@@ -10,6 +10,11 @@
     "task_list": "Task list",
     "quote": "Quote",
     "url_aria_label": "URL",
+    "link_edit": {
+      "apply": "Apply link",
+      "remove": "Remove link",
+      "close": "Close link editor"
+    },
     "heading_dropdown": {
       "text": "Text",
       "normal_text": "Normal Text",
@@ -34,7 +39,18 @@
     "copy_link": "Copy link",
     "delete": "Delete",
     "link_copied": "Link copied",
-    "copy_link_failed": "Failed to copy link"
+    "copy_link_failed": "Failed to copy link",
+    "canvas_label": "Image canvas. Drag to pan, scroll to zoom, double-click to toggle actual size.",
+    "previous": "Previous image",
+    "next": "Next image",
+    "sequence_position": "{{index}} / {{total}}",
+    "unavailable": "That image is no longer available — skipped it."
+  },
+  "canvas": {
+    "zoom_in": "Zoom in",
+    "zoom_out": "Zoom out",
+    "zoom_fit": "Fit to view",
+    "zoom_actual": "Actual size"
   },
   "attachment": {
     "download_failed": "Couldn't fetch a download link. Try again in a moment.",
@@ -61,7 +77,8 @@
     "no_results": "No results",
     "group_current": "Current page",
     "group_recent": "Recently viewed",
-    "group_search": "Search results"
+    "group_search": "Search results",
+    "group_cancelled": "Cancelled"
   },
   "slash_command": {
     "no_skills_configured": "No skills configured",
@@ -81,7 +98,11 @@
   },
   "upload": {
     "failed": "Couldn't upload {{filename}}: {{reason}}",
-    "in_progress": "Uploading…"
+    "in_progress": "Uploading…",
+    "interrupted": "Upload interrupted — the file wasn’t saved. Attach it again.",
+    "remove": "Remove",
+    "uploading_label": "Uploading {{filename}}…",
+    "failed_label": "Couldn’t upload {{filename}}"
   },
   "title_editor": {
     "title_aria_label": "Title"
@@ -96,11 +117,6 @@
     "copy_source": "Copy diagram source",
     "show_source": "Show source",
     "show_diagram": "Show diagram",
-    "zoom_in": "Zoom in",
-    "zoom_out": "Zoom out",
-    "zoom_fit": "Fit to view",
-    "zoom_actual": "Actual size",
-    "reset_view": "Reset view",
     "export": "Export",
     "export_png": "Download PNG",
     "export_svg": "Download SVG",

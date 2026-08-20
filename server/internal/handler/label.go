@@ -13,7 +13,6 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
@@ -149,10 +148,6 @@ func (h *Handler) ListLabels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if resourceType != defaultLabelResourceType && !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusNotFound, "resource labels are not enabled")
-		return
-	}
 	labels, err := h.Queries.ListLabels(r.Context(), db.ListLabelsParams{
 		WorkspaceID: parseUUID(workspaceID), ResourceType: resourceType,
 	})
@@ -213,10 +208,6 @@ func (h *Handler) CreateLabel(w http.ResponseWriter, r *http.Request) {
 	resourceType, err := parseLabelResourceType(req.ResourceType)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	if resourceType != defaultLabelResourceType && !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusNotFound, "resource labels are not enabled")
 		return
 	}
 	workspaceID := h.resolveWorkspaceID(r)
@@ -417,7 +408,10 @@ func (h *Handler) ListLabelsForIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to list labels")
 		return
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"labels": labelsToResponse(labels)})
+	writeJSON(w, http.StatusOK, map[string]any{
+		"labels":         labelsToResponse(labels),
+		"issue_revision": issue.Revision,
+	})
 }
 
 // AttachLabel attaches a label to an issue.
@@ -464,11 +458,12 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
+	attached, err := h.Queries.AttachLabelToIssue(r.Context(), db.AttachLabelToIssueParams{
 		IssueID:     issue.ID,
 		LabelID:     labelID,
 		WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Warn("AttachLabelToIssue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to attach label")
 		return
@@ -484,11 +479,18 @@ func (h *Handler) AttachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := labelsToResponse(labels)
-	h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
-		"issue_id": uuidToString(issue.ID),
-		"labels":   resp,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"labels": resp})
+	if attached.Changed {
+		h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
+			"issue_id":       uuidToString(issue.ID),
+			"labels":         resp,
+			"issue_revision": attached.IssueRevision,
+		})
+	}
+	payload := map[string]any{"labels": resp}
+	if attached.IssueRevision > 0 {
+		payload["issue_revision"] = attached.IssueRevision
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // DetachLabel removes a label from an issue.
@@ -529,11 +531,12 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.Queries.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
+	detached, err := h.Queries.DetachLabelFromIssue(r.Context(), db.DetachLabelFromIssueParams{
 		IssueID:     issue.ID,
 		LabelID:     labelUUID,
 		WorkspaceID: issue.WorkspaceID,
-	}); err != nil {
+	})
+	if err != nil {
 		slog.Warn("DetachLabelFromIssue failed", append(logger.RequestAttrs(r), "error", err)...)
 		writeError(w, http.StatusInternalServerError, "failed to detach label")
 		return
@@ -545,11 +548,18 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	resp := labelsToResponse(labels)
-	h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
-		"issue_id": uuidToString(issue.ID),
-		"labels":   resp,
-	})
-	writeJSON(w, http.StatusOK, map[string]any{"labels": resp})
+	if detached.Changed {
+		h.publish(protocol.EventIssueLabelsChanged, uuidToString(issue.WorkspaceID), "member", userID, map[string]any{
+			"issue_id":       uuidToString(issue.ID),
+			"labels":         resp,
+			"issue_revision": detached.IssueRevision,
+		})
+	}
+	payload := map[string]any{"labels": resp}
+	if detached.IssueRevision > 0 {
+		payload["issue_revision"] = detached.IssueRevision
+	}
+	writeJSON(w, http.StatusOK, payload)
 }
 
 // ---------------------------------------------------------------------------
@@ -557,10 +567,6 @@ func (h *Handler) DetachLabel(w http.ResponseWriter, r *http.Request) {
 // ---------------------------------------------------------------------------
 
 func (h *Handler) ListLabelsForAgent(w http.ResponseWriter, r *http.Request) {
-	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusNotFound, "resource labels are not enabled")
-		return
-	}
 	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
 		return
@@ -576,10 +582,6 @@ func (h *Handler) ListLabelsForAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AttachLabelToAgent(w http.ResponseWriter, r *http.Request) {
-	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusNotFound, "resource labels are not enabled")
-		return
-	}
 	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))
 	if !ok || !h.canManageAgent(w, r, agent) {
 		return
@@ -609,10 +611,6 @@ func (h *Handler) AttachLabelToAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DetachLabelFromAgent(w http.ResponseWriter, r *http.Request) {
-	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusNotFound, "resource labels are not enabled")
-		return
-	}
 	agent, ok := h.loadAgentForUser(w, r, chi.URLParam(r, "id"))
 	if !ok || !h.canManageAgent(w, r, agent) {
 		return
@@ -632,10 +630,6 @@ func (h *Handler) DetachLabelFromAgent(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) ListLabelsForSkill(w http.ResponseWriter, r *http.Request) {
-	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusNotFound, "resource labels are not enabled")
-		return
-	}
 	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
 	if !ok {
 		return
@@ -651,10 +645,6 @@ func (h *Handler) ListLabelsForSkill(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) AttachLabelToSkill(w http.ResponseWriter, r *http.Request) {
-	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusNotFound, "resource labels are not enabled")
-		return
-	}
 	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
 	if !ok || !h.canManageSkill(w, r, skill) {
 		return
@@ -684,10 +674,6 @@ func (h *Handler) AttachLabelToSkill(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) DetachLabelFromSkill(w http.ResponseWriter, r *http.Request) {
-	if !featureflags.ResourceLabelsEnabled(r.Context(), h.FeatureFlags) {
-		writeError(w, http.StatusNotFound, "resource labels are not enabled")
-		return
-	}
 	skill, ok := h.loadSkillForUser(w, r, chi.URLParam(r, "id"))
 	if !ok || !h.canManageSkill(w, r, skill) {
 		return

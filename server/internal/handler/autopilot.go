@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -40,6 +42,7 @@ type AutopilotResponse struct {
 	AssigneeType       string  `json:"assignee_type"`
 	AssigneeID         string  `json:"assignee_id"`
 	Status             string  `json:"status"`
+	PauseReason        *string `json:"pause_reason"`
 	ExecutionMode      string  `json:"execution_mode"`
 	IssueTitleTemplate *string `json:"issue_title_template"`
 	CreatedByType      string  `json:"created_by_type"`
@@ -72,6 +75,17 @@ type AutopilotResponse struct {
 	// owners/admins, NOT by granted collaborators (who can write but cannot
 	// re-grant). Nil when built without a caller in context. See MUL-3807.
 	CanManageAccess *bool `json:"can_manage_access,omitempty"`
+}
+
+type AutopilotQuotaUsageResponse struct {
+	Action        string           `json:"action"`
+	Used          *int64           `json:"used"`
+	Reserved      *int64           `json:"reserved"`
+	Limit         *int64           `json:"limit"`
+	PeriodStart   *string          `json:"period_start"`
+	PeriodEnd     *string          `json:"period_end"`
+	ResetAt       *string          `json:"reset_at"`
+	BlockedCounts map[string]int64 `json:"blocked_counts"`
 }
 
 // AutopilotCollaboratorEntry is a member explicitly granted write access to an
@@ -153,10 +167,9 @@ type AutopilotRunResponse struct {
 	CompletedAt   *string `json:"completed_at"`
 	FailureReason *string `json:"failure_reason"`
 	// ReasonCode is a stable, localizable, enumeration-safe classification of a
-	// non-success run (skipped/failed), derived from FailureReason. The "run now"
-	// UI localizes it instead of echoing the raw English reason (which may name a
-	// private assignee agent). Additive: nil for success-path runs and ignored by
-	// old clients (MUL-4525).
+	// non-success run (skipped/failed), persisted at the decision source. The UI
+	// localizes it instead of echoing the raw English reason (which may name a
+	// private assignee agent). Additive: nil for legacy/success-path runs.
 	ReasonCode     *string `json:"reason_code,omitempty"`
 	TriggerPayload any     `json:"trigger_payload"`
 	Result         any     `json:"result"`
@@ -190,6 +203,7 @@ func autopilotToResponse(a db.Autopilot, subscribers []db.AutopilotSubscriber) A
 		AssigneeType:       assigneeType,
 		AssigneeID:         uuidToString(a.AssigneeID),
 		Status:             a.Status,
+		PauseReason:        textToPtr(a.PauseReason),
 		ExecutionMode:      a.ExecutionMode,
 		IssueTitleTemplate: textToPtr(a.IssueTitleTemplate),
 		CreatedByType:      a.CreatedByType,
@@ -275,20 +289,17 @@ func runToResponse(r db.AutopilotRun) AutopilotRunResponse {
 		json.Unmarshal(r.Result, &result)
 	}
 	return AutopilotRunResponse{
-		ID:            uuidToString(r.ID),
-		AutopilotID:   uuidToString(r.AutopilotID),
-		TriggerID:     uuidToPtr(r.TriggerID),
-		Source:        r.Source,
-		Status:        r.Status,
-		IssueID:       uuidToPtr(r.IssueID),
-		TaskID:        uuidToPtr(r.TaskID),
-		TriggeredAt:   timestampToString(r.TriggeredAt),
-		CompletedAt:   timestampToPtr(r.CompletedAt),
-		FailureReason: textToPtr(r.FailureReason),
-		// ReasonCode is left unset here: it is a decision-time value the manual
-		// "run now" handler injects from the typed dispatch outcome (MUL-4525).
-		// Persisted rows (list/history) surface the human failure_reason instead
-		// of a code reverse-engineered from that text.
+		ID:             uuidToString(r.ID),
+		AutopilotID:    uuidToString(r.AutopilotID),
+		TriggerID:      uuidToPtr(r.TriggerID),
+		Source:         r.Source,
+		Status:         r.Status,
+		IssueID:        uuidToPtr(r.IssueID),
+		TaskID:         uuidToPtr(r.TaskID),
+		TriggeredAt:    timestampToString(r.TriggeredAt),
+		CompletedAt:    timestampToPtr(r.CompletedAt),
+		FailureReason:  textToPtr(r.FailureReason),
+		ReasonCode:     textToPtr(r.ReasonCode),
 		TriggerPayload: payload,
 		Result:         result,
 		CreatedAt:      timestampToString(r.CreatedAt),
@@ -647,9 +658,6 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
 		return
 	}
-	if !h.validateAutopilotAssignee(w, r, assigneeType, assigneeUUID, wsUUID) {
-		return
-	}
 	projectID, ok := h.parseAutopilotProjectID(w, r, req.ProjectID, wsUUID)
 	if !ok {
 		return
@@ -668,6 +676,13 @@ func (h *Handler) CreateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// Keep save-time readiness validation in the same transaction as the
+	// insert. The assignment lock serializes this path with Runtime teardown,
+	// so an active Autopilot cannot slip in after teardown's pause sweep.
+	if !h.validateAutopilotAssigneeForSave(w, r, qtx, assigneeType, assigneeUUID, wsUUID, true) {
+		return
+	}
 
 	autopilot, err := qtx.CreateAutopilot(r.Context(), db.CreateAutopilotParams{
 		WorkspaceID:        wsUUID,
@@ -838,8 +853,9 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	// rejected.
 	_, typeSent := rawFields["assignee_type"]
 	_, idSent := rawFields["assignee_id"]
+	nextType := prev.AssigneeType
+	nextID := prev.AssigneeID
 	if typeSent || idSent {
-		nextType := prev.AssigneeType
 		if typeSent && req.AssigneeType != nil && *req.AssigneeType != "" {
 			nextType = *req.AssigneeType
 		}
@@ -847,7 +863,6 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 			writeError(w, http.StatusBadRequest, "assignee_type must be agent or squad")
 			return
 		}
-		nextID := prev.AssigneeID
 		if idSent {
 			if req.AssigneeID == nil {
 				writeError(w, http.StatusBadRequest, "assignee_id cannot be null")
@@ -864,9 +879,6 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 		// versa.
 		if typeSent && !idSent && nextType != prev.AssigneeType {
 			writeError(w, http.StatusBadRequest, "assignee_id is required when changing assignee_type")
-			return
-		}
-		if !h.validateAutopilotAssignee(w, r, nextType, nextID, prev.WorkspaceID) {
 			return
 		}
 		if typeSent {
@@ -899,6 +911,45 @@ func (h *Handler) UpdateAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tx.Rollback(r.Context())
 	qtx := h.Queries.WithTx(tx)
+
+	// Retargeting must validate the polymorphic reference; resuming must also
+	// validate Runtime readiness. Keep both in this transaction so Runtime
+	// teardown either pauses an active row after it commits or wins first and
+	// makes activation fail with a useful recovery message.
+	nextStatus := prev.Status
+	if req.Status != nil {
+		nextStatus = *req.Status
+	}
+	validateAssignee := typeSent || idSent || (req.Status != nil && *req.Status == "active")
+	if validateAssignee && !h.validateAutopilotAssigneeForSave(
+		w, r, qtx, nextType, nextID, prev.WorkspaceID, nextStatus == "active",
+	) {
+		return
+	}
+
+	// Assignment locks come first. Runtime teardown and squad leader changes
+	// also lock Agent/Squad before they update matching Autopilot rows; keeping
+	// that global order prevents an Agent↔Autopilot deadlock.
+	lockedPrev, err := qtx.LockAutopilotForUpdate(r.Context(), db.LockAutopilotForUpdateParams{
+		ID:          prev.ID,
+		WorkspaceID: prev.WorkspaceID,
+	})
+	if errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "autopilot not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to update autopilot")
+		return
+	}
+	if lockedPrev.UpdatedAt.Valid != prev.UpdatedAt.Valid ||
+		(lockedPrev.UpdatedAt.Valid && !lockedPrev.UpdatedAt.Time.Equal(prev.UpdatedAt.Time)) {
+		writeJSON(w, http.StatusConflict, map[string]any{
+			"error": "the autopilot changed while it was being edited; reload and try again.",
+			"code":  "autopilot_update_conflict",
+		})
+		return
+	}
 
 	autopilot, err := qtx.UpdateAutopilot(r.Context(), params)
 	if err != nil {
@@ -1463,29 +1514,45 @@ func isValidAutopilotAssigneeType(t string) bool {
 	}
 }
 
-// validateAutopilotAssignee checks that the assignee (agent or squad) exists
-// in the given workspace, and for squad assignees that the squad's leader
-// agent is in a workable state at create / update time. Writes an HTTP error
-// and returns false on any failure.
+// validateAutopilotAssigneeForSave checks that the assignee (agent or squad)
+// exists in the given workspace and, when requireRuntime is true, that its
+// effective Agent has a Runtime. It takes assignment locks through q so active
+// saves and the caller's Autopilot write are serialized with Runtime teardown.
 //
 // At dispatch time the same checks (resolveAutopilotLeader + AgentReadiness)
 // run again — they live there to handle "leader was online at save time but
 // went offline by trigger time". Save-time validation exists so the user gets
-// immediate feedback ("can't pick this squad because its leader is archived")
-// instead of discovering the autopilot is dead at the next schedule tick.
-func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Request, assigneeType string, assigneeID, workspaceID pgtype.UUID) bool {
+// immediate feedback ("bind a runtime first") instead of discovering the
+// Autopilot is inert at the next schedule tick.
+func (h *Handler) validateAutopilotAssigneeForSave(
+	w http.ResponseWriter,
+	r *http.Request,
+	q *db.Queries,
+	assigneeType string,
+	assigneeID, workspaceID pgtype.UUID,
+	requireRuntime bool,
+) bool {
 	switch assigneeType {
 	case "agent":
-		if _, err := h.Queries.GetAgentInWorkspace(r.Context(), db.GetAgentInWorkspaceParams{
+		agent, err := q.LockAgentForAutopilotAssignment(r.Context(), db.LockAgentForAutopilotAssignmentParams{
 			ID:          assigneeID,
 			WorkspaceID: workspaceID,
-		}); err != nil {
+		})
+		if err != nil {
 			writeError(w, http.StatusBadRequest, "assignee must be a valid agent in this workspace")
+			return false
+		}
+		if agent.ArchivedAt.Valid {
+			writeError(w, http.StatusUnprocessableEntity, "assignee agent is archived; pick a different agent")
+			return false
+		}
+		if requireRuntime && !agent.RuntimeID.Valid {
+			writeError(w, http.StatusUnprocessableEntity, "assignee agent needs a runtime before this autopilot can be active")
 			return false
 		}
 		return true
 	case "squad":
-		squad, err := h.Queries.GetSquadInWorkspace(r.Context(), db.GetSquadInWorkspaceParams{
+		squad, err := q.LockSquadForAutopilotAssignment(r.Context(), db.LockSquadForAutopilotAssignmentParams{
 			ID:          assigneeID,
 			WorkspaceID: workspaceID,
 		})
@@ -1503,13 +1570,20 @@ func (h *Handler) validateAutopilotAssignee(w http.ResponseWriter, r *http.Reque
 			writeError(w, http.StatusUnprocessableEntity, "squad is archived; pick a different squad")
 			return false
 		}
-		leader, err := h.Queries.GetAgent(r.Context(), squad.LeaderID)
+		leader, err := q.LockAgentForAutopilotAssignment(r.Context(), db.LockAgentForAutopilotAssignmentParams{
+			ID:          squad.LeaderID,
+			WorkspaceID: workspaceID,
+		})
 		if err != nil {
 			writeError(w, http.StatusBadRequest, "squad leader agent not found")
 			return false
 		}
 		if leader.ArchivedAt.Valid {
 			writeError(w, http.StatusUnprocessableEntity, "squad leader is archived; pick a different squad or rotate the leader before assigning autopilot")
+			return false
+		}
+		if requireRuntime && !leader.RuntimeID.Valid {
+			writeError(w, http.StatusUnprocessableEntity, "squad leader needs a runtime before this autopilot can be active")
 			return false
 		}
 		// Private-leader gate: the member configuring the autopilot must have
@@ -2018,8 +2092,30 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	}
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 
-	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManual(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID))
+	idempotencyKey := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if len(idempotencyKey) > 255 {
+		writeError(w, http.StatusBadRequest, "Idempotency-Key is too long")
+		return
+	}
+	if idempotencyKey == "" {
+		idempotencyKey = service.NewRequestIdempotencyKey()
+	}
+	run, reasonCode, err := h.AutopilotService.DispatchAutopilotManualWithKey(r.Context(), autopilot, pgtype.UUID{}, nil, memberActorUserID(actorType, actorID), idempotencyKey)
 	if err != nil {
+		var quotaErr *service.AutopilotQuotaExceededError
+		if errors.As(err, &quotaErr) {
+			retryAfter := int64(time.Until(quotaErr.ResetAt).Seconds())
+			if retryAfter < 1 {
+				retryAfter = 1
+			}
+			w.Header().Set("Retry-After", strconv.FormatInt(retryAfter, 10))
+			writeJSON(w, http.StatusTooManyRequests, map[string]any{
+				"reason_code": "quota_exceeded", "used": quotaErr.Used,
+				"reserved": quotaErr.Reserved, "limit": quotaErr.Limit,
+				"reset_at": quotaErr.ResetAt.UTC().Format(time.RFC3339),
+			})
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
 		return
 	}
@@ -2031,6 +2127,41 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 	if reasonCode != "" {
 		c := string(reasonCode)
 		resp.ReasonCode = &c
+	}
+	writeJSON(w, http.StatusOK, resp)
+}
+
+// GetAutopilotQuotaUsage exposes Cloud-provided interval facts plus durable
+// server-owned blocked counts. When the gate is off or malformed, the service
+// returns before any quota-table read.
+func (h *Handler) GetAutopilotQuotaUsage(w http.ResponseWriter, r *http.Request) {
+	workspaceID, err := util.ParseUUID(h.resolveWorkspaceID(r))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid workspace")
+		return
+	}
+	usage, err := h.AutopilotService.AutopilotQuotaUsage(r.Context(), workspaceID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to load autopilot quota usage")
+		return
+	}
+	resp := AutopilotQuotaUsageResponse{Action: "off"}
+	if usage.Enabled {
+		resp.Action = usage.Action
+		resp.Used, resp.Reserved, resp.Limit = usage.Used, usage.Reserved, usage.Limit
+		resp.BlockedCounts = usage.BlockedCounts
+		if usage.PeriodStart != nil {
+			v := usage.PeriodStart.UTC().Format(time.RFC3339)
+			resp.PeriodStart = &v
+		}
+		if usage.PeriodEnd != nil {
+			v := usage.PeriodEnd.UTC().Format(time.RFC3339)
+			resp.PeriodEnd = &v
+		}
+		if usage.ResetAt != nil {
+			v := usage.ResetAt.UTC().Format(time.RFC3339)
+			resp.ResetAt = &v
+		}
 	}
 	writeJSON(w, http.StatusOK, resp)
 }

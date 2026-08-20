@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -135,6 +136,65 @@ func parseBoolEnv(raw string) (bool, error) {
 	}
 }
 
+// awsEndpointDomains are the parent domains AWS serves S3 from. VPC, dualstack
+// and FIPS hostnames all live under them, as does the China partition.
+var awsEndpointDomains = []string{"amazonaws.com", "amazonaws.com.cn"}
+
+// usesAWSEndpoint reports whether uploads go to real AWS S3 — either the
+// default endpoint or an explicitly configured AWS one. The match is on the
+// host label boundary, so "notamazonaws.com" and "s3.amazonaws.com.evil.net"
+// are correctly treated as third-party endpoints.
+func (s *S3Storage) usesAWSEndpoint() bool {
+	if s.endpointURL == "" {
+		return true
+	}
+	host := endpointHostname(s.endpointURL)
+	for _, domain := range awsEndpointDomains {
+		if host == domain || strings.HasSuffix(host, "."+domain) {
+			return true
+		}
+	}
+	return false
+}
+
+// endpointHostname extracts the comparable hostname from a configured
+// endpoint: lowercased, without the port, and without a trailing root dot.
+// A value written without a scheme is retried as an https URL, since
+// url.Parse otherwise reads the whole thing as a path.
+func endpointHostname(endpointURL string) string {
+	parsed, err := url.Parse(endpointURL)
+	if err != nil {
+		return ""
+	}
+	if parsed.Hostname() == "" {
+		parsed, err = url.Parse("https://" + endpointURL)
+		if err != nil {
+			return ""
+		}
+	}
+	return strings.TrimSuffix(strings.ToLower(parsed.Hostname()), ".")
+}
+
+// uploadChecksumOptions returns the per-request options for the buffered
+// upload path. The SDK defaults RequestChecksumCalculation to WhenSupported,
+// which sends the body as aws-chunked with a CRC32 trailer; Aliyun OSS and
+// Tencent COS do not implement that encoding and reject the request outright.
+//
+// Downgrading to WhenRequired drops the trailer, but it also drops the
+// client-side checksum entirely, so it is applied only to non-AWS endpoints.
+// Real AWS S3 accepts the trailer today, and buckets carrying a default Object
+// Lock retention actually require a checksum, so those requests are left
+// exactly as the SDK built them — including any AWS_REQUEST_CHECKSUM_CALCULATION
+// the operator configured.
+func (s *S3Storage) uploadChecksumOptions() []func(*s3.Options) {
+	if s.usesAWSEndpoint() {
+		return nil
+	}
+	return []func(*s3.Options){func(opts *s3.Options) {
+		opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
+	}}
+}
+
 // storageClass returns the appropriate S3 storage class.
 // Custom endpoints (e.g. MinIO) only support STANDARD; real AWS defaults to INTELLIGENT_TIERING.
 func (s *S3Storage) storageClass() types.StorageClass {
@@ -239,16 +299,29 @@ func (s *S3Storage) PresignGetWithContentDisposition(ctx context.Context, key st
 
 // Delete removes an object from S3. Errors are logged but not fatal.
 func (s *S3Storage) Delete(ctx context.Context, key string) {
+	if err := s.DeleteObject(ctx, key); err != nil {
+		slog.Error("s3 DeleteObject failed", "key", key, "error", err)
+	}
+}
+
+// DeleteObject is Delete with the error surfaced — the media reconciler needs
+// it to keep the ledger row and schedule a retry instead of assuming success.
+func (s *S3Storage) DeleteObject(ctx context.Context, key string) error {
 	if key == "" {
-		return
+		return nil
 	}
 	_, err := s.client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(s.bucket),
 		Key:    aws.String(key),
 	})
-	if err != nil {
-		slog.Error("s3 DeleteObject failed", "key", key, "error", err)
-	}
+	return err
+}
+
+// ObjectURL returns the URL a successful Upload/UploadStream of key would
+// return. It is a pure function of configuration, so the media intent ledger
+// can persist the URL BEFORE the upload for the durable reference check.
+func (s *S3Storage) ObjectURL(key string) string {
+	return s.uploadedURL(key)
 }
 
 // DeleteKeys removes multiple objects from S3. Best-effort, errors are logged.
@@ -267,6 +340,34 @@ func (s *S3Storage) Upload(ctx context.Context, key string, data []byte, content
 		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
 		CacheControl:       aws.String("max-age=432000,public"),
 		StorageClass:       s.storageClass(),
+	}, s.uploadChecksumOptions()...)
+	if err != nil {
+		return "", fmt.Errorf("s3 PutObject: %w", err)
+	}
+	return s.uploadedURL(key), nil
+}
+
+func (s *S3Storage) UploadStream(ctx context.Context, key string, data io.Reader, sizeBytes int64, contentType string, filename string) (string, error) {
+	if sizeBytes <= 0 {
+		return "", fmt.Errorf("s3 PutObject: content length is required for streaming upload")
+	}
+	input := &s3.PutObjectInput{
+		Bucket:             aws.String(s.bucket),
+		Key:                aws.String(key),
+		Body:               data,
+		ContentLength:      aws.Int64(sizeBytes),
+		ContentType:        aws.String(contentType),
+		ContentDisposition: aws.String(ContentDisposition(contentType, filename)),
+		CacheControl:       aws.String("max-age=432000,public"),
+		StorageClass:       s.storageClass(),
+	}
+	_, err := s.client.PutObject(ctx, input, func(opts *s3.Options) {
+		// A non-seekable stream cannot be rewound for SigV4 payload hashing.
+		// S3 supports UNSIGNED-PAYLOAD for authenticated requests. Avoid the
+		// optional trailing-checksum path as well: it requires another rewind
+		// or aws-chunked framing that S3-compatible backends handle unevenly.
+		opts.APIOptions = append(opts.APIOptions, v4.SwapComputePayloadSHA256ForUnsignedPayloadMiddleware)
+		opts.RequestChecksumCalculation = aws.RequestChecksumCalculationWhenRequired
 	})
 	if err != nil {
 		return "", fmt.Errorf("s3 PutObject: %w", err)

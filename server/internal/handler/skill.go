@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"golang.org/x/sync/errgroup"
@@ -26,16 +27,16 @@ import (
 
 // sanitizeNullBytes makes a string safe for a PostgreSQL TEXT column.
 //
-// Two failure modes covered:
-//   - Embedded NUL (0x00) — PG rejects with SQLSTATE 22021. Removed.
-//   - Other invalid-UTF-8 byte sequences (e.g. 0x91 = Windows-1252 smart
-//     quote, which crashed agent-template import of skills containing
-//     Windows-encoded prose). `strings.ToValidUTF8` drops them.
+// Thin alias for util.SanitizeTextForPostgres, kept because ~20 call sites
+// spell it this way. The shared helper is the single definition of what
+// "safe to persist" means, so the daemon task endpoints and the
+// comment/skill/property endpoints can no longer drift into storing
+// different text for the same input (GH #7098 review).
 //
-// Name is kept for compatibility with the many call sites; the behaviour
-// is a strict superset of the original.
+// One behaviour change came with the move: invalid UTF-8 is now replaced
+// with U+FFFD rather than dropped silently. NUL is still removed outright.
 func sanitizeNullBytes(s string) string {
-	return strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", ""), "")
+	return util.SanitizeTextForPostgres(s)
 }
 
 // --- Response structs ---
@@ -2252,12 +2253,9 @@ func importFetchErrorResponse(ctx context.Context, err error) (int, string) {
 	return http.StatusBadGateway, err.Error()
 }
 
-// finishSkillImport runs the shared tail of every skill import — whether the
-// bundle came from a hosted URL or an uploaded archive (.skill / .zip). It maps
-// the extracted files onto CreateSkillFileRequest, records provenance into
-// config.origin, and creates the skill, routing same-name collisions through
-// the on_conflict strategy.
-func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID, strategy string, structuredResult bool, imported *importedSkill) {
+// importedSkillFileRequests maps a fetched bundle's supporting files onto
+// CreateSkillFileRequest, dropping entries whose path fails validateFilePath.
+func importedSkillFileRequests(imported *importedSkill) []CreateSkillFileRequest {
 	files := make([]CreateSkillFileRequest, 0, len(imported.files))
 	for _, f := range imported.files {
 		if !validateFilePath(f.path) {
@@ -2268,6 +2266,16 @@ func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, work
 			Content: f.content,
 		})
 	}
+	return files
+}
+
+// finishSkillImport runs the shared tail of every skill import — whether the
+// bundle came from a hosted URL or an uploaded archive (.skill / .zip). It maps
+// the extracted files onto CreateSkillFileRequest, records provenance into
+// config.origin, and creates the skill, routing same-name collisions through
+// the on_conflict strategy.
+func (h *Handler) finishSkillImport(w http.ResponseWriter, r *http.Request, workspaceID string, workspaceUUID, creatorUUID pgtype.UUID, creatorID, strategy string, structuredResult bool, imported *importedSkill) {
+	files := importedSkillFileRequests(imported)
 
 	// Persist provenance into skill.config.origin so list/detail UI can show
 	// "Imported from GitHub / ClawHub / Skills.sh" and link back to the source.

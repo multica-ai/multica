@@ -26,4 +26,6 @@ export interface IssueSurfaceProps {
   modes: IssueSurfaceMode[];
   surfaceKey?: string;
   createDefaults?: IssueCreateDefaults;
+  /** Server-owned membership search shared by non-Table issue surfaces. */
+  search?: string;
 }

@@ -9,22 +9,28 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useModalStore } from "@multica/core/modals";
 import { useUpdateIssue } from "@multica/core/issues/mutations";
+import { errorCode } from "@multica/core/api";
 import { pinListOptions, useCreatePin, useDeletePin } from "@multica/core/pins";
 import { copyText } from "@multica/ui/lib/clipboard";
 import { useNavigation } from "../../navigation";
 import { useT } from "../../i18n";
 import { useIssueSurfaceActionsOptional } from "../surface/actions-context";
+import type { IssueSurfaceMutationOptions } from "../surface/actions-context";
 
 export interface UseIssueActionsResult {
   isPinned: boolean;
-  updateField: (updates: Partial<UpdateIssueRequest>) => void;
+  updateField: (
+    updates: Partial<UpdateIssueRequest>,
+    options?: IssueSurfaceMutationOptions,
+  ) => void;
+  openInNewTab: () => void;
   togglePin: () => void;
   copyLink: () => Promise<void>;
   openCreateSubIssue: () => void;
   openSetParent: () => void;
   removeParent: () => void;
   openAddChild: () => void;
-  openDeleteConfirm: (opts?: { onDeletedNavigateTo?: string }) => void;
+  openDeleteConfirm: (opts?: { onDeletedFallbackPath?: string }) => void;
 }
 
 /**
@@ -60,10 +66,14 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   const issueId = issue?.id ?? null;
   const issueIdentifier = issue?.identifier ?? null;
   const issueProjectId = issue?.project_id ?? null;
+  const issueAssigneeType = issue?.assignee_type ?? null;
+  const issueAssigneeId = issue?.assignee_id ?? null;
   const issueStatus = issue?.status ?? null;
-
   const updateField = useCallback(
-    (updates: Partial<UpdateIssueRequest>) => {
+    (
+      updates: Partial<UpdateIssueRequest>,
+      options?: IssueSurfaceMutationOptions,
+    ) => {
       if (!issueId) return;
       // Assigning to an agent/squad may start a run. Route through the
       // pre-trigger confirm modal (preview + optional handoff note + "暂不开始"),
@@ -91,23 +101,57 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       if (surfaceActions) {
         surfaceActions.updateIssue(issueId, updates, {
           errorMessage: t(($) => $.detail.update_failed),
+          ...options,
         });
       } else {
         updateIssue.mutate(
           { id: issueId, ...updates },
           {
-            onError: (err) =>
+            onSuccess: options?.onSuccess,
+            onError: (err) => {
               toast.error(
-                err instanceof Error && err.message
+                errorCode(err) === "revision_conflict"
+                  ? t(($) => $.revision.conflict)
+                  : err instanceof Error && err.message
                   ? err.message
                   : t(($) => $.detail.update_failed),
-              ),
+              );
+              options?.onError?.(err);
+            },
+            onSettled: () => options?.onSettled?.(),
           },
         );
       }
     },
     [issueId, issueStatus, surfaceActions, updateIssue, openModal, t],
   );
+
+  // Explicit "open it somewhere else" CTA, so the new tab takes focus
+  // (`activate: true`) — the user is asking to move into the new context, not
+  // to stash it for later the way modifier-click does. Same contract as the
+  // table row open and the attachment preview's "Open in new tab".
+  //
+  // Only desktop implements `openInNewTab`; on web it is undefined and we fall
+  // back to a real browser tab via the shareable URL.
+  const openInNewTab = useCallback(() => {
+    if (!issueId) return;
+    // Identifier form, same as copyLink: on web this becomes a real browser
+    // tab at the shareable URL, so it is a link the user sees and may copy out
+    // of the address bar. Opening on the UUID would also make the route
+    // immediately rewrite the fresh tab's URL.
+    const path = paths.issueDetail(issueIdentifier || issueId);
+    if (navigation.openInNewTab) {
+      navigation.openInNewTab(path, issueIdentifier ?? undefined, {
+        activate: true,
+      });
+      return;
+    }
+    window.open(
+      navigation.getShareableUrl(path),
+      "_blank",
+      "noopener,noreferrer",
+    );
+  }, [issueId, issueIdentifier, navigation, paths]);
 
   const togglePin = useCallback(() => {
     if (!issueId) return;
@@ -120,13 +164,16 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
 
   const copyLink = useCallback(async () => {
     if (!issueId) return;
-    const url = navigation.getShareableUrl(paths.issueDetail(issueId));
+    // Share the identifier form (`/{ws}/issues/MUL-123`): a pasted link should
+    // say which issue it points at. The UUID form stays valid, so links copied
+    // before this still resolve.
+    const url = navigation.getShareableUrl(paths.issueDetail(issueIdentifier || issueId));
     if (await copyText(url)) {
       toast.success(t(($) => $.detail.link_copied));
     } else {
       toast.error(t(($) => $.detail.link_copy_failed));
     }
-  }, [paths, issueId, navigation, t]);
+  }, [paths, issueId, issueIdentifier, navigation, t]);
 
   const openCreateSubIssue = useCallback(() => {
     if (!issueId) return;
@@ -134,8 +181,25 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       parent_issue_id: issueId,
       parent_issue_identifier: issueIdentifier,
       ...(issueProjectId ? { project_id: issueProjectId } : {}),
+      // Inherit the parent's assignee (member/agent/squad) so a sub-issue
+      // created from the "Add sub-issue" entry starts with the same owner
+      // (discussion #1728). The modal keys off whether these fields are
+      // present, not their value, so a seed overrides the sticky last-used
+      // assignee it would otherwise fall back to, while omitting both for
+      // an unassigned parent leaves that fallback intact. Seed the two
+      // together — assignee_type is meaningless without assignee_id.
+      ...(issueAssigneeType && issueAssigneeId
+        ? { assignee_type: issueAssigneeType, assignee_id: issueAssigneeId }
+        : {}),
     });
-  }, [openModal, issueId, issueIdentifier, issueProjectId]);
+  }, [
+    openModal,
+    issueId,
+    issueIdentifier,
+    issueProjectId,
+    issueAssigneeType,
+    issueAssigneeId,
+  ]);
 
   const openSetParent = useCallback(() => {
     if (!issueId) return;
@@ -155,7 +219,10 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
     if (surfaceActions) {
       surfaceActions.updateIssue(
         issueId,
-        { parent_issue_id: null, stage: null },
+        {
+          parent_issue_id: null,
+          stage: null,
+        },
         {
           onSuccess: () =>
             toast.success(t(($) => $.actions.remove_parent_issue_success)),
@@ -164,7 +231,11 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
       );
     } else {
       updateIssue.mutate(
-        { id: issueId, parent_issue_id: null, stage: null },
+        {
+          id: issueId,
+          parent_issue_id: null,
+          stage: null,
+        },
         {
           onSuccess: () =>
             toast.success(t(($) => $.actions.remove_parent_issue_success)),
@@ -185,12 +256,12 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   }, [openModal, issueId]);
 
   const openDeleteConfirm = useCallback(
-    (opts?: { onDeletedNavigateTo?: string }) => {
+    (opts?: { onDeletedFallbackPath?: string }) => {
       if (!issueId) return;
       openModal("issue-delete-confirm", {
         issueId,
         identifier: issueIdentifier,
-        onDeletedNavigateTo: opts?.onDeletedNavigateTo,
+        onDeletedFallbackPath: opts?.onDeletedFallbackPath,
       });
     },
     [openModal, issueId, issueIdentifier],
@@ -199,6 +270,7 @@ export function useIssueActions(issue: Issue | null): UseIssueActionsResult {
   return {
     isPinned,
     updateField,
+    openInNewTab,
     togglePin,
     copyLink,
     openCreateSubIssue,

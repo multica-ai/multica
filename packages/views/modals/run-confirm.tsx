@@ -16,10 +16,14 @@ import { Textarea } from "@multica/ui/components/ui/textarea";
 import { Spinner } from "@multica/ui/components/ui/spinner";
 import type { IssueAssigneeType, UpdateIssueRequest } from "@multica/core/types";
 import { useUpdateIssue, useBatchUpdateIssues } from "@multica/core/issues/mutations";
+import { errorCode } from "@multica/core/api";
 import { useActorName } from "@multica/core/workspace/hooks";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { agentListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { runtimeListOptions, readRuntimeCliVersion, handoffSupported } from "@multica/core/runtimes";
+import { useShortcut, shortcutMatchesEvent, isPlainShortcut } from "@multica/core/shortcuts";
+import { isImeComposing } from "@multica/core/utils";
+import { ShortcutKeycaps } from "../common/shortcut-keycaps";
 import { useT } from "../i18n";
 
 const MAX_HANDOFF_NOTE = 2000;
@@ -51,6 +55,7 @@ interface RunConfirmData {
   assigneeType?: IssueAssigneeType;
   assigneeId?: string;
   assigneeName?: string;
+  issueRevision?: number;
 }
 
 /**
@@ -78,7 +83,9 @@ export function RunConfirmModal({
   data: Record<string, unknown> | null;
 }) {
   const { t } = useT("modals");
+  const { t: tIssues } = useT("issues");
   const { getActorName } = useActorName();
+  const sendShortcut = useShortcut("send");
   const d = (data ?? {}) as RunConfirmData;
   const issueIds = d.issueIds ?? [];
 
@@ -153,15 +160,53 @@ export function RunConfirmModal({
       // no result toast to add here. Whether a run started is the server's
       // existing decision at write time, not something this dialog reports.
       if (issueIds.length === 1) {
-        await updateIssue.mutateAsync({ id: issueIds[0]!, ...payload });
+        await updateIssue.mutateAsync({
+          id: issueIds[0]!,
+          ...payload,
+        });
       } else {
         await batchUpdate.mutateAsync({ ids: issueIds, updates: payload });
       }
       onClose();
     } catch (err) {
-      toast.error(err instanceof Error && err.message ? err.message : t(($) => $.run_confirm.toast_failed));
+      toast.error(
+        errorCode(err) === "revision_conflict"
+          ? tIssues(($) => $.revision.conflict)
+          : err instanceof Error && err.message
+            ? err.message
+            : t(($) => $.run_confirm.toast_failed),
+      );
       setPendingAction(null);
     }
+  };
+
+  /**
+   * The configured `send` chord confirms the assignment, the same chord that
+   * creates from the issue composer (MUL-5694).
+   *
+   * Bound on the dialog, not on the note box, because the chord means "run the
+   * primary action" no matter which control has focus — and the note box is
+   * not always where focus is. An old runtime disables it, which hands initial
+   * focus to the footer instead, and that is precisely where the keycap on the
+   * confirm button would otherwise be advertising a dead key.
+   */
+  const onDialogKeyDown = (e: React.KeyboardEvent) => {
+    // A held chord submits once, and the Enter that commits an IME
+    // composition is the user picking a candidate, never a confirmation.
+    if (e.defaultPrevented || e.repeat || isImeComposing(e)) return;
+    if (!shortcutMatchesEvent(sendShortcut, e.nativeEvent)) return;
+    // Only a BARE Enter activates a focused button (Chromium fires no click
+    // for ⌘/Ctrl+Enter), so a `send` remapped to plain Enter is the one case
+    // where confirming here too would double-write — and on "Don't start yet"
+    // the two writes would disagree about suppress_run. Every chord form
+    // reaches the footer as a dead key without us, so it must not be skipped.
+    const activatesFocusedButton =
+      isPlainShortcut(sendShortcut, "Enter") &&
+      e.target instanceof HTMLElement &&
+      e.target.closest("button") !== null;
+    if (activatesFocusedButton) return;
+    e.preventDefault();
+    void submit(false);
   };
 
   // States the action, not a prediction: the assignment is certain, the run is
@@ -179,7 +224,7 @@ export function RunConfirmModal({
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v && !submitting) onClose(); }}>
-      <DialogContent>
+      <DialogContent onKeyDown={onDialogKeyDown}>
         <DialogHeader>
           <DialogTitle>{t(($) => $.run_confirm.title_assign)}</DialogTitle>
           <DialogDescription>{headline}</DialogDescription>
@@ -188,7 +233,7 @@ export function RunConfirmModal({
         {/* Always mounted and always usable on the first frame — nothing about
             this box depends on a server answer. */}
         <div className="grid gap-1.5">
-          <label className="text-sm font-medium" htmlFor="handoff-note">
+          <label className="text-body font-medium" htmlFor="handoff-note">
             {t(($) => $.run_confirm.note_label)}
           </label>
           <Textarea
@@ -201,7 +246,7 @@ export function RunConfirmModal({
             rows={3}
           />
           {noteDisabled ? (
-            <p className="text-xs text-muted-foreground">{t(($) => $.run_confirm.note_unsupported)}</p>
+            <p className="text-caption text-muted-foreground">{t(($) => $.run_confirm.note_unsupported)}</p>
           ) : null}
         </div>
 
@@ -212,7 +257,24 @@ export function RunConfirmModal({
             {pendingAction === "suppress" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.dont_start)}
           </Button>
           <Button type="button" disabled={submitting} onClick={() => submit(false)}>
-            {pendingAction === "go" ? <Spinner className="size-4" /> : t(($) => $.run_confirm.confirm_assign)}
+            {pendingAction === "go" ? (
+              <Spinner className="size-4" />
+            ) : (
+              <>
+                {t(($) => $.run_confirm.confirm_assign)}
+                {/* Decorative: the accessible name stays "Confirm assignment",
+                    not "Confirm assignment Command Enter". Absent when `send`
+                    is unbound. */}
+                {sendShortcut ? (
+                  <ShortcutKeycaps
+                    shortcut={sendShortcut}
+                    decorative
+                    className="ml-1"
+                    keyClassName="border-background/30 bg-background/15 text-primary-foreground shadow-none"
+                  />
+                ) : null}
+              </>
+            )}
           </Button>
         </DialogFooter>
       </DialogContent>

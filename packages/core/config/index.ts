@@ -15,16 +15,29 @@ interface ConfigState {
   // must be hidden. Defaults to false so unknown / older servers behave like
   // the managed-cloud case.
   workspaceCreationDisabled: boolean;
+  // Self-host-only gate for the Git provider integration (Forgejo / Gitea /
+  // GitLab). When false the whole Settings → Integrations "Git providers"
+  // section is hidden. Defaults to false so unknown / older servers and the
+  // managed cloud (which omits the field) keep it hidden.
+  vcsIntegrationAvailable: boolean;
   featureFlags: Record<string, boolean>;
   // The running API build version, surfaced in the Help popover so
   // self-hosted operators can confirm what's deployed. Empty for dev builds
   // or servers older than this feature.
   serverVersion: string;
+  // Whether the connected server validates local_directory execution_mode.
+  // Defaults to false, and stays false for any server that does not declare it:
+  // the dangerous ones accept worktree mode, drop the field, and run the task
+  // in the user's working copy anyway (#7113). Servers that validate but
+  // predate this signal are caught by the same net — indistinguishable from
+  // here, and only one of the two answers is safe to guess.
+  localWorktreeSupported: boolean;
   setCdnConfig: (config: { cdnDomain: string; cdnSigned?: boolean }) => void;
   setAuthConfig: (config: {
     allowSignup: boolean;
     googleClientId?: string;
     workspaceCreationDisabled?: boolean;
+    vcsIntegrationAvailable?: boolean;
   }) => void;
   setDaemonConfig: (config: {
     daemonServerUrl?: string;
@@ -32,6 +45,7 @@ interface ConfigState {
   }) => void;
   setFeatureFlags: (flags?: Record<string, boolean>) => void;
   setServerVersion: (version?: string) => void;
+  setLocalWorktreeSupported: (supported?: boolean) => void;
 }
 
 export const configStore = createStore<ConfigState>((set) => ({
@@ -42,15 +56,23 @@ export const configStore = createStore<ConfigState>((set) => ({
   daemonServerUrl: "",
   daemonAppUrl: "",
   workspaceCreationDisabled: false,
+  vcsIntegrationAvailable: false,
   featureFlags: {},
   serverVersion: "",
+  localWorktreeSupported: false,
   setCdnConfig: ({ cdnDomain, cdnSigned = false }) => set({ cdnDomain, cdnSigned }),
-  setAuthConfig: ({ allowSignup, googleClientId = "", workspaceCreationDisabled = false }) =>
-    set({ allowSignup, googleClientId, workspaceCreationDisabled }),
+  setAuthConfig: ({
+    allowSignup,
+    googleClientId = "",
+    workspaceCreationDisabled = false,
+    vcsIntegrationAvailable = false,
+  }) => set({ allowSignup, googleClientId, workspaceCreationDisabled, vcsIntegrationAvailable }),
   setDaemonConfig: ({ daemonServerUrl = "", daemonAppUrl = "" }) =>
     set({ daemonServerUrl, daemonAppUrl }),
   setFeatureFlags: (flags = {}) => set({ featureFlags: { ...flags } }),
   setServerVersion: (version = "") => set({ serverVersion: version }),
+  setLocalWorktreeSupported: (supported = false) =>
+    set({ localWorktreeSupported: supported === true }),
 }));
 
 export function useConfigStore(): ConfigState;

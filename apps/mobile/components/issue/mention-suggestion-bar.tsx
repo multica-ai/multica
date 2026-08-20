@@ -30,6 +30,12 @@ import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
+import {
+  CLOSED_CATEGORIES,
+  issueBehavesAsAny,
+  issueColumnCategory,
+} from "@/lib/issue-status";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
@@ -43,6 +49,7 @@ import {
 } from "@/data/viewed-issues-store";
 import type { MentionMarker } from "@/lib/mention-serialize";
 import { cn } from "@/lib/utils";
+import { isAgentRuntimeBound } from "@/lib/is-agent-runtime-bound";
 
 type Mode = "comment" | "chat";
 
@@ -75,6 +82,9 @@ export function MentionSuggestionBar({
 }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const isChat = mode === "chat";
+  // Rows are icon-only, so colour is the only thing that can carry a custom
+  // status's identity here. (MUL-6243)
+  const catalog = useIssueStatuses();
 
   // Comment-mode data — disabled in chat mode to avoid wasted fetches.
   const { data: members = [] } = useQuery({
@@ -159,10 +169,19 @@ export function MentionSuggestionBar({
     // assignee can never act on; web hides them, mobile must too.
     const myRole =
       members.find((m) => m.user_id === userId)?.role ?? null;
+    const runnableAgentIds = new Set(
+      agents
+        .filter(
+          (agent) =>
+            !agent.archived_at && isAgentRuntimeBound(agent),
+        )
+        .map((agent) => agent.id),
+    );
     const matchedAgents = [...agents]
       .filter(
         (a) =>
           !a.archived_at &&
+          isAgentRuntimeBound(a) &&
           (!q || a.name.toLowerCase().includes(q)) &&
           canAssignAgentToIssue(a, { userId, role: myRole }).allowed,
       )
@@ -171,7 +190,10 @@ export function MentionSuggestionBar({
     // A re-activated squad re-appears on the next list refetch.
     const matchedSquads = [...squads]
       .filter(
-        (s) => !s.archived_at && (!q || s.name.toLowerCase().includes(q)),
+        (s) =>
+          !s.archived_at &&
+          runnableAgentIds.has(s.leader_id) &&
+          (!q || s.name.toLowerCase().includes(q)),
       )
       .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -289,8 +311,10 @@ export function MentionSuggestionBar({
             );
           }
           if (item.kind === "agent") {
+            const runtimeBound = isAgentRuntimeBound(item.agent);
             return (
               <Pressable
+                disabled={!runtimeBound}
                 onPress={() =>
                   onSelect({
                     type: "agent",
@@ -298,13 +322,19 @@ export function MentionSuggestionBar({
                     name: item.agent.name,
                   })
                 }
-                className="flex-row items-center gap-3 px-3 py-2 active:bg-secondary"
+                className={cn(
+                  "flex-row items-center gap-3 px-3 py-2 active:bg-secondary",
+                  !runtimeBound && "opacity-50",
+                )}
               >
                 <ActorAvatar type="agent" id={item.agent.id} size={28} showPresence />
                 <Text className="flex-1 text-sm text-foreground">
                   {item.agent.name}
                 </Text>
-                <Badge label="Agent" tone="brand" />
+                <Badge
+                  label={runtimeBound ? "Agent" : "Needs runtime"}
+                  tone={runtimeBound ? "brand" : "outline"}
+                />
               </Pressable>
             );
           }
@@ -329,9 +359,11 @@ export function MentionSuggestionBar({
             );
           }
           // issue
-          const closed =
-            item.issue.status === "done" ||
-            item.issue.status === "cancelled";
+          // By CATEGORY, not by key: a custom status in the done category IS
+          // done, and `status === "done"` silently disagrees — the row would
+          // render at full opacity as though the work were still open.
+          // (MUL-6243)
+          const closed = issueBehavesAsAny(item.issue, CLOSED_CATEGORIES);
           return (
             <Pressable
               onPress={() =>
@@ -347,7 +379,12 @@ export function MentionSuggestionBar({
               )}
             >
               <View className="size-7 items-center justify-center">
-                <StatusIcon status={item.issue.status} size={16} />
+                <StatusIcon
+                  status={item.issue.status}
+                  category={issueColumnCategory(item.issue)}
+                  color={catalog.colorOf(item.issue.status)}
+                  size={16}
+                />
               </View>
               <Text className="text-sm font-medium text-foreground">
                 {item.issue.identifier}

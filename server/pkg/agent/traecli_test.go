@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -68,7 +67,11 @@ while IFS= read -r line; do
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"tool_call","toolCallId":"tc-1","name":"Shell","status":"pending","parameters":{"command":"echo hi"}}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"tool_call_update","toolCallId":"tc-1","status":"completed","name":"Shell","output":"hi\\n"}}}\n'
       printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"pong"}}}}\n'
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn"}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"stopReason":"end_turn","usage":{"inputTokens":17,"outputTokens":5,"cachedReadTokens":3,"cachedWriteTokens":2,"costUsdTicks":900}}}\n' "$id"
+      if [ -n "$TRAECLI_LATE_CHUNK" ]; then
+        sleep 0.05
+        printf '{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"ses_new","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":" tail"}}}}\n'
+      fi
       exit 0
       ;;
   esac
@@ -111,6 +114,9 @@ func TestTraecliBackendStreamsAndCompletes(t *testing.T) {
 	}
 	if result.SessionID != "ses_new" {
 		t.Fatalf("session id = %q, want ses_new", result.SessionID)
+	}
+	if usage := result.Usage["unknown"]; usage != (TokenUsage{InputTokens: 17, OutputTokens: 5, CacheReadTokens: 3, CacheWriteTokens: 2, CostUSDTicks: 900}) {
+		t.Fatalf("usage = %+v, want all prompt-result fields", usage)
 	}
 	// The agent_message_chunk must surface as MessageText; the tool_call must
 	// surface as a MessageToolUse normalized to a canonical tool name.
@@ -289,34 +295,28 @@ func TestTraecliUsesSessionLoadForResume(t *testing.T) {
 	}
 }
 
-// TestTraecliRealACPSmoke drives the REAL official `traecli acp serve` binary
-// end-to-end when it is installed and logged in. It is the live counterpart to
-// the fake-ACP tests above: it proves the backend's initialize → session/new →
-// session/prompt flow works against the actual binary and the user's account.
-//
-// Skipped automatically when traecli is not on PATH or the session cannot be
-// created (not logged in), so CI — which has neither — stays green. Run locally
-// with a logged-in traecli to exercise it.
-func TestTraecliRealACPSmoke(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping real-binary smoke test in -short mode")
-	}
-	path, err := exec.LookPath("traecli")
-	if err != nil {
-		t.Skip("traecli not on PATH; skipping real-binary smoke test")
-	}
+// TestTraecliDrainsNotificationsAfterPromptResponse pins the trailing-notification
+// drain. traecli ACP can emit a final session update just after the
+// session/prompt response returns; closing stdin and cancelling the context at
+// that boundary raced the stdout reader and silently truncated the last chunk.
+// The same defect was fixed for the sibling ACP backends in #5440 (grok) and
+// #5675 (hermes).
+func TestTraecliDrainsNotificationsAfterPromptResponse(t *testing.T) {
+	t.Parallel()
 
-	backend, err := New("traecli", Config{ExecutablePath: path, Logger: slog.Default()})
+	fakePath := filepath.Join(t.TempDir(), "trae")
+	writeTestExecutable(t, fakePath, []byte(fakeTraecliACPScript()))
+
+	backend, err := New("traecli", Config{
+		ExecutablePath: fakePath,
+		Logger:         slog.Default(),
+		Env:            map[string]string{"TRAECLI_LATE_CHUNK": "1"},
+	})
 	if err != nil {
 		t.Fatalf("new traecli backend: %v", err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
-	defer cancel()
 
-	session, err := backend.Execute(ctx, "Reply with exactly one word: pong. Do not use any tools.", ExecOptions{
-		Cwd:     t.TempDir(),
-		Timeout: 80 * time.Second,
-	})
+	session, err := backend.Execute(context.Background(), "task", ExecOptions{Timeout: 5 * time.Second})
 	if err != nil {
 		t.Fatalf("execute: %v", err)
 	}
@@ -325,24 +325,11 @@ func TestTraecliRealACPSmoke(t *testing.T) {
 		}
 	}()
 
-	select {
-	case result := <-session.Result:
-		// "session/new" panics on a NOT-logged-in traecli (no models); treat
-		// that as a skip so the test only fails for real protocol regressions.
-		if result.Status == "failed" && strings.Contains(result.Error, "session/new") {
-			t.Skipf("traecli not logged in (session/new failed): %v", result.Error)
-		}
-		if result.Status != "completed" {
-			t.Fatalf("real traecli run did not complete: status=%q error=%q", result.Status, result.Error)
-		}
-		if !strings.Contains(strings.ToLower(result.Output), "pong") {
-			t.Fatalf("expected real traecli output to contain 'pong', got %q", result.Output)
-		}
-		if result.SessionID == "" {
-			t.Error("expected a non-empty session id from real traecli")
-		}
-		t.Logf("real traecli smoke OK: session=%s output=%q", result.SessionID, result.Output)
-	case <-time.After(90 * time.Second):
-		t.Fatal("timeout waiting for real traecli result")
+	result := <-session.Result
+	if result.Status != "completed" {
+		t.Fatalf("expected completed, got status=%q error=%q", result.Status, result.Error)
+	}
+	if !strings.Contains(result.Output, "pong tail") {
+		t.Fatalf("late output was truncated: %q", result.Output)
 	}
 }

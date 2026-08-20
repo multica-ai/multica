@@ -41,7 +41,10 @@ export function getInboxDisplayTitle(item: InboxItem): string {
     const prompt = singleLine(details.original_prompt);
     if (prompt) return prompt;
   }
-  if (item.type === "quick_create_failed") {
+  // Both non-success quick-create outcomes surface the user's original input
+  // as the row title. Mirrors isQuickCreateOutcome in
+  // packages/views/inbox/components/inbox-display.ts.
+  if (item.type === "quick_create_failed" || item.type === "quick_create_unconfirmed") {
     const prompt = singleLine(details.original_prompt);
     if (prompt) return prompt;
   }

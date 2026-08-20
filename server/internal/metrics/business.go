@@ -9,6 +9,8 @@ import (
 
 var taskDurationBuckets = []float64{1, 2.5, 5, 10, 30, 60, 120, 300, 600, 1200, 3600, 7200}
 
+var chatClaimResumeQueryDurationBuckets = []float64{0.001, 0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5}
+
 type activeTaskLabels struct {
 	source      string
 	runtimeMode string
@@ -31,8 +33,22 @@ type BusinessMetrics struct {
 	llmUnpricedTokens *prometheus.CounterVec
 	llmRequests       *prometheus.CounterVec
 
-	taskQueuedExpired *prometheus.CounterVec
-	taskLeaseExpired  *prometheus.CounterVec
+	taskQueuedExpired                 *prometheus.CounterVec
+	taskLeaseExpired                  *prometheus.CounterVec
+	chatClaimSessionFallbackNeeded    prometheus.Counter
+	chatClaimSessionFallbackResult    *prometheus.CounterVec
+	chatClaimResumeQueryDuration      *prometheus.HistogramVec
+	runtimeGCDeleted                  prometheus.Counter
+	runtimeGCFailed                   prometheus.Counter
+	runtimeGCBlocked                  prometheus.Gauge
+	runtimeGCBlockedObservationFailed prometheus.Counter
+	entitlementConfigError            prometheus.Counter
+	entitlementCache                  *prometheus.CounterVec
+	entitlementRefresh                *prometheus.CounterVec
+	entitlementRefreshDuration        *prometheus.HistogramVec
+	entitlementDecision               *prometheus.CounterVec
+	entitlementVersionRegression      *prometheus.CounterVec
+	autopilotQuotaDecision            *prometheus.CounterVec
 
 	activeMu    sync.Mutex
 	activeTasks map[string]activeTaskLabels
@@ -145,6 +161,77 @@ func NewBusinessMetrics() *BusinessMetrics {
 			Name:      "lease_expired_total",
 			Help:      "Total dispatched or running task leases expired by the scheduler.",
 		}, metricLabels("multica_task_lease_expired_total")),
+		chatClaimSessionFallbackNeeded: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "chat_claim",
+			Name:      "session_fallback_needed_total",
+			Help:      "Total chat claims whose session pointer lacked a provider session or workdir.",
+		}),
+		chatClaimSessionFallbackResult: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "chat_claim",
+			Name:      "session_fallback_result_total",
+			Help:      "Total chat-claim session fallback query results (hit, miss, or error).",
+		}, metricLabels("multica_chat_claim_session_fallback_result_total")),
+		chatClaimResumeQueryDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica",
+			Subsystem: "chat_claim",
+			Name:      "resume_query_duration_seconds",
+			Help:      "Duration of chat-claim resume-history queries by fixed query name.",
+			Buckets:   chatClaimResumeQueryDurationBuckets,
+		}, metricLabels("multica_chat_claim_resume_query_duration_seconds")),
+		runtimeGCDeleted: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "runtime_gc",
+			Name:      "deleted_total",
+			Help:      "Total stale offline runtimes safely deleted by garbage collection.",
+		}),
+		runtimeGCFailed: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "runtime_gc",
+			Name:      "failed_total",
+			Help:      "Total runtime garbage-collection operations that failed.",
+		}),
+		runtimeGCBlocked: prometheus.NewGauge(prometheus.GaugeOpts{
+			Namespace: "multica",
+			Subsystem: "runtime_gc",
+			Name:      "blocked_runtimes",
+			Help:      "Bounded count of stale offline runtimes blocked from garbage collection by non-terminal tasks.",
+		}),
+		runtimeGCBlockedObservationFailed: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica",
+			Subsystem: "runtime_gc",
+			Name:      "blocked_observation_failed_total",
+			Help:      "Total failures while observing stale runtimes blocked from garbage collection.",
+		}),
+		entitlementConfigError: prometheus.NewCounter(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "config_error_total",
+			Help: "Total startup failures caused by explicitly enabled but invalid entitlement policy configuration.",
+		}),
+		entitlementCache: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "cache_total",
+			Help: "Total entitlement cache outcomes.",
+		}, metricLabels("multica_entitlement_cache_total")),
+		entitlementRefresh: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "refresh_total",
+			Help: "Total entitlement refresh outcomes.",
+		}, metricLabels("multica_entitlement_refresh_total")),
+		entitlementRefreshDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "refresh_duration_seconds",
+			Help: "Duration of entitlement refreshes.", Buckets: chatClaimResumeQueryDurationBuckets,
+		}, metricLabels("multica_entitlement_refresh_duration_seconds")),
+		entitlementDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "decision_total",
+			Help: "Total entitlement decisions by bounded gate, action, and reason.",
+		}, metricLabels("multica_entitlement_decision_total")),
+		entitlementVersionRegression: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "entitlement", Name: "version_regression_total",
+			Help: "Total rejected entitlement version regressions.",
+		}, metricLabels("multica_entitlement_version_regression_total")),
+		autopilotQuotaDecision: prometheus.NewCounterVec(prometheus.CounterOpts{
+			Namespace: "multica", Subsystem: "autopilot_quota", Name: "decision_total",
+			Help: "Total autopilot quota admission outcomes.",
+		}, metricLabels("multica_autopilot_quota_decision_total")),
 		activeTasks: map[string]activeTaskLabels{},
 		events:      newBusinessEventMetrics(),
 	}
@@ -170,7 +257,93 @@ func (m *BusinessMetrics) Collectors() []prometheus.Collector {
 		m.llmRequests,
 		m.taskQueuedExpired,
 		m.taskLeaseExpired,
+		m.chatClaimSessionFallbackNeeded,
+		m.chatClaimSessionFallbackResult,
+		m.chatClaimResumeQueryDuration,
+		m.runtimeGCDeleted,
+		m.runtimeGCFailed,
+		m.runtimeGCBlocked,
+		m.runtimeGCBlockedObservationFailed,
+		m.entitlementConfigError,
+		m.entitlementCache,
+		m.entitlementRefresh,
+		m.entitlementRefreshDuration,
+		m.entitlementDecision,
+		m.entitlementVersionRegression,
+		m.autopilotQuotaDecision,
 	}, m.events.collectors()...)
+}
+
+func (m *BusinessMetrics) RecordEntitlementConfigError() {
+	if m != nil {
+		m.entitlementConfigError.Inc()
+	}
+}
+
+func (m *BusinessMetrics) RecordEntitlementCache(outcome string) {
+	if m != nil {
+		m.entitlementCache.WithLabelValues(outcome).Inc()
+	}
+}
+
+func (m *BusinessMetrics) RecordEntitlementRefresh(outcome string, seconds float64) {
+	if m == nil {
+		return
+	}
+	m.entitlementRefresh.WithLabelValues(outcome).Inc()
+	m.entitlementRefreshDuration.WithLabelValues(outcome).Observe(seconds)
+}
+
+func (m *BusinessMetrics) RecordEntitlementDecision(gate, action, reason string) {
+	if m != nil {
+		m.entitlementDecision.WithLabelValues(gate, action, reason).Inc()
+	}
+}
+
+func (m *BusinessMetrics) RecordEntitlementVersionRegression(source string) {
+	if m != nil {
+		m.entitlementVersionRegression.WithLabelValues(source).Inc()
+	}
+}
+
+func (m *BusinessMetrics) RecordAutopilotQuotaDecision(action, source, result string) {
+	if m == nil {
+		return
+	}
+	switch source {
+	case "schedule", "webhook", "manual", "api":
+	default:
+		source = "other"
+	}
+	m.autopilotQuotaDecision.WithLabelValues(action, source, result).Inc()
+}
+
+func (m *BusinessMetrics) RecordRuntimeGCDeleted() {
+	if m == nil {
+		return
+	}
+	m.runtimeGCDeleted.Inc()
+}
+
+func (m *BusinessMetrics) RecordRuntimeGCFailed() {
+	if m == nil {
+		return
+	}
+	m.runtimeGCFailed.Inc()
+}
+
+func (m *BusinessMetrics) SetRuntimeGCBlocked(count int64) {
+	if m == nil {
+		return
+	}
+	m.runtimeGCBlocked.Set(float64(count))
+}
+
+func (m *BusinessMetrics) RecordRuntimeGCBlockedObservationFailed() {
+	if m == nil {
+		return
+	}
+	m.runtimeGCBlockedObservationFailed.Inc()
 }
 
 func (m *BusinessMetrics) RecordTaskEnqueued(source, runtimeMode string) {
@@ -250,7 +423,54 @@ func (m *BusinessMetrics) RecordTaskLeaseExpired(source string) {
 	m.taskLeaseExpired.WithLabelValues(NormalizeTaskSource(source)).Inc()
 }
 
-func (m *BusinessMetrics) RecordLLMUsage(source, runtimeMode, rawProvider, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens int64) {
+// RecordChatClaimSessionFallbackNeeded counts a claim whose chat-session
+// pointer lacked either the provider session or the workdir.
+func (m *BusinessMetrics) RecordChatClaimSessionFallbackNeeded() {
+	if m == nil {
+		return
+	}
+	m.chatClaimSessionFallbackNeeded.Inc()
+}
+
+func (m *BusinessMetrics) RecordChatClaimSessionFallbackHit() {
+	m.recordChatClaimSessionFallbackResult("hit")
+}
+
+func (m *BusinessMetrics) RecordChatClaimSessionFallbackMiss() {
+	m.recordChatClaimSessionFallbackResult("miss")
+}
+
+func (m *BusinessMetrics) RecordChatClaimSessionFallbackError() {
+	m.recordChatClaimSessionFallbackResult("error")
+}
+
+func (m *BusinessMetrics) recordChatClaimSessionFallbackResult(result string) {
+	if m == nil {
+		return
+	}
+	m.chatClaimSessionFallbackResult.WithLabelValues(result).Inc()
+}
+
+func (m *BusinessMetrics) observeChatClaimResumeQuery(query string, seconds float64) {
+	if m == nil || seconds < 0 {
+		return
+	}
+	m.chatClaimResumeQueryDuration.WithLabelValues(query).Observe(seconds)
+}
+
+func (m *BusinessMetrics) ObserveChatClaimLastSessionQuery(seconds float64) {
+	m.observeChatClaimResumeQuery("last_session", seconds)
+}
+
+func (m *BusinessMetrics) ObserveChatClaimRolloutMissingQuery(seconds float64) {
+	m.observeChatClaimResumeQuery("rollout_missing", seconds)
+}
+
+// costUSDTicks is the provider's own price for this usage in 1e-10 USD, or 0
+// when it reported none. When present it wins over the rate table: the table
+// cannot express request-level rules such as xAI's 2x surcharge above a 200K
+// prompt, so for those providers the local estimate is structurally low.
+func (m *BusinessMetrics) RecordLLMUsage(source, runtimeMode, rawProvider, modelAlias string, inputTokens, outputTokens, cacheReadTokens, cacheWriteTokens, costUSDTicks int64) {
 	if m == nil {
 		return
 	}
@@ -264,15 +484,60 @@ func (m *BusinessMetrics) RecordLLMUsage(source, runtimeMode, rawProvider, model
 		m.recordUnpricedTokens(provider, alias, "output", outputTokens)
 		m.recordUnpricedTokens(provider, alias, "cache_read", cacheReadTokens)
 		m.recordUnpricedTokens(provider, alias, "cache_write", cacheWriteTokens)
+		// Having no rate row does not mean having no cost: the provider may
+		// have priced the turn itself (`grok-composer-*` is in the Grok Build
+		// catalog but absent from xAI's price sheet). Dropping the charge here
+		// would under-report real spend purely for lack of a rate we no longer
+		// need. Without rates there is nothing to split the total by, so it
+		// lands whole in the `input` bucket — the same fallback
+		// distributeAuthoritativeCost uses when it has no shape to scale.
+		if costUSDTicks > 0 {
+			m.llmCostUSD.
+				WithLabelValues(provider, alias, NormalizeTokenType("input"), runtimeMode, source).
+				Add(float64(costUSDTicks) / CostUSDTicksPerUSD)
+		}
 		m.llmRequests.WithLabelValues(provider, "unknown", runtimeMode).Inc()
 		return
 	}
 
-	m.recordPricedTokens(price.Provider, price.Model, "input", runtimeMode, source, inputTokens, tokenCostUSD(inputTokens, price.InputPerM))
-	m.recordPricedTokens(price.Provider, price.Model, "output", runtimeMode, source, outputTokens, tokenCostUSD(outputTokens, price.OutputPerM))
-	m.recordPricedTokens(price.Provider, price.Model, "cache_read", runtimeMode, source, cacheReadTokens, tokenCostUSD(cacheReadTokens, price.CacheReadPerM))
-	m.recordPricedTokens(price.Provider, price.Model, "cache_write", runtimeMode, source, cacheWriteTokens, tokenCostUSD(cacheWriteTokens, price.CacheWritePerM))
+	costs := [4]float64{
+		tokenCostUSD(inputTokens, price.InputPerM),
+		tokenCostUSD(outputTokens, price.OutputPerM),
+		tokenCostUSD(cacheReadTokens, price.CacheReadPerM),
+		tokenCostUSD(cacheWriteTokens, price.CacheWritePerM),
+	}
+	if costUSDTicks > 0 {
+		costs = distributeAuthoritativeCost(float64(costUSDTicks)/CostUSDTicksPerUSD, costs)
+	}
+
+	m.recordPricedTokens(price.Provider, price.Model, "input", runtimeMode, source, inputTokens, costs[0])
+	m.recordPricedTokens(price.Provider, price.Model, "output", runtimeMode, source, outputTokens, costs[1])
+	m.recordPricedTokens(price.Provider, price.Model, "cache_read", runtimeMode, source, cacheReadTokens, costs[2])
+	m.recordPricedTokens(price.Provider, price.Model, "cache_write", runtimeMode, source, cacheWriteTokens, costs[3])
 	m.llmRequests.WithLabelValues(price.Provider, price.Model, runtimeMode).Inc()
+}
+
+// distributeAuthoritativeCost rescales the per-token-type estimates so they
+// sum to the provider's actual charge. `llm_cost_usd` is broken down by
+// token_type and the provider reports one number for the whole turn, so the
+// split has to come from somewhere; the rate table's own proportions are the
+// best available guess and keep the total exact. Only the total is
+// authoritative — the per-type split remains an estimate, which is why this
+// scales rather than inventing a new label value.
+//
+// A zero estimate (unknown rates, or a turn recorded with no tokens) has no
+// proportions to scale, so the charge lands on `input` to avoid dropping real
+// spend from the total.
+func distributeAuthoritativeCost(actual float64, estimated [4]float64) [4]float64 {
+	total := estimated[0] + estimated[1] + estimated[2] + estimated[3]
+	if total <= 0 {
+		return [4]float64{actual, 0, 0, 0}
+	}
+	scale := actual / total
+	for i := range estimated {
+		estimated[i] *= scale
+	}
+	return estimated
 }
 
 func (m *BusinessMetrics) recordPricedTokens(provider, model, tokenType, runtimeMode, source string, tokens int64, cost float64) {

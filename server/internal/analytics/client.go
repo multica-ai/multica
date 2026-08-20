@@ -1,6 +1,6 @@
 // Package analytics ships product telemetry events to an external analytics
 // backend (PostHog). Events feed the acquisition → activation → expansion
-// funnel — see docs/analytics.md for the event contract.
+// funnel — see events.go for the event contract.
 //
 // Design:
 //   - Capture is non-blocking. Request handlers must never wait on analytics

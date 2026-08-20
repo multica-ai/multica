@@ -1,7 +1,6 @@
 package agent
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -12,6 +11,11 @@ import (
 	"sync/atomic"
 	"time"
 )
+
+// kiroReaderDrainGrace bounds how long the turn waits for trailing ACP
+// notifications after the session/prompt response. A var, not a const, so
+// tests can shorten it. Mirrors qoderReaderDrainGrace / traecliReaderDrainGrace.
+var kiroReaderDrainGrace = 2 * time.Second
 
 // kiroBlockedArgs are flags hardcoded by the daemon that must not be
 // overridden by user-configured custom_args. `acp` is the protocol subcommand,
@@ -58,9 +62,9 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	runCtx, cancel := runContext(ctx, timeout)
 
 	kiroArgs := append([]string{"acp", "--trust-all-tools"}, filterCustomArgs(opts.CustomArgs, kiroBlockedArgs, b.cfg.Logger)...)
-	cmd := exec.CommandContext(runCtx, execPath, kiroArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, kiroArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", kiroArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(kiroArgs, trustAgentCommandPositional(0, "acp")))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}
@@ -104,8 +108,10 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	msgCh := make(chan Message, 256)
 	resCh := make(chan Result, 1)
 
-	var outputMu sync.Mutex
-	var output strings.Builder
+	// Kiro streams interim narration and the final answer as the same
+	// AgentMessageChunk type; the tracker keeps only the post-tool-call block
+	// for Result.Output while retaining the full text for error detection.
+	var deliverable acpDeliverableTracker
 	var streamingCurrentTurn atomic.Bool
 	// Completion-preservation state for the -32603 close-handshake guard.
 	//
@@ -132,6 +138,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	var lastFinishingResultStatus string // "", "completed", or "failed"
 
 	promptDone := make(chan hermesPromptResult, 1)
+	activity := make(chan struct{}, 1)
 
 	c := &hermesClient{
 		cfg:          b.cfg,
@@ -140,6 +147,12 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		pendingTools: make(map[string]*pendingToolCall),
 		acceptNotification: func(string) bool {
 			return streamingCurrentTurn.Load()
+		},
+		onActivity: func() {
+			select {
+			case activity <- struct{}{}:
+			default:
+			}
 		},
 		onMessage: func(msg Message) {
 			if !streamingCurrentTurn.Load() {
@@ -174,11 +187,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finishingMu.Unlock()
 				}
 			}
-			if msg.Type == MessageText {
-				outputMu.Lock()
-				output.WriteString(msg.Content)
-				outputMu.Unlock()
-			}
+			deliverable.observe(msg)
 			trySend(msgCh, msg)
 		},
 		onPromptDone: func(result hermesPromptResult) {
@@ -195,8 +204,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
-		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		scanner := newAgentStreamScanner(stdout)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
@@ -245,7 +253,7 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// advertise. See the matching comment in hermes.go for why
 		// unconditionally sending http/sse to a stdio-only ACP runtime
 		// tanks the whole session/new.
-		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kiro", b.cfg.Logger)
+		mcpServers = filterACPMcpServersByCapability(mcpServers, extractACPMcpCapabilities(initResult), "kiro", b.cfg)
 
 		cwd := opts.Cwd
 		if cwd == "" {
@@ -397,6 +405,24 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					)
 					sessionID = ""
 					resumeRejected = true
+				} else if opts.ResumeSessionID != "" && isKiroOversizedHistoryImage(err) {
+					// A resumed session whose history contains an image
+					// exceeding the provider's max pixel dimensions replays
+					// that image on every session/prompt and is rejected
+					// before the current turn runs (GH #5975). Unlike a
+					// missing session the transcript still exists, so this is
+					// permanent for the resume path: only a fresh session
+					// without the resume id can recover. Signal
+					// ResumeRejected so the daemon retries once from a cold
+					// session; keep the (poisoned) session id on the result
+					// so it stays visible for auditing — the daemon gates the
+					// retry on the boolean, not on an empty id, and a
+					// successful fresh retry overwrites it with the new id.
+					b.cfg.Logger.Warn("resumed session has an oversized historical image the provider rejects; signaling resume rejection so the daemon retries with a fresh session",
+						"backend", "kiro",
+						"session_id", sessionID,
+					)
+					resumeRejected = true
 				}
 			}
 		} else {
@@ -406,14 +432,10 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 					finalStatus = "aborted"
 					finalError = "kiro cancelled the prompt"
 				}
-				c.usageMu.Lock()
-				c.usage.InputTokens += pr.usage.InputTokens
-				c.usage.OutputTokens += pr.usage.OutputTokens
-				c.usage.CacheReadTokens += pr.usage.CacheReadTokens
-				c.usage.CacheWriteTokens += pr.usage.CacheWriteTokens
-				c.usageMu.Unlock()
+				c.mergeUsage(pr.usage)
 			default:
 			}
+			waitForACPNotificationQuiescence(runCtx, activity, readerDone, acpNotificationQuietTime, kiroReaderDrainGrace)
 		}
 
 		duration := time.Since(startTime)
@@ -427,24 +449,22 @@ func (b *kiroBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 		// provider-error sniffer; see hermes.go for the failure mode.
 		<-stderrDone
 
-		outputMu.Lock()
-		finalOutput := output.String()
-		outputMu.Unlock()
+		finalOutput, providerErrorOutput := deliverable.result()
 
 		// Promote completed→failed when stderr or the agent text
 		// stream show a terminal upstream-LLM failure (HTTP 4xx /
 		// rate-limit / expired token). See the helper docs for the
 		// full signal set; the key safety property is that transient
 		// per-attempt warnings followed by a successful retry stay
-		// "completed".
-		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, finalOutput, providerErr)
+		// "completed". It reads the full text stream, not the
+		// deliverable, so a give-up turn that lands before a tool call
+		// stays visible.
+		finalStatus, finalError = promoteACPResultOnProviderError(finalStatus, finalError, providerErrorOutput, providerErr)
 
-		c.usageMu.Lock()
-		u := c.usage
-		c.usageMu.Unlock()
+		u := c.accumulatedUsage()
 
 		var usageMap map[string]TokenUsage
-		if u.InputTokens > 0 || u.OutputTokens > 0 || u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		if acpUsagePresent(u) {
 			model := effectiveModel
 			if model == "" {
 				model = "unknown"
@@ -478,6 +498,36 @@ func isKiroGoalCompleteCloseError(err error) bool {
 		return false
 	}
 	return strings.Contains(strings.ToLower(rpcErr.Data), "failed to generate a response")
+}
+
+// isKiroOversizedHistoryImage reports whether err is Kiro/upstream rejecting a
+// resumed conversation because an image already baked into the session history
+// exceeds the provider's maximum allowed pixel dimensions. Kiro surfaces this
+// at session/prompt time as a -32603 whose `data` names the offending
+// messages[n].content[m].image.source.base64.data block and the dimension
+// limit (GH #5975), e.g.:
+//
+//	session/prompt: Internal error (code=-32603, data=Encountered an error in
+//	the response stream: messages.14.content.0.image.source.base64.data: At
+//	least one of the image dimensions exceed max allowed size: 8000 pixels)
+//
+// Both markers must be present so an unrelated -32603 — a transient "failed to
+// generate a response" close, or a mid-command crash producing the same
+// result-less shape — is never misread as a permanent history incompatibility.
+// This is deliberately distinct from isACPSessionNotFound: the session exists,
+// only its historical multimodal content is unusable, so the recovery is a
+// fresh session started WITHOUT the resume id rather than clearing a dead id.
+func isKiroOversizedHistoryImage(err error) bool {
+	var rpcErr *acpRPCError
+	if !errors.As(err, &rpcErr) {
+		return false
+	}
+	if rpcErr.Method != "session/prompt" || rpcErr.Code != -32603 {
+		return false
+	}
+	data := strings.ToLower(rpcErr.Data)
+	return strings.Contains(data, "image.source.base64.data") &&
+		strings.Contains(data, "image dimensions exceed max allowed size")
 }
 
 // isKiroIssueCommentAddTool reports whether a tool-use message is a

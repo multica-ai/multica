@@ -18,8 +18,9 @@ import "log/slog"
 //     Pi session JSONL records only the first line of the prompt
 //     (#3306). To stay on the official launch path while avoiding that
 //     re-tokenisation, we resolve pi.ps1 next to the .cmd and invoke
-//     PowerShell with `-File <ps1>` directly, letting Go pass each argv
-//     as a separate token.
+//     PowerShell with `-File <ps1>` directly. The task prompt now travels on
+//     stdin (#6457), but the rewrite remains necessary for multi-line custom
+//     option values and installations that still use the npm batch launcher.
 //
 // The Windows-specific behaviour is implemented in
 // pi_invocation_windows.go; on other platforms we fall through to a
