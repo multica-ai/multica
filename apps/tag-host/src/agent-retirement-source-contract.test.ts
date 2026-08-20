@@ -73,6 +73,10 @@ function productionSources(relativeRoot: string): string[] {
   const root = resolve(REPO_ROOT, relativeRoot);
   const sources: string[] = [];
 
+  // Whole-product retirement may remove a source root entirely (for example,
+  // Desktop). An absent root satisfies this no-caller contract.
+  if (!existsSync(root)) return sources;
+
   for (const entry of readdirSync(root)) {
     const path = resolve(root, entry);
     const relativePath = path.slice(REPO_ROOT.length + 1);
