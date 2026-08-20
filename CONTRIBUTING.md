@@ -494,56 +494,6 @@ make clean
 rm -rf "$HOME/.multica/profiles/$PROFILE"
 ```
 
-### Desktop App Local Testing
-
-To test the Electron desktop app against a local backend:
-
-```bash
-# After backend is running (make dev)
-pnpm dev:desktop
-```
-
-This automatically:
-
-1. Compiles the `multica` CLI from `server/cmd/multica` into
-   `apps/desktop/resources/bin/multica`
-2. Creates an isolated profile named `desktop-localhost-<PORT>`
-3. Starts and manages its own daemon instance
-4. Connects to the local backend
-
-Login in the Desktop UI with `dev@localhost` and the generated code from the
-backend logs. If you set `MULTICA_DEV_VERIFICATION_CODE=888888` before starting
-the backend, you can use `888888` instead.
-
-If the backend runs on a non-default port (worktree), create
-`apps/desktop/.env.development.local`:
-
-```bash
-VITE_API_URL=http://localhost:<backend-port>
-VITE_WS_URL=ws://localhost:<backend-port>/ws
-```
-
-#### Running multiple worktrees side-by-side
-
-`pnpm dev:desktop` auto-isolates a worktree so several worktrees can run their
-own desktop dev instance at once — no extra setup. From a linked worktree it
-derives, from the worktree path (same `cksum % 1000` offset as the backend /
-frontend ports in `.env.worktree`):
-
-- `DESKTOP_RENDERER_PORT` = `5174 + offset` — its own Vite dev server (`5174`
-  base leaves `5173` for the primary checkout, even when `offset` is `0`). The
-  one offset that would land on `6000` gets `6174` instead: Chromium treats
-  `6000` as a restricted port and fails the load with `ERR_UNSAFE_PORT`
-- `DESKTOP_APP_SUFFIX` = `<folder>-<offset>` — its own single-instance lock /
-  `userData`, and an app named `Multica Canary <folder>-<offset>` so it is
-  distinguishable in Cmd+Tab. The offset keeps it unique across worktrees that
-  share a folder name at different paths.
-
-The primary checkout is left untouched (`5173`, `Multica Canary`). Set either
-env var explicitly to override the derived value. Which backend each instance
-talks to is still controlled only by `apps/desktop/.env*` above — point each
-worktree's desktop at its own backend to also isolate the daemon profile.
-
 ### Isolation Guarantee
 
 Nothing in this flow touches the system-installed `multica` or the default
@@ -556,7 +506,6 @@ Nothing in this flow touches the system-installed `multica` or the default
 | Health port | `19514` | `19514 + 1 + (name_hash % 1000)` |
 | Workspaces dir | `~/multica_workspaces/` | `~/multica_workspaces_dev-<slug>-<hash>/` |
 | Database | remote / production | local Docker: `multica_<slug>_<hash>` |
-| Desktop profile | `desktop-api.multica.ai` | `desktop-localhost-<port>` |
 
 Multiple worktrees can run simultaneously without conflict.
 

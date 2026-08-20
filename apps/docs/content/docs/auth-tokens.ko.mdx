@@ -5,7 +5,7 @@ description: 브라우저 로그인, 개인 액세스 토큰, 에이전트 실�
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-Multica를 일상적으로 사용할 때 주로 접하는 자격 증명은 브라우저 로그인 세션과 개인 액세스 토큰 두 가지입니다. 브라우저 세션은 Web과 Desktop에서 사용하고 개인 액세스 토큰은 CLI, 데몬, 스크립트, API에서 사용합니다.
+Multica를 일상적으로 사용할 때 주로 접하는 자격 증명은 브라우저 로그인 세션과 개인 액세스 토큰 두 가지입니다. 브라우저 세션은 Web에서 사용하고 개인 액세스 토큰은 CLI, 데몬, 스크립트, API에서 사용합니다.
 
 ## 브라우저 로그인 세션
 
@@ -92,7 +92,7 @@ curl https://api.multica.ai/api/issues \
 | `mcn_` | Multica Cloud Node 연결 | Multica Cloud Fleet |
 | `mdt_` | 워크스페이스 범위의 데몬 인증 프로토콜 | 서버 내부 절차 |
 
-일반 Cloud, 자체 호스팅, Desktop 설치에서는 이를 직접 만들 필요가 없습니다. 사용자 측 CLI와 데몬은 항상 `mul_` PAT를 사용합니다. 다른 접두사의 토큰을 직접 만들지 마세요.
+일반 Cloud와 자체 호스팅 설치에서는 이를 직접 만들 필요가 없습니다. 사용자 측 CLI와 데몬은 항상 `mul_` PAT를 사용합니다. 다른 접두사의 토큰을 직접 만들지 마세요.
 
 ## 다음 단계
 

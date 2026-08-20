@@ -49,8 +49,6 @@ import (
 
 var defaultOrigins = []string{
 	"http://localhost:3000", // Next.js dev
-	"http://localhost:5173", // electron-vite dev
-	"http://localhost:5174", // electron-vite dev (fallback port)
 }
 
 // corsAllowedHeaders must list every header the browser clients send. A header
@@ -1169,8 +1167,8 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	}
 
 	// Capability-authenticated attachment download (MUL-5292). Public by
-	// necessity: a native download (Electron's webContents.downloadURL, a
-	// cross-site webview <img>) carries neither Authorization nor a session
+	// necessity: a bare download or cross-site webview <img> carries neither
+	// Authorization nor a session
 	// cookie, so there is nothing here for middleware.Auth to read. The
 	// short-lived, single-attachment signature in the query is the credential,
 	// and it is only ever minted by the AUTHENTICATED GET

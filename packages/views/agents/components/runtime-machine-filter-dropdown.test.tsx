@@ -21,10 +21,8 @@ function makeMachine(
     subtitle: "x86_64 macOS",
     deviceInfo: "dev.local · x86_64 macOS",
     cliVersion: "1.0.0",
-    launchedBy: null,
     mode: "local",
-    section: "local",
-    isCurrent: true,
+    section: "remote",
     health: "online",
     runtimes: [],
     onlineCount: 1,
@@ -90,7 +88,6 @@ describe("RuntimeMachineFilterDropdown", () => {
         id: "m-remote",
         title: "build-server",
         section: "remote",
-        isCurrent: false,
       }),
     ];
     const counts = new Map([
@@ -120,18 +117,16 @@ describe("RuntimeMachineFilterDropdown", () => {
 
   it("groups machines under their section headers in the menu", () => {
     const machines = [
-      makeMachine({ id: "m-local", title: "dev.local", section: "local" }),
+      makeMachine({ id: "m-local", title: "dev.local", section: "remote" }),
       makeMachine({
         id: "m-remote",
         title: "build-server",
         section: "remote",
-        isCurrent: false,
       }),
       makeMachine({
         id: "m-cloud",
         title: "Multica cloud",
         section: "cloud",
-        isCurrent: false,
         mode: "cloud",
       }),
     ];
@@ -146,7 +141,6 @@ describe("RuntimeMachineFilterDropdown", () => {
     fireEvent.click(screen.getByTestId("agents-runtime-filter"));
 
     // Section labels render as plain text (uppercase is CSS-only).
-    expect(screen.getByText("Local")).toBeTruthy();
     expect(screen.getByText("Remote")).toBeTruthy();
     expect(screen.getByText("Cloud")).toBeTruthy();
     // The menu items themselves also render.
@@ -176,12 +170,11 @@ describe("RuntimeMachineFilterDropdown", () => {
 
   it("fires onChange(machineId) when a specific machine row is clicked", () => {
     const machines = [
-      makeMachine({ id: "m-local", title: "dev.local", section: "local" }),
+      makeMachine({ id: "m-local", title: "dev.local", section: "remote" }),
       makeMachine({
         id: "m-remote",
         title: "build-server",
         section: "remote",
-        isCurrent: false,
       }),
     ];
     const counts = new Map([

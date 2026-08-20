@@ -7,8 +7,8 @@ import { describe, expect, it } from "vitest";
  * Does the product still have exactly one type scale?
  *
  * Before `--text-*` existed in tokens.css there was no baseline to align to, so
- * font sizes grew wherever they were needed: 51 distinct sizes across web and
- * desktop, 370 written as arbitrary pixel values, six of those at half a pixel
+ * font sizes grew wherever they were needed: 51 distinct sizes across the UI,
+ * 370 written as arbitrary pixel values, six of those at half a pixel
  * (10.5 / 11.5 / 12.5 / 13.5 / 14.5 / 15.5px). A scale only holds if going off
  * it is harder than staying on it, and nothing in a Tailwind build makes an
  * off-scale arbitrary size look wrong — it compiles exactly like a token does.
@@ -43,7 +43,7 @@ const SCALE = [
   ["display", 36, 40],
 ] as const;
 
-const scanRoots = ["packages/ui", "packages/views", "apps/web", "apps/desktop/src"];
+const scanRoots = ["packages/ui", "packages/views", "apps/web"];
 const skipDirs = new Set(["node_modules", ".next", "dist", "out", "build", ".turbo"]);
 const sourceExtensions = [".ts", ".tsx", ".css"];
 

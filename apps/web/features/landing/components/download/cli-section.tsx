@@ -12,7 +12,7 @@ const SETUP_CMD = "multica setup";
 /**
  * Scenario-first CLI section. Copy leans into servers / remote dev
  * boxes / headless setups rather than positioning CLI as a
- * lightweight Desktop. Two copy-and-paste command blocks.
+ * lightweight local runtime. Two copy-and-paste command blocks.
  */
 export function CliSection() {
   const { t } = useLocale();

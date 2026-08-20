@@ -110,8 +110,8 @@ export function MermaidViewer({
         showCloseButton={false}
         initialFocus={canvasRef}
         finalFocus={finalFocusRef}
-        // Dynamic viewport units: on mobile Safari and in narrow Electron
-        // panes `vh` includes retracted browser chrome, which would push the
+        // Dynamic viewport units: on mobile Safari and narrow browser panes,
+        // `vh` includes retracted browser chrome, which would push the
         // toolbar off-screen — the exact "can't find the close button"
         // failure this viewer exists to remove.
         className="!max-w-[calc(100vw-2rem)] !h-[min(90dvh,calc(100dvh-2rem))] !w-[calc(100vw-2rem)] flex flex-col gap-0 overflow-hidden p-0 xl:!max-w-[80rem]"

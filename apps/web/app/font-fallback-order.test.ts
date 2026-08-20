@@ -59,21 +59,4 @@ describe("CJK font fallback order", () => {
     expectJapaneseScopedOverride(cssSource);
   });
 
-  it("keeps desktop Chinese font fallbacks before Korean font fallbacks", () => {
-    const desktopCss = readFileSync(
-      resolve(repoRoot, "apps/desktop/src/renderer/src/globals.css"),
-      "utf8",
-    );
-
-    expectChineseFontsBeforeKoreanFonts(desktopCss);
-  });
-
-  it("scopes the Japanese-first CJK stack to html[lang|='ja'] (desktop)", () => {
-    const desktopCss = readFileSync(
-      resolve(repoRoot, "apps/desktop/src/renderer/src/globals.css"),
-      "utf8",
-    );
-
-    expectJapaneseScopedOverride(desktopCss);
-  });
 });

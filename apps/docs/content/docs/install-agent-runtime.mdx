@@ -74,7 +74,7 @@ Get-Command <command>
 
 Replace `<command>` with a command from the table, such as `claude`, `codex`, or `cursor-agent`. The first command prints the executable path.
 
-If the terminal finds the tool but Desktop or the background daemon does not, the two are usually using different `PATH` values. Restart the app, or set an absolute path through the matching `MULTICA_<PROVIDER>_PATH` environment variable; full configuration is in [Environment variables](/environment-variables#daemon-configuration).
+If the terminal finds the tool but the background daemon does not, they are usually using different `PATH` values. Restart the daemon, or set an absolute path through the matching `MULTICA_<PROVIDER>_PATH` environment variable; full configuration is in [Environment variables](/environment-variables#daemon-configuration).
 
 ## 4. Re-detect and confirm the runtime is online
 
@@ -90,7 +90,7 @@ If the daemon is already running, restart it after installing a new tool:
 multica daemon restart
 ```
 
-With Multica Desktop, quit and reopen the app.
+Restart the daemon with `multica daemon stop && multica daemon start`.
 
 Then open Multica's **Runtimes** page. The tool appears under the target computer and shows as online. You can now select this runtime when creating or editing an agent.
 

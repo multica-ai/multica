@@ -9,8 +9,8 @@ import { paths } from "./paths";
  *   hasOnboarded + no workspace → /workspaces/new
  *
  * V3 invariant: `onboarded_at != null` is the single source of truth for
- * "may access /<slug>/*". The web workspace layout and the desktop App.tsx
- * overlay decision both gate on this — sending an un-onboarded user
+ * "may access /<slug>/*". Browser-host workspace layouts gate on this —
+ * sending an un-onboarded user
  * straight to /issues would just be redirected back to /onboarding by
  * the layout gate, costing a navigation round-trip. Check onboarded
  * first.

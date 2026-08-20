@@ -6,7 +6,7 @@ description: Multica のクライアント、Go サービス、実行デーモ�
 Multica は Go バックエンド、複数のクライアント、実行用コンピューター上で動作するデーモンで構成されています。PostgreSQL がコラボレーションデータを保存し、デーモンがタスクを取得してローカルの AI コーディングツールを呼び出します。
 
 ```text
-Web / Desktop / Mobile / CLI
+Web / Tag / Mobile / CLI
              │
        HTTP + WebSocket
              │
@@ -25,33 +25,31 @@ Web / Desktop / Mobile / CLI
 | --- | --- | --- |
 | `server/` | API、認証、タスクスケジューリング、インテグレーション、CLI、デーモン | Go、Chi、sqlc、gorilla/websocket |
 | `apps/web/` | ブラウザクライアントとランディングページ | Next.js App Router |
-| `apps/desktop/` | デスクトップクライアントとローカルプロセス管理 | Electron、electron-vite |
 | `apps/mobile/` | 独立した iOS クライアント | Expo、React Native |
 | `apps/docs/` | 多言語ドキュメントサイト | Next.js、Fumadocs |
 | `packages/core/` | API クライアント、型、クエリ、mutation、プラットフォーム非依存のビジネスロジック | TanStack Query、Zustand |
 | `packages/ui/` | ビジネスロジックを含まない基礎 UI | shadcn、Base UI |
-| `packages/views/` | Web と Desktop で共有するビジネスページとコンポーネント | React |
+| `packages/views/` | ブラウザホストで共有するビジネスページとコンポーネント | React |
 | `packages/tsconfig/`、`packages/eslint-config/` | 共有ツール設定 | TypeScript、ESLint |
 
 共有パッケージは `.ts` と `.tsx` のソースファイルを直接エクスポートし、利用するアプリケーション側でコンパイルします。依存方向は `views → core + ui` であり、`core` と `ui` は互いに依存しません。
 
-## Web と Desktop のコード共有
+## ブラウザホストのコード共有
 
-Web と Desktop は次の 3 層を共有します。
+Web と Tag は次の 3 層を共有します。
 
 1. `packages/core` が API、キャッシュ、権限、プラットフォーム非依存の状態を扱います。
 2. `packages/ui` が基礎コンポーネントを提供します。
 3. `packages/views` がビジネスページを構成します。
 
-ルーティング、cookie、Electron IPC などのプラットフォーム機能はアプリケーション層に残します。共有ページは `NavigationAdapter` を通じて遷移し、`next/*` や `react-router-dom` を直接インポートしません。
+ルーティングや cookie などのプラットフォーム機能はアプリケーション層に残します。共有ページは `NavigationAdapter` を通じて遷移し、フレームワーク固有のルーティング API を直接インポートしません。
 
-たとえば Web と Desktop の両方で必要なイシュー機能は、通常次の場所にまたがります。
+たとえばブラウザホストで共有するイシュー機能は、通常次の場所にまたがります。
 
 ```text
 packages/core/issues/      クエリ、mutation、キャッシュ更新
 packages/views/issues/     ページとビジネスコンポーネント
 apps/web/platform/         Next.js ルーティングアダプター
-apps/desktop/.../platform/ Electron ルーティングアダプター
 ```
 
 Mobile はこれらの React ページを再利用しません。`@multica/core` の型や純粋関数をインポートできますが、UI、query key、状態、リアルタイム購読、リリースフローは独自に持ちます。
@@ -67,7 +65,7 @@ Mobile はこれらの React ページを再利用しません。`@multica/core`
 
 WebSocket イベントは TanStack Query のキャッシュを更新または無効化します。サーバーオブジェクトを Zustand にコピーしてはいけません。ワークスペースの作成、削除、退出のように画面遷移を伴う mutation は、サーバーの確認を待ってからローカル状態を消去する必要があります。
 
-API レスポンスは `packages/core/api/` の境界で zod schema により解析します。インストール済みの Desktop がより新しいバックエンドへ接続する場合があるため、ネットワーク JSON を TypeScript 型へ直接キャストしてはいけません。
+API レスポンスは `packages/core/api/` の境界で zod schema により解析します。クライアントとサーバーは異なる時点でデプロイされる場合があるため、ネットワーク JSON を TypeScript 型へ直接キャストしてはいけません。
 
 ## バックエンドの階層
 

@@ -34,8 +34,7 @@ The monorepo enforces strict package boundaries:
 | `packages/ui` | nothing | `@multica/core`, business logic |
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
 | `apps/web/platform/` | `next/*` | other apps |
-| `apps/desktop/.../platform/` | `react-router-dom`, electron | other apps |
-| `apps/mobile/` | types and pure functions from `@multica/core` | Web/Desktop React pages, stores, and platform implementations |
+| `apps/mobile/` | types and pure functions from `@multica/core` | Browser-host React pages, stores, and platform implementations |
 
 If logic appears in both apps, it MUST be extracted to a shared package. There are no exceptions for "small" duplication. Mobile owns a separate UI, data layer, and release process; it shares only types and pure functions.
 
@@ -76,7 +75,7 @@ If logic appears in both apps, it MUST be extracted to a shared package. There a
 - Parse network responses with `parseWithFallback` and zod schemas from `packages/core/api/schema.ts`; do not cast them directly with `as T`.
 - When adding or changing an endpoint, update its schema and cover missing or malformed fields in tests.
 - Downstream UI must provide defaults for optional fields, and every `switch` over a server enum must include a `default` branch.
-- An installed Desktop client may connect to a newer backend; never assume that frontend and backend versions always match.
+- Clients and servers may be deployed at different times; never assume that frontend and backend versions always match.
 
 ### Runtime display names
 
@@ -276,13 +275,12 @@ Examples:
 - `inbox.empty.title`
 - `settings.preferences.language.title`
 
-### Web-only / desktop-only copy
+### Host-specific copy
 
 - Shared copy: top level of the namespace JSON
-- Web-only: `web` section
-- Desktop-only: `desktop` section
+- Host-only: a section named for that host
 
-See `auth.json` for the canonical example (the `web` section contains `prefer_desktop` / `desktop_handoff.*`).
+Keep shared copy at the top level unless a host genuinely owns the entire interaction.
 
 ---
 

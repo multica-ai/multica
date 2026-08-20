@@ -119,7 +119,7 @@
     "local_validate_not_a_directory": "Path is not a directory.",
     "local_validate_not_readable": "Directory is not readable.",
     "local_validate_not_writable": "Directory is not writable.",
-    "local_validate_unsupported": "Local directories can only be picked on the desktop app.",
+    "local_validate_unsupported": "Add local directories through the CLI or API on the runtime machine.",
     "mode_dialog_title": "How should tasks use this folder?",
     "mode_dialog_description": "This decides how you get an agent's work back, and whether tasks on this folder can run at the same time.",
     "mode_in_place_title": "Edit this folder directly",

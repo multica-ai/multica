@@ -88,7 +88,7 @@ export const AppLink = forwardRef<HTMLAnchorElement, AppLinkProps>(
     // the http/https allowlist drops it — the click does nothing at all. In
     // dev the renderer is `http://localhost:<port>`, which clears the
     // allowlist and throws the click out into the system browser instead.
-    // Both were reproduced against Electron 39 before this handler existed.
+    // Both were reproduced in a browser host before this handler existed.
     const handleAuxClick = (e: React.MouseEvent<HTMLAnchorElement>) => {
       // The caller sees every aux click, and can opt out of the new tab by
       // calling preventDefault — the same escape hatch a child element inside

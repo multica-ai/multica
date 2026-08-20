@@ -50,11 +50,11 @@ together and what must be delivered when you redistribute.
         "Multica user interface" means any user interface derived, in whole
         or in substantial part, from the user interface code in this
         repository. This includes the components located in the
-        `apps/web/`, `apps/desktop/`, `apps/mobile/`, `packages/views/`,
+        `apps/web/`, `apps/tag-host/`, `apps/mobile/`, `packages/views/`,
         and `packages/ui/` directories when running Multica from the raw
         source code, the frontend container image (published as
         `ghcr.io/multica-ai/multica-web`) when running Multica with
-        Docker, and any compiled desktop or mobile application built from
+        Docker, and any compiled mobile application built from
         that code. That enumeration is illustrative rather than
         exhaustive: user interface code remains covered when it is
         modified, moved, renamed, or extracted into another package or

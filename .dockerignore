@@ -33,6 +33,3 @@ coverage
 
 # Docs
 docs/
-
-# Desktop app (not needed for web self-hosting)
-apps/desktop

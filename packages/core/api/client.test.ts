@@ -1036,19 +1036,10 @@ describe("ApiClient", () => {
 
     const client = new ApiClient("https://api.example.test");
     const response = await client.createFeedback({
-      message: "Desktop route crashed",
-      url: "app://desktop/acme/issues",
+      message: "Route crashed",
+      url: "https://app.example.test/acme/issues",
       workspace_id: "ws-1",
       kind: "bug",
-      context: {
-        kind: "desktop_route_error",
-        trigger: "route-errorElement",
-        error: {
-          name: "TypeError",
-          message: "Cannot read properties of undefined",
-          stack: "TypeError: Cannot read properties of undefined",
-        },
-      },
     });
 
     expect(response).toEqual({
@@ -1060,19 +1051,10 @@ describe("ApiClient", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({
-          message: "Desktop route crashed",
-          url: "app://desktop/acme/issues",
+          message: "Route crashed",
+          url: "https://app.example.test/acme/issues",
           workspace_id: "ws-1",
           kind: "bug",
-          context: {
-            kind: "desktop_route_error",
-            trigger: "route-errorElement",
-            error: {
-              name: "TypeError",
-              message: "Cannot read properties of undefined",
-              stack: "TypeError: Cannot read properties of undefined",
-            },
-          },
         }),
       }),
     );

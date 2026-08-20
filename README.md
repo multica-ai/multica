@@ -87,16 +87,16 @@ issue — so nobody reconstructs context, and nothing ships without a human sayi
 - **[Roles](https://multica.ai/docs/members-roles) and [access scopes](https://multica.ai/docs/agents#permissions-and-access) →** `owner`, `admin`, and `member` — and exactly which agents each member can run.
 - **[Security model](https://multica.ai/docs/security-model) →** What an agent can reach, and what it can't.
 - **[Slack, Lark, DingTalk, and WeCom](https://multica.ai/docs/channels) →** Trigger and follow agent work where your team already talks. DingTalk and WeCom are community-maintained.
-- **[Web, desktop, and mobile](https://multica.ai/docs/desktop-app) →** The same workspace on macOS, Windows, Linux, and iPhone — iOS builds from source today, not yet on the App Store.
+- **Web and mobile →** The same workspace in the browser and on iPhone — iOS builds from source today, not yet on the App Store.
 - **[CLI and API](https://multica.ai/docs/cli) →** Every surface is scriptable. Agents drive Multica through the same CLI you do.
 
 ---
 
 ## Get started
 
-No terminal required: sign up at **[multica.ai](https://multica.ai)**, or download
-**[Multica Desktop](https://multica.ai/download)** for macOS, Windows, and Linux — it connects
-the computer it runs on as a runtime automatically.
+No terminal is required to start: sign up at **[multica.ai](https://multica.ai)**.
+Install the [Multica CLI](https://multica.ai/download) when you want to connect
+a computer as a local runtime.
 
 The one prerequisite: the machine that will run agents needs at least one
 [supported agent CLI](#runtimes) installed and signed in — Claude Code, Codex, Cursor, and
@@ -125,13 +125,11 @@ fall back to `make selfhost-build` from a checkout.
 
 ## Your first agent in five minutes
 
-**1. Sign in.** [multica.ai](https://multica.ai) in the browser, or open
-[Multica Desktop](https://multica.ai/download).
+**1. Sign in.** Open [multica.ai](https://multica.ai) in the browser.
 
 **2. Connect a computer.** A *runtime* is any machine agents can work on — your laptop, or a
-cloud box. Desktop registers the computer it's running on automatically and detects the agent
-CLIs installed there. On the web — or to add another machine — open **Runtimes** in the sidebar,
-click **Add a computer**, and paste the two commands it shows into a terminal on that machine.
+cloud box. Open **Runtimes** in the sidebar, click **Add a computer**, and paste
+the two commands it shows into a terminal on that machine.
 
 **3. Create an agent.** Open **Agents** in the sidebar and click **New agent**. Pick the runtime
 you just connected, pick a provider, and give it a name — or let **Build with AI** generate the
@@ -188,7 +186,7 @@ Installing and authenticating them: [Install an agent runtime](https://multica.a
 ## Architecture
 
 ```
-        Web  ·  Desktop (macOS/Windows/Linux)  ·  iOS
+                  Web browser  ·  iOS
                           │
                           ▼
    ┌──────────────┐   ┌──────────────┐   ┌──────────────────┐
@@ -209,7 +207,6 @@ Installing and authenticating them: [Install an agent runtime](https://multica.a
 | Layer | Stack |
 | --- | --- |
 | Web | Next.js 16 (App Router) |
-| Desktop | Electron, sharing the web UI packages |
 | Mobile | Expo / React Native (iOS) |
 | Backend | Go (Chi router, sqlc, gorilla/websocket) |
 | Database | PostgreSQL 17 with pgvector |

@@ -15,8 +15,8 @@ import (
 
 // Attachment download capabilities — MUL-5292.
 //
-// A native download is a browser-level request: Electron's
-// webContents.downloadURL (and an <img> in a cross-site webview) carries
+// A native download is a browser-level request: an <img> in a cross-site
+// webview carries
 // neither the desktop client's Authorization header nor a session cookie, so
 // the authenticated /api/attachments/{id}/download endpoint answers 401 and
 // the user never gets a file.
@@ -26,7 +26,7 @@ import (
 // that needs no credentials of ours. Proxy mode (local disk, private object
 // host) had no equivalent and kept returning the auth-gated API path, which
 // is the entirety of the bug: one unfinished branch of an otherwise correct
-// design, not a missing Electron feature.
+// design, not a missing client feature.
 //
 // A capability closes that branch the same way the other two modes do. The
 // ALREADY-AUTHENTICATED GetAttachmentByID mints a short-lived signature

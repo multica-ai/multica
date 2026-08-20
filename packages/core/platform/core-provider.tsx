@@ -19,10 +19,7 @@ import { AuthInitializer } from "./auth-initializer";
 import type { CoreProviderProps, ClientIdentity } from "./types";
 import type { StorageAdapter } from "../types/storage";
 import { ClientUsageReporter } from "../client-usage";
-import {
-  configureShortcutPlatform,
-  configureShortcutRuntime,
-} from "../shortcuts/platform";
+import { configureShortcutPlatform } from "../shortcuts/platform";
 
 // Module-level singletons — created once at first render, never recreated.
 // Vite HMR preserves module-level state, so these survive hot reloads.
@@ -47,12 +44,6 @@ function initCore(
       ? identity.os
       : null,
   );
-  // Authoritative override; before this runs (module-eval store hydration)
-  // detectShortcutRuntime() reads the preload globals and already agrees.
-  configureShortcutRuntime(
-    identity?.platform === "desktop" ? "desktop" : null,
-  );
-
   const api = new ApiClient(apiBaseUrl, {
     logger: createLogger("api"),
     onUnauthorized: () => {
@@ -100,8 +91,7 @@ export function CoreProvider({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useMemo(() => initCore(apiBaseUrl, storage, onLogin, onLogout, cookieAuth, identity), []);
 
-  // Client-only freeze watchdog — shared by web and desktop. No-op on the
-  // server and idempotent, so mounting it here covers both apps in one place.
+  // Client-only freeze watchdog. No-op on the server and idempotent.
   useEffect(() => {
     installFreezeWatchdog();
   }, []);
@@ -118,11 +108,7 @@ export function CoreProvider({
         cookieAuth={cookieAuth}
         identity={identity}
       >
-        {/* Desktop's reporter owns both activity and runtime state so it must
-            be the only writer for that installation. */}
-        {identity?.platform !== "desktop" && (
-          <ClientUsageReporter storage={storage} identity={identity} />
-        )}
+        <ClientUsageReporter storage={storage} identity={identity} />
         <WSProvider
           wsUrl={wsUrl}
           authStore={authStore}
@@ -137,7 +123,7 @@ export function CoreProvider({
   );
 
   // UserLocaleSync requires a LocaleAdapter to persist; only mount it when
-  // the host app provides one (web layout + desktop App both do).
+  // the host app provides one.
   const withAdapter = localeAdapter ? (
     <LocaleAdapterProvider adapter={localeAdapter}>
       <UserLocaleSync />

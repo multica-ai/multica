@@ -109,28 +109,94 @@
       "navigation": "ナビゲーション"
     },
     "actions": {
-      "openSearch": { "label": "検索を開く", "description": "どこからでも検索やコマンドを実行します。" },
-      "createIssue": { "label": "タスクを作成", "description": "優先するタスク作成フローを開きます。" },
-      "toggleSidebar": { "label": "サイドバーを切り替え", "description": "メインサイドバーの表示を切り替えます。" },
-      "toggleChat": { "label": "チャットウィンドウを切り替え", "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。" },
-      "findInIssue": { "label": "タスク内を検索", "description": "開いているタスクの詳細を検索します。" },
-      "openThreadNav": { "label": "スレッドナビゲーターを開く", "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。" },
-      "archiveInboxItem": { "label": "通知をアーカイブ", "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。" },
-      "send": { "label": "送信", "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。" },
-      "goBack": { "label": "戻る", "description": "ブラウザーのように履歴を戻ります。" },
-      "goForward": { "label": "進む", "description": "ブラウザーのように履歴を進みます。" },
-      "goInbox": { "label": "受信トレイへ移動", "description": "ワークスペースの受信トレイを開きます。" },
-      "goChat": { "label": "チャットへ移動", "description": "ワークスペースのチャットを開きます。" },
-      "goMyIssues": { "label": "自分のタスクへ移動", "description": "自分に割り当てられたタスクを開きます。" },
-      "goIssues": { "label": "タスクへ移動", "description": "タスク一覧を開きます。" },
-      "goProjects": { "label": "プロジェクトへ移動", "description": "プロジェクト一覧を開きます。" },
-      "goAutopilots": { "label": "自動化へ移動", "description": "ワークスペースの自動化を開きます。" },
-      "goAgents": { "label": "エージェントへ移動", "description": "エージェント一覧を開きます。" },
-      "goSquads": { "label": "Squadsへ移動", "description": "Squad一覧を開きます。" },
-      "goUsage": { "label": "使用量へ移動", "description": "使用量分析を開きます。" },
-      "goRuntimes": { "label": "ランタイムへ移動", "description": "ランタイム設定を開きます。" },
-      "goSkills": { "label": "Skillsへ移動", "description": "Skillライブラリを開きます。" },
-      "goSettings": { "label": "設定へ移動", "description": "ワークスペース設定を開きます。" }
+      "openSearch": {
+        "label": "検索を開く",
+        "description": "どこからでも検索やコマンドを実行します。"
+      },
+      "createIssue": {
+        "label": "タスクを作成",
+        "description": "優先するタスク作成フローを開きます。"
+      },
+      "toggleSidebar": {
+        "label": "サイドバーを切り替え",
+        "description": "メインサイドバーの表示を切り替えます。"
+      },
+      "toggleChat": {
+        "label": "チャットウィンドウを切り替え",
+        "description": "フローティングチャットを開閉します。開いたときは入力欄にフォーカスします。"
+      },
+      "findInIssue": {
+        "label": "タスク内を検索",
+        "description": "開いているタスクの詳細を検索します。"
+      },
+      "openThreadNav": {
+        "label": "スレッドナビゲーターを開く",
+        "description": "開いているタスクのコメントスレッドを一覧・検索して移動します。"
+      },
+      "archiveInboxItem": {
+        "label": "通知をアーカイブ",
+        "description": "開いているインボックス通知をアーカイブします。アーカイブ表示中はアーカイブを解除します。"
+      },
+      "send": {
+        "label": "送信",
+        "description": "チャット、コメント、返信、フィードバック、プロンプトを送信し、作成ダイアログでタスクを作成します。"
+      },
+      "goBack": {
+        "label": "戻る",
+        "description": "ブラウザーのように履歴を戻ります。"
+      },
+      "goForward": {
+        "label": "進む",
+        "description": "ブラウザーのように履歴を進みます。"
+      },
+      "goInbox": {
+        "label": "受信トレイへ移動",
+        "description": "ワークスペースの受信トレイを開きます。"
+      },
+      "goChat": {
+        "label": "チャットへ移動",
+        "description": "ワークスペースのチャットを開きます。"
+      },
+      "goMyIssues": {
+        "label": "自分のタスクへ移動",
+        "description": "自分に割り当てられたタスクを開きます。"
+      },
+      "goIssues": {
+        "label": "タスクへ移動",
+        "description": "タスク一覧を開きます。"
+      },
+      "goProjects": {
+        "label": "プロジェクトへ移動",
+        "description": "プロジェクト一覧を開きます。"
+      },
+      "goAutopilots": {
+        "label": "自動化へ移動",
+        "description": "ワークスペースの自動化を開きます。"
+      },
+      "goAgents": {
+        "label": "エージェントへ移動",
+        "description": "エージェント一覧を開きます。"
+      },
+      "goSquads": {
+        "label": "Squadsへ移動",
+        "description": "Squad一覧を開きます。"
+      },
+      "goUsage": {
+        "label": "使用量へ移動",
+        "description": "使用量分析を開きます。"
+      },
+      "goRuntimes": {
+        "label": "ランタイムへ移動",
+        "description": "ランタイム設定を開きます。"
+      },
+      "goSkills": {
+        "label": "Skillsへ移動",
+        "description": "Skillライブラリを開きます。"
+      },
+      "goSettings": {
+        "label": "設定へ移動",
+        "description": "ワークスペース設定を開きます。"
+      }
     },
     "fixed": {
       "title": "固定のシステムショートカット",
@@ -206,9 +272,9 @@
       "labels": "ラベル",
       "properties": "プロパティ",
       "quick_actions": "クイックアクション",
-    "plugins": "Plugins",
-    "mcp": "MCP",
-    "billing": "請求とプラン"
+      "plugins": "Plugins",
+      "mcp": "MCP",
+      "billing": "請求とプラン"
     }
   },
   "plugins": {
@@ -983,25 +1049,6 @@
     "manage_hint": "リポジトリを管理できるのは admin と owner のみです。",
     "toast_saved": "リポジトリを保存しました",
     "toast_save_failed": "リポジトリを保存できませんでした"
-  },
-  "desktop": {
-    "tabs": {
-      "updates": "アップデート"
-    },
-    "updates": {
-      "title": "アップデート",
-      "description": "バックグラウンドでの自動アップデートを設定するか、新しいバージョンを手動で確認します。",
-      "current_version": "現在のバージョン",
-      "automatic_updates_title": "バックグラウンドで自動アップデート",
-      "automatic_updates_description": "有効にすると、起動直後と 1 時間ごとにアップデートを確認し、利用可能なバージョンをバックグラウンドでダウンロードします。",
-      "automatic_updates_save_failed": "自動アップデート設定を保存できませんでした",
-      "check_section_title": "アップデートを確認",
-      "check_section_description": "自動アップデートの設定にかかわらず、今すぐ確認します。利用可能なアップデートはバックグラウンドでダウンロードされ、準備が整うと再起動を促すメッセージが表示されます。",
-      "up_to_date": "最新バージョンを使用しています。",
-      "downloading": "v{{version}} をバックグラウンドでダウンロード中です。インストールの準備が整うとお知らせします。",
-      "check_now": "今すぐ確認",
-      "checking": "確認中…"
-    }
   },
   "members": {
     "section_title": "メンバー（{{count}}）",

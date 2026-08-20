@@ -112,7 +112,7 @@ Block Public Access, R2, MinIO), the API instead serves avatars from
 `/api/avatars/<signature>/<key>` and resolves each request through
 `ATTACHMENT_DOWNLOAD_MODE` — a presigned redirect, a CloudFront-signed
 redirect, or a proxied body. The signature in the path is what authorizes the
-read: an auth-gated URL cannot be used as an `<img src>` from the Desktop app
+read: an auth-gated URL cannot be used as an `<img src>` from a cross-origin client
 or a split-origin frontend, because the session cookie is `SameSite=Strict`.
 
 Only image objects resolve through this route, and only ones that are

@@ -400,7 +400,7 @@ export function DataTable<TData>({
         >
           {/* Opaque rather than translucent-and-blurred. A backdrop-filter on
             * a sticky element with content scrolling beneath it is a known
-            * Chromium compositing fault (electron#12906, chromium#339841685) —
+            * Chromium compositing fault (chromium#339841685) —
             * the blur layer has to recompute its backdrop every frame while
             * virtualisation adds and removes the rows underneath it, and the
             * strip flickers black. The mix resolves to the same colour

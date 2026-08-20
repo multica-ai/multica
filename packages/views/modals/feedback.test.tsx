@@ -59,11 +59,6 @@ vi.mock("@multica/core/api", () => ({ api: {} }));
 vi.mock("sonner", () => ({ toast: { info: vi.fn(), error: vi.fn(), success: vi.fn() } }));
 vi.mock("@multica/core/feedback", () => ({
   FEEDBACK_KINDS: ["bug", "feature", "general", "praise"] as const,
-  isFeedbackContext: (value: unknown) =>
-    typeof value === "object" &&
-    value !== null &&
-    "kind" in value &&
-    value.kind === "desktop_route_error",
   useCreateFeedback: () => ({ isPending: false, mutateAsync: feedbackMocks.mutateAsync }),
   useFeedbackDraftStore: (selector: any) =>
     selector({ draft: { message: storedDraftMessage }, setDraft: vi.fn(), clearDraft: vi.fn() }),
@@ -170,39 +165,6 @@ describe("FeedbackModal", () => {
     });
   });
 
-  it("forwards structured diagnostic context without putting it in the message", async () => {
-    storedDraftMessage = "";
-    const context = {
-      kind: "desktop_route_error" as const,
-      trigger: "route-errorElement",
-      error: {
-        name: "Error",
-        message: "route render exploded",
-        stack: "Error: route render exploded",
-      },
-    };
-    render(
-      <FeedbackModal
-        onClose={vi.fn()}
-        data={{ kind: "bug", context }}
-      />,
-    );
-
-    const editor = screen.getByLabelText("feedback editor");
-    expect(editor).toHaveValue("");
-    fireEvent.change(editor, { target: { value: "I clicked an issue link." } });
-    fireEvent.keyDown(editor, { key: "Enter", metaKey: true });
-
-    await waitFor(() => {
-      expect(feedbackMocks.mutateAsync).toHaveBeenCalledWith(
-        expect.objectContaining({
-          message: "I clicked an issue link.",
-          kind: "bug",
-          context,
-        }),
-      );
-    });
-  });
 
   // MUL-4808 — Feedback refused to submit mid-upload inside the handler, but
   // the Send button stayed enabled, so the only signal was a toast fired after

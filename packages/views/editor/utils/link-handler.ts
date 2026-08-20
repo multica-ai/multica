@@ -63,8 +63,7 @@ function isWorkspaceScopedPath(pathname: string): boolean {
  *
  * An agent or a user pasting `https://<app-host>/acme/issues/123` means the same
  * destination as `/acme/issues/123`. Without this, the URL reads as external and
- * the desktop app hands it to the system browser instead of opening a tab
- * (MUL-5208).
+ * a host may hand it to an external browser instead of opening a tab (MUL-5208).
  *
  * `appOrigin` is the deployment's public app URL, which only the platform layer
  * knows (web: the current origin; desktop: the connected environment's app URL).

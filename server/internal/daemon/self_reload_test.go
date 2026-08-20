@@ -315,28 +315,6 @@ func TestAutoUpdateLoop_AlsoWatchesTheBinaryForDevBuilds(t *testing.T) {
 	<-done
 }
 
-// TestAutoUpdateLoop_SkipsBothHalvesForDesktop asserts the Desktop exclusion is
-// drawn once, above both checks: the Electron app ships and replaces the CLI
-// binary itself, so following it would fight the app's own lifecycle.
-func TestAutoUpdateLoop_SkipsBothHalvesForDesktop(t *testing.T) {
-	d, restartCalls := newSelfReloadTestDaemon(t, "0.3.7")
-	d.cfg.AutoUpdateEnabled = true
-	d.cfg.LaunchedBy = "desktop"
-	probes := stubSelfVersion(t, "0.3.8", nil)
-	withStubRelease(t, nil, errors.New("fetchLatestRelease must not be called on Desktop"))
-	shortenLoopTimers(t)
-
-	// Returns immediately rather than looping, so no cancel is needed.
-	d.autoUpdateLoop(context.Background())
-
-	if probes.Load() != 0 {
-		t.Fatalf("probed the binary %d times on a Desktop-managed daemon, want 0", probes.Load())
-	}
-	if restartCalls.Load() != 0 {
-		t.Fatal("Desktop-managed daemon scheduled a restart")
-	}
-}
-
 // TestAutoUpdateLoop_ExitsWhenBothHalvesDisabled keeps the goroutine from
 // spinning a ticker nobody reads.
 func TestAutoUpdateLoop_ExitsWhenBothHalvesDisabled(t *testing.T) {

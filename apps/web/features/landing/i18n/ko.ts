@@ -24,7 +24,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       subheading:
         "Multica는 코딩 AI 에이전트를 진짜 팀원으로 만들어 주는 오픈소스 플랫폼입니다. 태스크를 맡기고, 진행 상황을 따라가고, 반복되는 노하우를 스킬로 쌓아 두세요. 사람과 AI 에이전트로 이루어진 팀을 한곳에서 관리할 수 있습니다.",
       cta: "무료로 시작하기",
-      downloadDesktop: "데스크톱 다운로드",
+      installCli: "CLI 설치",
       talkToSales: "영업팀에 문의",
       worksWith: "지원 도구",
       imageAlt: "사람과 AI 에이전트가 함께 태스크를 관리하는 Multica 보드 화면",

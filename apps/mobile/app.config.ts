@@ -26,8 +26,8 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     orientation: "portrait",
     userInterfaceStyle: "automatic",
     scheme: "multica",
-    // 1024x1024 source shared with the desktop client
-    // (apps/desktop/build/icon.png). Expo prebuild generates every required
+    // 1024x1024 source aligned with the browser app icon. Expo prebuild
+    // generates every required
     // iOS icon size from this single PNG.
     icon: "./assets/icon.png",
     ios: {

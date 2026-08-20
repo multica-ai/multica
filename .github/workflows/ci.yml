@@ -12,7 +12,7 @@ concurrency:
 
 jobs:
   # Decides whether the heavy frontend validation jobs have anything to do.
-  # The frontend jobs validate the web/desktop apps, the shared packages,
+  # The frontend jobs validate the web app and shared packages,
   # the install graph, and the selfhost / reserved-slugs scripts it runs;
   # a pure backend-only or docs-only PR touches none of those and gains
   # nothing from a full web build. This job emits a single `frontend`
@@ -40,7 +40,6 @@ jobs:
           filters: |
             frontend:
               - 'apps/web/**'
-              - 'apps/desktop/**'
               - 'packages/**'
               - 'package.json'
               - '.npmrc'
@@ -48,6 +47,7 @@ jobs:
               - 'pnpm-workspace.yaml'
               - 'turbo.json'
               - '.github/workflows/ci.yml'
+              - 'scripts/desktop-retirement.test.mjs'
               - 'scripts/generate-reserved-slugs.mjs'
               - 'server/internal/handler/reserved_slugs.json'
               - 'scripts/selfhost-config.test.sh'
@@ -87,7 +87,7 @@ jobs:
 
   # The frontend validation is split across four runners on purpose. A prior
   # split isolated build/typecheck/lint from the test suites; on a full test
-  # cache miss, however, web/core/desktop/views still competed for the four
+  # cache miss, however, web/core/views still competed for the four
   # vCPUs on the test runner and stretched the job to ~8 minutes. Giving views
   # its own runner only reduced that to 7m23s because the suite itself remained
   # the long pole, so two Vitest shards now split it across two runners while
@@ -166,7 +166,7 @@ jobs:
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         # Mobile lives in a parallel mobile-verify workflow (path-filtered
         # to apps/mobile/** + packages/core/**) so it doesn't add
-        # ~50s of expo-lint + tsc to every web/desktop PR. Keep this
+        # ~50s of expo-lint + tsc to every web PR. Keep this
         # filter in sync with the root package.json scripts, which also
         # exclude @multica/mobile.
         run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
@@ -214,7 +214,7 @@ jobs:
           restore-keys: |
             turbo-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
 
-      - name: Test web, core, and desktop
+      - name: Test web and core
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         # Same filter rationale as frontend-build. Type errors are not this
         # job's responsibility -- frontend-build owns the `typecheck` task.

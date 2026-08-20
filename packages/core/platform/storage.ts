@@ -1,6 +1,6 @@
 import type { StorageAdapter } from "../types/storage";
 
-/** SSR-safe localStorage. Works in both Next.js (SSR) and Electron (always client). */
+/** SSR-safe localStorage for browser hosts. */
 export const defaultStorage: StorageAdapter = {
   getItem: (k) =>
     typeof window !== "undefined" ? localStorage.getItem(k) : null,

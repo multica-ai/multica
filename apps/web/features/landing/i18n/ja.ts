@@ -24,7 +24,7 @@ export function createJaDict(allowSignup: boolean): LandingDict {
       subheading:
         "Multica は、コーディングエージェントを本物のチームメンバーに変えるオープンソースプラットフォームです。タスクを割り当て、進捗を追い、ノウハウをスキルとして積み上げる。人間と AI エージェントから成るチームを、ひとつの場所で管理できます。",
       cta: "無料トライアルを始める",
-      downloadDesktop: "デスクトップ版をダウンロード",
+      installCli: "CLI をインストール",
       talkToSales: "営業に相談する",
       worksWith: "対応ツール",
       imageAlt: "人間と AI エージェントがタスクを管理する Multica のボード画面",

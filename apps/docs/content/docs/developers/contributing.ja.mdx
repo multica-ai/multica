@@ -82,7 +82,6 @@ make build            # server、CLI、migrate バイナリをビルド
 ```bash
 pnpm install
 pnpm dev:web
-pnpm dev:desktop
 pnpm build
 pnpm typecheck
 pnpm lint
@@ -110,13 +109,13 @@ make cli ARGS="issue list"
 
 ## フロントエンド機能の変更
 
-Web と Desktop の両方で必要な機能は、責務に応じて配置します。
+ブラウザホストで共有する機能は、責務に応じて配置します。
 
 1. API 型、query、mutation、プラットフォーム非依存のロジックは `packages/core/` に置きます。
 2. 基礎 UI は `packages/ui/` に置き、ビジネスコードへ依存させません。
 3. ビジネスページとコンポーネントは `packages/views/` に置きます。
-4. Next.js、Electron、ルーティングアダプターは対応する app に残します。
-5. 共有ページは Web と Desktop の両方へ接続します。
+4. フレームワーク固有のルーティングアダプターは対応する app に残します。
+5. 共有ページは利用するブラウザホストへ接続します。
 
 サーバーデータは TanStack Query、フィルター、下書き、レイアウトなどのクライアント状態は Zustand が管理します。具体的な境界は[プロジェクトアーキテクチャ](/developers/architecture)とルートの `CLAUDE.md` を参照してください。
 
@@ -141,7 +140,7 @@ Migration は `server/migrations/`、クエリは `server/pkg/db/queries/` に�
 | --- | --- |
 | 共有ビジネスロジック、query、store | `packages/core/*.test.ts` |
 | 共有ページとコンポーネント | `packages/views/*.test.tsx` |
-| Web または Desktop のプラットフォーム wiring | 対応する `apps/*` ディレクトリ |
+| ブラウザホストのプラットフォーム wiring | 対応する `apps/*` ディレクトリ |
 | エンドツーエンドフロー | `e2e/*.spec.ts` |
 | バックエンド | 関連する Go package の `*_test.go` |
 

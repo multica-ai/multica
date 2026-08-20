@@ -51,13 +51,6 @@ var daemonStatusCmd = &cobra.Command{
 	RunE:  runDaemonStatus,
 }
 
-var daemonProbeRuntimesCmd = &cobra.Command{
-	Use:    "probe-runtimes",
-	Short:  "Probe locally configured runtimes for the Desktop app",
-	Hidden: true,
-	RunE:   runDaemonProbeRuntimes,
-}
-
 var daemonRestartCmd = &cobra.Command{
 	Use:   "restart",
 	Short: "Restart the running daemon (stop + start)",
@@ -77,8 +70,8 @@ var daemonDiskUsageCmd = &cobra.Command{
 		"Default view is per-task, sorted by size descending. --by-workspace switches to a per-workspace summary;\n" +
 		"--top N keeps only the largest N entries.\n\n" +
 		"By default only the current profile's root is scanned. --all-profiles aggregates across every workspace\n" +
-		"root — the default root plus each ~/.multica/profiles/* root, including the Desktop app's dedicated\n" +
-		"`desktop-<host>` root — and prints a per-root breakdown with a combined grand total. In that mode --top\n" +
+		"root — the default root plus each ~/.multica/profiles/* root — and prints a per-root breakdown with a\n" +
+		"combined grand total. In that mode --top\n" +
 		"applies within each root and --workspaces-root is not allowed.\n\n" +
 		"Bytes are split into total and the artifact-cleanable subset (node_modules, .next, .turbo by default,\n" +
 		"overridable via MULTICA_GC_ARTIFACT_PATTERNS) so the report stays in sync with what the GC reclaims.\n" +
@@ -136,48 +129,14 @@ func init() {
 	df.Int("top", 0, "Keep only the largest N entries (per root in --all-profiles mode)")
 	df.String("output", "table", "Output format: table or json")
 	df.String("workspaces-root", "", "Override the workspaces root path (default: same as the daemon)")
-	df.Bool("all-profiles", false, "Scan every workspace root (default root + all ~/.multica/profiles/* roots, incl. the Desktop app's) and report a combined total")
+	df.Bool("all-profiles", false, "Scan every workspace root (default root + all ~/.multica/profiles/* roots) and report a combined total")
 
 	daemonCmd.AddCommand(daemonStartCmd)
 	daemonCmd.AddCommand(daemonStopCmd)
 	daemonCmd.AddCommand(daemonRestartCmd)
 	daemonCmd.AddCommand(daemonStatusCmd)
-	daemonCmd.AddCommand(daemonProbeRuntimesCmd)
 	daemonCmd.AddCommand(daemonLogsCmd)
 	daemonCmd.AddCommand(daemonDiskUsageCmd)
-}
-
-type daemonRuntimeProbe struct {
-	ProbeResult     string         `json:"probe_result"`
-	RuntimeCount    int            `json:"runtime_count"`
-	ProviderSummary map[string]int `json:"provider_summary"`
-}
-
-func runDaemonProbeRuntimes(cmd *cobra.Command, _ []string) error {
-	if err := requireHumanLocalCommand("daemon probe-runtimes"); err != nil {
-		return err
-	}
-	cfg, err := daemon.LoadConfig(daemon.Overrides{
-		Profile:       resolveProfile(cmd),
-		AllowNoAgents: true,
-	})
-	if err != nil {
-		return err
-	}
-	probe := daemonRuntimeProbeFromAgents(cfg.Agents)
-	return json.NewEncoder(cmd.OutOrStdout()).Encode(probe)
-}
-
-func daemonRuntimeProbeFromAgents(agents map[string]daemon.AgentEntry) daemonRuntimeProbe {
-	probe := daemonRuntimeProbe{
-		ProbeResult:     "success",
-		RuntimeCount:    len(agents),
-		ProviderSummary: make(map[string]int, len(agents)),
-	}
-	for provider := range agents {
-		probe.ProviderSummary[provider]++
-	}
-	return probe
 }
 
 // daemonDirForProfile returns the state directory for the given profile.
@@ -1058,9 +1017,6 @@ func runDaemonForeground(cmd *cobra.Command) error {
 		return err
 	}
 	cfg.CLIVersion = version
-	// Set by the Electron Desktop app when it spawns the CLI so the server
-	// can mark those runtimes as "managed" and hide CLI self-update UI.
-	cfg.LaunchedBy = os.Getenv("MULTICA_LAUNCHED_BY")
 
 	ctx, stop := notifyShutdownContext(context.Background())
 	defer stop()
@@ -1449,16 +1405,6 @@ func daemonStatusHealthPort(cmd *cobra.Command) (int, error) {
 	return port, nil
 }
 
-// describeDaemonManager turns the daemon's launched_by tag into something a
-// user can act on. Unknown values are passed through rather than dropped: a
-// newer daemon naming a manager this CLI predates is still worth showing.
-func describeDaemonManager(launchedBy string) string {
-	if launchedBy == "desktop" {
-		return "Multica Desktop app (start and stop it from the app)"
-	}
-	return launchedBy
-}
-
 // printDaemonStatusReport renders a key/value summary of the daemon health
 // response. The value column is aligned to the widest label so the dynamic
 // "Daemon [profile]" row stays in step with the static rows below it.
@@ -1469,12 +1415,6 @@ func printDaemonStatusReport(w io.Writer, label string, health map[string]any) {
 	}
 	if version, ok := health["cli_version"].(string); ok && version != "" {
 		rows = append(rows, row{"Version", version})
-	}
-	// Answers "why is a daemon running that I never started?" — the reporter's
-	// ask in #6694. Only rendered when the daemon names a manager, so a
-	// standalone daemon and an older one that cannot say both stay unchanged.
-	if managed, ok := health["launched_by"].(string); ok && managed != "" {
-		rows = append(rows, row{"Managed by", describeDaemonManager(managed)})
 	}
 	// Only present while a confirmed on-disk version change is waiting for the
 	// daemon to go idle, so it reads as an explanation rather than a status line.
@@ -1935,8 +1875,8 @@ func newParentStatusFetcher(cmd *cobra.Command, profile string) daemon.ParentSta
 
 // runDaemonDiskUsageAggregate scans every workspace root (the default root plus
 // each ~/.multica/profiles/* root) and renders a per-root breakdown with a
-// combined grand total. This is the path that surfaces the Desktop app's
-// `desktop-<host>` root, which the default single-root scan never sees.
+// combined grand total. Named profile roots are not part of the default
+// single-root scan.
 func runDaemonDiskUsageAggregate(cmd *cobra.Command, byWorkspace bool, top int, output string) error {
 	roots, err := enumerateDiskUsageRoots()
 	if err != nil {

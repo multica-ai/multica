@@ -43,7 +43,6 @@ import {
 import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../../i18n";
-import { isDesktopShell } from "../../platform/local-directory";
 import { openExternal } from "../../platform/open-external";
 import { SettingsCard, SettingsSection, SettingsTab } from "./settings-layout";
 
@@ -148,11 +147,7 @@ function RemoteMCPConfiguration({
         if (!result.authorization_url) {
           throw new Error(t(($) => $.plugins.remote_mcp.oauth_connect_failed));
         }
-        if (isDesktopShell()) {
-          openExternal(result.authorization_url);
-        } else {
-          window.location.assign(result.authorization_url);
-        }
+        openExternal(result.authorization_url, { webTarget: "same-tab" });
         return;
       }
       const result = await configureMutation.mutateAsync({

@@ -142,7 +142,6 @@ function winning(
 }
 
 const WEB_CSS = resolve(repoRoot, "apps/web/app/globals.css");
-const DESKTOP_CSS = resolve(repoRoot, "apps/desktop/src/renderer/src/globals.css");
 
 // The chip's own composition: layout classes only, colour from the variant.
 const brand = cn(buttonVariants({ variant: "brand", size: "sm" }), "h-8 px-2");
@@ -248,34 +247,5 @@ describe("brand Button variants resolve to brand colour in the real stylesheet",
       expect(text(overridden, {})).toBe("text-muted-foreground");
       expect(text(overridden, { dark: true })).toBe("text-muted-foreground");
     });
-  });
-});
-
-describe("desktop ships the same brand cascade as web", () => {
-  let rules: FlatRule[];
-
-  beforeAll(async () => {
-    rules = await compileStylesheet(DESKTOP_CSS);
-  }, 60_000);
-
-  // Desktop declares its own `@custom-variant dark` and its own @source globs,
-  // so the guarantee has to be re-proved against its bundle rather than
-  // assumed from web's.
-  it("fills the brand tier with brand in both themes", () => {
-    const classes = brand.split(/\s+/);
-    expect(winning(rules, classes, {}, "background-color")).toBe("bg-brand");
-    expect(winning(rules, classes, { dark: true }, "background-color")).toBe(
-      "bg-brand",
-    );
-    expect(winning(rules, classes, { dark: true }, "color")).toBe(
-      "text-brand-foreground",
-    );
-  });
-
-  it("keeps the tint tier's dark notches", () => {
-    const classes = brandSubtle.split(/\s+/);
-    expect(winning(rules, classes, { dark: true }, "background-color")).toBe(
-      "dark:bg-brand/12",
-    );
   });
 });

@@ -16,9 +16,7 @@
     "DOCS_URL",
     "COMPOSE_PROJECT_NAME",
     "POSTGRES_DB",
-    "POSTGRES_PORT",
-    "DESKTOP_RENDERER_PORT",
-    "DESKTOP_APP_SUFFIX"
+    "POSTGRES_PORT"
   ],
   "tasks": {
     "build": {
@@ -54,7 +52,7 @@
       "dependsOn": ["^cache-inputs"]
     },
     // Without a dependency edge, editing packages/views or packages/ui left
-    // `@multica/web#test` and `@multica/desktop#test` byte-identical in hash,
+    // `@multica/web#test` byte-identical in hash,
     // so a cached pass would be replayed over changed code. `^cache-inputs`
     // closes that without side effects: `^typecheck` would also work but drags
     // three real `tsc --noEmit` runs (~223 CPU-seconds) into the test job, and

@@ -67,33 +67,19 @@ export interface AnalyticsConfig {
   host: string;
   /**
    * Client app version — attached to every event as an `app_version`
-   * super-property. Web injects the build-time tag / sha; desktop reads from
-   * the Electron API. Optional because local dev may not have a version
-   * available.
+   * super-property. Web injects the build-time tag / sha. Optional because
+   * local development may not have a version available.
    */
   appVersion?: string;
   environment?: string;
 }
 
-export type ClientType = "desktop" | "web";
+export type ClientType = "web";
 
 /**
- * Classify the current runtime as desktop (Electron renderer) or web. Used as
- * a super-property so every event can be split by client without relying on
- * PostHog's `$lib`, which reports "web" in both the Next.js app and the
- * Electron renderer (both Chromium).
- *
- * Signals we trust:
- *   - `window.electron` is exposed by the preload script in every renderer.
- *   - `navigator.userAgent` contains "Electron" as a fallback.
+ * Return the canonical browser client type used by frontend analytics.
  */
 export function detectClientType(): ClientType {
-  if (typeof window === "undefined") return "web";
-  const w = window as unknown as { electron?: unknown; desktopAPI?: unknown };
-  if (w.electron || w.desktopAPI) return "desktop";
-  if (typeof navigator !== "undefined" && /Electron/i.test(navigator.userAgent)) {
-    return "desktop";
-  }
   return "web";
 }
 
@@ -162,9 +148,7 @@ export function initAnalytics(config: AnalyticsConfig | null | undefined): boole
   });
   analyticsEnvironment = normalizeEnvironment(config.environment);
   // Register super-properties — attached to every event emitted from this
-  // client. `client_type` is the canonical split between desktop and web
-  // (PostHog's own `$lib` reports "web" for both because Electron renderers
-  // are Chromium). `app_version` is optional so self-hosted or local dev
+  // client. `app_version` is optional so self-hosted or local development
   // builds without a version don't pollute the property.
   // We cache the set so resetAnalytics() can re-apply it after
   // posthog.reset() — reset() clears persisted super-properties otherwise.

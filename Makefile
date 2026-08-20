@@ -312,7 +312,7 @@ sqlc: ## Regenerate sqlc code
 clean: ## Remove build caches, generated binaries, and temp files
 	rm -rf server/bin server/tmp
 	rm -rf apps/*/.next apps/*/.source apps/*/.expo
-	rm -rf apps/*/out apps/*/dist apps/*/dist-electron packages/*/dist
+	rm -rf apps/*/out apps/*/dist packages/*/dist
 	rm -rf .turbo apps/*/.turbo packages/*/.turbo
 	rm -rf apps/*/*.tsbuildinfo packages/*/*.tsbuildinfo
 	@echo "✓ Clean complete."

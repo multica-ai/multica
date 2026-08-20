@@ -59,14 +59,6 @@ import { useT, useTimeAgo } from "../../i18n";
 import { daemonRuntimesDocsHref } from "./runtime-docs";
 
 export interface RuntimesPageProps {
-  /** Desktop-only daemon id used to identify this device. */
-  localDaemonId?: string | null;
-  /** Desktop-only friendly device name for the local daemon. */
-  localMachineName?: string | null;
-  /** Keep the local device visible even before its first runtime registers. */
-  hasLocalMachine?: boolean;
-  /** The bundled daemon is starting but has not registered yet. */
-  bootstrapping?: boolean;
   /** Web SaaS-only Cloud Runtime entrypoint. */
   cloudRuntimeEnabled?: boolean;
 }
@@ -81,10 +73,6 @@ function useNowTick(intervalMs = 30_000): number {
 }
 
 export function RuntimesPage({
-  localDaemonId,
-  localMachineName,
-  hasLocalMachine,
-  bootstrapping,
   cloudRuntimeEnabled = false,
 }: RuntimesPageProps = {}) {
   const isAuthLoading = useAuthStore((state) => state.isLoading);
@@ -125,21 +113,9 @@ export function RuntimesPage({
     () =>
       buildRuntimeMachines(runtimes, {
         now,
-        localDaemonId,
-        localMachineName,
-        currentUserId,
         workloadByRuntimeId: workloadIndex,
-        ensureLocalMachine: hasLocalMachine,
       }),
-    [
-      runtimes,
-      now,
-      localDaemonId,
-      localMachineName,
-      currentUserId,
-      workloadIndex,
-      hasLocalMachine,
-    ],
+    [runtimes, now, workloadIndex],
   );
   const orphanProfileRuntimes = useMemo(() => {
     if (machines.some((machine) => machine.mode === "local")) return [];
@@ -158,10 +134,7 @@ export function RuntimesPage({
   }
 
   const showEmpty =
-    machines.length === 0 &&
-    orphanProfileRuntimes.length === 0 &&
-    !bootstrapping &&
-    hasLocalMachine !== true;
+    machines.length === 0 && orphanProfileRuntimes.length === 0;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -190,12 +163,7 @@ export function RuntimesPage({
                 currentUserId={currentUserId ?? null}
               />
             )}
-            {(machines.length > 0 || bootstrapping) && (
-              <MachineList
-                machines={machines}
-                bootstrapping={bootstrapping}
-              />
-            )}
+            {machines.length > 0 && <MachineList machines={machines} />}
             {orphanProfileRuntimes.length > 0 && (
               <OrphanRuntimeProfiles
                 runtimes={orphanProfileRuntimes}
@@ -414,28 +382,14 @@ function PageHeaderBar({
   );
 }
 
-function MachineList({
-  machines,
-  bootstrapping,
-}: {
-  machines: RuntimeMachine[];
-  bootstrapping?: boolean;
-}) {
+function MachineList({ machines }: { machines: RuntimeMachine[] }) {
   const { t } = useT("runtimes");
   if (machines.length === 0) {
     return (
       <CollectionPageState
         icon={Server}
-        title={
-          bootstrapping
-            ? t(($) => $.page.bootstrapping.title)
-            : t(($) => $.page.empty.title)
-        }
-        description={
-          bootstrapping
-            ? t(($) => $.page.bootstrapping.hint)
-            : t(($) => $.page.empty.hint)
-        }
+        title={t(($) => $.page.empty.title)}
+        description={t(($) => $.page.empty.hint)}
       />
     );
   }
@@ -479,11 +433,6 @@ function MachineRow({ machine }: { machine: RuntimeMachine }) {
                 ? t(($) => $.machine.metrics.cloud_worker)
                 : t(($) => $.machine.metrics.local_daemon))}
           </span>
-          {machine.isCurrent && (
-            <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-micro font-medium text-muted-foreground">
-              {t(($) => $.machine.this_machine)}
-            </span>
-          )}
         </span>
       </span>
 

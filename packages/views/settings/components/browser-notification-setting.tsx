@@ -19,7 +19,7 @@ import { SettingsCard, SettingsRow } from "./settings-layout";
 
 /**
  * Web-only control for the permission + durable PushManager subscription used
- * by the root service worker. Unsupported browsers and Electron render no
+ * by the root service worker. Unsupported browsers render no
  * control; foreground window.Notification is intentionally not a fallback.
  *
  * Capability and permission are read from `window`, so the first paint defers

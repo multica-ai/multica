@@ -26,9 +26,7 @@ Multica는 작업을 기록하고 조율하며 연결된 컴퓨터가 실행을 
 
 ## 데몬 시작
 
-Multica Desktop을 사용하면 앱이 데몬을 자동으로 시작하므로 별도 명령을 실행할 필요가 없습니다.
-
-Web, 원격 컴퓨터, 화면 없는 환경에서는 먼저 [Multica CLI를 설치](/cli)한 뒤 다음을 실행합니다.
+먼저 [Multica CLI를 설치](/cli)한 뒤 다음을 실행합니다.
 
 ```bash
 multica daemon start
@@ -98,7 +96,7 @@ multica daemon start
 
 여기에는 shell script가 아니라 실행 파일과 인수를 입력합니다. 일반 인수, 따옴표, 백슬래시 이스케이프는 사용할 수 있지만 파이프, 리디렉션, `&&`, `;`, 역따옴표, 환경 변수 확장은 사용할 수 없습니다. 이런 동작이 필요하면 wrapper script에 넣고 해당 스크립트를 명령으로 입력하세요.
 
-Desktop이 시작한 데몬에서 터미널에서는 실행되는 명령을 찾지 못한다면 현재 컴퓨터에 절대 경로를 설정할 수 있습니다.
+백그라운드 데몬에서 터미널에서는 실행되는 명령을 찾지 못한다면 현재 컴퓨터에 절대 경로를 설정할 수 있습니다.
 
 ```bash
 multica runtime profile set-path <profile-id> --path /absolute/path/to/command

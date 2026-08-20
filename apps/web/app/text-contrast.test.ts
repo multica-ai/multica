@@ -163,7 +163,7 @@ const landingCss = () =>
 
 // ── source scanning ────────────────────────────────────────────────────────
 
-const scanRoots = ["packages/ui", "packages/views", "apps/web", "apps/desktop/src"];
+const scanRoots = ["packages/ui", "packages/views", "apps/web"];
 const skipDirs = new Set(["node_modules", ".next", "dist", "out", "build", ".turbo"]);
 const sourceExtensions = [".ts", ".tsx", ".css"];
 

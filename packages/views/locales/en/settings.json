@@ -100,7 +100,7 @@
     "unassigned": "Unassigned",
     "no_results": "No matching shortcut actions.",
     "conflict_error": "Already used by {{action}}.",
-    "reserved_error": "Reserved by the browser or desktop window.",
+    "reserved_error": "Reserved by the browser window.",
     "send_error": "Send can only use Enter or Mod+Enter.",
     "unsafe_error": "This key would interfere with typing or basic keyboard navigation.",
     "send_enter_hint": "Shift+Enter inserts a paragraph, continues a list, or adds a code-block newline.",
@@ -109,32 +109,98 @@
       "navigation": "Navigation"
     },
     "actions": {
-      "openSearch": { "label": "Open search", "description": "Search and run commands from anywhere." },
-      "createIssue": { "label": "Create issue", "description": "Open your preferred issue creation flow." },
-      "toggleSidebar": { "label": "Toggle sidebar", "description": "Show or hide the main sidebar." },
-      "toggleChat": { "label": "Toggle chat window", "description": "Open or close the floating chat window. Opening it focuses the message input." },
-      "findInIssue": { "label": "Find in issue", "description": "Search within the open issue detail." },
-      "openThreadNav": { "label": "Open thread navigator", "description": "List, search, and jump between the comment threads of the open issue." },
-      "archiveInboxItem": { "label": "Archive notification", "description": "Archive the open inbox notification, or restore it while reading the archive." },
-      "send": { "label": "Send", "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog." },
-      "goBack": { "label": "Go back", "description": "Navigate back through history, like a browser." },
-      "goForward": { "label": "Go forward", "description": "Navigate forward through history, like a browser." },
-      "goInbox": { "label": "Go to Inbox", "description": "Open the workspace inbox." },
-      "goChat": { "label": "Go to Chat", "description": "Open workspace chat." },
-      "goMyIssues": { "label": "Go to My Issues", "description": "Open issues assigned to you." },
-      "goIssues": { "label": "Go to Issues", "description": "Open the issue list." },
-      "goProjects": { "label": "Go to Projects", "description": "Open the project list." },
-      "goAutopilots": { "label": "Go to Autopilot", "description": "Open workspace automations." },
-      "goAgents": { "label": "Go to Agents", "description": "Open the agent list." },
-      "goSquads": { "label": "Go to Squads", "description": "Open the squad list." },
-      "goUsage": { "label": "Go to Usage", "description": "Open usage analytics." },
-      "goRuntimes": { "label": "Go to Runtimes", "description": "Open runtime configuration." },
-      "goSkills": { "label": "Go to Skills", "description": "Open the skill library." },
-      "goSettings": { "label": "Go to Settings", "description": "Open workspace settings." }
+      "openSearch": {
+        "label": "Open search",
+        "description": "Search and run commands from anywhere."
+      },
+      "createIssue": {
+        "label": "Create issue",
+        "description": "Open your preferred issue creation flow."
+      },
+      "toggleSidebar": {
+        "label": "Toggle sidebar",
+        "description": "Show or hide the main sidebar."
+      },
+      "toggleChat": {
+        "label": "Toggle chat window",
+        "description": "Open or close the floating chat window. Opening it focuses the message input."
+      },
+      "findInIssue": {
+        "label": "Find in issue",
+        "description": "Search within the open issue detail."
+      },
+      "openThreadNav": {
+        "label": "Open thread navigator",
+        "description": "List, search, and jump between the comment threads of the open issue."
+      },
+      "archiveInboxItem": {
+        "label": "Archive notification",
+        "description": "Archive the open inbox notification, or restore it while reading the archive."
+      },
+      "send": {
+        "label": "Send",
+        "description": "Send chat messages, comments, replies, feedback, and prompts, and create issues in the create dialog."
+      },
+      "goBack": {
+        "label": "Go back",
+        "description": "Navigate back through history, like a browser."
+      },
+      "goForward": {
+        "label": "Go forward",
+        "description": "Navigate forward through history, like a browser."
+      },
+      "goInbox": {
+        "label": "Go to Inbox",
+        "description": "Open the workspace inbox."
+      },
+      "goChat": {
+        "label": "Go to Chat",
+        "description": "Open workspace chat."
+      },
+      "goMyIssues": {
+        "label": "Go to My Issues",
+        "description": "Open issues assigned to you."
+      },
+      "goIssues": {
+        "label": "Go to Issues",
+        "description": "Open the issue list."
+      },
+      "goProjects": {
+        "label": "Go to Projects",
+        "description": "Open the project list."
+      },
+      "goAutopilots": {
+        "label": "Go to Autopilot",
+        "description": "Open workspace automations."
+      },
+      "goAgents": {
+        "label": "Go to Agents",
+        "description": "Open the agent list."
+      },
+      "goSquads": {
+        "label": "Go to Squads",
+        "description": "Open the squad list."
+      },
+      "goUsage": {
+        "label": "Go to Usage",
+        "description": "Open usage analytics."
+      },
+      "goRuntimes": {
+        "label": "Go to Runtimes",
+        "description": "Open runtime configuration."
+      },
+      "goSkills": {
+        "label": "Go to Skills",
+        "description": "Open the skill library."
+      },
+      "goSettings": {
+        "label": "Go to Settings",
+        "description": "Open workspace settings."
+      }
     },
     "fixed": {
       "title": "Fixed system shortcuts",
-      "description": "Window and accessibility shortcuts stay fixed so they remain reliable. Zoom and tab controls apply to the desktop app.",
+      "description": "Browser and accessibility shortcuts stay fixed so they remain reliable.",
       "close_tab": "Close active tab",
       "zoom_in": "Zoom in",
       "zoom_out": "Zoom out",
@@ -206,9 +272,9 @@
       "labels": "Labels",
       "properties": "Properties",
       "quick_actions": "Quick Actions",
-    "plugins": "Plugins",
-    "mcp": "MCP",
-    "billing": "Billing"
+      "plugins": "Plugins",
+      "mcp": "MCP",
+      "billing": "Billing"
     }
   },
   "plugins": {
@@ -984,25 +1050,6 @@
     "manage_hint": "Only admins and owners can manage repositories.",
     "toast_saved": "Repositories saved",
     "toast_save_failed": "Failed to save repositories"
-  },
-  "desktop": {
-    "tabs": {
-      "updates": "Updates"
-    },
-    "updates": {
-      "title": "Updates",
-      "description": "Control automatic background updates or check for a new version manually.",
-      "current_version": "Current version",
-      "automatic_updates_title": "Automatic background updates",
-      "automatic_updates_description": "Check shortly after launch and every hour, then download available updates in the background.",
-      "automatic_updates_save_failed": "Failed to save automatic update settings",
-      "check_section_title": "Check for updates",
-      "check_section_description": "Check now regardless of your automatic update preference. Available updates download in the background and show a restart prompt when ready.",
-      "up_to_date": "You're on the latest version.",
-      "downloading": "v{{version}} is downloading in the background — you'll be notified when it's ready to install.",
-      "check_now": "Check now",
-      "checking": "Checking…"
-    }
   },
   "members": {
     "section_title": "Members ({{count}})",

@@ -29,7 +29,7 @@ const SEMVER_RE = /v?(\d+)\.(\d+)\.(\d+)/;
 // the latest tag, e.g. `v0.2.15-235-gdaf0e935` or `v0.2.15-235-gdaf0e935-dirty`.
 // Daemons built from source (Makefile `make build` / `make daemon`) report this
 // shape; tagged releases are bare semver. Treating dev-described daemons as OK
-// is what keeps `pnpm dev:desktop` + `make daemon` unblocked without weakening
+// keeps local browser-host + daemon development unblocked without weakening
 // the gate for staging or production users running stale stable releases.
 const DEV_DESCRIBE_RE = /^v?\d+\.\d+\.\d+-\d+-g[0-9a-fA-F]+/;
 

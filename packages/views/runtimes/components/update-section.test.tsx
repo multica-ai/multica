@@ -18,7 +18,6 @@ vi.mock("@multica/core/api", () => ({
 
 function renderSection(props: {
   runtimeId: string | null;
-  launchedBy?: string | null;
   currentVersion?: string;
 }) {
   return render(
@@ -27,7 +26,6 @@ function renderSection(props: {
         runtimeId={props.runtimeId}
         currentVersion={props.currentVersion ?? "v0.4.0"}
         isOnline
-        launchedBy={props.launchedBy}
       />
     </I18nProvider>,
   );
@@ -51,24 +49,6 @@ describe("UpdateSection read-only status", () => {
     renderSection({ runtimeId: null });
 
     expect(await screen.findByText("Latest")).toBeInTheDocument();
-    expect(screen.queryByText("Read-only")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: "Update" }),
-    ).not.toBeInTheDocument();
-  });
-
-  it("shows the Desktop manager without exposing an update action", () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({ tag_name: "v0.4.0" }),
-      }),
-    );
-
-    renderSection({ runtimeId: null, launchedBy: "desktop" });
-
-    expect(screen.getByText("Managed by Desktop")).toBeInTheDocument();
     expect(screen.queryByText("Read-only")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Update" }),

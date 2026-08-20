@@ -49,13 +49,11 @@ export function MachineCliSection({
   }
 
   // A viewer's ability to send an update command must not gate the
-  // machine-level version and manager information. The only local machine
-  // without anything to report is Desktop's synthesized stopped-daemon row.
+  // machine-level version information.
   if (
     !updateRuntime &&
     machine.runtimes.length === 0 &&
-    !machine.cliVersion &&
-    !machine.launchedBy
+    !machine.cliVersion
   ) {
     return null;
   }
@@ -65,7 +63,6 @@ export function MachineCliSection({
       runtimeId={updateRuntime?.id ?? null}
       currentVersion={machine.cliVersion}
       isOnline={updateRuntime?.status === "online"}
-      launchedBy={machine.launchedBy}
     />
   );
 }

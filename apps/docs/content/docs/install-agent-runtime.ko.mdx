@@ -74,7 +74,7 @@ Get-Command <command>
 
 `<command>`를 표에 있는 `claude`, `codex`, `cursor-agent` 같은 명령으로 바꾸세요. 첫 명령이 실행 파일 경로를 반환합니다.
 
-터미널에서는 도구를 찾지만 Desktop이나 백그라운드 데몬에서는 찾지 못한다면 보통 서로 다른 `PATH`를 사용하기 때문입니다. 앱을 다시 시작하거나 해당 `MULTICA_<PROVIDER>_PATH` 환경 변수로 절대 경로를 지정할 수 있습니다. 전체 설정은 [환경 변수](/environment-variables#데몬-설정)를 참고하세요.
+터미널에서는 도구를 찾지만 백그라운드 데몬에서는 찾지 못한다면 보통 서로 다른 `PATH`를 사용하기 때문입니다. 데몬을 다시 시작하거나 해당 `MULTICA_<PROVIDER>_PATH` 환경 변수로 절대 경로를 지정할 수 있습니다. 전체 설정은 [환경 변수](/environment-variables#데몬-설정)를 참고하세요.
 
 ## 4. 다시 감지하고 온라인 상태 확인
 
@@ -90,7 +90,7 @@ multica daemon start
 multica daemon restart
 ```
 
-Multica Desktop을 사용한다면 앱을 종료한 뒤 다시 열면 됩니다.
+`multica daemon restart`를 실행하여 도구를 다시 감지하세요.
 
 그런 다음 Multica의 **런타임** 페이지를 엽니다. 대상 컴퓨터 아래에 해당 도구가 나타나고 온라인으로 표시됩니다. 이제 에이전트를 만들거나 수정할 때 이 런타임을 선택할 수 있습니다.
 

@@ -113,11 +113,9 @@ That directory holds `daemon.log` (the log), `daemon.pid` (the background
 daemon's PID), and `daemon.err.log` (raw crash output; near-empty on a healthy
 daemon, since normal logging goes to `daemon.log`).
 
-The Desktop app runs its own named profile, so on a machine that has ever run
-both, `~/.multica/daemon.log` and `~/.multica/profiles/<name>/daemon.log` both
-exist and both read as plausible logs — only one is being written to. Don't
-guess: `multica daemon logs` prints the absolute path it resolved (see
-[Logs](#logs)).
+Named profiles keep separate logs. If a machine has run more than one profile,
+do not guess which file is active: `multica daemon logs` prints the absolute
+path it resolved (see [Logs](#logs)).
 
 To run in the foreground (useful for debugging):
 
@@ -149,9 +147,6 @@ Agent CLIs (codex, claude, ...) are handled differently: when one of them is
 upgraded in place, the daemon re-probes its version and re-registers the runtime
 **without restarting**, so subsequent tasks pick up the new CLI while Multica's
 availability stays independent of a third party's release cadence.
-
-Desktop-managed daemons ignore both, because the Desktop app owns its bundled
-CLI's lifecycle.
 
 ### Stop
 

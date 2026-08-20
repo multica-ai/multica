@@ -19,13 +19,9 @@ export {
 } from "./definitions";
 export {
   configureShortcutPlatform,
-  configureShortcutRuntime,
   detectShortcutPlatform,
-  detectShortcutRuntime,
   getShortcutPlatform,
-  getShortcutRuntime,
   type ShortcutPlatform,
-  type ShortcutRuntime,
 } from "./platform";
 export {
   useShortcutStore,

@@ -26,9 +26,7 @@ An agent's custom environment variables are stored server-side and sent to the r
 
 ## Starting the daemon
 
-With Multica Desktop, the app starts the daemon automatically — no extra command needed.
-
-On the web, a remote computer, or a headless environment, [install the Multica CLI](/cli) first, then run:
+On a local computer, remote computer, or headless environment, [install the Multica CLI](/cli) first, then run:
 
 ```bash
 multica daemon start
@@ -115,7 +113,7 @@ Two more consequences worth knowing:
 - **Multica's own values win a conflict.** If your fixed arguments set a flag Multica also sets, Multica's value comes later and takes effect. Most importantly, a model chosen on the agent overrides a `--model` pinned in the profile. To pin a model for everyone, leave the agents' model field empty.
 - **Protocol-critical flags are ignored.** `-p`, `--output-format`, `--input-format`, `--permission-mode`, and the equivalents for other families are dropped from your fixed arguments, because overriding them would break the daemon's connection to the tool. Subcommands and other positional arguments always pass through.
 
-If a Desktop-launched daemon cannot find a command your terminal can run, set an absolute path for the current computer:
+If a background daemon cannot find a command your terminal can run, set an absolute path for the current computer:
 
 ```bash
 multica runtime profile set-path <profile-id> --path /absolute/path/to/command

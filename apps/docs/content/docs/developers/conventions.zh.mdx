@@ -34,10 +34,9 @@ monorepo 的包边界是硬约束：
 | `packages/ui` | 无业务依赖 | `@multica/core`、业务逻辑 |
 | `packages/views` | `core/`、`ui/` | `next/*`、`react-router-dom`、stores |
 | `apps/web/platform/` | `next/*` | 其他 app |
-| `apps/desktop/.../platform/` | `react-router-dom`、electron | 其他 app |
-| `apps/mobile/` | `@multica/core` 的类型和纯函数 | Web/Desktop 的 React 页面、store 和平台实现 |
+| `apps/mobile/` | `@multica/core` 的类型和纯函数 | 浏览器 Host 的 React 页面、store 和平台实现 |
 
-Web 和 Desktop 都有的逻辑，**必须**抽到共享包。"小段重复"也不算例外。Mobile 拥有独立的 UI、数据层和发布流程，只共享类型与纯函数。
+多个 Host 共用的逻辑，**必须**抽到共享包。"小段重复"也不算例外。Mobile 拥有独立的 UI、数据层和发布流程，只共享类型与纯函数。
 
 ### 文件与组件
 
@@ -76,7 +75,7 @@ Web 和 Desktop 都有的逻辑，**必须**抽到共享包。"小段重复"也�
 - 网络响应必须用 `packages/core/api/schema.ts` 中的 `parseWithFallback` 和 zod schema 解析，不能直接 `as T`
 - 新增或修改 endpoint 时，同步更新 schema，并覆盖字段缺失或格式错误的测试
 - 下游 UI 对可选字段提供默认值；服务端枚举的 `switch` 必须有 `default` 分支
-- 已安装的 Desktop 可能连接更新的 backend，不能假设前后端永远同版本
+- 客户端与服务端可能在不同时间发布，不能假设前后端永远同版本
 
 ### Runtime 显示名
 
@@ -276,13 +275,12 @@ i18next 用 `_one` / `_other`；中文不区分语法单复数，只填 `_other`
 - `inbox.empty.title`
 - `settings.preferences.language.title`
 
-### Web-only / Desktop-only 文案位置
+### Host 专属文案位置
 
 - 共享文案：放 namespace JSON 顶层
-- Web-only：放 `web` 段
-- Desktop-only：放 `desktop` 段
+- Host 专属：放以该 Host 命名的段
 
-参考 `auth.json`（`web` 段含 `prefer_desktop` / `desktop_handoff.*`）。
+除非整段交互只属于某个 Host，否则文案应保持在顶层共享。
 
 ---
 

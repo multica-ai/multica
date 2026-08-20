@@ -210,7 +210,6 @@ import type {
 import type { OnboardingCompletionPath } from "../onboarding/types";
 import type {
   CreateFeedbackResponse,
-  FeedbackContext,
   FeedbackKind,
 } from "../feedback/types";
 import type {
@@ -421,7 +420,7 @@ import {
  *  X-Client-OS so the backend can log, gate, or split metrics by client.
  *  See server/internal/middleware/client.go for the receiving end. */
 export interface ApiClientIdentity {
-  /** Logical client kind. Server expects: "web" | "desktop" | "cli" | "daemon". */
+  /** Logical client kind. Server expects: "web" | "cli" | "daemon". */
   platform?: string;
   /** Client/app version string (e.g. "0.1.0", git tag, commit). */
   version?: string;
@@ -1019,7 +1018,6 @@ export class ApiClient {
     url?: string;
     workspace_id?: string;
     kind?: FeedbackKind;
-    context?: FeedbackContext;
   }): Promise<CreateFeedbackResponse> {
     const raw = await this.fetch<unknown>("/api/feedback", {
       method: "POST",

@@ -82,7 +82,6 @@ make build            # server, CLI, migrate binary 빌드
 ```bash
 pnpm install
 pnpm dev:web
-pnpm dev:desktop
 pnpm build
 pnpm typecheck
 pnpm lint
@@ -110,13 +109,13 @@ make cli ARGS="issue list"
 
 ## 프런트엔드 기능 변경
 
-Web과 Desktop에 모두 필요한 기능은 역할에 따라 배치합니다.
+브라우저 호스트가 공유하는 기능은 역할에 따라 배치합니다.
 
 1. API 유형, query, mutation, 플랫폼 독립 로직은 `packages/core/`에 둡니다.
 2. 기본 UI는 `packages/ui/`에 두며 비즈니스 코드에 의존하면 안 됩니다.
 3. 비즈니스 페이지와 컴포넌트는 `packages/views/`에 둡니다.
-4. Next.js, Electron, 라우팅 adapter는 해당 app에 남깁니다.
-5. 공유 페이지는 Web과 Desktop 양쪽에 연결합니다.
+4. 프레임워크 전용 라우팅 adapter는 해당 app에 남깁니다.
+5. 공유 페이지는 사용하는 브라우저 호스트에 연결합니다.
 
 서버 데이터는 TanStack Query가 관리하고 필터, 초안, 레이아웃 같은 클라이언트 상태는 Zustand가 관리합니다. 구체적인 경계는 [프로젝트 아키텍처](/developers/architecture)와 루트 `CLAUDE.md`를 참고하세요.
 
@@ -141,7 +140,7 @@ Migration은 `server/migrations/`에 있고 query는 `server/pkg/db/queries/`에
 | --- | --- |
 | 공유 비즈니스 로직, query, store | `packages/core/*.test.ts` |
 | 공유 페이지와 컴포넌트 | `packages/views/*.test.tsx` |
-| Web 또는 Desktop 플랫폼 wiring | 해당 `apps/*` 디렉터리 |
+| 브라우저 호스트 플랫폼 wiring | 해당 `apps/*` 디렉터리 |
 | end-to-end 흐름 | `e2e/*.spec.ts` |
 | Backend | 관련 Go package의 `*_test.go` |
 

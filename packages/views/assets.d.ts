@@ -1,6 +1,6 @@
 // Asset imports — modern bundlers resolve these to a URL at build time,
 // but the exact shape differs between consumers:
-//   - electron-vite / plain vite: a `string` URL
+//   - Vite: a `string` URL
 //   - Next.js (apps/web): a `StaticImageData` object with `.src`, plus
 //     width/height/blurDataURL
 // Declare the union here so packages/views compiles in both contexts.

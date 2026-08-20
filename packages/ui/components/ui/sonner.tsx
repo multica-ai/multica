@@ -7,8 +7,8 @@ import { CircleCheckIcon, InfoIcon, TriangleAlertIcon, OctagonXIcon, Loader2Icon
 const Toaster = ({ ...props }: ToasterProps) => {
   // Use `resolvedTheme` (the concrete "light" / "dark" value) instead of
   // `theme` (which can be "system"). When we forward "system", sonner reads
-  // `prefers-color-scheme` itself, and the Electron renderer's media query
-  // can disagree with next-themes' `html.dark` class — that's why the toast
+  // `prefers-color-scheme` itself, which can disagree with next-themes'
+  // `html.dark` class — that's why the toast
   // sometimes rendered light on a dark UI.
   const { resolvedTheme = "system" } = useTheme()
 

@@ -99,10 +99,6 @@ var selfReloadProbeTimeout = 10 * time.Second
 //   - trySelfReload: notice that the binary on disk was replaced out of band
 //     and re-exec into it.
 //
-// Both are skipped entirely for Desktop-managed daemons: the Electron app ships
-// and replaces the CLI binary itself, so self-updating would be clobbered on
-// the next launch and re-execing would fight the app's own lifecycle.
-//
 // The GitHub half is additionally skipped when the operator opted out
 // (--no-auto-update / MULTICA_DAEMON_AUTO_UPDATE=false), when the server is
 // self-hosted (default-off, MUL-2381), or when the running version isn't a
@@ -114,11 +110,6 @@ var selfReloadProbeTimeout = 10 * time.Second
 // Each tick is silent on the happy path so the log stays uncluttered for users
 // who run the daemon for weeks at a time.
 func (d *Daemon) autoUpdateLoop(ctx context.Context) {
-	if d.cfg.LaunchedBy == "desktop" {
-		d.logger.Info("auto-update: skipped (managed by Desktop)")
-		return
-	}
-
 	pullEnabled := d.cfg.AutoUpdateEnabled
 	switch {
 	case !pullEnabled:

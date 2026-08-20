@@ -85,7 +85,6 @@ vi.mock("@multica/core/plugins", () => ({
 }));
 
 vi.mock("../../platform/open-external", () => ({ openExternal: mockOpenExternal }));
-vi.mock("../../platform/local-directory", () => ({ isDesktopShell: () => true }));
 
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({ queryKey: ["agents"] }),
@@ -284,7 +283,10 @@ describe("PluginsTab", () => {
         failure_policy: "optional",
       }),
     })));
-    expect(mockOpenExternal).toHaveBeenCalledWith("https://auth.example.test/authorize");
+    expect(mockOpenExternal).toHaveBeenCalledWith(
+      "https://auth.example.test/authorize",
+      { webTarget: "same-tab" },
+    );
 
     await user.click(screen.getByText("Advanced configuration"));
     expect(screen.getByLabelText("HTTPS endpoint")).toHaveValue("https://saved.example.test/mcp");

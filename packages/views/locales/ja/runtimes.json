@@ -13,7 +13,7 @@
     "filter_all_description": "このビューのすべてのランタイム",
     "empty": {
       "title": "まだランタイムがありません",
-      "hint": "デスクトップ版はこのコンピュータを自動でスキャンします。別のマシン — サーバー、開発用マシン、ターミナルのあるコンピュータ — を使うには、ここに追加してください。"
+      "hint": "「コンピューターを追加」を選び、対象マシンのターミナルでセットアップコマンドを実行します。"
     },
     "no_matches": {
       "title": "一致する結果なし",
@@ -21,10 +21,6 @@
       "with_query_filter_suffix": "(このフィルター内)",
       "no_query": "このフィルターに一致するランタイムがありません。",
       "try_widening": " 範囲を広げるか、フィルターをクリアしてみてください。"
-    },
-    "bootstrapping": {
-      "title": "ローカルランタイムを起動中…",
-      "hint": "通常は数秒かかります。デーモンがワークスペースに登録しています。"
     }
   },
   "mika_setup": {
@@ -252,8 +248,6 @@
   "update": {
     "cli_version_label": "CLI バージョン:",
     "version_unknown": "不明",
-    "managed_by_desktop": "デスクトップで管理",
-    "managed_by_desktop_title": "CLI バイナリは Multica Desktop で管理されています。CLI をアップグレードするには Desktop を更新してください。",
     "read_only": "読み取り専用",
     "read_only_title": "CLI を更新できるのは、ランタイムの所有者とワークスペース管理者のみです。",
     "local_build": "ローカルビルド",
@@ -291,7 +285,6 @@
     "col_cost": "コスト · 7 日",
     "col_cli": "CLI",
     "cost_delta_flat": "変化なし",
-    "cli_managed_badge": "デスクトップ",
     "row_actions_aria": "行の操作",
     "edit_action": "カスタムランタイムを編集",
     "delete_action": "削除",

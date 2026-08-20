@@ -41,7 +41,6 @@ _features
 /docs/
 /e2e/
 /server/
-/apps/desktop/
 /scripts/
 
 *.log
@@ -63,7 +62,6 @@ bin
 dist
 out
 build
-dist-electron
 
 # Deployment-only trims: tests and lint configs are not used by `next build`.
 **/__tests__/**

@@ -16,8 +16,7 @@ interface ResolvedDownload {
   resolveAttachment: (url: string) => Attachment | undefined;
   // Called by NodeView click handlers. Re-signs through `getAttachment` when
   // the URL maps to a known attachment; falls back to `openExternal` for
-  // external URLs so Electron still routes through the IPC bridge instead of
-  // letting `window.open` hit the `setWindowOpenHandler` deny path.
+  // external URLs so browser hosts can apply their own navigation policy.
   openByUrl: (url: string) => void;
 }
 

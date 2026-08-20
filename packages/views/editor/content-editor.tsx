@@ -430,7 +430,7 @@ const ContentEditor = forwardRef<ContentEditorRef, ContentEditorProps>(
     // Attachment.normalize() can't swap the persisted /api/attachments/<id>/
     // download URL to a freshly-loadable one, and the <img> renders broken in
     // any environment where the renderer's origin doesn't proxy /api to the
-    // API host (MUL-3192, Desktop/Electron).
+    // API host (MUL-3192).
     const [sessionUploads, setSessionUploads] = useState<Attachment[]>([]);
     // Wrap the caller-supplied uploader so we can stash each successful result
     // in `sessionUploads`. The wrapper is rebuilt only when the underlying

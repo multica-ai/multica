@@ -5,7 +5,7 @@ description: Understand browser sign-in sessions, personal access tokens, and th
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-In day-to-day use of Multica you mainly deal with two kinds of credentials: browser sign-in sessions and personal access tokens. Browser sessions serve web and Desktop; personal access tokens serve the CLI, the daemon, scripts, and the API.
+In day-to-day use of Multica you mainly deal with two kinds of credentials: browser sign-in sessions and personal access tokens. Browser sessions serve the web; personal access tokens serve the CLI, the daemon, scripts, and the API.
 
 ## Browser sign-in sessions
 
@@ -92,7 +92,7 @@ The server also recognizes two credentials used in internal or managed scenarios
 | `mcn_` | Multica Cloud Node connections | Multica Cloud Fleet |
 | `mdt_` | Workspace-scoped daemon authentication protocol | Internal server flows |
 
-Regular Cloud, self-hosted, and Desktop installations never need to create them manually. The user-side CLI and daemon always use `mul_` PATs; don't construct tokens with other prefixes yourself.
+Regular Cloud and self-hosted installations never need to create them manually. The user-side CLI and daemon always use `mul_` PATs; don't construct tokens with other prefixes yourself.
 
 ## Next steps
 

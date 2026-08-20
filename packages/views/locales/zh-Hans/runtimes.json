@@ -13,7 +13,7 @@
     "filter_all_description": "当前视图下的所有运行时",
     "empty": {
       "title": "还没有运行时",
-      "hint": "桌面端会自动扫描这台电脑。想把另一台电脑加进来——服务器、远程开发机，或任何能开终端的电脑——在这里添加。"
+      "hint": "点击“添加电脑”，然后在目标机器的终端运行设置命令。"
     },
     "no_matches": {
       "title": "无匹配",
@@ -21,10 +21,6 @@
       "with_query_filter_suffix": "（在当前筛选下）",
       "no_query": "当前筛选下没有匹配的运行时。",
       "try_widening": "试试放宽筛选或清除条件。"
-    },
-    "bootstrapping": {
-      "title": "正在启动本地运行时...",
-      "hint": "通常需要几秒钟。守护进程正在向工作区注册。"
     }
   },
   "mika_setup": {
@@ -252,8 +248,6 @@
   "update": {
     "cli_version_label": "CLI 版本：",
     "version_unknown": "未知",
-    "managed_by_desktop": "由桌面端管理",
-    "managed_by_desktop_title": "CLI 二进制由 Multica 桌面端管理——升级桌面端即可升级 CLI。",
     "read_only": "只读",
     "read_only_title": "只有运行时所有者和工作区管理员可以更新 CLI。",
     "local_build": "本地构建",
@@ -291,7 +285,6 @@
     "col_cost": "费用 · 7 天",
     "col_cli": "CLI",
     "cost_delta_flat": "持平",
-    "cli_managed_badge": "桌面端",
     "row_actions_aria": "行操作",
     "edit_action": "编辑自定义运行时",
     "delete_action": "删除",

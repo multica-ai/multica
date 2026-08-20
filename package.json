@@ -6,8 +6,6 @@
   "scripts": {
     "dev:web": "turbo dev --filter=@multica/web",
     "dev:docs": "turbo dev --filter=@multica/docs",
-    "dev:desktop": "turbo dev --filter=@multica/desktop",
-    "dev:desktop:staging": "turbo dev:staging --filter=@multica/desktop",
     "dev:mobile": "pnpm -C apps/mobile dev",
     "dev:mobile:staging": "pnpm -C apps/mobile dev:staging",
     "dev:mobile:prod": "pnpm -C apps/mobile dev:prod",
@@ -21,7 +19,7 @@
     "ios:mobile:device:prod:release": "pnpm -C apps/mobile ios:device:prod:release",
     "build": "turbo build --filter=!@multica/mobile",
     "typecheck": "turbo typecheck --filter=!@multica/mobile",
-    "test": "turbo test --filter=!@multica/mobile",
+    "test": "node --test scripts/desktop-retirement.test.mjs && turbo test --filter=!@multica/mobile",
     "lint": "turbo lint --filter=!@multica/mobile",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
@@ -32,10 +30,7 @@
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "electron"
-    ],
+    "onlyBuiltDependencies": ["esbuild"],
     "overrides": {
       "@types/react": "catalog:",
       "@types/react-dom": "catalog:",

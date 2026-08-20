@@ -38,8 +38,7 @@ archives:
         formats:
           - zip
     name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
-  # Versioned archive name used by current CLI / install scripts /
-  # desktop bootstrap going forward.
+  # Versioned archive name used by current CLI and install scripts.
   - id: versioned
     files:
       - LICENSE*

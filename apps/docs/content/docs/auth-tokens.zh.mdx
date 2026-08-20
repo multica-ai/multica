@@ -5,7 +5,7 @@ description: 了解浏览器登录、个人访问令牌，以及智能体执行�
 
 import { Callout } from "fumadocs-ui/components/callout";
 
-日常使用 Multica 时，你主要会接触两种凭据：浏览器登录会话和个人访问令牌。浏览器会话用于 Web 与 Desktop；个人访问令牌用于 CLI、守护进程、脚本和 API。
+日常使用 Multica 时，你主要会接触两种凭据：浏览器登录会话和个人访问令牌。浏览器会话用于 Web；个人访问令牌用于 CLI、守护进程、脚本和 API。
 
 ## 浏览器登录会话
 
@@ -92,7 +92,7 @@ curl https://api.multica.ai/api/issues \
 | `mcn_` | Multica Cloud Node 连接 | Multica Cloud Fleet |
 | `mdt_` | 工作区范围的守护进程认证协议 | 服务端内部流程 |
 
-普通 Cloud、自托管和 Desktop 安装都不需要手动创建它们。用户侧的 CLI 与守护进程始终使用 `mul_` PAT；不要自行构造其他前缀的令牌。
+普通 Cloud 和自托管安装都不需要手动创建它们。用户侧的 CLI 与守护进程始终使用 `mul_` PAT；不要自行构造其他前缀的令牌。
 
 ## 接下来
 

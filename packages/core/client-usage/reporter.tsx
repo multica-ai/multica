@@ -29,8 +29,7 @@ export function ClientUsageReporter({
   const reportIfNeeded = useCallback(async () => {
     const platform = identity?.platform;
     const activeUserID = userIDRef.current;
-    if (!activeUserID || (platform !== "web" && platform !== "desktop"))
-      return;
+    if (!activeUserID || platform !== "web") return;
     if (inFlight.current) {
       rerun.current = true;
       return;

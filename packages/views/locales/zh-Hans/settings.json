@@ -109,28 +109,94 @@
       "navigation": "导航"
     },
     "actions": {
-      "openSearch": { "label": "打开搜索", "description": "随时搜索内容或运行命令。" },
-      "createIssue": { "label": "新建任务", "description": "打开你常用的任务创建流程。" },
-      "toggleSidebar": { "label": "显示或隐藏侧边栏", "description": "切换主侧边栏的显示状态。" },
-      "toggleChat": { "label": "显示或隐藏聊天窗", "description": "打开或关闭悬浮聊天窗，打开时自动聚焦输入框。" },
-      "findInIssue": { "label": "在任务中查找", "description": "搜索当前打开的任务详情。" },
-      "openThreadNav": { "label": "打开讨论导航", "description": "列出、搜索并跳转当前任务的评论讨论。" },
-      "archiveInboxItem": { "label": "归档通知", "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。" },
-      "send": { "label": "发送", "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建任务。" },
-      "goBack": { "label": "后退", "description": "像浏览器一样在历史记录中后退。" },
-      "goForward": { "label": "前进", "description": "像浏览器一样在历史记录中前进。" },
-      "goInbox": { "label": "前往收件箱", "description": "打开工作区收件箱。" },
-      "goChat": { "label": "前往聊天", "description": "打开工作区聊天。" },
-      "goMyIssues": { "label": "前往我的任务", "description": "打开分配给你的任务。" },
-      "goIssues": { "label": "前往任务", "description": "打开任务列表。" },
-      "goProjects": { "label": "前往项目", "description": "打开项目列表。" },
-      "goAutopilots": { "label": "前往自动化", "description": "打开工作区自动化。" },
-      "goAgents": { "label": "前往智能体", "description": "打开智能体列表。" },
-      "goSquads": { "label": "前往小队", "description": "打开小队列表。" },
-      "goUsage": { "label": "前往用量", "description": "打开用量分析。" },
-      "goRuntimes": { "label": "前往运行时", "description": "打开运行时配置。" },
-      "goSkills": { "label": "前往 Skills", "description": "打开 skill 库。" },
-      "goSettings": { "label": "前往设置", "description": "打开工作区设置。" }
+      "openSearch": {
+        "label": "打开搜索",
+        "description": "随时搜索内容或运行命令。"
+      },
+      "createIssue": {
+        "label": "新建任务",
+        "description": "打开你常用的任务创建流程。"
+      },
+      "toggleSidebar": {
+        "label": "显示或隐藏侧边栏",
+        "description": "切换主侧边栏的显示状态。"
+      },
+      "toggleChat": {
+        "label": "显示或隐藏聊天窗",
+        "description": "打开或关闭悬浮聊天窗，打开时自动聚焦输入框。"
+      },
+      "findInIssue": {
+        "label": "在任务中查找",
+        "description": "搜索当前打开的任务详情。"
+      },
+      "openThreadNav": {
+        "label": "打开讨论导航",
+        "description": "列出、搜索并跳转当前任务的评论讨论。"
+      },
+      "archiveInboxItem": {
+        "label": "归档通知",
+        "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。"
+      },
+      "send": {
+        "label": "发送",
+        "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建任务。"
+      },
+      "goBack": {
+        "label": "后退",
+        "description": "像浏览器一样在历史记录中后退。"
+      },
+      "goForward": {
+        "label": "前进",
+        "description": "像浏览器一样在历史记录中前进。"
+      },
+      "goInbox": {
+        "label": "前往收件箱",
+        "description": "打开工作区收件箱。"
+      },
+      "goChat": {
+        "label": "前往聊天",
+        "description": "打开工作区聊天。"
+      },
+      "goMyIssues": {
+        "label": "前往我的任务",
+        "description": "打开分配给你的任务。"
+      },
+      "goIssues": {
+        "label": "前往任务",
+        "description": "打开任务列表。"
+      },
+      "goProjects": {
+        "label": "前往项目",
+        "description": "打开项目列表。"
+      },
+      "goAutopilots": {
+        "label": "前往自动化",
+        "description": "打开工作区自动化。"
+      },
+      "goAgents": {
+        "label": "前往智能体",
+        "description": "打开智能体列表。"
+      },
+      "goSquads": {
+        "label": "前往小队",
+        "description": "打开小队列表。"
+      },
+      "goUsage": {
+        "label": "前往用量",
+        "description": "打开用量分析。"
+      },
+      "goRuntimes": {
+        "label": "前往运行时",
+        "description": "打开运行时配置。"
+      },
+      "goSkills": {
+        "label": "前往 Skills",
+        "description": "打开 skill 库。"
+      },
+      "goSettings": {
+        "label": "前往设置",
+        "description": "打开工作区设置。"
+      }
     },
     "fixed": {
       "title": "固定的系统快捷键",
@@ -206,9 +272,9 @@
       "labels": "标签",
       "properties": "属性",
       "quick_actions": "快捷操作",
-    "plugins": "Plugins",
-    "mcp": "MCP",
-    "billing": "账单与套餐"
+      "plugins": "Plugins",
+      "mcp": "MCP",
+      "billing": "账单与套餐"
     }
   },
   "plugins": {
@@ -983,25 +1049,6 @@
     "manage_hint": "只有管理员和所有者可以管理代码仓库。",
     "toast_saved": "已保存代码仓库",
     "toast_save_failed": "保存代码仓库失败"
-  },
-  "desktop": {
-    "tabs": {
-      "updates": "更新"
-    },
-    "updates": {
-      "title": "更新",
-      "description": "控制后台自动更新，或手动检查新版本。",
-      "current_version": "当前版本",
-      "automatic_updates_title": "后台自动更新",
-      "automatic_updates_description": "开启后，桌面端会在启动后和每小时检查更新，并在后台下载可用版本。",
-      "automatic_updates_save_failed": "保存自动更新设置失败",
-      "check_section_title": "检查更新",
-      "check_section_description": "无论是否开启自动更新，都立即检查新版本。可用的更新会在后台下载，就绪时弹出重启提示。",
-      "up_to_date": "已是最新版本。",
-      "downloading": "v{{version}} 正在后台下载——准备好安装时会通知你。",
-      "check_now": "立即检查",
-      "checking": "检查中..."
-    }
   },
   "members": {
     "section_title": "成员（{{count}}）",

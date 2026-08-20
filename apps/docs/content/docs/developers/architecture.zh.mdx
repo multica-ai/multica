@@ -6,7 +6,7 @@ description: 了解 Multica 的客户端、Go 服务、执行守护进程和共�
 Multica 由一个 Go backend、多种客户端和运行在执行电脑上的守护进程组成。PostgreSQL 保存协作数据；守护进程领取 task，并调用本机的 AI 编程工具。
 
 ```text
-Web / Desktop / Mobile / CLI
+Web / Tag / Mobile / CLI
              │
        HTTP + WebSocket
              │
@@ -25,33 +25,31 @@ Web / Desktop / Mobile / CLI
 | --- | --- | --- |
 | `server/` | API、认证、任务调度、集成、CLI 和守护进程 | Go、Chi、sqlc、gorilla/websocket |
 | `apps/web/` | 浏览器客户端和 landing page | Next.js App Router |
-| `apps/desktop/` | 桌面客户端和本机进程管理 | Electron、electron-vite |
 | `apps/mobile/` | 独立的 iOS 客户端 | Expo、React Native |
 | `apps/docs/` | 多语言文档站 | Next.js、Fumadocs |
 | `packages/core/` | API client、类型、查询、mutation 和平台无关业务逻辑 | TanStack Query、Zustand |
 | `packages/ui/` | 不包含业务逻辑的基础 UI | shadcn、Base UI |
-| `packages/views/` | Web 与 Desktop 共用的业务页面和组件 | React |
+| `packages/views/` | 浏览器 Host 共用的业务页面和组件 | React |
 | `packages/tsconfig/`、`packages/eslint-config/` | 共享工具配置 | TypeScript、ESLint |
 
 共享包直接导出 `.ts` 和 `.tsx` 源文件，由使用它们的应用编译。依赖方向是 `views → core + ui`；`core` 和 `ui` 互不依赖。
 
-## Web 与 Desktop 的代码共享
+## 浏览器 Host 的代码共享
 
-Web 和 Desktop 共用三层：
+Web 和 Tag 共用三层：
 
 1. `packages/core` 处理 API、缓存、权限和平台无关状态；
 2. `packages/ui` 提供基础组件；
 3. `packages/views` 组合业务页面。
 
-路由、cookie 和 Electron IPC 等平台能力留在应用层。共享页面通过 `NavigationAdapter` 导航，不直接导入 `next/*` 或 `react-router-dom`。
+路由和 cookie 等平台能力留在应用层。共享页面通过 `NavigationAdapter` 导航，不直接导入框架专用的路由 API。
 
-例如，一项 Web 与 Desktop 都需要的 issue 功能通常会涉及：
+例如，一项浏览器 Host 共用的 issue 功能通常会涉及：
 
 ```text
 packages/core/issues/      查询、mutation、缓存更新
 packages/views/issues/     页面和业务组件
 apps/web/platform/         Next.js 路由适配
-apps/desktop/.../platform/ Electron 路由适配
 ```
 
 Mobile 不复用这些 React 页面。它可以导入 `@multica/core` 的类型和纯函数，但拥有自己的 UI、query key、状态、实时订阅和发布流程。
@@ -67,7 +65,7 @@ Mobile 不复用这些 React 页面。它可以导入 `@multica/core` 的类型�
 
 WebSocket 事件应更新或失效 TanStack Query cache，不能把服务端对象复制进 Zustand。创建、删除或离开工作区这类会导航的 mutation，需要等待服务端确认后再清理本地状态。
 
-API 返回值在 `packages/core/api/` 边界通过 zod schema 解析。已安装的 Desktop 可能连接更新的 backend，因此不能直接把网络 JSON 强制转换成 TypeScript 类型。
+API 返回值在 `packages/core/api/` 边界通过 zod schema 解析。客户端与服务端可能在不同时间发布，因此不能直接把网络 JSON 强制转换成 TypeScript 类型。
 
 ## Backend 分层
 

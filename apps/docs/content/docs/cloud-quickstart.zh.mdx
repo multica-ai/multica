@@ -11,17 +11,13 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 1. 登录，进入工作区
 
-用 Web（[multica.ai](https://multica.ai)）或 [Multica Desktop](https://multica.ai/download) 登录，支持邮箱验证码和 Google。
-
-- **Desktop**：可以自动连接这台电脑。
-- **Web**：需要在下一步通过命令行连接。
+在 Web（[multica.ai](https://multica.ai)）登录，支持邮箱验证码和 Google。下一步通过命令行连接电脑。
 
 ## 2. 连接一台电脑
 
 智能体在你连接的电脑上执行工作。打开侧边栏底部的 **配置 → 运行时**：
 
-- **用 Desktop**：Desktop 会自动把这台电脑注册为运行时，并检测已安装的 AI 编程工具。刚安装的工具，点"刷新"重新检测。
-- **用 Web，或需要添加另一台电脑**：点右上角的 **添加电脑**，在目标电脑的终端里运行弹窗给出的两条命令：
+- 点右上角的 **添加电脑**，在目标电脑的终端里运行弹窗给出的两条命令：
 
   **macOS / Linux**
 
@@ -82,8 +78,8 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 | 现象 | 先检查什么 |
 |---|---|
-| 没有找到运行时 | 确认 AI 编程工具已经安装并能在终端中运行。Desktop 点"刷新"；CLI 方式重新运行 `multica setup`。 |
-| 运行时显示离线 | Desktop 保持打开；CLI 方式运行 `multica daemon status`，未启动时运行 `multica daemon start`。 |
+| 没有找到运行时 | 确认 AI 编程工具已经安装并能在终端中运行，然后重新运行 `multica setup`。 |
+| 运行时显示离线 | 运行 `multica daemon status`，未启动时运行 `multica daemon start`。 |
 | issue 一直排队 | 确认智能体使用的运行时在线。运行时达到并发上限时，新任务会继续排队。 |
 
 更多情况见[故障排查](/troubleshooting)。

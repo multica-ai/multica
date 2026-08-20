@@ -11,17 +11,13 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 1. 로그인하고 워크스페이스 열기
 
-Web([multica.ai](https://multica.ai)) 또는 [Multica Desktop](https://multica.ai/download)에서 로그인합니다. 이메일 인증 코드와 Google 로그인을 지원합니다.
-
-- **Desktop**: 현재 컴퓨터를 자동으로 연결할 수 있습니다.
-- **Web**: 다음 단계에서 명령줄을 통해 연결해야 합니다.
+Web([multica.ai](https://multica.ai))에서 로그인합니다. 이메일 인증 코드와 Google 로그인을 지원합니다. 다음 단계에서 명령줄을 통해 컴퓨터를 연결합니다.
 
 ## 2. 컴퓨터 연결
 
 에이전트는 연결된 컴퓨터에서 작업을 실행합니다. 사이드바 아래쪽의 **설정 → 런타임**을 엽니다.
 
-- **Desktop 사용**: Desktop이 이 컴퓨터를 런타임으로 자동 등록하고 설치된 AI 코딩 도구를 감지합니다. 도구를 방금 설치했다면 "새로고침"을 클릭해 다시 감지하세요.
-- **Web을 사용하거나 다른 컴퓨터를 추가해야 하는 경우**: 오른쪽 위의 **컴퓨터 추가**를 클릭하고 대상 컴퓨터의 터미널에서 팝업에 표시된 두 명령을 실행합니다.
+- 오른쪽 위의 **컴퓨터 추가**를 클릭하고 대상 컴퓨터의 터미널에서 팝업에 표시된 두 명령을 실행합니다.
 
   **macOS / Linux**
 
@@ -82,8 +78,8 @@ Web([multica.ai](https://multica.ai)) 또는 [Multica Desktop](https://multica.a
 
 | 증상 | 먼저 확인할 사항 |
 |---|---|
-| 런타임을 찾지 못함 | AI 코딩 도구가 설치되어 있고 터미널에서 실행되는지 확인합니다. Desktop에서는 "새로고침"을 클릭하고 CLI 방식에서는 `multica setup`을 다시 실행합니다. |
-| 런타임이 오프라인으로 표시됨 | Desktop을 계속 열어 둡니다. CLI 방식에서는 `multica daemon status`를 실행하고 시작되지 않았다면 `multica daemon start`를 실행합니다. |
+| 런타임을 찾지 못함 | AI 코딩 도구가 설치되어 있고 터미널에서 실행되는지 확인한 뒤 `multica setup`을 다시 실행합니다. |
+| 런타임이 오프라인으로 표시됨 | `multica daemon status`를 실행하고 시작되지 않았다면 `multica daemon start`를 실행합니다. |
 | 이슈가 계속 큐에서 대기함 | 에이전트가 사용하는 런타임이 온라인인지 확인합니다. 런타임이 동시 실행 상한에 도달하면 새 태스크는 계속 대기합니다. |
 
 더 많은 경우는 [문제 해결](/troubleshooting)을 참고하세요.

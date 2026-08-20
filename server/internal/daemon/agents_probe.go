@@ -79,7 +79,7 @@ func cachedShellResolvedAgents() map[string]string {
 // This is pure discovery: no version detection and no minimum-version gate
 // (detectBuiltinRuntimes owns those, per registration round). The result is
 // therefore the machine's *availability* set, which is exactly what
-// /health.agents reports and what `multica daemon probe-runtimes` prints.
+// /health.agents reports.
 //
 // It is called once from LoadConfig at startup and again from the periodic
 // workspace sync (refreshAgentAvailability), so a CLI the user installs while
@@ -90,7 +90,7 @@ func cachedShellResolvedAgents() map[string]string {
 // A var so tests can stub discovery without installing real CLIs.
 var probeAgentCLIs = func() map[string]AgentEntry {
 	// Probe available agent CLIs. exec.LookPath is the primary path, but on
-	// macOS/Linux a GUI-launched daemon (Electron, Launchpad) does not
+	// macOS/Linux a GUI-launched daemon does not
 	// inherit the user's interactive shell PATH — fnm/nvm/volta multishells,
 	// the Anthropic native installer prefix, and per-user npm prefixes all
 	// live in dirs that only get added to PATH by ~/.zshrc or ~/.bashrc.

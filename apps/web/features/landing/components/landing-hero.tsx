@@ -49,7 +49,7 @@ export function LandingHero() {
                 className={heroButtonClassName("ghost")}
               >
                 <Download className="size-4" aria-hidden />
-                {t.hero.downloadDesktop}
+                {t.hero.installCli}
               </Link>
               <Link
                 href="/contact-sales"

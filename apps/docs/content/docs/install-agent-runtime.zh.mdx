@@ -74,7 +74,7 @@ Get-Command <command>
 
 把 `<command>` 换成表格中的命令，例如 `claude`、`codex` 或 `cursor-agent`。第一条命令返回可执行文件路径。
 
-如果终端能够找到工具，但 Desktop 或后台守护进程找不到，通常是两者使用的 `PATH` 不同。可以重启应用，或通过对应的 `MULTICA_<PROVIDER>_PATH` 环境变量指定绝对路径；完整配置见[环境变量](/environment-variables#守护进程配置)。
+如果终端能够找到工具，但后台守护进程找不到，通常是两者使用的 `PATH` 不同。可以重启守护进程，或通过对应的 `MULTICA_<PROVIDER>_PATH` 环境变量指定绝对路径；完整配置见[环境变量](/environment-variables#守护进程配置)。
 
 ## 4. 重新检测并确认上线
 
@@ -90,7 +90,7 @@ multica daemon start
 multica daemon restart
 ```
 
-使用 Multica Desktop 时，退出并重新打开应用即可。
+运行 `multica daemon restart` 以重新检测工具。
 
 然后打开 Multica 的**运行时**页面。目标电脑下面会出现对应工具，并显示为在线。现在可以在创建或编辑智能体时选择这条运行时。
 

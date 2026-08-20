@@ -147,11 +147,11 @@ function normalize(
     // pass so a site-relative `/api/attachments/...` or `/uploads/...`
     // path becomes a proper origin-bearing URL when the renderer's
     // document origin doesn't proxy /api or /uploads to the API host
-    // (Electron desktop, mobile webview). Web with a same-origin
+    // (for example, a mobile webview). Web with a same-origin
     // proxy keeps `apiBaseUrl=""` and the helper is a no-op there.
     // See MUL-3192 — quick-create modal regressed because the freshly-
-    // uploaded image URL stayed site-relative and Electron's renderer
-    // origin (file://) couldn't load it.
+    // uploaded image URL stayed site-relative and a distinct renderer
+    // origin couldn't load it.
     url: absolutizeMediaURL(
       record ? pickInlineMediaURL(record, input.url, cdnDomain, cdnSigned) : input.url,
     ),
@@ -172,7 +172,7 @@ function normalize(
 // so new content already loads natively on every client. This helper only
 // matters for content written BEFORE MUL-3192 — those bodies still carry
 // the old relative shape, and rendering them on a surface whose document
-// origin is NOT the API host (Electron desktop, mobile webview) needs the
+// origin is NOT the API host (for example, a mobile webview) needs the
 // API base URL pinned in at render time.
 //
 // On web, `api.getBaseUrl()` is empty (the Next.js rewrite proxies /api/*

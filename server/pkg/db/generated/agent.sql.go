@@ -5046,7 +5046,7 @@ WHERE a.workspace_id = $1
 //   - Each agent's most recent OUTCOME task (completed / failed) — NOT part of
 //     presence since #1823; it is the "last activity" line the Squad hover card
 //     renders (agent-live-peek-card.tsx). Kept in this response because shipped
-//     desktop builds read it from here; see MUL-5436 for the plan to move it to
+//     older clients read it from here; see MUL-5436 for the plan to move it to
 //     a dedicated lazy endpoint.
 //
 // Cancelled tasks are excluded from the outcome half on purpose: cancel is a

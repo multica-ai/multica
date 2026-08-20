@@ -8,7 +8,7 @@ import (
 // Client metadata context keys.
 //
 // Populated by ClientMetadata middleware from X-Client-Platform / X-Client-Version /
-// X-Client-OS request headers. Sent by every first-party client (Web, Desktop, CLI,
+// X-Client-OS request headers. Sent by every first-party client (Web, CLI,
 // Daemon) so the server can split logs / metrics / gating decisions by caller
 // without having to reverse-engineer User-Agent strings or upgrade payloads.
 //

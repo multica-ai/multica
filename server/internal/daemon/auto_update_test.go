@@ -230,10 +230,6 @@ func TestAutoUpdateLoop_EarlyExits(t *testing.T) {
 			cfg:  Config{AutoUpdateEnabled: false, CLIVersion: "v0.1.13"},
 		},
 		{
-			name: "managed by desktop",
-			cfg:  Config{AutoUpdateEnabled: true, CLIVersion: "v0.1.13", LaunchedBy: "desktop"},
-		},
-		{
 			name: "dev build",
 			cfg:  Config{AutoUpdateEnabled: true, CLIVersion: "v0.1.13-235-gabcdef0"},
 		},

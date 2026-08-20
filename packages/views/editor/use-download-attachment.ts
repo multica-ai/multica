@@ -7,10 +7,6 @@ import { useWorkspaceSlug } from "@multica/core/paths";
 import { resolvePublicFileUrl } from "@multica/core/workspace/avatar-url";
 import { useT } from "../i18n";
 
-interface DesktopBridge {
-  downloadURL?: (u: string) => Promise<void> | void;
-}
-
 function attachmentDownloadEndpoint(
   attachmentId: string,
   workspaceSlug: string,
@@ -79,23 +75,12 @@ function triggerBrowserDownload(url: string): void {
   anchor.remove();
 }
 
-// Detected at call time, not module load — the bridge is injected by the
-// Electron preload after `window` exists, and reading it lazily lets the
-// same hook work in both renderers without a build-time fork.
-function hasDesktopDownloadBridge(): boolean {
-  if (typeof window === "undefined") return false;
-  const bridge = (window as unknown as { desktopAPI?: DesktopBridge }).desktopAPI;
-  return Boolean(bridge?.downloadURL);
-}
-
 /**
  * Returns a callback that downloads an attachment by ID. The Web path uses
  * the unified server endpoint directly instead of opening a blank tab or
  * materializing the file as a Blob in renderer memory.
  *
- * Two execution shapes, picked at call time:
- *
- * - **Web**: refreshes attachment metadata (for the existing error-feedback
+ * It refreshes attachment metadata (for the existing error-feedback
  *   path and to read the download URLs), then clicks a temporary anchor. It
  *   prefers `attachment_download_url` — the credential-free URL that forces
  *   Content-Disposition: attachment in every storage mode — then the #6092
@@ -104,12 +89,6 @@ function hasDesktopDownloadBridge(): boolean {
  *   that predates both. Either way the backend owns CloudFront / S3 presign /
  *   proxy selection, so large files stay in the browser's native download
  *   pipeline.
- *
- * - **Desktop**: uses `desktopAPI.downloadURL()` which invokes Electron's
- *   native `webContents.downloadURL()`, showing a save dialog and saving
- *   the file directly. This avoids the system browser entirely and fixes
- *   the Linux/Ubuntu issue where HTML files are rendered inline instead
- *   of being downloaded.
  */
 export function useDownloadAttachment(): (attachmentId: string) => Promise<void> {
   const { t } = useT("editor");
@@ -117,34 +96,6 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
   return useCallback(
     async (attachmentId: string) => {
       const failed = () => toast.error(t(($) => $.attachment.download_failed));
-
-      if (hasDesktopDownloadBridge()) {
-        try {
-          const fresh = await api.getAttachment(attachmentId);
-          // Prefer the forced-attachment URL (Content-Disposition: attachment in
-          // every storage mode) so the native save writes the file rather than
-          // opening media inline; fall back to the load-intent `download_url` for
-          // a server that predates the field. Either may be server-relative (the
-          // proxy capability) or absolute (CloudFront / S3 presigned); Electron's
-          // main-side `downloadURLSafely` requires `new URL()` to parse to
-          // http/https, so resolve against the configured API base before we
-          // cross the bridge. Absolute URLs pass through unchanged.
-          const downloadUrl = resolvePublicFileUrl(
-            fresh.attachment_download_url || fresh.download_url,
-          );
-          if (!downloadUrl) {
-            failed();
-            return;
-          }
-          const bridge = (
-            window as unknown as { desktopAPI?: DesktopBridge }
-          ).desktopAPI;
-          await bridge!.downloadURL!(downloadUrl);
-        } catch {
-          failed();
-        }
-        return;
-      }
 
       try {
         // The preflight metadata request is both the permission check (so API

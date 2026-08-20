@@ -6,7 +6,7 @@ description: Learn how Multica's clients, Go service, execution daemon, and shar
 Multica consists of a Go backend, multiple clients, and a daemon that runs on execution computers. PostgreSQL stores collaboration data; the daemon claims tasks and invokes local AI coding tools.
 
 ```text
-Web / Desktop / Mobile / CLI
+Web / Tag / Mobile / CLI
              │
        HTTP + WebSocket
              │
@@ -25,33 +25,31 @@ For a product-facing explanation, see [How Multica works](/how-multica-works). T
 | --- | --- | --- |
 | `server/` | API, authentication, task scheduling, integrations, CLI, and daemon | Go, Chi, sqlc, gorilla/websocket |
 | `apps/web/` | Browser client and landing page | Next.js App Router |
-| `apps/desktop/` | Desktop client and local process management | Electron, electron-vite |
 | `apps/mobile/` | Standalone iOS client | Expo, React Native |
 | `apps/docs/` | Multilingual documentation site | Next.js, Fumadocs |
 | `packages/core/` | API client, types, queries, mutations, and platform-independent business logic | TanStack Query, Zustand |
 | `packages/ui/` | Foundational UI with no business logic | shadcn, Base UI |
-| `packages/views/` | Business pages and components shared by Web and Desktop | React |
+| `packages/views/` | Business pages and components shared by browser hosts | React |
 | `packages/tsconfig/`, `packages/eslint-config/` | Shared tooling configuration | TypeScript, ESLint |
 
 Shared packages export `.ts` and `.tsx` source files directly and are compiled by their consuming applications. The dependency direction is `views → core + ui`; `core` and `ui` do not depend on each other.
 
-## Code sharing between Web and Desktop
+## Code sharing between browser hosts
 
-Web and Desktop share three layers:
+Web and Tag share three layers:
 
 1. `packages/core` handles APIs, caching, permissions, and platform-independent state.
 2. `packages/ui` provides foundational components.
 3. `packages/views` composes business pages.
 
-Platform capabilities such as routing, cookies, and Electron IPC stay in the application layer. Shared pages navigate through `NavigationAdapter` and do not import `next/*` or `react-router-dom` directly.
+Platform capabilities such as routing and cookies stay in the application layer. Shared pages navigate through `NavigationAdapter` and do not import framework-specific routing APIs directly.
 
-For example, an issue feature needed by both Web and Desktop usually touches:
+For example, an issue feature used by browser hosts usually touches:
 
 ```text
 packages/core/issues/      queries, mutations, cache updates
 packages/views/issues/     pages and business components
 apps/web/platform/         Next.js routing adapter
-apps/desktop/.../platform/ Electron routing adapter
 ```
 
 Mobile does not reuse these React pages. It may import types and pure functions from `@multica/core`, but it owns its UI, query keys, state, realtime subscriptions, and release process.
@@ -67,7 +65,7 @@ Server data and client state are managed separately:
 
 WebSocket events should update or invalidate the TanStack Query cache. Do not copy server objects into Zustand. Mutations that navigate, such as creating, deleting, or leaving a workspace, must wait for server confirmation before clearing local state.
 
-API responses are parsed with zod schemas at the `packages/core/api/` boundary. An installed Desktop client may connect to a newer backend, so network JSON must not be asserted directly as a TypeScript type.
+API responses are parsed with zod schemas at the `packages/core/api/` boundary. Clients and servers may be deployed at different times, so network JSON must not be asserted directly as a TypeScript type.
 
 ## Backend layers
 

@@ -596,12 +596,9 @@ func TestHealthHandlerReportsProfileIdentity(t *testing.T) {
 
 	t.Run("named profile reports its name", func(t *testing.T) {
 		t.Parallel()
-		raw := rawHealth(t, Config{Profile: "desktop-api.multica.ai", LaunchedBy: "desktop"})
-		if got, want := raw["profile"], "desktop-api.multica.ai"; got != want {
+		raw := rawHealth(t, Config{Profile: "api.multica.ai"})
+		if got, want := raw["profile"], "api.multica.ai"; got != want {
 			t.Errorf("profile key: got %v, want %q", got, want)
-		}
-		if got, want := raw["launched_by"], "desktop"; got != want {
-			t.Errorf("launched_by key: got %v, want %q", got, want)
 		}
 	})
 
@@ -621,13 +618,4 @@ func TestHealthHandlerReportsProfileIdentity(t *testing.T) {
 		}
 	})
 
-	// launched_by is display-only, so absence and empty mean the same thing
-	// and omitempty keeps a standalone daemon's payload unchanged.
-	t.Run("standalone daemon omits launched_by", func(t *testing.T) {
-		t.Parallel()
-		raw := rawHealth(t, Config{Profile: "dev"})
-		if _, ok := raw["launched_by"]; ok {
-			t.Errorf("launched_by should be omitted for a standalone daemon, got %v", raw["launched_by"])
-		}
-	})
 }

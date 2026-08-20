@@ -283,42 +283,6 @@ func TestDaemonStatusReportsPortConflictInsteadOfClaimingItsOwn(t *testing.T) {
 	})
 }
 
-func TestDaemonStatusShowsWhoManagesTheDaemon(t *testing.T) {
-	t.Run("desktop-managed daemon says so", func(t *testing.T) {
-		clearDaemonTaskEnv(t)
-		mkProfiles(t, "desk-managed-test")
-		serveHealthAs(t, "desk-managed-test", map[string]any{
-			"profile": "desk-managed-test", "launched_by": "desktop",
-		})
-
-		out, err := captureStdout(t, func() error {
-			return runDaemonStatus(daemonStatusCmdFor(t, "desk-managed-test", ""), nil)
-		})
-		if err != nil {
-			t.Fatalf("runDaemonStatus = %v, want nil", err)
-		}
-		if !strings.Contains(out, "Managed by") || !strings.Contains(out, "Desktop") {
-			t.Errorf("stdout = %q, want it to say the Desktop app manages this daemon", out)
-		}
-	})
-
-	t.Run("standalone daemon output is unchanged", func(t *testing.T) {
-		clearDaemonTaskEnv(t)
-		mkProfiles(t, "standalone")
-		serveHealthAs(t, "standalone", map[string]any{"profile": "standalone"})
-
-		out, err := captureStdout(t, func() error {
-			return runDaemonStatus(daemonStatusCmdFor(t, "standalone", ""), nil)
-		})
-		if err != nil {
-			t.Fatalf("runDaemonStatus = %v, want nil", err)
-		}
-		if strings.Contains(out, "Managed by") {
-			t.Errorf("stdout = %q, a standalone daemon must not grow a Managed by row", out)
-		}
-	})
-}
-
 // Inside a daemon-managed task the health port is injected by the host daemon
 // rather than derived from a profile hash, so there is no collision to detect.
 // The task's own profile is necessarily empty (--profile is rejected there),
@@ -331,7 +295,7 @@ func TestDaemonStatusInTaskContextReportsNamedProfileHost(t *testing.T) {
 		clearDaemonTaskEnv(t)
 		mkProfiles(t)
 		stub := serveHealthAs(t, "host-named-profile", map[string]any{
-			"profile": "host-named-profile", "launched_by": "desktop",
+			"profile": "host-named-profile",
 		})
 		t.Setenv("MULTICA_TASK_ID", "task-test")
 		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(stub.port))

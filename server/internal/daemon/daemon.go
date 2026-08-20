@@ -1943,7 +1943,6 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
 		"gc_enabled", d.cfg.GCEnabled,
 		"auto_update", d.cfg.AutoUpdateEnabled,
-		"launched_by", d.cfg.LaunchedBy,
 	)
 
 	// Mark the daemon-owned workspaces tree before any task runs. A sandbox
@@ -1962,7 +1961,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 	}
 
 	// Bind and serve the health port before the (potentially slow) preflight,
-	// so `daemon start` and the desktop see a live "starting" daemon instead
+	// so `daemon start` and browser clients see a live "starting" daemon instead
 	// of connection-refused while preflightAuth runs. preflightAuth's initial
 	// workspace sync detects every configured agent's version by exec'ing it,
 	// which on a cold cache with many agents takes ~20s. Liveness (port up) and
@@ -2627,7 +2626,6 @@ func (d *Daemon) registerRuntimesForWorkspaceBatchLocked(ctx context.Context, wo
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
-		"launched_by":       d.cfg.LaunchedBy,
 		"runtimes":          runtimes,
 		"failed_profiles":   failedProfiles,
 	}
@@ -2672,7 +2670,6 @@ func (d *Daemon) registerBuiltinRuntimesForWorkspaceLocked(ctx context.Context, 
 		"legacy_daemon_ids": d.cfg.LegacyDaemonIDs,
 		"device_name":       d.cfg.DeviceName,
 		"cli_version":       d.cfg.CLIVersion,
-		"launched_by":       d.cfg.LaunchedBy,
 		"runtimes":          runtimes,
 		// Deliberately empty: this call carries no profiles, so it must not
 		// report profile failures either.
@@ -4298,19 +4295,6 @@ func (d *Daemon) reportRuntimeResultWithRetry(ctx context.Context, kind, runtime
 
 // handleUpdate performs the CLI update when triggered by the server via heartbeat.
 func (d *Daemon) handleUpdate(ctx context.Context, runtimeID string, update *PendingUpdate) {
-	// Desktop-managed daemons share their CLI binary with the Electron app,
-	// which is responsible for shipping and replacing it. Letting the daemon
-	// self-update would just get overwritten on the next Desktop launch and
-	// could brick the embedded binary mid-update. Refuse cleanly.
-	if d.cfg.LaunchedBy == "desktop" {
-		d.logger.Info("refusing CLI self-update: daemon is managed by Desktop", "runtime_id", runtimeID, "update_id", update.ID)
-		d.reportUpdateResult(ctx, runtimeID, update.ID, map[string]any{
-			"status": "failed",
-			"error":  "CLI is managed by Multica Desktop — update the Desktop app to upgrade the CLI",
-		})
-		return
-	}
-
 	switch d.tryBeginServerUpdate(ctx) {
 	case serverUpdateAlreadyRunning:
 		d.logger.Warn("update deferred: another update is already in progress", "runtime_id", runtimeID, "update_id", update.ID)

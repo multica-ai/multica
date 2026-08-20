@@ -56,11 +56,10 @@ func TestDaemonLocalCommandsFailClosedInTaskContext(t *testing.T) {
 	t.Setenv("MULTICA_TASK_CONFIG_ROOT", filepath.Join(t.TempDir(), "task-multica"))
 
 	cases := map[string]func() error{
-		"probe-runtimes": func() error { return runDaemonProbeRuntimes(daemonProbeRuntimesCmd, nil) },
-		"start":          func() error { return runDaemonStart(daemonStartCmd, nil) },
-		"restart":        func() error { return runDaemonRestart(daemonRestartCmd, nil) },
-		"stop":           func() error { return runDaemonStop(daemonStopCmd, nil) },
-		"logs":           func() error { return runDaemonLogs(daemonLogsCmd, nil) },
+		"start":   func() error { return runDaemonStart(daemonStartCmd, nil) },
+		"restart": func() error { return runDaemonRestart(daemonRestartCmd, nil) },
+		"stop":    func() error { return runDaemonStop(daemonStopCmd, nil) },
+		"logs":    func() error { return runDaemonLogs(daemonLogsCmd, nil) },
 	}
 	for name, run := range cases {
 		err := run()

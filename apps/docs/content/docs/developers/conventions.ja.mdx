@@ -34,8 +34,7 @@ Multica のコードを書く、翻訳を変更する、あるいは中国語の
 | `packages/ui` | なし | `@multica/core`, ビジネスロジック |
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
 | `apps/web/platform/` | `next/*` | 他のアプリ |
-| `apps/desktop/.../platform/` | `react-router-dom`, electron | 他のアプリ |
-| `apps/mobile/` | `@multica/core` の型と純粋関数 | Web/Desktop の React ページ、store、プラットフォーム実装 |
+| `apps/mobile/` | `@multica/core` の型と純粋関数 | ブラウザホストの React ページ、store、プラットフォーム実装 |
 
 両方のアプリに同じロジックが現れる場合は、必ず共有パッケージに抽出しなければなりません。「ささいな」重複という例外はありません。Mobile は独自の UI、データ層、リリースフローを持ち、型と純粋関数だけを共有します。
 
@@ -76,7 +75,7 @@ Multica のコードを書く、翻訳を変更する、あるいは中国語の
 - ネットワークレスポンスは `packages/core/api/schema.ts` の `parseWithFallback` と zod schema で解析し、`as T` で直接キャストしない
 - endpoint を追加または変更するときは schema も更新し、フィールド欠落や形式不正をテストで網羅する
 - 下流 UI は任意フィールドにデフォルト値を用意し、サーバー enum の `switch` には必ず `default` 分岐を設ける
-- インストール済みの Desktop がより新しい backend に接続する場合があるため、フロントエンドとバックエンドが常に同じバージョンだと仮定しない
+- クライアントとサーバーは異なる時点でデプロイされる場合があるため、常に同じバージョンだと仮定しない
 
 ### イシューキー
 
@@ -264,13 +263,12 @@ i18next は `_one` / `_other` を使います。中国語には文法的な数�
 - `inbox.empty.title`
 - `settings.preferences.language.title`
 
-### Web 専用 / Desktop 専用のコピー
+### ホスト専用のコピー
 
 - 共有コピー: namespace JSON の最上位
-- Web 専用: `web` セクション
-- Desktop 専用: `desktop` セクション
+- ホスト専用: そのホスト名のセクション
 
-正式な例は `auth.json` を参照してください（`web` セクションに `prefer_desktop` / `desktop_handoff.*` が含まれます）。
+インタラクション全体を単一ホストが所有する場合を除き、共有コピーは最上位に置きます。
 
 ---
 

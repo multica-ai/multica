@@ -1,4 +1,4 @@
-// Client freeze watchdog — shared by web and desktop.
+// Client freeze watchdog for browser hosts.
 //
 // Installs a long-task observer in the main thread. A "long task" is any
 // stretch where the thread didn't return to the event loop; the browser
@@ -8,20 +8,16 @@
 // "almost froze" events, not the normal 50–600ms render cost.
 //
 // This is the in-thread, recoverable tier: it catches freezes the thread
-// survives. A true non-recoverable hang (the thread never unblocks) can only
-// be caught from outside — on desktop that is the main process `unresponsive`
-// handler (see apps/desktop renderer-recovery). Web has no free external
-// watcher, so this observer is its only freeze signal for now.
+// survives. Browser hosts have no external process watching the renderer, so
+// this observer is their freeze signal.
 //
 // The emitted `client_unresponsive` event carries `client_type` automatically
-// (an analytics super-property), so desktop vs web is queryable without any
-// platform branch here.
+// as an analytics super-property.
 
 import { captureEvent } from "../analytics";
-import { getDiagnosticRoute } from "./diagnostic-context";
 
 // 2s is well above the normal switch/render cost (measured 50–600ms) and just
-// under Electron's renderer-hang threshold, so an event here means "the user
+// under the renderer-hang threshold, so an event here means "the user
 // felt a real stall" without flooding on routine heavy renders.
 const FREEZE_THRESHOLD_MS = 2000;
 
@@ -74,14 +70,7 @@ export function installFreezeWatchdog(): void {
 
 /**
  * Which page the freeze happened on.
- *
- * The desktop shell publishes its memory-router route, because
- * `location.pathname` there is the packaged `index.html` path and identifies
- * nothing. Web publishes no route and falls back to the real URL, which is
- * already the right answer.
  */
 function resolveDiagnosticPath(): string | undefined {
-  const route = getDiagnosticRoute();
-  if (route) return route;
   return typeof location !== "undefined" ? location.pathname : undefined;
 }

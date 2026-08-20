@@ -34,8 +34,7 @@ Multica 코드를 작성하거나, 번역을 변경하거나, 중국어 제품 �
 | `packages/ui` | 없음 | `@multica/core`, 비즈니스 로직 |
 | `packages/views` | `core/`, `ui/` | `next/*`, `react-router-dom`, stores |
 | `apps/web/platform/` | `next/*` | 다른 앱 |
-| `apps/desktop/.../platform/` | `react-router-dom`, electron | 다른 앱 |
-| `apps/mobile/` | `@multica/core`의 유형과 순수 함수 | Web/Desktop의 React 페이지, store, 플랫폼 구현 |
+| `apps/mobile/` | `@multica/core`의 유형과 순수 함수 | 브라우저 호스트의 React 페이지, store, 플랫폼 구현 |
 
 두 앱 모두에 동일한 로직이 나타난다면 반드시 공유 패키지로 추출해야 합니다. "사소한" 중복이라는 예외는 없습니다. Mobile은 독립된 UI, 데이터 계층, 출시 절차를 가지며 유형과 순수 함수만 공유합니다.
 
@@ -76,7 +75,7 @@ Multica 코드를 작성하거나, 번역을 변경하거나, 중국어 제품 �
 - 네트워크 응답은 `packages/core/api/schema.ts`의 `parseWithFallback`과 zod schema로 parsing하며 `as T`로 직접 강제 변환하지 않음
 - endpoint를 추가하거나 변경할 때 schema도 업데이트하고 필드 누락 또는 잘못된 형식을 테스트로 포함
 - 하위 UI는 선택 필드에 기본값을 제공하고 서버 enum의 `switch`에는 반드시 `default` 분기를 포함
-- 설치된 Desktop이 더 새로운 backend에 연결될 수 있으므로 프런트엔드와 backend가 항상 같은 버전이라고 가정하지 않음
+- 클라이언트와 서버는 서로 다른 시점에 배포될 수 있으므로 항상 같은 버전이라고 가정하지 않음
 
 ### 이슈 키
 
@@ -264,13 +263,12 @@ i18next는 `_one` / `_other`를 사용합니다; 중국어에는 문법적 수�
 - `inbox.empty.title`
 - `settings.preferences.language.title`
 
-### Web 전용 / Desktop 전용 카피
+### 호스트 전용 카피
 
 - 공유 카피: namespace JSON의 최상위
-- Web 전용: `web` 섹션
-- Desktop 전용: `desktop` 섹션
+- 호스트 전용: 해당 호스트 이름의 섹션
 
-정식 예시는 `auth.json`을 참고하세요(`web` 섹션에 `prefer_desktop` / `desktop_handoff.*`가 포함됨).
+전체 상호작용을 하나의 호스트가 소유하는 경우가 아니라면 공유 카피는 최상위에 둡니다.
 
 ---
 

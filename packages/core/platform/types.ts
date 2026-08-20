@@ -9,7 +9,7 @@ import type { StorageAdapter } from "../types/storage";
  *  ApiClient and WSClient so all HTTP requests and WS connections from
  *  this app instance are tagged with platform / version / os. */
 export interface ClientIdentity {
-  /** Logical client kind: "web" | "desktop" | "cli" | "daemon". */
+  /** Logical client kind: "web" | "cli" | "daemon". */
   platform?: string;
   /** Client/app version string (e.g. "0.1.0"). */
   version?: string;
@@ -31,9 +31,9 @@ export interface CoreProviderProps {
   onLogin?: () => void;
   /** Called after logout (e.g. clear cookie). */
   onLogout?: () => void;
-  /** Identifies the calling client (web/desktop + version + os) to the server. */
+  /** Identifies the calling client (platform + version + os) to the server. */
   identity?: ClientIdentity;
-  /** Active locale, determined server-side (web) or at app boot (desktop). */
+  /** Active locale, determined by the host. */
   locale: SupportedLocale;
   /** i18next resources, server-preloaded for the active locale. */
   resources: Record<string, LocaleResources>;

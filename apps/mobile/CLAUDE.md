@@ -13,7 +13,7 @@ Everything else, mobile writes its own.
 
 For any new mobile feature / screen / interaction, complete the three steps below in order. **Skipping any step = no code yet** (read-only investigation and answering questions are exempt). This section overrides every other rule in this file.
 
-### 1. Read the real web/desktop implementation
+### 1. Read the real web implementation
 
 Until you can name the relevant code, don't reason from "general experience":
 
@@ -39,7 +39,7 @@ Include:
 
 > Detailed rules live downstream: must-agree details in §Behavioral parity; component waterfall in §UI components; data / mirroring rules in §Data layer helpers and §Realtime. Pre-flight is the gate; those are the references.
 
-## Behavioral parity with web/desktop
+## Behavioral parity with web
 
 Mobile is allowed to differ in **UI and interaction** — it's a phone, not a port. It is NOT allowed to differ in **product semantics**. Users should not get a different mental model of "what's there" depending on which client they open.
 
@@ -60,7 +60,7 @@ Mobile is allowed to differ in **UI and interaction** — it's a phone, not a po
 1. archived items, and
 2. multiple inbox notifications per issue (a comment, a status change, and an assignment on the same issue each create one row).
 
-Web/desktop run those raw rows through `deduplicateInboxItems` (`packages/core/inbox/queries.ts`) before rendering and before counting unread:
+Web runs those raw rows through `deduplicateInboxItems` (`packages/core/inbox/queries.ts`) before rendering and before counting unread:
 1. filter `archived = true` out
 2. group by `issue_id`, keep the newest in each group
 3. sort by `created_at` desc
@@ -71,7 +71,7 @@ Mobile's first cut rendered the raw list directly. So a single issue with 3 noti
 
 **Lesson — encode this into your reflexes when adding any new mobile screen that consumes a list endpoint**:
 
-> Before rendering an API list response, grep `packages/core/<domain>/queries.ts` and `packages/views/<domain>/components/*.tsx` for any preprocessing — `dedupe*`, `coalesce*`, `filter*`, `*-display.ts`, `useMemo(() => transform(raw))`. Mirror everything that runs between `useQuery` and the JSX in web/desktop. **Do not assume the backend returns "what should be displayed"** — it usually returns the raw cache shape, and the client is responsible for shaping it.
+> Before rendering an API list response, grep `packages/core/<domain>/queries.ts` and `packages/views/<domain>/components/*.tsx` for any preprocessing — `dedupe*`, `coalesce*`, `filter*`, `*-display.ts`, `useMemo(() => transform(raw))`. Mirror everything that runs between `useQuery` and the JSX in web. **Do not assume the backend returns "what should be displayed"** — it usually returns the raw cache shape, and the client is responsible for shaping it.
 
 This pattern repeats: timeline coalescing (`buildTimelineGroups`), inbox dedup, comment thread flattening, etc. Each one is a behavioral parity hazard if mobile skips it.
 
@@ -84,7 +84,7 @@ Start minimal. Add to this list when actually adopted — do NOT pre-list librar
 - **React 19.1** — whatever Expo SDK 55 ships. Pinned in `apps/mobile/package.json` directly, NOT via root `catalog:`.
 - **TypeScript** strict
 - **Expo Router 55** (file-based routing — version aligns with Expo SDK)
-- **NativeWind 4** + **Tailwind 3.4** — NativeWind 5 is unstable; stay on v4. (Note: web/desktop use Tailwind v4 — versions intentionally differ.)
+- **NativeWind 4** + **Tailwind 3.4** — NativeWind 5 is unstable; stay on v4. (Note: web and Tag use Tailwind v4 — versions intentionally differ.)
 - **react-native-reusables (RNR)** — the shadcn equivalent for React Native. Uses NativeWind + RN-Primitives + CVA. Component API mirrors shadcn. **Phased adoption in progress — see `apps/mobile/docs/rnr-migration.md` for the canonical plan, three-tier classification, and Phase 0/1/2/3 status.**
 - **TanStack Query 5** — mobile owns its `QueryClient` with `AppState` focus listener + `NetInfo` online listener.
 - **Zustand** — mobile-local state only.
@@ -153,12 +153,12 @@ Never copy the visual shape of an existing hand-written `components/ui/` compone
 
 ## Build & release
 
-- **Main CI** (`.github/workflows/ci.yml`) excludes mobile via `--filter='!@multica/mobile'`. Mobile failures do NOT block web/desktop PRs.
+- **Main CI** (`.github/workflows/ci.yml`) excludes mobile via `--filter='!@multica/mobile'`. Mobile failures do NOT block shared web PRs.
 - **Mobile verify** (`.github/workflows/mobile-verify.yml`): triggered on `apps/mobile/**` or `packages/core/types/**` changes — runs typecheck/lint/test only, no IPA build.
 - **Mobile release** (`.github/workflows/mobile-release.yml`): triggered by `mobile-v*.*.*` tag → `eas build` + `eas submit`.
 - **OTA** — EAS Update for JS-only fixes that don't change the runtime version. Manual / on-demand push to preview/production channels.
 
-Mobile release cadence is decoupled from main `v*.*.*` tags (server / CLI / desktop).
+Mobile release cadence is decoupled from main `v*.*.*` tags (server / CLI).
 
 ### Local iOS builds go through `scripts/ios-run.sh`
 
@@ -175,7 +175,7 @@ The wrapper is invoked under the caller's `dotenv`/`cross-env`, so prebuild and 
 
 ## Realtime / WebSocket strategy
 
-Mobile uses the same WS server protocol as web/desktop, but mounts subscriptions differently. The rules below exist because mobile-specific constraints (cellular data cost, AppState lifecycle, per-screen unmount cleanup, smaller cache surface) make a direct port of web's pattern wrong.
+Mobile uses the same WS server protocol as web and Tag, but mounts subscriptions differently. The rules below exist because mobile-specific constraints (cellular data cost, AppState lifecycle, per-screen unmount cleanup, smaller cache surface) make a direct port of web's pattern wrong.
 
 ### Three-layer stack
 
@@ -291,7 +291,7 @@ fallback, sync-before-await ordering, type-safe payloads).
 
 ### Three rails that every feature must follow
 
-1. **Logic mirrors web/desktop.** See §Pre-flight step 1 at the top of
+1. **Logic mirrors web.** See §Pre-flight step 1 at the top of
    this file. Restating the data-contract half here: endpoints, request
    bodies, response schemas, optimistic patches, and cache key prefixes
    all match web verbatim. UI / interaction can diverge freely per

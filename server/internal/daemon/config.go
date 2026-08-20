@@ -92,7 +92,6 @@ type Config struct {
 	DeviceName                     string
 	RuntimeName                    string
 	CLIVersion                     string                // multica CLI version (e.g. "0.1.13")
-	LaunchedBy                     string                // "desktop" when spawned by the Electron app, empty for standalone
 	Profile                        string                // profile name (empty = default)
 	Agents                         map[string]AgentEntry // keyed by provider: claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw (plus built-in runtime identities from agent.BuiltinRuntimes, e.g. omp)
 	WorkspacesRoot                 string                // base path for execution envs (default: ~/multica_workspaces)
@@ -502,7 +501,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	// different concerns, and the self-host rationale for defaulting the former
 	// off (don't clobber my fork) argues the opposite way for the latter: an
 	// operator who installed a build by hand wants the daemon to run it.
-	// Default on for every CLI-launched daemon; Desktop opts out at the loop.
+	// Default on for every CLI-launched daemon.
 	autoReloadEnabled := boolFromEnv("MULTICA_DAEMON_AUTO_RELOAD", true)
 	if overrides.DisableAutoReload {
 		autoReloadEnabled = false
@@ -893,7 +892,7 @@ var supportedLoginShells = map[string]struct{}{
 // Daemon-style processes on macOS/Linux do not inherit the user's interactive
 // PATH. `claude --version` working in Terminal.app is no guarantee that
 // exec.LookPath("claude") will work from a binary spawned by Launchpad, the
-// Electron app, or `launchctl`. The most common offenders are fnm/nvm/volta
+// a GUI launcher, or `launchctl`. The most common offenders are fnm/nvm/volta
 // "multishell" prefix dirs (per-shell, ephemeral) and the Anthropic native
 // installer (`~/.claude/local/`) — both leave their binaries on a path that
 // only `.zshrc` knows about.

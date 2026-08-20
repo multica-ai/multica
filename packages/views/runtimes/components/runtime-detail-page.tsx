@@ -32,11 +32,6 @@ import { useT, useTimeAgo } from "../../i18n";
 export interface RuntimeDetailPageProps {
   /** A machine id, or a legacy runtime id that locates its machine. */
   runtimeId: string;
-  localDaemonId?: string | null;
-  localMachineName?: string | null;
-  localMachineActions?: React.ReactNode;
-  hasLocalMachine?: boolean;
-  bootstrapping?: boolean;
 }
 
 function useNowTick(intervalMs = 30_000): number {
@@ -65,10 +60,7 @@ function findMachine(
       (candidate) =>
         candidate.id === locator ||
         candidate.runtimes.some((runtime) => runtime.id === locator),
-    ) ??
-    (locator === "local:placeholder"
-      ? machines.find((candidate) => candidate.isCurrent) ?? null
-      : null)
+    ) ?? null
   );
 }
 
@@ -79,11 +71,6 @@ function findMachine(
  */
 export function RuntimeDetailPage({
   runtimeId,
-  localDaemonId,
-  localMachineName,
-  localMachineActions,
-  hasLocalMachine,
-  bootstrapping,
 }: RuntimeDetailPageProps) {
   const { t } = useT("runtimes");
   const wsId = useWorkspaceId();
@@ -111,21 +98,9 @@ export function RuntimeDetailPage({
     () =>
       buildRuntimeMachines(runtimes, {
         now,
-        localDaemonId,
-        localMachineName,
-        currentUserId,
         workloadByRuntimeId: workloadIndex,
-        ensureLocalMachine: hasLocalMachine,
       }),
-    [
-      runtimes,
-      now,
-      localDaemonId,
-      localMachineName,
-      currentUserId,
-      workloadIndex,
-      hasLocalMachine,
-    ],
+    [runtimes, now, workloadIndex],
   );
   const baseMachine = findMachine(baseMachines, machineLocator);
   const profileRows = useMemo(
@@ -236,11 +211,6 @@ export function RuntimeDetailPage({
                     <HealthIcon health={machine.health} />
                     {healthLabel(machine.health)}
                   </span>
-                  {machine.isCurrent && (
-                    <span className="rounded bg-foreground px-1.5 py-0.5 text-micro font-medium text-background">
-                      {t(($) => $.machine.this_machine)}
-                    </span>
-                  )}
                 </div>
                 {machine.subtitle && (
                   <p className="mt-1 text-body text-muted-foreground">
@@ -285,7 +255,6 @@ export function RuntimeDetailPage({
                   {t(($) => $.machine.rename)}
                 </Button>
               )}
-              {machine.isCurrent && localMachineActions}
             </div>
           </div>
         </div>
@@ -331,14 +300,10 @@ export function RuntimeDetailPage({
                 className="h-7 w-7 text-faint-foreground"
               />
               <p className="mt-3 text-body font-medium">
-                {bootstrapping
-                  ? t(($) => $.page.bootstrapping.title)
-                  : t(($) => $.machine.no_runtimes_title)}
+                {t(($) => $.machine.no_runtimes_title)}
               </p>
               <p className="mt-1 max-w-sm text-caption text-muted-foreground">
-                {bootstrapping
-                  ? t(($) => $.page.bootstrapping.hint)
-                  : t(($) => $.machine.no_runtimes_hint)}
+                {t(($) => $.machine.no_runtimes_hint)}
               </p>
             </div>
           )}

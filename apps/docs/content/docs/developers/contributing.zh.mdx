@@ -82,7 +82,6 @@ make build            # 构建 server、CLI 和 migrate 二进制
 ```bash
 pnpm install
 pnpm dev:web
-pnpm dev:desktop
 pnpm build
 pnpm typecheck
 pnpm lint
@@ -110,13 +109,13 @@ make cli ARGS="issue list"
 
 ## 修改前端功能
 
-Web 与 Desktop 都需要的功能按职责放置：
+浏览器 Host 共用的功能按职责放置：
 
 1. API 类型、query、mutation 和平台无关逻辑放在 `packages/core/`；
 2. 基础 UI 放在 `packages/ui/`，不能依赖业务代码；
 3. 业务页面和组件放在 `packages/views/`；
-4. Next.js、Electron 和路由适配留在对应 app；
-5. 共享页面需要同时接入 Web 与 Desktop。
+4. 框架专用的路由适配留在对应 app；
+5. 共享页面接入实际使用它的浏览器 Host。
 
 服务端数据由 TanStack Query 管理，筛选、草稿和布局等客户端状态由 Zustand 管理。具体边界见[项目架构](/developers/architecture)和根目录 `CLAUDE.md`。
 
@@ -141,7 +140,7 @@ Migration 位于 `server/migrations/`，查询位于 `server/pkg/db/queries/`。
 | --- | --- |
 | 共享业务逻辑、query、store | `packages/core/*.test.ts` |
 | 共享页面和组件 | `packages/views/*.test.tsx` |
-| Web 或 Desktop 平台 wiring | 对应 `apps/*` 目录 |
+| 浏览器 Host 平台 wiring | 对应 `apps/*` 目录 |
 | 端到端流程 | `e2e/*.spec.ts` |
 | Backend | 相关 Go package 的 `*_test.go` |
 

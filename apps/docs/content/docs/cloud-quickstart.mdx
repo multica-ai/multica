@@ -11,17 +11,13 @@ Before an agent can execute, the computer that runs it needs at least one [suppo
 
 ## 1. Sign in and open your workspace
 
-Sign in on the web ([multica.ai](https://multica.ai)) or with [Multica Desktop](https://multica.ai/download). Email verification codes and Google are both supported.
-
-- **Desktop**: can connect this computer automatically.
-- **Web**: connect from the command line in the next step.
+Sign in on the web ([multica.ai](https://multica.ai)). Email verification codes and Google are both supported. Connect a computer from the command line in the next step.
 
 ## 2. Connect a computer
 
 Agents execute work on the computers you connect. Open **Configure → Runtimes** at the bottom of the sidebar:
 
-- **With Desktop**: Desktop automatically registers this computer as a runtime and detects the installed AI coding tools. For a tool you just installed, click **Refresh** to detect it again.
-- **With Web, or to add another computer**: click **Add a computer** in the top right, then run the two commands from the dialog in a terminal on the target computer:
+- Click **Add a computer** in the top right, then run the two commands from the dialog in a terminal on the target computer:
 
   **macOS / Linux**
 
@@ -82,8 +78,8 @@ After submitting, open the issue: the execution log shows the run status, and th
 
 | Symptom | Check first |
 |---|---|
-| No runtime found | Confirm the AI coding tool is installed and runs in a terminal. On Desktop, click **Refresh**; on the CLI path, rerun `multica setup`. |
-| Runtime shows offline | Keep Desktop open; on the CLI path, run `multica daemon status`, and `multica daemon start` if it is not running. |
+| No runtime found | Confirm the AI coding tool is installed and runs in a terminal, then rerun `multica setup`. |
+| Runtime shows offline | Run `multica daemon status`, and `multica daemon start` if it is not running. |
 | Issue stays queued | Confirm the runtime the agent uses is online. When a runtime hits its concurrency limit, new tasks keep queueing. |
 
 For more cases, see [Troubleshooting](/troubleshooting).

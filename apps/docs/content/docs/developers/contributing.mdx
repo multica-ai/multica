@@ -82,7 +82,6 @@ make build            # Build the server, CLI, and migrate binaries
 ```bash
 pnpm install
 pnpm dev:web
-pnpm dev:desktop
 pnpm build
 pnpm typecheck
 pnpm lint
@@ -110,13 +109,13 @@ make cli ARGS="issue list"
 
 ## Changing frontend features
 
-Place features needed by both Web and Desktop according to responsibility:
+Place features shared by browser hosts according to responsibility:
 
 1. Put API types, queries, mutations, and platform-independent logic in `packages/core/`.
 2. Put foundational UI in `packages/ui/`; it must not depend on business code.
 3. Put business pages and components in `packages/views/`.
-4. Keep Next.js, Electron, and routing adapters in the corresponding app.
-5. Wire shared pages into both Web and Desktop.
+4. Keep framework-specific routing adapters in the corresponding app.
+5. Wire shared pages into the browser hosts that use them.
 
 TanStack Query owns server data. Zustand owns client state such as filters, drafts, and layout. See [Project architecture](/developers/architecture) and the root `CLAUDE.md` for the exact boundary.
 
@@ -141,7 +140,7 @@ Use an application transaction in the service layer when multiple writes must su
 | --- | --- |
 | Shared business logic, queries, stores | `packages/core/*.test.ts` |
 | Shared pages and components | `packages/views/*.test.tsx` |
-| Web or Desktop platform wiring | Corresponding `apps/*` directory |
+| Browser-host platform wiring | Corresponding `apps/*` directory |
 | End-to-end workflows | `e2e/*.spec.ts` |
 | Backend | `*_test.go` in the relevant Go package |
 

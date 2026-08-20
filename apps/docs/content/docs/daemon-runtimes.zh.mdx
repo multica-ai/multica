@@ -26,9 +26,7 @@ Multica 负责记录和协调工作，连接的电脑负责执行。电脑上的
 
 ## 启动守护进程
 
-使用 Multica Desktop 时，应用会自动启动守护进程，不需要额外运行命令。
-
-使用 Web、远程电脑或无界面环境时，先[安装 Multica CLI](/cli)，再运行：
+先[安装 Multica CLI](/cli)，再运行：
 
 ```bash
 multica daemon start
@@ -115,7 +113,7 @@ multica daemon start
 - **冲突时以 Multica 的值为准。** 如果固定参数设置了 Multica 也会设置的 flag，Multica 的值排在后面并最终生效。最典型的是：在 Agent 上选择的模型会覆盖 profile 里固定的 `--model`。若要为所有人固定模型，请把 Agent 的模型字段留空。
 - **协议关键 flag 会被忽略。** `-p`、`--output-format`、`--input-format`、`--permission-mode` 以及其他协议族的对应 flag 会从固定参数中被剔除，因为覆盖它们会切断 daemon 与工具之间的通信。子命令和其他位置参数始终原样传递。
 
-如果 Desktop 启动的守护进程找不到终端里能够执行的命令，可以为当前电脑设置绝对路径：
+如果后台守护进程找不到终端里能够执行的命令，可以为当前电脑设置绝对路径：
 
 ```bash
 multica runtime profile set-path <profile-id> --path /absolute/path/to/command

@@ -65,17 +65,6 @@ describe("initAnalytics super-properties", () => {
     });
   });
 
-  it("detects desktop when window.electron is present", async () => {
-    vi.stubGlobal("window", { electron: {} });
-    const { analytics, posthog } = await loadModule();
-    analytics.initAnalytics({ key: "k", host: "" });
-    expect(posthog.register).toHaveBeenCalledWith({
-      client_type: "desktop",
-      environment: "dev",
-      event_schema_version: 2,
-      is_demo: false,
-    });
-  });
 });
 
 describe("resetAnalytics", () => {

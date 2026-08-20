@@ -26,11 +26,9 @@ function fireLongTask(duration: number) {
 async function load() {
   vi.resetModules();
   const mod = await import("./freeze-watchdog");
-  const { setDiagnosticRoute } = await import("./diagnostic-context");
   const { captureEvent } = await import("../analytics");
   return {
     installFreezeWatchdog: mod.installFreezeWatchdog,
-    setDiagnosticRoute,
     captureEvent: captureEvent as unknown as ReturnType<typeof vi.fn>,
   };
 }
@@ -65,24 +63,7 @@ describe("installFreezeWatchdog", () => {
     });
   });
 
-  // Desktop runs a memory router, so `location.pathname` there is the packaged
-  // index.html path and identifies no page at all. The shell publishes its real
-  // route instead; web publishes nothing and keeps the URL.
-  it("prefers the published diagnostic route over location.pathname", async () => {
-    const { installFreezeWatchdog, setDiagnosticRoute, captureEvent } = await load();
-    setDiagnosticRoute("/:slug/issues/:id");
-    installFreezeWatchdog();
-
-    fireLongTask(2300);
-
-    expect(captureEvent).toHaveBeenCalledWith("client_unresponsive", {
-      source: "longtask",
-      duration_ms: 2300,
-      path: "/:slug/issues/:id",
-    });
-  });
-
-  it("falls back to location.pathname when no route was published (web)", async () => {
+  it("uses location.pathname", async () => {
     const { installFreezeWatchdog, captureEvent } = await load();
     installFreezeWatchdog();
 

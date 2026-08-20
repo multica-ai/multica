@@ -6,7 +6,7 @@ description: Multica의 클라이언트, Go 서비스, 실행 데몬, 공유 프
 Multica는 Go backend, 여러 클라이언트, 실행 컴퓨터에서 동작하는 데몬으로 구성됩니다. PostgreSQL이 협업 데이터를 저장하고 데몬이 태스크를 가져가 로컬 AI 코딩 도구를 호출합니다.
 
 ```text
-Web / Desktop / Mobile / CLI
+Web / Tag / Mobile / CLI
              │
        HTTP + WebSocket
              │
@@ -25,33 +25,31 @@ Web / Desktop / Mobile / CLI
 | --- | --- | --- |
 | `server/` | API, 인증, 태스크 스케줄링, 연동, CLI, 데몬 | Go, Chi, sqlc, gorilla/websocket |
 | `apps/web/` | 브라우저 클라이언트와 landing page | Next.js App Router |
-| `apps/desktop/` | 데스크톱 클라이언트와 로컬 프로세스 관리 | Electron, electron-vite |
 | `apps/mobile/` | 독립적인 iOS 클라이언트 | Expo, React Native |
 | `apps/docs/` | 다국어 문서 사이트 | Next.js, Fumadocs |
 | `packages/core/` | API client, 유형, query, mutation, 플랫폼 독립 비즈니스 로직 | TanStack Query, Zustand |
 | `packages/ui/` | 비즈니스 로직이 없는 기본 UI | shadcn, Base UI |
-| `packages/views/` | Web과 Desktop이 공유하는 비즈니스 페이지 및 컴포넌트 | React |
+| `packages/views/` | 브라우저 호스트가 공유하는 비즈니스 페이지 및 컴포넌트 | React |
 | `packages/tsconfig/`, `packages/eslint-config/` | 공유 도구 설정 | TypeScript, ESLint |
 
 공유 패키지는 `.ts`와 `.tsx` 소스 파일을 직접 export하며 사용하는 애플리케이션이 컴파일합니다. 의존 방향은 `views → core + ui`이고 `core`와 `ui`는 서로 의존하지 않습니다.
 
-## Web과 Desktop의 코드 공유
+## 브라우저 호스트의 코드 공유
 
-Web과 Desktop은 세 계층을 공유합니다.
+Web과 Tag는 세 계층을 공유합니다.
 
 1. `packages/core`가 API, cache, 권한, 플랫폼 독립 상태를 처리합니다.
 2. `packages/ui`가 기본 컴포넌트를 제공합니다.
 3. `packages/views`가 비즈니스 페이지를 구성합니다.
 
-라우팅, cookie, Electron IPC 같은 플랫폼 기능은 애플리케이션 계층에 둡니다. 공유 페이지는 `NavigationAdapter`를 통해 이동하며 `next/*` 또는 `react-router-dom`을 직접 import하지 않습니다.
+라우팅과 cookie 같은 플랫폼 기능은 애플리케이션 계층에 둡니다. 공유 페이지는 `NavigationAdapter`를 통해 이동하며 프레임워크 전용 라우팅 API를 직접 import하지 않습니다.
 
-예를 들어 Web과 Desktop에 모두 필요한 이슈 기능은 일반적으로 다음 위치에 걸쳐 있습니다.
+예를 들어 브라우저 호스트가 공유하는 이슈 기능은 일반적으로 다음 위치에 걸쳐 있습니다.
 
 ```text
 packages/core/issues/      query, mutation, cache 업데이트
 packages/views/issues/     페이지와 비즈니스 컴포넌트
 apps/web/platform/         Next.js 라우팅 adapter
-apps/desktop/.../platform/ Electron 라우팅 adapter
 ```
 
 Mobile은 이 React 페이지를 재사용하지 않습니다. `@multica/core`의 유형과 순수 함수를 import할 수 있지만 UI, query key, 상태, 실시간 구독, 출시 절차는 별도로 소유합니다.
@@ -67,7 +65,7 @@ Mobile은 이 React 페이지를 재사용하지 않습니다. `@multica/core`�
 
 WebSocket 이벤트는 TanStack Query cache를 업데이트하거나 무효화해야 합니다. 서버 객체를 Zustand에 복사하면 안 됩니다. 워크스페이스 생성, 삭제, 나가기처럼 화면 이동을 동반하는 mutation은 서버 확인을 기다린 뒤 로컬 상태를 정리해야 합니다.
 
-API 응답은 `packages/core/api/` 경계에서 zod schema로 parsing합니다. 설치된 Desktop이 더 새로운 backend에 연결될 수 있으므로 network JSON을 TypeScript 유형으로 바로 강제 변환하면 안 됩니다.
+API 응답은 `packages/core/api/` 경계에서 zod schema로 parsing합니다. 클라이언트와 서버는 서로 다른 시점에 배포될 수 있으므로 network JSON을 TypeScript 유형으로 바로 강제 변환하면 안 됩니다.
 
 ## Backend 계층
 

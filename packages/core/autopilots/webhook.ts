@@ -6,7 +6,7 @@ import type { AutopilotTrigger } from "../types";
  * Resolution order:
  *  1. trigger.webhook_url — present only when MULTICA_PUBLIC_URL is set on the
  *     server. This is the authoritative form when available.
- *  2. apiBaseUrl + webhook_path — desktop apps and self-host setups where the
+ *  2. apiBaseUrl + webhook_path — self-host setups where the
  *     server didn't mint an absolute URL but the client knows its API origin.
  *  3. currentOrigin + webhook_path — browser fallback when getBaseUrl() is
  *     empty (e.g. same-origin Next.js dev).

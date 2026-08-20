@@ -19,11 +19,9 @@ import type { MetadataRoute } from "next";
  *
  *   sips -s format png --resampleHeightWidth 512 512 icon.svg --out icon-maskable-512.png
  *   sips -s format png --resampleHeightWidth 180 180 icon.svg --out apple-touch-icon.png
- *   sips -s format png --resampleHeightWidth 512 512 ../../../desktop/build/icon.png --out icon-512.png
- *   sips -s format png --resampleHeightWidth 192 192 ../../../desktop/build/icon.png --out icon-192.png
+ * Keep the generated PNGs aligned with the canonical SVG in public/icons.
  *
- * The two `any` icons come from the desktop app icon so an installed web app
- * and an installed desktop app show the same artwork; the maskable one is
+ * The two `any` icons use the shared Multica artwork; the maskable one is
  * full-bleed because Android crops it to the launcher's shape.
  */
 

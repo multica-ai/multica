@@ -5,7 +5,7 @@ const COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
 
 // Web-only adapter: persists via document.cookie so the Next.js proxy can
 // read the active locale on the next request. Desktop has no server-side
-// proxy and must use createDesktopLocaleAdapter (apps/desktop/.../i18n-adapter)
+// proxy and must provide its own locale adapter
 // which persists via window.localStorage instead.
 export function createBrowserCookieLocaleAdapter(): LocaleAdapter {
   return {

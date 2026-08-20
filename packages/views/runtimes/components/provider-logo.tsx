@@ -4,7 +4,7 @@ import qwenLogo from "./qwen-logo.svg";
 import reasonixLogo from "./reasonix-logo.svg";
 
 // Next.js exposes static imports as objects while Vite exposes URL strings.
-// Normalize both shapes here so shared provider logos work in web and desktop.
+// Normalize both shapes here so shared provider logos work across hosts.
 function staticAssetSrc(asset: string | { src: string }): string {
   return typeof asset === "string" ? asset : asset.src;
 }
@@ -291,8 +291,7 @@ function GrokLogo({ className }: { className: string }) {
   );
 }
 
-// Qwen Code — official SVG copied verbatim from QwenLM/qwen-code's desktop
-// brand assets (packages/desktop/apps/electron/resources/brands/qwen-code/icon.svg).
+// Qwen Code — official SVG copied verbatim from QwenLM/qwen-code's brand assets.
 const qwenLogoSrc = staticAssetSrc(qwenLogo);
 
 function QwenLogo({ className }: { className: string }) {

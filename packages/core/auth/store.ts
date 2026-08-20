@@ -59,7 +59,7 @@ export function createAuthStore(options: AuthStoreOptions) {
     verifyCode: async (email: string, code: string) => {
       const { token, user } = await api.verifyCode(email, code);
       if (!cookieAuth) {
-        // Token mode: persist for Electron / legacy.
+        // Token mode: persist for legacy clients.
         storage.setItem("multica_token", token);
         api.setToken(token);
       }
