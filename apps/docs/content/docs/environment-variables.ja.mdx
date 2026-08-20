@@ -230,6 +230,8 @@ API key と base URL の両方が空の場合、このレイヤーは無効に�
 
 各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
+ZCode は `MULTICA_ZCODE_PATH`(ブリッジ `zcode-acp-server` の実行ファイル)と `MULTICA_ZCODE_MODEL`(ブリッジが提供するカタログのモデル id、例: `glm-5.3`)をサポートします。
+
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude
 MULTICA_CLAUDE_ARGS=--max-turns 40

@@ -39,6 +39,7 @@ Multica は現在、次のコマンドを検出します。
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 公式サイト](https://www.trae.cn/) |
 | Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
+| ZCode | `zcode-acp-server` | [ZCode](https://zcode.z.ai) |
 
 ここでの「対応」とは、Multica が該当する CLI を呼び出せるという意味です。そのツールのアカウント、サブスクリプション、モデルの利用枠を Multica が提供するわけではありません。
 
@@ -51,6 +52,7 @@ Reasonix を使う場合は、デーモンを起動する前に `reasonix setup`
 QwenPaw を使う場合は、QwenPaw 側の設定でプロバイダーとモデルを選んでください。Multica が実行時に QwenPaw のモデルを上書きすることはできません。
 
 MiniMax Code を使う場合は、対応する Node.js バージョン（`>=22.19 <23` または `>=24 <27`）をインストールし、`npm install --global @minimax-ai/code@latest` を実行してください。npm のグローバルインストールによって `mcode` は npm のグローバル実行ファイルディレクトリに配置されます。`command -v mcode` または `Get-Command mcode` で見つからない場合は、そのディレクトリを `PATH` に追加してください。その後 `mcode login` を実行します。モデルは MiniMax Code が管理し、Multica から ACP 経由で上書きすることはできません。
+ZCode を使うには、ZCode デスクトップアプリをインストールしてアプリ内で一度サインインし、コミュニティ ACP ブリッジ [zcode-acp-server](https://github.com/william0wang/zcode-acp)(`npm i -g zcode-acp-server`、william0wang/zcode-acp#38 を含むリリースが必要)をインストールします。ブリッジはデスクトップアプリがインストールした公式ランタイムを駆動し、その資格情報を再利用するため、別のサインインは不要です。
 
 DeepSeek Harness を使う場合は、Node.js 20+ をインストールして `npm install -g @deepseek-ai/dsh` を実行し、Multica ランタイムプロファイルを追加してください（`dsh plugin --profile multica add <bundle>`）。デーモンは `dsh --profile multica --probe` が成功した場合のみ DeepSeek Harness を登録します。デーモンを起動する前に `DEEPSEEK_API_KEY` を設定（または dsh の設定に保存）してください。
 

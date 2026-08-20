@@ -6147,3 +6147,30 @@ func TestEnvironmentCleanupStandardModeRemovesWorkdir(t *testing.T) {
 		t.Fatalf("output/ removed by partial cleanup: %v", err)
 	}
 }
+
+// TestInjectRuntimeConfigZcodeSkills pins the review requirement: Multica
+// must land bound skills where the zcode-acp-server bridge (0.2.0+) actually
+// scans them — .agents/skills/ in the session cwd. Without the zcode case in
+// skillsDirPath this fell back to .agent_context/skills/, which the runtime
+// never reads, and Multica-bound skills silently never reached ZCode.
+func TestWriteContextFilesZcodeSkills(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := writeContextFiles(dir, "zcode", TaskContextForEnv{
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}, nil); err != nil {
+		t.Fatalf("writeContextFiles(zcode): %v", err)
+	}
+	// sanitizeSkillName lower-cases the skill name, so the directory is
+	// "coding" not "Coding". The assertion must match the sanitised slug —
+	// macOS (case-insensitive FS) accepts either, but Linux CI is
+	// case-sensitive and would fail on the capitalised form.
+	skillPath := filepath.Join(dir, ".agents", "skills", "coding", "SKILL.md")
+	content, err := os.ReadFile(skillPath)
+	if err != nil {
+		t.Fatalf("expected bound skill at %s (bridge scans .agents/skills/): %v", skillPath, err)
+	}
+	if !strings.Contains(string(content), "Write good code.") {
+		t.Errorf("skill content not written correctly: %s", content)
+	}
+}

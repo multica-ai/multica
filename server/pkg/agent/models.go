@@ -1335,6 +1335,62 @@ func discoverHermesModels(ctx context.Context, runtimeCmd Command) ([]Model, err
 //
 // Failure modes (kimi missing, not logged in, config error) return an empty
 // list so the UI falls back to manual entry.
+// discoverZcodeModels enumerates the model catalog advertised by the
+// zcode-acp-server bridge over ACP via session/new configOptions (option id
+// `model`). Any failure returns an empty catalog (Fallback) so the model
+// picker keeps manual entry available. The bridge ignores extra argv, so the
+// shared helper's default `acp` positional is harmless.
+func discoverZcodeModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
+	return discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		defaultBin:   "zcode-acp-server",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-zcode-discovery-",
+		annotate: func(models []Model, sessionResult json.RawMessage) {
+			option, ok := parseACPEffortOption(sessionResult)
+			if !ok || len(option.Choices) == 0 {
+				return
+			}
+			thinking := &ModelThinking{
+				SupportedLevels: option.Choices,
+				DefaultLevel:    option.CurrentValue,
+			}
+			current := acpModelOptionCurrentValue(sessionResult)
+			for i := range models {
+				if current == "" || models[i].ID == current {
+					models[i].Thinking = thinking
+				}
+			}
+		},
+	})
+}
+
+// acpModelOptionCurrentValue reads the `model` config option's currentValue
+// out of an ACP session/new response — the encoded id of the model whose
+// per-session options the response describes. Empty when absent.
+func acpModelOptionCurrentValue(raw json.RawMessage) string {
+	type acpOption struct {
+		ID           string `json:"id"`
+		CurrentValue string `json:"currentValue"`
+	}
+	var resp struct {
+		ConfigOptions      []acpOption `json:"configOptions"`
+		ConfigOptionsSnake []acpOption `json:"config_options"`
+	}
+	if err := json.Unmarshal(raw, &resp); err != nil {
+		return ""
+	}
+	options := resp.ConfigOptions
+	if len(options) == 0 {
+		options = resp.ConfigOptionsSnake
+	}
+	for _, opt := range options {
+		if opt.ID == "model" {
+			return opt.CurrentValue
+		}
+	}
+	return ""
+}
+
 func discoverKimiModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {
 	var acpVersion string
 	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{

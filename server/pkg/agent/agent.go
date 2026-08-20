@@ -278,7 +278,7 @@ type Config struct {
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode", "dim", "zcode".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -321,6 +321,7 @@ var SupportedTypes = []string{
 	"qwenpaw",
 	"mcode",
 	"dim",
+	"zcode",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -421,6 +422,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qwenpawBackend{cfg: cfg}, nil
 	case "mcode":
 		return &mcodeBackend{cfg: cfg}, nil
+	case "zcode":
+		return &zcodeBackend{cfg: cfg}, nil
 	default:
 		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
@@ -452,6 +455,7 @@ var launchHeaders = map[string]string{
 	"deveco":      "deveco run (json)",
 	"hermes":      "hermes acp",
 	"kimi":        "kimi acp",
+	"zcode":       "zcode-acp-server (ACP bridge)",
 	"reasonix":    "reasonix acp",
 	"dsh":         "dsh --profile multica (stdio)",
 	"kiro":        "kiro-cli acp",
