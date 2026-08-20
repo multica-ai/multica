@@ -136,6 +136,11 @@ export function SkillsTab({
   };
 
   const runtimeSkills = runtimeQuery.data?.skills ?? [];
+  const assignedSkillNames = new Set(
+    agent.skills
+      .filter((skill) => skill.enabled !== false)
+      .map((skill) => normalizeSkillName(skill.name)),
+  );
 
   return (
     <div className="space-y-8">
@@ -278,11 +283,16 @@ export function SkillsTab({
         ) : (
           <ul className="divide-y rounded-lg border bg-surface-raised/40">
             {runtimeSkills.map((skill) => {
-              const disabled = isRuntimeSkillDisabled(
-                agent.disabled_runtime_skills,
-                runtime?.id,
-                skill,
+              const overridden = assignedSkillNames.has(
+                normalizeSkillName(skill.name),
               );
+              const disabled =
+                overridden ||
+                isRuntimeSkillDisabled(
+                  agent.disabled_runtime_skills,
+                  runtime?.id,
+                  skill,
+                );
               const busyKey = runtimeSkillIdentity(skill);
               const busy = busyId === busyKey;
               return (
@@ -317,14 +327,20 @@ export function SkillsTab({
                       </span>
                     </span>
                   </button>
+                  {overridden && (
+                    <Badge variant="outline">
+                      {t(($) => $.tab_body.skills.runtime_overridden_badge)}
+                    </Badge>
+                  )}
                   {canEdit &&
-                    skill.can_disable === true &&
-                    skill.root &&
-                    (busy ? (
+                    (overridden ||
+                      (skill.can_disable === true && Boolean(skill.root))) &&
+                    (busy && !overridden ? (
                       <Loader2 className="h-4 w-4 animate-spin text-muted-foreground motion-reduce:animate-none" />
                     ) : (
                       <Switch
                         checked={!disabled}
+                        disabled={overridden}
                         onCheckedChange={(checked) =>
                           handleRuntimeToggle(skill, checked)
                         }
@@ -354,6 +370,16 @@ export function SkillsTab({
 
 function runtimeSkillIdentity(skill: RuntimeLocalSkillSummary): string {
   return `runtime:${skill.root ?? "unknown"}:${skill.key}:${skill.plugin ?? ""}`;
+}
+
+function normalizeSkillName(name: string): string {
+  // Keep this in sync with execenv.sanitizeSkillName in the daemon.
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return normalized || "skill";
 }
 
 function isRuntimeSkillDisabled(
