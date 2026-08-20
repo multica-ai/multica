@@ -29,7 +29,6 @@ import { api } from "@multica/core/api";
 import {
   resolvePostAuthDestination,
   useCurrentWorkspace,
-  useHasOnboarded,
 } from "@multica/core/paths";
 import { setCurrentWorkspace } from "@multica/core/platform";
 import type { Workspace } from "@multica/core/types";
@@ -83,7 +82,6 @@ export function WorkspaceTab() {
   const leaveWorkspace = useLeaveWorkspace();
   const deleteWorkspace = useDeleteWorkspace();
   const navigation = useNavigation();
-  const hasOnboarded = useHasOnboarded();
 
   /**
    * Send the user to a safe URL, computed from the current cached workspace
@@ -124,7 +122,7 @@ export function WorkspaceTab() {
     // takes over immediately, or the new-workspace overlay takes over
     // (which has no workspace context, so null is correct).
     setCurrentWorkspace(null, null);
-    navigation.push(resolvePostAuthDestination(remaining, hasOnboarded));
+    navigation.push(resolvePostAuthDestination(remaining));
   };
 
   const [name, setName] = useState(workspace?.name ?? "");

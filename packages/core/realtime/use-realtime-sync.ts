@@ -54,7 +54,7 @@ import {
   promotePendingChatTask,
   removePendingChatTask,
 } from "../chat/pending";
-import { resolvePostAuthDestination, useHasOnboarded } from "../paths";
+import { resolvePostAuthDestination } from "../paths";
 import type {
   MemberAddedPayload,
   WorkspaceDeletedPayload,
@@ -99,7 +99,6 @@ import type {
   ChatPendingTask,
   ChatMessagesPage,
   ChatSession,
-  InvitationCreatedPayload,
 } from "../types";
 
 const chatWsLogger = createLogger("chat.ws");
@@ -517,7 +516,6 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: workspaceKeys.members(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.squads(wsId) });
     qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
-    qc.invalidateQueries({ queryKey: workspaceKeys.invitations(wsId) });
     qc.invalidateQueries({ queryKey: projectKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: runtimeKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: autopilotKeys.all(wsId) });
@@ -602,13 +600,6 @@ export function useRealtimeSync(
 ) {
   const { authStore } = stores;
   const qc = useQueryClient();
-
-  // Captured via ref so the (rare) hasOnboarded change doesn't re-subscribe
-  // every WS handler in this effect. The resolver reads `.current` at the
-  // moment workspace-loss fires, which is what we want.
-  const hasOnboarded = useHasOnboarded();
-  const hasOnboardedRef = useRef(hasOnboarded);
-  hasOnboardedRef.current = hasOnboarded;
 
   // Main sync: onAny -> refreshMap with debounce
   useEffect(() => {
@@ -1035,10 +1026,9 @@ export function useRealtimeSync(
         staleTime: 0,
       });
       const remaining = wsList.filter((w) => w.id !== lostWsId);
-      const target = resolvePostAuthDestination(
-        remaining,
-        hasOnboardedRef.current,
-      );
+      const target = remaining.length > 0
+        ? resolvePostAuthDestination(remaining)
+        : "/tag/workspaces/new";
       if (typeof window !== "undefined") {
         window.location.assign(target);
       }
@@ -1088,40 +1078,11 @@ export function useRealtimeSync(
       const myUserId = authStore.getState().user?.id;
       if (member.user_id === myUserId) {
         qc.invalidateQueries({ queryKey: workspaceKeys.list() });
-        qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
         onToast?.(
           `You joined ${workspace_name ?? "a workspace"}`,
           "info",
         );
       }
-    });
-
-    // invitation:created — notify the invitee of a new pending invitation
-    const unsubInvitationCreated = ws.on("invitation:created", (p) => {
-      const { workspace_name } = p as InvitationCreatedPayload;
-      qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
-      onToast?.(
-        `You were invited to ${workspace_name ?? "a workspace"}`,
-        "info",
-      );
-    });
-
-    // invitation:accepted / declined / revoked — refresh invitation lists
-    const unsubInvitationAccepted = ws.on("invitation:accepted", () => {
-      const currentWsId = getCurrentWsId();
-      if (currentWsId) {
-        qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
-        qc.invalidateQueries({ queryKey: workspaceKeys.members(currentWsId) });
-      }
-    });
-    const unsubInvitationDeclined = ws.on("invitation:declined", () => {
-      const currentWsId = getCurrentWsId();
-      if (currentWsId) {
-        qc.invalidateQueries({ queryKey: workspaceKeys.invitations(currentWsId) });
-      }
-    });
-    const unsubInvitationRevoked = ws.on("invitation:revoked", () => {
-      qc.invalidateQueries({ queryKey: workspaceKeys.myInvitations() });
     });
 
     // --- Chat / task events (global, survives ChatWindow unmount) ---
@@ -1463,10 +1424,6 @@ export function useRealtimeSync(
       unsubWsDeleted();
       unsubMemberRemoved();
       unsubMemberAdded();
-      unsubInvitationCreated();
-      unsubInvitationAccepted();
-      unsubInvitationDeclined();
-      unsubInvitationRevoked();
       unsubTaskMessage();
       unsubChatMessage();
       unsubChatDone();

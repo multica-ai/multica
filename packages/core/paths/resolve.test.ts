@@ -20,25 +20,14 @@ function makeWs(slug: string): Workspace {
 }
 
 describe("resolvePostAuthDestination", () => {
-  it("enters an existing workspace without consulting onboarded_at", () => {
-    const ws = [makeWs("acme")];
-    expect(resolvePostAuthDestination(ws, false)).toBe(
-      paths.workspace("acme").issues(),
-    );
-    expect(resolvePostAuthDestination(ws, true)).toBe(
-      paths.workspace("acme").issues(),
-    );
-  });
-
-  it("onboarded + workspace[0] → /<first.slug>/issues", () => {
+  it("enters the first existing workspace without consulting onboarded_at", () => {
     const ws = [makeWs("acme"), makeWs("beta")];
-    expect(resolvePostAuthDestination(ws, true)).toBe(
+    expect(resolvePostAuthDestination(ws)).toBe(
       paths.workspace("acme").issues(),
     );
   });
 
   it("uses the authority-backed workspace entry when none is projected", () => {
-    expect(resolvePostAuthDestination([], false)).toBe(paths.newWorkspace());
-    expect(resolvePostAuthDestination([], true)).toBe(paths.newWorkspace());
+    expect(resolvePostAuthDestination([])).toBe(paths.newWorkspace());
   });
 });

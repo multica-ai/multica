@@ -29,7 +29,7 @@ export type {
   TabEntityData,
   TabLabelKey,
 } from "./tab-presentation";
-export { resolvePostAuthDestination, useHasOnboarded } from "./resolve";
+export { resolvePostAuthDestination } from "./resolve";
 export {
   WorkspaceSlugProvider,
   useWorkspaceSlug,

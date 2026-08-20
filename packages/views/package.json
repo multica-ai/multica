@@ -47,8 +47,6 @@
     "./slack": "./slack/index.ts",
     "./dingtalk": "./dingtalk/index.ts",
     "./wecom": "./wecom/index.ts",
-    "./invite": "./invite/index.ts",
-    "./invitations": "./invitations/index.ts",
     "./platform": "./platform/index.ts",
     "./i18n": "./i18n/index.ts",
     "./attachments": "./attachments/index.ts",
