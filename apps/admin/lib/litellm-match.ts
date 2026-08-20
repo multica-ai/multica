@@ -1,4 +1,4 @@
-import type { LiteLlmKey } from "./litellm-schema";
+import type { LiteLlmKey, LiteLlmTeam } from "./litellm-schema";
 
 /**
  * Pure matching logic, split out of litellm-join.ts so it's testable
@@ -14,4 +14,16 @@ import type { LiteLlmKey } from "./litellm-schema";
  */
 export function findKeyForSlug(keys: LiteLlmKey[], slug: string): LiteLlmKey | null {
   return keys.find((k) => k.key_alias === `agentfarm-${slug}`) ?? null;
+}
+
+/**
+ * Resolves a key's `team_id` to the org's real team name. The raw /key/list
+ * response has a `team_alias` field too, but it's always null on every real
+ * key sampled, which is why LiteLlmKeySchema doesn't model it — the display
+ * name has to come from a separate /team/list lookup keyed on `team_id`
+ * instead.
+ */
+export function resolveTeamName(teams: LiteLlmTeam[], teamId: string | null | undefined): string | null {
+  if (!teamId) return null;
+  return teams.find((t) => t.team_id === teamId)?.team_alias ?? null;
 }

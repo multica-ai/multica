@@ -7,7 +7,6 @@ import { z } from "zod";
 
 export const LiteLlmKeySchema = z.object({
   key_alias: z.string().nullish(),
-  team_alias: z.string().nullish(),
   team_id: z.string().nullish(),
 });
 
@@ -19,6 +18,22 @@ export const LiteLlmKeyListSchema = z.object({
     })
     .nullish(),
 });
+
+// /team/list entries. `team_alias` here is the org's real, human-assigned
+// team name (e.g. "Digital Acquisition"). Note the raw /key/list response
+// also has a field named `team_alias`, but it's always null on every key
+// created via Gandalf's workspace_create path, so LiteLlmKeySchema
+// deliberately doesn't model it — the key only carries `team_id`, and this
+// list is what resolves that id to a display name.
+export const LiteLlmTeamSchema = z.object({
+  team_id: z.string().nullish(),
+  team_alias: z.string().nullish(),
+});
+
+export const LiteLlmTeamListSchema = z.union([
+  z.array(LiteLlmTeamSchema),
+  z.object({ teams: z.array(LiteLlmTeamSchema).default([]) }),
+]);
 
 export const LiteLlmModelMetricsSchema = z.object({
   spend: z.number().nullish(),
@@ -46,4 +61,5 @@ export const LiteLlmTeamActivitySchema = z.object({
 
 export type LiteLlmKey = z.infer<typeof LiteLlmKeySchema>;
 export type LiteLlmKeyList = z.infer<typeof LiteLlmKeyListSchema>;
+export type LiteLlmTeam = z.infer<typeof LiteLlmTeamSchema>;
 export type LiteLlmTeamActivity = z.infer<typeof LiteLlmTeamActivitySchema>;

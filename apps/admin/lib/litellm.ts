@@ -3,7 +3,9 @@ import { parseWithFallback } from "./schema";
 import {
   LiteLlmKeyListSchema,
   LiteLlmTeamActivitySchema,
+  LiteLlmTeamListSchema,
   type LiteLlmKey,
+  type LiteLlmTeam,
 } from "./litellm-schema";
 
 /**
@@ -93,6 +95,41 @@ export async function listLiteLlmKeys(): Promise<LiteLlmKey[]> {
   return keys;
 }
 
+// This LiteLLM deployment caps list endpoints' `size` at 100 (larger values 422).
+const TEAM_PAGE_SIZE = 100;
+const MAX_TEAM_PAGES = 200; // hard backstop, mirrors MAX_KEY_PAGES
+
+/**
+ * Fetches all teams so `team_id` (the only team identifier a key actually
+ * carries — see lib/litellm-match.ts) can be resolved to `team_alias`, the
+ * org's real human-assigned team name (e.g. "Digital Acquisition"). Same
+ * best-effort/degrade-to-partial semantics as listLiteLlmKeys.
+ */
+export async function listLiteLlmTeams(): Promise<LiteLlmTeam[]> {
+  if (!litellmConfigured()) return [];
+  const teams: LiteLlmTeam[] = [];
+  for (let page = 1; page <= MAX_TEAM_PAGES; page++) {
+    let raw: unknown;
+    try {
+      raw = await apiGet("/team/list", {
+        page: String(page),
+        size: String(TEAM_PAGE_SIZE),
+      });
+    } catch (error) {
+      console.error(`[admin] LiteLLM /team/list page ${page} failed`, error);
+      break;
+    }
+    const parsed = parseWithFallback(raw, LiteLlmTeamListSchema, [], {
+      endpoint: "/team/list",
+    });
+    const pageTeams = Array.isArray(parsed) ? parsed : parsed.teams;
+    if (pageTeams.length === 0) break;
+    teams.push(...pageTeams);
+    if (pageTeams.length < TEAM_PAGE_SIZE) break;
+  }
+  return teams;
+}
+
 export interface LiteLlmUsage {
   cost24h: number;
   cost30d: number;
@@ -100,22 +137,21 @@ export interface LiteLlmUsage {
 }
 
 /**
- * Best-effort 24h/30d spend + token usage for a team, keyed by team_alias
- * (see the join strategy note in lib/queries.ts). Returns null rather than
- * zeros when the feed has nothing for this alias — the UI must render "no
+ * Best-effort 24h/30d spend + token usage for a team, keyed by team_id (the
+ * identifier /team/daily/activity's `team_ids` filter actually expects — a
+ * team_alias here silently returns no matching rows). Returns null rather
+ * than zeros when the feed has nothing for this id — the UI must render "no
  * data" instead of an invented $0.00, per DESIGN.md's anti-pattern rule.
+ *
+ * Note this is team-wide spend: it aggregates every key on the team, not
+ * just the one workspace's key, since LiteLLM has no per-workspace scope.
  */
-export async function getTeamUsage(teamAlias: string): Promise<LiteLlmUsage | null> {
+export async function getTeamUsage(teamId: string): Promise<LiteLlmUsage | null> {
   if (!litellmConfigured()) return null;
   const end = new Date();
   const start30 = new Date(end.getTime() - 30 * 86400_000);
-  // /team/daily/activity supports a team_ids filter (LiteLLM proxy docs) — the
-  // join in lib/litellm-join.ts only gives us team_alias, but passing it here
-  // scopes the request server-side rather than fetching every team's activity
-  // and hoping the per-day breakdown happens to carry a team identifier to
-  // filter on client-side (it doesn't — see LiteLlmDayResultSchema).
   const raw = await apiGet("/team/daily/activity", {
-    team_ids: teamAlias,
+    team_ids: teamId,
     start_date: start30.toISOString().slice(0, 10),
     end_date: end.toISOString().slice(0, 10),
     page: "1",

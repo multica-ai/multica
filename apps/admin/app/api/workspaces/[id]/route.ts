@@ -6,13 +6,13 @@ import {
   getWorkspaceMetadata,
   getWorkspaceStatus,
 } from "@/lib/queries";
-import { findKeyForSlug } from "@/lib/litellm-join";
-import { getTeamUsage, listLiteLlmKeys } from "@/lib/litellm";
+import { findKeyForSlug, resolveTeamName } from "@/lib/litellm-join";
+import { getTeamUsage, listLiteLlmKeys, listLiteLlmTeams } from "@/lib/litellm";
 import { deriveHealth, deriveSuccessRate } from "@/lib/derive";
 import type { LiteLlmSection, WorkspaceDetail } from "@/lib/types";
 
 async function buildLiteLlmSection(slug: string): Promise<LiteLlmSection> {
-  const keys = await listLiteLlmKeys();
+  const [keys, teams] = await Promise.all([listLiteLlmKeys(), listLiteLlmTeams()]);
   const match = findKeyForSlug(keys, slug);
   if (!match) {
     return {
@@ -25,11 +25,12 @@ async function buildLiteLlmSection(slug: string): Promise<LiteLlmSection> {
       tokens24h: null,
     };
   }
-  const usage = match.team_alias ? await getTeamUsage(match.team_alias) : null;
+  const teamAlias = resolveTeamName(teams, match.team_id);
+  const usage = match.team_id ? await getTeamUsage(match.team_id) : null;
   return {
     linked: true,
     keyAlias: match.key_alias ?? null,
-    teamAlias: match.team_alias ?? null,
+    teamAlias,
     // LiteLLM's /key/list and /team/daily/activity responses don't carry a
     // member-username list for a team — no such field exists in the schemas
     // in lib/litellm-schema.ts. Left empty rather than invented; the UI
