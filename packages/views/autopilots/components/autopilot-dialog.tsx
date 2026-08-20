@@ -564,15 +564,23 @@ export function AutopilotDialog(props: AutopilotDialogProps) {
           {/* Left: Runbook */}
           <div className="flex-none lg:flex-1 min-h-0 min-w-0 flex flex-col border-b lg:border-b-0 lg:border-r">
             <div className="px-6 pt-5 pb-3 shrink-0">
-              <TitleEditor
-                ref={titleEditorRef}
-                autoFocus={isCreate}
-                defaultValue={initial.title ?? ""}
-                placeholder={t(($) => $.dialog.title_placeholder)}
-                className="text-display-sm font-semibold tracking-tight"
-                onChange={setTitle}
-                onSubmit={handleSubmit}
-              />
+              <div className="mb-1.5 flex items-center gap-1 text-caption font-medium text-foreground">
+                <span>{t(($) => $.dialog.title_label)}</span>
+                <span aria-hidden="true" className="text-destructive">*</span>
+                <span className="sr-only">{t(($) => $.dialog.required)}</span>
+              </div>
+              <div className="rounded-md border border-input bg-background px-3 py-2 transition-colors focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+                <TitleEditor
+                  ref={titleEditorRef}
+                  autoFocus={isCreate}
+                  required
+                  defaultValue={initial.title ?? ""}
+                  placeholder={t(($) => $.dialog.title_placeholder)}
+                  className="text-title-sm font-medium"
+                  onChange={setTitle}
+                  onSubmit={handleSubmit}
+                />
+              </div>
               {/* role="alert": the title is a contenteditable, so there is no
                   input to hang aria-describedby off — announcing the error is
                   the only way a screen-reader user learns why Create did
