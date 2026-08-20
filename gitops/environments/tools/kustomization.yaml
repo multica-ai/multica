@@ -41,4 +41,4 @@ images:
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newTag: "ed451b6c"
   - name: ghcr.io/g2crowd/agentfarm-admin-prod
-    newTag: "7c443f0f"
+    newTag: "ed451b6c"
