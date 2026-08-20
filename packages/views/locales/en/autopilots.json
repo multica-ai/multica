@@ -354,10 +354,12 @@
     "cron_invalid": "This cron expression isn't valid.",
     "timezone_invalid": "This timezone isn't recognized by the server.",
     "advanced_hint": "This expression uses features the visual editor can't represent. Edit the cron text directly, or simplify it to re-enable the controls.",
+    "advanced_unsupported": "This backend does not support schedule preview yet. Update the self-hosted backend to match the web app; the controls stay off until then.",
     "advanced_unverified": "The server couldn't be reached to check this expression, so the controls stay off. Make sure the cron text is right before saving.",
     "advanced_checking": "Checking this expression with the server. The controls stay off until it answers.",
     "next_runs_label": "Next runs",
     "next_in": "in {{countdown}}",
+    "preview_unsupported": "This backend does not support schedule preview yet. Update the self-hosted backend to match the web app. Saving is still allowed; confirm the cron text first.",
     "preview_unavailable": "Next runs unavailable right now.",
     "no_upcoming_runs": "This expression has no upcoming runs.",
     "describe": {
