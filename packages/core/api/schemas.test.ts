@@ -970,6 +970,16 @@ describe("AppConfigSchema cdn_signed drift", () => {
   });
 });
 
+describe("AppConfigSchema auth provider drift", () => {
+  it("defaults old server responses to local authentication", () => {
+    expect(AppConfigSchema.parse({}).auth_provider).toBe("local");
+  });
+
+  it("preserves a configured HZT redirect provider", () => {
+    expect(AppConfigSchema.parse({ auth_provider: "hzt_redirect" }).auth_provider).toBe("hzt_redirect");
+  });
+});
+
 describe("InboxUnreadSummarySchema", () => {
   const ENDPOINT = { endpoint: "GET /api/inbox/unread-summary" };
 

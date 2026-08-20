@@ -1,0 +1,1 @@
+CREATE UNIQUE INDEX CONCURRENTLY hzt_external_identity_subject_uidx ON hzt_external_identity (external_subject);

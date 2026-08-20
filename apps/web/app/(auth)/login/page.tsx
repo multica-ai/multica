@@ -61,6 +61,8 @@ function LoginPageContent() {
   const qc = useQueryClient();
   const { t } = useT("auth");
   const googleClientId = useConfigStore((state) => state.googleClientId);
+  const authProvider = useConfigStore((state) => state.authProvider);
+  const authConfigLoaded = useConfigStore((state) => state.authConfigLoaded);
   const user = useAuthStore((s) => s.user);
   const isLoading = useAuthStore((s) => s.isLoading);
   const searchParams = useSearchParams();
@@ -135,6 +137,14 @@ function LoginPageContent() {
       .then((list) => resolveLoggedInDestination(qc, hasOnboarded, list))
       .then((dest) => router.replace(dest));
   }, [isLoading, user, router, nextUrl, cliCallbackRaw, isDesktopHandoff, hasOnboarded, qc]);
+
+  useEffect(() => {
+    if (!authConfigLoaded || authProvider !== "hzt_redirect" || isLoading || user) return;
+    const params = new URLSearchParams();
+    if (nextUrl) params.set("next", nextUrl);
+    const query = params.toString();
+    window.location.replace(`/auth/hzt/login${query ? `?${query}` : ""}`);
+  }, [authConfigLoaded, authProvider, isLoading, nextUrl, user]);
 
   const handleSuccess = async () => {
     // Read the latest user snapshot directly — the closure's `hasOnboarded`
@@ -211,6 +221,14 @@ function LoginPageContent() {
             )}
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  if (!authConfigLoaded || authProvider === "hzt_redirect") {
+    return (
+      <div className="flex min-h-screen items-center justify-center">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" aria-label="Redirecting to identity provider" />
       </div>
     );
   }

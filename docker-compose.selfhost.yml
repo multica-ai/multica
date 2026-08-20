@@ -41,6 +41,8 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-multica}
     volumes:
       - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
     restart: unless-stopped
     healthcheck:
       test:
@@ -62,7 +64,7 @@ services:
     volumes:
       - backend_uploads:/app/data/uploads
     environment:
-      DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
+      DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@${POSTGRES_HOST:-postgres}:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
       METRICS_ADDR: ${METRICS_ADDR:-}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set to a strong random value — generate one with 'openssl rand -hex 32'}
@@ -101,6 +103,11 @@ services:
       ALLOW_SIGNUP: ${ALLOW_SIGNUP:-true}
       ALLOWED_EMAILS: ${ALLOWED_EMAILS:-}
       ALLOWED_EMAIL_DOMAINS: ${ALLOWED_EMAIL_DOMAINS:-}
+      AUTH_PROVIDER: ${AUTH_PROVIDER:-local}
+      HZT_PUBLIC_URL: ${HZT_PUBLIC_URL:-}
+      HZT_INTERNAL_URL: ${HZT_INTERNAL_URL:-}
+      HZT_SSO_SECRET: ${HZT_SSO_SECRET:-}
+      HZT_DEFAULT_WORKSPACE_SLUG: ${HZT_DEFAULT_WORKSPACE_SLUG:-}
       DISABLE_WORKSPACE_CREATION: ${DISABLE_WORKSPACE_CREATION:-}
       # Managed entitlement policy is explicitly opt-in. The false/empty
       # defaults keep self-hosted installs on the legacy path with no Cloud
