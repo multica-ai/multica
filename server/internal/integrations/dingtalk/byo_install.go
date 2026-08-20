@@ -10,7 +10,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
 
 // ErrInvalidAppKey / ErrInvalidAppSecret are returned by RegisterBYO when a
@@ -26,11 +26,13 @@ var (
 	ErrCredentialValidation = errors.New("dingtalk: could not validate credentials")
 )
 
-// RegisterBYOParams are the inputs for a bring-your-own-app install: the agent
-// this bot represents, who is installing, and the two credentials the user
-// pasted from their own DingTalk Stream-mode robot.
+// RegisterBYOParams are the inputs for a bring-your-own-app install. TargetID is
+// the stable Agent or Squad destination; AgentID is the executable Agent (the
+// current Leader for a Squad) validated by the handler.
 type RegisterBYOParams struct {
 	WorkspaceID pgtype.UUID
+	TargetType  engine.TargetType
+	TargetID    pgtype.UUID
 	AgentID     pgtype.UUID
 	InitiatorID pgtype.UUID
 	AppKey      string // client id — robotCode + access-token mint
@@ -38,7 +40,7 @@ type RegisterBYOParams struct {
 }
 
 // RegisterBYO installs a user-supplied ("bring your own") DingTalk robot for an
-// default agent. The user creates their own DingTalk Stream-mode robot and pastes its
+// target. The user creates their own DingTalk Stream-mode robot and pastes its
 // AppKey (client id) + AppSecret (client secret). There is NO OAuth code
 // exchange: we validate the credentials live by minting an access_token (which
 // proves the AppKey/AppSecret pair is valid), encrypt the AppSecret at rest, and
@@ -54,14 +56,14 @@ type RegisterBYOParams struct {
 // conflict sentinel. The dedicated Stream connection that consumes the stored
 // credentials lives in dingtalk_channel.go; this method only persists the
 // installation.
-func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (db.ChannelInstallation, error) {
+func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (Installation, error) {
 	appKey := strings.TrimSpace(p.AppKey)
 	appSecret := strings.TrimSpace(p.AppSecret)
 	if appKey == "" {
-		return db.ChannelInstallation{}, ErrInvalidAppKey
+		return Installation{}, ErrInvalidAppKey
 	}
 	if appSecret == "" {
-		return db.ChannelInstallation{}, ErrInvalidAppSecret
+		return Installation{}, ErrInvalidAppSecret
 	}
 
 	// Validate the credentials live: a successful access_token mint proves the
@@ -70,12 +72,12 @@ func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (
 	validationCtx, cancel := context.WithTimeout(ctx, s.validationTimeout)
 	defer cancel()
 	if _, _, err := fetchAccessToken(validationCtx, s.httpClient, s.apiBase, appKey, appSecret); err != nil {
-		return db.ChannelInstallation{}, fmt.Errorf("%w: %v", ErrCredentialValidation, err)
+		return Installation{}, fmt.Errorf("%w: %v", ErrCredentialValidation, err)
 	}
 
 	sealedSecret, err := s.box.Seal([]byte(appSecret))
 	if err != nil {
-		return db.ChannelInstallation{}, fmt.Errorf("encrypt dingtalk app secret: %w", err)
+		return Installation{}, fmt.Errorf("encrypt dingtalk app secret: %w", err)
 	}
 	cfgJSON, err := json.Marshal(installConfig{
 		AppID:              appKey,
@@ -83,7 +85,7 @@ func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (
 		AppSecretEncrypted: base64.StdEncoding.EncodeToString(sealedSecret),
 	})
 	if err != nil {
-		return db.ChannelInstallation{}, fmt.Errorf("encode dingtalk installation config: %w", err)
+		return Installation{}, fmt.Errorf("encode dingtalk installation config: %w", err)
 	}
 
 	// Persist one installation per default agent (the row is keyed by workspace
@@ -94,6 +96,8 @@ func (s *InstallService) RegisterBYO(ctx context.Context, p RegisterBYOParams) (
 	// agent, and refuses a LIVE owner with an accurate conflict sentinel.
 	return s.persistInstall(ctx, installPersist{
 		wsID:        p.WorkspaceID,
+		targetType:  p.TargetType,
+		targetID:    p.TargetID,
 		agentID:     p.AgentID,
 		installerID: p.InitiatorID,
 		appIDKey:    appKey,

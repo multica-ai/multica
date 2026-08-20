@@ -34,7 +34,7 @@ import {
 } from "@multica/ui/components/ui/alert-dialog";
 import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
-import { agentListOptions, memberListOptions } from "@multica/core/workspace/queries";
+import { agentListOptions, memberListOptions, squadListOptions } from "@multica/core/workspace/queries";
 import { DingTalkMark } from "./dingtalk-mark";
 import { useActorName } from "@multica/core/workspace/hooks";
 import {
@@ -43,7 +43,7 @@ import {
   dingtalkKeys,
 } from "@multica/core/dingtalk";
 import { api } from "@multica/core/api";
-import type { DingTalkGroupRoute, DingTalkInstallation } from "@multica/core/types";
+import type { DingTalkGroupRoute, DingTalkInstallation, DingTalkTargetType } from "@multica/core/types";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { openExternal } from "../../platform";
 import { useT } from "../../i18n";
@@ -56,6 +56,17 @@ function formatInstalledAt(value: string): string {
   const t = Date.parse(value);
   if (!value || Number.isNaN(t) || t <= 0) return "—";
   return new Date(t).toLocaleString();
+}
+
+function dingtalkTarget(target: {
+  target_type?: DingTalkTargetType;
+  target_id?: string;
+  agent_id: string;
+}) {
+  return {
+    type: target.target_type ?? "agent",
+    id: target.target_id || target.agent_id,
+  } as const;
 }
 
 // DingTalkTab is the workspace settings panel for DingTalk robot installations.
@@ -82,6 +93,10 @@ export function DingTalkTab() {
     isSuccess: agentsLoaded,
     refetch: retryAgents,
   } = useQuery(agentListOptions(wsId));
+  const {
+    data: squads = [],
+    isSuccess: squadsLoaded,
+  } = useQuery(squadListOptions(wsId));
   const currentMember = members.find((m) => m.user_id === user?.id) ?? null;
   const canManage =
     currentMember?.role === "owner" || currentMember?.role === "admin";
@@ -92,6 +107,7 @@ export function DingTalkTab() {
   const installations = data?.installations ?? [];
   const configured = data?.configured === true;
   const groupRoutingSupported = data?.group_routing_supported === true;
+  const squadRoutingSupported = data?.squad_routing_supported === true;
   const hasActiveInstallation = installations.some(
     (installation) => installation.status === "active",
   );
@@ -107,6 +123,9 @@ export function DingTalkTab() {
   });
   const groupRoutes = groupRouteData?.routes ?? [];
   const activeAgents = (agents ?? []).filter((agent) => !agent.archived_at);
+  const activeSquads = squadRoutingSupported
+    ? squads.filter((squad) => !squad.archived_at)
+    : [];
 
   const [disconnectTarget, setDisconnectTarget] = useState<string | null>(null);
   const [disconnecting, setDisconnecting] = useState(false);
@@ -129,11 +148,31 @@ export function DingTalkTab() {
     }
   }
 
-  async function handleRouteAgentChange(route: DingTalkGroupRoute, agentId: string) {
-    if (!canManage || !agentsLoaded || updatingRouteId || route.agent_id === agentId) return;
+  async function handleRouteTargetChange(route: DingTalkGroupRoute, value: string) {
+    const separator = value.indexOf(":");
+    if (separator < 0) return;
+    const targetType = value.slice(0, separator) as DingTalkTargetType;
+    const targetId = value.slice(separator + 1);
+    if (targetType !== "agent" && targetType !== "squad") return;
+    const current = dingtalkTarget(route);
+    const selectedListLoaded =
+      targetType === "agent"
+        ? agentsLoaded
+        : squadRoutingSupported && squadsLoaded;
+    if (
+      !canManage ||
+      !selectedListLoaded ||
+      updatingRouteId ||
+      (current.type === targetType && current.id === targetId)
+    ) {
+      return;
+    }
     setUpdatingRouteId(route.id);
     try {
-      await api.updateDingTalkGroupRoute(wsId, route.id, { agent_id: agentId });
+      await api.updateDingTalkGroupRoute(wsId, route.id, {
+        target_type: targetType,
+        target_id: targetId,
+      });
       await qc.invalidateQueries({ queryKey: dingtalkKeys.groupRoutes(wsId) });
       toast.success(t(($) => $.dingtalk.group_routes_updated));
     } catch (e) {
@@ -278,7 +317,9 @@ export function DingTalkTab() {
                       {t(($) => $.dingtalk.group_routes_agents_retry)}
                     </Button>
                   </div>
-                ) : agentsLoaded && activeAgents.length === 0 ? (
+                ) : agentsLoaded &&
+                  (!squadRoutingSupported || squadsLoaded) &&
+                  activeAgents.length + activeSquads.length === 0 ? (
                   <div className="space-y-1 pb-3">
                     <p className="text-body font-medium">
                       {t(($) => $.dingtalk.group_routes_agents_empty_title)}
@@ -293,11 +334,20 @@ export function DingTalkTab() {
                     key={route.id}
                     route={route}
                     agents={activeAgents}
-                    selectedAgentName={agents?.find((agent) => agent.id === route.agent_id)?.name}
+                    squads={activeSquads}
+                    selectedTargetName={(() => {
+                      const target = dingtalkTarget(route);
+                      return target.type === "squad"
+                        ? squads.find((squad) => squad.id === target.id)?.name
+                        : agents?.find((agent) => agent.id === target.id)?.name;
+                    })()}
                     canManage={canManage}
-                    selectorAvailable={agentsLoaded && activeAgents.length > 0}
+                    selectorAvailable={
+                      (agentsLoaded && activeAgents.length > 0) ||
+                      (squadsLoaded && activeSquads.length > 0)
+                    }
                     updating={updatingRouteId !== null}
-                    onAgentChange={(agentId) => handleRouteAgentChange(route, agentId)}
+                    onTargetChange={(value) => handleRouteTargetChange(route, value)}
                   />
                 ))}
               </CardContent>
@@ -340,27 +390,45 @@ export function DingTalkTab() {
 function GroupRouteRow({
   route,
   agents,
-  selectedAgentName,
+  squads,
+  selectedTargetName,
   canManage,
   selectorAvailable,
   updating,
-  onAgentChange,
+  onTargetChange,
 }: {
   route: DingTalkGroupRoute;
   agents: Array<{ id: string; name: string }>;
-  selectedAgentName?: string;
+  squads: Array<{ id: string; name: string }>;
+  selectedTargetName?: string;
   canManage: boolean;
   selectorAvailable: boolean;
   updating: boolean;
-  onAgentChange: (agentId: string) => void;
+  onTargetChange: (value: string) => void;
 }) {
   const { t } = useT("settings");
   const title = route.conversation_title || route.conversation_id;
-  const selectedAgent = agents.find((agent) => agent.id === route.agent_id);
+  const current = dingtalkTarget(route);
+  const selectedAgent =
+    current.type === "agent"
+      ? agents.find((agent) => agent.id === current.id)
+      : undefined;
+  const selectedSquad =
+    current.type === "squad"
+      ? squads.find((squad) => squad.id === current.id)
+      : undefined;
   const selectedLabel =
-    selectedAgentName ??
+    selectedTargetName ??
     selectedAgent?.name ??
+    selectedSquad?.name ??
     t(($) => $.dingtalk.group_routes_unknown_agent);
+  const options = [
+    ...agents.map((agent) => ({ value: `agent:${agent.id}`, label: agent.name })),
+    ...squads.map((squad) => ({
+      value: `squad:${squad.id}`,
+      label: `${squad.name} · ${t(($) => $.dingtalk.target_type_squad)}`,
+    })),
+  ];
 
   return (
     <div className="flex flex-col gap-3 py-3 first:pt-0 last:pb-0 sm:flex-row sm:items-center sm:justify-between">
@@ -372,10 +440,10 @@ function GroupRouteRow({
       </div>
       {canManage ? (
         <Select
-          items={agents.map((agent) => ({ value: agent.id, label: agent.name }))}
-          value={route.agent_id}
-          onValueChange={(agentId) => {
-            if (agentId) onAgentChange(agentId);
+          items={options}
+          value={`${current.type}:${current.id}`}
+          onValueChange={(value) => {
+            if (value) onTargetChange(value);
           }}
           disabled={!selectorAvailable || updating}
         >
@@ -386,8 +454,13 @@ function GroupRouteRow({
           </SelectTrigger>
           <SelectContent>
             {agents.map((agent) => (
-              <SelectItem key={agent.id} value={agent.id}>
+              <SelectItem key={`agent:${agent.id}`} value={`agent:${agent.id}`}>
                 {agent.name}
+              </SelectItem>
+            ))}
+            {squads.map((squad) => (
+              <SelectItem key={`squad:${squad.id}`} value={`squad:${squad.id}`}>
+                {squad.name} · {t(($) => $.dingtalk.target_type_squad)}
               </SelectItem>
             ))}
           </SelectContent>
@@ -411,9 +484,11 @@ function InstallationRow({
   onDisconnect: () => void;
 }) {
   const { t } = useT("settings");
-  const { getAgentName } = useActorName();
+  const { getAgentName, getSquadName } = useActorName();
   const isActive = installation.status === "active";
-  const agentName = getAgentName(installation.agent_id);
+  const target = dingtalkTarget(installation);
+  const targetName =
+    target.type === "squad" ? getSquadName(target.id) : getAgentName(target.id);
   const linkedIdentityIDs = canManage
     ? (installation.bound_dingtalk_user_ids ?? [])
     : [];
@@ -421,15 +496,15 @@ function InstallationRow({
     <div className="flex items-start justify-between gap-4 py-3 first:pt-0 last:pb-0">
       <div className="flex min-w-0 items-start gap-3">
         <ActorAvatar
-          actorType="agent"
-          actorId={installation.agent_id}
+          actorType={target.type}
+          actorId={target.id}
           size="lg"
           enableHoverCard
           profileLink
         />
         <div className="min-w-0 space-y-1">
           <p className="text-body font-medium">
-            {agentName}
+            {targetName}
             {!isActive && (
               <span className="ml-2 rounded bg-muted px-1.5 py-0.5 text-micro text-muted-foreground">
                 {t(($) => $.dingtalk.revoked_badge)}
@@ -504,6 +579,30 @@ export function DingTalkAgentBindButton({
    */
   onShowConnectedDetails?: () => void;
 }) {
+  return (
+    <DingTalkTargetBindButton
+      targetType="agent"
+      targetId={agentId}
+      targetName={agentName}
+      className={className}
+      onShowConnectedDetails={onShowConnectedDetails}
+    />
+  );
+}
+
+export function DingTalkTargetBindButton({
+  targetType,
+  targetId,
+  targetName,
+  className,
+  onShowConnectedDetails,
+}: {
+  targetType: DingTalkTargetType;
+  targetId: string;
+  targetName?: string;
+  className?: string;
+  onShowConnectedDetails?: () => void;
+}) {
   const { t, i18n } = useT("settings");
   const wsId = useWorkspaceId();
   const qc = useQueryClient();
@@ -518,6 +617,8 @@ export function DingTalkAgentBindButton({
     ...dingtalkInstallationsOptions(wsId),
   });
   const installSupported = listing?.install_supported === true;
+  const targetInstallSupported =
+    targetType === "agent" || listing?.squad_routing_supported === true;
 
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
@@ -530,7 +631,10 @@ export function DingTalkAgentBindButton({
   if (!canManage) return null;
 
   const existing = listing?.installations?.find(
-    (inst) => inst.agent_id === agentId && inst.status === "active",
+    (inst) => {
+      const target = dingtalkTarget(inst);
+      return target.type === targetType && target.id === targetId && inst.status === "active";
+    },
   );
   if (existing) {
     return onShowConnectedDetails ? (
@@ -543,7 +647,7 @@ export function DingTalkAgentBindButton({
     );
   }
 
-  if (!installSupported) return null;
+  if (!installSupported || !targetInstallSupported) return null;
 
   function closeDialog() {
     if (submitting) return;
@@ -555,10 +659,15 @@ export function DingTalkAgentBindButton({
   async function handleSubmit() {
     const client_id = clientId.trim();
     const client_secret = clientSecret.trim();
-    if (submitting || !agentId || !client_id || !client_secret) return;
+    if (submitting || !targetId || !client_id || !client_secret) return;
     setSubmitting(true);
     try {
-      await api.registerDingTalkBYO(wsId, agentId, { client_id, client_secret });
+      const credentials = { client_id, client_secret };
+      if (targetType === "squad") {
+        await api.registerDingTalkBYO(wsId, targetId, credentials, targetType);
+      } else {
+        await api.registerDingTalkBYO(wsId, targetId, credentials);
+      }
       // The dingtalk_installation realtime event also refreshes this list, but
       // invalidate explicitly so the connected badge appears immediately.
       await qc.invalidateQueries({ queryKey: dingtalkKeys.installations(wsId) });
@@ -587,10 +696,10 @@ export function DingTalkAgentBindButton({
         variant="outline"
         size="sm"
         onClick={() => setDialogOpen(true)}
-        disabled={!agentId}
+        disabled={!targetId}
         title={
-          agentName
-            ? t(($) => $.dingtalk.bind_button_title, { agent: agentName })
+          targetName
+            ? t(($) => $.dingtalk.bind_button_title, { agent: targetName })
             : undefined
         }
         data-testid="dingtalk-agent-connect"

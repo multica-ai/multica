@@ -220,6 +220,7 @@ export type {
 } from "./slack";
 export type {
   DingTalkInstallation,
+  DingTalkTargetType,
   DingTalkGroupRoute,
   ListDingTalkInstallationsResponse,
   ListDingTalkGroupRoutesResponse,

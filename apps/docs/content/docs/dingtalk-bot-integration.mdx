@@ -58,23 +58,25 @@ Open the app's **凭证与基础信息** (Credentials & Basic Information) and c
 3. Paste the **AppKey** and the **AppSecret**, then click **Connect**.
 4. The agent shows **Connected to DingTalk**. The bot is now listening over its own Stream connection.
 
+You can also connect the robot from **Squads → _your squad_ → Integrations**. A Squad target does not fan a message out to every member: Multica sends it to the Squad's **current Leader** with the Squad instructions and roster attached. The Leader decides whether to answer directly or distribute work to members. `/issue` creates an issue assigned to the Squad.
+
 <Callout type="warning">
-Both credentials must be from the **same** DingTalk app, and that app is installed only once in a Multica workspace. Connecting it as a second installation or in another workspace is refused. The installation's agent remains the default for DMs; group routes may target other agents without reconnecting the app.
+Both credentials must be from the **same** DingTalk app, and that app is installed only once in a Multica workspace. Connecting it as a second installation or in another workspace is refused. The installation's Agent or Squad remains the default for DMs; group routes may target other Agents or Squads without reconnecting the app.
 </Callout>
 
 <Callout type="info">
-Want one robot to serve **multiple agents**? Add it to each DingTalk group, @-mention it once so Multica discovers the group, then choose that group's agent under **Settings → Integrations → DingTalk → Group routing**. Install separate DingTalk apps only when you want separate bot identities or separate DM agents.
+Want one robot to serve **multiple Agents or Squads**? Add it to each DingTalk group, @-mention it once so Multica discovers the group, then choose that group's target under **Settings → Integrations → DingTalk → Group routing**. Install separate DingTalk apps only when you want separate bot identities or separate DM routes.
 </Callout>
 
 ## What the integration does
 
 | Surface | Behavior |
 |---|---|
-| **Agent → Integrations** | Owners and admins see **Connect DingTalk**; once connected it flips to a **Connected to DingTalk** badge with a **Disconnect** control. |
-| **DM the bot** | A workspace member messages the bot in a 1:1 chat. The conversation becomes a Multica [chat](/chat) session with the agent; every message is read. |
-| **@-mention in a group** | Add the bot to the group and @-mention it. The first mention discovers the group and uses the robot's default agent; an owner or admin can then select a different agent under **Group routing**. Only mentioning messages are read — the bot does not listen to the whole group. |
+| **Agent / Squad → Integrations** | Owners and admins see **Connect DingTalk**; once connected it flips to a **Connected to DingTalk** badge with a **Disconnect** control. |
+| **DM the bot** | A workspace member messages the bot in a 1:1 chat. An Agent target receives it directly. A Squad target sends it only to the current Leader, with the Squad instructions and roster. |
+| **@-mention in a group** | Add the bot to the group and @-mention it. The first mention discovers the group and uses the robot's default Agent or Squad; an owner or admin can then select a different target under **Group routing**. Only mentioning messages are read — the bot does not listen to the whole group. |
 | **Send images** | Images in a DM, or sent alongside a group @-mention, land in the conversation for the agent to see — PNG, JPEG, GIF, WebP, or BMP, up to 4 images per message and 10 MB each. Each image is copied into Multica storage, so it stays visible in the chat after DingTalk's temporary link expires. Images sent with `/issue` go to the created issue instead of the chat turn. Files and voice messages aren't supported. |
-| **`/issue` command** | Starting a message with `/issue <title>` creates a Multica issue directly from your input, attributed to you, and posts the issue ID and title back into the same conversation. Put the description on following lines. Images sent in the same DingTalk message are attached to the created issue. The command itself does not appear in Multica Chat; the created issue is the result recorded in Multica. |
+| **`/issue` command** | Starting a message with `/issue <title>` creates a Multica issue assigned to the route's Agent or Squad, attributed to you, and posts the issue ID and title back into the same conversation. Put the description on following lines. Images sent in the same DingTalk message are attached to the created issue. |
 | **`/new` command** | Starting a message with `/new <your message>` runs that message without prior conversation context. Sending `/new` by itself records the same fresh-start intent for your next non-empty message without creating an empty turn, and the bot confirms when that intent is ready. The pending intent remains active until a later chat task is successfully queued. The conversation history remains intact. |
 | **Reply** | The agent's answer is posted back into the same 1:1 chat or group. |
 
@@ -100,9 +102,9 @@ Only **members of the workspace** can use the bot. If you aren't a member, or yo
 
 Workspace-wide management lives in **Settings → Integrations**:
 
-- **Connected bots** lists every bot in the workspace and the agent each is bound to (visible to all members).
-- **Group routing** lists every group discovered by a bot. Owners and admins can select one fixed agent per group; all members can see the current routes.
-- Every route change starts a new chat session for the selected agent. Routing Agent A → Agent B → Agent A does not resume A's earlier session. Archiving an assigned agent preserves the route but pauses processing with an unavailable notice until that agent is restored or the group is reassigned.
+- **Connected bots** lists every bot in the workspace and the Agent or Squad each is bound to (visible to all members).
+- **Group routing** lists every group discovered by a bot. Owners and admins can select one Agent or Squad per group; all members can see the current routes.
+- Every route change starts a new chat session for the selected target. Routing Agent A → Agent B → Agent A does not resume A's earlier session. A Squad Leader change also starts a fresh session on the next message. Archiving the target pauses processing with an unavailable notice until it is restored or the group is reassigned.
 - **Disconnect** is **owner / admin only**. It stops the bot from receiving DingTalk messages and tears down its connection; the installation record is kept for audit, and you can re-connect later.
 
 ## Permissions

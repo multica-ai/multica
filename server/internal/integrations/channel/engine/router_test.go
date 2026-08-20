@@ -1198,6 +1198,33 @@ func TestRouter_IssueCommand_Creates(t *testing.T) {
 	}
 }
 
+func TestRouter_IssueCommand_AssignsSquadTarget(t *testing.T) {
+	h := newHarness(t)
+	squadID := uuidFromString(t, "88888888-8888-4888-8888-888888888888")
+	h.inst.inst.TargetType = TargetSquad
+	h.inst.inst.TargetID = squadID
+	h.binder.appendResult = AppendResult{
+		DedupMarked:  true,
+		IssueCommand: &IssueCommand{Title: "Coordinate launch"},
+	}
+	h.issues.result = service.IssueCreateResult{Issue: db.Issue{
+		ID: uuidFromString(t, "77777777-7777-7777-7777-777777777777"), Number: 43,
+	}}
+
+	if err := h.router.Handle(context.Background(), p2pMessage(t)); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if !h.issues.called {
+		t.Fatal("expected issue create")
+	}
+	if !h.issues.params.AssigneeType.Valid || h.issues.params.AssigneeType.String != string(TargetSquad) {
+		t.Fatalf("assignee_type = %+v, want squad", h.issues.params.AssigneeType)
+	}
+	if h.issues.params.AssigneeID != squadID {
+		t.Fatalf("assignee_id = %v, want Squad %v", h.issues.params.AssigneeID, squadID)
+	}
+}
+
 func TestRouter_IssueCommandWithMediaBindsWithoutChatRun(t *testing.T) {
 	h := newHarness(t)
 	issueTaskID := uuidFromString(t, "99999999-9999-4999-8999-999999999999")

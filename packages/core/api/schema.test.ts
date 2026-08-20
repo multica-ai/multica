@@ -395,10 +395,12 @@ describe("ApiClient schema fallback", () => {
         configured: true,
         install_supported: true,
         group_routing_supported: true,
+        squad_routing_supported: true,
       });
       const client = new ApiClient("https://api.example.test");
       const res = await client.listDingTalkInstallations("ws-1");
       expect(res.group_routing_supported).toBe(true);
+      expect(res.squad_routing_supported).toBe(true);
       expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual(["staff-1001"]);
     });
 
@@ -414,6 +416,28 @@ describe("ApiClient schema fallback", () => {
       const res = await client.listDingTalkInstallations("ws-1");
       expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual([]);
       expect(res.installations[1]?.bound_dingtalk_user_ids).toEqual([]);
+    });
+
+    it("preserves a Squad target and its resolved Leader", async () => {
+      stubFetchJson({
+        installations: [
+          {
+            id: "dt-squad",
+            status: "active",
+            target_type: "squad",
+            target_id: "squad-1",
+            agent_id: "leader-1",
+          },
+        ],
+        configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.installations[0]).toMatchObject({
+        target_type: "squad",
+        target_id: "squad-1",
+        agent_id: "leader-1",
+      });
     });
   });
 
@@ -449,6 +473,8 @@ describe("ApiClient schema fallback", () => {
         installation_id: "",
         conversation_id: "",
         conversation_title: "",
+        target_type: "agent",
+        target_id: "",
         agent_id: "",
         discovered_at: "",
         updated_at: "",

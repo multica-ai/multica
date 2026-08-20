@@ -444,6 +444,10 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 			SessionID:           sessionID,
 			Sender:              identity.UserID,
 			InstallationID:      inst.ID,
+			WorkspaceID:         inst.WorkspaceID,
+			TargetType:          inst.TargetType,
+			TargetID:            inst.TargetID,
+			TargetRevision:      inst.TargetRevision,
 			AgentID:             inst.AgentID,
 			RouteRevision:       inst.RouteRevision,
 			Message:             msg,
@@ -796,7 +800,7 @@ func (r *Router) flushChatRun(set ResolverSet, inst ResolvedInstallation, msg ch
 		switch {
 		case errors.Is(err, service.ErrChatTaskAgentNoRuntime):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, OutcomeAgentOffline)
-		case errors.Is(err, service.ErrChatTaskAgentArchived):
+		case errors.Is(err, service.ErrChatTaskAgentArchived), errors.Is(err, service.ErrChatTaskSquadUnavailable):
 			r.emitFlushReply(ctx, set, inst, msg, sessionID, OutcomeAgentArchived)
 		default:
 			r.logger.Error("channel router: flush enqueue chat task failed",
@@ -875,14 +879,15 @@ func (r *Router) createIssue(ctx context.Context, inst ResolvedInstallation, ori
 	if cmd.Title == "" {
 		return service.IssueCreateResult{}, ErrEmptyIssueTitle
 	}
+	targetType, targetID := inst.EffectiveTarget()
 	params := service.IssueCreateParams{
 		WorkspaceID:  inst.WorkspaceID,
 		Title:        cmd.Title,
 		Description:  pgtype.Text{String: cmd.Description, Valid: cmd.Description != ""},
 		Status:       "todo",
 		Priority:     "none",
-		AssigneeType: pgtype.Text{String: "agent", Valid: true},
-		AssigneeID:   inst.AgentID,
+		AssigneeType: pgtype.Text{String: string(targetType), Valid: true},
+		AssigneeID:   targetID,
 		CreatorType:  "member",
 		CreatorID:    creatorUserID,
 		OriginType:   pgtype.Text{String: originType, Valid: originType != ""},

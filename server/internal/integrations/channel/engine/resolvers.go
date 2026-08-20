@@ -80,13 +80,44 @@ type Result struct {
 type ResolvedInstallation struct {
 	ID          pgtype.UUID
 	WorkspaceID pgtype.UUID
-	AgentID     pgtype.UUID
+	// TargetType/TargetID preserve the product-level destination while AgentID
+	// is the concrete executable Agent. For a Squad target, AgentID is resolved
+	// to the Squad's current Leader for this dispatch and TargetID is the Squad.
+	TargetType TargetType
+	TargetID   pgtype.UUID
+	// TargetRevision is a monotonic identity fence for mutable targets. Squad
+	// adapters set it to leader_revision so A → B → A handoffs cannot revive
+	// work or replies from A's earlier tenure.
+	TargetRevision int64
+	AgentID        pgtype.UUID
 	// RouteRevision is an adapter-owned optimistic fence for platforms that
 	// route one installation to multiple agents. Zero means no such fence.
 	RouteRevision   int64
 	InstallerUserID pgtype.UUID
 	Active          bool
 	Platform        any
+}
+
+// TargetType is the channel destination selected by an administrator. Channel
+// tasks always execute on an Agent, but a Squad target keeps its own identity
+// so the current Leader receives the Squad role and instructions.
+type TargetType string
+
+const (
+	TargetAgent TargetType = "agent"
+	TargetSquad TargetType = "squad"
+)
+
+// EffectiveTarget returns a backward-compatible Agent target when an adapter
+// predates polymorphic targets and only populated AgentID.
+func (r ResolvedInstallation) EffectiveTarget() (TargetType, pgtype.UUID) {
+	if r.TargetType == TargetSquad && r.TargetID.Valid {
+		return TargetSquad, r.TargetID
+	}
+	if r.TargetType == TargetAgent && r.TargetID.Valid {
+		return TargetAgent, r.TargetID
+	}
+	return TargetAgent, r.AgentID
 }
 
 // ResolvedIdentity is the sender mapped to a Multica user.
@@ -113,6 +144,10 @@ type AppendParams struct {
 	SessionID           pgtype.UUID
 	Sender              pgtype.UUID
 	InstallationID      pgtype.UUID
+	WorkspaceID         pgtype.UUID
+	TargetType          TargetType
+	TargetID            pgtype.UUID
+	TargetRevision      int64
 	AgentID             pgtype.UUID
 	RouteRevision       int64
 	Message             channel.InboundMessage

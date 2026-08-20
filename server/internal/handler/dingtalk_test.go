@@ -28,7 +28,7 @@ func TestPublishDingTalkInstallationCreated(t *testing.T) {
 		fired++
 	})
 
-	h.publishDingTalkInstallationCreated(db.ChannelInstallation{
+	h.publishDingTalkInstallationCreated(dingtalkintegration.Installation{
 		ID:          parseUUID(instID),
 		WorkspaceID: parseUUID(wsID),
 	}, "user-1")

@@ -1532,6 +1532,11 @@ func (s *TaskService) EnqueueQuickCreateTask(ctx context.Context, workspaceID, r
 // has been archived" rather than retrying.
 var ErrChatTaskAgentArchived = errors.New("chat task: agent archived")
 
+// ErrChatTaskSquadUnavailable means a Squad-backed channel session no longer
+// points at that Squad's active current Leader. Refuse the stale dispatch so a
+// Leader handoff can never send work to the former Leader.
+var ErrChatTaskSquadUnavailable = errors.New("chat task: squad or leader unavailable")
+
 // ErrChatTaskAgentNoRuntime signals that EnqueueChatTask refused to
 // queue work because the agent has never been associated with a
 // runtime (agent.runtime_id IS NULL). This is the "agent has no
@@ -1663,6 +1668,22 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	if currentSession.Status != "active" {
 		return db.AgentTaskQueue{}, ErrChatSessionArchived
 	}
+	if currentSession.AgentID != chatSession.AgentID {
+		return db.AgentTaskQueue{}, ErrChatTaskSquadUnavailable
+	}
+	if currentSession.SquadID.Valid {
+		if _, err := qtx.LockActiveSquadChatLeader(ctx, db.LockActiveSquadChatLeaderParams{
+			SquadID:             currentSession.SquadID,
+			WorkspaceID:         currentSession.WorkspaceID,
+			AgentID:             currentSession.AgentID,
+			SquadLeaderRevision: currentSession.SquadLeaderRevision.Int64,
+		}); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return db.AgentTaskQueue{}, ErrChatTaskSquadUnavailable
+			}
+			return db.AgentTaskQueue{}, fmt.Errorf("lock squad chat leader: %w", err)
+		}
+	}
 	// Lock the channel binding only after the chat_session lock above. The
 	// append path touches chat_session before binding as well, so this order
 	// avoids an ABBA edge while keeping pending fresh in the enqueue transaction.
@@ -1682,11 +1703,16 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		mediaPendingUntil = pgtype.Timestamptz{}
 	}
 	task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
-		AgentID:           chatSession.AgentID,
-		RuntimeID:         agent.RuntimeID,
-		Priority:          2, // medium priority for chat
-		ChatSessionID:     chatSession.ID,
-		InitiatorUserID:   initiatorUserID,
+		AgentID:         currentSession.AgentID,
+		RuntimeID:       agent.RuntimeID,
+		Priority:        2, // medium priority for chat
+		ChatSessionID:   chatSession.ID,
+		InitiatorUserID: initiatorUserID,
+		IsLeaderTask: pgtype.Bool{
+			Bool:  currentSession.SquadID.Valid,
+			Valid: true,
+		},
+		SquadID:           currentSession.SquadID,
 		FireAt:            mediaPendingUntil,
 		OriginatorUserID:  initiatorUserID,
 		AccountableUserID: attr.AccountableUserID,
@@ -1947,7 +1973,20 @@ func (s *TaskService) SendDirectChatMessage(
 		if currentSession.Status != "active" {
 			return ErrChatSessionArchived
 		}
-		carrier, err := qtx.GetAgentForClaimUpdate(ctx, session.AgentID)
+		if currentSession.SquadID.Valid {
+			if _, err := qtx.LockActiveSquadChatLeader(ctx, db.LockActiveSquadChatLeaderParams{
+				SquadID:             currentSession.SquadID,
+				WorkspaceID:         currentSession.WorkspaceID,
+				AgentID:             currentSession.AgentID,
+				SquadLeaderRevision: currentSession.SquadLeaderRevision.Int64,
+			}); err != nil {
+				if errors.Is(err, pgx.ErrNoRows) {
+					return ErrChatTaskSquadUnavailable
+				}
+				return fmt.Errorf("lock squad chat leader: %w", err)
+			}
+		}
+		carrier, err := qtx.GetAgentForClaimUpdate(ctx, currentSession.AgentID)
 		if err != nil {
 			return fmt.Errorf("reload chat agent: %w", err)
 		}
@@ -1971,11 +2010,13 @@ func (s *TaskService) SendDirectChatMessage(
 		out.Queued = queued
 
 		task, err := qtx.CreateChatTask(ctx, db.CreateChatTaskParams{
-			AgentID:              session.AgentID,
+			AgentID:              currentSession.AgentID,
 			RuntimeID:            carrier.RuntimeID,
 			Priority:             2, // medium priority for chat; matches EnqueueChatTask
 			ChatSessionID:        session.ID,
 			InitiatorUserID:      initiatorUserID,
+			IsLeaderTask:         pgtype.Bool{Bool: currentSession.SquadID.Valid, Valid: true},
+			SquadID:              currentSession.SquadID,
 			OriginatorUserID:     attr.UserID,
 			AccountableUserID:    attr.AccountableUserID,
 			ForceFreshSession:    pgtype.Bool{Bool: false, Valid: true},

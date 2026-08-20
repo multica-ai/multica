@@ -4205,10 +4205,12 @@ export class ApiClient {
   // returning the new installation.
   async registerDingTalkBYO(
     workspaceId: string,
-    agentId: string,
+    targetId: string,
     body: RegisterDingTalkBYORequest,
+    targetType: "agent" | "squad" = "agent",
   ): Promise<DingTalkInstallation> {
-    const search = new URLSearchParams({ agent_id: agentId });
+    const search = new URLSearchParams({ target_type: targetType, target_id: targetId });
+    if (targetType === "agent") search.set("agent_id", targetId);
     const raw = await this.fetch<unknown>(
       `/api/workspaces/${workspaceId}/dingtalk/install/byo?${search.toString()}`,
       {

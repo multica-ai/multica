@@ -1,6 +1,12 @@
 -- name: CreateChatSession :one
-INSERT INTO chat_session (workspace_id, agent_id, creator_id, title, runtime_id, is_agent_intro, project_id)
-VALUES ($1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5, sqlc.narg('project_id'))
+INSERT INTO chat_session (
+    workspace_id, agent_id, creator_id, title, runtime_id, is_agent_intro,
+    project_id, squad_id, squad_leader_revision
+)
+VALUES (
+    $1, $2, $3, $4, (SELECT runtime_id FROM agent WHERE id = $2), $5,
+    sqlc.narg('project_id'), sqlc.narg('squad_id'), sqlc.narg('squad_leader_revision')
+)
 RETURNING *;
 
 -- name: ClearChatSessionProjectByProject :exec
@@ -18,6 +24,22 @@ WHERE id = $1;
 -- name: GetChatSessionInWorkspace :one
 SELECT * FROM chat_session
 WHERE id = $1 AND workspace_id = $2;
+
+-- name: LockActiveSquadChatLeader :one
+-- A Squad channel session executes only on the Squad's current Leader. Hold
+-- the Squad row through task creation so a concurrent Leader change either
+-- commits first (and this returns no row) or waits until this dispatch lands.
+SELECT s.leader_id
+FROM squad s
+JOIN agent a ON a.id = s.leader_id AND a.workspace_id = s.workspace_id
+WHERE s.id = sqlc.arg(squad_id)
+  AND s.workspace_id = sqlc.arg(workspace_id)
+  AND s.leader_id = sqlc.arg(agent_id)
+  AND s.leader_revision = sqlc.arg(squad_leader_revision)
+  AND s.archived_at IS NULL
+  AND a.kind = 'user'
+  AND a.archived_at IS NULL
+FOR SHARE OF s, a;
 
 -- name: GetPublicChatSessionInWorkspace :one
 -- A channel command is a durable control-plane record, not a public chat turn.
@@ -924,6 +946,7 @@ WHERE id = $1;
 -- bypass (MUL-4302 §2).
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, chat_session_id,
+    is_leader_task, squad_id,
     initiator_user_id, originator_user_id, accountable_user_id, force_fresh_session, runtime_mcp_overlay,
     runtime_connected_apps, originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
     fire_at
@@ -931,7 +954,9 @@ INSERT INTO agent_task_queue (
 SELECT
     $1, $2, NULL,
     CASE WHEN sqlc.narg('fire_at')::timestamptz IS NULL THEN 'queued' ELSE 'deferred' END,
-    $3, $4, $5,
+    $3, $4,
+    COALESCE(sqlc.narg('is_leader_task')::boolean, FALSE), sqlc.narg('squad_id'),
+    $5,
     sqlc.narg(originator_user_id),
     sqlc.narg(accountable_user_id),
     COALESCE(sqlc.narg('force_fresh_session')::boolean, FALSE),

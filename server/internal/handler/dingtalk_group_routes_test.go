@@ -51,8 +51,9 @@ func newDingTalkGroupRouteHandlerFixture(t *testing.T) dingtalkGroupRouteHandler
 	var routeID string
 	if err := testPool.QueryRow(context.Background(), `
 		INSERT INTO dingtalk_group_route (
-			workspace_id, installation_id, conversation_id, conversation_title, agent_id
-		) VALUES ($1, $2, 'cid-handler-routes', 'Handler routes', $3)
+			workspace_id, installation_id, conversation_id, conversation_title,
+			agent_id, target_type, target_id
+		) VALUES ($1, $2, 'cid-handler-routes', 'Handler routes', $3, 'agent', $3)
 		RETURNING id
 	`, testWorkspaceID, installationID, defaultAgentID).Scan(&routeID); err != nil {
 		t.Fatalf("create DingTalk group route: %v", err)
@@ -329,11 +330,12 @@ func TestListDingTalkInstallationsAdvertisesGroupRoutingCapability(t *testing.T)
 		}
 		var body struct {
 			GroupRoutingSupported bool `json:"group_routing_supported"`
+			SquadRoutingSupported bool `json:"squad_routing_supported"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode disabled installations response: %v", err)
 		}
-		if body.GroupRoutingSupported {
+		if body.GroupRoutingSupported || body.SquadRoutingSupported {
 			t.Fatal("disabled deployment advertised group routing")
 		}
 	})
@@ -411,12 +413,13 @@ func TestListDingTalkInstallationsAdvertisesGroupRoutingCapability(t *testing.T)
 		}
 		var body struct {
 			GroupRoutingSupported bool                           `json:"group_routing_supported"`
+			SquadRoutingSupported bool                           `json:"squad_routing_supported"`
 			Installations         []DingTalkInstallationResponse `json:"installations"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 			t.Fatalf("decode configured installations response: %v", err)
 		}
-		if !body.GroupRoutingSupported {
+		if !body.GroupRoutingSupported || !body.SquadRoutingSupported {
 			t.Fatal("configured deployment did not advertise group routing")
 		}
 		var found *DingTalkInstallationResponse
@@ -699,6 +702,31 @@ func TestDingTalkGroupRouteHandlersValidationAndErrors(t *testing.T) {
 		}
 		if body.ID != fx.routeID || body.AgentID != fx.targetAgentID {
 			t.Fatalf("successful PATCH body = %+v", body)
+		}
+	})
+
+	t.Run("PATCH routes the group to a Squad and returns its Leader", func(t *testing.T) {
+		var squadID string
+		if err := testPool.QueryRow(context.Background(), `
+			INSERT INTO squad (workspace_id, name, leader_id, creator_id)
+			VALUES ($1, $2, $3, $4) RETURNING id
+		`, testWorkspaceID, "DingTalk handler Squad "+fmt.Sprint(time.Now().UnixNano()), fx.targetAgentID, testUserID).Scan(&squadID); err != nil {
+			t.Fatalf("create Squad target: %v", err)
+		}
+		t.Cleanup(func() { _, _ = testPool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID) })
+
+		rec := patch(t, testWorkspaceID, fx.routeID, UpdateDingTalkGroupRouteRequest{
+			TargetType: "squad", TargetID: squadID,
+		})
+		if rec.Code != http.StatusOK {
+			t.Fatalf("Squad PATCH status = %d: %s", rec.Code, rec.Body.String())
+		}
+		var body DingTalkGroupRouteResponse
+		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if body.TargetType != "squad" || body.TargetID != squadID || body.AgentID != fx.targetAgentID {
+			t.Fatalf("Squad PATCH body = %+v", body)
 		}
 	})
 }

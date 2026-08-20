@@ -184,13 +184,15 @@ func newChatSessionWith(q SessionQueries, tx TxStarter, channelType channel.Type
 // Sender is the already-resolved Multica user (the session creator: the sole
 // human for p2p, the installer for group chats — the caller decides which).
 type EnsureSessionInput struct {
-	WorkspaceID    pgtype.UUID
-	AgentID        pgtype.UUID
-	InstallationID pgtype.UUID
-	Sender         pgtype.UUID
-	BindingKey     string
-	BindingConfig  []byte
-	ChatType       channel.ChatType
+	WorkspaceID         pgtype.UUID
+	AgentID             pgtype.UUID
+	SquadID             pgtype.UUID
+	SquadLeaderRevision pgtype.Int8
+	InstallationID      pgtype.UUID
+	Sender              pgtype.UUID
+	BindingKey          string
+	BindingConfig       []byte
+	ChatType            channel.ChatType
 }
 
 // EnsureSession returns the chat_session.id bound to (installation, BindingKey),
@@ -239,10 +241,12 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 	}
 
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
-		WorkspaceID: in.WorkspaceID,
-		AgentID:     in.AgentID,
-		CreatorID:   in.Sender,
-		Title:       s.titles.forType(in.ChatType),
+		WorkspaceID:         in.WorkspaceID,
+		AgentID:             in.AgentID,
+		CreatorID:           in.Sender,
+		Title:               s.titles.forType(in.ChatType),
+		SquadID:             in.SquadID,
+		SquadLeaderRevision: in.SquadLeaderRevision,
 	})
 	if err != nil {
 		return pgtype.UUID{}, fmt.Errorf("create chat session: %w", err)

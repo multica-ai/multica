@@ -50,6 +50,11 @@
     "keep_editing": "继续编辑",
     "discard_button": "放弃"
   },
+  "detail_tabs": {
+    "members": "成员",
+    "instructions": "指引",
+    "integrations": "集成"
+  },
   "members_tab": {
     "section_title": "成员",
     "section_count_other": "该小队有 {{count}} 名成员",
@@ -80,6 +85,10 @@
     "description": "小队指引会在 Leader 智能体处理分配给该小队的任务时注入到它的 prompt 中。可用来给 Leader 提供贯穿全队的指导、协作规范，或每次 task 都应遵循的上下文。",
     "unsaved_changes": "有未保存的修改",
     "save_button": "保存"
+  },
+  "integrations_tab": {
+    "dingtalk_title": "钉钉机器人",
+    "dingtalk_description": "消息只会发送给此小队当前的负责人。负责人可以直接回复，也可以将工作分发给小队成员。"
   },
   "scope": {
     "mine": "我的",

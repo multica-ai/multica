@@ -312,9 +312,15 @@ ORDER BY created_at ASC;
 -- archival, so an archived-but-present agent's installation is still listed.
 SELECT ci.* FROM channel_installation ci
 JOIN workspace w ON w.id = ci.workspace_id
-JOIN agent a ON a.id = ci.agent_id
+LEFT JOIN agent a ON COALESCE(ci.target_type, 'agent') = 'agent'
+                 AND a.id = COALESCE(ci.target_id, ci.agent_id)
+                 AND a.workspace_id = ci.workspace_id
+LEFT JOIN squad s ON ci.target_type = 'squad'
+                 AND s.id = ci.target_id
+                 AND s.workspace_id = ci.workspace_id
 WHERE ci.status = 'active'
   AND ci.channel_type = sqlc.arg('channel_type')
+  AND (a.id IS NOT NULL OR s.id IS NOT NULL)
 ORDER BY ci.created_at ASC;
 
 -- name: ListAllActiveChannelInstallations :many
@@ -329,8 +335,14 @@ ORDER BY ci.created_at ASC;
 -- DELETE CASCADE semantics (row existence, not agent archival).
 SELECT ci.* FROM channel_installation ci
 JOIN workspace w ON w.id = ci.workspace_id
-JOIN agent a ON a.id = ci.agent_id
+LEFT JOIN agent a ON COALESCE(ci.target_type, 'agent') = 'agent'
+                 AND a.id = COALESCE(ci.target_id, ci.agent_id)
+                 AND a.workspace_id = ci.workspace_id
+LEFT JOIN squad s ON ci.target_type = 'squad'
+                 AND s.id = ci.target_id
+                 AND s.workspace_id = ci.workspace_id
 WHERE ci.status = 'active'
+  AND (a.id IS NOT NULL OR s.id IS NOT NULL)
 ORDER BY ci.created_at ASC;
 
 -- name: SetChannelInstallationStatus :exec

@@ -50,6 +50,11 @@
     "keep_editing": "Keep editing",
     "discard_button": "Discard"
   },
+  "detail_tabs": {
+    "members": "Members",
+    "instructions": "Instructions",
+    "integrations": "Integrations"
+  },
   "members_tab": {
     "section_title": "Members",
     "section_count_one": "{{count}} member in this squad",
@@ -83,6 +88,10 @@
     "description": "Squad instructions are injected into the leader agent's prompt whenever it works on an issue assigned to this squad. Use them to give the leader squad-wide guidance, working agreements, or context the leader should follow on every task.",
     "unsaved_changes": "Unsaved changes",
     "save_button": "Save"
+  },
+  "integrations_tab": {
+    "dingtalk_title": "DingTalk robot",
+    "dingtalk_description": "Messages are delivered to this Squad's current Leader. The Leader can answer directly or distribute work to Squad members."
   },
   "scope": {
     "mine": "Mine",

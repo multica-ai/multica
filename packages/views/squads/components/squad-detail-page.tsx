@@ -15,7 +15,7 @@ import { useNavigation } from "../../navigation";
 import { AppLink } from "../../navigation";
 import { BreadcrumbHeader } from "../../layout/breadcrumb-header";
 import { PageHeader } from "../../layout/page-header";
-import { Users, Plus, Trash2, ArrowUpRight, Crown, Loader2, Pencil, FileText, Save } from "lucide-react";
+import { Users, Plus, Trash2, ArrowUpRight, Crown, Loader2, Pencil, FileText, Save, Plug } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import { Input } from "@multica/ui/components/ui/input";
 import { Label } from "@multica/ui/components/ui/label";
@@ -62,6 +62,7 @@ import { toast } from "sonner";
 import type { Squad, SquadMember, SquadMemberStatus, SquadMemberStatusValue, Agent, MemberWithUser } from "@multica/core/types";
 import { useT } from "../../i18n";
 import { matchesPinyin } from "../../editor/extensions/pinyin-match";
+import { DingTalkTargetBindButton } from "../../settings/components/dingtalk-tab";
 
 export function SquadDetailPage() {
   const { t } = useT("squads");
@@ -927,15 +928,16 @@ function SquadDescriptionEditorBody({
 }
 
 // ---------------------------------------------------------------------------
-// SquadOverviewPane — right column with two tabs (Members | Instructions).
+// SquadOverviewPane — right column with Members, Instructions, and Integrations.
 // Mirrors AgentOverviewPane: dirty-guard via AlertDialog when switching tabs
 // with unsaved Instructions.
 // ---------------------------------------------------------------------------
-type SquadDetailTab = "members" | "instructions";
+type SquadDetailTab = "members" | "instructions" | "integrations";
 
-const squadDetailTabs: { id: SquadDetailTab; label: string; icon: typeof FileText }[] = [
-  { id: "members", label: "Members", icon: Users },
-  { id: "instructions", label: "Instructions", icon: FileText },
+const squadDetailTabs: { id: SquadDetailTab; icon: typeof FileText }[] = [
+  { id: "members", icon: Users },
+  { id: "instructions", icon: FileText },
+  { id: "integrations", icon: Plug },
 ];
 
 function SquadOverviewPane({
@@ -1009,7 +1011,7 @@ function SquadOverviewPane({
             }`}
           >
             <tab.icon className="h-3.5 w-3.5" />
-            {tab.label}
+            {t(($) => $.detail_tabs[tab.id])}
           </button>
         ))}
       </div>
@@ -1041,6 +1043,25 @@ function SquadOverviewPane({
               onSave={onSaveInstructions}
               onDirtyChange={setActiveDirty}
             />
+          </div>
+        )}
+        {activeTab === "integrations" && (
+          <div className="flex h-full flex-col p-4 md:p-6">
+            <div className="space-y-4">
+              <div>
+                <h3 className="text-body font-medium">
+                  {t(($) => $.integrations_tab.dingtalk_title)}
+                </h3>
+                <p className="mt-1 text-caption text-muted-foreground">
+                  {t(($) => $.integrations_tab.dingtalk_description)}
+                </p>
+              </div>
+              <DingTalkTargetBindButton
+                targetType="squad"
+                targetId={squad.id}
+                targetName={squad.name}
+              />
+            </div>
           </div>
         )}
       </div>

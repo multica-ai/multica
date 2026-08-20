@@ -50,6 +50,11 @@
     "keep_editing": "編集を続ける",
     "discard_button": "破棄"
   },
+  "detail_tabs": {
+    "members": "メンバー",
+    "instructions": "指示",
+    "integrations": "連携"
+  },
   "members_tab": {
     "section_title": "メンバー",
     "section_count_other": "このスクワッドのメンバー {{count}}名",
@@ -80,6 +85,10 @@
     "description": "スクワッドの指示は、リーダーエージェントがこのスクワッドに割り当てられたタスクに取り組むたびに、そのプロンプトに挿入されます。スクワッド全体の方針、進め方の取り決め、リーダーがすべての作業で従うべきコンテキストを伝えるために使用します。",
     "unsaved_changes": "保存していない変更",
     "save_button": "保存"
+  },
+  "integrations_tab": {
+    "dingtalk_title": "DingTalk ロボット",
+    "dingtalk_description": "メッセージはこの Squad の現在のリーダーだけに送信されます。リーダーは直接返信するか、Squad メンバーに作業を割り振れます。"
   },
   "scope": {
     "mine": "自分",

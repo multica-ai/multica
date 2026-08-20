@@ -1267,6 +1267,110 @@ func TestEnqueueChatTaskStampsChatEvidence(t *testing.T) {
 	}
 }
 
+func TestEnqueueChatTaskMarksSquadLeaderDispatch(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var squadID, chatSessionID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, leader_id, creator_id)
+		VALUES ($1, $2, $3, $4) RETURNING id`, workspaceID,
+		"DingTalk Squad "+time.Now().Format("150405.000000"), agentID, userID).Scan(&squadID); err != nil {
+		t.Fatalf("seed squad: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, squad_id, squad_leader_revision
+		) VALUES ($1, $2, $3, $4, 1) RETURNING id`, workspaceID, agentID, userID, squadID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("seed Squad chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE chat_session_id = $1`, chatSessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	task, err := svc.EnqueueChatTask(ctx, db.ChatSession{
+		ID:      util.MustParseUUID(chatSessionID),
+		AgentID: util.MustParseUUID(agentID),
+	}, util.MustParseUUID(userID), false)
+	if err != nil {
+		t.Fatalf("EnqueueChatTask: %v", err)
+	}
+	if !task.IsLeaderTask {
+		t.Fatal("Squad channel task was not marked as a Leader task")
+	}
+	if !task.SquadID.Valid || task.SquadID != util.MustParseUUID(squadID) {
+		t.Fatalf("task squad_id = %s, want %s", util.UUIDToString(task.SquadID), squadID)
+	}
+}
+
+func TestSendDirectChatMessagePreservesSquadLeaderDispatch(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+
+	var squadID, chatSessionID string
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO squad (workspace_id, name, leader_id, creator_id)
+		VALUES ($1, $2, $3, $4) RETURNING id`, workspaceID,
+		"DingTalk Direct Squad "+time.Now().Format("150405.000000"), agentID, userID).Scan(&squadID); err != nil {
+		t.Fatalf("seed squad: %v", err)
+	}
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO chat_session (
+			workspace_id, agent_id, creator_id, squad_id, squad_leader_revision
+		) VALUES ($1, $2, $3, $4, 1) RETURNING id`, workspaceID, agentID, userID, squadID).Scan(&chatSessionID); err != nil {
+		t.Fatalf("seed Squad chat session: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_message WHERE chat_session_id = $1`, chatSessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE chat_session_id = $1`, chatSessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM chat_session WHERE id = $1`, chatSessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM squad WHERE id = $1`, squadID)
+	})
+
+	session, err := q.GetChatSession(ctx, util.MustParseUUID(chatSessionID))
+	if err != nil {
+		t.Fatalf("load chat session: %v", err)
+	}
+	agent, err := q.GetAgent(ctx, util.MustParseUUID(agentID))
+	if err != nil {
+		t.Fatalf("load agent: %v", err)
+	}
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	result, err := svc.SendDirectChatMessage(
+		ctx, session, agent, util.MustParseUUID(userID), "follow up", nil,
+		"member", util.MustParseUUID(userID),
+	)
+	if err != nil {
+		t.Fatalf("SendDirectChatMessage: %v", err)
+	}
+	if !result.Task.IsLeaderTask {
+		t.Fatal("Squad direct-chat task was not marked as a Leader task")
+	}
+	if !result.Task.SquadID.Valid || result.Task.SquadID != util.MustParseUUID(squadID) {
+		t.Fatalf("task squad_id = %s, want %s", util.UUIDToString(result.Task.SquadID), squadID)
+	}
+
+	// Models an A → B → A handoff: the Leader ID is the same again, but its
+	// monotonic revision changed. The old session must still be fenced.
+	if _, err := pool.Exec(ctx, `UPDATE squad SET leader_revision = leader_revision + 2 WHERE id = $1`, squadID); err != nil {
+		t.Fatalf("advance Squad Leader revision: %v", err)
+	}
+	_, err = svc.SendDirectChatMessage(
+		ctx, session, agent, util.MustParseUUID(userID), "stale follow up", nil,
+		"member", util.MustParseUUID(userID),
+	)
+	if !errors.Is(err, ErrChatTaskSquadUnavailable) {
+		t.Fatalf("SendDirectChatMessage after Leader handoff error = %v, want ErrChatTaskSquadUnavailable", err)
+	}
+}
+
 func TestEnqueueChatTaskDefersForChannelMediaAndPromotesWhenReady(t *testing.T) {
 	pool := newResolveOriginatorPool(t)
 	ctx := context.Background()

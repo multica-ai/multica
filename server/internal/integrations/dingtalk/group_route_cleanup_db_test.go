@@ -88,8 +88,9 @@ func seedDingTalkRouteCleanupAgent(
 	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO dingtalk_group_route (
-			id, workspace_id, installation_id, conversation_id, conversation_title, agent_id
-		) VALUES ($1, $2, $3, $4, 'DingTalk cleanup group', $5)
+			id, workspace_id, installation_id, conversation_id, conversation_title,
+			agent_id, target_type, target_id
+		) VALUES ($1, $2, $3, $4, 'DingTalk cleanup group', $5, 'agent', $5)
 	`, owner.routeID, owner.workspaceID, owner.installationID, "cid-"+owner.routeID, owner.agentID); err != nil {
 		t.Fatalf("seed cleanup group route: %v", err)
 	}
@@ -157,7 +158,8 @@ func TestDeleteDingTalkInstallationForReplacementCleansOnlyTargetRoutes(t *testi
 	if _, err := db.New(pool).DeleteDingTalkInstallationForReplacement(ctx, db.DeleteDingTalkInstallationForReplacementParams{
 		InstallationID: util.MustParseUUID(target.installationID),
 		WorkspaceID:    util.MustParseUUID(target.workspaceID),
-		AgentID:        util.MustParseUUID(target.agentID),
+		TargetType:     "agent",
+		TargetID:       util.MustParseUUID(target.agentID),
 	}); err != nil {
 		t.Fatalf("DeleteDingTalkInstallationForReplacement: %v", err)
 	}

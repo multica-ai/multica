@@ -16,6 +16,7 @@ vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "workspace-1" }));
 
 const agentListQueryFn = vi.hoisted(() => vi.fn());
 const memberListQueryFn = vi.hoisted(() => vi.fn());
+const squadListQueryFn = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({
@@ -25,6 +26,10 @@ vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: () => ({
     queryKey: ["agents", "workspace-1"],
     queryFn: agentListQueryFn,
+  }),
+  squadListOptions: () => ({
+    queryKey: ["squads", "workspace-1"],
+    queryFn: squadListQueryFn,
   }),
 }));
 
@@ -73,6 +78,8 @@ beforeEach(() => {
   ]);
   memberListQueryFn.mockReset();
   memberListQueryFn.mockResolvedValue([{ user_id: "user-1", role: "owner" }]);
+  squadListQueryFn.mockReset();
+  squadListQueryFn.mockResolvedValue([]);
 });
 
 function renderUI(children: ReactNode) {
@@ -211,11 +218,11 @@ describe("DingTalkTab group-route query failures", () => {
       await vi.advanceTimersByTimeAsync(1);
     });
 
-    expect(screen.getByText("Loading Agents for group routing…")).toBeTruthy();
+    expect(screen.getByText("Loading Agents and Squads for group routing…")).toBeTruthy();
     expect(screen.getByText("Platform team")).toBeTruthy();
     expect(screen.getByText("cid-platform")).toBeTruthy();
-    expect(screen.queryByText("No eligible Agents")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).toBeDisabled();
+    expect(screen.queryByText("No eligible targets")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Target for this group" })).toBeDisabled();
     queryClient.clear();
   });
 
@@ -233,8 +240,8 @@ describe("DingTalkTab group-route query failures", () => {
     expect(screen.getByRole("button", { name: "Retry Agents" })).toBeTruthy();
     expect(screen.getByText("Platform team")).toBeTruthy();
     expect(screen.getByText("cid-platform")).toBeTruthy();
-    expect(screen.queryByText("No eligible Agents")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).toBeDisabled();
+    expect(screen.queryByText("No eligible targets")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Target for this group" })).toBeDisabled();
     queryClient.clear();
   });
 
@@ -248,12 +255,12 @@ describe("DingTalkTab group-route query failures", () => {
       await vi.advanceTimersByTimeAsync(1);
     });
 
-    expect(screen.getByText("No eligible Agents")).toBeTruthy();
+    expect(screen.getByText("No eligible targets")).toBeTruthy();
     expect(screen.getByText("Platform team")).toBeTruthy();
     expect(screen.getByText("cid-platform")).toBeTruthy();
-    expect(screen.queryByText("Loading Agents for group routing…")).toBeNull();
+    expect(screen.queryByText("Loading Agents and Squads for group routing…")).toBeNull();
     expect(screen.queryByText("Could not load Agents")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Target for this group" })).toBeDisabled();
     queryClient.clear();
   });
 
@@ -279,7 +286,7 @@ describe("DingTalkTab group-route query failures", () => {
     });
 
     expect(screen.queryByText("Could not load Agents")).toBeNull();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).not.toBeDisabled();
+    expect(screen.getByRole("combobox", { name: "Target for this group" })).not.toBeDisabled();
     queryClient.clear();
   });
 
@@ -297,8 +304,8 @@ describe("DingTalkTab group-route query failures", () => {
 
     expect(screen.getByText("Platform team")).toBeTruthy();
     expect(screen.getAllByText("Agent One").length).toBeGreaterThan(0);
-    expect(screen.getByText("No eligible Agents")).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Agent for this group" })).toBeDisabled();
+    expect(screen.getByText("No eligible targets")).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Target for this group" })).toBeDisabled();
     queryClient.clear();
   });
 
@@ -315,8 +322,8 @@ describe("DingTalkTab group-route query failures", () => {
 
     expect(screen.getByText("Platform team")).toBeTruthy();
     expect(screen.getByText("cid-platform")).toBeTruthy();
-    expect(screen.getByText("Unknown Agent")).toBeTruthy();
-    expect(screen.queryByRole("combobox", { name: "Agent for this group" })).toBeNull();
+    expect(screen.getByText("Unknown target")).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Target for this group" })).toBeNull();
     queryClient.clear();
   });
 
