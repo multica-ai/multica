@@ -2872,6 +2872,14 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// An issue created directly in the in_progress category must have an
+	// assignee: without one, no run is ever enqueued and the issue becomes a
+	// zombie (I4127.DP). See validateInProgressRequiresAssignee.
+	if status, msg := h.validateInProgressRequiresAssignee(r.Context(), wsUUID, status, assigneeType, assigneeID); status != 0 {
+		writeError(w, status, msg)
+		return
+	}
+
 	if req.ProjectID != nil {
 		id, ok := parseUUIDOrBadRequest(w, *req.ProjectID, "project_id")
 		if !ok {
@@ -3069,6 +3077,10 @@ func (h *Handler) CreateIssue(w http.ResponseWriter, r *http.Request) {
 	if errors.Is(err, service.ErrIssueStatusUnavailable) {
 		writeError(w, http.StatusConflict,
 			"the target status was archived while this request was in flight; reload the status list and retry")
+		return
+	}
+	if errors.Is(err, service.ErrInProgressRequiresAssignee) {
+		writeError(w, http.StatusBadRequest, "issue cannot be in_progress without an assignee; assign the issue or move it to another status")
 		return
 	}
 	if writeIssueLimitReached(w, err) {
@@ -3531,6 +3543,21 @@ func (h *Handler) UpdateIssue(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The write must not leave the issue in the in_progress category without
+	// an assignee (I4127.DP). Evaluate the RESULTING state: the status this
+	// request sets (if any) merged with the issue's current status, and the
+	// assignee pair merged the same way via params. This refuses both "move
+	// to in_progress while unassigned" and "unassign while in_progress", and
+	// also forces repair of legacy zombies on their next write.
+	resultingStatus := prevIssue.Status
+	if statusKeyForGuard != "" {
+		resultingStatus = statusKeyForGuard
+	}
+	if status, msg := h.validateInProgressRequiresAssignee(r.Context(), prevIssue.WorkspaceID, resultingStatus, params.AssigneeType, params.AssigneeID); status != 0 {
+		writeError(w, status, msg)
+		return
+	}
+
 	attachmentIDs, ok := parseUUIDSliceOrBadRequest(w, req.AttachmentIDs, "attachment_ids")
 	if !ok {
 		return
@@ -3759,6 +3786,35 @@ func (h *Handler) validateAssigneePair(ctx context.Context, r *http.Request, wor
 	default:
 		return http.StatusBadRequest, "assignee_type must be 'member', 'agent', or 'squad'"
 	}
+}
+
+// validateInProgressRequiresAssignee refuses writes that would leave an issue
+// in the in_progress category without an assignee (I4127.DP).
+//
+// An in_progress issue with no assignee is a zombie: WillEnqueueRun only
+// starts a run for a valid assignee, so the issue sits in_progress forever
+// with no run, no comments, and no owner — while still counting against the
+// queue ceiling. The status column has only an enum CHECK, so nothing in the
+// DB layer expresses the dependency; this is the application-layer guard.
+//
+// The check runs on the EFFECTIVE status (a custom status inherits its
+// category's behavior), so a custom status in the in_progress category is
+// held to the same rule as the built-in (MUL-6243).
+//
+// statusKey is the status the issue would have after the write ("" = no
+// status change in the request). Returns (0, "") when the write is allowed,
+// or (400, message) when it would leave the issue in_progress unassigned.
+func (h *Handler) validateInProgressRequiresAssignee(ctx context.Context, workspaceID pgtype.UUID, statusKey string, assigneeType pgtype.Text, assigneeID pgtype.UUID) (int, string) {
+	if statusKey == "" {
+		return 0, ""
+	}
+	if issuestatus.Effective(ctx, h.Queries, workspaceID, statusKey) != issuestatus.InProgress {
+		return 0, ""
+	}
+	if assigneeType.Valid && assigneeID.Valid {
+		return 0, ""
+	}
+	return http.StatusBadRequest, "issue cannot be in_progress without an assignee; assign the issue or move it to another status"
 }
 
 // shouldEnqueueAgentTask returns true when an issue creation or assignment
@@ -4272,6 +4328,19 @@ func (h *Handler) BatchUpdateIssues(w http.ResponseWriter, r *http.Request) {
 			if status, _ := h.validateAssigneePair(r.Context(), r, workspaceID, params.AssigneeType, params.AssigneeID); status != 0 {
 				continue
 			}
+		}
+
+		// Same in_progress-requires-assignee guard as CreateIssue and
+		// UpdateIssue (I4127.DP): a batch move to the in_progress category
+		// with no assignee would mint a zombie issue. Skip the issue rather
+		// than fail the whole batch — the batch contract is per-issue
+		// best-effort, like the assignee-pair guard above.
+		batchResultingStatus := prevIssue.Status
+		if batchStatusKey != "" {
+			batchResultingStatus = batchStatusKey
+		}
+		if status, _ := h.validateInProgressRequiresAssignee(r.Context(), wsUUID, batchResultingStatus, params.AssigneeType, params.AssigneeID); status != 0 {
+			continue
 		}
 
 		var issue db.Issue

@@ -297,7 +297,14 @@ func TestBuiltInStatusesAreImmutable(t *testing.T) {
 func TestArchiveRetiresStatusWithoutTouchingExistingIssues(t *testing.T) {
 	ctx := context.Background()
 	entry := createTestCustomStatus(t, "in_use_a", issuestatus.InProgress)
-	issueID := mustCreateIssue(t, "occupies the status", "in_use_a")
+	// The occupant must carry an assignee: an in_progress issue without one is
+	// refused at the write boundary (I4127.DP).
+	agentID := createHandlerTestAgent(t, "Archive Retire Agent", nil)
+	occupant := createIssueForTest(t, map[string]any{
+		"title": "occupies the status", "status": "in_use_a",
+		"assignee_type": "agent", "assignee_id": agentID,
+	})
+	issueID := parseUUID(occupant.ID)
 
 	if code := archiveStatusVia(t, entry); code != http.StatusOK {
 		t.Fatalf("archiving an in-use status should succeed, got %d", code)
@@ -535,7 +542,7 @@ func TestCustomTerminalStatusCountsAsTerminalInSQL(t *testing.T) {
 	})
 
 	t.Run("sub-issue progress counts it as done", func(t *testing.T) {
-		parent := mkIssue("sql child progress parent", "in_progress")
+		parent := mkIssue("sql child progress parent", "todo")
 		for _, id := range []pgtype.UUID{
 			mkIssue("sql child custom done", "gate_approved_s"),
 			mkIssue("sql child open", "todo"),
@@ -695,9 +702,11 @@ func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
 	t.Run("writer wins: archive still succeeds and leaves the issue alone", func(t *testing.T) {
 		entry := createTestCustomStatus(t, "race_b_writer", issuestatus.InProgress)
 
+		agentID := createHandlerTestAgent(t, "Archive Writer Agent", nil)
 		rec := httptest.NewRecorder()
 		testHandler.CreateIssue(rec, newRequest(http.MethodPost, "/api/issues", map[string]any{
 			"title": "race writer wins", "status": "race_b_writer",
+			"assignee_type": "agent", "assignee_id": agentID,
 		}))
 		if rec.Code != http.StatusCreated {
 			t.Fatalf("create on custom status: %d %s", rec.Code, rec.Body.String())
@@ -729,11 +738,13 @@ func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
 		release := holdExclusiveCatalogLock(t)
 		defer release()
 
+		agentID := createHandlerTestAgent(t, "Archive Block Agent", nil)
 		done := make(chan int, 1)
 		go func() {
 			rec := httptest.NewRecorder()
 			testHandler.CreateIssue(rec, newRequest(http.MethodPost, "/api/issues", map[string]any{
 				"title": "race blocked writer", "status": "race_block",
+				"assignee_type": "agent", "assignee_id": agentID,
 			}))
 			done <- rec.Code
 		}()
@@ -772,6 +783,20 @@ func TestArchiveSucceedsAfterACommittedWrite(t *testing.T) {
 // Seed issues for the update/batch cases are created BEFORE the exclusive lock
 // is taken, so the only thing racing the archive is the status write itself.
 func TestArchiveCommitsInsideTheWriteRaceWindow(t *testing.T) {
+	// Every write in this test lands on a custom status in the in_progress
+	// category, which the I4127.DP guard refuses for unassigned issues — so
+	// every issue the writer touches must carry an assignee, otherwise the
+	// write fails pre-flight instead of parking on the archive lock.
+	agentID := createHandlerTestAgent(t, "Archive Race Agent", nil)
+	seedAssigned := func(t *testing.T, title string) pgtype.UUID {
+		t.Helper()
+		created := createIssueForTest(t, map[string]any{
+			"title": title, "status": "todo",
+			"assignee_type": "agent", "assignee_id": agentID,
+		})
+		return parseUUID(created.ID)
+	}
+
 	cases := []struct {
 		name  string
 		key   string
@@ -785,6 +810,7 @@ func TestArchiveCommitsInsideTheWriteRaceWindow(t *testing.T) {
 				rec := httptest.NewRecorder()
 				testHandler.CreateIssue(rec, newRequest(http.MethodPost, "/api/issues", map[string]any{
 					"title": "race window create", "status": key,
+					"assignee_type": "agent", "assignee_id": agentID,
 				}))
 				return rec.Code
 			},
@@ -793,7 +819,7 @@ func TestArchiveCommitsInsideTheWriteRaceWindow(t *testing.T) {
 			name: "update",
 			key:  "win_update",
 			seed: func(t *testing.T, key string) pgtype.UUID {
-				return mustCreateIssue(t, "race window update "+key, "todo")
+				return seedAssigned(t, "race window update "+key)
 			},
 			write: func(t *testing.T, key string, seed pgtype.UUID) int {
 				rec := httptest.NewRecorder()
@@ -807,7 +833,7 @@ func TestArchiveCommitsInsideTheWriteRaceWindow(t *testing.T) {
 			name: "update with description merge",
 			key:  "win_upd_merge",
 			seed: func(t *testing.T, key string) pgtype.UUID {
-				return mustCreateIssue(t, "race window merge "+key, "todo")
+				return seedAssigned(t, "race window merge "+key)
 			},
 			write: func(t *testing.T, key string, seed pgtype.UUID) int {
 				rec := httptest.NewRecorder()
@@ -823,7 +849,7 @@ func TestArchiveCommitsInsideTheWriteRaceWindow(t *testing.T) {
 			name: "batch",
 			key:  "win_batch",
 			seed: func(t *testing.T, key string) pgtype.UUID {
-				return mustCreateIssue(t, "race window batch "+key, "todo")
+				return seedAssigned(t, "race window batch "+key)
 			},
 			write: func(t *testing.T, key string, seed pgtype.UUID) int {
 				rec := httptest.NewRecorder()
@@ -838,7 +864,7 @@ func TestArchiveCommitsInsideTheWriteRaceWindow(t *testing.T) {
 			name: "batch with description merge",
 			key:  "win_batch_merge",
 			seed: func(t *testing.T, key string) pgtype.UUID {
-				return mustCreateIssue(t, "race window batch merge "+key, "todo")
+				return seedAssigned(t, "race window batch merge "+key)
 			},
 			write: func(t *testing.T, key string, seed pgtype.UUID) int {
 				rec := httptest.NewRecorder()
@@ -946,7 +972,7 @@ func TestBatchCustomTerminalStatusEntersStageBarrier(t *testing.T) {
 	ctx := context.Background()
 	createTestCustomStatus(t, "batch_done_s", issuestatus.Done)
 
-	parent := mustCreateIssue(t, "batch barrier parent", "in_progress")
+	parent := mustCreateIssue(t, "batch barrier parent", "todo")
 	child := mustCreateIssue(t, "batch barrier child", "todo")
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET parent_issue_id = $1 WHERE id = $2`, parent, child); err != nil {
 		t.Fatalf("attach child: %v", err)
@@ -980,7 +1006,7 @@ func TestChildrenResponseCarriesStatusCategory(t *testing.T) {
 	ctx := context.Background()
 	createTestCustomStatus(t, "children_done_s", issuestatus.Done)
 
-	parent := mustCreateIssue(t, "children category parent", "in_progress")
+	parent := mustCreateIssue(t, "children category parent", "todo")
 	child := mustCreateIssue(t, "children category child", "children_done_s")
 	if _, err := testPool.Exec(ctx, `UPDATE issue SET parent_issue_id = $1 WHERE id = $2`, parent, child); err != nil {
 		t.Fatalf("attach child: %v", err)
