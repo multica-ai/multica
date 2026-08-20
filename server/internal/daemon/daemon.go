@@ -359,7 +359,12 @@ type Daemon struct {
 	client     *Client
 	repoCache  repoCacheBackend
 	skillCache *SkillBundleCache
-	logger     *slog.Logger
+	// skillDownloads is daemon-global: every task shares both the per-ref
+	// flights and the HTTP download slots. skillDownloadsOnce keeps focused
+	// tests that construct Daemon literals zero-value safe.
+	skillDownloadsOnce sync.Once
+	skillDownloads     *skillBundleDownloadCoordinator
+	logger             *slog.Logger
 
 	mu           sync.Mutex
 	workspaces   map[string]*workspaceState
@@ -622,6 +627,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		client:                    client,
 		repoCache:                 repocache.New(cacheRoot, logger),
 		skillCache:                NewSkillBundleCache(skillCacheRoot),
+		skillDownloads:            newSkillBundleDownloadCoordinator(defaultMaxConcurrentSkillDownloads),
 		logger:                    logger,
 		workspaces:                make(map[string]*workspaceState),
 		runtimeIndex:              make(map[string]Runtime),
@@ -1963,6 +1969,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 		"idle_watchdog", d.cfg.AgentIdleWatchdog,
 		"opencode_idle_watchdog", d.cfg.OpenCodeIdleWatchdog,
 		"max_concurrent_tasks", d.cfg.MaxConcurrentTasks,
+		"max_concurrent_skill_downloads", defaultMaxConcurrentSkillDownloads,
 		"gc_enabled", d.cfg.GCEnabled,
 		"auto_update", d.cfg.AutoUpdateEnabled,
 		"launched_by", d.cfg.LaunchedBy,
@@ -5933,29 +5940,46 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 		}
 	}
 
-	// Resolve each missing bundle in its own request, caching it the moment it
-	// arrives. The download is the slow part on jittery links, so fetching the
-	// whole set in one atomic body read meant a single timeout discarded all
-	// progress and the cache never converged — every dispatch re-downloaded
-	// everything and timed out again. Per-skill, each download fits its own
-	// size-scaled deadline and is persisted independently, so even a dispatch
-	// that ultimately fails leaves the skills it did fetch cached for the next
-	// one. (GitHub #4505 / MUL-3650)
+	// Leave part of the prepare hard limit for materializing the execution
+	// environment after the bundles arrive. A context without a deadline is
+	// used by focused tests and callers outside runTask, so it stays unbounded.
+	downloadWaitCtx, cancelDownloadWait := skillBundleDownloadWaitContext(ctx)
+	defer cancelDownloadWait()
+
+	// Resolve misses concurrently. The per-task limit bounds waiter goroutines;
+	// the daemon-global coordinator separately limits real HTTP requests and
+	// coalesces the same immutable ref across tasks. Every successful bundle is
+	// cached independently even if a sibling fails, preserving convergence
+	// across dispatches. (GitHub #4505 / #6691; MUL-3650 / MUL-5971)
+	var (
+		group      errgroup.Group
+		resolvedMu sync.Mutex
+	)
+	group.SetLimit(defaultMaxConcurrentSkillDownloads)
 	for _, ref := range misses {
-		started := time.Now()
-		bundle, err := d.resolveSkillBundle(ctx, task, ref)
-		if err != nil {
-			// Name the skill, its declared size, and how long we actually
-			// waited. The bare "resolve skill bundles: context deadline
-			// exceeded" this replaced was indistinguishable from a generic
-			// network fault, and cost a community thread three hours of
-			// guesswork (MUL-5370): size + elapsed separate "this bundle is
-			// too big for the link" from "the link is dead".
-			return fmt.Errorf("%w: skill %q (id=%s, %d bytes) after %s: %w",
-				errSkillBundleUnavailable, ref.Name, ref.ID, ref.SizeBytes,
-				time.Since(started).Round(time.Millisecond), err)
-		}
-		resolved[skillRefKey(bundle.Source, bundle.ID)] = bundle
+		ref := ref
+		group.Go(func() error {
+			started := time.Now()
+			bundle, err := d.resolveSkillBundle(downloadWaitCtx, task, ref)
+			if err != nil {
+				// Name the skill, its declared size, and how long we actually
+				// waited. The bare "resolve skill bundles: context deadline
+				// exceeded" this replaced was indistinguishable from a generic
+				// network fault, and cost a community thread three hours of
+				// guesswork (MUL-5370): size + elapsed separate "this bundle is
+				// too big for the link" from "the link is dead".
+				return fmt.Errorf("%w: skill %q (id=%s, %d bytes) after %s: %w",
+					errSkillBundleUnavailable, ref.Name, ref.ID, ref.SizeBytes,
+					time.Since(started).Round(time.Millisecond), err)
+			}
+			resolvedMu.Lock()
+			resolved[skillRefKey(bundle.Source, bundle.ID)] = bundle
+			resolvedMu.Unlock()
+			return nil
+		})
+	}
+	if err := group.Wait(); err != nil {
+		return err
 	}
 
 	skills := make([]SkillData, 0, len(task.Agent.SkillRefs))
@@ -5970,13 +5994,50 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 	return nil
 }
 
-// resolveSkillBundle downloads one skill bundle and writes it to the on-disk
-// cache before returning. The request runs under its own deadline, scaled to
-// the bundle's declared size rather than the daemon's fixed 30s control-plane
-// timeout, so a large bundle on a slow link is given room to finish instead of
-// being cut off mid-body. Caching on success is what lets the resolve converge
-// across dispatches. (GitHub #4505 / MUL-3650)
+// resolveSkillBundle joins or starts the daemon-global flight for one immutable
+// ref. The flight covers the second cache check through validated atomic store,
+// so concurrent tasks never issue duplicate HTTP requests for the same key.
 func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRefData) (SkillData, error) {
+	coordinator := d.skillBundleDownloads()
+	return coordinator.do(ctx, skillBundleCacheKey(task.WorkspaceID, ref), func(flightCtx context.Context) (SkillData, error) {
+		if err := coordinator.acquire(flightCtx); err != nil {
+			return SkillData{}, err
+		}
+		defer coordinator.release()
+
+		// The initial scan and this flight can race with a preceding task that
+		// has just stored the same ref. Re-check only after owning both the
+		// singleflight key and a global slot, immediately before network I/O.
+		var cached SkillData
+		if err := d.skillCache.WithRefLock(task.WorkspaceID, ref, func() error {
+			if bundle, ok := d.skillCache.Load(task.WorkspaceID, ref); ok {
+				cached = bundle
+			}
+			return nil
+		}); err != nil {
+			return SkillData{}, fmt.Errorf("load skill bundle cache: %w", err)
+		}
+		if cached.ID != "" {
+			return cached, nil
+		}
+
+		return d.downloadAndCacheSkillBundle(flightCtx, task, ref)
+	})
+}
+
+func (d *Daemon) skillBundleDownloads() *skillBundleDownloadCoordinator {
+	d.skillDownloadsOnce.Do(func() {
+		if d.skillDownloads == nil {
+			d.skillDownloads = newSkillBundleDownloadCoordinator(defaultMaxConcurrentSkillDownloads)
+		}
+	})
+	return d.skillDownloads
+}
+
+// downloadAndCacheSkillBundle owns one real HTTP attempt sequence. Its timeout
+// includes retries and uses a conservative transfer floor; the waiting task's
+// earlier prepare-aware context can still stop waiting independently.
+func (d *Daemon) downloadAndCacheSkillBundle(ctx context.Context, task *Task, ref SkillRefData) (SkillData, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, skillBundleResolveTimeout(ref.SizeBytes))
 	defer cancel()
 
@@ -6010,33 +6071,47 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 }
 
 const (
-	// skillBundleResolveMinTimeout floors the per-skill resolve deadline so a
-	// tiny bundle still tolerates connection setup and round-trip latency.
-	skillBundleResolveMinTimeout = 30 * time.Second
+	// skillBundleResolveFixedBudget covers connection setup and first-byte
+	// latency before any payload throughput can be observed.
+	skillBundleResolveFixedBudget = 30 * time.Second
 	// skillBundleResolveMaxTimeout caps it so a wedged download cannot pin a
 	// task in prepare indefinitely.
 	skillBundleResolveMaxTimeout = 5 * time.Minute
-	// skillBundleResolveMinThroughput is the pessimistic floor throughput
-	// (bytes/sec) used to scale the deadline to bundle size — deliberately low
-	// to cover slow, jittery links rather than ideal bandwidth.
-	skillBundleResolveMinThroughput = 50 * 1024
+	// skillBundleResolveMinThroughput is deliberately pessimistic for slow,
+	// jittery links. Transfer time is rounded up so every declared byte gets a
+	// full throughput allowance.
+	skillBundleResolveMinThroughput = 10 * 1024
+	// skillBundlePrepareReserve is kept outside bundle waits so execenv setup
+	// and StartTask still have room inside the five-minute prepare hard limit.
+	skillBundlePrepareReserve = 30 * time.Second
 )
 
 // skillBundleResolveTimeout returns the deadline budget for downloading a
-// bundle of the given size: at least skillBundleResolveMinTimeout, scaled up at
-// skillBundleResolveMinThroughput, and capped at skillBundleResolveMaxTimeout.
+// bundle: fixed connect/first-byte time plus ceil(size / minimum throughput),
+// capped by the per-bundle maximum. The caller's context applies the remaining
+// prepare budget independently.
 func skillBundleResolveTimeout(sizeBytes int64) time.Duration {
 	if sizeBytes <= 0 {
-		return skillBundleResolveMinTimeout
+		return skillBundleResolveFixedBudget
 	}
-	scaled := time.Duration(sizeBytes/skillBundleResolveMinThroughput) * time.Second
-	if scaled < skillBundleResolveMinTimeout {
-		return skillBundleResolveMinTimeout
+	transferSeconds := sizeBytes / skillBundleResolveMinThroughput
+	if sizeBytes%skillBundleResolveMinThroughput != 0 {
+		transferSeconds++
 	}
-	if scaled > skillBundleResolveMaxTimeout {
+	maxTransferSeconds := int64((skillBundleResolveMaxTimeout - skillBundleResolveFixedBudget) / time.Second)
+	if transferSeconds >= maxTransferSeconds {
 		return skillBundleResolveMaxTimeout
 	}
-	return scaled
+	budget := skillBundleResolveFixedBudget + time.Duration(transferSeconds)*time.Second
+	return budget
+}
+
+func skillBundleDownloadWaitContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		return context.WithCancel(ctx)
+	}
+	return context.WithDeadline(ctx, deadline.Add(-skillBundlePrepareReserve))
 }
 
 func (d *Daemon) startTaskPrepareLeaseExtender(ctx context.Context, task Task, taskLog *slog.Logger) func() {

@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,11 +23,14 @@ func TestSkillBundleResolveTimeout(t *testing.T) {
 		size int64
 		want time.Duration
 	}{
-		{"zero size floors to min", 0, skillBundleResolveMinTimeout},
-		{"negative size floors to min", -5, skillBundleResolveMinTimeout},
-		{"tiny bundle floors to min", 1024, skillBundleResolveMinTimeout},
-		{"scales with size above the floor", 2 * 1024 * 1024, 40 * time.Second},
+		{"zero size gets fixed budget", 0, skillBundleResolveFixedBudget},
+		{"negative size gets fixed budget", -5, skillBundleResolveFixedBudget},
+		{"one byte rounds up transfer time", 1, skillBundleResolveFixedBudget + time.Second},
+		{"exact throughput second", 10 * 1024, skillBundleResolveFixedBudget + time.Second},
+		{"partial throughput second rounds up", 10*1024 + 1, skillBundleResolveFixedBudget + 2*time.Second},
+		{"scales at conservative throughput", 2 * 1024 * 1024, 3*time.Minute + 55*time.Second},
 		{"huge bundle caps at max", 100 * 1024 * 1024, skillBundleResolveMaxTimeout},
+		{"max int does not overflow", int64(^uint64(0) >> 1), skillBundleResolveMaxTimeout},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -33,6 +38,31 @@ func TestSkillBundleResolveTimeout(t *testing.T) {
 				t.Fatalf("skillBundleResolveTimeout(%d) = %s, want %s", tc.size, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestSkillBundleDownloadWaitContext_ReservesPrepareTime(t *testing.T) {
+	parentDeadline := time.Now().Add(2 * time.Minute)
+	parent, cancelParent := context.WithDeadline(context.Background(), parentDeadline)
+	defer cancelParent()
+
+	ctx, cancel := skillBundleDownloadWaitContext(parent)
+	defer cancel()
+	got, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("download wait context has no deadline")
+	}
+	want := parentDeadline.Add(-skillBundlePrepareReserve)
+	if !got.Equal(want) {
+		t.Fatalf("download deadline = %s, want %s", got, want)
+	}
+}
+
+func TestSkillBundleDownloadWaitContext_NoParentDeadline(t *testing.T) {
+	ctx, cancel := skillBundleDownloadWaitContext(context.Background())
+	defer cancel()
+	if _, ok := ctx.Deadline(); ok {
+		t.Fatal("background download wait context unexpectedly has a deadline")
 	}
 }
 
@@ -140,6 +170,9 @@ func TestEnsureTaskSkillBundles_CachesEachSuccessAcrossDispatches(t *testing.T) 
 	if _, ok := d.skillCache.Load("ws-1", refs[2]); ok {
 		t.Error("dispatch 1: skill-3 must not be cached after a failed download")
 	}
+	if len(task.Agent.Skills) != 0 {
+		t.Fatalf("dispatch 1: task received %d skills after a missing bundle; want none", len(task.Agent.Skills))
+	}
 	// A 500 is transient, so skill-3 is retried over the full schedule.
 	mu.Lock()
 	wantSkill3 := len(skillBundleResolveRetrySchedule) + 1
@@ -173,6 +206,346 @@ func TestEnsureTaskSkillBundles_CachesEachSuccessAcrossDispatches(t *testing.T) 
 		if task.Agent.Skills[i].ID != id {
 			t.Errorf("dispatch 2: skill[%d].ID = %q, want %q", i, task.Agent.Skills[i].ID, id)
 		}
+	}
+}
+
+func TestEnsureTaskSkillBundles_SingleflightAcrossTasks(t *testing.T) {
+	bundle := makeResolvableSkillBundle("shared-skill")
+	ref := skillRefFromBundle(bundle)
+
+	var calls atomic.Int32
+	requestStarted := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	var releaseOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			close(requestStarted)
+		}
+		<-releaseRequest
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"bundles": []SkillData{bundle}})
+	}))
+	defer srv.Close()
+	defer releaseOnce.Do(func() { close(releaseRequest) })
+
+	coordinator := newSkillBundleDownloadCoordinator(defaultMaxConcurrentSkillDownloads)
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		skillCache:     NewSkillBundleCache(t.TempDir()),
+		skillDownloads: coordinator,
+	}
+
+	const taskCount = 20
+	start := make(chan struct{})
+	errCh := make(chan error, taskCount)
+	for i := 0; i < taskCount; i++ {
+		task := testTaskWithSkillRefs(fmt.Sprintf("task-%d", i), "ws-1", []SkillRefData{ref})
+		go func() {
+			<-start
+			errCh <- d.ensureTaskSkillBundles(context.Background(), task)
+		}()
+	}
+	close(start)
+
+	waitForSignal(t, requestStarted, "shared bundle request")
+	waitForSkillFlightWaiters(t, coordinator, skillBundleCacheKey("ws-1", ref), taskCount)
+	releaseOnce.Do(func() { close(releaseRequest) })
+
+	for i := 0; i < taskCount; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("task %d: ensure skill bundle: %v", i, err)
+		}
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("resolve requests = %d, want 1", got)
+	}
+}
+
+func TestEnsureTaskSkillBundles_DownloadsMissesConcurrently(t *testing.T) {
+	const skillCount = defaultMaxConcurrentSkillDownloads
+	bundles := make(map[string]SkillData, skillCount)
+	refs := make([]SkillRefData, 0, skillCount)
+	for i := 0; i < skillCount; i++ {
+		bundle := makeResolvableSkillBundle(fmt.Sprintf("skill-%d", i))
+		bundles[bundle.ID] = bundle
+		refs = append(refs, skillRefFromBundle(bundle))
+	}
+
+	entered := make(chan struct{}, skillCount)
+	releaseRequests := make(chan struct{})
+	var releaseOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Skills []SkillRefData `json:"skills"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Skills) != 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		entered <- struct{}{}
+		<-releaseRequests
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"bundles": []SkillData{bundles[req.Skills[0].ID]}})
+	}))
+	defer srv.Close()
+	defer releaseOnce.Do(func() { close(releaseRequests) })
+
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		skillCache:     NewSkillBundleCache(t.TempDir()),
+		skillDownloads: newSkillBundleDownloadCoordinator(defaultMaxConcurrentSkillDownloads),
+	}
+	task := testTaskWithSkillRefs("task-1", "ws-1", refs)
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.ensureTaskSkillBundles(context.Background(), task) }()
+	for i := 0; i < skillCount; i++ {
+		waitForSignal(t, entered, "concurrent bundle request")
+	}
+	releaseOnce.Do(func() { close(releaseRequests) })
+	if err := waitForError(t, errCh, "concurrent bundle resolution"); err != nil {
+		t.Fatalf("ensure skill bundles: %v", err)
+	}
+	if got := len(task.Agent.Skills); got != skillCount {
+		t.Fatalf("resolved skills = %d, want %d", got, skillCount)
+	}
+}
+
+func TestEnsureTaskSkillBundles_WaiterCancellationDoesNotCancelSharedDownload(t *testing.T) {
+	bundle := makeResolvableSkillBundle("shared-skill")
+	ref := skillRefFromBundle(bundle)
+
+	requestStarted := make(chan struct{})
+	probeRequest := make(chan struct{})
+	requestAlive := make(chan struct{})
+	requestCancelled := make(chan struct{})
+	releaseRequest := make(chan struct{})
+	var releaseOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		close(requestStarted)
+		<-probeRequest
+		select {
+		case <-r.Context().Done():
+			close(requestCancelled)
+			return
+		default:
+			close(requestAlive)
+		}
+		select {
+		case <-r.Context().Done():
+			close(requestCancelled)
+			return
+		case <-releaseRequest:
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{"bundles": []SkillData{bundle}})
+		}
+	}))
+	defer srv.Close()
+	defer releaseOnce.Do(func() { close(releaseRequest) })
+
+	coordinator := newSkillBundleDownloadCoordinator(defaultMaxConcurrentSkillDownloads)
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		skillCache:     NewSkillBundleCache(t.TempDir()),
+		skillDownloads: coordinator,
+	}
+	task1 := testTaskWithSkillRefs("task-1", "ws-1", []SkillRefData{ref})
+	task2 := testTaskWithSkillRefs("task-2", "ws-1", []SkillRefData{ref})
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	err1 := make(chan error, 1)
+	go func() { err1 <- d.ensureTaskSkillBundles(ctx1, task1) }()
+	waitForSignal(t, requestStarted, "shared bundle request")
+
+	err2 := make(chan error, 1)
+	go func() { err2 <- d.ensureTaskSkillBundles(context.Background(), task2) }()
+	waitForSkillFlightWaiters(t, coordinator, skillBundleCacheKey("ws-1", ref), 2)
+
+	cancel1()
+	if err := waitForError(t, err1, "cancelled waiter"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled waiter error = %v, want context.Canceled", err)
+	}
+	close(probeRequest)
+	select {
+	case <-requestAlive:
+	case <-requestCancelled:
+		t.Fatal("cancelling one waiter cancelled the shared HTTP request")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out probing shared HTTP request")
+	}
+
+	releaseOnce.Do(func() { close(releaseRequest) })
+	if err := waitForError(t, err2, "remaining waiter"); err != nil {
+		t.Fatalf("remaining waiter failed: %v", err)
+	}
+}
+
+func TestSkillBundleDownloadCoordinator_CancelsWhenAllWaitersLeave(t *testing.T) {
+	coordinator := newSkillBundleDownloadCoordinator(defaultMaxConcurrentSkillDownloads)
+	started := make(chan struct{})
+	operationCancelled := make(chan struct{})
+	var calls atomic.Int32
+	fn := func(ctx context.Context) (SkillData, error) {
+		if calls.Add(1) == 1 {
+			close(started)
+		}
+		<-ctx.Done()
+		close(operationCancelled)
+		return SkillData{}, context.Cause(ctx)
+	}
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	err1 := make(chan error, 1)
+	err2 := make(chan error, 1)
+	go func() {
+		_, err := coordinator.do(ctx1, "shared", fn)
+		err1 <- err
+	}()
+	waitForSignal(t, started, "shared operation")
+	go func() {
+		_, err := coordinator.do(ctx2, "shared", fn)
+		err2 <- err
+	}()
+	waitForSkillFlightWaiters(t, coordinator, "shared", 2)
+
+	cancel1()
+	if err := waitForError(t, err1, "first cancelled waiter"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("first waiter error = %v, want context.Canceled", err)
+	}
+	select {
+	case <-operationCancelled:
+		t.Fatal("shared operation cancelled while one waiter remained")
+	default:
+	}
+
+	cancel2()
+	if err := waitForError(t, err2, "last cancelled waiter"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("last waiter error = %v, want context.Canceled", err)
+	}
+	waitForSignal(t, operationCancelled, "shared operation cancellation")
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("shared operation calls = %d, want 1", got)
+	}
+}
+
+func TestEnsureTaskSkillBundles_GlobalDownloadLimit(t *testing.T) {
+	const (
+		downloadLimit = defaultMaxConcurrentSkillDownloads
+		taskCount     = 8
+	)
+
+	bundles := make(map[string]SkillData, taskCount)
+	refs := make([]SkillRefData, 0, taskCount)
+	for i := 0; i < taskCount; i++ {
+		bundle := makeResolvableSkillBundle(fmt.Sprintf("skill-%d", i))
+		bundles[bundle.ID] = bundle
+		refs = append(refs, skillRefFromBundle(bundle))
+	}
+
+	var inFlight atomic.Int32
+	var maxInFlight atomic.Int32
+	entered := make(chan struct{}, taskCount)
+	releaseRequests := make(chan struct{})
+	var releaseOnce sync.Once
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req struct {
+			Skills []SkillRefData `json:"skills"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || len(req.Skills) != 1 {
+			w.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		current := inFlight.Add(1)
+		defer inFlight.Add(-1)
+		for {
+			peak := maxInFlight.Load()
+			if current <= peak || maxInFlight.CompareAndSwap(peak, current) {
+				break
+			}
+		}
+		entered <- struct{}{}
+		<-releaseRequests
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"bundles": []SkillData{bundles[req.Skills[0].ID]}})
+	}))
+	defer srv.Close()
+	defer releaseOnce.Do(func() { close(releaseRequests) })
+
+	d := &Daemon{
+		client:         NewClient(srv.URL),
+		skillCache:     NewSkillBundleCache(t.TempDir()),
+		skillDownloads: newSkillBundleDownloadCoordinator(downloadLimit),
+	}
+	errCh := make(chan error, taskCount)
+	for i, ref := range refs {
+		task := testTaskWithSkillRefs(fmt.Sprintf("task-%d", i), "ws-1", []SkillRefData{ref})
+		go func() { errCh <- d.ensureTaskSkillBundles(context.Background(), task) }()
+	}
+	for i := 0; i < downloadLimit; i++ {
+		waitForSignal(t, entered, "bounded bundle request")
+	}
+	select {
+	case <-entered:
+		t.Fatalf("more than %d bundle requests entered concurrently", downloadLimit)
+	case <-time.After(50 * time.Millisecond):
+	}
+	releaseOnce.Do(func() { close(releaseRequests) })
+
+	for i := 0; i < taskCount; i++ {
+		if err := <-errCh; err != nil {
+			t.Fatalf("task %d: ensure skill bundle: %v", i, err)
+		}
+	}
+	if got := maxInFlight.Load(); got > downloadLimit {
+		t.Fatalf("max concurrent downloads = %d, want <= %d", got, downloadLimit)
+	}
+}
+
+func testTaskWithSkillRefs(taskID, workspaceID string, refs []SkillRefData) *Task {
+	return &Task{
+		ID:          taskID,
+		RuntimeID:   "rt-1",
+		WorkspaceID: workspaceID,
+		Agent:       &AgentData{ID: "agent-1", SkillRefs: refs},
+	}
+}
+
+func waitForSkillFlightWaiters(t *testing.T, coordinator *skillBundleDownloadCoordinator, key string, want int) {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		coordinator.mu.Lock()
+		flight := coordinator.flights[key]
+		got := 0
+		if flight != nil {
+			got = flight.waiters
+		}
+		coordinator.mu.Unlock()
+		if got >= want {
+			return
+		}
+		time.Sleep(time.Millisecond)
+	}
+	t.Fatalf("flight %q did not reach %d waiters", key, want)
+}
+
+func waitForSignal(t *testing.T, ch <-chan struct{}, name string) {
+	t.Helper()
+	select {
+	case <-ch:
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+	}
+}
+
+func waitForError(t *testing.T, ch <-chan error, name string) error {
+	t.Helper()
+	select {
+	case err := <-ch:
+		return err
+	case <-time.After(2 * time.Second):
+		t.Fatalf("timed out waiting for %s", name)
+		return nil
 	}
 }
 
@@ -324,5 +697,11 @@ func TestEnsureTaskSkillBundles_DeadlineIsLabelledStructurally(t *testing.T) {
 	want := taskfailure.ReasonSkillBundleUnavailable.String()
 	if got := taskRunFailureReason(err); got != want {
 		t.Errorf("taskRunFailureReason = %q, want %q (retryable platform-side reason)", got, want)
+	}
+	if _, ok := d.skillCache.Load("ws-1", ref); ok {
+		t.Error("deadline failure must not leave a cache entry")
+	}
+	if len(task.Agent.Skills) != 0 {
+		t.Fatalf("deadline failure injected %d incomplete skills into task", len(task.Agent.Skills))
 	}
 }

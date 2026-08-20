@@ -75,11 +75,15 @@ func (c *SkillBundleCache) WithRefLock(workspaceID string, ref SkillRefData, fn 
 	if c == nil {
 		return fn()
 	}
-	key := workspaceID + "\x00" + ref.Source + "\x00" + ref.ID + "\x00" + ref.Hash
+	key := skillBundleCacheKey(workspaceID, ref)
 	lock := c.lockForKey(key)
 	lock.Lock()
 	defer lock.Unlock()
 	return fn()
+}
+
+func skillBundleCacheKey(workspaceID string, ref SkillRefData) string {
+	return workspaceID + "\x00" + ref.Source + "\x00" + ref.ID + "\x00" + ref.Hash
 }
 
 func (c *SkillBundleCache) lockForKey(key string) *sync.Mutex {

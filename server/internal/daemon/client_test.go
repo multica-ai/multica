@@ -441,6 +441,37 @@ func TestPostJSONWithRetry_CtxCancelStopsRetries(t *testing.T) {
 	}
 }
 
+func TestPostJSONWithRetry_DoesNotSleepPastDeadline(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusBadGateway)
+	}))
+	defer srv.Close()
+
+	prev := retrySleep
+	var sleeps atomic.Int32
+	retrySleep = func(context.Context, time.Duration) error {
+		sleeps.Add(1)
+		return nil
+	}
+	defer func() { retrySleep = prev }()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	c := NewClient(srv.URL)
+	err := c.postJSONWithRetry(ctx, "/x", map[string]any{}, nil, []time.Duration{time.Second})
+	if err == nil {
+		t.Fatal("expected first transient request to fail")
+	}
+	if got := calls.Load(); got != 1 {
+		t.Fatalf("requests = %d, want 1", got)
+	}
+	if got := sleeps.Load(); got != 0 {
+		t.Fatalf("retry sleeps = %d, want 0 when delay exceeds remaining deadline", got)
+	}
+}
+
 func TestDefaultTerminalRetrySchedule_MatchesAgreedPlan(t *testing.T) {
 	// MUL-2780 settled on a 5-step exponential backoff (4s, 8s, 16s, 32s, 64s).
 	// Pin it so a future "tidy this up" refactor can't silently flatten or

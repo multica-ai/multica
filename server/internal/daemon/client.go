@@ -1033,7 +1033,14 @@ func (c *Client) postJSONViaWithRetry(ctx context.Context, httpClient *http.Clie
 		if attempt >= len(schedule) {
 			return err
 		}
-		if sleepErr := retrySleep(ctx, schedule[attempt]); sleepErr != nil {
+		delay := schedule[attempt]
+		// Do not spend the rest of a request's total deadline sleeping when no
+		// budget remains for the next HTTP attempt. This matters most for large
+		// bundle downloads, whose retries share one size-based context budget.
+		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) <= delay {
+			return err
+		}
+		if sleepErr := retrySleep(ctx, delay); sleepErr != nil {
 			return err
 		}
 	}
