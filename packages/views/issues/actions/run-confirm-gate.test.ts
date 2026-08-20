@@ -125,8 +125,27 @@ describe("runConfirmIntent — promote", () => {
     expect(runConfirmIntent(issue(from), { status: to }, catalog)).not.toBeNull();
   });
 
+  // `blocked` is the other parking lot, and only `todo` releases it — the same
+  // asymmetry the server predicate has (AERIS-284).
+  it.each([
+    ["built-in todo", "todo"],
+    ["custom Todo-category status", "rework"],
+  ])("confirms the resume out of blocked (%s)", (_label, to) => {
+    expect(runConfirmIntent(issue({ status: "blocked" }), { status: to }, CATALOG)).toEqual({
+      issueIds: ["issue-1"],
+      mode: "promote",
+      status: to,
+      assigneeType: "agent",
+      assigneeId: "agent-1",
+    });
+  });
+
   it.each([
     ["no owner", { status: "backlog", assignee_type: null, assignee_id: null }, "todo"],
+    ["blocked → a status that reports on work already in flight", { status: "blocked" }, "in_progress"],
+    ["blocked → a custom in_review status", { status: "blocked" }, "qa"],
+    ["blocked → parked", { status: "blocked" }, "later"],
+    ["blocked → done", { status: "blocked" }, "done"],
     ["member owner", { status: "backlog", assignee_type: "member" as const, assignee_id: "u-1" }, "todo"],
     ["already active", { status: "todo" }, "in_progress"],
     ["closing the issue", { status: "backlog" }, "done"],

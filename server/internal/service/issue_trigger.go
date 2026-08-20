@@ -85,10 +85,10 @@ func allowAllAgents(db.Agent) bool { return true }
 // CreateAgentTask, guarded by the (issue_id, agent_id) partial unique index
 // over pending (queued/dispatched) tasks; the pending check below mirrors that
 // guard, and only the status source needs it:
-//   - status source (backlog → active) can re-fire against an assignee that
-//     already holds a pending task (e.g. one a @mention raised while the issue
-//     sat in backlog); the check keeps preview from promising a run the unique
-//     index would coalesce away.
+//   - status source (leaving a parking lot, see startsRunOnStatusChange) can
+//     re-fire against an assignee that already holds a pending task (e.g. one a
+//     @mention raised while the issue sat in backlog); the check keeps preview
+//     from promising a run the unique index would coalesce away.
 //   - assign source (create / assignee change) skips the check: a create
 //     targets a fresh issue with no prior task, and a reassignment no longer
 //     cancels existing tasks (#4963 / MUL-4113) — in the rare case the new
@@ -104,19 +104,16 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		canAccess = allowAllAgents
 	}
 
-	// The status source also requires LEAVING the backlog category, not merely
-	// changing the status key. Before custom statuses a key change out of
-	// `backlog` was always a category change, so the two were the same
-	// condition; now `backlog` → a custom status in the `backlog` category is a
-	// move within the parking lot, and starting a run on it would break the one
-	// promise backlog makes. (MUL-6463)
-	//
 	// Both sides of the transition are normalized to the canonical status they
 	// inherit, so a custom status in the `backlog` category parks exactly like
 	// Backlog and a custom status in the `todo` category starts a run exactly
-	// like Todo. Built-in keys resolve to themselves without a query, leaving
-	// this decision bit-identical for workspaces with no custom statuses —
-	// which is the whole set of them until an admin defines one. (MUL-6243)
+	// like Todo. That is what lets the status source key on CATEGORIES rather
+	// than keys: `backlog` → a custom status in the `backlog` category is a move
+	// within the parking lot, not a promotion, and starting a run on it would
+	// break the one promise backlog makes (MUL-6463). Built-in keys resolve to
+	// themselves without a query, leaving this decision bit-identical for
+	// workspaces with no custom statuses — which is the whole set of them until
+	// an admin defines one. (MUL-6243)
 	currentStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status)
 	prevStatus := issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, in.PrevStatus)
 
@@ -128,9 +125,7 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 			return IssueRunTrigger{}, false
 		}
 		source = RunSourceAssign
-	case in.StatusChanged && prevStatus == "backlog" &&
-		currentStatus != "backlog" &&
-		currentStatus != "done" && currentStatus != "cancelled":
+	case in.StatusChanged && startsRunOnStatusChange(prevStatus, currentStatus):
 		if probe.IsSelfLoop != nil && probe.IsSelfLoop() {
 			return IssueRunTrigger{}, false
 		}
@@ -198,6 +193,43 @@ func (s *IssueService) WillEnqueueRun(ctx context.Context, in IssueTriggerInput,
 		}, true
 	}
 	return IssueRunTrigger{}, false
+}
+
+// startsRunOnStatusChange reports whether a status-only write releases the
+// issue from a parking lot. Both arguments are canonical categories, already
+// resolved by issuestatus.Effective.
+//
+// There are two parking lots and they release differently:
+//
+//   - `backlog` is where a USER parks work. Leaving it in any direction that is
+//     not terminal is a promotion, so it starts the run.
+//   - `blocked` is where an AGENT parks work: the runtime brief has it write
+//     `blocked` when it gets stuck, so the issue keeps its assignee and ends the
+//     turn with no task — it looks runnable while nothing is queued. Nothing
+//     server-side takes it back out: the stuck-task sweeper resets `in_progress`
+//     and deliberately skips `blocked` (HandleFailedTasks), because an
+//     automated reset would restart an agent on work someone else is holding.
+//     So leaving `blocked` is always a decision someone made, and moving it to
+//     `todo` is how they say "the blocker is gone, carry on" — that must start
+//     the run. Before AERIS-284 the write landed with no enqueue and
+//     `multica issue rerun` was the only way out.
+//
+// Only `todo` releases `blocked`, deliberately. `todo` is the one status that
+// means "ready, nobody has picked this up", which is exactly what unblocking
+// says. `in_progress` and `in_review` report on work already in flight: the
+// agent's own runtime writes `in_progress` when a run starts (working-on-issues
+// workflow step 3), so treating it as a resume signal would let a run that
+// begins on a blocked issue enqueue its own successor.
+func startsRunOnStatusChange(prevStatus, currentStatus string) bool {
+	switch prevStatus {
+	case "backlog":
+		return currentStatus != "backlog" &&
+			currentStatus != "done" && currentStatus != "cancelled"
+	case "blocked":
+		return currentStatus == "todo"
+	default:
+		return false
+	}
 }
 
 // hasPendingRun reports whether the agent already holds a queued or dispatched

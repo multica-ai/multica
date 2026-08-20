@@ -188,6 +188,16 @@ on it. These are the contracts, not advice:
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.
+- **`blocked`** parks the work an agent could not finish: the assignee stays,
+  the task ends. Nothing server-side takes an issue back out of it — the
+  stuck-task sweeper resets `in_progress` and skips `blocked` on purpose — so
+  moving `blocked → todo` is the resume signal, and it enqueues the assignee
+  again. Unblocking IS how you restart the work; `multica issue rerun` stays the
+  explicit force-a-rerun path rather than a required step. Only `todo` resumes
+  it: `blocked → in_progress` / `in_review` report on work already in flight and
+  start nothing, and `backlog` / `done` / `cancelled` park or close it. Note the
+  asymmetry with `backlog` on the other axis — ASSIGNING an agent to a `blocked`
+  issue starts a run immediately, exactly as it would on any active status.
 - **`in_progress` / `in_review`** are agent-managed CLI mutations, not
   `StartTask` / `CompleteTask` side effects. The runtime brief asks agents to
   write the state the issue is in whenever their work changes it — not from

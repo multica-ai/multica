@@ -51,6 +51,8 @@ When the issue already has an agent or squad owner, moving it out of `backlog` o
 
 Only the `backlog` category works this way, and a [custom status](/issues#custom-statuses) in that category behaves identically. Issues already in `done` or `cancelled` still start a run immediately when assigned or reassigned to an agent.
 
+Resuming a `blocked` issue starts a run as well. An agent writes `blocked` when it gets stuck, which leaves the issue owned but with nothing running, and Multica never takes it back out on its own — so moving it back to `todo` is what picks the work up again. Changing the status from the status picker opens the same dialog, with the same **Don't start yet**. Moving it from `blocked` to `in_progress` or `in_review` only records where the work stands and starts nothing.
+
 ## Assignment permissions
 
 Whether you can assign an agent is decided by its Access:

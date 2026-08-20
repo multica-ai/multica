@@ -127,6 +127,7 @@ and is hidden from the PR list.
 | `shouldEnqueueAgentTask` returns false for `backlog` (parking lot) | `server/internal/handler/issue.go:2644-2648` | new citation |
 | Backlog → non-backlog (not done/cancelled) enqueues on update | `server/internal/handler/issue.go:2537-2540` | `:2523` |
 | Same contract in batch update | `server/internal/handler/issue.go:3021-3024` | new citation |
+| `blocked → todo` enqueues the assignee (agent) or the squad leader; `blocked` → anything else does not (AERIS-284) | `server/internal/service/issue_trigger.go` (`startsRunOnStatusChange`, called from `WillEnqueueRun`) | new citation |
 | Child → `done` notifies + wakes the parent, gated by the stage barrier | `server/internal/handler/issue_child_done.go:66` (`notifyParentOfChildDone`; doc comment at `:15`; barrier gate at `:115`) | func def `:51` |
 | Status change (incl. → `cancelled`) does NOT cancel in-flight tasks; only issue deletion does (MUL-4465) | no-cancel note in `server/internal/handler/issue.go:2652-2658` (`UpdateIssue`) and `:3170-3171` (`BatchUpdateIssues`); deletion still cancels at `:2863` (`DeleteIssue`) / `:3239` (`BatchDeleteIssues`) via `CancelTasksForIssue` (`server/internal/service/task.go:1229`) | new citation |
 | `StartTask` / `CompleteTask` do not write issue status (agent CLI owns progress) | `server/internal/service/task.go` (`StartTask` / `CompleteTask` comments) | new citation |
@@ -216,5 +217,6 @@ grep -n 'func issuePullRequestRowToResponse\|type GitHubPullRequestResponse stru
 grep -n 'extractIdentifiers(\|extractClosingIdentifiers(\|derivePRState(' internal/handler/github.go
 grep -n 'qualifyingIdents\|reference_only\|ReferenceOnly' internal/handler/github.go pkg/db/queries/github.sql
 grep -n 'prevIssue.Status == "backlog"\|func (h \*Handler) shouldEnqueueAgentTask' internal/handler/issue.go
+grep -n 'func startsRunOnStatusChange' -A 12  internal/service/issue_trigger.go
 grep -n 'func notifyParentOfChildDone'       internal/handler/issue_child_done.go
 ```
