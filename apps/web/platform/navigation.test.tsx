@@ -58,12 +58,15 @@ beforeEach(() => {
 });
 
 describe("WebNavigationProvider internal link bridge", () => {
-  it("pushes the path a content link resolved to", () => {
+  it("hands a content Issue link to the mounted Tag host", () => {
     render(<WebNavigationProvider>{null}</WebNavigationProvider>);
 
     navigate("/acme/issues/MUL-1");
 
-    expect(router.push).toHaveBeenCalledWith("/acme/issues/MUL-1");
+    expect(documentNavigation.assign).toHaveBeenCalledWith(
+      "/tag/acme/issues/MUL-1",
+    );
+    expect(router.push).not.toHaveBeenCalled();
   });
 
   it("ignores an event without a path", () => {
@@ -123,7 +126,10 @@ describe("WebNavigationProvider canGoBack", () => {
 
     adapter().push("/acme/issues");
 
-    expect(router.push).toHaveBeenCalledWith("/acme/issues");
+    expect(documentNavigation.assign).toHaveBeenCalledWith(
+      "/tag/acme/issues",
+    );
+    expect(router.push).not.toHaveBeenCalled();
     expect(adapter().canGoBack!()).toBe(false);
   });
 

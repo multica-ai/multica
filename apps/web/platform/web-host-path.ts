@@ -25,17 +25,25 @@ export function toWebHostPath(path: string): string {
   ) {
     return `${TAG_CREATE_WORKSPACE_PATH}${path.slice("/workspaces/new".length)}`;
   }
+
+  // This adapter only receives app-navigation destinations, never API paths.
+  // A Workspace-scoped Issues path belongs to the mounted Tag host.
+  const workspaceIssues = path.match(/^\/([^/?#]+)\/issues(?:[/?#]|$)/u);
+  if (workspaceIssues?.[1] && workspaceIssues[1] !== "tag") {
+    return `/tag${path}`;
+  }
   return path;
 }
 
 /** Resolve the ordinary post-auth landing surface owned by the Tag host. */
 export function toWebPostAuthPath(path: string): string {
-  const hostPath = toWebHostPath(path);
-  const workspaceIssues = hostPath.match(
+  const workspaceIssues = path.match(
     /^\/([^/?#]+)\/issues(?<suffix>[?#].*)?$/u,
   );
-  if (!workspaceIssues) return hostPath;
-  return `/tag/${workspaceIssues[1]}/chat${workspaceIssues.groups?.suffix ?? ""}`;
+  if (workspaceIssues?.[1] && workspaceIssues[1] !== "tag") {
+    return `/tag/${workspaceIssues[1]}/chat${workspaceIssues.groups?.suffix ?? ""}`;
+  }
+  return toWebHostPath(path);
 }
 
 export function isDocumentHandoffPath(path: string): boolean {
