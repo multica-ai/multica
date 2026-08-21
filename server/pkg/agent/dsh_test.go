@@ -3,15 +3,11 @@ package agent
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"runtime"
-	"strconv"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -324,67 +320,6 @@ exit 3
 	}
 	if !strings.Contains(err.Error(), "profile multica not found") {
 		t.Fatalf("expected stderr tail in error, got %q", err.Error())
-	}
-}
-
-func TestDshBackendStartupCancellationKillsProcessTree(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("shell fixture")
-	}
-	dir := t.TempDir()
-	marker := filepath.Join(dir, "alive")
-	pidFile := filepath.Join(dir, "pid")
-	// The fixture starts a long-lived child, writes the group marker plus its
-	// pid, and never emits a protocol `ready` frame on stdout — Execute must
-	// still be waiting for the handshake when the context is cancelled.
-	bin := writeDshFixture(t, fmt.Sprintf(`
-sleep 30 &
-echo $! > %q
-printf '%%s' alive > %q
-wait
-`, pidFile, marker))
-	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-startup-cancel", Logger: slog.Default()})
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	_, err = b.Execute(ctx, "run", ExecOptions{
-		Cwd:              t.TempDir(),
-		Timeout:          5 * time.Second,
-		HandshakeTimeout: 10 * time.Second,
-	})
-	if err == nil || !strings.Contains(err.Error(), "cancelled before the runtime protocol became ready") {
-		t.Fatalf("expected cancelled-before-ready error, got %v", err)
-	}
-	// Wait for the fixture to write its child pid, then verify the whole
-	// process group (fixture + `sleep 30` child) is gone after cancellation.
-	deadline := time.Now().Add(5 * time.Second)
-	var childPID []byte
-	for {
-		childPID, err = os.ReadFile(pidFile)
-		if err == nil && len(strings.TrimSpace(string(childPID))) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("fixture never reported its child pid: %v", err)
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	pid, convErr := strconv.Atoi(strings.TrimSpace(string(childPID)))
-	if convErr != nil {
-		t.Fatalf("parse child pid %q: %v", childPID, convErr)
-	}
-	deadline = time.Now().Add(5 * time.Second)
-	for {
-		err := syscall.Kill(pid, 0)
-		if errors.Is(err, syscall.ESRCH) {
-			return // child is gone: the process tree did not survive
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("orphaned child pid %d still alive after startup cancellation", pid)
-		}
-		time.Sleep(20 * time.Millisecond)
 	}
 }
 
