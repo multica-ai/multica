@@ -3,11 +3,15 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/multica-ai/multica/server/internal/testutil"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 // The claim path resolves project context from a SOFT reference: issue.project_id,
@@ -331,5 +335,190 @@ func TestClaimTask_AutopilotRunOnlyForeignWorkspace_CancelsTask(t *testing.T) {
 	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
 	if status != "cancelled" {
 		t.Fatalf("cross-workspace autopilot task status = %q, want cancelled", status)
+	}
+}
+
+// failQueryDBTX delegates every query to the real pool except the ones whose
+// SQL contains failOn, which fail with a transient-looking error. db.Queries is
+// built on the DBTX interface, so this is the seam that lets a single source
+// read fail while the rest of the claim proceeds normally — the shape of a real
+// DB blip, which a globally broken pool cannot reproduce (it trips the earlier
+// agent-load guard instead).
+type failQueryDBTX struct {
+	db.DBTX
+	failOn string
+	err    error
+}
+
+type errRow struct{ err error }
+
+func (r errRow) Scan(...any) error { return r.err }
+
+func (f failQueryDBTX) QueryRow(ctx context.Context, sql string, args ...any) pgx.Row {
+	if strings.Contains(sql, f.failOn) {
+		return errRow{err: f.err}
+	}
+	return f.DBTX.QueryRow(ctx, sql, args...)
+}
+
+func (f failQueryDBTX) Query(ctx context.Context, sql string, args ...any) (pgx.Rows, error) {
+	if strings.Contains(sql, f.failOn) {
+		return nil, f.err
+	}
+	return f.DBTX.Query(ctx, sql, args...)
+}
+
+// A claim resolves its SOURCE row — issue, chat session, autopilot_run,
+// autopilot — before anything else. Those reads used to be written as
+// `if x, err := ...; err == nil {`, with no else: a failed read silently
+// skipped the whole branch. taskToResponse has already seeded resp.WorkspaceID
+// with the RUNTIME's workspace by then, so the skipped claim sailed through the
+// builder's backstop isolation check (which compared that seed against itself)
+// and dispatched an agent with no issue, no chat input, or no autopilot
+// instructions at all.
+//
+// A transient read failure must instead produce NO claim payload and preserve
+// the task for the stale-dispatched reclaim — cancelling would destroy a valid
+// task over a momentary DB error.
+func TestBuildClaimedTaskResponse_SourceLoadFailure_PreservesTaskAndEmitsNoContext(t *testing.T) {
+	if testHandler == nil || testPool == nil {
+		t.Skip("database not available")
+	}
+
+	var agentID, runtimeID string
+	dbfx.QueryRow(t,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID)
+
+	projectID := dbfx.Project(t, "Source load failure project")
+	dbfx.Insert(t, "project_resource", testutil.Cols{
+		"project_id":    projectID,
+		"workspace_id":  testWorkspaceID,
+		"resource_type": "github_repo",
+		"resource_ref":  `{"url":"https://github.com/example/must-not-appear"}`,
+		"position":      0,
+	})
+	issueID := dbfx.Issue(t, "source load failure issue", testutil.Cols{
+		"project_id": projectID,
+		"priority":   "medium",
+		"number":     88201,
+	})
+	chatSessionID := dbfx.ChatSession(t, agentID, testutil.Cols{"project_id": projectID})
+
+	for _, tc := range []struct {
+		name   string
+		failOn string
+		cols   testutil.Cols
+	}{
+		{
+			name:   "issue",
+			failOn: "FROM issue\nWHERE id = $1",
+			cols:   testutil.Cols{"runtime_id": runtimeID, "issue_id": issueID},
+		},
+		{
+			name:   "chat session",
+			failOn: "FROM chat_session\nWHERE id = $1",
+			cols:   testutil.Cols{"runtime_id": runtimeID, "issue_id": nil, "chat_session_id": chatSessionID},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			taskID := dbfx.Task(t, agentID, tc.cols)
+			dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'dispatched' WHERE id = $1`, taskID)
+
+			task := db.AgentTaskQueue{
+				ID:        parseUUID(taskID),
+				AgentID:   parseUUID(agentID),
+				RuntimeID: parseUUID(runtimeID),
+				Status:    "dispatched",
+			}
+			if issueRef, ok := tc.cols["issue_id"].(string); ok {
+				task.IssueID = parseUUID(issueRef)
+			}
+			if chatRef, ok := tc.cols["chat_session_id"].(string); ok {
+				task.ChatSessionID = parseUUID(chatRef)
+			}
+
+			brokenHandler := *testHandler
+			brokenHandler.Queries = db.New(failQueryDBTX{
+				DBTX:   testPool,
+				failOn: tc.failOn,
+				err:    errors.New("simulated transient read failure"),
+			})
+
+			runtime := db.AgentRuntime{
+				ID:          parseUUID(runtimeID),
+				WorkspaceID: parseUUID(testWorkspaceID),
+			}
+			req := httptest.NewRequest(http.MethodPost, "/api/daemon/runtimes/"+runtimeID+"/claim", nil)
+
+			resp, _, _, _, failure := brokenHandler.buildClaimedTaskResponse(
+				req, &task, runtime, runtimeID, testWorkspaceID)
+
+			if failure == nil {
+				t.Fatal("expected the claim to be rejected when its source row cannot be read")
+			}
+			if failure.outcome != "error_source_load" {
+				t.Errorf("outcome = %q, want error_source_load", failure.outcome)
+			}
+			if failure.status != http.StatusInternalServerError {
+				t.Errorf("status = %d, want 500", failure.status)
+			}
+
+			// No context may be assembled from a source the handler could not read.
+			if resp.ThreadName != "" {
+				t.Errorf("thread_name = %q, want empty on a failed source read", resp.ThreadName)
+			}
+			if resp.ProjectID != "" || len(resp.ProjectResources) != 0 || len(resp.Repos) != 0 {
+				t.Errorf("project context leaked into a failed claim: project_id=%q resources=%d repos=%d",
+					resp.ProjectID, len(resp.ProjectResources), len(resp.Repos))
+			}
+
+			// A transient failure preserves the task for the reclaim path.
+			var status string
+			dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
+			if status != "dispatched" {
+				t.Errorf("task status = %q, want it preserved as dispatched for reclaim", status)
+			}
+		})
+	}
+}
+
+// The other half of the split: a source row that is GONE cannot be retried into
+// existence, so it settles terminally instead of spinning in the reclaim loop.
+// Legacy FKs keep this state from arising today (agent_task_queue.issue_id ON
+// DELETE CASCADE and friends), so the branch is exercised directly rather than
+// through a claim.
+func TestRejectClaimSourceLoad_MissingRow_CancelsTask(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var agentID, runtimeID string
+	dbfx.QueryRow(t,
+		`SELECT id, runtime_id FROM agent WHERE workspace_id = $1 LIMIT 1`,
+		testWorkspaceID,
+	).Scan(&agentID, &runtimeID)
+
+	taskID := dbfx.Task(t, agentID, testutil.Cols{"runtime_id": runtimeID, "issue_id": nil})
+	dbfx.Exec(t, `UPDATE agent_task_queue SET status = 'dispatched' WHERE id = $1`, taskID)
+	task := db.AgentTaskQueue{ID: parseUUID(taskID), AgentID: parseUUID(agentID), Status: "dispatched"}
+
+	failure := testHandler.rejectClaimSourceLoad(
+		context.Background(), &task, pgx.ErrNoRows, "issue", uuidToString(task.IssueID))
+	if failure == nil {
+		t.Fatal("expected a failure for a missing source row")
+	}
+	if failure.outcome != "error_source_missing" {
+		t.Errorf("outcome = %q, want error_source_missing", failure.outcome)
+	}
+	if failure.message != "task is missing its issue" {
+		t.Errorf("message = %q, want it to name the missing source", failure.message)
+	}
+
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
+	if status != "cancelled" {
+		t.Errorf("task status = %q, want cancelled for an unrecoverable source reference", status)
 	}
 }
