@@ -529,6 +529,10 @@ type Daemon struct {
 	// It deliberately includes preparation and local-directory waiters because
 	// restart/update barriers must not kill any claimed task.
 	activeTasks atomic.Int64
+	// taskActivityMu serializes the active-task transition that acquires or
+	// releases the macOS idle-sleep assertion.
+	taskActivityMu     sync.Mutex
+	idleSleepAssertion idleSleepAssertion
 	// runningTasks counts live provider execution sessions, beginning only after
 	// backend.Execute returns. It can briefly lag the server-side running state,
 	// which starts during preparation before provider launch. resourceWaitTasks
@@ -642,6 +646,7 @@ func New(cfg Config, logger *slog.Logger) *Daemon {
 		pendingWorkLastRun:        make(map[string]time.Time),
 		reregisterNextAttempt:     make(map[string]time.Time),
 		reregisterLastCompletedAt: make(map[string]time.Time),
+		idleSleepAssertion:        newIdleSleepAssertion(logger),
 		cancelPollInterval:        5 * time.Second,
 		taskPrepareTimeout:        defaultTaskPrepareTimeout,
 		reconcile:                 newReconcileBroadcaster(),
@@ -1935,6 +1940,7 @@ func (d *Daemon) clearWSHeartbeatAcks() {
 func (d *Daemon) Run(ctx context.Context) error {
 	// Wrap context so handleUpdate can cancel the daemon for restart.
 	ctx, cancel := context.WithCancel(ctx)
+	defer d.releaseIdleSleepAssertion()
 	d.cancelFunc = cancel
 	d.rootCtx = ctx
 
@@ -4800,7 +4806,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			}
 			d.logger.Info("task received", "task", shortID(t.ID), "target", taskTarget)
 			taskWG.Add(1)
-			d.activeTasks.Add(1)
+			d.taskStarted()
 			if cache, ok := d.repoCache.(interface{ CancelMaintenance() }); ok {
 				// A task can reuse an existing worktree and never enter the
 				// checkout path that normally preempts repository maintenance.
@@ -4810,7 +4816,7 @@ func (d *Daemon) runBatchPoller(pollerCtx, parentCtx context.Context, sem chan i
 			}
 			go func(t Task, slot int) {
 				defer taskWG.Done()
-				defer d.activeTasks.Add(-1)
+				defer d.taskFinished()
 				defer func() {
 					// Release local capacity before waking the poller. The task's
 					// terminal callback and local cleanup have both finished at this
