@@ -709,6 +709,11 @@ jobs:
           go test ./internal/daemon/execenv -v -run '^(TestSeedUserCodexSkills|TestHydrateCodexSkills)' -count=1 -timeout=5m
           go test ./internal/daemon -v -run '^(TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction|TestTaskSize_DoesNotCountDirectoryJunction)$' -count=1 -timeout=5m
 
+      - name: Test Windows task temp cleanup retry
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        run: go test ./internal/daemon -v -run '^TestCleanupTaskTempDirRetriesWindowsSharingViolation$' -count=1 -timeout=5m
+
       - name: Test Windows agent executable junction resolution
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server

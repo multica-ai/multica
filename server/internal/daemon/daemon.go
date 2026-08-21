@@ -6951,8 +6951,11 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", err)
 	}
 	defer func() {
-		if cerr := os.RemoveAll(taskTempDir); cerr != nil {
-			taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
+		attempts, cerr := cleanupTaskTempDir(taskTempDir)
+		if cerr != nil {
+			taskLog.Warn("task temp dir cleanup failed after retries", "path", taskTempDir, "attempts", attempts, "error", cerr)
+		} else if attempts > 1 {
+			taskLog.Info("task temp dir cleanup succeeded after retry", "path", taskTempDir, "attempts", attempts)
 		}
 	}()
 
