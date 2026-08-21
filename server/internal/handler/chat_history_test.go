@@ -29,6 +29,22 @@ type fakeChatHistoryReader struct {
 	gotOpts       channel.HistoryOptions
 }
 
+func TestChatHistoryScopePassesImmutableContextGeneration(t *testing.T) {
+	scope := chatHistoryScope{
+		contextRevision: pgtype.Int8{Int64: 3, Valid: true},
+		historyStart:    "100.000000",
+		historyEnd:      "200.000000",
+		boundaryPending: true,
+	}
+	opts := scope.historyOptions(newRequest("GET", "/api/chat/history?limit=7&before=150.000000", nil))
+	if opts.ContextRevision != 3 || opts.After != "100.000000" || opts.Until != "200.000000" || !opts.BoundaryPending {
+		t.Fatalf("generation options = %+v", opts)
+	}
+	if opts.Limit != 7 || opts.Before != "150.000000" {
+		t.Fatalf("paging options = %+v", opts)
+	}
+}
+
 func (f *fakeChatHistoryReader) ChannelOverview(_ context.Context, sid pgtype.UUID, opts channel.HistoryOptions) (channel.HistoryPage, error) {
 	f.overviewCalls++
 	f.gotSession = sid
@@ -457,16 +473,6 @@ func TestGetChatHistory_ChannelTaskCannotReadEarlierContextGeneration(t *testing
 			($1, 'user', 'fresh question', NULL, TRUE, 2)
 	`, sessionID, legacyTaskID); err != nil {
 		t.Fatalf("seed context messages: %v", err)
-	}
-	// The mixed-version trigger correctly stamps new NULL-revision user rows
-	// with the current generation. Clear this fixture after insertion to model
-	// a row that predates the migration and must still read as generation 1.
-	if _, err := testPool.Exec(ctx, `
-		UPDATE chat_message
-		SET channel_context_revision = NULL
-		WHERE chat_session_id = $1 AND content = 'rolling legacy message'
-	`, sessionID); err != nil {
-		t.Fatalf("restore pre-migration NULL message revision: %v", err)
 	}
 	visible, err := testHandler.Queries.ListChatMessages(ctx, util.MustParseUUID(sessionID))
 	if err != nil {

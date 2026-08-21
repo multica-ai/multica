@@ -430,19 +430,21 @@ type ChatDraftRestore struct {
 }
 
 type ChatMessage struct {
-	ID                       pgtype.UUID        `json:"id"`
-	ChatSessionID            pgtype.UUID        `json:"chat_session_id"`
-	Role                     string             `json:"role"`
-	Content                  string             `json:"content"`
-	TaskID                   pgtype.UUID        `json:"task_id"`
-	CreatedAt                pgtype.Timestamptz `json:"created_at"`
-	FailureReason            pgtype.Text        `json:"failure_reason"`
-	ElapsedMs                pgtype.Int8        `json:"elapsed_ms"`
-	MessageKind              string             `json:"message_kind"`
-	ChannelMediaPendingUntil pgtype.Timestamptz `json:"channel_media_pending_until"`
-	ChannelIngested          bool               `json:"channel_ingested"`
-	QuickActions             []byte             `json:"quick_actions"`
-	ChannelContextRevision   pgtype.Int8        `json:"channel_context_revision"`
+	ID                        pgtype.UUID        `json:"id"`
+	ChatSessionID             pgtype.UUID        `json:"chat_session_id"`
+	Role                      string             `json:"role"`
+	Content                   string             `json:"content"`
+	TaskID                    pgtype.UUID        `json:"task_id"`
+	CreatedAt                 pgtype.Timestamptz `json:"created_at"`
+	FailureReason             pgtype.Text        `json:"failure_reason"`
+	ElapsedMs                 pgtype.Int8        `json:"elapsed_ms"`
+	MessageKind               string             `json:"message_kind"`
+	ChannelMediaPendingUntil  pgtype.Timestamptz `json:"channel_media_pending_until"`
+	ChannelIngested           bool               `json:"channel_ingested"`
+	QuickActions              []byte             `json:"quick_actions"`
+	ChannelContextRevision    pgtype.Int8        `json:"channel_context_revision"`
+	ChannelOutboundType       pgtype.Text        `json:"channel_outbound_type"`
+	ChannelOutboundMessageIds []string           `json:"channel_outbound_message_ids"`
 }
 
 type ChatPinnedAgent struct {

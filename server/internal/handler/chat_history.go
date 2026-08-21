@@ -232,6 +232,9 @@ func (s chatHistoryScope) historyOptions(r *http.Request) channel.HistoryOptions
 	opts.BoundaryPending = s.boundaryPending
 	opts.After = s.historyStart
 	opts.Until = s.historyEnd
+	if s.contextRevision.Valid {
+		opts.ContextRevision = s.contextRevision.Int64
+	}
 	return opts
 }
 

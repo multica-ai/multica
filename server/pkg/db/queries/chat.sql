@@ -486,6 +486,34 @@ SELECT EXISTS (
       AND channel_ingested
 ) AS channel_ingested;
 
+-- name: SetChatMessageChannelOutboundProvenanceByTask :execrows
+-- The assistant row is committed before EventChatDone is published. Attach the
+-- external identifiers produced by the adapter to that durable turn so a live
+-- provider-history reader can apply the same context-generation boundary as
+-- the stored transcript. A send that succeeds but cannot record provenance is
+-- deliberately treated as unknown (and therefore excluded from generation >1).
+UPDATE chat_message
+SET channel_outbound_type = @channel_type,
+    channel_outbound_message_ids = @message_ids::text[]
+WHERE task_id = @task_id
+  AND role = 'assistant';
+
+-- name: ListChannelOutboundMessageIDsForContext :many
+-- Assistant generation is inherited from its owning task, matching
+-- ListChatMessagesPageForChannelContext. Provider IDs are scoped by session,
+-- adapter, and immutable generation before being trusted as agent context.
+SELECT unnest(message.channel_outbound_message_ids)::text AS message_id
+FROM chat_message AS message
+JOIN agent_task_queue AS owner ON owner.id = message.task_id
+WHERE message.chat_session_id = @chat_session_id
+  AND message.role = 'assistant'
+  AND message.channel_outbound_type = @channel_type
+  AND message.channel_outbound_message_ids IS NOT NULL
+  AND (
+      owner.channel_context_revision = @channel_context_revision
+      OR (@channel_context_revision = 1 AND owner.channel_context_revision IS NULL)
+  );
+
 -- name: GetChannelMediaPendingUntil :one
 -- The latest unexpired media deadline gates a channel task. Using a durable
 -- task fire_at means a process restart still produces the placeholder fallback.

@@ -86,4 +86,7 @@ type HistoryOptions struct {
 	After           string
 	Until           string
 	BoundaryPending bool
+	// ContextRevision is the task's immutable channel context generation. Zero
+	// means this is a legacy or direct-chat read with no generation boundary.
+	ContextRevision int64
 }

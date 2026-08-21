@@ -37,6 +37,7 @@ const (
 type historyQueries interface {
 	GetChannelChatSessionBindingBySession(ctx context.Context, arg db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error)
 	GetChannelInstallation(ctx context.Context, arg db.GetChannelInstallationParams) (db.ChannelInstallation, error)
+	ListChannelOutboundMessageIDsForContext(ctx context.Context, arg db.ListChannelOutboundMessageIDsForContextParams) ([]string, error)
 }
 
 // historyClient is the slice of the slack-go Web API the reader calls. The real
@@ -146,8 +147,14 @@ func (h *History) ChannelOverview(ctx context.Context, chatSessionID pgtype.UUID
 	if err != nil {
 		return channel.HistoryPage{}, fmt.Errorf("read slack channel: %w", err)
 	}
-	raw := filterHistoryWindow(resp.Messages, opts, t.botUserID)
+	nextCursor := historyNextCursor(resp.Messages, limit)
+	allowedBotMessages, err := h.allowedBotMessages(ctx, chatSessionID, opts)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	raw := filterHistoryWindow(resp.Messages, opts, t.botUserID, allowedBotMessages)
 	page := normalizePage(ctx, t.client, h.logger, raw, t.botUserID, limit, true)
+	page.NextCursor = nextCursor
 	page.ChannelType = string(TypeSlack)
 	return page, nil
 }
@@ -207,8 +214,14 @@ func (h *History) Thread(ctx context.Context, chatSessionID pgtype.UUID, threadI
 		}
 		raw = msgs
 	}
-	raw = filterHistoryWindow(raw, opts, t.botUserID)
+	nextCursor := historyNextCursor(raw, limit)
+	allowedBotMessages, err := h.allowedBotMessages(ctx, chatSessionID, opts)
+	if err != nil {
+		return channel.HistoryPage{}, err
+	}
+	raw = filterHistoryWindow(raw, opts, t.botUserID, allowedBotMessages)
 	page := normalizePage(ctx, t.client, h.logger, raw, t.botUserID, limit, false)
+	page.NextCursor = nextCursor
 	page.ChannelType = string(TypeSlack)
 	page.ThreadID = ts
 	return page, nil
@@ -229,7 +242,39 @@ func historyCursorReachedStart(before, start string) bool {
 	return before != "" && start != "" && !slackTSLess(start, before)
 }
 
-func filterHistoryWindow(raw []slack.Message, opts channel.HistoryOptions, botUserID string) []slack.Message {
+func historyNextCursor(raw []slack.Message, limit int) string {
+	if len(raw) < limit || len(raw) == 0 {
+		return ""
+	}
+	oldest := raw[0].Timestamp
+	for i := 1; i < len(raw); i++ {
+		if slackTSLess(raw[i].Timestamp, oldest) {
+			oldest = raw[i].Timestamp
+		}
+	}
+	return oldest
+}
+
+func (h *History) allowedBotMessages(ctx context.Context, chatSessionID pgtype.UUID, opts channel.HistoryOptions) (map[string]struct{}, error) {
+	if opts.ContextRevision <= 1 {
+		return nil, nil
+	}
+	ids, err := h.q.ListChannelOutboundMessageIDsForContext(ctx, db.ListChannelOutboundMessageIDsForContextParams{
+		ChatSessionID:          chatSessionID,
+		ChannelType:            pgtype.Text{String: string(TypeSlack), Valid: true},
+		ChannelContextRevision: pgtype.Int8{Int64: opts.ContextRevision, Valid: true},
+	})
+	if err != nil {
+		return nil, fmt.Errorf("load slack reply provenance: %w", err)
+	}
+	allowed := make(map[string]struct{}, len(ids))
+	for _, id := range ids {
+		allowed[id] = struct{}{}
+	}
+	return allowed, nil
+}
+
+func filterHistoryWindow(raw []slack.Message, opts channel.HistoryOptions, botUserID string, allowedBotMessages map[string]struct{}) []slack.Message {
 	out := raw[:0]
 	for _, message := range raw {
 		if opts.After != "" && slackTSLess(message.Timestamp, opts.After) {
@@ -237,6 +282,17 @@ func filterHistoryWindow(raw []slack.Message, opts channel.HistoryOptions, botUs
 		}
 		if opts.Until != "" && !slackTSLess(message.Timestamp, opts.Until) {
 			continue
+		}
+		// Slack timestamps alone are not a causal boundary: a reply from an old
+		// task may be posted after /new. From generation 2 onward, trust an
+		// assistant message only when its provider id was persisted on a task in
+		// this exact generation. Human and third-party bot messages still follow
+		// the provider time window. Unknown own-bot output fails closed for agent
+		// context but remains visible to people in Slack.
+		if opts.ContextRevision > 1 && message.User == botUserID {
+			if _, ok := allowedBotMessages[message.Timestamp]; !ok {
+				continue
+			}
 		}
 		if message.Timestamp == opts.After {
 			text := strings.TrimSpace(strings.ReplaceAll(message.Text, "<@"+botUserID+">", ""))
@@ -322,13 +378,7 @@ func normalizePage(ctx context.Context, client historyClient, logger *slog.Logge
 		out = append(out, hm)
 	}
 
-	page := channel.HistoryPage{Messages: out}
-	// Advertise a cursor only when the platform returned a full page (more may
-	// exist older than the oldest message we just returned).
-	if len(raw) >= limit && len(out) > 0 {
-		page.NextCursor = out[0].TS
-	}
-	return page
+	return channel.HistoryPage{Messages: out}
 }
 
 // maxDerivedTextLen caps text recovered from attachments/blocks so a verbose

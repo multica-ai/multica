@@ -4,6 +4,12 @@ ALTER TABLE channel_chat_session_binding
 ALTER TABLE chat_message
     ADD COLUMN IF NOT EXISTS channel_context_revision BIGINT;
 
+ALTER TABLE chat_message
+    ADD COLUMN IF NOT EXISTS channel_outbound_type TEXT;
+
+ALTER TABLE chat_message
+    ADD COLUMN IF NOT EXISTS channel_outbound_message_ids TEXT[];
+
 ALTER TABLE agent_task_queue
     ADD COLUMN IF NOT EXISTS channel_context_revision BIGINT;
 

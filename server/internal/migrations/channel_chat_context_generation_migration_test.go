@@ -6,7 +6,10 @@ import (
 	"testing"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/multica-ai/multica/server/internal/util"
+	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
 const channelContextMigrationTestSchema = "channel_context_migration_test"
@@ -57,6 +60,7 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 		CREATE TABLE agent_task_queue (
 			id UUID NOT NULL,
 			chat_session_id UUID,
+			status TEXT NOT NULL DEFAULT 'queued',
 			parent_task_id UUID,
 			chat_input_task_id UUID,
 			retry_of_task_id UUID,
@@ -69,6 +73,7 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 	const sessionID = "c3440000-0000-4000-8000-000000000001"
 	const directSessionID = "c3440000-0000-4000-8000-000000000009"
 	const directTaskID = "c3440000-0000-4000-8000-000000000010"
+	const terminalTaskID = "c3440000-0000-4000-8000-000000000011"
 	if _, err := conn.Exec(ctx, `INSERT INTO channel_chat_session_binding (chat_session_id) VALUES ($1)`, sessionID); err != nil {
 		t.Fatalf("seed pre-migration binding: %v", err)
 	}
@@ -80,10 +85,15 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 		t.Fatalf("seed pre-migration messages: %v", err)
 	}
 	if _, err := conn.Exec(ctx, `
-		INSERT INTO agent_task_queue (id, chat_session_id)
-		VALUES ('c3440000-0000-4000-8000-000000000004', $1),
-		       ($2, $3)
-	`, sessionID, directTaskID, directSessionID); err != nil {
+		INSERT INTO agent_task_queue (id, chat_session_id, status)
+		VALUES ('c3440000-0000-4000-8000-000000000004', $1, 'queued'),
+		       ($2, $3, 'queued'),
+		       ($4, $1, 'completed'),
+		       ('c3440000-0000-4000-8000-000000000020', $1, 'dispatched'),
+		       ('c3440000-0000-4000-8000-000000000021', $1, 'running'),
+		       ('c3440000-0000-4000-8000-000000000022', $1, 'waiting_local_directory'),
+		       ('c3440000-0000-4000-8000-000000000023', $1, 'deferred')
+	`, sessionID, directTaskID, directSessionID, terminalTaskID); err != nil {
 		t.Fatalf("seed pre-migration task: %v", err)
 	}
 
@@ -127,12 +137,19 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 		t.Fatalf("assistant message revision = %v, want NULL (derived from its task)", *assistantRevision)
 	}
 
-	var taskRevision *int64
-	if err := conn.QueryRow(ctx, `SELECT channel_context_revision FROM agent_task_queue WHERE chat_session_id = $1`, sessionID).Scan(&taskRevision); err != nil {
+	var backfilled int
+	if err := conn.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id = $1 AND channel_context_revision = 1`, sessionID).Scan(&backfilled); err != nil {
 		t.Fatalf("read task backfill: %v", err)
 	}
-	if taskRevision == nil || *taskRevision != 1 {
-		t.Fatalf("legacy channel task revision = %v, want 1", taskRevision)
+	if backfilled != 5 {
+		t.Fatalf("backfilled in-flight channel tasks = %d, want 5", backfilled)
+	}
+	var terminalTaskRevision *int64
+	if err := conn.QueryRow(ctx, `SELECT channel_context_revision FROM agent_task_queue WHERE id = $1`, terminalTaskID).Scan(&terminalTaskRevision); err != nil {
+		t.Fatalf("read terminal task backfill: %v", err)
+	}
+	if terminalTaskRevision != nil {
+		t.Fatalf("terminal channel task revision = %v, want NULL", *terminalTaskRevision)
 	}
 	var directTaskRevision *int64
 	if err := conn.QueryRow(ctx, `SELECT channel_context_revision FROM agent_task_queue WHERE id = $1`, directTaskID).Scan(&directTaskRevision); err != nil {
@@ -142,7 +159,7 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 		t.Fatalf("legacy direct task revision = %v, want NULL", *directTaskRevision)
 	}
 
-	assertChannelContextMixedVersionGuards(t, ctx, conn.Conn(), sessionID)
+	assertChannelContextOwnershipGuard(t, ctx, conn.Conn(), sessionID, directSessionID, directTaskID)
 
 	assertChannelContextIndex(t, ctx, conn.Conn())
 	if _, err := conn.Exec(ctx, `
@@ -166,6 +183,8 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 	for _, column := range []string{
 		"channel_chat_session_binding.context_revision",
 		"chat_message.channel_context_revision",
+		"chat_message.channel_outbound_type",
+		"chat_message.channel_outbound_message_ids",
 		"agent_task_queue.channel_context_revision",
 	} {
 		var exists bool
@@ -186,11 +205,12 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 	}
 }
 
-func assertChannelContextMixedVersionGuards(t *testing.T, ctx context.Context, conn *pgx.Conn, sessionID string) {
+func assertChannelContextOwnershipGuard(t *testing.T, ctx context.Context, conn *pgx.Conn, sessionID, directSessionID, directTaskID string) {
 	t.Helper()
 	const newMessageID = "c3440000-0000-4000-8000-000000000006"
 	const taskID = "c3440000-0000-4000-8000-000000000007"
 	const retryTaskID = "c3440000-0000-4000-8000-000000000008"
+	const rerunTaskID = "c3440000-0000-4000-8000-000000000009"
 
 	statements := []struct {
 		sql  string
@@ -198,49 +218,41 @@ func assertChannelContextMixedVersionGuards(t *testing.T, ctx context.Context, c
 	}{
 		{`UPDATE channel_chat_session_binding SET context_revision = 2, pending_fresh = TRUE WHERE chat_session_id = $1`, []any{sessionID}},
 		{`INSERT INTO channel_chat_context_generation (chat_session_id, revision, pending_fresh) VALUES ($1, 2, TRUE)`, []any{sessionID}},
-		{`INSERT INTO chat_message (id, chat_session_id, role) VALUES ($2, $1, 'user')`, []any{sessionID, newMessageID}},
-		{`INSERT INTO agent_task_queue (id, chat_session_id) VALUES ($2, $1)`, []any{sessionID, taskID}},
-		{`INSERT INTO agent_task_queue (id, chat_session_id, parent_task_id) VALUES ($2, $1, $3)`, []any{sessionID, retryTaskID, "c3440000-0000-4000-8000-000000000004"}},
+		{`INSERT INTO chat_message (id, chat_session_id, role, channel_context_revision) VALUES ($2, $1, 'user', 2)`, []any{sessionID, newMessageID}},
+		{`INSERT INTO agent_task_queue (id, chat_session_id, channel_context_revision) VALUES ($2, $1, 2)`, []any{sessionID, taskID}},
+		{`INSERT INTO agent_task_queue (id, chat_session_id, retry_of_task_id) VALUES ($2, $1, $3)`, []any{directSessionID, retryTaskID, directTaskID}},
+		{`INSERT INTO agent_task_queue (id, chat_session_id, rerun_of_task_id) VALUES ($2, $1, $3)`, []any{directSessionID, rerunTaskID, directTaskID}},
 	}
 	for _, statement := range statements {
 		if _, err := conn.Exec(ctx, statement.sql, statement.args...); err != nil {
-			t.Fatalf("simulate old writers at revision 2: %v", err)
+			t.Fatalf("seed ownership guard fixture: %v", err)
 		}
 	}
 
-	var messageRevision, taskRevision int64
-	if err := conn.QueryRow(ctx, `
-		SELECT message.channel_context_revision, task.channel_context_revision
-		FROM chat_message AS message
-		JOIN agent_task_queue AS task ON task.id = $2
-		WHERE message.id = $1
-	`, newMessageID, taskID).Scan(&messageRevision, &taskRevision); err != nil {
-		t.Fatalf("read old-writer revision stamps: %v", err)
-	}
-	if messageRevision != 2 || taskRevision != 2 {
-		t.Fatalf("old-writer revisions = message:%d task:%d, want 2/2", messageRevision, taskRevision)
-	}
-	var retryRevision int64
-	if err := conn.QueryRow(ctx, `SELECT channel_context_revision FROM agent_task_queue WHERE id = $1`, retryTaskID).Scan(&retryRevision); err != nil {
-		t.Fatalf("read old-writer retry revision: %v", err)
-	}
-	if retryRevision != 1 {
-		t.Fatalf("old-writer retry revision = %d, want inherited legacy revision 1", retryRevision)
+	for _, id := range []string{retryTaskID, rerunTaskID} {
+		var revision *int64
+		if err := conn.QueryRow(ctx, `SELECT channel_context_revision FROM agent_task_queue WHERE id = $1`, id).Scan(&revision); err != nil {
+			t.Fatalf("read direct retry/rerun revision: %v", err)
+		}
+		if revision != nil {
+			t.Fatalf("direct retry/rerun %s revision = %v, want NULL", id, *revision)
+		}
 	}
 
 	if _, err := conn.Exec(ctx, `
 		UPDATE chat_message SET task_id = $1
 		WHERE chat_session_id = $2 AND role = 'user' AND task_id IS NULL
 	`, taskID, sessionID); err != nil {
-		t.Fatalf("simulate old unscoped batch seal: %v", err)
+		t.Fatalf("seal generation-2 batch: %v", err)
 	}
 
 	var newOwner *string
 	if err := conn.QueryRow(ctx, `
-		SELECT MAX(task_id::text) FILTER (WHERE id = $1)
+		SELECT task_id::text
 		FROM chat_message
+		WHERE id = $1
 	`, newMessageID).Scan(&newOwner); err != nil {
-		t.Fatalf("read mixed-version batch ownership: %v", err)
+		t.Fatalf("read generation-2 batch ownership: %v", err)
 	}
 	var legacyOwner *string
 	if err := conn.QueryRow(ctx, `SELECT task_id::text FROM chat_message WHERE id = $1`, "c3440000-0000-4000-8000-000000000002").Scan(&legacyOwner); err != nil {
@@ -254,22 +266,30 @@ func assertChannelContextMixedVersionGuards(t *testing.T, ctx context.Context, c
 	}
 
 	if _, err := conn.Exec(ctx, `
-		UPDATE channel_chat_session_binding
-		SET pending_fresh = FALSE
-		WHERE chat_session_id = $1
-	`, sessionID); err != nil {
-		t.Fatalf("simulate old pending-fresh clear: %v", err)
+		INSERT INTO chat_message (id, chat_session_id, role, task_id)
+		VALUES ('c3440000-0000-4000-8000-000000000030', $1, 'assistant', $2)
+	`, sessionID, taskID); err != nil {
+		t.Fatalf("seed assistant outbound row: %v", err)
 	}
-	var generationPending bool
-	if err := conn.QueryRow(ctx, `
-		SELECT pending_fresh
-		FROM channel_chat_context_generation
-		WHERE chat_session_id = $1 AND revision = 2
-	`, sessionID).Scan(&generationPending); err != nil {
-		t.Fatalf("read synchronized generation pending-fresh: %v", err)
+	q := db.New(conn)
+	rows, err := q.SetChatMessageChannelOutboundProvenanceByTask(ctx, db.SetChatMessageChannelOutboundProvenanceByTaskParams{
+		ChannelType: pgtype.Text{String: "slack", Valid: true},
+		MessageIds:  []string{"104.000000", "105.000000"},
+		TaskID:      util.MustParseUUID(taskID),
+	})
+	if err != nil || rows != 1 {
+		t.Fatalf("record outbound provenance: rows=%d err=%v", rows, err)
 	}
-	if generationPending {
-		t.Fatal("old binding clear did not clear generation pending_fresh")
+	ids, err := q.ListChannelOutboundMessageIDsForContext(ctx, db.ListChannelOutboundMessageIDsForContextParams{
+		ChatSessionID:          util.MustParseUUID(sessionID),
+		ChannelType:            pgtype.Text{String: "slack", Valid: true},
+		ChannelContextRevision: pgtype.Int8{Int64: 2, Valid: true},
+	})
+	if err != nil {
+		t.Fatalf("list outbound provenance: %v", err)
+	}
+	if len(ids) != 2 || ids[0] != "104.000000" || ids[1] != "105.000000" {
+		t.Fatalf("outbound provenance ids = %v", ids)
 	}
 }
 

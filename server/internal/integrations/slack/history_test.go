@@ -14,10 +14,12 @@ import (
 )
 
 type fakeHistoryQueries struct {
-	binding    db.ChannelChatSessionBinding
-	bindingErr error
-	inst       db.ChannelInstallation
-	instErr    error
+	binding       db.ChannelChatSessionBinding
+	bindingErr    error
+	inst          db.ChannelInstallation
+	instErr       error
+	messageIDs    []string
+	messageIDsErr error
 }
 
 func (f *fakeHistoryQueries) GetChannelChatSessionBindingBySession(context.Context, db.GetChannelChatSessionBindingBySessionParams) (db.ChannelChatSessionBinding, error) {
@@ -26,6 +28,10 @@ func (f *fakeHistoryQueries) GetChannelChatSessionBindingBySession(context.Conte
 
 func (f *fakeHistoryQueries) GetChannelInstallation(context.Context, db.GetChannelInstallationParams) (db.ChannelInstallation, error) {
 	return f.inst, f.instErr
+}
+
+func (f *fakeHistoryQueries) ListChannelOutboundMessageIDsForContext(context.Context, db.ListChannelOutboundMessageIDsForContextParams) ([]string, error) {
+	return f.messageIDs, f.messageIDsErr
 }
 
 type fakeHistoryClient struct {
@@ -168,6 +174,64 @@ func TestChannelOverviewScopesAndSanitizesFreshGeneration(t *testing.T) {
 	}
 	if len(page.Messages) != 2 || page.Messages[0].Text != "current question" || page.Messages[1].Text != "new reply" {
 		t.Fatalf("scoped messages = %+v", page.Messages)
+	}
+}
+
+func TestChannelOverviewExcludesLateReplyFromPreviousGeneration(t *testing.T) {
+	q := &fakeHistoryQueries{
+		binding: groupBinding("100.000000"), inst: activeSlackInstall(),
+		messageIDs: []string{"104.000000"},
+	}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
+		msg("UBOT", "current generation answer", "104.000000"),
+		msg("UBOT", "late previous generation answer", "103.500000"),
+		msg("U1", "/new current question", "103.000000"),
+	}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{
+		After: "103.000000", ContextRevision: 2,
+	})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if len(page.Messages) != 2 || page.Messages[0].Text != "current question" || page.Messages[1].Text != "current generation answer" {
+		t.Fatalf("causally scoped messages = %+v", page.Messages)
+	}
+}
+
+func TestChannelOverviewFailsClosedForUnknownOwnBotReply(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
+		msg("UBOT", "unattributed answer", "104.000000"),
+		msg("U1", "/new current question", "103.000000"),
+	}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{
+		After: "103.000000", ContextRevision: 2,
+	})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if len(page.Messages) != 1 || page.Messages[0].Text != "current question" {
+		t.Fatalf("fail-closed messages = %+v", page.Messages)
+	}
+}
+
+func TestChannelOverviewKeepsPagingCursorWhenLateRepliesFillPage(t *testing.T) {
+	q := &fakeHistoryQueries{binding: groupBinding("100.000000"), inst: activeSlackInstall()}
+	fc := &fakeHistoryClient{historyMsgs: []slack.Message{
+		msg("UBOT", "late old answer 2", "105.000000"),
+		msg("UBOT", "late old answer 1", "104.000000"),
+	}}
+	h := newTestHistory(q, fc)
+	page, err := h.ChannelOverview(context.Background(), uid(9), channel.HistoryOptions{
+		Limit: 2, After: "103.000000", ContextRevision: 2,
+	})
+	if err != nil {
+		t.Fatalf("ChannelOverview: %v", err)
+	}
+	if len(page.Messages) != 0 || page.NextCursor != "104.000000" {
+		t.Fatalf("filtered full page = messages:%+v cursor:%q", page.Messages, page.NextCursor)
 	}
 }
 
