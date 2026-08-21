@@ -2785,19 +2785,41 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// issue for the agent to fetch.
 	if task.AutopilotRunID.Valid {
 		if run, err := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID); err == nil {
-			resp.AutopilotID = uuidToString(run.AutopilotID)
-			resp.AutopilotSource = run.Source
-			if run.TriggerPayload != nil {
-				resp.AutopilotTriggerPayload = json.RawMessage(run.TriggerPayload)
-			}
 			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
+				autopilotWorkspaceID := uuidToString(ap.WorkspaceID)
+				if autopilotWorkspaceID == "" || autopilotWorkspaceID != runtimeWorkspaceID {
+					slog.Error("autopilot claim: workspace isolation check failed, cancelling task",
+						"task_id", uuidToString(task.ID),
+						"autopilot_run_id", uuidToString(task.AutopilotRunID),
+						"autopilot_id", uuidToString(run.AutopilotID),
+						"runtime_id", runtimeID,
+						"runtime_workspace", runtimeWorkspaceID,
+						"autopilot_workspace", autopilotWorkspaceID,
+					)
+					if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
+						slog.Error("autopilot claim: cancel after workspace check failed",
+							"task_id", uuidToString(task.ID), "error", cerr)
+					}
+					return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+						outcome: "error_workspace",
+						status:  http.StatusInternalServerError,
+						message: "task workspace isolation check failed",
+					}
+				}
+
+				// Only expose Autopilot-owned context after its workspace has been
+				// proven to match the claiming runtime. taskToResponse seeds the
+				// runtime workspace, so it cannot serve as this comparison.
+				resp.WorkspaceID = autopilotWorkspaceID
+				resp.AutopilotID = uuidToString(run.AutopilotID)
+				resp.AutopilotSource = run.Source
+				if run.TriggerPayload != nil {
+					resp.AutopilotTriggerPayload = json.RawMessage(run.TriggerPayload)
+				}
 				resp.AutopilotTitle = ap.Title
 				resp.ThreadName = ap.Title
 				if ap.Description.Valid {
 					resp.AutopilotDescription = ap.Description.String
-				}
-				if resp.WorkspaceID == "" {
-					resp.WorkspaceID = uuidToString(ap.WorkspaceID)
 				}
 
 				// A run_only autopilot has no issue from which to inherit project

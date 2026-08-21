@@ -2324,6 +2324,93 @@ func TestClaimTask_AutopilotRunOnly_PopulatesWorkspaceAndProjectContext(t *testi
 	}
 }
 
+// A corrupt cross-workspace autopilot_run_id must be rejected before any
+// Autopilot-owned project context is hydrated into the daemon claim response.
+func TestClaimTask_AutopilotRunOnlyWorkspaceMismatch_CancelsWithoutForeignContext(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	var localAgentID, localRuntimeID string
+	dbfx.QueryRow(t, `
+		SELECT a.id, a.runtime_id FROM agent a WHERE a.workspace_id = $1 LIMIT 1
+	`, testWorkspaceID).Scan(&localAgentID, &localRuntimeID)
+
+	foreignWorkspaceID := dbfx.Insert(t, "workspace", testutil.Cols{
+		"name":         "Foreign autopilot claim workspace",
+		"slug":         "foreign-autopilot-claim-workspace",
+		"description":  "",
+		"issue_prefix": "FAC",
+	})
+	const foreignProjectTitle = "Foreign project must not leak"
+	foreignProjectID := dbfx.Project(t, foreignProjectTitle, testutil.Cols{
+		"workspace_id": foreignWorkspaceID,
+	})
+	const foreignRepoURL = "https://github.com/example/foreign-claim-project"
+	const foreignLocalPath = "/srv/foreign-claim-project"
+	dbfx.Insert(t, "project_resource", testutil.Cols{
+		"project_id":    foreignProjectID,
+		"workspace_id":  foreignWorkspaceID,
+		"resource_type": "github_repo",
+		"resource_ref":  `{"url":"` + foreignRepoURL + `"}`,
+		"position":      0,
+	})
+	dbfx.Insert(t, "project_resource", testutil.Cols{
+		"project_id":    foreignProjectID,
+		"workspace_id":  foreignWorkspaceID,
+		"resource_type": "local_directory",
+		"resource_ref":  `{"daemon_id":"foreign-daemon","local_path":"` + foreignLocalPath + `","execution_mode":"in_place"}`,
+		"position":      1,
+	})
+
+	const foreignAutopilotTitle = "Foreign autopilot must not leak"
+	foreignAutopilotID := dbfx.Insert(t, "autopilot", testutil.Cols{
+		"workspace_id":    foreignWorkspaceID,
+		"project_id":      foreignProjectID,
+		"title":           foreignAutopilotTitle,
+		"assignee_id":     localAgentID,
+		"execution_mode":  "run_only",
+		"created_by_type": "member",
+		"created_by_id":   testUserID,
+	})
+	foreignRunID := dbfx.Insert(t, "autopilot_run", testutil.Cols{
+		"autopilot_id": foreignAutopilotID,
+		"source":       "manual",
+		"status":       "running",
+	})
+	taskID := dbfx.Task(t, localAgentID, testutil.Cols{
+		"runtime_id":       localRuntimeID,
+		"issue_id":         nil,
+		"autopilot_run_id": foreignRunID,
+	})
+
+	req := newDaemonTokenRequest("POST", "/api/daemon/runtimes/"+localRuntimeID+"/claim", nil,
+		testWorkspaceID, "local-daemon")
+	req = withURLParam(req, "runtimeId", localRuntimeID)
+	w := testutil.Call(t, testHandler.ClaimTaskByRuntime, req).Want(http.StatusInternalServerError)
+	if !strings.Contains(w.Text(), "task workspace isolation check failed") {
+		t.Fatalf("claim error response = %q, want workspace isolation failure", w.Text())
+	}
+
+	for _, foreignValue := range []string{
+		foreignAutopilotTitle,
+		foreignProjectTitle,
+		foreignProjectID,
+		foreignRepoURL,
+		foreignLocalPath,
+	} {
+		if strings.Contains(w.Text(), foreignValue) {
+			t.Errorf("claim error response leaked foreign project context %q: %s", foreignValue, w.Text())
+		}
+	}
+
+	var status string
+	dbfx.QueryRow(t, `SELECT status FROM agent_task_queue WHERE id = $1`, taskID).Scan(&status)
+	if status != "cancelled" {
+		t.Fatalf("cross-workspace autopilot task status = %q, want cancelled", status)
+	}
+}
+
 // TestClaimTaskByRuntime_TaskWorkspaceMismatch_CancelsAndRejects verifies
 // the defense-in-depth check in ClaimTaskByRuntime: if a task is somehow
 // dispatched to a runtime whose workspace doesn't match the task's
