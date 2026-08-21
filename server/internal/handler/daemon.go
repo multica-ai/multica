@@ -2799,7 +2799,59 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				if resp.WorkspaceID == "" {
 					resp.WorkspaceID = uuidToString(ap.WorkspaceID)
 				}
-				if len(resp.Repos) == 0 {
+
+				// A run_only autopilot has no issue from which to inherit project
+				// context. Hydrate its configured project here so the daemon gets
+				// the same resource contract as issue-bound and quick-create tasks:
+				// project repositories scope checkout, while local_directory lets
+				// the daemon select the bound path and write its managed manifest.
+				var projectRepos []RepoData
+				if ap.ProjectID.Valid {
+					project, projectErr := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
+						ID:          ap.ProjectID,
+						WorkspaceID: ap.WorkspaceID,
+					})
+					if projectErr == nil {
+						resp.ProjectID = uuidToString(project.ID)
+						resp.ProjectTitle = project.Title
+						resp.ProjectDescription = project.Description.String
+
+						if rows := h.listProjectResourcesForProject(r.Context(), project.ID); len(rows) > 0 {
+							resources := make([]ProjectResourceData, 0, len(rows))
+							for _, row := range rows {
+								label := ""
+								if row.Label.Valid {
+									label = row.Label.String
+								}
+								ref := json.RawMessage(row.ResourceRef)
+								if len(ref) == 0 {
+									ref = json.RawMessage("{}")
+								}
+								resources = append(resources, ProjectResourceData{
+									ID:           uuidToString(row.ID),
+									ResourceType: row.ResourceType,
+									ResourceRef:  ref,
+									Label:        label,
+								})
+
+								if row.ResourceType == "github_repo" {
+									var payload struct {
+										URL string `json:"url"`
+										Ref string `json:"ref,omitempty"`
+									}
+									if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
+										projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
+									}
+								}
+							}
+							resp.ProjectResources = resources
+						}
+					}
+				}
+
+				if len(projectRepos) > 0 {
+					resp.Repos = projectRepos
+				} else if len(resp.Repos) == 0 {
 					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
 						var repos []RepoData
 						if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
