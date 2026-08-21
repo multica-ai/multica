@@ -15,6 +15,11 @@
     "ios:device:staging:release": "dotenv -e .env.staging -- cross-env APP_ENV=staging ./scripts/ios-run.sh --device --configuration Release",
     "ios:device:prod": "dotenv -e .env.production -- cross-env APP_ENV=production ./scripts/ios-run.sh --device",
     "ios:device:prod:release": "dotenv -e .env.production -- cross-env APP_ENV=production ./scripts/ios-run.sh --device --configuration Release",
+    "android": "expo run:android",
+    "android:staging": "dotenv -e .env.staging -- cross-env APP_ENV=staging expo run:android",
+    "android:prod": "dotenv -e .env.production -- cross-env APP_ENV=production expo run:android",
+    "android:prod:release": "dotenv -e .env.production -- cross-env APP_ENV=production expo run:android --variant release",
+    "android:verify-signing": "./scripts/verify-signing-config.sh",
     "lint": "expo lint",
     "typecheck": "tsc --noEmit",
     "test": "vitest run && bash scripts/ios-run.test.sh"
@@ -22,6 +27,7 @@
   "dependencies": {
     "@expo/vector-icons": "^14.1.0",
     "@multica/core": "workspace:*",
+    "@react-native-async-storage/async-storage": "^2.2.0",
     "@react-native-community/datetimepicker": "8.6.0",
     "@react-native-community/netinfo": "11.5.2",
     "@react-native-segmented-control/segmented-control": "2.5.7",

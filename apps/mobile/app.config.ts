@@ -58,6 +58,21 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ? "ai.multica.mobile.staging"
           : (process.env.EXPO_BUNDLE_IDENTIFIER_DEV ?? "ai.multica.mobile.dev"),
     },
+    android: {
+      // 与 iOS 同一套 per-variant 包名策略:variant 各自独立、可被环境变量
+      // 覆盖(自建副本换成自有反向域名),三个变体可在同一台设备共存。
+      package: isProd
+        ? (process.env.EXPO_ANDROID_PACKAGE_PROD ?? "ai.multica.mobile")
+        : isStaging
+          ? "ai.multica.mobile.staging"
+          : (process.env.EXPO_ANDROID_PACKAGE_DEV ?? "ai.multica.mobile.dev"),
+      // 复用与 iOS 相同的 1024 源图标;Android 12+ 实际展示的是
+      // adaptiveIcon,monochromeImage 供主题图标(Material You)使用。
+      adaptiveIcon: {
+        foregroundImage: "./assets/adaptive-icon.png",
+        backgroundColor: "#1C212C",
+      },
+    },
     plugins: [
       "expo-router",
       "expo-secure-store",
@@ -82,8 +97,19 @@ export default ({ config }: ConfigContext): ExpoConfig => {
           ios: {
             buildReactNativeFromSource: true,
           },
+          android: {
+            // 自定义服务器地址由用户在运行时添加,无法用域名白名单覆盖。
+            // 产品语义允许用户确认弱警告后访问 http 自建服务;显式开启
+            // Android cleartext,HTTPS 仍由 TLS 校验保护。若产品以后改为
+            // 禁止明文,删除此项并重新 prebuild/release 即可回退到 Android
+            // 默认拒绝策略。
+            usesCleartextTraffic: true,
+          },
         },
       ],
+      // android/ 是 prebuild 产物且被 gitignore,release 签名配置只能靠 plugin
+      // 每次重新注入。凭据从构建机的 Gradle 属性读取,不进仓库。
+      "./plugins/with-android-release-signing",
     ],
     extra: { APP_ENV: env },
   };

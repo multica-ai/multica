@@ -44,6 +44,7 @@ import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
 import { useAuthStore } from "@/data/auth-store";
 import { useProjectRealtime } from "@/data/realtime/use-project-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { getWebUrl } from "@/data/server-store";
 
 export default function ProjectDetail() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -86,12 +87,14 @@ export default function ProjectDetail() {
 
   const onPressMore = () => {
     if (!project) return;
-    const wsUrl = process.env.EXPO_PUBLIC_WEB_URL;
+    // getWebUrl() 恒有值(未单独配置 Web 地址时回退当前服务器地址),
+    // 「Open on web」恒显示 —— 不再有空值隐藏分支(RUYI-4)。
+    const wsUrl = getWebUrl();
     const options = [
       "Cancel",
       isPinned ? "Unpin" : "Pin",
       "Edit details",
-      ...(wsUrl ? ["Open on web"] : []),
+      "Open on web",
       "Delete",
     ];
     const destructiveIndex = options.length - 1;
@@ -115,7 +118,7 @@ export default function ProjectDetail() {
           if (wsSlug) router.push(`/${wsSlug}/project/${id}/edit`);
           return;
         }
-        if (label === "Open on web" && wsUrl) {
+        if (label === "Open on web") {
           Linking.openURL(`${wsUrl}/${wsSlug}/projects/${id}`);
           return;
         }

@@ -72,6 +72,8 @@ export default function RootLayout() {
                     <Stack.Screen name="index" />
                     <Stack.Screen name="(auth)" />
                     <Stack.Screen name="(app)" />
+                    {/* 登录前后都可达 —— 未登录用户连自建后端是核心场景。 */}
+                    <Stack.Screen name="server-settings" />
                   </Stack>
                   <PortalHost />
                 </LightboxProvider>

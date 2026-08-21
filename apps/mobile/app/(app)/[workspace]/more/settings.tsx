@@ -25,6 +25,8 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { workspaceListOptions } from "@/data/queries/workspaces";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { useServerStore } from "@/data/server-store";
+import { pickActiveServer } from "@/data/server-config";
 import {
   useColorScheme,
   type ThemePreference,
@@ -55,6 +57,9 @@ export default function SettingsPage() {
   const currentSlug = useWorkspaceStore((s) => s.currentWorkspaceSlug);
   const setCurrentWorkspace = useWorkspaceStore((s) => s.setCurrentWorkspace);
   const clearWorkspace = useWorkspaceStore((s) => s.clear);
+  const servers = useServerStore((s) => s.servers);
+  const activeServerId = useServerStore((s) => s.activeServerId);
+  const activeServer = pickActiveServer(servers, activeServerId);
   const { data, isLoading, error } = useQuery(workspaceListOptions());
   const { preference, setPreference, colorScheme } = useColorScheme();
   const mutedFg = THEME[colorScheme].mutedForeground;
@@ -117,6 +122,16 @@ export default function SettingsPage() {
           chevronColor={mutedFg}
           title="Notifications"
           subtitle="Inbox and system alerts"
+        />
+      </SectionGroup>
+
+      {/* 网络配置在层级上属于账号之下、工作区之上(RUYI-4)。 */}
+      <SectionGroup title="Server">
+        <NavRow
+          onPress={() => router.push("/server-settings")}
+          chevronColor={mutedFg}
+          title={activeServer.name || activeServer.apiUrl}
+          subtitle={activeServer.apiUrl}
         />
       </SectionGroup>
 

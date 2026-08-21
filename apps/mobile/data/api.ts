@@ -122,18 +122,14 @@ import {
 } from "./schemas";
 import type { ZodType } from "zod";
 import { getCurrentSlug } from "./workspace-store";
+import { getApiUrl } from "./server-store";
 import { parseWithFallback } from "@/lib/parse-response";
 import { createRequestId } from "@/lib/request-id";
 import { buildCommentUpdateBody } from "./revision";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
-if (!API_URL) {
-  throw new Error(
-    "EXPO_PUBLIC_API_URL is not set. Add it to apps/mobile/.env.development.local " +
-      "(see apps/mobile/.env.staging for an example).",
-  );
-}
+// API 基地址不再是模块级常量:用户可以在应用内切换服务器,地址必须在每次
+// 请求时从 server-store 现取(RUYI-4)。env 缺失的启动检查移到了
+// server-store 合成内置默认项处,失败面与改造前相同。
 
 export interface LoginResponse {
   token: string;
@@ -245,7 +241,7 @@ class ApiClient {
 
     let res: Response;
     try {
-      res = await fetch(`${API_URL}${path}`, {
+      res = await fetch(`${getApiUrl()}${path}`, {
         ...init,
         signal: controller.signal,
         headers,
@@ -1252,7 +1248,7 @@ class ApiClient {
 
     console.log(`[api] → POST ${path}`, { rid, filename: asset.name });
 
-    const res = await fetch(`${API_URL}${path}`, {
+    const res = await fetch(`${getApiUrl()}${path}`, {
       method: "POST",
       headers,
       body: formData,

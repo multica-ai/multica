@@ -1,0 +1,95 @@
+name: Mobile Android Build
+
+# 在 fork 内的 PR 上自动构建 Android Release APK，也支持合并后手动构建。
+# fork 无需发布签名密钥：Android 签名插件在 MULTICA_RELEASE_* Gradle
+# 属性缺失时回退到 debug keystore，产物仍可直接安装。
+#
+# `android/` 是被忽略的 Expo prebuild 产物，全新 checkout 中不存在，
+# 因此这里显式执行 prebuild，而不是依赖需要设备或模拟器的 expo run:android。
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "apps/mobile/**"
+      - "packages/core/**"
+      - "package.json"
+      - "pnpm-lock.yaml"
+      - "pnpm-workspace.yaml"
+      - "turbo.json"
+      - ".github/workflows/mobile-android-build.yml"
+  workflow_dispatch:
+    inputs:
+      app_env:
+        description: "选择 APP_ENV 构建环境"
+        required: false
+        default: production
+        type: choice
+        options:
+          - production
+          - staging
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    env:
+      APP_ENV: ${{ inputs.app_env || 'production' }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          # Matches apps/mobile/android's Gradle 9.0 wrapper, which requires
+          # JDK 17+.
+          java-version: "17"
+
+      - name: Install dependencies
+        run: pnpm install
+
+      # Re-applies app.config.ts (package name, icon, signing plugin) into a
+      # fresh android/ every run — same rationale as apps/mobile's
+      # scripts/ios-run.sh: `expo run:android` only prebuilds when the
+      # native dir is missing, so an explicit prebuild is the only way to
+      # guarantee the config plugins actually ran.
+      - name: Prebuild Android project (${{ env.APP_ENV }})
+        working-directory: apps/mobile
+        run: pnpm exec dotenv -e .env.${{ env.APP_ENV }} -- cross-env APP_ENV=${{ env.APP_ENV }} expo prebuild -p android
+
+      # Gradle 缓存必须在 prebuild 之后启用：`android/` 是 Expo prebuild
+      # 产物且被 .gitignore 排除，全新 checkout 中不存在。setup-java@v4 内置
+      # 的 `cache: gradle` 在安装 JDK 时就运行 gradle/actions/setup-gradle，
+      # 此时 android/ 还没有，导致 "No file matched" 错误。拆成独立 step
+      # 放在 prebuild 之后解决时序问题，同时使用 gradle/actions 的推荐
+      # 方式（直接引用 action 而非 setup-java 的 cache 选项）。
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build release APK
+        working-directory: apps/mobile/android
+        run: ./gradlew assembleRelease --no-daemon
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: multica-mobile-${{ env.APP_ENV }}-release-apk
+          path: apps/mobile/android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: error

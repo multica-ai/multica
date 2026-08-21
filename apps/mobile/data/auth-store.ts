@@ -14,6 +14,7 @@ import type { User } from "@multica/core/types";
 import { api, ApiError } from "./api";
 import { clearToken, getToken, setToken } from "./secure-storage";
 import { useWorkspaceStore } from "./workspace-store";
+import { useServerStore } from "./server-store";
 
 interface AuthState {
   user: User | null;
@@ -32,6 +33,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   isLoading: true,
 
   initialize: async () => {
+    // 服务器配置必须最先就绪 —— 下面的 api.getMe() 是首个网络请求,地址
+    // 取自 server-store。晚一步就会打到内置默认服务器上(RUYI-4)。
+    await useServerStore.getState().hydrate();
+
     // Restore the persisted workspace slug alongside the auth token so the
     // entry redirect (app/index.tsx) can route directly to the last-used
     // workspace without flashing /select-workspace.

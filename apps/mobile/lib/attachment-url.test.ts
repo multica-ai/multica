@@ -1,9 +1,11 @@
 /**
  * Pure-function tests for the mobile attachment URL resolver. We exercise
- * the with-base form because `resolveAttachmentUrl` itself is bound at
- * module load to `process.env.EXPO_PUBLIC_API_URL`, which is what we
- * intentionally don't want to mutate in tests — the with-base helper is
- * the same code path with the API base passed in explicitly.
+ * the with-base form because `resolveAttachmentUrl` reads the active API
+ * base from `server-store` at call time (RUYI-4) — that store owns
+ * AsyncStorage + build-time env and is out of scope for this node-env
+ * suite. The with-base helper is the same code path with the API base
+ * passed in explicitly; the store is mocked below so the bound form's
+ * pass-through contract stays covered.
  *
  * Coverage target: every branch the call sites in the app rely on —
  *   - `comment-attachment-list.tsx`         → file chip Linking.openURL
@@ -11,7 +13,15 @@
  *   - `composer-attachment-row.tsx`         → completed non-image chip
  *                                             tap → Linking.openURL
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+// server-store 在模块加载期从构建期 env 合成内置默认项,并 import
+// AsyncStorage 原生模块 —— 两者在 node 环境里都不可用。这里只需要
+// getApiUrl 的返回值。
+vi.mock("@/data/server-store", () => ({
+  getApiUrl: () => "https://api.example.test",
+}));
+
 import {
   resolveAttachmentUrl,
   resolveAttachmentUrlWithBase,
@@ -109,12 +119,20 @@ describe("composer file chip — completed non-image attachment", () => {
   });
 });
 
-describe("resolveAttachmentUrl (env-bound)", () => {
-  it("matches the with-base form for an absolute URL regardless of EXPO_PUBLIC_API_URL", () => {
-    // The bound form is module-evaluation-time, but for absolute URLs the
-    // base is irrelevant — guarantees pass-through stays stable.
+describe("resolveAttachmentUrl (store-bound)", () => {
+  it("matches the with-base form for an absolute URL regardless of the active server", () => {
+    // For absolute URLs the base is irrelevant — guarantees pass-through
+    // stays stable.
     const absolute = "https://cdn.example.test/file.pdf?Signature=s";
     expect(resolveAttachmentUrl(absolute)).toBe(absolute);
+  });
+
+  it("resolves a server-relative path against the ACTIVE server's API base", () => {
+    // RUYI-4: 这是应用内切换服务器后附件必须跟着走的那条路径 —— 地址在
+    // 调用时从 store 现取,不是模块加载期绑死的。
+    expect(resolveAttachmentUrl("/api/attachments/att-1/download")).toBe(
+      "https://api.example.test/api/attachments/att-1/download",
+    );
   });
 
   it("returns null for empty input", () => {

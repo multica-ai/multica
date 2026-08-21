@@ -200,7 +200,7 @@ function AttachmentChipView({ item, onRemove, onRetry }: AttachmentChipProps) {
       // on non-CloudFront deployments is a server-relative path like
       // `/api/attachments/{id}/download` (MUL-2976). RN's `Linking.openURL`
       // requires an absolute http(s) URL — `Cannot open URL` otherwise — so
-      // resolve against `EXPO_PUBLIC_API_URL` first. Already-absolute
+      // resolve against the active server's API base first. Already-absolute
       // CloudFront/presigned URLs pass through unchanged. `null` (no
       // downloadUrl yet) falls through to a no-op.
       const target = resolveAttachmentUrl(item.downloadUrl);

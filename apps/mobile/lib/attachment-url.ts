@@ -14,8 +14,9 @@
  * exactly. We don't import the core helper because its `getBaseUrl()`
  * pulls from a singleton ApiClient that lives in `@multica/core/api` —
  * not on the mobile sharing whitelist (apps/mobile/CLAUDE.md "mirror,
- * don't import"). Mobile reads its own `EXPO_PUBLIC_API_URL` from the
- * Expo env, the same value the rest of `data/api.ts` uses.
+ * don't import"). Mobile reads the active API base from `server-store`
+ * at call time, the same source `data/api.ts` uses — the user can switch
+ * servers in-app (RUYI-4), so this must not be bound at module load.
  *
  * Contract:
  *   - null / undefined / "" → null (caller should treat as "no URL").
@@ -25,7 +26,7 @@
  *                             base before joining).
  */
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL ?? "";
+import { getApiUrl } from "@/data/server-store";
 
 export function resolveAttachmentUrlWithBase(
   rawUrl: string | null | undefined,
@@ -40,5 +41,5 @@ export function resolveAttachmentUrlWithBase(
 export function resolveAttachmentUrl(
   rawUrl: string | null | undefined,
 ): string | null {
-  return resolveAttachmentUrlWithBase(rawUrl, API_URL);
+  return resolveAttachmentUrlWithBase(rawUrl, getApiUrl());
 }

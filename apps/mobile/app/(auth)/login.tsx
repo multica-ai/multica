@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { KeyboardAvoidingView, Platform, View } from "react-native";
+import { KeyboardAvoidingView, Platform, Pressable, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { router } from "expo-router";
 import * as Haptics from "expo-haptics";
@@ -79,6 +79,15 @@ export default function Login() {
             <Text>{submitting ? "Sending..." : "Send code"}</Text>
           </Button>
         </View>
+
+        {/* 服务器设置入口 —— 弱视觉、贴底,不抢 Send code 的注意力。
+            自建后端用户必须能在登录前改地址(RUYI-4)。 */}
+        <Pressable
+          onPress={() => router.push("/server-settings")}
+          className="items-center pb-4 active:opacity-60"
+        >
+          <Text className="text-xs text-muted-foreground">Server settings</Text>
+        </Pressable>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );

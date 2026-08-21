@@ -25,6 +25,7 @@ import * as Haptics from "expo-haptics";
 import type { Reaction, TimelineEntry } from "@multica/core/types";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { getWebUrl } from "@/data/server-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
 import { useActorLookup } from "@/data/use-actor-name";
@@ -55,8 +56,10 @@ export function useCommentLongPress(
     const isRoot = !entry.parent_id;
     const resolved = !!entry.resolved_at;
     const hasContent = !!entry.content;
-    const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
-    const canCopyLink = !!(webUrl && wsSlug && issueIdentifier);
+    // getWebUrl() 恒有值(未单独配置 Web 地址时回退当前服务器地址),
+    // 能否复制链接只取决于 slug / identifier 是否就绪(RUYI-4)。
+    const webUrl = getWebUrl();
+    const canCopyLink = !!(wsSlug && issueIdentifier);
     const reactions = (entry.reactions ?? []) as Reaction[];
 
     Haptics.selectionAsync().catch(() => {});

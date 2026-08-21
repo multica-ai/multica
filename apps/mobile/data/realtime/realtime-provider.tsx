@@ -39,18 +39,12 @@ import NetInfo from "@react-native-community/netinfo";
 import { useAuthStore } from "@/data/auth-store";
 import { useWorkspaceStore } from "@/data/workspace-store";
 import { getToken } from "@/data/secure-storage";
+import { getApiUrl } from "@/data/server-store";
+import { toWebSocketUrl } from "@/data/server-config";
 import { WSClient } from "./ws-client";
 
-const API_URL = process.env.EXPO_PUBLIC_API_URL;
-
-if (!API_URL) {
-  // ApiClient already throws on this; keeping a defensive check here
-  // avoids a confusing "URL constructor failed" deep in WSClient.
-  throw new Error("EXPO_PUBLIC_API_URL is not set");
-}
-
-// http(s)://host → ws(s)://host/ws
-const WS_URL = `${API_URL.replace(/^http/, "ws")}/ws`;
+// WS 地址不做模块级派生:用户可在应用内切换服务器(RUYI-4),连接时现算。
+// 切换服务器会强制登出 → userId 置空 → 下面的 effect 依赖自然触发断连重建。
 
 const RealtimeContext = createContext<WSClient | null>(null);
 
@@ -87,7 +81,7 @@ export function RealtimeProvider({ children }: { children: React.ReactNode }) {
       if (cancelled || !token) return;
 
       ws = new WSClient({
-        url: WS_URL,
+        url: toWebSocketUrl(getApiUrl()),
         token,
         workspaceSlug: wsSlug,
         clientVersion: "0.1.0",

@@ -22,7 +22,13 @@ export default defineConfig({
   test: {
     environment: "node",
     globals: true,
-    include: ["lib/**/*.test.ts", "data/**/*.test.ts"],
+    // plugins/ 是 Expo config plugin(构建期 Node 代码,纯字符串改写),
+    // 与 lib/ 同属"无 RN 运行时依赖"的可测范围。
+    include: [
+      "lib/**/*.test.ts",
+      "data/**/*.test.ts",
+      "plugins/**/*.test.ts",
+    ],
     passWithNoTests: true,
   },
 });

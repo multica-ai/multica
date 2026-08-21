@@ -39,6 +39,7 @@ import { useCreatePin, useDeletePin } from "@/data/mutations/pins";
 import { useAuthStore } from "@/data/auth-store";
 import { useIssueRealtime } from "@/data/realtime/use-issue-realtime";
 import { useWorkspaceStore } from "@/data/workspace-store";
+import { getWebUrl } from "@/data/server-store";
 import { useViewedIssuesStore } from "@/data/viewed-issues-store";
 import { useCommentSelectStore } from "@/data/comment-select-store";
 import { useReplyTargetStore } from "@/data/stores/reply-target-store";
@@ -105,22 +106,21 @@ export default function IssueDetail() {
   const createPin = useCreatePin();
   const deletePin = useDeletePin();
 
-  // Three-dot menu: Pin/Unpin / Copy link / Open on web (if web URL set) /
-  // Delete. Mirrors apps/mobile/app/(app)/[workspace]/project/[id].tsx — same
-  // ActionSheetIOS + Alert.alert confirm pattern. Property edits (status,
-  // priority, assignee, due_date) live on the IssueHeaderCard chips inside
-  // the timeline list, not in this menu — one entry per action.
+  // Three-dot menu: Pin/Unpin / Copy link / Open on web / Delete. Mirrors
+  // apps/mobile/app/(app)/[workspace]/project/[id].tsx — same ActionSheetIOS +
+  // Alert.alert confirm pattern. Property edits (status, priority, assignee,
+  // due_date) live on the IssueHeaderCard chips inside the timeline list, not
+  // in this menu — one entry per action.
   const onPressMore = useCallback(() => {
     if (!issue || !wsSlug) return;
-    const webUrl = process.env.EXPO_PUBLIC_WEB_URL;
-    const issueLink = webUrl
-      ? `${webUrl}/${wsSlug}/issue/${issue.identifier}`
-      : null;
+    // getWebUrl() 恒有值(未单独配置 Web 地址时回退当前服务器地址),所以
+    // 链接类菜单项恒显示 —— 不再有「webUrl 为空则隐藏」的分支(RUYI-4)。
+    const issueLink = `${getWebUrl()}/${wsSlug}/issue/${issue.identifier}`;
     const options: string[] = ["Cancel"];
     options.push(isPinned ? "Unpin" : "Pin");
     options.push("Edit details");
-    if (issueLink) options.push("Copy link");
-    if (issueLink) options.push("Open on web");
+    options.push("Copy link");
+    options.push("Open on web");
     options.push("Delete issue");
     const destructiveIndex = options.length - 1;
     ActionSheetIOS.showActionSheetWithOptions(
@@ -138,9 +138,9 @@ export default function IssueDetail() {
           deletePin.mutate({ itemType: "issue", itemId: issue.id });
         } else if (label === "Edit details") {
           if (wsSlug) router.push(`/${wsSlug}/issue/${issue.id}/edit`);
-        } else if (label === "Copy link" && issueLink) {
+        } else if (label === "Copy link") {
           Clipboard.setStringAsync(issueLink);
-        } else if (label === "Open on web" && issueLink) {
+        } else if (label === "Open on web") {
           Linking.openURL(issueLink);
         } else if (label === "Delete issue") {
           confirmDelete(issue, () =>
