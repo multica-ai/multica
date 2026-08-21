@@ -965,3 +965,114 @@ func TestValidateExecutionModeAcceptsKnownModes(t *testing.T) {
 		t.Errorf("nil assignment should validate, got %v", err)
 	}
 }
+
+func TestChatTaskSkipsPathMutex(t *testing.T) {
+	daemonID := "d-mine"
+	dir := t.TempDir()
+	raw, _ := json.Marshal(localDirectoryRef{DaemonID: daemonID, LocalPath: dir, ExecutionMode: ""})
+	resources := []ProjectResourceData{{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw}}
+	assignment, err := localDirectoryAssignmentForTask(Task{ID: "worker", ProjectResources: resources}, daemonID)
+	if err != nil {
+		t.Fatalf("assignment: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(http.StatusOK) }))
+	t.Cleanup(srv.Close)
+	locker := NewLocalPathLocker()
+	d := &Daemon{cfg: Config{DaemonID: daemonID}, client: NewClient(srv.URL), localPathLocks: locker, logger: slog.Default()}
+	// worker acquires
+	worker := Task{ID: "worker", ProjectResources: resources}
+	release, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), worker, slog.Default())
+	if abort || release == nil {
+		t.Fatalf("worker should acquire, abort=%v release nil=%v", abort, release == nil)
+	}
+	defer release()
+	// chat task should not block
+	chat := Task{ID: "chat", ChatSessionID: "sess-1", ProjectResources: resources}
+	type res struct {
+		release func()
+		abort   bool
+	}
+	ch := make(chan res, 1)
+	go func() {
+		rel, ab := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default())
+		ch <- res{rel, ab}
+	}()
+	select {
+	case r := <-ch:
+		if r.abort {
+			t.Fatal("chat task should not abort")
+		}
+		if r.release != nil {
+			t.Fatal("chat task should get nil release")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("chat task blocked behind worker — should skip mutex")
+	}
+	if got := locker.Holder(assignment.RealPath); got != "worker" {
+		t.Fatalf("holder = %q, want worker", got)
+	}
+	// second worker should still wait (verify mutex still works for workers)
+	done := make(chan struct{})
+	go func() {
+		w2 := Task{ID: "worker2", ProjectResources: resources}
+		r2, a2 := d.acquireLocalDirectoryLockIfNeeded(context.Background(), w2, slog.Default())
+		if a2 {
+			t.Error("worker2 abort")
+		}
+		if r2 != nil {
+			r2()
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+		t.Fatal("worker2 should block while worker holds lock")
+	case <-time.After(200 * time.Millisecond):
+	}
+}
+
+func TestChatTaskValidationStillRuns(t *testing.T) {
+	dir := t.TempDir()
+	daemonID := "d-mine"
+	// invalid execution mode
+	raw, _ := json.Marshal(localDirectoryRef{DaemonID: daemonID, LocalPath: dir, ExecutionMode: "bogus"})
+	resources := []ProjectResourceData{{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw}}
+	var failCalls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		failCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	d := &Daemon{cfg: Config{DaemonID: daemonID}, localPathLocks: NewLocalPathLocker(), logger: slog.Default(), client: NewClient(srv.URL)}
+	chat := Task{ID: "chat", ChatSessionID: "sess-1", ProjectResources: resources}
+	_, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat, slog.Default())
+	if !abort {
+		t.Fatal("chat task with bad mode should abort")
+	}
+	// invalid path
+	raw2, _ := json.Marshal(localDirectoryRef{DaemonID: daemonID, LocalPath: "/", ExecutionMode: ""})
+	resources2 := []ProjectResourceData{{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw2}}
+	chat2 := Task{ID: "chat2", ChatSessionID: "sess-1", ProjectResources: resources2}
+	_, abort = d.acquireLocalDirectoryLockIfNeeded(context.Background(), chat2, slog.Default())
+	if !abort {
+		t.Fatal("chat task with invalid path should abort")
+	}
+	if got := failCalls.Load(); got != 2 {
+		t.Fatalf("failCalls = %d, want 2", got)
+	}
+}
+
+func TestChatTaskAssignmentSurvives(t *testing.T) {
+	daemonID := "d-mine"
+	dir := t.TempDir()
+	raw, _ := json.Marshal(localDirectoryRef{DaemonID: daemonID, LocalPath: dir})
+	resources := []ProjectResourceData{{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: raw}}
+	chat := Task{ID: "chat", ChatSessionID: "sess-1", ProjectResources: resources}
+	a, err := localDirectoryAssignmentForTask(chat, daemonID)
+	if err != nil {
+		t.Fatalf("assignment err: %v", err)
+	}
+	if a == nil {
+		t.Fatal("chat assignment should be non-nil")
+	}
+}

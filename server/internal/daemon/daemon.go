@@ -5334,6 +5334,18 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, false
 	}
 
+	// Chat tasks are conversations, not edits — they do not mutate the
+	// working tree, so the path mutex that serialises concurrent edits
+	// need not block them. Skipping it avoids a chat turn waiting behind
+	// a long worker build in the same repo. Trade-off: a chat turn that
+	// is asked to edit a file mid-conversation now runs unserialised
+	// against a worker in the same tree; future work could acquire
+	// lazily on first write instead.
+	if task.ChatSessionID != "" {
+		taskLog.Info("local_directory: chat task, skipping path mutex")
+		return nil, false
+	}
+
 	// While the lock is contended the daemon would otherwise sit blocked on
 	// the path mutex with no signal back from the server — the main
 	// per-task watcher only starts after the lock is acquired. If the user
