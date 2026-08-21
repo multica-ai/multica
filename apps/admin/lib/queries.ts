@@ -273,12 +273,12 @@ export async function getIssueMetrics(id: string): Promise<IssueMetrics> {
     avg_resolution_hours: string | null;
     active_issue_count: string;
   }>(
+    // issue_effective_status resolves custom per-workspace statuses to their
+    // canonical category (see 340_issue_effective_status_fn.up.sql) before
+    // every comparison below — a raw status string match would misclassify
+    // a workspace's custom statuses (e.g. a custom "done"-category status
+    // would be counted as still open).
     `
-    -- issue_effective_status resolves custom per-workspace statuses to their
-    -- canonical category (see 340_issue_effective_status_fn.up.sql) before
-    -- every comparison below — a raw status string match would misclassify
-    -- a workspace's custom statuses (e.g. a custom "done"-category status
-    -- would be counted as still open).
     SELECT
       count(*) FILTER (
         WHERE issue_effective_status(workspace_id, status) NOT IN ('done', 'cancelled')
