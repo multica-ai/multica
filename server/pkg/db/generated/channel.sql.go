@@ -719,7 +719,7 @@ type FindChannelBindingForMemberParams struct {
 // Outbound notification lookup: given a Multica member and a channel_type,
 // return the (installation, channel_user_id) that outbound push should
 // target. The wecom smart-bot inbox-notification path uses this to decide
-// whether to deliver via the bot at all — no row means "unbound member,
+// whether to deliver via the bot at all: no row means "unbound member,
 // fall back to the legacy path (TOF/RTX)".
 //
 // If a member has bound multiple installations of the same channel_type in
