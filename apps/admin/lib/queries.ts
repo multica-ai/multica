@@ -2,6 +2,8 @@ import "server-only";
 import { query } from "./db";
 import type {
   ActivityEvent,
+  AnalyticsParams,
+  AutopilotRunCounts,
   IssueMetrics,
   ListWorkspacesParams,
   ListWorkspacesResult,
@@ -386,4 +388,143 @@ export async function getTaskOutcomeCounts(
     else if (r.status === "failed") failed = Number(r.n);
   }
   return { completed, failed };
+}
+
+/**
+ * Global (cross-workspace) time series for the Analytics page. Errors keep
+ * raw `failure_reason` strings — folding those into the 7 display classes
+ * (auth/rate_limit/timeout/provider/runtime/agent/other) happens in the
+ * route handler via `failureClassOf` from @multica/core/dashboard, not here,
+ * so this module has no dependency beyond the DB itself.
+ */
+export interface AnalyticsRawBucket {
+  bucketStart: string;
+  workspacesCreated: number;
+  issuesCreated: number;
+  autopilotRuns: AutopilotRunCounts;
+  errorsByReason: Record<string, number>;
+}
+
+// Every bucketing expression below is anchored at `from` ($1) rather than a
+// calendar boundary, so a granularity that doesn't evenly divide 24h (e.g.
+// 3h against a window starting mid-day) still buckets identically across
+// every metric query and the generate_series spine — they all evaluate this
+// exact expression against the exact same $1/$3. Output as an ISO-8601
+// string (not left as timestamptz) so every query's bucket column is a
+// stable, directly-comparable map key regardless of the pg driver's
+// timestamptz-to-JS-Date parsing.
+function bucketStartIsoExpr(column: string): string {
+  return `to_char(
+      ($1::timestamptz + floor(extract(epoch from (${column} - $1::timestamptz)) / ($3::int * 3600))
+        * ($3::int * interval '1 hour')) AT TIME ZONE 'UTC',
+      'YYYY-MM-DD"T"HH24:MI:SS"Z"'
+    )`;
+}
+
+export async function getAnalyticsTimeSeries(params: AnalyticsParams): Promise<AnalyticsRawBucket[]> {
+  const { from, to, granularityHours } = params;
+  const values = [from, to, granularityHours];
+
+  const [spine, workspaceRows, issueRows, autopilotRows, errorRows] = await Promise.all([
+    // Zero-fills empty buckets rather than letting them gap. generate_series
+    // is end-inclusive, so a window whose length is an exact multiple of the
+    // granularity would otherwise emit a trailing zero-width bucket at `to`
+    // — excluded via `gs < to`, same bound every metric query uses.
+    query<{ bucket_start: string }>(
+      `
+      SELECT to_char(gs AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS bucket_start
+      FROM generate_series($1::timestamptz, $2::timestamptz, ($3 || ' hours')::interval) AS gs
+      WHERE gs < $2::timestamptz
+      ORDER BY 1
+      `,
+      values,
+    ),
+    query<{ bucket_start: string; n: string }>(
+      `
+      SELECT ${bucketStartIsoExpr("created_at")} AS bucket_start, count(*) AS n
+      FROM workspace
+      WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz
+      GROUP BY 1
+      `,
+      values,
+    ),
+    query<{ bucket_start: string; n: string }>(
+      `
+      SELECT ${bucketStartIsoExpr("created_at")} AS bucket_start, count(*) AS n
+      FROM issue
+      WHERE created_at >= $1::timestamptz AND created_at < $2::timestamptz
+      GROUP BY 1
+      `,
+      values,
+    ),
+    query<{ bucket_start: string; status: string; n: string }>(
+      `
+      SELECT ${bucketStartIsoExpr("triggered_at")} AS bucket_start, status, count(*) AS n
+      FROM autopilot_run
+      WHERE triggered_at >= $1::timestamptz AND triggered_at < $2::timestamptz
+      GROUP BY 1, 2
+      `,
+      values,
+    ),
+    // Mirrors ListDashboardFailuresDaily (server/pkg/db/queries/task_usage.sql)
+    // with the workspace_id filter dropped: terminal failed tasks, bucketed
+    // on completed_at (not started_at — a task can fail before starting).
+    // Deliberately NOT unioned with autopilot_run.status='failed': an
+    // autopilot run that fails because its task failed already has a row
+    // here (taskFailureReasonForAutopilotRun in server/internal/service/
+    // autopilot.go copies the task's own failure_reason onto the run), so
+    // adding autopilot_run's failures too would double-count. Autopilot
+    // failures that never reached a task surface in the autopilot-runs
+    // chart's own "failed" segment instead.
+    query<{ bucket_start: string; failure_reason: string; n: string }>(
+      `
+      SELECT ${bucketStartIsoExpr("completed_at")} AS bucket_start,
+             COALESCE(NULLIF(failure_reason, ''), 'unclassified') AS failure_reason,
+             count(*) AS n
+      FROM agent_task_queue
+      WHERE status = 'failed'
+        AND completed_at >= $1::timestamptz AND completed_at < $2::timestamptz
+      GROUP BY 1, 2
+      `,
+      values,
+    ),
+  ]);
+
+  const buckets = new Map<string, AnalyticsRawBucket>();
+  const bucketFor = (bucketStart: string): AnalyticsRawBucket => {
+    let b = buckets.get(bucketStart);
+    if (!b) {
+      b = {
+        bucketStart,
+        workspacesCreated: 0,
+        issuesCreated: 0,
+        autopilotRuns: { completed: 0, failed: 0, skipped: 0, other: 0 },
+        errorsByReason: {},
+      };
+      buckets.set(bucketStart, b);
+    }
+    return b;
+  };
+
+  for (const row of spine) bucketFor(row.bucket_start);
+  for (const row of workspaceRows) bucketFor(row.bucket_start).workspacesCreated = Number(row.n);
+  for (const row of issueRows) bucketFor(row.bucket_start).issuesCreated = Number(row.n);
+  for (const row of autopilotRows) {
+    const b = bucketFor(row.bucket_start);
+    const n = Number(row.n);
+    // Live CHECK constraint (043_fix_orphaned_autopilot_runs +
+    // 079_autopilot_run_skipped_status) allows exactly these five statuses;
+    // issue_created/running are still in flight when queried, so they fold
+    // into `other` rather than getting their own chart segments.
+    if (row.status === "completed") b.autopilotRuns.completed = n;
+    else if (row.status === "failed") b.autopilotRuns.failed = n;
+    else if (row.status === "skipped") b.autopilotRuns.skipped = n;
+    else b.autopilotRuns.other += n;
+  }
+  for (const row of errorRows) {
+    const b = bucketFor(row.bucket_start);
+    b.errorsByReason[row.failure_reason] = (b.errorsByReason[row.failure_reason] ?? 0) + Number(row.n);
+  }
+
+  return Array.from(buckets.values()).sort((a, b) => a.bucketStart.localeCompare(b.bucketStart));
 }

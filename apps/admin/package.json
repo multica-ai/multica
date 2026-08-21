@@ -12,6 +12,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@multica/core": "workspace:*",
     "@multica/ui": "workspace:*",
     "@tanstack/react-query": "catalog:",
     "lucide-react": "catalog:",

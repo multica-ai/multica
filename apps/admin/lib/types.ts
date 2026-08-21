@@ -142,3 +142,63 @@ export interface ListWorkspacesResult {
   page: number;
   pageSize: number;
 }
+
+// ---------------------------------------------------------------------------
+// Analytics page — global (cross-workspace) time-series.
+// ---------------------------------------------------------------------------
+
+/** Granularities offered in the UI. `168` = weekly, for the widest windows. */
+export const GRANULARITY_HOURS = [1, 3, 6, 12, 24, 168] as const;
+export type GranularityHours = (typeof GRANULARITY_HOURS)[number];
+
+export interface AnalyticsParams {
+  /** ISO timestamp, inclusive start of the window. */
+  from: string;
+  /** ISO timestamp, exclusive end of the window. */
+  to: string;
+  granularityHours: GranularityHours;
+}
+
+export interface AutopilotRunCounts {
+  completed: number;
+  failed: number;
+  skipped: number;
+  /** issue_created / running — still in flight when queried. The
+   * 'pending' status was removed by 043_fix_orphaned_autopilot_runs; the
+   * live CHECK constraint only allows issue_created/running/completed/
+   * failed/skipped. */
+  other: number;
+}
+
+/** Same 7 classes the per-workspace Errors tab uses (@multica/core/dashboard's
+ * FAILURE_CLASSES) — kept as a plain string-keyed record here so this module
+ * doesn't have to depend on that package's type for a shape this generic. */
+export type ErrorClassCounts = Record<
+  "auth" | "rate_limit" | "timeout" | "provider" | "runtime" | "agent" | "other",
+  number
+>;
+
+export interface AnalyticsBucket {
+  /** ISO timestamp — start of this bucket. */
+  bucketStart: string;
+  workspacesCreated: number;
+  issuesCreated: number;
+  autopilotRuns: AutopilotRunCounts;
+  errors: ErrorClassCounts;
+}
+
+export interface AnalyticsResult {
+  from: string;
+  to: string;
+  granularityHours: GranularityHours;
+  buckets: AnalyticsBucket[];
+  /**
+   * Sum of `spend` across every LiteLLM key (lib/litellm.ts), i.e. lifetime
+   * cost — not scoped to `from`/`to`. LiteLLM's /key/list only reports
+   * cumulative spend per key, not a date-ranged figure, so this is
+   * deliberately NOT a per-bucket time series (see the "cost" KPI card
+   * rather than a chart). Null when LiteLLM isn't configured
+   * (litellmConfigured() in lib/litellm.ts) — never fabricated as 0.
+   */
+  totalLiteLlmSpendUsd: number | null;
+}

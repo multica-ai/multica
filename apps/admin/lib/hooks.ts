@@ -1,7 +1,7 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import type { ListWorkspacesParams, ListWorkspacesResult, WorkspaceDetail } from "./types";
+import type { AnalyticsParams, AnalyticsResult, ListWorkspacesParams, ListWorkspacesResult, WorkspaceDetail } from "./types";
 
 // Client-side data hooks. These hit this app's own Route Handlers (never
 // Postgres/LiteLLM directly, never the Go API) — see app/api/workspaces/*.
@@ -46,5 +46,18 @@ export function useLiteLlmHealth() {
     queryKey: ["litellm-health"],
     queryFn: () => fetchJson("/api/litellm/health"),
     staleTime: 5 * 60_000,
+  });
+}
+
+export function useAnalytics(params: AnalyticsParams) {
+  const qs = new URLSearchParams({
+    from: params.from,
+    to: params.to,
+    granularityHours: String(params.granularityHours),
+  });
+  return useQuery<AnalyticsResult>({
+    queryKey: ["analytics", params],
+    queryFn: () => fetchJson(`/api/analytics?${qs.toString()}`),
+    placeholderData: (prev) => prev,
   });
 }
