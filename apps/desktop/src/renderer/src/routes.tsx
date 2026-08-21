@@ -42,22 +42,27 @@ import { DesktopRouteErrorPage } from "./components/route-error-page";
  * from i18n. The route element has to be a component (not a literal JSX
  * value) for `useT` to run.
  */
-function DesktopSettingsRoute() {
+export function DesktopSettingsRoute() {
   const { t } = useT("settings");
   return (
     <SettingsPage
-      extraAccountTabs={[
+      extraSettingsGroups={[
         {
-          value: "daemon",
-          label: "Daemon",
-          icon: Server,
-          content: <DaemonSettingsTab />,
-        },
-        {
-          value: "updates",
-          label: t(($) => $.desktop.tabs.updates),
-          icon: Download,
-          content: <UpdatesSettingsTab />,
+          label: t(($) => $.desktop.group_title),
+          tabs: [
+            {
+              value: "daemon",
+              label: t(($) => $.desktop.tabs.daemon),
+              icon: Server,
+              content: <DaemonSettingsTab />,
+            },
+            {
+              value: "updates",
+              label: t(($) => $.desktop.tabs.updates),
+              icon: Download,
+              content: <UpdatesSettingsTab />,
+            },
+          ],
         },
       ]}
     />

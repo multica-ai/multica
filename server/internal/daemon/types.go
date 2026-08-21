@@ -95,7 +95,7 @@ type Task struct {
 	// server at claim time; the daemon never reads plugin state itself.
 	PluginHookTools []PluginHookTool `json:"plugin_hook_tools,omitempty"`
 	// WorkspaceContext mirrors workspace.context (the per-workspace system
-	// prompt set in Settings → General). Server populates this on every claim
+	// prompt set in Settings → Basic Information). Server populates this on every claim
 	// regardless of task kind so the daemon can inject `## Workspace Context`
 	// into the brief. Empty when the owner hasn't set one.
 	WorkspaceContext string `json:"workspace_context,omitempty"`

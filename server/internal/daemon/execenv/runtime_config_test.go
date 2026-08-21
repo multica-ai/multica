@@ -652,7 +652,7 @@ func TestSubIssueCreationSectionIsUnconditional(t *testing.T) {
 }
 
 // Workspace Context block: workspace.context (the per-workspace system prompt
-// owners set in Settings → General) must reach the brief as `## Workspace
+// owners set in Settings → Basic Information) must reach the brief as `## Workspace
 // Context` for every task kind so agents see a consistent shared system prompt
 // regardless of how they were triggered. Empty content must skip the heading
 // entirely — bare headings would just add noise.

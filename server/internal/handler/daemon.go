@@ -3013,7 +3013,7 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	// Workspace-level Context (workspace.context DB column) — the per-workspace
-	// system prompt that workspace owners set in Settings → General. Inject it
+	// system prompt that workspace owners set in Settings → Basic Information. Inject it
 	// into the brief regardless of task kind (issue / chat / autopilot /
 	// quick-create) so every agent running in the workspace sees the same
 	// shared context. Empty string when the owner hasn't set one; the daemon

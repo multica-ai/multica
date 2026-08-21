@@ -12,7 +12,7 @@ import { isFloatingChatRouteSuppressed } from "./floating-chat-visibility";
  * each app shell's dashboard layout; owns the two gates that decide whether the
  * overlay exists at all:
  *
- *  1. The Settings → Chat preference (`floatingChatEnabled`). When a user turns
+ *  1. The Settings → Preferences chat setting (`floatingChatEnabled`). When a user turns
  *     the floating window off, Chat lives only in its dedicated tab.
  *  2. The Chat tab route itself. On `/:slug/chat` the full-page surface already
  *     owns the conversation, so a floating copy of the same `activeSessionId`

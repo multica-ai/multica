@@ -305,16 +305,21 @@
   "page": {
     "title": "Settings",
     "my_account": "My Account",
-    "workspace_fallback": "Workspace",
+    "groups": {
+      "management": "Workspace · General",
+      "tasks": "Workspace · Issues",
+      "connections": "Workspace · Connections",
+      "extensions": "Workspace · Extensions"
+    },
     "tabs": {
       "profile": "Profile",
       "preferences": "Preferences",
       "shortcuts": "Shortcuts",
-      "issue": "Issue",
+      "issue": "Issue Preferences",
       "chat": "Chat",
       "notifications": "Notifications",
       "tokens": "API Tokens",
-      "general": "General",
+      "general": "Basic Information",
       "repositories": "Repositories",
       "github": "GitHub",
       "integrations": "Integrations",
@@ -1114,7 +1119,9 @@
     "toast_save_failed": "Failed to save repositories"
   },
   "desktop": {
+    "group_title": "Desktop",
     "tabs": {
+      "daemon": "Daemon",
       "updates": "Updates"
     },
     "updates": {

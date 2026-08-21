@@ -19,6 +19,7 @@ import {
 import { useLocaleAdapter } from "@multica/core/i18n/react";
 import { useAuthStore } from "@multica/core/auth";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
+import { useChatStore } from "@multica/core/chat";
 import { api } from "@multica/core/api";
 import { browserTimezone, timezoneOptions } from "../../common/timezone-select";
 import { useT } from "../../i18n";
@@ -165,7 +166,36 @@ export function PreferencesTab() {
           <StickyCommentBarRow />
         </SettingsCard>
       </SettingsSection>
+      <SettingsSection title={t(($) => $.page.tabs.chat)}>
+        <SettingsCard>
+          <FloatingChatRow />
+        </SettingsCard>
+      </SettingsSection>
     </SettingsTab>
+  );
+}
+
+function FloatingChatRow() {
+  const { t } = useT("settings");
+  const enabled = useChatStore((s) => s.floatingChatEnabled);
+  const setEnabled = useChatStore((s) => s.setFloatingChatEnabled);
+
+  return (
+    <SettingsRow
+      label={t(($) => $.chat.floating_label)}
+      description={t(($) => $.chat.floating_hint)}
+    >
+      <Switch
+        checked={enabled}
+        onCheckedChange={(checked) => {
+          setEnabled(checked);
+          toast.success(t(($) => $.auto_save.toast_saved), {
+            id: "settings-auto-save",
+          });
+        }}
+        aria-label={t(($) => $.chat.floating_label)}
+      />
+    </SettingsRow>
   );
 }
 

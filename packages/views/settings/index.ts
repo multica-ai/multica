@@ -1,5 +1,5 @@
 export { SettingsPage } from "./components";
-export type { ExtraSettingsTab } from "./components";
+export type { ExtraSettingsGroup, ExtraSettingsTab } from "./components";
 export {
   SettingsCard,
   SettingsRow,

@@ -81,7 +81,23 @@ vi.mock("@multica/core/auth", async () => {
 });
 
 import { PreferencesTab } from "./preferences-tab";
+import {
+  createChatStore,
+  registerChatStore,
+  useChatStore,
+} from "@multica/core/chat";
 import { useCommentComposerStore } from "@multica/core/issues/stores";
+
+const chatStorage = new Map<string, string>();
+registerChatStore(
+  createChatStore({
+    storage: {
+      getItem: (key) => chatStorage.get(key) ?? null,
+      setItem: (key, value) => chatStorage.set(key, value),
+      removeItem: (key) => chatStorage.delete(key),
+    },
+  }),
+);
 
 const TEST_RESOURCES = {
   en: { common: enCommon, auth: enAuth, settings: enSettings },
@@ -335,6 +351,32 @@ describe("PreferencesTab — Sticky comment bar", () => {
 
     expect(useCommentComposerStore.getState().sticky).toBe(false);
     expect(toggle).toHaveAttribute("aria-checked", "false");
+    expect(mockToastSuccess).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("PreferencesTab — Floating chat", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    userRef.current = null;
+    useChatStore.setState({ floatingChatEnabled: false });
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("hosts the former Chat tab preference and saves changes", async () => {
+    const user = userEvent.setup();
+    render(<PreferencesTab />, { wrapper: I18nWrapper });
+
+    const toggle = screen.getByRole("switch", { name: "Floating chat window" });
+    expect(toggle).toHaveAttribute("aria-checked", "false");
+
+    await user.click(toggle);
+
+    expect(useChatStore.getState().floatingChatEnabled).toBe(true);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
     expect(mockToastSuccess).toHaveBeenCalledTimes(1);
   });
 });

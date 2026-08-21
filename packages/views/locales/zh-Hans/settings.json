@@ -305,16 +305,21 @@
   "page": {
     "title": "设置",
     "my_account": "我的账号",
-    "workspace_fallback": "工作区",
+    "groups": {
+      "management": "工作区 · 常规",
+      "tasks": "工作区 · 任务",
+      "connections": "工作区 · 连接",
+      "extensions": "工作区 · 扩展"
+    },
     "tabs": {
       "profile": "个人资料",
       "preferences": "偏好设置",
       "shortcuts": "快捷键",
-      "issue": "任务",
+      "issue": "任务偏好",
       "chat": "聊天",
       "notifications": "通知",
       "tokens": "API Token",
-      "general": "常规",
+      "general": "基本信息",
       "repositories": "代码仓库",
       "github": "GitHub",
       "integrations": "集成",
@@ -324,26 +329,26 @@
       "issue_statuses": "任务状态",
       "properties": "属性",
       "quick_actions": "快捷操作",
-      "plugins": "Plugins",
+      "plugins": "插件",
       "mcp": "MCP",
       "billing": "账单与套餐"
     }
   },
   "plugins": {
-    "title": "Plugins",
+    "title": "插件",
     "description": "在这个工作区里发布插件，然后安装某个具体版本，并逐条确认它能访问什么。",
-    "loading": "正在加载 Plugins",
-    "load_failed": "无法加载 Plugins",
-    "load_failed_description": "请重试。已安装的 Plugin 不受影响。",
+    "loading": "正在加载插件",
+    "load_failed": "无法加载插件",
+    "load_failed_description": "请重试。已安装的插件不受影响。",
     "read_only": "只读访问",
-    "read_only_description": "工作区 owner 和 admin 可以安装、配置和移除 Plugin。",
-    "empty": "还没有安装任何 Plugin。",
-    "action_failed": "Plugin 操作失败",
-    "enabled": "Plugin 已启用",
-    "disabled": "Plugin 已停用",
-    "enabled_label": "启用 Plugin",
+    "read_only_description": "工作区 owner 和 admin 可以安装、配置和移除插件。",
+    "empty": "还没有安装任何插件。",
+    "action_failed": "插件操作失败",
+    "enabled": "插件已启用",
+    "disabled": "插件已停用",
+    "enabled_label": "启用插件",
     "uninstall": "卸载",
-    "uninstalled": "Plugin 已卸载，其存储数据与密钥一并删除",
+    "uninstalled": "插件已卸载，其存储数据与密钥一并删除",
     "granted_scopes": "已授予的访问权限",
     "contributes": "提供的能力",
     "version": "v{{version}}",
@@ -355,12 +360,12 @@
       "title": "已安装"
     },
     "consent": {
-      "title": "该 Plugin 请求以下访问权限",
-      "description": "你批准的是某个具体版本。它的代码由 Multica 存储，在你升级之前不会变化。Plugin 只能做这些权限允许的事，且永远不会超过使用者本人的权限。",
+      "title": "该插件请求以下访问权限",
+      "description": "你批准的是某个具体版本。它的代码由 Multica 存储，在你升级之前不会变化。插件只能做这些权限允许的事，且永远不会超过使用者本人的权限。",
       "cancel": "取消",
       "confirm": "授权并安装",
       "confirm_upgrade": "授权并升级",
-      "installed": "Plugin 已安装",
+      "installed": "插件已安装",
       "upgrade_from": " · 从 v{{version}} 升级",
       "new_scope": "新增"
     },
@@ -1112,7 +1117,9 @@
     "toast_save_failed": "保存代码仓库失败"
   },
   "desktop": {
+    "group_title": "桌面端",
     "tabs": {
+      "daemon": "守护进程",
       "updates": "更新"
     },
     "updates": {
