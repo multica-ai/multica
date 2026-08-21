@@ -106,7 +106,7 @@ import { useT, useTimeAgo } from "../../i18n";
 //   (name + usedBy), no horizontal scroll, column toggles don't apply.
 const GRID_COLS =
   "grid-cols-[0.75rem_1rem_minmax(120px,1fr)_var(--lgc-usedby)_1.75rem_0.75rem] " +
-  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--lgc-usedby)_var(--lgc-source)_var(--lgc-creator)_var(--lgc-updated)_var(--lgc-created)_1.75rem_0.75rem]";
+  "@2xl:grid-cols-[0.75rem_1rem_minmax(200px,1fr)_var(--lgc-usedby)_var(--lgc-usecount)_var(--lgc-source)_var(--lgc-creator)_var(--lgc-updated)_var(--lgc-created)_1.75rem_0.75rem]";
 
 // h-12 rows. The virtualizer's fixed-size contract: every row renders at
 // exactly this height, which is what lets it skip per-row measurement.
@@ -115,6 +115,7 @@ const ROW_HEIGHT = 48;
 // Single source for hideable column widths: track vars and the grid's
 // min-width derive from the same numbers.
 const COLUMN_WIDTHS: Record<SkillColumnKey, number> = {
+  useCount: 96,
   usedBy: 144,
   source: 152,
   creator: 144,
@@ -139,6 +140,7 @@ function columnTrackVars(
       0,
     );
   return {
+    "--lgc-usecount": width("useCount"),
     "--lgc-usedby": width("usedBy"),
     "--lgc-source": width("source"),
     "--lgc-creator": width("creator"),
@@ -485,6 +487,13 @@ function SkillListHeader({
         </ListGridHeaderCell>
       ) : (
         <ListGridHeaderCell className="px-0" />
+      )}
+      {isColVisible("useCount") ? (
+        <ListGridHeaderCell className="hidden @2xl:flex">
+          {t(($) => $.table.use_count)}
+        </ListGridHeaderCell>
+      ) : (
+        <ListGridHeaderCell className="hidden px-0 @2xl:flex" />
       )}
       {isColVisible("source") ? (
         <ListGridHeaderCell className="hidden @2xl:flex">
@@ -910,6 +919,13 @@ export default function SkillsPage() {
                   <UsedByCell agents={row.agents} />
                 ) : (
                   <ListGridCell className="px-0" />
+                )}
+                {isColVisible("useCount") ? (
+                  <ListGridCell className="hidden whitespace-nowrap text-caption tabular-nums text-muted-foreground @2xl:flex">
+                    {row.skill.use_count}
+                  </ListGridCell>
+                ) : (
+                  <ListGridCell className="hidden px-0 @2xl:flex" />
                 )}
                 {isColVisible("source") ? (
                   <SourceCell skill={row.skill} runtime={row.runtime} />

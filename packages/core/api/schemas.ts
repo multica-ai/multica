@@ -1548,6 +1548,8 @@ export const AgentTaskSchema = z.object({
   coalesced_comment_ids: OptionalStringArraySchema,
   delivered_comment_ids: OptionalStringArraySchema,
   trigger_summary: z.string().optional(),
+  issue_title: z.string().optional(),
+  issue_identifier: z.string().optional(),
   handoff_note: z.string().optional(),
   kind: z.string().optional(),
   work_dir: z.string().optional().catch(undefined),
@@ -2765,6 +2767,7 @@ export const EMPTY_SKILL: Skill = {
   created_by: null,
   created_at: "",
   updated_at: "",
+  use_count: 0,
   files: [],
 };
 
