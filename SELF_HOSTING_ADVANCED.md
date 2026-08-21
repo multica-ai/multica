@@ -86,7 +86,17 @@ Changes take effect after restarting the backend / compose stack. The web UI rea
 
 ### File Storage (Optional)
 
-For file uploads and attachments, configure S3 and (optionally) CloudFront:
+Attachments are stored on local disk by default. Set `S3_BUCKET` to switch to
+S3-compatible object storage instead.
+
+#### Local disk (default)
+
+| Variable | Description |
+|----------|-------------|
+| `LOCAL_UPLOAD_DIR` | Directory attachments are written to. Default `./data/uploads`, which is **relative to the backend's working directory** — `/app` in the bundled image (where the compose file mounts the `backend_uploads` volume), but whatever directory you launched from when running the binary manually. Set an absolute path for manual installs, otherwise uploads silently land somewhere new whenever the launch directory changes |
+| `LOCAL_UPLOAD_BASE_URL` | Optional absolute base for attachment URLs (e.g. `http://localhost:8080`). Leave empty to store `/uploads/...` paths that stay relative to the API origin |
+
+#### S3 / CloudFront
 
 | Variable | Description |
 |----------|-------------|
