@@ -71,9 +71,12 @@ type ExecOptions struct {
 	// daemon-wide zero still disables the watchdog entirely, and an in-flight
 	// tool continues to use the separate tool watchdog budget.
 	IdleWatchdogTimeout time.Duration
-	// HandshakeTimeout bounds startup RPCs for providers with a long-lived
-	// protocol transport. It is currently consumed by Codex app-server;
-	// zero uses the provider default rather than disabling the bound.
+	// HandshakeTimeout bounds startup handshakes for providers with a
+	// long-lived protocol transport. It is consumed by the Codex app-server
+	// startup RPCs and the DSH stdio `ready` wait; the daemon fills it from
+	// the provider-specific knob (CodexHandshakeTimeout / DshHandshakeTimeout)
+	// so one provider's tuning never moves the other's bound. Zero uses the
+	// provider default rather than disabling the bound.
 	HandshakeTimeout time.Duration
 	ResumeSessionID  string // if non-empty, resume a previous agent session
 	// ResumeExpected records that this task intended to continue a prior

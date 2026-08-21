@@ -30,6 +30,13 @@ const (
 	DefaultAgentTimeout                   = 0
 	DefaultCodexSemanticInactivityTimeout = 10 * time.Minute
 	DefaultCodexHandshakeTimeout          = 30 * time.Second
+	// DefaultDshHandshakeTimeout bounds the DSH runtime's stdio handshake (the
+	// wait for the protocol `ready` frame). Separate from the Codex value
+	// because the transports differ: Codex dials an app-server over a
+	// long-lived RPC channel, DSH only needs its stdin/stdout pipe to come up,
+	// so the DSH default is tighter. MULTICA_CODEX_HANDSHAKE_TIMEOUT must not
+	// reach DSH runs (and vice versa).
+	DefaultDshHandshakeTimeout = 10 * time.Second
 	// DefaultOpenCodeIdleWatchdog shortens the no-message budget for OpenCode
 	// runs while they are not executing a tool. OpenCode streams text and tool
 	// events incrementally, so a completely silent interval here covers both a
@@ -125,6 +132,7 @@ type Config struct {
 	// for app-servers that are legitimately slow to their first event (GH #3262).
 	CodexFirstTurnNoProgressTimeout time.Duration
 	CodexHandshakeTimeout           time.Duration
+	DshHandshakeTimeout             time.Duration // DSH stdio `ready` handshake bound; independent of the Codex value
 	OpenCodeIdleWatchdog            time.Duration // OpenCode-specific no-message window; 0 falls back to AgentIdleWatchdog and values above it cannot extend the global bound
 	AgentIdleWatchdog               time.Duration // force-stop a run when the backend goes silent this long with an empty queue (0 = disabled)
 	AgentToolWatchdog               time.Duration // force-stop a run when a single tool call stays in flight (silent) this long (0 = disabled); backstop for hung tools now that there is no wall-clock cap
@@ -155,6 +163,7 @@ type Overrides struct {
 	AgentTimeout                   *time.Duration
 	CodexSemanticInactivityTimeout time.Duration
 	CodexHandshakeTimeout          time.Duration
+	DshHandshakeTimeout            time.Duration
 	MaxConcurrentTasks             int
 	DaemonID                       string
 	DeviceName                     string
@@ -342,6 +351,17 @@ func LoadConfig(overrides Overrides) (Config, error) {
 	}
 	if overrides.CodexHandshakeTimeout > 0 {
 		codexHandshakeTimeout = overrides.CodexHandshakeTimeout
+	}
+
+	dshHandshakeTimeout, err := durationFromEnv("MULTICA_DSH_HANDSHAKE_TIMEOUT", DefaultDshHandshakeTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	if dshHandshakeTimeout <= 0 {
+		dshHandshakeTimeout = DefaultDshHandshakeTimeout
+	}
+	if overrides.DshHandshakeTimeout > 0 {
+		dshHandshakeTimeout = overrides.DshHandshakeTimeout
 	}
 
 	// MULTICA_AGENT_IDLE_WATCHDOG=0 disables the per-task idle watchdog. We
@@ -543,6 +563,7 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		CodexSemanticInactivityTimeout:  codexSemanticInactivityTimeout,
 		CodexFirstTurnNoProgressTimeout: codexFirstTurnNoProgressTimeout,
 		CodexHandshakeTimeout:           codexHandshakeTimeout,
+		DshHandshakeTimeout:             dshHandshakeTimeout,
 		OpenCodeIdleWatchdog:            openCodeIdleWatchdog,
 		AgentIdleWatchdog:               agentIdleWatchdog,
 		AgentToolWatchdog:               agentToolWatchdog,

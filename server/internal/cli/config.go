@@ -112,6 +112,14 @@ type CLIConfig struct {
 	// DefaultCodexHandshakeTimeout.
 	CodexHandshakeTimeout string `json:"codex_handshake_timeout,omitempty"`
 
+	// DshHandshakeTimeout caps the DSH runtime stdio `ready` handshake (Go
+	// duration string). Persist-once semantics match PollInterval. Independent
+	// of CodexHandshakeTimeout so tuning one provider leaves the other alone.
+	// Resolution precedence: --dsh-handshake-timeout flag,
+	// MULTICA_DSH_HANDSHAKE_TIMEOUT env, this field,
+	// DefaultDshHandshakeTimeout.
+	DshHandshakeTimeout string `json:"dsh_handshake_timeout,omitempty"`
+
 	// DisableAutoUpdate, when true, turns off the daemon's periodic CLI
 	// self-update poll. Only a single direction is persistable — the
 	// --no-auto-update flag is likewise one-way — because the env/default

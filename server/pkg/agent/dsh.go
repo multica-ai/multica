@@ -373,10 +373,10 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 				result.Error = fmt.Sprintf("read dsh event stream: %v", scanErr)
 			case state.protocolError != "":
 				result.Error = state.protocolError
-			case !state.ready:
-				result.Error = "dsh exited before the runtime protocol became ready"
 			case exitErr != nil:
 				result.Error = fmt.Sprintf("dsh exited with error: %v", exitErr)
+			case !state.ready:
+				result.Error = "dsh exited before the runtime protocol became ready"
 			default:
 				result.Error = "dsh exited without a terminal result"
 			}
@@ -394,6 +394,11 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	// Wait for the runtime's `ready` frame before sending execute. Old and new
 	// profiles share protocol_version 1, so the capabilities object is the only
 	// safe signal for optional execute fields like issue_id / task_contract.
+	// Ready, process exit, and external cancellation are observed as distinct
+	// outcomes: a pre-ready exit must surface the reader's diagnostic (exit
+	// status, protocol error, stderr tail) rather than a generic cancellation
+	// message, and every failure path must tear down the whole process group
+	// before Execute returns.
 	handshakeTimeout := opts.HandshakeTimeout
 	if handshakeTimeout <= 0 {
 		handshakeTimeout = dshHandshakeTimeout
@@ -403,15 +408,28 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	var capabilities dshCapabilities
 	select {
 	case capabilities = <-readyCh:
+	case result := <-resCh:
+		cancel()
+		return nil, dshStartupError(result)
 	case <-runCtx.Done():
-		_ = stdin.Close()
+		// The reader's deferred cancel() runs after it delivers the exit
+		// result, so a value here means the process died on its own and its
+		// diagnostic must win over the generic cancellation message.
+		select {
+		case result := <-resCh:
+			cancel()
+			return nil, dshStartupError(result)
+		default:
+		}
+		terminateDshStartupTree(cmd, stdout, stdin)
+		<-procDone
 		cancel()
-		return nil, fmt.Errorf("dsh cancelled before the runtime protocol became ready")
+		return nil, errors.New(withAgentStderr("dsh cancelled before the runtime protocol became ready", "dsh", stderrBuf.Tail()))
 	case <-readyTimer.C:
-		_ = stdin.Close()
+		terminateDshStartupTree(cmd, stdout, stdin)
+		<-procDone
 		cancel()
-		signalProcessGroup(cmd, syscall.SIGKILL)
-		return nil, fmt.Errorf("dsh did not become ready within %s", handshakeTimeout)
+		return nil, errors.New(withAgentStderr(fmt.Sprintf("dsh did not become ready within %s", handshakeTimeout), "dsh", stderrBuf.Tail()))
 	}
 
 	if capabilities.IssueID && opts.IssueID != "" {
@@ -426,8 +444,8 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		}
 	}
 	if err := writeFrame(command); err != nil {
-		signalProcessGroup(cmd, syscall.SIGKILL)
-		_ = stdin.Close()
+		terminateDshStartupTree(cmd, stdout, stdin)
+		<-procDone
 		cancel()
 		return nil, fmt.Errorf("send dsh execute command: %w", err)
 	}
@@ -456,6 +474,36 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	}()
 
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// terminateDshStartupTree tears down the runtime process tree on a pre-ready
+// failure path. Before execute is sent there is no cancel goroutine yet, and
+// cmd.Cancel is a no-op, so without this the direct child dies (eventually,
+// via WaitDelay) while descendants that inherited stdout keep the scanner
+// blocked and survive the task. It mirrors the post-execute escalation:
+// SIGKILL the group, close both pipes so the reader unblocks, and let the
+// caller wait on procDone for the fully reaped tree.
+func terminateDshStartupTree(cmd *exec.Cmd, stdout io.ReadCloser, stdin io.WriteCloser) {
+	signalProcessGroup(cmd, syscall.SIGKILL)
+	if stdout != nil {
+		_ = stdout.Close()
+	}
+	if stdin != nil {
+		_ = stdin.Close()
+	}
+}
+
+// dshStartupError converts a pre-ready reader result into the Execute error.
+// The reader already classified the failure (exit status, protocol error,
+// timeout, stderr tail), so surface it verbatim instead of masking it with a
+// generic "cancelled before ready" — external cancellation races with a real
+// crash must keep the diagnostic.
+func dshStartupError(result Result) error {
+	message := fmt.Sprintf("dsh exited before the runtime protocol became ready")
+	if result.Error != "" {
+		message = result.Error
+	}
+	return errors.New(message)
 }
 
 type dshRunState struct {
