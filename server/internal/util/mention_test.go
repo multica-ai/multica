@@ -63,6 +63,51 @@ func TestParseMentions(t *testing.T) {
 			content: `[@David\[TF\]](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa) hi`,
 			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
 		},
+		{
+			name:    "mention inside fenced code block is ignored",
+			content: "```\n[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n```",
+			want:    nil,
+		},
+		{
+			name:    "mention inside tilde fenced code block is ignored",
+			content: "~~~\n[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n~~~",
+			want:    nil,
+		},
+		{
+			name:    "mention inside fenced block with info string is ignored",
+			content: "```markdown\n[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n```",
+			want:    nil,
+		},
+		{
+			name:    "mention inside inline code span is ignored",
+			content: "use `[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)` to mention",
+			want:    nil,
+		},
+		{
+			name:    "mention inside double-backtick span containing a backtick is ignored",
+			content: "use ``[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)` `` to mention",
+			want:    nil,
+		},
+		{
+			name:    "mention before a fenced block is still returned",
+			content: "[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\n```\n[@B](mention://agent/bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb)\n```",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "mention after a closing fence is still returned",
+			content: "```\ncode\n```\n[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "mention inside blockquote is still returned",
+			content: "> [@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)",
+			want:    []Mention{{Type: "agent", ID: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"}},
+		},
+		{
+			name:    "unterminated fence suppresses everything after it",
+			content: "```\n[@A](mention://agent/aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa)\nand more text",
+			want:    nil,
+		},
 	}
 
 	for _, tt := range tests {
