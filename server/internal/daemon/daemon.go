@@ -6971,10 +6971,16 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		return TaskResult{}, fmt.Errorf("prepare task temp dir: %w", err)
 	}
+	// The GC temp-base sweep uses the same reservation protocol as the store
+	// pruners: while this mark is held, the dir cannot be reserved for
+	// deletion, so a long-running task whose TMPDIR root goes untouched never
+	// loses it to an mtime-only rule.
+	d.markActiveStore(taskTempDir)
 	defer func() {
 		if cerr := os.RemoveAll(taskTempDir); cerr != nil {
 			taskLog.Warn("task temp dir cleanup failed", "path", taskTempDir, "error", cerr)
 		}
+		d.unmarkActiveStore(taskTempDir)
 	}()
 
 	// Issue #3999 race A: now that env.WorkDir is on disk, transition the
@@ -8421,10 +8427,26 @@ func (d *Daemon) markActiveStore(store string) {
 	}
 	d.activeStoresMu.Lock()
 	defer d.activeStoresMu.Unlock()
+	d.ensureActiveStoreStateLocked()
 	for d.deletingStores[store] {
 		d.activeStoresCond.Wait()
 	}
 	d.activeStores[store]++
+}
+
+// ensureActiveStoreStateLocked lazily initialises the store-guard state, the
+// same way ensureActiveEnvRootStateLocked does, so a Daemon built without
+// New (tests) still tolerates a mark/unmark.
+func (d *Daemon) ensureActiveStoreStateLocked() {
+	if d.activeStores == nil {
+		d.activeStores = make(map[string]int)
+	}
+	if d.deletingStores == nil {
+		d.deletingStores = make(map[string]bool)
+	}
+	if d.activeStoresCond == nil {
+		d.activeStoresCond = sync.NewCond(&d.activeStoresMu)
+	}
 }
 
 func (d *Daemon) unmarkActiveStore(store string) {
@@ -8433,6 +8455,7 @@ func (d *Daemon) unmarkActiveStore(store string) {
 	}
 	d.activeStoresMu.Lock()
 	defer d.activeStoresMu.Unlock()
+	d.ensureActiveStoreStateLocked()
 	if d.activeStores[store] <= 1 {
 		delete(d.activeStores, store)
 		return
@@ -8451,6 +8474,7 @@ func (d *Daemon) unmarkActiveStore(store string) {
 func (d *Daemon) reserveStoreForDeletion(store string) (commit func(), ok bool) {
 	d.activeStoresMu.Lock()
 	defer d.activeStoresMu.Unlock()
+	d.ensureActiveStoreStateLocked()
 	if d.activeStores[store] > 0 || d.deletingStores[store] {
 		return nil, false
 	}
