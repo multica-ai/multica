@@ -7316,6 +7316,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if task.Agent != nil {
 		agentCustomEnv = task.Agent.CustomEnv
 	}
+	layerTaskTokens(agentEnv, task.TaskTokens, d.logger)
 	layerCustomEnvAndHermesHome(agentEnv, agentCustomEnv, env.HermesHome, d.logger)
 	if provider == "reasonix" {
 		reasonixStateHome, err := prepareReasonixTaskStateHome(d.cfg.Profile, task.RuntimeID, task.AgentID)
@@ -8924,6 +8925,25 @@ func annotateHermesProviderUnconfigured(errMsg, provider string, overlayActive b
 		return errMsg
 	}
 	return errMsg + hermesProviderUnconfiguredHint
+}
+
+// layerTaskTokens applies server-issued identity tokens onto the child env.
+//
+// Runs BEFORE layerCustomEnvAndHermesHome so an agent's custom_env can still
+// override a token by name — the documented local-debugging path. The
+// blocklist is re-checked here even though the server validates template env
+// names, because this is the boundary that actually owns the child process
+// environment.
+func layerTaskTokens(agentEnv, taskTokens map[string]string, logger *slog.Logger) {
+	for k, v := range taskTokens {
+		if isBlockedEnvKey(k) {
+			if logger != nil {
+				logger.Warn("task token: blocked env key skipped", "key", k)
+			}
+			continue
+		}
+		agentEnv[k] = v
+	}
 }
 
 func layerCustomEnvAndHermesHome(agentEnv, customEnv map[string]string, overlayHome string, logger *slog.Logger) {
