@@ -79,10 +79,11 @@ func NewHistory(q historyQueries, decrypt Decrypter, logger *slog.Logger) *Histo
 // slackTarget is the resolved per-session read context: a bot-token client plus
 // the session's pinned channel and its own thread root.
 type slackTarget struct {
-	client     historyClient
-	channelID  string
-	threadRoot string // the session's own thread (empty for a DM)
-	botUserID  string
+	client         historyClient
+	installationID pgtype.UUID
+	channelID      string
+	threadRoot     string // the session's own thread (empty for a DM)
+	botUserID      string
 }
 
 // resolve maps a chat_session to its Slack channel + bot client. The channel is
@@ -116,10 +117,11 @@ func (h *History) resolve(ctx context.Context, chatSessionID pgtype.UUID) (slack
 	}
 	channelID, threadRoot := historyTarget(binding)
 	return slackTarget{
-		client:     h.newClient(creds.BotToken),
-		channelID:  channelID,
-		threadRoot: threadRoot,
-		botUserID:  creds.BotUserID,
+		client:         h.newClient(creds.BotToken),
+		installationID: binding.InstallationID,
+		channelID:      channelID,
+		threadRoot:     threadRoot,
+		botUserID:      creds.BotUserID,
 	}, nil
 }
 
@@ -148,7 +150,7 @@ func (h *History) ChannelOverview(ctx context.Context, chatSessionID pgtype.UUID
 		return channel.HistoryPage{}, fmt.Errorf("read slack channel: %w", err)
 	}
 	nextCursor := historyNextCursor(resp.Messages, limit)
-	allowedBotMessages, err := h.allowedBotMessages(ctx, chatSessionID, opts)
+	allowedBotMessages, err := h.allowedBotMessages(ctx, chatSessionID, t, opts, resp.Messages)
 	if err != nil {
 		return channel.HistoryPage{}, err
 	}
@@ -215,7 +217,7 @@ func (h *History) Thread(ctx context.Context, chatSessionID pgtype.UUID, threadI
 		raw = msgs
 	}
 	nextCursor := historyNextCursor(raw, limit)
-	allowedBotMessages, err := h.allowedBotMessages(ctx, chatSessionID, opts)
+	allowedBotMessages, err := h.allowedBotMessages(ctx, chatSessionID, t, opts, raw)
 	if err != nil {
 		return channel.HistoryPage{}, err
 	}
@@ -255,14 +257,26 @@ func historyNextCursor(raw []slack.Message, limit int) string {
 	return oldest
 }
 
-func (h *History) allowedBotMessages(ctx context.Context, chatSessionID pgtype.UUID, opts channel.HistoryOptions) (map[string]struct{}, error) {
+func (h *History) allowedBotMessages(ctx context.Context, chatSessionID pgtype.UUID, target slackTarget, opts channel.HistoryOptions, raw []slack.Message) (map[string]struct{}, error) {
 	if opts.ContextRevision <= 1 {
 		return nil, nil
+	}
+	candidates := make([]string, 0, len(raw))
+	for _, message := range raw {
+		if message.User == target.botUserID {
+			candidates = append(candidates, message.Timestamp)
+		}
+	}
+	if len(candidates) == 0 {
+		return map[string]struct{}{}, nil
 	}
 	ids, err := h.q.ListChannelOutboundMessageIDsForContext(ctx, db.ListChannelOutboundMessageIDsForContextParams{
 		ChatSessionID:          chatSessionID,
 		ChannelType:            pgtype.Text{String: string(TypeSlack), Valid: true},
+		InstallationID:         target.installationID,
+		ChannelChatID:          pgtype.Text{String: target.channelID, Valid: true},
 		ChannelContextRevision: pgtype.Int8{Int64: opts.ContextRevision, Valid: true},
+		CandidateMessageIds:    candidates,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("load slack reply provenance: %w", err)

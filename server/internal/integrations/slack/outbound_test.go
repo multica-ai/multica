@@ -149,6 +149,9 @@ func TestOutbound_PostsSealedChannelTaskReply(t *testing.T) {
 	if !q.gotProvenance.ChannelType.Valid || q.gotProvenance.ChannelType.String != "slack" {
 		t.Fatalf("recorded channel type = %+v, want slack", q.gotProvenance.ChannelType)
 	}
+	if q.gotProvenance.InstallationID != uid(1) || !q.gotProvenance.ChannelChatID.Valid || q.gotProvenance.ChannelChatID.String != "C123" {
+		t.Fatalf("recorded target = installation:%+v chat:%+v", q.gotProvenance.InstallationID, q.gotProvenance.ChannelChatID)
+	}
 }
 
 func TestOutbound_PostsReplyToBoundSlackChannel(t *testing.T) {

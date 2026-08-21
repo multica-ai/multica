@@ -154,9 +154,11 @@ func (o *Outbound) processEvent(ctx context.Context, e events.Event) error {
 		return errors.New("post slack reply: provider returned no message id")
 	}
 	rows, err := o.q.SetChatMessageChannelOutboundProvenanceByTask(ctx, db.SetChatMessageChannelOutboundProvenanceByTaskParams{
-		ChannelType: pgtype.Text{String: string(TypeSlack), Valid: true},
-		MessageIds:  messageIDs,
-		TaskID:      taskID,
+		ChannelType:    pgtype.Text{String: string(TypeSlack), Valid: true},
+		InstallationID: binding.InstallationID,
+		ChannelChatID:  pgtype.Text{String: channelID, Valid: true},
+		MessageIds:     messageIDs,
+		TaskID:         taskID,
 	})
 	if err != nil {
 		return fmt.Errorf("record slack reply provenance: %w", err)

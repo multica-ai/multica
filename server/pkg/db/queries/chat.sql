@@ -494,6 +494,8 @@ SELECT EXISTS (
 -- deliberately treated as unknown (and therefore excluded from generation >1).
 UPDATE chat_message
 SET channel_outbound_type = @channel_type,
+    channel_outbound_installation_id = @installation_id,
+    channel_outbound_chat_id = @channel_chat_id,
     channel_outbound_message_ids = @message_ids::text[]
 WHERE task_id = @task_id
   AND role = 'assistant';
@@ -502,13 +504,17 @@ WHERE task_id = @task_id
 -- Assistant generation is inherited from its owning task, matching
 -- ListChatMessagesPageForChannelContext. Provider IDs are scoped by session,
 -- adapter, and immutable generation before being trusted as agent context.
-SELECT unnest(message.channel_outbound_message_ids)::text AS message_id
+SELECT external.message_id::text
 FROM chat_message AS message
 JOIN agent_task_queue AS owner ON owner.id = message.task_id
+CROSS JOIN LATERAL unnest(message.channel_outbound_message_ids) AS external(message_id)
 WHERE message.chat_session_id = @chat_session_id
   AND message.role = 'assistant'
   AND message.channel_outbound_type = @channel_type
+  AND message.channel_outbound_installation_id = @installation_id
+  AND message.channel_outbound_chat_id = @channel_chat_id
   AND message.channel_outbound_message_ids IS NOT NULL
+  AND external.message_id = ANY(@candidate_message_ids::text[])
   AND (
       owner.channel_context_revision = @channel_context_revision
       OR (@channel_context_revision = 1 AND owner.channel_context_revision IS NULL)

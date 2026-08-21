@@ -8,6 +8,12 @@ ALTER TABLE chat_message
     ADD COLUMN IF NOT EXISTS channel_outbound_type TEXT;
 
 ALTER TABLE chat_message
+    ADD COLUMN IF NOT EXISTS channel_outbound_installation_id UUID;
+
+ALTER TABLE chat_message
+    ADD COLUMN IF NOT EXISTS channel_outbound_chat_id TEXT;
+
+ALTER TABLE chat_message
     ADD COLUMN IF NOT EXISTS channel_outbound_message_ids TEXT[];
 
 ALTER TABLE agent_task_queue

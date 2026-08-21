@@ -7,6 +7,12 @@ ALTER TABLE chat_message
     DROP COLUMN IF EXISTS channel_outbound_message_ids;
 
 ALTER TABLE chat_message
+    DROP COLUMN IF EXISTS channel_outbound_chat_id;
+
+ALTER TABLE chat_message
+    DROP COLUMN IF EXISTS channel_outbound_installation_id;
+
+ALTER TABLE chat_message
     DROP COLUMN IF EXISTS channel_outbound_type;
 
 ALTER TABLE chat_message
