@@ -118,3 +118,32 @@ func TestPruneTaskTempDirs_UnreadableRootIsNoop(t *testing.T) {
 		t.Fatalf("unreadable root must return (0,0), got (%d,%d)", removed, freed)
 	}
 }
+
+// TestPruneTaskTempDirs_RemovalFailureRetriedNextCycle covers the failure
+// path: a base dir without write permission makes RemoveAll of the child
+// fail (unlink needs write on the parent). The sweep must report removed=0,
+// leave the dir in place, and let the next cycle retry. Skipped as root —
+// root unlinks regardless of mode, so the failure cannot be produced.
+func TestPruneTaskTempDirs_RemovalFailureRetriedNextCycle(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod-based removal failure cannot be produced")
+	}
+	base := t.TempDir()
+	dir := seedTaskTempDir(t, base, 32)
+	old := time.Now().Add(-30 * 24 * time.Hour)
+	chtimesTree(t, dir, old)
+
+	if err := os.Chmod(base, 0o500); err != nil {
+		t.Fatalf("chmod base: %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(base, 0o700) })
+
+	removed, freed := PruneTaskTempDirs(base, 7*24*time.Hour, time.Now(), nil, testLogger())
+	if removed != 0 {
+		t.Fatalf("removed = %d, want 0 (removal must fail without write permission on the base)", removed)
+	}
+	if freed != 0 {
+		t.Errorf("bytesFreed = %d, want 0 when nothing was removed", freed)
+	}
+	assertPresent(t, dir)
+}
