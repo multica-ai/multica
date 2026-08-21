@@ -2072,6 +2072,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			message: "failed to load task agent",
 		}
 	}
+	// Identity tokens for this run's accountable human. Degrades to nil on
+	// every path that cannot name a precise human; never fails the claim.
+	resp.TaskTokens = h.issueTaskTokens(r.Context(), task, agent, runtimeWorkspaceID)
 	useSkillRefs := requestHasClientCapability(r, protocol.DaemonCapabilitySkillBundlesV1)
 	var customEnv map[string]string
 	if agent.CustomEnv != nil {

@@ -1,12 +1,16 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/attribution"
 	"github.com/multica-ai/multica/server/internal/logger"
+	"github.com/multica-ai/multica/server/internal/tasktoken"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/dbid"
 )
@@ -189,4 +193,62 @@ func (h *Handler) UpdateAgentTaskTokens(w http.ResponseWriter, r *http.Request) 
 		Available: h.availableTaskTokenTemplates(),
 		Enabled:   enabled,
 	})
+}
+
+// issueTaskTokens signs the identity tokens this run's agent has enabled.
+//
+// The identity is the run's accountable human, taken straight from the task
+// row's attribution columns — the same waterfall the activity UI shows
+// (MUL-4302). Only a PRECISE source is signed: owner_fallback / backfill /
+// unattributed mean no human authorized this run, and issuing on those would
+// lend the agent owner's identity to work nobody asked for.
+//
+// Returns nil on every degraded path. Failing to obtain a token is an
+// "unauthorized" condition for whatever wanted it, never a task failure, so
+// this must not propagate errors into the claim.
+func (h *Handler) issueTaskTokens(ctx context.Context, task *db.AgentTaskQueue, agent db.Agent, workspaceID string) map[string]string {
+	if h.TaskTokenIssuer == nil {
+		return nil
+	}
+	enabled := unmarshalTaskTokenTemplates(agent)
+	if len(enabled) == 0 {
+		return nil
+	}
+
+	src := attribution.Source(task.OriginatorSource.String)
+	if !src.Precise() || !task.AccountableUserID.Valid {
+		slog.Info("task token: run has no precise accountable human; issuing none",
+			"task_id", uuidToString(task.ID),
+			"originator_source", task.OriginatorSource.String)
+		return nil
+	}
+
+	user, err := h.Queries.GetUser(ctx, task.AccountableUserID)
+	if err != nil {
+		slog.Warn("task token: accountable user lookup failed; issuing none",
+			"task_id", uuidToString(task.ID),
+			"user_id", uuidToString(task.AccountableUserID), "error", err)
+		return nil
+	}
+
+	tctx := tasktoken.Context{
+		Identity: tasktoken.Identity{
+			Email:  user.Email,
+			Name:   user.Name,
+			UserID: uuidToString(user.ID),
+			Source: string(src),
+		},
+		WorkspaceID: workspaceID,
+	}
+	// Slug is best-effort: a template that does not reference it must not pay
+	// for a failed lookup, and one that does gets an empty string rather than
+	// a dropped token.
+	if ws, wsErr := h.Queries.GetWorkspace(ctx, parseUUID(workspaceID)); wsErr == nil {
+		tctx.WorkspaceSlug = ws.Slug
+	} else {
+		slog.Warn("task token: workspace lookup failed; slug will be empty",
+			"workspace_id", workspaceID, "error", wsErr)
+	}
+
+	return h.TaskTokenIssuer.Issue(enabled, tctx, time.Now())
 }
