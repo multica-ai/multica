@@ -58,6 +58,7 @@ import {
   issueMatchesGroup,
   getMoveUpdates,
   propertyGroupId,
+  projectGroupId,
 } from "../utils/drag-utils";
 
 function isStatusGroup(
@@ -66,14 +67,27 @@ function isStatusGroup(
   return group.status !== undefined;
 }
 
+interface BuildGroupsContext {
+  getActorName: (type: string, id: string) => string;
+  groupingProperty: IssueProperty | null;
+  projectMap: Map<string, Project> | undefined;
+  noAssigneeLabel: string;
+  noValueLabel: string;
+  noProjectLabel: string;
+}
+
 function buildGroups(
   issues: Issue[],
   visibleStatuses: IssueStatusCategory[],
   grouping: IssueGrouping,
-  getActorName: (type: string, id: string) => string,
-  noAssigneeLabel: string,
-  groupingProperty: IssueProperty | null,
-  noValueLabel: string,
+  {
+    getActorName,
+    groupingProperty,
+    projectMap,
+    noAssigneeLabel,
+    noValueLabel,
+    noProjectLabel,
+  }: BuildGroupsContext,
 ): BoardColumnGroup[] {
   if (grouping === "status") {
     return visibleStatuses.map((status) => ({
@@ -104,6 +118,35 @@ function buildGroups(
       propertyOptionId: null,
     });
     return columns;
+  }
+
+  // Project board: one column per project the loaded cards reference, plus the
+  // pinned "No project" column. Ordering mirrors the server's group order
+  // (no-project first, then project title) so the client fallback and the
+  // paged server columns cannot disagree.
+  if (grouping === "project") {
+    const columns = new Map<string, BoardColumnGroup>();
+    for (const issue of issues) {
+      const projectId = issue.project_id ?? null;
+      const id = projectGroupId(projectId);
+      if (columns.has(id)) continue;
+      const project = projectId ? projectMap?.get(projectId) ?? null : null;
+      columns.set(id, {
+        id,
+        // Same convention as the swimlane's project lanes: a project the
+        // projects query cannot resolve (deleted, or not visible to this
+        // member) keeps an empty title rather than reading as "No project".
+        title: projectId ? project?.title ?? "" : noProjectLabel,
+        projectId,
+        project,
+        createData: { project_id: projectId },
+      });
+    }
+    return Array.from(columns.values()).toSorted((a, b) => {
+      if (a.projectId === null) return b.projectId === null ? 0 : -1;
+      if (b.projectId === null) return 1;
+      return a.title.localeCompare(b.title);
+    });
   }
 
   const groups = new Map<string, BoardColumnGroup>();
@@ -275,6 +318,22 @@ function BoardViewImpl({
     }
     return undefined;
   }, [getActorName, groupBranches, grouping, t]);
+  const hydratedProjectGroups = useMemo<BoardColumnGroup[] | undefined>(() => {
+    if (grouping !== "project" || !groupBranches?.enabled) return undefined;
+    return groupBranches.descriptors.flatMap((descriptor): BoardColumnGroup[] => {
+      if (descriptor.value.kind !== "project") return [];
+      const projectId = descriptor.value.project_id ?? null;
+      const project = projectId ? projectMap?.get(projectId) ?? null : null;
+      return [{
+        id: descriptor.key,
+        title: projectId ? project?.title ?? "" : t(($) => $.swimlane.no_project),
+        projectId,
+        project,
+        totalCount: descriptor.count,
+        createData: { project_id: projectId },
+      }];
+    });
+  }, [groupBranches, grouping, projectMap, t]);
   const groupPagination = useMemo(() => {
     if (!groupBranches?.enabled) return undefined;
     const grouped = new Map<string, IssueGroupPageState[]>();
@@ -321,21 +380,21 @@ function BoardViewImpl({
     () => {
       const built =
         hydratedAssigneeGroups ??
-        buildGroups(
-        issues,
-        visibleStatuses,
-        grouping,
-        getActorName,
-        t(($) => $.filters.no_assignee),
-        groupingProperty,
-        t(($) => $.board.no_value),
-        );
+        hydratedProjectGroups ??
+        buildGroups(issues, visibleStatuses, grouping, {
+          getActorName,
+          groupingProperty,
+          projectMap,
+          noAssigneeLabel: t(($) => $.filters.no_assignee),
+          noValueLabel: t(($) => $.board.no_value),
+          noProjectLabel: t(($) => $.swimlane.no_project),
+        });
       return built.map((group) => ({
         ...group,
         totalCount: groupPagination?.[group.id]?.total ?? group.totalCount,
       }));
     },
-    [hydratedAssigneeGroups, issues, visibleStatuses, grouping, getActorName, groupingProperty, groupPagination, t],
+    [hydratedAssigneeGroups, hydratedProjectGroups, issues, visibleStatuses, grouping, getActorName, groupingProperty, projectMap, groupPagination, t],
   );
   const groupIds = useMemo(
     () => new Set(groups.map((group) => group.id)),
