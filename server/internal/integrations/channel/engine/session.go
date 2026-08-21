@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // This file is the SHARED, channel-agnostic chat-session service every IM
@@ -239,6 +240,7 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 	}
 
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: in.WorkspaceID,
 		AgentID:     in.AgentID,
 		CreatorID:   in.Sender,
@@ -353,6 +355,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	// it must be stamped in the same transaction as the message so no later
 	// binding deletion (archive, installation rebind) can strip it.
 	msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ID:                      dbid.NewV7(),
 		ChatSessionID:           in.SessionID,
 		Role:                    "user",
 		Content:                 in.Body,

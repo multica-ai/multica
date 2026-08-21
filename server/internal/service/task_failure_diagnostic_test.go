@@ -33,7 +33,7 @@ func TestFailTaskSanitizesNULDiagnostic(t *testing.T) {
 	})
 
 	svc := &TaskService{Queries: db.New(pool), TxStarter: pool, Bus: events.New()}
-	if _, err := svc.FailTask(ctx, util.MustParseUUID(taskID), "worker failed\x00 diagnostic details", "", "", "", "agent_error", false, ""); err != nil {
+	if _, err := svc.FailTask(ctx, util.MustParseUUID(taskID), "worker failed\x00 diagnostic details", "", "", "", "agent_error", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 

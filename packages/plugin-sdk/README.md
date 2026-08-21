@@ -14,9 +14,7 @@ multica.ui.resize(320);
 
 ## What a surface is
 
-An ordinary script in a sandboxed iframe. Multica never executes plugin code on
-its servers — a surface runs in the user's browser, or on your own server behind
-a hook.
+An ordinary script in a sandboxed iframe.
 
 The frame is mounted with `sandbox="allow-scripts"` and **not**
 `allow-same-origin`, so it has an opaque origin. Consequences worth knowing

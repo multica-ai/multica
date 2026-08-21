@@ -825,6 +825,8 @@ var acpCatalogThinkingProviders = map[string]bool{
 	// version string: one provider, two binaries, and the session answers the
 	// capability question directly.
 	"hermes": true,
+	// dim (dimcode 0.3.10+): session/new advertises thought_level.
+	"dim": true,
 }
 
 // usesDynamicThinkingCatalog reports whether a provider's effort vocabulary is

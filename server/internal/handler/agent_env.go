@@ -11,6 +11,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -153,6 +154,7 @@ func (h *Handler) GetAgentEnv(w http.ResponseWriter, r *http.Request) {
 		"key_count":     len(revealedKeys),
 	})
 	if _, err := h.Queries.CreateActivity(r.Context(), db.CreateActivityParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: agent.WorkspaceID,
 		IssueID:     pgtype.UUID{}, // env access is not tied to an issue
 		ActorType:   pgtype.Text{String: "member", Valid: true},
@@ -240,6 +242,7 @@ func (h *Handler) UpdateAgentEnv(w http.ResponseWriter, r *http.Request) {
 	}
 	details, _ := json.Marshal(auditDetails)
 	if _, err := qtx.CreateActivity(r.Context(), db.CreateActivityParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: agent.WorkspaceID,
 		IssueID:     pgtype.UUID{},
 		ActorType:   pgtype.Text{String: "member", Valid: true},

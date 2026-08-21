@@ -626,7 +626,7 @@ WHERE received_at < $1;
 -- column — only routing / identity / drop_reason / timestamp.
 INSERT INTO channel_inbound_audit (
     installation_id, channel_type, channel_chat_id, event_type,
-    channel_event_id, channel_message_id, drop_reason
+    channel_event_id, channel_message_id, drop_reason, id
 ) VALUES (
     sqlc.narg('installation_id'),
     $1,
@@ -634,7 +634,8 @@ INSERT INTO channel_inbound_audit (
     $2,
     sqlc.narg('channel_event_id'),
     sqlc.narg('channel_message_id'),
-    $3
+    $3,
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 );
 
 -- name: ListChannelInboundAuditByInstallation :many

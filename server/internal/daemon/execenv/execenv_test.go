@@ -1810,6 +1810,39 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 	}
 }
 
+// TestInjectRuntimeConfigDim verifies that the runtime brief is delivered to
+// Dim via AGENTS.md (review #1/#6). Dim reads AGENTS.md from the session cwd,
+// so InjectRuntimeConfig must write the brief there.
+func TestInjectRuntimeConfigDim(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "dim", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Dim should advertise native skill discovery")
+	}
+}
+
 // TestWriteContextFilesAntigravityNativeSkills pins that skills for the
 // antigravity provider land in {workDir}/.agents/skills/<slug>/, matching the
 // CLI's native workspace discovery path (Gemini CLI lineage).
@@ -4999,25 +5032,35 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 	t.Run("mentions-section-lists-loop-protocol", func(t *testing.T) {
 		t.Parallel()
 		s := readClaudeMD(t, assignmentCtx)
+		// MUL-6417: the section is fact-anchored, no prescriptive default.
+		// Pin each fact that invalidates a false reason to mention — losing
+		// any one of them re-opens the incident class it closed.
 		for _, want := range []string{
 			"side-effecting actions",
 			"enqueues a new run for that agent",
-			// MUL-5442 judgment rewrite: the two H3 subsections merged into one
-			// paragraph — pin the policy anchors, not the retired headings.
-			"Default: NO mention",
-			// Each warranted-case scope qualifier pinned separately — "not yet
-			// involved" and "for the first time" ARE the anti-repeat-notify
-			// scope, not decoration (review catch on #6453).
-			"restarts an agent-to-agent loop and costs the user money",
-			"Mention only when escalating to a human owner",
-			"not yet involved",
-			"for the first time",
-			"explicitly asks to loop someone in",
-			"end with no mention at all",
+			// Notifying FOLLOWERS is a false need: delivery already happens.
+			// Scoped to followers on purpose — for a non-follower, a mention
+			// IS how they find out (Elon's review catch on #7245).
+			"followers of the issue already see your comment",
+			"completion notifications are platform-owned",
+			// The one real function, with its scope.
+			"pulls someone into work they are not doing yet",
+			// The courtesy-loop fact (the incident class behind #1581/#6453).
+			"whose only possible reply is another courtesy",
+			// The asymmetry that breaks ambiguous cases toward not mentioning.
+			"a missed mention costs one follow-up ask, a stray one costs a run",
 			"Silence ends conversations",
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("Mentions section missing %q\n---\n%s", want, s)
+			}
+		}
+		// Neither the bare prescription (MUL-6417) nor the overreach that
+		// replaced it may come back: "never how someone finds out" was false
+		// for non-followers and suppressed legitimate human escalation.
+		for _, banned := range []string{"Default: NO mention", "never how someone finds out"} {
+			if strings.Contains(s, banned) {
+				t.Errorf("Mentions section carries retired wording %q\n---\n%s", banned, s)
 			}
 		}
 	})
@@ -5046,10 +5089,13 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		// back: "Decide whether a reply is warranted", "produced actual
 		// work", "pure acknowledgment / thanks / sign-off", "do NOT reply",
 		// "Silence is a valid and preferred way".
+		// MUL-6417 merged the reply-mode block into the shared steps: the
+		// unconditional one-comment contract now lives in step 4, and the
+		// mention-after-work bullet is gone with the block (the discipline
+		// itself stays in `## Mentions`, pinned by the Mentions subtest).
 		for _, want := range []string{
-			"Posting your reply as a comment is mandatory",
-			"Do any requested work first",
-			"Never @mention the agent you are replying to as a thank-you or sign-off",
+			"**Post your final results as a comment — this step is mandatory**",
+			"whose only possible reply is another courtesy",
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("comment-triggered CLAUDE.md missing %q", want)
@@ -5102,24 +5148,23 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	}
 	s := string(data)
 
-	// The comment-triggered workflow must contain the squad leader no_action
-	// rule, and the reply imperative must carry the no_action carve-out so a
-	// later bullet never contradicts it (MUL-5442 #6493 review).
+	// The no_action rule lives on the leader variant of workflow step 4 since
+	// MUL-6417 (the reply-mode block that used to duplicate it is gone): the
+	// delivery imperative itself carries the carve-out, so no later bullet
+	// can contradict it (MUL-5442 #6493 review).
 	for _, want := range []string{
-		"Squad leader rule",
-		"DO NOT post any comment",
+		"unless your outcome is `no_action`",
 		"multica squad activity",
-		"Unless your outcome is `no_action` (Squad leader rule above), posting your reply as a comment is mandatory",
+		"DO NOT post a comment announcing no_action",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
 		}
 	}
-	// Capital-P form = the ordinary unconditional bullet; the leader brief
-	// must carry only the carve-out variant (its lowercase "posting your
-	// reply as a comment is mandatory" tail is expected and legal).
-	if strings.Contains(s, "Posting your reply as a comment is mandatory") {
-		t.Errorf("squad leader CLAUDE.md still carries the unconditional reply bullet")
+	// The unconditional ordinary-agent imperative must not coexist with the
+	// carve-out variant.
+	if strings.Contains(s, "**Post your final results as a comment — this step is mandatory**") {
+		t.Errorf("squad leader CLAUDE.md still carries the unconditional delivery step")
 	}
 
 	// The Output section must use strong prohibition language.
@@ -5142,8 +5187,8 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 		t.Fatalf("read CLAUDE.md: %v", err)
 	}
 	s2 := string(data2)
-	if strings.Contains(s2, "Squad leader rule") {
-		t.Errorf("non-squad-leader CLAUDE.md should NOT contain squad leader rule")
+	if strings.Contains(s2, "unless your outcome is `no_action`") {
+		t.Errorf("non-squad-leader CLAUDE.md should NOT contain the leader no_action carve-out")
 	}
 }
 

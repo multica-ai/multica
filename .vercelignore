@@ -31,8 +31,11 @@ _features
 /e2e/
 /server/
 /apps/*
-!/apps/web/
-!/apps/docs/
+# Vercel checks directory entries without a trailing slash before descending.
+!/apps/web
+!/apps/web/**
+!/apps/docs
+!/apps/docs/**
 /scripts/
 
 *.log

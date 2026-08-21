@@ -4,6 +4,14 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# docker-compose.selfhost.yml requires JWT_SECRET (${JWT_SECRET:?...}) and
+# .env.example ships an empty value. Direct `docker compose config` calls in
+# this script let the calling environment outrank the env file, so one
+# throwaway export covers them. The make-driven recipes below additionally
+# include .env and bare-`export` it to the recipe environment, clobbering
+# this value, so run_recipe seeds it into the recipe .env as well.
+export JWT_SECRET=test-secret-for-config-test
+
 require_config() {
   local config=$1
   local expected=$2
@@ -258,6 +266,13 @@ run_recipe() {
   local target=$1 env_mutation=$2 shell_env=$3 make_args=$4
 
   cp "$recipe_dir/.env.example" "$recipe_dir/.env"
+  # The Makefile includes .env and bare-`export`s every variable to the
+  # recipe environment, which clobbers this script's JWT_SECRET with the
+  # empty value .env.example ships; docker-compose.selfhost.yml now refuses
+  # to interpolate an empty JWT_SECRET. Seed the throwaway value into the
+  # recipe .env so make, the stub, and Compose all see a usable secret.
+  sed "s/^JWT_SECRET=.*/JWT_SECRET=$JWT_SECRET/" "$recipe_dir/.env" >"$recipe_dir/.env.tmp"
+  mv "$recipe_dir/.env.tmp" "$recipe_dir/.env"
   if [ -n "$env_mutation" ]; then
     sed "$env_mutation" "$recipe_dir/.env" >"$recipe_dir/.env.tmp"
     mv "$recipe_dir/.env.tmp" "$recipe_dir/.env"

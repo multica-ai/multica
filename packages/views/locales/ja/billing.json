@@ -81,6 +81,10 @@
       "trialing": "トライアル中",
       "past_due": "支払い遅延",
       "canceled": "キャンセル済み",
+      "incomplete": "未完了",
+      "incomplete_expired": "設定期限切れ",
+      "paused": "一時停止中",
+      "unpaid": "未払い",
       "unknown": "不明なステータス"
     },
     "load_failed": {
@@ -89,6 +93,7 @@
     },
     "actions": {
       "retry": "再試行",
+      "retry_autopilots": "自動化の使用量を再取得",
       "upgrade": "Pro にアップグレード",
       "manage": "請求を管理",
       "refresh_seats": "席数を更新",
@@ -121,7 +126,23 @@
     },
     "past_due": {
       "title": "お支払い方法の確認が必要です",
-      "description": "Pro を継続するには Billing Portal でお支払い方法を更新してください。"
+      "description": "Billing Portal でお支払い方法を更新してください。上のプランバッジには現在利用できるアクセス権が表示されます。",
+      "grace_description": "Pro を継続するには {{date}} までにお支払い方法を更新してください。"
+    },
+    "subscription_notice": {
+      "canceling_title": "キャンセルが予定されています",
+      "canceling_description": "このサブスクリプションは {{date}} にキャンセルされる予定です。上のプランバッジには現在適用中のアクセス権が表示されます。",
+      "canceling_description_without_date": "このサブスクリプションは現在の期間終了時にキャンセルされる予定です。",
+      "incomplete_title": "サブスクリプション設定が未完了です",
+      "incomplete_description": "請求管理を開き、お支払い設定を完了または確認してください。",
+      "incomplete_expired_title": "サブスクリプション設定の期限が切れました",
+      "incomplete_expired_description": "以前のお支払い設定は Pro を有効化せず期限切れになりました。必要なときに再度アップグレードしてください。",
+      "paused_title": "サブスクリプションは一時停止中です",
+      "paused_description": "請求管理を開き、一時停止と再開方法を確認してください。",
+      "unpaid_title": "サブスクリプションは未払いです",
+      "unpaid_description": "請求管理を開き、未払い残高を解消してください。",
+      "canceled_title": "サブスクリプションはキャンセル済みです",
+      "canceled_description": "上のプランバッジは、このワークスペースに現在適用されているプランを示します。"
     },
     "read_only": {
       "title": "請求情報の閲覧のみ",
@@ -134,6 +155,8 @@
       "members": "ユーザー席",
       "members_description": "エージェントと保留中の招待は席数に含まれません。",
       "member_count_other": "{{count}}名",
+      "billing_interval": "請求期間",
+      "billing_interval_description": "有効なサブスクリプションに保存されている請求期間です。",
       "period_end": "現在の期間終了日",
       "period_end_description": "現在のサブスクリプション情報で報告された日付です。"
     },
@@ -159,19 +182,40 @@
     },
     "limits": {
       "title": "使用量と上限",
-      "description": "サーバーがまだ提供していない使用済み件数を 0 とせず、現在の上限のみ表示します。",
+      "description": "上限は現在の entitlement、自動化の使用量はサーバーのクォータ集計に基づきます。",
       "issues": "最近のタスク",
       "issues_description": "Free では最近アクティブなタスクを利用できます。Pro には件数制限がありません。",
       "autopilots": "成功した自動化",
       "autopilots_description": "Free の上限は UTC の暦月ごとにリセットされます。Pro は無制限です。",
       "unlimited": "無制限",
-      "per_month": "月 {{count}} 回"
+      "unavailable": "利用できません",
+      "per_month": "月 {{count}} 回",
+      "usage_loading": "自動化の使用量を読み込み中",
+      "usage_label": "自動化クォータの使用量",
+      "current_usage": "現在の使用量",
+      "reached": "上限に達しました",
+      "usage_total": "{{total}} / {{limit}}",
+      "usage_breakdown": "完了 {{used}} · 実行中 {{reserved}}",
+      "resets_at": "{{date}} にリセット",
+      "usage_unavailable": "使用量は一時的に利用できません"
     },
     "seats": {
       "title": "席数",
       "description": "現在のユーザーメンバーはそれぞれ Pro の 1 席として数えられます。エージェントと保留中の招待は含まれません。",
       "human_members": "現在のユーザーメンバー",
       "human_members_description": "メンバー変更後に更新すると、Cloud Billing が Stripe の quantity を照合します。",
+      "billed": "請求席数",
+      "billed_description": "Stripe 請求に現在保存されている席数です。",
+      "pending": "変更予定の席数",
+      "pending_description": "Cloud Billing が次の期間に対して報告した、より少ない席数です。",
+      "seat_count_other": "{{count}}席",
+      "pending_with_date_other": "{{date}} から {{count}}席",
+      "none_pending": "予定された変更はありません",
+      "not_subscribed": "有効なサブスクリプションはありません",
+      "unavailable": "利用できません",
+      "summary_loading": "サブスクリプションの席数詳細を読み込み中",
+      "summary_unavailable_title": "一部の席数詳細を利用できません",
+      "summary_unavailable_description": "現在のプランは表示できますが、請求席数と変更予定の席数を読み込めませんでした。",
       "updated": "席数を更新しました",
       "reconciled": "現在のメンバー: {{actual}} · 請求席数: {{billed}}"
     },

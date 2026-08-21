@@ -30,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/redact"
 	"github.com/multica-ai/multica/server/pkg/skillbundle"
@@ -1745,6 +1746,7 @@ func (h *Handler) ClaimTasksByRuntime(w http.ResponseWriter, r *http.Request) {
 		// the exact claim is requeued and omitted from this batch.
 		commentBackedTask := task.TriggerCommentID.Valid || len(task.CoalescedCommentIds) > 0
 		receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), task, db.CreateTaskTokenParams{
+			ID:          dbid.NewV7(),
 			TokenHash:   auth.HashToken(tokenStr),
 			TaskID:      task.ID,
 			AgentID:     task.AgentID,
@@ -1833,6 +1835,7 @@ func (h *Handler) failClaimedTaskBeforeLaunch(
 		failureReason.String(),
 		false,
 		"",
+		"",
 	); err != nil {
 		slog.Error("task claim: fail rejected task failed; requeueing claim",
 			"task_id", uuidToString(task.ID),
@@ -1893,6 +1896,25 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// not — because its absence is what tells an upgraded daemon it is talking
 	// to a server too old to have answered the question (MUL-5811).
 	resp.LeaderRoleResolved = true
+	// Agent-trigger plugin hooks, as tools. A failure here degrades to no
+	// tools rather than failing the claim: a plugin that cannot be listed must
+	// not stop an agent from working on the issue.
+	if h.PluginService != nil && h.pluginsV1Enabled(r.Context()) {
+		if tools, toolErr := h.PluginService.AgentHookTools(r.Context(), parseUUID(runtimeWorkspaceID)); toolErr != nil {
+			slog.Warn("plugins: could not list agent hook tools", "workspace_id", runtimeWorkspaceID, "error", toolErr)
+		} else {
+			resp.PluginHookTools = tools
+		}
+		// mcp-transport hooks ride the EXISTING broker: the connection shape is
+		// what validatePinnedRemoteMCPTools already reads, so an approved tool
+		// that went missing or whose schema drifted refuses at startup without
+		// any new enforcement code.
+		if connections, connErr := h.PluginService.AgentMCPConnections(r.Context(), parseUUID(runtimeWorkspaceID)); connErr != nil {
+			slog.Warn("plugins: could not list agent MCP connections", "workspace_id", runtimeWorkspaceID, "error", connErr)
+		} else if len(connections) > 0 {
+			resp.RemoteMCPConnections = append(resp.RemoteMCPConnections, connections...)
+		}
+	}
 	supportsCoalescedComments := requestHasClientCapability(r, protocol.DaemonCapabilityCoalescedCommentsV1)
 	// Empty-but-non-nil so pgx persists '{}' rather than NULL for tasks without
 	// comment input. Comment tasks replace this with the ids actually embedded
@@ -3212,6 +3234,7 @@ func (h *Handler) ClaimTaskByRuntime(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	receipt, ferr := h.TaskService.FinalizeTaskClaim(r.Context(), *task, db.CreateTaskTokenParams{
+		ID:          dbid.NewV7(),
 		TokenHash:   auth.HashToken(tokenStr),
 		TaskID:      task.ID,
 		AgentID:     task.AgentID,
@@ -3513,6 +3536,9 @@ type TaskCompleteRequest struct {
 	Output    string `json:"output"`
 	SessionID string `json:"session_id"` // Claude session ID for future resumption
 	WorkDir   string `json:"work_dir"`   // working directory used during execution
+	// DurableWorkDir is the configured project directory that replaces a
+	// disposable task worktree after the daemon confirms the worktree is gone.
+	DurableWorkDir string `json:"durable_work_dir,omitempty"`
 	// BranchName is the branch this run delivered its work on. Worktree-mode
 	// local_directory tasks never touch the user's working copy, so this is the
 	// only pointer to where the changes went. Empty for every other task kind.
@@ -3532,13 +3558,15 @@ type TaskCompleteRequest struct {
 // caller-supplied string on a terminal task callback. Both request types are
 // flat bags of strings, so this is exhaustive by construction — but that also
 // means a NEW string field must be added here, or it reopens GH #7098 through a
-// fresh door. The task-row columns these feed (error, work_dir, branch_name,
-// session_id) are all TEXT, and result is JSONB; neither tolerates a NUL.
+// fresh door. The task-row columns these feed (error, work_dir,
+// durable_work_dir, branch_name, session_id) are all TEXT, and result is
+// JSONB; neither tolerates a NUL.
 func sanitizeTaskCompleteRequest(req *TaskCompleteRequest) {
 	req.PRURL = util.SanitizeTextForPostgres(req.PRURL)
 	req.Output = util.SanitizeTextForPostgres(req.Output)
 	req.SessionID = util.SanitizeTextForPostgres(req.SessionID)
 	req.WorkDir = util.SanitizeTextForPostgres(req.WorkDir)
+	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
 }
@@ -3547,6 +3575,7 @@ func sanitizeTaskFailRequest(req *TaskFailRequest) {
 	req.Error = util.SanitizeTextForPostgres(req.Error)
 	req.SessionID = util.SanitizeTextForPostgres(req.SessionID)
 	req.WorkDir = util.SanitizeTextForPostgres(req.WorkDir)
+	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
 	req.RetiredSessionID = util.SanitizeTextForPostgres(req.RetiredSessionID)
@@ -3593,10 +3622,11 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 			"failure_reason", taskfailure.ReasonAgentContextOverflow,
 		)
 		h.failTask(w, r, taskID, workspaceID, TaskFailRequest{
-			Error:         req.Output,
-			FailureReason: string(taskfailure.ReasonAgentContextOverflow),
-			SessionID:     req.SessionID,
-			WorkDir:       req.WorkDir,
+			Error:          req.Output,
+			FailureReason:  string(taskfailure.ReasonAgentContextOverflow),
+			SessionID:      req.SessionID,
+			WorkDir:        req.WorkDir,
+			DurableWorkDir: req.DurableWorkDir,
 			// Carry the branch across the reroute. The run still delivered one:
 			// it ran out of context, it did not fail to produce anything, and
 			// dropping the name here would hide the work it did commit.
@@ -3612,7 +3642,7 @@ func (h *Handler) CompleteTask(w http.ResponseWriter, r *http.Request) {
 	// transaction (force session_id NULL + flag the row), so an auto-retry the
 	// same commit creates and wakes can never observe the withheld pointer or a
 	// missing continuity-gap flag.
-	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID)
+	task, err := h.TaskService.CompleteTask(r.Context(), parseUUID(taskID), result, req.SessionID, req.WorkDir, req.BranchName, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
 	if err != nil {
 		// A CompleteTask error is an infrastructure failure (transaction /
 		// assistant-outcome write), not a bad request: an already-finalized
@@ -4255,10 +4285,11 @@ func (h *Handler) GetTaskStatus(w http.ResponseWriter, r *http.Request) {
 
 // FailTask marks a running task as failed.
 type TaskFailRequest struct {
-	Error         string `json:"error"`
-	SessionID     string `json:"session_id,omitempty"`
-	WorkDir       string `json:"work_dir,omitempty"`
-	FailureReason string `json:"failure_reason,omitempty"`
+	Error          string `json:"error"`
+	SessionID      string `json:"session_id,omitempty"`
+	WorkDir        string `json:"work_dir,omitempty"`
+	DurableWorkDir string `json:"durable_work_dir,omitempty"`
+	FailureReason  string `json:"failure_reason,omitempty"`
 	// BranchName: a failed run can still have produced a branch — worktree mode
 	// commits whatever the agent left before tearing the worktree down. Report
 	// it so a partially-successful run is still findable.
@@ -4307,7 +4338,7 @@ func (h *Handler) failTask(w http.ResponseWriter, r *http.Request, taskID, works
 	// keep a stale mid-flight pin) and flagging the row in the same commit that
 	// creates and wakes the auto-retry, so the retry can never claim the withheld
 	// pointer or miss the continuity gap.
-	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID)
+	task, err := h.TaskService.FailTask(r.Context(), parseUUID(taskID), req.Error, req.SessionID, req.WorkDir, req.BranchName, req.FailureReason, req.SessionRolloutMissing, req.RetiredSessionID, req.DurableWorkDir)
 	if err != nil {
 		// A FailTask error is an infrastructure failure (the terminal
 		// transaction that also clears the withheld session, writes the
@@ -4456,6 +4487,9 @@ type TaskCancelAckRequest struct {
 	// the cancellation. The rest of the result is discarded on this path, so
 	// this is the only channel that can report where the work went.
 	BranchName string `json:"branch_name,omitempty"`
+	// DurableWorkDir is present only when Finalize confirmed the disposable
+	// worktree was removed and the configured project directory is authoritative.
+	DurableWorkDir string `json:"durable_work_dir,omitempty"`
 	// ErrorMessage / FailureReason: set when the cancelled run's worktree
 	// Finalize ABORTED — there is no branch, and the error text naming the
 	// preserved worktree is the only pointer left to the agent's work.
@@ -4480,6 +4514,7 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 	req.ErrorMessage = util.SanitizeTextForPostgres(req.ErrorMessage)
 	req.FailureReason = util.SanitizeTextForPostgres(req.FailureReason)
 	req.BranchName = util.SanitizeTextForPostgres(req.BranchName)
+	req.DurableWorkDir = util.SanitizeTextForPostgres(req.DurableWorkDir)
 
 	// Terminal deliveries first, failing LOUD on persistence errors: these
 	// fields are the only pointer to a cancelled task's work, and the daemon
@@ -4494,6 +4529,18 @@ func (h *Handler) AckTaskCancelled(w http.ResponseWriter, r *http.Request) {
 	// nothing for the daemon to retry — and the rebroadcast below is guarded
 	// by the same status check inside RebroadcastCancelledTask.
 	delivered := false
+	if durableWorkDir := strings.TrimSpace(req.DurableWorkDir); durableWorkDir != "" {
+		if err := h.Queries.SetAgentTaskDurableWorkDir(r.Context(), db.SetAgentTaskDurableWorkDirParams{
+			ID:             task.ID,
+			DurableWorkDir: pgtype.Text{String: durableWorkDir, Valid: true},
+		}); err != nil {
+			slog.Error("cancel ack: record durable work directory failed",
+				"task_id", taskID, "error", err)
+			writeError(w, http.StatusInternalServerError, "failed to record durable work directory")
+			return
+		}
+		delivered = true
+	}
 	if branch := strings.TrimSpace(req.BranchName); branch != "" {
 		if err := h.Queries.SetAgentTaskBranchName(r.Context(), db.SetAgentTaskBranchNameParams{
 			ID:         task.ID,

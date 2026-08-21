@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // originWecomChat is the issue.origin_type label written for issues created
@@ -294,6 +295,7 @@ func (a *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channe
 		instIDArg = instID
 	}
 	return a.store.Queries.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
+		ID:               dbid.NewV7(),
 		InstallationID:   instIDArg,
 		ChannelType:      channelTypeWecom,
 		ChannelChatID:    textOrNull(msg.Source.ChatID),

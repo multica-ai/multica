@@ -47,22 +47,6 @@ func backendResumeContinuityNotice(task Task) string {
 	return sessionContinuityNoticeFor(task)
 }
 
-// Turn-mode markers consumed by the runtime brief's mode router
-// (execenv.writeWorkflowIssue). The brief is byte-identical on every run and
-// therefore cannot say what triggered this turn; these lines do, and they are
-// emitted unconditionally from the same branches BuildPrompt uses to pick a
-// path, so the two can never disagree.
-//
-// Reply mode = respond to the triggering comment; the status arc opens only
-// when the turn does substantive work on an issue assigned to this agent
-// (MUL-6300). Ownership mode = an assignment/status change started this run;
-// own the status arc unconditionally. Applying the wrong one changes when
-// issue status moves.
-const (
-	turnModeReply     = "**Turn mode: Reply.** Follow the Reply-mode block in your runtime workflow file for this turn; the Ownership-mode status steps do not apply.\n\n"
-	turnModeOwnership = "**Turn mode: Ownership.** Follow the Ownership-mode block in your runtime workflow file for this turn; the Reply-mode rules do not apply.\n\n"
-)
-
 // perTurnContextBlocks renders the run-scoped context blocks that used to live
 // in the runtime brief (CLAUDE.md / AGENTS.md).
 //
@@ -158,7 +142,6 @@ func buildPromptBody(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	b.WriteString(turnModeOwnership)
 	// Assignment handoff (MUL-3375): a free-text instruction the person who
 	// assigned/promoted this issue left for you. Frame it as a handoff, not a
 	// comment to reply to — there is no comment thread to answer here.
@@ -285,13 +268,6 @@ func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	// Mode marker for the brief's router. Emitted unconditionally from the same
-	// branch that selects this code path, so the brief and the prompt can never
-	// disagree about which mode this turn is in. It must NOT be gated on
-	// TriggerCommentContent: an empty comment body (or an older server that
-	// doesn't send one) would otherwise leave the turn unlabelled, and the
-	// agent would fall through to Ownership mode and change the issue status.
-	b.WriteString(turnModeReply)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
 		if task.TriggerAuthorType == "system" {

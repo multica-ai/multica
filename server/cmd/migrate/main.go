@@ -28,6 +28,35 @@ import (
 // retries the hook + migration.
 type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 
+// migrationCondition decides whether a pending migration's SQL should execute.
+// A false result still records the migration as applied (or rolled back), which
+// lets one migration encode environment-specific DDL without blocking later
+// versions. Conditions must be read-only and idempotent; schema changes belong
+// in the migration file so they remain visible to review and rollback tooling.
+type migrationCondition func(ctx context.Context, conn *pgxpool.Conn) (apply bool, reason string, err error)
+
+// usableIndexRequirement describes the exact index shape that may replace a
+// fallback. Checking only extension or relation existence is unsafe: historical
+// pg_bigm migrations swallowed CREATE INDEX errors, and an interrupted
+// concurrent build can leave an INVALID relation with the expected name.
+type usableIndexRequirement struct {
+	IndexRegclass string
+	TableRegclass string
+	AccessMethod  string
+	OperatorClass string
+	Expression    string
+	Extension     string
+}
+
+var commentContentBigramIndex = usableIndexRequirement{
+	IndexRegclass: "public.idx_comment_content_bigm",
+	TableRegclass: "public.comment",
+	AccessMethod:  "gin",
+	OperatorClass: "gin_bigm_ops",
+	Expression:    "lower(content)",
+	Extension:     "pg_bigm",
+}
+
 // preMigrationHooks wires migration version → hook. The version key is
 // the file basename without the `.up.sql` suffix, matching what
 // `migrations.ExtractVersion` returns.
@@ -207,6 +236,8 @@ var concurrentIndexCleanups = map[string]string{
 	"357_webhook_delivery_replay_idempotency_index":             "uq_webhook_delivery_replay_idempotency",
 	"358_autopilot_quota_reservation_state_index":               "idx_autopilot_quota_reservation_state",
 	"361_issue_last_activity_index":                             "idx_issue_workspace_last_activity",
+	"363_plugin_invocation_installation_index":                  "idx_plugin_invocation_installation_created",
+	"364_plugin_invocation_created_at_index":                    "idx_plugin_invocation_created_at",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -225,6 +256,8 @@ var concurrentDownIndexCleanups = map[string]string{
 	"302_drop_redundant_channel_chat_session_binding_index": "idx_channel_chat_session_binding_session",
 	"303_drop_redundant_lark_chat_session_binding_index":    "idx_lark_chat_session_binding_session",
 	"312_drop_global_plugin_identity_key_index":             "idx_plugin_identity_key",
+	"371_comment_content_search_index_strategy":             "idx_comment_content_trgm",
+	"375_drop_issue_last_activity_index":                    "idx_issue_workspace_last_activity",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
@@ -246,6 +279,16 @@ var preRollbackHooks = func() map[string]preMigrationHook {
 	return hooks
 }()
 
+var upMigrationConditions = map[string]migrationCondition{
+	// Fresh databases that successfully built the CJK-friendly bigram index do
+	// not need to build the trigram fallback only to remove it at migration 371.
+	"140_comment_content_trgm_index": whenIndexNotUsable(commentContentBigramIndex),
+	// Existing pg_bigm deployments already have both indexes. Remove the
+	// fallback only after proving the preferred index has the exact usable shape;
+	// pg_bigm-less self-hosted databases keep trgm and record 371 as a no-op.
+	"371_comment_content_search_index_strategy": whenIndexUsable(commentContentBigramIndex),
+}
+
 func hooksForDirection(direction string) map[string]preMigrationHook {
 	switch direction {
 	case "up":
@@ -255,6 +298,98 @@ func hooksForDirection(direction string) map[string]preMigrationHook {
 	default:
 		return nil
 	}
+}
+
+func conditionsForDirection(direction string) map[string]migrationCondition {
+	if direction == "up" {
+		return upMigrationConditions
+	}
+	// Rollbacks intentionally ignore environment gates: they restore the
+	// portable pre-migration schema regardless of which up SQL actually ran.
+	return nil
+}
+
+func whenIndexUsable(requirement usableIndexRequirement) migrationCondition {
+	return func(ctx context.Context, conn *pgxpool.Conn) (bool, string, error) {
+		usable, err := indexIsUsable(ctx, conn, requirement)
+		if err != nil {
+			return false, "", err
+		}
+		if !usable {
+			return false, fmt.Sprintf("preferred index %s is unavailable or unusable", requirement.IndexRegclass), nil
+		}
+		return true, "", nil
+	}
+}
+
+func whenIndexNotUsable(requirement usableIndexRequirement) migrationCondition {
+	return func(ctx context.Context, conn *pgxpool.Conn) (bool, string, error) {
+		usable, err := indexIsUsable(ctx, conn, requirement)
+		if err != nil {
+			return false, "", err
+		}
+		if usable {
+			return false, fmt.Sprintf("preferred index %s is ready", requirement.IndexRegclass), nil
+		}
+		return true, "", nil
+	}
+}
+
+// indexIsUsable fails closed: every property needed by the search query must
+// match before a fallback index may be skipped or removed. In particular, the
+// preferred relation must be a live, ready, valid, non-partial GIN expression
+// index owned by the expected extension. A same-named stale or drifted index is
+// treated as unusable, preserving the fallback.
+func indexIsUsable(ctx context.Context, conn *pgxpool.Conn, requirement usableIndexRequirement) (bool, error) {
+	var usable bool
+	err := conn.QueryRow(ctx, `
+		SELECT COALESCE(
+			idx.relkind = 'i'
+			AND i.indisvalid
+			AND i.indisready
+			AND i.indislive
+			AND NOT i.indisunique
+			AND i.indpred IS NULL
+			AND i.indexprs IS NOT NULL
+			AND i.indrelid = to_regclass($2)
+			AND i.indnkeyatts = 1
+			AND i.indnatts = 1
+			AND am.amname = $3
+			AND opc.opcname = $4
+			AND pg_get_indexdef(i.indexrelid, 1, FALSE) = $5
+			AND EXISTS (
+				SELECT 1
+				FROM pg_depend dep
+				JOIN pg_extension ext ON ext.oid = dep.refobjid
+				WHERE dep.classid = 'pg_opclass'::regclass
+				  AND dep.objid = opc.oid
+				  AND dep.refclassid = 'pg_extension'::regclass
+				  AND dep.deptype = 'e'
+				  AND ext.extname = $6
+			),
+			FALSE
+		)
+		FROM pg_class idx
+		LEFT JOIN pg_index i ON i.indexrelid = idx.oid
+		LEFT JOIN pg_am am ON am.oid = idx.relam
+		-- pg_index.indclass is an int2vector, whose subscripts start at zero.
+		LEFT JOIN pg_opclass opc ON opc.oid = i.indclass[0]
+		WHERE idx.oid = to_regclass($1)
+	`,
+		requirement.IndexRegclass,
+		requirement.TableRegclass,
+		requirement.AccessMethod,
+		requirement.OperatorClass,
+		requirement.Expression,
+		requirement.Extension,
+	).Scan(&usable)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect preferred index %q: %w", requirement.IndexRegclass, err)
+	}
+	return usable, nil
 }
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an
@@ -372,6 +507,11 @@ type runOptions struct {
 	// passes the direction-specific hook map; tests leave this nil unless they
 	// exercise a hook.
 	Hooks map[string]preMigrationHook
+	// Conditions maps migration version → a read-only gate that decides
+	// whether the SQL file should execute. A false result still advances the
+	// migration ledger, allowing later migrations to run in environments where
+	// this version's DDL is intentionally unnecessary.
+	Conditions map[string]migrationCondition
 }
 
 func main() {
@@ -413,9 +553,10 @@ func main() {
 	}
 
 	if err := runMigrations(ctx, pool, runOptions{
-		Direction: direction,
-		Files:     files,
-		Hooks:     hooksForDirection(direction),
+		Direction:  direction,
+		Files:      files,
+		Hooks:      hooksForDirection(direction),
+		Conditions: conditionsForDirection(direction),
 	}); err != nil {
 		slog.Error("migration run failed", "error", err)
 		os.Exit(1)
@@ -540,8 +681,19 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 			}
 		}
 
-		if _, err := conn.Exec(ctx, string(sql)); err != nil {
-			return fmt.Errorf("apply migration %q: %w", file, err)
+		applySQL := true
+		conditionReason := ""
+		if condition, ok := opts.Conditions[version]; ok && condition != nil {
+			applySQL, conditionReason, err = condition(ctx, conn)
+			if err != nil {
+				return fmt.Errorf("evaluate migration condition for %q (%s): %w", version, opts.Direction, err)
+			}
+		}
+
+		if applySQL {
+			if _, err := conn.Exec(ctx, string(sql)); err != nil {
+				return fmt.Errorf("apply migration %q: %w", file, err)
+			}
 		}
 
 		if opts.Direction == "up" {
@@ -553,7 +705,11 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 			return fmt.Errorf("record migration %q: %w", version, err)
 		}
 
-		fmt.Printf("  %s  %s\n", opts.Direction, version)
+		if applySQL {
+			fmt.Printf("  %s  %s\n", opts.Direction, version)
+		} else {
+			fmt.Printf("  %s  %s (SQL skipped: %s)\n", opts.Direction, version, conditionReason)
+		}
 	}
 
 	return nil

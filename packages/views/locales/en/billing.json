@@ -81,6 +81,10 @@
       "trialing": "Trialing",
       "past_due": "Past due",
       "canceled": "Canceled",
+      "incomplete": "Incomplete",
+      "incomplete_expired": "Setup expired",
+      "paused": "Paused",
+      "unpaid": "Unpaid",
       "unknown": "Unknown status"
     },
     "load_failed": {
@@ -89,6 +93,7 @@
     },
     "actions": {
       "retry": "Retry",
+      "retry_autopilots": "Retry automation usage",
       "upgrade": "Upgrade to Pro",
       "manage": "Manage billing",
       "refresh_seats": "Refresh seats",
@@ -121,7 +126,23 @@
     },
     "past_due": {
       "title": "Payment needs attention",
-      "description": "Open the Billing Portal to update your payment method and keep Pro access."
+      "description": "Open the Billing Portal to update your payment method. The plan badge above shows the access currently available.",
+      "grace_description": "Update your payment method by {{date}} to keep Pro access."
+    },
+    "subscription_notice": {
+      "canceling_title": "Cancellation is scheduled",
+      "canceling_description": "This subscription is scheduled to cancel on {{date}}. The plan badge above shows the access currently enforced.",
+      "canceling_description_without_date": "This subscription is scheduled to cancel at the end of its current period.",
+      "incomplete_title": "Subscription setup is incomplete",
+      "incomplete_description": "Open billing management to finish or review the payment setup.",
+      "incomplete_expired_title": "Subscription setup expired",
+      "incomplete_expired_description": "The previous payment setup expired without activating Pro. Start a new upgrade when ready.",
+      "paused_title": "Subscription is paused",
+      "paused_description": "Open billing management to review the pause and available recovery options.",
+      "unpaid_title": "Subscription is unpaid",
+      "unpaid_description": "Open billing management to resolve the unpaid balance.",
+      "canceled_title": "Subscription is canceled",
+      "canceled_description": "The entitlement badge above shows the plan currently enforced for this workspace."
     },
     "read_only": {
       "title": "Read-only billing access",
@@ -135,6 +156,8 @@
       "members_description": "Agents and pending invitations are not counted as seats.",
       "member_count_one": "{{count}} member",
       "member_count_other": "{{count}} members",
+      "billing_interval": "Billing interval",
+      "billing_interval_description": "The interval stored for the active subscription.",
       "period_end": "Current period ends",
       "period_end_description": "The date reported by the current subscription snapshot."
     },
@@ -161,19 +184,42 @@
     },
     "limits": {
       "title": "Usage and limits",
-      "description": "Current limits are shown without inventing usage totals the server does not provide yet.",
+      "description": "Limits come from the current entitlement. Automation usage comes from server quota accounting.",
       "issues": "Recent tasks",
       "issues_description": "Free keeps the most recently active tasks available. Pro has no window limit.",
       "autopilots": "Successful automations",
       "autopilots_description": "The Free allowance resets each UTC calendar month. Pro is unlimited.",
       "unlimited": "Unlimited",
-      "per_month": "{{count}} / month"
+      "unavailable": "Unavailable",
+      "per_month": "{{count}} / month",
+      "usage_loading": "Loading automation usage",
+      "usage_label": "Automation quota usage",
+      "current_usage": "Current usage",
+      "reached": "Limit reached",
+      "usage_total": "{{total}} / {{limit}}",
+      "usage_breakdown": "{{used}} completed · {{reserved}} in progress",
+      "resets_at": "Resets {{date}}",
+      "usage_unavailable": "Usage is temporarily unavailable"
     },
     "seats": {
       "title": "Seats",
       "description": "Every current human member counts as a Pro seat. Agents and pending invitations do not.",
       "human_members": "Current human members",
       "human_members_description": "Refresh after membership changes to ask cloud billing to reconcile Stripe quantity.",
+      "billed": "Billed seats",
+      "billed_description": "The seat quantity currently persisted for Stripe billing.",
+      "pending": "Scheduled seat quantity",
+      "pending_description": "A lower quantity that cloud billing reports for the next period.",
+      "seat_count_one": "{{count}} seat",
+      "seat_count_other": "{{count}} seats",
+      "pending_with_date_one": "{{count}} seat from {{date}}",
+      "pending_with_date_other": "{{count}} seats from {{date}}",
+      "none_pending": "No scheduled change",
+      "not_subscribed": "No active subscription",
+      "unavailable": "Unavailable",
+      "summary_loading": "Loading subscription seat details",
+      "summary_unavailable_title": "Some seat details are unavailable",
+      "summary_unavailable_description": "The current plan is still shown, but billed and scheduled seat quantities could not be loaded.",
       "updated": "Seats refreshed",
       "reconciled": "Current members: {{actual}} · billed seats: {{billed}}"
     },

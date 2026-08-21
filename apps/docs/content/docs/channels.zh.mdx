@@ -1,37 +1,40 @@
 ---
 title: 聊天集成
-description: 把 Multica 智能体接入飞书、Lark、Slack、钉钉或企业微信，在团队已有的聊天工具中使用。
+description: 把 Multica 智能体接入飞书、Lark、Slack、钉钉、企业微信或 Telegram，在团队已有的聊天工具中使用。
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 聊天集成让团队不用打开 Multica，也能直接向智能体提问、在群聊中 @它，或从聊天窗口创建 issue。
 
-目前支持飞书/Lark、Slack、钉钉和企业微信。它们使用相同的会话、身份和执行机制，但安装方式不同。
+目前支持飞书/Lark、Slack、钉钉、企业微信和 Telegram。它们使用相同的会话、身份和执行机制，但安装方式不同。
 
 ## 选择平台
 
-| | 飞书 / Lark | Slack | 钉钉 | 企业微信 |
-|---|---|---|---|---|
-| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica | 在企业微信管理后台创建智能机器人并开启长连接，再把 Bot ID 与 Secret 填入 Multica |
-| 私聊智能体 | 支持 | 支持 | 支持 | 支持 |
-| 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 |
-| 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 |
-| 连接方式 | 平台长连接 | Socket Mode | Stream 模式 | 平台长连接 |
+| | 飞书 / Lark | Slack | 钉钉 | 企业微信 | Telegram |
+|---|---|---|---|---|---|
+| 安装方式 | 在 Multica 中生成二维码，用飞书扫码授权 | 在 Slack 创建 app，再把两个 token 填入 Multica | 创建企业内部应用和 Stream 模式机器人，再把 AppKey 与 AppSecret 填入 Multica | 在企业微信管理后台创建智能机器人并开启长连接，再把 Bot ID 与 Secret 填入 Multica | 用 @BotFather 创建 Bot，再把 token 填入 Multica |
+| 私聊智能体 | 支持 | 支持 | 支持 | 支持 | 支持 |
+| 群聊或频道 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 后触发 | @ Bot 或回复 Bot 后触发 |
+| 创建 issue | `/issue` 消息命令，按输入直接创建 | `/issue` slash 命令，智能体整理描述后创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 | `/issue` 消息命令，按输入直接创建 |
+| 连接方式 | 平台长连接 | Socket Mode | Stream 模式 | 平台长连接 | `getUpdates` 长轮询 |
 
 新连接目前只开放中国大陆版飞书；已有的国际版 Lark 连接仍可继续使用和管理。
 
 每个 Bot 绑定一个 Multica 智能体。需要在同一个聊天平台中使用多个智能体时，要分别连接多个 Bot。
 
-钉钉和企业微信由社区维护：随每个版本发布，但没有官方支持 SLA。遇到问题请提交 [GitHub issue](https://github.com/multica-ai/multica/issues)。
+钉钉、企业微信和 Telegram [由社区维护](/community-maintained)：随每个版本发布，但没有官方支持 SLA。遇到问题请提交 [GitHub issue](https://github.com/multica-ai/multica/issues)。
 
 企业微信目前只处理文字消息。语音、图片和文件消息会收到一句说明，不会转交给智能体。
+
+Telegram 目前只处理文字消息。不支持的媒体消息会收到一句说明，不会转交给智能体。
 
 详细步骤：
 
 - [飞书 / Lark Bot 接入](/lark-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
+- [Telegram Bot 接入](/telegram-bot-integration)
 
 ## 消息的执行流程
 
@@ -51,6 +54,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 - Slack 私聊按频道区分；频道中的每个 thread 分别保存一段会话。
 - 钉钉按 conversation 区分会话；每个单聊或群聊分别延续自己的会话。
 - 企业微信按聊天区分会话；每个单聊或群聊分别延续自己的会话。
+- Telegram 按聊天区分会话；forum 的每个 topic 分别隔离。
 
 在频道中继续追问时仍需再次 @ Bot。智能体只收到发给自己的消息，不会自动读取整个频道的历史。
 
@@ -79,6 +83,7 @@ MULTICA_LARK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_SLACK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_DINGTALK_SECRET_KEY=<base64 编码的 32 字节密钥>
 MULTICA_WECOM_SECRET_KEY=<base64 编码的 32 字节密钥>
+MULTICA_TELEGRAM_SECRET_KEY=<base64 编码的 32 字节密钥>
 ```
 
 这些密钥用于加密保存 Bot 凭据。生成、保存和轮换方法见[环境变量](/environment-variables)。Multica Cloud 已完成这项配置。
@@ -90,4 +95,5 @@ MULTICA_WECOM_SECRET_KEY=<base64 编码的 32 字节密钥>
 - [飞书 / Lark Bot 接入](/lark-bot-integration)
 - [Slack Bot 接入](/slack-bot-integration)
 - [钉钉 Bot 接入](/dingtalk-bot-integration)
+- [Telegram Bot 接入](/telegram-bot-integration)
 - [与智能体对话](/chat)

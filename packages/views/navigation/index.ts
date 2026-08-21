@@ -3,6 +3,7 @@ export {
   useNavigation,
   useOptionalNavigation,
   useIsNavigating,
+  useReportNavigating,
 } from "./context";
 export { AppLink } from "./app-link";
 export { resolveClickIntent } from "./click-intent";

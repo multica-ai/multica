@@ -73,6 +73,8 @@ import { Skeleton } from "@multica/ui/components/ui/skeleton";
 import { cn } from "@multica/ui/lib/utils";
 import { ApiError } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
+import { useIssueStatuses } from "@multica/core/issue-statuses/hooks";
+import { useModalStore } from "@multica/core/modals";
 import {
   issueKeys,
   issueTableGroupsOptions,
@@ -117,6 +119,7 @@ import {
   useQueryClient,
   type UseQueryResult,
 } from "@tanstack/react-query";
+import { runConfirmIntent } from "../actions/run-confirm-gate";
 import { ActorAvatar } from "../../common/actor-avatar";
 import { LabelChip } from "../../labels/label-chip";
 import { resolveClickIntent, useIntentNavigate } from "../../navigation";
@@ -933,7 +936,9 @@ type TableViewMeta = {
    *  remounts and freezes the table structure while it is up. */
   editingCellKey: string | null;
   setEditingCellKey: (key: string | null) => void;
-  updateIssue: (issueId: string, updates: Partial<UpdateIssueRequest>) => void;
+  /** Takes the ISSUE, not its id: the run-confirm gate reads its status
+   *  category and owner to decide whether the write needs confirming first. */
+  updateIssue: (issue: Issue, updates: Partial<UpdateIssueRequest>) => void;
   openIssue: (issue: Issue, event?: React.MouseEvent) => void;
   createSubIssue: (issue: Issue) => void;
   toggleTableParentCollapsed: (issueId: string) => void;
@@ -1108,7 +1113,7 @@ function IssueTableBodyCell({
   const setEditorOpen = (open: boolean) =>
     meta.setEditingCellKey(open ? cellKey : null);
   const onUpdate = (updates: Partial<UpdateIssueRequest>) =>
-    meta.updateIssue(issue.id, updates);
+    meta.updateIssue(issue, updates);
 
   const propertyId = propertyIdFromViewKey(key);
   if (propertyId) {
@@ -1281,6 +1286,8 @@ export function TableView({
   const { t } = useT("issues");
   const wsId = useWorkspaceId();
   const resolveStatusLabel = useStatusLabel(wsId);
+  const { entryOf } = useIssueStatuses(wsId);
+  const openModal = useModalStore((s) => s.open);
   const queryClient = useQueryClient();
   const intentNavigate = useIntentNavigate();
   const paths = useWorkspacePaths();
@@ -2092,10 +2099,20 @@ export function TableView({
     [propertyById, t],
   );
 
+  // Inline row edits are single-issue writes like the picker in the issue
+  // detail or the right-click menu, so they route on the same gate: a status
+  // change that promotes an agent-owned issue out of the backlog category
+  // starts a run, and must confirm rather than fire from one click (MUL-6463).
   const updateIssue = useCallback(
-    (issueId: string, updates: Partial<UpdateIssueRequest>) =>
-      actions?.updateIssue(issueId, updates),
-    [actions],
+    (issue: Issue, updates: Partial<UpdateIssueRequest>) => {
+      const intent = runConfirmIntent(issue, updates, { entryOf });
+      if (intent) {
+        openModal("issue-run-confirm", intent);
+        return;
+      }
+      actions?.updateIssue(issue.id, updates);
+    },
+    [actions, entryOf, openModal],
   );
 
   const openIssue = useCallback(

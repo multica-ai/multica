@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { Issue } from "@multica/core/types";
+import type { AgentTask, Issue } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../../locales/en/common.json";
 import enIssues from "../../../locales/en/issues.json";
@@ -106,8 +106,27 @@ vi.mock("../../../navigation", () => ({
   }),
 }));
 
+const { toastSuccessMock } = vi.hoisted(() => ({
+  toastSuccessMock: vi.fn(),
+}));
+
 vi.mock("sonner", () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
+  toast: { success: toastSuccessMock, error: vi.fn() },
+}));
+
+const { apiMocks, copyTextMock } = vi.hoisted(() => ({
+  apiMocks: {
+    listTasksByIssue: vi.fn(),
+  },
+  copyTextMock: vi.fn(),
+}));
+
+vi.mock("@multica/core/api", () => ({
+  api: apiMocks,
+}));
+
+vi.mock("@multica/ui/lib/clipboard", () => ({
+  copyText: copyTextMock,
 }));
 
 vi.mock("../../../common/actor-avatar", () => ({
@@ -120,6 +139,8 @@ import {
   IssueActionsContextMenu,
   IssueContextMenuProvider,
 } from "../issue-actions-context-menu";
+
+const listTasksByIssueMock = apiMocks.listTasksByIssue;
 
 const mockIssue: Issue = {
   id: "issue-1",
@@ -158,6 +179,11 @@ beforeEach(() => {
   openInNewTabMock.mockReset();
   getShareableUrlMock.mockClear();
   navState.hasOpenInNewTab = true;
+  copyTextMock.mockReset();
+  copyTextMock.mockResolvedValue(true);
+  toastSuccessMock.mockReset();
+  listTasksByIssueMock.mockReset();
+  listTasksByIssueMock.mockResolvedValue([]);
 });
 
 describe("IssueActionsDropdown", () => {
@@ -265,6 +291,67 @@ describe("IssueActionsDropdown", () => {
       issueId: "issue-1",
       identifier: "TES-1",
       onDeletedFallbackPath: "/test/issues",
+    });
+  });
+
+  it("copies the durable local project path for a worktree task", async () => {
+    listTasksByIssueMock.mockResolvedValue([
+      {
+        status: "completed",
+        created_at: "2026-08-18T10:00:00Z",
+        work_dir: "/managed/task/worktree",
+        durable_work_dir: "/Users/dev/project",
+        branch_name: "agent/j/abc12345",
+      } as AgentTask,
+    ]);
+
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    fireEvent.click(await screen.findByText("Copy project directory path"));
+
+    await waitFor(() => {
+      expect(copyTextMock).toHaveBeenCalledWith("/Users/dev/project");
+      expect(toastSuccessMock).toHaveBeenCalledWith(
+        "Project directory path copied — work is on agent/j/abc12345",
+      );
+    });
+  });
+
+  it("keeps a live task on its actual workdir", async () => {
+    listTasksByIssueMock.mockResolvedValue([
+      {
+        status: "running",
+        created_at: "2026-08-18T10:00:00Z",
+        work_dir: "/managed/task/worktree",
+        durable_work_dir: "/Users/dev/project",
+      } as AgentTask,
+    ]);
+
+    render(
+      wrap(
+        <IssueActionsDropdown
+          issue={mockIssue}
+          trigger={<button data-testid="trigger">Menu</button>}
+        />,
+      ),
+    );
+
+    fireEvent.click(screen.getByTestId("trigger"));
+    await waitFor(() => {
+      expect(listTasksByIssueMock).toHaveBeenCalledWith("issue-1");
+    });
+    fireEvent.click(await screen.findByText("Copy local workdir path"));
+
+    await waitFor(() => {
+      expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
     });
   });
 });

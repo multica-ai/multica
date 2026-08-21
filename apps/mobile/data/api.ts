@@ -45,6 +45,7 @@ import type {
   RuntimeDevice,
   SearchIssuesResponse,
   SearchProjectsResponse,
+  ListIssueStatusesResponse,
   SendChatMessageResponse,
   Squad,
   NotificationPreferenceResponse,
@@ -58,10 +59,12 @@ import type {
   Workspace,
 } from "@multica/core/types";
 import {
+  EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
   EMPTY_LIST_ISSUES_RESPONSE,
   EMPTY_TIMELINE_ENTRIES,
   IssueSchema,
   ListIssuesResponseSchema,
+  ListIssueStatusesResponseSchema,
   TimelineEntriesSchema,
 } from "@multica/core/api/schemas";
 import {
@@ -864,6 +867,32 @@ class ApiClient {
     return this.fetch<IssueLabelsResponse>(
       `/api/issues/${issueId}/labels/${labelId}`,
       { method: "DELETE" },
+    );
+  }
+
+  // --- Issue status catalog (MUL-6243) ---
+  /**
+   * The workspace's issue statuses — the 7 built-ins plus any custom ones an
+   * admin defined. Reads are open to every workspace member; the catalog
+   * mutations are owner/admin only and live on web's settings screen, which is
+   * why mobile ships the read alone.
+   *
+   * `include_archived` is on by design. Archiving retires a status from FUTURE
+   * assignment but leaves the issues already on it, and those issues must keep
+   * their real name, colour and category — dropping archived rows here would
+   * degrade them to a raw key with a guessed category. Pickers filter them out
+   * via `IssueStatusCatalog.activeStatuses` instead.
+   */
+  async listIssueStatuses(
+    includeArchived = false,
+    opts?: { signal?: AbortSignal },
+  ): Promise<ListIssueStatusesResponse> {
+    const query = includeArchived ? "?include_archived=true" : "";
+    return this.fetchValidated(
+      `/api/issue-statuses${query}`,
+      ListIssueStatusesResponseSchema,
+      EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+      { ...opts, endpoint: "GET /api/issue-statuses" },
     );
   }
 

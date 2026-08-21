@@ -29,6 +29,7 @@ jobs:
       frontend: ${{ steps.decide.outputs.frontend }}
       backend: ${{ steps.decide.outputs.backend }}
       sqlc: ${{ steps.decide.outputs.sqlc }}
+      images: ${{ steps.filter.outputs.images }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -101,6 +102,9 @@ jobs:
               - 'scripts/helm-config.test.sh'
               - 'scripts/test-go.sh'
               - 'scripts/test-go.test.sh'
+              # makefile-build.test.sh asserts how `make build` names its
+              # output binaries, so a change to either side must run it.
+              - 'scripts/makefile-build.test.sh'
               - 'Makefile'
               - '.github/workflows/ci.yml'
             sqlc:
@@ -110,6 +114,19 @@ jobs:
               - 'server/sqlc.yaml'
               - 'Makefile'
               - '.github/workflows/ci.yml'
+            # Gates the image-budget job so the full-history checkout it
+            # needs is only paid for on PRs that actually touch a bitmap.
+            images:
+              - '**/*.png'
+              - '**/*.jpg'
+              - '**/*.jpeg'
+              - '**/*.gif'
+              - '**/*.bmp'
+              - '**/*.tif'
+              - '**/*.tiff'
+              - '**/*.webp'
+              - '**/*.avif'
+              - 'scripts/check-image-budget.mjs'
 
       - name: Decide
         id: decide
@@ -485,6 +502,10 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/helm-config.test.sh
 
+      - name: Test build output naming
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: bash scripts/makefile-build.test.sh
+
       - name: Build
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go build ./...
@@ -703,6 +724,27 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         run: go build ./cmd/multica
+
+  image-budget:
+    # Soft gate against the 21.7MB of raw PNG/JPG that MUL-6352 cleared out:
+    # a bitmap added or grown past 300KB fails until the PR description says
+    # why. Pull requests only — a push to main has no description to read,
+    # and the branch it came from was already checked.
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.images == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # The check diffs against the base branch, which a shallow
+          # clone does not contain.
+          fetch-depth: 0
+
+      - name: Check image budget
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/check-image-budget.mjs --base "origin/${{ github.base_ref }}"
 
   installer:
     # Stub-driven shell tests for scripts/install.sh and scripts/install.ps1.

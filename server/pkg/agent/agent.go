@@ -243,7 +243,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim)
 	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
@@ -320,6 +320,7 @@ var SupportedTypes = []string{
 	"qwen",
 	"qwenpaw",
 	"mcode",
+	"dim",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -402,6 +403,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &reasonixBackend{cfg: cfg}, nil
 	case "dsh":
 		return &dshBackend{cfg: cfg}, nil
+	case "dim":
+		return &dimBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
 	case "antigravity":
@@ -461,6 +464,7 @@ var launchHeaders = map[string]string{
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
+	"dim":         "dim acp",
 	"mcode":       "mcode acp",
 }
 

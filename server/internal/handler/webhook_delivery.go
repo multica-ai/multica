@@ -14,6 +14,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // ── Response types ──────────────────────────────────────────────────────────
@@ -308,6 +309,7 @@ func (h *Handler) ReplayAutopilotDelivery(w http.ResponseWriter, r *http.Request
 		contentType = original.ContentType.String
 	}
 	replay, err := h.Queries.CreateWebhookDelivery(r.Context(), db.CreateWebhookDeliveryParams{
+		ID:                     dbid.NewV7(),
 		WorkspaceID:            autopilot.WorkspaceID,
 		AutopilotID:            autopilot.ID,
 		TriggerID:              original.TriggerID,

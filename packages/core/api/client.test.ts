@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY } from "./client";
+import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
 import { EMPTY_PLUGIN_PREVIEW } from "./schemas";
 
 afterEach(() => {
@@ -2290,5 +2290,30 @@ describe("ApiClient workspace MCP servers", () => {
     [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/agents/agent-1/mcp-servers/srv-1");
     expect(init.method).toBe("DELETE");
+  });
+});
+
+describe("clientErrorMessage", () => {
+  it("returns a 4xx message, which handlers write for the user", () => {
+    expect(clientErrorMessage(new ApiError("autopilot is not active", 400, "Bad Request")))
+      .toBe("autopilot is not active");
+    expect(clientErrorMessage(new ApiError("forbidden", 403, "Forbidden"))).toBe("forbidden");
+  });
+
+  it("withholds a 5xx message, which carries internal server detail", () => {
+    // MUL-6472: the pre-fix body for a failed autopilot trigger looked like
+    // this, and it was rendered verbatim in the run-now toast.
+    const leaky = new ApiError(
+      'failed to trigger autopilot: create run: ERROR: duplicate key value violates unique constraint "autopilot_run_pkey" (SQLSTATE 23505)',
+      500,
+      "Internal Server Error",
+    );
+    expect(clientErrorMessage(leaky)).toBeUndefined();
+    expect(clientErrorMessage(new ApiError("internal error", 503, "Service Unavailable"))).toBeUndefined();
+  });
+
+  it("withholds a transport failure, whose message says nothing actionable", () => {
+    expect(clientErrorMessage(new TypeError("Failed to fetch"))).toBeUndefined();
+    expect(clientErrorMessage(undefined)).toBeUndefined();
   });
 });

@@ -329,13 +329,22 @@ func TestPluginInstallRejectsMalformedManifest(t *testing.T) {
 func TestPluginInstallRejectsUnshippedCapabilities(t *testing.T) {
 	withPluginsV1Flag(t, testHandler, true)
 	cleanupPluginInstallations(t)
-	// A hook is the contribution kind the host genuinely cannot run yet, so this
-	// exercises the real shipped gate rather than a capability that happens to be
-	// off today. Written against a still-gated kind on purpose: asserting on a
-	// SHIPPED one turns every future capability flip into a test failure that
-	// says nothing about the gate itself.
+	// Tests the WIRING — that install consults the capability gate and refuses
+	// what the host cannot run — against an explicitly narrowed host set rather
+	// than against whatever HostCapabilities happens to contain today.
+	//
+	// The earlier version picked a contribution kind that was unshipped at the
+	// time, so shipping it turned this red with a message about the flip instead
+	// of about the gate. It also had a shelf life: once every kind ships there
+	// is nothing left to write such a fixture against. Narrowing the host here
+	// keeps the assertion true for good.
 	source := withLocalPluginSource(t, hookOnlyTestManifest)
-	testHandler.PluginService.Host = plugincontract.HostCapabilities()
+	testHandler.PluginService.Host = plugincontract.Capabilities{
+		SurfaceTypes:  map[string]bool{plugincontract.SurfaceIssuePanel: true},
+		HookTriggers:  map[string]bool{},
+		HookTransport: map[string]bool{},
+		ResourceTypes: map[string]bool{},
+	}
 
 	body, _ := json.Marshal(map[string]any{
 		"source_url":     source,
@@ -351,6 +360,28 @@ func TestPluginInstallRejectsUnshippedCapabilities(t *testing.T) {
 	// fire.
 	if !strings.Contains(recorder.Body.String(), "hook trigger") {
 		t.Fatalf("error does not name the missing capability: %s", recorder.Body.String())
+	}
+}
+
+// The gate must also let through what the host DOES ship, read from the real
+// set. Together with the test above this pins both directions: nothing
+// unrunnable installs, and nothing runnable is refused.
+func TestPluginInstallAcceptsEveryCapabilityThisHostShips(t *testing.T) {
+	withPluginsV1Flag(t, testHandler, true)
+	cleanupPluginInstallations(t)
+	source := withLocalPluginSource(t, hookOnlyTestManifest)
+	testHandler.PluginService.Host = plugincontract.HostCapabilities()
+
+	body, _ := json.Marshal(map[string]any{
+		"source_url":     source,
+		"granted_scopes": []string{"issues:read", "net:example.com"},
+	})
+	recorder := httptest.NewRecorder()
+	testHandler.InstallPlugin(recorder, pluginHandlerRequest(http.MethodPost, "/plugins", body, map[string]string{"id": testWorkspaceID}))
+	// hookOnlyTestManifest declares ui + http, both shipped by the hook engine.
+	// If this starts failing, the gate is refusing something the host can run.
+	if recorder.Code != http.StatusCreated {
+		t.Fatalf("a manifest declaring only shipped capabilities was refused: status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 

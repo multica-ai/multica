@@ -254,6 +254,14 @@ func ListModels(ctx context.Context, providerType string, runtimeCmd Command) (C
 		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
 			return discoverGrokModels(ctx, runtimeCmd)
 		})
+	case "dim":
+		// Dim (dimcode) is ACP-native (`dim acp`); its model catalog is
+		// advertised by session/new under models.availableModels. Enumeration
+		// requires a logged-in dim (OAuth); on any failure fall back to an
+		// empty catalog so the UI keeps manual entry available.
+		return cachedDiscovery(discoveryCacheKey(providerType, runtimeCmd), func() (Catalog, error) {
+			return discoverDimModels(ctx, runtimeCmd)
+		})
 	default:
 		return Catalog{}, fmt.Errorf("unknown agent type: %q", providerType)
 	}
@@ -2565,4 +2573,24 @@ func codebuddyStaticModels() []Model {
 		{ID: "gpt-5.5", Label: "GPT 5.5", Provider: "openai"},
 		{ID: "deepseek-v3-2-volc-ioa", Label: "Deepseek V3 2 Volc IOA", Provider: "deepseek"},
 	}
+}
+
+// discoverDimModels enumerates the model catalog from a Dim ACP session/new
+// handshake. Dim (dimcode) advertises models.availableModels; enumeration
+// requires a logged-in dim (OAuth). On any failure the caller falls back to
+// the manual-entry field.
+func discoverDimModels(ctx context.Context, runtimeCmd Command) (Catalog, error) {
+	models, err := discoverACPModels(ctx, runtimeCmd, acpDiscoveryProvider{
+		defaultBin:   "dim",
+		clientName:   "multica-model-discovery",
+		tmpdirPrefix: "multica-dim-discovery-",
+		acpArgs:      []string{"acp"},
+	})
+	if err != nil || len(models) == 0 {
+		if err != nil {
+			slog.Debug("dim model discovery failed; falling back to manual entry", "error", err)
+		}
+		return Catalog{Models: []Model{}, Fallback: true}, nil
+	}
+	return Catalog{Models: models}, nil
 }

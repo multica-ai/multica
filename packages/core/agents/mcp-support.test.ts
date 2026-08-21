@@ -21,6 +21,7 @@ describe("providerSupportsMcpConfig", () => {
     expect(providerSupportsMcpConfig("qwenpaw")).toBe(true);
     expect(providerSupportsMcpConfig("traecli")).toBe(true);
     expect(providerSupportsMcpConfig("grok")).toBe(true);
+    expect(providerSupportsMcpConfig("dim")).toBe(true);
     expect(providerSupportsMcpConfig("mcode")).toBe(true);
   });
 

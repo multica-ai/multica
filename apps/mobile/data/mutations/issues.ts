@@ -19,12 +19,14 @@ import type {
   CreateIssueRequest,
   Issue,
   IssueReaction,
+  IssueStatus,
   Label,
   Reaction,
   TimelineEntry,
   UpdateIssueRequest,
 } from "@multica/core/types";
 import { api } from "@/data/api";
+import { isIssueStatusCategory } from "@/lib/issue-status";
 import { issueKeys } from "@/data/queries/issues";
 import { inboxKeys } from "@/data/queries/inbox";
 import { useAuthStore } from "@/data/auth-store";
@@ -476,6 +478,25 @@ export function useToggleIssueReaction(issueId: string) {
 }
 
 /**
+ * Keeps `status_category` consistent with an optimistic `status` write
+ * (MUL-6243).
+ *
+ * A cached issue looks like `{status: "todo", status_category: "todo"}` while a
+ * patch carries only `{status: "human_review"}`, so a bare spread would leave
+ * the STALE category on an issue that no longer behaves that way — and category
+ * is what every list groups on. A custom key this response cannot resolve gets
+ * `undefined` rather than the inherited value: unresolvable is honest, stale is
+ * not, and `issueColumnCategory` falls back from there. The server's full
+ * response lands moments later and settles it either way.
+ */
+function statusCategoryPatch(status: IssueStatus | undefined): Partial<Issue> {
+  if (status === undefined) return {};
+  return {
+    status_category: isIssueStatusCategory(status) ? status : undefined,
+  };
+}
+
+/**
  * Update an issue's editable fields (status / priority / assignee / due_date /
  * project_id / etc). Predictable fields merge optimistically into the detail
  * cache; description stays authoritative because the server resolves it
@@ -506,7 +527,11 @@ export function useUpdateIssue(issueId: string) {
           expected_revision: _expectedRevision,
           ...optimisticPatch
         } = patch;
-        qc.setQueryData<Issue>(key, { ...prev, ...optimisticPatch });
+        qc.setQueryData<Issue>(key, {
+          ...prev,
+          ...optimisticPatch,
+          ...statusCategoryPatch(optimisticPatch.status),
+        });
       }
       return { prev, key };
     },

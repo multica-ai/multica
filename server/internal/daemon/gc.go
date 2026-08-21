@@ -20,8 +20,8 @@ import (
 // them, so every walk over the root has to decide explicitly what to do with it.
 const reposDirName = ".repos"
 
-// gcLoop periodically scans local workspace directories and removes those
-// whose issue is done/cancelled and hasn't been updated within the configured TTL.
+// gcLoop periodically scans local workspace directories and applies the
+// configured retention policies.
 func (d *Daemon) gcLoop(ctx context.Context) {
 	if !d.cfg.GCEnabled {
 		d.logger.Info("gc: disabled")
@@ -30,6 +30,7 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 	d.logger.Info("gc: started",
 		"interval", d.cfg.GCInterval,
 		"ttl", d.cfg.GCTTL,
+		"completed_task_ttl", d.cfg.GCCompletedTaskTTL,
 		"orphan_ttl", d.cfg.GCOrphanTTL,
 		"artifact_ttl", d.cfg.GCArtifactTTL,
 		"repo_ttl", d.cfg.GCRepoTTL,
@@ -59,7 +60,7 @@ func (d *Daemon) gcLoop(ctx context.Context) {
 
 // gcStats accumulates byte counts and per-pattern hit counts for one GC cycle.
 type gcStats struct {
-	cleaned         int // whole task dirs removed (issue done/cancelled)
+	cleaned         int // whole task dirs removed by a parent-lifecycle or completed-task policy
 	orphaned        int // whole task dirs removed (no meta / unreachable issue)
 	skipped         int // task dirs left untouched
 	artifactDirs    int // task dirs that had at least one artifact reclaimed
@@ -276,14 +277,12 @@ func (d *Daemon) applyGCAction(taskDir string, action gcAction, stats *gcStats) 
 	}
 	switch action {
 	case gcActionClean:
-		bytes := dirSize(taskDir)
-		d.cleanTaskDir(taskDir)
+		bytes := d.cleanTaskDir(taskDir)
 		stats.cleaned++
 		stats.bytesReclaimed += bytes
 		return 1
 	case gcActionOrphan:
-		bytes := dirSize(taskDir)
-		d.cleanTaskDir(taskDir)
+		bytes := d.cleanTaskDir(taskDir)
 		stats.orphaned++
 		stats.bytesReclaimed += bytes
 		return 1
@@ -320,7 +319,7 @@ type gcAction int
 
 const (
 	gcActionSkip                  gcAction = iota
-	gcActionClean                          // issue is done/cancelled and stale
+	gcActionClean                          // a parent-lifecycle or completed-task policy selected full cleanup
 	gcActionOrphan                         // no meta or unknown issue and dir is old
 	gcActionCleanArtifacts                 // task completed long enough ago; drop regenerable artifacts only
 	gcActionCleanManagedArtifacts          // preserve the task and drop exact daemon-managed artifacts only
@@ -517,6 +516,30 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 		return gcActionClean
 	}
 
+	// Operators may opt into a hard retention bound for completed issue-task
+	// environments even while the parent issue stays open. A successful parent
+	// lookup with a recognized status is intentionally required: transient
+	// network/auth failures and response drift keep data rather than turning an
+	// unavailable or malformed status into a deletion signal.
+	// The active-root guard and reservation protect concurrent reuse. User-owned
+	// local_directory envs stay on the existing artifact-only policy so a shorter
+	// completed-task TTL cannot make artifact cleanup happen early.
+	if d.cfg.GCCompletedTaskTTL > 0 &&
+		!meta.LocalDirectory &&
+		!meta.CompletedAt.IsZero() &&
+		isKnownIssueStatus(result.Status) &&
+		time.Since(meta.CompletedAt) > d.cfg.GCCompletedTaskTTL {
+		d.logger.Info("gc: completed task eligible for full cleanup",
+			"dir", filepath.Base(taskDir),
+			"kind", "issue",
+			"issue", meta.IssueID,
+			"status", result.Status,
+			"completed_at", meta.CompletedAt.Format(time.RFC3339),
+			"completed_task_ttl", d.cfg.GCCompletedTaskTTL,
+		)
+		return gcActionClean
+	}
+
 	if d.cfg.GCArtifactTTL > 0 && !meta.CompletedAt.IsZero() && time.Since(meta.CompletedAt) > d.cfg.GCArtifactTTL {
 		d.logger.Info("gc: eligible for artifact cleanup",
 			"dir", filepath.Base(taskDir),
@@ -547,6 +570,18 @@ func (d *Daemon) gcDecisionIssueResult(taskDir string, meta *execenv.GCMeta, res
 	}
 
 	return gcActionSkip
+}
+
+// isKnownIssueStatus mirrors the issue status constraint enforced by the
+// server. Full task cleanup must fail closed when an older daemon receives a
+// future status or a malformed response from the GC check endpoint.
+func isKnownIssueStatus(status string) bool {
+	switch status {
+	case "backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled":
+		return true
+	default:
+		return false
+	}
 }
 
 func gcMetaFileAge(taskDir string) (time.Duration, bool) {
@@ -716,13 +751,17 @@ func isAgentTaskTerminal(status string) bool {
 	}
 }
 
-// cleanTaskDir removes a task directory and logs the result.
-func (d *Daemon) cleanTaskDir(taskDir string) {
+// cleanTaskDir removes a task directory, logs the reclaimed bytes, and returns
+// that count for the cycle summary. A failed removal reports zero reclaimed.
+func (d *Daemon) cleanTaskDir(taskDir string) int64 {
+	bytes := dirSize(taskDir)
 	if err := os.RemoveAll(taskDir); err != nil {
 		d.logger.Warn("gc: remove task dir failed", "dir", taskDir, "error", err)
+		return 0
 	} else {
-		d.logger.Info("gc: removed", "dir", taskDir)
+		d.logger.Info("gc: removed", "dir", taskDir, "bytes_reclaimed", bytes)
 	}
+	return bytes
 }
 
 // linkedDirModes are the mode bits that mark a directory entry as a link to

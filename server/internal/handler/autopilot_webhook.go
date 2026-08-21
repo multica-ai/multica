@@ -26,6 +26,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/middleware"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // maxWebhookBodyBytes is the request body size cap for webhook ingress.
@@ -799,6 +800,7 @@ type persistDeliveryInput struct {
 // Any other error bubbles up so the handler can 500 cleanly.
 func (h *Handler) persistInboundDelivery(r *http.Request, in persistDeliveryInput) (db.WebhookDelivery, bool, error) {
 	params := db.CreateWebhookDeliveryParams{
+		ID:              dbid.NewV7(),
 		WorkspaceID:     in.WorkspaceID,
 		AutopilotID:     in.AutopilotID,
 		TriggerID:       in.TriggerID,

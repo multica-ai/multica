@@ -1,7 +1,7 @@
 # Issue last-activity backfill runbook
 
-Use this command only after migrations 360 and 361 are applied and every
-issue-writing backend has been upgraded to maintain `issue.last_activity_at`.
+Use this command only after migration 360 is applied and every issue-writing
+backend has been upgraded to maintain `issue.last_activity_at`.
 Running it while an older writer is still live can make that writer's later
 changes invisible to the activity clock.
 
@@ -21,15 +21,11 @@ counting the table forever. Release the long-held row locks and rerun, or adjust
 Completion is explicit: do not depend on complete historical activity ordering
 until the command logs `remaining=0`.
 
-Migration 361 builds the serving index before this operator-run backfill so
-new application versions can sort safely throughout a rolling deployment. The
-tradeoff is index maintenance and possible bloat while historical rows are
-updated. After a large backfill, rebuild it online during a normal maintenance
-window:
-
-```sql
-REINDEX INDEX CONCURRENTLY idx_issue_workspace_last_activity;
-```
+Migration 375 retires the `idx_issue_workspace_last_activity` serving index
+because neither the planned recent-issue window nor a first-party
+last-activity sort is active. The backfill remains useful as the semantic
+activity clock, but an explicit API `sort=last_activity` request uses a scan and
+sort until a replacement serving design is introduced.
 
 Do not roll application writers back to a version that predates
 `last_activity_at` after the backfill. The nullable column keeps old readers
