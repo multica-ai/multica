@@ -2840,10 +2840,12 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.AutopilotDescription = ap.Description.String
 		}
 
-		// A run_only autopilot has no issue to inherit project context from.
-		// Resolving it here is left to the change that adds it (#7396); this
-		// call keeps the workspace-repo fallback the branch already had.
-		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), pgtype.UUID{}, ap.WorkspaceID)
+		// A run_only autopilot has no issue from which to inherit project
+		// context, so its configured project is hydrated here. That gives the
+		// daemon the same resource contract as issue-bound and quick-create
+		// tasks: project repositories scope the checkout, while local_directory
+		// lets the daemon select the bound path and write its managed manifest.
+		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), ap.ProjectID, ap.WorkspaceID)
 		if projectErr != nil {
 			slog.Error("autopilot claim: load project context failed; preserving task for redelivery",
 				"task_id", uuidToString(task.ID),
