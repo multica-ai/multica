@@ -8,6 +8,7 @@ import type {
   MemberWithUser,
 } from "@multica/core/types";
 import { providerSupportsMcpConfig } from "@multica/core/agents";
+import { api } from "@multica/core/api";
 import { useFeatureEnabled } from "@multica/core/config";
 import { COMPOSIO_MCP_APPS_FLAG } from "@multica/core/feature-flags";
 import { useWorkspaceId } from "@multica/core/hooks";
@@ -31,6 +32,7 @@ import { ActivityTab } from "./tabs/activity-tab";
 import { InstructionsTab } from "./tabs/instructions-tab";
 import { SkillsTab } from "./tabs/skills-tab";
 import { EnvTab } from "./tabs/env-tab";
+import { TaskTokensTab, agentTaskTokensKey } from "./tabs/task-tokens-tab";
 import { CustomArgsTab } from "./tabs/custom-args-tab";
 import { McpConfigTab } from "./tabs/mcp-config-tab";
 import { AgentMcpTab } from "./tabs/agent-mcp-tab";
@@ -56,6 +58,7 @@ export type DetailTab =
   | "general"
   | "access"
   | "env"
+  | "task_tokens"
   | "custom_args"
   | "runtime_config";
 
@@ -70,6 +73,7 @@ type SecondaryTab = {
     | "general"
     | "access"
     | "environment"
+    | "task_tokens"
     | "custom_args"
     | "runtime_config";
 };
@@ -86,6 +90,7 @@ const SETTINGS_TABS: SecondaryTab[] = [
   { id: "general", labelKey: "general" },
   { id: "access", labelKey: "access" },
   { id: "env", labelKey: "environment" },
+  { id: "task_tokens", labelKey: "task_tokens" },
   { id: "custom_args", labelKey: "custom_args" },
   { id: "runtime_config", labelKey: "runtime_config" },
 ];
@@ -217,6 +222,16 @@ export function AgentOverviewPane({
     runtime,
   ]);
 
+  // Probe the deployment's task-token catalog so an install that configured
+  // none never shows the tab. Shares its query key with TaskTokensTab, so
+  // react-query dedupes rather than fetching twice.
+  const { data: taskTokens } = useQuery({
+    queryKey: agentTaskTokensKey(agent.id),
+    queryFn: () => api.getAgentTaskTokens(agent.id),
+    enabled: canEdit,
+  });
+  const hasTaskTokenCatalog = (taskTokens?.available.length ?? 0) > 0;
+
   const visibleSettingsTabs = useMemo(
     () =>
       SETTINGS_TABS.filter((tab) => {
@@ -226,10 +241,14 @@ export function AgentOverviewPane({
         // showing the tab to anyone else guarantees a 403 on "Reveal & edit".
         // The server stays the boundary; this only removes a dead entry point.
         if (tab.id === "env") return canEdit;
+        // Same authorization as env, plus: hide the tab entirely on a
+        // deployment that configured no catalog, so an unconfigured install
+        // gains no empty entry point.
+        if (tab.id === "task_tokens") return canEdit && hasTaskTokenCatalog;
         if (tab.id === "runtime_config") return runtime?.provider === "openclaw";
         return true;
       }),
-    [canEdit, runtime?.provider],
+    [canEdit, hasTaskTokenCatalog, runtime?.provider],
   );
 
   const visibleViews = useMemo(
@@ -476,6 +495,9 @@ export function AgentOverviewPane({
                   )}
                   {effectiveView === "env" && (
                     <EnvTab agent={agent} onDirtyChange={setActiveDirty} />
+                  )}
+                  {effectiveView === "task_tokens" && (
+                    <TaskTokensTab agent={agent} />
                   )}
                   {effectiveView === "custom_args" && (
                     <CustomArgsTab

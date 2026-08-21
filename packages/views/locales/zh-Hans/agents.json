@@ -262,6 +262,7 @@
     "composio_mcp": "MCP 应用",
     "integrations": "集成",
     "runtime_config": "路由",
+    "task_tokens": "身份令牌",
     "discard_dialog_title": "放弃未保存的修改？",
     "discard_dialog_description": "当前 tab 有未保存的修改，离开会丢弃这些修改。",
     "discard_keep": "继续编辑",
@@ -478,6 +479,13 @@
       "revealing": "正在解锁…",
       "reveal_failed_toast": "加载环境变量值失败",
       "empty_editable": "尚未配置环境变量。新增一条即可在智能体启动时注入。"
+    },
+    "task_tokens": {
+      "description": "选择该智能体可以访问哪些内部系统。令牌按次签发，代表触发这次运行的人，不会被保存。",
+      "unconfigured": "当前部署未配置身份令牌。",
+      "injected_as": "注入为 {{env}}",
+      "saved": "身份令牌已更新",
+      "save_failed": "身份令牌更新失败"
     },
     "custom_args": {
       "intro": "添加智能体启动时传入的 CLI 参数。",

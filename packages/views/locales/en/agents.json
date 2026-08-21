@@ -271,6 +271,7 @@
     "composio_mcp": "MCP Apps",
     "integrations": "Integrations",
     "runtime_config": "Routing",
+    "task_tokens": "Identity Tokens",
     "discard_dialog_title": "Discard unsaved changes?",
     "discard_dialog_description": "You have unsaved changes in this tab. Leaving now will discard them.",
     "discard_keep": "Keep editing",
@@ -489,6 +490,13 @@
       "revealing": "Revealing…",
       "reveal_failed_toast": "Failed to load env values",
       "empty_editable": "No environment variables configured. Add one to inject it into the agent at launch."
+    },
+    "task_tokens": {
+      "description": "Choose which internal systems this agent may act on. Tokens are signed per run for the person who triggered it, and are never stored.",
+      "unconfigured": "This deployment has no identity tokens configured.",
+      "injected_as": "Injected as {{env}}",
+      "saved": "Identity tokens updated",
+      "save_failed": "Could not update identity tokens"
     },
     "custom_args": {
       "intro": "Add CLI arguments passed when this agent starts.",
