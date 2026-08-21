@@ -113,6 +113,7 @@ type AppendParams struct {
 	SessionID           pgtype.UUID
 	Sender              pgtype.UUID
 	InstallationID      pgtype.UUID
+	WorkspaceID         pgtype.UUID
 	AgentID             pgtype.UUID
 	RouteRevision       int64
 	Message             channel.InboundMessage

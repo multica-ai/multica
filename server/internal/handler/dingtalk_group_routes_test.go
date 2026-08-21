@@ -502,6 +502,81 @@ func TestListDingTalkInstallationsAdvertisesGroupRoutingCapability(t *testing.T)
 	})
 }
 
+func TestListDingTalkParticipantsReturnsObservedSenderMetadata(t *testing.T) {
+	fx := newDingTalkGroupRouteHandlerFixture(t)
+	ctx := context.Background()
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO channel_user_binding (
+			workspace_id, multica_user_id, installation_id,
+			channel_type, channel_user_id, config
+		) VALUES ($1, $2, $3, 'dingtalk', 'staff-participant', '{"unrelated":"preserved"}'::jsonb)
+	`, testWorkspaceID, testUserID, fx.installationID); err != nil {
+		t.Fatalf("seed DingTalk participant binding: %v", err)
+	}
+
+	queries := db.New(testPool)
+	record := func(params db.RecordDingTalkParticipantParams) {
+		t.Helper()
+		rows, err := queries.RecordDingTalkParticipant(ctx, params)
+		if err != nil || rows != 1 {
+			t.Fatalf("record DingTalk participant rows=%d err=%v", rows, err)
+		}
+	}
+	base := db.RecordDingTalkParticipantParams{
+		SenderID: "encrypted-open-id", CorpID: "corp-42", Nickname: "Ada Lovelace",
+		IsAdmin: true, MessageCreatedAtMs: 1_777_777_777_000,
+		InstallationID: parseUUID(fx.installationID), WorkspaceID: parseUUID(testWorkspaceID),
+		MulticaUserID: parseUUID(testUserID), DingtalkStaffID: "staff-participant",
+	}
+	record(base)
+	base.SenderID = ""
+	base.CorpID = ""
+	base.Nickname = "Ada Byron"
+	base.IsAdmin = false
+	base.MessageCreatedAtMs++
+	record(base)
+
+	req := requestWithRouteParams(
+		newRequest(http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/participants", nil),
+		testWorkspaceID,
+		"",
+	)
+	rec := httptest.NewRecorder()
+	testHandler.ListDingTalkParticipants(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("participants status = %d: %s", rec.Code, rec.Body.String())
+	}
+	var body struct {
+		Participants []DingTalkParticipantResponse `json:"participants"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode participants: %v", err)
+	}
+	if len(body.Participants) != 1 {
+		t.Fatalf("participants = %+v", body.Participants)
+	}
+	participant := body.Participants[0]
+	if participant.InstallationID != fx.installationID ||
+		participant.MulticaUserID != testUserID ||
+		participant.DingTalkStaffID != "staff-participant" ||
+		participant.DingTalkSenderID != "encrypted-open-id" ||
+		participant.DingTalkCorpID != "corp-42" ||
+		participant.DingTalkNickname != "Ada Byron" ||
+		participant.IsAdmin || participant.MessageCount != 2 ||
+		participant.LastMessageCreatedAtMS != 1_777_777_777_001 ||
+		participant.FirstSeenAt == "" || participant.LastSeenAt == "" {
+		t.Fatalf("participant = %+v", participant)
+	}
+	var unrelated string
+	if err := testPool.QueryRow(ctx, `
+		SELECT config ->> 'unrelated'
+		FROM channel_user_binding
+		WHERE installation_id = $1 AND channel_user_id = 'staff-participant'
+	`, fx.installationID).Scan(&unrelated); err != nil || unrelated != "preserved" {
+		t.Fatalf("unrelated binding config = %q, err=%v", unrelated, err)
+	}
+}
+
 func TestDingTalkGroupRouteHandlersValidationAndErrors(t *testing.T) {
 	fx := newDingTalkGroupRouteHandlerFixture(t)
 
@@ -734,6 +809,7 @@ func TestDingTalkGroupRouteAuthorizationWiring(t *testing.T) {
 		r.Group(func(r chi.Router) {
 			r.Use(middleware.RequireWorkspaceRoleFromURL(testHandler.Queries, "id", "owner", "admin"))
 			r.Patch("/dingtalk/group-routes/{routeId}", testHandler.UpdateDingTalkGroupRoute)
+			r.Get("/dingtalk/participants", testHandler.ListDingTalkParticipants)
 		})
 	})
 
@@ -779,6 +855,19 @@ func TestDingTalkGroupRouteAuthorizationWiring(t *testing.T) {
 	}
 	if rec := exercise(http.MethodGet, base, "", nil); rec.Code != http.StatusUnauthorized {
 		t.Errorf("anonymous GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	participantsBase := "/api/workspaces/" + testWorkspaceID + "/dingtalk/participants"
+	if rec := exercise(http.MethodGet, participantsBase, memberID, nil); rec.Code != http.StatusForbidden {
+		t.Errorf("member participants GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := exercise(http.MethodGet, participantsBase, outsiderID, nil); rec.Code != http.StatusNotFound {
+		t.Errorf("outsider participants GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := exercise(http.MethodGet, participantsBase, "", nil); rec.Code != http.StatusUnauthorized {
+		t.Errorf("anonymous participants GET status = %d: %s", rec.Code, rec.Body.String())
+	}
+	if rec := exercise(http.MethodGet, participantsBase, testUserID, nil); rec.Code != http.StatusOK {
+		t.Errorf("owner participants GET status = %d: %s", rec.Code, rec.Body.String())
 	}
 	patchBody := UpdateDingTalkGroupRouteRequest{AgentID: fx.targetAgentID}
 	if rec := exercise(http.MethodPatch, base+"/"+fx.routeID, memberID, patchBody); rec.Code != http.StatusForbidden {

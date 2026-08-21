@@ -89,20 +89,38 @@ func TestDingTalkRejectedGroupCallbacksDoNotDiscoverRoutesDB(t *testing.T) {
 			t.Fatalf("%s persisted %d rejected group route(s)", label, count)
 		}
 	}
+	assertNoParticipants := func(label string) {
+		t.Helper()
+		var count int
+		if err := pool.QueryRow(ctx, `
+			SELECT count(*)
+			FROM channel_user_binding
+			WHERE installation_id = $1
+			  AND config ? 'dingtalk_participant'
+		`, installation).Scan(&count); err != nil {
+			t.Fatalf("%s: count participant profiles: %v", label, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s persisted %d rejected participant profile(s)", label, count)
+		}
+	}
 
 	if err := router.Handle(ctx, message("unmentioned", "cid-unmentioned", false)); err != nil {
 		t.Fatalf("unmentioned callback: %v", err)
 	}
 	assertNoRoutes("unmentioned callback")
+	assertNoParticipants("unmentioned callback")
 
 	if err := router.Handle(ctx, message("unbound", "cid-unbound", true)); err != nil {
 		t.Fatalf("unbound callback: %v", err)
 	}
 	assertNoRoutes("unbound callback")
+	assertNoParticipants("unbound callback")
 
 	exec(`INSERT INTO channel_user_binding (workspace_id, multica_user_id, installation_id, channel_type, channel_user_id) VALUES ($1, $2, $3, 'dingtalk', $4)`, workspaceID, boundUserID, installation, staffID)
 	if err := router.Handle(ctx, message("nonmember", "cid-nonmember", true)); err != nil {
 		t.Fatalf("non-member callback: %v", err)
 	}
 	assertNoRoutes("non-member callback")
+	assertNoParticipants("non-member callback")
 }

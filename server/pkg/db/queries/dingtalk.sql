@@ -13,6 +13,108 @@ WHERE workspace_id = sqlc.arg(workspace_id)
   AND channel_type = 'dingtalk'
 ORDER BY bound_at DESC, id ASC;
 
+-- name: RecordDingTalkParticipant :execrows
+-- Enrich the already-linked DingTalk identity only after the shared inbound
+-- router has validated both account binding and current workspace membership.
+-- The binding row is the natural participant record: it is already unique by
+-- (installation_id, channel_user_id), and all member/install/workspace cleanup
+-- paths already delete it. Keeping the profile under one namespaced config key
+-- avoids a second identity table and preserves any unrelated binding config.
+--
+-- Empty mutable string fields do not erase a previously observed value. The
+-- callback's admin flag is authoritative on every message. Interaction counts
+-- use one atomic UPDATE inside the durable message transaction, and malformed
+-- legacy JSON falls back to a clean object and zero count instead of aborting
+-- inbound processing.
+UPDATE channel_user_binding AS binding
+SET config = jsonb_set(
+    binding.config,
+    '{dingtalk_participant}',
+    (
+        CASE
+            WHEN jsonb_typeof(binding.config -> 'dingtalk_participant') = 'object'
+                THEN binding.config -> 'dingtalk_participant'
+            ELSE '{}'::jsonb
+        END
+        || jsonb_strip_nulls(jsonb_build_object(
+            'sender_id', NULLIF(sqlc.arg(sender_id)::text, ''),
+            'corp_id', NULLIF(sqlc.arg(corp_id)::text, ''),
+            'nickname', NULLIF(sqlc.arg(nickname)::text, ''),
+            'is_admin', sqlc.arg(is_admin)::boolean,
+            'last_message_created_at_ms', CASE
+                WHEN sqlc.arg(message_created_at_ms)::bigint > 0
+                    THEN to_jsonb(sqlc.arg(message_created_at_ms)::bigint)
+                ELSE NULL
+            END
+        ))
+        || jsonb_build_object(
+            'first_seen_at', COALESCE(
+                binding.config #> '{dingtalk_participant,first_seen_at}',
+                to_jsonb(now())
+            ),
+            'last_seen_at', to_jsonb(now()),
+            'message_count', CASE
+                WHEN jsonb_typeof(binding.config #> '{dingtalk_participant,message_count}') = 'number'
+                    THEN (binding.config #>> '{dingtalk_participant,message_count}')::bigint
+                ELSE 0
+            END + 1
+        )
+    ),
+    true
+)
+WHERE binding.installation_id = sqlc.arg(installation_id)
+  AND binding.workspace_id = sqlc.arg(workspace_id)
+  AND binding.multica_user_id = sqlc.arg(multica_user_id)
+  AND binding.channel_type = 'dingtalk'
+  AND binding.channel_user_id = sqlc.arg(dingtalk_staff_id)
+  AND EXISTS (
+      SELECT 1
+      FROM member current_member
+      WHERE current_member.workspace_id = binding.workspace_id
+        AND current_member.user_id = binding.multica_user_id
+  );
+
+-- name: ListDingTalkParticipantsByWorkspace :many
+-- Admin-only API query. Join current membership defensively even though member
+-- removal prunes the binding in the same application transaction. No email,
+-- mobile number, callback credential, or message content is returned.
+SELECT
+    binding.installation_id,
+    binding.multica_user_id,
+    user_record.name AS multica_user_name,
+    binding.channel_user_id AS dingtalk_staff_id,
+    COALESCE(binding.config #>> '{dingtalk_participant,sender_id}', '')::text AS dingtalk_sender_id,
+    COALESCE(binding.config #>> '{dingtalk_participant,corp_id}', '')::text AS dingtalk_corp_id,
+    COALESCE(binding.config #>> '{dingtalk_participant,nickname}', '')::text AS dingtalk_nickname,
+    COALESCE((binding.config #>> '{dingtalk_participant,is_admin}')::boolean, false)::boolean AS is_admin,
+    COALESCE(
+        (binding.config #>> '{dingtalk_participant,first_seen_at}')::timestamptz,
+        binding.bound_at
+    ) AS first_seen_at,
+    COALESCE(
+        (binding.config #>> '{dingtalk_participant,last_seen_at}')::timestamptz,
+        binding.bound_at
+    ) AS last_seen_at,
+    CASE
+        WHEN jsonb_typeof(binding.config #> '{dingtalk_participant,message_count}') = 'number'
+            THEN (binding.config #>> '{dingtalk_participant,message_count}')::bigint
+        ELSE 0
+    END::bigint AS message_count,
+    CASE
+        WHEN jsonb_typeof(binding.config #> '{dingtalk_participant,last_message_created_at_ms}') = 'number'
+            THEN (binding.config #>> '{dingtalk_participant,last_message_created_at_ms}')::bigint
+        ELSE 0
+    END::bigint AS last_message_created_at_ms
+FROM channel_user_binding binding
+JOIN member current_member
+  ON current_member.workspace_id = binding.workspace_id
+ AND current_member.user_id = binding.multica_user_id
+JOIN "user" user_record ON user_record.id = binding.multica_user_id
+WHERE binding.workspace_id = sqlc.arg(workspace_id)
+  AND binding.channel_type = 'dingtalk'
+  AND binding.config ? 'dingtalk_participant'
+ORDER BY last_seen_at DESC, binding.installation_id ASC, binding.channel_user_id ASC;
+
 -- name: DiscoverDingTalkGroupRoute :one
 -- Persist a group only after the shared inbound router has accepted the @bot
 -- message and validated the sender's identity/workspace membership. The INSERT

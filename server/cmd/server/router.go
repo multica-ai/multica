@@ -1581,6 +1581,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/dingtalk/installations/{installationId}", h.RevokeDingTalkInstallation)
 					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
 					r.Patch("/dingtalk/group-routes/{routeId}", h.UpdateDingTalkGroupRoute)
+					r.Get("/dingtalk/participants", h.ListDingTalkParticipants)
 				})
 
 				// Telegram integration. Same admin/member split as Slack:
