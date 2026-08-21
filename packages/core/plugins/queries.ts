@@ -4,6 +4,7 @@ import { api } from "../api";
 export const pluginKeys = {
   all: (wsId: string) => ["workspaces", wsId, "plugins"] as const,
   installed: (wsId: string) => [...pluginKeys.all(wsId), "installed"] as const,
+  packages: (wsId: string) => [...pluginKeys.all(wsId), "packages"] as const,
 };
 
 export function pluginInstallationsOptions(wsId: string) {
@@ -11,6 +12,39 @@ export function pluginInstallationsOptions(wsId: string) {
     queryKey: pluginKeys.installed(wsId),
     queryFn: () => api.listPluginInstallations(wsId),
     enabled: wsId.length > 0,
+  });
+}
+
+/** What this workspace has published, with each plugin's versions. */
+export function pluginPackagesOptions(wsId: string) {
+  return queryOptions({
+    queryKey: pluginKeys.packages(wsId),
+    queryFn: () => api.listPluginPackages(wsId),
+    enabled: wsId.length > 0,
+  });
+}
+
+/**
+ * The code one surface runs.
+ *
+ * A published version is immutable, so this is keyed by the version rather than
+ * the installation and never goes stale on its own: an upgrade changes the key.
+ * `staleTime: Infinity` is a statement about the artifact, not a cache tuning
+ * choice — the same version id can only ever return the same bytes.
+ */
+export function pluginSurfaceScriptOptions(
+  wsId: string,
+  installationId: string,
+  surfaceKey: string,
+  packageVersionId: string,
+) {
+  return queryOptions({
+    queryKey: [...pluginKeys.all(wsId), installationId, "surface", surfaceKey, packageVersionId] as const,
+    queryFn: () => api.getPluginSurfaceScript(wsId, installationId, surfaceKey),
+    enabled: wsId.length > 0 && installationId.length > 0 && surfaceKey.length > 0,
+    staleTime: Infinity,
+    gcTime: 30 * 60 * 1000,
+    retry: false,
   });
 }
 

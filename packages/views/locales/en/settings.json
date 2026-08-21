@@ -331,7 +331,7 @@
   },
   "plugins": {
     "title": "Plugins",
-    "description": "Install plugins by URL and review exactly what each one is allowed to reach.",
+    "description": "Publish plugins into this workspace, then install a specific version and review exactly what it is allowed to reach.",
     "loading": "Loading Plugins",
     "load_failed": "Plugins couldn't be loaded",
     "load_failed_description": "Try again. Installed Plugins are unaffected.",
@@ -348,22 +348,15 @@
     "contributes": "Contributes",
     "version": "v{{version}}",
     "byline": "{{author}} · v{{version}}",
-    "source": "Source",
     "states": {
       "disabled": "Disabled"
-    },
-    "install": {
-      "title": "Install a Plugin",
-      "description": "Paste the URL of a plugin manifest. You'll see what it asks for before anything is installed.",
-      "placeholder": "https://example.com/multica.plugin.json",
-      "review": "Review"
     },
     "installed": {
       "title": "Installed"
     },
     "consent": {
       "title": "This Plugin is asking for the following access",
-      "description": "Multica never runs plugin code on its servers. A Plugin can only do what these scopes allow, and never more than the person using it can already do.",
+      "description": "You are approving one specific version. Its code is stored by Multica and will not change until you upgrade. A Plugin can only do what these scopes allow, and never more than the person using it can already do.",
       "cancel": "Cancel",
       "confirm": "Grant and install",
       "confirm_upgrade": "Grant and upgrade",
@@ -402,6 +395,19 @@
       "drifted": "Schema changed",
       "save": "Save approvals",
       "approved": "Approved tools updated."
+    },
+    "publish": {
+      "title": "Publish a Plugin",
+      "description": "Upload a plugin package. Multica stores and serves it, so a plugin author needs no server of their own.",
+      "hint": "A .zip holding multica.plugin.json and every file it names.",
+      "upload": "Upload package",
+      "published": "Published {{name}} {{version}}",
+      "empty": "Nothing has been published in this workspace yet.",
+      "delete": "Delete published Plugin",
+      "deleted": "Published Plugin deleted",
+      "installed_version": "In use",
+      "review_install": "Review and install",
+      "review_upgrade": "Review and upgrade"
     }
   },
   "properties": {

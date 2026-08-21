@@ -778,11 +778,13 @@
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}}의 인터페이스를 불러오지 못했습니다.",
-    "surface_local_only": "{{name}}은(는) 로컬 소스에서 설치되어 브라우저에서 인터페이스를 불러올 수 없습니다.",
     "hook_succeeded": "{{name}} 완료됨.",
     "hook_failed": "{{name}} 실패함.",
     "hook_refused": "{{name}}이(가) 실행되지 않았습니다.",
     "hook_activity": "최근 호출",
-    "hook_never_run": "이 훅은 아직 실행되지 않았습니다."
+    "hook_never_run": "이 훅은 아직 실행되지 않았습니다.",
+    "surface_loading": "{{name}} 불러오는 중…",
+    "surface_unavailable": "{{name}}의 인터페이스를 불러올 수 없습니다. 설치된 버전에 포함되어 있지 않을 수 있습니다.",
+    "surface_navigated": "{{name}}이(가) 패널을 외부에서 불러온 페이지로 바꾸려 했습니다. 중지하고 연결을 끊었습니다. 워크스페이스 관리자에게 알리세요."
   }
 }

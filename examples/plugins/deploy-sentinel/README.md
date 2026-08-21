@@ -73,10 +73,15 @@ export MULTICA_PLUGIN_DEV_ORIGINS=https://127.0.0.1:8788,https://127.0.0.1:8789
 export MULTICA_PLUGIN_DEV_CA=/path/to/your-dev-ca.pem
 ```
 
-Install it as `local:deploy-sentinel`, fill in the config form, then open the
-`metrics` approval panel and tick the tools you want agents to reach. Nothing
-under `metrics` is callable until you do — that is the whole difference between
-the `mcp` transport and an `http` hook.
+Publish it from `MULTICA_PLUGIN_DIR` as `deploy-sentinel`, install the version
+that appears, fill in the config form, then open the `metrics` approval panel
+and tick the tools you want agents to reach. Nothing under `metrics` is callable
+until you do — that is the whole difference between the `mcp` transport and an
+`http` hook.
+
+Note what `MULTICA_PLUGIN_DIR` does and does not cover. It is a publishing
+shortcut for the FRONTEND artifact only; the two servers above are still yours
+to run, and the `net:` scopes are still what authorises reaching them.
 
 Both endpoints must be HTTPS even locally: the manifest validator requires it,
 and `MULTICA_PLUGIN_DEV_CA` is how you get a self-signed certificate trusted.

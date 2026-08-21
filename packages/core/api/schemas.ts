@@ -27,6 +27,8 @@ import type {
   WorkspaceSubscriptionPrices,
   CreateWorkspaceSubscriptionCheckoutResponse,
   WorkspaceSubscriptionSeatReconcileResult,
+  WorkspaceSeatPurchasePreview,
+  PurchaseWorkspaceSeatsResponse,
   CreateWorkspaceSubscriptionPortalResponse,
   CronPreviewResponse,
   DingTalkInstallation,
@@ -65,7 +67,10 @@ import type {
   NotificationPreferenceResponse,
   PluginInstallation,
   PluginInstallationListResponse,
+  PluginPackage,
+  PluginPackageListResponse,
   PluginPreview,
+  PluginSurfaceScript,
   ResourceLabelsResponse,
   RuntimeModelListRequest,
   SearchIssuesResponse,
@@ -122,7 +127,7 @@ export const PluginInstallationSchema = z.object({
   name: z.string().default(""),
   description: z.string().optional(),
   version: z.string().default(""),
-  source_url: z.string().default(""),
+  package_version_id: z.string().default(""),
   enabled: z.boolean().default(false),
   granted_scopes: z.array(z.string()).default([]),
   config_schema: z.array(PluginConfigFieldSchema).default([]),
@@ -140,7 +145,7 @@ export const EMPTY_PLUGIN_INSTALLATION: PluginInstallation = {
   plugin_key: "",
   name: "",
   version: "",
-  source_url: "",
+  package_version_id: "",
   enabled: false,
   granted_scopes: [],
   config_schema: [],
@@ -235,6 +240,9 @@ export const PluginPreviewSchema = z.object({
   manifest: PluginManifestSummarySchema,
   scopes: z.array(z.string()).default([]),
   config_schema: z.array(PluginConfigFieldSchema).default([]),
+  version_id: z.string().default(""),
+  version: z.string().default(""),
+  digest: z.string().default(""),
   installed: z.boolean().default(false),
   installed_version: z.string().optional(),
   added_scopes: z.array(z.string()).default([]),
@@ -244,8 +252,66 @@ export const EMPTY_PLUGIN_PREVIEW: PluginPreview = {
   manifest: { key: "", name: "", version: "", author: { name: "" } },
   scopes: [],
   config_schema: [],
+  version_id: "",
+  version: "",
+  digest: "",
   installed: false,
   added_scopes: [],
+};
+
+/**
+ * A published version. `installed` is the marker the settings page reads to
+ * answer "which one am I on"; it defaults to false so a malformed response can
+ * never claim a version is running that is not.
+ */
+export const PluginPackageVersionSchema = z.object({
+  id: z.string().default(""),
+  version: z.string().default(""),
+  digest: z.string().default(""),
+  size_bytes: z.number().default(0),
+  published_at: z.string().default(""),
+  installed: z.boolean().default(false),
+}).loose();
+
+export const PluginPackageSchema = z.object({
+  id: z.string().default(""),
+  plugin_key: z.string().default(""),
+  name: z.string().default(""),
+  versions: z.array(PluginPackageVersionSchema).default([]),
+  created_at: z.string().default(""),
+}).loose();
+
+export const PluginPackageListResponseSchema = z.object({
+  packages: z.array(PluginPackageSchema).default([]),
+}).loose();
+
+export const EMPTY_PLUGIN_PACKAGE_LIST: PluginPackageListResponse = {
+  packages: [],
+};
+
+export const EMPTY_PLUGIN_PACKAGE: PluginPackage = {
+  id: "",
+  plugin_key: "",
+  name: "",
+  versions: [],
+  created_at: "",
+};
+
+/**
+ * A surface's code. The empty default is what the frame renders as "this panel
+ * could not load" — an unparseable response must never become an empty script
+ * that looks like a working but silent panel.
+ */
+export const PluginSurfaceScriptSchema = z.object({
+  code: z.string().default(""),
+  version: z.string().default(""),
+  digest: z.string().default(""),
+}).loose();
+
+export const EMPTY_PLUGIN_SURFACE_SCRIPT: PluginSurfaceScript = {
+  code: "",
+  version: "",
+  digest: "",
 };
 
 export const GitHubInstallationSchema = z.object({
@@ -2379,6 +2445,20 @@ export const WorkspaceSubscriptionSummarySchema = z
     actual_seats: z.number().int().nonnegative(),
     billed_seats: z.number().int().nonnegative().nullable().optional(),
     pending_seat_quantity: z.number().int().nonnegative().nullable().optional(),
+    used_seats: z.number().int().nonnegative().optional().catch(undefined),
+    reserved_seats: z.number().int().nonnegative().optional().catch(0),
+    purchase_version: z.number().int().positive().optional().catch(undefined),
+    active_seat_purchase: z
+      .object({
+        request_id: z.string(),
+        target_seats: z.number().int().positive(),
+        status: z.enum(["pending", "processing", "submitted"]),
+        expires_at: z.string().min(1).optional().catch(undefined),
+      })
+      .loose()
+      .nullable()
+      .optional()
+      .catch(null),
     cancel_at_period_end: z.boolean().optional(),
     grace_until: z.string().nullable().optional(),
     has_stripe_customer: z.boolean().optional(),
@@ -2391,6 +2471,17 @@ export const WorkspaceSubscriptionSummarySchema = z
       actualSeats: value.actual_seats,
       billedSeats: value.billed_seats ?? null,
       pendingSeatQuantity: value.pending_seat_quantity ?? null,
+      usedSeats: value.used_seats ?? value.actual_seats,
+      reservedSeats: value.reserved_seats ?? 0,
+      purchaseVersion: value.purchase_version ?? null,
+      activeSeatPurchase: value.active_seat_purchase
+        ? {
+            requestId: value.active_seat_purchase.request_id,
+            targetSeats: value.active_seat_purchase.target_seats,
+            status: value.active_seat_purchase.status,
+            expiresAt: value.active_seat_purchase.expires_at ?? null,
+          }
+        : null,
       cancelAtPeriodEnd: value.cancel_at_period_end ?? false,
       graceUntil: value.grace_until ?? null,
       hasStripeCustomer: value.has_stripe_customer ?? false,
@@ -2466,6 +2557,56 @@ export const WorkspaceSubscriptionSeatReconcileResultSchema = z
       billedSeats: value.billed_seats,
       actualSeats: value.actual_seats,
       action: value.action,
+    }),
+  );
+
+export const WorkspaceSeatPurchasePreviewSchema = z
+  .object({
+    current_seats: z.number().int().positive(),
+    additional_seats: z.number().int().positive(),
+    resulting_seats: z.number().int().positive(),
+    purchase_version: z.number().int().positive(),
+    currency: z.string().regex(/^[a-z]{3}$/),
+    proration_amount: z.number().int().nonnegative(),
+    next_invoice_amount: z.number().int().nonnegative(),
+    quoted_at: z.string().min(1),
+  })
+  .loose()
+  .transform(
+    (value): WorkspaceSeatPurchasePreview => ({
+      currentSeats: value.current_seats,
+      additionalSeats: value.additional_seats,
+      resultingSeats: value.resulting_seats,
+      purchaseVersion: value.purchase_version,
+      currency: value.currency,
+      prorationAmount: value.proration_amount,
+      nextInvoiceAmount: value.next_invoice_amount,
+      quotedAt: value.quoted_at,
+    }),
+  );
+
+export const PurchaseWorkspaceSeatsResponseSchema = z
+  .object({
+    request_id: z.string(),
+    current_seats: z.number().int().positive(),
+    additional_seats: z.number().int().positive(),
+    resulting_seats: z.number().int().positive(),
+    currency: z.string().regex(/^[a-z]{3}$/),
+    proration_amount: z.number().int().nonnegative(),
+    next_invoice_amount: z.number().int().nonnegative(),
+    status: z.enum(["pending", "submitted", "confirmed"]),
+  })
+  .loose()
+  .transform(
+    (value): PurchaseWorkspaceSeatsResponse => ({
+      requestId: value.request_id,
+      currentSeats: value.current_seats,
+      additionalSeats: value.additional_seats,
+      resultingSeats: value.resulting_seats,
+      currency: value.currency,
+      prorationAmount: value.proration_amount,
+      nextInvoiceAmount: value.next_invoice_amount,
+      status: value.status,
     }),
   );
 

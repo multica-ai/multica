@@ -331,7 +331,7 @@
   },
   "plugins": {
     "title": "Plugins",
-    "description": "URL로 Plugin을 설치하고 각 Plugin이 무엇에 접근할 수 있는지 확인합니다.",
+    "description": "이 워크스페이스에 플러그인을 게시하고 특정 버전을 설치하며, 무엇에 접근할 수 있는지 확인합니다.",
     "loading": "Plugins 불러오는 중",
     "load_failed": "Plugins를 불러올 수 없습니다",
     "load_failed_description": "다시 시도하세요. 설치된 Plugin에는 영향이 없습니다.",
@@ -348,22 +348,15 @@
     "contributes": "제공 기능",
     "version": "v{{version}}",
     "byline": "{{author}} · v{{version}}",
-    "source": "출처",
     "states": {
       "disabled": "비활성"
-    },
-    "install": {
-      "title": "Plugin 설치",
-      "description": "Plugin manifest의 URL을 붙여넣으세요. 설치 전에 요청하는 권한을 확인할 수 있습니다.",
-      "placeholder": "https://example.com/multica.plugin.json",
-      "review": "권한 확인"
     },
     "installed": {
       "title": "설치됨"
     },
     "consent": {
       "title": "이 Plugin이 요청하는 접근 권한",
-      "description": "Multica는 서버에서 Plugin 코드를 실행하지 않습니다. Plugin은 이 권한 범위 안에서만 동작하며, 사용자 본인의 권한을 넘어설 수 없습니다.",
+      "description": "승인하는 것은 특정 버전입니다. 해당 코드는 Multica가 저장하며 업그레이드하기 전까지 변하지 않습니다. Plugin은 이 권한 범위 안에서만 동작하며, 사용자 본인의 권한을 넘어설 수 없습니다.",
       "cancel": "취소",
       "confirm": "허용하고 설치",
       "confirm_upgrade": "허용하고 업그레이드",
@@ -402,6 +395,19 @@
       "drifted": "스키마가 변경됨",
       "save": "승인 저장",
       "approved": "승인된 도구를 업데이트했습니다."
+    },
+    "publish": {
+      "title": "플러그인 게시",
+      "description": "플러그인 패키지를 업로드하세요. Multica가 저장하고 제공하므로 작성자에게 별도의 서버가 필요하지 않습니다.",
+      "hint": "multica.plugin.json과 그것이 참조하는 모든 파일이 담긴 .zip입니다.",
+      "upload": "패키지 업로드",
+      "published": "{{name}} {{version}} 게시됨",
+      "empty": "이 워크스페이스에는 아직 게시된 것이 없습니다.",
+      "delete": "게시된 플러그인 삭제",
+      "deleted": "게시된 플러그인을 삭제했습니다",
+      "installed_version": "사용 중",
+      "review_install": "확인 후 설치",
+      "review_upgrade": "확인 후 업그레이드"
     }
   },
   "properties": {

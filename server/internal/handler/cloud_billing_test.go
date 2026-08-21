@@ -450,6 +450,98 @@ func TestCreateCloudWorkspaceSubscriptionCheckoutAcceptsHeaderIdempotencyKey(t *
 	}
 }
 
+func TestCloudWorkspaceSeatPurchaseForwardsOnlyAdditiveConfirmation(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{enabled: true, resp: &cloudruntime.Response{StatusCode: http.StatusAccepted, Body: []byte(`{"status":"submitted"}`)}}
+	useCloudRuntimeProxy(t, proxy)
+	req := withCloudSubscriptionWorkspace(newRequest(http.MethodPost, "/api/cloud-subscriptions/seats/purchases", map[string]any{
+		"workspace_id":              "00000000-0000-0000-0000-000000000001",
+		"target_seats":              999,
+		"additional_seats":          2,
+		"expected_current_seats":    5,
+		"expected_purchase_version": 9,
+		"accepted_proration_amount": 425,
+		"currency":                  "USD",
+		"idempotency_key":           "seat-request-1",
+	}), "admin")
+	w := httptest.NewRecorder()
+	testHandler.PurchaseCloudWorkspaceSubscriptionSeats(w, req)
+
+	if w.Code != http.StatusAccepted || proxy.req.Path != "/api/v1/subscriptions/"+testWorkspaceID+"/seats/purchases" {
+		t.Fatalf("status=%d path=%s body=%s", w.Code, proxy.req.Path, w.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(proxy.req.Body, &body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["workspace_id"]; ok {
+		t.Fatalf("client workspace leaked upstream: %v", body)
+	}
+	if _, ok := body["target_seats"]; ok {
+		t.Fatalf("absolute target leaked upstream: %v", body)
+	}
+	if body["additional_seats"] != float64(2) || body["currency"] != "usd" || body["idempotency_key"] != "seat-request-1" {
+		t.Fatalf("upstream body=%v", body)
+	}
+	if proxy.req.Headers.Get(idempotencyKeyHeader) != "seat-request-1" {
+		t.Fatalf("upstream idempotency=%q", proxy.req.Headers.Get(idempotencyKeyHeader))
+	}
+}
+
+func TestCloudWorkspaceSeatPurchasePreviewUsesAuthoritativePath(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	proxy := &fakeCloudRuntimeProxy{enabled: true, resp: &cloudruntime.Response{StatusCode: http.StatusOK, Body: []byte(`{"resulting_seats":7}`)}}
+	useCloudRuntimeProxy(t, proxy)
+	req := withCloudSubscriptionWorkspace(newRequest(http.MethodPost, "/api/cloud-subscriptions/seats/purchase-preview", map[string]any{
+		"additional_seats": 2, "workspace_id": "00000000-0000-0000-0000-000000000002", "target_seats": 999,
+	}), "owner")
+	w := httptest.NewRecorder()
+	testHandler.PreviewCloudWorkspaceSubscriptionSeatPurchase(w, req)
+
+	if w.Code != http.StatusOK || proxy.req.Path != "/api/v1/subscriptions/"+testWorkspaceID+"/seats/purchase-preview" {
+		t.Fatalf("status=%d path=%s body=%s", w.Code, proxy.req.Path, w.Body.String())
+	}
+	if string(proxy.req.Body) != `{"additional_seats":2}` {
+		t.Fatalf("upstream body=%s", proxy.req.Body)
+	}
+}
+
+func TestCloudWorkspaceSeatPurchaseRejectsInvalidOrUnauthorizedRequests(t *testing.T) {
+	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
+	tests := []struct {
+		name   string
+		role   string
+		body   map[string]any
+		header string
+	}{
+		{name: "member", role: "member", body: map[string]any{"additional_seats": 1}},
+		{name: "absolute overflow", role: "owner", body: map[string]any{"additional_seats": 2, "expected_current_seats": 9999, "expected_purchase_version": 1, "accepted_proration_amount": 0, "currency": "usd", "idempotency_key": "key"}},
+		{name: "bad currency", role: "owner", body: map[string]any{"additional_seats": 1, "expected_current_seats": 5, "expected_purchase_version": 1, "accepted_proration_amount": 0, "currency": "u$d", "idempotency_key": "key"}},
+		{name: "long key", role: "owner", body: map[string]any{"additional_seats": 1, "expected_current_seats": 5, "expected_purchase_version": 1, "accepted_proration_amount": 0, "currency": "usd"}, header: strings.Repeat("a", 201)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			proxy := &fakeCloudRuntimeProxy{enabled: true}
+			useCloudRuntimeProxy(t, proxy)
+			req := withCloudSubscriptionWorkspace(newRequest(http.MethodPost, "/api/cloud-subscriptions/seats/purchases", tc.body), tc.role)
+			if tc.header != "" {
+				req.Header.Set(idempotencyKeyHeader, tc.header)
+			}
+			w := httptest.NewRecorder()
+			testHandler.PurchaseCloudWorkspaceSubscriptionSeats(w, req)
+			if tc.role == "member" && w.Code != http.StatusForbidden {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if tc.role != "member" && w.Code != http.StatusBadRequest {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if proxy.called {
+				t.Fatal("invalid request reached upstream")
+			}
+		})
+	}
+}
+
 func TestCloudWorkspaceSubscriptionWritesRequireManagerRole(t *testing.T) {
 	withFeatureFlag(t, testHandler, featureflags.BillingWorkspaceSubscriptions, true)
 	proxy := &fakeCloudRuntimeProxy{enabled: true}

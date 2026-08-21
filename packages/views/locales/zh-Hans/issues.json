@@ -778,11 +778,13 @@
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}} 的界面加载失败。",
-    "surface_local_only": "{{name}} 是从本地源安装的，界面无法在浏览器里加载。",
     "hook_succeeded": "{{name}} 已完成。",
     "hook_failed": "{{name}} 执行失败。",
     "hook_refused": "{{name}} 未被执行。",
     "hook_activity": "最近调用",
-    "hook_never_run": "该 hook 尚未运行过。"
+    "hook_never_run": "该 hook 尚未运行过。",
+    "surface_loading": "正在加载 {{name}}…",
+    "surface_unavailable": "{{name}} 的界面无法加载，已安装的版本可能不包含它。",
+    "surface_navigated": "{{name}} 试图把面板替换成从别处加载的页面。已经拦下并断开连接，建议告知工作区管理员。"
   }
 }

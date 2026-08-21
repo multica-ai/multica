@@ -331,7 +331,7 @@
   },
   "plugins": {
     "title": "Plugins",
-    "description": "URL から Plugin をインストールし、各 Plugin が何にアクセスできるかを確認します。",
+    "description": "このワークスペースにプラグインを公開し、特定のバージョンをインストールして、何にアクセスできるかを確認します。",
     "loading": "Plugins を読み込み中",
     "load_failed": "Plugins を読み込めませんでした",
     "load_failed_description": "再試行してください。インストール済みの Plugin には影響しません。",
@@ -348,22 +348,15 @@
     "contributes": "提供する機能",
     "version": "v{{version}}",
     "byline": "{{author}} · v{{version}}",
-    "source": "ソース",
     "states": {
       "disabled": "無効"
-    },
-    "install": {
-      "title": "Plugin をインストール",
-      "description": "Plugin manifest の URL を貼り付けてください。インストール前に要求される権限を確認できます。",
-      "placeholder": "https://example.com/multica.plugin.json",
-      "review": "権限を確認"
     },
     "installed": {
       "title": "インストール済み"
     },
     "consent": {
       "title": "この Plugin は次のアクセスを要求しています",
-      "description": "Multica はサーバー上で Plugin のコードを実行しません。Plugin はこれらの権限の範囲内でのみ動作し、利用者本人の権限を超えることはありません。",
+      "description": "承認するのは特定のバージョンです。そのコードは Multica が保存し、アップグレードするまで変わりません。Plugin はこれらの権限の範囲内でのみ動作し、利用者本人の権限を超えることはありません。",
       "cancel": "キャンセル",
       "confirm": "許可してインストール",
       "confirm_upgrade": "許可してアップグレード",
@@ -402,6 +395,19 @@
       "drifted": "スキーマが変更されました",
       "save": "承認を保存",
       "approved": "承認済みツールを更新しました。"
+    },
+    "publish": {
+      "title": "プラグインを公開",
+      "description": "プラグインパッケージをアップロードします。Multica が保存と配信を行うため、作者自身のサーバーは不要です。",
+      "hint": "multica.plugin.json とそれが参照するすべてのファイルを含む .zip。",
+      "upload": "パッケージをアップロード",
+      "published": "{{name}} {{version}} を公開しました",
+      "empty": "このワークスペースではまだ何も公開されていません。",
+      "delete": "公開したプラグインを削除",
+      "deleted": "公開したプラグインを削除しました",
+      "installed_version": "使用中",
+      "review_install": "確認してインストール",
+      "review_upgrade": "確認してアップグレード"
     }
   },
   "properties": {

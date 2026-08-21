@@ -1091,6 +1091,14 @@ describe("workspace subscription contract", () => {
       actual_seats: 3,
       billed_seats: 5,
       pending_seat_quantity: 3,
+      used_seats: 3,
+      reserved_seats: 2,
+      purchase_version: 11,
+      active_seat_purchase: {
+        request_id: "22222222-2222-2222-2222-222222222222",
+        target_seats: 7,
+        status: "processing",
+      },
       cancel_at_period_end: true,
       grace_until: "2026-09-08T00:00:00Z",
       has_stripe_customer: true,
@@ -1104,6 +1112,15 @@ describe("workspace subscription contract", () => {
     expect(summary?.billingInterval).toBe("year");
     expect(summary?.billedSeats).toBe(5);
     expect(summary?.pendingSeatQuantity).toBe(3);
+    expect(summary?.usedSeats).toBe(3);
+    expect(summary?.reservedSeats).toBe(2);
+    expect(summary?.purchaseVersion).toBe(11);
+    expect(summary?.activeSeatPurchase).toEqual({
+      requestId: "22222222-2222-2222-2222-222222222222",
+      targetSeats: 7,
+      status: "processing",
+      expiresAt: null,
+    });
     expect(summary?.cancelAtPeriodEnd).toBe(true);
     expect(summary?.graceUntil).toBe("2026-09-08T00:00:00Z");
     expect(summary?.hasStripeCustomer).toBe(true);
@@ -1120,6 +1137,10 @@ describe("workspace subscription contract", () => {
     expect(summary?.billingInterval).toBeNull();
     expect(summary?.billedSeats).toBeNull();
     expect(summary?.pendingSeatQuantity).toBeNull();
+    expect(summary?.usedSeats).toBe(3);
+    expect(summary?.reservedSeats).toBe(0);
+    expect(summary?.purchaseVersion).toBeNull();
+    expect(summary?.activeSeatPurchase).toBeNull();
     expect(summary?.cancelAtPeriodEnd).toBe(false);
     expect(summary?.graceUntil).toBeNull();
     // Absent means "no Stripe customer known", which is the safe reading: the
@@ -1222,5 +1243,74 @@ describe("workspace subscription contract", () => {
     const client = new ApiClient("https://api.example.test");
 
     expect(await client.getWorkspaceSubscriptionPrices()).toBeNull();
+  });
+
+  it("maps seat purchase previews and confirmations without trusting client totals", async () => {
+    stubFetchJson({
+      current_seats: 5,
+      additional_seats: 2,
+      resulting_seats: 7,
+      purchase_version: 9,
+      currency: "usd",
+      proration_amount: 425,
+      next_invoice_amount: 14000,
+      quoted_at: "2026-08-21T06:00:00Z",
+    });
+    const client = new ApiClient("https://api.example.test");
+    await expect(
+      client.previewWorkspaceSeatPurchase({ additionalSeats: 2 }),
+    ).resolves.toEqual({
+      currentSeats: 5,
+      additionalSeats: 2,
+      resultingSeats: 7,
+      purchaseVersion: 9,
+      currency: "usd",
+      prorationAmount: 425,
+      nextInvoiceAmount: 14000,
+      quotedAt: "2026-08-21T06:00:00Z",
+    });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/seats/purchase-preview",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ additional_seats: 2 }),
+      }),
+    );
+
+    stubFetchJson({
+      request_id: "33333333-3333-3333-3333-333333333333",
+      current_seats: 5,
+      additional_seats: 2,
+      resulting_seats: 7,
+      currency: "usd",
+      proration_amount: 425,
+      next_invoice_amount: 14000,
+      status: "submitted",
+    }, 202);
+    await expect(
+      client.purchaseWorkspaceSeats({
+        additionalSeats: 2,
+        expectedCurrentSeats: 5,
+        expectedPurchaseVersion: 9,
+        acceptedProrationAmount: 425,
+        currency: "usd",
+        idempotencyKey: "seat-request-1",
+      }),
+    ).resolves.toMatchObject({ resultingSeats: 7, status: "submitted" });
+    expect(vi.mocked(fetch)).toHaveBeenLastCalledWith(
+      "https://api.example.test/api/cloud-subscriptions/seats/purchases",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({
+          additional_seats: 2,
+          expected_current_seats: 5,
+          expected_purchase_version: 9,
+          accepted_proration_amount: 425,
+          currency: "usd",
+          idempotency_key: "seat-request-1",
+        }),
+        headers: expect.objectContaining({ "Idempotency-Key": "seat-request-1" }),
+      }),
+    );
   });
 });

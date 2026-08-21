@@ -978,21 +978,21 @@ type PinnedItem struct {
 }
 
 type PluginInstallation struct {
-	ID             pgtype.UUID        `json:"id"`
-	WorkspaceID    pgtype.UUID        `json:"workspace_id"`
-	PluginKey      string             `json:"plugin_key"`
-	SourceUrl      string             `json:"source_url"`
-	Version        string             `json:"version"`
-	Manifest       []byte             `json:"manifest"`
-	GrantedScopes  []byte             `json:"granted_scopes"`
-	Config         []byte             `json:"config"`
-	Enabled        bool               `json:"enabled"`
-	InstalledBy    pgtype.UUID        `json:"installed_by"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	TokenHash      pgtype.Text        `json:"token_hash"`
-	TokenRotatedAt pgtype.Timestamptz `json:"token_rotated_at"`
-	McpApprovals   []byte             `json:"mcp_approvals"`
+	ID               pgtype.UUID        `json:"id"`
+	WorkspaceID      pgtype.UUID        `json:"workspace_id"`
+	PluginKey        string             `json:"plugin_key"`
+	Version          string             `json:"version"`
+	Manifest         []byte             `json:"manifest"`
+	GrantedScopes    []byte             `json:"granted_scopes"`
+	Config           []byte             `json:"config"`
+	Enabled          bool               `json:"enabled"`
+	InstalledBy      pgtype.UUID        `json:"installed_by"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	TokenHash        pgtype.Text        `json:"token_hash"`
+	TokenRotatedAt   pgtype.Timestamptz `json:"token_rotated_at"`
+	McpApprovals     []byte             `json:"mcp_approvals"`
+	PackageVersionID pgtype.UUID        `json:"package_version_id"`
 }
 
 type PluginInvocation struct {
@@ -1007,6 +1007,38 @@ type PluginInvocation struct {
 	LatencyMs      int32              `json:"latency_ms"`
 	Error          pgtype.Text        `json:"error"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type PluginPackage struct {
+	ID          pgtype.UUID        `json:"id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	PluginKey   string             `json:"plugin_key"`
+	Name        string             `json:"name"`
+	CreatedBy   pgtype.UUID        `json:"created_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PluginPackageFile struct {
+	ID        pgtype.UUID        `json:"id"`
+	VersionID pgtype.UUID        `json:"version_id"`
+	Path      string             `json:"path"`
+	Content   []byte             `json:"content"`
+	SizeBytes int64              `json:"size_bytes"`
+	Sha256    string             `json:"sha256"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type PluginPackageVersion struct {
+	ID          pgtype.UUID        `json:"id"`
+	PackageID   pgtype.UUID        `json:"package_id"`
+	WorkspaceID pgtype.UUID        `json:"workspace_id"`
+	Version     string             `json:"version"`
+	Manifest    []byte             `json:"manifest"`
+	Digest      string             `json:"digest"`
+	SizeBytes   int64              `json:"size_bytes"`
+	PublishedBy pgtype.UUID        `json:"published_by"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
 type PluginSecret struct {

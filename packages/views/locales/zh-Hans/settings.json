@@ -331,7 +331,7 @@
   },
   "plugins": {
     "title": "Plugins",
-    "description": "通过 URL 安装 Plugin，并逐条查看它能访问什么。",
+    "description": "在这个工作区里发布插件，然后安装某个具体版本，并逐条确认它能访问什么。",
     "loading": "正在加载 Plugins",
     "load_failed": "无法加载 Plugins",
     "load_failed_description": "请重试。已安装的 Plugin 不受影响。",
@@ -348,22 +348,15 @@
     "contributes": "提供的能力",
     "version": "v{{version}}",
     "byline": "{{author}} · v{{version}}",
-    "source": "来源",
     "states": {
       "disabled": "已停用"
-    },
-    "install": {
-      "title": "安装 Plugin",
-      "description": "粘贴 Plugin manifest 的 URL。安装前你会先看到它请求的全部权限。",
-      "placeholder": "https://example.com/multica.plugin.json",
-      "review": "查看权限"
     },
     "installed": {
       "title": "已安装"
     },
     "consent": {
       "title": "该 Plugin 请求以下访问权限",
-      "description": "Multica 从不在服务器上运行 Plugin 代码。Plugin 只能做这些权限允许的事，且永远不会超过使用者本人的权限。",
+      "description": "你批准的是某个具体版本。它的代码由 Multica 存储，在你升级之前不会变化。Plugin 只能做这些权限允许的事，且永远不会超过使用者本人的权限。",
       "cancel": "取消",
       "confirm": "授权并安装",
       "confirm_upgrade": "授权并升级",
@@ -402,6 +395,19 @@
       "drifted": "schema 已变更",
       "save": "保存批准",
       "approved": "已更新批准的工具。"
+    },
+    "publish": {
+      "title": "发布插件",
+      "description": "上传插件产物包。Multica 负责存储和分发，作者不需要自己的服务器。",
+      "hint": "一个 .zip，包含 multica.plugin.json 和它引用的所有文件。",
+      "upload": "上传产物包",
+      "published": "已发布 {{name}} {{version}}",
+      "empty": "这个工作区还没有发布过插件。",
+      "delete": "删除已发布的插件",
+      "deleted": "已删除发布的插件",
+      "installed_version": "使用中",
+      "review_install": "查看并安装",
+      "review_upgrade": "查看并升级"
     }
   },
   "properties": {
