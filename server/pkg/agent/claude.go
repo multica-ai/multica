@@ -9,12 +9,15 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"syscall"
 	"time"
 
+	"github.com/multica-ai/multica/server/pkg/protocol"
 	"github.com/multica-ai/multica/server/pkg/taskfailure"
 )
 
@@ -183,6 +186,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 		assistantEventCount := 0
 		toolUseCount := 0
 		unreadableAssistantCount := 0
+		var planLimits *protocol.PlanLimitsSnapshot
 
 		// On cancellation / timeout, terminate claude (and every MCP server and
 		// tool subprocess it spawned) BEFORE unblocking the scanner. EOF stdin
@@ -222,6 +226,9 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" {
 				continue
+			}
+			if snapshot := claudePlanLimitsFromLine(line, time.Now()); snapshot != nil {
+				planLimits = snapshot
 			}
 
 			var msg claudeSDKMessage
@@ -359,6 +366,7 @@ func (b *claudeBackend) Execute(ctx context.Context, prompt string, opts ExecOpt
 			DurationMs:     duration.Milliseconds(),
 			SessionID:      reportedSessionID,
 			Usage:          usage,
+			PlanLimits:     planLimits,
 			ResumeRejected: resumeRejected,
 		}
 	}()
@@ -590,6 +598,86 @@ type claudeResultModelUsage struct {
 	OutputTokens             int64 `json:"outputTokens"`
 	CacheReadInputTokens     int64 `json:"cacheReadInputTokens"`
 	CacheCreationInputTokens int64 `json:"cacheCreationInputTokens"`
+}
+
+var claudeSessionLimitResetPattern = regexp.MustCompile(`(?i)\bresets?\s+(\d{1,2}):(\d{2})\s*(am|pm)(?:\s*\(([^)]+)\))?`)
+
+func claudePlanLimitsFromLine(line string, observedAt time.Time) *protocol.PlanLimitsSnapshot {
+	var value any
+	if err := json.Unmarshal([]byte(line), &value); err != nil {
+		return nil
+	}
+	text := strings.Join(collectJSONStrings(value), " ")
+	if !strings.Contains(strings.ToLower(text), "hit your session limit") {
+		return nil
+	}
+
+	snapshot := &protocol.PlanLimitsSnapshot{
+		Provider:   "claude",
+		Status:     protocol.PlanLimitsStatusExhausted,
+		ObservedAt: observedAt.Unix(),
+	}
+	if resetsAt, ok := parseClaudeSessionLimitReset(text, observedAt); ok {
+		snapshot.Windows = []protocol.PlanLimitWindow{{
+			Name:     "primary",
+			ResetsAt: &resetsAt,
+		}}
+	}
+	return snapshot
+}
+
+func collectJSONStrings(value any) []string {
+	var out []string
+	var visit func(any)
+	visit = func(current any) {
+		switch item := current.(type) {
+		case string:
+			out = append(out, item)
+		case []any:
+			for _, child := range item {
+				visit(child)
+			}
+		case map[string]any:
+			for _, child := range item {
+				visit(child)
+			}
+		}
+	}
+	visit(value)
+	return out
+}
+
+func parseClaudeSessionLimitReset(text string, observedAt time.Time) (int64, bool) {
+	match := claudeSessionLimitResetPattern.FindStringSubmatch(text)
+	if match == nil {
+		return 0, false
+	}
+	hour, err := strconv.Atoi(match[1])
+	if err != nil || hour < 1 || hour > 12 {
+		return 0, false
+	}
+	minute, err := strconv.Atoi(match[2])
+	if err != nil || minute < 0 || minute > 59 {
+		return 0, false
+	}
+	if strings.EqualFold(match[3], "pm") && hour != 12 {
+		hour += 12
+	} else if strings.EqualFold(match[3], "am") && hour == 12 {
+		hour = 0
+	}
+
+	location := observedAt.Location()
+	if zoneName := strings.TrimSpace(match[4]); zoneName != "" {
+		if parsed, err := time.LoadLocation(zoneName); err == nil {
+			location = parsed
+		}
+	}
+	localObservedAt := observedAt.In(location)
+	reset := time.Date(localObservedAt.Year(), localObservedAt.Month(), localObservedAt.Day(), hour, minute, 0, 0, location)
+	if !reset.After(localObservedAt) {
+		reset = reset.AddDate(0, 0, 1)
+	}
+	return reset.Unix(), true
 }
 
 // claudeTerminalReasonFailure turns Claude Code's structured terminal_reason

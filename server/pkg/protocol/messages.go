@@ -322,8 +322,34 @@ type ChatSessionUpdatedPayload struct {
 // Mirrors the body of POST /api/daemon/heartbeat so both transports share
 // identical semantics.
 type DaemonHeartbeatRequestPayload struct {
-	RuntimeID           string `json:"runtime_id"`
-	SupportsBatchImport bool   `json:"supports_batch_import,omitempty"`
+	RuntimeID           string              `json:"runtime_id"`
+	SupportsBatchImport bool                `json:"supports_batch_import,omitempty"`
+	PlanLimits          *PlanLimitsSnapshot `json:"plan_limits,omitempty"`
+}
+
+const (
+	PlanLimitsStatusAvailable = "available"
+	PlanLimitsStatusExhausted = "exhausted"
+)
+
+// PlanLimitsSnapshot is a credential-free view of the subscription windows
+// reported by the provider CLI running beside the daemon. Provider-specific
+// account identifiers, plan names, credits, and tokens are deliberately not
+// part of this wire shape.
+type PlanLimitsSnapshot struct {
+	Provider   string            `json:"provider"`
+	Status     string            `json:"status"`
+	Windows    []PlanLimitWindow `json:"windows,omitempty"`
+	ObservedAt int64             `json:"observed_at"`
+}
+
+// PlanLimitWindow describes one rolling provider limit. Pointer fields retain
+// the distinction between a real zero and a value the CLI did not report.
+type PlanLimitWindow struct {
+	Name          string   `json:"name"`
+	UsedPercent   *float64 `json:"used_percent,omitempty"`
+	WindowMinutes *int64   `json:"window_minutes,omitempty"`
+	ResetsAt      *int64   `json:"resets_at,omitempty"`
 }
 
 // DaemonHeartbeatAckPayload is the server's reply to DaemonHeartbeatRequestPayload.

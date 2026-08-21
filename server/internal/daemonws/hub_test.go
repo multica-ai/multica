@@ -434,10 +434,13 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 
 	hub := NewHub()
 	var calls atomic.Int32
-	hub.SetHeartbeatHandler(func(_ context.Context, identity ClientIdentity, runtimeID string, _ bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+	hub.SetHeartbeatHandler(func(_ context.Context, identity ClientIdentity, runtimeID string, _ bool, planLimits *protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
 		calls.Add(1)
 		if identity.WorkspaceID != "ws-1" {
 			t.Errorf("identity workspace = %q, want ws-1", identity.WorkspaceID)
+		}
+		if planLimits == nil || planLimits.Provider != "codex" || len(planLimits.Windows) != 1 {
+			t.Errorf("plan limits = %+v, want Codex primary window", planLimits)
 		}
 		return &protocol.DaemonHeartbeatAckPayload{
 			RuntimeID: runtimeID,
@@ -465,8 +468,16 @@ func TestHeartbeatRoundTrip(t *testing.T) {
 	defer conn.Close()
 
 	hbFrame, err := json.Marshal(protocol.Message{
-		Type:    protocol.EventDaemonHeartbeat,
-		Payload: mustMarshalRaw(protocol.DaemonHeartbeatRequestPayload{RuntimeID: "runtime-1"}),
+		Type: protocol.EventDaemonHeartbeat,
+		Payload: mustMarshalRaw(protocol.DaemonHeartbeatRequestPayload{
+			RuntimeID: "runtime-1",
+			PlanLimits: &protocol.PlanLimitsSnapshot{
+				Provider:   "codex",
+				Status:     protocol.PlanLimitsStatusAvailable,
+				ObservedAt: 1_800_000_000,
+				Windows:    []protocol.PlanLimitWindow{{Name: "primary"}},
+			},
+		}),
 	})
 	if err != nil {
 		t.Fatalf("marshal heartbeat: %v", err)
@@ -516,7 +527,7 @@ func TestHeartbeatHandlerCtxNotTimeBounded(t *testing.T) {
 
 	hub := NewHub()
 	const stall = 250 * time.Millisecond
-	hub.SetHeartbeatHandler(func(ctx context.Context, _ ClientIdentity, runtimeID string, _ bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+	hub.SetHeartbeatHandler(func(ctx context.Context, _ ClientIdentity, runtimeID string, _ bool, _ *protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
 		select {
 		case <-time.After(stall):
 		case <-ctx.Done():
@@ -577,7 +588,7 @@ func TestHeartbeatRejectsUnauthorizedRuntime(t *testing.T) {
 
 	hub := NewHub()
 	var called atomic.Bool
-	hub.SetHeartbeatHandler(func(context.Context, ClientIdentity, string, bool) (*protocol.DaemonHeartbeatAckPayload, error) {
+	hub.SetHeartbeatHandler(func(context.Context, ClientIdentity, string, bool, *protocol.PlanLimitsSnapshot) (*protocol.DaemonHeartbeatAckPayload, error) {
 		called.Store(true)
 		return &protocol.DaemonHeartbeatAckPayload{Status: "ok"}, nil
 	})
