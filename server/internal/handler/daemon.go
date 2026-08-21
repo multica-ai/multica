@@ -1789,6 +1789,85 @@ type claimBuildFailure struct {
 	message string
 }
 
+// rejectAutopilotClaim settles a run_only autopilot claim whose autopilot_run /
+// autopilot row could not be read. This branch used to swallow the error and
+// fall through, which dispatched the agent with no autopilot instructions at
+// all — a run_only task IS its autopilot instructions — and left resp.WorkspaceID
+// holding the runtime workspace the isolation check then compared against
+// itself. The two failures settle differently:
+//
+//   - The read FAILED (transient: DB blip, timeout, reset). Preserve the
+//     just-dispatched task so the stale-dispatched reclaim redelivers it,
+//     exactly as the chat-input load does (MUL-4351). This is the reachable
+//     case and the one worth fixing.
+//   - The row is GONE (ErrNoRows). Cancel: the task can never run, and
+//     preserving it would spin in the reclaim loop forever. Legacy FKs
+//     (autopilot_run.autopilot_id ON DELETE CASCADE, then
+//     agent_task_queue.autopilot_run_id ON DELETE SET NULL) currently keep this
+//     state from arising, so the branch is defensive — it is what protects the
+//     claim path when those FKs are dropped for the repo's no-FK rule.
+func (h *Handler) rejectAutopilotClaim(ctx context.Context, task *db.AgentTaskQueue, err error, entity, entityID string) *claimBuildFailure {
+	if errors.Is(err, pgx.ErrNoRows) {
+		slog.Error("autopilot claim: referenced row is missing; cancelling task",
+			"task_id", uuidToString(task.ID), "entity", entity, "entity_id", entityID)
+		if _, cerr := h.TaskService.CancelTask(ctx, task.ID); cerr != nil {
+			slog.Error("autopilot claim: cancel after missing row failed",
+				"task_id", uuidToString(task.ID), "error", cerr)
+		}
+		return &claimBuildFailure{
+			outcome: "error_autopilot_missing",
+			status:  http.StatusInternalServerError,
+			message: "autopilot task is missing its autopilot",
+		}
+	}
+	slog.Error("autopilot claim: load failed; preserving task for redelivery",
+		"task_id", uuidToString(task.ID), "entity", entity, "entity_id", entityID, "error", err)
+	return &claimBuildFailure{
+		outcome: "error_autopilot_load",
+		status:  http.StatusInternalServerError,
+		message: "failed to load autopilot context",
+	}
+}
+
+// rejectClaimOnWorkspaceMismatch enforces the claim's tenant boundary against
+// the workspace that OWNS the task's context (issue / chat session / autopilot
+// / quick-create), which is the only authority for MULTICA_WORKSPACE_ID in the
+// agent env. An empty value would make the CLI silently fall back to the
+// user-global config and talk to whatever workspace the user happened to last
+// configure; a value that doesn't match the runtime's workspace means upstream
+// routed a foreign-workspace task here. Both cases hard-fail AND cancel the
+// just-dispatched task so the queue / agent status don't sit stuck until the
+// stale-task sweeper fires minutes later.
+//
+// Every branch calls this as soon as it knows its authoritative workspace and
+// BEFORE it hydrates project context, so "prove ownership, then load" is a
+// property of the structure rather than a check each branch remembers to
+// repeat. Returns nil when the claim may proceed.
+func (h *Handler) rejectClaimOnWorkspaceMismatch(ctx context.Context, task *db.AgentTaskQueue, resolvedWorkspaceID, runtimeID, runtimeWorkspaceID string, hasQuickCreate bool) *claimBuildFailure {
+	if resolvedWorkspaceID != "" && resolvedWorkspaceID == runtimeWorkspaceID {
+		return nil
+	}
+	slog.Error("task claim: workspace isolation check failed, cancelling task",
+		"task_id", uuidToString(task.ID),
+		"runtime_id", runtimeID,
+		"runtime_workspace", runtimeWorkspaceID,
+		"resolved_workspace", resolvedWorkspaceID,
+		"has_issue", task.IssueID.Valid,
+		"has_chat", task.ChatSessionID.Valid,
+		"has_autopilot_run", task.AutopilotRunID.Valid,
+		"has_quick_create", hasQuickCreate,
+	)
+	if _, cerr := h.TaskService.CancelTask(ctx, task.ID); cerr != nil {
+		slog.Error("task claim: cancel after workspace check failed",
+			"task_id", uuidToString(task.ID), "error", cerr)
+	}
+	return &claimBuildFailure{
+		outcome: "error_workspace",
+		status:  http.StatusInternalServerError,
+		message: "task workspace isolation check failed",
+	}
+}
+
 // remoteMCPDaemonTokenForClaim prepares the short-lived credential the daemon
 // uses to resolve write-only Remote MCP secrets for this task. The raw token is
 // returned only in the claim response; its hash is committed atomically with
@@ -2132,15 +2211,14 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	}
 
 	// Include workspace ID and repos so the daemon can set up worktrees.
-	//
-	// Repo precedence: project-bound github_repo resources override workspace
-	// repos when present. Mixing both would just confuse the agent — if a
-	// project explicitly attached its repos, those are the authoritative set
-	// for issues inside that project. When the project has no github_repo
-	// resources (or no project at all), we fall back to the workspace repos.
+	// Project context, repo precedence and the tenant/failure rules around both
+	// live in resolveClaimProjectContext, which every claim path shares.
 	if task.IssueID.Valid {
 		if issue, err := h.Queries.GetIssue(r.Context(), task.IssueID); err == nil {
 			resp.WorkspaceID = uuidToString(issue.WorkspaceID)
+			if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, false); failure != nil {
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
+			}
 			resp.ThreadName = issue.Title
 
 			// Squad-leader briefing injection: keyed off the task being a
@@ -2230,55 +2308,19 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 			}
 
-			var projectRepos []RepoData
-			if issue.ProjectID.Valid {
-				resp.ProjectID = uuidToString(issue.ProjectID)
-				if proj, err := h.Queries.GetProject(r.Context(), issue.ProjectID); err == nil {
-					resp.ProjectTitle = proj.Title
-					resp.ProjectDescription = proj.Description.String
-				}
-				if rows := h.listProjectResourcesForProject(r.Context(), issue.ProjectID); len(rows) > 0 {
-					out := make([]ProjectResourceData, 0, len(rows))
-					for _, row := range rows {
-						label := ""
-						if row.Label.Valid {
-							label = row.Label.String
-						}
-						ref := json.RawMessage(row.ResourceRef)
-						if len(ref) == 0 {
-							ref = json.RawMessage("{}")
-						}
-						out = append(out, ProjectResourceData{
-							ID:           uuidToString(row.ID),
-							ResourceType: row.ResourceType,
-							ResourceRef:  ref,
-							Label:        label,
-						})
-						// Lift github_repo resources into the daemon's repo list
-						// so `multica repo checkout` and the meta-skill render
-						// them as the issue's repos.
-						if row.ResourceType == "github_repo" {
-							var payload struct {
-								URL string `json:"url"`
-								Ref string `json:"ref,omitempty"`
-							}
-							if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-								projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
-							}
-						}
-					}
-					resp.ProjectResources = out
+			projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), issue.ProjectID, issue.WorkspaceID)
+			if projectErr != nil {
+				slog.Error("issue claim: load project context failed; preserving task for redelivery",
+					"task_id", uuidToString(task.ID),
+					"issue_id", uuidToString(issue.ID),
+					"error", projectErr)
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+					outcome: "error_project_context",
+					status:  http.StatusInternalServerError,
+					message: "failed to load project context",
 				}
 			}
-
-			if len(projectRepos) > 0 {
-				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), issue.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
-			}
+			projectCtx.applyTo(&resp)
 		}
 
 		// Load every planned input as one chronological, de-duplicated set.
@@ -2516,6 +2558,9 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	if task.ChatSessionID.Valid {
 		if cs, err := h.Queries.GetChatSession(r.Context(), task.ChatSessionID); err == nil {
 			resp.WorkspaceID = uuidToString(cs.WorkspaceID)
+			if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, false); failure != nil {
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
+			}
 			resp.ChatSessionID = uuidToString(cs.ID)
 			resp.ThreadName = cs.Title
 			// Legacy compatibility: agent creation no longer creates intro chats,
@@ -2582,57 +2627,20 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 				}
 			}
 			// A web chat can opt into the same durable project context as an
-			// issue-bound task. Revalidate the soft reference in this workspace at
-			// claim time: a deleted/stale project degrades to workspace context and
-			// can never leak a project from another tenant.
-			var projectRepos []RepoData
-			if cs.ProjectID.Valid {
-				if project, err := h.Queries.GetProjectInWorkspace(r.Context(), db.GetProjectInWorkspaceParams{
-					ID:          cs.ProjectID,
-					WorkspaceID: cs.WorkspaceID,
-				}); err == nil {
-					resp.ProjectID = uuidToString(project.ID)
-					resp.ProjectTitle = project.Title
-					resp.ProjectDescription = project.Description.String
-					if rows := h.listProjectResourcesForProject(r.Context(), project.ID); len(rows) > 0 {
-						resources := make([]ProjectResourceData, 0, len(rows))
-						for _, row := range rows {
-							label := ""
-							if row.Label.Valid {
-								label = row.Label.String
-							}
-							ref := json.RawMessage(row.ResourceRef)
-							if len(ref) == 0 {
-								ref = json.RawMessage("{}")
-							}
-							resources = append(resources, ProjectResourceData{
-								ID:           uuidToString(row.ID),
-								ResourceType: row.ResourceType,
-								ResourceRef:  ref,
-								Label:        label,
-							})
-							if row.ResourceType == "github_repo" {
-								var payload struct {
-									URL string `json:"url"`
-									Ref string `json:"ref,omitempty"`
-								}
-								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
-								}
-							}
-						}
-						resp.ProjectResources = resources
-					}
+			// issue-bound task.
+			projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), cs.ProjectID, cs.WorkspaceID)
+			if projectErr != nil {
+				slog.Error("chat claim: load project context failed; preserving task for redelivery",
+					"task_id", uuidToString(task.ID),
+					"chat_session_id", uuidToString(cs.ID),
+					"error", projectErr)
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+					outcome: "error_project_context",
+					status:  http.StatusInternalServerError,
+					message: "failed to load project context",
 				}
 			}
-			if len(projectRepos) > 0 {
-				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), cs.WorkspaceID); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
-				}
-			}
+			projectCtx.applyTo(&resp)
 			if !task.ForceFreshSession {
 				// Resume chat sessions only when the stored pointer was produced
 				// by the same runtime as the claiming task. When the chat_session
@@ -2784,31 +2792,55 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 	// autopilot, and include the autopilot instructions because there is no
 	// issue for the agent to fetch.
 	if task.AutopilotRunID.Valid {
-		if run, err := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID); err == nil {
-			resp.AutopilotID = uuidToString(run.AutopilotID)
-			resp.AutopilotSource = run.Source
-			if run.TriggerPayload != nil {
-				resp.AutopilotTriggerPayload = json.RawMessage(run.TriggerPayload)
-			}
-			if ap, err := h.Queries.GetAutopilot(r.Context(), run.AutopilotID); err == nil {
-				resp.AutopilotTitle = ap.Title
-				resp.ThreadName = ap.Title
-				if ap.Description.Valid {
-					resp.AutopilotDescription = ap.Description.String
-				}
-				if resp.WorkspaceID == "" {
-					resp.WorkspaceID = uuidToString(ap.WorkspaceID)
-				}
-				if len(resp.Repos) == 0 {
-					if ws, err := h.Queries.GetWorkspace(r.Context(), ap.WorkspaceID); err == nil && ws.Repos != nil {
-						var repos []RepoData
-						if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-							resp.Repos = repos
-						}
-					}
-				}
+		run, runErr := h.Queries.GetAutopilotRun(r.Context(), task.AutopilotRunID)
+		if runErr != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+				h.rejectAutopilotClaim(r.Context(), task, runErr, "autopilot_run", uuidToString(task.AutopilotRunID))
+		}
+		ap, apErr := h.Queries.GetAutopilot(r.Context(), run.AutopilotID)
+		if apErr != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount,
+				h.rejectAutopilotClaim(r.Context(), task, apErr, "autopilot", uuidToString(run.AutopilotID))
+		}
+
+		// The autopilot owns this task's workspace. taskToResponse seeded
+		// resp.WorkspaceID with the RUNTIME's workspace, so the old
+		// `if resp.WorkspaceID == ""` guard never fired and left the isolation
+		// check comparing the runtime workspace against itself. Assign
+		// authoritatively, then prove ownership before exposing any
+		// autopilot-owned context.
+		resp.WorkspaceID = uuidToString(ap.WorkspaceID)
+		if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, false); failure != nil {
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
+		}
+
+		resp.AutopilotID = uuidToString(run.AutopilotID)
+		resp.AutopilotSource = run.Source
+		if run.TriggerPayload != nil {
+			resp.AutopilotTriggerPayload = json.RawMessage(run.TriggerPayload)
+		}
+		resp.AutopilotTitle = ap.Title
+		resp.ThreadName = ap.Title
+		if ap.Description.Valid {
+			resp.AutopilotDescription = ap.Description.String
+		}
+
+		// A run_only autopilot has no issue to inherit project context from.
+		// Resolving it here is left to the change that adds it (#7396); this
+		// call keeps the workspace-repo fallback the branch already had.
+		projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), pgtype.UUID{}, ap.WorkspaceID)
+		if projectErr != nil {
+			slog.Error("autopilot claim: load project context failed; preserving task for redelivery",
+				"task_id", uuidToString(task.ID),
+				"autopilot_id", uuidToString(run.AutopilotID),
+				"error", projectErr)
+			return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+				outcome: "error_project_context",
+				status:  http.StatusInternalServerError,
+				message: "failed to load project context",
 			}
 		}
+		projectCtx.applyTo(&resp)
 	}
 
 	// Handoff note (MUL-3375) is populated by taskToResponse (the shared mapper
@@ -2829,61 +2861,33 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 			resp.QuickCreateAttachmentIDs = append([]string(nil), qc.AttachmentIDs...)
 			resp.ThreadName = qc.Prompt
 			resp.WorkspaceID = qc.WorkspaceID
+			if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, true); failure != nil {
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
+			}
 
 			// When the user picked a project in the modal, surface its title
 			// and resources to the daemon so the agent has the same context
-			// it would for an issue-bound task: the prompt template can name
-			// the project, and `multica repo checkout` sees the project's
-			// github_repo resources instead of the workspace fallback.
-			var projectRepos []RepoData
+			// it would for an issue-bound task. A prompt-supplied project id
+			// that does not parse is treated as no project at all.
+			var quickCreateProjectID pgtype.UUID
 			if qc.ProjectID != "" {
-				projectUUID, err := util.ParseUUID(qc.ProjectID)
-				if err == nil {
-					resp.ProjectID = qc.ProjectID
-					if proj, err := h.Queries.GetProject(r.Context(), projectUUID); err == nil {
-						resp.ProjectTitle = proj.Title
-						resp.ProjectDescription = proj.Description.String
-					}
-					if rows := h.listProjectResourcesForProject(r.Context(), projectUUID); len(rows) > 0 {
-						out := make([]ProjectResourceData, 0, len(rows))
-						for _, row := range rows {
-							label := ""
-							if row.Label.Valid {
-								label = row.Label.String
-							}
-							ref := json.RawMessage(row.ResourceRef)
-							if len(ref) == 0 {
-								ref = json.RawMessage("{}")
-							}
-							out = append(out, ProjectResourceData{
-								ID:           uuidToString(row.ID),
-								ResourceType: row.ResourceType,
-								ResourceRef:  ref,
-								Label:        label,
-							})
-							if row.ResourceType == "github_repo" {
-								var payload struct {
-									URL string `json:"url"`
-									Ref string `json:"ref,omitempty"`
-								}
-								if json.Unmarshal(row.ResourceRef, &payload) == nil && payload.URL != "" {
-									projectRepos = append(projectRepos, RepoData{URL: payload.URL, Ref: strings.TrimSpace(payload.Ref)})
-								}
-							}
-						}
-						resp.ProjectResources = out
-					}
+				if parsed, err := util.ParseUUID(qc.ProjectID); err == nil {
+					quickCreateProjectID = parsed
 				}
 			}
-
-			if len(projectRepos) > 0 {
-				resp.Repos = projectRepos
-			} else if ws, err := h.Queries.GetWorkspace(r.Context(), parseUUID(qc.WorkspaceID)); err == nil && ws.Repos != nil {
-				var repos []RepoData
-				if json.Unmarshal(ws.Repos, &repos) == nil && len(repos) > 0 {
-					resp.Repos = repos
+			projectCtx, projectErr := h.resolveClaimProjectContext(r.Context(), quickCreateProjectID, parseUUID(qc.WorkspaceID))
+			if projectErr != nil {
+				slog.Error("quick-create claim: load project context failed; preserving task for redelivery",
+					"task_id", uuidToString(task.ID),
+					"project_id", qc.ProjectID,
+					"error", projectErr)
+				return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
+					outcome: "error_project_context",
+					status:  http.StatusInternalServerError,
+					message: "failed to load project context",
 				}
 			}
+			projectCtx.applyTo(&resp)
 
 			// Parent-issue resolution for quick-create tasks opened from
 			// "Add sub issue". The handler already verified workspace
@@ -2951,34 +2955,13 @@ func (h *Handler) buildClaimedTaskResponse(r *http.Request, task *db.AgentTaskQu
 		}
 	}
 
-	// Workspace isolation check: the daemon uses this response's workspace_id
-	// as the only authority for MULTICA_WORKSPACE_ID in the agent env. An
-	// empty value would make the CLI silently fall back to the user-global
-	// config and talk to whatever workspace the user happened to last
-	// configure; a value that doesn't match the runtime's workspace means
-	// upstream routed a foreign-workspace task here. Both cases must hard-
-	// fail AND cancel the just-dispatched task so the queue / agent status
-	// don't sit stuck until the stale-task sweeper fires minutes later.
-	if resp.WorkspaceID == "" || resp.WorkspaceID != runtimeWorkspaceID {
-		slog.Error("task claim: workspace isolation check failed, cancelling task",
-			"task_id", uuidToString(task.ID),
-			"runtime_id", runtimeID,
-			"runtime_workspace", runtimeWorkspaceID,
-			"resolved_workspace", resp.WorkspaceID,
-			"has_issue", task.IssueID.Valid,
-			"has_chat", task.ChatSessionID.Valid,
-			"has_autopilot_run", task.AutopilotRunID.Valid,
-			"has_quick_create", hasQuickCreate,
-		)
-		if _, cerr := h.TaskService.CancelTask(r.Context(), task.ID); cerr != nil {
-			slog.Error("task claim: cancel after workspace check failed",
-				"task_id", uuidToString(task.ID), "error", cerr)
-		}
-		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, &claimBuildFailure{
-			outcome: "error_workspace",
-			status:  http.StatusInternalServerError,
-			message: "task workspace isolation check failed",
-		}
+	// Catch-all workspace isolation check. Every context branch above already
+	// ran this the moment it resolved its owning workspace, which is what makes
+	// "prove ownership, then hydrate" structural rather than per-branch
+	// discipline. This final call is the backstop for a task that reached here
+	// without any branch claiming it.
+	if failure := h.rejectClaimOnWorkspaceMismatch(r.Context(), task, resp.WorkspaceID, runtimeID, runtimeWorkspaceID, hasQuickCreate); failure != nil {
+		return resp, deliveredCommentIDs, agentSkillCount, builtinSkillCount, failure
 	}
 
 	// Surface a bounded snapshot of the same agent's other in-flight issue
