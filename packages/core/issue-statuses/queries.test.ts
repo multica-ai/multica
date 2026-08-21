@@ -1,6 +1,11 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
-import { buildIssueStatusCatalog, compareIssueStatusEntries, isIssueStatusCategory } from "./queries";
+import {
+  buildIssueStatusCatalog,
+  compareIssueStatusEntries,
+  isIssueStatusCategory,
+  issueStatusColor,
+} from "./queries";
 import type { IssueStatusEntry } from "../types";
 
 function entry(key: string, category: string, name = key, archivedAt: string | null = null): IssueStatusEntry {
@@ -45,6 +50,29 @@ describe("buildIssueStatusCatalog", () => {
   it("ignores a corrupt category rather than trusting it", () => {
     const c = buildIssueStatusCatalog([entry("weird", "started")]);
     expect(c.categoryOf("weird")).toBe("todo");
+  });
+
+  // The 7 built-ins carry a seeded hex the server refuses to let anyone edit,
+  // and every surface paints them from their category token instead. A caller
+  // that read the seed drew the SAME status in two different greens depending
+  // on which control it was looking at. (MUL-6440)
+  it("gives a built-in no color of its own", () => {
+    const builtIn = { ...entry("in_review", "in_review", "In Review"), is_system: true, color: "#22c55e" };
+    const c = buildIssueStatusCatalog([builtIn, entry("qa", "in_review", "QA")]);
+    expect(c.colorOf("in_review")).toBeNull();
+    expect(c.colorOf("qa")).toBe("#123456");
+  });
+
+  it("gives no color to a status it cannot resolve", () => {
+    const c = buildIssueStatusCatalog(undefined);
+    expect(c.colorOf("in_review")).toBeNull();
+    expect(c.colorOf("ghost")).toBeNull();
+  });
+
+  it("issueStatusColor answers the same question for an entry in hand", () => {
+    expect(issueStatusColor(undefined)).toBeNull();
+    expect(issueStatusColor({ ...entry("qa", "in_review"), is_system: true })).toBeNull();
+    expect(issueStatusColor(entry("qa", "in_review"))).toBe("#123456");
   });
 
   it("groups by category in catalog order", () => {

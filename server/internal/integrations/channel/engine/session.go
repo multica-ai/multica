@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // This file is the SHARED, channel-agnostic chat-session service every IM
@@ -46,7 +47,6 @@ type SessionQueries interface {
 	LockWorkspaceForChatSessionCreate(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	CreateChatSession(ctx context.Context, arg db.CreateChatSessionParams) (db.ChatSession, error)
 	CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
-	LockChatSessionForAppend(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
 	ClearChatMessageChannelMediaPending(ctx context.Context, arg db.ClearChatMessageChannelMediaPendingParams) error
 	LockIssueForChannelMediaBind(ctx context.Context, arg db.LockIssueForChannelMediaBindParams) (pgtype.UUID, error)
@@ -80,9 +80,6 @@ func (a dbSessionQueries) CreateChatSession(ctx context.Context, arg db.CreateCh
 }
 func (a dbSessionQueries) CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error) {
 	return a.q.CreateChannelChatSessionBinding(ctx, arg)
-}
-func (a dbSessionQueries) LockChatSessionForAppend(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
-	return a.q.LockChatSessionForAppend(ctx, id)
 }
 func (a dbSessionQueries) CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	return a.q.CreateChatMessage(ctx, arg)
@@ -239,6 +236,7 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 	}
 
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: in.WorkspaceID,
 		AgentID:     in.AgentID,
 		CreatorID:   in.Sender,
@@ -289,10 +287,6 @@ type AppendInput struct {
 	ClaimToken          pgtype.UUID
 	MediaPendingSeconds float64
 	ForceFresh          bool
-	// BeforeWrite runs inside the append transaction before any durable write.
-	// Adapters use it to acquire a route fence that is held through the message
-	// insert and in-transaction dedup mark.
-	BeforeWrite func(context.Context, pgx.Tx) error
 }
 
 // BindMediaInput links already-uploaded media to either an /issue target or a
@@ -331,17 +325,6 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
-	// Keep the repo-wide teardown order: chat_session before any adapter-owned
-	// route fence. FOR KEY SHARE is sufficient to serialize deletion without
-	// blocking normal non-key session updates or debounced task enqueueing.
-	if _, err := qtx.LockChatSessionForAppend(ctx, in.SessionID); err != nil {
-		return AppendResult{}, fmt.Errorf("lock chat session for append: %w", err)
-	}
-	if in.BeforeWrite != nil {
-		if err := in.BeforeWrite(ctx, tx); err != nil {
-			return AppendResult{}, err
-		}
-	}
 
 	commandSource := in.CommandText
 	if commandSource == "" {
@@ -353,6 +336,7 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	// it must be stamped in the same transaction as the message so no later
 	// binding deletion (archive, installation rebind) can strip it.
 	msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ID:                      dbid.NewV7(),
 		ChatSessionID:           in.SessionID,
 		Role:                    "user",
 		Content:                 in.Body,

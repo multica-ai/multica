@@ -44,10 +44,10 @@ describe("unionTaskMessagesBySeq", () => {
   });
 
   it("lets the authoritative row win on conflict", () => {
-    const clipped = { ...msg(1), content: "clip", truncated: true };
-    const persisted = { ...msg(1), content: "full" };
+    const live = { ...msg(1), content: "live" };
+    const persisted = { ...msg(1), content: "persisted" };
 
-    const united = unionTaskMessagesBySeq([clipped], [persisted]);
+    const united = unionTaskMessagesBySeq([live], [persisted]);
 
     expect(united).toEqual([persisted]);
   });

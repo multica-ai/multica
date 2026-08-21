@@ -11,7 +11,7 @@ import { issueKeys } from "../issues/queries";
 import { chatKeys } from "../chat/queries";
 import { workspaceWorkingAgentsKeys } from "../agents/queries";
 import { workspaceKeys } from "../workspace/queries";
-import { dingtalkKeys } from "../dingtalk/queries";
+import { issueStatusKeys } from "../issue-statuses/queries";
 import {
   markWorkspaceDeletePending,
   unmarkWorkspaceDeletePending,
@@ -119,8 +119,8 @@ describe("useRealtimeSync — ws instance change", () => {
     // (16 workspace-scoped [incl. property definitions] + 6 per-issue
     // prefixes + the workspace working-agents projection + 5 per-chat
     // prefixes + 1 workspaceKeys.list() + 1 cross-workspace inbox unread
-    // summary = 30 calls)
-    expect(invalidateSpy).toHaveBeenCalledTimes(30);
+    // summary = 31 calls)
+    expect(invalidateSpy).toHaveBeenCalledTimes(31);
   });
 
   it("does not re-invalidate when rerendered with the same ws instance", () => {
@@ -154,6 +154,9 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(calls).toContainEqual(["chat", "ws-1"]);
     expect(calls).toContainEqual(["labels", "ws-1"]);
     expect(calls).toContainEqual(["workspaces", "ws-1", "invitations"]);
+    // A catalog edit made while this client was disconnected is otherwise
+    // invisible for the query's whole 5-minute staleTime.
+    expect(calls).toContainEqual(issueStatusKeys.all("ws-1"));
   });
 
   it("invalidates per-issue caches (no wsId in key) on ws instance change", () => {
@@ -236,8 +239,31 @@ describe("useRealtimeSync — ws instance change", () => {
       queryKey: issueKeys.attachments("issue-1"),
     });
   });
+  it("refetches the status catalog after an admin changes it elsewhere", async () => {
+    const ws = createMockWs();
+    renderHook(() => useRealtimeSync(ws, stores), {
+      wrapper: createWrapper(qc),
+    });
+    const onAny = vi.mocked(ws.onAny).mock.calls[0]?.[0];
+    expect(onAny).toBeDefined();
 
-  it("invalidates DingTalk group routes after a route update event", async () => {
+    onAny!({ type: "issue_status:changed", payload: { action: "created" } } as never);
+    await new Promise((resolve) => setTimeout(resolve, 120));
+
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: issueStatusKeys.all("ws-1"),
+    });
+    // Deliberately NOT the issue caches. A row stores the status KEY; its name,
+    // color and category are resolved from the catalog at render time, so no
+    // cached issue field can go stale here. Dragging every board and list along
+    // would turn one admin rename into a workspace-wide refetch storm on every
+    // connected client. (MUL-6458)
+    expect(invalidateSpy).not.toHaveBeenCalledWith({
+      queryKey: issueKeys.all("ws-1"),
+    });
+  });
+
+  it("ignores removed DingTalk group-route events", () => {
     const ws = createMockWs();
     renderHook(() => useRealtimeSync(ws, stores), {
       wrapper: createWrapper(qc),
@@ -246,11 +272,8 @@ describe("useRealtimeSync — ws instance change", () => {
     expect(onAny).toBeDefined();
 
     onAny!({ type: "dingtalk_group_route:updated", payload: {} } as never);
-    await new Promise((resolve) => setTimeout(resolve, 120));
 
-    expect(invalidateSpy).toHaveBeenCalledWith({
-      queryKey: dingtalkKeys.groupRoutes("ws-1"),
-    });
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });
 

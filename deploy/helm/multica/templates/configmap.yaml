@@ -7,6 +7,8 @@ metadata:
 data:
   # --- Backend ---
   PORT: "8080"
+  MULTICA_DATABASE_STARTUP_TIMEOUT: {{ .Values.backend.config.databaseStartupTimeout | quote }}
+  MULTICA_DATABASE_CONNECT_TIMEOUT: {{ .Values.backend.config.databaseConnectTimeout | quote }}
   APP_ENV: {{ .Values.backend.config.appEnv | quote }}
   MULTICA_APP_URL: {{ .Values.backend.config.appUrl | quote }}
   FRONTEND_ORIGIN: {{ .Values.backend.config.frontendOrigin | quote }}

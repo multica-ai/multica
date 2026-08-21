@@ -19,6 +19,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -126,6 +127,7 @@ func (h *Handler) CreateChatSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	session, err := qtx.CreateChatSession(r.Context(), db.CreateChatSessionParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: workspaceUUID,
 		AgentID:     agentID,
 		CreatorID:   parseUUID(userID),
@@ -1223,11 +1225,29 @@ func (h *Handler) ListChatMessagesPage(w http.ResponseWriter, r *http.Request) {
 // optimistic seeds don't have a real task created_at and the timer needs to
 // survive refresh / reopen.
 type PendingChatTaskResponse struct {
-	TaskID        string                   `json:"task_id,omitempty"`
-	Status        string                   `json:"status,omitempty"`
-	CreatedAt     string                   `json:"created_at,omitempty"`
+	TaskID    string `json:"task_id,omitempty"`
+	Status    string `json:"status,omitempty"`
+	CreatedAt string `json:"created_at,omitempty"`
+	// WaitReason explains a waiting_local_directory hold: which directory the
+	// task is parked on and, when known, the short id of the task holding it.
+	// Emitted only for that status — on any other one the column still carries
+	// the last hold's text, which would read as a live explanation for a task
+	// that is running fine. Absent on older servers, which the client renders
+	// as today's bare "Waiting for local directory".
+	WaitReason    string                   `json:"wait_reason,omitempty"`
 	SupportsQueue bool                     `json:"supports_queue"`
 	QueuedTasks   []QueuedChatTaskResponse `json:"queued_tasks,omitempty"`
+}
+
+// waitReasonForStatus gates the stored hold text on the status it describes.
+// wait_reason is never cleared when a task resumes — the daemon writes it once
+// on the way into the hold — so returning it unconditionally would attach "held
+// by task abc12345" to a task that has been running for ten minutes.
+func waitReasonForStatus(status string, reason pgtype.Text) string {
+	if status != "waiting_local_directory" || !reason.Valid {
+		return ""
+	}
+	return strings.TrimSpace(reason.String)
 }
 
 type QueuedChatTaskResponse struct {
@@ -1604,6 +1624,7 @@ func (h *Handler) GetPendingChatTask(w http.ResponseWriter, r *http.Request) {
 		TaskID:        uuidToString(head.ID),
 		Status:        head.Status,
 		CreatedAt:     timestampToString(head.CreatedAt),
+		WaitReason:    waitReasonForStatus(head.Status, head.WaitReason),
 		SupportsQueue: true,
 		QueuedTasks:   queued,
 	})

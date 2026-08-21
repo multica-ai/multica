@@ -498,6 +498,12 @@ WITH
 deleted_sessions AS (
     DELETE FROM chat_session WHERE chat_session.workspace_id = $1
 ),
+deleted_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE workspace_id = $1
+),
+deleted_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE workspace_id = $1
+),
 deleted_channel_installations AS (
     DELETE FROM channel_installation
     WHERE channel_installation.workspace_id = $1
@@ -597,6 +603,26 @@ deleted_secrets AS (
 -- was already uninstalled would otherwise survive the workspace it described.
 deleted_invocations AS (
     DELETE FROM plugin_invocation
+    WHERE workspace_id = $1
+),
+-- Published artifacts are workspace-scoped too, and independent of whether
+-- anything installed them. Deleting the workspace without these would leave the
+-- stored bundles as the largest orphan the plugin surface can produce.
+versions AS MATERIALIZED (
+    SELECT plugin_package_version.id
+    FROM plugin_package_version
+    WHERE plugin_package_version.workspace_id = $1
+),
+deleted_package_files AS (
+    DELETE FROM plugin_package_file
+    WHERE version_id IN (SELECT id FROM versions)
+),
+deleted_package_versions AS (
+    DELETE FROM plugin_package_version
+    WHERE workspace_id = $1
+),
+deleted_packages AS (
+    DELETE FROM plugin_package
     WHERE workspace_id = $1
 )
 DELETE FROM plugin_installation WHERE id IN (SELECT id FROM installations);

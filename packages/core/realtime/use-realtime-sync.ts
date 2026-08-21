@@ -16,6 +16,7 @@ import { autopilotKeys } from "../autopilots/queries";
 import { runtimeKeys } from "../runtimes/queries";
 import { labelKeys } from "../labels/queries";
 import { propertyKeys } from "../properties/queries";
+import { issueStatusKeys } from "../issue-statuses/queries";
 import {
   agentTaskSnapshotKeys,
   workspaceWorkingAgentsKeys,
@@ -57,7 +58,6 @@ import {
 } from "../platform/system-notification";
 import type { Workspace } from "../types/workspace";
 import {
-  backfillTaskMessages,
   chatKeys,
   isTaskMessageTimelineHeld,
   mergeTaskMessagesBySeq,
@@ -658,6 +658,10 @@ function invalidateWorkspaceScopedQueries(qc: QueryClient): void {
     qc.invalidateQueries({ queryKey: chatKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: labelKeys.all(wsId) });
     qc.invalidateQueries({ queryKey: propertyKeys.all(wsId) });
+    // A catalog edit missed while disconnected would otherwise sit behind the
+    // 5-minute staleTime — long enough to offer a status the server already
+    // archived, or to keep painting its old name.
+    qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
   }
   // Cross-workspace, so outside the wsId guard: a reconnect may have missed
   // inbox events from any workspace, so re-pull the switcher-dot summary.
@@ -810,6 +814,20 @@ export function useRealtimeSync(
           qc.invalidateQueries({ queryKey: workspaceKeys.skills(wsId) });
         }
       },
+      // The issue status catalog (MUL-6243). An admin edits it in the settings
+      // page; every other tab and device is rendering statuses out of it.
+      //
+      // Invalidate only — the event carries no entry to merge. Issue caches are
+      // deliberately NOT dragged along: a row stores the status KEY, and its
+      // name, color and category are resolved from this catalog at render time
+      // (`useStatusLabel`, `colorOf`), so refetching the catalog is what makes a
+      // rename repaint. Pulling every board and list with it would turn one
+      // admin rename into a workspace-wide refetch storm on every connected
+      // client. (MUL-6458)
+      issue_status: () => {
+        const wsId = getCurrentWsId();
+        if (wsId) qc.invalidateQueries({ queryKey: issueStatusKeys.all(wsId) });
+      },
       pin: () => {
         const wsId = getCurrentWsId();
         const userId = authStore.getState().user?.id;
@@ -844,10 +862,6 @@ export function useRealtimeSync(
       dingtalk_installation: () => {
         const wsId = getCurrentWsId();
         if (wsId) qc.invalidateQueries({ queryKey: dingtalkKeys.installations(wsId) });
-      },
-      dingtalk_group_route: () => {
-        const wsId = getCurrentWsId();
-        if (wsId) qc.invalidateQueries({ queryKey: dingtalkKeys.groupRoutes(wsId) });
       },
       vcs_connection: () => {
         const wsId = getCurrentWsId();
@@ -1326,7 +1340,6 @@ export function useRealtimeSync(
     // The entry can be collected between the two, which is why the flush
     // re-checks rather than trusting the gate — see flushTaskMessages.
     const taskMessageBatches = new Map<string, TaskMessagePayload[]>();
-    const truncatedTaskIds = new Set<string>();
     let taskMessageFlushTimer: ReturnType<typeof setTimeout> | null = null;
 
     const flushTaskMessages = () => {
@@ -1344,7 +1357,6 @@ export function useRealtimeSync(
         // instead costs nothing: the rows are persisted, so the next open
         // fetches the whole timeline.
         if (!isTaskMessageTimelineHeld(qc, taskId)) {
-          truncatedTaskIds.delete(taskId);
           continue;
         }
         qc.setQueryData<TaskMessagePayload[]>(
@@ -1353,21 +1365,6 @@ export function useRealtimeSync(
         );
       }
       taskMessageBatches.clear();
-
-      // A truncated frame carries clipped tool input/output — the full row
-      // lives only in the DB, and `taskMessagesOptions` is staleTime:Infinity,
-      // so nothing would ever replace the clipped copy on its own. Backfill
-      // once per flush, not once per frame: a run writing several large files
-      // in a row would otherwise queue a fetch for each one.
-      for (const taskId of truncatedTaskIds) {
-        void backfillTaskMessages(qc, taskId).catch((err: unknown) => {
-          chatWsLogger.debug("task:message backfill failed", {
-            task_id: taskId,
-            error: err,
-          });
-        });
-      }
-      truncatedTaskIds.clear();
     };
 
     const unsubTaskMessage = ws.on("task:message", (p) => {
@@ -1379,7 +1376,6 @@ export function useRealtimeSync(
       const batch = taskMessageBatches.get(payload.task_id);
       if (batch) batch.push(payload);
       else taskMessageBatches.set(payload.task_id, [payload]);
-      if (payload.truncated) truncatedTaskIds.add(payload.task_id);
 
       // Fixed window, not a resetting debounce: a continuous stream must still
       // flush every TASK_MESSAGE_FLUSH_MS instead of being starved until a gap.
@@ -1565,6 +1561,8 @@ export function useRealtimeSync(
               old,
               payload.task_id,
               "waiting_local_directory",
+              undefined,
+              payload.wait_reason,
             ),
         );
         invalidateChatMessageQueries(qc, payload.chat_session_id);

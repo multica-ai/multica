@@ -204,14 +204,19 @@ WITH dead AS (
       )
     RETURNING ci.id
 ),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM dead)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding
     WHERE installation_id IN (SELECT id FROM dead)
     RETURNING chat_session_id
-),
-cleared_dingtalk_group_routes AS (
-    DELETE FROM dingtalk_group_route
-    WHERE installation_id IN (SELECT id FROM dead)
 ),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no installation_id,
@@ -260,12 +265,18 @@ WITH doomed AS (
         SELECT id FROM agent WHERE runtime_id = sqlc.arg('runtime_id') AND kind = 'system'
     )
 ),
-cleared_chat_sessions AS (
-    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
-    RETURNING chat_session_id
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM doomed)
 ),
 cleared_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
+    RETURNING chat_session_id
 ),
 cleared_outbound_cards AS (
     -- Reach channel_outbound_card_message (keyed by chat_session_id, no FK)
@@ -626,7 +637,7 @@ WHERE received_at < $1;
 -- column — only routing / identity / drop_reason / timestamp.
 INSERT INTO channel_inbound_audit (
     installation_id, channel_type, channel_chat_id, event_type,
-    channel_event_id, channel_message_id, drop_reason
+    channel_event_id, channel_message_id, drop_reason, id
 ) VALUES (
     sqlc.narg('installation_id'),
     $1,
@@ -634,7 +645,8 @@ INSERT INTO channel_inbound_audit (
     $2,
     sqlc.narg('channel_event_id'),
     sqlc.narg('channel_message_id'),
-    $3
+    $3,
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 );
 
 -- name: ListChannelInboundAuditByInstallation :many

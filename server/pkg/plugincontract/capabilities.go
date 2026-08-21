@@ -35,16 +35,24 @@ func HostCapabilities() Capabilities {
 			SurfaceIssuePanel: true,
 			SurfaceModal:      true,
 		},
-		// The agent trigger is not a fourth call site the host drives; it is a
-		// hook exposed to an agent as an MCP tool, which needs the daemon-side
-		// server that lands with the agent integration.
+		// The agent trigger is not a call site the host drives: the hook is
+		// offered to an agent as an MCP tool and the agent decides. The
+		// daemon-side server that renders it is daemon/plugin_hook_mcp.go.
 		HookTriggers: map[string]bool{
 			TriggerUI:     true,
 			TriggerManual: true,
 			TriggerEvent:  true,
+			TriggerAgent:  true,
 		},
-		HookTransport: map[string]bool{TransportHTTP: true},
-		ResourceTypes: map[string]bool{},
+		// http calls one declared endpoint; mcp adopts an external MCP server's
+		// tools, which is why it ships with an approval step that pins them by
+		// schema digest — see service/plugin_mcp_transport.go. Installing the
+		// plugin is not the grant there; approving the tools is.
+		HookTransport: map[string]bool{TransportHTTP: true, TransportMCP: true},
+		// A skill resource is not a call in either direction — it is a SKILL.md
+		// written into the existing skill table at install and removed at
+		// uninstall. service.InstallSkillResources does that.
+		ResourceTypes: map[string]bool{ResourceSkill: true},
 	}
 }
 

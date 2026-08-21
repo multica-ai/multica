@@ -1620,74 +1620,23 @@ func TestPerTurnContextBlocksOnAssignmentPath(t *testing.T) {
 	}
 }
 
-// TestTurnModeMarkerAlwaysPresent is the regression guard for the review
-// finding on #6021: the brief's mode router keys off an explicit marker in the
-// per-turn prompt, so that marker must be emitted unconditionally from the same
-// branch that selects the code path.
-//
-// The dangerous case is a comment-triggered run whose comment body is empty (or
-// an older server that doesn't send one). Before this guard the prompt emitted
-// no `[NEW COMMENT]` block at all, the brief fell through to Ownership mode,
-// and the agent would change the issue status on a turn that must not.
-func TestTurnModeMarkerAlwaysPresent(t *testing.T) {
-	t.Parallel()
-
-	cases := []struct {
-		name string
-		task Task
-		want string
-		deny string
-	}{
-		{
-			name: "comment-triggered with content",
-			task: Task{IssueID: "issue-1", TriggerCommentID: "c-1", TriggerCommentContent: "please look"},
-			want: "**Turn mode: Reply.**",
-			deny: "**Turn mode: Ownership.**",
-		},
-		{
-			name: "comment-triggered with EMPTY content",
-			task: Task{IssueID: "issue-1", TriggerCommentID: "c-1"},
-			want: "**Turn mode: Reply.**",
-			deny: "**Turn mode: Ownership.**",
-		},
-		{
-			name: "assignment-triggered",
-			task: Task{IssueID: "issue-1"},
-			want: "**Turn mode: Ownership.**",
-			deny: "**Turn mode: Reply.**",
-		},
-		{
-			name: "assignment-triggered with handoff note",
-			task: Task{IssueID: "issue-1", HandoffNote: "start with the API"},
-			want: "**Turn mode: Ownership.**",
-			deny: "**Turn mode: Reply.**",
-		},
-	}
-
-	for _, tc := range cases {
-		tc := tc
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			prompt := BuildPrompt(tc.task, "claude")
-			if !strings.Contains(prompt, tc.want) {
-				t.Errorf("prompt missing turn-mode marker %q\n---\n%s", tc.want, prompt)
-			}
-			if strings.Contains(prompt, tc.deny) {
-				t.Errorf("prompt carries the wrong turn-mode marker %q\n---\n%s", tc.deny, prompt)
-			}
-		})
-	}
-}
-
-// The mode marker only makes sense for the two issue paths — the issue-less
-// kinds have no Reply/Ownership distinction and no issue status to protect.
-func TestTurnModeMarkerAbsentOnIssuelessKinds(t *testing.T) {
+// TestTurnModeMarkersRetired pins MUL-6417: the Reply/Ownership turn-mode
+// split is gone, so no task kind may emit a `Turn mode:` marker. The brief no
+// longer carries a router to consume one, and a stray marker would read as an
+// instruction the brief never defines. The empty-content comment case is kept
+// from the old router guard: it exercised the branch that historically
+// misrouted, and it must stay marker-free like every other path.
+func TestTurnModeMarkersRetired(t *testing.T) {
 	t.Parallel()
 
 	for _, tc := range []struct {
 		name string
 		task Task
 	}{
+		{"comment-triggered with content", Task{IssueID: "issue-1", TriggerCommentID: "c-1", TriggerCommentContent: "please look"}},
+		{"comment-triggered with EMPTY content", Task{IssueID: "issue-1", TriggerCommentID: "c-1"}},
+		{"assignment-triggered", Task{IssueID: "issue-1"}},
+		{"assignment-triggered with handoff note", Task{IssueID: "issue-1", HandoffNote: "start with the API"}},
 		{"chat", Task{ChatSessionID: "chat-1"}},
 		{"quick-create", Task{QuickCreatePrompt: "make an issue"}},
 		{"autopilot", Task{AutopilotRunID: "run-1"}},
@@ -1696,34 +1645,30 @@ func TestTurnModeMarkerAbsentOnIssuelessKinds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			prompt := BuildPrompt(tc.task, "claude")
-			for _, banned := range []string{"**Turn mode: Reply.**", "**Turn mode: Ownership.**"} {
-				if strings.Contains(prompt, banned) {
-					t.Errorf("%s prompt must not carry %q\n---\n%s", tc.name, banned, prompt)
-				}
+			if strings.Contains(prompt, "Turn mode") {
+				t.Errorf("%s prompt must not carry a turn-mode marker (MUL-6417)\n---\n%s", tc.name, prompt)
 			}
 		})
 	}
 }
 
-// The brief's router must describe the markers the prompt actually emits.
-// A drift here is exactly the bug this pair of changes fixes, and it is
-// invisible at runtime until an agent silently picks the wrong mode.
-func TestBriefModeRouterMatchesPromptMarkers(t *testing.T) {
+// The brief must not carry the retired mode router either — end-to-end through
+// InjectRuntimeConfig, so a reintroduction anywhere in the assembled brief
+// fails here even if the workflow section itself stays clean.
+func TestBriefCarriesNoModeRouter(t *testing.T) {
 	t.Parallel()
 
 	brief, err := execenv.InjectRuntimeConfig(t.TempDir(), "claude", execenv.TaskContextForEnv{IssueID: "issue-1"})
 	if err != nil {
 		t.Fatalf("InjectRuntimeConfig: %v", err)
 	}
-	for _, want := range []string{"`Turn mode: Reply.`", "`Turn mode: Ownership.`"} {
-		if !strings.Contains(brief, want) {
-			t.Errorf("brief mode router does not name %s\n---\n%s", want, brief)
+	for _, banned := range []string{"Turn mode", "Ownership mode", "Reply mode", "mode block"} {
+		if strings.Contains(brief, banned) {
+			t.Errorf("brief still references the retired turn-mode split via %q (MUL-6417)\n---\n%s", banned, brief)
 		}
 	}
-	// The retired wording keyed off the prompt's first line, which was never
-	// actually the [NEW COMMENT] block.
-	if strings.Contains(brief, "It opens with a `[NEW COMMENT]` block") {
-		t.Error("brief still routes on the prompt's opening line; it must route on the explicit marker")
+	if !strings.Contains(brief, "**Issue status — write the state the issue is in, whenever it changes**") {
+		t.Errorf("brief lost the unified status rule\n---\n%s", brief)
 	}
 }
 
@@ -1782,4 +1727,48 @@ func TestChatChannelDeliversFilesDefaultsOffAcrossVersions(t *testing.T) {
 	if !strings.Contains(buildChatPrompt(delivering), "run `multica attachment upload <local-path>`") {
 		t.Error("a server that reported file delivery did not produce the upload guidance")
 	}
+}
+
+// TestSharedLocalDirectoryBlock covers the notice a lock-exempt turn gets. It
+// is opt-in per run rather than derived from the Task, because whether the
+// directory is shared depends on the daemon's own resolution of the resource —
+// something the claimed Task does not carry.
+func TestSharedLocalDirectoryBlock(t *testing.T) {
+	t.Parallel()
+
+	chat := Task{ChatSessionID: "sess-1", ChatMessage: "how does the parser work?"}
+
+	t.Run("absent by default", func(t *testing.T) {
+		out := BuildPrompt(chat, "claude")
+		if strings.Contains(out, "Shared working directory") {
+			t.Fatalf("notice leaked into a run with no local_directory:\n%s", out)
+		}
+	})
+
+	t.Run("present when the turn runs unlocked in a shared directory", func(t *testing.T) {
+		out := BuildPrompt(chat, "claude", WithSharedLocalDirectory())
+		if !strings.Contains(out, "Shared working directory") {
+			t.Fatalf("notice missing:\n%s", out)
+		}
+		// The non-inferable fact is the concurrent writer. Without it the block
+		// is just style advice.
+		if !strings.Contains(out, "another task on this machine may be editing it") {
+			t.Fatalf("notice does not state that a sibling task may be writing:\n%s", out)
+		}
+		// It must stay guidance: turning it into a prohibition would promise an
+		// isolation the daemon does not enforce for the user's own editor either.
+		if strings.Contains(out, "Do NOT write") || strings.Contains(out, "must not write") {
+			t.Fatalf("notice hardened into a prohibition the system does not enforce:\n%s", out)
+		}
+	})
+
+	t.Run("appended after the cacheable prefix", func(t *testing.T) {
+		// Run-scoped blocks go at the end so a resumed session's cached prefix
+		// is unchanged by them (MUL-5377).
+		out := BuildPrompt(chat, "claude", WithSharedLocalDirectory())
+		body := buildChatPrompt(chat)
+		if !strings.HasPrefix(out, body) {
+			t.Fatalf("notice was not appended after the chat body:\n%s", out)
+		}
+	})
 }

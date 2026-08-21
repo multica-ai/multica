@@ -40,6 +40,8 @@ Assignment does not bypass an agent's Access; when assigning to a squad, the lea
 
 ## Status
 
+Every workspace starts with seven built-in statuses. They are also the seven **categories** — the fixed set of behaviors Multica knows about — so each built-in status names its own category.
+
 | Status | Meaning |
 |---|---|
 | `backlog` | Not starting yet. An issue assigned to an agent only creates a task after it leaves `backlog`. |
@@ -52,7 +54,7 @@ Assignment does not bypass an agent's Access; when assigning to a squad, the lea
 
 There is no fixed flow between statuses — members and agents can change them directly.
 
-Once an issue is assigned to an agent, the agent is expected to move the status from `backlog` / `todo` to `in_progress` when it starts, then to `in_review` when it has delivered. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a task starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or an integration such as a PR with close intent that merges.
+Agents write the status the issue is in as their work changes it: starting work on what the issue asks for — in whatever form, research, design, or a review the issue itself requests — moves it to `in_progress` right away, so the board shows the work while it runs; delivering moves it to `in_review`; work that continues beyond the turn keeps it `in_progress`; a turn that produces nothing of the issue's own deliverable — answering questions, consulting on work owned elsewhere — leaves the status untouched throughout. These updates are written explicitly by the agent through the Multica CLI during the run — the server does not flip issue status when a task starts or completes (apart from the two system exceptions below). `done` is usually a human confirmation, or an integration such as a PR with close intent that merges.
 
 <Callout type="info">
 Two changes are made by the system:
@@ -60,6 +62,33 @@ Two changes are made by the system:
 - When a run fails, the issue has no other runs, and no retry is triggered, `in_progress` rolls back to `todo`.
 - When a linked GitHub PR merges with close intent and no other linked PR is still open or draft, the issue becomes `done`.
 </Callout>
+
+### Custom statuses
+
+A workspace owner or admin can add statuses of their own under **Settings → Issue Statuses** — `Code Review`, `QA`, `Rework`. Each new status picks one of the seven categories and inherits that category's behavior in full:
+
+| Category | What every status in it does |
+|---|---|
+| `backlog` | Parked: assigning an agent never starts a run. Moving the issue out of this category is what starts one, unless the target is `done` or `cancelled`. |
+| `todo` | Queued to start. Unlike `backlog`, assigning an agent to an issue here starts a run right away. |
+| `in_progress` | Counts as actively worked on: a run that fails with nothing else in flight rolls the issue back to `todo`. |
+| `in_review` | Counts as delivered and waiting on review: it finalizes an [autopilot](/autopilots) run, and past run-failure notifications are archived automatically. |
+| `done` | Counts as finished: it closes out a sub-issue stage and counts toward the parent's progress. |
+| `blocked` | Stalled on something external; nothing resumes on its own. |
+| `cancelled` | No longer pursued, record kept; also terminal for a sub-issue stage. |
+
+So a `Code Review` status in the `in_review` category ends an autopilot run exactly like `in_review` does, and moving an issue out of `backlog` into a `Rework` status in the `todo` category starts the assigned agent exactly like moving it to `todo` would.
+
+The name is what your team reads; the category is what the platform acts on. Wherever the rest of this documentation says a status triggers something, that rule belongs to the category, so a custom status inside it is covered too. It does not work in reverse: when the platform sets a status itself — the rollback to `todo` or the `done` on a merged PR above — it writes the built-in status, never a custom one from that category.
+
+Four things follow from that model:
+
+- **A status's category is fixed once the status exists.** Changing it later would silently rewrite what the platform does with every issue already sitting on that status, so the editor keeps it read-only. Choose the behavior first, then name it.
+- **Board columns are categories, not statuses.** Adding a status never adds a column — there is one column per category. A custom status sits in its category's column, and its cards carry a small chip with the status name, so `Code Review` and `QA` stay distinguishable inside In Review.
+- **Built-in statuses are locked.** Their names, colors, and categories cannot be changed, and they cannot be archived — a workspace that never opens the page keeps exactly the board it had.
+- **Archiving retires a status, it does not delete it.** Issues already on it keep it, keep its name and color, and keep behaving the same. It only stops being offered the next time someone sets a status.
+
+Built-in statuses are translated into the interface language; a custom status always shows the name you typed. The API and the CLI address it by its key: `multica issue status MUL-42 code_review`. The settings page derives that key from the name; the API accepts an explicit one and only falls back to deriving it. Either way the key is fixed at creation — renaming the status later does not change it.
 
 ## Issues and tasks
 

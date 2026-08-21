@@ -309,6 +309,8 @@
     "event_filter_docs_link_label": "イベントフィルターの仕組みを学ぶ",
     "event_filter_event_placeholder": "例: workflow_run",
     "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_add": "追加",
+    "event_filter_remove_label": "フィルターを削除",
     "event_filter_hint": "これらのイベントに一致する Webhook のみを処理します。空にするとすべて許可します。",
     "schedule_disabled_reason": "このオートパイロットには複数のスケジュールがあります。詳細ページで編集してください。",
     "schedule_empty": "スケジュールはありません。このオートパイロットは手動で実行したときだけ動きます。",

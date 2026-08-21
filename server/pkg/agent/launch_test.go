@@ -131,7 +131,7 @@ func TestNewFiltersLaunchPrefixOnce(t *testing.T) {
 func TestLaunchPrefixReachesACPFamilies(t *testing.T) {
 	t.Parallel()
 
-	for _, family := range []string{"kimi", "hermes", "kiro", "reasonix", "qwenpaw"} {
+	for _, family := range []string{"kimi", "hermes", "kiro", "reasonix", "qwenpaw", "dim"} {
 		t.Run(family, func(t *testing.T) {
 			t.Parallel()
 			cfg := Config{LaunchPrefix: []string{"start", "q36"}, Logger: slog.Default()}
@@ -633,6 +633,31 @@ func TestFilterLaunchPrefixConsumesBlockedFlagValue(t *testing.T) {
 	want := []string{"start", "q36"}
 	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
 		t.Fatalf("filterLaunchPrefix = %v, want %v", got, want)
+	}
+}
+
+// TestDimLaunchPrefixFiltersBlockedFlags proves the Dim launch-prefix safety
+// policy: allowed positional tokens reach the command ahead of the hardcoded
+// `acp` subcommand, while protocol-breaking flags (--help, --auth-setup,
+// --remote, -h, acp) are stripped. Without this the fixed_args regression
+// this round fixed could return silently.
+func TestDimLaunchPrefixFiltersBlockedFlags(t *testing.T) {
+	t.Parallel()
+
+	// Allowed positional prefix tokens survive and precede `acp`.
+	cfg := Config{LaunchPrefix: []string{"start", "q36"}, Logger: slog.Default()}
+	argv := cfg.commandAt("wrapper").Argv("acp")
+	if idx := prefixIndex(argv, []string{"start", "q36", "acp"}); idx != 0 {
+		t.Fatalf("dim: allowed prefix must precede the acp subcommand, got %v", argv)
+	}
+
+	// Protocol-breaking flags are removed from the prefix.
+	got := filterLaunchPrefix(
+		[]string{"start", "--help", "--auth-setup", "--remote", "-h", "q36"},
+		"dim", slog.Default())
+	want := []string{"start", "q36"}
+	if strings.Join(got, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("dim: blocked flags must be stripped, got %v, want %v", got, want)
 	}
 }
 

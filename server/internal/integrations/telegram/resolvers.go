@@ -15,6 +15,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // This file is the Telegram ResolverSet: the platform-specific seams the
@@ -246,6 +247,7 @@ type auditor struct{ q *db.Queries }
 func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
 	raw, _ := decodeTelegramRaw(msg) // best-effort; a decode miss still audits
 	return r.q.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
+		ID:               dbid.NewV7(),
 		ChannelType:      string(TypeTelegram),
 		EventType:        raw.EventType,
 		DropReason:       string(reason),

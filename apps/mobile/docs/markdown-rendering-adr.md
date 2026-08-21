@@ -2,13 +2,10 @@
 
 **Status**: Accepted
 **Date**: 2026-05-19
-**Supersedes**: nothing (formalises what `markdown-renderer-research.md` was
-already documenting in research form)
 
 This is the durable architecture-decision record for how the mobile app
-renders markdown. `markdown-renderer-research.md` continues to hold the
-detailed history and incident log; this file is the **one-page answer**
-to "what are we using and why" with A-tier sources.
+renders markdown — the **one-page answer** to "what are we using and why"
+with A-tier sources.
 
 ---
 
@@ -150,10 +147,11 @@ above` vs `~3pt below` glyphs in chips inside CJK paragraphs (seen in
   not** show this asymmetry — confirming the artifact is library-specific.
 - **Upstream tracking**: [`software-mansion-labs/react-native-enriched-markdown#255`](https://github.com/software-mansion-labs/react-native-enriched-markdown/issues/255)
   (filed 2026-04-20 by `@xindixu`, maintainer unresponsive as of 2026-05-19).
-- **Failed mitigation (reverted)**: reducing `MD_LINE.body` from 24 to
-  20 shrinks absolute padding but does not change the asymmetry ratio —
-  net negative (cost CJK leading, didn't fix the chip). See
-  `markdown-renderer-research.md` decision log 2026-05-19.
+- **Failed mitigation (reverted 2026-05-19, same day)**: reducing
+  `MD_LINE.body` from 24 to 20 shrinks absolute padding but does not
+  change the asymmetry ratio (still ≈ 4:1 — enriched sets the padding
+  distribution internally) — net negative, cost CJK leading and didn't
+  fix the chip.
 
 **Mitigation applied (2026-05-19)** — inline code rendered WITHOUT a
 background:
@@ -256,5 +254,4 @@ React-tree renderer:
 - `apps/mobile/lib/markdown/markdown-style.ts` — `useMarkdownStyle()` theme bridge
 - `apps/mobile/lib/markdown/code-block.tsx` — Shiki-powered code segment
 - `apps/mobile/lib/markdown/markdown-image.tsx` — lightbox-aware image segment
-- `apps/mobile/docs/markdown-renderer-research.md` — full incident log and historical context
 - `apps/mobile/CLAUDE.md` — mobile-wide rules including theme/CSS-variable system

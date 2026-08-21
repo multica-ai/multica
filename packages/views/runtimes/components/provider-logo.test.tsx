@@ -23,6 +23,17 @@ describe("ProviderLogo", () => {
     expect(logo?.classList.contains("runtime-logo")).toBe(true);
   });
 
+  it("renders the dedicated Dim mark", () => {
+    const { container } = render(<ProviderLogo provider="dim" className="runtime-logo" />);
+
+    const logo = container.querySelector("img");
+    const logoSrc = decodeURIComponent(logo?.getAttribute("src") ?? "");
+
+    expect(logo?.getAttribute("alt")).toBe("");
+    expect(logoSrc).toContain("dim-logo.png");
+    expect(logo?.classList.contains("runtime-logo")).toBe(true);
+  });
+
   it("renders the dedicated Qwen Code mark", () => {
     const { container } = render(<ProviderLogo provider="qwen" className="runtime-logo" />);
 

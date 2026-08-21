@@ -20,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -1782,69 +1783,84 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 
-	// Defense against resumed-session drift: when an agent posts from inside a
-	// comment-triggered task AND the comment is being posted on that same
-	// issue, the parent_id must exactly match the task's trigger comment.
-	// Resumed Claude sessions otherwise carry forward a previous turn's
-	// --parent UUID and silently misplace the reply.
-	//
-	// The task.IssueID scope is important: the CLI stamps X-Task-ID on every
-	// request, so an agent legitimately commenting on a different issue must
-	// not be blocked by its current task's trigger. Assignment-triggered
-	// tasks (no TriggerCommentID) are also unaffected.
 	// sourceTaskID captures the agent's currently-executing task when it posts
 	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
 	// originator inheritance chain (resolveOriginatorFromTriggerComment →
 	// comment.source_task_id → parent task's originator_user_id) intact across
-	// the leader→worker mention hop. Without this stamp, a private squad
-	// leader's worker-agent whose completion wakes the leader via
-	// routeAssignedSquadLeaderFallback can't pass canInvokeAgent — the
-	// worker's task originator is unattributed, effectiveUser resolves to "",
-	// and the private-agent gate denies the wake (MUL-4015).
+	// an agent→agent hop. Without this stamp, a private squad leader's
+	// worker-agent whose completion wakes the leader via
+	// routeAssignedSquadLeaderFallback can't pass canInvokeAgent — the worker's
+	// task originator is unattributed, effectiveUser resolves to "", and the
+	// private-agent gate denies the wake (MUL-4015).
+	//
+	// The header is NOT client-chosen: the task token forces X-Task-ID and
+	// X-Agent-ID from its own row, and resolveActor rejects the JWT path unless
+	// the named task belongs to the named agent. So the stamp always records the
+	// authoring agent's own run.
+	//
+	// It is deliberately NOT scoped to that run's own issue (MUL-6490 / GH
+	// #7328). A run that legitimately comments on ANOTHER issue — the ordinary
+	// "agent creates issue Y, then coordinates there" flow — used to persist a
+	// NULL lineage, so the run that comment woke resolved as unattributed and
+	// every @mention / assign / sub-issue inside it hit invocation_not_allowed,
+	// even though the SAME delegation had just succeeded on the originating
+	// issue. Propagating the chain is monotonic: it can only carry the human
+	// this run ALREADY acts for, and every hop still re-runs canInvokeAgent
+	// against that same human, so the admissible set stays a subset of what that
+	// human could trigger directly. What must never happen is SUBSTITUTING a
+	// human — an owner fallback, or adopting the target issue's own originator —
+	// because that borrows a different person's authority; those stay rejected.
+	//
+	// Consumers that genuinely need "the authoring run is working on THIS issue"
+	// keep that check next to their own rule instead: the reply-parent /
+	// no_action guards below, and autopilotDelegationAuthority's lineage
+	// verification (MUL-4857).
 	var sourceTaskID pgtype.UUID
 	if authorType == "agent" {
-		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
-			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
-			if parseErr == nil {
-				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
-					if task.TriggerCommentID.Valid {
-						if !taskCoversReplyParent(task, parentID) {
-							// Keep this error actionable for agents (MUL-4417 / GH #5266).
-							// The two rejections need different copy. A resumed
-							// session carrying a previous turn's --parent forward
-							// (GH #6264) did NOT ask for a top-level comment, and
-							// telling it that it did sends it looking for a
-							// new-thread opt-in instead of simply correcting the
-							// parent it already passed.
-							fix := "set parent_id (--parent) to " + uuidToString(task.TriggerCommentID) + " or a coalesced comment id"
-							msg := "comment-triggered tasks cannot create top-level comments; " + fix
-							if parentID.Valid {
-								msg = "parent_id " + uuidToString(parentID) + " is not a comment this task may reply under; " + fix
-							}
-							writeError(w, http.StatusConflict, msg)
-							return
+		if task, ok := h.taskFromRequestHeader(r); ok {
+			// Defense against resumed-session drift: when an agent posts from
+			// inside a comment-triggered task AND the comment is being posted on
+			// that same issue, the parent_id must exactly match the task's
+			// trigger comment. Resumed Claude sessions otherwise carry forward a
+			// previous turn's --parent UUID and silently misplace the reply.
+			//
+			// The task.IssueID scope is important: the CLI stamps X-Task-ID on
+			// every request, so an agent legitimately commenting on a different
+			// issue must not be blocked by its current task's trigger.
+			// Assignment-triggered tasks (no TriggerCommentID) are also
+			// unaffected.
+			if task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
+				if task.TriggerCommentID.Valid {
+					if !taskCoversReplyParent(task, parentID) {
+						// Keep this error actionable for agents (MUL-4417 / GH #5266).
+						// The two rejections need different copy. A resumed
+						// session carrying a previous turn's --parent forward
+						// (GH #6264) did NOT ask for a top-level comment, and
+						// telling it that it did sends it looking for a
+						// new-thread opt-in instead of simply correcting the
+						// parent it already passed.
+						fix := "set parent_id (--parent) to " + uuidToString(task.TriggerCommentID) + " or a coalesced comment id"
+						msg := "comment-triggered tasks cannot create top-level comments; " + fix
+						if parentID.Valid {
+							msg = "parent_id " + uuidToString(parentID) + " is not a comment this task may reply under; " + fix
 						}
-					}
-					noAction, checkErr := service.HasSquadLeaderNoActionEvaluationForTask(r.Context(), h.Queries, task)
-					if checkErr != nil {
-						slog.Warn("checking squad leader no_action evaluation failed", append(logger.RequestAttrs(r),
-							"error", checkErr,
-							"task_id", taskIDHeader,
-							"issue_id", issueID,
-						)...)
-					} else if noAction {
-						writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
+						writeError(w, http.StatusConflict, msg)
 						return
 					}
-					// Only stamp source_task_id for a task belonging to THIS
-					// issue. An agent legitimately commenting on a DIFFERENT
-					// issue than its current task must not stamp that task's
-					// id here — the resulting chain would then attribute the
-					// out-of-band comment to an unrelated task's originator.
-					sourceTaskID = taskUUID
+				}
+				noAction, checkErr := service.HasSquadLeaderNoActionEvaluationForTask(r.Context(), h.Queries, task)
+				if checkErr != nil {
+					slog.Warn("checking squad leader no_action evaluation failed", append(logger.RequestAttrs(r),
+						"error", checkErr,
+						"task_id", uuidToString(task.ID),
+						"issue_id", issueID,
+					)...)
+				} else if noAction {
+					writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
+					return
 				}
 			}
+			sourceTaskID = task.ID
 		}
 	}
 
@@ -1869,6 +1885,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	}
 
 	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
 		AuthorType:   authorType,
@@ -3300,17 +3317,17 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		triggerIssue = &issue
 		// A content edit is a NEW action, so its delegation lineage must key on THIS
-		// edit. Only the AGENT author re-editing its OWN comment carries issue-scoped
-		// lineage forward (commentSourceTaskIDForIssue re-stamps the current editing
-		// task, and clears it on a cross-issue edit) — so preview, save, and the
-		// deferred completion-reconcile all resolve the authority from this one
-		// action. Any OTHER editor — a workspace owner/admin editing an AGENT's
-		// comment, or a member editing their own — CLEARS the lineage so the deferred
-		// reconcile fails closed instead of resurrecting the original autopilot run's
-		// creator authority. An admin holds manage rights over the comment, not
-		// invoke rights over the author's private agents (Elon must-fix, round 3).
+		// edit. Only the AGENT author re-editing its OWN comment carries the lineage
+		// forward (commentSourceTaskID re-stamps the current editing task) — so
+		// preview, save, and the deferred completion-reconcile all resolve the
+		// authority from this one action. Any OTHER editor — a workspace owner/admin
+		// editing an AGENT's comment, or a member editing their own — CLEARS the
+		// lineage so the deferred reconcile fails closed instead of resurrecting the
+		// original autopilot run's creator authority. An admin holds manage rights
+		// over the comment, not invoke rights over the author's private agents (Elon
+		// must-fix, round 3).
 		if actorType == "agent" && isAuthor {
-			sourceTaskID = h.commentSourceTaskIDForIssue(r, issue)
+			sourceTaskID = h.commentSourceTaskID(r)
 		} else {
 			sourceTaskID = pgtype.UUID{}
 		}
@@ -3430,9 +3447,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		// author re-stamps its current task; every other editor clears it), so
 		// resolving from the comment keys the delegation authority on the current
 		// editing action — identical to what the edit preview computed from the same
-		// request, and to what the completion-reconcile will restore. A cross-issue
-		// or non-author edit left it NULL, so this fails closed rather than borrowing
-		// the old authoring run's authority.
+		// request, and to what the completion-reconcile will restore. A non-author
+		// edit left it NULL, and a cross-issue editing task is rejected inside
+		// autopilotDelegationAuthority, so neither can borrow the old authoring run's
+		// authority.
 		delegationAuthority := h.autopilotDelegationAuthorityFromComment(r.Context(), issue, comment)
 		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), delegationAuthority, suppressAgentIDs)
 	}

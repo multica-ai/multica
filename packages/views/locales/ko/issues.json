@@ -368,6 +368,8 @@
     "link_copied": "링크를 복사했습니다",
     "link_copy_failed": "링크를 복사하지 못했습니다",
     "workdir_path_copied": "작업 디렉터리 경로를 복사했습니다",
+    "project_directory_path_copied": "프로젝트 디렉터리 경로를 복사했습니다",
+    "project_directory_path_copied_with_branch": "프로젝트 디렉터리 경로를 복사했습니다 — 작업은 {{branch}} 브랜치에 있습니다",
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
     "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 태스크를 실행하지 않았습니다"
   },
@@ -594,7 +596,8 @@
   },
   "card": {
     "update_failed": "태스크를 업데이트하지 못했습니다",
-    "updated_ago": "{{time}} 수정됨"
+    "updated_ago": "{{time}} 수정됨",
+    "child_progress_restricted_other": "하위 태스크 {{count}}개 제한됨"
   },
   "actions": {
     "status": "상태",
@@ -616,6 +619,7 @@
     "unpin_from_sidebar": "사이드바 고정 해제",
     "copy_link": "링크 복사",
     "copy_workdir_path": "로컬 작업 디렉터리 경로 복사",
+    "copy_project_directory_path": "프로젝트 디렉터리 경로 복사",
     "relations": "관계",
     "create_sub_issue": "하위 태스크 만들기",
     "set_parent_issue": "상위 태스크 설정...",
@@ -774,11 +778,13 @@
   "plugins": {
     "panels": "Plugins",
     "surface_failed": "{{name}}의 인터페이스를 불러오지 못했습니다.",
-    "surface_local_only": "{{name}}은(는) 로컬 소스에서 설치되어 브라우저에서 인터페이스를 불러올 수 없습니다.",
     "hook_succeeded": "{{name}} 완료됨.",
     "hook_failed": "{{name}} 실패함.",
     "hook_refused": "{{name}}이(가) 실행되지 않았습니다.",
     "hook_activity": "최근 호출",
-    "hook_never_run": "이 훅은 아직 실행되지 않았습니다."
+    "hook_never_run": "이 훅은 아직 실행되지 않았습니다.",
+    "surface_loading": "{{name}} 불러오는 중…",
+    "surface_unavailable": "{{name}}의 인터페이스를 불러올 수 없습니다. 설치된 버전에 포함되어 있지 않을 수 있습니다.",
+    "surface_navigated": "{{name}}이(가) 패널을 외부에서 불러온 페이지로 바꾸려 했습니다. 중지하고 연결을 끊었습니다. 워크스페이스 관리자에게 알리세요."
   }
 }

@@ -2,7 +2,9 @@ package daemon
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -13,13 +15,20 @@ import (
 )
 
 type SkillBundleCache struct {
-	root  string
-	mu    sync.Mutex
-	locks map[string]*sync.Mutex
+	root      string
+	rename    func(string, string) error
+	removeAll func(string) error
+	mu        sync.Mutex
+	locks     map[string]*sync.Mutex
 }
 
 func NewSkillBundleCache(root string) *SkillBundleCache {
-	return &SkillBundleCache{root: root, locks: make(map[string]*sync.Mutex)}
+	return &SkillBundleCache{
+		root:      root,
+		rename:    os.Rename,
+		removeAll: os.RemoveAll,
+		locks:     make(map[string]*sync.Mutex),
+	}
 }
 
 func (c *SkillBundleCache) Load(workspaceID string, ref SkillRefData) (SkillData, bool) {
@@ -64,9 +73,19 @@ func (c *SkillBundleCache) Store(workspaceID string, bundle SkillData) error {
 	if err := os.WriteFile(filepath.Join(tmp, "bundle.json"), data, 0o644); err != nil {
 		return err
 	}
-	_ = os.RemoveAll(dir)
-	if err := os.Rename(tmp, dir); err != nil {
+	if err := c.removeAll(dir); err != nil {
 		return err
+	}
+	if err := c.rename(tmp, dir); err != nil {
+		if !errors.Is(err, fs.ErrExist) {
+			return err
+		}
+		if err := c.removeAll(dir); err != nil {
+			return err
+		}
+		if err := c.rename(tmp, dir); err != nil {
+			return err
+		}
 	}
 	return nil
 }

@@ -56,12 +56,15 @@ func writePluginError(w http.ResponseWriter, err error, fallback string) {
 // encrypted table), and configured secrets appear as names in
 // `configured_secrets`.
 type pluginInstallationResponse struct {
-	ID                string                      `json:"id"`
-	PluginKey         string                      `json:"plugin_key"`
-	Name              string                      `json:"name"`
-	Description       string                      `json:"description,omitempty"`
-	Version           string                      `json:"version"`
-	SourceURL         string                      `json:"source_url"`
+	ID          string `json:"id"`
+	PluginKey   string `json:"plugin_key"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+	Version     string `json:"version"`
+	// The published version this installation is bound to. Nothing about it can
+	// change under the workspace's feet: upgrading means pointing at a different
+	// version id, which is a second consent.
+	PackageVersionID  string                      `json:"package_version_id"`
 	Enabled           bool                        `json:"enabled"`
 	GrantedScopes     []string                    `json:"granted_scopes"`
 	ConfigSchema      []service.PluginConfigField `json:"config_schema"`
@@ -133,7 +136,7 @@ func (h *Handler) pluginInstallationPayload(ctx context.Context, installation db
 		Name:              manifest.Name,
 		Description:       manifest.Description,
 		Version:           installation.Version,
-		SourceURL:         installation.SourceUrl,
+		PackageVersionID:  uuidToString(installation.PackageVersionID),
 		Enabled:           installation.Enabled,
 		GrantedScopes:     granted,
 		ConfigSchema:      service.ConfigFieldsForManifest(manifest),
@@ -176,7 +179,7 @@ func (h *Handler) ListPlugins(w http.ResponseWriter, r *http.Request) {
 }
 
 type previewPluginRequest struct {
-	SourceURL string `json:"source_url"`
+	VersionID string `json:"version_id"`
 }
 
 // PreviewPlugin — POST /api/workspaces/{id}/plugins/preview
@@ -196,7 +199,7 @@ func (h *Handler) PreviewPlugin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	preview, err := h.PluginService.PreviewPlugin(r.Context(), workspaceID, req.SourceURL)
+	preview, err := h.PluginService.PreviewPlugin(r.Context(), workspaceID, req.VersionID)
 	if err != nil {
 		writePluginError(w, err, "failed to read the Plugin manifest")
 		return
@@ -205,7 +208,7 @@ func (h *Handler) PreviewPlugin(w http.ResponseWriter, r *http.Request) {
 }
 
 type installPluginRequest struct {
-	SourceURL     string   `json:"source_url"`
+	VersionID     string   `json:"version_id"`
 	GrantedScopes []string `json:"granted_scopes"`
 }
 
@@ -228,7 +231,7 @@ func (h *Handler) InstallPlugin(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	installation, err := h.PluginService.InstallPlugin(r.Context(), workspaceID, member.UserID, req.SourceURL, req.GrantedScopes)
+	installation, err := h.PluginService.InstallPlugin(r.Context(), workspaceID, member.UserID, req.VersionID, req.GrantedScopes)
 	if err != nil {
 		writePluginError(w, err, "failed to install the Plugin")
 		return

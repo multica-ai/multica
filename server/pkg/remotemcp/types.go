@@ -37,6 +37,17 @@ type Connection struct {
 	FailurePolicy        string          `json:"failure_policy"`
 }
 
+// PluginContributionPrefix marks a connection contributed by an installed
+// Plugin rather than by a workspace's own Remote MCP configuration.
+//
+// The two kinds share one Connection shape and one broker, but their
+// credentials live in different places and are served by different routes. The
+// daemon holds only the contribution id at dial time, so the id is what has to
+// say which kind it is — inferring it from the string's shape would make a
+// cloud-issued id that happened to contain a colon resolve against the plugin
+// route.
+const PluginContributionPrefix = "plugin:"
+
 // DigestBytes is the content digest used to pin approved tool schemas.
 func DigestBytes(content []byte) string {
 	digest := sha256.Sum256(content)

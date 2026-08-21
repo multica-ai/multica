@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -2116,7 +2117,16 @@ func (h *Handler) TriggerAutopilot(w http.ResponseWriter, r *http.Request) {
 			})
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot: "+err.Error())
+		// Everything past the quota branch is an unclassified internal failure
+		// whose chain carries pgx constraint/table names and internal ids. Any
+		// workspace member can reach "run now", so the detail stays in the log
+		// and the response is the same fixed 5xx string the rest of this file
+		// returns (MUL-6472).
+		slog.Error("trigger autopilot failed",
+			"error", err,
+			"autopilot_id", uuidToString(autopilot.ID),
+		)
+		writeError(w, http.StatusInternalServerError, "failed to trigger autopilot")
 		return
 	}
 

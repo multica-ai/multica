@@ -30,6 +30,12 @@ import { canAssignAgentToIssue } from "@multica/core/permissions";
 import { Text } from "@/components/ui/text";
 import { ActorAvatar } from "@/components/ui/actor-avatar";
 import { StatusIcon } from "@/components/ui/status-icon";
+import {
+  CLOSED_CATEGORIES,
+  issueBehavesAsAny,
+  issueColumnCategory,
+} from "@/lib/issue-status";
+import { useIssueStatuses } from "@/lib/use-issue-statuses";
 import { memberListOptions } from "@/data/queries/members";
 import { agentListOptions } from "@/data/queries/agents";
 import { squadListOptions } from "@/data/queries/squads";
@@ -76,6 +82,9 @@ export function MentionSuggestionBar({
 }: Props) {
   const wsId = useWorkspaceStore((s) => s.currentWorkspaceId);
   const isChat = mode === "chat";
+  // Rows are icon-only, so colour is the only thing that can carry a custom
+  // status's identity here. (MUL-6243)
+  const catalog = useIssueStatuses();
 
   // Comment-mode data — disabled in chat mode to avoid wasted fetches.
   const { data: members = [] } = useQuery({
@@ -350,9 +359,11 @@ export function MentionSuggestionBar({
             );
           }
           // issue
-          const closed =
-            item.issue.status === "done" ||
-            item.issue.status === "cancelled";
+          // By CATEGORY, not by key: a custom status in the done category IS
+          // done, and `status === "done"` silently disagrees — the row would
+          // render at full opacity as though the work were still open.
+          // (MUL-6243)
+          const closed = issueBehavesAsAny(item.issue, CLOSED_CATEGORIES);
           return (
             <Pressable
               onPress={() =>
@@ -368,7 +379,12 @@ export function MentionSuggestionBar({
               )}
             >
               <View className="size-7 items-center justify-center">
-                <StatusIcon status={item.issue.status} size={16} />
+                <StatusIcon
+                  status={item.issue.status}
+                  category={issueColumnCategory(item.issue)}
+                  color={catalog.colorOf(item.issue.status)}
+                  size={16}
+                />
               </View>
               <Text className="text-sm font-medium text-foreground">
                 {item.issue.identifier}

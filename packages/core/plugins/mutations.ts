@@ -9,13 +9,42 @@ function useInvalidatePlugins(wsId: string) {
 }
 
 /**
- * Preview is deliberately a mutation, not a query: it performs an outbound
- * fetch of a URL the administrator just typed, so it must run on an explicit
- * action and never be replayed by a cache refetch.
+ * Preview is deliberately a mutation, not a query: it is the first half of a
+ * consent flow the administrator started, so it must run on an explicit action
+ * rather than be replayed by a cache refetch.
  */
 export function usePreviewPlugin(wsId: string) {
   return useMutation({
     mutationFn: (request: PluginPreviewRequest) => api.previewPlugin(wsId, request),
+  });
+}
+
+/**
+ * Publishes an artifact bundle. A published version is immutable, so this only
+ * ever adds one — it can never change what an installed workspace is running.
+ */
+export function usePublishPluginPackage(wsId: string) {
+  const invalidate = useInvalidatePlugins(wsId);
+  return useMutation({
+    mutationFn: (bundle: File) => api.publishPluginPackage(wsId, bundle),
+    onSettled: invalidate,
+  });
+}
+
+/** The development channel: publish from MULTICA_PLUGIN_DIR instead of a zip. */
+export function usePublishLocalPluginPackage(wsId: string) {
+  const invalidate = useInvalidatePlugins(wsId);
+  return useMutation({
+    mutationFn: (name: string) => api.publishLocalPluginPackage(wsId, name),
+    onSettled: invalidate,
+  });
+}
+
+export function useDeletePluginPackage(wsId: string) {
+  const invalidate = useInvalidatePlugins(wsId);
+  return useMutation({
+    mutationFn: (packageId: string) => api.deletePluginPackage(wsId, packageId),
+    onSettled: invalidate,
   });
 }
 
@@ -41,6 +70,21 @@ export function useSetPluginEnabled(wsId: string) {
   return useMutation({
     mutationFn: ({ installationId, enabled }: { installationId: string; enabled: boolean }) =>
       api.setPluginEnabled(wsId, installationId, enabled),
+    onSettled: invalidate,
+  });
+}
+
+/**
+ * Pins the approved tool set for one `mcp` hook.
+ *
+ * `tools` is the complete set the administrator wants approved, never a delta —
+ * unchecking one and saving is what revokes it. An empty array withdraws the
+ * hook, and the next task claim stops offering it to agents.
+ */
+export function useApprovePluginMCPTools(wsId: string, installationId: string, hookKey: string) {
+  const invalidate = useInvalidatePlugins(wsId);
+  return useMutation({
+    mutationFn: (tools: string[]) => api.approvePluginMCPTools(wsId, installationId, hookKey, tools),
     onSettled: invalidate,
   });
 }

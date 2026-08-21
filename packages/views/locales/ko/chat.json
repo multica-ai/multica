@@ -191,6 +191,7 @@
       "retrying": "재시도 중",
       "queued": "대기 중",
       "waiting_local_directory": "로컬 디렉터리 대기 중",
+      "waiting_local_directory_reason": "{{reason}} 대기 중",
       "starting_up": "시작 중",
       "thinking": "생각 중",
       "typing": "입력 중"

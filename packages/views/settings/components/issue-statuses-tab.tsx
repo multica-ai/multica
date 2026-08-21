@@ -29,7 +29,7 @@ import { useWorkspaceId } from "@multica/core/hooks";
 import { useAuthStore } from "@multica/core/auth";
 import { useFeatureEnabled } from "@multica/core/config";
 import { memberListOptions } from "@multica/core/workspace/queries";
-import { issueStatusListOptions } from "@multica/core/issue-statuses/queries";
+import { issueStatusColor, issueStatusListOptions } from "@multica/core/issue-statuses/queries";
 import {
   useArchiveIssueStatus,
   useCreateIssueStatus,
@@ -411,7 +411,7 @@ function CustomStatusRow({
       <StatusIcon
         status={entry.key}
         category={entry.category}
-        color={entry.color}
+        color={issueStatusColor(entry)}
         className="size-4"
       />
       {/* Name over description, the way the row is read. The old layout pinned

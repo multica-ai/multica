@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 22개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 23개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 22개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 23개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -268,6 +268,47 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         fixes: "버그 수정",
       },
       entries: [
+        {
+          version: "0.4.32",
+          date: "2026-08-21",
+          title: "DingTalk 그룹, 프로젝트 보기, 더 원활한 협업",
+          changes: [],
+          features: [
+            "그룹에서 DingTalk 봇을 멘션하면 해당 그룹이 담당 에이전트 아래에 표시됩니다.",
+            "보드와 테이블을 프로젝트별로 묶어 관련 Issue를 함께 볼 수 있습니다.",
+          ],
+          improvements: [
+            "오래 실행되는 에이전트 작업이 더 원활하게 진행됩니다.",
+            "셀프 호스팅 서버가 짧은 데이터베이스 장애 후 자동으로 복구됩니다.",
+            "Telegram 안내와 답변이 영어로 표시됩니다.",
+          ],
+          fixes: [
+            "작업을 다시 실행해도 진행 중인 작업은 중단되지 않습니다.",
+            "동시에 실행되는 작업이 서로의 작업 공간을 덮어쓰지 않습니다.",
+            "OpenClaw, Pi, OpenCode에서 구성한 사용자 지정 공급자를 사용할 수 있습니다.",
+            "워크스페이스를 전환해도 실시간 업데이트와 멘션이 끊기지 않습니다.",
+            "일반 CLI 출력에 Autopilot Webhook 자격 증명이 표시되지 않습니다.",
+            "관련 없는 코딩 작업이 끝날 때까지 기다리지 않고 에이전트와 채팅할 수 있습니다.",
+          ],
+        },
+        {
+          version: "0.4.31",
+          date: "2026-08-20",
+          title: "백로그 이동 전 실행 확인, Webhook 이벤트 필터, Windows 빌드 수정",
+          changes: [],
+          improvements: [
+            "웹 도움말 메뉴에서 데스크톱 앱을 바로 찾을 수 있습니다.",
+            "에이전트가 맡은 Issue를 백로그에서 옮기기 전에 실행을 확인할 수 있습니다.",
+            "Webhook 이벤트 필터를 더 쉽게 추가하고 제거할 수 있습니다.",
+            "/ 입력 시 정확히 일치하는 스킬이 먼저 표시됩니다.",
+          ],
+          fixes: [
+            "Windows CLI 빌드에서 올바른 실행 파일 이름을 생성합니다.",
+            "잠시 연결이 끊겨도 에이전트 스킬을 계속 불러올 수 있습니다.",
+            "자동화 실행 실패 시 내부 오류 세부 정보가 더 이상 표시되지 않습니다.",
+            "바쁜 워크스페이스에서도 에이전트 업데이트가 안정적으로 유지됩니다.",
+          ],
+        },
         {
           version: "0.4.30",
           date: "2026-08-19",

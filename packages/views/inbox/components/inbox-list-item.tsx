@@ -55,7 +55,7 @@ export function InboxListItem({
   const timeAgo = useTimeAgo();
   // Inbox is a cross-workspace surface, so the catalog is read against the
   // item's OWN workspace rather than the route's. (MUL-6243)
-  const { categoryOf: statusCategoryOf, entryOf: statusEntryOf } =
+  const { categoryOf: statusCategoryOf, colorOf: statusColorOf } =
     useIssueStatuses(item.workspace_id);
   const statusLabelOf = useStatusLabel(item.workspace_id);
   const openContextMenu = useInboxContextMenu();
@@ -83,12 +83,9 @@ export function InboxListItem({
   // custom "Human Review" — moving between two statuses of the same category
   // left this row pixel-identical and read as "the inbox never updated"
   // (MUL-6395). Colour is what carries a custom status's own identity, exactly
-  // as the status-changed detail label already renders it. Built-ins pass null
-  // so they keep their semantic token colour rather than the catalog's seed.
-  const statusEntry = item.issue_status
-    ? statusEntryOf(item.issue_status)
-    : undefined;
-  const statusColor = statusEntry?.is_system === true ? null : statusEntry?.color;
+  // as the status-changed detail label already renders it. `colorOf` returns
+  // null for a built-in, which keeps it on its semantic token.
+  const statusColor = item.issue_status ? statusColorOf(item.issue_status) : null;
 
   return (
     // A div, not a <button>: the row carries its own controls (the action

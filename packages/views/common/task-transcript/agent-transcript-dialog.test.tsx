@@ -704,6 +704,64 @@ describe("AgentTranscriptDialog", () => {
   });
 });
 
+describe("AgentTranscriptDialog — work directory handoff", () => {
+  it("shows and copies the durable project directory after worktree cleanup", async () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        work_dir: "/managed/task/worktree",
+        relative_work_dir: "workspace/task/worktree",
+        durable_work_dir: "/Users/dev/project",
+        relative_durable_work_dir: "project",
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(screen.getByText("Project directory")).toBeInTheDocument();
+    expect(screen.getByText("project")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTitle("Copy project directory"));
+    expect(copyTextMock).toHaveBeenCalledWith("/Users/dev/project");
+  });
+
+  it("keeps a live task on its actual workdir", async () => {
+    renderDialog(items, {
+      task: {
+        ...liveTask,
+        work_dir: "/managed/task/worktree",
+        relative_work_dir: "workspace/task/worktree",
+        durable_work_dir: "/Users/dev/project",
+        relative_durable_work_dir: "project",
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(screen.getByText("Workdir")).toBeInTheDocument();
+    expect(screen.getByText("workspace/task/worktree")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTitle("Copy working directory"));
+    expect(copyTextMock).toHaveBeenCalledWith("/managed/task/worktree");
+  });
+
+  it("keeps a failed-but-preserved task on its worktree", async () => {
+    renderDialog(items, {
+      task: {
+        ...baseTask,
+        status: "failed",
+        work_dir: "/managed/preserved/worktree",
+        relative_work_dir: "workspace/task/worktree",
+      },
+    });
+
+    await userEvent.click(screen.getByRole("button", { name: "Run details" }));
+    expect(screen.getByText("Workdir")).toBeInTheDocument();
+    expect(screen.getByText("workspace/task/worktree")).toBeInTheDocument();
+
+    await userEvent.click(screen.getByTitle("Copy working directory"));
+    expect(copyTextMock).toHaveBeenCalledWith("/managed/preserved/worktree");
+  });
+});
+
 // A worktree-mode run never touches the user's working copy: the branch is the
 // only pointer to what it produced. Showing it in Run details is what makes the
 // result findable — including for a run that failed partway, which still

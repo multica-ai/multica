@@ -72,9 +72,6 @@ cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM ws_installations)
     RETURNING chat_session_id
 ),
-cleared_dingtalk_group_routes AS (
-    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
-),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no FK); its own
     -- chat_session rows cascade away with the workspace, so reach the cards through
@@ -97,6 +94,15 @@ cleared_draft_restores AS (
 ),
 cleared_inbound_dedup AS (
     DELETE FROM channel_inbound_message_dedup WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM ws_installations)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE workspace_id = $1
 ),
 cleared_audit AS (
     -- Purge, don't detach: the workspace is gone and channel_inbound_audit has no

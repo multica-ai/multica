@@ -575,12 +575,18 @@ WITH doomed AS (
         SELECT id FROM agent WHERE runtime_id = $1 AND kind = 'system'
     )
 ),
-cleared_chat_sessions AS (
-    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
-    RETURNING chat_session_id
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM doomed)
 ),
 cleared_dingtalk_group_routes AS (
     DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_chat_sessions AS (
+    DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
+    RETURNING chat_session_id
 ),
 cleared_outbound_cards AS (
     -- Reach channel_outbound_card_message (keyed by chat_session_id, no FK)
@@ -1539,14 +1545,19 @@ WITH dead AS (
       )
     RETURNING ci.id
 ),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM dead)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding
     WHERE installation_id IN (SELECT id FROM dead)
     RETURNING chat_session_id
-),
-cleared_dingtalk_group_routes AS (
-    DELETE FROM dingtalk_group_route
-    WHERE installation_id IN (SELECT id FROM dead)
 ),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no installation_id,
@@ -1635,7 +1646,7 @@ const recordChannelInboundDrop = `-- name: RecordChannelInboundDrop :exec
 
 INSERT INTO channel_inbound_audit (
     installation_id, channel_type, channel_chat_id, event_type,
-    channel_event_id, channel_message_id, drop_reason
+    channel_event_id, channel_message_id, drop_reason, id
 ) VALUES (
     $4,
     $1,
@@ -1643,7 +1654,8 @@ INSERT INTO channel_inbound_audit (
     $2,
     $6,
     $7,
-    $3
+    $3,
+    COALESCE($8::uuid, gen_random_uuid())
 )
 `
 
@@ -1655,6 +1667,7 @@ type RecordChannelInboundDropParams struct {
 	ChannelChatID    pgtype.Text `json:"channel_chat_id"`
 	ChannelEventID   pgtype.Text `json:"channel_event_id"`
 	ChannelMessageID pgtype.Text `json:"channel_message_id"`
+	ID               pgtype.UUID `json:"id"`
 }
 
 // =====================
@@ -1671,6 +1684,7 @@ func (q *Queries) RecordChannelInboundDrop(ctx context.Context, arg RecordChanne
 		arg.ChannelChatID,
 		arg.ChannelEventID,
 		arg.ChannelMessageID,
+		arg.ID,
 	)
 	return err
 }

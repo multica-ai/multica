@@ -14,7 +14,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
@@ -61,6 +63,13 @@ func channelLeaseRedisURLFromEnv() string {
 	return strings.TrimSpace(os.Getenv("REDIS_URL"))
 }
 
+func realtimeRelayRedisURLFromEnv() string {
+	if dedicated := strings.TrimSpace(os.Getenv("REALTIME_RELAY_REDIS_URL")); dedicated != "" {
+		return dedicated
+	}
+	return strings.TrimSpace(os.Getenv("REDIS_URL"))
+}
+
 func closeRedisClient(label string, client *redis.Client) {
 	if client == nil {
 		return
@@ -77,7 +86,15 @@ func shardedRelayConfigFromEnv() realtime.ShardedStreamRelayConfig {
 	cfg.ReadCount = envPositiveInt64("REALTIME_RELAY_XREAD_COUNT", cfg.ReadCount)
 	cfg.ReadBlock = envDuration("REALTIME_RELAY_XREAD_BLOCK", cfg.ReadBlock)
 	cfg.ReplayGrace = envDuration("REALTIME_RELAY_REPLAY_GRACE", cfg.ReplayGrace)
-	return cfg
+	cfg.TrimHorizon = envDuration("REALTIME_RELAY_TRIM_HORIZON", 2*cfg.ReplayGrace)
+	cfg.StreamTTL = envDuration("REALTIME_RELAY_STREAM_TTL", cfg.TrimHorizon+cfg.ReplayGrace)
+	cfg.TTLRefreshInterval = envDuration("REALTIME_RELAY_TTL_REFRESH_INTERVAL", cfg.TTLRefreshInterval)
+	cfg.MaintenanceInterval = envDuration("REALTIME_RELAY_MAINTENANCE_INTERVAL", cfg.MaintenanceInterval)
+	cfg.StreamTTLEnabled = envBool("REALTIME_RELAY_STREAM_TTL_ENABLED", false)
+	if err := cfg.Validate(); err != nil {
+		slog.Warn("invalid realtime relay retention config; normalizing to safe values", "error", err)
+	}
+	return cfg.Normalized()
 }
 
 func realtimeRelayModeFromEnv() string {
@@ -239,12 +256,33 @@ func backgroundServices(h *handler.Handler) (*service.TaskService, *service.Auto
 	return h.TaskService, h.AutopilotService
 }
 
+// jwtSecretBootError returns a non-nil error when the combination of
+// JWT_SECRET and APP_ENV is unsafe to boot with: production must never run
+// on an empty or publicly-known default secret (auth.ValidateJWTSecret).
+// Non-production keeps the historical dev fallback (see auth.JWTSecret)
+// and only warns.
+func jwtSecretBootError(jwtSecret, appEnv string) error {
+	isProduction := strings.EqualFold(strings.TrimSpace(appEnv), "production")
+	if !isProduction {
+		return nil
+	}
+	return auth.ValidateJWTSecret(jwtSecret)
+}
+
 func main() {
 	logger.Init()
 
 	// Warn about missing configuration
+	if err := jwtSecretBootError(os.Getenv("JWT_SECRET"), os.Getenv("APP_ENV")); err != nil {
+		slog.Error(
+			"refusing to start: "+err.Error()+
+				"; generate a strong secret with `openssl rand -hex 32` and set JWT_SECRET (see .env.example)",
+			"app_env", os.Getenv("APP_ENV"),
+		)
+		os.Exit(1)
+	}
 	if os.Getenv("JWT_SECRET") == "" {
-		slog.Warn("JWT_SECRET is not set — using insecure default. Set JWT_SECRET for production use.")
+		slog.Warn("JWT_SECRET is not set — using insecure dev default (allowed only because APP_ENV is not production).")
 	}
 	if os.Getenv("RESEND_API_KEY") == "" && strings.TrimSpace(os.Getenv("SMTP_HOST")) == "" {
 		slog.Warn("no email backend configured (RESEND_API_KEY and SMTP_HOST both empty) — verification codes will be printed to the log instead of emailed.")
@@ -285,21 +323,33 @@ func main() {
 		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
 	}
 
-	// Connect to database
-	ctx := context.Background()
-	pool, err := newDBPool(ctx, dbURL)
+	startupSettings := dbstartup.SettingsFromEnv()
+	pool, err := newDBPool(context.Background(), dbURL, startupSettings.ConnectTimeout)
 	if err != nil {
 		slog.Error("unable to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
 
-	if err := pool.Ping(ctx); err != nil {
+	startupCtx, stopStartup := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	retryOptions := startupSettings.RetryOptions()
+	retryOptions.ShouldRetry = dbstartup.IsTransientDatabaseError
+	retryOptions.OnRetry = func(event dbstartup.RetryEvent) {
+		slog.Warn("database unavailable during server startup; retrying",
+			"attempt", event.Attempt,
+			"retry_in", event.Delay,
+			"error", event.Err,
+		)
+	}
+	if err := dbstartup.Retry(startupCtx, retryOptions, pool.Ping); err != nil {
+		stopStartup()
 		slog.Error("unable to ping database", "error", err)
 		os.Exit(1)
 	}
+	stopStartup()
 	slog.Info("connected to database")
 	logPoolConfig(pool)
+	ctx := context.Background()
 
 	bus := events.New()
 	hub := realtime.NewHub()
@@ -338,15 +388,23 @@ func main() {
 		closeRedisClient("channel-lease", channelLeaseRedis)
 		closeRedisClient("store", storeRedis)
 	}()
-	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
-		opts, err := redis.ParseURL(redisURL)
-		if err != nil {
-			slog.Error("invalid REDIS_URL — falling back to in-memory hub", "error", err)
+	sharedRedisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
+	relayRedisURL := realtimeRelayRedisURLFromEnv()
+	if (sharedRedisURL != "" || relayRedisURL != "") && envBool("REDIS_DISABLE_CLIENT_NAME", false) {
+		slog.Info("redis: CLIENT SETNAME disabled (REDIS_DISABLE_CLIENT_NAME=true) for managed Redis compatibility")
+	}
+	if sharedRedisURL != "" {
+		if opts, err := redis.ParseURL(sharedRedisURL); err != nil {
+			slog.Error("invalid REDIS_URL — request-path Redis features disabled", "error", err)
 		} else {
-			if envBool("REDIS_DISABLE_CLIENT_NAME", false) {
-				slog.Info("redis: CLIENT SETNAME disabled (REDIS_DISABLE_CLIENT_NAME=true) for managed Redis compatibility")
-			}
 			storeRedis = newNamedRedisClient(opts, "store")
+		}
+	}
+	if relayRedisURL != "" {
+		opts, err := redis.ParseURL(relayRedisURL)
+		if err != nil {
+			slog.Error("invalid realtime relay Redis URL — falling back to in-memory hub", "error", err)
+		} else {
 			relayWriteRedis = newNamedRedisClient(opts, "realtime-write")
 
 			relayMode := realtimeRelayModeFromEnv()
@@ -354,14 +412,14 @@ func main() {
 			switch relayMode {
 			case "legacy":
 				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
-				relay = realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
+				relay = realtime.NewRedisRelayWithClientsAndConfig(hub, relayWriteRedis, relayReadRedis, relayConfig.RetentionConfig())
 				slog.Info("daemon websocket wakeup: Redis fanout disabled in legacy realtime relay mode")
 			case "dual":
 				shardedReadRedis = newNamedRedisClient(opts, "realtime-read-sharded")
 				legacyReadRedis = newNamedRedisClient(opts, "realtime-read-legacy")
 				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, shardedReadRedis, relayConfig)
 				sharded.SetDaemonRuntimeDeliverer(daemonHub)
-				legacy := realtime.NewRedisRelayWithClients(hub, relayWriteRedis, legacyReadRedis)
+				legacy := realtime.NewRedisRelayWithClientsAndConfig(hub, relayWriteRedis, legacyReadRedis, relayConfig.RetentionConfig())
 				relay = realtime.NewMirroredRelay(sharded, legacy)
 				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
 			default:
@@ -373,21 +431,30 @@ func main() {
 			}
 			relay.Start(relayCtx)
 			broadcaster = realtime.NewDualWriteBroadcaster(hub, relay)
+			storePoolSize := 0
+			if storeRedis != nil {
+				storePoolSize = storeRedis.Options().PoolSize
+			}
 			slog.Info(
 				"realtime: Redis relay enabled",
 				"node_id", relay.NodeID(),
 				"mode", relayMode,
+				"dedicated_instance", strings.TrimSpace(os.Getenv("REALTIME_RELAY_REDIS_URL")) != "",
 				"shards", relayConfig.Shards,
 				"stream_max_len", relayConfig.StreamMaxLen,
+				"replay_grace", relayConfig.ReplayGrace.String(),
+				"trim_horizon", relayConfig.TrimHorizon.String(),
+				"stream_ttl", relayConfig.StreamTTL.String(),
+				"stream_ttl_enabled", relayConfig.StreamTTLEnabled,
 				"xread_count", relayConfig.ReadCount,
 				"xread_block", relayConfig.ReadBlock.String(),
-				"store_pool_size", opts.PoolSize,
+				"store_pool_size", storePoolSize,
 				"realtime_write_pool_size", opts.PoolSize,
 				"realtime_read_pool_size", opts.PoolSize,
 			)
 		}
 	} else {
-		slog.Info("realtime: REDIS_URL not set — using in-memory hub (single-node mode)")
+		slog.Info("realtime: REDIS_URL and REALTIME_RELAY_REDIS_URL are unset — using in-memory hub (single-node mode)")
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_BACKEND")), "redis") {
 		leaseRedisURL := channelLeaseRedisURLFromEnv()

@@ -39,11 +39,11 @@ func TestInboundFromCallback_P2PAddressedAndTrimmed(t *testing.T) {
 
 func TestInboundFromCallback_GroupAddressing(t *testing.T) {
 	callback := textCallback(convTypeGroup, true)
-	callback.ConversationTitle = "Platform team"
+	callback.ConversationTitle = "  Platform team  "
 	if msg, ok := inboundFromCallback(callback, "a"); !ok || !msg.AddressedToBot {
 		t.Fatalf("group mention must be addressed: ok=%v msg=%+v", ok, msg)
 	} else if raw, err := decodeDingTalkRaw(msg); err != nil || raw.ConversationTitle != "Platform team" {
-		t.Fatalf("group title = %q, err=%v", raw.ConversationTitle, err)
+		t.Fatalf("group title metadata = %q, err=%v", raw.ConversationTitle, err)
 	}
 	msg, ok := inboundFromCallback(textCallback(convTypeGroup, false), "a")
 	if !ok || msg.AddressedToBot {

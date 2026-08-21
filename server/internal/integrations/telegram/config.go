@@ -10,16 +10,13 @@
 // (outbound.go); verdict replies (binding prompt, offline notice) live in
 // replier.go.
 //
-// Maintenance: this package is COMMUNITY-MAINTAINED. @leonzone contributed it
-// and is its code owner — the first stop for Telegram-specific bugs and behavior
-// questions, on a best-effort volunteer basis. The Multica team keeps this
-// package compiling and its tests green through shared-layer refactors, but
-// does not use Telegram and cannot verify behavior against the real platform;
-// that part depends on the code owner. If the integration breaks in a way that
-// cannot be fixed without real Telegram access and no fix lands for a few
-// releases, it may be deprecated rather than left quietly broken. Changing the
-// shared channel engine? Keep this adapter building — and loop in the code
-// owner for anything that changes Telegram-visible behavior.
+// Maintenance: this package is COMMUNITY-MAINTAINED. Its maintainers, the
+// support boundary and the retirement rule are published at
+// https://multica.ai/docs/community-maintained
+// (apps/docs/content/docs/community-maintained.mdx, four locales). That page
+// is the single source of truth — record ownership changes there, not here.
+// Changing the shared channel engine? Keep this adapter building, and loop in
+// its maintainers for anything that changes Telegram-visible behavior.
 package telegram
 
 import (

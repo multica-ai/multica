@@ -206,8 +206,8 @@ WITH touched_issue AS (
     WHERE issue.id = $1 AND issue.workspace_id = $2
     RETURNING issue.id, issue.workspace_id, issue.revision
 ), inserted_comment AS (
-    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id)
-    SELECT ti.id, ti.workspace_id, $3, $4, $5, $6, $7, $8, $9, $10
+    INSERT INTO comment (issue_id, workspace_id, author_type, author_id, content, type, parent_id, source_task_id, quick_action_id, via_plugin_id, id)
+    SELECT ti.id, ti.workspace_id, $3, $4, $5, $6, $7, $8, $9, $10, COALESCE($11::uuid, gen_random_uuid())
     FROM touched_issue ti
     RETURNING id, issue_id, author_type, author_id, content, type, created_at, updated_at, parent_id, workspace_id, resolved_at, resolved_by_type, resolved_by_id, source_task_id, quick_action_id, via_plugin_id, revision
 )
@@ -227,6 +227,7 @@ type CreateCommentParams struct {
 	SourceTaskID  pgtype.UUID `json:"source_task_id"`
 	QuickActionID pgtype.UUID `json:"quick_action_id"`
 	ViaPluginID   pgtype.UUID `json:"via_plugin_id"`
+	ID            pgtype.UUID `json:"id"`
 }
 
 type CreateCommentRow struct {
@@ -278,6 +279,7 @@ func (q *Queries) CreateComment(ctx context.Context, arg CreateCommentParams) (C
 		arg.SourceTaskID,
 		arg.QuickActionID,
 		arg.ViaPluginID,
+		arg.ID,
 	)
 	var i CreateCommentRow
 	err := row.Scan(

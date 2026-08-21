@@ -42,9 +42,14 @@
       "@types/react": "catalog:",
       "@types/react-dom": "catalog:",
       "@xmldom/xmldom": "^0.8.13",
-      "postcss": "8.5.10",
+      "postcss": "8.5.26",
       "uuid": "11.1.1",
-      "shell-quote": "1.9.0"
+      "shell-quote": "1.9.0",
+      "minimatch@3>brace-expansion": "1.1.18",
+      "minimatch@5>brace-expansion": "2.1.4",
+      "minimatch@9>brace-expansion": "2.1.4",
+      "minimatch@10>brace-expansion": "5.0.9",
+      "builder-util-runtime": "9.7.0"
     }
   },
   "devDependencies": {

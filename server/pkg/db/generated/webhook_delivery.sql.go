@@ -246,13 +246,13 @@ INSERT INTO webhook_delivery (
     workspace_id, autopilot_id, trigger_id, provider, event,
     dedupe_key, dedupe_source, signature_status, status,
     selected_headers, content_type, raw_body,
-    replayed_from_delivery_id, replay_idempotency_key, reason_code
+    replayed_from_delivery_id, replay_idempotency_key, reason_code, id
 ) VALUES (
     $1, $2, $3, $4, $5,
     $9, $10, $6, $7,
     $8, $11, $12,
     $13, $14,
-    $15
+    $15, COALESCE($16::uuid, gen_random_uuid())
 ) RETURNING id, workspace_id, autopilot_id, trigger_id, provider, event, dedupe_key, dedupe_source, signature_status, status, attempt_count, selected_headers, content_type, raw_body, response_status, response_body, autopilot_run_id, replayed_from_delivery_id, error, received_at, last_attempt_at, created_at, available_at, lease_token, lease_expires_at, dispatch_attempts, reason_code, replay_idempotency_key
 `
 
@@ -272,6 +272,7 @@ type CreateWebhookDeliveryParams struct {
 	ReplayedFromDeliveryID pgtype.UUID `json:"replayed_from_delivery_id"`
 	ReplayIdempotencyKey   pgtype.Text `json:"replay_idempotency_key"`
 	ReasonCode             pgtype.Text `json:"reason_code"`
+	ID                     pgtype.UUID `json:"id"`
 }
 
 // =====================
@@ -297,6 +298,7 @@ func (q *Queries) CreateWebhookDelivery(ctx context.Context, arg CreateWebhookDe
 		arg.ReplayedFromDeliveryID,
 		arg.ReplayIdempotencyKey,
 		arg.ReasonCode,
+		arg.ID,
 	)
 	var i WebhookDelivery
 	err := row.Scan(

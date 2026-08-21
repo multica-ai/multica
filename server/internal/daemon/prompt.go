@@ -47,22 +47,6 @@ func backendResumeContinuityNotice(task Task) string {
 	return sessionContinuityNoticeFor(task)
 }
 
-// Turn-mode markers consumed by the runtime brief's mode router
-// (execenv.writeWorkflowIssue). The brief is byte-identical on every run and
-// therefore cannot say what triggered this turn; these lines do, and they are
-// emitted unconditionally from the same branches BuildPrompt uses to pick a
-// path, so the two can never disagree.
-//
-// Reply mode = respond to the triggering comment; the status arc opens only
-// when the turn does substantive work on an issue assigned to this agent
-// (MUL-6300). Ownership mode = an assignment/status change started this run;
-// own the status arc unconditionally. Applying the wrong one changes when
-// issue status moves.
-const (
-	turnModeReply     = "**Turn mode: Reply.** Follow the Reply-mode block in your runtime workflow file for this turn; the Ownership-mode status steps do not apply.\n\n"
-	turnModeOwnership = "**Turn mode: Ownership.** Follow the Ownership-mode block in your runtime workflow file for this turn; the Reply-mode rules do not apply.\n\n"
-)
-
 // perTurnContextBlocks renders the run-scoped context blocks that used to live
 // in the runtime brief (CLAUDE.md / AGENTS.md).
 //
@@ -76,14 +60,52 @@ const (
 // changing them costs only this turn's own tokens (MUL-5377).
 //
 // Returns "" when none of the blocks apply.
-func perTurnContextBlocks(task Task) string {
+func perTurnContextBlocks(task Task, opts promptOpts) string {
 	var b strings.Builder
 	b.WriteString(buildActiveSiblingRunsBlock(task.IssueID, task.ActiveSiblingRuns))
+	b.WriteString(buildSharedLocalDirectoryBlock(opts.sharedLocalDirectory))
 	if task.PriorSessionResumeUnavailable {
 		b.WriteString(sessionContinuityNoticeFor(task))
 	}
 	b.WriteString(execenv.BuildTaskInitiatorBlock(task.InitiatorType, task.InitiatorName, task.InitiatorEmail))
 	b.WriteString(execenv.BuildConnectedAppsBlock(task.ConnectedApps))
+	return b.String()
+}
+
+// promptOpts carries per-run facts the claimed Task does not: things only the
+// daemon's own execution context can answer. Kept behind PromptOption so the
+// common BuildPrompt(task, provider) call sites stay unchanged.
+type promptOpts struct {
+	sharedLocalDirectory bool
+}
+
+// PromptOption tunes per-turn prompt copy with run-scoped context.
+type PromptOption func(*promptOpts)
+
+// WithSharedLocalDirectory marks a turn that runs inside the user's own
+// directory WITHOUT holding its path mutex — today, a chat turn on an in_place
+// local_directory resource (see localDirectoryLockExempt). Such a turn may
+// overlap a coding task writing to the same tree, and unlike every other task
+// it got there by design rather than by winning the lock, so it is the one that
+// has to be told (issue #7344).
+func WithSharedLocalDirectory() PromptOption {
+	return func(o *promptOpts) { o.sharedLocalDirectory = true }
+}
+
+// buildSharedLocalDirectoryBlock warns an unlocked turn that its working
+// directory is shared live. Deliberately guidance and not a prohibition: the
+// mutex never covered the user's own editor either, so refusing writes here
+// would buy a restriction the surrounding system does not actually enforce.
+// What the turn cannot infer on its own is that a sibling task may be mid-edit
+// in the same tree — so state that, and let it size its writes accordingly.
+func buildSharedLocalDirectoryBlock(shared bool) string {
+	if !shared {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("## Shared working directory\n\n")
+	b.WriteString("Your working directory is the user's own checkout, and another task on this machine may be editing it while you run. This turn deliberately neither holds nor waits for the directory lock — that is what keeps a conversation from queueing behind a long build.\n\n")
+	b.WriteString("Read freely. Treat writing the way the user treats saving a file in their own editor: reasonable for a small change they just asked for, wrong for a broad refactor, a dependency install, or a build that rewrites many files. Work that size belongs in an issue task, which is serialised against the other writers. If you do write, say so in your reply — a sibling task may be looking at the same file.\n\n")
 	return b.String()
 }
 
@@ -128,12 +150,16 @@ func buildActiveSiblingRunsBlock(currentIssueID string, runs []ActiveSiblingRunD
 // is provider-agnostic AND host-agnostic now (every OS → write a UTF-8 file,
 // post with `--content-file`) because the shell-layer corruption it guards
 // against is not specific to any one provider or host (MUL-2904, #4182).
-func BuildPrompt(task Task, provider string) string {
+func BuildPrompt(task Task, provider string, options ...PromptOption) string {
+	var opts promptOpts
+	for _, apply := range options {
+		apply(&opts)
+	}
 	body := buildPromptBody(task, provider)
 	// Run-scoped context is appended, never prepended: everything ahead of it
 	// is stable across runs of a resumed session, and appending keeps it after
 	// the cached prefix (MUL-5377).
-	if blocks := perTurnContextBlocks(task); blocks != "" {
+	if blocks := perTurnContextBlocks(task, opts); blocks != "" {
 		if !strings.HasSuffix(body, "\n\n") {
 			body += "\n"
 		}
@@ -158,7 +184,6 @@ func buildPromptBody(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	b.WriteString(turnModeOwnership)
 	// Assignment handoff (MUL-3375): a free-text instruction the person who
 	// assigned/promoted this issue left for you. Frame it as a handoff, not a
 	// comment to reply to — there is no comment thread to answer here.
@@ -285,13 +310,6 @@ func buildCommentPrompt(task Task, provider string) string {
 	var b strings.Builder
 	b.WriteString("You are running as a local coding agent for a Multica workspace.\n\n")
 	fmt.Fprintf(&b, "Your assigned issue ID is: %s\n\n", task.IssueID)
-	// Mode marker for the brief's router. Emitted unconditionally from the same
-	// branch that selects this code path, so the brief and the prompt can never
-	// disagree about which mode this turn is in. It must NOT be gated on
-	// TriggerCommentContent: an empty comment body (or an older server that
-	// doesn't send one) would otherwise leave the turn unlabelled, and the
-	// agent would fall through to Ownership mode and change the issue status.
-	b.WriteString(turnModeReply)
 	if task.TriggerCommentContent != "" {
 		authorLabel := "A user"
 		if task.TriggerAuthorType == "system" {

@@ -10,13 +10,13 @@ INSERT INTO webhook_delivery (
     workspace_id, autopilot_id, trigger_id, provider, event,
     dedupe_key, dedupe_source, signature_status, status,
     selected_headers, content_type, raw_body,
-    replayed_from_delivery_id, replay_idempotency_key, reason_code
+    replayed_from_delivery_id, replay_idempotency_key, reason_code, id
 ) VALUES (
     $1, $2, $3, $4, $5,
     sqlc.narg('dedupe_key'), sqlc.narg('dedupe_source'), $6, $7,
     $8, sqlc.narg('content_type'), sqlc.narg('raw_body'),
     sqlc.narg('replayed_from_delivery_id'), sqlc.narg('replay_idempotency_key'),
-    sqlc.narg('reason_code')
+    sqlc.narg('reason_code'), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 ) RETURNING *;
 
 -- name: GetWebhookReplayByIdempotencyKey :one

@@ -672,7 +672,7 @@
     },
     "integrations": {
       "intro": "Connect this agent to external chat platforms so people can work with it where they already are.",
-      "members_note": "Only workspace owners and admins can connect an agent to an external chat platform. You can view connected bots in Settings → Integrations."
+      "members_note": "Only workspace owners and admins can manage this connection. You can view connected bots in Settings → Integrations."
     },
     "activity": {
       "status": {
@@ -828,10 +828,12 @@
     "details_provider": "Provider",
     "details_mode": "Mode",
     "details_workdir": "Workdir",
+    "details_project_directory": "Project directory",
     "details_created": "Created",
     "details_started": "Started",
     "details_completed": "Completed",
     "copy_workdir": "Copy working directory",
+    "copy_project_directory": "Copy project directory",
     "close": "Close",
     "fact_created": "Created {{time}}",
     "fact_took": "Took {{duration}}",

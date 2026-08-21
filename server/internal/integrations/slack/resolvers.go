@@ -12,6 +12,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // Slack resolvers connect the channel-agnostic inbound pipeline to Slack
@@ -375,6 +376,7 @@ type auditor struct{ q *db.Queries }
 func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
 	raw, _ := decodeSlackRaw(msg) // event_type is best-effort; a decode miss still audits the drop
 	return r.q.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
+		ID:               dbid.NewV7(),
 		ChannelType:      string(TypeSlack),
 		EventType:        raw.EventType,
 		DropReason:       string(reason),

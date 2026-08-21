@@ -35,7 +35,18 @@ default_config="$(
 require_rendered_value "$default_config" 'MULTICA_VCS_INTEGRATION_ENABLED: "true"'
 require_rendered_value "$default_config" 'MULTICA_ENTITLEMENT_POLICY_ENABLED: "false"'
 require_rendered_value "$default_config" 'MULTICA_ENTITLEMENT_POLICY_URL: ""'
+require_rendered_value "$default_config" 'MULTICA_DATABASE_STARTUP_TIMEOUT: "3m"'
+require_rendered_value "$default_config" 'MULTICA_DATABASE_CONNECT_TIMEOUT: "5s"'
 reject_rendered_value "$default_config" 'MULTICA_ENTITLEMENT_SERVICE_TOKEN'
+
+default_backend="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/backend.yaml
+)"
+require_rendered_value "$default_backend" 'failureThreshold: 60'
+liveness_block="$(sed -n '/livenessProbe:/,/resources:/p' <<<"$default_backend")"
+require_rendered_value "$liveness_block" 'path: /health'
+reject_rendered_value "$liveness_block" 'path: /healthz'
 
 disabled_config="$(
   helm template multica "$CHART_DIR" \

@@ -185,21 +185,36 @@ multica issue property unset <issue-id> --name Environment
 A status change is not cosmetic — the server enqueues or skips agent work based
 on it. These are the contracts, not advice:
 
+A workspace may define custom statuses beyond the seven built-ins; when any
+exist, the runtime brief's Available Commands section lists this workspace's
+catalog. A custom status inherits its category's behavior in full, and each
+built-in key below is also the name of its category — so read these bullets as
+category rules. Two writes are literal-key exceptions, not category rules: the
+failed-task rollback below writes the literal `todo` key, and a merged PR with
+close intent writes the literal `done` key.
+
 - **`backlog`** parks an agent-assigned issue: the assignee is set but no task
   fires. Moving `backlog → todo` (or any non-done/non-cancelled status) enqueues
   the assigned agent then.
 - **`in_progress` / `in_review`** are agent-managed CLI mutations, not
-  `StartTask` / `CompleteTask` side effects. The runtime brief asks ordinary
-  agents for `todo`/`backlog` → `in_progress` then `in_review` when they have
-  delivered. Ownership turns open that arc unconditionally; reply turns own the
-  same arc, but only when the issue is assigned to you AND the turn does
-  substantive work — a question, a discussion, or an acknowledgement never
-  moves the status, and neither does a turn on an issue not assigned to you
-  (someone else's, or unassigned — you were pulled in by an @mention either
-  way). Squad leaders share the opening
-  `in_progress` step on the first assignment turn, keep the parent there while
-  members work, and only move to `in_review` when a later re-trigger confirms
-  the overall goal is met.
+  `StartTask` / `CompleteTask` side effects. The runtime brief asks agents to
+  write the state the issue is in whenever their work changes it — not from
+  the trigger type or the run's lifecycle, and not gated on being the
+  assignee. Writes happen whenever the state changes, mid-turn included: a
+  turn that advances the issue's own ask sets `in_progress` as soon as that
+  is known, so the board shows the work while it runs; a blocker is recorded
+  when it is hit; and the turn must not exit with a stale value — delivered
+  the issue's own ask → `in_review`; work continues beyond the turn
+  (dispatched sub-issues, partial delivery) → `in_progress`; stuck →
+  `blocked`. A turn that produces none of the issue's own deliverable —
+  answering a question, consulting on work owned elsewhere — writes nothing
+  at any point. The kind of activity never decides this: research, design,
+  planning, and review all count as the work exactly when they are what the
+  issue asks for (a review-the-PR issue is being worked the moment reviewing
+  starts). Questions, discussion, or acknowledgements never move the status.
+  Squad leaders: dispatching members is not delivery — a dispatch turn
+  leaves the parent `in_progress`, and it moves to `in_review` only when a
+  later re-trigger confirms the overall goal is met.
 - **`in_review`** is an accepted issue status. Some workflows use it while a PR
   is open and awaiting review; moving to it is an explicit mutation.
 - **`done`** on a child issue posts a system comment on its parent. If a PR

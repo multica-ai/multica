@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -41,7 +42,7 @@ func TestShortID(t *testing.T) {
 func TestPredictRootDir(t *testing.T) {
 	t.Parallel()
 	got := PredictRootDir("/root", "ws-uuid", "a1b2c3d4-e5f6-7890-abcd-ef1234567890")
-	want := filepath.Join("/root", "ws-uuid", "a1b2c3d4")
+	want := filepath.Join("/root", "ws-uuid", "ef1234567890")
 	if got != want {
 		t.Errorf("PredictRootDir = %q, want %q", got, want)
 	}
@@ -1807,6 +1808,39 @@ func TestInjectRuntimeConfigAntigravity(t *testing.T) {
 	}
 	if strings.Contains(s, ".agent_context/skills/") {
 		t.Error("AGENTS.md for Antigravity must not reference the .agent_context/skills/ fallback")
+	}
+}
+
+// TestInjectRuntimeConfigDim verifies that the runtime brief is delivered to
+// Dim via AGENTS.md (review #1/#6). Dim reads AGENTS.md from the session cwd,
+// so InjectRuntimeConfig must write the brief there.
+func TestInjectRuntimeConfigDim(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	ctx := TaskContextForEnv{
+		IssueID:     "test-issue-id",
+		AgentSkills: []SkillContextForEnv{{Name: "Coding", Content: "Write good code."}},
+	}
+
+	if _, err := InjectRuntimeConfig(dir, "dim", ctx); err != nil {
+		t.Fatalf("InjectRuntimeConfig failed: %v", err)
+	}
+
+	content, err := os.ReadFile(filepath.Join(dir, "AGENTS.md"))
+	if err != nil {
+		t.Fatalf("failed to read AGENTS.md: %v", err)
+	}
+
+	s := string(content)
+	if !strings.Contains(s, "Multica Agent Runtime") {
+		t.Error("AGENTS.md missing meta skill header")
+	}
+	if !strings.Contains(s, "coding") {
+		t.Error("AGENTS.md missing skill name")
+	}
+	if !strings.Contains(s, "discovered automatically") {
+		t.Error("AGENTS.md for Dim should advertise native skill discovery")
 	}
 }
 
@@ -4999,25 +5033,40 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 	t.Run("mentions-section-lists-loop-protocol", func(t *testing.T) {
 		t.Parallel()
 		s := readClaudeMD(t, assignmentCtx)
+		// MUL-6417: the section is fact-anchored, no prescriptive default.
+		// Pin each fact that invalidates a false reason to mention — losing
+		// any one of them re-opens the incident class it closed.
 		for _, want := range []string{
 			"side-effecting actions",
 			"enqueues a new run for that agent",
-			// MUL-5442 judgment rewrite: the two H3 subsections merged into one
-			// paragraph — pin the policy anchors, not the retired headings.
-			"Default: NO mention",
-			// Each warranted-case scope qualifier pinned separately — "not yet
-			// involved" and "for the first time" ARE the anti-repeat-notify
-			// scope, not decoration (review catch on #6453).
-			"restarts an agent-to-agent loop and costs the user money",
-			"Mention only when escalating to a human owner",
-			"not yet involved",
-			"for the first time",
-			"explicitly asks to loop someone in",
-			"end with no mention at all",
+			// Notifying FOLLOWERS is a false need: delivery already happens.
+			// Scoped to followers on purpose — for a non-follower, a mention
+			// IS how they find out (Elon's review catch on #7245).
+			"followers of the issue already see your comment",
+			"completion notifications are platform-owned",
+			// The one real function, with its scope.
+			"pulls someone into work they are not doing yet",
+			// The reference fact (MUL-6528): @-as-attribution ("per @X's
+			// decision") read as a way to write a name and dispatched the
+			// agent being credited.
+			"prose about them, not work for them",
+			"so a reference stays plain text",
+			// The courtesy-loop fact (the incident class behind #1581/#6453).
+			"whose only possible reply is another courtesy",
+			// The asymmetry that breaks ambiguous cases toward not mentioning.
+			"a missed mention costs one follow-up ask, a stray one costs a run",
 			"Silence ends conversations",
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("Mentions section missing %q\n---\n%s", want, s)
+			}
+		}
+		// Neither the bare prescription (MUL-6417) nor the overreach that
+		// replaced it may come back: "never how someone finds out" was false
+		// for non-followers and suppressed legitimate human escalation.
+		for _, banned := range []string{"Default: NO mention", "never how someone finds out"} {
+			if strings.Contains(s, banned) {
+				t.Errorf("Mentions section carries retired wording %q\n---\n%s", banned, s)
 			}
 		}
 	})
@@ -5046,10 +5095,13 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 		// back: "Decide whether a reply is warranted", "produced actual
 		// work", "pure acknowledgment / thanks / sign-off", "do NOT reply",
 		// "Silence is a valid and preferred way".
+		// MUL-6417 merged the reply-mode block into the shared steps: the
+		// unconditional one-comment contract now lives in step 4, and the
+		// mention-after-work bullet is gone with the block (the discipline
+		// itself stays in `## Mentions`, pinned by the Mentions subtest).
 		for _, want := range []string{
-			"Posting your reply as a comment is mandatory",
-			"Do any requested work first",
-			"Never @mention the agent you are replying to as a thank-you or sign-off",
+			"**Post your final results as a comment — this step is mandatory**",
+			"whose only possible reply is another courtesy",
 		} {
 			if !strings.Contains(s, want) {
 				t.Errorf("comment-triggered CLAUDE.md missing %q", want)
@@ -5102,24 +5154,23 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 	}
 	s := string(data)
 
-	// The comment-triggered workflow must contain the squad leader no_action
-	// rule, and the reply imperative must carry the no_action carve-out so a
-	// later bullet never contradicts it (MUL-5442 #6493 review).
+	// The no_action rule lives on the leader variant of workflow step 4 since
+	// MUL-6417 (the reply-mode block that used to duplicate it is gone): the
+	// delivery imperative itself carries the carve-out, so no later bullet
+	// can contradict it (MUL-5442 #6493 review).
 	for _, want := range []string{
-		"Squad leader rule",
-		"DO NOT post any comment",
+		"unless your outcome is `no_action`",
 		"multica squad activity",
-		"Unless your outcome is `no_action` (Squad leader rule above), posting your reply as a comment is mandatory",
+		"DO NOT post a comment announcing no_action",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("squad leader comment-triggered CLAUDE.md missing %q", want)
 		}
 	}
-	// Capital-P form = the ordinary unconditional bullet; the leader brief
-	// must carry only the carve-out variant (its lowercase "posting your
-	// reply as a comment is mandatory" tail is expected and legal).
-	if strings.Contains(s, "Posting your reply as a comment is mandatory") {
-		t.Errorf("squad leader CLAUDE.md still carries the unconditional reply bullet")
+	// The unconditional ordinary-agent imperative must not coexist with the
+	// carve-out variant.
+	if strings.Contains(s, "**Post your final results as a comment — this step is mandatory**") {
+		t.Errorf("squad leader CLAUDE.md still carries the unconditional delivery step")
 	}
 
 	// The Output section must use strong prohibition language.
@@ -5142,8 +5193,8 @@ func TestInjectRuntimeConfigSquadLeaderCommentTriggeredNoAction(t *testing.T) {
 		t.Fatalf("read CLAUDE.md: %v", err)
 	}
 	s2 := string(data2)
-	if strings.Contains(s2, "Squad leader rule") {
-		t.Errorf("non-squad-leader CLAUDE.md should NOT contain squad leader rule")
+	if strings.Contains(s2, "unless your outcome is `no_action`") {
+		t.Errorf("non-squad-leader CLAUDE.md should NOT contain the leader no_action carve-out")
 	}
 }
 
@@ -6100,5 +6151,468 @@ func TestEnvironmentCleanupStandardModeRemovesWorkdir(t *testing.T) {
 	// output/logs should remain.
 	if _, err := os.Stat(filepath.Join(env.RootDir, "output")); err != nil {
 		t.Fatalf("output/ removed by partial cleanup: %v", err)
+	}
+}
+
+// TestPredictRootDirDistinctForSharedUUIDv7Prefix is the regression guard for
+// #7326. Task ids are UUIDv7: the first 8 hex chars are the high 32 bits of a
+// 48-bit millisecond timestamp, so they only advance once every 2^16 ms
+// (~65.5s). Every task started inside one such window shares that prefix.
+// While the env root used the prefix, the second task's Prepare deleted the
+// first task's live directory — identity files, worktree and all.
+//
+// The three ids below are the ones from the bug report, ~4.7s apart.
+func TestPredictRootDirDistinctForSharedUUIDv7Prefix(t *testing.T) {
+	t.Parallel()
+	ids := []string{
+		"01a01ec0-e69d-7000-8000-000000000001",
+		"01a01ec0-f014-7000-8000-000000000002",
+		"01a01ec0-f927-7000-8000-000000000003",
+	}
+	seen := make(map[string]string, len(ids))
+	for _, id := range ids {
+		root := PredictRootDir("/root", "ws-uuid", id)
+		if prev, dup := seen[root]; dup {
+			t.Fatalf("tasks %s and %s share env root %q — a truncated task id is back", prev, id, root)
+		}
+		seen[root] = id
+	}
+}
+
+// TestLocalWorktreeBranchDistinctForSharedUUIDv7Prefix covers the same
+// truncation in the branch name: two concurrent tasks for one agent would
+// otherwise both ask git for agent/<name>/<same-prefix>.
+func TestLocalWorktreeBranchDistinctForSharedUUIDv7Prefix(t *testing.T) {
+	t.Parallel()
+	a := fmt.Sprintf("agent/%s/%s", sanitizeName("Reviewer"), taskKey("01a01ec0-e69d-7000-8000-000000000001"))
+	b := fmt.Sprintf("agent/%s/%s", sanitizeName("Reviewer"), taskKey("01a01ec0-f014-7000-8000-000000000002"))
+	if a == b {
+		t.Fatalf("both tasks resolved to branch %q", a)
+	}
+}
+
+// TestPrepareDoesNotDeleteConcurrentTaskEnv is the behavioural half of the
+// #7326 regression. Prepare removes an existing env root before recreating it,
+// which is correct only while that path belongs exclusively to the task being
+// prepared. With an 8-char UUIDv7 prefix it did not: task B's Prepare ran
+// os.RemoveAll over task A's *running* env root, destroying its identity
+// files, worktree and task-scoped config while A was still executing.
+func TestPrepareDoesNotDeleteConcurrentTaskEnv(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+
+	// Same first 8 hex chars — i.e. created inside the same ~65.5s window.
+	const (
+		taskA = "01a01ec0-e69d-7000-8000-000000000001"
+		taskB = "01a01ec0-f014-7000-8000-000000000002"
+	)
+
+	envA, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-collision",
+		TaskID:         taskA,
+		AgentName:      "Agent A",
+		Task:           TaskContextForEnv{IssueID: taskA},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare task A: %v", err)
+	}
+	defer envA.Cleanup(true)
+
+	// A marker standing in for everything a live task owns under its env root.
+	marker := filepath.Join(envA.WorkDir, "task-a-work.txt")
+	if err := os.WriteFile(marker, []byte("A"), 0o644); err != nil {
+		t.Fatalf("seed task A work: %v", err)
+	}
+
+	envB, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-collision",
+		TaskID:         taskB,
+		AgentName:      "Agent B",
+		Task:           TaskContextForEnv{IssueID: taskB},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("Prepare task B: %v", err)
+	}
+	defer envB.Cleanup(true)
+
+	if envA.RootDir == envB.RootDir {
+		t.Fatalf("both tasks share env root %q", envA.RootDir)
+	}
+	if _, err := os.Stat(marker); err != nil {
+		t.Fatalf("task B's Prepare destroyed task A's live env root: %v", err)
+	}
+}
+
+// TestTaskKeyReadsTheRandomTail pins the two properties the env-root and
+// branch segments depend on, which pull in opposite directions.
+//
+// Length: the full 32-char id pushed a branch ref past Windows MAX_PATH
+// ("cannot lock ref ...: Filename too long") because the ref is a path under
+// .git/refs/heads/ inside an already-deep task checkout. Keep it bounded.
+//
+// End: the segment must come from the id's random tail. UUIDv7 puts a
+// millisecond timestamp in front, so a leading slice is shared by every task
+// created in the same ~65.5s window (#7326) — short AND leading is the one
+// combination that reintroduces the bug.
+func TestTaskKeyReadsTheRandomTail(t *testing.T) {
+	t.Parallel()
+	const id = "01a01ec0-e69d-7000-8000-0123456789ab"
+	got := taskKey(id)
+	if len(got) != taskKeyLen {
+		t.Fatalf("taskKey(%q) = %q (len %d), want len %d — long segments overflow MAX_PATH on Windows", id, got, len(got), taskKeyLen)
+	}
+	if want := "0123456789ab"; got != want {
+		t.Fatalf("taskKey(%q) = %q, want %q — the segment must come from the random tail, not the timestamp head", id, got, want)
+	}
+	if short := taskKey("abc"); short != "abc" {
+		t.Fatalf("taskKey on a sub-length input = %q, want it returned as-is", short)
+	}
+}
+
+// TestPrepareRefusesEnvRootOwnedByAnotherTask covers the guard that makes the
+// os.RemoveAll in Prepare safe. taskKey makes a shared env root improbable but
+// not impossible, and the cost of being wrong is deleting a running task's
+// work — so a foreign owner must stop Prepare rather than be overwritten.
+func TestPrepareRefusesEnvRootOwnedByAnotherTask(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	envRoot := PredictRootDir(workspacesRoot, "ws-owned", taskID)
+	if err := os.MkdirAll(filepath.Join(envRoot, "workdir"), 0o755); err != nil {
+		t.Fatalf("seed env root: %v", err)
+	}
+	if err := writeEnvRootOwner(envRoot, "11111111-2222-3333-4444-555555555555"); err != nil {
+		t.Fatalf("seed owner: %v", err)
+	}
+	survivor := filepath.Join(envRoot, "workdir", "other-task-work.txt")
+	if err := os.WriteFile(survivor, []byte("keep me"), 0o644); err != nil {
+		t.Fatalf("seed work: %v", err)
+	}
+
+	_, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-owned",
+		TaskID:         taskID,
+		AgentName:      "Intruder",
+		Task:           TaskContextForEnv{IssueID: taskID},
+	}, testLogger())
+	if err == nil {
+		t.Fatal("Prepare accepted an env root owned by another task")
+	}
+	if !strings.Contains(err.Error(), "belongs to task") {
+		t.Fatalf("error = %v, want it to name the owning task", err)
+	}
+	if _, statErr := os.Stat(survivor); statErr != nil {
+		t.Fatalf("Prepare deleted the other task's work despite failing: %v", statErr)
+	}
+}
+
+// TestPrepareResetsItsOwnEnvRoot is the other half: a rerun of the SAME task
+// owns the path and must still get a clean directory.
+func TestPrepareResetsItsOwnEnvRoot(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	first, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-rerun",
+		TaskID:         taskID,
+		AgentName:      "Rerun",
+		Task:           TaskContextForEnv{IssueID: taskID},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("first Prepare: %v", err)
+	}
+	stale := filepath.Join(first.WorkDir, "stale.txt")
+	if err := os.WriteFile(stale, []byte("from the previous run"), 0o644); err != nil {
+		t.Fatalf("seed stale file: %v", err)
+	}
+	// End the first execution. A rerun only reaches the reset path once the
+	// previous execution has released the env root; an overlapping one is
+	// refused, which TestPrepareRefusesOverlappingExecutionOfSameTask covers.
+	first.ReleaseLock()
+
+	second, err := Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-rerun",
+		TaskID:         taskID,
+		AgentName:      "Rerun",
+		Task:           TaskContextForEnv{IssueID: taskID},
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("rerun Prepare rejected the task's own env root: %v", err)
+	}
+	defer second.Cleanup(true)
+	if _, statErr := os.Stat(stale); !os.IsNotExist(statErr) {
+		t.Fatalf("rerun did not reset the env root; stale file still present (%v)", statErr)
+	}
+}
+
+// TestPrepareConcurrentSameKeyTasksClaimExclusively is the race the previous
+// ownership check missed. It read the marker, then deleted, then wrote — three
+// steps, so two tasks sharing a taskKey could both observe "no owner", and the
+// slower one would still os.RemoveAll the faster one's live directory.
+//
+// Both ids below end in the same 12 hex chars, so they resolve to one env root.
+// Started together, exactly one must win: the other has to fail without
+// touching the winner's tree.
+func TestPrepareConcurrentSameKeyTasksClaimExclusively(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	ids := []string{
+		"aaaaaaaa-1111-2222-3333-0123456789ab",
+		"bbbbbbbb-4444-5555-6666-0123456789ab",
+	}
+	if taskKey(ids[0]) != taskKey(ids[1]) {
+		t.Fatalf("fixture ids no longer collide: %q vs %q", taskKey(ids[0]), taskKey(ids[1]))
+	}
+
+	var start sync.WaitGroup
+	start.Add(1)
+	var done sync.WaitGroup
+	envs := make([]*Environment, len(ids))
+	errs := make([]error, len(ids))
+	for i, id := range ids {
+		done.Add(1)
+		go func() {
+			defer done.Done()
+			start.Wait() // release both goroutines into Prepare together
+			envs[i], errs[i] = Prepare(PrepareParams{
+				WorkspacesRoot: workspacesRoot,
+				WorkspaceID:    "ws-race",
+				TaskID:         id,
+				AgentName:      "Racer",
+				Task:           TaskContextForEnv{IssueID: id},
+			}, testLogger())
+		}()
+	}
+	start.Done()
+	done.Wait()
+
+	winner := -1
+	for i := range ids {
+		if errs[i] == nil {
+			if winner >= 0 {
+				t.Fatalf("both tasks claimed the same env root: %s and %s", ids[winner], ids[i])
+			}
+			winner = i
+		}
+	}
+	if winner < 0 {
+		t.Fatalf("neither task started: %v / %v", errs[0], errs[1])
+	}
+	loser := 1 - winner
+	if !strings.Contains(errs[loser].Error(), "env root") {
+		t.Fatalf("loser failed for an unrelated reason: %v", errs[loser])
+	}
+	defer envs[winner].Cleanup(true)
+
+	// The winner's environment must be intact and still its own.
+	if _, err := os.Stat(envs[winner].WorkDir); err != nil {
+		t.Fatalf("winner %s lost its workdir to the loser: %v", ids[winner], err)
+	}
+	owner, err := readEnvRootOwner(envs[winner].RootDir)
+	if err != nil {
+		t.Fatalf("read owner: %v", err)
+	}
+	if owner != ids[winner] {
+		t.Fatalf("env root owner = %q, want the winning task %q", owner, ids[winner])
+	}
+}
+
+// TestClaimEnvRootRefusesUnownedDirectoryWithContent covers the other way the
+// marker can be missing: a directory that holds files but names no task. The
+// marker is written before any content, so this is not a shape Prepare
+// produces — and guessing that it is abandoned would mean deleting work whose
+// owner we could not identify.
+func TestClaimEnvRootRefusesUnownedDirectoryWithContent(t *testing.T) {
+	t.Parallel()
+	envRoot := filepath.Join(t.TempDir(), "ws", "0123456789ab")
+	if err := os.MkdirAll(filepath.Join(envRoot, "workdir"), 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(envRoot, "workdir", "work.txt"), []byte("x"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	if _, _, err := claimEnvRoot(envRoot, "aaaaaaaa-1111-2222-3333-0123456789ab"); err == nil {
+		t.Fatal("claimEnvRoot took a directory holding files with no owner")
+	} else if !strings.Contains(err.Error(), "names no owning task") {
+		t.Fatalf("error = %v, want it to explain the missing owner", err)
+	}
+	if _, err := os.Stat(filepath.Join(envRoot, "workdir", "work.txt")); err != nil {
+		t.Fatalf("claimEnvRoot deleted the content it refused to claim: %v", err)
+	}
+}
+
+// TestClaimEnvRootAdoptsEmptyDirectory is the self-heal counterpart: a crash
+// between Mkdir and the marker write leaves an empty directory, which holds no
+// work and must not wedge the task forever.
+func TestClaimEnvRootAdoptsEmptyDirectory(t *testing.T) {
+	t.Parallel()
+	envRoot := filepath.Join(t.TempDir(), "ws", "0123456789ab")
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	const id = "aaaaaaaa-1111-2222-3333-0123456789ab"
+	lock, reset, err := claimEnvRoot(envRoot, id)
+	if err != nil {
+		t.Fatalf("claimEnvRoot on an empty directory: %v", err)
+	}
+	defer releaseLockFile(lock)
+	if reset {
+		t.Fatal("adopting an empty directory should not ask for a reset")
+	}
+	if owner, _ := readEnvRootOwner(envRoot); owner != id {
+		t.Fatalf("owner = %q, want %q", owner, id)
+	}
+}
+
+// prepareSameTask is a helper for the stale-dispatch regressions below: two
+// executions of ONE task id, which is what the server actually re-delivers.
+func prepareSameTask(t *testing.T, workspacesRoot, taskID string) (*Environment, error) {
+	t.Helper()
+	return Prepare(PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-redispatch",
+		TaskID:         taskID,
+		AgentName:      "Redispatch",
+		Task:           TaskContextForEnv{IssueID: taskID},
+	}, testLogger())
+}
+
+// TestPrepareRefusesOverlappingExecutionOfSameTask covers the gap review found
+// after the identity marker landed: the marker answers WHO owns an env root,
+// not whether that owner is still running, so "owner == my task id" was read as
+// "my own rerun, safe to reset".
+//
+// That is reachable, not theoretical. ReclaimStaleDispatchedTaskForRuntime
+// re-delivers a task row whose prepare lease expired using the SAME task id,
+// and a failing lease renewal only logs — it does not cancel the Prepare still
+// in flight. The re-delivered execution would then wipe the running one's
+// workdir, config and worktree: the very cross-execution deletion the env-root
+// claim exists to prevent, arriving through the one door it left open.
+func TestPrepareRefusesOverlappingExecutionOfSameTask(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	live, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("first execution: %v", err)
+	}
+	defer live.Cleanup(true)
+
+	inFlight := filepath.Join(live.WorkDir, "in-flight.txt")
+	if err := os.WriteFile(inFlight, []byte("still running"), 0o644); err != nil {
+		t.Fatalf("seed in-flight work: %v", err)
+	}
+
+	// The stale-dispatch reclaim arrives while the first execution is running.
+	second, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err == nil {
+		second.Cleanup(true)
+		t.Fatal("a second execution of the same task took over a live env root")
+	}
+	if !strings.Contains(err.Error(), "running execution") {
+		t.Fatalf("error = %v, want it to name the live execution", err)
+	}
+	if _, statErr := os.Stat(inFlight); statErr != nil {
+		t.Fatalf("the re-dispatched execution destroyed live work: %v", statErr)
+	}
+}
+
+// TestPrepareResetsAfterPriorExecutionEnded is the other half: once the earlier
+// execution is gone, the same task id must still be able to recover. The lock
+// is what distinguishes the two cases, and the kernel drops it when the holder
+// exits, so no stale-state cleanup path is needed for a crashed execution.
+func TestPrepareResetsAfterPriorExecutionEnded(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	first, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("first execution: %v", err)
+	}
+	stale := filepath.Join(first.WorkDir, "stale.txt")
+	if err := os.WriteFile(stale, []byte("left behind"), 0o644); err != nil {
+		t.Fatalf("seed stale work: %v", err)
+	}
+	// The execution ends without tearing the directory down — a crash, from the
+	// next execution's point of view.
+	first.ReleaseLock()
+
+	second, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("recovery execution refused a released env root: %v", err)
+	}
+	defer second.Cleanup(true)
+	if _, statErr := os.Stat(stale); !os.IsNotExist(statErr) {
+		t.Fatalf("recovery did not reset the env root; stale file still present (%v)", statErr)
+	}
+}
+
+// TestClaimEnvRootRepairsTornOwnerMarker covers the reliability note from the
+// same review: the marker used to be created empty and written a moment later,
+// so a crash in between left a zero-length marker. That read back as "no
+// owner", while the marker itself counted as directory content — so the env
+// root could never be adopted OR reset, and stayed wedged until someone
+// deleted it by hand.
+//
+// Holding the lock before reading the marker is what makes repair safe: no
+// other execution can be mid-claim, so an unnamed marker can simply be
+// rewritten.
+func TestClaimEnvRootRepairsTornOwnerMarker(t *testing.T) {
+	t.Parallel()
+	envRoot := filepath.Join(t.TempDir(), "ws", "0123456789ab")
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(envRoot, envRootOwnerFile), nil, 0o644); err != nil {
+		t.Fatalf("seed torn marker: %v", err)
+	}
+
+	const id = "aaaaaaaa-1111-2222-3333-0123456789ab"
+	lock, _, err := claimEnvRoot(envRoot, id)
+	if err != nil {
+		t.Fatalf("claimEnvRoot wedged on a torn marker: %v", err)
+	}
+	defer releaseLockFile(lock)
+	if owner, _ := readEnvRootOwner(envRoot); owner != id {
+		t.Fatalf("owner = %q, want the repairing task %q", owner, id)
+	}
+}
+
+// TestReleaseLockFreesEnvRootForALaterDispatch pins the lifetime rule that
+// Windows CI surfaced: the lock belongs to the task EXECUTION, and nothing in
+// production calls Environment.Cleanup — the GC reclaims env roots on its own
+// schedule. A lock released only by Cleanup would therefore be held until the
+// daemon exited, fail-closing every later dispatch of that task and, on
+// Windows, pinning the directory against removal. The daemon defers
+// ReleaseLock for the task run; this covers the contract it relies on.
+func TestReleaseLockFreesEnvRootForALaterDispatch(t *testing.T) {
+	t.Parallel()
+	workspacesRoot := t.TempDir()
+	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+
+	first, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("first execution: %v", err)
+	}
+	first.ReleaseLock()
+	first.ReleaseLock() // idempotent: Cleanup may release the same lock again
+
+	second, err := prepareSameTask(t, workspacesRoot, taskID)
+	if err != nil {
+		t.Fatalf("later dispatch was refused after the lock was released: %v", err)
+	}
+	// Cleanup must stay safe on an already-released lock.
+	if err := second.Cleanup(true); err != nil {
+		t.Fatalf("cleanup after release: %v", err)
 	}
 }

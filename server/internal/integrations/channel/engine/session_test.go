@@ -101,10 +101,6 @@ func (f *fakeSessionQueries) CreateChannelChatSessionBinding(_ context.Context, 
 	return db.ChannelChatSessionBinding{ChatSessionID: arg.ChatSessionID}, nil
 }
 
-func (f *fakeSessionQueries) LockChatSessionForAppend(_ context.Context, id pgtype.UUID) (pgtype.UUID, error) {
-	return id, nil
-}
-
 func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	f.messages = append(f.messages, arg.Content)
 	f.lastCreate = arg
@@ -299,26 +295,6 @@ func TestAppendUserMessage_PlainText(t *testing.T) {
 	}
 	if f.touched != 1 || f.replyTargets != 1 {
 		t.Errorf("touched=%d replyTargets=%d, want 1/1", f.touched, f.replyTargets)
-	}
-}
-
-func TestAppendUserMessage_BeforeWriteFenceRejectsWithoutDurableWrites(t *testing.T) {
-	f := newFake()
-	s := newTestSession(f)
-	guardCalls := 0
-	_, err := s.AppendUserMessage(context.Background(), AppendInput{
-		SessionID: uid(1),
-		Body:      "must be rerouted",
-		BeforeWrite: func(_ context.Context, _ pgx.Tx) error {
-			guardCalls++
-			return ErrRouteChanged
-		},
-	})
-	if !errors.Is(err, ErrRouteChanged) {
-		t.Fatalf("append fence error = %v, want route changed", err)
-	}
-	if guardCalls != 1 || len(f.messages) != 0 || f.touched != 0 {
-		t.Fatalf("rejected append guard=%d messages=%d touches=%d, want 1/0/0", guardCalls, len(f.messages), f.touched)
 	}
 }
 

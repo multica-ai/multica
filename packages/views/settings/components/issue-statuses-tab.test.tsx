@@ -26,7 +26,10 @@ vi.mock("@multica/core/config", () => ({ useFeatureEnabled: () => flagOn }));
 vi.mock("@multica/core/workspace/queries", () => ({
   memberListOptions: () => ({ queryKey: ["members", "ws-1"] }),
 }));
-vi.mock("@multica/core/issue-statuses/queries", () => ({
+// Only the fetch is stubbed. The module's pure helpers (`issueStatusColor`)
+// are what the rows render with, and a stub of those would test the stub.
+vi.mock("@multica/core/issue-statuses/queries", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@multica/core/issue-statuses/queries")>()),
   issueStatusListOptions: () => ({ queryKey: ["issue-statuses", "ws-1"] }),
 }));
 vi.mock("@multica/core/issue-statuses/mutations", () => ({
