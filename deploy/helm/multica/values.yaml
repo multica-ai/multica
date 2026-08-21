@@ -113,6 +113,11 @@ backend:
         - ReadWriteOnce
   # All non-secret backend env. Secret values come from `existingSecret`.
   config:
+    # The migrator and API server retry transient PostgreSQL startup failures
+    # within this budget. Set to 0 to restore fail-fast startup behavior.
+    databaseStartupTimeout: 3m
+    # Bounds each PostgreSQL connection attempt during startup.
+    databaseConnectTimeout: 5s
     appEnv: production
     appUrl: http://multica.dev.lan
     frontendOrigin: http://multica.dev.lan

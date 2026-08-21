@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/attributionbackfill"
+	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/migrations"
 	"github.com/multica-ai/multica/server/internal/taskusagebackfill"
@@ -533,18 +536,13 @@ func main() {
 		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
 	}
 
-	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, dbURL)
+	startupSettings := dbstartup.SettingsFromEnv()
+	pool, err := dbstartup.NewPool(context.Background(), dbURL, startupSettings.ConnectTimeout)
 	if err != nil {
 		slog.Error("unable to connect to database", "error", err)
 		os.Exit(1)
 	}
 	defer pool.Close()
-
-	if err := pool.Ping(ctx); err != nil {
-		slog.Error("unable to ping database", "error", err)
-		os.Exit(1)
-	}
 
 	files, err := migrations.Files(direction)
 	if err != nil {
@@ -552,13 +550,50 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err := runMigrations(ctx, pool, runOptions{
+	options := runOptions{
 		Direction:  direction,
 		Files:      files,
 		Hooks:      hooksForDirection(direction),
 		Conditions: conditionsForDirection(direction),
-	}); err != nil {
-		slog.Error("migration run failed", "error", err)
+	}
+	startupCtx, stopStartup := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stopStartup()
+	retryOptions := startupSettings.RetryOptions()
+	retryOptions.ShouldRetry = dbstartup.IsTransientDatabaseError
+	retryOptions.OnRetry = func(event dbstartup.RetryEvent) {
+		slog.Warn("database unavailable before migrations; retrying",
+			"attempt", event.Attempt,
+			"retry_in", event.Delay,
+			"error", event.Err,
+		)
+	}
+	if err := dbstartup.Retry(startupCtx, retryOptions, pool.Ping); err != nil {
+		slog.Error("unable to ping database", "error", err)
+		os.Exit(1)
+	}
+
+	migrationErr := runMigrations(startupCtx, pool, options)
+	if migrationErr != nil && startupSettings.StartupTimeout > 0 && dbstartup.IsTransientDatabaseError(migrationErr) {
+		slog.Warn("migration interrupted by database unavailability; retrying", "error", migrationErr)
+		migrationRetryOptions := startupSettings.RetryOptions()
+		migrationRetryOptions.ShouldRetry = dbstartup.IsTransientDatabaseError
+		migrationRetryOptions.AllowOperationPastTimeout = true
+		migrationRetryOptions.OnRetry = func(event dbstartup.RetryEvent) {
+			slog.Warn("database unavailable during migration retry",
+				"attempt", event.Attempt,
+				"retry_in", event.Delay,
+				"error", event.Err,
+			)
+		}
+		migrationErr = dbstartup.Retry(startupCtx, migrationRetryOptions, func(attemptCtx context.Context) error {
+			if err := pool.Ping(attemptCtx); err != nil {
+				return fmt.Errorf("ping database: %w", err)
+			}
+			return runMigrations(attemptCtx, pool, options)
+		})
+	}
+	if migrationErr != nil {
+		slog.Error("migration run failed", "error", migrationErr)
 		os.Exit(1)
 	}
 
