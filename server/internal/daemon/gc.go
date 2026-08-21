@@ -72,6 +72,7 @@ type gcStats struct {
 	hermesMemoryStoresReclaimed  int            // per-agent Hermes memory stores reclaimed past their TTL
 	hermesSessionStoresReclaimed int            // per-conversation Hermes session stores reclaimed past their TTL
 	repoCachesReclaimed          int            // bare repo caches under .repos evicted past their TTL
+	taskTempDirsReclaimed        int            // orphaned per-task temp dirs (the agent's TMPDIR) reclaimed past their TTL
 	bytesReclaimed               int64          // total bytes freed in this cycle
 	byPattern                    map[string]int // configured basename or managed path label -> reclaim count
 }
@@ -134,7 +135,20 @@ func (d *Daemon) runGC(ctx context.Context) {
 		stats.bytesReclaimed += storeBytes
 	}
 
-	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 {
+	// Reclaim orphaned per-task temp dirs. Every task's TMPDIR lives under the
+	// task temp base (usually /tmp), outside WorkspacesRoot, and its only
+	// removal path is a defer in runTask — a daemon crash or a failed removal
+	// on Windows leaves it forever, unbounded in size. Liveness comes from the
+	// active-store reservation, not mtime: a running task can go tens of
+	// minutes without touching the root of its temp dir.
+	if tempBase, _, err := taskTempBaseDir(); err != nil {
+		d.logger.Warn("gc: resolve task temp base failed", "error", err)
+	} else if removed, freed := execenv.PruneTaskTempDirs(tempBase, d.cfg.GCTaskTempTTL, time.Now(), d.reserveStoreForDeletion, d.logger); removed > 0 {
+		stats.taskTempDirsReclaimed += removed
+		stats.bytesReclaimed += freed
+	}
+
+	if stats.cleaned > 0 || stats.orphaned > 0 || stats.artifactDirs > 0 || stats.storesReclaimed > 0 || stats.hermesMemoryStoresReclaimed > 0 || stats.hermesSessionStoresReclaimed > 0 || stats.repoCachesReclaimed > 0 || stats.taskTempDirsReclaimed > 0 {
 		d.logger.Info("gc: cycle complete",
 			"cleaned", stats.cleaned,
 			"orphaned", stats.orphaned,
@@ -145,6 +159,7 @@ func (d *Daemon) runGC(ctx context.Context) {
 			"hermes_memory_stores_reclaimed", stats.hermesMemoryStoresReclaimed,
 			"hermes_session_stores_reclaimed", stats.hermesSessionStoresReclaimed,
 			"repo_caches_reclaimed", stats.repoCachesReclaimed,
+			"task_temp_dirs_reclaimed", stats.taskTempDirsReclaimed,
 			"bytes_reclaimed", stats.bytesReclaimed,
 			"by_pattern", stats.byPattern,
 		)
