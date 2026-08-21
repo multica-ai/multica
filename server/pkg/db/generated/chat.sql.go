@@ -2016,6 +2016,11 @@ SELECT
     task.id,
     task.status,
     task.created_at,
+    -- Only meaningful while status is waiting_local_directory: the daemon
+    -- stamps which directory this task is parked on and who holds it, so the
+    -- StatusPill can say why it is not moving. Stale on any other status; the
+    -- renderer reads it only for the waiting one.
+    task.wait_reason,
     message.id AS message_id,
     COALESCE(message.content, '')::text AS content
 FROM agent_task_queue AS task
@@ -2042,11 +2047,12 @@ ORDER BY
 `
 
 type ListPendingChatTasksForSessionRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	MessageID pgtype.UUID        `json:"message_id"`
-	Content   string             `json:"content"`
+	ID         pgtype.UUID        `json:"id"`
+	Status     string             `json:"status"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	WaitReason pgtype.Text        `json:"wait_reason"`
+	MessageID  pgtype.UUID        `json:"message_id"`
+	Content    string             `json:"content"`
 }
 
 // Returns a claimed task first, then a deferred retry, followed by prioritized
@@ -2070,6 +2076,7 @@ func (q *Queries) ListPendingChatTasksForSession(ctx context.Context, chatSessio
 			&i.ID,
 			&i.Status,
 			&i.CreatedAt,
+			&i.WaitReason,
 			&i.MessageID,
 			&i.Content,
 		); err != nil {

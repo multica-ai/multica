@@ -3658,7 +3658,7 @@ func (s *TaskService) ExtendTaskPrepareLease(ctx context.Context, taskID, runtim
 // next to the status. Returns the updated row so the daemon can confirm the
 // transition and so the broadcast carries the up-to-date snapshot.
 func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID pgtype.UUID, reason string) (*db.AgentTaskQueue, error) {
-	reason = strings.TrimSpace(reason)
+	reason = sanitizeWaitReason(reason)
 	task, err := s.Queries.MarkAgentTaskWaitingLocalDirectory(ctx, db.MarkAgentTaskWaitingLocalDirectoryParams{
 		ID:               taskID,
 		WaitReason:       pgtype.Text{String: reason, Valid: reason != ""},
@@ -3678,8 +3678,71 @@ func (s *TaskService) MarkTaskWaitingLocalDirectory(ctx context.Context, taskID 
 	// reconcile immediately when it parks instead of leaving that persisted
 	// status stale until a terminal transition.
 	s.ReconcileAgentStatus(ctx, task.AgentID)
-	s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingLocalDirectory, task)
+	// Carry the reason on the event, not just in the row. Without it the client
+	// learns WHY a task parked only on the follow-up refetch, so the pill spends
+	// that round-trip saying nothing useful — which is the gap this hint exists
+	// to close. Already sanitized above, so the socket cannot carry a path the
+	// REST payload would have withheld.
+	extra := map[string]any{}
+	if reason != "" {
+		extra["wait_reason"] = reason
+	}
+	s.broadcastTaskEvent(ctx, protocol.EventTaskWaitingLocalDirectory, task, extra)
 	return &task, nil
+}
+
+// legacyLocalDirectoryWaitPrefix is how daemons before the display-name change
+// opened a wait reason: the literal word, a space, then the absolute path.
+const legacyLocalDirectoryWaitPrefix = "local_directory "
+
+// sanitizeWaitReason drops a wait reason that carries an absolute filesystem
+// path, then trims what remains.
+//
+// Version skew makes this load-bearing rather than defensive. Current daemons
+// send a display name (localDirectoryAssignment.DisplayName) precisely because
+// this text reaches every client on the session and lands in screenshots. An
+// OLDER daemon paired with this server still sends `local_directory /Users/
+// <name>/repo (held by task abc12345)`, and since clients now render the field
+// instead of ignoring it, passing that through would put the user's home path
+// — and account name — on screen. The leak would be introduced BY surfacing
+// the field, so the guard belongs with it.
+//
+// Dropping the whole string rather than editing it: clients already handle an
+// absent reason (older servers never sent one) by showing the plain waiting
+// label, which is exactly the pre-change behaviour and is never wrong.
+//
+// Remove once no supported daemon emits the legacy format.
+func sanitizeWaitReason(reason string) string {
+	reason = strings.TrimSpace(reason)
+	rest, ok := strings.CutPrefix(reason, legacyLocalDirectoryWaitPrefix)
+	if ok && startsWithAbsolutePath(rest) {
+		return ""
+	}
+	return reason
+}
+
+// startsWithAbsolutePath reports whether s opens with an absolute path on any
+// platform the daemon runs on: POSIX (/…), Windows drive (C:\… or C:/…), or a
+// UNC share (\\host\share). Checked against the daemon's own output, so the
+// question is only "did an old daemon put a path here", not general parsing.
+//
+// It deliberately does NOT match the holder clause a current daemon appends —
+// `local_directory (held by task abc12345)` is what this server produces when
+// a directory is genuinely NAMED "local_directory", and that name is the user's
+// own label, not a path.
+func startsWithAbsolutePath(s string) bool {
+	if s == "" {
+		return false
+	}
+	if s[0] == '/' || strings.HasPrefix(s, `\\`) {
+		return true
+	}
+	// Drive-letter form: a single ASCII letter, a colon, then a separator.
+	if len(s) >= 3 && s[1] == ':' && (s[2] == '\\' || s[2] == '/') {
+		c := s[0]
+		return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+	}
+	return false
 }
 
 // CompleteTask marks a task as completed.

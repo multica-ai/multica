@@ -5046,6 +5046,11 @@ func TestInjectRuntimeConfigMentionLoopHardening(t *testing.T) {
 			"completion notifications are platform-owned",
 			// The one real function, with its scope.
 			"pulls someone into work they are not doing yet",
+			// The reference fact (MUL-6528): @-as-attribution ("per @X's
+			// decision") read as a way to write a name and dispatched the
+			// agent being credited.
+			"prose about them, not work for them",
+			"so a reference stays plain text",
 			// The courtesy-loop fact (the incident class behind #1581/#6453).
 			"whose only possible reply is another courtesy",
 			// The asymmetry that breaks ambiguous cases toward not mentioning.

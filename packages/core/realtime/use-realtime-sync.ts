@@ -1565,6 +1565,8 @@ export function useRealtimeSync(
               old,
               payload.task_id,
               "waiting_local_directory",
+              undefined,
+              payload.wait_reason,
             ),
         );
         invalidateChatMessageQueries(qc, payload.chat_session_id);

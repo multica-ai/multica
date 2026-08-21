@@ -924,13 +924,13 @@ func TestSessionContinuityNoticeMatchesSurface(t *testing.T) {
 	}
 
 	// The notice only renders when the resume actually failed.
-	if blocks := perTurnContextBlocks(Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}); strings.Contains(blocks, "Session Continuity Notice") {
+	if blocks := perTurnContextBlocks(Task{IssueID: "a1b2c3d4-e5f6-7890-abcd-ef1234567890"}, promptOpts{}); strings.Contains(blocks, "Session Continuity Notice") {
 		t.Errorf("continuity notice leaked into a run that resumed fine:\n%s", blocks)
 	}
 	lost := perTurnContextBlocks(Task{
 		IssueID:                       "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
 		PriorSessionResumeUnavailable: true,
-	})
+	}, promptOpts{})
 	if !strings.Contains(lost, "Session Continuity Notice") {
 		t.Errorf("continuity notice missing when the resume was unavailable:\n%s", lost)
 	}

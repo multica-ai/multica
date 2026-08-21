@@ -5334,6 +5334,18 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		return nil, false
 	}
 
+	// A conversation is not a second writer. Everything above still applied —
+	// the mode was checked, the path was validated, and the assignment stands,
+	// so this task keeps the user's directory as its working directory. Only
+	// the queueing is skipped, which is what stops a chat turn from sitting
+	// behind a 20-minute build with nothing to contribute to it (issue #7344).
+	// See localDirectoryLockExempt for why the mutex does not owe this task a
+	// slot.
+	if localDirectoryLockExempt(task) {
+		taskLog.Info("local_directory: chat task, skipping path mutex")
+		return nil, false
+	}
+
 	// While the lock is contended the daemon would otherwise sit blocked on
 	// the path mutex with no signal back from the server — the main
 	// per-task watcher only starts after the lock is acquired. If the user
@@ -5371,8 +5383,17 @@ func (d *Daemon) acquireLocalDirectoryLockIfNeeded(ctx context.Context, task Tas
 		// server status update below fails.
 		d.resourceWaitTasks.Add(1)
 		waitCounted = true
-		reason := fmt.Sprintf("local_directory %s", assignment.AbsPath)
+		// Rendered to the user, so it names the directory rather than its path
+		// (see localDirectoryAssignment.DisplayName). The absolute path stays in
+		// the daemon's own logs, which is where an operator debugging a wedged
+		// lock looks for it.
+		reason := assignment.DisplayName()
 		if holder != "" {
+			// Known rough edge: this clause is English and the client renders it
+			// inside a localized "Waiting for {reason}" label, so a zh/ja/ko user
+			// sees mixed script. Fixing it properly means sending the directory
+			// and the holder as separate fields and localizing the join on the
+			// client — worth doing if this hint grows, not for one parenthetical.
 			reason = fmt.Sprintf("%s (held by task %s)", reason, shortID(holder))
 		}
 		taskLog.Info("local_directory: waiting on path mutex", "holder", shortID(holder))
@@ -6991,7 +7012,15 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if err != nil {
 		d.logger.Warn("execenv: inject runtime config failed (non-fatal)", "error", err)
 	}
-	prompt := BuildPrompt(task, provider)
+	// An exempt turn runs in the user's directory without having queued for it,
+	// so a sibling coding task may be writing to the same tree right now. That
+	// is the one thing it cannot work out from its own context — tell it.
+	// Worktree mode is excluded: there the tree is this task's private checkout.
+	var promptOptions []PromptOption
+	if localAssignment != nil && !localAssignment.UsesWorktree() && localDirectoryLockExempt(task) {
+		promptOptions = append(promptOptions, WithSharedLocalDirectory())
+	}
+	prompt := BuildPrompt(task, provider, promptOptions...)
 
 	// Pass task-scoped auth credentials and context so the spawned agent CLI
 	// can call the Multica API and the local daemon (e.g. `multica repo checkout`).
@@ -7358,7 +7387,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 				execOpts.SystemPrompt = runtimeBrief
 			}
 		}
-		freshPrompt := BuildPrompt(task, provider)
+		freshPrompt := BuildPrompt(task, provider, promptOptions...)
 
 		retryResult, retryTools, retryErr := d.executeAndDrain(ctx, backend, freshPrompt, execOpts, taskLog, task.ID, env.CodexHome, &msgSeq)
 		if retryErr != nil {
