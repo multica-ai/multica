@@ -503,6 +503,19 @@ describe("estimateCost", () => {
     ).toBeCloseTo(8.3, 5);
   });
 
+  it("prices grok-4.6 at the same published $2.00 / $6.00 tier as grok-4.5", () => {
+    expect(
+      estimateCost({
+        ...zeroUsage,
+        provider: "xai",
+        model: "grok-4.6",
+        input_tokens: 1_000_000,
+        output_tokens: 1_000_000,
+        cache_read_tokens: 1_000_000,
+      }),
+    ).toBeCloseTo(8.3, 5);
+  });
+
   it("prices the rest of the published Grok catalog", () => {
     // grok-4.3 and the 4.20 snapshots share one $1.25 / $2.50 tier;
     // grok-build-0.1 is its own $1.00 / $2.00 row.
