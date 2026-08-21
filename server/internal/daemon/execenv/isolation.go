@@ -69,6 +69,8 @@ type preparationResponse struct {
 // local openclaw CLI missing its deadline (ErrOpenclawCLITimeout).
 const preparationErrorKindOpenclawCLITimeout = "openclaw_cli_timeout"
 
+const preparationErrorKindEnvRootConflict = "env_root_conflict"
+
 // preparationKindError re-attaches a sentinel to an error that crossed the
 // helper boundary as text, so the daemon's classifier sees the same
 // errors.Is result it would have seen in-process.
@@ -87,6 +89,9 @@ func preparationErrorKind(err error) string {
 	if errors.Is(err, ErrOpenclawCLITimeout) {
 		return preparationErrorKindOpenclawCLITimeout
 	}
+	if errors.Is(err, ErrEnvRootConflict) {
+		return preparationErrorKindEnvRootConflict
+	}
 	return ""
 }
 
@@ -97,6 +102,8 @@ func rehydratePreparationError(message, kind string) error {
 	switch kind {
 	case preparationErrorKindOpenclawCLITimeout:
 		return &preparationKindError{msg: message, kind: ErrOpenclawCLITimeout}
+	case preparationErrorKindEnvRootConflict:
+		return &preparationKindError{msg: message, kind: ErrEnvRootConflict}
 	default:
 		return errors.New(message)
 	}

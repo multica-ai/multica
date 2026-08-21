@@ -138,6 +138,12 @@ const (
 	// only repeat an isolation failure.
 	ReasonInvalidTaskIdentity Reason = "invalid_task_identity"
 
+	// ReasonEnvPrepDirConflict: the daemon refused to prepare an execution
+	// environment because its env root could not be safely claimed or reset.
+	// The agent process is never launched, and retrying without repairing the
+	// host directory would repeat the same failure.
+	ReasonEnvPrepDirConflict Reason = "env_prep.dir_conflict"
+
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
 	// the right sub-reason from the string. IsAgentError returns true
@@ -213,7 +219,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 25 reasons. Order is
+// allReasons is the canonical ordered list of the 26 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -235,6 +241,7 @@ var allReasons = []Reason{
 	ReasonSkillBundleUnavailable,
 	ReasonRuntimeCLITimeout,
 	ReasonInvalidTaskIdentity,
+	ReasonEnvPrepDirConflict,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,

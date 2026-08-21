@@ -239,6 +239,37 @@ func TestPreparationHelperPreservesOpenclawTimeoutKind(t *testing.T) {
 	}
 }
 
+func TestPreparationHelperPreservesEnvRootConflictKind(t *testing.T) {
+	workspacesRoot := t.TempDir()
+	const taskID = "11111111-2222-3333-4444-555555555555"
+	envRoot := PredictRootDir(workspacesRoot, "ws-helper-conflict", taskID)
+	if err := os.MkdirAll(filepath.Join(envRoot, "workdir"), 0o755); err != nil {
+		t.Fatalf("seed conflicting env root: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(envRoot, "workdir", "work.txt"), []byte("preserve"), 0o644); err != nil {
+		t.Fatalf("seed conflicting work: %v", err)
+	}
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	_, err := PrepareIsolated(ctx, preparationHelperTestCommand(), PrepareParams{
+		WorkspacesRoot: workspacesRoot,
+		WorkspaceID:    "ws-helper-conflict",
+		TaskID:         taskID,
+		Task:           TaskContextForEnv{IssueID: "issue-helper-conflict"},
+	}, logger)
+	if err == nil {
+		t.Fatal("expected preparation to reject an unowned env root with content")
+	}
+	if !errors.Is(err, ErrEnvRootConflict) {
+		t.Fatalf("the env-root conflict sentinel must survive the helper boundary\ngot: %s", err)
+	}
+	if !strings.Contains(err.Error(), "names no owning task") {
+		t.Fatalf("the original diagnostic must survive too\ngot: %s", err)
+	}
+}
+
 // TestRehydratePreparationErrorUnknownKind pins the mixed-version direction of
 // the same wire: a helper newer than the daemon may name a kind this build has
 // never heard of, and the error must still arrive with its message intact
@@ -256,5 +287,13 @@ func TestRehydratePreparationErrorUnknownKind(t *testing.T) {
 	}
 	if kind := preparationErrorKind(fmt.Errorf("wrapped: %w", ErrOpenclawCLITimeout)); kind != preparationErrorKindOpenclawCLITimeout {
 		t.Errorf("preparationErrorKind(timeout) = %q, want %q", kind, preparationErrorKindOpenclawCLITimeout)
+	}
+	conflict := fmt.Errorf("wrapped: %w", ErrEnvRootConflict)
+	kind := preparationErrorKind(conflict)
+	if kind != preparationErrorKindEnvRootConflict {
+		t.Fatalf("preparationErrorKind(conflict) = %q, want %q", kind, preparationErrorKindEnvRootConflict)
+	}
+	if err := rehydratePreparationError(conflict.Error(), kind); !errors.Is(err, ErrEnvRootConflict) {
+		t.Fatalf("rehydrated error = %v, want ErrEnvRootConflict", err)
 	}
 }

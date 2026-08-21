@@ -6297,6 +6297,9 @@ func TestPrepareRefusesEnvRootOwnedByAnotherTask(t *testing.T) {
 	if err == nil {
 		t.Fatal("Prepare accepted an env root owned by another task")
 	}
+	if !errors.Is(err, ErrEnvRootConflict) {
+		t.Fatalf("error = %v, want ErrEnvRootConflict", err)
+	}
 	if !strings.Contains(err.Error(), "belongs to task") {
 		t.Fatalf("error = %v, want it to name the owning task", err)
 	}
@@ -6432,11 +6435,36 @@ func TestClaimEnvRootRefusesUnownedDirectoryWithContent(t *testing.T) {
 
 	if _, err := claimEnvRoot(envRoot, "aaaaaaaa-1111-2222-3333-0123456789ab"); err == nil {
 		t.Fatal("claimEnvRoot took a directory holding files with no owner")
+	} else if !errors.Is(err, ErrEnvRootConflict) {
+		t.Fatalf("error = %v, want ErrEnvRootConflict", err)
 	} else if !strings.Contains(err.Error(), "names no owning task") {
 		t.Fatalf("error = %v, want it to explain the missing owner", err)
 	}
 	if _, err := os.Stat(filepath.Join(envRoot, "workdir", "work.txt")); err != nil {
 		t.Fatalf("claimEnvRoot deleted the content it refused to claim: %v", err)
+	}
+}
+
+func TestResetEnvRootContentsMarksRemovalFailureAsConflict(t *testing.T) {
+	t.Parallel()
+	envRoot := t.TempDir()
+	workDir := filepath.Join(envRoot, "workdir")
+	if err := os.Mkdir(workDir, 0o755); err != nil {
+		t.Fatalf("seed workdir: %v", err)
+	}
+
+	removeErr := errors.New("directory is not empty")
+	err := resetEnvRootContentsWithRemoveAll(envRoot, func(path string) error {
+		if path != workDir {
+			t.Fatalf("remove path = %q, want %q", path, workDir)
+		}
+		return removeErr
+	})
+	if !errors.Is(err, ErrEnvRootConflict) {
+		t.Fatalf("error = %v, want ErrEnvRootConflict", err)
+	}
+	if !errors.Is(err, removeErr) {
+		t.Fatalf("error = %v, want wrapped removal error", err)
 	}
 }
 
