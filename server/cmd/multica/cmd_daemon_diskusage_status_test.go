@@ -495,3 +495,100 @@ func TestResolveDiskUsageRootTaskContext(t *testing.T) {
 		}
 	})
 }
+
+func TestRunDaemonDiskUsageHonorsProfileWorkspacesRoot(t *testing.T) {
+	pinHumanCLIContext(t)
+	home := t.TempDir()
+	customRoot := filepath.Join(t.TempDir(), "configured-workspaces")
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+	if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspacesRoot: customRoot}); err != nil {
+		t.Fatalf("SaveCLIConfig: %v", err)
+	}
+
+	cmd := newDiskUsageTestCmd(t)
+	if err := cmd.Flags().Set("output", "json"); err != nil {
+		t.Fatal(err)
+	}
+	out, err := captureStdout(t, func() error { return runDaemonDiskUsage(cmd, nil) })
+	if err != nil {
+		t.Fatalf("runDaemonDiskUsage: %v", err)
+	}
+	var report daemon.DiskUsageReport
+	if err := json.Unmarshal([]byte(out), &report); err != nil {
+		t.Fatalf("decode report: %v\n%s", err, out)
+	}
+	if report.WorkspacesRoot != customRoot {
+		t.Fatalf("WorkspacesRoot = %q, want configured root %q", report.WorkspacesRoot, customRoot)
+	}
+}
+
+func TestResolveDiskUsageRootEnvOverridesProfileConfig(t *testing.T) {
+	pinHumanCLIContext(t)
+	home := t.TempDir()
+	configRoot := filepath.Join(t.TempDir(), "configured-workspaces")
+	envRoot := filepath.Join(t.TempDir(), "env-workspaces")
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", envRoot)
+	if err := cli.SaveCLIConfig(cli.CLIConfig{WorkspacesRoot: configRoot}); err != nil {
+		t.Fatalf("SaveCLIConfig: %v", err)
+	}
+
+	got, err := resolveDiskUsageRoot(false, "", "")
+	if err != nil {
+		t.Fatalf("resolveDiskUsageRoot: %v", err)
+	}
+	if got != envRoot {
+		t.Fatalf("root = %q, want env root %q", got, envRoot)
+	}
+}
+
+func TestEnumerateDiskUsageRootsUsesAndDeduplicatesProfileConfig(t *testing.T) {
+	pinHumanCLIContext(t)
+	home := t.TempDir()
+	defaultRoot := filepath.Join(t.TempDir(), "default-root")
+	sharedRoot := filepath.Join(t.TempDir(), "shared-root")
+	uniqueRoot := filepath.Join(t.TempDir(), "unique-root")
+	neverRanRoot := filepath.Join(t.TempDir(), "never-ran-root")
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+
+	configs := []struct {
+		profile string
+		root    string
+	}{
+		{"", defaultRoot},
+		{"alpha", sharedRoot},
+		{"beta", sharedRoot},
+		{"gamma", uniqueRoot},
+		{"never-ran", neverRanRoot},
+	}
+	for _, item := range configs {
+		if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: item.root}, item.profile); err != nil {
+			t.Fatalf("save profile %q: %v", item.profile, err)
+		}
+	}
+	for _, root := range []string{defaultRoot, sharedRoot, uniqueRoot} {
+		if err := os.MkdirAll(root, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	roots, err := enumerateDiskUsageRoots()
+	if err != nil {
+		t.Fatalf("enumerateDiskUsageRoots: %v", err)
+	}
+	want := []daemon.DiskUsageRoot{
+		{Profile: "", Root: defaultRoot},
+		{Profile: "alpha", Root: sharedRoot},
+		{Profile: "gamma", Root: uniqueRoot},
+	}
+	if len(roots) != len(want) {
+		t.Fatalf("roots = %+v, want %+v", roots, want)
+	}
+	for i := range want {
+		if roots[i] != want[i] {
+			t.Fatalf("roots[%d] = %+v, want %+v", i, roots[i], want[i])
+		}
+	}
+}

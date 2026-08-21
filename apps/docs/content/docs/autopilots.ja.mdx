@@ -54,7 +54,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Cron に秒は含まれません。タイムゾーンには `Asia/Shanghai` のような IANA 名を使います。保存する前に、画面に表示される「次回」の時刻が意図どおりか確認してください。
 
-![オートパイロットエディター。Runbook、スケジュール設定、次回以降の実行プレビューが表示されています。](/images/docs/autopilot-schedule.png)
+![オートパイロットエディター。Runbook、スケジュール設定、次回以降の実行プレビューが表示されています。](/images/docs/autopilot-schedule.webp)
 
 ## Webhook で実行する
 
@@ -143,10 +143,13 @@ Multica は最近の実行が継続的に失敗していないか定期的に確
 ## CLI を使う
 
 ```bash
+multica autopilot get <autopilot-id> --output json
 multica autopilot trigger <autopilot-id>
 multica autopilot runs <autopilot-id>
 multica autopilot trigger-rotate-url <autopilot-id> <trigger-id>
 ```
+
+`autopilot get` はデフォルトで `webhook_token`、`webhook_path`、`webhook_url` を `null` にし、代わりに `has_webhook_token` と `webhook_token_hint` を返します。実際の認証情報が必要な場合に限り `--show-secrets` を追加してください。CLI は警告を stderr に出力するため、パイプされた JSON は有効なままです。
 
 すべての引数は [CLI](/cli)を参照してください。
 

@@ -2,10 +2,18 @@
 
 import { useCallback, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import type { Agent, MemberWithUser, Squad } from "../types";
+import type { Agent, MemberWithUser, Squad, Workspace } from "../types";
 import { useWorkspaceId } from "../hooks";
-import { memberListOptions, agentListOptions, squadListOptions } from "./queries";
+import {
+  memberListOptions,
+  agentListOptions,
+  squadListOptions,
+  workspaceListOptions,
+} from "./queries";
 import { resolvePublicFileUrl } from "./avatar-url";
+import { useFeatureEnabled } from "../config";
+import { PLUGINS_V1_FLAG } from "../feature-flags";
+import { pluginInstallationsOptions } from "../plugins";
 
 // Stable empties for the still-loading directory queries. A fresh `= []`
 // default allocates a new array on every render while `data` is undefined,
@@ -20,6 +28,32 @@ import { resolvePublicFileUrl } from "./avatar-url";
 const EMPTY_MEMBERS: MemberWithUser[] = [];
 const EMPTY_AGENTS: Agent[] = [];
 const EMPTY_SQUADS: Squad[] = [];
+const EMPTY_WORKSPACES: Workspace[] = [];
+
+/**
+ * Shared authoritative-state contract for the workspace list.
+ *
+ * TanStack Query's `isFetched` also becomes true after an initial failure, so
+ * it cannot distinguish "the account has no workspaces" from "the first
+ * request failed before any list arrived". Data presence can: a successful
+ * empty response is `[]`, while an initial failure remains `undefined`.
+ * Background failures retain cached data and therefore remain ready.
+ */
+export function useWorkspaceList({ enabled = true }: { enabled?: boolean } = {}) {
+  const query = useQuery({
+    ...workspaceListOptions(),
+    enabled,
+  });
+  const ready = query.data !== undefined;
+
+  return {
+    workspaces: query.data ?? EMPTY_WORKSPACES,
+    ready,
+    unavailable: enabled && !ready && query.isLoadingError,
+    isFetching: query.isFetching,
+    refetch: query.refetch,
+  };
+}
 
 /**
  * Pure actor-name resolution over explicit directory snapshots. Async flows
@@ -32,14 +66,26 @@ export function buildActorNameResolver(directories: {
   members: readonly { user_id: string; name: string }[];
   agents: readonly { id: string; name: string }[];
   squads: readonly { id: string; name: string }[];
+  /**
+   * Installed plugins. Optional because most callers have no reason to load
+   * them, and an event-written row then falls back to a generic "Plugin" —
+   * vague, but not wrong the way "System" would be.
+   */
+  plugins?: readonly { id: string; name: string }[];
 }) {
   const memberNames = new Map(directories.members.map((m) => [m.user_id, m.name]));
   const agentNames = new Map(directories.agents.map((a) => [a.id, a.name]));
   const squadNames = new Map(directories.squads.map((s) => [s.id, s.name]));
+  const pluginNames = new Map((directories.plugins ?? []).map((p) => [p.id, p.name]));
   return (type: string, id: string) => {
     if (type === "member") return memberNames.get(id) ?? "Unknown";
     if (type === "agent") return agentNames.get(id) ?? "Unknown Agent";
     if (type === "squad") return squadNames.get(id) ?? "Unknown Squad";
+    // An event-triggered hook writes as the installation itself: there is no
+    // person behind it, and borrowing the last member who touched the issue
+    // would be a lie the audit trail cannot undo. An id that no longer
+    // resolves means the plugin was uninstalled — the row stays readable.
+    if (type === "plugin") return pluginNames.get(id) ?? "Plugin";
     if (type === "system") return "Multica";
     return "System";
   };
@@ -50,6 +96,13 @@ export function useActorName() {
   const { data: members = EMPTY_MEMBERS } = useQuery(memberListOptions(wsId));
   const { data: agents = EMPTY_AGENTS } = useQuery(agentListOptions(wsId));
   const { data: squads = EMPTY_SQUADS } = useQuery(squadListOptions(wsId));
+  // Only for naming a plugin-authored row. Gated on the flag so a workspace
+  // without plugins does not fetch a list it can never render an author from.
+  const pluginsEnabled = useFeatureEnabled(PLUGINS_V1_FLAG, false);
+  const { data: pluginData } = useQuery({
+    ...pluginInstallationsOptions(wsId),
+    enabled: pluginsEnabled && wsId.length > 0,
+  });
 
   const getMemberName = useCallback((userId: string) => {
     const m = members.find((m) => m.user_id === userId);
@@ -67,8 +120,8 @@ export function useActorName() {
   }, [squads]);
 
   const getActorName = useMemo(
-    () => buildActorNameResolver({ members, agents, squads }),
-    [agents, members, squads],
+    () => buildActorNameResolver({ members, agents, squads, plugins: pluginData?.plugins }),
+    [agents, members, squads, pluginData],
   );
 
   const getActorInitials = useCallback((type: string, id: string) => {

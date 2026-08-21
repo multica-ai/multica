@@ -172,6 +172,7 @@
     "issue_prefix_label": "Issue prefix",
     "issue_prefix_prefix": "Issues will look like ",
     "issue_prefix_suffix": ". You can change this later in settings.",
+    "issue_prefix_pending": "Set the URL above and issue numbers will follow it — or type a prefix here.",
     "create_new_title": "Create a new workspace",
     "create_new_subtitle": "Start fresh — a separate space for a different side of your work.",
     "hint_opening": "Opening {{name}}.",

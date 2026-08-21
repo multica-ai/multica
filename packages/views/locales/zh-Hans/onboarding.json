@@ -172,6 +172,7 @@
     "issue_prefix_label": "任务前缀",
     "issue_prefix_prefix": "任务编号会像这样 ",
     "issue_prefix_suffix": "。之后可以在设置里修改。",
+    "issue_prefix_pending": "填好上面的 URL，任务编号会跟着它生成；也可以直接在这里输入前缀。",
     "create_new_title": "创建一个新工作区",
     "create_new_subtitle": "另起一个——把另一类工作放进单独的空间。",
     "hint_opening": "正在打开 {{name}}。",

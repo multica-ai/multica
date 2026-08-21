@@ -68,7 +68,12 @@ func (s *RedisUpdateStore) Create(ctx context.Context, runtimeID, targetVersion,
 		return nil, errUpdateInProgress
 	}
 
-	pipe := s.rdb.TxPipeline()
+	// The active reservation above provides the concurrency guarantee this
+	// write needs. Use a plain pipeline so managed Redis deployments that allow
+	// SET/ZADD but deny MULTI can still create update requests. Exec failures
+	// remain safe because the compensation below removes every partially
+	// written key and releases the reservation.
+	pipe := s.rdb.Pipeline()
 	pipe.Set(ctx, updateKey(req.ID), data, updateStoreRetention)
 	pipe.ZAdd(ctx, updatePendingKey(runtimeID), redis.Z{
 		Score:  float64(now.UnixNano()),

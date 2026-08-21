@@ -1072,6 +1072,9 @@ func TestDeleteBuilderSessionLocksAgentBeforeTasks(t *testing.T) {
 	ctx := context.Background()
 	created := newBuilderSession(t)
 	taskID := insertPendingChatTask(t, created.BuilderAgentID, created.SessionID, "queued")
+	if _, err := testPool.Exec(ctx, `UPDATE agent_runtime SET status = 'online', last_seen_at = now() WHERE id = $1`, testRuntimeID); err != nil {
+		t.Fatalf("refresh builder runtime heartbeat: %v", err)
+	}
 
 	claimTx, err := testPool.Begin(ctx)
 	if err != nil {
@@ -1103,7 +1106,9 @@ func TestDeleteBuilderSessionLocksAgentBeforeTasks(t *testing.T) {
 	}
 	claimed, err := qtx.ClaimAgentTask(ctx, db.ClaimAgentTaskParams{
 		AgentID:          agent.ID,
+		RuntimeID:        agent.RuntimeID,
 		PrepareLeaseSecs: 30,
+		RuntimeStaleSecs: service.RuntimeClaimFreshnessSeconds,
 	})
 	if err != nil {
 		t.Fatalf("claim while delete waits for agent lock: %v", err)
@@ -1211,9 +1216,8 @@ func TestSwitchAgentBuilderRuntimeEnforcesRuntimeAndSessionOwnership(t *testing.
 	}
 	ctx := context.Background()
 
-	// A plain member, so canUseRuntimeForAgent's owner/admin bypass does not
-	// apply — the fixture user is the workspace owner and may legitimately use
-	// anyone's private runtime.
+	// A plain member who owns none of the runtimes below — the fixture user
+	// owns them, and a private runtime is usable only by its owner.
 	var plainMemberID string
 	if err := testPool.QueryRow(ctx, `
 		INSERT INTO "user" (name, email) VALUES ('Builder Switch Plain Member', 'builder-switch-plain@multica.ai')

@@ -13,6 +13,7 @@ import {
 import type { QueryClient } from "@tanstack/react-query";
 import { getCurrentWsId } from "@multica/core/platform";
 import { flattenIssueBuckets, issueKeys } from "@multica/core/issues/queries";
+import { issueStatusCategory } from "@multica/core/issues";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { useAuthStore } from "@multica/core/auth";
 import { canAssignAgentToIssue } from "@multica/core/permissions";
@@ -42,7 +43,7 @@ import {
   TooltipTrigger,
 } from "@multica/ui/components/ui/tooltip";
 import { cn } from "@multica/ui/lib/utils";
-import type { IssueStatus, ProjectStatus } from "@multica/core/types";
+import type { IssueStatus, IssueStatusCategory, ProjectStatus } from "@multica/core/types";
 import { PROJECT_STATUS_CONFIG } from "@multica/core/projects/config";
 import type { SuggestionOptions } from "@tiptap/suggestion";
 import { PluginKey } from "@tiptap/pm/state";
@@ -76,6 +77,13 @@ export interface MentionItem {
   description?: string;
   /** Issue status for StatusIcon rendering */
   status?: IssueStatus;
+  /**
+   * The category that status behaves as, carried from the issue payload so the
+   * list never has to resolve a custom key itself. Both the glyph and the
+   * "closed / demoted" rules read this — comparing the raw key left a custom
+   * done status looking and ranking like active work. (MUL-6243)
+   */
+  statusCategory?: IssueStatusCategory;
   /** Project emoji/icon snapshot for ProjectIcon rendering */
   icon?: string | null;
   /** Project status snapshot for recent/current project rendering */
@@ -194,7 +202,7 @@ function mergeMentionItems(
  */
 function isDemotedCancelled(item: MentionItem, query: string): boolean {
   if (isPinnedAboveTruncation(item, query)) return false;
-  if (item.type === "issue") return item.status === "cancelled";
+  if (item.type === "issue") return item.statusCategory === "cancelled";
   if (item.type === "project") return item.projectStatus === "cancelled";
   return false;
 }
@@ -523,7 +531,8 @@ function MentionRow({
   if (item.type === "issue") {
     // Visually dim closed issues (done/cancelled) so they're distinguishable
     // from active ones in the suggestion list — they're still selectable.
-    const isClosed = item.status === "done" || item.status === "cancelled";
+    const isClosed =
+      item.statusCategory === "done" || item.statusCategory === "cancelled";
     return (
       <button
         type="button"
@@ -535,7 +544,11 @@ function MentionRow({
       >
         <span className="flex h-7 w-7 shrink-0 items-center justify-center">
           {item.status ? (
-            <StatusIcon status={item.status} className="h-3.5 w-3.5" />
+            <StatusIcon
+              status={item.status}
+              category={item.statusCategory}
+              className="h-3.5 w-3.5"
+            />
           ) : (
             <ListTodo className="h-3.5 w-3.5 text-muted-foreground" />
           )}
@@ -639,13 +652,16 @@ function MentionRow({
 // Suggestion config factory
 // ---------------------------------------------------------------------------
 
-function issueToMention(i: Pick<Issue, "id" | "identifier" | "title" | "status">): MentionItem {
+function issueToMention(
+  i: Pick<Issue, "id" | "identifier" | "title" | "status"> & Partial<Pick<Issue, "status_category">>,
+): MentionItem {
   return {
     id: i.id,
     label: i.identifier,
     type: "issue" as const,
     description: i.title,
     status: i.status as IssueStatus,
+    statusCategory: issueStatusCategory(i) ?? undefined,
   };
 }
 

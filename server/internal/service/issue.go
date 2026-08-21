@@ -10,12 +10,15 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/dispatch"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/issueguard"
 	"github.com/multica-ai/multica/server/internal/issueposition"
+	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -147,6 +150,12 @@ var ErrProjectNotFound = errors.New("project not found in this workspace")
 // label set. Callers translate this into their transport's 400.
 var ErrIssueLabelNotFound = errors.New("issue label not found in this workspace")
 
+// ErrIssueStatusUnavailable signals that the requested custom status was
+// archived between the caller's pre-flight validation and the create
+// transaction. Callers translate this into a 409 — the request was valid when
+// it arrived, so retrying against the refreshed catalog is the remedy.
+var ErrIssueStatusUnavailable = errors.New("issue status is no longer available")
+
 // IssueCreateResult is the typed return from IssueService.Create.
 //
 //   - On the happy path: Issue is the new row, Attachments lists the
@@ -198,6 +207,25 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.Queries.WithTx(tx)
+
+	// A create landing on a CUSTOM status takes the shared catalog lock AND
+	// re-resolves the status inside this transaction. The caller validated the
+	// status before the transaction opened, which is early enough to return a
+	// clean 400 but too early to be safe: an archive can commit in between.
+	// Re-checking under the lock is what makes the status provably active at
+	// the moment the row is written. Built-in statuses skip both — they can
+	// never be archived, so the common path is unchanged. (MUL-6243)
+	if !issuestatus.IsBuiltIn(p.Status) {
+		if err := qtx.LockIssueStatusCatalogShared(ctx, p.WorkspaceID); err != nil {
+			return IssueCreateResult{}, err
+		}
+		if _, err := issuestatus.Resolve(ctx, qtx, p.WorkspaceID, p.Status); err != nil {
+			if errors.Is(err, issuestatus.ErrUnknownStatus) {
+				return IssueCreateResult{}, ErrIssueStatusUnavailable
+			}
+			return IssueCreateResult{}, err
+		}
+	}
 
 	// Resolve and validate parent / project before reading from the
 	// duplicate guard so a forged parent or project ID is rejected
@@ -270,6 +298,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	var assignedTask db.AgentTaskQueue
 	if p.OriginType.Valid {
 		issue, err = qtx.CreateIssueWithOrigin(ctx, db.CreateIssueWithOriginParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   p.WorkspaceID,
 			Title:         p.Title,
 			Description:   p.Description,
@@ -291,6 +320,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 		})
 	} else {
 		issue, err = qtx.CreateIssue(ctx, db.CreateIssueParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   p.WorkspaceID,
 			Title:         p.Title,
 			Description:   p.Description,
@@ -320,7 +350,7 @@ func (s *IssueService) Create(ctx context.Context, p IssueCreateParams, opts Iss
 	// workspace/resource_type-guarded and ON CONFLICT DO NOTHING, and the
 	// ids were already validated above.
 	for _, label := range labels {
-		if err := qtx.AttachLabelToIssue(ctx, db.AttachLabelToIssueParams{
+		if err := qtx.AttachLabelToIssueOnCreate(ctx, db.AttachLabelToIssueOnCreateParams{
 			IssueID:     issue.ID,
 			LabelID:     label.ID,
 			WorkspaceID: p.WorkspaceID,
@@ -433,10 +463,11 @@ func (s *IssueService) linkAttachments(ctx context.Context, issue db.Issue, ids 
 	if len(ids) == 0 {
 		return nil
 	}
-	if err := s.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
-		IssueID:     issue.ID,
-		WorkspaceID: issue.WorkspaceID,
-		Column3:     ids,
+	if _, err := s.Queries.LinkAttachmentsToIssue(ctx, db.LinkAttachmentsToIssueParams{
+		IssueID:       issue.ID,
+		WorkspaceID:   issue.WorkspaceID,
+		AttachmentIds: ids,
+		BumpRevision:  false,
 	}); err != nil {
 		slog.Error("failed to link attachments to issue",
 			"issue_id", util.UUIDToString(issue.ID),
@@ -488,16 +519,8 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 	if s.Bus == nil {
 		return
 	}
-	s.Bus.Publish(events.Event{
-		Type:        protocol.EventIssueAttachmentsChanged,
-		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
-		ActorType:   "member",
-		ActorID:     util.UUIDToString(actorID),
-		Payload: map[string]any{
-			"issue_id": util.UUIDToString(issue.ID),
-		},
-	})
 	if s.Queries == nil {
+		s.publishIssueAttachmentsChanged(issue, actorID, 0)
 		return
 	}
 
@@ -508,12 +531,17 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 	if err != nil {
 		slog.Warn("failed to load issue after channel media bind",
 			"issue_id", util.UUIDToString(issue.ID), "error", err)
+		s.publishIssueAttachmentsChanged(issue, actorID, 0)
 		return
 	}
 	workspace, err := s.Queries.GetWorkspace(ctx, issue.WorkspaceID)
 	if err != nil {
 		slog.Warn("failed to load workspace after channel media bind",
 			"workspace_id", util.UUIDToString(issue.WorkspaceID), "error", err)
+		// Without the workspace we cannot publish the matching owner snapshot.
+		// Keep this auxiliary event unversioned so clients invalidate instead of
+		// advancing the owner revision past a snapshot they never received.
+		s.publishIssueAttachmentsChanged(issue, actorID, 0)
 		return
 	}
 	s.Bus.Publish(events.Event{
@@ -522,11 +550,29 @@ func (s *IssueService) PublishAttachmentsChanged(ctx context.Context, issue db.I
 		ActorType:   "member",
 		ActorID:     util.UUIDToString(actorID),
 		Payload: map[string]any{
-			"issue":            IssueToMap(current, workspace.IssuePrefix),
+			"issue":            IssueToMapWithCategory(ctx, s.Queries, current, workspace.IssuePrefix),
 			"assignee_changed": false,
 			"status_changed":   false,
 			"project_changed":  false,
 		},
+	})
+	// Publish the auxiliary projection only after the full owner snapshot at
+	// this revision. Reversing these two events makes revision-aware clients
+	// reject the issue:updated payload as an equal-revision duplicate.
+	s.publishIssueAttachmentsChanged(current, actorID, current.Revision)
+}
+
+func (s *IssueService) publishIssueAttachmentsChanged(issue db.Issue, actorID pgtype.UUID, revision int64) {
+	payload := map[string]any{"issue_id": util.UUIDToString(issue.ID)}
+	if revision > 0 {
+		payload["issue_revision"] = revision
+	}
+	s.Bus.Publish(events.Event{
+		Type:        protocol.EventIssueAttachmentsChanged,
+		WorkspaceID: util.UUIDToString(issue.WorkspaceID),
+		ActorType:   "member",
+		ActorID:     util.UUIDToString(actorID),
+		Payload:     payload,
 	})
 }
 
@@ -582,7 +628,22 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	if !issue.AssigneeType.Valid || !issue.AssigneeID.Valid {
 		return pgtype.UUID{}
 	}
-	if s.shouldEnqueueAgentTask(ctx, issue) {
+	// Backlog is the parking lot: nothing runs from it, so nothing here needs
+	// explaining either. A custom status in the backlog category parks the
+	// same way. (MUL-6243)
+	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
+		return pgtype.UUID{}
+	}
+	verdict, admitted := agentAssigneeVerdict(ctx, s.Queries, issue)
+	if !admitted && verdict.Reason == dispatch.ReasonRuntimeUnusable {
+		// Assignment has no response the assigner reads for this outcome, so the
+		// refusal explains itself on the issue instead of vanishing (MUL-6164).
+		// Only here, not in the create-with-assignee path above: that one runs
+		// inside the issue's transaction, and a notice about a machine has no
+		// business deciding whether the issue itself commits.
+		s.noteRuntimeUnusable(ctx, issue, verdict)
+	}
+	if admitted {
 		var task db.AgentTaskQueue
 		var err error
 		if agentRunFireAt.IsZero() {
@@ -604,35 +665,52 @@ func (s *IssueService) maybeEnqueueOnAssign(ctx context.Context, issue db.Issue,
 	return pgtype.UUID{}
 }
 
-// shouldEnqueueAgentTask returns true when an issue create or assignment
-// should trigger the assigned agent. Backlog issues are skipped — backlog
-// acts as a parking lot for pre-assigning without immediate execution.
+// shouldEnqueueAgentTaskWithQueries returns true when an issue create should
+// trigger the assigned agent. Backlog issues are skipped — backlog acts as a
+// parking lot for pre-assigning without immediate execution. The assignment
+// path does the same test through agentAssigneeVerdict, which also tells it
+// WHY a refusal happened; this one runs inside the create transaction, where
+// there is nothing to tell anyone yet.
+//
 // Mirrors handler.shouldEnqueueAgentTask; kept here to make the service
 // self-contained, since both code paths must move together.
-func (s *IssueService) shouldEnqueueAgentTask(ctx context.Context, issue db.Issue) bool {
-	return s.shouldEnqueueAgentTaskWithQueries(ctx, s.Queries, issue)
-}
-
 func (s *IssueService) shouldEnqueueAgentTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
-	if issue.Status == "backlog" {
+	// Resolved through q, not s.Queries: this runs inside the create
+	// transaction and must see the same snapshot as the rest of it. (MUL-6243)
+	if issuestatus.Effective(ctx, q, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
 	return isAgentAssigneeReadyWithQueries(ctx, q, issue)
 }
 
 func isAgentAssigneeReadyWithQueries(ctx context.Context, q *db.Queries, issue db.Issue) bool {
+	_, ok := agentAssigneeVerdict(ctx, q, issue)
+	return ok
+}
+
+// agentAssigneeVerdict resolves the issue's agent assignee through the shared
+// readiness check and reports whether work may be enqueued for it, plus the
+// verdict when it may not.
+//
+// Only a BLOCKED verdict stops the enqueue. A merely offline machine still
+// queues: that work runs when the laptop comes back, and people rely on it.
+func agentAssigneeVerdict(ctx context.Context, q *db.Queries, issue db.Issue) (AgentVerdict, bool) {
 	if !issue.AssigneeType.Valid || issue.AssigneeType.String != "agent" || !issue.AssigneeID.Valid {
-		return false
+		return AgentVerdict{}, false
 	}
 	agent, err := q.GetAgent(ctx, issue.AssigneeID)
-	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
-		return false
+	if err != nil {
+		return AgentVerdict{}, false
 	}
-	return true
+	verdict, err := AgentReadiness(ctx, q, agent)
+	if err != nil {
+		return AgentVerdict{}, false
+	}
+	return verdict, !verdict.Blocked()
 }
 
 func (s *IssueService) shouldEnqueueSquadLeaderOnAssign(ctx context.Context, issue db.Issue) bool {
-	if issue.Status == "backlog" {
+	if issuestatus.Effective(ctx, s.Queries, issue.WorkspaceID, issue.Status) == "backlog" {
 		return false
 	}
 	return s.isSquadLeaderReady(ctx, issue)
@@ -653,11 +731,11 @@ func (s *IssueService) isSquadLeaderReady(ctx context.Context, issue db.Issue) b
 	if err != nil {
 		return false
 	}
-	ready, _, err := AgentReadiness(ctx, s.Queries, agent)
+	verdict, err := AgentReadiness(ctx, s.Queries, agent)
 	if err != nil {
 		return false
 	}
-	return ready
+	return verdict.Ready()
 }
 
 func (s *IssueService) enqueueSquadLeaderTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, authorType, authorID string) {

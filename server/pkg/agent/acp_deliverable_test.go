@@ -167,8 +167,10 @@ var acpDeliverableCases = []acpDeliverableCase{
 	{backend: "hermes", binary: "hermes", notification: "session/update"},
 	{backend: "kimi", binary: "kimi", notification: "session/update"},
 	{backend: "reasonix", binary: "reasonix", notification: "session/update"},
+	{backend: "dim", binary: "dim", notification: "session/update"},
 	{backend: "traecli", binary: "traecli", notification: "session/update"},
 	{backend: "grok", binary: "grok", notification: "session/update"},
+	{backend: "mcode", binary: "mcode", notification: "session/update"},
 	{backend: "kiro", binary: "kiro-cli", notification: "session/notification", camelUpdates: true},
 	{backend: "qoder", binary: "qodercli", notification: "session/notification", camelUpdates: true},
 	{backend: "qoderclicn", binary: "qoderclicn", notification: "session/notification", camelUpdates: true},
@@ -223,13 +225,22 @@ while IFS= read -r line; do
   id=$(printf '%s' "$line" | sed -n 's/.*"id":\([0-9]*\).*/\1/p')
   case "$line" in
     *'"method":"initialize"'*)
-      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"authMethods":[{"id":"cached_token","name":"Cached login"},{"id":"xai.api_key","name":"API key"}],"agentCapabilities":{"loadSession":true}}}\n' "$id"
+      printf '{"jsonrpc":"2.0","id":%s,"result":{"protocolVersion":1,"authMethods":[{"id":"cached_token","name":"Cached login"},{"id":"xai.api_key","name":"API key"}],"agentInfo":{"name":"fake","version":"0.3.10"},"agentCapabilities":{"loadSession":true}}}\n' "$id"
       ;;
     *'"method":"authenticate"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/new"'*)
       printf '{"jsonrpc":"2.0","id":%s,"result":{"sessionId":"ses_deliverable"}}\n' "$id"
+      ;;
+    *'"method":"session/set_config_option"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/set_model"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
+      ;;
+    *'"method":"session/close"'*)
+      printf '{"jsonrpc":"2.0","id":%s,"result":{}}\n' "$id"
       ;;
     *'"method":"session/prompt"'*)
       pre='` + acpDeliverableNarration + `'

@@ -21,6 +21,17 @@ function attachmentDownloadEndpoint(
   return resolvePublicFileUrl(endpoint) ?? endpoint;
 }
 
+// Resolve the forced-attachment ("download button") URL the server minted, if
+// any. Unlike `download_url` (load-intent — media serves inline for preview),
+// `attachment_download_url` carries Content-Disposition: attachment in every
+// storage mode, so it downloads rather than previews. resolvePublicFileUrl keeps
+// a site-relative proxy capability same-origin and passes absolute presign /
+// CloudFront URLs through unchanged. Empty on a server that predates the field.
+function forcedAttachmentUrl(url: string | undefined): string | null {
+  if (!url) return null;
+  return resolvePublicFileUrl(url);
+}
+
 // The capability download URL the server minted, if any.
 //
 // In proxy mode the backend puts a signed, single-attachment capability into
@@ -36,9 +47,9 @@ function attachmentDownloadEndpoint(
 // `proxyAttachmentDownload` → `storage.ContentDisposition`, which returns
 // `inline` for image/video/audio/PDF. What makes the browser download rather
 // than preview is the request staying same-origin combined with the `download`
-// attribute. `resolvePublicFileUrl` leaves this URL same-origin whenever the app
-// reaches the API on its own origin; if it resolves cross-origin AND the file is
-// media, the capability previews in-tab instead — a row #6712 still tracks.
+// attribute. This is the #6713 fallback for a server that has the #6092
+// capability but not yet `attachment_download_url`; the forced-attachment URL
+// preferred above closes the cross-origin-media gap #6712 tracked.
 //
 // Absolute CloudFront / S3 `download_url`s are deliberately NOT used here: they
 // are cross-origin and inline-tuned, so an `<a download>` to them previews the
@@ -84,14 +95,14 @@ function hasDesktopDownloadBridge(): boolean {
  *
  * Two execution shapes, picked at call time:
  *
- * - **Web**: refreshes attachment metadata (for the existing error feedback
- *   path and to obtain the capability `download_url`), then clicks a temporary
- *   anchor. It prefers the signed capability URL the backend mints in proxy
- *   mode — the one a bare `<a download>` navigation can authenticate without a
- *   header or cookie — and otherwise falls back to the cookie-gated
- *   `/api/attachments/{id}/download?workspace_slug=...` endpoint. Either way the
- *   backend owns CloudFront / S3 presign / proxy selection and download
- *   Content-Disposition, so large files stay in the browser's native download
+ * - **Web**: refreshes attachment metadata (for the existing error-feedback
+ *   path and to read the download URLs), then clicks a temporary anchor. It
+ *   prefers `attachment_download_url` — the credential-free URL that forces
+ *   Content-Disposition: attachment in every storage mode — then the #6092
+ *   proxy capability, then the cookie-gated
+ *   `/api/attachments/{id}/download?workspace_slug=...` endpoint for a server
+ *   that predates both. Either way the backend owns CloudFront / S3 presign /
+ *   proxy selection, so large files stay in the browser's native download
  *   pipeline.
  *
  * - **Desktop**: uses `desktopAPI.downloadURL()` which invokes Electron's
@@ -110,15 +121,17 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
       if (hasDesktopDownloadBridge()) {
         try {
           const fresh = await api.getAttachment(attachmentId);
-          // Server may return a server-relative `download_url`
-          // (`/api/attachments/{id}/download`) when no CloudFront
-          // signer is configured — the unified download endpoint chooses
-          // CloudFront/presign/proxy at request time. Electron's main-side
-          // `downloadURLSafely` requires `new URL()` to parse to http/https,
-          // so resolve against the configured API base before we cross the
-          // bridge. Absolute URLs (legacy CloudFront / S3 presigned) pass
-          // through unchanged.
-          const downloadUrl = resolvePublicFileUrl(fresh.download_url);
+          // Prefer the forced-attachment URL (Content-Disposition: attachment in
+          // every storage mode) so the native save writes the file rather than
+          // opening media inline; fall back to the load-intent `download_url` for
+          // a server that predates the field. Either may be server-relative (the
+          // proxy capability) or absolute (CloudFront / S3 presigned); Electron's
+          // main-side `downloadURLSafely` requires `new URL()` to parse to
+          // http/https, so resolve against the configured API base before we
+          // cross the bridge. Absolute URLs pass through unchanged.
+          const downloadUrl = resolvePublicFileUrl(
+            fresh.attachment_download_url || fresh.download_url,
+          );
           if (!downloadUrl) {
             failed();
             return;
@@ -136,19 +149,28 @@ export function useDownloadAttachment(): (attachmentId: string) => Promise<void>
       try {
         // The preflight metadata request is both the permission check (so API
         // failures still produce the existing toast instead of a silent failed
-        // navigation) and where the server hands back the capability
-        // `download_url` it mints in proxy mode.
+        // navigation) and where the server hands back the download URLs it mints
+        // for this response.
         const fresh = await api.getAttachment(attachmentId);
         if (typeof document === "undefined") {
           failed();
           return;
         }
-        // Prefer the capability URL when the server minted one. A top-level
-        // `<a download>` navigation sends no `Authorization` header, so in
-        // token-mode — where auth is a bearer token in JS rather than a cookie —
-        // the cookie-gated slug endpoint 401s and the browser saves the error
-        // body as `download.txt`. The capability URL carries its own credential
-        // in the query string, so it authenticates that bare navigation itself.
+        // Prefer the forced-attachment URL when the server minted one: it is
+        // credential-free and carries Content-Disposition: attachment in every
+        // storage mode, so a bare `<a download>` navigation both authenticates
+        // and downloads — instead of previewing media inline or 401ing in
+        // token-mode.
+        const forced = forcedAttachmentUrl(fresh.attachment_download_url);
+        if (forced) {
+          triggerBrowserDownload(forced);
+          return;
+        }
+        // Older server without the forced-attachment field: fall back to the
+        // #6092 proxy capability (#6713). A top-level `<a download>` navigation
+        // sends no `Authorization` header, so in token-mode the cookie-gated
+        // slug endpoint 401s; the capability URL carries its own credential in
+        // the query string, so it authenticates that bare navigation itself.
         const capability = capabilityDownloadUrl(fresh.download_url);
         if (capability) {
           triggerBrowserDownload(capability);

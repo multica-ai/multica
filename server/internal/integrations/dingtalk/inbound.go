@@ -20,13 +20,14 @@ import (
 // reads; DingTalk sends more, which we ignore. Replaces the vendor SDK's
 // chatbot.BotCallbackDataModel.
 type botCallbackData struct {
-	ConversationId   string          `json:"conversationId"`
-	ConversationType string          `json:"conversationType"`
-	SenderStaffId    string          `json:"senderStaffId"`
-	MsgId            string          `json:"msgId"`
-	Msgtype          string          `json:"msgtype"`
-	IsInAtList       bool            `json:"isInAtList"`
-	Text             botCallbackText `json:"text"`
+	ConversationId    string          `json:"conversationId"`
+	ConversationTitle string          `json:"conversationTitle"`
+	ConversationType  string          `json:"conversationType"`
+	SenderStaffId     string          `json:"senderStaffId"`
+	MsgId             string          `json:"msgId"`
+	Msgtype           string          `json:"msgtype"`
+	IsInAtList        bool            `json:"isInAtList"`
+	Text              botCallbackText `json:"text"`
 	// Content is the msgtype-discriminated payload of non-text messages
 	// (picture / richText). Decoded lazily per msgtype; absent on over-quota
 	// callbacks (errorCode 20001 strips text/content entirely).
@@ -72,8 +73,9 @@ func refAlt(downloadCode, pictureDownloadCode string) (ref, alt string) {
 // envelope does not. AppID is stamped by the receiving connection (it is the
 // installation's routing key) and read back only inside the resolvers.
 type dingtalkRawEvent struct {
-	AppID string                  `json:"app_id"`
-	Media []dingtalkMediaResource `json:"media,omitempty"`
+	AppID             string                  `json:"app_id"`
+	ConversationTitle string                  `json:"conversation_title,omitempty"`
+	Media             []dingtalkMediaResource `json:"media,omitempty"`
 }
 
 type dingtalkMediaResource struct {
@@ -114,7 +116,7 @@ func inboundFromCallback(data *botCallbackData, appID string) (channel.InboundMe
 	}
 
 	chatType := dingtalkChatType(data.ConversationType)
-	rawEvent := dingtalkRawEvent{AppID: appID}
+	rawEvent := dingtalkRawEvent{AppID: appID, ConversationTitle: strings.TrimSpace(data.ConversationTitle)}
 	msg := channel.InboundMessage{
 		EventID:        data.MsgId,
 		MessageID:      data.MsgId,

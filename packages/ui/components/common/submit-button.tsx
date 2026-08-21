@@ -1,6 +1,6 @@
 "use client";
 
-import type { PointerEvent, ReactNode } from "react";
+import type { ReactNode, SyntheticEvent } from "react";
 import { ArrowUp, Loader2, Square } from "lucide-react";
 import { Button } from "@multica/ui/components/ui/button";
 import {
@@ -40,7 +40,7 @@ interface SubmitButtonProps {
 }
 
 /** Keep the composer focused so Send and Stop do not dismiss Android's keyboard. */
-function keepFocusInComposer(event: PointerEvent<HTMLButtonElement>) {
+function keepFocusInComposer(event: SyntheticEvent<HTMLButtonElement>) {
   event.preventDefault();
 }
 
@@ -62,6 +62,7 @@ function SubmitButton({
         size="icon-sm"
         className="rounded-full"
         onPointerDown={keepFocusInComposer}
+        onMouseDown={keepFocusInComposer}
         onClick={onStop}
         aria-label={stopAriaLabel}
       >
@@ -84,6 +85,7 @@ function SubmitButton({
       aria-disabled={busy || undefined}
       aria-busy={loading || busy || undefined}
       onPointerDown={keepFocusInComposer}
+      onMouseDown={keepFocusInComposer}
       onClick={onClick}
       aria-label={ariaLabel}
     >

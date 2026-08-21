@@ -1,1 +1,5 @@
-export { dingtalkKeys, dingtalkInstallationsOptions } from "./queries";
+export {
+  dingtalkKeys,
+  dingtalkInstallationsOptions,
+  dingtalkGroupRoutesOptions,
+} from "./queries";

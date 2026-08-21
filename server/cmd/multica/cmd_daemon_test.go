@@ -105,6 +105,20 @@ func TestBuildDaemonStartArgsForwardsCodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+func TestBuildDaemonStartArgsForwardsWorkspacesRoot(t *testing.T) {
+	cmd := &cobra.Command{}
+	cmd.Flags().String("workspaces-root", "", "")
+	if err := cmd.Flags().Set("workspaces-root", "/Volumes/Agent Workspaces"); err != nil {
+		t.Fatalf("set flag: %v", err)
+	}
+
+	args := buildDaemonStartArgs(cmd)
+	want := []string{"daemon", "start", "--foreground", "--workspaces-root", "/Volumes/Agent Workspaces"}
+	if strings.Join(args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("buildDaemonStartArgs() = %q, want %q", args, want)
+	}
+}
+
 // TestBuildDaemonStartArgsForwardsNoAutoReload matters because `daemon start`
 // re-execs itself as a foreground child: a flag the parent parsed but doesn't
 // forward is silently dropped, so the opt-out would appear to work and not.
@@ -131,6 +145,16 @@ func TestNoAutoReloadFlagRegisteredOnBothDaemonCommands(t *testing.T) {
 	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
 		if cmd.Flags().Lookup("no-auto-reload") == nil {
 			t.Errorf("daemon %s is missing --no-auto-reload", cmd.Name())
+		}
+	}
+}
+
+func TestWorkspacesRootFlagRegisteredOnBothDaemonCommands(t *testing.T) {
+	t.Parallel()
+
+	for _, cmd := range []*cobra.Command{daemonStartCmd, daemonRestartCmd} {
+		if cmd.Flags().Lookup("workspaces-root") == nil {
+			t.Errorf("daemon %s is missing --workspaces-root", cmd.Name())
 		}
 	}
 }
@@ -693,6 +717,30 @@ func TestPrintDiskUsageOtherRootsHintSuggestsDefaultFromNamedProfile(t *testing.
 	}
 }
 
+func TestPrintDiskUsageOtherRootsHintUsesProfileConfig(t *testing.T) {
+	home := t.TempDir()
+	customRoot := filepath.Join(t.TempDir(), "custom-profile-root")
+	t.Setenv("HOME", home)
+	t.Setenv("MULTICA_WORKSPACES_ROOT", "")
+	if err := cli.SaveCLIConfigForProfile(cli.CLIConfig{WorkspacesRoot: customRoot}, "custom"); err != nil {
+		t.Fatalf("SaveCLIConfigForProfile: %v", err)
+	}
+	writeDiskUsageFile(t, filepath.Join(customRoot, "ws1", "task1", "workdir", "main.go"))
+
+	var out bytes.Buffer
+	printDiskUsageOtherRootsHint(&out, daemon.DiskUsageReport{
+		WorkspacesRoot: filepath.Join(home, "multica_workspaces"),
+	}, "", "", false)
+
+	got := out.String()
+	if !strings.Contains(got, customRoot) {
+		t.Fatalf("hint output = %q, want configured root %q", got, customRoot)
+	}
+	if strings.Contains(got, filepath.Join(home, "multica_workspaces_custom")) {
+		t.Fatalf("hint output = %q, must not suggest the profile's old default root", got)
+	}
+}
+
 func TestPrintDiskUsageOtherRootsHintSkipsExplicitRootOverride(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
@@ -865,6 +913,28 @@ func TestDaemonStatusHealthPortInTaskContext(t *testing.T) {
 		}
 		if want := healthPortForProfile(""); got != want {
 			t.Fatalf("health port = %d, want %d", got, want)
+		}
+	})
+
+	t.Run("port-only host context derives the port from the profile", func(t *testing.T) {
+		t.Chdir(t.TempDir())
+		clearDaemonTaskEnv(t)
+		t.Setenv("MULTICA_DAEMON_PORT", strconv.Itoa(injectedPort))
+
+		cmd := &cobra.Command{}
+		cmd.Flags().String("profile", "", "")
+		if err := cmd.Flags().Set("profile", "staging"); err != nil {
+			t.Fatalf("set profile flag: %v", err)
+		}
+		got, err := daemonStatusHealthPort(cmd)
+		if err != nil {
+			t.Fatalf("daemonStatusHealthPort: %v", err)
+		}
+		if want := healthPortForProfile("staging"); got != want {
+			t.Fatalf("health port = %d, want profile-derived %d", got, want)
+		}
+		if got == injectedPort {
+			t.Fatal("port-only host context used the stale injected port")
 		}
 	})
 

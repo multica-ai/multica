@@ -143,9 +143,12 @@ func (b *grokBackend) Execute(ctx context.Context, prompt string, opts ExecOptio
 	grokArgs = append(grokArgs, filterCustomArgs(opts.CustomArgs, grokBlockedArgs, b.cfg.Logger)...)
 	grokArgs = append(grokArgs, "stdio")
 
-	cmd := exec.CommandContext(runCtx, execPath, grokArgs...)
+	cmd := b.cfg.commandAt(execPath).exec(runCtx, grokArgs...)
 	hideAgentWindow(cmd)
-	b.cfg.Logger.Info("agent command", "exec", execPath, "args", grokArgs)
+	b.cfg.logAgentCommand(cmd, newAgentCommandLogArgs(grokArgs,
+		trustAgentCommandPositional(1, "agent"),
+		trustAgentCommandPositional(len(grokArgs)-1, "stdio"),
+	))
 	if opts.Cwd != "" {
 		cmd.Dir = opts.Cwd
 	}

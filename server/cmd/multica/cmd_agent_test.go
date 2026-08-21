@@ -41,7 +41,12 @@ func chdirWithDaemonTaskMarker(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(markerPath), 0o755); err != nil {
 		t.Fatalf("create marker dir: %v", err)
 	}
-	data := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `"}`)
+	// Task-scoped: a real workdir marker always carries the identity of the
+	// task that wrote it, and that identity is what separates a leftover from
+	// the permanent workspaces root marker, which has managed_by and nothing
+	// else (MUL-6132). Writing the bare form here would model the root marker
+	// rather than the workdir marker these tests are about.
+	data := []byte(`{"managed_by":"` + execenv.TaskContextMarkerManagedBy + `","agent_id":"agent-1","issue_id":"issue-1"}`)
 	if err := os.WriteFile(markerPath, data, 0o644); err != nil {
 		t.Fatalf("write marker: %v", err)
 	}
@@ -61,6 +66,72 @@ func chdirWithDaemonTaskMarker(t *testing.T) {
 			t.Fatalf("restore cwd: %v", err)
 		}
 	})
+}
+
+func TestHumanLocalCommandDistinguishesPortHintFromTaskIdentity(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+
+	if err := requireHumanLocalCommand("login"); err != nil {
+		t.Fatalf("port-only host context rejected login: %v", err)
+	}
+
+	t.Setenv(cli.TaskConfigRootEnv, filepath.Join(t.TempDir(), "task-multica"))
+	if err := requireHumanLocalCommand("login"); err == nil || !strings.Contains(err.Error(), "daemon-managed task") {
+		t.Fatalf("task config root did not reject login: %v", err)
+	}
+}
+
+func TestHumanLocalCommandRejectsWorkdirTaskMarker(t *testing.T) {
+	chdirWithDaemonTaskMarker(t)
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "")
+
+	if err := requireHumanLocalCommand("daemon stop"); err == nil || !strings.Contains(err.Error(), "daemon-managed task") {
+		t.Fatalf("workdir task marker did not reject daemon stop: %v", err)
+	}
+}
+
+func TestHumanLocalCommandRejectsExplicitTaskIdentity(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		envName string
+		command string
+	}{
+		{name: "agent ID blocks setup", envName: "MULTICA_AGENT_ID", command: "setup"},
+		{name: "task ID blocks daemon stop", envName: "MULTICA_TASK_ID", command: "daemon stop"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Chdir(t.TempDir())
+			t.Setenv("MULTICA_AGENT_ID", "")
+			t.Setenv("MULTICA_TASK_ID", "")
+			t.Setenv(cli.TaskConfigRootEnv, "")
+			t.Setenv("MULTICA_DAEMON_PORT", "")
+			t.Setenv(tc.envName, "task-identity")
+
+			if err := requireHumanLocalCommand(tc.command); err == nil || !strings.Contains(err.Error(), "daemon-managed task") {
+				t.Fatalf("%s with %s was not rejected: %v", tc.command, tc.envName, err)
+			}
+		})
+	}
+}
+
+func TestMissingServerConfigMessageExplainsPortOnlyContext(t *testing.T) {
+	t.Chdir(t.TempDir())
+	t.Setenv("MULTICA_AGENT_ID", "")
+	t.Setenv("MULTICA_TASK_ID", "")
+	t.Setenv(cli.TaskConfigRootEnv, "")
+	t.Setenv("MULTICA_DAEMON_PORT", "20032")
+
+	message := missingServerConfigMessage()
+	if !strings.Contains(message, "MULTICA_DAEMON_PORT") || !strings.Contains(message, "remove") {
+		t.Fatalf("missing server message = %q, want stale port recovery guidance", message)
+	}
 }
 
 // TestNewAPIClient_WorkdirParentEscapeFailsClosed reproduces the confirmed
@@ -467,6 +538,7 @@ func TestNewAPIClient_AgentContextRequiresTaskToken(t *testing.T) {
 }
 
 func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
+	t.Chdir(t.TempDir())
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("MULTICA_SERVER_URL", "http://127.0.0.1:8080")
 	t.Setenv("MULTICA_WORKSPACE_ID", "workspace-123")
@@ -485,6 +557,9 @@ func TestNewAPIClient_DaemonPortRequiresTaskToken(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "mat_ token") {
 		t.Fatalf("newAPIClient() error = %q, want mat_ token guidance", err.Error())
+	}
+	if !strings.Contains(err.Error(), "MULTICA_DAEMON_PORT") || !strings.Contains(err.Error(), "remove") {
+		t.Fatalf("newAPIClient() error = %q, want stale port recovery guidance", err.Error())
 	}
 }
 
@@ -637,18 +712,6 @@ func TestAgentUpdateDoesNotExposeCustomEnvFlags(t *testing.T) {
 		if agentUpdateCmd.Flag(flag) != nil {
 			t.Errorf("agent update must NOT expose --%s after MUL-2600; use `multica agent env set` instead", flag)
 		}
-	}
-}
-
-// TestAgentCreateDoesNotExposeFromTemplate guards against re-adding the
-// `--from-template` flag. It was an untaught, immature CLI surface that
-// short-circuited before body assembly — silently dropping sibling create
-// flags like --mcp-config / --custom-env — and was removed. The agent-template
-// backend API still exists but has no CLI surface; manual `agent create` is the
-// only supported CLI creation path.
-func TestAgentCreateDoesNotExposeFromTemplate(t *testing.T) {
-	if agentCreateCmd.Flag("from-template") != nil {
-		t.Error("agent create must NOT expose --from-template; it was removed as an untaught CLI surface that silently dropped sibling flags")
 	}
 }
 

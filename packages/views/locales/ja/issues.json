@@ -1,4 +1,19 @@
 {
+  "status_catalog_error": {
+    "title": "ステータス一覧を読み込めませんでした",
+    "hint": "これがないとステータスの絞り込みを適用できないため、イシューは表示されません。",
+    "retry": "再試行"
+  },
+  "revision": {
+    "conflict": "タスクまたはコメントが変更されました。最新版に更新したので、比較してからもう一度保存してください。",
+    "compare_title": "タイトルが同時に変更されました。両方の内容を比較してください。",
+    "compare_description": "説明が同時に変更されました。両方の内容を比較してください。",
+    "compare_comment": "コメントが同時に変更されました。両方の内容を比較してください。",
+    "server_version": "サーバー上の最新版",
+    "local_version": "ローカル版",
+    "keep_local": "自分の版を使用",
+    "use_server": "最新版を使用"
+  },
   "page": {
     "breadcrumb_title": "タスク",
     "breadcrumb_workspace_fallback": "ワークスペース",
@@ -37,6 +52,7 @@
   "filters": {
     "tooltip": "フィルター",
     "placeholder": "フィルター...",
+    "search_status": "ステータスを検索...",
     "no_results": "結果なし",
     "no_labels": "まだラベルがありません",
     "no_assignee": "担当者なし",
@@ -242,6 +258,7 @@
     "back": "戻る",
     "title_placeholder": "タスクのタイトル",
     "desc_placeholder": "説明を追加...",
+    "current_issue": "現在のタスク",
     "sub_issues_label": "サブタスク",
     "sub_issue_of": "親タスク",
     "add_sub_issues": "サブタスクを追加",
@@ -351,6 +368,8 @@
     "link_copied": "リンクをコピーしました",
     "link_copy_failed": "リンクをコピーできませんでした",
     "workdir_path_copied": "作業ディレクトリのパスをコピーしました",
+    "project_directory_path_copied": "プロジェクトディレクトリのパスをコピーしました",
+    "project_directory_path_copied_with_branch": "プロジェクトディレクトリのパスをコピーしました — 作業は {{branch}} ブランチにあります",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
     "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません"
   },
@@ -404,11 +423,13 @@
     "trigger_blocked_invocation_not_allowed": "この対象が見つからないか、使用する権限がありません",
     "trigger_blocked_target_unavailable": "この対象は利用できません",
     "trigger_blocked_runtime_offline": "この対象のランタイムがオフラインです",
+    "trigger_blocked_runtime_unusable": "この対象の CLI はそのマシンで実行できません — そのマシンで再インストールしてください",
     "trigger_blocked_agent_runtime_required": "この対象にはランタイムがありません — 実行するにはバインドしてください",
     "trigger_blocked_generic": "この対象はトリガーされません",
     "trigger_blocked_short_invocation_not_allowed": "未検出または権限なし",
     "trigger_blocked_short_target_unavailable": "利用不可",
     "trigger_blocked_short_runtime_offline": "ランタイム オフライン",
+    "trigger_blocked_short_runtime_unusable": "CLI を実行できません",
     "trigger_blocked_short_agent_runtime_required": "ランタイム未設定",
     "trigger_blocked_short_generic": "トリガーされません",
     "send_reply_failed": "返信を送信できませんでした",
@@ -575,7 +596,8 @@
   },
   "card": {
     "update_failed": "タスクを更新できませんでした",
-    "updated_ago": "{{time}} に更新"
+    "updated_ago": "{{time}} に更新",
+    "child_progress_restricted_other": "サブタスク {{count}} 件が制限中"
   },
   "actions": {
     "status": "ステータス",
@@ -597,6 +619,7 @@
     "unpin_from_sidebar": "サイドバーのピン留めを解除",
     "copy_link": "リンクをコピー",
     "copy_workdir_path": "ローカルの作業ディレクトリのパスをコピー",
+    "copy_project_directory_path": "プロジェクトディレクトリのパスをコピー",
     "relations": "関係",
     "create_sub_issue": "サブタスクを作成",
     "set_parent_issue": "親タスクを設定...",
@@ -614,8 +637,11 @@
       "value_placeholder": "値を入力…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
+      "actor_search_placeholder": "メンバーを検索…",
       "open_link": "リンクを開く",
-      "archived_hint": "アーカイブ済みプロパティ — 値は読み取り専用です"
+      "archived_hint": "アーカイブ済みプロパティ — 値は読み取り専用です",
+      "unknown_value": "表示できません",
+      "unknown_value_hint": "この値は新しいバージョンの Multica で設定されており、ここでは編集できません。アプリを更新するか、値をクリアしてください"
     },
     "filter_options_aria": "フィルターオプション",
     "no_results": "結果なし",
@@ -748,5 +774,15 @@
     "manage_hint": "並び順と表示設定は自分にのみ適用されます",
     "visible_toggle": "ビューバーに表示",
     "more_label": "その他のビュー"
+  },
+  "plugins": {
+    "panels": "Plugins",
+    "surface_failed": "{{name}} のインターフェースを読み込めませんでした。",
+    "surface_local_only": "{{name}} はローカルソースからインストールされているため、ブラウザでインターフェースを読み込めません。",
+    "hook_succeeded": "{{name}} が完了しました。",
+    "hook_failed": "{{name}} が失敗しました。",
+    "hook_refused": "{{name}} は実行されませんでした。",
+    "hook_activity": "最近の呼び出し",
+    "hook_never_run": "このフックはまだ実行されていません。"
   }
 }

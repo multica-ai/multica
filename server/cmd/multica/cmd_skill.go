@@ -63,6 +63,13 @@ var skillImportCmd = &cobra.Command{
 	RunE:  runSkillImport,
 }
 
+var skillRefreshCmd = &cobra.Command{
+	Use:   "refresh <id>",
+	Short: "Re-download a skill from its imported source, preserving its id and agent assignments",
+	Args:  exactArgs(1),
+	RunE:  runSkillRefresh,
+}
+
 var skillSearchCmd = &cobra.Command{
 	Use:   "search <query>",
 	Short: "Search for installable skills",
@@ -105,6 +112,7 @@ func init() {
 	skillCmd.AddCommand(skillUpdateCmd)
 	skillCmd.AddCommand(skillDeleteCmd)
 	skillCmd.AddCommand(skillImportCmd)
+	skillCmd.AddCommand(skillRefreshCmd)
 	skillCmd.AddCommand(skillSearchCmd)
 	skillCmd.AddCommand(skillFilesCmd)
 
@@ -144,6 +152,9 @@ func init() {
 	skillImportCmd.Flags().String("file", "", "Path to a local skill archive (.skill or .zip) to import. Mutually exclusive with --url.")
 	skillImportCmd.Flags().String("on-conflict", "fail", "Conflict strategy when a skill with the same name exists: fail, overwrite, rename, or skip")
 	skillImportCmd.Flags().String("output", "json", "Output format: table or json")
+
+	// skill refresh
+	skillRefreshCmd.Flags().String("output", "json", "Output format: table or json")
 
 	// skill search
 	skillSearchCmd.Flags().String("output", "json", "Output format: table or json")
@@ -408,6 +419,31 @@ func runSkillDelete(cmd *cobra.Command, args []string) error {
 	}
 
 	fmt.Printf("Skill deleted: %s\n", args[0])
+	return nil
+}
+
+func runSkillRefresh(cmd *cobra.Command, args []string) error {
+	client, err := newAPIClient(cmd)
+	if err != nil {
+		return err
+	}
+
+	// The server re-fetches the bundle from the upstream source before
+	// answering; give it the same budget as an import (server-side cap: 45s).
+	ctx, cancel := context.WithTimeout(context.Background(), cli.AtLeastAPITimeout(60*time.Second))
+	defer cancel()
+
+	var result map[string]any
+	if err := client.PostJSON(ctx, "/api/skills/"+args[0]+"/refresh", map[string]any{}, &result); err != nil {
+		return fmt.Errorf("refresh skill: %w", err)
+	}
+
+	output, _ := cmd.Flags().GetString("output")
+	if output == "json" {
+		return cli.PrintJSON(os.Stdout, result)
+	}
+
+	fmt.Printf("Skill updated from source: %s (%s)\n", strVal(result, "name"), strVal(result, "id"))
 	return nil
 }
 

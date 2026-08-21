@@ -212,6 +212,8 @@ multica config show
 multica config show --profile staging
 ```
 
+Do not set `MULTICA_DAEMON_PORT` in the host shell, Compose service, or container entrypoint that starts a daemon. The host daemon derives its health port from `--profile` and injects this variable into agent tasks itself. Remove the variable from older startup environments entirely: versions 0.4.22 and 0.4.23 otherwise mistake that shell for a managed task and reject login. Newer versions let guarded human login and `daemon status` recover when the port is the only task signal, but ordinary API and profile-resolving commands intentionally remain fail-closed until the variable is removed.
+
 When the CLI runs inside a daemon-managed agent task, it does not load or modify these human-owned profile files. Multica API commands authenticate with the task-scoped credential injected by the daemon. `config show` and `config set` use private task-local state; human/local commands such as `login`, `logout`, `setup`, `workspace switch`, local runtime profile path changes, `daemon start` / `stop` / `restart`, `daemon logs`, and `daemon probe-runtimes` are unavailable. `auth status` does not print token material in this context.
 
 `daemon status` and `daemon disk-usage` stay available so an agent can inspect the runtime hosting it, scoped to that runtime: `status` probes the health port the daemon injected, and `disk-usage` scans the workspaces root the daemon injected. Neither accepts `--profile`, `disk-usage` also rejects `--all-profiles` and `--workspaces-root`, and its STATUS column is blank because resolving it would require the human's stored token. Use `du` and `df` for anything outside that scope.
@@ -233,9 +235,9 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `issue` | `list` | List issues | `--status`, `--priority`, `--assignee`, `--project`, `--metadata` (repeatable), `--limit`, `--offset`, `--sort`, `--full-id` |
 | | `get <id>` | Show a single issue | |
 | | `create` | Create an issue | `--title` (required), `--description` / `--description-stdin` / `--description-file`, `--status`, `--priority`, `--assignee`, `--parent`, `--stage`, `--project`, `--start-date`, `--due-date`, `--attachment` (repeatable) |
-| | `update <id>` | Update issue fields | Same fields as `create`, plus `--position` |
-| | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign` |
-| | `status <id> <status>` | Change status | |
+| | `update <id>` | Update issue fields | Same fields as `create`, plus `--position`, `--no-start` |
+| | `assign <id>` | Assign or unassign | `--to` (fuzzy name match against members, agents, and squads), `--to-id`, `--unassign`, `--no-start` |
+| | `status <id> <status>` | Change status | `--no-start` |
 | | `reorder <id>` | Move within a column | |
 | | `search <query>` | Search issues | `--limit`, `--include-closed` |
 | | `children <id>` | List sub-issues grouped by stage | |
@@ -244,7 +246,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `subscriber list/add/remove <issue-id>` | Manage subscribers | `--user`, `--user-id` (defaults to the current user) |
 | | `label list/add/remove <issue-id>` | Manage labels on an issue | |
 | | `metadata list/get/set/delete <issue-id>` | Manage issue-level key-value metadata | |
-| | `property list/set/unset <issue-id>` | Set custom property values | `set`: `--name`, `--value` |
+| | `property list/set/unset <issue-id>` | Set custom property values | `set`: `--name`, `--value` (`actor` / `multi_actor` accept a member name, email, or id) |
 | | `runs <issue-id>` | View run history | `--full-id` |
 | | `run-messages <task-id>` | View the messages of a single run | `--since`, `--issue` |
 | | `usage <issue-id>` | View aggregated token usage | |
@@ -252,20 +254,22 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | | `cancel-task <task-id>` | Cancel a running or queued task | `--issue` |
 | `project` | `list/get/create/update/delete` | Manage projects | |
 | | `status <id> <status>` | Change project status | |
-| | `resource list/add/update/remove` | Manage project resources | `--type`, `--url` |
+| | `resource list/add/update/remove` | Manage project resources | `--type`, `--url`, `--local-path`, `--daemon-id`, `--execution-mode` (`in_place` / `worktree` for a local directory) |
 | `label` | `list/get/create/update/delete` | Manage workspace labels | |
-| `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type`, `--option` (repeatable); `list`: `--include-archived`; the type cannot be changed after creation |
+| `property` | `list/get/create/update/archive/unarchive` | Manage workspace custom properties | `create`: `--name`, `--type` (`text`, `number`, `select`, `multi_select`, `date`, `checkbox`, `url`, `actor`, `multi_actor`), `--option` (repeatable, select types only); `list`: `--include-archived`; the type cannot be changed after creation |
 | `agent` | `list/get/create/update/archive/restore` | Manage agents | `--name`, `--runtime-id` (required for `create`), `--instructions`, `--model`, `--thinking-level`, `--mcp-config`, `--permission-mode`, `--max-concurrent-tasks` |
 | | `copy <agent-id>` | Copy into a new agent; the original is untouched | `--name` (defaults to the original name plus ` (copy)`), `--runtime-id` (copying to another runtime also requires `--model`), `--no-skills`; secret configuration such as `custom_env`, `mcp_config`, and `runtime_config` is not copied — re-provide it with the same flags as `create` |
 | | `tasks <id>` | View an agent's tasks | |
 | | `avatar <id>` | Upload an avatar | |
 | | `env get/set <agent-id>` | Read and write custom environment variables (owner and admin only) | |
 | | `skills list/set/add <agent-id>` | Manage attached skills | `--skill-ids` (`set` replaces the full list, `add` appends) |
+| | `mcp list/add/enable/disable/remove <agent-id>` | Assign workspace MCP servers to this agent | Take the server id from `workspace mcp list`. A library entry does nothing until it is added here; `disable` stops sending it without dropping the assignment |
 | `autopilot` | `list/get/create/update/delete` | Manage automations | `create`: `--title`, `--agent`, `--mode` (all required), `--priority`, `--project`, `--subscriber` (repeatable) |
 | | `trigger <id>` | Trigger a run manually | |
 | | `runs <id>` | View run history | |
 | | `trigger-add/trigger-update/trigger-delete/trigger-rotate-url` | Manage schedule and webhook triggers | |
 | `workspace` | `list/get/create/update/switch` | Manage workspaces; `switch` sets the current profile's default workspace | |
+| | `mcp list/add/update/remove` | Manage the workspace's MCP server library | Writes are owner/admin. A server added here is assigned to no agent — give it to one with `multica agent mcp add`. `list` shows names and transports only; the stored entry is write-only and never returned. `--server-config-file` / `--server-config-stdin` keep tokens out of shell history |
 | | `member list/invite <email>` | View members, send invites | `invite`: `--role` (member or admin, default member) |
 | `repo` | `list/add/remove/checkout` | Manage workspace repositories and check them out locally | `--url` (repeatable); `checkout`: `--ref` |
 | `skill` | `list/get/create/update/delete` | Manage skills | |
@@ -281,7 +285,7 @@ The tables below cover every current top-level command, grouped the way the CLI 
 
 | Command | Subcommand | Purpose | Key flags |
 | --- | --- | --- | --- |
-| `daemon` | `start` | Start the local daemon | `--foreground`, `--device-name`, `--runtime-name`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout` (`0` means no limit), `--max-concurrent-tasks`, `--no-auto-update`; each has a matching `MULTICA_*` environment variable |
+| `daemon` | `start` | Start the local daemon | `--foreground`, `--device-name`, `--runtime-name`, `--workspaces-root`, `--poll-interval`, `--heartbeat-interval`, `--agent-timeout` (`0` means no limit), `--max-concurrent-tasks`, `--no-auto-update`; each has a matching `MULTICA_*` environment variable |
 | | `stop` / `status` / `restart` | Stop, check status, restart (`restart` takes the same flags as `start`) | |
 | | `logs` | View daemon logs | `--follow`, `--lines` |
 | | `disk-usage` | View local disk usage | `--by-workspace`, `--by-task`, `--top` |
@@ -302,8 +306,24 @@ The tables below cover every current top-level command, grouped the way the CLI 
 | `update` | — | Update the CLI to the latest version | |
 | `version` | — | Print version information | `--output` (`text` or `json`) |
 
+## Driving Multica from another coding agent
+
+If most of your work already happens inside Codex, Claude Code, or Cursor, you can
+operate Multica from there instead of switching to a terminal. The
+[Multica CLI skill](https://github.com/multica-ai/multica-cli) teaches those agents
+to drive the commands on this page safely: reading issues and comment threads
+without burning tokens, writing comments through a file, and handling the side
+effects that mentions, status changes, and assignments carry.
+
+It runs entirely through your authenticated CLI and grants no access of its own —
+permissions still come from your login, selected profile, and workspace. It requires
+CLI v0.4.26 or newer. The repository README covers installation for the Claude Code
+plugin marketplace, the Codex skill installer, Cursor, and any other tool that loads
+Markdown instructions.
+
 ## Next steps
 
+- [Multica CLI skill](https://github.com/multica-ai/multica-cli) — operate Multica from Codex, Claude Code, or Cursor.
 - [Authentication and tokens](/auth-tokens) — creating, renewing, and revoking PATs.
 - [Troubleshooting](/troubleshooting) — diagnosing command errors and tasks that never start.
 - [Create and configure an agent](/agents-create) — the full semantics of every `agent create` field.

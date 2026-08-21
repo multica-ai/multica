@@ -1,0 +1,96 @@
+---
+title: Telegram Bot 接入
+description: 把 Multica 智能体接入你自己的 Telegram Bot，支持私聊、群聊 @、forum topic 和 /issue。
+---
+
+import { Callout } from "fumadocs-ui/components/callout";
+
+Multica 使用你通过 Telegram 官方 [@BotFather](https://t.me/BotFather) 创建的 Bot。一个 Bot 对应一个 Multica 智能体；需要多个独立 Bot 身份时，为每个智能体分别创建。
+
+Telegram 集成[由社区维护](/community-maintained)：每个版本都会随包发布，但不附带官方支持 SLA。遇到问题请提到 [GitHub issues](https://github.com/multica-ai/multica/issues)。
+
+## 开始前
+
+- 连接操作需要工作区 owner 或 admin 权限。
+- API 服务器必须能够访问 `https://api.telegram.org`。
+- 你需要 @BotFather 签发的 Bot token；它等同于密码。
+
+## 1. 创建 Bot
+
+1. 打开 [@BotFather](https://t.me/BotFather)，发送 `/newbot`。
+2. 设置显示名称和一个以 `bot` 结尾的用户名。
+3. 复制 HTTP API token。
+4. 保持 **Group Privacy** 开启。群聊里 Multica 只需要接收命令、明确的 @ 和对 Bot 消息的回复。
+
+<Callout type="warning">
+不要把 token 发到 issue、聊天、日志或代码仓库。若已泄露，请在 @BotFather 中撤销，再用替换后的 token 重新连接。
+</Callout>
+
+## 2. 连接到智能体
+
+1. 在 Multica 打开 **智能体**，选择目标智能体并进入 **集成**。
+2. 点击 **连接 Telegram**。
+3. 粘贴 Bot token，然后点击 **连接**。
+
+Multica 会实时请求 Telegram 验证 Bot，检查是否存在与长轮询冲突的 webhook，加密保存 token，并启动一条受监督的 `getUpdates` 连接。一个 Bot 若已连接到其他智能体或工作区，必须先在原处断开。
+
+## 首次使用与账号绑定
+
+成员第一次向 Bot 发消息时，会收到一次性 Multica 账号绑定链接。打开链接，登录同一工作区的 Multica 账号，再回到 Telegram 重新发送消息。链接 15 分钟后过期；再私聊 Bot 即可获取新链接。
+
+在群里，Bot 不会公开发送带凭据性质的绑定链接，只会让发送者先私聊 Bot。
+
+只有当前工作区成员能使用 Bot；每条消息都会重新校验成员身份。
+
+## 使用 Bot
+
+### 私聊
+
+直接打开 Bot 发送文字，不需要 @。
+
+### 群聊与 forum topic
+
+把 Bot 加入群后，@它，或直接回复它发过的消息。被接受的消息会保留在持续的 Multica 对话中；未明确发给 Bot 的群聊内容不会被收集。回复其他成员的消息时必须同时 @ Bot，只有这种情况下，被引用消息的发送者及文字（或 caption）才会随新指令进入上下文；只回复成员而不 @ Bot 不会触发。普通群聊各自延续一段 Multica 对话；forum 的每个 topic 分别隔离。
+
+### 命令
+
+- `/new <消息>` 让这条消息不带旧上下文运行；在回复其他成员并明确 @ Bot 时，被选中的引用内容仍会随这条 fresh 指令进入上下文。单独发送 `/new` 会把 fresh 意图应用到下一条非空消息。
+- `/issue <标题>` 创建 Multica issue，后续行作为可选描述；不带标题时返回用法提示。
+- 群聊支持 `/issue@your_bot` 这种 Telegram 命令后缀。
+
+### 回复与内容范围
+
+Bot 通过发送并编辑 Telegram 消息来流式展示文字回复，引用触发消息、保留 forum topic，并按 Telegram 长度限制自动分段。最终回复在进程内异步投递。正常情况下，某个聊天的退避等待不会占用 worker；缓存达到容量上限并压缩退避状态时，同一 Bot installation 下的其他聊天可能被保守延迟。终态队列有固定容量，超限任务会被明确拒绝并记录错误；队列不会跨服务重启恢复。
+
+当前版本只接收文字。图片、文件、视频、语音、贴纸等非文字消息在私聊中会收到明确的不支持提示；群里明确 @ Bot 的媒体消息也会收到提示，未 @ 的媒体消息保持静默。
+
+## 管理与断开
+
+在 **设置 → 集成 → Telegram** 查看所有已连接 Bot。owner 和 admin 可以断开。断开会停止长轮询和后续回复，但保留 Multica 对话与审计记录。
+
+## 自托管配置
+
+启动 API 服务器前配置一个长期稳定的 32 字节加密密钥：
+
+```dotenv
+MULTICA_TELEGRAM_SECRET_KEY=<base64 编码的 32 字节密钥>
+```
+
+可用 `openssl rand -base64 32` 生成。丢失或轮换此密钥后，已有 Bot token 无法解密，需要逐个重新连接。
+
+绑定链接使用 `MULTICA_APP_URL`，未设置时回退到 `FRONTEND_ORIGIN`；生成的地址必须能被成员访问。服务器网络或代理还必须允许 HTTPS 访问 `api.telegram.org`；Go 会读取标准的 `HTTPS_PROXY` 和 `NO_PROXY` 环境变量。
+
+## 故障排查
+
+- **无法验证 Bot**：先检查服务器网络和代理。只有 Telegram 明确拒绝 token 时才需要重新生成。
+- **webhook 冲突**：连接前移除这个 Bot 已有的 webhook；Telegram 不允许 webhook 与 `getUpdates` 同时使用。
+- **409 轮询冲突**：另一个 Multica 实例或进程正在轮询同一个 Bot。停止另一个消费者，或为不同环境使用不同 Bot。
+- **群里不回复**：确认 Bot 已入群，并且消息 @ 了它或回复了它的消息。
+- **绑定链接过期**：重新私聊 Bot，并使用最新链接。
+- **Bot 不执行**：检查智能体是否已归档，以及它使用的[运行时](/daemon-runtimes)是否在线。
+
+## 接下来
+
+- [聊天集成](/channels) — 比较平台并理解会话与身份机制。
+- [与智能体对话](/chat) — Bot 消息如何变成智能体执行。
+- [Issues](/issues) — `/issue` 创建的工作项。

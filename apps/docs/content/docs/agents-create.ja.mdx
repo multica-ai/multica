@@ -20,7 +20,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 Build with AI には、Builder との対話のためにオンラインのランタイムが必要です。どちらの方法でも、作成前に最終的な構成を確認して修正できます。
 
-![エージェント作成の開始方法選択画面：Start blank と Build with AI](/images/docs/quickstart-new-agent.png)
+![エージェント作成の開始方法選択画面：Start blank と Build with AI](/images/docs/quickstart-new-agent.webp)
 
 ## 必須項目
 
@@ -83,7 +83,7 @@ Access は、どのメンバーがこのエージェントを実行（割り当�
 | **Entire workspace** | ワークスペースの全メンバーが実行できます。 |
 | **Specific people** | 自分と選択したメンバーだけが実行できます。 |
 
-![Access 設定：Only me、Entire workspace、Specific people の 3 択](/images/docs/agent-access-settings.png)
+![Access 設定：Only me、Entire workspace、Specific people の 3 択](/images/docs/agent-access-settings.webp)
 
 Access を変更できるのはエージェントの owner だけで、ワークスペースの管理者にもできません。ワークスペースの `owner` と `admin` はその他の構成を管理できますが、管理者の立場を使って、許可されていないエージェントを実行することはできません。
 
@@ -118,6 +118,10 @@ Access を変更できるのはエージェントの owner だけで、ワーク
 ## カスタム引数と MCP
 
 カスタム引数は配列として 1 つずつ AI コーディングツールに渡され、シェル展開は行われません。引数名が有効かどうかは対応するツールが判断します。専用フィールドがあるモデル設定を、ここで重ねて指定する必要はありません。
+
+<Callout type="warning">
+認証情報などのシークレットをカスタム引数に入れないでください。値は子プロセスの argv に残り、同じマシン上の別プロセスから `ps` や `/proc` を通じて見える可能性があります。代わりに環境変数（`custom_env`）を使用してください。デーモンログでは引数値をマスクしますが、OS のプロセス一覧までは保護できません。
+</Callout>
 
 MCP 構成にはトークンが含まれることがあり、保存と表示のルールは環境変数と同じです。この項目が表示されるのは、マネージド MCP 構成をサポートするランタイムだけです。サポートしないツールが、構成を保存しただけで MCP 機能を獲得することはありません。
 

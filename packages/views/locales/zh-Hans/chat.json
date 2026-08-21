@@ -14,6 +14,7 @@
     "placeholder_archived": "此会话已归档",
     "placeholder_archived_agent": "该智能体已归档",
     "placeholder_runtime_required": "绑定运行时后继续",
+    "placeholder_access_revoked": "你已没有运行该智能体的权限",
     "placeholder_named": "给 {{name}} 发消息…",
     "placeholder_default": "输入消息…",
     "send_tooltip": "发送",
@@ -36,6 +37,7 @@
     "clear": "全部清空",
     "steer": "引导",
     "steer_unavailable": "当前回复开始后才能引导",
+    "steer_no_permission": "你已没有运行该智能体的权限",
     "steer_unavailable_toast": "暂时无法引导，正在刷新队列。",
     "edit": "编辑排队消息",
     "remove": "移除排队消息",
@@ -57,12 +59,13 @@
       "runtime_recovery": "智能体在完成前重启了。请重试。",
       "manual": "这次回复已取消。",
       "skill_bundle_unavailable": "没能下载到智能体的 skill，这次回复没有启动。通常是网络连接问题，请重试。",
+      "runtime_cli_timeout": "本机 OpenClaw CLI 没能在超时时间内响应，这次运行没有启动。这是本地启动超时，不是网络问题——除非 CLI 变快或调大超时（MULTICA_OPENCLAW_CLI_TIMEOUT），否则重试也不会成功。",
       "provider_network": "与模型服务的连接中断，回复没能完成。检查网络后重试。",
       "provider_auth_or_access": "智能体的模型账号登录已失效。重新登录后再试。",
       "provider_quota_limit": "智能体的模型账号额度已用尽。充值或更换账号后再试。",
       "provider_capacity_or_rate_limit": "模型服务繁忙或触发了限流。稍后再试。",
       "context_overflow": "这次对话超出了模型的上下文长度。开一个新会话，或把需求拆得更小一些。",
-      "runtime_missing_executable": "在这台设备上找不到智能体的 CLI。确认已安装并且在 PATH 中，然后重试。",
+      "runtime_missing_executable": "无法在这台设备上运行智能体的 CLI。确认已正确安装并且在 PATH 中，然后重试。",
       "runtime_version_unsupported": "智能体的 CLI 版本过低。升级后重试。",
       "fallback": "出了点问题，智能体未能完成回复。请重试。"
     },
@@ -110,7 +113,8 @@
       "cancel": "取消",
       "confirm": "删除",
       "confirming": "删除中..."
-    }
+    },
+    "row_actions_aria": "聊天操作"
   },
   "window": {
     "new_chat_tooltip": "新对话",
@@ -169,6 +173,7 @@
   },
   "no_agent_banner": "需要先有一个智能体才能开始对话。",
   "archived_agent_banner": "{{name}} 已归档——此会话为只读。",
+  "agent_access_revoked_banner": "你已没有运行 {{name}} 的权限——此会话为只读。",
   "runtime_required_banner": {
     "fallback_name": "该智能体",
     "message": "{{name}} 需要绑定运行时后才能回复。",
@@ -215,7 +220,8 @@
     "pinned": "已置顶",
     "archive": "归档",
     "unarchive": "取消归档",
-    "archived_title": "已归档"
+    "archived_title": "已归档",
+    "row_actions_aria": "聊天操作"
   },
   "header": {
     "view_profile": "查看 Agent 资料",

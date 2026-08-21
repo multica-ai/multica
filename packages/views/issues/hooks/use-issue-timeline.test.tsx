@@ -68,6 +68,7 @@ const queryState = vi.hoisted(() => ({
 // can assert what would have been written.
 const cacheUpdates = vi.hoisted(() => ({
   last: null as unknown,
+  invalidations: 0,
 }));
 
 vi.mock("@tanstack/react-query", async () => {
@@ -81,7 +82,9 @@ vi.mock("@tanstack/react-query", async () => {
       isLoading: queryState.isLoading,
     }),
     useQueryClient: () => ({
-      invalidateQueries: vi.fn(),
+      invalidateQueries: vi.fn(() => {
+        cacheUpdates.invalidations += 1;
+      }),
       setQueryData: vi.fn((_key: unknown, updater: unknown) => {
         cacheUpdates.last = typeof updater === "function"
           ? (updater as (old: unknown) => unknown)(queryState.data)
@@ -118,6 +121,7 @@ describe("useIssueTimeline", () => {
     queryState.data = [];
     queryState.isLoading = false;
     cacheUpdates.last = null;
+    cacheUpdates.invalidations = 0;
   });
 
   // CommentCard is wrapped in React.memo (perf fix for long timelines, see
@@ -169,6 +173,28 @@ describe("useIssueTimeline", () => {
       content: "updated",
       attachmentIds: ["attachment-1"],
       suppressAgentIds: ["agent-1"],
+    });
+  });
+
+  it("passes the captured comment content through editComment", async () => {
+    const { result } = renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    await act(async () => {
+      await result.current.editComment(
+        "comment-1",
+        "updated",
+        [],
+        undefined,
+        "original",
+      );
+    });
+
+    expect(stableHandles.updateMutateAsync).toHaveBeenCalledWith({
+      commentId: "comment-1",
+      content: "updated",
+      attachmentIds: [],
+      suppressAgentIds: undefined,
+      contentBase: "original",
     });
   });
 
@@ -276,6 +302,82 @@ describe("useIssueTimeline", () => {
     });
     // setQueryData should not have been invoked for a non-matching issue.
     expect(cacheUpdates.last).toBeNull();
+  });
+
+  it("rejects a delayed comment update older than the cached revision", () => {
+    queryState.data = [{
+      type: "comment",
+      id: "c1",
+      actor_type: "member",
+      actor_id: "u",
+      content: "latest",
+      parent_id: null,
+      created_at: "2026-05-06T01:00:00Z",
+      updated_at: "2026-05-06T03:00:00Z",
+      revision: 3,
+      reactions: [],
+      attachments: [],
+    }];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    act(() => {
+      wsHandlers.get("comment:updated")!({
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "stale",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T02:00:00Z",
+          revision: 2,
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+    });
+
+    expect(cacheUpdates.last).toEqual(queryState.data);
+  });
+
+  it("refetches instead of applying an unversioned event over versioned cache state", () => {
+    queryState.data = [{
+      type: "comment",
+      id: "c1",
+      actor_type: "member",
+      actor_id: "u",
+      content: "versioned",
+      parent_id: null,
+      created_at: "2026-05-06T01:00:00Z",
+      updated_at: "2026-05-06T03:00:00Z",
+      revision: 3,
+      reactions: [],
+      attachments: [],
+    }];
+    renderHook(() => useIssueTimeline("issue-1", "user-1"));
+
+    act(() => {
+      wsHandlers.get("comment:updated")!({
+        comment: {
+          id: "c1",
+          issue_id: "issue-1",
+          author_type: "member",
+          author_id: "u",
+          content: "unversioned",
+          parent_id: null,
+          created_at: "2026-05-06T01:00:00Z",
+          updated_at: "2026-05-06T04:00:00Z",
+          type: "comment",
+          reactions: [],
+          attachments: [],
+        },
+      });
+    });
+
+    expect(cacheUpdates.last).toEqual(queryState.data);
+    expect(cacheUpdates.invalidations).toBeGreaterThan(0);
   });
 
   // The global useRealtimeSync handler now uses refetchType: "none" for

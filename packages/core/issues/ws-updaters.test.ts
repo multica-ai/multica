@@ -175,6 +175,36 @@ describe("onIssueLabelsChanged", () => {
     ).toEqual({ labels: [labelB] });
   });
 
+  it("uses the picker cache revision to reject an older label snapshot", () => {
+    const labelKey = labelKeys.byIssue(WS_ID, ISSUE_ID);
+    qc.setQueryData<IssueLabelsResponse>(labelKey, {
+      labels: [labelA],
+      issue_revision: 3,
+    });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 2);
+
+    expect(qc.getQueryData<IssueLabelsResponse>(labelKey)).toEqual({
+      labels: [labelA],
+      issue_revision: 3,
+    });
+  });
+
+  it("advances the picker cache labels and revision together", () => {
+    const labelKey = labelKeys.byIssue(WS_ID, ISSUE_ID);
+    qc.setQueryData<IssueLabelsResponse>(labelKey, {
+      labels: [labelA],
+      issue_revision: 3,
+    });
+
+    onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB], 4);
+
+    expect(qc.getQueryData<IssueLabelsResponse>(labelKey)).toEqual({
+      labels: [labelB],
+      issue_revision: 4,
+    });
+  });
+
   it("leaves the per-issue label cache untouched when the picker has not fetched", () => {
     onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB]);
 
@@ -437,6 +467,29 @@ describe("issue property snapshots", () => {
 
     expectInvalidated(qc, boardUpdatedKey);
     expect(qc.getQueryState(boardPositionKey)?.isInvalidated).toBe(false);
+  });
+});
+
+describe("auxiliary issue activity ordering", () => {
+  it.each([
+    ["labels", (qc: QueryClient) => onIssueLabelsChanged(qc, WS_ID, ISSUE_ID, [labelB])],
+    ["metadata", (qc: QueryClient) => onIssueMetadataChanged(qc, WS_ID, ISSUE_ID, { state: "changed" })],
+    ["properties", (qc: QueryClient) => onIssuePropertiesChanged(qc, WS_ID, ISSUE_ID, { estimate: 5 })],
+  ])("re-sorts last_activity after committed %s changes", (_kind, apply) => {
+    const qc = new QueryClient();
+    const activityKey = issueKeys.listSorted(WS_ID, {
+      sort_by: "last_activity",
+      sort_direction: "desc",
+    });
+    const positionKey = issueKeys.listSorted(WS_ID, { sort_by: "position" });
+    qc.setQueryData<ListIssuesCache>(activityKey, makeListCache(baseIssue));
+    qc.setQueryData<ListIssuesCache>(positionKey, makeListCache(baseIssue));
+
+    apply(qc);
+
+    expectInvalidated(qc, activityKey);
+    expect(qc.getQueryState(positionKey)?.isInvalidated).toBe(false);
+    qc.clear();
   });
 });
 

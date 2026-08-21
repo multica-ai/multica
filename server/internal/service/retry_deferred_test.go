@@ -85,6 +85,89 @@ func TestCreateRetryTaskFireAtControlsDeferral(t *testing.T) {
 	}
 }
 
+// TestRuntimeOfflineRetryWaitsForHealthyRuntime covers the complete recovery
+// boundary: runtime_offline creates a deferred child, an offline runtime cannot
+// promote or claim it even after fire_at is due, and a fresh online heartbeat
+// releases that exact child without consuming another retry.
+func TestRuntimeOfflineRetryWaitsForHealthyRuntime(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	_, _, agentID, issueID := seedAttributionFixture(t, pool)
+
+	var runtimeID string
+	if err := pool.QueryRow(ctx, `SELECT runtime_id::text FROM agent WHERE id = $1`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("read agent runtime: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `UPDATE agent_runtime SET status='online', last_seen_at=now() WHERE id=$1`, runtimeID)
+	})
+	if _, err := pool.Exec(ctx, `UPDATE agent_runtime SET status='offline', last_seen_at=now() - interval '4 hours' WHERE id=$1`, runtimeID); err != nil {
+		t.Fatalf("mark runtime offline: %v", err)
+	}
+
+	var parentID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (agent_id, runtime_id, issue_id, status, priority, attempt, max_attempts, session_id, work_dir)
+		VALUES ($1, $2, $3, 'running', 0, 1, 2, 'src-session', '/tmp/src-workdir')
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&parentID); err != nil {
+		t.Fatalf("insert parent task: %v", err)
+	}
+	t.Cleanup(func() {
+		pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
+	})
+
+	svc := NewTaskService(q, pool, nil, events.New())
+	if _, err := svc.FailTask(ctx, parentID, "runtime went offline", "src-session", "/tmp/src-workdir", "", "runtime_offline", false, "", ""); err != nil {
+		t.Fatalf("FailTask: %v", err)
+	}
+
+	var childID pgtype.UUID
+	var childStatus string
+	var fireAt pgtype.Timestamptz
+	if err := pool.QueryRow(ctx, `
+		SELECT id, status, fire_at FROM agent_task_queue WHERE parent_task_id = $1
+	`, parentID).Scan(&childID, &childStatus, &fireAt); err != nil {
+		t.Fatalf("read retry child: %v", err)
+	}
+	if childStatus != "deferred" || !fireAt.Valid {
+		t.Fatalf("runtime_offline child = status:%q fire_at_valid:%v, want deferred with fire_at", childStatus, fireAt.Valid)
+	}
+	if _, err := pool.Exec(ctx, `UPDATE agent_task_queue SET fire_at=now() - interval '1 second' WHERE id=$1`, childID); err != nil {
+		t.Fatalf("make retry due: %v", err)
+	}
+
+	claimed, err := svc.ClaimTaskForRuntime(ctx, util.MustParseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("claim while offline: %v", err)
+	}
+	if claimed != nil {
+		t.Fatalf("offline runtime claimed retry %s", util.UUIDToString(claimed.ID))
+	}
+	if err := pool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id=$1`, childID).Scan(&childStatus); err != nil {
+		t.Fatalf("read child after offline claim: %v", err)
+	}
+	if childStatus != "deferred" {
+		t.Fatalf("offline claim changed child to %q, want deferred", childStatus)
+	}
+
+	if _, err := pool.Exec(ctx, `UPDATE agent_runtime SET status='online', last_seen_at=now() WHERE id=$1`, runtimeID); err != nil {
+		t.Fatalf("restore runtime heartbeat: %v", err)
+	}
+	claimed, err = svc.ClaimTaskForRuntime(ctx, util.MustParseUUID(runtimeID))
+	if err != nil {
+		t.Fatalf("claim after reconnect: %v", err)
+	}
+	if claimed == nil || claimed.ID != childID {
+		got := "nil"
+		if claimed != nil {
+			got = util.UUIDToString(claimed.ID)
+		}
+		t.Fatalf("claimed task = %s, want retry child %s", got, util.UUIDToString(childID))
+	}
+}
+
 // TestFailTaskProviderNetworkBudget is the end-to-end guard for Elon's must-fix
 // (MUL-4910): FailTask must (1) grant provider_network its raised budget and
 // persist a self-consistent child (attempt=3, max_attempts=3), and (2) still
@@ -132,7 +215,7 @@ func TestFailTaskProviderNetworkBudget(t *testing.T) {
 				pool.Exec(context.Background(), `DELETE FROM agent_task_queue WHERE parent_task_id = $1 OR id = $1`, parentID)
 			})
 
-			if _, err := svc.FailTask(ctx, parentID, "API Error: Connection closed mid-response.", "src-session", "/tmp/src-workdir", "agent_error.provider_network", false, ""); err != nil {
+			if _, err := svc.FailTask(ctx, parentID, "API Error: Connection closed mid-response.", "src-session", "/tmp/src-workdir", "", "agent_error.provider_network", false, "", ""); err != nil {
 				t.Fatalf("FailTask: %v", err)
 			}
 

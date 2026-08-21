@@ -1,0 +1,68 @@
+{
+  "manifest_version": 1,
+  "key": "ai.multica.triage-notify",
+  "name": "Triage Notify",
+  "description": "Sends an issue to an external triage service and writes its answer back as a comment. Demonstrates all three host-driven hook triggers: a button in the panel, an entry in the issue menu, and automatic dispatch when an issue is created.",
+  "version": "1.0.0",
+  "author": {
+    "name": "multica",
+    "url": "https://multica.ai"
+  },
+  "scopes": [
+    "issues:read",
+    "comments:read",
+    "comments:write",
+    "net:triage.example.com"
+  ],
+  "config": {
+    "team": {
+      "type": "string",
+      "label": "Team",
+      "description": "Passed to the triage service so it can route the issue.",
+      "required": true,
+      "placeholder": "platform"
+    }
+  },
+  "contributes": {
+    "surfaces": [
+      {
+        "key": "triage",
+        "type": "issue_panel",
+        "name": "Triage",
+        "entry": "ui/main.js",
+        "platforms": [
+          "web",
+          "desktop"
+        ]
+      }
+    ],
+    "hooks": [
+      {
+        "key": "triage_issue",
+        "name": "Triage this issue",
+        "description": "Sends the issue title and description to the triage service and posts its suggested owner and priority back as a comment.",
+        "input_schema": {
+          "type": "object",
+          "properties": {
+            "reason": {
+              "type": "string"
+            }
+          }
+        },
+        "triggers": [
+          "ui",
+          "manual",
+          "event"
+        ],
+        "events": [
+          "issue.created"
+        ],
+        "transport": {
+          "type": "http",
+          "url": "https://triage.example.com/hooks/triage"
+        },
+        "timeout_ms": 8000
+      }
+    ]
+  }
+}

@@ -282,7 +282,13 @@ export function ResourceLeadingVisual({
     }
     case "issue-status":
       // A null status (loading) renders StatusIcon's neutral fallback glyph.
-      inner = <StatusIcon status={visual.status ?? ""} className="size-3.5" />;
+      inner = (
+        <StatusIcon
+          status={visual.status ?? ""}
+          category={visual.category}
+          className="size-3.5"
+        />
+      );
       break;
     case "project-icon":
       inner = <ProjectIcon project={{ icon: visual.icon }} size="sm" />;

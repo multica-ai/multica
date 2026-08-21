@@ -1,37 +1,40 @@
 ---
 title: 채팅 연동
-description: Multica 에이전트를 Feishu, Lark, Slack, DingTalk 또는 WeCom에 연결해 팀이 이미 사용하는 채팅 도구에서 활용합니다.
+description: Multica 에이전트를 Feishu, Lark, Slack, DingTalk, WeCom 또는 Telegram에 연결해 팀이 이미 사용하는 채팅 도구에서 활용합니다.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 채팅 연동을 사용하면 팀이 Multica를 열지 않고도 에이전트에게 바로 질문하고, 그룹 채팅에서 @멘션하거나, 채팅 창에서 이슈를 만들 수 있습니다.
 
-현재 Feishu/Lark, Slack, DingTalk, WeCom을 지원합니다. 같은 대화, 신원, 실행 메커니즘을 사용하지만 설치 방법은 다릅니다.
+현재 Feishu/Lark, Slack, DingTalk, WeCom, Telegram을 지원합니다. 같은 대화, 신원, 실행 메커니즘을 사용하지만 설치 방법은 다릅니다.
 
 ## 플랫폼 선택
 
-| | Feishu / Lark | Slack | DingTalk | WeCom |
-|---|---|---|---|---|
-| 설치 방법 | Multica에서 QR 코드를 만든 뒤 Feishu로 스캔해 승인 | Slack에서 app을 만든 뒤 두 token을 Multica에 입력 | 사내 app과 Stream 모드 로봇을 만든 뒤 AppKey와 AppSecret을 Multica에 입력 | WeCom 관리자 콘솔에서 장기 연결을 켠 스마트 봇을 만든 뒤 Bot ID와 Secret을 Multica에 입력 |
-| 에이전트와 DM | 지원 | 지원 | 지원 | 지원 |
-| 그룹 채팅 또는 채널 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 |
-| 이슈 만들기 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` slash 명령으로 에이전트가 설명을 정리한 뒤 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 |
-| 연결 방식 | 플랫폼 장기 연결 | Socket Mode | Stream 모드 | 플랫폼 장기 연결 |
+| | Feishu / Lark | Slack | DingTalk | WeCom | Telegram |
+|---|---|---|---|---|---|
+| 설치 방법 | Multica에서 QR 코드를 만든 뒤 Feishu로 스캔해 승인 | Slack에서 app을 만든 뒤 두 token을 Multica에 입력 | 사내 app과 Stream 모드 로봇을 만든 뒤 AppKey와 AppSecret을 Multica에 입력 | WeCom 관리자 콘솔에서 장기 연결을 켠 스마트 봇을 만든 뒤 Bot ID와 Secret을 Multica에 입력 | @BotFather에서 Bot을 만든 뒤 token을 Multica에 입력 |
+| 에이전트와 DM | 지원 | 지원 | 지원 | 지원 | 지원 |
+| 그룹 채팅 또는 채널 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하면 트리거 | Bot을 @멘션하거나 Bot에 답장하면 트리거 |
+| 이슈 만들기 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` slash 명령으로 에이전트가 설명을 정리한 뒤 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 | `/issue` 메시지 명령으로 입력 내용을 바로 생성 |
+| 연결 방식 | 플랫폼 장기 연결 | Socket Mode | Stream 모드 | 플랫폼 장기 연결 | `getUpdates` long polling |
 
 새 연결은 현재 중국 본토 버전 Feishu에서만 만들 수 있습니다. 기존 국제 버전 Lark 연결은 계속 사용하고 관리할 수 있습니다.
 
 Bot 하나는 Multica 에이전트 하나에 연결됩니다. 같은 채팅 플랫폼에서 여러 에이전트를 사용하려면 각각 별도의 Bot을 연결해야 합니다.
 
-DingTalk과 WeCom은 커뮤니티에서 유지 관리합니다. 모든 릴리스에 포함되지만 공식 지원 SLA는 없습니다. 문제는 [GitHub issues](https://github.com/multica-ai/multica/issues)에 알려주세요.
+DingTalk, WeCom, Telegram은 [커뮤니티에서 유지 관리](/community-maintained)합니다. 모든 릴리스에 포함되지만 공식 지원 SLA는 없습니다. 문제는 [GitHub issues](https://github.com/multica-ai/multica/issues)에 알려주세요.
 
 WeCom은 현재 텍스트 메시지만 처리합니다. 음성, 이미지, 파일 메시지에는 안내 문구만 회신하며 에이전트로 전달하지 않습니다.
+
+Telegram은 현재 텍스트 메시지만 처리합니다. 미지원 미디어에는 안내 문구만 회신하며 에이전트로 전달하지 않습니다.
 
 자세한 단계는 다음 문서를 참고하세요.
 
 - [Feishu / Lark Bot 연결](/lark-bot-integration)
 - [Slack Bot 연결](/slack-bot-integration)
 - [DingTalk Bot 연결](/dingtalk-bot-integration)
+- [Telegram Bot 연결](/telegram-bot-integration)
 
 ## 메시지 실행 과정
 
@@ -51,6 +54,7 @@ Bot을 @멘션하지 않은 채널 메시지는 에이전트를 트리거하지 
 - Slack DM은 채널별로 구분하고, 채널 안에서는 각 thread가 별도 대화를 저장합니다.
 - DingTalk는 conversation별로 대화를 구분하며 각 DM 또는 그룹이 자체 대화를 이어갑니다.
 - WeCom은 채팅별로 대화를 구분하며 각 DM 또는 그룹 채팅이 자체 대화를 이어갑니다.
+- Telegram은 채팅별로 대화를 구분하며 forum topic은 topic별로 분리합니다.
 
 채널에서 후속 질문을 할 때도 Bot을 다시 @멘션해야 합니다. 에이전트는 자신에게 보낸 메시지만 받으며 전체 채널 기록을 자동으로 읽지 않습니다.
 
@@ -79,6 +83,7 @@ MULTICA_LARK_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_SLACK_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_DINGTALK_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 MULTICA_WECOM_SECRET_KEY=<base64로 인코딩한 32바이트 키>
+MULTICA_TELEGRAM_SECRET_KEY=<base64로 인코딩한 32바이트 키>
 ```
 
 이 키는 Bot 자격 증명을 암호화해 저장하는 데 사용됩니다. 생성, 보관, 교체 방법은 [환경 변수](/environment-variables)를 참고하세요. Multica Cloud에는 이미 설정되어 있습니다.
@@ -90,4 +95,5 @@ WeCom은 추가로 백엔드를 **단일 레플리카**로 운영해야 합니�
 - [Feishu / Lark Bot 연결](/lark-bot-integration)
 - [Slack Bot 연결](/slack-bot-integration)
 - [DingTalk Bot 연결](/dingtalk-bot-integration)
+- [Telegram Bot 연결](/telegram-bot-integration)
 - [에이전트와 대화](/chat)

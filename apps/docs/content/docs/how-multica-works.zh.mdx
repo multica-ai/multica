@@ -9,7 +9,7 @@ import { Callout } from "fumadocs-ui/components/callout";
 
 ## 一次执行的完整链路
 
-![一次执行的流程图：左侧 Multica 区域负责记录与调度，Issue 触发创建 Task；右侧"你的电脑"区域中，守护进程领取任务、启动 AI 编程工具、读写工作目录；过程消息实时流回执行日志，最终结果由守护进程写回 Issue](/images/docs/how-a-run-works.png)
+![一次执行的流程图：左侧 Multica 区域负责记录与调度，Issue 触发创建 Task；右侧"你的电脑"区域中，守护进程领取任务、启动 AI 编程工具、读写工作目录；过程消息实时流回执行日志，最终结果由守护进程写回 Issue](/images/docs/how-a-run-works.webp)
 
 1. **Issue 提供上下文。** Issue 保存工作说明、讨论和负责人。分配给智能体后，系统会使用该智能体的指令、模型、skill 和运行时配置。
 2. **Multica 创建执行任务。** 执行任务进入队列；没有在线运行时时，它会在队列中等待。

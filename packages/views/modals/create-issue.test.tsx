@@ -557,7 +557,11 @@ vi.mock("sonner", () => ({
   },
 }));
 
-import { CreateIssueModal, ManualCreatePanel } from "./create-issue";
+import {
+  CreateIssueModal,
+  ManualCreatePanel,
+  manualDialogContentClass,
+} from "./create-issue";
 
 function renderModal(element: React.ReactElement) {
   const qc = new QueryClient({
@@ -1660,6 +1664,37 @@ describe("CreateIssueModal", () => {
       expect(createButton.className).toContain("aria-disabled:cursor-not-allowed");
       expect(createButton.className).toContain("aria-disabled:active:translate-y-0");
       expect(createButton.className).not.toContain("aria-disabled:pointer-events-none");
+    });
+  });
+
+  // MUL-6236 — the manual panel shares the agent panel's phone treatment; it
+  // is one tap away behind "Switch to Manual", so it hit the same bugs.
+  describe("phone layout", () => {
+    it("caps the dialog inside the viewport on phones", () => {
+      for (const isExpanded of [false, true]) {
+        const className = manualDialogContentClass(isExpanded);
+
+        // Without this the `!important` widths below also override
+        // DialogContent's own `max-w-[calc(100%-2rem)]` and the card runs
+        // edge to edge on a phone.
+        expect(className).toContain("!max-w-[calc(100vw-1.5rem)]");
+        expect(className).toContain(isExpanded ? "sm:!max-w-4xl" : "sm:!max-w-2xl");
+      }
+    });
+
+    it("keeps every footer control a direct child of the grid container", () => {
+      renderModal(<CreateIssueModal onClose={vi.fn()} />);
+
+      const switchToAgent = screen.getByRole("button", { name: /Switch to Agent/i });
+      const create = screen.getByRole("button", { name: "Create Issue" });
+
+      // Grid placement only sees direct children — re-wrapping either control
+      // collapses the 2x2 phone footer back to one jammed row.
+      const footer = switchToAgent.parentElement;
+      expect(footer?.className).toContain("grid-cols-[auto_1fr]");
+      expect(footer?.className).toContain("sm:flex");
+      expect(create.parentElement).toBe(footer);
+      expect(create.className).toContain("justify-self-end");
     });
   });
 });

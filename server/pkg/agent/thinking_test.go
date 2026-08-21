@@ -179,7 +179,7 @@ func TestRunCodexDebugModels_ArgvSeenByBinary(t *testing.T) {
 	// Linux ETXTBSY when we exec the file (Go #22315).
 	writeTestExecutable(t, fake, []byte(script))
 
-	raw, err := runCodexDebugModels(context.Background(), fake)
+	raw, err := runCodexDebugModels(context.Background(), Command{Path: fake})
 	if err != nil {
 		t.Fatalf("runCodexDebugModels: %v (output=%q)", err, raw)
 	}
@@ -251,6 +251,18 @@ func TestParseCodexModelCatalog(t *testing.T) {
 				]
 			},
 			{
+				"slug": "gpt-5.6-terra",
+				"display_name": "GPT-5.6-Terra",
+				"visibility": "list",
+				"supported_reasoning_levels": []
+			},
+			{
+				"slug": "gpt-5.6-luna",
+				"display_name": "GPT-5.6-Luna",
+				"visibility": "list",
+				"supported_reasoning_levels": []
+			},
+			{
 				"slug": "hidden-model",
 				"display_name": "Hidden",
 				"visibility": "hide",
@@ -268,11 +280,34 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parseCodexModelCatalog: %v", err)
 	}
-	if len(got) != 2 {
-		t.Fatalf("expected two visible models, got %+v", got)
+	if len(got) != 4 {
+		t.Fatalf("expected four visible models, got %+v", got)
 	}
-	if got[0].ID != "gpt-5.6-sol" || got[0].Label != "GPT-5.6-Sol" || !got[0].Default {
+	if got[0].ID != "gpt-5.6-sol" || got[0].Label != "GPT-5.6 Sol" || !got[0].Default {
 		t.Errorf("unexpected first model: %+v", got[0])
+	}
+	for _, want := range []struct {
+		id    string
+		label string
+	}{
+		{"gpt-5.6-sol", "GPT-5.6 Sol"},
+		{"gpt-5.6-terra", "GPT-5.6 Terra"},
+		{"gpt-5.6-luna", "GPT-5.6 Luna"},
+	} {
+		var found *Model
+		for i := range got {
+			if got[i].ID == want.id {
+				found = &got[i]
+				break
+			}
+		}
+		if found == nil {
+			t.Errorf("missing %s in dynamic Codex catalog: %+v", want.id, got)
+			continue
+		}
+		if found.Label != want.label {
+			t.Errorf("%s dynamic label = %q, want %q", want.id, found.Label, want.label)
+		}
 	}
 	if got[0].Thinking == nil || got[0].Thinking.DefaultLevel != "low" || !hasThinkingLevel(got[0].Thinking, "max") || !hasThinkingLevel(got[0].Thinking, "ultra") || !hasThinkingLevel(got[0].Thinking, "future") {
 		t.Errorf("unexpected per-model thinking catalog: %+v", got[0].Thinking)
@@ -280,8 +315,8 @@ func TestParseCodexModelCatalog(t *testing.T) {
 	if len(got[0].ServiceTiers) != 1 || got[0].ServiceTiers[0].ID != "priority" || got[0].ServiceTiers[0].Name != "Fast" {
 		t.Errorf("unexpected service-tier catalog: %+v", got[0].ServiceTiers)
 	}
-	if got[1].ID != "no-reasoning" || got[1].Thinking != nil {
-		t.Errorf("model without reasoning should remain selectable without a thinking picker: %+v", got[1])
+	if got[3].ID != "no-reasoning" || got[3].Thinking != nil {
+		t.Errorf("model without reasoning should remain selectable without a thinking picker: %+v", got[3])
 	}
 }
 
@@ -310,7 +345,7 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 `
 		writeTestExecutable(t, fake, []byte(script))
 
-		got := discoverCodexModels(context.Background(), fake)
+		got := discoverCodexModels(context.Background(), Command{Path: fake})
 		if len(got) != 1 || got[0].ID != "runtime-model" || got[0].Thinking == nil || !hasThinkingLevel(got[0].Thinking, "high") {
 			t.Fatalf("expected runtime catalog, got %+v", got)
 		}
@@ -324,7 +359,7 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 			"exit 99\n"
 		writeTestExecutable(t, fake, []byte(script))
 
-		got := discoverCodexModels(context.Background(), fake)
+		got := discoverCodexModels(context.Background(), Command{Path: fake})
 		if len(got) == 0 || got[0].ID != "gpt-5.6-sol" {
 			t.Fatalf("expected static fallback, got %+v", got)
 		}
@@ -338,7 +373,7 @@ echo '{"models":[{"slug":"runtime-model","display_name":"Runtime Model","visibil
 			"exit 1\n"
 		writeTestExecutable(t, fake, []byte(script))
 
-		got := discoverCodexModels(context.Background(), fake)
+		got := discoverCodexModels(context.Background(), Command{Path: fake})
 		if len(got) == 0 || got[0].ID != "gpt-5.6-sol" || got[0].Thinking == nil {
 			t.Fatalf("expected model + thinking fallback, got %+v", got)
 		}
@@ -359,7 +394,7 @@ func TestValidateThinkingLevelCodexPerModelFallbackCatalog(t *testing.T) {
 		{model: "gpt-5.3-codex", level: "xhigh", want: true},
 		{model: "gpt-5.3-codex", level: "max", want: false},
 	} {
-		got, err := ValidateThinkingLevel(context.Background(), "codex", "/nonexistent/codex", tc.model, tc.level)
+		got, err := ValidateThinkingLevel(context.Background(), "codex", Command{Path: "/nonexistent/codex"}, tc.model, tc.level)
 		if err != nil {
 			t.Fatalf("ValidateThinkingLevel(%q, %q): %v", tc.model, tc.level, err)
 		}
@@ -480,7 +515,10 @@ func TestIsKnownThinkingValue(t *testing.T) {
 		{"kimi", ".hidden", false},
 		{"kimi", "bad value", false},
 		{"hermes", "", true},
-		{"hermes", "low", false}, // hermes' ACP surface exposes no effort dial
+		// jcode runs under this provider and applies an advertised effort;
+		// Hermes Agent advertises none. The per-session catalog decides, so the
+		// literal gate opens for both.
+		{"hermes", "low", true},
 		{"grok", "", true},
 		{"grok", "low", true},
 		{"grok", "medium", true},
@@ -512,9 +550,10 @@ func TestThinkingControlSupported(t *testing.T) {
 		{"codebuddy", true},
 		{"grok", true},
 		{"codex", true},    // dynamic catalog, validated per model by the daemon
+		{"dsh", true},      // dynamic catalog from the installed DSH profile
 		{"opencode", true}, // dynamic variant names from opencode.json
 		{"pi", true},       // fixed tokens, per-model subset discovered over RPC
-		{"hermes", false},  // ACP adapter drops reasoning entirely (MUL-5770)
+		{"hermes", true},   // jcode applies it; Hermes Agent gets an empty catalog
 		{"kimi", true},     // dynamic catalog; ACP session/set_config_option applies it
 		{"qwenpaw", false},
 		{"", false},
@@ -579,12 +618,12 @@ func TestValidateThinkingLevel_PiRPCPerModelCatalog(t *testing.T) {
 
 	check := func(model, value string, want bool) {
 		t.Helper()
-		ok, err := ValidateThinkingLevel(ctx, "pi", fakePi, model, value)
+		ok, err := ValidateThinkingLevel(ctx, "pi", Command{Path: fakePi}, model, value)
 		if err != nil {
-			t.Fatalf("ValidateThinkingLevel(pi, %q, %q): %v", model, value, err)
+			t.Fatalf("ValidateThinkingLevel(pi, %q, Command{Path: %q}): %v", model, value, err)
 		}
 		if ok != want {
-			t.Errorf("ValidateThinkingLevel(pi, %q, %q) = %v, want %v", model, value, ok, want)
+			t.Errorf("ValidateThinkingLevel(pi, %q, Command{Path: %q}) = %v, want %v", model, value, ok, want)
 		}
 	}
 
@@ -619,7 +658,7 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 		// Claude's catalog flags Sonnet 4.6 as Default. Sonnet supports
 		// low/medium/high/max (no xhigh) per claudeModelEffortAllow, so
 		// "high" must round-trip when model is left empty.
-		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "", "high")
+		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "", "high")
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -631,7 +670,7 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	t.Run("invalid level on default model fails", func(t *testing.T) {
 		// "xhigh" is opus-only; resolving "" to default (sonnet 4.6)
 		// should reject it, not silently accept.
-		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "", "xhigh")
+		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "", "xhigh")
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -643,7 +682,7 @@ func TestValidateThinkingLevel_EmptyModelResolvesToDefault(t *testing.T) {
 	t.Run("empty value always valid", func(t *testing.T) {
 		// Empty value means "use runtime default" — should pass
 		// regardless of model resolution.
-		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "", "")
+		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "", "")
 		if err != nil {
 			t.Fatalf("unexpected err: %v", err)
 		}
@@ -665,7 +704,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	ctx := context.Background()
 
 	// xhigh IS valid on Opus 4.7.
-	ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-4-7", "xhigh")
+	ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-4-7", "xhigh")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -677,7 +716,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	// adding it to the catalog: an agent pinned to it can still carry a
 	// persisted thinking_level without the daemon dropping the flag.
 	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
-		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5", level)
+		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-5", level)
 		if err != nil {
 			t.Fatalf("unexpected err for opus-5 %q: %v", level, err)
 		}
@@ -689,7 +728,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	// Claude Code appends a bracketed context-window tag to the model ID for
 	// long-context sessions. Capability validation must inherit the base
 	// model's effort catalog without rewriting the model passed to the CLI.
-	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5[1m]", "xhigh")
+	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-5[1m]", "xhigh")
 	if err != nil {
 		t.Fatalf("unexpected err for context-tagged opus-5: %v", err)
 	}
@@ -697,7 +736,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 		t.Error("xhigh should be valid on the opus-5[1m] context variant")
 	}
 
-	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5[500k]", "high")
+	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-5[500k]", "high")
 	if err != nil {
 		t.Fatalf("unexpected err for future context-tag shape: %v", err)
 	}
@@ -707,7 +746,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 
 	// Arbitrary bracket suffixes are not context-window tags. Keep malformed
 	// variants fail-closed even when their apparent base model is known.
-	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-opus-5[weird]", "high")
+	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-opus-5[weird]", "high")
 	if err != nil {
 		t.Fatalf("unexpected err for malformed context tag: %v", err)
 	}
@@ -716,7 +755,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 
 	// xhigh is NOT valid on Sonnet — should fail.
-	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-sonnet-4-6[1m]", "xhigh")
+	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-sonnet-4-6[1m]", "xhigh")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -725,7 +764,7 @@ func TestValidateThinkingLevel_ExplicitModel(t *testing.T) {
 	}
 
 	// An unknown model with a valid token still fails closed (no guess).
-	ok, err = ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-nonexistent", "high")
+	ok, err = ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-nonexistent", "high")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -752,12 +791,12 @@ func TestValidateThinkingLevel_CodexEmptyModelFailsClosed(t *testing.T) {
 
 	check := func(model, value string, want bool) {
 		t.Helper()
-		ok, err := ValidateThinkingLevel(ctx, "codex", fakeCodex, model, value)
+		ok, err := ValidateThinkingLevel(ctx, "codex", Command{Path: fakeCodex}, model, value)
 		if err != nil {
-			t.Fatalf("ValidateThinkingLevel(codex, %q, %q): unexpected err: %v", model, value, err)
+			t.Fatalf("ValidateThinkingLevel(codex, %q, Command{Path: %q}): unexpected err: %v", model, value, err)
 		}
 		if ok != want {
-			t.Errorf("ValidateThinkingLevel(codex, %q, %q) = %v, want %v", model, value, ok, want)
+			t.Errorf("ValidateThinkingLevel(codex, %q, Command{Path: %q}) = %v, want %v", model, value, ok, want)
 		}
 	}
 
@@ -798,7 +837,7 @@ func TestValidateThinkingLevel_PreEffortCLIRejectsAllLevels(t *testing.T) {
 	ctx := context.Background()
 
 	for _, level := range []string{"low", "medium", "high", "xhigh", "max"} {
-		ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-fable-5", level)
+		ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-fable-5", level)
 		if err != nil {
 			t.Fatalf("unexpected err for %q: %v", level, err)
 		}
@@ -808,7 +847,7 @@ func TestValidateThinkingLevel_PreEffortCLIRejectsAllLevels(t *testing.T) {
 	}
 
 	// Empty value still means "use runtime default" and must stay valid.
-	ok, err := ValidateThinkingLevel(ctx, "claude", fakeClaude, "claude-fable-5", "")
+	ok, err := ValidateThinkingLevel(ctx, "claude", Command{Path: fakeClaude}, "claude-fable-5", "")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -853,7 +892,7 @@ echo "opencode 9.9.9"
 	writeTestExecutable(t, fake, []byte(script))
 
 	ctx := context.Background()
-	ok, err := ValidateThinkingLevel(ctx, "opencode", fake, "", "max")
+	ok, err := ValidateThinkingLevel(ctx, "opencode", Command{Path: fake}, "", "max")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -861,7 +900,7 @@ echo "opencode 9.9.9"
 		t.Fatalf("expected empty-model opencode max to pass when any advertised model supports it")
 	}
 
-	ok, err = ValidateThinkingLevel(ctx, "opencode", fake, "", "xhigh")
+	ok, err = ValidateThinkingLevel(ctx, "opencode", Command{Path: fake}, "", "xhigh")
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
 	}
@@ -951,12 +990,12 @@ func TestValidateServiceTierCodexPerModelCatalog(t *testing.T) {
 		{provider: "claude", model: "gpt-5.6-sol", tier: "priority", want: false},
 		{provider: "codex", model: "gpt-5.6-sol", tier: "", want: true},
 	} {
-		got, err := ValidateServiceTier(context.Background(), tc.provider, fake, tc.model, tc.tier)
+		got, err := ValidateServiceTier(context.Background(), tc.provider, Command{Path: fake}, tc.model, tc.tier)
 		if err != nil {
-			t.Fatalf("ValidateServiceTier(%q, %q, %q): %v", tc.provider, tc.model, tc.tier, err)
+			t.Fatalf("ValidateServiceTier(%q, %q, Command{Path: %q}): %v", tc.provider, tc.model, tc.tier, err)
 		}
 		if got != tc.want {
-			t.Errorf("ValidateServiceTier(%q, %q, %q) = %v, want %v", tc.provider, tc.model, tc.tier, got, tc.want)
+			t.Errorf("ValidateServiceTier(%q, %q, Command{Path: %q}) = %v, want %v", tc.provider, tc.model, tc.tier, got, tc.want)
 		}
 	}
 }
@@ -988,9 +1027,9 @@ func TestThinkingCacheKeyDistinct(t *testing.T) {
 	resetThinkingCacheForTests()
 	defer resetThinkingCacheForTests()
 
-	a := thinkingCacheKey{provider: "claude", executablePath: "/bin/claude", cliVersion: "2.1.121"}
-	b := thinkingCacheKey{provider: "claude", executablePath: "/bin/claude", cliVersion: "2.1.122"}
-	c := thinkingCacheKey{provider: "claude", executablePath: "/opt/claude", cliVersion: "2.1.121"}
+	a := thinkingCacheKey{provider: "claude", command: "/bin/claude", cliVersion: "2.1.121"}
+	b := thinkingCacheKey{provider: "claude", command: "/bin/claude", cliVersion: "2.1.122"}
+	c := thinkingCacheKey{provider: "claude", command: "/opt/claude", cliVersion: "2.1.121"}
 
 	thinkingCachePut(a, map[string]*ModelThinking{"x": {DefaultLevel: "a"}})
 	thinkingCachePut(b, map[string]*ModelThinking{"x": {DefaultLevel: "b"}})

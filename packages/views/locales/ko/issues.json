@@ -1,4 +1,19 @@
 {
+  "status_catalog_error": {
+    "title": "상태 목록을 불러오지 못했습니다",
+    "hint": "이것 없이는 상태 필터를 적용할 수 없어 이슈를 표시하지 않습니다.",
+    "retry": "다시 시도"
+  },
+  "revision": {
+    "conflict": "태스크 또는 댓글이 변경되었습니다. 최신 버전으로 새로 고쳤으니 비교한 후 다시 저장하세요.",
+    "compare_title": "제목이 동시에 변경되었습니다. 두 버전을 비교하세요.",
+    "compare_description": "설명이 동시에 변경되었습니다. 두 버전을 비교하세요.",
+    "compare_comment": "댓글이 동시에 변경되었습니다. 두 버전을 비교하세요.",
+    "server_version": "서버의 최신 버전",
+    "local_version": "내 로컬 버전",
+    "keep_local": "내 버전 유지",
+    "use_server": "최신 버전 사용"
+  },
   "page": {
     "breadcrumb_title": "태스크",
     "breadcrumb_workspace_fallback": "워크스페이스",
@@ -37,6 +52,7 @@
   "filters": {
     "tooltip": "필터",
     "placeholder": "필터...",
+    "search_status": "상태 검색...",
     "no_results": "결과 없음",
     "no_labels": "아직 라벨이 없습니다",
     "no_assignee": "담당자 없음",
@@ -242,6 +258,7 @@
     "back": "뒤로",
     "title_placeholder": "태스크 제목",
     "desc_placeholder": "설명 추가...",
+    "current_issue": "현재 작업",
     "sub_issues_label": "하위 태스크",
     "sub_issue_of": "상위 태스크",
     "add_sub_issues": "하위 태스크 추가",
@@ -351,6 +368,8 @@
     "link_copied": "링크를 복사했습니다",
     "link_copy_failed": "링크를 복사하지 못했습니다",
     "workdir_path_copied": "작업 디렉터리 경로를 복사했습니다",
+    "project_directory_path_copied": "프로젝트 디렉터리 경로를 복사했습니다",
+    "project_directory_path_copied_with_branch": "프로젝트 디렉터리 경로를 복사했습니다 — 작업은 {{branch}} 브랜치에 있습니다",
     "workdir_path_copy_failed": "작업 디렉터리 경로를 복사하지 못했습니다",
     "workdir_path_unavailable": "아직 로컬 작업 디렉터리가 없습니다. 로컬 에이전트가 이 태스크를 실행하지 않았습니다"
   },
@@ -404,11 +423,13 @@
     "trigger_blocked_invocation_not_allowed": "이 대상을 찾을 수 없거나 사용할 권한이 없습니다",
     "trigger_blocked_target_unavailable": "이 대상을 사용할 수 없습니다",
     "trigger_blocked_runtime_offline": "이 대상의 런타임이 오프라인입니다",
+    "trigger_blocked_runtime_unusable": "이 대상의 CLI를 해당 기기에서 실행할 수 없습니다 — 그 기기에서 다시 설치하세요",
     "trigger_blocked_agent_runtime_required": "이 대상에 런타임이 없습니다 — 실행하려면 런타임을 연결하세요",
     "trigger_blocked_generic": "이 대상은 트리거되지 않습니다",
     "trigger_blocked_short_invocation_not_allowed": "찾을 수 없음 또는 권한 없음",
     "trigger_blocked_short_target_unavailable": "사용 불가",
     "trigger_blocked_short_runtime_offline": "런타임 오프라인",
+    "trigger_blocked_short_runtime_unusable": "CLI 실행 불가",
     "trigger_blocked_short_agent_runtime_required": "런타임 필요",
     "trigger_blocked_short_generic": "트리거 안 됨",
     "send_reply_failed": "답글을 보내지 못했습니다",
@@ -575,7 +596,8 @@
   },
   "card": {
     "update_failed": "태스크를 업데이트하지 못했습니다",
-    "updated_ago": "{{time}} 수정됨"
+    "updated_ago": "{{time}} 수정됨",
+    "child_progress_restricted_other": "하위 태스크 {{count}}개 제한됨"
   },
   "actions": {
     "status": "상태",
@@ -597,6 +619,7 @@
     "unpin_from_sidebar": "사이드바 고정 해제",
     "copy_link": "링크 복사",
     "copy_workdir_path": "로컬 작업 디렉터리 경로 복사",
+    "copy_project_directory_path": "프로젝트 디렉터리 경로 복사",
     "relations": "관계",
     "create_sub_issue": "하위 태스크 만들기",
     "set_parent_issue": "상위 태스크 설정...",
@@ -614,8 +637,11 @@
       "value_placeholder": "값 입력…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
+      "actor_search_placeholder": "멤버 검색…",
       "open_link": "링크 열기",
-      "archived_hint": "보관된 속성 — 값은 읽기 전용입니다"
+      "archived_hint": "보관된 속성 — 값은 읽기 전용입니다",
+      "unknown_value": "표시할 수 없음",
+      "unknown_value_hint": "이 값은 최신 버전의 Multica에서 설정되어 여기서는 편집할 수 없습니다. 앱을 업데이트하거나 값을 지우세요"
     },
     "filter_options_aria": "필터 옵션",
     "no_results": "결과 없음",
@@ -748,5 +774,15 @@
     "manage_hint": "순서와 표시 설정은 본인에게만 적용됩니다",
     "visible_toggle": "뷰 바에 표시",
     "more_label": "더 많은 뷰"
+  },
+  "plugins": {
+    "panels": "Plugins",
+    "surface_failed": "{{name}}의 인터페이스를 불러오지 못했습니다.",
+    "surface_local_only": "{{name}}은(는) 로컬 소스에서 설치되어 브라우저에서 인터페이스를 불러올 수 없습니다.",
+    "hook_succeeded": "{{name}} 완료됨.",
+    "hook_failed": "{{name}} 실패함.",
+    "hook_refused": "{{name}}이(가) 실행되지 않았습니다.",
+    "hook_activity": "최근 호출",
+    "hook_never_run": "이 훅은 아직 실행되지 않았습니다."
   }
 }

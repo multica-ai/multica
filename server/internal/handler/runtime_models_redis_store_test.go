@@ -98,6 +98,31 @@ func TestRedisModelListStore_CreateGetComplete(t *testing.T) {
 	}
 }
 
+func TestRedisModelListStore_CreateWithoutMultiPermission(t *testing.T) {
+	rdb := newRedisTestClientWithoutMulti(t)
+	ctx := context.Background()
+	store := NewRedisModelListStore(rdb)
+
+	req, err := store.Create(ctx, "runtime-no-multi")
+	if err != nil {
+		t.Fatalf("create without MULTI permission: %v", err)
+	}
+	got, err := store.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get created request: %v", err)
+	}
+	if got == nil || got.ID != req.ID {
+		t.Fatalf("created request was not persisted: %+v", got)
+	}
+	pending, err := store.HasPending(ctx, "runtime-no-multi")
+	if err != nil {
+		t.Fatalf("check pending request: %v", err)
+	}
+	if !pending {
+		t.Fatal("created request was not queued")
+	}
+}
+
 // TestRedisModelListStore_PopPendingAcrossInstances is the regression test
 // for the exact bug this PR fixes: two API replicas share one Redis, one
 // receives the POST that creates the request, the other receives the daemon

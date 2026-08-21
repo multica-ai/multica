@@ -1,8 +1,15 @@
 // @vitest-environment jsdom
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { ApiError } from "@multica/core/api";
 import type { Agent } from "@multica/core/types";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
@@ -18,7 +25,20 @@ const TEST_RESOURCES = { en: { common: enCommon, agents: enAgents } };
 // rules (via auth + member fixtures); the tabbed body and avatar/presence
 // widgets are irrelevant weight, so they're stubbed.
 vi.mock("./agent-overview-pane", () => ({
-  AgentOverviewPane: () => <div>agent-overview-pane</div>,
+  AgentOverviewPane: ({
+    agent,
+    onUpdate,
+  }: {
+    agent: Agent;
+    onUpdate: (id: string, data: Record<string, unknown>) => Promise<void>;
+  }) => (
+    <button
+      type="button"
+      onClick={() => void onUpdate(agent.id, { model: "new-model" })}
+    >
+      update model
+    </button>
+  ),
 }));
 vi.mock("../../common/actor-avatar", () => ({
   ActorAvatar: () => <div>actor-avatar</div>,
@@ -37,6 +57,8 @@ const currentUserRef = vi.hoisted(() => ({
 }));
 const mockToastError = vi.hoisted(() => vi.fn());
 const mockModalOpen = vi.hoisted(() => vi.fn());
+const mockGetAgent = vi.hoisted(() => vi.fn());
+const mockUpdateAgent = vi.hoisted(() => vi.fn());
 
 vi.mock("@multica/core/hooks", () => ({
   useWorkspaceId: () => "ws-1",
@@ -51,6 +73,29 @@ vi.mock("@multica/core/workspace/queries", () => ({
     queryKey: ["agents", wsId],
     queryFn: () => Promise.resolve(agentsRef.current),
   }),
+  agentDetailOptions: (wsId: string, agentId: string) => ({
+    queryKey: ["agents", wsId, "detail", agentId],
+    queryFn: () => mockGetAgent(agentId),
+    enabled: !!wsId && !!agentId,
+    retry: false,
+  }),
+  cacheAgentResponse: (
+    queryClient: QueryClient,
+    wsId: string,
+    agent: Agent,
+    options: { insertIntoList?: boolean } = {},
+  ) => {
+    queryClient.setQueryData(["agents", wsId, "detail", agent.id], agent);
+    queryClient.setQueryData<Agent[]>(["agents", wsId], (current) =>
+      current?.some((item) => item.id === agent.id)
+        ? current.map((item) => (item.id === agent.id ? agent : item))
+        : current
+          ? options.insertIntoList === false
+            ? current
+            : [...current, agent]
+          : current,
+    );
+  },
   memberListOptions: (wsId: string) => ({
     queryKey: ["members", wsId],
     queryFn: () =>
@@ -58,7 +103,15 @@ vi.mock("@multica/core/workspace/queries", () => ({
         ? new Promise(() => {})
         : Promise.resolve(membersRef.current),
   }),
-  workspaceKeys: { agents: (wsId: string) => ["agents", wsId] },
+  workspaceKeys: {
+    agents: (wsId: string) => ["agents", wsId],
+    agent: (wsId: string, agentId: string) => [
+      "agents",
+      wsId,
+      "detail",
+      agentId,
+    ],
+  },
 }));
 vi.mock("@multica/core/runtimes", () => ({
   runtimeListOptions: (wsId: string) => ({
@@ -90,13 +143,13 @@ vi.mock("@multica/core/paths", () => ({
 vi.mock("@multica/core/api", () => {
   class ApiError extends Error {
     status: number;
-    constructor(status: number, message: string) {
+    constructor(message: string, status: number) {
       super(message);
       this.status = status;
     }
   }
   return {
-    api: { getAgent: vi.fn(() => Promise.reject(new ApiError(404, "not found"))) },
+    api: { getAgent: mockGetAgent, updateAgent: mockUpdateAgent },
     ApiError,
   };
 });
@@ -144,7 +197,7 @@ function renderPage() {
     searchParams: new URLSearchParams(),
     getShareableUrl: (path) => path,
   };
-  render(
+  const view = render(
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <NavigationProvider value={navigation}>
         <QueryClientProvider client={queryClient}>
@@ -153,7 +206,7 @@ function renderPage() {
       </NavigationProvider>
     </I18nProvider>,
   );
-  return { push };
+  return { push, queryClient, ...view };
 }
 
 beforeEach(() => {
@@ -162,6 +215,163 @@ beforeEach(() => {
   membersRef.current = [{ user_id: "user-1", role: "member" }];
   membersPendingRef.current = false;
   agentsRef.current = [baseAgent];
+  mockGetAgent.mockRejectedValue(new ApiError("not found", 404, "Not Found"));
+  mockUpdateAgent.mockResolvedValue({ ...baseAgent, model: "new-model" });
+});
+
+describe("AgentDetailPage direct-detail fallback", () => {
+  it("does not fetch detail when the workspace list already has the agent", async () => {
+    renderPage();
+
+    expect(
+      await screen.findByRole("button", { name: "Assign work" }),
+    ).toBeInTheDocument();
+    expect(mockGetAgent).not.toHaveBeenCalled();
+  });
+
+  it("keeps the loading skeleton while the detail request is pending", async () => {
+    agentsRef.current = [];
+    mockGetAgent.mockImplementation(() => new Promise(() => {}));
+
+    const { container } = renderPage();
+
+    await waitFor(() => expect(mockGetAgent).toHaveBeenCalledWith("agent-1"));
+    expect(screen.queryByText("Agent not found")).not.toBeInTheDocument();
+    expect(container.querySelector('[data-slot="skeleton"]')).not.toBeNull();
+  });
+
+  it("renders an agent returned by the detail endpoint", async () => {
+    agentsRef.current = [];
+    mockGetAgent.mockResolvedValue(baseAgent);
+
+    renderPage();
+
+    expect(
+      await screen.findByRole("button", { name: "Assign work" }),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Agent not found")).not.toBeInTheDocument();
+  });
+
+  it("shows not found only after the detail endpoint returns 404", async () => {
+    agentsRef.current = [];
+
+    renderPage();
+
+    expect(await screen.findByText("Agent not found")).toBeInTheDocument();
+  });
+
+  it("keeps 403 distinct from not found", async () => {
+    agentsRef.current = [];
+    mockGetAgent.mockRejectedValue(
+      new ApiError("forbidden", 403, "Forbidden"),
+    );
+
+    renderPage();
+
+    expect(
+      await screen.findByText("You don't have access to this agent"),
+    ).toBeInTheDocument();
+    expect(screen.queryByText("Agent not found")).not.toBeInTheDocument();
+  });
+
+  it("shows 404 when a successful detail refetch later reports deletion", async () => {
+    agentsRef.current = [];
+    mockGetAgent.mockResolvedValueOnce(baseAgent);
+    const { queryClient } = renderPage();
+    await screen.findByRole("button", { name: "Assign work" });
+
+    mockGetAgent.mockRejectedValue(new ApiError("not found", 404, "Not Found"));
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["agents", "ws-1", "detail", "agent-1"],
+        exact: true,
+      });
+    });
+
+    expect(await screen.findByText("Agent not found")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Assign work" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows 403 when a successful detail refetch later loses access", async () => {
+    agentsRef.current = [];
+    mockGetAgent.mockResolvedValueOnce(baseAgent);
+    const { queryClient } = renderPage();
+    await screen.findByRole("button", { name: "Assign work" });
+
+    mockGetAgent.mockRejectedValue(
+      new ApiError("forbidden", 403, "Forbidden"),
+    );
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["agents", "ws-1", "detail", "agent-1"],
+        exact: true,
+      });
+    });
+
+    expect(
+      await screen.findByText("You don't have access to this agent"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Assign work" }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("shows a load failure instead of not found for transient errors", async () => {
+    agentsRef.current = [];
+    mockGetAgent.mockRejectedValue(new Error("Network request failed"));
+
+    renderPage();
+
+    expect(
+      await screen.findByText("Couldn't load this agent"),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Network request failed")).toBeInTheDocument();
+    expect(screen.queryByText("Agent not found")).not.toBeInTheDocument();
+  });
+
+  it("keeps successful detail data visible through a transient refetch error", async () => {
+    agentsRef.current = [];
+    mockGetAgent.mockResolvedValueOnce(baseAgent);
+    const { queryClient } = renderPage();
+    await screen.findByRole("button", { name: "Assign work" });
+
+    mockGetAgent.mockRejectedValue(new Error("Network request failed"));
+    await act(async () => {
+      await queryClient.invalidateQueries({
+        queryKey: ["agents", "ws-1", "detail", "agent-1"],
+        exact: true,
+      });
+    });
+
+    expect(
+      screen.getByRole("button", { name: "Assign work" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("Couldn't load this agent"),
+    ).not.toBeInTheDocument();
+  });
+
+  it("optimistically updates a detail-only cache entry", async () => {
+    agentsRef.current = [];
+    mockGetAgent.mockResolvedValue(baseAgent);
+    mockUpdateAgent.mockImplementation(() => new Promise(() => {}));
+    const { queryClient } = renderPage();
+    await screen.findByRole("button", { name: "Assign work" });
+
+    fireEvent.click(screen.getByRole("button", { name: "update model" }));
+
+    expect(await screen.findByText("new-model")).toBeInTheDocument();
+    expect(
+      queryClient.getQueryData<Agent>([
+        "agents",
+        "ws-1",
+        "detail",
+        "agent-1",
+      ]),
+    ).toMatchObject({ model: "new-model" });
+  });
 });
 
 describe("AgentDetailPage DM button", () => {

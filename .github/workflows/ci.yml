@@ -11,12 +11,15 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Decides whether the (heavy, ~6min) frontend job has anything to do.
-  # The frontend job validates the web/desktop apps, the shared packages,
+  # Decides whether the heavy frontend validation jobs, the backend Go jobs
+  # and sqlc verification have anything to do.
+  # The frontend jobs validate the web/desktop apps, the shared packages,
   # the install graph, and the selfhost / reserved-slugs scripts it runs;
   # a pure backend-only or docs-only PR touches none of those and gains
-  # nothing from a full web build. This job emits a single `frontend`
-  # output consumed by the frontend job below.
+  # nothing from a full web build. Symmetrically, the backend jobs compile
+  # and test server/, so a frontend-only or docs-only PR gains nothing from
+  # a `go test -race` run. The outputs are consumed by the focused jobs
+  # below.
   changes:
     runs-on: ubuntu-latest
     permissions:
@@ -24,6 +27,9 @@ jobs:
       pull-requests: read
     outputs:
       frontend: ${{ steps.decide.outputs.frontend }}
+      backend: ${{ steps.decide.outputs.backend }}
+      sqlc: ${{ steps.decide.outputs.sqlc }}
+      images: ${{ steps.filter.outputs.images }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -32,25 +38,32 @@ jobs:
         id: filter
         uses: dorny/paths-filter@v3
         with:
-          # apps/docs is excluded from the frontend turbo run, so a
-          # docs-only change does not need this job. apps/mobile has its
-          # own mobile-verify workflow. Everything else the frontend job
-          # touches is listed here; bias toward over-matching since a
-          # missed path silently skips validation.
+          # apps/docs is excluded from the frontend turbo run, but knip does
+          # analyze it, so a docs-only change still needs this job.
+          # apps/mobile has its own mobile-verify workflow. Everything else
+          # the frontend job touches is listed here; bias toward
+          # over-matching since a missed path silently skips validation.
           filters: |
             frontend:
               - 'apps/web/**'
               - 'apps/desktop/**'
+              - 'apps/docs/**'
               - 'packages/**'
               - 'package.json'
               - '.npmrc'
               - 'pnpm-lock.yaml'
               - 'pnpm-workspace.yaml'
               - 'turbo.json'
+              - 'knip.jsonc'
               - '.github/workflows/ci.yml'
               - 'scripts/generate-reserved-slugs.mjs'
               - 'server/internal/handler/reserved_slugs.json'
+              - 'scripts/check-ui-wildcard-exports.mjs'
+              - 'scripts/check-ui-wildcard-exports.test.sh'
               - 'scripts/selfhost-config.test.sh'
+              - 'scripts/drop-database.sh'
+              - 'scripts/remove-worktree.sh'
+              - 'scripts/worktree-db.test.sh'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
@@ -63,37 +76,126 @@ jobs:
               - 'docker-compose.selfhost.yml'
               - 'docker-compose.selfhost.build.yml'
               - 'Makefile'
+            # Everything the backend jobs (backend-tests,
+            # go-vulnerability-scan, windows-execenv) read, which is NOT the
+            # same thing as server/**: four Go tests reach out of the module
+            # to pin a contract against a file the other side owns, across
+            # three cross-module file dependencies. Each of those files has
+            # to be listed here or the PR that breaks the contract is exactly
+            # the PR that skips the test. Same bias as the frontend filter:
+            # over-match rather than silently skip validation.
+            backend:
+              - 'server/**'
+              - 'deploy/helm/**'
+              # pkg/agent/worktree_capability_contract_test.go reads this file
+              # and compares LOCAL_WORKTREE_CAPABILITY against the daemon's
+              # protocol constant. A typo on either side disables worktree
+              # mode for everyone with no error anywhere, so a change to the
+              # frontend half must run the backend suite.
+              - 'packages/core/runtimes/cli-version.ts'
+              # internal/daemon/agent_command_names_test.go reads both of
+              # these as test inputs; the guard script is additionally the
+              # entry point scripts/test-go.sh runs, and the names file is
+              # the data that guard consumes.
+              - 'scripts/agent-cli-command-names.txt'
+              - 'scripts/go-test-with-agent-cli-guard.sh'
+              - 'scripts/helm-config.test.sh'
+              - 'scripts/test-go.sh'
+              - 'scripts/test-go.test.sh'
+              # makefile-build.test.sh asserts how `make build` names its
+              # output binaries, so a change to either side must run it.
+              - 'scripts/makefile-build.test.sh'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+            sqlc:
+              - 'server/pkg/db/queries/**'
+              - 'server/pkg/db/generated/**'
+              - 'server/migrations/**'
+              - 'server/sqlc.yaml'
+              - 'Makefile'
+              - '.github/workflows/ci.yml'
+            # Gates the image-budget job so the full-history checkout it
+            # needs is only paid for on PRs that actually touch a bitmap.
+            images:
+              - '**/*.png'
+              - '**/*.jpg'
+              - '**/*.jpeg'
+              - '**/*.gif'
+              - '**/*.bmp'
+              - '**/*.tif'
+              - '**/*.tiff'
+              - '**/*.webp'
+              - '**/*.avif'
+              - 'scripts/check-image-budget.mjs'
 
       - name: Decide
         id: decide
-        # Always run the frontend job on push to main (full validation);
-        # on pull_request, run only when frontend-relevant paths changed.
-        # The frontend job itself always runs and reports success — its
-        # steps are gated on this output rather than the job being skipped
-        # — so the required "frontend" status check is satisfied with a
-        # genuine green instead of being left pending on filtered PRs.
+        # Always run everything on push to main (full validation); on
+        # pull_request, run only the areas whose paths changed.
+        # The gated jobs themselves always run and report success — their
+        # steps are gated on these outputs rather than the job being skipped
+        # — so the required "frontend" / "backend" status checks are
+        # satisfied with a genuine green instead of being left pending on
+        # filtered PRs. It also keeps the aggregate gates strict: a job that
+        # goes missing for any OTHER reason (a failed `changes`, a cancelled
+        # run) still reports non-success and fails the gate.
         env:
           EVENT_NAME: ${{ github.event_name }}
           FRONTEND_CHANGED: ${{ steps.filter.outputs.frontend }}
+          BACKEND_CHANGED: ${{ steps.filter.outputs.backend }}
+          SQLC_CHANGED: ${{ steps.filter.outputs.sqlc }}
         run: |
           if [ "$EVENT_NAME" != "pull_request" ] || [ "$FRONTEND_CHANGED" = "true" ]; then
             echo "frontend=true" >> "$GITHUB_OUTPUT"
           else
             echo "frontend=false" >> "$GITHUB_OUTPUT"
           fi
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$BACKEND_CHANGED" = "true" ]; then
+            echo "backend=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=false" >> "$GITHUB_OUTPUT"
+          fi
+          if [ "$EVENT_NAME" != "pull_request" ] || [ "$SQLC_CHANGED" = "true" ]; then
+            echo "sqlc=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "sqlc=false" >> "$GITHUB_OUTPUT"
+          fi
 
-  # The frontend validation is split across two runners on purpose. Both
-  # `@multica/web:build` (a webpack production build) and `@multica/views:test`
-  # (259 jsdom files) are CPU-saturating, and a standard runner only has
-  # 4 vCPUs. Running them in one job made them starve each other: the views
-  # suite needs ~104s wall when it owns 4 cores but took ~500s sharing them,
-  # and the identical webpack compile went from ~26s to ~342s. Splitting buys
-  # a second 4-vCPU box rather than reducing the work; total runner-minutes go
-  # up slightly, wall-clock feedback time goes down.
-  #
-  # The split is weighted, not even: the test group is by far the heavier half
-  # (~575 CPU-seconds vs ~250 for build + typecheck + lint), so it gets a
-  # runner to itself and everything else shares the other one.
+  sqlc-check:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        if: ${{ needs.changes.outputs.sqlc == 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        if: ${{ needs.changes.outputs.sqlc == 'true' }}
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Verify generated SQL is up to date
+        if: ${{ needs.changes.outputs.sqlc == 'true' }}
+        run: |
+          make sqlc
+          git diff --exit-code -- server/pkg/db/generated
+          untracked="$(git ls-files --others --exclude-standard -- server/pkg/db/generated)"
+          if [ -n "$untracked" ]; then
+            printf 'Untracked generated SQL files:\n%s\n' "$untracked"
+            exit 1
+          fi
+
+  # The frontend validation is split across four runners on purpose. A prior
+  # split isolated build/typecheck/lint from the test suites; on a full test
+  # cache miss, however, web/core/desktop/views still competed for the four
+  # vCPUs on the test runner and stretched the job to ~8 minutes. Giving views
+  # its own runner only reduced that to 7m23s because the suite itself remained
+  # the long pole, so two Vitest shards now split it across two runners while
+  # the remaining suites continue in parallel on another. The extra setup
+  # increases total runner-minutes but reduces wall-clock feedback time.
   frontend-build:
     needs: changes
     runs-on: ubuntu-latest
@@ -132,8 +234,8 @@ jobs:
 
       # Cache entries are immutable, so the key carries the commit SHA to make
       # every run publish a fresh one and `restore-keys` falls back to the most
-      # recent prefix match. The two frontend jobs run disjoint task sets, so
-      # they get their own prefixes rather than racing to save one key.
+      # recent prefix match. Each frontend worker runs a disjoint task set, so
+      # it gets its own prefix rather than racing to save one key.
       # GitHub scopes caches by branch: a PR reads main's entries (so unchanged
       # tasks hit on the first push) and writes its own (so re-pushes hit too).
       - name: Restore turbo cache
@@ -148,6 +250,10 @@ jobs:
       - name: Test self-host env derivation
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/selfhost-config.test.sh
+
+      - name: Test worktree database cleanup
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/worktree-db.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}
@@ -167,6 +273,35 @@ jobs:
         # filter in sync with the root package.json scripts, which also
         # exclude @multica/mobile.
         run: pnpm exec turbo build typecheck lint --filter='!@multica/docs' --filter='!@multica/mobile'
+
+      # Blocking from the start: it reports nothing today, and it covers the
+      # one regression knip structurally cannot see. packages/ui exports four
+      # wildcards, which knip expands into entry-point globs over every file
+      # in those directories — so a newly stranded component there always
+      # reads as "used". See the script header for the options ruled out.
+      - name: Check packages/ui wildcard exports
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: |
+          bash scripts/check-ui-wildcard-exports.test.sh
+          node scripts/check-ui-wildcard-exports.mjs
+
+      # WARN PHASE — reports, never blocks. `shamefully-hoist=true` in .npmrc
+      # hides both halves of the drift this catches: an undeclared import still
+      # resolves, and an obsolete declaration still installs. Neither shows up
+      # in build, typecheck, or lint.
+      #
+      # `continue-on-error` alone, with no `|| true`: the real exit code has to
+      # reach Actions for the step to show as a warning rather than a silent
+      # pass, and it is what makes the promotion below a one-line change.
+      #
+      # TO PROMOTE TO BLOCKING: once this step has run clean for a full cycle
+      # on main, drop `continue-on-error`. The findings it reports today are
+      # pre-existing dead code left out of the cleanup that introduced it
+      # (MUL-6353) — clear those first, or the flip turns them into a red main.
+      - name: Check for dead code and phantom dependencies (knip)
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        continue-on-error: true
+        run: pnpm knip
 
   frontend-test:
     needs: changes
@@ -211,22 +346,80 @@ jobs:
           restore-keys: |
             turbo-test-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
 
-      - name: Test
+      - name: Test web, core, and desktop
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         # Same filter rationale as frontend-build. Type errors are not this
         # job's responsibility -- frontend-build owns the `typecheck` task.
         # `test` reaches dependency sources through the hash-only
         # `^cache-inputs` edge (see turbo.json), so no `tsc` runs here.
-        run: pnpm exec turbo test --filter='!@multica/docs' --filter='!@multica/mobile'
+        run: pnpm exec turbo test --filter='!@multica/docs' --filter='!@multica/mobile' --filter='!@multica/views'
+
+  # Split views across two runners. GitHub reports the matrix job's combined
+  # result, so the aggregate gate can continue depending on this one job ID.
+  frontend-views-test:
+    name: frontend-views-test (${{ matrix.index }}/${{ matrix.total }})
+    needs: changes
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - index: 1
+            total: 2
+          - index: 2
+            total: 2
+    runs-on: ubuntu-latest
+    env:
+      TURBO_CACHE_DIR: .turbo/cache
+    steps:
+      - name: Checkout
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Setup pnpm
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node.js
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: pnpm install
+
+      - name: Resolve runtime for cache key
+        id: runtime
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: echo "node=$(node --version)" >> "$GITHUB_OUTPUT"
+
+      # Each shard has its own prefix so concurrent jobs never race to save the
+      # same immutable cache key. Turbo also includes the passthrough `--shard`
+      # argument in the task hash, while dependency sources still flow through
+      # turbo.json's hash-only `^cache-inputs` edge.
+      - name: Restore turbo cache
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        uses: actions/cache@v6
+        with:
+          path: .turbo/cache
+          key: turbo-views-test-${{ matrix.index }}-of-${{ matrix.total }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-${{ github.sha }}
+          restore-keys: |
+            turbo-views-test-${{ matrix.index }}-of-${{ matrix.total }}-${{ runner.os }}-${{ runner.arch }}-${{ steps.runtime.outputs.node }}-
+
+      - name: Test views shard ${{ matrix.index }}/${{ matrix.total }}
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: pnpm exec turbo test --filter='@multica/views' -- --shard=${{ matrix.index }}/${{ matrix.total }}
 
   # Aggregate gate. `frontend` is the status-check name the repository's
   # branch rules refer to, so it has to survive the split above: this job
-  # keeps reporting under that name and simply fails when either half fails.
+  # keeps reporting under that name and simply fails when any worker fails.
   # It also inherits the old contract that the check goes green (rather than
-  # staying pending) on PRs the path filter excluded — both halves succeed
+  # staying pending) on PRs the path filter excluded — all workers succeed
   # trivially in that case because every step is gated off.
   frontend:
-    needs: [frontend-build, frontend-test]
+    needs: [frontend-build, frontend-test, frontend-views-test]
     # `!cancelled()` rather than `always()`: a run superseded by a newer push
     # is cancelled by the concurrency group above, and there is no reason to
     # spend a runner reporting a verdict nobody will read.
@@ -237,16 +430,25 @@ jobs:
         env:
           BUILD_RESULT: ${{ needs.frontend-build.result }}
           TEST_RESULT: ${{ needs.frontend-test.result }}
+          VIEWS_TEST_RESULT: ${{ needs.frontend-views-test.result }}
         run: |
           echo "frontend-build: $BUILD_RESULT"
           echo "frontend-test:  $TEST_RESULT"
-          if [ "$BUILD_RESULT" != "success" ] || [ "$TEST_RESULT" != "success" ]; then
+          echo "frontend-views-test: $VIEWS_TEST_RESULT"
+          if [ "$BUILD_RESULT" != "success" ] || [ "$TEST_RESULT" != "success" ] || [ "$VIEWS_TEST_RESULT" != "success" ]; then
             echo "::error::frontend validation failed"
             exit 1
           fi
 
-  backend:
+  backend-tests:
+    needs: changes
     runs-on: ubuntu-latest
+    # `services` cannot be conditional, so the Postgres and Redis containers
+    # still start on a filtered PR. That is ~1 minute of runner time against
+    # the several minutes the gated steps below cost; job-level `if` would
+    # save it but report `skipped` to the aggregate gate, which then has to
+    # accept `skipped` as success and stops catching jobs that go missing for
+    # reasons other than the path filter.
     services:
       postgres:
         image: pgvector/pgvector:pg17
@@ -279,48 +481,119 @@ jobs:
       REDIS_TEST_URL: redis://localhost:6379/1
     steps:
       - name: Checkout
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/checkout@v6
 
       - name: Setup Go
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.1"
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # CI follows the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
           cache-dependency-path: server/go.sum
 
       - name: Setup Helm
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: azure/setup-helm@v4
 
       - name: Test Helm chart
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/helm-config.test.sh
 
+      - name: Test build output naming
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: bash scripts/makefile-build.test.sh
+
       - name: Build
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go build ./...
 
       - name: Run migrations
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go run ./cmd/migrate up
 
       - name: Verify Go test wrapper
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/test-go.test.sh
 
       - name: Test
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/test-go.sh --race
+
+  # Keep the live vulnerability database from hiding build and test results.
+  # The aggregate backend job below still treats both jobs as one merge gate.
+  go-vulnerability-scan:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        uses: actions/checkout@v6
+
+      - name: Setup Go
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        uses: actions/setup-go@v5
+        with:
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # CI follows the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
+          cache-dependency-path: server/go.sum
+
+      - name: Scan Go vulnerabilities
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        run: go tool govulncheck ./...
+
+  # Preserve the existing required-check name while allowing tests, generated
+  # SQL verification, and the vulnerability scan to run independently.
+  backend:
+    needs: [backend-tests, sqlc-check, go-vulnerability-scan]
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check backend job results
+        env:
+          TEST_RESULT: ${{ needs.backend-tests.result }}
+          SQLC_RESULT: ${{ needs.sqlc-check.result }}
+          VULNERABILITY_RESULT: ${{ needs.go-vulnerability-scan.result }}
+        run: |
+          echo "backend-tests:        $TEST_RESULT"
+          echo "sqlc-check:           $SQLC_RESULT"
+          echo "go-vulnerability-scan: $VULNERABILITY_RESULT"
+          if [ "$TEST_RESULT" != "success" ] || [ "$SQLC_RESULT" != "success" ] || [ "$VULNERABILITY_RESULT" != "success" ]; then
+            echo "::error::backend validation failed"
+            exit 1
+          fi
 
   windows-execenv:
     # The environment-preparation deadline owns a process tree, not just a Go
     # process. This Windows runtime test verifies Job Object cancellation kills
     # a delayed descendant before an immediate retry can reuse the same root.
+    # Every step here is a Go test under server/, so it rides the same path
+    # filter as the backend jobs; steps are gated rather than the job so the
+    # check still reports green on a filtered PR.
+    needs: changes
     runs-on: windows-latest
     steps:
       - name: Checkout
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/checkout@v6
 
       - name: Setup Go
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         uses: actions/setup-go@v5
         with:
-          go-version: "1.26.1"
+          # Deliberately independent from the minimum patch in server/go.mod:
+          # CI follows the newest 1.26 patch available to setup-go.
+          go-version: "1.26.x"
+          check-latest: true
           cache-dependency-path: server/go.sum
 
       - name: Test Windows execution-environment isolation
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # Keep this job scoped to the runtime regression it exists to prove.
         # The package's legacy OpenClaw HOME tests are not Windows-safe and are
@@ -328,6 +601,7 @@ jobs:
         run: go test ./internal/daemon/execenv -run '^TestPrepareIsolated_WindowsKillsDescendantBeforeRetry$' -count=1 -timeout=5m
 
       - name: Test Windows agent launcher argv/stdin handling
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # Agent prompts must never reach a Windows launcher through argv: the
         # official cursor-agent.ps1 and pi.ps1 launch native children with
@@ -344,6 +618,7 @@ jobs:
         run: go test ./pkg/agent -v -run '^(TestCursorExecutePromptSurvivesPowerShellShim|TestPiExecutePromptSurvivesPowerShellShim|TestPlatformCursorInvocation|TestPlatformCopilotInvocation|TestPlatformPiInvocation)' -count=1 -timeout=5m
 
       - name: Test Windows OpenCode oversized prompt reaches stdin
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # #6538: the daemon inlined the whole task prompt as an argv element,
         # so every OpenCode task whose prompt cleared CreateProcess's 32,767
@@ -359,14 +634,19 @@ jobs:
         # in the log instead of passing as "ok".
         run: go test ./pkg/agent -v -run '^TestOpencodeExecuteOversizedPromptStartsOnWindows$' -count=1 -timeout=5m
 
-      - name: Test bounded Codex cleanup with inherited stdout descendant
+      - name: Test Windows agent process-tree ownership
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
-        # Windows cannot prove whole-tree termination without a Job Object,
-        # but a descendant holding inherited stdout must never keep Result
-        # blocked forever. -v makes RUN/PASS evidence explicit in CI logs.
-        run: go test ./pkg/agent -v -run '^TestCodexWindowsInheritedStdoutDescendantCleanupIsBounded$' -count=1 -timeout=5m
+        # A Job Object is the only way to prove whole-tree termination on
+        # Windows, and only a real Windows runner can exercise it: that a
+        # grandchild dies with the tree that owns it, that an unowned process
+        # still reports cleanup as unconfirmed, and that a descendant holding
+        # inherited stdout neither keeps Result blocked nor survives cleanup.
+        # -v makes RUN/PASS evidence explicit in CI logs.
+        run: go test ./pkg/agent -v -run '^(TestStartOwnedProcessTreeCapturesImmediateDescendants|TestStartOwnedProcessTreeLeavesNoSuspendedChild|TestWaitProcessGroupGoneWithoutOwnershipReportsUnconfirmed|TestCodexInitializeRetrySupportedWithOwnedProcessTree|TestCodexWindowsDescendantsDieWithTheOwnedProcessTree)$' -count=1 -timeout=5m
 
       - name: Test Windows OpenClaw npm shim interpreter resolution
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # #6061: every OpenClaw task failed execenv prep on a Windows host with
         # a bare `exit status 1` and no stderr. A batch shim resolves and runs
@@ -388,6 +668,7 @@ jobs:
         run: go test ./internal/daemon/execenv -v -run '^TestWindowsOpenclawShim' -count=1 -timeout=5m
 
       - name: Test Windows isolated repo checkout is committable
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # #6449: on Windows the daemon now hands Codex tasks a checkout whose
         # .git lives inside the task workdir, because a linked worktree's
@@ -409,6 +690,7 @@ jobs:
         run: go test ./internal/daemon/repocache -v -run '^(TestIsolatedCheckoutIsCommittableOnWindows|TestIsolatedCheckoutAcrossVolumesOnWindows)$' -count=1 -timeout=5m
 
       - name: Test Windows directory-junction link safety
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         # MUL-6000: the per-task codex-home links the user's real skills into
         # the task directory instead of copying them. On Windows that link is a
@@ -427,9 +709,42 @@ jobs:
           go test ./internal/daemon/execenv -v -run '^(TestSeedUserCodexSkills|TestHydrateCodexSkills)' -count=1 -timeout=5m
           go test ./internal/daemon -v -run '^(TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction|TestTaskSize_DoesNotCountDirectoryJunction)$' -count=1 -timeout=5m
 
+      - name: Test Windows agent executable junction resolution
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # The standalone Codex installer exposes bin as a directory junction.
+        # filepath.EvalSymlinks cannot traverse that reparse-point shape, so
+        # only a real Windows filesystem proves both PATH discovery and an
+        # explicitly configured path reach the release executable. The same job
+        # covers the npm shape, where the entry point is a `.cmd` shim that only
+        # the command interpreter can run.
+        run: go test ./internal/daemon -v -run '^(TestCanonicalExecutablePath|TestTrimExtendedLengthPrefix|TestResolveAgentExecutablePathKeeps|TestResolveAgentEntry(FollowsRetargetedInstallerJunction|CanonicalizesRediscoveredJunction|ForLaunchKeepsCmdShimLaunchable|ForLaunchRejectsUnverifiedInitialJunctionTarget|ForLaunchRejectsRediscoveredJunctionWhenFinalPathResolutionFails|DoesNotSharePreRetargetSingleflightResult|ForLaunchFailsWhenJunctionKeepsRetargeting)|TestHandleTaskReportsWindowsCodexProcessStartFailure)' -count=1 -timeout=5m
+
       - name: Build Windows CLI helper entrypoint
+        if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         run: go build ./cmd/multica
+
+  image-budget:
+    # Soft gate against the 21.7MB of raw PNG/JPG that MUL-6352 cleared out:
+    # a bitmap added or grown past 300KB fails until the PR description says
+    # why. Pull requests only — a push to main has no description to read,
+    # and the branch it came from was already checked.
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.images == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # The check diffs against the base branch, which a shallow
+          # clone does not contain.
+          fetch-depth: 0
+
+      - name: Check image budget
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/check-image-budget.mjs --base "origin/${{ github.base_ref }}"
 
   installer:
     # Stub-driven shell tests for scripts/install.sh and scripts/install.ps1.

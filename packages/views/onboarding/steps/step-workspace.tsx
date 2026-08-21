@@ -11,7 +11,6 @@ import {
   FieldError,
   FieldGroup,
   FieldLabel,
-  FieldTitle,
 } from "@multica/ui/components/ui/field";
 import { cn } from "@multica/ui/lib/utils";
 import { useCreateWorkspace } from "@multica/core/workspace/mutations";
@@ -54,7 +53,10 @@ import { isReservedSlug } from "@multica/core/paths";
  * app URL so self-hosted instances show their own domain), and a live
  * `Issues will look
  * like ACME-123` line shows the user what their issue IDs will read
- * like before they've created anything.
+ * like before they've created anything. The issue prefix behind that line
+ * is an editable field pre-filled from the slug (MUL-6050) — it used to be
+ * read-only, which left every non-ASCII-named workspace stuck on the
+ * server's old `WS` fallback with no in-flow way out.
  *
  * Resume path ships two picker cards (existing + create-new) and the
  * user toggles between them. No-existing path just shows the create
@@ -62,11 +64,26 @@ import { isReservedSlug } from "@multica/core/paths";
  */
 
 function issuePrefix(slug: string): string {
-  // Mirrors the server's default prefix derivation — first 4 chars of
-  // the slug, uppercased. Falls back to "WS" when the slug is empty so
-  // the preview line never collapses to a single dangling "-".
-  const head = slug.trim().replace(/[^a-z0-9]/g, "").slice(0, 4);
-  return (head || "ws").toUpperCase();
+  // Mirrors the server's default prefix derivation
+  // (handler.defaultIssuePrefixFromSlug) — alphanumerics of the slug, first
+  // 4 chars, uppercased. Lowercase first because the server lowercases the
+  // slug before deriving, so a user who types "ACME" here sees the same
+  // "ACME" the server would produce rather than an empty strip. Returns ""
+  // for a slug with nothing to derive from; that slug can't be submitted, so
+  // only the preview has to cope with it.
+  return slug
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .slice(0, 4)
+    .toUpperCase();
+}
+
+// Letters + digits only, uppercase, capped at 10 — the same guardrail the
+// settings tab applies, and the same shape the server now validates
+// (`^[A-Z0-9]{1,10}$`).
+function normalizePrefix(raw: string): string {
+  return raw.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 10);
 }
 
 export function StepWorkspace({
@@ -116,6 +133,12 @@ export function StepWorkspace({
   const [slug, setSlug] = useState("");
   const [slugServerError, setSlugServerError] = useState<string | null>(null);
   const slugTouched = useRef(false);
+  // Prefix follows the slug the same way the slug follows the name, and stops
+  // following the moment the user edits it (MUL-6050). Editable here because
+  // settings was the only place to change it, and a user who never noticed the
+  // default would never go looking.
+  const [prefix, setPrefix] = useState("");
+  const prefixTouched = useRef(false);
 
   const slugValidationError =
     slug.length > 0 && !WORKSPACE_SLUG_REGEX.test(slug)
@@ -129,26 +152,47 @@ export function StepWorkspace({
   const canCreate =
     name.trim().length > 0 && slug.trim().length > 0 && !slugError;
 
+  // What the workspace will actually be created with. Clearing the prefix
+  // input reverts to the slug-derived default rather than blocking the CTA —
+  // the placeholder shows that default, so an empty field is never a
+  // surprise. Empty only while the slug is (a name that romanizes to nothing
+  // derives none), which is also exactly when `canCreate` is false, so submit
+  // always carries a real prefix.
+  const derivedPrefix = issuePrefix(slug);
+  const effectivePrefix = prefix || derivedPrefix;
+
+  // Every slug write goes through here so the untouched prefix can't drift
+  // out of sync with the slug it is derived from.
+  const applySlug = (value: string) => {
+    setSlug(value);
+    setSlugServerError(null);
+    if (!prefixTouched.current) setPrefix(issuePrefix(value));
+  };
+
   const handleNameChange = (value: string) => {
     setName(value);
     if (!slugTouched.current) {
-      setSlug(nameToWorkspaceSlug(value));
-      setSlugServerError(null);
+      // Locale decides whether Han characters are read as Chinese; see
+      // nameToWorkspaceSlug.
+      applySlug(nameToWorkspaceSlug(value, locale));
     }
   };
 
   const handleSlugChange = (value: string) => {
     slugTouched.current = true;
-    setSlug(value);
-    setSlugServerError(null);
+    applySlug(value);
+  };
+
+  const handlePrefixChange = (value: string) => {
+    prefixTouched.current = true;
+    setPrefix(normalizePrefix(value));
   };
 
   const handleRandomName = () => {
     const identity = randomCelestialWorkspaceIdentity(locale);
     slugTouched.current = true;
     setName(identity.name);
-    setSlug(identity.slug);
-    setSlugServerError(null);
+    applySlug(identity.slug);
   };
 
   const createWorkspace = useCreateWorkspace();
@@ -156,7 +200,15 @@ export function StepWorkspace({
   const handleCreate = () => {
     if (!canCreate || createWorkspace.isPending) return;
     createWorkspace.mutate(
-      { name: name.trim(), slug: slug.trim() },
+      {
+        name: name.trim(),
+        slug: slug.trim(),
+        // Send what the user was shown. The server derives the same value
+        // from the slug when the field is omitted, so the preview and the
+        // created workspace agree either way — but submitting it explicitly
+        // is what makes an edited prefix stick.
+        issue_prefix: effectivePrefix,
+      },
       {
         onSuccess: onCreated,
         onError: (error) => {
@@ -289,16 +341,48 @@ export function StepWorkspace({
         </div>
         {slugError ? <FieldError>{slugError}</FieldError> : null}
       </Field>
-      {/* Derived, not entered — FieldTitle rather than FieldLabel, since
-          there is no control for a label to point at. */}
+      {/* Editable, pre-filled from the slug. Narrow input — the value is
+          capped at 10 chars, so a full-width field would read as a mistake.
+
+          Nothing is invented while the slug is empty: a name that romanizes
+          to nothing — kana, Hangul, emoji — derives no slug (see
+          nameToWorkspaceSlug), and the placeholder used to fill that gap with
+          "WS", telling the user they were getting the exact prefix this whole
+          change exists to eliminate. Empty field plus a hint is the honest
+          state; the user is picking a URL next anyway, and the prefix appears
+          the moment they do. */}
       <Field>
-        <FieldTitle>{t(($) => $.step_workspace.issue_prefix_label)}</FieldTitle>
+        <FieldLabel htmlFor="ws-issue-prefix">
+          {t(($) => $.step_workspace.issue_prefix_label)}
+        </FieldLabel>
+        <Input
+          id="ws-issue-prefix"
+          type="text"
+          value={prefix}
+          onChange={(e) => handlePrefixChange(e.target.value)}
+          placeholder={derivedPrefix}
+          autoComplete="off"
+          autoCapitalize="characters"
+          spellCheck={false}
+          maxLength={10}
+          className="w-32 font-mono uppercase"
+          onKeyDown={(e) => {
+            if (isImeComposing(e)) return;
+            if (e.key === "Enter") handleCreate();
+          }}
+        />
         <FieldDescription>
-          {t(($) => $.step_workspace.issue_prefix_prefix)}
-          <span className="font-mono text-foreground">
-            {issuePrefix(slug)}-123
-          </span>
-          {t(($) => $.step_workspace.issue_prefix_suffix)}
+          {effectivePrefix ? (
+            <>
+              {t(($) => $.step_workspace.issue_prefix_prefix)}
+              <span className="font-mono text-foreground">
+                {effectivePrefix}-123
+              </span>
+              {t(($) => $.step_workspace.issue_prefix_suffix)}
+            </>
+          ) : (
+            t(($) => $.step_workspace.issue_prefix_pending)
+          )}
         </FieldDescription>
       </Field>
     </FieldGroup>
