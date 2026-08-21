@@ -81,8 +81,9 @@ spec:
           # The entrypoint runs `./migrate up` before serving traffic. On a
           # cold cluster (Postgres still coming up) this can take minutes. The
           # startupProbe holds off liveness/readiness until /healthz is OK.
-          # Its 10 minute window exceeds the default database wait budget and
-          # leaves time for migrations before kubelet may restart the pod.
+          # Its 10 minute window exceeds the shared 3 minute database retry
+          # budget and leaves time for migrations before kubelet may restart
+          # the pod.
           startupProbe:
             httpGet:
               path: /healthz

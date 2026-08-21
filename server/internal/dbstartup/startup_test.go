@@ -3,7 +3,10 @@ package dbstartup
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +36,27 @@ func TestSettingsFromEnvAllowsFailFastButKeepsConnectionTimeoutBounded(t *testin
 	}
 	if got.ConnectTimeout != DefaultConnectTimeout {
 		t.Fatalf("ConnectTimeout = %s, want %s", got.ConnectTimeout, DefaultConnectTimeout)
+	}
+}
+
+func TestSettingsFromEnvSharesEntrypointStartupBudget(t *testing.T) {
+	current := time.Unix(2_000_000_000, 0)
+	t.Setenv(StartupTimeoutEnv, "3m")
+	t.Setenv(startupStartedAtEnv, fmt.Sprintf("%d", current.Unix()))
+
+	settings := settingsFromEnv(func() time.Time { return current })
+	if got := settings.RetryOptions().Timeout; got != 3*time.Minute {
+		t.Fatalf("initial retry timeout = %s, want 3m", got)
+	}
+
+	current = current.Add(70 * time.Second)
+	if got := settings.RetryOptions().Timeout; got != 110*time.Second {
+		t.Fatalf("remaining retry timeout = %s, want 1m50s", got)
+	}
+
+	current = current.Add(2 * time.Minute)
+	if got := settings.RetryOptions().Timeout; got != 0 {
+		t.Fatalf("expired retry timeout = %s, want 0", got)
 	}
 }
 
@@ -116,6 +140,24 @@ func TestRetryStopsAtTimeout(t *testing.T) {
 	}
 }
 
+func TestRetryTimeoutPreservesLastError(t *testing.T) {
+	wantErr := &pgconn.PgError{Code: "57P03", Message: "database is starting"}
+	err := Retry(context.Background(), RetryOptions{
+		Timeout: time.Minute,
+		Sleep: func(context.Context, time.Duration) error {
+			return context.DeadlineExceeded
+		},
+	}, func(context.Context) error {
+		return wantErr
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Retry error = %v, want context.DeadlineExceeded", err)
+	}
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("Retry error = %v, want wrapped last error %v", err, wantErr)
+	}
+}
+
 func TestRetryWithZeroTimeoutAttemptsOnce(t *testing.T) {
 	wantErr := errors.New("database unavailable")
 	var attempts int
@@ -174,6 +216,7 @@ func TestIsTransientDatabaseError(t *testing.T) {
 		{name: "database starting", err: &pgconn.PgError{Code: "57P03"}, want: true},
 		{name: "too many connections", err: &pgconn.PgError{Code: "53300"}, want: true},
 		{name: "syntax error", err: &pgconn.PgError{Code: "42601"}, want: false},
+		{name: "connection deadline", err: context.DeadlineExceeded, want: true},
 		{name: "cancelled", err: context.Canceled, want: false},
 	}
 	for _, tt := range tests {
@@ -183,4 +226,103 @@ func TestIsTransientDatabaseError(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRetryRetriesConnectionHandshakeTimeout(t *testing.T) {
+	address := startStalledDatabaseListener(t)
+	pool, err := NewPool(
+		context.Background(),
+		fmt.Sprintf("postgres://user:pass@%s/db?sslmode=disable", address),
+		30*time.Millisecond,
+	)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	var attempts int
+	err = Retry(context.Background(), RetryOptions{
+		Timeout:        200 * time.Millisecond,
+		InitialBackoff: time.Millisecond,
+		MaxBackoff:     time.Millisecond,
+		Jitter:         func(delay time.Duration) time.Duration { return delay },
+		ShouldRetry:    IsTransientDatabaseError,
+	}, func(ctx context.Context) error {
+		attempts++
+		return pool.Ping(ctx)
+	})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Retry error = %v, want context.DeadlineExceeded", err)
+	}
+	if attempts < 2 {
+		t.Fatalf("attempts = %d, want at least 2 for a connection handshake timeout", attempts)
+	}
+}
+
+func TestIsTransientDatabaseErrorFromRefusedConnection(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	address := listener.Addr().String()
+	if err := listener.Close(); err != nil {
+		t.Fatalf("close listener: %v", err)
+	}
+
+	pool, err := NewPool(
+		context.Background(),
+		fmt.Sprintf("postgres://user:pass@%s/db?sslmode=disable", address),
+		100*time.Millisecond,
+	)
+	if err != nil {
+		t.Fatalf("NewPool: %v", err)
+	}
+	defer pool.Close()
+
+	err = pool.Ping(context.Background())
+	if err == nil {
+		t.Fatal("Ping unexpectedly succeeded")
+	}
+	if !IsTransientDatabaseError(err) {
+		t.Fatalf("IsTransientDatabaseError(%v) = false, want true", err)
+	}
+}
+
+func startStalledDatabaseListener(t *testing.T) string {
+	t.Helper()
+
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	var (
+		mu          sync.Mutex
+		connections []net.Conn
+	)
+	acceptDone := make(chan struct{})
+	go func() {
+		defer close(acceptDone)
+		for {
+			conn, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			mu.Lock()
+			connections = append(connections, conn)
+			mu.Unlock()
+		}
+	}()
+
+	t.Cleanup(func() {
+		_ = listener.Close()
+		<-acceptDone
+		mu.Lock()
+		defer mu.Unlock()
+		for _, conn := range connections {
+			_ = conn.Close()
+		}
+	})
+
+	return listener.Addr().String()
 }

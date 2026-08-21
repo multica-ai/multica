@@ -8,6 +8,7 @@ import (
 	"math/rand/v2"
 	"net"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -18,6 +19,10 @@ import (
 const (
 	StartupTimeoutEnv = "MULTICA_DATABASE_STARTUP_TIMEOUT"
 	ConnectTimeoutEnv = "MULTICA_DATABASE_CONNECT_TIMEOUT"
+	// startupStartedAtEnv is set by the container entrypoint so the migrator
+	// and API server consume one shared retry budget. It is intentionally not
+	// a user-facing setting.
+	startupStartedAtEnv = "MULTICA_INTERNAL_DATABASE_STARTUP_STARTED_AT_UNIX"
 
 	DefaultStartupTimeout = 3 * time.Minute
 	DefaultConnectTimeout = 5 * time.Second
@@ -29,15 +34,46 @@ const (
 type Settings struct {
 	StartupTimeout time.Duration
 	ConnectTimeout time.Duration
+
+	startupDeadline time.Time
+	now             func() time.Time
 }
 
 // SettingsFromEnv reads the shared startup settings used by the migrator and
 // API server. A zero startup timeout preserves an explicit fail-fast option.
 func SettingsFromEnv() Settings {
-	return Settings{
-		StartupTimeout: envDuration(StartupTimeoutEnv, DefaultStartupTimeout, true),
+	return settingsFromEnv(time.Now)
+}
+
+func settingsFromEnv(now func() time.Time) Settings {
+	startupTimeout := envDuration(StartupTimeoutEnv, DefaultStartupTimeout, true)
+	settings := Settings{
+		StartupTimeout: startupTimeout,
 		ConnectTimeout: envDuration(ConnectTimeoutEnv, DefaultConnectTimeout, false),
+		now:            now,
 	}
+	if startupTimeout <= 0 {
+		return settings
+	}
+
+	startedAt := now()
+	if raw := os.Getenv(startupStartedAtEnv); raw != "" {
+		unixSeconds, err := strconv.ParseInt(raw, 10, 64)
+		if err == nil && unixSeconds > 0 {
+			startedAt = time.Unix(unixSeconds, 0)
+		} else {
+			if err == nil {
+				err = errors.New("timestamp must be positive")
+			}
+			slog.Warn("invalid internal database startup timestamp, starting a new retry budget",
+				"name", startupStartedAtEnv,
+				"value", raw,
+				"error", err,
+			)
+		}
+	}
+	settings.startupDeadline = startedAt.Add(startupTimeout)
+	return settings
 }
 
 // ParsePoolConfig applies the same bounded connection timeout to every startup
@@ -85,10 +121,22 @@ type RetryOptions struct {
 	OnRetry                   func(RetryEvent)
 }
 
-// RetryOptions returns production defaults for database startup retries.
+// RetryOptions returns production defaults with the startup budget remaining
+// at the time of the call. Repeated phases therefore share one deadline.
 func (s Settings) RetryOptions() RetryOptions {
+	timeout := s.StartupTimeout
+	if timeout > 0 && !s.startupDeadline.IsZero() {
+		now := s.now
+		if now == nil {
+			now = time.Now
+		}
+		timeout = s.startupDeadline.Sub(now())
+		if timeout < 0 {
+			timeout = 0
+		}
+	}
 	return RetryOptions{
-		Timeout:        s.StartupTimeout,
+		Timeout:        timeout,
 		InitialBackoff: defaultInitialBackoff,
 		MaxBackoff:     defaultMaxBackoff,
 	}
@@ -178,7 +226,7 @@ func retryStopped(attempts int, cause, lastErr error) error {
 	if lastErr == nil {
 		return fmt.Errorf("database startup stopped before an attempt completed: %w", cause)
 	}
-	return fmt.Errorf("database startup failed after %d attempt(s): %w (last error: %v)", attempts, cause, lastErr)
+	return fmt.Errorf("database startup failed after %d attempt(s): %w (last error: %w)", attempts, cause, lastErr)
 }
 
 func jitterDelay(delay time.Duration) time.Duration {
@@ -191,7 +239,7 @@ func jitterDelay(delay time.Duration) time.Duration {
 // availability failures. SQL and migration-definition errors fail immediately
 // instead of consuming the startup retry budget.
 func IsTransientDatabaseError(err error) bool {
-	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+	if err == nil || errors.Is(err, context.Canceled) {
 		return false
 	}
 

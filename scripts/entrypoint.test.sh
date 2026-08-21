@@ -22,6 +22,7 @@ cat >"$TEST_DIR/migrate" <<'SCRIPT'
 #!/bin/sh
 trap 'printf "TERM\n" >"$MIGRATE_SIGNAL_FILE"; exit 143' TERM
 printf '%s\n' "$$" >"$MIGRATE_PID_FILE"
+printf '%s\n' "$MULTICA_INTERNAL_DATABASE_STARTUP_STARTED_AT_UNIX" >"$MIGRATE_STARTED_AT_FILE"
 while :; do
   sleep 1
 done
@@ -30,13 +31,16 @@ SCRIPT
 cat >"$TEST_DIR/server" <<'SCRIPT'
 #!/bin/sh
 printf 'started\n' >"$SERVER_STARTED_FILE"
+printf '%s\n' "$MULTICA_INTERNAL_DATABASE_STARTUP_STARTED_AT_UNIX" >"$SERVER_STARTED_AT_FILE"
 SCRIPT
 
 chmod +x "$TEST_DIR/entrypoint.sh" "$TEST_DIR/migrate" "$TEST_DIR/server"
 
 export MIGRATE_PID_FILE="$TEST_DIR/migrate.pid"
 export MIGRATE_SIGNAL_FILE="$TEST_DIR/migrate.signal"
+export MIGRATE_STARTED_AT_FILE="$TEST_DIR/migrate.started-at"
 export SERVER_STARTED_FILE="$TEST_DIR/server.started"
+export SERVER_STARTED_AT_FILE="$TEST_DIR/server.started-at"
 
 (
   cd "$TEST_DIR"
@@ -77,6 +81,7 @@ fi
 
 cat >"$TEST_DIR/migrate" <<'SCRIPT'
 #!/bin/sh
+printf '%s\n' "$MULTICA_INTERNAL_DATABASE_STARTUP_STARTED_AT_UNIX" >"$MIGRATE_STARTED_AT_FILE"
 exit 0
 SCRIPT
 chmod +x "$TEST_DIR/migrate"
@@ -89,5 +94,16 @@ if [ "$(cat "$SERVER_STARTED_FILE" 2>/dev/null || true)" != "started" ]; then
   echo "entrypoint did not start the server after successful migrations"
   exit 1
 fi
+started_at="$(cat "$MIGRATE_STARTED_AT_FILE" 2>/dev/null || true)"
+if [ -z "$started_at" ] || [ "$started_at" != "$(cat "$SERVER_STARTED_AT_FILE" 2>/dev/null || true)" ]; then
+  echo "entrypoint did not share one database startup timestamp"
+  exit 1
+fi
+case "$started_at" in
+  *[!0-9]*)
+    echo "entrypoint database startup timestamp is not a Unix timestamp"
+    exit 1
+    ;;
+esac
 
 echo "entrypoint startup and signal forwarding ok"
