@@ -129,33 +129,44 @@ const ISSUES = [
   makeIssue("loose", null),
 ];
 
-/** What `useIssueGroupBranches` hands the board for `{ kind: "project" }`. */
-const groupBranches: IssueGroupBranches = {
-  enabled: true,
-  descriptors: [
-    { key: "project:none", value: { kind: "project", project_id: null }, count: 1 },
-    {
-      key: `project:${ACME_ID}`,
-      value: { kind: "project", project_id: ACME_ID },
-      count: 4,
-    },
-    {
-      key: `project:${GHOST_ID}`,
-      value: { kind: "project", project_id: GHOST_ID },
-      count: 1,
-    },
-  ],
-  issues: ISSUES,
-  pagination: {},
-  total: 3,
-  isLoading: false,
-  isRefreshing: false,
-  isError: false,
-  hasMoreGroups: false,
-  isLoadingMoreGroups: false,
-  loadMoreGroups: () => {},
-  retryGroups: () => {},
+const NO_PROJECT_DESCRIPTOR = {
+  key: "project:none",
+  value: { kind: "project" as const, project_id: null },
+  count: 1,
 };
+const PROJECT_DESCRIPTORS = [
+  {
+    key: `project:${ACME_ID}`,
+    value: { kind: "project" as const, project_id: ACME_ID },
+    count: 4,
+  },
+  {
+    key: `project:${GHOST_ID}`,
+    value: { kind: "project" as const, project_id: GHOST_ID },
+    count: 1,
+  },
+];
+
+/** What `useIssueGroupBranches` hands the board for `{ kind: "project" }`. */
+function makeGroupBranches(
+  descriptors: IssueGroupBranches["descriptors"],
+  issues: Issue[],
+): IssueGroupBranches {
+  return {
+    enabled: true,
+    descriptors,
+    issues,
+    pagination: {},
+    total: issues.length,
+    isLoading: false,
+    isRefreshing: false,
+    isError: false,
+    hasMoreGroups: false,
+    isLoadingMoreGroups: false,
+    loadMoreGroups: () => {},
+    retryGroups: () => {},
+  };
+}
 
 class ObserverStub {
   observe() {}
@@ -182,7 +193,13 @@ describe("Board grouped by project", () => {
     vi.unstubAllGlobals();
   });
 
-  function render() {
+  function render({
+    descriptors = [NO_PROJECT_DESCRIPTOR, ...PROJECT_DESCRIPTORS],
+    issues = ISSUES,
+  }: {
+    descriptors?: IssueGroupBranches["descriptors"];
+    issues?: Issue[];
+  } = {}) {
     const store = getIssueSurfaceViewStore(
       `board-project-${Math.floor(Math.random() * 1e9)}`,
     );
@@ -197,14 +214,14 @@ describe("Board grouped by project", () => {
         <ViewStoreProvider store={store}>
           <IssueContextMenuProvider>
           <BoardView
-            issues={ISSUES}
+            issues={issues}
             visibleStatuses={["todo"]}
             hiddenStatuses={[]}
             onMoveIssue={() => {}}
             projectMap={
               new Map([[ACME_ID, makeProject(ACME_ID, "Acme Corp", "🚀")]])
             }
-            groupBranches={groupBranches}
+            groupBranches={makeGroupBranches(descriptors, issues)}
           />
           </IssueContextMenuProvider>
         </ViewStoreProvider>
@@ -212,14 +229,39 @@ describe("Board grouped by project", () => {
     );
   }
 
-  it("titles each column with its project and pins a No project column", () => {
+  it("titles each column with its project, never with its id", () => {
     render();
 
     expect(screen.getByText("Acme Corp")).toBeTruthy();
     expect(screen.getByText("No project")).toBeTruthy();
-    // The id is never user-facing text.
     expect(screen.queryByText(ACME_ID)).toBeNull();
     expect(screen.queryByText(GHOST_ID)).toBeNull();
+  });
+
+  it("keeps a No project column when the server returns no such group", () => {
+    // Clearing a card's project by dragging has to stay possible in a workspace
+    // where every card currently has one, so this column is not derived from
+    // the result set like the others.
+    render({
+      descriptors: PROJECT_DESCRIPTORS,
+      issues: ISSUES.filter((issue) => issue.project_id !== null),
+    });
+
+    const header = screen.getByText("No project").parentElement!;
+    expect(header.textContent).toContain("0");
+  });
+
+  it("keeps exactly one No project column when the server does return it", () => {
+    render();
+
+    expect(screen.getAllByText("No project")).toHaveLength(1);
+  });
+
+  it("reads an unresolvable project the way the Table does", () => {
+    // The board and the table must not describe the same project differently.
+    render();
+
+    expect(screen.getByText("Unavailable value")).toBeTruthy();
   });
 
   it("shows the server's group count, not the loaded card count", () => {
