@@ -1127,6 +1127,11 @@ func (env *Environment) Cleanup(removeAll bool) error {
 // another task may still be executing in (#7326).
 const envRootOwnerFile = ".task_owner"
 
+// ErrEnvRootConflict marks an environment preparation failure caused by an
+// env root that cannot be safely claimed or reset. Callers use errors.Is so
+// diagnostics can evolve without breaking failure classification.
+var ErrEnvRootConflict = errors.New("environment root conflict")
+
 // claimEnvRoot atomically establishes that taskID owns envRoot.
 //
 // fresh is true when this call created the claim and the directory is the
@@ -1165,7 +1170,7 @@ func claimEnvRoot(envRoot, taskID string) (fresh bool, err error) {
 	case owner == taskID:
 		return false, nil
 	case owner != "":
-		return false, fmt.Errorf("env root %s belongs to task %s; refusing to reset it for task %s", envRoot, owner, taskID)
+		return false, fmt.Errorf("%w: env root %s belongs to task %s; refusing to reset it for task %s", ErrEnvRootConflict, envRoot, owner, taskID)
 	}
 
 	// No owner. A directory holding work is never ours to take — the marker is
@@ -1177,7 +1182,7 @@ func claimEnvRoot(envRoot, taskID string) (fresh bool, err error) {
 		return false, fmt.Errorf("inspect env root %s: %w", envRoot, err)
 	}
 	if !empty {
-		return false, fmt.Errorf("env root %s already holds files but names no owning task; refusing to delete it", envRoot)
+		return false, fmt.Errorf("%w: env root %s already holds files but names no owning task; refusing to delete it", ErrEnvRootConflict, envRoot)
 	}
 	if err := writeEnvRootOwnerExclusive(envRoot, taskID); err != nil {
 		// Lost the race for an empty directory: whoever won owns it now.
@@ -1199,7 +1204,7 @@ func writeEnvRootOwnerExclusive(envRoot, taskID string) error {
 		if owner == taskID {
 			return nil
 		}
-		return fmt.Errorf("env root %s was claimed by task %s while task %s was starting", envRoot, owner, taskID)
+		return fmt.Errorf("%w: env root %s was claimed by task %s while task %s was starting", ErrEnvRootConflict, envRoot, owner, taskID)
 	}
 	if err != nil {
 		return fmt.Errorf("claim env root %s: %w", envRoot, err)
@@ -1231,6 +1236,10 @@ func readEnvRootOwner(envRoot string) (string, error) {
 // would drop the claim for as long as the recreate takes, which is exactly the
 // window claimEnvRoot exists to close.
 func resetEnvRootContents(envRoot string) error {
+	return resetEnvRootContentsWithRemoveAll(envRoot, os.RemoveAll)
+}
+
+func resetEnvRootContentsWithRemoveAll(envRoot string, removeAll func(string) error) error {
 	entries, err := os.ReadDir(envRoot)
 	if err != nil {
 		return err
@@ -1239,8 +1248,9 @@ func resetEnvRootContents(envRoot string) error {
 		if e.Name() == envRootOwnerFile {
 			continue
 		}
-		if err := os.RemoveAll(filepath.Join(envRoot, e.Name())); err != nil {
-			return err
+		path := filepath.Join(envRoot, e.Name())
+		if err := removeAll(path); err != nil {
+			return fmt.Errorf("%w: remove %s: %w", ErrEnvRootConflict, path, err)
 		}
 	}
 	return nil

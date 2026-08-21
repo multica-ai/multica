@@ -5234,6 +5234,9 @@ func taskRunFailureReason(err error) string {
 	if errors.Is(err, errInvalidTaskIdentity) {
 		return taskfailure.ReasonInvalidTaskIdentity.String()
 	}
+	if errors.Is(err, execenv.ErrEnvRootConflict) {
+		return taskfailure.ReasonEnvPrepDirConflict.String()
+	}
 	if errors.Is(err, errTaskPrepareTimeout) {
 		return taskfailure.ReasonTimeout.String()
 	}
