@@ -2436,3 +2436,12 @@ INSERT INTO agent (
     @owner_id, '', '{}'::jsonb, '[]'::jsonb, 'user', @system_key
 )
 RETURNING *;
+
+-- name: UpdateAgentTaskTokenTemplates :one
+-- Replaces an agent's enabled task-token template ids wholesale. Written only
+-- by PUT /api/agents/{id}/task-tokens, which validates every id against the
+-- server-configured catalog first.
+UPDATE agent
+SET task_token_templates = $2, updated_at = now()
+WHERE id = $1
+RETURNING *;

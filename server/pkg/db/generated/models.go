@@ -52,6 +52,7 @@ type Agent struct {
 	SystemKey             pgtype.Text `json:"system_key"`
 	DisabledRuntimeSkills []byte      `json:"disabled_runtime_skills"`
 	ServiceTier           pgtype.Text `json:"service_tier"`
+	TaskTokenTemplates    []byte      `json:"task_token_templates"`
 }
 
 type AgentBuilderDraft struct {
