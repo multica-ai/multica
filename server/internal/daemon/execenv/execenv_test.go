@@ -368,7 +368,7 @@ func TestProjectReposReplaceWorkspaceReposInMetaSkill(t *testing.T) {
 func TestWriteProjectResourcesSkippedWhenNone(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
-	if err := writeProjectResources(dir, TaskContextForEnv{}, nil); err != nil {
+	if err := writeProjectResources(dir, TaskContextForEnv{}, nil, false); err != nil {
 		t.Fatalf("writeProjectResources: %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".multica", "project", "resources.json")); !os.IsNotExist(err) {
@@ -6271,20 +6271,21 @@ func TestTaskKeyReadsTheRandomTail(t *testing.T) {
 	}
 }
 
-// TestPrepareRefusesEnvRootOwnedByAnotherTask covers the guard that makes the
-// os.RemoveAll in Prepare safe. taskKey makes a shared env root improbable but
-// not impossible, and the cost of being wrong is deleting a running task's
-// work — so a foreign owner must stop Prepare rather than be overwritten.
-func TestPrepareRefusesEnvRootOwnedByAnotherTask(t *testing.T) {
+// TestPrepareQuarantinesEnvRootOwnedByAnotherTask covers the guard that makes
+// the os.RemoveAll in Prepare safe. taskKey makes a shared env root improbable
+// but not impossible; when the path is already owned by another task the
+// occupant is renamed aside so its files never appear in the incoming run.
+func TestPrepareQuarantinesEnvRootOwnedByAnotherTask(t *testing.T) {
 	t.Parallel()
 	workspacesRoot := t.TempDir()
 	const taskID = "01a01ec0-e69d-7000-8000-0123456789ab"
+	const otherID = "11111111-2222-3333-4444-555555555555"
 
 	envRoot := PredictRootDir(workspacesRoot, "ws-owned", taskID)
 	if err := os.MkdirAll(filepath.Join(envRoot, "workdir"), 0o755); err != nil {
 		t.Fatalf("seed env root: %v", err)
 	}
-	if err := writeEnvRootOwner(envRoot, "11111111-2222-3333-4444-555555555555"); err != nil {
+	if err := writeEnvRootOwner(envRoot, otherID); err != nil {
 		t.Fatalf("seed owner: %v", err)
 	}
 	survivor := filepath.Join(envRoot, "workdir", "other-task-work.txt")
@@ -6292,21 +6293,41 @@ func TestPrepareRefusesEnvRootOwnedByAnotherTask(t *testing.T) {
 		t.Fatalf("seed work: %v", err)
 	}
 
-	_, err := Prepare(PrepareParams{
+	env, err := Prepare(PrepareParams{
 		WorkspacesRoot: workspacesRoot,
 		WorkspaceID:    "ws-owned",
 		TaskID:         taskID,
 		AgentName:      "Intruder",
 		Task:           TaskContextForEnv{IssueID: taskID},
 	}, testLogger())
-	if err == nil {
-		t.Fatal("Prepare accepted an env root owned by another task")
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
 	}
-	if !strings.Contains(err.Error(), "belongs to task") {
-		t.Fatalf("error = %v, want it to name the owning task", err)
+	defer env.Cleanup(true)
+
+	if _, statErr := os.Stat(survivor); !os.IsNotExist(statErr) {
+		t.Fatalf("incoming run still sees the other task's work at %s: %v", survivor, statErr)
 	}
-	if _, statErr := os.Stat(survivor); statErr != nil {
-		t.Fatalf("Prepare deleted the other task's work despite failing: %v", statErr)
+	entries, err := os.ReadDir(filepath.Dir(envRoot))
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if !strings.Contains(e.Name(), ".quarantine-") {
+			continue
+		}
+		found = true
+		got, readErr := os.ReadFile(filepath.Join(filepath.Dir(envRoot), e.Name(), "workdir", "other-task-work.txt"))
+		if readErr != nil {
+			t.Fatalf("quarantined work missing: %v", readErr)
+		}
+		if string(got) != "keep me" {
+			t.Fatalf("quarantined work = %q", got)
+		}
+	}
+	if !found {
+		t.Fatal("expected a .quarantine-* sibling of the env root")
 	}
 }
 
@@ -6424,14 +6445,14 @@ func TestPrepareConcurrentSameKeyTasksClaimExclusively(t *testing.T) {
 	}
 }
 
-// TestClaimEnvRootRefusesUnownedDirectoryWithContent covers the other way the
-// marker can be missing: a directory that holds files but names no task. The
-// marker is written before any content, so this is not a shape Prepare
-// produces — and guessing that it is abandoned would mean deleting work whose
-// owner we could not identify.
-func TestClaimEnvRootRefusesUnownedDirectoryWithContent(t *testing.T) {
+// TestClaimEnvRootQuarantinesUnownedDirectoryWithContent covers the other way
+// the marker can be missing: a directory that holds files but names no task.
+// Guessing it is abandoned would delete work whose owner we could not identify,
+// so the occupant is renamed aside and the incoming task gets an empty root.
+func TestClaimEnvRootQuarantinesUnownedDirectoryWithContent(t *testing.T) {
 	t.Parallel()
-	envRoot := filepath.Join(t.TempDir(), "ws", "0123456789ab")
+	parent := t.TempDir()
+	envRoot := filepath.Join(parent, "0123456789ab")
 	if err := os.MkdirAll(filepath.Join(envRoot, "workdir"), 0o755); err != nil {
 		t.Fatalf("seed: %v", err)
 	}
@@ -6439,13 +6460,39 @@ func TestClaimEnvRootRefusesUnownedDirectoryWithContent(t *testing.T) {
 		t.Fatalf("seed: %v", err)
 	}
 
-	if _, _, err := claimEnvRoot(envRoot, "aaaaaaaa-1111-2222-3333-0123456789ab"); err == nil {
-		t.Fatal("claimEnvRoot took a directory holding files with no owner")
-	} else if !strings.Contains(err.Error(), "names no owning task") {
-		t.Fatalf("error = %v, want it to explain the missing owner", err)
+	lock, reset, err := claimEnvRoot(envRoot, "aaaaaaaa-1111-2222-3333-0123456789ab")
+	if err != nil {
+		t.Fatalf("claimEnvRoot: %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(envRoot, "workdir", "work.txt")); err != nil {
-		t.Fatalf("claimEnvRoot deleted the content it refused to claim: %v", err)
+	if reset {
+		t.Fatal("fresh claim after quarantine should not ask to reset")
+	}
+	if lock != nil {
+		releaseLockFile(lock)
+	}
+	if _, err := os.Stat(filepath.Join(envRoot, "workdir", "work.txt")); !os.IsNotExist(err) {
+		t.Fatal("incoming claim still sees the unowned work")
+	}
+	entries, err := os.ReadDir(parent)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	found := false
+	for _, e := range entries {
+		if !strings.Contains(e.Name(), ".quarantine-") {
+			continue
+		}
+		found = true
+		got, readErr := os.ReadFile(filepath.Join(parent, e.Name(), "workdir", "work.txt"))
+		if readErr != nil {
+			t.Fatalf("quarantined work missing: %v", readErr)
+		}
+		if string(got) != "x" {
+			t.Fatalf("quarantined work = %q", got)
+		}
+	}
+	if !found {
+		t.Fatal("expected a .quarantine-* sibling preserving the unowned work")
 	}
 }
 

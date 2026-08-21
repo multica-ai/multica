@@ -202,6 +202,39 @@ func TestShouldReusePriorWorkdirSquadLeaderRejectsMismatchedProvenanceOwner(t *t
 // TestShouldReusePriorWorkdirSquadLeaderRejectsMismatchedTaskMarker keeps its
 // original intent — a marker for another agent must be refused — now with a
 // matching provenance in place so the check reaches the marker comparison.
+func TestShouldReusePriorWorkdirRejectsCrossProjectBinding(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	workDir := filepath.Join(root, "ws-leader", "12345678", "workdir")
+	writeLeaderTaskMarker(t, workDir, "agent-leader", "issue-leader")
+	envRoot := filepath.Dir(workDir)
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		t.Fatalf("mkdir env root: %v", err)
+	}
+	if err := execenv.WriteManagedEnvProvenance(envRoot, execenv.ManagedEnvProvenance{
+		WorkspaceID: "ws-leader",
+		IssueID:     "issue-leader",
+		AgentID:     "agent-leader",
+		ProjectID:   "63be9f70-ea4d-435b-a099-3c53b4cba706",
+		RepoURLs:    []string{"https://github.com/example/housebuilderpro"},
+	}); err != nil {
+		t.Fatalf("write provenance: %v", err)
+	}
+
+	task := leaderReuseTestTask("task-cross-project")
+	task.ProjectID = "949398e5-2e0e-4584-8d3c-98c0439c79c4"
+	task.ProjectResources = []ProjectResourceData{{
+		ID:           "res-cc",
+		ResourceType: "github_repo",
+		ResourceRef:  []byte(`{"url":"https://github.com/apexagi-app/command-center.git"}`),
+	}}
+	task.PriorWorkDir = workDir
+	if _, ok := shouldReusePriorWorkdir(task, nil, root); ok {
+		t.Fatal("reused a House Builder Pro env root for a Command Center task")
+	}
+}
+
 func TestShouldReusePriorWorkdirSquadLeaderRejectsMismatchedTaskMarker(t *testing.T) {
 	t.Parallel()
 

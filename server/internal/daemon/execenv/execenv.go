@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -544,7 +545,15 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		}()
 	}
 
-	if err := writeContextFiles(workDir, params.Provider, params.Task, manifest); err != nil {
+	writeCtx := writeContextFiles
+	if params.LocalWorkDir == "" {
+		// Managed env roots are daemon-owned. A leftover sidecar from a
+		// previous occupant of this path (shared ULID prefix, crashed
+		// prepare, missing sidecar manifest) must not survive as the
+		// new task's issue/project context.
+		writeCtx = writeContextFilesRefreshing
+	}
+	if err := writeCtx(workDir, params.Provider, params.Task, manifest); err != nil {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 
@@ -563,6 +572,8 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 			IssueID:       params.Task.IssueID,
 			ChatSessionID: params.Task.ChatSessionID,
 			AgentID:       params.Task.AgentID,
+			ProjectID:     params.Task.ProjectID,
+			RepoURLs:      BindingRepoURLs(params.Task.Repos, params.Task.ProjectResources),
 		}); err != nil && logger != nil {
 			logger.Warn("execenv: write managed env provenance failed (non-fatal); a follow-up may start a fresh session", "error", err)
 		}
@@ -836,7 +847,11 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	// legacy local_directory Reuse fallback — skip the persist in that
 	// case to avoid creating a stray manifest at the filesystem root.
 	manifest := &sidecarManifest{}
-	if err := writeContextFiles(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
+	writeCtx := writeContextFiles
+	if !params.LocalDirectory {
+		writeCtx = writeContextFilesRefreshing
+	}
+	if err := writeCtx(params.WorkDir, params.Provider, params.Task, manifest); err != nil {
 		logger.Warn("execenv: refresh context files failed", "error", err)
 	}
 
@@ -1105,6 +1120,13 @@ type ManagedEnvProvenance struct {
 	IssueID       string `json:"issue_id,omitempty"`
 	ChatSessionID string `json:"chat_session_id,omitempty"`
 	AgentID       string `json:"agent_id"`
+	// ProjectID and RepoURLs bind the env root to the project and repositories
+	// the task was prepared with. shouldReusePriorWorkdir fails closed when a
+	// follow-up's binding disagrees, so a Command Center run cannot inherit a
+	// House Builder Pro worktree (or the reverse) merely because two issue
+	// ids shared a truncated directory name.
+	ProjectID string   `json:"project_id,omitempty"`
+	RepoURLs  []string `json:"repo_urls,omitempty"`
 }
 
 // WriteManagedEnvProvenance persists the reuse-eligibility marker at the env
@@ -1381,7 +1403,7 @@ func claimEnvRoot(envRoot, taskID string) (lockFile *os.File, reset bool, err er
 		// lock it would still be holding.
 		return lockFile, true, nil
 	case owner != "":
-		return nil, false, fmt.Errorf("env root %s belongs to task %s; refusing to reset it for task %s", envRoot, owner, taskID)
+		return adoptQuarantinedEnvRoot(envRoot, taskID, owner, lockFile)
 	}
 
 	// No owner recorded. Either the directory is new, or a crash tore the
@@ -1392,12 +1414,66 @@ func claimEnvRoot(envRoot, taskID string) (lockFile *os.File, reset bool, err er
 		return nil, false, fmt.Errorf("inspect env root %s: %w", envRoot, err)
 	}
 	if hasWork {
-		return nil, false, fmt.Errorf("env root %s already holds files but names no owning task; refusing to delete it", envRoot)
+		return adoptQuarantinedEnvRoot(envRoot, taskID, "unowned", lockFile)
 	}
 	if err := writeEnvRootOwner(envRoot, taskID); err != nil {
 		return nil, false, err
 	}
 	return lockFile, false, nil
+}
+
+// adoptQuarantinedEnvRoot moves a foreign or unowned env root aside and
+// returns a freshly claimed empty directory at the original path. The
+// occupant is preserved so a later human or GC pass can inspect it; the
+// incoming task never sees those files.
+func adoptQuarantinedEnvRoot(envRoot, taskID, owner string, lockFile *os.File) (*os.File, bool, error) {
+	// Rename while still holding the lock so a concurrent claimant cannot
+	// observe the original path unowned between unlock and rename. The lock
+	// inode moves with the directory; release it after the rename.
+	quarantined, err := quarantineEnvRoot(envRoot, owner)
+	if err != nil {
+		return nil, false, fmt.Errorf("env root %s belongs to task %s; quarantine failed: %w", envRoot, owner, err)
+	}
+	releaseLockFile(lockFile)
+	if err := os.MkdirAll(envRoot, 0o755); err != nil {
+		return nil, false, fmt.Errorf("recreate env root %s after quarantining %s: %w", envRoot, quarantined, err)
+	}
+	lock, err := openLockFile(filepath.Join(envRoot, envRootLockFile))
+	if err != nil {
+		return nil, false, fmt.Errorf("open env root lock for %s after quarantine: %w", envRoot, err)
+	}
+	locked, err := lockFileExclusiveNonBlocking(lock)
+	if err != nil {
+		lock.Close()
+		return nil, false, fmt.Errorf("lock env root %s after quarantine: %w", envRoot, err)
+	}
+	if !locked {
+		lock.Close()
+		return nil, false, fmt.Errorf("env root %s is held after quarantine; refusing to reset it for task %s", envRoot, taskID)
+	}
+	if err := writeEnvRootOwner(envRoot, taskID); err != nil {
+		releaseLockFile(lock)
+		return nil, false, err
+	}
+	return lock, false, nil
+}
+
+// quarantineEnvRoot renames envRoot to a sibling directory that cannot collide
+// with PredictRootDir for any task id. The lock inode lives inside the
+// directory and moves with it; the caller releases that lock after the rename.
+func quarantineEnvRoot(envRoot, owner string) (string, error) {
+	parent := filepath.Dir(envRoot)
+	base := filepath.Base(envRoot)
+	ownerKey := taskKey(owner)
+	if ownerKey == "" {
+		ownerKey = "unknown"
+	}
+	name := base + ".quarantine-" + ownerKey + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)
+	dest := filepath.Join(parent, name)
+	if err := os.Rename(envRoot, dest); err != nil {
+		return "", err
+	}
+	return dest, nil
 }
 
 // ReleaseLock drops the env root's execution lock. The daemon defers this for

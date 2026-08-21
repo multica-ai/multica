@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -1799,10 +1800,16 @@ func runDaemonDiskUsage(cmd *cobra.Command, _ []string) error {
 	}
 	// Resolve before --top trims the slice: the batch endpoint costs the same
 	// either way, and the JSON consumer sees statuses for everything it gets.
-	// Skipped in a task: the fetcher authenticates with the Owner profile's
-	// stored token, which a task must not borrow, so the column stays blank.
-	if !taskContext && diskUsageNeedsParentStatus(byWorkspace, output) {
-		fillDiskUsageParentStatuses(cmd, profile, &report)
+	// Outside a task this uses the Owner profile token. Inside a task it uses
+	// the injected task token against the ordinary issue API — never the
+	// Owner profile — so STATUS can name the real issue without borrowing
+	// the runtime owner's credential.
+	if diskUsageNeedsParentStatus(byWorkspace, output) {
+		if taskContext {
+			fillDiskUsageParentStatusesWithTaskToken(cmd, &report)
+		} else {
+			fillDiskUsageParentStatuses(cmd, profile, &report)
+		}
 	}
 
 	if top > 0 {
@@ -1881,6 +1888,44 @@ func diskUsageNeedsParentStatus(byWorkspace bool, output string) bool {
 // diagnostic that has to keep working when the machine is offline or logged
 // out. When statuses can't be resolved the column simply stays blank, and the
 // reason goes to stderr so `--output json` stdout stays machine-readable.
+func fillDiskUsageParentStatusesWithTaskToken(cmd *cobra.Command, report *daemon.DiskUsageReport) {
+	token := strings.TrimSpace(os.Getenv("MULTICA_TOKEN"))
+	serverURL := strings.TrimSpace(os.Getenv("MULTICA_SERVER_URL"))
+	workspaceID := strings.TrimSpace(os.Getenv("MULTICA_WORKSPACE_ID"))
+	if token == "" || serverURL == "" {
+		return
+	}
+	baseURL, err := daemon.NormalizeServerBaseURL(serverURL)
+	if err != nil {
+		return
+	}
+	api := cli.NewAPIClient(baseURL, workspaceID, token)
+	fetch := func(ctx context.Context, _ string, issueIDs []string) (map[string]string, error) {
+		statuses := make(map[string]string, len(issueIDs))
+		var firstErr error
+		for _, id := range issueIDs {
+			var issue struct {
+				Status string `json:"status"`
+			}
+			if err := api.GetJSON(ctx, "/api/issues/"+url.PathEscape(id), &issue); err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+				continue
+			}
+			if issue.Status != "" {
+				statuses[id] = issue.Status
+			}
+		}
+		return statuses, firstErr
+	}
+	ctx, cancel := cli.APIContext(cmd.Context())
+	defer cancel()
+	if err := daemon.ResolveParentStatuses(ctx, report, fetch); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: could not resolve issue statuses, STATUS column may be blank: %v\n", err)
+	}
+}
+
 func fillDiskUsageParentStatuses(cmd *cobra.Command, profile string, report *daemon.DiskUsageReport) {
 	fetch := newParentStatusFetcher(cmd, profile)
 	if fetch == nil {
@@ -2066,8 +2111,16 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 	for _, task := range report.Tasks {
 		displayedSize += task.SizeBytes
 		displayedArtifact += task.ArtifactSizeBytes
+		identity := task.TaskID
+		if identity == "" {
+			identity = task.IssueID
+		}
+		if identity == "" {
+			identity = task.ParentID
+		}
 		rows = append(rows, []string{
 			task.WorkspaceShort + "/" + task.TaskShort,
+			emptyDash(identity),
 			task.Kind,
 			emptyDash(task.ParentStatus),
 			formatAge(task.AgeSeconds),
@@ -2075,7 +2128,7 @@ func printDiskUsageTaskTable(w io.Writer, report daemon.DiskUsageReport) {
 			formatBytes(task.ArtifactSizeBytes),
 		})
 	}
-	cli.PrintTable(w, []string{"PATH", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS"}, rows)
+	cli.PrintTable(w, []string{"PATH", "ID", "KIND", "STATUS", "AGE", "SIZE", "ARTIFACTS"}, rows)
 
 	if len(report.Tasks) < report.TotalTaskCount {
 		// Report-wide totals stay anchored to the full scan; the displayed
