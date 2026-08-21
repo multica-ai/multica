@@ -11,6 +11,7 @@ describe("IssueMetricsSection", () => {
           openIssues: 3,
           closedLast7d: 1,
           avgResolutionHours: 4.5,
+          activeIssueCount: 2,
           dailyOpenCounts: [],
           labelBreakdown: [
             { name: "bug", color: "#c96442", count: 2 },
@@ -30,6 +31,7 @@ describe("IssueMetricsSection", () => {
           openIssues: 0,
           closedLast7d: 0,
           avgResolutionHours: null,
+          activeIssueCount: 0,
           dailyOpenCounts: [],
           labelBreakdown: [],
         }}

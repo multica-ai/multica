@@ -3,11 +3,12 @@ import {
   getIssueMetrics,
   getRecentActivity,
   getTaskOutcomeCounts,
+  getWorkspaceMembers,
   getWorkspaceMetadata,
   getWorkspaceStatus,
 } from "@/lib/queries";
 import { findKeyForSlug, resolveTeamName } from "@/lib/litellm-join";
-import { getTeamUsage, listLiteLlmKeys, listLiteLlmTeams } from "@/lib/litellm";
+import { listLiteLlmKeys, listLiteLlmTeams } from "@/lib/litellm";
 import { deriveHealth, deriveSuccessRate } from "@/lib/derive";
 import type { LiteLlmSection, WorkspaceDetail } from "@/lib/types";
 
@@ -19,28 +20,18 @@ async function buildLiteLlmSection(slug: string): Promise<LiteLlmSection> {
       linked: false,
       keyAlias: null,
       teamAlias: null,
-      members: [],
       keySpend: null,
-      cost24h: null,
-      cost30d: null,
-      tokens24h: null,
+      costPerTicket: null,
     };
   }
   const teamAlias = resolveTeamName(teams, match.team_id);
-  const usage = match.team_id ? await getTeamUsage(match.team_id) : null;
   return {
     linked: true,
     keyAlias: match.key_alias ?? null,
     teamAlias,
-    // LiteLLM's /key/list and /team/daily/activity responses don't carry a
-    // member-username list for a team — no such field exists in the schemas
-    // in lib/litellm-schema.ts. Left empty rather than invented; the UI
-    // renders "No members reported" for an empty list.
-    members: [],
     keySpend: match.spend ?? null,
-    cost24h: usage?.cost24h ?? null,
-    cost30d: usage?.cost30d ?? null,
-    tokens24h: usage?.tokens24h ?? null,
+    // Filled in by the caller once issue metrics are available.
+    costPerTicket: null,
   };
 }
 
@@ -58,22 +49,20 @@ export async function GET(
       return NextResponse.json({ error: "Workspace not found" }, { status: 404 });
     }
 
-    const [status, activity, issues, outcomes, litellm] = await Promise.all([
+    const [status, activity, issues, outcomes, members, litellmBase] = await Promise.all([
       getWorkspaceStatus(id),
       getRecentActivity(id),
       getIssueMetrics(id),
       getTaskOutcomeCounts(id),
+      getWorkspaceMembers(id),
       buildLiteLlmSection(metadata.slug).catch((error) => {
         console.error("[admin] LiteLLM lookup failed", error);
         return {
           linked: false,
           keyAlias: null,
           teamAlias: null,
-          members: [],
           keySpend: null,
-          cost24h: null,
-          cost30d: null,
-          tokens24h: null,
+          costPerTicket: null,
         } satisfies LiteLlmSection;
       }),
     ]);
@@ -85,12 +74,21 @@ export async function GET(
       avgResolutionHours: issues.avgResolutionHours,
     });
 
+    const litellm: LiteLlmSection = {
+      ...litellmBase,
+      costPerTicket:
+        litellmBase.keySpend !== null && issues.activeIssueCount > 0
+          ? litellmBase.keySpend / issues.activeIssueCount
+          : null,
+    };
+
     const detail: WorkspaceDetail = {
       metadata,
       status,
       activity,
       issues,
       litellm,
+      members,
       insights: { successRate, health },
     };
     return NextResponse.json(detail);

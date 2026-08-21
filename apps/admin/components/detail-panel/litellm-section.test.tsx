@@ -11,53 +11,44 @@ describe("LiteLlmSection", () => {
           linked: false,
           keyAlias: null,
           teamAlias: null,
-          members: [],
           keySpend: null,
-          cost24h: null,
-          cost30d: null,
-          tokens24h: null,
+          costPerTicket: null,
         }}
       />,
     );
     expect(screen.getByText("No LiteLLM key linked to this workspace.")).toBeInTheDocument();
   });
 
-  it("renders 'No members reported' for a linked key with an empty member list", () => {
+  it("renders cost per active ticket for a linked key", () => {
     render(
       <LiteLlmSection
         litellm={{
           linked: true,
           keyAlias: "acme-workspace",
           teamAlias: "acme-team",
-          members: [],
           keySpend: 8.9,
-          cost24h: 1.23,
-          cost30d: 45.67,
-          tokens24h: 1000,
+          costPerTicket: 2.5,
         }}
       />,
     );
-    expect(screen.getByText("No members reported.")).toBeInTheDocument();
-    expect(screen.getByText("$1.23")).toBeInTheDocument();
+    expect(screen.getByText("Cost / active ticket")).toBeInTheDocument();
     expect(screen.getByText("$8.90")).toBeInTheDocument();
+    expect(screen.getByText("$2.50")).toBeInTheDocument();
   });
 
-  it("renders an em dash for the key spend stat when keySpend is null", () => {
+  it("renders an em dash for cost per ticket when there are no active tickets to divide by", () => {
     render(
       <LiteLlmSection
         litellm={{
           linked: true,
           keyAlias: "acme-workspace",
           teamAlias: "acme-team",
-          members: [],
           keySpend: null,
-          cost24h: 1.23,
-          cost30d: 45.67,
-          tokens24h: 1000,
+          costPerTicket: null,
         }}
       />,
     );
     expect(screen.getByText("Key spend")).toBeInTheDocument();
-    expect(screen.getByText("—")).toBeInTheDocument();
+    expect(screen.getAllByText("—")).toHaveLength(2);
   });
 });

@@ -2,12 +2,10 @@ import "server-only";
 import { parseWithFallback } from "./schema";
 import {
   LiteLlmKeyListSchema,
-  LiteLlmTeamActivitySchema,
   LiteLlmTeamListSchema,
   type LiteLlmKey,
   type LiteLlmTeam,
 } from "./litellm-schema";
-import { aggregateTeamUsage } from "./litellm-usage";
 
 /**
  * LiteLLM admin API client. Modeled directly on
@@ -129,39 +127,4 @@ export async function listLiteLlmTeams(): Promise<LiteLlmTeam[]> {
     if (pageTeams.length < TEAM_PAGE_SIZE) break;
   }
   return teams;
-}
-
-export interface LiteLlmUsage {
-  cost24h: number;
-  cost30d: number;
-  tokens24h: number;
-}
-
-/**
- * Best-effort 24h/30d spend + token usage for a team, keyed by team_id (the
- * identifier /team/daily/activity's `team_ids` filter actually expects — a
- * team_alias here silently returns no matching rows). Returns null rather
- * than zeros when the feed has nothing for this id — the UI must render "no
- * data" instead of an invented $0.00, per DESIGN.md's anti-pattern rule.
- *
- * Note this is team-wide spend: it aggregates every key on the team, not
- * just the one workspace's key, since LiteLLM has no per-workspace scope.
- */
-export async function getTeamUsage(teamId: string): Promise<LiteLlmUsage | null> {
-  if (!litellmConfigured()) return null;
-  const end = new Date();
-  const start30 = new Date(end.getTime() - 30 * 86400_000);
-  const raw = await apiGet("/team/daily/activity", {
-    team_ids: teamId,
-    start_date: start30.toISOString().slice(0, 10),
-    end_date: end.toISOString().slice(0, 10),
-    page: "1",
-    page_size: "1000",
-  });
-  const parsed = parseWithFallback(raw, LiteLlmTeamActivitySchema, { results: [] }, {
-    endpoint: "/team/daily/activity",
-  });
-
-  const todayISO = end.toISOString().slice(0, 10);
-  return aggregateTeamUsage(parsed.results, todayISO);
 }

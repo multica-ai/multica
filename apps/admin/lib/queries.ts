@@ -6,6 +6,7 @@ import type {
   ListWorkspacesParams,
   ListWorkspacesResult,
   WorkspaceListItem,
+  WorkspaceMember,
   WorkspaceMetadata,
   WorkspaceStatus,
 } from "./types";
@@ -27,8 +28,10 @@ import type {
 //                   filesystem path; real workspaces don't have one on the
 //                   server (it's daemon/local-machine state). Rendered as an
 //                   explicit "Not reported" empty state, never fabricated.
-//   gitRemote    -- workspace.repos[0].url (JSONB array of RepoData; see
-//                   server/internal/handler/agent.go's RepoData struct)
+//   repoCount    -- workspace.repos.length (JSONB array of RepoData; see
+//                   server/internal/handler/agent.go's RepoData struct) — a
+//                   workspace can have more than one connected repo, so only
+//                   the count is shown, not a single URL
 //   llmKey/team  -- NOT a DB column; resolved via a LiteLLM lookup merged in
 //                   the route handler (see app/api/workspaces/[id]/route.ts
 //                   and the join-strategy note in the design plan)
@@ -209,11 +212,7 @@ export async function getWorkspaceMetadata(id: string): Promise<WorkspaceMetadat
   const row = rows[0];
   if (!row) return null;
 
-  let gitRemote: string | null = null;
-  if (Array.isArray(row.repos) && row.repos.length > 0) {
-    const first = row.repos[0] as { url?: unknown };
-    if (typeof first?.url === "string") gitRemote = first.url;
-  }
+  const repoCount = Array.isArray(row.repos) ? row.repos.length : 0;
 
   return {
     id: row.id,
@@ -222,7 +221,7 @@ export async function getWorkspaceMetadata(id: string): Promise<WorkspaceMetadat
     owner: row.owner_name,
     model: row.model,
     root: null, // not stored server-side — see provenance note above
-    gitRemote,
+    repoCount,
   };
 }
 
@@ -272,13 +271,29 @@ export async function getIssueMetrics(id: string): Promise<IssueMetrics> {
     open_issues: string;
     closed_7d: string;
     avg_resolution_hours: string | null;
+    active_issue_count: string;
   }>(
     `
+    -- issue_effective_status resolves custom per-workspace statuses to their
+    -- canonical category (see 340_issue_effective_status_fn.up.sql) before
+    -- every comparison below — a raw status string match would misclassify
+    -- a workspace's custom statuses (e.g. a custom "done"-category status
+    -- would be counted as still open).
     SELECT
-      count(*) FILTER (WHERE status NOT IN ('done', 'cancelled')) AS open_issues,
-      count(*) FILTER (WHERE status = 'done' AND updated_at > now() - interval '7 days') AS closed_7d,
-      avg(EXTRACT(EPOCH FROM (updated_at - created_at)) / 3600.0)
-        FILTER (WHERE status = 'done' AND updated_at > now() - interval '30 days') AS avg_resolution_hours
+      count(*) FILTER (
+        WHERE issue_effective_status(workspace_id, status) NOT IN ('done', 'cancelled')
+      ) AS open_issues,
+      count(*) FILTER (
+        WHERE issue_effective_status(workspace_id, status) = 'done'
+          AND updated_at > now() - interval '7 days'
+      ) AS closed_7d,
+      avg(EXTRACT(EPOCH FROM (updated_at - created_at)) / 3600.0) FILTER (
+        WHERE issue_effective_status(workspace_id, status) = 'done'
+          AND updated_at > now() - interval '30 days'
+      ) AS avg_resolution_hours,
+      count(*) FILTER (
+        WHERE issue_effective_status(workspace_id, status) NOT IN ('todo', 'backlog')
+      ) AS active_issue_count
     FROM issue
     WHERE workspace_id = $1
     `,
@@ -305,7 +320,8 @@ export async function getIssueMetrics(id: string): Promise<IssueMetrics> {
     FROM issue i
     JOIN issue_to_label itl ON itl.issue_id = i.id
     JOIN issue_label il ON il.id = itl.label_id
-    WHERE i.workspace_id = $1 AND i.status NOT IN ('done', 'cancelled')
+    WHERE i.workspace_id = $1
+      AND issue_effective_status(i.workspace_id, i.status) NOT IN ('done', 'cancelled')
     GROUP BY il.name, il.color
     ORDER BY count DESC
     `,
@@ -318,9 +334,32 @@ export async function getIssueMetrics(id: string): Promise<IssueMetrics> {
     avgResolutionHours: counts?.avg_resolution_hours
       ? Math.round(Number(counts.avg_resolution_hours) * 10) / 10
       : null,
+    activeIssueCount: Number(counts?.active_issue_count ?? 0),
     dailyOpenCounts: trend.map((t) => ({ date: t.day, count: Number(t.count) })),
     labelBreakdown: labels.map((l) => ({ name: l.name, color: l.color, count: Number(l.count) })),
   };
+}
+
+/** Real agentfarm membership for a workspace (member + user join), ordered
+ * by join date. This is the actual member roster — distinct from LiteLLM's
+ * key/team data, which carries no member/username information at all. */
+export async function getWorkspaceMembers(id: string): Promise<WorkspaceMember[]> {
+  const rows = await query<{ id: string; name: string; email: string; role: string }>(
+    `
+    SELECT u.id, u.name, u.email, m.role
+    FROM member m
+    JOIN "user" u ON u.id = m.user_id
+    WHERE m.workspace_id = $1
+    ORDER BY m.created_at ASC
+    `,
+    [id],
+  );
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    email: r.email,
+    role: r.role as WorkspaceMember["role"],
+  }));
 }
 
 /** Completed vs. failed agent_task_queue rows in the last 30 days, for

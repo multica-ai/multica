@@ -34,13 +34,17 @@ export interface WorkspaceMetadata {
   owner: string | null;
   model: string | null;
   root: string | null;
-  gitRemote: string | null;
+  repoCount: number;
 }
 
 export interface IssueMetrics {
   openIssues: number;
   closedLast7d: number;
   avgResolutionHours: number | null;
+  /** Issues whose effective status (see issue_effective_status in
+   * queries.ts) is neither "todo" nor "backlog" — i.e. actively worked or
+   * done. Denominator for the cost-per-ticket figure in LiteLlmSection. */
+  activeIssueCount: number;
   dailyOpenCounts: Array<{ date: string; count: number }>;
   /** Open-issue counts grouped by label, per plan §2.2E ("severity breakdown
    * by label"). The schema has no dedicated severity field — issue_label is
@@ -58,11 +62,17 @@ export interface LiteLlmSection {
   linked: boolean;
   keyAlias: string | null;
   teamAlias: string | null;
-  members: string[];
   keySpend: number | null;
-  cost24h: number | null;
-  cost30d: number | null;
-  tokens24h: number | null;
+  /** keySpend / issues.activeIssueCount. Null when there's no linked key or
+   * no active tickets to divide by — never a fabricated 0. */
+  costPerTicket: number | null;
+}
+
+export interface WorkspaceMember {
+  id: string;
+  name: string;
+  email: string;
+  role: "owner" | "admin" | "member";
 }
 
 export interface WorkspaceDetail {
@@ -71,6 +81,7 @@ export interface WorkspaceDetail {
   activity: ActivityEvent[];
   issues: IssueMetrics;
   litellm: LiteLlmSection;
+  members: WorkspaceMember[];
   insights: DerivedInsights;
 }
 

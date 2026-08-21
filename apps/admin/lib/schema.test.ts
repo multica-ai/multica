@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { parseWithFallback } from "./schema";
-import { LiteLlmKeyListSchema, LiteLlmTeamActivitySchema } from "./litellm-schema";
+import { LiteLlmKeyListSchema } from "./litellm-schema";
 
 describe("parseWithFallback", () => {
   it("returns the parsed data when the schema matches", () => {
@@ -48,17 +48,5 @@ describe("LiteLLM schema tolerance (API Response Compatibility boundary)", () =>
       team_id: undefined,
       spend: undefined,
     });
-  });
-
-  it("degrades /team/daily/activity to empty results on a malformed payload", () => {
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const result = parseWithFallback(
-      { results: "not-an-array" },
-      LiteLlmTeamActivitySchema,
-      { results: [] },
-      { endpoint: "/team/daily/activity" },
-    );
-    expect(result.results).toEqual([]);
-    warnSpy.mockRestore();
   });
 });

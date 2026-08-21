@@ -6,6 +6,7 @@ import { Button } from "@multica/ui/components/ui/button";
 import { useWorkspaceDetail } from "@/lib/hooks";
 import { DetailHeader } from "./header";
 import { MetadataGrid } from "./metadata-grid";
+import { MembersSection } from "./members-section";
 import { ActivityTimeline } from "./activity-timeline";
 import { IssueMetricsSection } from "./issue-metrics";
 import { LiteLlmSection } from "./litellm-section";
@@ -50,6 +51,7 @@ export function DetailPanel({ workspace, onClose }: DetailPanelProps) {
                 a summary, so it belongs after the at-a-glance sections. */}
             <DetailHeader workspace={workspace} status={data.status} />
             <MetadataGrid metadata={data.metadata} />
+            <MembersSection members={data.members} />
             <LiteLlmSection litellm={data.litellm} />
             <IssueMetricsSection issues={data.issues} />
             <DerivedInsights insights={data.insights} />

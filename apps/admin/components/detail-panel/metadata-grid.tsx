@@ -1,19 +1,5 @@
 import type { WorkspaceMetadata } from "@/lib/types";
 
-// metadata.gitRemote comes from workspace.repos (JSONB set by whatever wrote
-// the workspace row) and is rendered as a clickable link — only ever treat it
-// as a link for http(s) URLs. Anything else (a bare "git@host:repo.git" SSH
-// remote, or a malicious "javascript:..." value) renders as plain text
-// instead of becoming an executable/unexpected href.
-function safeHttpUrl(value: string): string | null {
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? value : null;
-  } catch {
-    return null;
-  }
-}
-
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, {
     year: "numeric",
@@ -31,15 +17,9 @@ function Field({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function GitRemoteValue({ value }: { value: string | null }) {
-  if (!value) return <span className="text-muted-foreground">Not reported</span>;
-  const href = safeHttpUrl(value);
-  if (!href) return value;
-  return (
-    <a href={href} className="text-primary hover:underline" target="_blank" rel="noreferrer">
-      {value}
-    </a>
-  );
+function RepoCountValue({ count }: { count: number }) {
+  if (count === 0) return <span className="text-muted-foreground">No repos connected</span>;
+  return `${count} repo${count === 1 ? "" : "s"} connected`;
 }
 
 export function MetadataGrid({ metadata }: { metadata: WorkspaceMetadata }) {
@@ -57,7 +37,7 @@ export function MetadataGrid({ metadata }: { metadata: WorkspaceMetadata }) {
           label="Root path"
           value={metadata.root ?? <span className="text-muted-foreground">Not reported</span>}
         />
-        <Field label="Git remote" value={<GitRemoteValue value={metadata.gitRemote} />} />
+        <Field label="Repos" value={<RepoCountValue count={metadata.repoCount} />} />
       </dl>
     </section>
   );
