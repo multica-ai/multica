@@ -32,10 +32,7 @@ const (
 	defaultMaxBackoff     = 30 * time.Second
 )
 
-var (
-	keywordConnectTimeoutPattern = regexp.MustCompile(`(?:^|\s)connect_timeout\s*=`)
-	keywordServicePattern        = regexp.MustCompile(`(?:^|\s)service\s*=`)
-)
+var keywordConnectTimeoutPattern = regexp.MustCompile(`(?:^|\s)connect_timeout\s*=`)
 
 // Settings bounds database startup retries and individual connection attempts.
 type Settings struct {
@@ -104,7 +101,7 @@ func ParsePoolConfig(databaseURL string, connectTimeout time.Duration) (*pgxpool
 }
 
 func pgxConnectTimeoutConfigured(databaseURL string, parsedTimeout time.Duration) bool {
-	if parsedTimeout != 0 || os.Getenv("PGCONNECT_TIMEOUT") != "" || os.Getenv("PGSERVICE") != "" {
+	if parsedTimeout != 0 || os.Getenv("PGCONNECT_TIMEOUT") != "" {
 		return true
 	}
 
@@ -113,12 +110,11 @@ func pgxConnectTimeoutConfigured(databaseURL string, parsedTimeout time.Duration
 		if err == nil {
 			query := parsedURL.Query()
 			_, hasConnectTimeout := query["connect_timeout"]
-			_, hasService := query["service"]
-			return hasConnectTimeout || hasService
+			return hasConnectTimeout
 		}
 	}
 
-	return keywordConnectTimeoutPattern.MatchString(databaseURL) || keywordServicePattern.MatchString(databaseURL)
+	return keywordConnectTimeoutPattern.MatchString(databaseURL)
 }
 
 // NewPool creates a startup pool with the shared connection timeout.

@@ -5,6 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
+	"os"
+	"path/filepath"
 	"reflect"
 	"sync"
 	"testing"
@@ -144,6 +147,77 @@ func TestParsePoolConfigPreservesPGConnectTimeout(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestParsePoolConfigServiceConnectTimeout(t *testing.T) {
+	serviceFile := writePGServiceFile(t)
+	t.Setenv("PGCONNECT_TIMEOUT", "")
+	t.Setenv("PGSERVICEFILE", serviceFile)
+
+	tests := []struct {
+		name        string
+		serviceEnv  string
+		databaseURL string
+		want        time.Duration
+	}{
+		{
+			name:        "PGSERVICE without timeout",
+			serviceEnv:  "without_timeout",
+			databaseURL: "",
+			want:        7 * time.Second,
+		},
+		{
+			name:        "URL service without timeout",
+			databaseURL: fmt.Sprintf("postgres:///?servicefile=%s&service=without_timeout", url.QueryEscape(serviceFile)),
+			want:        7 * time.Second,
+		},
+		{
+			name:        "PGSERVICE with timeout",
+			serviceEnv:  "with_timeout",
+			databaseURL: "",
+			want:        13 * time.Second,
+		},
+		{
+			name:        "URL service with timeout",
+			databaseURL: fmt.Sprintf("postgres:///?servicefile=%s&service=with_timeout", url.QueryEscape(serviceFile)),
+			want:        13 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv("PGSERVICE", tt.serviceEnv)
+			cfg, err := ParsePoolConfig(tt.databaseURL, 7*time.Second)
+			if err != nil {
+				t.Fatalf("ParsePoolConfig: %v", err)
+			}
+			if cfg.ConnConfig.ConnectTimeout != tt.want {
+				t.Fatalf("ConnectTimeout = %s, want %s", cfg.ConnConfig.ConnectTimeout, tt.want)
+			}
+		})
+	}
+}
+
+func writePGServiceFile(t *testing.T) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "pg_service.conf")
+	contents := []byte(`[without_timeout]
+host=localhost
+port=5432
+dbname=db
+user=user
+
+[with_timeout]
+host=localhost
+port=5432
+dbname=db
+user=user
+connect_timeout=13
+`)
+	if err := os.WriteFile(path, contents, 0o600); err != nil {
+		t.Fatalf("write service file: %v", err)
+	}
+	return path
 }
 
 func TestRetryRecoversWithCappedExponentialBackoff(t *testing.T) {
