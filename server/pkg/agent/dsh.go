@@ -410,6 +410,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	case capabilities = <-readyCh:
 	case result := <-resCh:
 		cancel()
+		reapDshStartupTree(cmd)
 		return nil, dshStartupError(result)
 	case <-runCtx.Done():
 		// The reader's deferred cancel() runs after it delivers the exit
@@ -418,6 +419,7 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		select {
 		case result := <-resCh:
 			cancel()
+			reapDshStartupTree(cmd)
 			return nil, dshStartupError(result)
 		default:
 		}
@@ -491,6 +493,19 @@ func terminateDshStartupTree(cmd *exec.Cmd, stdout io.ReadCloser, stdin io.Write
 	if stdin != nil {
 		_ = stdin.Close()
 	}
+}
+
+// reapDshStartupTree finishes cleanup after the runtime process itself has
+// already exited (the reader delivered a result, so cmd.Wait returned and
+// procDone is closed). A pre-ready exit can still leave descendants behind —
+// a background child that redirected its own stdio does not keep the scanner
+// blocked and survives the parent — so SIGKILL the remaining group and wait
+// for it to be gone before returning the diagnostic. Escalation beyond the
+// grace window is unnecessary: nothing is left to read our signals politely.
+func reapDshStartupTree(cmd *exec.Cmd) {
+	signalProcessGroup(cmd, syscall.SIGKILL)
+	waitProcessGroupGone(cmd, dshTerminateGrace)
+	signalProcessGroup(cmd, syscall.SIGKILL)
 }
 
 // dshStartupError converts a pre-ready reader result into the Execute error.
