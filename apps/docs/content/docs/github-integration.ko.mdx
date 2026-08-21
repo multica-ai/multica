@@ -123,6 +123,7 @@ Repository permissions:
 | 권한 | 수준 |
 |---|---|
 | Metadata | Read-only |
+| Contents | Read-only. PR snapshot 쿼리가 head commit과 머지 가능 여부, CI rollup을 함께 읽는 데 필요 |
 | Pull requests | Read-only |
 | Checks | Read-only. CI 상태 표시에 사용 |
 | Commit statuses | Read-only. legacy status 형식의 CI 집계에 사용 |
@@ -132,7 +133,7 @@ Repository permissions:
 - **Pull request**
 - CI와 merge 가능 여부 새로 고침을 트리거할 **Check suite**, **Check run**, **Status**
 
-Multica에서 CI를 표시할 필요가 없다면 Checks 및 Commit statuses 권한을 부여하거나 관련 이벤트를 구독하지 않아도 됩니다.
+Multica에서 CI를 표시할 필요가 없다면 Checks 및 Commit statuses 권한을 부여하거나 관련 이벤트를 구독하지 않아도 됩니다. 단, Contents는 반드시 필요합니다. 없으면 snapshot 쿼리 자체가 실패해 PR 카드에서 머지 상태도 사라집니다.
 
 <Callout type="warning">
 여기에는 OAuth Client secret이 아니라 **Webhook secret**이 필요합니다. 양쪽에 입력한 Webhook secret이 다르면 GitHub delivery가 `401 invalid signature`를 반환합니다.
@@ -175,7 +176,7 @@ API 서비스를 다시 시작한 뒤 **설정 → GitHub**에서 연결을 완�
 - **Webhook이 401을 반환함**: GitHub App과 API가 같은 Webhook secret을 사용하는지 확인하고 GitHub의 **Recent Deliveries**에서 다시 전달합니다.
 - **PR이 연결되지 않음**: 저장소가 App 승인 범위에 있는지, 자동 연결이 켜져 있는지, 번호가 현재 워크스페이스에 속하는지 확인합니다.
 - **본문에 번호를 썼지만 표시되지 않음**: `Closes MUL-123`을 사용하거나 번호를 브랜치 이름 또는 PR 제목에 넣습니다.
-- **CI 상태가 없음**: `GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`가 설정되었는지, App에 Checks 및 Commit statuses 읽기 권한이 있고 관련 이벤트를 구독했는지 확인합니다. 설치된 App에 권한을 추가한 뒤에는 각 installation owner가 GitHub에서 승인해야 적용됩니다.
+- **CI 상태가 없음**: `GITHUB_APP_ID`와 `GITHUB_APP_PRIVATE_KEY`가 설정되었는지, App에 Contents, Checks 및 Commit statuses 읽기 권한이 있고 관련 이벤트를 구독했는지 확인합니다. Contents가 없으면 snapshot 전체가 실패해 PR 카드에 CI도 머지 상태도 표시되지 않습니다. 설치된 App에 권한을 추가한 뒤에는 각 installation owner가 GitHub에서 승인해야 적용됩니다.
 - **PR merge 후 이슈가 완료되지 않음**: PR에 종료 문구가 있는지 확인하고 다른 연결 PR이 Open 또는 Draft 상태로 남아 있는지 확인합니다.
 
 ## 다음 단계

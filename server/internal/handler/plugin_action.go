@@ -199,6 +199,9 @@ func (h *Handler) pluginIssueForUser(w http.ResponseWriter, r *http.Request, cal
 		writeError(w, http.StatusNotFound, "issue not found")
 		return db.Issue{}, false
 	}
+	if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "plugin") {
+		return db.Issue{}, false
+	}
 	return issue, true
 }
 

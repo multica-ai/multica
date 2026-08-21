@@ -220,12 +220,13 @@ export type {
 } from "./slack";
 export type {
   DingTalkInstallation,
-  DingTalkGroupRoute,
   ListDingTalkInstallationsResponse,
-  ListDingTalkGroupRoutesResponse,
+  DingTalkGroupBot,
+  DingTalkGroup,
+  ListDingTalkGroupsResponse,
+  ListDingTalkGroupsParams,
   RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
-  UpdateDingTalkGroupRouteRequest,
 } from "./dingtalk";
 export type {
   WecomInstallation,

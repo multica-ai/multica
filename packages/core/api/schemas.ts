@@ -29,10 +29,9 @@ import type {
   WorkspaceSubscriptionSeatReconcileResult,
   CreateWorkspaceSubscriptionPortalResponse,
   CronPreviewResponse,
-  DingTalkGroupRoute,
   DingTalkInstallation,
-  ListDingTalkGroupRoutesResponse,
   ListDingTalkInstallationsResponse,
+  ListDingTalkGroupsResponse,
   RedeemDingTalkBindingTokenResponse,
   WecomInstallation,
   ListWecomInstallationsResponse,
@@ -1257,6 +1256,17 @@ export const SubscribersListSchema = z.array(SubscriberSchema);
 
 export const ChildIssuesResponseSchema = z.object({
   issues: z.array(IssueSchema).default([]),
+}).loose();
+
+export const ChildIssueProgressResponseSchema = z.object({
+  progress: z.array(z.object({
+    parent_issue_id: z.string(),
+    total: z.number(),
+    done: z.number(),
+    visible_total: z.number().optional(),
+    visible_done: z.number().optional(),
+    hidden_total: z.number().optional(),
+  }).loose()).default([]),
 }).loose();
 
 export const CloudRuntimeNodeSchema = z.object({
@@ -2556,6 +2566,7 @@ export const DingTalkInstallationSchema = z.object({
   installed_at: z.string().default(""),
   created_at: z.string().default(""),
   updated_at: z.string().default(""),
+  agent_available: z.boolean().optional(),
   bound_dingtalk_user_ids: z.array(z.string()).catch([]).default([]),
 }).loose();
 
@@ -2575,7 +2586,6 @@ export const ListDingTalkInstallationsResponseSchema = z.object({
   installations: z.array(DingTalkInstallationSchema).default([]),
   configured: z.boolean().default(false),
   install_supported: z.boolean().optional(),
-  group_routing_supported: z.boolean().optional(),
 }).loose();
 
 export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallationsResponse = {
@@ -2583,34 +2593,32 @@ export const EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE: ListDingTalkInstallatio
   configured: false,
 };
 
-export const DingTalkGroupRouteSchema = z.object({
-  id: z.string(),
-  workspace_id: z.string().default(""),
+export const DingTalkGroupBotSchema = z.object({
   installation_id: z.string().default(""),
-  conversation_id: z.string().default(""),
-  conversation_title: z.string().default(""),
   agent_id: z.string().default(""),
-  discovered_at: z.string().default(""),
-  updated_at: z.string().default(""),
+  bot_name: z.string().default(""),
+  bot_identity_issue: z.string().default(""),
+  last_active_at: z.string().optional(),
+  mention_count: z.number().int().nonnegative().optional(),
 }).loose();
 
-export const EMPTY_DINGTALK_GROUP_ROUTE: DingTalkGroupRoute = {
-  id: "",
-  workspace_id: "",
-  installation_id: "",
-  conversation_id: "",
-  conversation_title: "",
-  agent_id: "",
-  discovered_at: "",
-  updated_at: "",
-};
-
-export const ListDingTalkGroupRoutesResponseSchema = z.object({
-  routes: z.array(DingTalkGroupRouteSchema).default([]),
+export const DingTalkGroupSchema = z.object({
+  conversation_id: z.string(),
+  conversation_title: z.string().default(""),
+  bots: z.array(DingTalkGroupBotSchema).catch([]).default([]),
 }).loose();
 
-export const EMPTY_LIST_DINGTALK_GROUP_ROUTES_RESPONSE: ListDingTalkGroupRoutesResponse = {
-  routes: [],
+export const ListDingTalkGroupsResponseSchema = z.object({
+  groups: z.array(DingTalkGroupSchema).default([]),
+  group_discovery_supported: z.boolean().default(false),
+  inactive_group_counts: z.record(z.string(), z.number().int().nonnegative()).optional(),
+  bot_identities: z.record(z.string(), DingTalkGroupBotSchema).optional(),
+  next_offset: z.number().int().nonnegative().optional(),
+}).loose();
+
+export const EMPTY_LIST_DINGTALK_GROUPS_RESPONSE: ListDingTalkGroupsResponse = {
+  groups: [],
+  group_discovery_supported: false,
 };
 
 export const RedeemDingTalkBindingTokenResponseSchema = z.object({

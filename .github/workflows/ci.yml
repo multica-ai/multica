@@ -100,6 +100,8 @@ jobs:
               - 'scripts/agent-cli-command-names.txt'
               - 'scripts/go-test-with-agent-cli-guard.sh'
               - 'scripts/helm-config.test.sh'
+              - 'scripts/entrypoint.test.sh'
+              - 'docker/entrypoint.sh'
               - 'scripts/test-go.sh'
               - 'scripts/test-go.test.sh'
               # makefile-build.test.sh asserts how `make build` names its
@@ -501,6 +503,10 @@ jobs:
       - name: Test Helm chart
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/helm-config.test.sh
+
+      - name: Test backend entrypoint signals
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: bash scripts/entrypoint.test.sh
 
       - name: Test build output naming
         if: ${{ needs.changes.outputs.backend == 'true' }}

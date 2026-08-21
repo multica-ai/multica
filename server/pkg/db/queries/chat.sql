@@ -333,11 +333,9 @@ WHERE id = $1
 FOR UPDATE;
 
 -- name: LockChatSessionForAppend :one
--- The append transaction's first lock. FOR KEY SHARE conflicts with workspace
--- or session deletion but remains compatible with normal non-key session
--- updates and task enqueueing. DingTalk then acquires its route fence, matching
--- the workspace teardown order chat_session -> dingtalk_group_route and
--- preventing a route/session lock inversion.
+-- The append transaction's first lock. FOR KEY SHARE remains compatible with
+-- task enqueue's FOR NO KEY UPDATE while establishing chat_session -> binding
+-- -> generation order before the later TouchChatSession update.
 SELECT id FROM chat_session
 WHERE id = $1
 FOR KEY SHARE;
@@ -1235,6 +1233,11 @@ SELECT
     task.id,
     task.status,
     task.created_at,
+    -- Only meaningful while status is waiting_local_directory: the daemon
+    -- stamps which directory this task is parked on and who holds it, so the
+    -- StatusPill can say why it is not moving. Stale on any other status; the
+    -- renderer reads it only for the waiting one.
+    task.wait_reason,
     message.id AS message_id,
     COALESCE(message.content, '')::text AS content
 FROM agent_task_queue AS task

@@ -176,13 +176,12 @@ import type {
   ListSlackInstallationsResponse,
   RegisterSlackBYORequest,
   RedeemSlackBindingTokenResponse,
-  DingTalkGroupRoute,
   DingTalkInstallation,
-  ListDingTalkGroupRoutesResponse,
   ListDingTalkInstallationsResponse,
+  ListDingTalkGroupsResponse,
+  ListDingTalkGroupsParams,
   RegisterDingTalkBYORequest,
   RedeemDingTalkBindingTokenResponse,
-  UpdateDingTalkGroupRouteRequest,
   WecomInstallation,
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
@@ -238,6 +237,7 @@ import {
   SendChatMessageResponseSchema,
   StartMikaOnboardingResponseSchema,
   ChildIssuesResponseSchema,
+  ChildIssueProgressResponseSchema,
   CommentsListSchema,
   CommentTriggerPreviewSchema,
   IssueTriggerPreviewSchema,
@@ -321,14 +321,12 @@ import {
   WorkspaceSubscriptionSeatReconcileResultSchema,
   CreateWorkspaceSubscriptionPortalResponseSchema,
   DingTalkInstallationSchema,
-  DingTalkGroupRouteSchema,
-  ListDingTalkGroupRoutesResponseSchema,
   ListDingTalkInstallationsResponseSchema,
+  ListDingTalkGroupsResponseSchema,
   RedeemDingTalkBindingTokenResponseSchema,
   EMPTY_DINGTALK_INSTALLATION,
-  EMPTY_DINGTALK_GROUP_ROUTE,
-  EMPTY_LIST_DINGTALK_GROUP_ROUTES_RESPONSE,
   EMPTY_LIST_DINGTALK_INSTALLATIONS_RESPONSE,
+  EMPTY_LIST_DINGTALK_GROUPS_RESPONSE,
   EMPTY_REDEEM_DINGTALK_BINDING_TOKEN_RESPONSE,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
@@ -578,6 +576,16 @@ function workspaceHeader(
   slug?: string,
 ): Record<string, string> | undefined {
   return slug ? { "X-Workspace-Slug": slug } : undefined;
+}
+
+function dingTalkGroupSearch(params: ListDingTalkGroupsParams): string {
+  const search = new URLSearchParams();
+  if (params.activity) search.set("activity", params.activity);
+  if (params.installationId) search.set("installation_id", params.installationId);
+  if (params.offset !== undefined) search.set("offset", String(params.offset));
+  if (params.limit !== undefined) search.set("limit", String(params.limit));
+  const encoded = search.toString();
+  return encoded ? `?${encoded}` : "";
 }
 
 export class ApiClient {
@@ -1093,8 +1101,20 @@ export class ApiClient {
     });
   }
 
-  async getChildIssueProgress(): Promise<{ progress: { parent_issue_id: string; total: number; done: number }[] }> {
-    return this.fetch("/api/issues/child-progress");
+  async getChildIssueProgress(): Promise<{
+    progress: {
+      parent_issue_id: string;
+      total: number;
+      done: number;
+      visible_total?: number;
+      visible_done?: number;
+      hidden_total?: number;
+    }[];
+  }> {
+    const raw = await this.fetch<unknown>("/api/issues/child-progress");
+    return parseWithFallback(raw, ChildIssueProgressResponseSchema, { progress: [] }, {
+      endpoint: "GET /api/issues/child-progress",
+    });
   }
 
   async deleteIssue(id: string): Promise<void> {
@@ -4187,36 +4207,74 @@ export class ApiClient {
     );
   }
 
-  async listDingTalkGroupRoutes(
+  async listDingTalkGroups(
     workspaceId: string,
-  ): Promise<ListDingTalkGroupRoutesResponse> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/dingtalk/group-routes`);
+    params: ListDingTalkGroupsParams = {},
+  ): Promise<ListDingTalkGroupsResponse> {
+    let raw: unknown;
+    try {
+      const search = dingTalkGroupSearch(params);
+      raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/dingtalk/groups${search}`);
+    } catch (error) {
+      // Installed clients can be newer than the server they reconnect to. A
+      // backend predating group discovery 404s this additive endpoint. The
+      // first admin-only version returns 403 to members; both mean this client
+      // cannot use the workspace inventory, while real failures stay visible.
+      if (
+        error instanceof ApiError &&
+        (error.status === 404 || error.status === 403)
+      ) {
+        return EMPTY_LIST_DINGTALK_GROUPS_RESPONSE;
+      }
+      throw error;
+    }
     return parseWithFallback(
       raw,
-      ListDingTalkGroupRoutesResponseSchema,
-      EMPTY_LIST_DINGTALK_GROUP_ROUTES_RESPONSE,
-      { endpoint: "GET /api/workspaces/:id/dingtalk/group-routes" },
+      ListDingTalkGroupsResponseSchema,
+      EMPTY_LIST_DINGTALK_GROUPS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/dingtalk/groups" },
     );
   }
 
-  async updateDingTalkGroupRoute(
+  async listAgentDingTalkGroups(
+    agentId: string,
+    params: ListDingTalkGroupsParams = {},
+  ): Promise<ListDingTalkGroupsResponse> {
+    let raw: unknown;
+    try {
+      const search = dingTalkGroupSearch(params);
+      raw = await this.fetch<unknown>(`/api/agents/${agentId}/dingtalk/groups${search}`);
+    } catch (error) {
+      // Keep installed clients compatible with servers that predate agent-
+      // scoped group discovery. Authorization failures must remain visible.
+      if (error instanceof ApiError && error.status === 404) {
+        return EMPTY_LIST_DINGTALK_GROUPS_RESPONSE;
+      }
+      throw error;
+    }
+    return parseWithFallback(
+      raw,
+      ListDingTalkGroupsResponseSchema,
+      EMPTY_LIST_DINGTALK_GROUPS_RESPONSE,
+      { endpoint: "GET /api/agents/:id/dingtalk/groups" },
+    );
+  }
+
+  async forgetDingTalkGroup(
     workspaceId: string,
-    routeId: string,
-    body: UpdateDingTalkGroupRouteRequest,
-  ): Promise<DingTalkGroupRoute> {
-    const raw = await this.fetch<unknown>(
-      `/api/workspaces/${workspaceId}/dingtalk/group-routes/${routeId}`,
-      { method: "PATCH", body: JSON.stringify(body) },
+    installationId: string,
+    conversationId: string,
+  ): Promise<void> {
+    await this.fetch(
+      `/api/workspaces/${workspaceId}/dingtalk/installations/${installationId}/groups/${encodeURIComponent(conversationId)}`,
+      { method: "DELETE" },
     );
-    return parseWithFallback(raw, DingTalkGroupRouteSchema, EMPTY_DINGTALK_GROUP_ROUTE, {
-      endpoint: "PATCH /api/workspaces/:id/dingtalk/group-routes/:routeId",
-    });
   }
 
-  // registerDingTalkBYO performs a bring-your-own-app install: the admin pastes
-  // the AppKey (client id) + AppSecret (client secret) of the DingTalk
-  // Stream-mode robot they created, and the backend validates + persists it,
-  // returning the new installation.
+  // registerDingTalkBYO performs a bring-your-own-app install: the agent owner
+  // or a workspace owner/admin pastes the AppKey (client id) + AppSecret
+  // (client secret) of the DingTalk Stream-mode robot they created, and the
+  // backend validates + persists it, returning the new installation.
   async registerDingTalkBYO(
     workspaceId: string,
     agentId: string,

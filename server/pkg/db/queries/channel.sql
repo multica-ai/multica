@@ -204,6 +204,15 @@ WITH dead AS (
       )
     RETURNING ci.id
 ),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM dead)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM dead)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding
     WHERE installation_id IN (SELECT id FROM dead)
@@ -219,10 +228,6 @@ cleared_chat_contexts AS (
           SELECT 1 FROM chat_session AS session
           WHERE session.id = generation.chat_session_id
       )
-),
-cleared_dingtalk_group_routes AS (
-    DELETE FROM dingtalk_group_route
-    WHERE installation_id IN (SELECT id FROM dead)
 ),
 cleared_outbound_cards AS (
     -- channel_outbound_card_message is keyed by chat_session_id (no installation_id,
@@ -277,6 +282,15 @@ doomed AS (
     SELECT id FROM channel_installation
     WHERE agent_id IN (SELECT id FROM system_agents)
 ),
+cleared_dingtalk_group_presence AS (
+    DELETE FROM dingtalk_group_presence WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_dingtalk_bot_identity AS (
+    DELETE FROM dingtalk_bot_identity WHERE installation_id IN (SELECT id FROM doomed)
+),
+cleared_dingtalk_group_routes AS (
+    DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM doomed)
+),
 cleared_chat_sessions AS (
     DELETE FROM channel_chat_session_binding WHERE installation_id IN (SELECT id FROM doomed)
     RETURNING chat_session_id
@@ -285,9 +299,6 @@ cleared_chat_contexts AS (
     DELETE FROM channel_chat_context_generation
     WHERE chat_session_id IN (SELECT chat_session_id FROM cleared_chat_sessions)
        OR chat_session_id IN (SELECT id FROM doomed_sessions)
-),
-cleared_dingtalk_group_routes AS (
-    DELETE FROM dingtalk_group_route WHERE installation_id IN (SELECT id FROM doomed)
 ),
 cleared_outbound_cards AS (
     -- Reach channel_outbound_card_message (keyed by chat_session_id, no FK)

@@ -33,6 +33,8 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_URL` | ローカルの `multica` データベース | PostgreSQL 接続文字列 |
 | `DATABASE_MAX_CONNS` | `25` | API プロセスあたりの最大データベース接続数 |
 | `DATABASE_MIN_CONNS` | `5` | API プロセスが保持する最小接続数 |
+| `MULTICA_DATABASE_STARTUP_TIMEOUT` | `3m` | コンテナ起動時に migration と API が共有する、一時的なデータベース障害への再試行時間。`0` にすると各フェーズで 1 回だけ試行します |
+| `MULTICA_DATABASE_CONNECT_TIMEOUT` | `5s` | 起動時の接続試行ごとのフォールバックタイムアウト。pgx ネイティブの `connect_timeout`、`PGCONNECT_TIMEOUT`、service 設定が優先されます |
 | `PORT` | `8080` | API のリッスンポート |
 | `JWT_SECRET` | 本番環境で必須 | ログイン JWT と一部の署名フローに使うシークレット。本番では空または既知のプレースホルダーだと起動を拒否 |
 | `APP_ENV` | 空 | プロダクションでは `production` を設定 |

@@ -282,6 +282,14 @@ export interface ChatPendingTask {
   task_id?: string;
   status?: string;
   created_at?: string;
+  /**
+   * Why a `waiting_local_directory` task is parked: the directory it needs and,
+   * when known, the short id of the task holding it. Set only while that status
+   * is current — see promotePendingChatTask, which clears it on every other
+   * transition so a stale hold can never be read as a live one. Absent on
+   * servers predating the field, which renders as the bare waiting label.
+   */
+  wait_reason?: string;
   /** Explicit capability gate; absent on servers predating follow-up queues. */
   supports_queue?: boolean;
   /**

@@ -385,26 +385,6 @@ func TestAppendUserMessage_PlainText(t *testing.T) {
 	}
 }
 
-func TestAppendUserMessage_BeforeWriteFenceRejectsWithoutDurableWrites(t *testing.T) {
-	f := newFake()
-	s := newTestSession(f)
-	guardCalls := 0
-	_, err := s.AppendUserMessage(context.Background(), AppendInput{
-		SessionID: uid(1),
-		Body:      "must be rerouted",
-		BeforeWrite: func(_ context.Context, _ pgx.Tx) error {
-			guardCalls++
-			return ErrRouteChanged
-		},
-	})
-	if !errors.Is(err, ErrRouteChanged) {
-		t.Fatalf("append fence error = %v, want route changed", err)
-	}
-	if guardCalls != 1 || len(f.messages) != 0 || f.touched != 0 {
-		t.Fatalf("rejected append guard=%d messages=%d touches=%d, want 1/0/0", guardCalls, len(f.messages), f.touched)
-	}
-}
-
 func TestAppendUserMessage_NoReplyTargetWithoutMessageID(t *testing.T) {
 	f := newFake()
 	s := newTestSession(f)
@@ -427,6 +407,20 @@ func TestAppendUserMessage_IssueCommand(t *testing.T) {
 	}
 	if res.IssueCommand == nil || res.IssueCommand.Title != "Fix bug" || res.IssueCommand.Description != "steps to repro" {
 		t.Errorf("IssueCommand = %+v", res.IssueCommand)
+	}
+}
+
+func TestAppendUserMessage_ChannelCommandDoesNotReplaceContextInitiator(t *testing.T) {
+	f := newFake()
+	f.contextInitiator = uid(7)
+	s := newTestSession(f)
+	if _, err := s.AppendUserMessage(context.Background(), AppendInput{
+		SessionID: uid(1), Sender: uid(8), Body: "/issue Fix bug", MessageID: "m1",
+	}); err != nil {
+		t.Fatalf("AppendUserMessage: %v", err)
+	}
+	if f.contextInitiator != uid(7) {
+		t.Fatalf("context initiator = %v, want prior agent-input sender %v", f.contextInitiator, uid(7))
 	}
 }
 

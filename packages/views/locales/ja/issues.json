@@ -596,7 +596,8 @@
   },
   "card": {
     "update_failed": "タスクを更新できませんでした",
-    "updated_ago": "{{time}} に更新"
+    "updated_ago": "{{time}} に更新",
+    "child_progress_restricted_other": "サブタスク {{count}} 件が制限中"
   },
   "actions": {
     "status": "ステータス",

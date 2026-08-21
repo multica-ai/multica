@@ -28,10 +28,10 @@ import (
 //   - Dropped addressed /issue commands: an authorization/status refusal.
 
 const (
-	msgFreshPending   = "✅ 已准备开始新对话。你的下一条聊天消息将不带之前的上下文运行。"
-	msgIssueUsage     = "请填写任务标题，格式如下：\n\n/issue <标题>\n[描述]（可选）"
-	msgIssueNotMember = "你不是该 Multica 工作区的成员，因此无法创建任务。请让工作区管理员邀请你后重试。"
-	msgIssueDisabled  = "该 Telegram 机器人未连接到 Multica（或已断开连接）。请让工作区管理员重新连接。"
+	msgFreshPending   = "✅ Fresh start ready. Your next chat message will run without previous context."
+	msgIssueUsage     = "Please include an issue title. Use:\n\n/issue <title>\n[description] (optional)"
+	msgIssueNotMember = "You're not a member of this Multica workspace, so I can't file an issue for you. Ask a workspace admin to invite you, then send the command again."
+	msgIssueDisabled  = "This Telegram bot isn't connected to Multica (or was disconnected). Ask a workspace admin to reconnect it."
 )
 
 // bindingMinter is the binding-token surface the replier needs.
@@ -168,7 +168,7 @@ func (r *OutboundReplier) sendBindingPrompt(ctx context.Context, inst engine.Res
 		return fmt.Errorf("mint binding token: %w", err)
 	}
 	bindURL := r.appURL + r.bindingPath + "?token=" + url.QueryEscape(token.Raw)
-	text := "👋 要开始和我对话，请先绑定你的 Multica 账号：\n" + bindURL + "\n（链接 15 分钟内有效）"
+	text := "👋 To start chatting with me, link your Telegram account to Multica:\n" + bindURL + "\n(This link expires in 15 minutes.)"
 	return r.post(ctx, inst, msg, text)
 }
 
@@ -210,18 +210,18 @@ func issueCreatedText(res engine.Result) string {
 	id := issueResultIdentifier(res)
 	title := strings.TrimSpace(res.IssueTitle)
 	if title == "" {
-		return "✅ 已创建 " + id
+		return "✅ Created " + id
 	}
-	return "✅ 已创建 " + id + " — " + title
+	return "✅ Created " + id + " — " + title
 }
 
 func issueDuplicateText(res engine.Result) string {
 	id := issueResultIdentifier(res)
 	title := strings.TrimSpace(res.IssueTitle)
 	if title == "" {
-		return "⚠️ 未创建：已存在进行中的任务 " + id + "。"
+		return "⚠️ Not created — active issue " + id + " already exists."
 	}
-	return "⚠️ 未创建：已存在进行中的任务 " + id + " — " + title
+	return "⚠️ Not created — active issue " + id + " already exists: " + title
 }
 
 func issueResultIdentifier(res engine.Result) string {

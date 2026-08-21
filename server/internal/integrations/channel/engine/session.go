@@ -332,10 +332,6 @@ type AppendInput struct {
 	ClaimToken          pgtype.UUID
 	MediaPendingSeconds float64
 	ForceFresh          bool
-	// BeforeWrite runs inside the append transaction before any durable write.
-	// Adapters use it to acquire a route fence that is held through the message
-	// insert and in-transaction dedup mark.
-	BeforeWrite func(context.Context, pgx.Tx) error
 }
 
 // BindMediaInput links already-uploaded media to either an /issue target or a
@@ -374,16 +370,17 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
-	// Keep the repo-wide teardown order: chat_session before any adapter-owned
-	// route fence. FOR KEY SHARE is sufficient to serialize deletion without
-	// blocking normal non-key session updates or debounced task enqueueing.
+	commandSource := in.CommandText
+	if commandSource == "" {
+		commandSource = in.Body
+	}
+	cmd, _ := ParseIssueCommand(commandSource)
+
+	// Context paths acquire chat_session before binding and generation. This
+	// also keeps the later TouchChatSession update from introducing the reverse
+	// binding -> chat_session edge against task enqueue.
 	if _, err := qtx.LockChatSessionForAppend(ctx, in.SessionID); err != nil {
 		return AppendResult{}, fmt.Errorf("lock chat session for append: %w", err)
-	}
-	if in.BeforeWrite != nil {
-		if err := in.BeforeWrite(ctx, tx); err != nil {
-			return AppendResult{}, err
-		}
 	}
 	binding, err := qtx.LockChannelChatSessionBindingForContext(ctx, in.SessionID)
 	if err != nil {
@@ -415,20 +412,15 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 			return AppendResult{}, fmt.Errorf("resolve channel chat history boundary: %w", err)
 		}
 	}
-	if contextRevision > 0 {
+	// A channel command is excluded from agent input, so it must not replace
+	// the principal used to recover earlier unowned agent-visible messages.
+	if contextRevision > 0 && cmd == nil {
 		if _, err := qtx.SetChannelChatContextInitiator(ctx, db.SetChannelChatContextInitiatorParams{
 			ChatSessionID: in.SessionID, Revision: contextRevision, InitiatorUserID: in.Sender,
 		}); err != nil {
 			return AppendResult{}, fmt.Errorf("snapshot channel context initiator: %w", err)
 		}
 	}
-
-	commandSource := in.CommandText
-	if commandSource == "" {
-		commandSource = in.Body
-	}
-	cmd, _ := ParseIssueCommand(commandSource)
-
 	// channel_ingested is the immutable provenance the cancel path gates on:
 	// it must be stamped in the same transaction as the message so no later
 	// binding deletion (archive, installation rebind) can strip it.

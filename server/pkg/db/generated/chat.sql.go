@@ -2160,6 +2160,11 @@ SELECT
     task.id,
     task.status,
     task.created_at,
+    -- Only meaningful while status is waiting_local_directory: the daemon
+    -- stamps which directory this task is parked on and who holds it, so the
+    -- StatusPill can say why it is not moving. Stale on any other status; the
+    -- renderer reads it only for the waiting one.
+    task.wait_reason,
     message.id AS message_id,
     COALESCE(message.content, '')::text AS content
 FROM agent_task_queue AS task
@@ -2186,11 +2191,12 @@ ORDER BY
 `
 
 type ListPendingChatTasksForSessionRow struct {
-	ID        pgtype.UUID        `json:"id"`
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	MessageID pgtype.UUID        `json:"message_id"`
-	Content   string             `json:"content"`
+	ID         pgtype.UUID        `json:"id"`
+	Status     string             `json:"status"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	WaitReason pgtype.Text        `json:"wait_reason"`
+	MessageID  pgtype.UUID        `json:"message_id"`
+	Content    string             `json:"content"`
 }
 
 // Returns a claimed task first, then a deferred retry, followed by prioritized
@@ -2214,6 +2220,7 @@ func (q *Queries) ListPendingChatTasksForSession(ctx context.Context, chatSessio
 			&i.ID,
 			&i.Status,
 			&i.CreatedAt,
+			&i.WaitReason,
 			&i.MessageID,
 			&i.Content,
 		); err != nil {
@@ -2279,11 +2286,9 @@ WHERE id = $1
 FOR KEY SHARE
 `
 
-// The append transaction's first lock. FOR KEY SHARE conflicts with workspace
-// or session deletion but remains compatible with normal non-key session
-// updates and task enqueueing. DingTalk then acquires its route fence, matching
-// the workspace teardown order chat_session -> dingtalk_group_route and
-// preventing a route/session lock inversion.
+// The append transaction's first lock. FOR KEY SHARE remains compatible with
+// task enqueue's FOR NO KEY UPDATE while establishing chat_session -> binding
+// -> generation order before the later TouchChatSession update.
 func (q *Queries) LockChatSessionForAppend(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	row := q.db.QueryRow(ctx, lockChatSessionForAppend, id)
 	var id_2 pgtype.UUID
