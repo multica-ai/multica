@@ -1028,21 +1028,31 @@ const runtimeLivenessTTL = 90 * time.Second
 // DB-only fallback path (used when an IsAliveBatch call to Redis errors) does
 // not false-positive on alive-but-Redis-only runtimes.
 //
+// This is the actual write-volume throttle: recordHeartbeat only schedules a
+// DB write when a runtime's last_seen_at is older than this value, so total
+// agent_runtime row-touches scale with 1/flushInterval per online runtime —
+// independent of the BatchedHeartbeatScheduler tick cadence, which only
+// controls how promptly an already-due write is flushed and how many due
+// writes get coalesced into one transaction, not how often a write becomes
+// due in the first place.
+//
 // Load-bearing invariant: this must be strictly less than the sweeper's
 // stale threshold (150s in cmd/server/runtime_sweeper.go) MINUS one daemon
 // heartbeat cycle (~15s) MINUS the BatchedHeartbeatScheduler tick interval
 // (~30s). Worst-case DB age for an alive runtime is therefore bounded by
-// flush + heartbeat + batchTick = 60 + 15 + 30 = 105s, leaving a 45s buffer
-// below the 150s stale window. If you tune any of these constants, recompute
-// the chain and keep at least a one-tick buffer.
+// flush + heartbeat + batchTick = 75 + 15 + 30 = 120s, leaving a 30s (one
+// batch-tick) buffer below the 150s stale window — the minimum buffer this
+// invariant allows. If you tune any of these constants, recompute the chain
+// and keep at least a one-tick buffer.
 //
-// We intentionally keep the per-runtime flush throttle at 60s (rather than
-// pushing it higher) so a crashed runtime is detected within ~150s instead
-// of ~10 minutes. The bulk of the DB-pressure win comes from batched
-// coalescing in HeartbeatScheduler — at 70 online runtimes that collapses
-// ~17 single-row UPDATE/s into ~0.03 bulk UPDATE/s (one per batch tick),
-// independent of how the per-runtime throttle is tuned.
-const runtimeHeartbeatDBFlushInterval = 60 * time.Second
+// Raised from 60s to 75s (2026-08) to reduce agent_runtime write volume as
+// fleet size has grown far past the ~70-online-runtime baseline the original
+// batching design assumed (see BatchedHeartbeatScheduler doc). This is the
+// safe ceiling under the current 150s stale threshold; a larger reduction
+// would require also raising RuntimeClaimFreshnessSeconds (server/internal/
+// service/task.go), which has a wider blast radius (task-claim freshness,
+// reconnect grace) and was left out of this change deliberately.
+const runtimeHeartbeatDBFlushInterval = 75 * time.Second
 
 func (h *Handler) DaemonHeartbeat(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
