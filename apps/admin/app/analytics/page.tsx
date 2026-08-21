@@ -35,7 +35,9 @@ export default function AnalyticsPage() {
     setWindowHours(hours);
     const choices = granularityOptionsFor(hours);
     if (!choices.includes(granularityHours)) {
-      setGranularityHours(choices[0]);
+      // Every WindowHours key maps to a non-empty options array (see
+      // GRANULARITY_OPTIONS in window-toolbar.tsx) — choices[0] always exists.
+      setGranularityHours(choices[0]!);
     }
   }
 

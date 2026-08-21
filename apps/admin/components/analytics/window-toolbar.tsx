@@ -27,7 +27,9 @@ const GRANULARITY_OPTIONS: Record<WindowHours, readonly GranularityHours[]> = {
 };
 
 export function granularityOptionsFor(windowHours: WindowHours): readonly GranularityHours[] {
-  return GRANULARITY_OPTIONS[windowHours];
+  // GRANULARITY_OPTIONS is a Record<WindowHours, ...>, so this key always
+  // exists — noUncheckedIndexedAccess can't see that through bracket access.
+  return GRANULARITY_OPTIONS[windowHours]!;
 }
 
 function granularityLabel(hours: GranularityHours): string {
