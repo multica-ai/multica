@@ -1234,6 +1234,18 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		task, err = s.Queries.CreateAgentTask(ctx, createParams)
 	}
 	if err != nil {
+		// A concurrent enqueue for the same (issue, agent) won the race and the
+		// unique index rejected this insert. Mirror the mention path: this is
+		// benign — a sibling run already covers this assignee — so log at debug
+		// and return the bare typed sentinel the caller maps to a coalesced
+		// outcome / 409 rather than a 500 leaking the raw constraint name
+		// (#5914). This is the assignee-path counterpart the mention path fixed;
+		// EnqueueTaskForIssue callers (comment trigger, assign/promote, autopilot)
+		// route through here (#5914 follow-up).
+		if isDuplicatePendingTaskErr(err) {
+			slog.Debug("task enqueue coalesced: pending task already exists", "issue_id", util.UUIDToString(issue.ID), "agent_id", util.UUIDToString(issue.AssigneeID))
+			return db.AgentTaskQueue{}, ErrDuplicatePendingTask
+		}
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", err)
 		return db.AgentTaskQueue{}, fmt.Errorf("create task: %w", err)
 	}
