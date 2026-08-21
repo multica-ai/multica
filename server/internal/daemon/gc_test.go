@@ -57,6 +57,53 @@ func createTaskDir(t *testing.T, root, wsID, dirName string, meta *execenv.GCMet
 	return taskDir
 }
 
+func TestRunGC_MixedLayoutsUseMetadataWorkspaceIdentity(t *testing.T) {
+	workspaceID := "a05b0e10-ee7a-4603-a72d-a548b2390cb2"
+	legacyIssueID := "11111111-1111-1111-1111-111111111111"
+	readableIssueID := "22222222-2222-2222-2222-222222222222"
+	var batchRequests int
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/"+workspaceID+"/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		batchRequests++
+		var body struct {
+			IssueIDs []string `json:"issue_ids"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode batch request: %v", err)
+		}
+		issues := make([]map[string]any, 0, len(body.IssueIDs))
+		for _, issueID := range body.IssueIDs {
+			issues = append(issues, map[string]any{
+				"id": issueID, "found": true, "status": "done",
+				"updated_at": time.Now().Add(-10 * 24 * time.Hour),
+			})
+		}
+		json.NewEncoder(w).Encode(map[string]any{"issues": issues})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	legacyDir := createTaskDir(t, d.cfg.WorkspacesRoot, workspaceID, "11111111", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: legacyIssueID, WorkspaceID: workspaceID,
+		CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+	readableDir := createTaskDir(t, d.cfg.WorkspacesRoot, "asset-feed-a548b2390cb2", "mul-6063-b659c34a1dc3", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: readableIssueID, WorkspaceID: workspaceID,
+		TaskID: "22222222-ee7a-4603-a72d-b659c34a1dc3", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
+	})
+
+	d.runGC(context.Background())
+
+	if batchRequests != 2 {
+		t.Fatalf("batch requests = %d, want one per physical layout", batchRequests)
+	}
+	for _, taskDir := range []string{legacyDir, readableDir} {
+		if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+			t.Fatalf("task dir %s was not reclaimed", taskDir)
+		}
+	}
+}
+
 func TestShouldCleanTaskDir_DoneIssueOverTTL(t *testing.T) {
 	t.Parallel()
 	issueID := "11111111-1111-1111-1111-111111111111"
@@ -278,6 +325,43 @@ func TestCleanTaskDir_RemovesDirectory(t *testing.T) {
 
 	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 		t.Fatal("task dir should be removed after cleanup")
+	}
+}
+
+func TestCleanTaskDir_RemovesStableRootRecord(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	params := execenv.PrepareParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     "a05b0e10-ee7a-4603-a72d-a548b2390cb2",
+		WorkspaceSlug:   "Asset Feed",
+		TaskID:          "5c57b65b-ee7a-4603-a72d-b659c34a1dc3",
+		IssueIdentifier: "MUL-6063",
+		AgentName:       "GC Identity",
+	}
+	env, err := execenv.Prepare(params, slog.Default())
+	if err != nil {
+		t.Fatalf("Prepare: %v", err)
+	}
+	original := env.RootDir
+	d := &Daemon{cfg: Config{WorkspacesRoot: root}, logger: slog.Default()}
+	if bytes := d.cleanTaskDir(original); bytes <= 0 {
+		t.Fatalf("reclaimed bytes = %d, want owner metadata bytes", bytes)
+	}
+
+	resolved, err := execenv.ResolveRootDir(execenv.RootDirParams{
+		WorkspacesRoot:  root,
+		WorkspaceID:     params.WorkspaceID,
+		WorkspaceSlug:   "Renamed Workspace",
+		TaskID:          params.TaskID,
+		IssueIdentifier: "NEW-6063",
+	})
+	if err != nil {
+		t.Fatalf("ResolveRootDir after terminal GC: %v", err)
+	}
+	if resolved == original {
+		t.Fatalf("terminal GC left stale root record %q", resolved)
 	}
 }
 
@@ -2058,6 +2142,9 @@ func TestGCMetaForTask(t *testing.T) {
 			}
 			if meta.WorkspaceID != "ws" {
 				t.Fatalf("workspace_id: want %q, got %q", "ws", meta.WorkspaceID)
+			}
+			if meta.TaskID != tc.task.ID {
+				t.Fatalf("task_id: want %q, got %q", tc.task.ID, meta.TaskID)
 			}
 		})
 	}

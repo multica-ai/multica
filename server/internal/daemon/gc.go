@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -160,7 +161,7 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 	}
 
 	cleanedHere := 0
-	issueCandidates := make([]issueGCCandidate, 0, len(taskEntries))
+	issueCandidatesByWorkspace := make(map[string][]issueGCCandidate)
 	for _, entry := range taskEntries {
 		if ctx.Err() != nil {
 			return
@@ -175,13 +176,25 @@ func (d *Daemon) gcWorkspace(ctx context.Context, wsDir string, stats *gcStats) 
 		}
 		meta, metaErr := execenv.ReadGCMeta(taskDir)
 		if metaErr == nil && meta.Kind == execenv.GCKindIssue && strings.TrimSpace(meta.IssueID) != "" {
-			issueCandidates = append(issueCandidates, issueGCCandidate{taskDir: taskDir, meta: meta})
-			continue
+			if workspaceID := strings.TrimSpace(meta.WorkspaceID); workspaceID != "" {
+				issueCandidatesByWorkspace[workspaceID] = append(
+					issueCandidatesByWorkspace[workspaceID],
+					issueGCCandidate{taskDir: taskDir, meta: meta},
+				)
+				continue
+			}
 		}
 		action := d.shouldCleanTaskDir(ctx, taskDir)
 		cleanedHere += d.applyGCAction(taskDir, action, stats)
 	}
-	cleanedHere += d.gcWorkspaceIssues(ctx, filepath.Base(wsDir), issueCandidates, stats)
+	workspaceIDs := make([]string, 0, len(issueCandidatesByWorkspace))
+	for workspaceID := range issueCandidatesByWorkspace {
+		workspaceIDs = append(workspaceIDs, workspaceID)
+	}
+	sort.Strings(workspaceIDs)
+	for _, workspaceID := range workspaceIDs {
+		cleanedHere += d.gcWorkspaceIssues(ctx, workspaceID, issueCandidatesByWorkspace[workspaceID], stats)
+	}
 
 	// Remove the workspace directory itself if it's now empty.
 	if cleanedHere > 0 {
@@ -766,11 +779,17 @@ func isAgentTaskTerminal(status string) bool {
 // that count for the cycle summary. A failed removal reports zero reclaimed.
 func (d *Daemon) cleanTaskDir(taskDir string) int64 {
 	bytes := dirSize(taskDir)
+	owner, ownerErr := execenv.ReadEnvRootOwner(taskDir)
 	if err := os.RemoveAll(taskDir); err != nil {
 		d.logger.Warn("gc: remove task dir failed", "dir", taskDir, "error", err)
 		return 0
 	} else {
 		d.logger.Info("gc: removed", "dir", taskDir, "bytes_reclaimed", bytes)
+	}
+	if ownerErr == nil && owner != nil {
+		if err := execenv.RemoveRootDirRecord(d.cfg.WorkspacesRoot, taskDir, *owner); err != nil {
+			d.logger.Warn("gc: remove stable task root record failed", "dir", taskDir, "error", err)
+		}
 	}
 	return bytes
 }
