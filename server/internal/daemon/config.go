@@ -77,6 +77,17 @@ const (
 	DefaultGCHermesSessionTTL             = 14 * 24 * time.Hour // 14 days — reclaim per-conversation Hermes session stores untouched this long (matches Codex: these hold transcripts, and losing an idle one restarts the thread rather than the agent's notes)
 	DefaultGCRepoTTL                      = 30 * 24 * time.Hour // 30 days — evict a bare repo cache no task has checked out this long
 	DefaultAutoUpdateCheckInterval        = 6 * time.Hour       // how often the daemon polls GitHub for a newer CLI release
+
+	// DefaultSkillBundleResolveMinTimeout floors the per-skill download deadline
+	// so tiny bundles still tolerate connection setup and round-trip latency.
+	DefaultSkillBundleResolveMinTimeout = 30 * time.Second
+	// DefaultSkillBundleResolveMaxTimeout caps the per-skill download deadline so
+	// a wedged download cannot pin a task in prepare indefinitely.
+	DefaultSkillBundleResolveMaxTimeout = 5 * time.Minute
+	// DefaultSkillBundleResolveMinThroughput is the pessimistic floor throughput
+	// (bytes/sec) used to scale the deadline to bundle size — deliberately low
+	// to cover slow, jittery links rather than ideal bandwidth.
+	DefaultSkillBundleResolveMinThroughput int64 = 50 * 1024
 )
 
 // DefaultGCArtifactPatterns lists basename matches that the GC loop treats as
@@ -136,6 +147,21 @@ type Config struct {
 	CodebuddyArgs                   []string
 	QwenArgs                        []string
 	QwenpawArgs                     []string
+
+	// SkillBundleLocalDir, when non-empty, is a directory the daemon scans for
+	// pre-built skill bundles before asking the server to resolve them. Each
+	// bundle must follow the skill-cache layout:
+	//   <dir>/<workspace>/<source>/<id>/<hash>/bundle.json
+	// This lets operators on slow or air-gapped machines (e.g. 5090) maintain
+	// skill bundles locally instead of pulling them over the network.
+	SkillBundleLocalDir string
+	// SkillBundleMinTimeout is the floor for the per-skill resolve deadline.
+	SkillBundleMinTimeout time.Duration
+	// SkillBundleMaxTimeout is the ceiling for the per-skill resolve deadline.
+	SkillBundleMaxTimeout time.Duration
+	// SkillBundleMinThroughput is the pessimistic bytes-per-second floor used
+	// to scale the deadline with bundle size.
+	SkillBundleMinThroughput int64
 
 	// ProfileCommandOverrides maps a custom runtime profile_id -> the absolute
 	// executable path to use for that profile on THIS machine (MUL-3284).
@@ -518,6 +544,23 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		autoReloadEnabled = false
 	}
 
+	// Skill bundle resolution config: env > defaults. These control how long
+	// the daemon waits when downloading a skill bundle from the server, and
+	// where it looks for locally-maintained bundles before making a network call.
+	skillBundleLocalDir := os.Getenv("MULTICA_SKILL_BUNDLE_LOCAL_DIR")
+	skillBundleMinTimeout, err := durationFromEnv("MULTICA_SKILL_BUNDLE_MIN_TIMEOUT", DefaultSkillBundleResolveMinTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	skillBundleMaxTimeout, err := durationFromEnv("MULTICA_SKILL_BUNDLE_MAX_TIMEOUT", DefaultSkillBundleResolveMaxTimeout)
+	if err != nil {
+		return Config{}, err
+	}
+	skillBundleMinThroughput, err := int64FromEnv("MULTICA_SKILL_BUNDLE_MIN_THROUGHPUT", DefaultSkillBundleResolveMinThroughput)
+	if err != nil {
+		return Config{}, err
+	}
+
 	return Config{
 		ServerBaseURL:                   serverBaseURL,
 		DaemonID:                        daemonID,
@@ -560,6 +603,10 @@ func LoadConfig(overrides Overrides) (Config, error) {
 		QwenArgs:                        qwenArgs,
 		QwenpawArgs:                     qwenpawArgs,
 		ProfileCommandOverrides:         profileCommandOverrides,
+		SkillBundleLocalDir:             skillBundleLocalDir,
+		SkillBundleMinTimeout:           skillBundleMinTimeout,
+		SkillBundleMaxTimeout:           skillBundleMaxTimeout,
+		SkillBundleMinThroughput:        skillBundleMinThroughput,
 	}, nil
 }
 

@@ -5919,6 +5919,13 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 		ref := ref
 		var bundle SkillData
 		if err := d.skillCache.WithRefLock(task.WorkspaceID, ref, func() error {
+			// Locally-maintained bundles take precedence over both the on-disk
+			// cache and the server, so operators can pin skills on slow or
+			// air-gapped machines without fighting stale cached server copies.
+			if local, ok := loadLocalSkillBundle(d.cfg.SkillBundleLocalDir, task.WorkspaceID, ref); ok {
+				bundle = local
+				return nil
+			}
 			if cached, ok := d.skillCache.Load(task.WorkspaceID, ref); ok {
 				bundle = cached
 				return nil
@@ -5977,7 +5984,13 @@ func (d *Daemon) ensureTaskSkillBundles(ctx context.Context, task *Task) error {
 // being cut off mid-body. Caching on success is what lets the resolve converge
 // across dispatches. (GitHub #4505 / MUL-3650)
 func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRefData) (SkillData, error) {
-	reqCtx, cancel := context.WithTimeout(ctx, skillBundleResolveTimeout(ref.SizeBytes))
+	// If the operator maintains skill bundles locally (e.g. on an air-gapped or
+	// slow-link machine like 5090), use the local copy before any network call.
+	if bundle, ok := loadLocalSkillBundle(d.cfg.SkillBundleLocalDir, task.WorkspaceID, ref); ok {
+		return bundle, nil
+	}
+
+	reqCtx, cancel := context.WithTimeout(ctx, d.skillBundleResolveTimeout(ref.SizeBytes))
 	defer cancel()
 
 	bundle, err := d.client.ResolveSkillBundle(reqCtx, task.RuntimeID, task.ID, ref)
@@ -6017,32 +6030,40 @@ func (d *Daemon) resolveSkillBundle(ctx context.Context, task *Task, ref SkillRe
 	return bundle, nil
 }
 
-const (
-	// skillBundleResolveMinTimeout floors the per-skill resolve deadline so a
-	// tiny bundle still tolerates connection setup and round-trip latency.
-	skillBundleResolveMinTimeout = 30 * time.Second
-	// skillBundleResolveMaxTimeout caps it so a wedged download cannot pin a
-	// task in prepare indefinitely.
-	skillBundleResolveMaxTimeout = 5 * time.Minute
-	// skillBundleResolveMinThroughput is the pessimistic floor throughput
-	// (bytes/sec) used to scale the deadline to bundle size — deliberately low
-	// to cover slow, jittery links rather than ideal bandwidth.
-	skillBundleResolveMinThroughput = 50 * 1024
-)
-
 // skillBundleResolveTimeout returns the deadline budget for downloading a
-// bundle of the given size: at least skillBundleResolveMinTimeout, scaled up at
-// skillBundleResolveMinThroughput, and capped at skillBundleResolveMaxTimeout.
-func skillBundleResolveTimeout(sizeBytes int64) time.Duration {
+// bundle of the given size using the daemon's configured floor/ceiling/throughput.
+func (d *Daemon) skillBundleResolveTimeout(sizeBytes int64) time.Duration {
+	minTimeout := d.cfg.SkillBundleMinTimeout
+	if minTimeout <= 0 {
+		minTimeout = DefaultSkillBundleResolveMinTimeout
+	}
+	maxTimeout := d.cfg.SkillBundleMaxTimeout
+	if maxTimeout <= 0 {
+		maxTimeout = DefaultSkillBundleResolveMaxTimeout
+	}
+	minThroughput := d.cfg.SkillBundleMinThroughput
+	if minThroughput <= 0 {
+		minThroughput = DefaultSkillBundleResolveMinThroughput
+	}
+	return skillBundleResolveTimeoutFor(sizeBytes, minTimeout, maxTimeout, minThroughput)
+}
+
+// skillBundleResolveTimeoutFor returns the deadline budget for downloading a
+// bundle of the given size: at least minTimeout, scaled up at minThroughput
+// bytes per second, and capped at maxTimeout.
+func skillBundleResolveTimeoutFor(sizeBytes int64, minTimeout, maxTimeout time.Duration, minThroughput int64) time.Duration {
 	if sizeBytes <= 0 {
-		return skillBundleResolveMinTimeout
+		return minTimeout
 	}
-	scaled := time.Duration(sizeBytes/skillBundleResolveMinThroughput) * time.Second
-	if scaled < skillBundleResolveMinTimeout {
-		return skillBundleResolveMinTimeout
+	if minThroughput <= 0 {
+		minThroughput = DefaultSkillBundleResolveMinThroughput
 	}
-	if scaled > skillBundleResolveMaxTimeout {
-		return skillBundleResolveMaxTimeout
+	scaled := time.Duration(sizeBytes/minThroughput) * time.Second
+	if scaled < minTimeout {
+		return minTimeout
+	}
+	if scaled > maxTimeout {
+		return maxTimeout
 	}
 	return scaled
 }
