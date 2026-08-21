@@ -693,3 +693,63 @@ func TestCommentTriggerMentionAssigneeDoneIssue(t *testing.T) {
 		t.Errorf("expected 1 pending task after @mention of assignee on done issue, got %d", n)
 	}
 }
+
+// TestCommentTriggerThreadSurvivesTriggerReattribution is the MUL-6224
+// regression: conversation-continuation ownership must mean "a task COVERED the
+// thread root", not "the root is still some task's trigger_comment_id".
+//
+// The trigger pointer is mutable: when a second comment merges into the root's
+// still-queued task (MUL-4195 coalescing), MergeCommentIntoPendingTask
+// re-attributes trigger_comment_id to the new comment and demotes the root into
+// coalesced_comment_ids. Ownership matching keyed on the trigger pointer alone
+// therefore lost the thread the moment a busy-window merge stole it: every
+// later un-mentioned member reply in that thread routed NOWHERE — silently, at
+// create time and again in every completion reconcile (which re-runs the same
+// deterministic routing), so the instruction was permanently dropped. That is
+// exactly how two member instructions vanished on MUL-6139.
+func TestCommentTriggerThreadSurvivesTriggerReattribution(t *testing.T) {
+	agentID := getAgentID(t)
+	issueID := createIssueAssignedToAgent(t, "MUL-6224 re-attribution test", agentID)
+	t.Cleanup(func() {
+		clearTasks(t, issueID)
+		resp := authRequest(t, "DELETE", "/api/issues/"+issueID, nil)
+		resp.Body.Close()
+	})
+	clearTasks(t, issueID) // drop the assignment task so we start clean
+
+	// Member starts a thread; the root triggers a task (trigger = root).
+	rootID := postComment(t, issueID, "The plugin capabilities also need work", nil)
+	// A second top-level comment lands while that task is still queued and
+	// merges into it: the trigger is re-attributed, the root is demoted.
+	otherID := postComment(t, issueID, "Also, the page does not refresh", nil)
+	if n := countPendingTasks(t, issueID); n != 1 {
+		t.Fatalf("expected the second comment to merge into the pending task, got %d tasks", n)
+	}
+	if got := latestTriggerCommentID(t, issueID); got != otherID {
+		t.Fatalf("merge should re-attribute trigger_comment_id to %s, got %s", otherID, got)
+	}
+	if coalesced := coalescedCommentIDs(t, issueID); !containsID(coalesced, rootID) {
+		t.Fatalf("expected root %s demoted into coalesced_comment_ids, got %v", rootID, coalesced)
+	}
+
+	// The merged batch run claims and starts — the incident window: the agent
+	// is busy, the root is covered by a RUNNING task that no longer points at
+	// it, and nothing is queued/dispatched.
+	if _, err := testPool.Exec(context.Background(), `
+		UPDATE agent_task_queue
+		SET status = 'running', started_at = now()
+		WHERE issue_id = $1 AND status = 'queued'
+	`, issueID); err != nil {
+		t.Fatalf("failed to mark batch task running: %v", err)
+	}
+
+	// Member replies under the ROOT without a mention ("ok, go ahead"). Before
+	// the fix this routed nowhere and no task was ever created for it.
+	replyID := postComment(t, issueID, "ok, please go ahead with that", strPtr(rootID))
+	if n := countPendingTasks(t, issueID); n != 1 {
+		t.Fatalf("expected 1 pending task (conversation continuation via coalesced root), got %d", n)
+	}
+	if got := latestTriggerCommentID(t, issueID); got != replyID {
+		t.Errorf("continuation task trigger_comment_id = %q, want reply id %q", got, replyID)
+	}
+}

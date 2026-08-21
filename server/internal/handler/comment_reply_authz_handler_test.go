@@ -10,7 +10,7 @@ import (
 )
 
 // TestCreateComment_TriggeredTaskRejectsTopLevelComment exercises the full
-// CreateComment handler path (not just taskCoversReplyParent) for the trap
+// CreateComment handler path (not just taskCoversComment) for the trap
 // reported in MUL-4417 / GH #5266: a comment-triggered task that posts a
 // parentless, top-level comment on its own issue is rejected with a 409 whose
 // message names the trigger comment and states that top-level comments are not

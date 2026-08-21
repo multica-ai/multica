@@ -3701,6 +3701,7 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 	}
 	agent, err := h.Queries.GetAgent(ctx, issue.AssigneeID)
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		warnCommentRouteLookup("issue-assignee", "load assignee agent", issue, issue.AssigneeID, opts, err)
 		return db.Agent{}, false, false
 	}
 	if !h.canInvokeAgent(ctx, agent, actorType, actorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
@@ -3708,10 +3709,9 @@ func (h *Handler) assigneeFallbackAgent(ctx context.Context, issue db.Issue, act
 	}
 	// Coalescing queue: pending is still a valid route target, but callers
 	// that actually enqueue tasks use this flag to avoid piling on duplicates.
-	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, issue.AssigneeID, opts)
-	if err != nil {
-		return db.Agent{}, false, false
-	}
+	// The check fails OPEN: a DB error here must degrade to "no dedup", never
+	// to "no route" (MUL-6224).
+	hasPending := h.pendingDedupOrFailOpen(ctx, issue.ID, issue.AssigneeID, opts, "issue-assignee")
 	return agent, hasPending, true
 }
 

@@ -3888,6 +3888,17 @@ func (h *Handler) reconcileCommentsOnCompletion(ctx context.Context, task *db.Ag
 		// comments are unaffected: they keep their full routing.
 		if actorType != "member" {
 			triggers = keepExplicitMentionTriggers(triggers)
+		} else if len(triggers) == 0 {
+			// An undelivered MEMBER comment that routes to NO agent at all is
+			// beyond every safety net: this reconcile — and every later one —
+			// re-runs the same deterministic routing, so nothing will ever
+			// replay it (MUL-6224). It may be a legitimately agent-free side
+			// thread, but when it is a lost instruction this line is the only
+			// trace, so log it rather than skip in silence.
+			slog.Warn("reconcile comments on completion: undelivered member comment routes to no agent",
+				"issue_id", uuidToString(task.IssueID),
+				"completed_task_id", uuidToString(task.ID),
+				"comment_id", uuidToString(c.ID))
 		}
 		scoped := make([]commentAgentTrigger, 0, 1)
 		for _, trigger := range triggers {

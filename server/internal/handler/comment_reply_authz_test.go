@@ -40,8 +40,8 @@ func TestTaskCoversReplyParent(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := taskCoversReplyParent(task, tc.parent); got != tc.want {
-				t.Errorf("taskCoversReplyParent(%s) = %v, want %v", uuidToString(tc.parent), got, tc.want)
+			if got := taskCoversComment(task, tc.parent); got != tc.want {
+				t.Errorf("taskCoversComment(%s) = %v, want %v", uuidToString(tc.parent), got, tc.want)
 			}
 		})
 	}
@@ -49,7 +49,7 @@ func TestTaskCoversReplyParent(t *testing.T) {
 	// An assignment-triggered task (no trigger comment, no coalesced set) covers
 	// nothing here; the caller only consults this when TriggerCommentID is valid.
 	empty := db.AgentTaskQueue{}
-	if taskCoversReplyParent(empty, util.MustParseUUID(trigger)) {
+	if taskCoversComment(empty, util.MustParseUUID(trigger)) {
 		t.Errorf("a task with no trigger/coalesced comments must not authorize any parent")
 	}
 }

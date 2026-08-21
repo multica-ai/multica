@@ -1682,22 +1682,28 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 	writeJSON(w, http.StatusOK, resp)
 }
 
-// taskCoversReplyParent reports whether parentID is a comment this task is
-// authorized to reply under. A comment-triggered task may reply to its trigger
-// comment OR to any earlier comment that was folded into the same run while it
-// was still queued (coalesced_comment_ids). A coalesced run answers each root
-// thread it covered inside that thread, so its replies legitimately target
-// those threads' comments — not just the trigger (MUL-4348 per-thread fan-out).
+// taskCoversComment reports whether commentID is part of this task's input
+// set: its current trigger comment, or an earlier comment folded into the same
+// run (coalesced_comment_ids). The trigger pointer alone under-reports what a
+// task covers — MergeCommentIntoPendingTask re-attributes trigger_comment_id
+// to the newest folded comment (MUL-4302), demoting earlier inputs (often
+// thread roots) into coalesced_comment_ids.
 //
-// Every other parent on the task's own issue is still rejected: this is the
-// defense against resumed-session --parent drift and cross-thread misplacement.
-// The allow-list is exactly the set the run was given to answer, so it cannot
-// reach arbitrary comments.
-func taskCoversReplyParent(task db.AgentTaskQueue, parentID pgtype.UUID) bool {
-	if !parentID.Valid {
+// Two consumers rely on this exact set:
+//   - Reply-parent authorization (CreateComment): a comment-triggered task may
+//     reply under its trigger OR any comment folded into the same run — a
+//     coalesced run answers each root thread it covered inside that thread
+//     (MUL-4348 per-thread fan-out). Every other parent on the task's own
+//     issue is still rejected: that is the defense against resumed-session
+//     --parent drift and cross-thread misplacement.
+//   - Conversation-continuation routing (routeConversationOwnersForRoot): a
+//     thread root this task covered marks the thread as the covering agent's
+//     conversation whether or not the root is still the trigger (MUL-6224).
+func taskCoversComment(task db.AgentTaskQueue, commentID pgtype.UUID) bool {
+	if !commentID.Valid {
 		return false
 	}
-	target := uuidToString(parentID)
+	target := uuidToString(commentID)
 	if task.TriggerCommentID.Valid && uuidToString(task.TriggerCommentID) == target {
 		return true
 	}
@@ -1810,7 +1816,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
 				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
 					if task.TriggerCommentID.Valid {
-						if !taskCoversReplyParent(task, parentID) {
+						if !taskCoversComment(task, parentID) {
 							// Keep this error actionable for agents (MUL-4417 / GH #5266).
 							// The two rejections need different copy. A resumed
 							// session carrying a previous turn's --parent forward
@@ -2750,6 +2756,23 @@ func hasMemberMention(mentions []util.Mention) bool {
 	return false
 }
 
+// warnCommentRouteLookup logs an UNEXPECTED lookup failure inside an implicit
+// comment route. Implicit routes legitimately answer "no route" for policy
+// reasons (missing row, archived agent, invoke gate) and those stay silent —
+// but an infrastructure error must not be indistinguishable from them: it
+// means a member comment may be dropped with no other trace (MUL-6224).
+func warnCommentRouteLookup(route, step string, issue db.Issue, targetID pgtype.UUID, opts commentTriggerComputeOptions, err error) {
+	if err == nil || errors.Is(err, pgx.ErrNoRows) {
+		return
+	}
+	slog.Warn("comment routing: "+step+" failed",
+		"route", route,
+		"issue_id", uuidToString(issue.ID),
+		"target_id", uuidToString(targetID),
+		"comment_id", uuidToString(opts.ExcludeTriggerCommentID),
+		"error", err)
+}
+
 func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, parent *db.Comment, authorType, authorID string, opts commentTriggerComputeOptions) (commentAgentTrigger, bool) {
 	if parent == nil || parent.AuthorType != "agent" || !parent.AuthorID.Valid {
 		return commentAgentTrigger{}, false
@@ -2759,15 +2782,13 @@ func (h *Handler) routeReplyToParentAuthor(ctx context.Context, issue db.Issue, 
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		warnCommentRouteLookup("thread-parent", "load parent agent", issue, parent.AuthorID, opts, err)
 		return commentAgentTrigger{}, false
 	}
 	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
 		return commentAgentTrigger{}, false
 	}
-	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, parent.AuthorID, opts)
-	if err != nil {
-		return commentAgentTrigger{}, false
-	}
+	hasPending := h.pendingDedupOrFailOpen(ctx, issue.ID, parent.AuthorID, opts, "thread-parent")
 	return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceThreadParent, AlreadyPending: hasPending}, true
 }
 
@@ -2784,6 +2805,7 @@ func (h *Handler) routeThreadRootOwners(ctx context.Context, issue db.Issue, par
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil || !root.ID.Valid || root.AuthorType != "member" {
+		warnCommentRouteLookup("conversation", "load thread root", issue, parent.ID, opts, err)
 		return nil, false
 	}
 	return h.routeConversationOwnersForRoot(ctx, issue, root, memberID, opts)
@@ -2800,22 +2822,31 @@ func (h *Handler) routeConversationOwnersForRoot(ctx context.Context, issue db.I
 		return []commentAgentTrigger{trigger}, true
 	}
 
-	rootID := uuidToString(root.ID)
 	excludedID := uuidToString(opts.ExcludeTriggerCommentID)
 
 	tasks, err := h.Queries.ListTasksByIssue(ctx, issue.ID)
 	if err != nil {
+		// Without the task list there is no ownership evidence and the reply
+		// falls into the member-to-member no-route below — leave a trace, this
+		// is a drop, not a policy decision (MUL-6224).
+		slog.Warn("conversation routing: list issue tasks failed; reply gets no conversation route",
+			"issue_id", uuidToString(issue.ID), "comment_id", excludedID, "error", err)
 		return nil, false
 	}
 	routedAgents := make(map[string]conversationRoutedAgentInfo)
 	for _, task := range tasks {
-		if !task.TriggerCommentID.Valid || !task.AgentID.Valid {
+		if !task.AgentID.Valid {
 			continue
 		}
-		if excludedID != "" && uuidToString(task.TriggerCommentID) == excludedID {
+		if excludedID != "" && task.TriggerCommentID.Valid && uuidToString(task.TriggerCommentID) == excludedID {
 			continue
 		}
-		if uuidToString(task.TriggerCommentID) != rootID {
+		// Ownership means the task COVERED the root, not "the root is still the
+		// trigger pointer": a merge re-attributes trigger_comment_id to the
+		// newest folded comment, which used to make a busy-window root's whole
+		// thread permanently unroutable for un-mentioned member replies — at
+		// create time AND in every completion reconcile (MUL-6224).
+		if !taskCoversComment(task, root.ID) {
 			continue
 		}
 		agentID := uuidToString(task.AgentID)
@@ -2877,15 +2908,13 @@ func (h *Handler) routeConversationContinuationToAgent(ctx context.Context, issu
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		warnCommentRouteLookup("conversation", "load conversation agent", issue, agentID, opts, err)
 		return commentAgentTrigger{}, false
 	}
 	if !h.canInvokeAgent(ctx, agent, "member", memberID, memberID, uuidToString(issue.WorkspaceID)) {
 		return commentAgentTrigger{}, false
 	}
-	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentID, opts)
-	if err != nil {
-		return commentAgentTrigger{}, false
-	}
+	hasPending := h.pendingDedupOrFailOpen(ctx, issue.ID, agentID, opts, "conversation")
 	trigger := commentAgentTrigger{Agent: agent, Source: commentTriggerSourceConversation, AlreadyPending: hasPending}
 	if squadID.Valid {
 		if squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
@@ -2922,6 +2951,7 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil {
+		warnCommentRouteLookup("assigned-squad-leader", "load assigned squad", issue, issue.AssigneeID, opts, err)
 		return commentAgentTrigger{}, false
 	}
 	if authorType == "agent" && authorID == uuidToString(squad.LeaderID) &&
@@ -2933,16 +2963,37 @@ func (h *Handler) routeAssignedSquadLeaderFallback(ctx context.Context, issue db
 		WorkspaceID: issue.WorkspaceID,
 	})
 	if err != nil || !agent.RuntimeID.Valid || agent.ArchivedAt.Valid {
+		warnCommentRouteLookup("assigned-squad-leader", "load squad leader agent", issue, squad.LeaderID, opts, err)
 		return commentAgentTrigger{}, false
 	}
 	if !h.canInvokeAgent(ctx, agent, authorType, authorID, opts.effectiveInvoker(), uuidToString(issue.WorkspaceID)) {
 		return commentAgentTrigger{}, false
 	}
-	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, squad.LeaderID, opts)
-	if err != nil {
-		return commentAgentTrigger{}, false
-	}
+	hasPending := h.pendingDedupOrFailOpen(ctx, issue.ID, squad.LeaderID, opts, "assigned-squad-leader")
 	return commentAgentTrigger{Agent: agent, Source: commentTriggerSourceIssueAssignee, Squad: &squad, AlreadyPending: hasPending}, true
+}
+
+// pendingDedupOrFailOpen resolves a route's AlreadyPending flag, FAILING OPEN
+// (no pending) when the check errors. The flag is a dedup optimization only:
+// enqueue correctness is already guaranteed by the
+// idx_one_pending_task_per_issue_agent_v2 partial unique index plus the
+// ErrDuplicatePendingTask merge/register retry loop in
+// resolveCommentTriggerEnqueue, so "false" at worst costs one extra insert
+// attempt that converges through that loop. Failing CLOSED here returned the
+// same signal as a policy rejection and silently discarded the member's
+// comment — with no log and no dispatch outcome (MUL-6224 defect 2).
+func (h *Handler) pendingDedupOrFailOpen(ctx context.Context, issueID, agentID pgtype.UUID, opts commentTriggerComputeOptions, route string) bool {
+	hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issueID, agentID, opts)
+	if err != nil {
+		slog.Warn("comment routing: pending-task dedup check failed; failing open",
+			"route", route,
+			"issue_id", uuidToString(issueID),
+			"agent_id", uuidToString(agentID),
+			"comment_id", uuidToString(opts.ExcludeTriggerCommentID),
+			"error", err)
+		return false
+	}
+	return hasPending
 }
 
 func (h *Handler) hasPendingTaskForIssueAndAgent(ctx context.Context, issueID, agentID pgtype.UUID, opts commentTriggerComputeOptions) (bool, error) {
