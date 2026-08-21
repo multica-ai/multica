@@ -40,9 +40,14 @@
  * `startRenderingFromBottom` (initial paint at bottom, no setTimeout
  * hacks). Cell recycling also keeps scroll-up smooth.
  */
-import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
-import { FlashList } from "@shopify/flash-list";
+import { useCallback, useMemo, useRef, useState } from "react";
+import {
+  ActivityIndicator,
+  Pressable,
+  type LayoutChangeEvent,
+  View,
+} from "react-native";
+import { FlashList, useLayoutState } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -276,6 +281,31 @@ function MessageRow({
     (s) => s.selectingId === message.id,
   );
   const longPress = useChatMessageLongPress(message);
+  const [, setBubbleLayoutVersion] = useLayoutState(0);
+  const lastBubbleLayout = useRef<{
+    messageId: string;
+    height: number;
+  } | null>(null);
+  const onUserBubbleLayout = useCallback(
+    ({ nativeEvent: { layout } }: LayoutChangeEvent) => {
+      const previous = lastBubbleLayout.current;
+      if (
+        previous?.messageId === message.id &&
+        previous.height === layout.height
+      ) {
+        return;
+      }
+      lastBubbleLayout.current = {
+        messageId: message.id,
+        height: layout.height,
+      };
+      // EnrichedMarkdownText can grow after FlashList has measured its cell.
+      // useLayoutState tells FlashList v2 to remeasure this recycled cell, so
+      // the bubble background cannot paint over the following message.
+      setBubbleLayoutVersion((version) => version + 1);
+    },
+    [message.id, setBubbleLayoutVersion],
+  );
 
   if (isFailure) {
     return (
@@ -298,6 +328,7 @@ function MessageRow({
     // trailing alignment instead of stretching across the column.
     const body = (
       <View
+        onLayout={onUserBubbleLayout}
         className={cn(
           "self-end max-w-[80%] gap-1.5 rounded-2xl border-2 px-3.5 py-2 transition-colors",
           isSelecting
