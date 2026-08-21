@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -744,7 +745,10 @@ func TestProjectResourceUpdateLifecycle(t *testing.T) {
 		t.Fatalf("decode CreateProjectResource: %v", err)
 	}
 
-	// Update only the label; ref/position/type must stay untouched.
+	// Update only the label. Path/daemon/type must stay untouched, but the
+	// ref's embedded label FOLLOWS the rename: older desktop builds read (and
+	// write) only that copy, so leaving it behind would show them the previous
+	// name forever (MUL-6323).
 	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, map[string]any{
 		"label": "renamed",
@@ -765,8 +769,11 @@ func TestProjectResourceUpdateLifecycle(t *testing.T) {
 	if err := json.Unmarshal(updated.ResourceRef, &ref); err != nil {
 		t.Fatalf("decode resource_ref: %v", err)
 	}
-	if ref.LocalPath != "/Users/foo/work/a" || ref.DaemonID != "d1" || ref.Label != "A" {
+	if ref.LocalPath != "/Users/foo/work/a" || ref.DaemonID != "d1" {
 		t.Errorf("label-only update leaked into resource_ref: %+v", ref)
+	}
+	if ref.Label != "renamed" {
+		t.Errorf("ref label should mirror the rename, got %q", ref.Label)
 	}
 
 	// Update the ref payload (move to a new daemon path) and bump position.
@@ -790,17 +797,29 @@ func TestProjectResourceUpdateLifecycle(t *testing.T) {
 	if err := json.Unmarshal(updated.ResourceRef, &ref); err != nil {
 		t.Fatalf("decode resource_ref: %v", err)
 	}
-	if ref.LocalPath != "/Users/foo/work/b" || ref.DaemonID != "d2" || ref.Label != "B" {
+	if ref.LocalPath != "/Users/foo/work/b" || ref.DaemonID != "d2" {
 		t.Errorf("ref-update mismatch: %+v", ref)
 	}
 	if updated.Position != 5 {
 		t.Errorf("position = %d, want 5", updated.Position)
 	}
+	// This request changes the ref's label ("renamed" → "B") AND its path and
+	// daemon, so it is not a rename — a client's ref is a snapshot, and only a
+	// request whose sole difference is the label can be read as "the user
+	// renamed this". The name therefore stays put in both homes, and callers
+	// that mean to rename say so with the top-level label field.
+	// TestProjectResourceStaleRefSnapshotDoesNotRollBackARename pins why:
+	// otherwise an execution-mode dialog opened before someone else's rename
+	// undoes it on save. TestProjectResourceLabelConvergence pins the matrix.
 	if updated.Label == nil || *updated.Label != "renamed" {
-		t.Errorf("label should survive ref edit, got %v", updated.Label)
+		t.Errorf("an edit that is not a rename must not change the name, got %v", updated.Label)
+	}
+	if ref.Label != "renamed" {
+		t.Errorf("ref copy should hold the row's current name, got %q", ref.Label)
 	}
 
-	// Explicit null clears the outer label.
+	// Explicit null clears the outer label — and the ref's copy with it, or
+	// the UI would fall back to the very name the user deleted.
 	w = httptest.NewRecorder()
 	req = newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, map[string]any{
 		"label": nil,
@@ -815,6 +834,13 @@ func TestProjectResourceUpdateLifecycle(t *testing.T) {
 	}
 	if updated.Label != nil {
 		t.Errorf("label should be cleared, got %v", *updated.Label)
+	}
+	var clearedFields map[string]json.RawMessage
+	if err := json.Unmarshal(updated.ResourceRef, &clearedFields); err != nil {
+		t.Fatalf("decode cleared resource_ref: %v", err)
+	}
+	if _, hasLabel := clearedFields["label"]; hasLabel {
+		t.Errorf("clearing the label must also drop the ref copy, got %s", updated.ResourceRef)
 	}
 
 	// Bad ref payload must reject with 400 (relative path).
@@ -837,6 +863,200 @@ func TestProjectResourceUpdateLifecycle(t *testing.T) {
 	testHandler.UpdateProjectResource(w, req)
 	if w.Code != http.StatusNotFound {
 		t.Errorf("missing resource: expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+// TestProjectResourceLabelConvergence pins how the server converges the two
+// homes a local_directory display name historically has: the top-level label
+// column (written by renames since they stopped resending the ref) and the
+// legacy copy inside resource_ref (the only home desktop ≤ v0.4.28 knows,
+// which those builds both read first and write renames into). The server is
+// the only writer that sees both client generations, so every write must
+// leave the two agreeing — otherwise each generation edits its own copy and
+// the same row shows different names on different devices (MUL-6323).
+func TestProjectResourceLabelConvergence(t *testing.T) {
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Label convergence project",
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: %d %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	defer func() {
+		r := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		r = withURLParam(r, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	}()
+
+	// Created the way current clients do: name inside the ref, no column.
+	w = httptest.NewRecorder()
+	req = newRequest("POST", "/api/projects/"+project.ID+"/resources", map[string]any{
+		"resource_type": "local_directory",
+		"resource_ref": map[string]any{
+			"local_path":     "/Users/dev/work/game-client",
+			"daemon_id":      "daemon-label-convergence",
+			"label":          "Game Client",
+			"execution_mode": "in_place",
+		},
+	})
+	req = withURLParam(req, "id", project.ID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProjectResource: %d %s", w.Code, w.Body.String())
+	}
+	var created ProjectResourceResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode CreateProjectResource: %v", err)
+	}
+
+	update := func(body map[string]any) ProjectResourceResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, body)
+		req = withURLParams(req, "id", project.ID, "resourceId", created.ID)
+		testHandler.UpdateProjectResource(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateProjectResource %v: %d %s", body, w.Code, w.Body.String())
+		}
+		var resp ProjectResourceResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode UpdateProjectResource: %v", err)
+		}
+		return resp
+	}
+	refFields := func(resp ProjectResourceResponse) map[string]json.RawMessage {
+		t.Helper()
+		var fields map[string]json.RawMessage
+		if err := json.Unmarshal(resp.ResourceRef, &fields); err != nil {
+			t.Fatalf("decode resource_ref: %v", err)
+		}
+		return fields
+	}
+	refString := func(fields map[string]json.RawMessage, key string) string {
+		t.Helper()
+		rawValue, ok := fields[key]
+		if !ok {
+			return ""
+		}
+		var s string
+		if err := json.Unmarshal(rawValue, &s); err != nil {
+			t.Fatalf("ref[%q] not a string: %s", key, rawValue)
+		}
+		return s
+	}
+
+	// A rename from a desktop ≤ v0.4.28: the whole ref comes back with a new
+	// embedded label and no label field. The column must follow, or clients
+	// that read the column first keep showing the name this rename replaced.
+	resp := update(map[string]any{
+		"resource_ref": map[string]any{
+			"local_path":     "/Users/dev/work/game-client",
+			"daemon_id":      "daemon-label-convergence",
+			"label":          "Renamed On Old Desktop",
+			"execution_mode": "in_place",
+		},
+	})
+	if resp.Label == nil || *resp.Label != "Renamed On Old Desktop" {
+		t.Fatalf("column should follow a legacy ref rename, got %v", resp.Label)
+	}
+
+	// Plant what an even newer server may leave in the row: a ref field this
+	// binary does not know. Label writes must patch around it, not re-marshal
+	// it away — dropping unknown fields on an unrelated edit is the exact
+	// failure this PR closes for execution_mode on old servers.
+	futureRef := json.RawMessage(`{"local_path":"/Users/dev/work/game-client","daemon_id":"daemon-label-convergence","label":"Renamed On Old Desktop","execution_mode":"in_place","future_field":{"keep":"me"}}`)
+	if _, err := testHandler.Queries.UpdateProjectResource(context.Background(), db.UpdateProjectResourceParams{
+		ID:          parseUUID(created.ID),
+		ResourceRef: futureRef,
+		Label:       pgtype.Text{String: "Renamed On Old Desktop", Valid: true},
+		Position:    0,
+	}); err != nil {
+		t.Fatalf("plant future ref: %v", err)
+	}
+
+	// A rename from a current client: label only, no ref. The ref's embedded
+	// copy must follow so ≤ v0.4.28 readers see the new name — with the mode
+	// and the unknown field untouched.
+	resp = update(map[string]any{"label": "Renamed On New Desktop"})
+	if resp.Label == nil || *resp.Label != "Renamed On New Desktop" {
+		t.Fatalf("label-only rename: column = %v", resp.Label)
+	}
+	fields := refFields(resp)
+	if got := refString(fields, "label"); got != "Renamed On New Desktop" {
+		t.Errorf("ref label should mirror the rename for legacy readers, got %q", got)
+	}
+	if got := refString(fields, "execution_mode"); got != "in_place" {
+		t.Errorf("rename must not touch execution_mode, got %q", got)
+	}
+	if string(fields["future_field"]) != `{"keep":"me"}` {
+		t.Errorf("rename must preserve unknown ref fields and their values, got %s", fields["future_field"])
+	}
+
+	// A ref resent with its embedded label UNCHANGED — the execution-mode
+	// dialog spreads the stored ref back — is not a rename. It must not
+	// overwrite a column rename... but this write may converge the ref copy
+	// onto the column. (The resend goes through ref normalization, so this is
+	// also where future_field legitimately disappears on THIS server: that is
+	// the documented normalize contract for provided refs, not label code.)
+	if _, err := testHandler.Queries.UpdateProjectResource(context.Background(), db.UpdateProjectResourceParams{
+		ID:          parseUUID(created.ID),
+		ResourceRef: json.RawMessage(`{"local_path":"/Users/dev/work/game-client","daemon_id":"daemon-label-convergence","label":"Stale Ref Copy","execution_mode":"in_place"}`),
+		Label:       pgtype.Text{String: "Column Rename", Valid: true},
+		Position:    0,
+	}); err != nil {
+		t.Fatalf("plant diverged row: %v", err)
+	}
+	resp = update(map[string]any{
+		"resource_ref": map[string]any{
+			"local_path":     "/Users/dev/work/game-client",
+			"daemon_id":      "daemon-label-convergence",
+			"label":          "Stale Ref Copy",
+			"execution_mode": "in_place",
+		},
+	})
+	if resp.Label == nil || *resp.Label != "Column Rename" {
+		t.Fatalf("unchanged ref label must not overwrite a column rename, got %v", resp.Label)
+	}
+	if got := refString(refFields(resp), "label"); got != "Column Rename" {
+		t.Errorf("diverged ref copy should heal onto the column, got %q", got)
+	}
+
+	// Clearing the name removes BOTH copies: with either one left behind the
+	// UI would resurrect the name the user just deleted.
+	resp = update(map[string]any{"label": ""})
+	if resp.Label != nil {
+		t.Fatalf("clear: column = %v", *resp.Label)
+	}
+	fields = refFields(resp)
+	if _, hasLabel := fields["label"]; hasLabel {
+		t.Errorf("clear must drop the ref copy too, got %s", resp.ResourceRef)
+	}
+	if got := refString(fields, "execution_mode"); got != "in_place" {
+		t.Errorf("clear must not touch execution_mode, got %q", got)
+	}
+
+	// A write that decides no label — position only — must leave the name of
+	// a row whose only copy lives in the ref alone: NULL column here means
+	// "never set", not "cleared".
+	if _, err := testHandler.Queries.UpdateProjectResource(context.Background(), db.UpdateProjectResourceParams{
+		ID:          parseUUID(created.ID),
+		ResourceRef: json.RawMessage(`{"local_path":"/Users/dev/work/game-client","daemon_id":"daemon-label-convergence","label":"Ref Only Name","execution_mode":"in_place"}`),
+		Label:       pgtype.Text{},
+		Position:    0,
+	}); err != nil {
+		t.Fatalf("plant legacy row: %v", err)
+	}
+	resp = update(map[string]any{"position": 3})
+	if got := refString(refFields(resp), "label"); got != "Ref Only Name" {
+		t.Errorf("position-only update must not strip a ref-only name, got %q", got)
+	}
+	if resp.Label != nil {
+		t.Errorf("position-only update invented a column label: %v", *resp.Label)
 	}
 }
 
@@ -1237,5 +1457,243 @@ func TestLatestDaemonCLIVersion(t *testing.T) {
 				t.Errorf("latestDaemonCLIVersion = %q, want %q", got, tc.want)
 			}
 		})
+	}
+}
+
+// The bundled create path (project + resources in one transaction) skipped the
+// worktree save gate that POST/PUT /resources have always run, so a project
+// could be created with a mode the machine cannot run — surfacing only later,
+// as the claim gate cancelling the task.
+//
+// It matters more now that the client no longer predicts this answer: the UI
+// leaves parallel mode selectable and lets the server rule on it (#7113), which
+// only works if every write path actually asks.
+func TestCreateProjectGatesWorktreeLocalDirectory(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{
+		"title": "Bundled worktree resource",
+		"resources": []map[string]any{
+			{
+				"resource_type": "local_directory",
+				"resource_ref": map[string]any{
+					"local_path":     "/Users/dev/work/game-client",
+					"daemon_id":      "daemon-with-no-runtime-row",
+					"execution_mode": "worktree",
+				},
+			},
+		},
+	})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("CreateProject with un-runnable worktree resource: expected 422, got %d: %s",
+			w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp["code"] != "daemon_version_unsupported" {
+		t.Fatalf("expected the shared gate's error code, got %#v", resp["code"])
+	}
+
+	// The gate runs before the transaction opens, so the rejection must not
+	// leave a half-created project behind.
+	lw := httptest.NewRecorder()
+	lreq := newRequest("GET", "/api/projects?workspace_id="+testWorkspaceID, nil)
+	testHandler.ListProjects(lw, lreq)
+	if strings.Contains(lw.Body.String(), "Bundled worktree resource") {
+		t.Fatal("rejected create left a project behind")
+	}
+}
+
+// createTestProjectForResources / createLocalDirectoryResourceFor build the
+// fixtures the label-classification tests share, through the real handlers so
+// the rows look exactly like a client's would.
+func createTestProjectForResources(t *testing.T, title string) ProjectResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects?workspace_id="+testWorkspaceID, map[string]any{"title": title})
+	testHandler.CreateProject(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProject: %d %s", w.Code, w.Body.String())
+	}
+	var project ProjectResponse
+	if err := json.NewDecoder(w.Body).Decode(&project); err != nil {
+		t.Fatalf("decode CreateProject: %v", err)
+	}
+	t.Cleanup(func() {
+		r := newRequest("DELETE", "/api/projects/"+project.ID, nil)
+		r = withURLParam(r, "id", project.ID)
+		testHandler.DeleteProject(httptest.NewRecorder(), r)
+	})
+	return project
+}
+
+func createLocalDirectoryResourceFor(t *testing.T, projectID string, ref map[string]any) ProjectResourceResponse {
+	t.Helper()
+	w := httptest.NewRecorder()
+	req := newRequest("POST", "/api/projects/"+projectID+"/resources", map[string]any{
+		"resource_type": "local_directory",
+		"resource_ref":  ref,
+	})
+	req = withURLParam(req, "id", projectID)
+	testHandler.CreateProjectResource(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("CreateProjectResource: %d %s", w.Code, w.Body.String())
+	}
+	var created ProjectResourceResponse
+	if err := json.NewDecoder(w.Body).Decode(&created); err != nil {
+		t.Fatalf("decode CreateProjectResource: %v", err)
+	}
+	return created
+}
+
+// A resource's execution-mode dialog snapshots the whole ref when it OPENS, and
+// sends it back on save. If someone renames the folder from another device in
+// between, that snapshot arrives carrying a label the row no longer has — and
+// reading "the ref label differs" as "an old client renamed it" would undo the
+// rename, from a dialog that has nothing to do with the name.
+//
+// Also pins the other half of the same classification: an old client's rename
+// resends the ref but changes no execution semantics, so it must not be refused
+// by the worktree capability gate for a machine whose registration has drifted.
+func TestProjectResourceStaleRefSnapshotDoesNotRollBackARename(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	project := createTestProjectForResources(t, "Stale mode snapshot")
+	const daemonID = "daemon-stale-snapshot"
+
+	// The row as both devices last saw it: named "Game Client", in_place.
+	created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+		"local_path": "/Users/dev/work/game-client",
+		"daemon_id":  daemonID,
+		"label":      "Game Client",
+	})
+
+	update := func(body map[string]any) ProjectResourceResponse {
+		t.Helper()
+		w := httptest.NewRecorder()
+		req := newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, body)
+		req = withURLParams(req, "id", project.ID, "resourceId", created.ID)
+		testHandler.UpdateProjectResource(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("UpdateProjectResource(%v): %d %s", body, w.Code, w.Body.String())
+		}
+		var resp ProjectResourceResponse
+		if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		return resp
+	}
+	refLabelOf := func(resp ProjectResourceResponse) string {
+		t.Helper()
+		var fields map[string]any
+		if err := json.Unmarshal(resp.ResourceRef, &fields); err != nil {
+			t.Fatalf("decode ref: %v", err)
+		}
+		label, _ := fields["label"].(string)
+		return label
+	}
+
+	// Device B renames it. Both homes of the name now say "Renamed Client".
+	renamed := update(map[string]any{"label": "Renamed Client"})
+	if refLabelOf(renamed) != "Renamed Client" {
+		t.Fatalf("setup: ref copy did not follow the rename: %s", renamed.ResourceRef)
+	}
+
+	// Device A, whose dialog opened before that, saves in_place → in_place with
+	// its stale snapshot. The mode is what it came to change; the name is not.
+	after := update(map[string]any{
+		"resource_ref": map[string]any{
+			"local_path":     "/Users/dev/work/game-client",
+			"daemon_id":      daemonID,
+			"label":          "Game Client",
+			"execution_mode": "in_place",
+		},
+	})
+	if after.Label == nil || *after.Label != "Renamed Client" {
+		t.Fatalf("a stale mode snapshot rolled back the rename: column = %v", after.Label)
+	}
+	if got := refLabelOf(after); got != "Renamed Client" {
+		t.Errorf("stale ref label should be healed to the current name, got %q", got)
+	}
+
+	// A genuine ≤ v0.4.28 rename — ref resent, ONLY the label different — still
+	// counts, and still reaches the column.
+	legacy := update(map[string]any{
+		"resource_ref": map[string]any{
+			"local_path":     "/Users/dev/work/game-client",
+			"daemon_id":      daemonID,
+			"label":          "Renamed On Old Desktop",
+			"execution_mode": "in_place",
+		},
+	})
+	if legacy.Label == nil || *legacy.Label != "Renamed On Old Desktop" {
+		t.Fatalf("legacy rename should still reach the column, got %v", legacy.Label)
+	}
+}
+
+// An old client renames by resending the ref, so the worktree capability gate
+// would see "the ref was provided" and refuse the rename on a machine whose
+// runtime registration no longer advertises the capability — failing an edit
+// that changes nothing about what runs. The row already says worktree; the
+// claim gate is what keeps it from running somewhere that cannot.
+func TestProjectResourceLegacyRenameSkipsWorktreeGate(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+	project := createTestProjectForResources(t, "Legacy rename on a worktree row")
+	const daemonID = "daemon-no-runtime-row-for-rename"
+
+	created := createLocalDirectoryResourceFor(t, project.ID, map[string]any{
+		"local_path": "/Users/dev/work/game-client",
+		"daemon_id":  daemonID,
+		"label":      "Game Client",
+	})
+	// Plant the worktree mode directly: saving it through the API would (
+	// correctly) be refused for a daemon with no capable runtime row.
+	if _, err := testHandler.Queries.UpdateProjectResource(context.Background(), db.UpdateProjectResourceParams{
+		ID:          parseUUID(created.ID),
+		ResourceRef: json.RawMessage(`{"local_path":"/Users/dev/work/game-client","daemon_id":"` + daemonID + `","label":"Game Client","execution_mode":"worktree"}`),
+		Label:       pgtype.Text{String: "Game Client", Valid: true},
+		Position:    0,
+	}); err != nil {
+		t.Fatalf("plant worktree row: %v", err)
+	}
+
+	w := httptest.NewRecorder()
+	req := newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, map[string]any{
+		"resource_ref": map[string]any{
+			"local_path":     "/Users/dev/work/game-client",
+			"daemon_id":      daemonID,
+			"label":          "Renamed On Old Desktop",
+			"execution_mode": "worktree",
+		},
+	})
+	req = withURLParams(req, "id", project.ID, "resourceId", created.ID)
+	testHandler.UpdateProjectResource(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("a rename that changes no execution semantics must not hit the capability gate: %d %s",
+			w.Code, w.Body.String())
+	}
+
+	// And the gate still fires when the same client actually changes the mode.
+	w = httptest.NewRecorder()
+	req = newRequest("PUT", "/api/projects/"+project.ID+"/resources/"+created.ID, map[string]any{
+		"resource_ref": map[string]any{
+			"local_path":     "/Users/dev/work/game-client",
+			"daemon_id":      daemonID,
+			"label":          "Renamed On Old Desktop",
+			"execution_mode": "in_place",
+		},
+	})
+	req = withURLParams(req, "id", project.ID, "resourceId", created.ID)
+	testHandler.UpdateProjectResource(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("switching to in_place needs no capability: %d %s", w.Code, w.Body.String())
 	}
 }

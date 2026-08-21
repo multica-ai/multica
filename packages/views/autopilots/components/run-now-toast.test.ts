@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { runNowToastKind, runNowBlockedKey } from "./run-now-toast";
 
@@ -33,6 +34,7 @@ describe("runNowBlockedKey", () => {
     expect(runNowBlockedKey("target_unavailable")).toBe("run_blocked_target_unavailable");
     expect(runNowBlockedKey("attribution_blocked")).toBe("run_blocked_attribution");
     expect(runNowBlockedKey("already_active")).toBe("run_blocked_already_active");
+    expect(runNowBlockedKey("quota_exceeded")).toBe("run_blocked_quota_exceeded");
   });
 
   it("degrades an unknown or absent code to the generic message", () => {

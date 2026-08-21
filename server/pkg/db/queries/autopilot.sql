@@ -297,11 +297,12 @@ RETURNING *;
 -- a second run for the same (trigger_id, planned_at) pair (MUL-3551).
 INSERT INTO autopilot_run (
     autopilot_id, trigger_id, source, status, trigger_payload, squad_id, planned_at,
-    webhook_delivery_id
+    webhook_delivery_id, quota_reservation_id, reason_code, id
 ) VALUES (
     $1, sqlc.narg('trigger_id'), $2, $3, sqlc.narg('trigger_payload'),
     sqlc.narg('squad_id'), sqlc.narg('planned_at'),
-    sqlc.narg('webhook_delivery_id')
+    sqlc.narg('webhook_delivery_id'), sqlc.narg('quota_reservation_id'),
+    sqlc.narg('reason_code'), COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 ) RETURNING *;
 
 -- name: GetAutopilotRunByTriggerAndPlanned :one
@@ -323,7 +324,12 @@ SELECT * FROM autopilot_run
 WHERE webhook_delivery_id = $1
 LIMIT 1;
 
--- name: RecoverPartialAutopilotRun :exec
+-- name: GetAutopilotRunByQuotaReservation :one
+SELECT * FROM autopilot_run
+WHERE quota_reservation_id = $1
+LIMIT 1;
+
+-- name: RecoverPartialAutopilotRun :one
 -- Recovers a partial-state autopilot_run from a crashed first attempt
 -- (the runner wrote the run row but died before creating the downstream
 -- issue/task) so that a subsequent DispatchAutopilotForPlan call can
@@ -334,12 +340,54 @@ LIMIT 1;
 -- The row stays in autopilot_run as a FAILED record (with a recovery
 -- reason) so ops still see the abandoned attempt in the run history —
 -- it is not silently deleted.
-UPDATE autopilot_run
-SET status = 'failed',
-    completed_at = now(),
-    failure_reason = 'recovered partial dispatch (crashed before downstream creation)',
-    planned_at = NULL
-WHERE id = $1;
+WITH updated_run AS (
+    UPDATE autopilot_run AS ar
+    SET status = 'failed',
+        completed_at = now(),
+        failure_reason = 'recovered partial dispatch (crashed before downstream creation)',
+        reason_code = 'internal_error',
+        planned_at = NULL
+    WHERE ar.id = $1
+      AND (
+          ar.status = 'pending'
+          OR (ar.status = 'issue_created' AND ar.issue_id IS NULL)
+          OR (ar.status = 'running' AND ar.task_id IS NULL)
+      )
+      AND NOT EXISTS (
+          SELECT 1
+          FROM agent_task_queue task
+          WHERE task.autopilot_run_id = ar.id
+      )
+    RETURNING ar.quota_reservation_id
+), locked_reservation AS MATERIALIZED (
+    SELECT qr.*
+    FROM autopilot_quota_reservation qr
+    JOIN updated_run ar ON ar.quota_reservation_id = qr.id
+    WHERE qr.state = 'reserved'
+    FOR UPDATE
+), released_reservation AS (
+    UPDATE autopilot_quota_reservation AS qr
+    SET state = 'released', finalized_at = now()
+    FROM locked_reservation AS locked
+    WHERE qr.id = locked.id
+      AND EXISTS (
+          SELECT 1 FROM autopilot_quota_period p
+          WHERE p.workspace_id = locked.workspace_id
+            AND p.period_start = locked.period_start
+            AND p.period_end = locked.period_end
+      )
+    RETURNING locked.workspace_id, locked.period_start, locked.period_end
+), settled_period AS (
+    UPDATE autopilot_quota_period AS p
+    SET reserved_count = reserved_count - 1,
+        updated_at = now()
+    FROM released_reservation AS released
+    WHERE p.workspace_id = released.workspace_id
+      AND p.period_start = released.period_start
+      AND p.period_end = released.period_end
+    RETURNING p.workspace_id
+)
+SELECT count(*)::bigint FROM updated_run;
 
 -- name: GetAutopilotRun :one
 SELECT * FROM autopilot_run
@@ -364,18 +412,25 @@ WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunCompleted :one
+-- Quota safety: only use for a run known to have no reservation. Normal
+-- terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
 UPDATE autopilot_run
 SET status = 'completed', completed_at = now(), result = sqlc.narg('result')
 WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunFailed :one
+-- Quota safety: only use for a run known to have no reservation. Normal
+-- terminal paths must call UpdateAutopilotRunTerminalWithQuota instead.
 UPDATE autopilot_run
-SET status = 'failed', completed_at = now(), failure_reason = $2
+SET status = 'failed', completed_at = now(), failure_reason = $2,
+    reason_code = sqlc.narg('reason_code')
 WHERE id = $1
 RETURNING *;
 
 -- name: UpdateAutopilotRunSkipped :one
+-- Quota safety: this is only for pre-admission skipped rows, which never have
+-- reservations. Post-admission skips use UpdateAutopilotRunTerminalWithQuota.
 -- Marks an autopilot_run as skipped without enqueueing any task. Used by the
 -- pre-flight admission check when the assignee agent's runtime is offline:
 -- creating an issue / task in that state would just pile a doomed job onto
@@ -383,11 +438,73 @@ RETURNING *;
 -- MUL-1899). Recording the skip + reason gives the UI / failure monitor / ops
 -- a paper trail without polluting the failure ratio.
 UPDATE autopilot_run
-SET status = 'skipped', completed_at = now(), failure_reason = $2
+SET status = 'skipped', completed_at = now(), failure_reason = $2,
+    reason_code = sqlc.narg('reason_code')
 WHERE id = $1
 RETURNING *;
 
+-- name: UpdateAutopilotRunTerminalWithQuota :one
+-- Finalizes a run and its still-reserved quota slot in one statement. Runs
+-- created while the entitlement gate is off have a NULL reservation ID, so
+-- the quota CTEs become empty without an extra BEGIN/COMMIT round trip.
+-- Consumed slots are deliberately immutable: create_issue is chargeable once
+-- the issue exists, even if that issue is later blocked, cancelled, or deleted.
+-- The CTE sequence is: update the run, lock a still-reserved slot, finalize
+-- that slot exactly once, then move one unit from reserved_count to either
+-- used_count (consume) or nowhere (release). used_count never decreases.
+WITH updated_run AS (
+    UPDATE autopilot_run AS ar
+    SET status = @terminal_status::text,
+        completed_at = now(),
+        result = CASE
+            WHEN @terminal_status::text = 'completed' THEN sqlc.narg('result')::jsonb
+            ELSE ar.result
+        END,
+        failure_reason = CASE
+            WHEN @terminal_status::text IN ('failed', 'skipped') THEN sqlc.narg('failure_reason')::text
+            ELSE ar.failure_reason
+        END,
+        reason_code = CASE
+            WHEN @terminal_status::text IN ('failed', 'skipped') THEN sqlc.narg('reason_code')::text
+            ELSE ar.reason_code
+        END
+    WHERE ar.id = @run_id
+    RETURNING ar.*
+), locked_reservation AS MATERIALIZED (
+    SELECT qr.*
+    FROM autopilot_quota_reservation qr
+    JOIN updated_run ar ON ar.quota_reservation_id = qr.id
+    WHERE qr.state = 'reserved'
+    FOR UPDATE
+), finalized_reservation AS (
+    UPDATE autopilot_quota_reservation AS qr
+    SET state = CASE WHEN @consume::boolean THEN 'consumed' ELSE 'released' END,
+        finalized_at = now()
+    FROM locked_reservation AS locked
+    WHERE qr.id = locked.id
+      AND EXISTS (
+          SELECT 1 FROM autopilot_quota_period p
+          WHERE p.workspace_id = locked.workspace_id
+            AND p.period_start = locked.period_start
+            AND p.period_end = locked.period_end
+      )
+    RETURNING locked.workspace_id, locked.period_start, locked.period_end
+), settled_period AS (
+    UPDATE autopilot_quota_period AS p
+    SET reserved_count = reserved_count - 1,
+        used_count = used_count + CASE WHEN @consume::boolean THEN 1 ELSE 0 END,
+        updated_at = now()
+    FROM finalized_reservation AS finalized
+    WHERE p.workspace_id = finalized.workspace_id
+      AND p.period_start = finalized.period_start
+      AND p.period_end = finalized.period_end
+    RETURNING p.workspace_id
+)
+SELECT * FROM updated_run;
+
 -- name: UpdateAutopilotRunSkippedWithResult :one
+-- Quota safety: legacy no-reservation helper. New terminal paths must call
+-- UpdateAutopilotRunTerminalWithQuota instead.
 UPDATE autopilot_run
 SET status = 'skipped',
     completed_at = now(),
@@ -454,7 +571,8 @@ ORDER BY t.id;
 INSERT INTO agent_task_queue (
     agent_id, runtime_id, issue_id, status, priority, autopilot_run_id, trigger_summary,
     originator_user_id, accountable_user_id, rule_version_id,
-    originator_source, trigger_evidence_kind, trigger_evidence_ref_id
+    originator_source, trigger_evidence_kind, trigger_evidence_ref_id,
+    id
 )
 SELECT
     $1, $2, NULL, 'queued', $3, $4, sqlc.narg(trigger_summary),
@@ -463,7 +581,8 @@ SELECT
     sqlc.narg(rule_version_id),
     sqlc.narg(originator_source),
     sqlc.narg(trigger_evidence_kind),
-    sqlc.narg(trigger_evidence_ref_id)
+    sqlc.narg(trigger_evidence_ref_id),
+    COALESCE(sqlc.narg('id')::uuid, gen_random_uuid())
 WHERE lock_task_owner_rows($1, NULL, $2)
 RETURNING *;
 
@@ -484,13 +603,50 @@ SELECT * FROM autopilot_run
 WHERE issue_id = $1 AND status IN ('issue_created', 'running')
 LIMIT 1;
 
--- name: FailAutopilotRunsByIssue :exec
+-- name: FailAutopilotRunsByIssue :many
 -- Fails active autopilot runs linked to a given issue.
 -- Must be called BEFORE issue deletion (ON DELETE SET NULL clears issue_id).
-UPDATE autopilot_run
-SET status = 'failed', completed_at = now(), failure_reason = 'linked issue was deleted'
-WHERE issue_id = $1
-  AND status IN ('issue_created', 'running');
+-- Only still-reserved run_only slots are released. A create_issue slot was
+-- consumed when the issue was created and remains counted after deletion.
+WITH updated_runs AS (
+    UPDATE autopilot_run
+    SET status = 'failed', completed_at = now(), failure_reason = 'linked issue was deleted'
+    WHERE issue_id = $1
+      AND status IN ('issue_created', 'running')
+    RETURNING *
+), locked_reservations AS MATERIALIZED (
+    SELECT qr.*
+    FROM autopilot_quota_reservation qr
+    JOIN updated_runs ar ON ar.quota_reservation_id = qr.id
+    WHERE qr.state = 'reserved'
+    FOR UPDATE
+), released_reservations AS (
+    UPDATE autopilot_quota_reservation AS qr
+    SET state = 'released', finalized_at = now()
+    FROM locked_reservations AS locked
+    WHERE qr.id = locked.id
+      AND EXISTS (
+          SELECT 1 FROM autopilot_quota_period p
+          WHERE p.workspace_id = locked.workspace_id
+            AND p.period_start = locked.period_start
+            AND p.period_end = locked.period_end
+      )
+    RETURNING locked.workspace_id, locked.period_start, locked.period_end
+), released_by_period AS (
+    SELECT workspace_id, period_start, period_end, count(*)::bigint AS released_count
+    FROM released_reservations
+    GROUP BY workspace_id, period_start, period_end
+), settled_periods AS (
+    UPDATE autopilot_quota_period AS p
+    SET reserved_count = reserved_count - released.released_count,
+        updated_at = now()
+    FROM released_by_period AS released
+    WHERE p.workspace_id = released.workspace_id
+      AND p.period_start = released.period_start
+      AND p.period_end = released.period_end
+    RETURNING p.workspace_id
+)
+SELECT * FROM updated_runs;
 
 -- =====================
 -- Failure-rate auto-pause

@@ -7,7 +7,7 @@
 // failed tasks no longer have a top-level workload state; failure context
 // is purely a detail-page concern now.
 //
-// Covers the canonical taxonomy in server/pkg/taskfailure — 7 platform-side
+// Covers the canonical taxonomy in server/pkg/taskfailure — platform-side
 // reasons plus 14 `agent_error.*` sub-reasons — and the pre-MUL-1949 coarse
 // values still present on historical rows. This used to be a
 // `Record<TaskFailureReason, string>` indexed with a cast, which silently
@@ -18,12 +18,14 @@ const REASON_LABEL: Record<string, string> = {
   // Platform / scheduler side.
   queued_expired: "Expired in queue",
   runtime_offline: "Daemon offline",
+  runtime_reconnect_timeout: "Daemon did not reconnect in time",
   runtime_recovery: "Daemon restarted",
   timeout: "Task timed out",
   iteration_limit: "Hit the iteration limit",
   agent_blocked: "Waiting on human input",
   api_invalid_request: "Rejected by the model API",
   skill_bundle_unavailable: "Couldn't download the agent's skills",
+  runtime_cli_timeout: "Local runtime CLI timed out",
 
   // Agent process side — provider.
   "agent_error.provider_auth_or_access": "Provider auth failed",

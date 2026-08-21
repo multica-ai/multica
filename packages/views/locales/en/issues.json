@@ -1,4 +1,19 @@
 {
+  "status_catalog_error": {
+    "title": "Couldn't load the status list",
+    "hint": "Issues are hidden until it loads, because a status filter can't be applied without it.",
+    "retry": "Try again"
+  },
+  "revision": {
+    "conflict": "The issue or comment changed. The latest version was refreshed; compare it before saving again.",
+    "compare_title": "The title was changed concurrently. Compare both versions.",
+    "compare_description": "The description was changed concurrently. Compare both versions.",
+    "compare_comment": "The comment was changed concurrently. Compare both versions.",
+    "server_version": "Latest server version",
+    "local_version": "Your local version",
+    "keep_local": "Keep my version",
+    "use_server": "Use the latest version"
+  },
   "page": {
     "breadcrumb_title": "Issues",
     "breadcrumb_workspace_fallback": "Workspace",
@@ -37,6 +52,7 @@
   "filters": {
     "tooltip": "Filter",
     "placeholder": "Filter...",
+    "search_status": "Search status...",
     "no_results": "No results",
     "no_labels": "No labels yet",
     "no_assignee": "No assignee",
@@ -244,6 +260,7 @@
     "back": "Back",
     "title_placeholder": "Issue title",
     "desc_placeholder": "Add description...",
+    "current_issue": "This issue",
     "sub_issues_label": "Sub-issues",
     "sub_issue_of": "Sub-issue of",
     "add_sub_issues": "Add sub-issues",
@@ -356,6 +373,8 @@
     "link_copied": "Link copied",
     "link_copy_failed": "Failed to copy link",
     "workdir_path_copied": "Workdir path copied",
+    "project_directory_path_copied": "Project directory path copied",
+    "project_directory_path_copied_with_branch": "Project directory path copied — work is on {{branch}}",
     "workdir_path_copy_failed": "Failed to copy workdir path",
     "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
   },
@@ -629,6 +648,7 @@
     "unpin_from_sidebar": "Unpin from sidebar",
     "copy_link": "Copy link",
     "copy_workdir_path": "Copy local workdir path",
+    "copy_project_directory_path": "Copy project directory path",
     "relations": "Relations",
     "create_sub_issue": "Create sub-issue",
     "set_parent_issue": "Set parent issue...",
@@ -646,8 +666,11 @@
       "value_placeholder": "Enter value…",
       "url_placeholder": "https://…",
       "number_placeholder": "0",
+      "actor_search_placeholder": "Search members…",
       "open_link": "Open link",
-      "archived_hint": "Archived property — value is read-only"
+      "archived_hint": "Archived property — value is read-only",
+      "unknown_value": "Unavailable",
+      "unknown_value_hint": "This value was set by a newer version of Multica and can't be edited here — update the app, or clear it"
     },
     "filter_options_aria": "Filter options",
     "no_results": "No results",
@@ -780,5 +803,15 @@
     "manage_hint": "Order and visibility only affect you",
     "visible_toggle": "Show in view bar",
     "more_label": "More views"
+  },
+  "plugins": {
+    "panels": "Plugins",
+    "surface_failed": "{{name}} could not load its interface.",
+    "surface_local_only": "{{name}} was installed from a local source, so its interface cannot be loaded in the browser.",
+    "hook_succeeded": "{{name}} finished.",
+    "hook_failed": "{{name}} failed.",
+    "hook_refused": "{{name}} was not run.",
+    "hook_activity": "Recent calls",
+    "hook_never_run": "This hook has not run yet."
   }
 }

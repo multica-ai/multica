@@ -1,12 +1,15 @@
 package daemon
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/skill"
 	"github.com/multica-ai/multica/server/pkg/agent"
@@ -231,6 +234,11 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 				}
 			}
 			providerRoot = filepath.Join(qwenpawHome, "skill_pool")
+		case "mcode":
+			// MCode's default data directory is ~/.minimax; global skills live
+			// directly below it. Project skills are injected separately under
+			// <workDir>/.minimax/skills.
+			providerRoot = filepath.Join(home, ".minimax", "skills")
 		default:
 			return nil, false, nil
 		}
@@ -367,6 +375,57 @@ func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileDa
 		if err != nil || info.Size() > maxLocalSkillFileSize {
 			return nil
 		}
+		// A binary supporting file cannot survive SkillFileData.Content: the
+		// bytes go out as a Go string and encoding/json rewrites every invalid
+		// UTF-8 byte to U+FFFD, so writeSkillFiles later recreates a file that
+		// differs from the original and will not open.
+		//
+		// IsLikelyBinaryFilePath is the cheap first pass on the extension — the
+		// same heuristic the archive/URL importer uses — checked before any
+		// read so a known-binary file never pays the I/O. On its own it misses
+		// a binary file with an unlisted or missing extension (a .safetensors,
+		// a .parquet, a stray no-extension blob) and a text file in a
+		// non-UTF-8 encoding, both of which corrupt exactly the same way.
+		if skill.IsLikelyBinaryFilePath(rel) {
+			slog.Info("local skill: skipping binary file",
+				"skill_dir", skillDir,
+				"path", filepath.ToSlash(rel),
+				"size", info.Size(),
+				"reason", "binary_extension",
+			)
+			return nil
+		}
+		// The read below is the actual guarantee: skip whenever the bytes
+		// themselves are not safely round-trippable, regardless of what the
+		// extension suggested. This runs on both the includeContent=false
+		// (discovery) and includeContent=true (sync) passes so they agree on
+		// which files make up the bundle — skipping the read on the false pass
+		// would let a discovery listing promise a file that sync then silently
+		// drops.
+		//
+		// Valid UTF-8 alone is not enough: a NUL byte is legal UTF-8 but the
+		// server-side import path strips every 0x00 via sanitizeNullBytes
+		// (server/internal/handler/skill_create.go), so a file that is valid
+		// UTF-8 but contains NUL — UTF-16LE text made of ASCII characters is a
+		// realistic example — still comes back different from what went in.
+		// Require both: valid UTF-8 AND NUL-free.
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
+			reason := "invalid_utf8"
+			if utf8.Valid(content) {
+				reason = "embedded_nul"
+			}
+			slog.Info("local skill: skipping binary file",
+				"skill_dir", skillDir,
+				"path", filepath.ToSlash(rel),
+				"size", info.Size(),
+				"reason", reason,
+			)
+			return nil
+		}
 		if len(files) >= maxLocalSkillFileCount {
 			return fmt.Errorf("local skill exceeds %d files", maxLocalSkillFileCount)
 		}
@@ -377,10 +436,6 @@ func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileDa
 
 		file := SkillFileData{Path: filepath.ToSlash(rel)}
 		if includeContent {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
 			file.Content = string(content)
 		}
 		files = append(files, file)

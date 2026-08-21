@@ -27,6 +27,7 @@ Multica는 현재 다음 명령을 감지합니다.
 | Hermes Agent | `hermes` | [Hermes 빠른 시작](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
 | Kiro CLI | `kiro-cli` | [Kiro CLI 설치](https://kiro.dev/docs/cli/installation/) |
+| MiniMax Code | `mcode` | [MiniMax Code CLI 설치](https://www.npmjs.com/package/@minimax-ai/code) |
 | OpenClaw | `openclaw` | [OpenClaw 설치](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode 빠른 시작](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
@@ -37,6 +38,7 @@ Multica는 현재 다음 명령을 감지합니다.
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE 공식 사이트](https://www.trae.cn/) |
+| Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
 
 "지원됨"은 Multica가 해당 CLI를 호출할 수 있다는 뜻이며 Multica가 도구의 계정, 구독, 모델 사용량을 제공한다는 뜻은 아닙니다.
 
@@ -48,12 +50,14 @@ Reasonix를 사용할 때는 데몬을 시작하기 전에 `reasonix setup`을 �
 
 QwenPaw를 사용할 때는 QwenPaw 자체 설정에서 공급자와 모델을 선택하세요. Multica는 실행 시 QwenPaw의 모델을 덮어쓸 수 없습니다.
 
+MiniMax Code를 사용하려면 지원되는 Node.js 버전(`>=22.19 <23` 또는 `>=24 <27`)을 설치한 뒤 `npm install --global @minimax-ai/code@latest`를 실행하세요. npm 전역 설치는 `mcode`를 npm의 전역 실행 파일 디렉터리에 추가합니다. `command -v mcode` 또는 `Get-Command mcode`에서 찾지 못하면 해당 디렉터리를 `PATH`에 추가하세요. 그다음 `mcode login`을 실행합니다. 모델은 MiniMax Code가 관리하며 Multica는 ACP를 통해 이를 덮어쓸 수 없습니다.
+
 DeepSeek Harness를 사용하려면 Node.js 20+를 설치하고 `npm install -g @deepseek-ai/dsh`를 실행한 뒤 Multica 런타임 프로필을 추가하세요(`dsh plugin --profile multica add <bundle>`). 데몬은 `dsh --profile multica --probe`가 성공한 경우에만 DeepSeek Harness를 등록합니다. 데몬을 시작하기 전에 `DEEPSEEK_API_KEY`를 설정(또는 dsh 자체 설정에 저장)하세요.
 
 로그인 자격 증명은 도구가 로컬에 저장합니다. Multica는 Claude, Codex, Cursor 또는 다른 CLI의 로그인 token을 받지 않습니다.
 
 <Callout type="info">
-Claude Code는 2.0.0 이상, Codex는 0.100.0 이상, Copilot은 1.0.0 이상, Grok은 0.2.89 이상, Qwen Code는 0.20.0 이상이 필요합니다. 최소 버전보다 낮으면 데몬이 해당 런타임을 등록하지 않습니다.
+Claude Code는 2.0.0 이상, Codex는 0.100.0 이상, Copilot은 1.0.0 이상, Grok은 0.2.89 이상, Qwen Code는 0.20.0 이상, MiniMax Code는 0.1.2 이상이 필요합니다. 최소 버전보다 낮으면 데몬이 해당 런타임을 등록하지 않습니다.
 </Callout>
 
 ## 3. 데몬이 명령을 찾을 수 있는지 확인

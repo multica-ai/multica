@@ -387,7 +387,11 @@ describe("ApiClient schema fallback", () => {
 
     it("parses the new-server group-routing capability", async () => {
       stubFetchJson({
-        installations: [{ id: "dt-1", status: "active" }],
+        installations: [{
+          id: "dt-1",
+          status: "active",
+          bound_dingtalk_user_ids: ["staff-1001"],
+        }],
         configured: true,
         install_supported: true,
         group_routing_supported: true,
@@ -395,6 +399,21 @@ describe("ApiClient schema fallback", () => {
       const client = new ApiClient("https://api.example.test");
       const res = await client.listDingTalkInstallations("ws-1");
       expect(res.group_routing_supported).toBe(true);
+      expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual(["staff-1001"]);
+    });
+
+    it("defaults missing or malformed linked-identity IDs to an empty list", async () => {
+      stubFetchJson({
+        installations: [
+          { id: "dt-old", status: "active" },
+          { id: "dt-broken", status: "active", bound_dingtalk_user_ids: "staff-1001" },
+        ],
+        configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listDingTalkInstallations("ws-1");
+      expect(res.installations[0]?.bound_dingtalk_user_ids).toEqual([]);
+      expect(res.installations[1]?.bound_dingtalk_user_ids).toEqual([]);
     });
   });
 
@@ -441,6 +460,49 @@ describe("ApiClient schema fallback", () => {
           body: JSON.stringify({ agent_id: "agent-2" }),
         }),
       );
+    });
+  });
+
+  describe("Telegram integration", () => {
+    it("falls back to a safe empty installation list when the response is malformed", async () => {
+      stubFetchJson({ installations: "not-an-array", configured: true });
+      const client = new ApiClient("https://api.example.test");
+      await expect(client.listTelegramInstallations("ws-1")).resolves.toEqual({
+        installations: [],
+        configured: false,
+      });
+    });
+
+    it("defaults fields omitted by an older server", async () => {
+      stubFetchJson({
+        installations: [{ id: "tg-1", status: "active" }],
+        configured: true,
+      });
+      const client = new ApiClient("https://api.example.test");
+      const res = await client.listTelegramInstallations("ws-1");
+      expect(res.installations[0]).toMatchObject({
+        id: "tg-1",
+        workspace_id: "",
+        agent_id: "",
+        bot_id: "",
+        bot_username: "",
+      });
+      expect(res.install_supported).toBeUndefined();
+    });
+
+    it("falls back safely when register and redeem responses are malformed", async () => {
+      stubFetchJson({ id: 123 });
+      const client = new ApiClient("https://api.example.test");
+      await expect(
+        client.registerTelegramBot("ws-1", "agent-1", { bot_token: "token" }),
+      ).resolves.toMatchObject({ id: "", status: "revoked" });
+
+      stubFetchJson({ workspace_id: 123 });
+      await expect(client.redeemTelegramBindingToken("bind-token")).resolves.toEqual({
+        workspace_id: "",
+        installation_id: "",
+        telegram_user_id: "",
+      });
     });
   });
 

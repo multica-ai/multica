@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/featureflags"
 	"github.com/multica-ai/multica/server/internal/handler"
@@ -32,6 +33,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
@@ -43,6 +45,7 @@ import (
 	composiosdk "github.com/multica-ai/multica/server/pkg/composio"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
+	"github.com/multica-ai/multica/server/pkg/llm"
 )
 
 var defaultOrigins = []string{
@@ -72,6 +75,8 @@ var corsAllowedHeaders = []string{
 	"X-Client-Version",
 	"X-Client-OS",
 	"X-Client-Capabilities",
+	// Sent by the host page when it relays a plugin surface's Action API call.
+	"X-Multica-Plugin-Installation",
 }
 
 // corsExposedHeaders lists response headers browser clients are allowed to read.
@@ -192,6 +197,13 @@ type RouterOptions struct {
 	// BatchedHeartbeatScheduler here so the caller can also drive Run/Stop;
 	// tests leave this nil and get the legacy synchronous behavior.
 	HeartbeatScheduler handler.HeartbeatScheduler
+	// LLMMaxRetries carries the parsed MULTICA_LLM_MAX_RETRIES budget. Unlike
+	// its three MULTICA_LLM_* siblings it is injected rather than read here,
+	// because an invalid value must fail the boot and only main() can exit —
+	// terminating the process from inside a router constructor would also kill
+	// any test that happened to have the variable set. nil means unset, which
+	// is what tests and NewRouter get.
+	LLMMaxRetries *llm.RetryOverride
 }
 
 func buildChannelSupervisor(
@@ -342,6 +354,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		LLMAPIKey:                strings.TrimSpace(os.Getenv("MULTICA_LLM_API_KEY")),
 		LLMBaseURL:               strings.TrimSpace(os.Getenv("MULTICA_LLM_BASE_URL")),
 		LLMDefaultModel:          strings.TrimSpace(os.Getenv("MULTICA_LLM_DEFAULT_MODEL")),
+		LLMMaxRetries:            opts.LLMMaxRetries,
 		ServerVersion:            normalizeServerVersion(version),
 	}
 	h := handler.New(queries, pool, hub, bus, emailSvc, store, cfSigner, analyticsClient, signupConfig, daemonHub)
@@ -355,6 +368,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	h.TaskService.FeatureFlags = opts.FeatureFlags
 	h.TaskService.Metrics = opts.BusinessMetrics
 	h.IssueService.Metrics = opts.BusinessMetrics
+	entitlementClient, entitlementErr := entitlement.New(entitlement.Config{
+		Enabled:      envBool("MULTICA_ENTITLEMENT_POLICY_ENABLED", false),
+		BaseURL:      strings.TrimSpace(os.Getenv("MULTICA_ENTITLEMENT_POLICY_URL")),
+		ServiceToken: os.Getenv("MULTICA_ENTITLEMENT_SERVICE_TOKEN"),
+		Timeout:      envDuration("MULTICA_ENTITLEMENT_POLICY_TIMEOUT", 3*time.Second),
+		StaleGrace:   envNonNegativeDuration("MULTICA_ENTITLEMENT_STALE_GRACE", 15*time.Minute),
+		Observer:     opts.BusinessMetrics,
+	})
+	if entitlementErr != nil {
+		slog.Error("entitlement policy client disabled by invalid configuration", "error", entitlementErr)
+		opts.BusinessMetrics.RecordEntitlementConfigError()
+	} else if entitlementClient.Enabled() {
+		entitlementClient.SetEmergencyDisabled(envBool("MULTICA_ENTITLEMENT_EMERGENCY_DISABLED", false))
+		h.AutopilotService.Entitlements = entitlementClient
+		h.AutopilotService.QuotaMetrics = opts.BusinessMetrics
+	}
 	if opts.BusinessMetrics != nil {
 		// Wire the BusinessMetrics receiver into the cloud runtime client
 		// so every outbound Fleet/Gateway request feeds the
@@ -943,6 +972,50 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		h.InboxChannelDispatcher = dispatcher
 	}
 
+	// Telegram integration. Same shape as Slack: BYO bot token pasted at
+	// install, one getUpdates long-polling loop per active installation
+	// supervised by the shared engine.Supervisor, resolvers on the generic
+	// channel_* tables, outbound streaming via throttled editMessageText on
+	// the event bus. Gated by MULTICA_TELEGRAM_SECRET_KEY (the at-rest token
+	// encryption key); when unset the handlers return 503 and no Factory is
+	// registered.
+	if telegramKey, err := secretbox.LoadKey("MULTICA_TELEGRAM_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(telegramKey)
+		if err != nil {
+			slog.Error("telegram: secretbox.New failed; telegram integration disabled", "error", err)
+		} else {
+			telegramBindingSvc := telegram.NewBindingTokenService(queries, pool)
+			h.TelegramBindingTokens = telegramBindingSvc
+			telegramReplier := telegram.NewOutboundReplier(telegram.OutboundReplierConfig{
+				Binding: telegramBindingSvc,
+				Decrypt: box.Open,
+				// The bind link (/telegram/bind) is a web-app page: app URL, not
+				// the API URL. Mirrors the Slack replier.
+				AppURL: appURLFromEnv(),
+				Logger: slog.Default(),
+			})
+			telegramTyping := telegram.NewTypingNotifier(box.Open, "", nil, slog.Default())
+			channelRouter.Register(telegram.TypeTelegram, telegram.NewTelegramResolverSet(queries, pool, telegramReplier, telegramTyping))
+			telegramOutbound := telegram.NewOutbound(queries, box.Open, "", nil, slog.Default())
+			telegramOutbound.Register(bus)
+			h.TelegramOutbound = telegramOutbound
+
+			// Per-installation inbound: the Supervisor builds + supervises one
+			// long-polling loop per active Telegram installation.
+			telegram.RegisterTelegram(channelRegistry, telegram.ChannelDeps{Decrypt: box.Open, Logger: slog.Default()})
+
+			installSvc, ierr := telegram.NewInstallService(queries, pool, box, slog.Default())
+			if ierr != nil {
+				slog.Error("telegram: InstallService init failed; install disabled", "error", ierr)
+			} else {
+				h.TelegramInstall = installSvc
+			}
+			slog.Info("telegram integration enabled (per-installation long polling)")
+		}
+	} else {
+		slog.Info("telegram integration disabled (MULTICA_TELEGRAM_SECRET_KEY not set)")
+	}
+
 	// Composio integration (MUL-3720). Gated by COMPOSIO_API_KEY plus the
 	// composio_mcp_apps feature flag. The env var is the project-scoped key the
 	// standalone SDK authenticates Composio with (sent as x-api-key; the project
@@ -1016,19 +1089,48 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("vcs integration disabled (MULTICA_VCS_SECRET_KEY not set)")
 	}
 
-	// Remote MCP Plugin credentials use a dedicated deployment key. Keeping
-	// this separate from VCS and channel secrets gives operators an isolated
-	// rotation and blast radius; without it configuration endpoints fail closed.
+	// Plugin secrets use a dedicated deployment key. Keeping this separate from
+	// VCS and channel secrets gives operators an isolated rotation and blast
+	// radius; without it, saving a `secret` config field fails closed rather
+	// than storing plaintext.
 	if pluginKey, err := secretbox.LoadKey("MULTICA_PLUGIN_SECRET_KEY"); err == nil {
 		box, err := secretbox.New(pluginKey)
 		if err != nil {
-			slog.Error("plugins: secretbox.New failed; Remote MCP credentials disabled", "error", err)
+			slog.Error("plugins: secretbox.New failed; Plugin secrets disabled", "error", err)
 		} else if h.PluginService != nil {
-			h.PluginService.RemoteMCPSecrets = box
-			slog.Info("Remote MCP Plugin credential encryption enabled")
+			h.PluginService.Secrets = box
+			// The same deployment key, kept raw as well. Sealing and signing
+			// need different things from it: a secret config value is sealed
+			// and later opened, while a hook signature must be REPRODUCED on
+			// demand, which a box cannot do. Each installation's signing secret
+			// is derived from this rather than stored, so no row holds a usable
+			// one.
+			h.PluginService.DeploymentKey = pluginKey
+			slog.Info("Plugin secret encryption enabled")
 		}
 	} else {
-		slog.Info("Remote MCP Plugin credentials disabled (MULTICA_PLUGIN_SECRET_KEY not set)")
+		slog.Info("Plugin secrets disabled (MULTICA_PLUGIN_SECRET_KEY not set)")
+	}
+
+	// Hook engine. Event-triggered hooks are dispatched off the bus onto a
+	// worker pool: Bus.Publish runs listeners inline on the publishing request's
+	// goroutine, so anything that dials a third-party endpoint from there would
+	// put an outside server on the critical path of creating an issue.
+	if h.PluginService != nil {
+		h.PluginService.Callbacks = service.NewCallbackTokens()
+		// Omitted rather than sent relative: a handler receiving
+		// "/api/v1/plugin" cannot call anything with it, and a broken absolute
+		// URL is harder to diagnose than an absent one.
+		if publicURL := strings.TrimSpace(os.Getenv("MULTICA_PUBLIC_URL")); publicURL != "" {
+			h.PluginService.CallbackBaseURL = strings.TrimSuffix(publicURL, "/") + "/api/v1/plugin"
+		} else {
+			slog.Warn("plugins: MULTICA_PUBLIC_URL is not set; hook callbacks will carry no callback_url")
+		}
+		// The flag reaches the event path only through the service: a worker has
+		// no request to read it from.
+		h.PluginService.FeatureFlags = h.FeatureFlags
+		pluginEvents := service.NewPluginEventDispatcher(h.PluginService)
+		service.SubscribePluginEvents(bus, pluginEvents)
 	}
 
 	if opts.HeartbeatScheduler != nil {
@@ -1213,9 +1315,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	// Auth group made a missing cookie a hard 401, breaking the flow for exactly
 	// the browsers above; the other four composio endpoints stay session-gated.
 	r.Get("/api/integrations/composio/callback", h.ComposioCallback)
-	// Generic hosted Remote MCP OAuth callback. Identity and installation scope
-	// come exclusively from the encrypted, single-use state record.
-	r.With(authVerifyRL).Get("/api/plugins/remote-mcp/oauth/callback", h.CompletePluginRemoteMCPOAuth)
 
 	// Daemon API routes (require daemon token or valid user token)
 	r.Route("/api/daemon", func(r chi.Router) {
@@ -1228,6 +1327,14 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Get("/workspaces", h.ListDaemonWorkspaces)
 		r.Get("/workspaces/{workspaceId}/repos", h.GetDaemonWorkspaceRepos)
 		r.Get("/workspaces/{workspaceId}/runtime-profiles", h.DaemonListRuntimeProfiles)
+
+		// Agent-triggered plugin hooks. The daemon's local MCP server calls
+		// this when an agent picks one of its tools; the server makes the
+		// signed request so the daemon never holds the signing secret.
+		r.Post("/tasks/{id}/plugin-hooks", h.InvokeAgentPluginHook)
+		// The broker asks for an mcp hook's credential at connection time, so
+		// a secret never sits in a task record.
+		r.Get("/tasks/{id}/plugin-mcp/{contributionId}/credential", h.ResolvePluginMCPCredential)
 
 		r.Post("/runtimes/{runtimeId}/tasks/claim", h.ClaimTaskByRuntime)
 		// Canonical machine-level batch claim (MUL-4257). `/claim` is a
@@ -1244,7 +1351,6 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		r.Post("/runtimes/{runtimeId}/local-skills/import/{requestId}/result", h.ReportLocalSkillImportResult)
 
 		r.Get("/tasks/{taskId}/status", h.GetTaskStatus)
-		r.Get("/tasks/{taskId}/remote-mcp/{contributionId}/credential", h.ResolveTaskRemoteMCPCredential)
 		r.Post("/tasks/{taskId}/start", h.StartTask)
 		r.Post("/tasks/{taskId}/wait-local-directory", h.MarkTaskWaitingLocalDirectory)
 		r.Post("/tasks/{taskId}/progress", h.ReportTaskProgress)
@@ -1266,10 +1372,50 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 	})
 
 	// Protected API routes
+	// Plugin Action API. Two kinds of caller reach these, and the difference is
+	// only in WHO the call acts as.
+	//
+	// A SURFACE has no credential: the iframe asks the host page over the
+	// postMessage bridge, and the host re-issues the call on the signed-in
+	// user's own session, naming the installation in a header the iframe cannot
+	// set for itself. That path goes through the ordinary Auth chain.
+	//
+	// A HOOK HANDLER — the plugin author's own server — has no session and
+	// never will, so it presents a plugin bearer token instead. PluginAuth
+	// routes that request past the session chain to the handler, which resolves
+	// the token itself; a request with neither credential is refused there.
+	//
+	// The workspace always comes from the installation, never from the client.
+	r.Group(func(r chi.Router) {
+		r.Use(middleware.PluginAuth(middleware.Auth(queries, patCache, cloudPATVerifier)))
+		r.Route("/api/v1/plugin", func(r chi.Router) {
+			r.Get("/context", h.GetPluginContext)
+			r.Get("/issues/{id}", h.GetPluginIssue)
+			r.Patch("/issues/{id}", h.PatchPluginIssue)
+			r.Get("/issues/{id}/comments", h.ListPluginComments)
+			r.Post("/issues/{id}/comments", h.CreatePluginComment)
+			r.Get("/storage/{scope}", h.ListPluginStorage)
+			r.Get("/storage/{scope}/{key}", h.GetPluginStorage)
+			r.Put("/storage/{scope}/{key}", h.PutPluginStorage)
+			r.Delete("/storage/{scope}/{key}", h.DeletePluginStorage)
+			// ui / manual only. `event` is dispatched by the host off the event
+			// bus and never requested; `agent` arrives over MCP in PR 4.
+			r.Post("/hooks/{key}", h.InvokePluginHook)
+		})
+	})
+
 	r.Group(func(r chi.Router) {
 		r.Use(middleware.Auth(queries, patCache, cloudPATVerifier))
 		r.Use(middleware.RefreshCloudFrontCookies(cfSigner))
 
+		// Plugin Action API. Called by the HOST PAGE on the signed-in user's
+		// session after a surface asks for something over the postMessage
+		// bridge — the iframe holds no credential and never reaches these
+		// directly. Which installation is speaking arrives in a header the
+		// host sets; the workspace is derived from that installation rather
+		// than trusted from the client, and membership is then checked
+		// against it. Sits in the user-scoped group for that reason: there is
+		// no workspace in the path to gate on.
 		// --- User-scoped routes (no workspace context required) ---
 		r.Get("/api/me", h.GetMe)
 		r.Patch("/api/me", h.UpdateMe)
@@ -1339,11 +1485,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					// The payload is names and transports only; the stored
 					// entries are write-only.
 					r.Get("/mcp-servers", h.ListWorkspaceMcpServers)
+					// Installed Plugins are member-visible so a member can
+					// see what is mounted in their workspace and which scopes
+					// it holds; install / configure / remove stay admin-only.
 					r.Get("/plugins", h.ListPlugins)
-					r.Get("/plugins/private", h.ListPrivatePlugins)
-					r.Get("/plugins/private/{pluginRef}", h.GetPrivatePluginStatus)
-					r.Get("/plugins/catalog", h.ListPluginCatalog)
-					r.Get("/plugins/catalog/{pluginKey}", h.GetPluginCatalogRelease)
 				})
 				// Admin-level access
 				r.Group(func(r chi.Router) {
@@ -1370,17 +1515,22 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Patch("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
 					r.Put("/runtime-profiles/{profileId}", h.UpdateRuntimeProfile)
 					r.Delete("/runtime-profiles/{profileId}", h.DeleteRuntimeProfile)
-					r.Post("/plugins/install", h.InstallPlugin)
-					r.Post("/plugins/private/install", h.InstallPrivatePlugin)
-					r.Post("/plugins/{installationId}/upgrade", h.UpgradePlugin)
+					// Installing a Plugin is two steps on purpose: preview
+					// parses the manifest and returns the scope list without
+					// writing anything, so the consent screen has something to
+					// show before an installation exists.
+					r.Post("/plugins/preview", h.PreviewPlugin)
+					r.Post("/plugins", h.InstallPlugin)
+					r.Get("/plugins/{installationId}/invocations", h.ListPluginInvocations)
+					r.Post("/plugins/{installationId}/token", h.RotatePluginToken)
+					r.Delete("/plugins/{installationId}/token", h.RevokePluginToken)
+					// mcp-transport approval. Discovery adopts nothing; the PUT
+					// is the grant, and it pins the tools by schema digest.
+					r.Get("/plugins/{installationId}/mcp/{hookKey}/tools", h.ListPluginMCPTools)
+					r.Put("/plugins/{installationId}/mcp/{hookKey}/tools", h.ApprovePluginMCPTools)
+					r.Put("/plugins/{installationId}/config", h.ConfigurePlugin)
 					r.Post("/plugins/{installationId}/enable", h.EnablePlugin)
 					r.Post("/plugins/{installationId}/disable", h.DisablePlugin)
-					r.Put("/plugins/{installationId}/remote-mcp/{contributionKey}/config", h.ConfigurePluginRemoteMCP)
-					r.Post("/plugins/{installationId}/remote-mcp/{contributionKey}/oauth/start", h.StartPluginRemoteMCPOAuth)
-					r.Post("/plugins/{installationId}/remote-mcp/{contributionKey}/test", h.TestPluginRemoteMCP)
-					r.Post("/plugins/{installationId}/remote-mcp/{contributionKey}/approve", h.ReviewPluginRemoteMCPTools)
-					r.Delete("/plugins/{installationId}/remote-mcp/{contributionKey}/credential", h.RevokePluginRemoteMCPCredential)
-					r.Post("/plugins/{installationId}/rollback", h.RollbackPlugin)
 					r.Delete("/plugins/{installationId}", h.UninstallPlugin)
 				})
 				// Owner-only access
@@ -1457,6 +1607,18 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Post("/dingtalk/install/byo", h.RegisterDingTalkBYO)
 					r.Patch("/dingtalk/group-routes/{routeId}", h.UpdateDingTalkGroupRoute)
 				})
+
+				// Telegram integration. Same admin/member split as Slack:
+				// listing is member-visible; install + revoke are admin-only.
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/telegram/installations", h.ListTelegramInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
+					r.Post("/telegram/install", h.RegisterTelegramBot)
+				})
 			})
 		})
 
@@ -1480,6 +1642,10 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// Lark/Slack: the session is the source of truth for the redeemer's
 		// Multica identity; the token only carries the WeCom userid to bind.
 		r.Post("/api/wecom/binding/redeem", h.RedeemWecomBindingToken)
+		// Telegram binding-token redemption. Same rationale: not
+		// workspace-scoped, identity from the session, token proves only
+		// "this Telegram user id requested binding".
+		r.Post("/api/telegram/binding/redeem", h.RedeemTelegramBindingToken)
 
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in
@@ -1664,6 +1830,19 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				})
 			})
 
+			// Issue status catalog (MUL-6243). Reads are open to any member —
+			// every client needs the catalog to render a status. Writes are
+			// gated to workspace owner/admin inside the handlers.
+			r.Route("/api/issue-statuses", func(r chi.Router) {
+				r.Get("/", h.ListIssueStatuses)
+				r.Post("/", h.CreateIssueStatus)
+				r.Patch("/reorder", h.ReorderIssueStatuses)
+				r.Route("/{id}", func(r chi.Router) {
+					r.Patch("/", h.UpdateIssueStatus)
+					r.Delete("/", h.ArchiveIssueStatus)
+				})
+			})
+
 			// Projects
 			r.Route("/api/projects", func(r chi.Router) {
 				r.Get("/search", h.SearchProjects)
@@ -1704,6 +1883,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 				r.Get("/", h.ListAutopilots)
 				r.Post("/", h.CreateAutopilot)
 				r.Get("/cron-preview", h.CronPreview)
+				r.Get("/usage", h.GetAutopilotQuotaUsage)
 				r.Route("/{id}", func(r chi.Router) {
 					r.Get("/", h.GetAutopilot)
 					r.Patch("/", h.UpdateAutopilot)

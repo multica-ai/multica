@@ -1,5 +1,6 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Issue } from "@multica/core/types";
 import { api } from "@multica/core/api";
@@ -124,7 +125,11 @@ export function IssuePickerModal({
                     onOpenChange(false);
                   }}
                 >
-                  <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+                  <StatusIcon
+                    status={issue.status}
+                    category={issueStatusCategory(issue) ?? undefined}
+                    className="h-3.5 w-3.5 shrink-0"
+                  />
                   <span className="text-muted-foreground shrink-0">{issue.identifier}</span>
                   <span className="truncate">{issue.title}</span>
                 </CommandItem>

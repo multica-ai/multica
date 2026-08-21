@@ -1,8 +1,10 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import {
   buildLanes,
   buildSteps,
   groupSteps,
+  laneSegmentPosition,
   rowCalls,
   shouldShowTimeline,
   timelineTicks,
@@ -234,6 +236,40 @@ describe("timelineTicks", () => {
 
   it("returns nothing for a run with no length", () => {
     expect(timelineTicks(0)).toEqual([]);
+  });
+});
+
+describe("laneSegmentPosition", () => {
+  const total = 39 * 60_000;
+
+  it("gives a sub-pixel call a visible, clickable minimum width", () => {
+    // 40ms of a 39-minute run is well under a pixel at any sane track width,
+    // so the floor is what the reader actually sees.
+    const { width } = laneSegmentPosition({ startMs: 0, durationMs: 40, kind: "tool" }, total);
+    const [, truePct] = width.match(/^max\(3px, ([\d.e-]+)%\)$/) ?? [];
+    expect(Number(truePct)).toBeCloseTo(0.0017, 4);
+  });
+
+  it("keeps a widened sliver inside the axis instead of past its end", () => {
+    // The last thing a run does ends at the run's end, so the final segment is
+    // routinely a sliver at ~100%. Left unclamped, its 3px minimum lands beyond
+    // the track, and those 3px of scrollable overflow are what gave the
+    // timeline a scrollbar it could not settle on (#6278). Capping the offset
+    // by the bar's own width is what keeps `left + width` on the axis.
+    const last = laneSegmentPosition(
+      { startMs: total - 300, durationMs: 300, kind: "think" },
+      total,
+    );
+    expect(last.left).toBe(`min(${((total - 300) / total) * 100}%, 100% - ${last.width})`);
+  });
+
+  it("leaves a segment wider than the minimum where it belongs", () => {
+    // min() picks the raw offset here: 25% + 50% is comfortably inside 100%.
+    const mid = laneSegmentPosition(
+      { startMs: total / 4, durationMs: total / 2, kind: "tool" },
+      total,
+    );
+    expect(mid).toEqual({ left: "min(25%, 100% - max(3px, 50%))", width: "max(3px, 50%)" });
   });
 });
 

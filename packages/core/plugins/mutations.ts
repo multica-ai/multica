@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api";
-import type { PluginBindingRequest, PluginReleaseRequest, RemoteMCPConfigRequest, RemoteMCPOAuthStartRequest } from "../types";
+import type { PluginConfigRequest, PluginInstallRequest, PluginPreviewRequest } from "../types";
 import { pluginKeys } from "./queries";
 
 function useInvalidatePlugins(wsId: string) {
@@ -8,19 +8,30 @@ function useInvalidatePlugins(wsId: string) {
   return () => queryClient.invalidateQueries({ queryKey: pluginKeys.all(wsId) });
 }
 
+/**
+ * Preview is deliberately a mutation, not a query: it performs an outbound
+ * fetch of a URL the administrator just typed, so it must run on an explicit
+ * action and never be replayed by a cache refetch.
+ */
+export function usePreviewPlugin(wsId: string) {
+  return useMutation({
+    mutationFn: (request: PluginPreviewRequest) => api.previewPlugin(wsId, request),
+  });
+}
+
 export function useInstallPlugin(wsId: string) {
   const invalidate = useInvalidatePlugins(wsId);
   return useMutation({
-    mutationFn: (request: PluginReleaseRequest) => api.installPlugin(wsId, request),
+    mutationFn: (request: PluginInstallRequest) => api.installPlugin(wsId, request),
     onSettled: invalidate,
   });
 }
 
-export function useUpgradePlugin(wsId: string) {
+export function useConfigurePlugin(wsId: string) {
   const invalidate = useInvalidatePlugins(wsId);
   return useMutation({
-    mutationFn: ({ installationId, ...request }: PluginReleaseRequest & { installationId: string }) =>
-      api.upgradePlugin(wsId, installationId, request),
+    mutationFn: ({ installationId, ...request }: PluginConfigRequest & { installationId: string }) =>
+      api.configurePlugin(wsId, installationId, request),
     onSettled: invalidate,
   });
 }
@@ -28,20 +39,23 @@ export function useUpgradePlugin(wsId: string) {
 export function useSetPluginEnabled(wsId: string) {
   const invalidate = useInvalidatePlugins(wsId);
   return useMutation({
-    mutationFn: ({ installationId, enabled, binding }: {
-      installationId: string;
-      enabled: boolean;
-      binding: PluginBindingRequest;
-    }) => api.setPluginEnabled(wsId, installationId, enabled, binding),
+    mutationFn: ({ installationId, enabled }: { installationId: string; enabled: boolean }) =>
+      api.setPluginEnabled(wsId, installationId, enabled),
     onSettled: invalidate,
   });
 }
 
-export function useRollbackPlugin(wsId: string) {
+/**
+ * Pins the approved tool set for one `mcp` hook.
+ *
+ * `tools` is the complete set the administrator wants approved, never a delta —
+ * unchecking one and saving is what revokes it. An empty array withdraws the
+ * hook, and the next task claim stops offering it to agents.
+ */
+export function useApprovePluginMCPTools(wsId: string, installationId: string, hookKey: string) {
   const invalidate = useInvalidatePlugins(wsId);
   return useMutation({
-    mutationFn: ({ installationId, version }: { installationId: string; version: string }) =>
-      api.rollbackPlugin(wsId, installationId, version),
+    mutationFn: (tools: string[]) => api.approvePluginMCPTools(wsId, installationId, hookKey, tools),
     onSettled: invalidate,
   });
 }
@@ -54,43 +68,42 @@ export function useUninstallPlugin(wsId: string) {
   });
 }
 
-export function useConfigurePluginRemoteMCP(wsId: string) {
+/**
+ * Invokes a hook the user asked for.
+ *
+ * A mutation rather than a query for the same reason preview is: it performs an
+ * outbound call to a third-party server, and a cache refetch must never replay
+ * it. Whatever the hook did on the far side is not something to repeat because
+ * a component remounted.
+ *
+ * Deliberately does NOT invalidate on settle. A hook may have changed nothing,
+ * or may have written through the Action API under its own attribution — the
+ * caller knows which and invalidates what it actually expects to have moved.
+ */
+export function useInvokePluginHook() {
+  return useMutation({
+    mutationFn: ({ installationId, hookKey, ...request }: {
+      installationId: string;
+      hookKey: string;
+      trigger: "ui" | "manual";
+      issueId?: string;
+      input?: unknown;
+    }) => api.invokePluginHook(installationId, hookKey, request),
+  });
+}
+
+export function useRotatePluginToken(wsId: string) {
   const invalidate = useInvalidatePlugins(wsId);
   return useMutation({
-    mutationFn: ({ installationId, contributionKey, request }: { installationId: string; contributionKey: string; request: RemoteMCPConfigRequest }) =>
-      api.configurePluginRemoteMCP(wsId, installationId, contributionKey, request),
+    mutationFn: (installationId: string) => api.rotatePluginToken(wsId, installationId),
     onSettled: invalidate,
   });
 }
 
-export function useTestPluginRemoteMCP(wsId: string) {
-  return useMutation({
-    mutationFn: ({ installationId, contributionKey }: { installationId: string; contributionKey: string }) =>
-      api.testPluginRemoteMCP(wsId, installationId, contributionKey),
-  });
-}
-
-export function useStartPluginRemoteMCPOAuth(wsId: string) {
-  return useMutation({
-    mutationFn: ({ installationId, contributionKey, request }: { installationId: string; contributionKey: string; request: RemoteMCPOAuthStartRequest }) =>
-      api.startPluginRemoteMCPOAuth(wsId, installationId, contributionKey, request),
-  });
-}
-
-export function useApprovePluginRemoteMCPTools(wsId: string) {
+export function useRevokePluginToken(wsId: string) {
   const invalidate = useInvalidatePlugins(wsId);
   return useMutation({
-    mutationFn: ({ installationId, contributionKey, tools }: { installationId: string; contributionKey: string; tools: string[] }) =>
-      api.approvePluginRemoteMCPTools(wsId, installationId, contributionKey, tools),
-    onSettled: invalidate,
-  });
-}
-
-export function useRevokePluginRemoteMCPCredential(wsId: string) {
-  const invalidate = useInvalidatePlugins(wsId);
-  return useMutation({
-    mutationFn: ({ installationId, contributionKey }: { installationId: string; contributionKey: string }) =>
-      api.revokePluginRemoteMCPCredential(wsId, installationId, contributionKey),
+    mutationFn: (installationId: string) => api.revokePluginToken(wsId, installationId),
     onSettled: invalidate,
   });
 }

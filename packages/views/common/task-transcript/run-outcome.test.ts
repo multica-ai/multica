@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import { buildRunOutcome } from "./run-outcome";
 import { buildSteps } from "./build-steps";

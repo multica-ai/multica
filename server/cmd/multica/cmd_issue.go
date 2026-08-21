@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -369,6 +370,10 @@ var issueSearchCmd = &cobra.Command{
 	RunE: runIssueSearch,
 }
 
+// validIssueStatuses are the 7 BUILT-IN status keys, present in every
+// workspace. Since MUL-6243 a workspace may define additional custom statuses,
+// so this is the list shown in help text and error messages, not the set of
+// accepted values — see validateIssueStatus.
 var validIssueStatuses = []string{
 	"backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled",
 }
@@ -398,9 +403,30 @@ var directionalIssueSortColumns = func() []string {
 	return cols
 }()
 
+// validateIssueStatus checks the shape of a status key, not its membership.
+//
+// Since MUL-6243 a workspace can define custom statuses, so the CLI cannot know
+// the valid set without a round trip. It validates the format locally — that
+// still catches the common typo classes instantly and offline — and lets the
+// server reject an unknown key, which it does with a 400 listing that
+// workspace's actual statuses. Keeping a hard-coded list here would reject the
+// custom statuses the feature exists to enable.
 func validateIssueStatus(status string) error {
-	return validateIssueEnum("status", status, validIssueStatuses)
+	trimmed := strings.ToLower(strings.TrimSpace(status))
+	if trimmed == "" {
+		return fmt.Errorf("invalid status %q; valid values: %s",
+			status, strings.Join(validIssueStatuses, ", "))
+	}
+	if !issueStatusKeyPattern.MatchString(trimmed) {
+		return fmt.Errorf(
+			"invalid status %q; a status key is 1-32 characters of lowercase letters, digits or underscore. Built-in values: %s",
+			status, strings.Join(validIssueStatuses, ", "))
+	}
+	return nil
 }
+
+// issueStatusKeyPattern mirrors the issue_status.key storage constraint.
+var issueStatusKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_]{0,31}$`)
 
 func validateIssuePriority(priority string) error {
 	return validateIssueEnum("priority", priority, validIssuePriorities)
@@ -955,7 +981,7 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 		}
 		stages[gi].Issues = append(stages[gi].Issues, c)
 		stages[gi].Total++
-		if st := strVal(c, "status"); st == "done" || st == "cancelled" {
+		if isTerminalChildIssue(c) {
 			stages[gi].Done++
 		}
 	}
@@ -964,6 +990,22 @@ func runIssueChildren(cmd *cobra.Command, args []string) error {
 		"stages":   stages,
 		"unstaged": unstaged,
 	})
+}
+
+// isTerminalChildIssue reports whether a child issue counts as finished for
+// stage progress.
+//
+// Prefers `status_category`, which the server resolves for custom statuses: a
+// workspace can define its own statuses, and one in the `done` category must
+// count as done here or an agent reads the wrong progress. Falls back to the
+// raw status when the field is absent, so an older backend still reports the
+// built-in statuses correctly. (MUL-6243)
+func isTerminalChildIssue(c map[string]any) bool {
+	status := strVal(c, "status_category")
+	if status == "" {
+		status = strVal(c, "status")
+	}
+	return status == "done" || status == "cancelled"
 }
 
 // isHTTPURL reports whether path is an http:// or https:// URL.
@@ -2504,6 +2546,8 @@ type assigneeKinds struct {
 var (
 	issueAssigneeKinds = assigneeKinds{member: true, agent: true, squad: true}
 	memberOrAgentKinds = assigneeKinds{member: true, agent: true}
+	// Actor property values are members only (MUL-6286).
+	memberOnlyKinds = assigneeKinds{member: true}
 )
 
 var assigneeResolveRetrySleep = func(ctx context.Context, d time.Duration) bool {
@@ -2581,11 +2625,21 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 	var errs []error
 	var fetchAttempts int
 
-	classify := func(entityType, id, displayName string) {
+	// exactAliases are additional unique identifiers that select a candidate
+	// outright, ranked with id matches rather than name matches — a member's
+	// email is as unambiguous as their id, and is what people actually have to
+	// hand. Without it, `--value bohan@example.com` fails to resolve.
+	classify := func(entityType, id, displayName string, exactAliases ...string) {
 		match := assigneeMatch{Type: entityType, ID: id, Name: displayName}
 		if id != "" && (strings.EqualFold(id, input) || strings.EqualFold(truncateID(id), input)) {
 			idMatches = append(idMatches, match)
 			return
+		}
+		for _, alias := range exactAliases {
+			if alias != "" && strings.EqualFold(alias, input) {
+				idMatches = append(idMatches, match)
+				return
+			}
 		}
 		if strings.EqualFold(displayName, input) {
 			exactMatches = append(exactMatches, match)
@@ -2604,7 +2658,7 @@ func resolveAssignee(ctx context.Context, client *cli.APIClient, name string, ki
 			errs = append(errs, fmt.Errorf("fetch members: %w", err))
 		} else {
 			for _, m := range members {
-				classify("member", strVal(m, "user_id"), strVal(m, "name"))
+				classify("member", strVal(m, "user_id"), strVal(m, "name"), strVal(m, "email"))
 			}
 		}
 	}

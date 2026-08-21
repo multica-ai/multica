@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -26,7 +27,8 @@ func (h *Handler) noteRuntimeUnusable(ctx context.Context, issue db.Issue, agent
 	content := service.RuntimeUnusableNotice(agent.Name, verdict)
 	// author_type='system', author_id=zero UUID — same shape as the sub-issue
 	// completion notice; clients branch on author_type, not the UUID value.
-	comment, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+	created, err := h.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID:          dbid.NewV7(),
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  "system",
@@ -42,11 +44,13 @@ func (h *Handler) noteRuntimeUnusable(ctx context.Context, issue db.Issue, agent
 			"agent_id", uuidToString(agent.ID))
 		return
 	}
+	comment := created.Comment()
 	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), "system", "", map[string]any{
 		"comment":             commentToResponse(comment, nil, nil),
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
+		"issue_revision":      created.IssueRevision,
 	})
 }

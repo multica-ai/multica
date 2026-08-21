@@ -1736,7 +1736,7 @@ const recordChannelInboundDrop = `-- name: RecordChannelInboundDrop :exec
 
 INSERT INTO channel_inbound_audit (
     installation_id, channel_type, channel_chat_id, event_type,
-    channel_event_id, channel_message_id, drop_reason
+    channel_event_id, channel_message_id, drop_reason, id
 ) VALUES (
     $4,
     $1,
@@ -1744,7 +1744,8 @@ INSERT INTO channel_inbound_audit (
     $2,
     $6,
     $7,
-    $3
+    $3,
+    COALESCE($8::uuid, gen_random_uuid())
 )
 `
 
@@ -1756,6 +1757,7 @@ type RecordChannelInboundDropParams struct {
 	ChannelChatID    pgtype.Text `json:"channel_chat_id"`
 	ChannelEventID   pgtype.Text `json:"channel_event_id"`
 	ChannelMessageID pgtype.Text `json:"channel_message_id"`
+	ID               pgtype.UUID `json:"id"`
 }
 
 // =====================
@@ -1772,6 +1774,7 @@ func (q *Queries) RecordChannelInboundDrop(ctx context.Context, arg RecordChanne
 		arg.ChannelChatID,
 		arg.ChannelEventID,
 		arg.ChannelMessageID,
+		arg.ID,
 	)
 	return err
 }

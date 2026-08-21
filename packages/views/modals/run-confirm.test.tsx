@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
 import {
   configureShortcutPlatform,
   createShortcutChord,
@@ -28,6 +29,25 @@ vi.mock("@tanstack/react-query", () => ({
   },
 }));
 vi.mock("@multica/core/hooks", () => ({ useWorkspaceId: () => "ws-test" }));
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () =>
+    buildIssueStatusCatalog([
+      {
+        id: "rework",
+        workspace_id: "ws-test",
+        key: "rework",
+        name: "Rework",
+        description: "",
+        category: "todo",
+        color: "#22c55e",
+        is_system: false,
+        position: 0,
+        archived_at: null,
+        created_at: "",
+        updated_at: "",
+      },
+    ]),
+}));
 vi.mock("@multica/core/workspace/queries", () => ({
   agentListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "agents"] }),
   squadListOptions: (wsId: string) => ({ queryKey: ["workspaces", wsId, "squads"] }),
@@ -80,7 +100,13 @@ vi.mock("../i18n", () => ({
           confirm_assign: "Confirm assignment",
           dont_start: "Don't start yet",
           toast_failed: "failed",
+          title_promote: "Start work now?",
+          promote_single: "move to {{status}}, {{name}} starts",
+          confirm_promote: "Move and start",
         },
+        // useStatusLabel resolves BUILT-IN keys through i18n and custom ones
+        // through the catalog, so the promote headline needs both sources.
+        status: { todo: "Todo" },
       };
       return sel(labels).replace(/\{\{(\w+)\}\}/g, (_m, k) => String(vars?.[k] ?? ""));
     },
@@ -145,6 +171,17 @@ const single = {
   assigneeId: "agent-1",
 };
 
+// Promoting a parked issue out of backlog starts the run on its own, so it
+// confirms through this same dialog — one behaviour for built-in `todo` and
+// every custom Todo-category status alike (MUL-6463).
+const promote = {
+  issueIds: ["issue-1"],
+  mode: "promote" as const,
+  status: "rework",
+  assigneeType: "agent" as const,
+  assigneeId: "agent-1",
+};
+
 describe("RunConfirmModal", () => {
   it("is fully operable on the first frame — no preview request, no spinner", () => {
     // The MUL-5010 core: opening the dialog fires nothing and blocks nothing.
@@ -197,6 +234,44 @@ describe("RunConfirmModal", () => {
     render(<RunConfirmModal onClose={vi.fn()} data={single} />);
     expect(noteBox()).toBeDisabled();
     expect(screen.getByText("runtime too old")).toBeInTheDocument();
+  });
+
+  it("promote sends the status change with the handoff note and no assignee fields", async () => {
+    // The owner is already on the issue: re-sending it would turn a status
+    // write into an assignee write on the server's side of the predicate.
+    render(<RunConfirmModal onClose={vi.fn()} data={promote} />);
+    fireEvent.change(noteBox(), { target: { value: "redo the migration" } });
+    fireEvent.click(screen.getByRole("button", { name: "Move and start" }));
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    expect(mockUpdate).toHaveBeenCalledWith({
+      id: "issue-1",
+      status: "rework",
+      handoff_note: "redo the migration",
+    });
+  });
+
+  it("promote's 'don't start yet' still moves the issue, without the run", async () => {
+    // The status change is the point; suppress_run is the only difference. This
+    // is the one way to leave backlog WITHOUT waking the agent.
+    render(<RunConfirmModal onClose={vi.fn()} data={promote} />);
+    fireEvent.click(screen.getByText("Don't start yet"));
+    await waitFor(() => expect(mockUpdate).toHaveBeenCalledTimes(1));
+    expect(mockUpdate).toHaveBeenCalledWith({
+      id: "issue-1",
+      status: "rework",
+      suppress_run: true,
+    });
+  });
+
+  it("promote names the target status the way the workspace named it", () => {
+    // A custom status is only recognisable by its catalog name; built-ins keep
+    // resolving through i18n so a zh workspace never reads "In Progress".
+    const { container, rerender } = render(<RunConfirmModal onClose={vi.fn()} data={promote} />);
+    expect(screen.getByText("Start work now?")).toBeInTheDocument();
+    expect(container.textContent).toContain("move to Rework, Walt starts");
+
+    rerender(<RunConfirmModal onClose={vi.fn()} data={{ ...promote, status: "todo" }} />);
+    expect(container.textContent).toContain("move to Todo, Walt starts");
   });
 
   it("resolves a squad's verdict through its leader's runtime, locally", () => {

@@ -109,6 +109,15 @@ const (
 	EventPropertyUpdated        = "property:updated"
 	EventIssuePropertiesChanged = "issue_properties:changed"
 
+	// Issue status catalog events (MUL-6243). ONE event for all four writes
+	// — create, edit, archive, reorder — rather than a verb per write, because
+	// the catalog is read as a whole table and every client answers all four
+	// the same way: re-read it. Splitting it would mint four contracts that no
+	// consumer can tell apart, and reorder has no single row to name anyway.
+	// The `action` in the payload is advisory (it makes a frame in devtools
+	// self-describing); nothing routes on it.
+	EventIssueStatusChanged = "issue_status:changed"
+
 	// Pin events
 	EventPinCreated   = "pin:created"
 	EventPinDeleted   = "pin:deleted"
@@ -184,10 +193,13 @@ const (
 	EventSlackInstallationRevoked = "slack_installation:revoked"
 
 	// DingTalk installation lifecycle follows the same create/revoke semantics
-	// as Slack's BYO channel installation.
-	EventDingTalkInstallationCreated = "dingtalk_installation:created"
-	EventDingTalkInstallationRevoked = "dingtalk_installation:revoked"
-	EventDingTalkGroupRouteUpdated   = "dingtalk_group_route:updated"
+	// as Slack's BYO channel installation. BindingUpdated shares the
+	// dingtalk_installation prefix because it changes the member-scoped account
+	// identifiers returned by the installation listing.
+	EventDingTalkInstallationCreated   = "dingtalk_installation:created"
+	EventDingTalkInstallationRevoked   = "dingtalk_installation:revoked"
+	EventDingTalkAccountBindingUpdated = "dingtalk_installation:binding_updated"
+	EventDingTalkGroupRouteUpdated     = "dingtalk_group_route:updated"
 
 	// WeCom smart-bot installation lifecycle. Same semantics as Lark /
 	// Slack: `created` covers both first install and re-install via
@@ -197,4 +209,9 @@ const (
 	// installations query on either.
 	EventWecomInstallationCreated = "wecom_installation:created"
 	EventWecomInstallationRevoked = "wecom_installation:revoked"
+
+	// Telegram installation lifecycle. Same contract as the Slack pair:
+	// front-ends invalidate the Telegram installations query on either.
+	EventTelegramInstallationCreated = "telegram_installation:created"
+	EventTelegramInstallationRevoked = "telegram_installation:revoked"
 )

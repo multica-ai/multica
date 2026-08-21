@@ -13,8 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/multica-ai/multica/server/pkg/plugincontract"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
+	"github.com/multica-ai/multica/server/pkg/remotemcp"
 	"github.com/multica-ai/multica/server/pkg/remotemcp/remotemcptest"
 )
 
@@ -31,11 +30,11 @@ func TestRemoteMCPProxyFiltersToolsAndInjectsCredential(t *testing.T) {
 		taskID: "task", endpoint: endpoint, client: fixture.Client(), path: "/capability",
 		credentialHeaders: http.Header{"Authorization": []string{"Bearer " + remotemcptest.Credential}},
 		semaphore:         make(chan struct{}, remoteMCPMaxConcurrency), logger: slog.New(slog.NewTextHandler(io.Discard, nil)),
-		connection: pluginruntime.RemoteMCPConnection{
+		connection: remotemcp.Connection{
 			InstallationID: "installation", ContributionKey: "fixture",
-			ApprovedTools: []pluginruntime.RemoteMCPTool{{
+			ApprovedTools: []remotemcp.Tool{{
 				Name: "fixture.read", Description: "pinned", InputSchema: canonical,
-				SchemaDigest: plugincontract.DigestBytes(canonical), Risk: "read",
+				SchemaDigest: remotemcp.DigestBytes(canonical), Risk: "read",
 			}},
 		},
 	}
@@ -61,8 +60,8 @@ func TestRemoteMCPProxyFiltersToolsAndInjectsCredential(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proxy.connection.ApprovedTools = append(proxy.connection.ApprovedTools, pluginruntime.RemoteMCPTool{
-		Name: "fixture.write", InputSchema: writeSchema, SchemaDigest: plugincontract.DigestBytes(writeSchema), Risk: "write",
+	proxy.connection.ApprovedTools = append(proxy.connection.ApprovedTools, remotemcp.Tool{
+		Name: "fixture.write", InputSchema: writeSchema, SchemaDigest: remotemcp.DigestBytes(writeSchema), Risk: "write",
 	})
 	writeRequest := httptest.NewRequest(http.MethodPost, "/capability", strings.NewReader(`{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"fixture.write","arguments":{"value":"broker-write"}}}`))
 	writeResponse := httptest.NewRecorder()
@@ -80,7 +79,7 @@ func TestRemoteMCPProxyRejectsUnapprovedToolWithoutCallingUpstream(t *testing.T)
 	proxy := &remoteMCPProxy{
 		endpoint: endpoint, client: upstream.Client(), path: "/capability",
 		semaphore:  make(chan struct{}, remoteMCPMaxConcurrency),
-		connection: pluginruntime.RemoteMCPConnection{ApprovedTools: []pluginruntime.RemoteMCPTool{{Name: "allowed"}}},
+		connection: remotemcp.Connection{ApprovedTools: []remotemcp.Tool{{Name: "allowed"}}},
 	}
 	request := httptest.NewRequest(http.MethodPost, "/capability", bytes.NewBufferString(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"denied","arguments":{"secret":"not logged"}}}`))
 	response := httptest.NewRecorder()
@@ -125,9 +124,9 @@ func TestRemoteMCPProxyRechecksCredentialBeforeUpstreamCall(t *testing.T) {
 	proxy := &remoteMCPProxy{
 		endpoint: endpoint, client: upstream.Client(), path: "/capability",
 		semaphore: make(chan struct{}, remoteMCPMaxConcurrency),
-		connection: pluginruntime.RemoteMCPConnection{
+		connection: remotemcp.Connection{
 			ContributionID: "contribution", CredentialHeader: "Authorization",
-			ApprovedTools: []pluginruntime.RemoteMCPTool{{Name: "allowed"}},
+			ApprovedTools: []remotemcp.Tool{{Name: "allowed"}},
 		},
 		resolveCredential: func(context.Context, string) (http.Header, error) {
 			return nil, errors.New("revoked")
@@ -142,7 +141,7 @@ func TestRemoteMCPProxyRechecksCredentialBeforeUpstreamCall(t *testing.T) {
 }
 
 func TestRemoteMCPProviderMatrixAndConfigMerge(t *testing.T) {
-	for _, provider := range []string{"codex", "claude", "hermes", "qoder"} {
+	for _, provider := range []string{"codex", "claude", "hermes", "qoder", "mcode"} {
 		if !providerSupportsRemoteMCPBroker(provider) {
 			t.Fatalf("provider %s must support Remote MCP", provider)
 		}

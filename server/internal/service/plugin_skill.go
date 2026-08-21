@@ -1,142 +1,139 @@
 package service
 
 import (
-	"fmt"
-	"path"
-	"sort"
+	"context"
+	"net/url"
 	"strings"
 
 	"github.com/jackc/pgx/v5/pgtype"
-	"github.com/multica-ai/multica/server/internal/util"
+	"github.com/multica-ai/multica/server/internal/skill"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/plugincontract"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
-	"github.com/multica-ai/multica/server/pkg/skillbundle"
 )
 
-// compilePluginSkillFiles turns every artifact file owned by a Skill root into
-// an immutable execution-manifest pin. The manifest still declares only the
-// canonical SKILL.md entry; companion files are discovered by convention so a
-// community Skill directory can be packaged without translating its layout.
-func compilePluginSkillFiles(releaseID pgtype.UUID, contributionKey, entryPath string, files []db.PluginArtifactFile) ([]pluginruntime.SkillFile, []skillbundle.File, error) {
-	root, err := pluginSkillRoot(contributionKey, entryPath)
-	if err != nil {
-		return nil, nil, err
-	}
-	foundEntry := false
-	seen := make(map[string]struct{})
-	pins := make([]pluginruntime.SkillFile, 0)
-	bundleFiles := make([]skillbundle.File, 0)
-	for _, file := range files {
-		if file.ReleaseID != releaseID {
-			return nil, nil, fmt.Errorf("plugin Skill artifact file belongs to another release")
-		}
-		if file.Path == entryPath {
-			foundEntry = true
-			continue
-		}
-		if !strings.HasPrefix(file.Path, root) {
-			continue
-		}
-		relative := strings.TrimPrefix(file.Path, root)
-		if err := validatePluginSkillRelativePath(relative); err != nil {
-			return nil, nil, err
-		}
-		if _, exists := seen[relative]; exists {
-			return nil, nil, fmt.Errorf("plugin Skill contains duplicate companion path %q", relative)
-		}
-		seen[relative] = struct{}{}
-		if file.Digest != plugincontract.DigestBytes([]byte(file.Content)) || file.SizeBytes != int64(len(file.Content)) {
-			return nil, nil, fmt.Errorf("plugin Skill companion file %q failed digest validation", relative)
-		}
-		pins = append(pins, pluginruntime.SkillFile{
-			ArtifactFileID: util.UUIDToString(file.ID),
-			Path:           relative,
-			Digest:         file.Digest,
-			SizeBytes:      file.SizeBytes,
-		})
-		bundleFiles = append(bundleFiles, skillbundle.File{Path: relative, Content: file.Content})
-	}
-	if !foundEntry {
-		return nil, nil, fmt.Errorf("plugin Skill entry %q is missing from release artifacts", entryPath)
-	}
-	sort.Slice(pins, func(i, j int) bool { return pins[i].Path < pins[j].Path })
-	sort.Slice(bundleFiles, func(i, j int) bool { return bundleFiles[i].Path < bundleFiles[j].Path })
-	return pins, bundleFiles, nil
-}
+// Skill resources.
+//
+// A plugin's `skill` resource becomes an ordinary row in the existing skill
+// table. Not a plugin-owned copy, not a bundle, not an artifact with a digest:
+// the previous plugin system built all of that across fourteen tables and, at
+// the end of it, delivered one SKILL.md that this table could already hold.
+//
+// The only thing the platform has to remember is which installation contributed
+// which skill, so uninstall removes exactly those and nothing a person wrote.
+// That is one nullable column.
+//
+// A resource is not a hook — nothing calls anything. The file is fetched once,
+// at install, from the same origin as the manifest, and after that it is just a
+// skill.
 
-func materializePinnedPluginSkill(entry pluginruntime.CompiledEntry, filesByID map[string]db.PluginArtifactFile) (AgentSkillData, error) {
-	root, err := pluginSkillRoot(entry.ContributionKey, entry.EntryPath)
-	if err != nil {
-		return AgentSkillData{}, fmt.Errorf("execution manifest contains invalid plugin Skill: %w", err)
+// maxSkillBytes bounds one fetched SKILL.md. Generous for prose, small enough
+// that a source URL cannot use the install path to push a large body into the
+// database.
+const maxSkillBytes = 256 * 1024
+
+// InstallSkillResources writes the manifest's skill resources and prunes the
+// ones this installation no longer declares.
+//
+// Called inside the install transaction: a plugin that half-installs its skills
+// is worse than one that fails, because the missing half is invisible.
+func (s *PluginService) InstallSkillResources(ctx context.Context, queries *db.Queries, installation db.PluginInstallation, manifest plugincontract.Manifest, sourceURL string, userID pgtype.UUID) error {
+	resources := skillResources(manifest)
+
+	// Prune first, so a rename frees its old name before the new one is
+	// written. The reverse order would collide with the table's unique
+	// (workspace_id, name) on any rename that only changes case or spacing.
+	keep := make([]string, 0, len(resources))
+	for _, resource := range resources {
+		keep = append(keep, resource.Key)
 	}
-	releaseID, err := util.ParseUUID(entry.ReleaseID)
-	if err != nil {
-		return AgentSkillData{}, fmt.Errorf("execution manifest contains invalid release id")
+	if err := queries.DeletePluginSkillsNotIn(ctx, db.DeletePluginSkillsNotInParams{
+		PluginInstallationID: installation.ID,
+		KeepNames:            keep,
+	}); err != nil {
+		return &PluginError{Kind: PluginErrorUnavailable, Message: "prune plugin skills", Err: err}
 	}
-	entryFile, ok := filesByID[entry.ArtifactFileID]
-	if !ok || entryFile.ReleaseID != releaseID || entryFile.Path != entry.EntryPath || entryFile.Digest != entry.EntryDigest || plugincontract.DigestBytes([]byte(entryFile.Content)) != entry.EntryDigest {
-		return AgentSkillData{}, fmt.Errorf("pinned plugin Skill entry failed digest validation")
-	}
-	if entry.SkillFileCount != len(entry.SkillFiles) {
-		return AgentSkillData{}, fmt.Errorf("pinned plugin Skill companion file count is invalid")
+	if len(resources) == 0 {
+		return nil
 	}
 
-	skill := AgentSkillData{
-		ID:          "plugin:" + entry.ContributionID,
-		Source:      skillbundle.SourcePlugin,
-		Name:        entry.ContributionKey,
-		Description: entry.Description,
-		Content:     entryFile.Content,
-		Files:       make([]AgentSkillFileData, 0, len(entry.SkillFiles)),
-	}
-	seenPaths := make(map[string]struct{}, len(entry.SkillFiles))
-	seenIDs := make(map[string]struct{}, len(entry.SkillFiles))
-	for _, pinned := range entry.SkillFiles {
-		if err := validatePluginSkillRelativePath(pinned.Path); err != nil {
-			return AgentSkillData{}, fmt.Errorf("execution manifest contains invalid plugin Skill companion file: %w", err)
+	for _, resource := range resources {
+		content, err := s.fetchSkillResource(ctx, sourceURL, resource.Entry)
+		if err != nil {
+			return err
 		}
-		if pinned.ArtifactFileID == "" || pinned.Digest == "" || pinned.SizeBytes < 0 {
-			return AgentSkillData{}, fmt.Errorf("execution manifest contains incomplete plugin Skill companion file")
+		name, description := skill.ParseSkillFrontmatter(content)
+		// The manifest key is authoritative for the name, not the frontmatter.
+		// The consent screen listed the key, the tool namespace uses it, and a
+		// file that disagrees must not silently install under another name.
+		name = resource.Key
+		if strings.TrimSpace(description) == "" {
+			description = "Provided by the " + manifest.Name + " Plugin."
 		}
-		if _, exists := seenPaths[pinned.Path]; exists {
-			return AgentSkillData{}, fmt.Errorf("execution manifest contains duplicate plugin Skill companion path %q", pinned.Path)
-		}
-		if _, exists := seenIDs[pinned.ArtifactFileID]; exists {
-			return AgentSkillData{}, fmt.Errorf("execution manifest contains duplicate plugin Skill artifact file id")
-		}
-		seenPaths[pinned.Path] = struct{}{}
-		seenIDs[pinned.ArtifactFileID] = struct{}{}
 
-		file, ok := filesByID[pinned.ArtifactFileID]
-		if !ok || file.ReleaseID != releaseID || file.Path != root+pinned.Path || file.Digest != pinned.Digest || file.SizeBytes != pinned.SizeBytes || plugincontract.DigestBytes([]byte(file.Content)) != pinned.Digest || int64(len(file.Content)) != pinned.SizeBytes {
-			return AgentSkillData{}, fmt.Errorf("pinned plugin Skill companion file %q failed digest validation", pinned.Path)
+		if _, err := queries.UpsertPluginSkill(ctx, db.UpsertPluginSkillParams{
+			WorkspaceID:          installation.WorkspaceID,
+			Name:                 name,
+			Description:          description,
+			Content:              content,
+			CreatedBy:            userID,
+			PluginInstallationID: installation.ID,
+		}); err != nil {
+			if isUniqueViolation(err) {
+				return pluginErrf(PluginErrorConflict,
+					"a skill named %q already exists in this workspace", name)
+			}
+			return &PluginError{Kind: PluginErrorUnavailable, Message: "install plugin skill", Err: err}
 		}
-		skill.Files = append(skill.Files, AgentSkillFileData{
-			Path:      pinned.Path,
-			Content:   file.Content,
-			SHA256:    pinned.Digest,
-			SizeBytes: pinned.SizeBytes,
-		})
-	}
-	return skill, nil
-}
-
-func pluginSkillRoot(contributionKey, entryPath string) (string, error) {
-	expected := "skills/" + contributionKey + "/SKILL.md"
-	if entryPath != expected {
-		return "", fmt.Errorf("plugin Skill entry must be %q", expected)
-	}
-	return strings.TrimSuffix(expected, "SKILL.md"), nil
-}
-
-func validatePluginSkillRelativePath(relative string) error {
-	firstSegment := relative
-	if separator := strings.IndexByte(relative, '/'); separator >= 0 {
-		firstSegment = relative[:separator]
-	}
-	if relative == "" || relative == "." || relative == ".." || strings.EqualFold(firstSegment, "SKILL.md") || strings.Contains(relative, "\\") || path.IsAbs(relative) || path.Clean(relative) != relative || strings.HasPrefix(relative, "../") {
-		return fmt.Errorf("plugin Skill companion path %q is invalid", relative)
 	}
 	return nil
+}
+
+func skillResources(manifest plugincontract.Manifest) []plugincontract.Resource {
+	resources := make([]plugincontract.Resource, 0, len(manifest.Contributes.Resources))
+	for _, resource := range manifest.Contributes.Resources {
+		if resource.Type == plugincontract.ResourceSkill {
+			resources = append(resources, resource)
+		}
+	}
+	return resources
+}
+
+// fetchSkillResource reads one SKILL.md from beside the manifest.
+//
+// Resolved relative to the source URL rather than taken as a URL of its own:
+// the manifest already passed the origin checks, and letting a resource name an
+// arbitrary address would hand the install path a second, unreviewed fetch
+// target. `entry` is validated at parse time to be a relative path with no
+// traversal, which is what makes this safe to join.
+func (s *PluginService) fetchSkillResource(ctx context.Context, sourceURL, entry string) (string, error) {
+	if strings.HasPrefix(sourceURL, LocalSourcePrefix) {
+		raw, err := s.readLocalFile(strings.TrimPrefix(sourceURL, LocalSourcePrefix), entry)
+		if err != nil {
+			return "", err
+		}
+		return string(raw), nil
+	}
+
+	base, err := url.Parse(sourceURL)
+	if err != nil {
+		return "", pluginErrf(PluginErrorInvalid, "source_url is not a valid URL")
+	}
+	resolved := base.JoinPath("..", entry).String()
+
+	var raw []byte
+	if s.isDevOrigin(resolved) {
+		raw, err = fetchDevManifest(ctx, resolved)
+	} else {
+		raw, err = fetchRemoteManifest(ctx, resolved)
+	}
+	if err != nil {
+		return "", &PluginError{Kind: PluginErrorInvalid, Message: "fetch plugin skill " + entry, Err: err}
+	}
+	if len(raw) > maxSkillBytes {
+		return "", pluginErrf(PluginErrorInvalid, "plugin skill %s exceeds %d bytes", entry, maxSkillBytes)
+	}
+	if strings.TrimSpace(string(raw)) == "" {
+		return "", pluginErrf(PluginErrorInvalid, "plugin skill %s is empty", entry)
+	}
+	return string(raw), nil
 }

@@ -28,6 +28,35 @@ import (
 // retries the hook + migration.
 type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 
+// migrationCondition decides whether a pending migration's SQL should execute.
+// A false result still records the migration as applied (or rolled back), which
+// lets one migration encode environment-specific DDL without blocking later
+// versions. Conditions must be read-only and idempotent; schema changes belong
+// in the migration file so they remain visible to review and rollback tooling.
+type migrationCondition func(ctx context.Context, conn *pgxpool.Conn) (apply bool, reason string, err error)
+
+// usableIndexRequirement describes the exact index shape that may replace a
+// fallback. Checking only extension or relation existence is unsafe: historical
+// pg_bigm migrations swallowed CREATE INDEX errors, and an interrupted
+// concurrent build can leave an INVALID relation with the expected name.
+type usableIndexRequirement struct {
+	IndexRegclass string
+	TableRegclass string
+	AccessMethod  string
+	OperatorClass string
+	Expression    string
+	Extension     string
+}
+
+var commentContentBigramIndex = usableIndexRequirement{
+	IndexRegclass: "public.idx_comment_content_bigm",
+	TableRegclass: "public.comment",
+	AccessMethod:  "gin",
+	OperatorClass: "gin_bigm_ops",
+	Expression:    "lower(content)",
+	Extension:     "pg_bigm",
+}
+
 // preMigrationHooks wires migration version → hook. The version key is
 // the file basename without the `.up.sql` suffix, matching what
 // `migrations.ExtractVersion` returns.
@@ -74,9 +103,84 @@ type preMigrationHook func(ctx context.Context, pool *pgxpool.Pool) error
 // index of the same name, `IF NOT EXISTS` then skips the rebuild, the runner
 // records the migration as applied, and the queries that need the index silently
 // stay on a full scan — the exact regression these migrations exist to fix.
+//
+// MUL-6288: registration used to be opt-in per batch, so 316 / 317 / 326 / 328 /
+// 330 / 331 shipped without a hook and the hazard came back. The map is now
+// total — every up migration that builds an index concurrently is listed, the
+// same invariant `concurrentDownIndexCleanups` already holds for rollbacks — and
+// TestEveryConcurrentUpBuildHasCleanup fails the build if a new migration is
+// added without its entry. Registering the already-applied historical
+// migrations costs one to_regclass lookup each, and only on a database where
+// they are still pending: a fresh self-hosted install, which is exactly where an
+// interrupted build would otherwise leave a permanently unusable index.
 var concurrentIndexCleanups = map[string]string{
+	"035_task_queue_issue_id_index":                             "idx_agent_task_queue_issue_id",
+	"067_task_queue_claim_candidate_index":                      "idx_agent_task_queue_claim_candidates",
+	"074_task_usage_updated_at_index":                           "idx_task_usage_updated_at",
+	"075_task_usage_created_at_index":                           "idx_task_usage_created_at",
+	"078_task_usage_created_at_legacy_index":                    "idx_task_usage_created_at_legacy",
+	"080_agent_task_queue_queued_index":                         "idx_agent_task_queue_queued_created_at",
+	"106_member_user_workspace_index":                           "idx_member_user_workspace",
+	"114_agent_task_queue_running_started_at_index":             "idx_agent_task_queue_running_started_at",
+	"115_agent_runtime_last_seen_at_index":                      "idx_agent_runtime_last_seen_at",
+	"119_user_created_at_index":                                 "idx_user_created_at",
+	"125_agent_task_queue_dispatched_prepare_index":             "idx_agent_task_queue_dispatched_prepare",
+	"135_comment_workspace_index":                               "idx_comment_workspace",
+	"138_issue_title_trgm_index":                                "idx_issue_title_trgm",
+	"139_issue_description_trgm_index":                          "idx_issue_description_trgm",
+	"140_comment_content_trgm_index":                            "idx_comment_content_trgm",
+	"141_project_title_trgm_index":                              "idx_project_title_trgm",
+	"142_project_description_trgm_index":                        "idx_project_description_trgm",
+	"143_agent_task_queue_chat_pending_v2":                      "idx_agent_task_queue_chat_pending_v2",
+	"153_chat_pinned_agent_user_ws_index":                       "idx_chat_pinned_agent_user_ws",
+	"156_chat_session_pinned_index":                             "idx_chat_session_pinned",
+	"160_chat_message_input_owner_index":                        "idx_chat_message_input_owner",
+	"165_attachment_task_id_index":                              "idx_attachment_task",
+	"167_resource_label_namespace_index":                        "issue_label_workspace_type_name_lower_idx",
+	"168_resource_label_type_index":                             "issue_label_workspace_type_idx",
+	"169_agent_label_lookup_index":                              "agent_to_label_label_idx",
+	"170_skill_label_lookup_index":                              "skill_to_label_label_idx",
+	"172_agent_system_identity_index":                           "agent_system_identity_unique",
+	"177_autopilot_run_webhook_delivery_index":                  "uq_autopilot_run_webhook_delivery",
+	"178_webhook_delivery_queue_index":                          "idx_webhook_delivery_queue",
+	"181_task_chat_finalize_deferred_index":                     "idx_task_chat_finalize_deferred",
+	"183_chat_draft_restore_index":                              "idx_chat_draft_restore_session",
+	"187_autopilot_rule_version_index":                          "idx_autopilot_rule_version_active",
+	"192_issue_properties_gin_index":                            "idx_issue_properties_gin",
+	"194_issue_property_workspace_name_index":                   "idx_issue_property_ws_name",
+	"195_issue_property_workspace_index":                        "idx_issue_property_workspace",
+	"200_inbox_archived_listing_index":                          "idx_inbox_recipient_archived_created",
+	"201_inbox_active_by_issue_index":                           "idx_inbox_active_by_issue",
+	"203_issue_workspace_assignee_index":                        "idx_issue_workspace_assignee",
+	"204_issue_workspace_parent_index":                          "idx_issue_workspace_parent",
+	"205_issue_workspace_position_index":                        "idx_issue_workspace_position",
+	"208_client_usage_daily_unique_index":                       "client_usage_daily_identity_date_uidx",
+	"210_client_usage_daily_query_index":                        "client_usage_daily_activity_client_user_idx",
+	"211_client_usage_daily_workspace_index":                    "client_usage_daily_workspace_idx",
+	"215_chat_session_project_index":                            "idx_chat_session_project",
+	"217_vcs_connection_workspace_index":                        "idx_vcs_connection_workspace",
+	"218_vcs_pull_request_workspace_index":                      "idx_vcs_pull_request_workspace",
+	"219_vcs_pull_request_connection_index":                     "idx_vcs_pull_request_connection",
+	"220_issue_vcs_pull_request_pr_index":                       "idx_issue_vcs_pull_request_pr",
+	"221_vcs_commit_status_lookup_index":                        "idx_vcs_commit_status_lookup",
+	"223_github_pr_check_run_pr_ordinal_index":                  "github_pull_request_check_run_pr_ordinal_idx",
+	"228_channel_media_pending_object_key_index":                "channel_media_pending_object_storage_key_uidx",
+	"230_channel_media_pending_object_claim_index":              "idx_channel_media_pending_object_claim",
+	"231_agent_task_queue_terminal_completed_at_index":          "idx_agent_task_queue_terminal_completed_at",
+	"232_channel_media_pending_object_due_index":                "idx_channel_media_pending_object_due",
+	"233_agent_task_queue_agent_terminal_latest_index":          "idx_agent_task_queue_agent_terminal_latest",
+	"238_quick_action_workspace_index":                          "idx_quick_action_workspace_status_usage",
+	"241_comment_parent_lookup_index":                           "idx_comment_workspace_issue_parent",
+	"244_issue_dependency_issue_index":                          "idx_issue_dependency_issue_id",
+	"245_issue_dependency_depends_on_index":                     "idx_issue_dependency_depends_on_issue_id",
+	"246_inbox_item_issue_index":                                "idx_inbox_item_issue_id",
+	"247_comment_parent_index":                                  "idx_comment_parent_id",
+	"248_agent_task_trigger_comment_index":                      "idx_agent_task_queue_trigger_comment_id",
+	"255_agent_task_queue_chat_pending_deferred_v3":             "idx_agent_task_queue_chat_pending_v3",
 	"257_agent_task_queue_channel_media_pending_unique_v2":      "idx_one_pending_task_per_issue_agent_v2",
 	"261_agent_task_queue_terminal_completed_at_v2":             "idx_agent_task_queue_terminal_completed_at_v2",
+	"266_issue_view_owner_index":                                "idx_issue_view_owner",
+	"267_issue_view_shared_index":                               "idx_issue_view_shared",
 	"273_agent_task_queue_runtime_id_index":                     "idx_agent_task_queue_runtime_id",
 	"274_task_token_workspace_id_index":                         "idx_task_token_workspace_id",
 	"275_task_token_agent_id_index":                             "idx_task_token_agent_id",
@@ -103,12 +207,37 @@ var concurrentIndexCleanups = map[string]string{
 	"305_dingtalk_group_route_installation_conversation_unique": "idx_dingtalk_group_route_installation_conversation",
 	"306_dingtalk_group_route_workspace_index":                  "idx_dingtalk_group_route_workspace",
 	"307_dingtalk_group_route_id_unique":                        "idx_dingtalk_group_route_id_unique",
+	"309_agent_runtime_id_index":                                "idx_agent_runtime_id",
 	"311_plugin_identity_scoped_key_index":                      "idx_plugin_identity_scoped_key",
+	"316_workspace_mcp_server_name_unique":                      "idx_workspace_mcp_server_workspace_name",
+	"317_agent_mcp_server_server_index":                         "idx_agent_mcp_server_server",
 	"320_plugin_installation_config_revision_index":             "idx_plugin_installation_config_contribution_revision",
 	"321_plugin_installation_config_workspace_index":            "idx_plugin_installation_config_workspace",
 	"322_plugin_remote_mcp_secret_revision_index":               "idx_plugin_remote_mcp_secret_revision",
 	"323_plugin_remote_mcp_secret_workspace_index":              "idx_plugin_remote_mcp_secret_workspace",
 	"324_plugin_remote_mcp_one_active_secret_index":             "idx_plugin_remote_mcp_one_active_secret",
+	"326_plugin_remote_mcp_oauth_state_expiry_index":            "plugin_remote_mcp_oauth_state_expiry_idx",
+	"328_workspace_share_link_id_uidx":                          "workspace_share_link_pkey_uidx",
+	"330_workspace_share_link_active_ws_uidx":                   "workspace_share_link_active_ws_uidx",
+	"331_workspace_share_link_code_uidx":                        "workspace_share_link_code_uidx",
+	"333_issue_status_pkey_index":                               "issue_status_pkey_uidx",
+	"335_issue_status_workspace_key_index":                      "idx_issue_status_workspace_key",
+	"336_issue_status_workspace_name_index":                     "idx_issue_status_workspace_name_active",
+	"343_comment_delegated_failure_pending_index":               "idx_comment_delegated_failure_pending",
+	"345_plugin_installation_workspace_key_index":               "idx_plugin_installation_workspace_key",
+	"346_plugin_storage_scope_key_index":                        "idx_plugin_storage_scope_key",
+	"347_plugin_secret_installation_key_index":                  "idx_plugin_secret_installation_key",
+	"349_agent_task_queue_chat_terminal_resume_index":           "idx_agent_task_queue_chat_terminal_resume",
+	"350_agent_task_queue_chat_retired_session_index":           "idx_agent_task_queue_chat_retired_session",
+	"353_autopilot_quota_period_scope_index":                    "uq_autopilot_quota_period_scope",
+	"354_autopilot_quota_reservation_id_index":                  "autopilot_quota_reservation_pkey_uidx",
+	"355_autopilot_quota_reservation_key_index":                 "uq_autopilot_quota_reservation_key",
+	"356_autopilot_run_quota_reservation_index":                 "uq_autopilot_run_quota_reservation",
+	"357_webhook_delivery_replay_idempotency_index":             "uq_webhook_delivery_replay_idempotency",
+	"358_autopilot_quota_reservation_state_index":               "idx_autopilot_quota_reservation_state",
+	"361_issue_last_activity_index":                             "idx_issue_workspace_last_activity",
+	"363_plugin_invocation_installation_index":                  "idx_plugin_invocation_installation_created",
+	"364_plugin_invocation_created_at_index":                    "idx_plugin_invocation_created_at",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
@@ -127,6 +256,8 @@ var concurrentDownIndexCleanups = map[string]string{
 	"302_drop_redundant_channel_chat_session_binding_index": "idx_channel_chat_session_binding_session",
 	"303_drop_redundant_lark_chat_session_binding_index":    "idx_lark_chat_session_binding_session",
 	"312_drop_global_plugin_identity_key_index":             "idx_plugin_identity_key",
+	"371_comment_content_search_index_strategy":             "idx_comment_content_trgm",
+	"375_drop_issue_last_activity_index":                    "idx_issue_workspace_last_activity",
 }
 
 var preMigrationHooks = func() map[string]preMigrationHook {
@@ -148,6 +279,16 @@ var preRollbackHooks = func() map[string]preMigrationHook {
 	return hooks
 }()
 
+var upMigrationConditions = map[string]migrationCondition{
+	// Fresh databases that successfully built the CJK-friendly bigram index do
+	// not need to build the trigram fallback only to remove it at migration 371.
+	"140_comment_content_trgm_index": whenIndexNotUsable(commentContentBigramIndex),
+	// Existing pg_bigm deployments already have both indexes. Remove the
+	// fallback only after proving the preferred index has the exact usable shape;
+	// pg_bigm-less self-hosted databases keep trgm and record 371 as a no-op.
+	"371_comment_content_search_index_strategy": whenIndexUsable(commentContentBigramIndex),
+}
+
 func hooksForDirection(direction string) map[string]preMigrationHook {
 	switch direction {
 	case "up":
@@ -157,6 +298,98 @@ func hooksForDirection(direction string) map[string]preMigrationHook {
 	default:
 		return nil
 	}
+}
+
+func conditionsForDirection(direction string) map[string]migrationCondition {
+	if direction == "up" {
+		return upMigrationConditions
+	}
+	// Rollbacks intentionally ignore environment gates: they restore the
+	// portable pre-migration schema regardless of which up SQL actually ran.
+	return nil
+}
+
+func whenIndexUsable(requirement usableIndexRequirement) migrationCondition {
+	return func(ctx context.Context, conn *pgxpool.Conn) (bool, string, error) {
+		usable, err := indexIsUsable(ctx, conn, requirement)
+		if err != nil {
+			return false, "", err
+		}
+		if !usable {
+			return false, fmt.Sprintf("preferred index %s is unavailable or unusable", requirement.IndexRegclass), nil
+		}
+		return true, "", nil
+	}
+}
+
+func whenIndexNotUsable(requirement usableIndexRequirement) migrationCondition {
+	return func(ctx context.Context, conn *pgxpool.Conn) (bool, string, error) {
+		usable, err := indexIsUsable(ctx, conn, requirement)
+		if err != nil {
+			return false, "", err
+		}
+		if usable {
+			return false, fmt.Sprintf("preferred index %s is ready", requirement.IndexRegclass), nil
+		}
+		return true, "", nil
+	}
+}
+
+// indexIsUsable fails closed: every property needed by the search query must
+// match before a fallback index may be skipped or removed. In particular, the
+// preferred relation must be a live, ready, valid, non-partial GIN expression
+// index owned by the expected extension. A same-named stale or drifted index is
+// treated as unusable, preserving the fallback.
+func indexIsUsable(ctx context.Context, conn *pgxpool.Conn, requirement usableIndexRequirement) (bool, error) {
+	var usable bool
+	err := conn.QueryRow(ctx, `
+		SELECT COALESCE(
+			idx.relkind = 'i'
+			AND i.indisvalid
+			AND i.indisready
+			AND i.indislive
+			AND NOT i.indisunique
+			AND i.indpred IS NULL
+			AND i.indexprs IS NOT NULL
+			AND i.indrelid = to_regclass($2)
+			AND i.indnkeyatts = 1
+			AND i.indnatts = 1
+			AND am.amname = $3
+			AND opc.opcname = $4
+			AND pg_get_indexdef(i.indexrelid, 1, FALSE) = $5
+			AND EXISTS (
+				SELECT 1
+				FROM pg_depend dep
+				JOIN pg_extension ext ON ext.oid = dep.refobjid
+				WHERE dep.classid = 'pg_opclass'::regclass
+				  AND dep.objid = opc.oid
+				  AND dep.refclassid = 'pg_extension'::regclass
+				  AND dep.deptype = 'e'
+				  AND ext.extname = $6
+			),
+			FALSE
+		)
+		FROM pg_class idx
+		LEFT JOIN pg_index i ON i.indexrelid = idx.oid
+		LEFT JOIN pg_am am ON am.oid = idx.relam
+		-- pg_index.indclass is an int2vector, whose subscripts start at zero.
+		LEFT JOIN pg_opclass opc ON opc.oid = i.indclass[0]
+		WHERE idx.oid = to_regclass($1)
+	`,
+		requirement.IndexRegclass,
+		requirement.TableRegclass,
+		requirement.AccessMethod,
+		requirement.OperatorClass,
+		requirement.Expression,
+		requirement.Extension,
+	).Scan(&usable)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("inspect preferred index %q: %w", requirement.IndexRegclass, err)
+	}
+	return usable, nil
 }
 
 // cleanupInvalidConcurrentIndexHook removes an INVALID index left by an
@@ -274,6 +507,11 @@ type runOptions struct {
 	// passes the direction-specific hook map; tests leave this nil unless they
 	// exercise a hook.
 	Hooks map[string]preMigrationHook
+	// Conditions maps migration version → a read-only gate that decides
+	// whether the SQL file should execute. A false result still advances the
+	// migration ledger, allowing later migrations to run in environments where
+	// this version's DDL is intentionally unnecessary.
+	Conditions map[string]migrationCondition
 }
 
 func main() {
@@ -315,9 +553,10 @@ func main() {
 	}
 
 	if err := runMigrations(ctx, pool, runOptions{
-		Direction: direction,
-		Files:     files,
-		Hooks:     hooksForDirection(direction),
+		Direction:  direction,
+		Files:      files,
+		Hooks:      hooksForDirection(direction),
+		Conditions: conditionsForDirection(direction),
 	}); err != nil {
 		slog.Error("migration run failed", "error", err)
 		os.Exit(1)
@@ -442,8 +681,19 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 			}
 		}
 
-		if _, err := conn.Exec(ctx, string(sql)); err != nil {
-			return fmt.Errorf("apply migration %q: %w", file, err)
+		applySQL := true
+		conditionReason := ""
+		if condition, ok := opts.Conditions[version]; ok && condition != nil {
+			applySQL, conditionReason, err = condition(ctx, conn)
+			if err != nil {
+				return fmt.Errorf("evaluate migration condition for %q (%s): %w", version, opts.Direction, err)
+			}
+		}
+
+		if applySQL {
+			if _, err := conn.Exec(ctx, string(sql)); err != nil {
+				return fmt.Errorf("apply migration %q: %w", file, err)
+			}
 		}
 
 		if opts.Direction == "up" {
@@ -455,7 +705,11 @@ func runMigrations(ctx context.Context, pool *pgxpool.Pool, opts runOptions) err
 			return fmt.Errorf("record migration %q: %w", version, err)
 		}
 
-		fmt.Printf("  %s  %s\n", opts.Direction, version)
+		if applySQL {
+			fmt.Printf("  %s  %s\n", opts.Direction, version)
+		} else {
+			fmt.Printf("  %s  %s (SQL skipped: %s)\n", opts.Direction, version, conditionReason)
+		}
 	}
 
 	return nil

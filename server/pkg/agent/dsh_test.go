@@ -142,7 +142,7 @@ func TestDiscoverDshModels(t *testing.T) {
 	bin := writeDshFixture(t, `
 printf '%s\n' '{"v":1,"type":"models","models":[{"id":"deepseek-official/deepseek-v4-flash","label":"DeepSeek V4 Flash","provider":"DeepSeek","default":true,"thinking":{"supported_levels":[{"value":"high","label":"High"},{"value":"max","label":"Max"}],"default_level":"high"}}]}'
 `)
-	models, err := discoverDshModels(context.Background(), bin)
+	models, err := discoverDshModels(context.Background(), Command{Path: bin})
 	if err != nil {
 		t.Fatal(err)
 	}

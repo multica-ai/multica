@@ -17,9 +17,6 @@ import (
 	"sort"
 	"strings"
 	"time"
-
-	"github.com/multica-ai/multica/server/pkg/plugincontract"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 )
 
 const (
@@ -36,6 +33,16 @@ func ValidatePublicHTTPSEndpoint(ctx context.Context, raw string, allowedHosts [
 	endpoint, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return nil, fmt.Errorf("parse endpoint: %w", err)
+	}
+	// An operator-named dev origin skips the public-internet requirement and
+	// nothing else: the net: scope below still applies, so a Plugin still
+	// cannot reach a destination the administrator did not consent to.
+	if isDevOrigin(endpoint) {
+		devHost := strings.ToLower(strings.TrimSuffix(endpoint.Hostname(), "."))
+		if len(allowedHosts) > 0 && !hostAllowed(devHost, allowedHosts) {
+			return nil, errors.New("endpoint host is outside the Plugin endpoint policy")
+		}
+		return endpoint, nil
 	}
 	if endpoint.Scheme != "https" || endpoint.Hostname() == "" || endpoint.User != nil || endpoint.Fragment != "" || endpoint.RawQuery != "" {
 		return nil, errors.New("endpoint must be a public HTTPS URL without userinfo, query, or fragment")
@@ -105,9 +112,21 @@ func isPublicAddress(address netip.Addr) bool {
 }
 
 func NewSecureHTTPClient(endpoint *url.URL) *http.Client {
+	// Decided once, here, rather than inside the dialer: the endpoint is fixed
+	// for this client's lifetime, so a per-dial lookup could only differ if the
+	// environment changed mid-task, and honouring that would be a way to widen
+	// the guard after the connection was approved.
+	devOrigin := isDevOrigin(endpoint)
 	dialer := &net.Dialer{Timeout: ConnectTimeout, KeepAlive: 30 * time.Second}
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.Proxy = nil
+	if devOrigin {
+		// Trust an extra CA for this origin, never skip verification: a plugin
+		// author's local MCP server still presents a certificate.
+		if config := devTLSConfig(); config != nil {
+			transport.TLSClientConfig = config
+		}
+	}
 	transport.DialContext = func(ctx context.Context, network, address string) (net.Conn, error) {
 		host, port, err := net.SplitHostPort(address)
 		if err != nil {
@@ -122,7 +141,10 @@ func NewSecureHTTPClient(endpoint *url.URL) *http.Client {
 		}
 		for _, candidate := range addresses {
 			candidate = candidate.Unmap()
-			if !isPublicAddress(candidate) {
+			// The host pin above still holds for a dev origin, so a redirect
+			// pointing somewhere else is refused either way. What this skips is
+			// only "the address must be on the public internet".
+			if !devOrigin && !isPublicAddress(candidate) {
 				return nil, errors.New("remote MCP endpoint resolved to a non-public address")
 			}
 			connection, dialErr := dialer.DialContext(ctx, network, net.JoinHostPort(candidate.String(), port))
@@ -157,17 +179,27 @@ type discoveredTool struct {
 	InputSchema json.RawMessage `json:"inputSchema"`
 }
 
-func Discover(ctx context.Context, rawEndpoint string, allowedHosts, protocolVersions []string, headers http.Header) ([]pluginruntime.RemoteMCPTool, string, error) {
+// SupportedProtocolVersions is the MCP protocol revisions this build speaks,
+// most preferred first. Discover offers the first and accepts any of them.
+func SupportedProtocolVersions() []string {
+	return []string{"2025-03-26", "2024-11-05"}
+}
+
+func Discover(ctx context.Context, rawEndpoint string, allowedHosts, protocolVersions []string, headers http.Header) ([]Tool, string, error) {
 	endpoint, err := ValidatePublicHTTPSEndpoint(ctx, rawEndpoint, allowedHosts, nil)
 	if err != nil {
 		return nil, "", err
 	}
 	client := NewSecureHTTPClient(endpoint)
 	sessionID := ""
-	protocolVersion := "2025-03-26"
-	if len(protocolVersions) > 0 {
-		protocolVersion = protocolVersions[0]
+	// An empty list means "whatever this build supports", not "nothing is
+	// acceptable". The response is checked against this same slice further
+	// down, so leaving it empty rejected every server that answered correctly —
+	// which is exactly what it did to the first plugin that used this path.
+	if len(protocolVersions) == 0 {
+		protocolVersions = SupportedProtocolVersions()
 	}
+	protocolVersion := protocolVersions[0]
 	initialize := map[string]any{
 		"jsonrpc": "2.0", "id": 1, "method": "initialize",
 		"params": map[string]any{
@@ -204,7 +236,7 @@ func Discover(ctx context.Context, rawEndpoint string, allowedHosts, protocolVer
 	if err := json.Unmarshal(toolsResponse.Result, &result); err != nil {
 		return nil, "", fmt.Errorf("decode tools/list result: %w", err)
 	}
-	tools := make([]pluginruntime.RemoteMCPTool, 0, len(result.Tools))
+	tools := make([]Tool, 0, len(result.Tools))
 	seen := map[string]bool{}
 	for _, tool := range result.Tools {
 		if strings.TrimSpace(tool.Name) == "" || seen[tool.Name] {
@@ -215,9 +247,9 @@ func Discover(ctx context.Context, rawEndpoint string, allowedHosts, protocolVer
 		if err != nil {
 			return nil, "", fmt.Errorf("tool %q input schema: %w", tool.Name, err)
 		}
-		tools = append(tools, pluginruntime.RemoteMCPTool{
+		tools = append(tools, Tool{
 			Name: tool.Name, Description: tool.Description, InputSchema: canonical,
-			SchemaDigest: plugincontract.DigestBytes(canonical),
+			SchemaDigest: DigestBytes(canonical),
 		})
 	}
 	sort.Slice(tools, func(i, j int) bool { return tools[i].Name < tools[j].Name })
@@ -356,8 +388,8 @@ func canonicalJSON(raw json.RawMessage) (json.RawMessage, error) {
 	return json.RawMessage(canonical), err
 }
 
-func ToolSetDigest(tools []pluginruntime.RemoteMCPTool) (string, error) {
-	copyTools := append([]pluginruntime.RemoteMCPTool(nil), tools...)
+func ToolSetDigest(tools []Tool) (string, error) {
+	copyTools := append([]Tool(nil), tools...)
 	for i := range copyTools {
 		canonical, err := canonicalJSON(copyTools[i].InputSchema)
 		if err != nil {
@@ -370,5 +402,5 @@ func ToolSetDigest(tools []pluginruntime.RemoteMCPTool) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return plugincontract.DigestBytes(raw), nil
+	return DigestBytes(raw), nil
 }

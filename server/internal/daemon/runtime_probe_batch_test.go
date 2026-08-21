@@ -315,7 +315,8 @@ func newBatchFixture(t *testing.T) *batchFixture {
 		detectAgentVersion = origDetect
 		checkAgentMinVersion = origCheck
 	})
-	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		path := runtimeCmd.Path
 		fx.mu.Lock()
 		fx.probes[path]++
 		attempt := fx.probes[path]
@@ -759,7 +760,8 @@ func countingVersionProbe(t *testing.T, answer func(path string) (string, error)
 		checkAgentMinVersion = origCheck
 	})
 	var probes atomic.Int32
-	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		path := runtimeCmd.Path
 		probes.Add(1)
 		return answer(path)
 	}

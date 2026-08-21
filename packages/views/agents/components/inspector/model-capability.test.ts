@@ -1,3 +1,4 @@
+// @vitest-environment node
 import { describe, expect, it } from "vitest";
 import type { RuntimeModel } from "@multica/core/types";
 import {

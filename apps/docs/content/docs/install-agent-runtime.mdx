@@ -27,6 +27,7 @@ Multica currently detects these commands:
 | Hermes Agent | `hermes` | [Hermes quickstart](https://hermes-agent.nousresearch.com/docs/getting-started/quickstart/) |
 | Kimi CLI | `kimi` | [Kimi CLI](https://github.com/MoonshotAI/kimi-cli) |
 | Kiro CLI | `kiro-cli` | [Install Kiro CLI](https://kiro.dev/docs/cli/installation/) |
+| MiniMax Code | `mcode` | [Install MiniMax Code CLI](https://www.npmjs.com/package/@minimax-ai/code) |
 | OpenClaw | `openclaw` | [Install OpenClaw](https://docs.openclaw.ai/install) |
 | OpenCode | `opencode` | [OpenCode quickstart](https://opencode.ai/en/docs) |
 | Pi coding agent | `pi` | [Pi coding agent](https://github.com/earendil-works/pi) |
@@ -37,6 +38,7 @@ Multica currently detects these commands:
 | QwenPaw | `qwenpaw` | [QwenPaw](https://github.com/agentscope-ai/QwenPaw) |
 | Reasonix | `reasonix` | [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) |
 | TRAE CLI | `traecli` | [TRAE official site](https://www.trae.cn/) |
+| Dim | `dim` | [DimCode](https://dimagent.cn/en/docs/cli) |
 
 "Supported" means Multica can invoke that CLI. It does not mean Multica provides the tool's account, subscription, or model quota for you.
 
@@ -48,12 +50,14 @@ For Reasonix, run `reasonix setup` and configure a default provider and model be
 
 For QwenPaw, choose the provider and model in QwenPaw's own configuration. Multica cannot override a QwenPaw model at run time.
 
+For MiniMax Code, install a supported Node.js release (`>=22.19 <23` or `>=24 <27`) and run `npm install --global @minimax-ai/code@latest`. A global npm install places `mcode` on npm's global binary path; if `command -v mcode` or `Get-Command mcode` cannot find it, add that path to `PATH`. Then run `mcode login`. MiniMax Code owns the model selection; Multica cannot override it through ACP.
+
 For DeepSeek Harness, install Node.js 20+ and run `npm install -g @deepseek-ai/dsh`, then add the Multica runtime profile to it (`dsh plugin --profile multica add <bundle>`). The daemon registers DeepSeek Harness only after `dsh --profile multica --probe` succeeds. Set `DEEPSEEK_API_KEY` (or store it in dsh's own settings) before starting the daemon.
 
 Those login credentials are stored locally by the tool itself. Multica never receives login tokens from Claude, Codex, Cursor, or any other CLI.
 
 <Callout type="info">
-Claude Code requires 2.0.0 or later, Codex 0.100.0 or later, Copilot 1.0.0 or later, Grok 0.2.89 or later, and Qwen Code 0.20.0 or later. Below the minimum version, the daemon does not register the corresponding runtime.
+Claude Code requires 2.0.0 or later, Codex 0.100.0 or later, Copilot 1.0.0 or later, Grok 0.2.89 or later, Qwen Code 0.20.0 or later, and MiniMax Code 0.1.2 or later. Below the minimum version, the daemon does not register the corresponding runtime.
 </Callout>
 
 ## 3. Confirm the daemon can find the command

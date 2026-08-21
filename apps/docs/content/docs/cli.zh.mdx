@@ -238,7 +238,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `subscriber list/add/remove <issue-id>` | 管理订阅者 | `--user`、`--user-id`（缺省为当前用户） |
 | | `label list/add/remove <issue-id>` | 管理 issue 上的标签 | |
 | | `metadata list/get/set/delete <issue-id>` | 管理 issue 级键值元数据 | |
-| | `property list/set/unset <issue-id>` | 设置自定义属性值 | `set`：`--name`、`--value` |
+| | `property list/set/unset <issue-id>` | 设置自定义属性值 | `set`：`--name`、`--value`（`actor` / `multi_actor` 接受成员的名称、邮箱或 id） |
 | | `runs <issue-id>` | 查看执行历史 | `--full-id` |
 | | `run-messages <task-id>` | 查看单次执行的消息 | `--since`、`--issue` |
 | | `usage <issue-id>` | 查看聚合 token 用量 | |
@@ -248,7 +248,7 @@ CLI 配置文件包含可代表你访问 Multica 的令牌。不要提交到仓�
 | | `status <id> <status>` | 修改项目状态 | |
 | | `resource list/add/update/remove` | 管理项目附加资源 | `--type`、`--url`、`--local-path`、`--daemon-id`、`--execution-mode`（本地目录的 `in_place` / `worktree`） |
 | `label` | `list/get/create/update/delete` | 管理工作区标签 | |
-| `property` | `list/get/create/update/archive/unarchive` | 管理工作区自定义属性 | `create`：`--name`、`--type`、`--option`（可重复）；`list`：`--include-archived`；类型创建后不可修改 |
+| `property` | `list/get/create/update/archive/unarchive` | 管理工作区自定义属性 | `create`：`--name`、`--type`（`text`、`number`、`select`、`multi_select`、`date`、`checkbox`、`url`、`actor`、`multi_actor`）、`--option`（可重复，仅 select 类型）；`list`：`--include-archived`；类型创建后不可修改 |
 | `agent` | `list/get/create/update/archive/restore` | 管理智能体 | `--name`、`--runtime-id`（`create` 必填）、`--instructions`、`--model`、`--thinking-level`、`--mcp-config`、`--permission-mode`、`--max-concurrent-tasks` |
 | | `copy <agent-id>` | 复制为新智能体，原智能体不受影响 | `--name`（默认为原名加 ` (copy)`）、`--runtime-id`（复制到其他运行时时必须同时指定 `--model`）、`--no-skills`；`custom_env`、`mcp_config`、`runtime_config` 等机密配置不会复制，需用与 `create` 相同的 flag 重新提供 |
 | | `tasks <id>` | 查看智能体的 task | |

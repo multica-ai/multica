@@ -451,19 +451,11 @@ describe("SkillDetailPage origin link", () => {
     ).toBeNull();
   });
 
-  it("does not link an imported origin whose source_url is missing", async () => {
-    skillRef.current = {
-      ...baseSkill,
-      config: { origin: { type: "github" } },
-    };
-    renderPage();
-    expect(await screen.findByText("Imported · GitHub")).toBeTruthy();
-    expect(
-      screen.queryByRole("link", { name: "Imported · GitHub" }),
-    ).toBeNull();
-  });
-
-  it("does not link a source_url whose host does not match the origin type", async () => {
+  // Which source_urls are linkable is originSourceUrl's contract; its full
+  // matrix lives in ../lib/origin.test.ts. What belongs here is the chip's
+  // behaviour when the helper refuses: it degrades to plain text, still
+  // naming the origin, rather than dropping the label along with the href.
+  it("degrades a refused source_url to plain text, keeping the chip", async () => {
     skillRef.current = {
       ...baseSkill,
       config: {

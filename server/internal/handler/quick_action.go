@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -885,7 +886,8 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 
 	body := sanitizeNullBytes(buildQuickActionBody(qa, target))
 
-	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+		ID:          dbid.NewV7(),
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  actorType,
@@ -903,14 +905,17 @@ func (h *Handler) RunQuickAction(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to run quick action")
 		return
 	}
+	comment := created.Comment()
 
 	resp := commentToResponse(comment, nil, nil)
+	resp.IssueRevision = created.IssueRevision
 	h.publish(protocol.EventCommentCreated, workspaceID, actorType, actorID, map[string]any{
 		"comment":             resp,
 		"issue_title":         issue.Title,
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
+		"issue_revision":      created.IssueRevision,
 	})
 
 	delegationAuthority := h.autopilotDelegationAuthorityFromRequest(r, issue, actorType, actorID)

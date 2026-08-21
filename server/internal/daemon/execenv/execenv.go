@@ -5,10 +5,12 @@ package execenv
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/multica-ai/multica/server/internal/runtimeapps"
@@ -318,7 +320,7 @@ func PredictRootDir(workspacesRoot, workspaceID, taskID string) string {
 	if workspacesRoot == "" || workspaceID == "" || taskID == "" {
 		return ""
 	}
-	return filepath.Join(workspacesRoot, workspaceID, shortID(taskID))
+	return filepath.Join(workspacesRoot, workspaceID, taskKey(taskID))
 }
 
 // Prepare creates an isolated execution environment for a task.
@@ -335,7 +337,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: task ID is required")
 	}
 
-	envRoot := filepath.Join(params.WorkspacesRoot, params.WorkspaceID, shortID(params.TaskID))
+	envRoot := PredictRootDir(params.WorkspacesRoot, params.WorkspaceID, params.TaskID)
 
 	// Self-heal the root-level daemon marker on every task start so a marker
 	// removed while the daemon runs is restored before the agent spawns. The
@@ -347,10 +349,31 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		logger.Warn("execenv: workspaces root marker not written; fail-closed guard limited to the task workdir", "error", err)
 	}
 
-	// Remove existing env if present (defensive — task IDs are unique).
-	if _, err := os.Stat(envRoot); err == nil {
-		if err := os.RemoveAll(envRoot); err != nil {
-			return nil, fmt.Errorf("execenv: remove existing env: %w", err)
+	// Take exclusive ownership of the env root before touching anything in it.
+	// What follows wipes the directory, and while the segment was a UUIDv7
+	// prefix that routinely wiped a live sibling task's workdir, worktree and
+	// task-scoped config (#7326). taskKey now reads the id's random tail, which
+	// makes a shared path improbable rather than impossible — so prove
+	// ownership instead of assuming it. A task that refuses to start is
+	// recoverable; one that deletes a running sibling's uncommitted work is not.
+	//
+	// claimEnvRoot is the only thing standing between two same-key tasks, so it
+	// has to be atomic end to end: a read-then-delete would let both pass the
+	// check and one still delete the other. Once claimed, the claim is held for
+	// the rest of Prepare — the reset below clears the directory's CONTENTS and
+	// leaves the marker in place, so there is never a moment where the env root
+	// looks unowned to a racing task.
+	fresh, err := claimEnvRoot(envRoot, params.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("execenv: %w", err)
+	}
+	// Not fresh means this task already owned the directory — a rerun, which is
+	// meant to start from a clean tree. Reuse of a PRIOR task's directory never
+	// reaches here; that is Reuse, which takes an explicit WorkDir and deletes
+	// nothing.
+	if !fresh {
+		if err := resetEnvRootContents(envRoot); err != nil {
+			return nil, fmt.Errorf("execenv: reset existing env: %w", err)
 		}
 	}
 
@@ -468,20 +491,21 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		return nil, fmt.Errorf("execenv: write context files: %w", err)
 	}
 
-	// Persist managed-env provenance for non-local issue envs at Prepare time
+	// Persist managed-env provenance for non-local resumable envs at Prepare time
 	// (not on completion, where .gc_meta.json is written). A same-issue
 	// follow-up can be claimed the instant the prior task completes — before
 	// the prior handler writes .gc_meta.json — so reuse eligibility must be
 	// provable from an artifact that exists the moment the env is created. Only
-	// managed (non-local_directory) issue envs get this marker; that is exactly
-	// the set squad-leader reuse targets (MUL-4886). Non-fatal: a write failure
+	// managed (non-local_directory) issue and chat envs get this marker; that is
+	// exactly the set with a durable conversation scope. Non-fatal: a write failure
 	// only costs the next follow-up its session reuse (it falls back to a fresh
 	// session), which must never block dispatching this task.
-	if params.LocalWorkDir == "" && params.Task.IssueID != "" {
+	if params.LocalWorkDir == "" && (params.Task.IssueID != "" || params.Task.ChatSessionID != "") {
 		if err := WriteManagedEnvProvenance(envRoot, ManagedEnvProvenance{
-			WorkspaceID: params.WorkspaceID,
-			IssueID:     params.Task.IssueID,
-			AgentID:     params.Task.AgentID,
+			WorkspaceID:   params.WorkspaceID,
+			IssueID:       params.Task.IssueID,
+			ChatSessionID: params.Task.ChatSessionID,
+			AgentID:       params.Task.AgentID,
 		}); err != nil && logger != nil {
 			logger.Warn("execenv: write managed env provenance failed (non-fatal); a follow-up may start a fresh session", "error", err)
 		}
@@ -584,6 +608,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
+			CacheDir:    openclawProfileCacheDir(params.Profile, logger),
 			McpConfig:   params.McpConfig,
 			Gateway:     params.OpenclawGateway,
 			Logger:      logger,
@@ -863,6 +888,7 @@ func Reuse(params ReuseParams, logger *slog.Logger) *Environment {
 	if params.Provider == "openclaw" {
 		result, err := prepareOpenclawConfig(env.RootDir, params.WorkDir, OpenclawConfigPrep{
 			OpenclawBin: params.OpenclawBin,
+			CacheDir:    openclawProfileCacheDir(params.Profile, logger),
 			McpConfig:   params.McpConfig,
 			Gateway:     params.OpenclawGateway,
 			Logger:      logger,
@@ -1002,8 +1028,8 @@ const ManagedEnvProvenanceManagedBy = "multica-daemon-managed-env"
 
 // ManagedEnvProvenance is persisted to .managed_env.json inside the env root at
 // Prepare time (NOT on completion, unlike .gc_meta.json). It records that this
-// env root is a daemon-managed, non-local_directory issue env owned by a
-// specific workspace/issue/agent.
+// env root is a daemon-managed, non-local_directory resumable env owned by a
+// specific workspace, conversation scope, and agent.
 //
 // Its whole reason to exist is timing. A squad-leader follow-up on the same
 // issue can be claimed the instant the prior task completes — the server's
@@ -1012,18 +1038,19 @@ const ManagedEnvProvenanceManagedBy = "multica-daemon-managed-env"
 // eligibility off .gc_meta.json therefore raced: the successor read a
 // not-yet-written file and started a fresh session (MUL-4886). This marker is
 // on disk from the moment the env is created, so the successor can prove reuse
-// safety inside that window. It is written ONLY for non-local managed issue
-// envs, so its presence is itself the "safe to reuse, not a user
+// safety inside that window. It is written only for non-local managed issue or
+// chat envs, so its presence is itself the "safe to reuse, not a user
 // local_directory" assertion; see shouldReusePriorWorkdir.
 type ManagedEnvProvenance struct {
-	ManagedBy   string `json:"managed_by"`
-	WorkspaceID string `json:"workspace_id"`
-	IssueID     string `json:"issue_id"`
-	AgentID     string `json:"agent_id"`
+	ManagedBy     string `json:"managed_by"`
+	WorkspaceID   string `json:"workspace_id"`
+	IssueID       string `json:"issue_id,omitempty"`
+	ChatSessionID string `json:"chat_session_id,omitempty"`
+	AgentID       string `json:"agent_id"`
 }
 
 // WriteManagedEnvProvenance persists the reuse-eligibility marker at the env
-// root. Callers must only invoke it for non-local_directory issue envs, since
+// root. Callers must only invoke it for non-local_directory resumable envs, since
 // the file's presence is the non-local assertion. ManagedBy is stamped here so
 // callers cannot forget the discriminator.
 func WriteManagedEnvProvenance(envRoot string, p ManagedEnvProvenance) error {
@@ -1092,4 +1119,138 @@ func (env *Environment) Cleanup(removeAll bool) error {
 		return err
 	}
 	return nil
+}
+
+// envRootOwnerFile records which task an env root belongs to. Creating it with
+// O_EXCL is the atomic step that decides which of two same-key tasks owns the
+// directory, and it is the proof Prepare needs before wiping a directory that
+// another task may still be executing in (#7326).
+const envRootOwnerFile = ".task_owner"
+
+// claimEnvRoot atomically establishes that taskID owns envRoot.
+//
+// fresh is true when this call created the claim and the directory is the
+// caller's to populate; false when taskID already owned it, i.e. a rerun that
+// may reset its own tree. Any other owner is an error, and so is a directory
+// that holds content but names no owner — refusing to guess is the whole point
+// of the marker.
+//
+// Atomicity comes from two filesystem primitives rather than a lock: os.Mkdir
+// fails if the directory exists, and O_EXCL fails if the marker exists. Exactly
+// one racing caller can win each, and a caller that wins neither never reaches
+// the destructive path. The emptiness check below only decides whether a
+// caller may ATTEMPT a claim; O_EXCL alone decides who gets it.
+func claimEnvRoot(envRoot, taskID string) (fresh bool, err error) {
+	if err := os.MkdirAll(filepath.Dir(envRoot), 0o755); err != nil {
+		return false, fmt.Errorf("create workspace directory: %w", err)
+	}
+
+	switch err := os.Mkdir(envRoot, 0o755); {
+	case err == nil:
+		// We created the directory, so nothing of anyone's can be inside it.
+		if err := writeEnvRootOwnerExclusive(envRoot, taskID); err != nil {
+			return false, err
+		}
+		return true, nil
+	case !errors.Is(err, os.ErrExist):
+		return false, fmt.Errorf("create env root %s: %w", envRoot, err)
+	}
+
+	// The directory already existed. Who owns it?
+	owner, err := readEnvRootOwner(envRoot)
+	if err != nil {
+		return false, fmt.Errorf("read env root owner for %s: %w", envRoot, err)
+	}
+	switch {
+	case owner == taskID:
+		return false, nil
+	case owner != "":
+		return false, fmt.Errorf("env root %s belongs to task %s; refusing to reset it for task %s", envRoot, owner, taskID)
+	}
+
+	// No owner. A directory holding work is never ours to take — the marker is
+	// written before any content, so the only unowned directory that can be
+	// safely claimed is an empty one (a crash between Mkdir and the marker
+	// write). Anything else fails closed and waits for a human.
+	empty, err := dirIsEmpty(envRoot)
+	if err != nil {
+		return false, fmt.Errorf("inspect env root %s: %w", envRoot, err)
+	}
+	if !empty {
+		return false, fmt.Errorf("env root %s already holds files but names no owning task; refusing to delete it", envRoot)
+	}
+	if err := writeEnvRootOwnerExclusive(envRoot, taskID); err != nil {
+		// Lost the race for an empty directory: whoever won owns it now.
+		return false, err
+	}
+	return true, nil
+}
+
+// writeEnvRootOwnerExclusive creates the owner marker, failing if one already
+// exists. This is the atomic arbiter between two racing claims.
+func writeEnvRootOwnerExclusive(envRoot, taskID string) error {
+	path := filepath.Join(envRoot, envRootOwnerFile)
+	f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+	if errors.Is(err, os.ErrExist) {
+		owner, readErr := readEnvRootOwner(envRoot)
+		if readErr != nil {
+			return fmt.Errorf("read env root owner for %s: %w", envRoot, readErr)
+		}
+		if owner == taskID {
+			return nil
+		}
+		return fmt.Errorf("env root %s was claimed by task %s while task %s was starting", envRoot, owner, taskID)
+	}
+	if err != nil {
+		return fmt.Errorf("claim env root %s: %w", envRoot, err)
+	}
+	if _, err := f.WriteString(taskID); err != nil {
+		f.Close()
+		return fmt.Errorf("record env root owner for %s: %w", envRoot, err)
+	}
+	return f.Close()
+}
+
+// readEnvRootOwner returns the task id that owns envRoot, or "" when no marker
+// is present. An unreadable marker is an error, not an empty owner: treating it
+// as unowned would hand the caller a licence to delete the very directory it
+// could not identify.
+func readEnvRootOwner(envRoot string) (string, error) {
+	b, err := os.ReadFile(filepath.Join(envRoot, envRootOwnerFile))
+	if errors.Is(err, os.ErrNotExist) {
+		return "", nil
+	}
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(b)), nil
+}
+
+// resetEnvRootContents empties an env root the caller already owns, keeping the
+// directory and its owner marker. Removing and recreating the directory instead
+// would drop the claim for as long as the recreate takes, which is exactly the
+// window claimEnvRoot exists to close.
+func resetEnvRootContents(envRoot string) error {
+	entries, err := os.ReadDir(envRoot)
+	if err != nil {
+		return err
+	}
+	for _, e := range entries {
+		if e.Name() == envRootOwnerFile {
+			continue
+		}
+		if err := os.RemoveAll(filepath.Join(envRoot, e.Name())); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// dirIsEmpty reports whether dir has no entries at all.
+func dirIsEmpty(dir string) (bool, error) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return false, err
+	}
+	return len(entries) == 0, nil
 }

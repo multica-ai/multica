@@ -32,6 +32,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | Hermes | `hermes` | ✓ | ✓ | per-task `HERMES_HOME/skills/` |
 | Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
 | Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
+| MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
 | Pi | `pi` | ✓ | — | `.pi/skills/` |
@@ -42,6 +43,7 @@ Install steps are in [Install AI coding tools](/install-agent-runtime).
 | QwenPaw | `qwenpaw` | ✓ | ✓ | per-task workspace `skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
+| Dim | `dim` | ✓ | ✓ | — |
 
 "Multica-managed MCP" means you can define MCP servers in the agent configuration and Multica passes them to the tool before a run. It does not mean the tool has no other way to configure MCP.
 
@@ -51,7 +53,7 @@ When you create an agent, the model list comes from the corresponding runtime. S
 
 If you do not pick a model, Multica uses the tool's own default. If the list is empty, confirm the runtime is online and the tool is signed in, then refresh the model list.
 
-QwenPaw is the one exception: it does not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in QwenPaw's own configuration instead. An empty model list is expected there and is not a sign that the runtime is offline.
+QwenPaw and MiniMax Code are exceptions: they do not accept a model chosen from Multica, so the picker is inert and shows "Managed by runtime". Choose the model in the tool's own configuration instead. An empty model list is expected there and is not a sign that the runtime is offline.
 
 DeepSeek Harness advertises its model catalog from the runtime itself (`dsh --profile multica --list-models`). Its model ids use the `provider/model` form (for example `deepseek-official/deepseek-chat`), so select the full id from the list.
 
@@ -61,7 +63,7 @@ Different tools may use different model names. After switching AI coding tools, 
 
 ## Session resumption
 
-All of these tools support continuing an existing session in a later run. The prerequisites are that the original session still exists and the task is executed by a runtime that can reach it.
+All tools marked ✓ support continuing an existing session in a later run. The prerequisites are that the original session still exists and the task is executed by a runtime that can reach it. MiniMax Code 0.1.2 advertises no session-loading capability over ACP, so Multica starts a fresh MCode session for a later run.
 
 Multica stores the session identifier the tool returns. The next time work continues on the same issue, the runtime tries to resume that session; when it cannot, it creates a new session and keeps going. Pi stores a local session file path, so it depends more on the original computer and file.
 

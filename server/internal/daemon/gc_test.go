@@ -197,15 +197,16 @@ func TestShouldCleanTaskDir_APIErrorSkipped(t *testing.T) {
 	})
 
 	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "task7", &execenv.GCMeta{
 		IssueID:     issueID,
 		WorkspaceID: "ws1",
-		CompletedAt: time.Now(),
+		CompletedAt: time.Now().Add(-2 * time.Hour),
 	})
 
 	action := d.shouldCleanTaskDir(context.Background(), taskDir)
 	if action != gcActionSkip {
-		t.Fatalf("expected gcActionSkip on API error, got %d", action)
+		t.Fatalf("expected gcActionSkip on API error despite completed-task TTL, got %d", action)
 	}
 }
 
@@ -265,12 +266,15 @@ func TestCleanTaskDir_RemovesDirectory(t *testing.T) {
 	t.Parallel()
 	d := newGCTestDaemon(t, http.NewServeMux())
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "doomed", nil)
+	writeFile(t, filepath.Join(taskDir, "workdir", "payload.bin"), 64)
 
 	if _, err := os.Stat(taskDir); err != nil {
 		t.Fatal("task dir should exist before cleanup")
 	}
 
-	d.cleanTaskDir(taskDir)
+	if bytes := d.cleanTaskDir(taskDir); bytes < 64 {
+		t.Fatalf("reclaimed bytes = %d, want at least payload size", bytes)
+	}
 
 	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
 		t.Fatal("task dir should be removed after cleanup")
@@ -366,6 +370,40 @@ func TestGCWorkspace_BatchesAndDeduplicatesIssueChecks(t *testing.T) {
 	}
 }
 
+func TestGCWorkspace_CompletedTaskTTLRemovesOpenIssue(t *testing.T) {
+	t.Parallel()
+	issueID := "77777777-7777-7777-7777-777777777770"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/api/daemon/workspaces/ws-completed/issues/gc-check", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"issues": []map[string]any{
+			{"id": issueID, "found": true, "status": "in_review", "updated_at": time.Now()},
+		}})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = 24 * time.Hour
+	d.cfg.GCArtifactTTL = 0
+	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-completed")
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-completed", "completed-open", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws-completed",
+		CompletedAt: time.Now().Add(-25 * time.Hour),
+	})
+	writeFile(t, filepath.Join(taskDir, "workdir", "checkout.bin"), 128)
+
+	stats := &gcStats{byPattern: map[string]int{}}
+	d.gcWorkspace(context.Background(), wsDir, stats)
+
+	if _, err := os.Stat(taskDir); !os.IsNotExist(err) {
+		t.Fatalf("completed open-issue task dir should be removed, stat error = %v", err)
+	}
+	if stats.cleaned != 1 || stats.skipped != 0 || stats.bytesReclaimed < 128 {
+		t.Fatalf("unexpected stats after completed-task cleanup: %+v", stats)
+	}
+}
+
 func TestGCWorkspace_OldServerFallbackIsCached(t *testing.T) {
 	issueA := "77777777-7777-7777-7777-777777777773"
 	issueB := "77777777-7777-7777-7777-777777777774"
@@ -423,6 +461,7 @@ func TestGCWorkspace_BatchFailureDoesNotFanOutOrClean(t *testing.T) {
 	})
 
 	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
 	wsDir := filepath.Join(d.cfg.WorkspacesRoot, "ws-fail")
 	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws-fail", "task", &execenv.GCMeta{
 		IssueID: issueID, WorkspaceID: "ws-fail", CompletedAt: time.Now().Add(-10 * 24 * time.Hour),
@@ -530,6 +569,154 @@ func TestShouldCleanTaskDir_OpenIssueArtifactCleanup(t *testing.T) {
 	action := d.shouldCleanTaskDir(context.Background(), taskDir)
 	if action != gcActionCleanArtifacts {
 		t.Fatalf("expected gcActionCleanArtifacts for old completed task on open issue, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLRemovesOpenIssue(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888880"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]any{
+			"status":     "in_review",
+			"updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = 24 * time.Hour
+	d.cfg.GCArtifactTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "completed-open", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-25 * time.Hour),
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionClean {
+		t.Fatalf("expected completed-task TTL to clean open issue env, got %d", action)
+	}
+
+	recentTaskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "recently-completed-open", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-23 * time.Hour),
+	})
+	if action := d.shouldCleanTaskDir(context.Background(), recentTaskDir); action != gcActionSkip {
+		t.Fatalf("expected completed-task TTL to preserve a recent open-issue env, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLUnknownIssueStatusFailsClosed(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888884"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "future_or_malformed_status", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	d.cfg.GCArtifactTTL = 0
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "completed-unknown-status", &execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     issueID,
+		WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-2 * time.Hour),
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected unknown issue status to fail closed, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLRequiresCompletionTime(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888881"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "blocked", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "missing-completion", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected task without completed_at to remain, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLKeepsLocalDirectoryArtifactTTLSeparate(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888882"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "in_progress", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "local-directory-recent", &execenv.GCMeta{
+		Kind:           execenv.GCKindIssue,
+		IssueID:        issueID,
+		WorkspaceID:    "ws1",
+		CompletedAt:    time.Now().Add(-2 * time.Hour),
+		LocalDirectory: true,
+	})
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected completed-task TTL not to accelerate local_directory artifact cleanup, got %d", action)
+	}
+
+	artifactEligibleDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "local-directory-artifact-eligible", &execenv.GCMeta{
+		Kind:           execenv.GCKindIssue,
+		IssueID:        issueID,
+		WorkspaceID:    "ws1",
+		CompletedAt:    time.Now().Add(-13 * time.Hour),
+		LocalDirectory: true,
+	})
+	if action := d.shouldCleanTaskDir(context.Background(), artifactEligibleDir); action != gcActionCleanArtifacts {
+		t.Fatalf("expected existing artifact TTL to remain effective for local_directory env, got %d", action)
+	}
+}
+
+func TestShouldCleanTaskDir_CompletedTaskTTLPreservesActiveEnv(t *testing.T) {
+	t.Parallel()
+	issueID := "88888888-8888-8888-8888-888888888883"
+
+	mux := http.NewServeMux()
+	mux.HandleFunc(fmt.Sprintf("/api/daemon/issues/%s/gc-check", issueID), func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{
+			"status": "todo", "updated_at": time.Now(),
+		})
+	})
+
+	d := newGCTestDaemon(t, mux)
+	d.cfg.GCCompletedTaskTTL = time.Hour
+	taskDir := createTaskDir(t, d.cfg.WorkspacesRoot, "ws1", "active-completed", &execenv.GCMeta{
+		Kind: execenv.GCKindIssue, IssueID: issueID, WorkspaceID: "ws1",
+		CompletedAt: time.Now().Add(-2 * time.Hour),
+	})
+	d.markActiveEnvRoot(taskDir)
+	defer d.unmarkActiveEnvRoot(taskDir)
+
+	if action := d.shouldCleanTaskDir(context.Background(), taskDir); action != gcActionSkip {
+		t.Fatalf("expected active env to remain despite completed-task TTL, got %d", action)
 	}
 }
 

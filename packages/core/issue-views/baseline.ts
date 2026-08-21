@@ -1,6 +1,6 @@
 import type { ActorFilterValue, FilterSnapshot } from "../issues/stores/view-store";
 import type { IssuePriority, IssueStatus } from "../types";
-import { ALL_STATUSES, PRIORITY_DISPLAY_ORDER } from "../issues/config";
+import { PRIORITY_DISPLAY_ORDER } from "../issues/config";
 
 /**
  * The open saved view's query, normalized for two jobs:
@@ -46,8 +46,14 @@ function actorArray(v: unknown): ActorFilterValue[] {
 export function baselineFromQuery(query: Record<string, unknown>): IssueViewBaseline {
   // Unknown enum members (a newer server, a hand-edited blob) are dropped —
   // a value the store cannot represent must not enter the snapshot.
+  //
+  // Status is the exception: since MUL-6243 a status filter holds a status KEY,
+  // and a workspace's custom keys are not enumerable from a constant. Filtering
+  // against ALL_STATUSES here silently deleted every custom status filter the
+  // moment a saved view was reopened, so the view came back showing more than
+  // it was saved with. Any non-empty string is a representable status key.
   const statusFilters = stringArray(query.statusFilters).filter(
-    (s): s is IssueStatus => (ALL_STATUSES as readonly string[]).includes(s),
+    (s): s is IssueStatus => s.length > 0,
   );
   const priorityFilters = stringArray(query.priorityFilters).filter(
     (p): p is IssuePriority => (PRIORITY_DISPLAY_ORDER as readonly string[]).includes(p),

@@ -110,7 +110,7 @@ func TestCompleteTask_AlreadyFinalized(t *testing.T) {
 				Bus:     events.New(),
 			}
 
-			got, err := svc.CompleteTask(context.Background(), taskID, nil, "", "", "", false, "")
+			got, err := svc.CompleteTask(context.Background(), taskID, nil, "", "", "", false, "", "")
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}
@@ -152,7 +152,7 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 				Bus:     events.New(),
 			}
 
-			got, err := svc.FailTask(context.Background(), taskID, "agent crashed", "", "", "", "", false, "")
+			got, err := svc.FailTask(context.Background(), taskID, "agent crashed", "", "", "", "", false, "", "")
 			if err != nil {
 				t.Fatalf("expected no error, got %v", err)
 			}
@@ -171,8 +171,9 @@ func TestFailTask_AlreadyFinalized(t *testing.T) {
 
 // TestProviderNetworkRetrySchedule locks in the three-tier schedule for a
 // transient provider stream cut (MUL-4910): first run + immediate retry + one
-// retry deferred ~5s, and only for provider_network — other retryable reasons
-// keep their generic max_attempts=2 (single, immediate retry).
+// retry deferred ~5s. runtime_offline uses a separate deferred marker so its
+// retry waits for a healthy runtime; other retryable reasons keep their generic
+// max_attempts=2 (single, immediate retry).
 func TestProviderNetworkRetrySchedule(t *testing.T) {
 	const provNet = "agent_error.provider_network"
 
@@ -195,8 +196,8 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 		}
 	}
 
-	// Backoff: only provider_network's final attempt (after the 2nd failure) is
-	// deferred; its first retry and every other reason are immediate.
+	// Backoff / deferral: runtime_offline always waits for health-gated
+	// promotion; provider_network only defers its final tier.
 	delayCases := []struct {
 		reason        string
 		failedAttempt int32
@@ -204,6 +205,7 @@ func TestProviderNetworkRetrySchedule(t *testing.T) {
 	}{
 		{provNet, 1, 0}, // first failure → immediate retry
 		{provNet, 2, providerNetworkFinalRetryWait}, // second failure → 5s-deferred retry
+		{"runtime_offline", 1, runtimeOfflineRetryDeferral},
 		{"timeout", 2, 0}, // unrelated reason → never deferred
 	}
 	for _, tc := range delayCases {
@@ -277,6 +279,29 @@ func TestTaskFailureClassifiers(t *testing.T) {
 				t.Fatalf("retryableReasons[%q] = %v, want %v", tc.reason, got, tc.wantRetry)
 			}
 		})
+	}
+}
+
+// TestRuntimeCLITimeoutIsNotAutoRetried pins the retry posture for #7112. A
+// local runtime CLI that missed its preparation deadline is not transient: the
+// same host runs the same CLI on the next attempt and takes the same 8-11s to
+// fail again, so every retry is pure cost with a guaranteed outcome. That is
+// the difference from agent_error.provider_network, which the old text-based
+// classification lumped it in with — and which IS on the allowlist.
+//
+// Resume stays safe: the agent process never started, so the session the retry
+// (or the user's next message) resumes is untouched.
+func TestRuntimeCLITimeoutIsNotAutoRetried(t *testing.T) {
+	const reason = "runtime_cli_timeout"
+
+	if retryableReasons[reason] {
+		t.Errorf("retryableReasons[%q] = true, want false: the stall is local and deterministic", reason)
+	}
+	if resumeUnsafeFailureReason(reason) {
+		t.Errorf("resumeUnsafeFailureReason(%q) = true, want false: the agent never started", reason)
+	}
+	if !retryableReasons["agent_error.provider_network"] {
+		t.Error("agent_error.provider_network must stay retryable: real provider stalls are transient")
 	}
 }
 

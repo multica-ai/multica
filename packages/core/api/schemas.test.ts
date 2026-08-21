@@ -7,7 +7,14 @@ import {
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+  TelegramInstallationSchema,
+  ListTelegramInstallationsResponseSchema,
+  RedeemTelegramBindingTokenResponseSchema,
+  EMPTY_TELEGRAM_INSTALLATION,
+  EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
   AgentTaskListSchema,
+  AutopilotQuotaUsageSchema,
   AutopilotRunSchema,
   FALLBACK_AUTOPILOT_RUN,
   CommentTriggerPreviewSchema,
@@ -47,14 +54,20 @@ import {
   SquadSchema,
   TimelineEntriesSchema,
   UserSchema,
-  EMPTY_PLUGIN_CATALOG,
-  PluginCatalogResponseSchema,
   PluginInstallationSchema,
-  RemoteMCPDiscoveryResponseSchema,
-  RemoteMCPOAuthStartResponseSchema,
-  EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
+  PluginInstallationListResponseSchema,
+  PluginMCPToolListSchema,
+  PluginPreviewSchema,
+  EMPTY_PLUGIN_INSTALLATION_LIST,
+  EMPTY_PLUGIN_PREVIEW,
 } from "./schemas";
 import { IssueViewSchema, IssueViewListSchema } from "./schemas";
+import {
+  ListIssueStatusesResponseSchema,
+  IssueStatusEntrySchema,
+  EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+  EMPTY_ISSUE_STATUS_ENTRY,
+} from "./schemas";
 import { parseWithFallback } from "./schema";
 
 const baseIssue = {
@@ -82,6 +95,20 @@ const baseIssue = {
 };
 
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
+  it("accepts null activity during backfill and rejects malformed activity", () => {
+    const parsed = ListIssuesResponseSchema.parse({
+      issues: [{ ...baseIssue, last_activity_at: null }],
+      total: 1,
+    });
+    expect(parsed.issues[0]?.last_activity_at).toBeNull();
+    expect(() =>
+      ListIssuesResponseSchema.parse({
+        issues: [{ ...baseIssue, last_activity_at: 42 }],
+        total: 1,
+      }),
+    ).toThrow();
+  });
+
   it("accepts a primitive metadata KV map", () => {
     const payload = {
       issues: [
@@ -379,6 +406,43 @@ describe("AgentTaskListSchema", () => {
       "comment-2",
       "comment-3",
     ]);
+  });
+
+  it("accepts durable workdir metadata from newer backends", () => {
+    const parsed = AgentTaskListSchema.parse([
+      {
+        ...task,
+        status: "completed",
+        work_dir: "/managed/task/worktree",
+        durable_work_dir: "/Users/dev/project",
+        relative_durable_work_dir: "project",
+        branch_name: "agent/j/abc12345",
+      },
+    ]);
+
+    expect(parsed[0]).toMatchObject({
+      durable_work_dir: "/Users/dev/project",
+      relative_durable_work_dir: "project",
+      branch_name: "agent/j/abc12345",
+    });
+  });
+
+  it("degrades malformed optional path metadata without dropping task rows", () => {
+    const parsed = AgentTaskListSchema.parse([
+      {
+        ...task,
+        work_dir: 1,
+        durable_work_dir: { path: "/project" },
+        relative_durable_work_dir: false,
+        branch_name: ["agent/j/abc12345"],
+      },
+    ]);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.work_dir).toBeUndefined();
+    expect(parsed[0]?.durable_work_dir).toBeUndefined();
+    expect(parsed[0]?.relative_durable_work_dir).toBeUndefined();
+    expect(parsed[0]?.branch_name).toBeUndefined();
   });
 });
 
@@ -835,6 +899,33 @@ describe("dashboard + runtime usage schema drift", () => {
   });
 });
 
+// A server that never heard of worktree mode also never sends this flag, and
+// it does not reject the mode either — it drops execution_mode and answers 201,
+// leaving the task to run in the user's working copy (#7113). So the absent
+// case has to parse as false, not as "unknown, probably fine".
+describe("AppConfigSchema local_worktree_supported drift", () => {
+  it("defaults to false when the server predates the signal", () => {
+    const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
+    expect(parsed.local_worktree_supported).toBe(false);
+  });
+
+  it("coerces a malformed value to false rather than trusting it", () => {
+    const parsed = AppConfigSchema.parse({
+      cdn_domain: "cdn.example.com",
+      local_worktree_supported: "yes",
+    });
+    expect(parsed.local_worktree_supported).toBe(false);
+  });
+
+  it("carries a genuine true through", () => {
+    const parsed = AppConfigSchema.parse({
+      cdn_domain: "cdn.example.com",
+      local_worktree_supported: true,
+    });
+    expect(parsed.local_worktree_supported).toBe(true);
+  });
+});
+
 describe("AppConfigSchema cdn_signed drift", () => {
   it("defaults cdn_signed to false when the server omits it (pre-MUL-3254 servers)", () => {
     const parsed = AppConfigSchema.parse({ cdn_domain: "cdn.example.com" });
@@ -1089,6 +1180,39 @@ describe("AutopilotRunSchema", () => {
     const parsed = parseWithFallback("not-an-object", AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, ENDPOINT);
     expect(parsed).toBe(FALLBACK_AUTOPILOT_RUN);
     expect(parsed.status).toBe("failed");
+  });
+});
+
+describe("AutopilotQuotaUsageSchema", () => {
+  const baseUsage = {
+    action: "enforce",
+    used: 12,
+    reserved: 2,
+    limit: 100,
+    period_start: "2026-08-01T00:00:00Z",
+    period_end: "2026-09-01T00:00:00Z",
+    reset_at: "2026-09-01T00:00:00Z",
+  };
+
+  it("preserves durable blocked counts by execution source", () => {
+    const parsed = AutopilotQuotaUsageSchema.parse({
+      ...baseUsage,
+      blocked_counts: { schedule: 3, webhook: 7 },
+    });
+    expect(parsed.blocked_counts).toEqual({ schedule: 3, webhook: 7 });
+  });
+
+  it("defaults blocked_counts to null for an older server", () => {
+    expect(AutopilotQuotaUsageSchema.parse(baseUsage).blocked_counts).toBeNull();
+  });
+
+  it("isolates a malformed blocked_counts field", () => {
+    const parsed = AutopilotQuotaUsageSchema.parse({
+      ...baseUsage,
+      blocked_counts: { webhook: "many" },
+    });
+    expect(parsed.used).toBe(12);
+    expect(parsed.blocked_counts).toBeNull();
   });
 });
 
@@ -1370,80 +1494,234 @@ describe("WeCom installation schemas", () => {
   });
 });
 
-describe("Plugin catalog schemas", () => {
-  it("defaults optional release fields without granting trust or compatibility", () => {
-    const parsed = PluginCatalogResponseSchema.parse({
-      releases: [{ plugin_key: "ai.multica.software-delivery", version: "1.0.0" }],
+// Telegram drives the same connect/disabled/revoked UI decisions as WeCom.
+// Keep its wire-contract fallbacks explicit so malformed or older responses
+// cannot render a bot as connected or report a binding success.
+describe("Telegram installation schemas", () => {
+  it("parses a well-formed installation", () => {
+    const parsed = TelegramInstallationSchema.parse({
+      id: "i1",
+      workspace_id: "w1",
+      agent_id: "a1",
+      bot_id: "12345",
+      bot_username: "multica_test_bot",
+      installer_user_id: "u1",
+      status: "active",
     });
-    expect(parsed.supported).toBe(true);
-    expect(parsed.releases[0]?.compatible).toBe(false);
-    expect(parsed.releases[0]?.signature_verified).toBe(false);
-    expect(parsed.releases[0]?.contributions).toEqual([]);
+    expect(parsed.bot_username).toBe("multica_test_bot");
+    expect(parsed.status).toBe("active");
   });
 
-  it("defaults missing lifecycle and binding fields to a disabled error state", () => {
+  it("defaults incomplete data to the disconnected state", () => {
+    const parsed = TelegramInstallationSchema.parse({ id: "i1" });
+    expect(parsed.status).toBe("revoked");
+    expect(parsed.bot_id).toBe("");
+    expect(parsed.bot_username).toBe("");
+
+    const list = ListTelegramInstallationsResponseSchema.parse({});
+    expect(list).toEqual({ installations: [], configured: false });
+  });
+
+  it("keeps unknown forward-compatible installation fields", () => {
+    const parsed = TelegramInstallationSchema.parse({ id: "i1", future_field: "keep" });
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe("keep");
+  });
+
+  it("falls back safely for malformed list, install, and redeem responses", () => {
+    expect(
+      parseWithFallback(
+        "not json",
+        ListTelegramInstallationsResponseSchema,
+        EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+        { endpoint: "GET /api/workspaces/:id/telegram/installations" },
+      ),
+    ).toEqual(EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE);
+
+    expect(
+      parseWithFallback(42, TelegramInstallationSchema, EMPTY_TELEGRAM_INSTALLATION, {
+        endpoint: "POST /api/workspaces/:id/telegram/install",
+      }),
+    ).toEqual(EMPTY_TELEGRAM_INSTALLATION);
+
+    expect(
+      parseWithFallback(
+        null,
+        RedeemTelegramBindingTokenResponseSchema,
+        EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+        { endpoint: "POST /api/telegram/binding/redeem" },
+      ),
+    ).toEqual(EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE);
+  });
+});
+
+describe("Plugin schemas", () => {
+  it("defaults every missing installation field to an inert, disabled shape", () => {
     const parsed = PluginInstallationSchema.parse({ id: "installation-1" });
     expect(parsed.enabled).toBe(false);
-    expect(parsed.lifecycle_status).toBe("error");
-    expect(parsed.bindings).toEqual([]);
-    expect(parsed.trust_tier).toBe("");
-    expect(parsed.signature_verified).toBe(false);
-    expect(parsed.contribution_details).toEqual([]);
-    expect(parsed.remote_mcp).toEqual([]);
+    expect(parsed.granted_scopes).toEqual([]);
+    expect(parsed.config_schema).toEqual([]);
+    expect(parsed.configured_secrets).toEqual([]);
+    expect(parsed.surfaces).toEqual([]);
+    expect(parsed.hooks).toEqual([]);
+    expect(parsed.resources).toEqual([]);
   });
 
-  it("parses Remote MCP status without accepting secret-shaped response fields", () => {
+  it("does not model a secret value even when the server sends one", () => {
+    // The API contract is that a secret is write-only. If a future response
+    // ever regressed and echoed one, the client must not carry it into typed
+    // state where a component could render it.
     const parsed = PluginInstallationSchema.parse({
       id: "installation-1",
-      remote_mcp: [{
-        contribution_key: "search",
-        credential_state: "configured",
-        credential_hint: "••••1234",
-        credential: "must-not-be-modeled",
-        approved_tools: [{
-          name: "search.read",
-          input_schema: { type: "object" },
-          schema_digest: "sha256:fixture",
-          risk: "read",
-        }],
-        reviewed: true,
-        ready: true,
-      }],
+      config: { repo: "multica-ai/multica" },
+      configured_secrets: ["token"],
     });
-    expect(parsed.remote_mcp[0]?.credential_state).toBe("configured");
-    expect(parsed.remote_mcp[0]?.approved_tools[0]?.name).toBe("search.read");
-    expect(parsed.remote_mcp[0]?.ready).toBe(true);
-    expect(parsed.remote_mcp[0]).not.toHaveProperty("credential");
+    expect(parsed.config).toEqual({ repo: "multica-ai/multica" });
+    expect(parsed.configured_secrets).toEqual(["token"]);
+    expect(Object.keys(parsed)).not.toContain("secrets");
   });
 
-  it("defaults a malformed Remote MCP discovery response without inventing tools", () => {
-    const fallback = { config_revision: 0, discovered_tools: [], discovered_schema_digest: "" };
+  it("keeps config field declaration order so the generated form is stable", () => {
+    const parsed = PluginInstallationSchema.parse({
+      id: "installation-1",
+      config_schema: [
+        { key: "repo", type: "string", label: "Repo", required: true },
+        { key: "token", type: "secret", label: "Token" },
+      ],
+    });
+    expect(parsed.config_schema.map((field) => field.key)).toEqual(["repo", "token"]);
+    expect(parsed.config_schema[1]?.required).toBe(false);
+  });
+
+  it("degrades a malformed installation list to empty rather than a partial list", () => {
+    const parsed = parseWithFallback("not-json", PluginInstallationListResponseSchema, EMPTY_PLUGIN_INSTALLATION_LIST, {
+      endpoint: "GET /api/workspaces/{id}/plugins",
+    });
+    expect(parsed).toEqual(EMPTY_PLUGIN_INSTALLATION_LIST);
+  });
+
+  it("degrades a malformed preview so the consent screen cannot show a blank scope list as approval", () => {
+    const parsed = parseWithFallback({ scopes: "issues:read" }, PluginPreviewSchema, EMPTY_PLUGIN_PREVIEW, {
+      endpoint: "POST /api/workspaces/{id}/plugins/preview",
+    });
+    expect(parsed).toEqual(EMPTY_PLUGIN_PREVIEW);
+    expect(parsed.scopes).toEqual([]);
+  });
+
+  it("degrades a malformed MCP tool list to empty rather than showing tools as approved", () => {
+    const parsed = parseWithFallback({ tools: "search" }, PluginMCPToolListSchema, { tools: [] }, {
+      endpoint: "GET /api/workspaces/{id}/plugins/{installationId}/mcp/{hookKey}/tools",
+    });
+    expect(parsed.tools).toEqual([]);
+  });
+
+  // The dangerous direction is one-sided: a response missing `approved` must
+  // read as NOT approved. The opposite default would render an unpinned tool
+  // with a checked box, and the administrator's next save would pin it.
+  it("treats a tool with no approval field as unapproved", () => {
+    const parsed = PluginMCPToolListSchema.parse({ tools: [{ name: "search" }] });
+    expect(parsed.tools[0]?.approved).toBe(false);
+    expect(parsed.tools[0]?.drifted).toBe(false);
+  });
+
+  it("parses a preview that reports an upgrade adding new scopes", () => {
+    const parsed = PluginPreviewSchema.parse({
+      manifest: { key: "com.example.hello", name: "Hello", version: "2.0.0", author: { name: "example" } },
+      scopes: ["issues:read", "comments:write"],
+      installed: true,
+      installed_version: "1.0.0",
+      added_scopes: ["comments:write"],
+    });
+    expect(parsed.installed).toBe(true);
+    expect(parsed.installed_version).toBe("1.0.0");
+    expect(parsed.added_scopes).toEqual(["comments:write"]);
+  });
+});
+
+// Issue status catalog (MUL-6243). The catalog drives how every status renders,
+// so a drifting or malformed response must degrade to the built-ins rather than
+// leaving the UI with no statuses at all.
+describe("issue status catalog schemas", () => {
+  const baseStatus = {
+    id: "status-1",
+    workspace_id: "ws-1",
+    key: "human_review",
+    name: "Human Review",
+    description: "Waiting on a person",
+    category: "in_review",
+    color: "#22c55e",
+    is_system: false,
+    position: 1,
+    archived_at: null,
+    created_at: "2026-01-01T00:00:00Z",
+    updated_at: "2026-01-01T00:00:00Z",
+  };
+
+  it("parses a full catalog response", () => {
+    const parsed = ListIssueStatusesResponseSchema.parse({
+      statuses: [baseStatus],
+      categories: ["backlog", "todo", "in_progress", "in_review", "done", "blocked", "cancelled"],
+      total: 1,
+    });
+    expect(parsed.statuses[0]?.key).toBe("human_review");
+    expect(parsed.statuses[0]?.category).toBe("in_review");
+    expect(parsed.categories).toHaveLength(7);
+  });
+
+  it("falls back to the built-in categories on a malformed response", () => {
     const parsed = parseWithFallback(
-      { config_revision: "bad", discovered_tools: { name: "search" } },
-      RemoteMCPDiscoveryResponseSchema,
-      fallback,
-      { endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{key}/test" },
+      { statuses: "not-an-array", categories: 7 },
+      ListIssueStatusesResponseSchema,
+      EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+      { endpoint: "GET /api/issue-statuses" },
     );
-    expect(parsed).toEqual(fallback);
+    expect(parsed).toEqual(EMPTY_LIST_ISSUE_STATUSES_RESPONSE);
+    // The fallback still names all 7 categories, so a client talking to a
+    // server that predates this endpoint can still render every built-in.
+    expect(parsed.categories).toHaveLength(7);
+    expect(parsed.statuses).toEqual([]);
   });
 
-  it("rejects a malformed Remote MCP OAuth start response", () => {
-    expect(parseWithFallback(
-      { authorization_url: undefined },
-      RemoteMCPOAuthStartResponseSchema,
-      EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
-      { endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{key}/oauth/start" },
-    )).toEqual(EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE);
-    expect(RemoteMCPOAuthStartResponseSchema.parse({
-      authorization_url: "https://auth.example.test/authorize?state=opaque",
-    }).authorization_url).toContain("auth.example.test");
+  it("defaults the optional presentation fields the server may omit", () => {
+    const { color: _c, is_system: _s, position: _p, description: _d, archived_at: _a, ...minimal } = baseStatus;
+    const parsed = IssueStatusEntrySchema.parse(minimal);
+    expect(parsed.color).toBe("#6b7280");
+    expect(parsed.is_system).toBe(false);
+    expect(parsed.position).toBe(0);
+    expect(parsed.archived_at).toBeNull();
   });
 
-  it("degrades a malformed catalog response to unsupported and empty", () => {
-    const parsed = parseWithFallback("not-json", PluginCatalogResponseSchema, EMPTY_PLUGIN_CATALOG, {
-      endpoint: "GET /api/workspaces/{id}/plugins/catalog",
+  // PATCH /api/issue-statuses/reorder returns the same catalog shape as the
+  // list endpoint, so a malformed reorder response degrades the same way rather
+  // than leaving the settings page holding an unparsed blob. (MUL-6243)
+  it("falls back on a malformed reorder response", () => {
+    const parsed = parseWithFallback(
+      { statuses: [{ id: 1 }], total: "many" },
+      ListIssueStatusesResponseSchema,
+      EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+      { endpoint: "PATCH /api/issue-statuses/reorder" },
+    );
+    expect(parsed).toEqual(EMPTY_LIST_ISSUE_STATUSES_RESPONSE);
+  });
+
+  it("keeps an unknown category as a string instead of failing the whole catalog", () => {
+    // A newer server could report a category this build does not know. Dropping
+    // the entry (or throwing) would leave the board unable to render issues
+    // already sitting on it, so the value is carried through verbatim.
+    const parsed = ListIssueStatusesResponseSchema.parse({
+      statuses: [{ ...baseStatus, category: "started" }],
+      categories: ["started"],
+      total: 1,
     });
-    expect(parsed).toEqual(EMPTY_PLUGIN_CATALOG);
-    expect(parsed.supported).toBe(false);
+    expect(parsed.statuses[0]?.category).toBe("started");
+  });
+
+  it("falls back to an empty entry on a malformed single status", () => {
+    const parsed = parseWithFallback(
+      { id: 12345 },
+      IssueStatusEntrySchema,
+      EMPTY_ISSUE_STATUS_ENTRY,
+      { endpoint: "POST /api/issue-statuses" },
+    );
+    expect(parsed).toEqual(EMPTY_ISSUE_STATUS_ENTRY);
   });
 });

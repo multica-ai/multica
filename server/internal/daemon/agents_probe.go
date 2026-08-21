@@ -258,6 +258,17 @@ var probeAgentCLIs = func() map[string]AgentEntry {
 	if e, ok := probe("MULTICA_QWENPAW_PATH", "qwenpaw", ""); ok {
 		agents["qwenpaw"] = e
 	}
+	// Dim (`dim`) is the DimCode CLI agent, driven over ACP via `dim acp`.
+	// MULTICA_DIM_MODEL seeds the daemon-wide default (a model id from the
+	// user's logged-in dim catalog).
+	if e, ok := probe("MULTICA_DIM_PATH", "dim", "MULTICA_DIM_MODEL"); ok {
+		agents["dim"] = e
+	}
+	// MiniMax Code (`mcode`) exposes an ACP v1 server through `mcode acp`.
+	// Model selection is owned by the MCode runtime, so there is no model env.
+	if e, ok := probe("MULTICA_MCODE_PATH", "mcode", ""); ok {
+		agents["mcode"] = e
+	}
 	return agents
 }
 

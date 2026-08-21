@@ -156,10 +156,12 @@ var allFileBasedProviders = []string{
 	"kimi",
 	"reasonix",
 	"dsh",
+	"dim",
 	"kiro",
 	"antigravity",
 	"qwen",
 	"qwenpaw",
+	"mcode",
 }
 
 // TestPrepareThenCleanupSidecarsRoundTripEmptyWorkdir is the headline

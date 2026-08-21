@@ -6,11 +6,11 @@ import "testing"
 // keeps the bare provider key (what a built-in on PATH resolves to), and two
 // executables of the same protocol family never collapse onto one key.
 func TestDiscoveryCacheKeyScopesByExecutable(t *testing.T) {
-	if got, want := discoveryCacheKey("hermes", ""), "hermes"; got != want {
+	if got, want := discoveryCacheKey("hermes", Command{}), "hermes"; got != want {
 		t.Fatalf("discoveryCacheKey(hermes, \"\") = %q, want %q", got, want)
 	}
-	builtin := discoveryCacheKey("hermes", "/usr/local/bin/hermes")
-	custom := discoveryCacheKey("hermes", "/usr/local/bin/jcode")
+	builtin := discoveryCacheKey("hermes", Command{Path: "/usr/local/bin/hermes"})
+	custom := discoveryCacheKey("hermes", Command{Path: "/usr/local/bin/jcode"})
 	if builtin == custom {
 		t.Fatalf("same key %q for two different executables", builtin)
 	}
@@ -27,8 +27,8 @@ func TestDiscoveryCacheKeyScopesByExecutable(t *testing.T) {
 // full TTL, reintroducing the catalog/binary mismatch the daemon-side fix
 // removes.
 func TestCachedDiscoveryDoesNotShareMemoAcrossExecutables(t *testing.T) {
-	builtinKey := discoveryCacheKey("hermes", "/usr/local/bin/hermes")
-	customKey := discoveryCacheKey("hermes", "/usr/local/bin/jcode")
+	builtinKey := discoveryCacheKey("hermes", Command{Path: "/usr/local/bin/hermes"})
+	customKey := discoveryCacheKey("hermes", Command{Path: "/usr/local/bin/jcode"})
 	reset := func() {
 		modelCacheMu.Lock()
 		delete(modelCache, builtinKey)

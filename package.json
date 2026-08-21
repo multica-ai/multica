@@ -23,9 +23,14 @@
     "typecheck": "turbo typecheck --filter=!@multica/mobile",
     "test": "turbo test --filter=!@multica/mobile",
     "lint": "turbo lint --filter=!@multica/mobile",
+    "knip": "knip",
+    "check:ui-exports": "node scripts/check-ui-wildcard-exports.mjs",
     "clean": "turbo clean && rm -rf node_modules",
     "ui:add": "cd packages/ui && npx shadcn@latest add",
     "generate:reserved-slugs": "node scripts/generate-reserved-slugs.mjs"
+  },
+  "engines": {
+    "node": ">=22"
   },
   "packageManager": "pnpm@10.28.2",
   "pnpm": {
@@ -37,14 +42,21 @@
       "@types/react": "catalog:",
       "@types/react-dom": "catalog:",
       "@xmldom/xmldom": "^0.8.13",
-      "postcss": "8.5.10",
-      "uuid": "11.1.1"
+      "postcss": "8.5.26",
+      "uuid": "11.1.1",
+      "shell-quote": "1.9.0",
+      "minimatch@3>brace-expansion": "1.1.18",
+      "minimatch@5>brace-expansion": "2.1.4",
+      "minimatch@9>brace-expansion": "2.1.4",
+      "minimatch@10>brace-expansion": "5.0.9",
+      "builder-util-runtime": "9.7.0"
     }
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@types/node": "catalog:",
     "@types/pg": "^8.20.0",
+    "knip": "^6.32.2",
     "pg": "^8.20.0",
     "turbo": "^2.5.4",
     "typescript": "catalog:"

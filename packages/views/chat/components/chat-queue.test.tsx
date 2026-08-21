@@ -6,7 +6,7 @@ import { ChatQueue } from "./chat-queue";
 
 const TEST_RESOURCES = { en: { chat: enChat } };
 
-function renderQueue(headStatus = "running") {
+function renderQueue(headStatus = "running", sendNowDisabled = false) {
   const callbacks = {
     onSendNow: vi.fn<(taskId: string) => Promise<void>>().mockResolvedValue(),
     onEdit: vi.fn<(taskId: string) => Promise<void>>().mockResolvedValue(),
@@ -17,6 +17,7 @@ function renderQueue(headStatus = "running") {
     <I18nProvider locale="en" resources={TEST_RESOURCES}>
       <ChatQueue
         headStatus={headStatus}
+        sendNowDisabled={sendNowDisabled}
         tasks={[
           {
             task_id: "task-2",
@@ -123,5 +124,29 @@ describe("ChatQueue", () => {
       }
     });
     expect(actions.onClear).toHaveBeenCalledTimes(1);
+  });
+});
+
+// MUL-6380: steering a queued message dispatches it now, so it has to clear the
+// same invoke gate as a fresh send. When the caller has lost permission to run
+// the agent, a live-looking Steer button just walks them into a 403.
+describe("ChatQueue send-now gating", () => {
+  it("blocks Steer when the caller may no longer invoke the agent", async () => {
+    const { onSendNow } = renderQueue("running", true);
+
+    // The label must state the real reason: "wait for the reply to start" would
+    // send the user waiting for something waiting cannot fix.
+    const steer = screen.getAllByRole("button", {
+      name: "You no longer have permission to run this agent",
+    })[0]!;
+    expect(steer).toBeDisabled();
+    fireEvent.click(steer);
+    await waitFor(() => expect(onSendNow).not.toHaveBeenCalled());
+  });
+
+  it("leaves Steer available when the head task is dispatchable and permitted", () => {
+    renderQueue("running", false);
+
+    expect(screen.getAllByRole("button", { name: "Steer" })[0]!).not.toBeDisabled();
   });
 });

@@ -623,7 +623,7 @@
   "visibility": {
     "private": {
       "label": "개인",
-      "tooltip": "개인 · 본인과 워크스페이스 관리자만 이 에이전트를 사용할 수 있습니다"
+      "tooltip": "개인 · 소유자와 소유자가 허용한 사람만 이 에이전트를 실행할 수 있습니다"
     },
     "workspace": {
       "label": "워크스페이스",
@@ -714,10 +714,12 @@
     "details_provider": "제공자",
     "details_mode": "모드",
     "details_workdir": "작업 디렉터리",
+    "details_project_directory": "프로젝트 디렉터리",
     "details_created": "생성",
     "details_started": "시작",
     "details_completed": "완료",
     "copy_workdir": "작업 디렉터리 복사",
+    "copy_project_directory": "프로젝트 디렉터리 복사",
     "close": "닫기",
     "fact_created": "생성 {{time}}",
     "fact_took": "소요 {{duration}}",

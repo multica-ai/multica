@@ -12,20 +12,21 @@
 // This package lifts that classifier into the in-flight write path so the
 // stored failure_reason is already refined when the row is first
 // persisted, and so server / daemon / cloud share a single source of
-// truth for the canonical 22 values. PR1 of the Grafana board plan
+// truth for the canonical values. PR1 of the Grafana board plan
 // ([MUL-2946](https://multica/issues/MUL-2946)). Subsequent PRs use
 // AllReasons() to pre-warm the Prometheus failure_reason label set.
 //
-// The 22 canonical values fall into two groups:
+// The canonical values fall into two groups:
 //
-//   - 8 platform-side values (no `agent_error.` prefix) emitted by the
+//   - Platform-side values (no `agent_error.` prefix) emitted by the
 //     server-side sweepers and daemon classifiers when the failure is
 //     attributable to the platform/scheduler/runtime layer rather than
 //     anything the agent process did:
 //
-//     queued_expired, runtime_offline, runtime_recovery, timeout,
-//     iteration_limit, agent_blocked, api_invalid_request,
-//     skill_bundle_unavailable
+//     queued_expired, runtime_offline, runtime_reconnect_timeout,
+//     runtime_recovery, timeout, iteration_limit, agent_blocked,
+//     api_invalid_request, skill_bundle_unavailable,
+//     runtime_cli_timeout, invalid_task_identity
 //
 //   - 14 agent-side values (with `agent_error.` prefix) produced by
 //     Classify(rawError) when the agent process surfaced an error string.
@@ -33,9 +34,9 @@
 //
 // Wire stability: the string forms of these constants are persisted into
 // the database and surfaced as Prometheus labels. Renaming a value is a
-// breaking change. New values may be added — but only after the SQL
-// classifier in MUL-1949 grows a matching rule and a backfill migration
-// re-classifies historical rows.
+// breaking change. New classifier-derived values also require a matching SQL
+// backfill rule; new platform-side events may be added directly because no
+// historical rows need reclassification.
 package taskfailure
 
 import "strings"
@@ -48,7 +49,7 @@ type Reason string
 
 // agentErrorPrefix marks the 14 sub-reasons that originate inside the
 // agent process (provider error, runner crash, context overflow, etc.)
-// as opposed to the 8 platform-side reasons (queue expiry, runtime
+// as opposed to the platform-side reasons (queue expiry, runtime
 // offline, sweeper timeout, etc.). IsAgentError uses this prefix so
 // callers don't have to enumerate the agent-side reasons by hand.
 const agentErrorPrefix = "agent_error."
@@ -70,6 +71,12 @@ const (
 	// ReasonRuntimeOffline: the runtime owning a dispatched/running
 	// task went offline. Written by FailTasksForOfflineRuntimes.
 	ReasonRuntimeOffline Reason = "runtime_offline"
+
+	// ReasonRuntimeReconnectTimeout: a retry waiting for an offline runtime
+	// remained deferred for the full reconnect grace. Non-retryable: the
+	// runtime must return before a user starts another attempt. Written by
+	// FailExpiredRuntimeReconnectRetries.
+	ReasonRuntimeReconnectTimeout Reason = "runtime_reconnect_timeout"
 
 	// ReasonRuntimeRecovery: the daemon restarted while the task was
 	// in flight; the prior session is unrecoverable. Written by
@@ -110,6 +117,26 @@ const (
 	// converge instead of re-downloading the whole set. Written by
 	// taskRunFailureReason in daemon/daemon.go.
 	ReasonSkillBundleUnavailable Reason = "skill_bundle_unavailable"
+
+	// ReasonRuntimeCLITimeout: a local runtime CLI the daemon must call
+	// during task preparation did not answer within its deadline — today
+	// that is OpenClaw config discovery (`openclaw config file`), which on
+	// a slow host takes 8-11s against a deadline that used to be 5s
+	// (#7112). Platform-side: the agent process was never launched and no
+	// provider was contacted. Deliberately NOT retryable — the stall is
+	// local and deterministic, so retrying re-pays the same wall-clock and
+	// fails identically. The user-facing fix is to raise
+	// MULTICA_OPENCLAW_CLI_TIMEOUT or speed the CLI up, which is why the
+	// copy names the CLI instead of blaming the network. Written by
+	// taskRunFailureReason in daemon/daemon.go.
+	ReasonRuntimeCLITimeout Reason = "runtime_cli_timeout"
+
+	// ReasonInvalidTaskIdentity: the daemon refused a claimed task because
+	// the task row's authoritative agent_id was absent or disagreed with the
+	// nested agent payload. The agent process is never launched. This is
+	// deliberately non-retryable: retrying the same contradictory claim would
+	// only repeat an isolation failure.
+	ReasonInvalidTaskIdentity Reason = "invalid_task_identity"
 
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
@@ -186,7 +213,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 22 reasons. Order is
+// allReasons is the canonical ordered list of the 25 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -199,12 +226,15 @@ var allReasons = []Reason{
 	// Platform / scheduler side.
 	ReasonQueuedExpired,
 	ReasonRuntimeOffline,
+	ReasonRuntimeReconnectTimeout,
 	ReasonRuntimeRecovery,
 	ReasonTimeout,
 	ReasonIterationLimit,
 	ReasonAgentBlocked,
 	ReasonAPIInvalidRequest,
 	ReasonSkillBundleUnavailable,
+	ReasonRuntimeCLITimeout,
+	ReasonInvalidTaskIdentity,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,
@@ -244,7 +274,7 @@ func (r Reason) IsAgentError() bool {
 	return strings.HasPrefix(string(r), agentErrorPrefix)
 }
 
-// AllReasons returns the canonical 22 reasons in a stable order. The
+// AllReasons returns the canonical reasons in a stable order. The
 // caller MUST NOT mutate the returned slice; a copy is returned so
 // concurrent callers can append to their local copy without corrupting
 // the package-level fixture.

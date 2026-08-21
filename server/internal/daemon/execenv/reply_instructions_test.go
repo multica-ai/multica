@@ -204,26 +204,27 @@ func TestInjectRuntimeConfigKeepsTriggerCommentOutOfBrief(t *testing.T) {
 		t.Errorf("CLAUDE.md must not carry the trigger comment id (MUL-5377)\n---\n%s", s)
 	}
 	for _, want := range []string{
-		// MUL-5442 stage 1: the mode-router paragraph compressed to a
-		// "Turn mode." lead. Pin every routing RULE, not just the markers —
-		// a further compression that drops the one-block rule or the
-		// no-mode-line fallback must fail here (stage-1 review).
-		"**Turn mode.**",
-		"Steps 1–5 are shared",
-		"apply exactly one mode block",
-		"differ on issue status",
-		// The full fallback MAPPING, not its halves: "No mode line" and
-		// "Reply mode" pinned separately could both pass while the text
-		// says "No mode line → Ownership mode" (final-review catch).
-		"No mode line → Reply mode",
-		"do not change the issue status",
-		"`Turn mode: Reply.`",
-		"`Turn mode: Ownership.`",
-		"Use the `--parent` value the per-turn user message gives you for this turn",
-		"do NOT reuse a `--parent` from an earlier turn in this session",
+		// MUL-6417 retired the turn-mode router: one workflow, delivery
+		// routed on what the per-turn message carries. Pin the routing RULE
+		// halves — a compression that drops either delivery case must fail
+		// here.
+		"**Every issue turn runs the same workflow.**",
+		"with the `--parent` value it gives you for THIS turn",
+		"never one from an earlier turn",
+		"With no triggering comment, post a new top-level comment",
+		// The no-write default that makes the un-routed workflow safe: a
+		// turn that moved nothing writes nothing (MUL-6300 → MUL-6417).
+		"questions, discussion, and acknowledgements never touch status",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("CLAUDE.md missing %q\n---\n%s", want, s)
+		}
+	}
+
+	// The retired router must not come back in any phrasing.
+	for _, banned := range []string{"Turn mode", "mode block", "No mode line"} {
+		if strings.Contains(s, banned) {
+			t.Errorf("CLAUDE.md still carries retired mode-router text %q (MUL-6417)\n---\n%s", banned, s)
 		}
 	}
 }

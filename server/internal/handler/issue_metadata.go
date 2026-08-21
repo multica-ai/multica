@@ -188,10 +188,11 @@ func (h *Handler) SetIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	metadata := parseIssueMetadata(updated.Metadata)
 	h.publish(protocol.EventIssueMetadataChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id": uuidToString(updated.ID),
-		"metadata": metadata,
+		"issue_id":       uuidToString(updated.ID),
+		"metadata":       metadata,
+		"issue_revision": updated.Revision,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"metadata": metadata})
+	writeJSON(w, http.StatusOK, map[string]any{"metadata": metadata, "issue_revision": updated.Revision})
 }
 
 func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request) {
@@ -230,8 +231,9 @@ func (h *Handler) DeleteIssueMetadataKey(w http.ResponseWriter, r *http.Request)
 	actorType, actorID := h.resolveActor(r, userID, workspaceID)
 	metadata := parseIssueMetadata(updated.Metadata)
 	h.publish(protocol.EventIssueMetadataChanged, workspaceID, actorType, actorID, map[string]any{
-		"issue_id": uuidToString(updated.ID),
-		"metadata": metadata,
+		"issue_id":       uuidToString(updated.ID),
+		"metadata":       metadata,
+		"issue_revision": updated.Revision,
 	})
-	writeJSON(w, http.StatusOK, map[string]any{"metadata": metadata})
+	writeJSON(w, http.StatusOK, map[string]any{"metadata": metadata, "issue_revision": updated.Revision})
 }

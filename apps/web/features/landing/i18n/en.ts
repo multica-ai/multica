@@ -101,7 +101,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       label: "RUNTIMES",
       title: "One dashboard for all your compute",
       description:
-        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 22 supported coding tools on your machine.",
+        "Local daemons and cloud runtimes, managed from a single panel. Real-time monitoring of online/offline status, usage charts, and activity heatmaps. Auto-detects 23 supported coding tools on your machine.",
       cards: [
         {
           title: "Unified runtime panel",
@@ -116,7 +116,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
         {
           title: "Auto-detection on first run",
           description:
-            "Multica scans for 22 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI \u2014 and registers a runtime for each one it finds.",
+            "Multica scans for 23 supported coding tools \u2014 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI \u2014 and registers a runtime for each one it finds.",
         },
       ],
     },
@@ -136,7 +136,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         title: "Install the CLI & connect your machine",
         description:
-          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 22 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
+          "Run multica setup \u2014 it walks you through OAuth, starts the daemon, and scans for the 23 supported coding tools (Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI). Whichever ones you already have installed get registered as runtimes automatically.",
       },
       {
         title: "Create your first agent",
@@ -192,7 +192,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
       {
         question: "What coding agents does Multica support?",
         answer:
-          "Multica supports 22 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
+          "Multica supports 23 coding tools out of the box: Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, and Trae CLI. The daemon auto-detects whichever CLIs you already have installed and registers a runtime for each one. Since it's open source, you can also add your own backends.",
       },
       {
         question: "Do I need to self-host, or is there a cloud version?",
@@ -294,6 +294,126 @@ export function createEnDict(allowSignup: boolean): LandingDict {
     },
     entries: [
       {
+        version: "0.4.31",
+        date: "2026-08-20",
+        title: "Run confirmation before leaving backlog, Webhook event filters, and Windows build fixes",
+        changes: [],
+        improvements: [
+          "The web Help menu now makes the desktop app easier to find.",
+          "You can confirm an agent run before moving an assigned Issue out of backlog.",
+          "Webhook event filters are easier to add and remove.",
+          "The / picker now ranks exact skill matches first.",
+        ],
+        fixes: [
+          "Windows command-line builds now create correctly named executables.",
+          "Agents can still load skills after a brief connection drop.",
+          "Run now no longer exposes internal error details.",
+          "Agent updates stay responsive in busy workspaces.",
+        ],
+      },
+      {
+        version: "0.4.30",
+        date: "2026-08-19",
+        title: "Safer Issue editing, empty-property filters, and clearer agent identity",
+        changes: [],
+        features: [
+          "You can see which agent is handling each chat session.",
+          "Workspace admins can see linked DingTalk identities.",
+          "You can filter Issues by custom properties that have no value.",
+          "When an Issue or comment changes while you edit it, you can compare both versions before saving.",
+        ],
+        improvements: [
+          "The command palette now includes every workspace page.",
+          "Chat sessions now resume faster.",
+          "Issue activity times now reflect meaningful updates.",
+        ],
+        fixes: [
+          "Private agents can only be invoked by their owners.",
+          "Agent workspaces stay isolated when tasks run at the same time.",
+          "Provider command logs no longer expose credentials or prompts.",
+          "Posting a comment no longer reports a false send failure.",
+          "A dependency security vulnerability has been fixed.",
+        ],
+      },
+      {
+        version: "0.4.29",
+        date: "2026-08-18",
+        title: "MiniMax Code, cleaner run transcripts, and Hermes agent fixes",
+        changes: [],
+        features: [
+          "You can now run agents with MiniMax Code.",
+          "Press Cmd/Ctrl+, to open Settings in a new desktop tab.",
+        ],
+        improvements: [
+          "Hermes agent runs now show tools while they are working.",
+          "Agent transcripts are easier to scan without repeated names.",
+        ],
+        fixes: [
+          "Tasks keep running through brief runtime connection drops.",
+          "Daily and weekly cost charts now include cache-read costs.",
+          "Files and audio sent directly in Feishu now reach your agent.",
+          "Failed delegated work now returns to the coordinating agent.",
+          "Downloads now show the newest complete release.",
+        ],
+      },
+      {
+        version: "0.4.28",
+        date: "2026-08-17",
+        title:
+          "Member custom fields, bulk skill updates, and a clearer desktop update prompt",
+        changes: [],
+        features: [
+          "You can now put workspace members in a custom field, one or several.",
+          "Selected skills can now be updated from their source all at once.",
+        ],
+        improvements: [
+          "The desktop update prompt now links to what changed in that version.",
+          "The command line now accepts a member's email wherever an assignee is expected.",
+        ],
+        fixes: [
+          "Opening a new tab in the desktop app no longer loses your workspace.",
+          "Member filters now show names and avatars instead of a bare count.",
+        ],
+      },
+      {
+        version: "0.4.27",
+        date: "2026-08-17",
+        title:
+          "Workspace MCP servers, share-link invites, and a rebuilt transcript",
+        changes: [],
+        features: [
+          "You can now set up MCP servers once for a workspace and hand them to individual agents.",
+          "You can now create a share link that lets someone join your workspace directly.",
+          "The transcript now reads as steps, with a two-lane timeline and an outcome summary.",
+          "Files sent in Slack now arrive in the conversation as attachments.",
+          "You can now add Multica to your phone's home screen and open it like an app.",
+          "Browser tabs are now named after the workspace page you have open.",
+          "Imported skills now show where they came from.",
+          "A mention of the Issue you are reading now reads as \"This issue\".",
+        ],
+        improvements: [
+          "An agent whose CLI cannot run now goes offline and tells you the command that fixes it.",
+          "Typing an Issue identifier now brings up the mention far faster.",
+          "Channel messages no longer duplicate or drop out across multiple servers.",
+          "Workspace invitations can no longer be sent in floods.",
+          "The editor's floating toolbar is now readable by screen readers.",
+        ],
+        fixes: [
+          "Reopening the desktop app after a failed start no longer makes you sign in again.",
+          "Deleting your last workspace no longer leaves the desktop app blank.",
+          "A Pi task that ends its turn on an error now fails instead of hanging.",
+          "The Antigravity model list now loads.",
+          "HTML attachments now return to where you were reading after a tab switch.",
+          "Custom runtimes now receive their fixed arguments in the order you wrote them.",
+          "Cancelling a drag mid-way no longer locks the board.",
+          "Quick capture now works on mobile web.",
+          "Page headers no longer show a second sidebar toggle.",
+          "Creating an agent no longer flashes an error.",
+          "Hovering a bar in the run timeline no longer makes it shake.",
+          "A self-hosted upgrade that gets interrupted now carries on safely when you run it again.",
+        ],
+      },
+      {
         version: "0.4.26",
         date: "2026-08-14",
         title:
@@ -327,6 +447,7 @@ export function createEnDict(allowSignup: boolean): LandingDict {
           "Parallel local-folder mode, per-group DingTalk routing, and one-click skill updates",
         changes: [],
         features: [
+          "Your agents can now live in Telegram — DM them or @-mention them in a group or forum topic.",
           "A local folder can now run tasks in parallel, each delivering its own branch.",
           "One DingTalk bot can now serve each group with its own agent.",
           "Imported skills can now be updated from their source in one click.",

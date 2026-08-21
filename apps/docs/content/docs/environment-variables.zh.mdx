@@ -23,7 +23,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 还需要选择一种邮件服务，否则验证码和邀请只会写入服务端日志。
 
 <Callout type="warning">
-不要在生产环境使用默认的 `JWT_SECRET`，也不要设置 `MULTICA_DEV_VERIFICATION_CODE`。
+`JWT_SECRET` 在生产环境为必填：当 `APP_ENV=production` 时，后端会在密钥为空或等于已知占位值时拒绝启动（用 `openssl rand -hex 32` 生成）。也不要在生产环境设置 `MULTICA_DEV_VERIFICATION_CODE`。
 </Callout>
 
 ## API 与数据库
@@ -34,11 +34,12 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_MAX_CONNS` | `25` | 单个 API 进程的最大数据库连接数 |
 | `DATABASE_MIN_CONNS` | `5` | 单个 API 进程保留的最小连接数 |
 | `PORT` | `8080` | API 监听端口 |
-| `JWT_SECRET` | 开发用固定值 | 登录 JWT、部分签名流程使用的密钥 |
+| `JWT_SECRET` | 生产环境必填 | 登录 JWT、部分签名流程使用的密钥；生产环境对空值或已知占位值拒绝启动 |
 | `APP_ENV` | 空 | 生产环境设为 `production` |
 | `AUTH_TOKEN_TTL` | `720h`（30 天） | 浏览器 JWT 与 cookie 有效期；接受 Go duration 或正整数秒数 |
 | `LOG_LEVEL` | 应用默认 | 日志级别 |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 收到终止信号后，开始优雅退出前等待多久 |
+| `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | 运行时离线后可重新连接且不终止在途 task 的宽限时间；低于 `150s` 时按 `150s` 处理 |
 
 在 Kubernetes 中设置 shutdown hold 时，`terminationGracePeriodSeconds` 要大于 hold 与实际退出所需时间之和。
 
@@ -166,6 +167,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | 与 App ID 配套的完整 PEM 私钥，用途同上 |
 | 飞书 | `MULTICA_LARK_SECRET_KEY` | base64 编码的 32 字节凭据加密密钥 |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 编码的 32 字节 token 加密密钥 |
+| Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 编码的 32 字节 Bot token 加密密钥 |
 | Composio | `COMPOSIO_API_KEY` | 启用 Composio 工具连接 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | 回调 API 地址；可回退到 `MULTICA_PUBLIC_URL` |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state 签名密钥；可从 `JWT_SECRET` 派生 |
@@ -174,7 +176,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 
 不配置 `GITHUB_APP_ID` 和私钥时，PR 仍会正常关联、镜像和触发合并转 done，但卡片上不显示 CI 与可合并状态，"从 GitHub 选择"仓库入口也会禁用。
 
-配置步骤见 [GitHub 集成](/github-integration#自托管配置)、[飞书 Bot](/lark-bot-integration#自托管配置)和 [Slack Bot](/slack-bot-integration#自托管配置)。
+配置步骤见 [GitHub 集成](/github-integration#自托管配置)、[飞书 Bot](/lark-bot-integration#自托管配置)、[Slack Bot](/slack-bot-integration#自托管配置)和 [Telegram Bot](/telegram-bot-integration#自托管配置)。
 
 ## 服务端 LLM
 
@@ -185,8 +187,20 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `MULTICA_LLM_API_KEY` | 空 | OpenAI 兼容 API key |
 | `MULTICA_LLM_BASE_URL` | 空 | OpenAI 兼容 endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | 请求未指定模型时使用 |
+| `MULTICA_LLM_MAX_RETRIES` | `2` | 单次调用的重试上限；`0` 表示禁用重试，`1`–`5` 表示最多重试 N 次 |
 
-API key 与 base URL 都为空时，服务端 LLM 生成关闭，调用方会使用本地回退逻辑。
+`MULTICA_LLM_MAX_RETRIES` 是重试策略的唯一配置源。不设置时使用默认的 2 次；设为 `0` 表示每次调用只发一个请求；设为 1–5 表示最多重试这么多次。它是上限而不是配额：只有可重试的失败才会消耗它，请求成功或调用方自身的超时都会让调用提前结束。其它取值（负数、非数字、大于 5）会让服务启动失败，而不是被静默纠正。上限是一个延迟预算：退避从 0.5s 开始翻倍，上限 8s，更大的预算会超出调用方自身的超时，把可重试的失败变成超时失败。重试覆盖连接失败以及 HTTP 408、409、429 和 5xx；其余 4xx 直接返回。服务启动时会以 `llm retry policy` 打印生效策略，其中不包含任何凭据。
+
+有两个功能会使用这一层，它们都会把聊天内容发送到你配置的 endpoint：
+
+- **对话标题自动生成** —— 发送新对话中用户的第一条消息，原文发送。附件不会包含在内。
+- **后续提问建议**（智能体回复下方的按钮）—— 发送对话末尾的内容：最多 6 条消息，其中被追问的那条回复上限 3000 字符，更早的每条上限 800 字符。
+
+API key 与 base URL 都为空时，这一层关闭，不会发出任何上游请求——上面两个功能都不再发送内容。如果你的政策不允许这一层把聊天内容发到部署之外，这就是受支持的配置方式：对话继续使用客户端根据第一条消息生成的标题，后续提问按钮不再出现，其余功能不受影响。
+
+<Callout type="info">
+这只覆盖辅助生成这一层。智能体执行是另一条数据路径：智能体回复对话时，由你的守护进程调用该智能体的 AI 编程工具，用的是那个工具自己的凭据，守护进程不会把上面的 `MULTICA_LLM_*` 配置传给它。（智能体自身需要的任务级 Multica 连接变量由守护进程单独注入。）把上面的变量留空不影响这条路径——它由智能体的运行时配置决定。
+</Callout>
 
 ## 守护进程配置
 
@@ -214,7 +228,7 @@ API key 与 base URL 都为空时，服务端 LLM 生成关闭，调用方会使
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | 仅适用于 Linux/macOS。私有 task 临时目录的父目录；必须是现有、可写的绝对路径，无效值会使 task 启动失败，不会回退到 `/tmp`。请选择较短的路径——子工具可能会在其中绑定 AF_UNIX socket；Linux 的 `sun_path` 上限为 108 字节，macOS 为 104 字节 |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | 保留执行任务目录用于调试 |
 
-各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 和 `MULTICA_<PROVIDER>_MODEL` 覆盖命令路径与默认模型。QwenPaw 是例外：它没有 `MULTICA_QWENPAW_MODEL`，因为 Multica 不会向它传模型，详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
+各 AI 编程工具可以使用 `MULTICA_<PROVIDER>_PATH` 覆盖命令路径；支持模型覆盖的工具还可以使用 `MULTICA_<PROVIDER>_MODEL`。QwenPaw 和 MiniMax Code 没有模型变量，因为 Multica 不会向它们传模型；MiniMax Code 的路径变量是 `MULTICA_MCODE_PATH`。详见 [AI 编程工具对比](/providers#模型来源)。DeepSeek Harness 支持 `MULTICA_DSH_PATH` 和 `MULTICA_DSH_MODEL`（取值为 dsh 模型目录中的模型 id，例如 `deepseek-official/deepseek-chat`）。全机默认参数 `MULTICA_<PROVIDER>_ARGS` 目前支持 Claude Code、Codex、CodeBuddy、Qwen Code 和 QwenPaw 五款工具。对应变量是 `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS` 和 `MULTICA_QWENPAW_ARGS`。例如：
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

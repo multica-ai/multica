@@ -81,6 +81,10 @@
       "trialing": "체험 중",
       "past_due": "결제 연체",
       "canceled": "취소됨",
+      "incomplete": "미완료",
+      "incomplete_expired": "설정 만료",
+      "paused": "일시 중지됨",
+      "unpaid": "미결제",
       "unknown": "알 수 없는 상태"
     },
     "load_failed": {
@@ -89,6 +93,7 @@
     },
     "actions": {
       "retry": "다시 시도",
+      "retry_autopilots": "자동화 사용량 다시 시도",
       "upgrade": "Pro로 업그레이드",
       "manage": "결제 관리",
       "refresh_seats": "좌석 새로고침",
@@ -121,7 +126,23 @@
     },
     "past_due": {
       "title": "결제 정보를 확인해야 합니다",
-      "description": "Pro 이용을 유지하려면 Billing Portal에서 결제 수단을 업데이트하세요."
+      "description": "Billing Portal에서 결제 수단을 업데이트하세요. 위의 요금제 배지는 현재 이용 가능한 액세스를 표시합니다.",
+      "grace_description": "Pro 이용을 유지하려면 {{date}}까지 결제 수단을 업데이트하세요."
+    },
+    "subscription_notice": {
+      "canceling_title": "구독 취소가 예정되어 있습니다",
+      "canceling_description": "이 구독은 {{date}}에 취소될 예정입니다. 위의 플랜 배지는 현재 적용 중인 액세스를 표시합니다.",
+      "canceling_description_without_date": "이 구독은 현재 결제 기간 종료 시 취소될 예정입니다.",
+      "incomplete_title": "구독 설정이 완료되지 않았습니다",
+      "incomplete_description": "결제 관리를 열어 결제 설정을 완료하거나 확인하세요.",
+      "incomplete_expired_title": "구독 설정이 만료되었습니다",
+      "incomplete_expired_description": "이전 결제 설정은 Pro를 활성화하지 못한 채 만료되었습니다. 필요할 때 다시 업그레이드하세요.",
+      "paused_title": "구독이 일시 중지되었습니다",
+      "paused_description": "결제 관리를 열어 일시 중지 상태와 복구 방법을 확인하세요.",
+      "unpaid_title": "구독이 미결제 상태입니다",
+      "unpaid_description": "결제 관리를 열어 미결제 잔액을 해결하세요.",
+      "canceled_title": "구독이 취소되었습니다",
+      "canceled_description": "위 요금제 배지는 이 워크스페이스에 현재 적용되는 요금제를 보여 줍니다."
     },
     "read_only": {
       "title": "결제 정보 읽기 전용",
@@ -134,6 +155,8 @@
       "members": "사용자 좌석",
       "members_description": "에이전트와 대기 중인 초대는 좌석에 포함되지 않습니다.",
       "member_count_other": "멤버 {{count}}명",
+      "billing_interval": "결제 주기",
+      "billing_interval_description": "활성 구독에 저장된 결제 주기입니다.",
       "period_end": "현재 결제 기간 종료일",
       "period_end_description": "현재 구독 정보에 보고된 날짜입니다."
     },
@@ -159,19 +182,40 @@
     },
     "limits": {
       "title": "사용량 및 한도",
-      "description": "서버가 아직 제공하지 않는 사용량을 0으로 표시하지 않고 현재 한도만 보여 줍니다.",
+      "description": "한도는 현재 entitlement에서, 자동화 사용량은 서버 쿼터 집계에서 가져옵니다.",
       "issues": "최근 태스크",
       "issues_description": "Free에서는 최근 활성 태스크를 이용할 수 있습니다. Pro에는 범위 제한이 없습니다.",
       "autopilots": "성공한 자동화",
       "autopilots_description": "Free 한도는 UTC 기준 매월 초기화됩니다. Pro는 무제한입니다.",
       "unlimited": "무제한",
-      "per_month": "월 {{count}}회"
+      "unavailable": "사용할 수 없음",
+      "per_month": "월 {{count}}회",
+      "usage_loading": "자동화 사용량 불러오는 중",
+      "usage_label": "자동화 쿼터 사용량",
+      "current_usage": "현재 사용량",
+      "reached": "한도 도달",
+      "usage_total": "{{total}} / {{limit}}",
+      "usage_breakdown": "완료 {{used}} · 진행 중 {{reserved}}",
+      "resets_at": "{{date}}에 초기화",
+      "usage_unavailable": "사용량을 일시적으로 불러올 수 없습니다"
     },
     "seats": {
       "title": "좌석",
       "description": "현재 사용자 멤버 한 명당 Pro 좌석 하나로 계산됩니다. 에이전트와 대기 중인 초대는 포함되지 않습니다.",
       "human_members": "현재 사용자 멤버",
       "human_members_description": "멤버 변경 후 새로고침하면 Cloud Billing이 Stripe quantity를 조정합니다.",
+      "billed": "결제 좌석",
+      "billed_description": "Stripe 결제에 현재 저장된 좌석 수입니다.",
+      "pending": "예정 좌석 수",
+      "pending_description": "Cloud Billing이 다음 결제 기간에 대해 보고한 더 적은 좌석 수입니다.",
+      "seat_count_other": "좌석 {{count}}개",
+      "pending_with_date_other": "{{date}}부터 좌석 {{count}}개",
+      "none_pending": "예정된 변경 없음",
+      "not_subscribed": "활성 구독 없음",
+      "unavailable": "사용할 수 없음",
+      "summary_loading": "구독 좌석 상세 정보 불러오는 중",
+      "summary_unavailable_title": "일부 좌석 상세 정보를 불러올 수 없습니다",
+      "summary_unavailable_description": "현재 요금제는 계속 표시되지만 결제 좌석과 예정 좌석 수를 불러오지 못했습니다.",
       "updated": "좌석 새로고침됨",
       "reconciled": "현재 멤버: {{actual}} · 결제 좌석: {{billed}}"
     },

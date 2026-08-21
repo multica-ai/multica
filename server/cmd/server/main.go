@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -13,16 +14,19 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/multica-ai/multica/server/internal/analytics"
+	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/daemonws"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
+	"github.com/multica-ai/multica/server/internal/profiling"
 	"github.com/multica-ai/multica/server/internal/realtime"
 	"github.com/multica-ai/multica/server/internal/scheduler"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/featureflag"
+	"github.com/multica-ai/multica/server/pkg/llm"
 	"github.com/redis/go-redis/v9"
 )
 
@@ -58,6 +62,13 @@ func channelLeaseRedisURLFromEnv() string {
 	return strings.TrimSpace(os.Getenv("REDIS_URL"))
 }
 
+func realtimeRelayRedisURLFromEnv() string {
+	if dedicated := strings.TrimSpace(os.Getenv("REALTIME_RELAY_REDIS_URL")); dedicated != "" {
+		return dedicated
+	}
+	return strings.TrimSpace(os.Getenv("REDIS_URL"))
+}
+
 func closeRedisClient(label string, client *redis.Client) {
 	if client == nil {
 		return
@@ -74,7 +85,15 @@ func shardedRelayConfigFromEnv() realtime.ShardedStreamRelayConfig {
 	cfg.ReadCount = envPositiveInt64("REALTIME_RELAY_XREAD_COUNT", cfg.ReadCount)
 	cfg.ReadBlock = envDuration("REALTIME_RELAY_XREAD_BLOCK", cfg.ReadBlock)
 	cfg.ReplayGrace = envDuration("REALTIME_RELAY_REPLAY_GRACE", cfg.ReplayGrace)
-	return cfg
+	cfg.TrimHorizon = envDuration("REALTIME_RELAY_TRIM_HORIZON", 2*cfg.ReplayGrace)
+	cfg.StreamTTL = envDuration("REALTIME_RELAY_STREAM_TTL", cfg.TrimHorizon+cfg.ReplayGrace)
+	cfg.TTLRefreshInterval = envDuration("REALTIME_RELAY_TTL_REFRESH_INTERVAL", cfg.TTLRefreshInterval)
+	cfg.MaintenanceInterval = envDuration("REALTIME_RELAY_MAINTENANCE_INTERVAL", cfg.MaintenanceInterval)
+	cfg.StreamTTLEnabled = envBool("REALTIME_RELAY_STREAM_TTL_ENABLED", false)
+	if err := cfg.Validate(); err != nil {
+		slog.Warn("invalid realtime relay retention config; normalizing to safe values", "error", err)
+	}
+	return cfg.Normalized()
 }
 
 func realtimeRelayModeFromEnv() string {
@@ -116,6 +135,46 @@ func envNonNegativeInt(name string, def int) int {
 		return def
 	}
 	return v
+}
+
+// maxLLMRetriesLimit caps MULTICA_LLM_MAX_RETRIES. The ceiling is a latency
+// budget, not a taste call: SDK backoff is 0.5s doubling to an 8s cap, so 6
+// retries spend ~21s and 10 spend ~48s sleeping before the last attempt. Every
+// internal caller of pkg/llm runs under a far tighter deadline (8s for chat
+// quick actions, 20s for title generation), so a budget past 5 cannot finish —
+// it only converts a retryable upstream failure into a deadline-exceeded one.
+const maxLLMRetriesLimit = 5
+
+// parseLLMMaxRetries turns the raw MULTICA_LLM_MAX_RETRIES value into the
+// tri-state llm.Config.MaxRetries expects: nil for unset (use the default),
+// llm.Retries(0) to disable retries, llm.Retries(N) for a ceiling of N.
+//
+// Unlike the envFooInt helpers above it returns an error instead of warning and
+// falling back to a default. A retry budget silently corrected to something the
+// operator did not ask for is the failure this knob exists to remove
+// (MUL-6364): a typo'd "3x" or a negative must stop the boot, not quietly
+// restore the default and look configured.
+func parseLLMMaxRetries(raw string) (*llm.RetryOverride, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return nil, nil
+	}
+	v, err := strconv.Atoi(raw)
+	if err != nil {
+		return nil, fmt.Errorf("must be an integer, got %q", raw)
+	}
+	if v > maxLLMRetriesLimit {
+		return nil, fmt.Errorf("must be at most %d, got %d", maxLLMRetriesLimit, v)
+	}
+	// llm.Retries owns the lower bound. It is the boundary that makes a negative
+	// budget unrepresentable, and this is the only place the server builds one,
+	// so the deployment-specific ceiling above and the type-level floor here
+	// cannot disagree.
+	override, err := llm.Retries(v)
+	if err != nil {
+		return nil, fmt.Errorf("must not be negative, got %d (use 0 to disable retries)", v)
+	}
+	return override, nil
 }
 
 func envPositiveInt64(name string, def int64) int64 {
@@ -196,12 +255,33 @@ func backgroundServices(h *handler.Handler) (*service.TaskService, *service.Auto
 	return h.TaskService, h.AutopilotService
 }
 
+// jwtSecretBootError returns a non-nil error when the combination of
+// JWT_SECRET and APP_ENV is unsafe to boot with: production must never run
+// on an empty or publicly-known default secret (auth.ValidateJWTSecret).
+// Non-production keeps the historical dev fallback (see auth.JWTSecret)
+// and only warns.
+func jwtSecretBootError(jwtSecret, appEnv string) error {
+	isProduction := strings.EqualFold(strings.TrimSpace(appEnv), "production")
+	if !isProduction {
+		return nil
+	}
+	return auth.ValidateJWTSecret(jwtSecret)
+}
+
 func main() {
 	logger.Init()
 
 	// Warn about missing configuration
+	if err := jwtSecretBootError(os.Getenv("JWT_SECRET"), os.Getenv("APP_ENV")); err != nil {
+		slog.Error(
+			"refusing to start: "+err.Error()+
+				"; generate a strong secret with `openssl rand -hex 32` and set JWT_SECRET (see .env.example)",
+			"app_env", os.Getenv("APP_ENV"),
+		)
+		os.Exit(1)
+	}
 	if os.Getenv("JWT_SECRET") == "" {
-		slog.Warn("JWT_SECRET is not set — using insecure default. Set JWT_SECRET for production use.")
+		slog.Warn("JWT_SECRET is not set — using insecure dev default (allowed only because APP_ENV is not production).")
 	}
 	if os.Getenv("RESEND_API_KEY") == "" && strings.TrimSpace(os.Getenv("SMTP_HOST")) == "" {
 		slog.Warn("no email backend configured (RESEND_API_KEY and SMTP_HOST both empty) — verification codes will be printed to the log instead of emailed.")
@@ -295,15 +375,23 @@ func main() {
 		closeRedisClient("channel-lease", channelLeaseRedis)
 		closeRedisClient("store", storeRedis)
 	}()
-	if redisURL := os.Getenv("REDIS_URL"); redisURL != "" {
-		opts, err := redis.ParseURL(redisURL)
-		if err != nil {
-			slog.Error("invalid REDIS_URL — falling back to in-memory hub", "error", err)
+	sharedRedisURL := strings.TrimSpace(os.Getenv("REDIS_URL"))
+	relayRedisURL := realtimeRelayRedisURLFromEnv()
+	if (sharedRedisURL != "" || relayRedisURL != "") && envBool("REDIS_DISABLE_CLIENT_NAME", false) {
+		slog.Info("redis: CLIENT SETNAME disabled (REDIS_DISABLE_CLIENT_NAME=true) for managed Redis compatibility")
+	}
+	if sharedRedisURL != "" {
+		if opts, err := redis.ParseURL(sharedRedisURL); err != nil {
+			slog.Error("invalid REDIS_URL — request-path Redis features disabled", "error", err)
 		} else {
-			if envBool("REDIS_DISABLE_CLIENT_NAME", false) {
-				slog.Info("redis: CLIENT SETNAME disabled (REDIS_DISABLE_CLIENT_NAME=true) for managed Redis compatibility")
-			}
 			storeRedis = newNamedRedisClient(opts, "store")
+		}
+	}
+	if relayRedisURL != "" {
+		opts, err := redis.ParseURL(relayRedisURL)
+		if err != nil {
+			slog.Error("invalid realtime relay Redis URL — falling back to in-memory hub", "error", err)
+		} else {
 			relayWriteRedis = newNamedRedisClient(opts, "realtime-write")
 
 			relayMode := realtimeRelayModeFromEnv()
@@ -311,14 +399,14 @@ func main() {
 			switch relayMode {
 			case "legacy":
 				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
-				relay = realtime.NewRedisRelayWithClients(hub, relayWriteRedis, relayReadRedis)
+				relay = realtime.NewRedisRelayWithClientsAndConfig(hub, relayWriteRedis, relayReadRedis, relayConfig.RetentionConfig())
 				slog.Info("daemon websocket wakeup: Redis fanout disabled in legacy realtime relay mode")
 			case "dual":
 				shardedReadRedis = newNamedRedisClient(opts, "realtime-read-sharded")
 				legacyReadRedis = newNamedRedisClient(opts, "realtime-read-legacy")
 				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, shardedReadRedis, relayConfig)
 				sharded.SetDaemonRuntimeDeliverer(daemonHub)
-				legacy := realtime.NewRedisRelayWithClients(hub, relayWriteRedis, legacyReadRedis)
+				legacy := realtime.NewRedisRelayWithClientsAndConfig(hub, relayWriteRedis, legacyReadRedis, relayConfig.RetentionConfig())
 				relay = realtime.NewMirroredRelay(sharded, legacy)
 				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
 			default:
@@ -330,21 +418,30 @@ func main() {
 			}
 			relay.Start(relayCtx)
 			broadcaster = realtime.NewDualWriteBroadcaster(hub, relay)
+			storePoolSize := 0
+			if storeRedis != nil {
+				storePoolSize = storeRedis.Options().PoolSize
+			}
 			slog.Info(
 				"realtime: Redis relay enabled",
 				"node_id", relay.NodeID(),
 				"mode", relayMode,
+				"dedicated_instance", strings.TrimSpace(os.Getenv("REALTIME_RELAY_REDIS_URL")) != "",
 				"shards", relayConfig.Shards,
 				"stream_max_len", relayConfig.StreamMaxLen,
+				"replay_grace", relayConfig.ReplayGrace.String(),
+				"trim_horizon", relayConfig.TrimHorizon.String(),
+				"stream_ttl", relayConfig.StreamTTL.String(),
+				"stream_ttl_enabled", relayConfig.StreamTTLEnabled,
 				"xread_count", relayConfig.ReadCount,
 				"xread_block", relayConfig.ReadBlock.String(),
-				"store_pool_size", opts.PoolSize,
+				"store_pool_size", storePoolSize,
 				"realtime_write_pool_size", opts.PoolSize,
 				"realtime_read_pool_size", opts.PoolSize,
 			)
 		}
 	} else {
-		slog.Info("realtime: REDIS_URL not set — using in-memory hub (single-node mode)")
+		slog.Info("realtime: REDIS_URL and REALTIME_RELAY_REDIS_URL are unset — using in-memory hub (single-node mode)")
 	}
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("CHANNEL_WS_LEASE_BACKEND")), "redis") {
 		leaseRedisURL := channelLeaseRedisURLFromEnv()
@@ -431,6 +528,15 @@ func main() {
 	// shutdown so any pending bumps are flushed before we exit.
 	heartbeatScheduler := handler.NewBatchedHeartbeatScheduler(queries, handler.DefaultHeartbeatBatchInterval)
 
+	// Validate the LLM retry budget before the router exists: an operator who
+	// typed a value we cannot honor should see the boot stop, the same way a
+	// malformed feature-flag file does above.
+	llmMaxRetries, err := parseLLMMaxRetries(os.Getenv("MULTICA_LLM_MAX_RETRIES"))
+	if err != nil {
+		slog.Error("invalid MULTICA_LLM_MAX_RETRIES", "error", err)
+		os.Exit(1)
+	}
+
 	r, h := NewRouterWithOptions(pool, hub, bus, analyticsClient, storeRedis, RouterOptions{
 		HTTPMetrics:         httpMetrics,
 		BusinessMetrics:     businessMetrics,
@@ -441,12 +547,14 @@ func main() {
 		DaemonWakeup:        daemonWakeup,
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
+		LLMMaxRetries:       llmMaxRetries,
 	})
 
 	srv := &http.Server{
 		Addr:    ":" + port,
 		Handler: r,
 	}
+	profilingServer := profiling.NewServer()
 
 	// Start background workers.
 	sweepCtx, sweepCancel := context.WithCancel(context.Background())
@@ -469,12 +577,26 @@ func main() {
 	}
 
 	// Start background sweeper to mark stale runtimes as offline.
-	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus)
+	runtimeReconnectGrace := envDuration("MULTICA_RUNTIME_RECONNECT_GRACE", defaultRuntimeReconnectGrace)
+	if runtimeReconnectGrace < minimumRuntimeReconnectGrace {
+		slog.Warn("runtime reconnect grace is shorter than heartbeat freshness; clamping",
+			"configured", runtimeReconnectGrace,
+			"minimum", minimumRuntimeReconnectGrace,
+		)
+		runtimeReconnectGrace = minimumRuntimeReconnectGrace
+	}
+	go runRuntimeSweeper(sweepCtx, pool, queries, liveness, taskSvc, bus, runtimeReconnectGrace)
 	go heartbeatScheduler.Run(sweepCtx)
 	go runAutopilotFailureMonitor(autopilotCtx, queries, bus, envFailureMonitorConfig())
+	if autopilotSvc.QuotaEnabled() {
+		go runAutopilotQuotaReconciler(autopilotCtx, autopilotSvc)
+	}
 	go runDBStatsLogger(sweepCtx, pool)
 	if h.WebhookDeliveryWorker != nil {
 		go h.WebhookDeliveryWorker.Run(sweepCtx)
+	}
+	if h.TelegramOutbound != nil {
+		h.TelegramOutbound.Start(sweepCtx)
 	}
 	// GitHub PR-card API snapshot pipeline (MUL-5265): worker pool + TTL sweeper.
 	// No-op when unconfigured (no App private key).
@@ -540,6 +662,13 @@ func main() {
 	}
 
 	go func() {
+		slog.Info("pprof server starting", "addr", profilingServer.Addr)
+		if err := profilingServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("pprof server disabled after startup error", "error", err)
+		}
+	}()
+
+	go func() {
 		slog.Info("server starting", "port", port)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)
@@ -576,6 +705,9 @@ func main() {
 	heartbeatScheduler.Stop()
 	if h.WebhookDeliveryWorker != nil && !h.WebhookDeliveryWorker.WaitWithTimeout(5*time.Second) {
 		slog.Warn("webhook delivery worker did not exit within shutdown timeout")
+	}
+	if h.TelegramOutbound != nil && !h.TelegramOutbound.WaitWithTimeout(5*time.Second) {
+		slog.Warn("telegram outbound workers did not exit within shutdown timeout")
 	}
 
 	// Join the channel supervisor's per-installation goroutines so the
@@ -619,5 +751,10 @@ func main() {
 		}
 		metricsShutdownCancel()
 	}
+	profilingShutdownCtx, profilingShutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	if err := profilingServer.Shutdown(profilingShutdownCtx); err != nil {
+		slog.Error("pprof server forced to shutdown", "error", err)
+	}
+	profilingShutdownCancel()
 	slog.Info("server stopped")
 }

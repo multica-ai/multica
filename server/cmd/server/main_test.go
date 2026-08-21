@@ -55,6 +55,76 @@ func TestChannelLeaseRedisURLFromEnvFallsBackToSharedRedis(t *testing.T) {
 	}
 }
 
+func TestRealtimeRelayRedisURLFromEnvPrefersDedicatedInstance(t *testing.T) {
+	t.Setenv("REDIS_URL", "redis://shared:6379/0")
+	t.Setenv("REALTIME_RELAY_REDIS_URL", " redis://relay:6379/0 ")
+	if got := realtimeRelayRedisURLFromEnv(); got != "redis://relay:6379/0" {
+		t.Fatalf("realtime relay Redis URL = %q", got)
+	}
+}
+
+func TestRealtimeRelayRedisURLFromEnvFallsBackToSharedRedis(t *testing.T) {
+	t.Setenv("REDIS_URL", " redis://shared:6379/0 ")
+	t.Setenv("REALTIME_RELAY_REDIS_URL", "")
+	if got := realtimeRelayRedisURLFromEnv(); got != "redis://shared:6379/0" {
+		t.Fatalf("realtime relay Redis URL = %q", got)
+	}
+}
+
+func TestShardedRelayConfigFromEnvDerivesSafeRetention(t *testing.T) {
+	t.Setenv("REALTIME_RELAY_STREAM_MAXLEN", "")
+	t.Setenv("REALTIME_RELAY_REPLAY_GRACE", "20m")
+	t.Setenv("REALTIME_RELAY_TRIM_HORIZON", "")
+	t.Setenv("REALTIME_RELAY_STREAM_TTL", "")
+
+	cfg := shardedRelayConfigFromEnv()
+	if cfg.StreamMaxLen != 2000 {
+		t.Fatalf("stream max len = %d, want 2000", cfg.StreamMaxLen)
+	}
+	if cfg.TrimHorizon != 40*time.Minute {
+		t.Fatalf("trim horizon = %s, want 40m", cfg.TrimHorizon)
+	}
+	if cfg.StreamTTL != 60*time.Minute {
+		t.Fatalf("stream TTL = %s, want 60m", cfg.StreamTTL)
+	}
+	if cfg.StreamTTLEnabled {
+		t.Fatal("stream TTL must remain disabled until the staged rollout flag is enabled")
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("derived retention config is invalid: %v", err)
+	}
+}
+
+func TestShardedRelayConfigFromEnvEnablesTTLExplicitly(t *testing.T) {
+	t.Setenv("REALTIME_RELAY_STREAM_TTL_ENABLED", "true")
+
+	cfg := shardedRelayConfigFromEnv()
+	if !cfg.StreamTTLEnabled {
+		t.Fatal("stream TTL flag was not applied")
+	}
+	retention := cfg.RetentionConfig()
+	if !retention.StreamTTLEnabled || retention.StreamTTL != cfg.StreamTTL {
+		t.Fatalf("legacy retention config diverged from sharded config: %+v", retention)
+	}
+}
+
+func TestShardedRelayConfigFromEnvNormalizesUnsafeOverrides(t *testing.T) {
+	t.Setenv("REALTIME_RELAY_REPLAY_GRACE", "5m")
+	t.Setenv("REALTIME_RELAY_TRIM_HORIZON", "4m")
+	t.Setenv("REALTIME_RELAY_STREAM_TTL", "3m")
+
+	cfg := shardedRelayConfigFromEnv()
+	if cfg.TrimHorizon != 10*time.Minute {
+		t.Fatalf("trim horizon = %s, want 10m", cfg.TrimHorizon)
+	}
+	if cfg.StreamTTL != 15*time.Minute {
+		t.Fatalf("stream TTL = %s, want 15m", cfg.StreamTTL)
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("normalized retention config is invalid: %v", err)
+	}
+}
+
 func TestNewNamedRedisClient_SetsClientName(t *testing.T) {
 	t.Setenv("REDIS_DISABLE_CLIENT_NAME", "")
 	base := &redis.Options{Addr: "localhost:6379"}
@@ -411,5 +481,35 @@ func TestHoldBeforeShutdownDisabled(t *testing.T) {
 	holdBeforeShutdown(syscall.SIGTERM, signals, 0)
 	if len(signals) != 1 {
 		t.Fatal("disabled hold should not consume another signal")
+	}
+}
+
+func TestJWTSecretBootError(t *testing.T) {
+	strong := "a1b2c3d4e5f60718293a4b5c6d7e8f9012a3b4c5d6e7f8091a2b3c4d5e6f70819"
+	tests := []struct {
+		name      string
+		jwtSecret string
+		appEnv    string
+		wantErr   bool
+	}{
+		{"production_with_empty_secret_is_rejected", "", "production", true},
+		{"production_with_code_default_is_rejected", "multica-dev-secret-change-in-production", "production", true},
+		{"production_with_compose_default_is_rejected", "change-me-in-production", "production", true},
+		{"production_with_uppercase_env_is_rejected", "change-me-in-production", "PRODUCTION", true},
+		{"production_with_whitespace_env_is_rejected", "change-me-in-production", " production ", true},
+		{"production_with_strong_secret_is_accepted", strong, "production", false},
+		{"non_production_with_empty_secret_is_allowed", "", "", false},
+		{"non_production_with_weak_secret_is_allowed", "change-me-in-production", "development", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := jwtSecretBootError(tt.jwtSecret, tt.appEnv)
+			if tt.wantErr && err == nil {
+				t.Fatalf("jwtSecretBootError(%q, %q) = nil, want error", tt.jwtSecret, tt.appEnv)
+			}
+			if !tt.wantErr && err != nil {
+				t.Fatalf("jwtSecretBootError(%q, %q) = %v, want nil", tt.jwtSecret, tt.appEnv, err)
+			}
+		})
 	}
 }

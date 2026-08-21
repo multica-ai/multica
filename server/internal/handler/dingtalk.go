@@ -9,8 +9,10 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
+	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
@@ -20,14 +22,15 @@ import (
 // server-internal (only the outbound sender decrypts it). WS lease columns are
 // runtime state, not API surface, so they are omitted too.
 type DingTalkInstallationResponse struct {
-	ID              string `json:"id"`
-	WorkspaceID     string `json:"workspace_id"`
-	AgentID         string `json:"agent_id"`
-	InstallerUserID string `json:"installer_user_id"`
-	Status          string `json:"status"`
-	InstalledAt     string `json:"installed_at"`
-	CreatedAt       string `json:"created_at"`
-	UpdatedAt       string `json:"updated_at"`
+	ID                   string   `json:"id"`
+	WorkspaceID          string   `json:"workspace_id"`
+	AgentID              string   `json:"agent_id"`
+	InstallerUserID      string   `json:"installer_user_id"`
+	Status               string   `json:"status"`
+	InstalledAt          string   `json:"installed_at"`
+	CreatedAt            string   `json:"created_at"`
+	UpdatedAt            string   `json:"updated_at"`
+	BoundDingTalkUserIDs []string `json:"bound_dingtalk_user_ids,omitempty"`
 }
 
 // DingTalkGroupRouteResponse is one group discovered from a Stream callback.
@@ -236,14 +239,43 @@ func (h *Handler) ListDingTalkInstallations(w http.ResponseWriter, r *http.Reque
 	if !ok {
 		return
 	}
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 	rows, err := h.DingTalkInstall.ListByWorkspace(r.Context(), wsUUID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list dingtalk installations")
 		return
 	}
+	bindingsByInstallation := map[pgtype.UUID][]string{}
+	member, hasMemberContext := middleware.MemberFromContext(r.Context())
+	canViewAccountBindings := hasMemberContext && (member.Role == "owner" || member.Role == "admin")
+	if canViewAccountBindings {
+		userUUID, ok := parseUUIDOrBadRequest(w, userID, "user id")
+		if !ok {
+			return
+		}
+		bindings, err := h.Queries.ListDingTalkUserBindingsForMember(r.Context(), db.ListDingTalkUserBindingsForMemberParams{
+			WorkspaceID:   wsUUID,
+			MulticaUserID: userUUID,
+		})
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to list dingtalk user bindings")
+			return
+		}
+		for _, binding := range bindings {
+			bindingsByInstallation[binding.InstallationID] = append(
+				bindingsByInstallation[binding.InstallationID],
+				binding.ChannelUserID,
+			)
+		}
+	}
 	out := make([]DingTalkInstallationResponse, 0, len(rows))
 	for _, row := range rows {
-		out = append(out, dingtalkInstallationToResponse(row))
+		response := dingtalkInstallationToResponse(row)
+		response.BoundDingTalkUserIDs = bindingsByInstallation[row.ID]
+		out = append(out, response)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"installations":           out,
@@ -449,6 +481,9 @@ func (h *Handler) RedeemDingTalkBindingToken(w http.ResponseWriter, r *http.Requ
 		}
 		return
 	}
+	h.publish(protocol.EventDingTalkAccountBindingUpdated, uuidToString(redeemed.WorkspaceID), "user", userID, map[string]any{
+		"id": uuidToString(redeemed.InstallationID),
+	})
 	writeJSON(w, http.StatusOK, RedeemDingTalkBindingTokenResponse{
 		WorkspaceID:    uuidToString(redeemed.WorkspaceID),
 		InstallationID: uuidToString(redeemed.InstallationID),

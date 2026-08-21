@@ -41,6 +41,7 @@ import { matchesPinyin } from "../../editor/extensions/pinyin-match";
 import { OfflineBanner } from "./offline-banner";
 import { NoAgentBanner } from "./no-agent-banner";
 import { ArchivedAgentBanner } from "./archived-agent-banner";
+import { AgentAccessRevokedBanner } from "./agent-access-revoked-banner";
 import { RuntimeRequiredBanner } from "./runtime-required-banner";
 import {
   chatSessionsOptions,
@@ -71,6 +72,7 @@ import { useChatInputFocus } from "./use-chat-input-focus";
 import { ChatMessageList, ChatMessageSkeleton } from "./chat-message-list";
 import { ChatInput } from "./chat-input";
 import { ChatQueue } from "./chat-queue";
+import { SessionRenameInput } from "./session-rename-input";
 import { ChatResizeHandles } from "./chat-resize-handles";
 import { useChatContextItems } from "./use-chat-context-items";
 import { useChatResize } from "./use-chat-resize";
@@ -239,6 +241,15 @@ export function ChatWindow() {
     null;
   const activeAgentRuntimeBound =
     !!activeAgent && isAgentRuntimeBound(activeAgent);
+
+  // A session outlives the permission that created it: the agent can be flipped
+  // to personal, change owner, or drop this member from its allow-list, and the
+  // server then refuses every send with `invocation_not_allowed` while still
+  // serving the transcript (MUL-4525). Judge the SESSION's agent, not just the
+  // picker list, so the composer goes read-only up front rather than after the
+  // user types (MUL-6380). Mirrors use-chat-controller.ts.
+  const isAgentAccessRevoked =
+    !!activeAgent && !canAssignAgent(activeAgent, user?.id, memberRole);
 
   const projectContextSupport = useChatProjectContextSupport(wsId, activeAgent);
 
@@ -411,6 +422,16 @@ export function ChatWindow() {
         });
         return false;
       }
+      // Invoke permission was revoked while this session was open — the server
+      // would refuse before persisting anything. Keep the draft, skip the
+      // roundtrip. The input is disabled here; belt-and-braces guard.
+      if (isAgentAccessRevoked) {
+        apiLogger.warn("sendChatMessage skipped: invoke permission revoked", {
+          sessionId: activeSessionId,
+          agentId: activeAgent.id,
+        });
+        return false;
+      }
       if (pendingTaskId && pendingTask?.supports_queue !== true) {
         apiLogger.warn("sendChatMessage skipped: server does not support follow-up queues", {
           sessionId: activeSessionId,
@@ -559,6 +580,7 @@ export function ChatWindow() {
       activeAgent,
       activeAgentRuntimeBound,
       isAgentArchived,
+      isAgentAccessRevoked,
       pendingTask,
       pendingTaskId,
       ensureSession,
@@ -880,6 +902,7 @@ export function ChatWindow() {
             !!pendingTaskId ||
             isSessionArchived ||
             isAgentArchived ||
+            isAgentAccessRevoked ||
             !activeAgentRuntimeBound ||
             noAgent
           }
@@ -912,6 +935,8 @@ export function ChatWindow() {
        *  first agent-list response stays banner-free. */}
       {noAgent ? (
         <NoAgentBanner />
+      ) : isAgentAccessRevoked ? (
+        <AgentAccessRevokedBanner agentName={activeAgent?.name} />
       ) : isAgentArchived ? (
         <ArchivedAgentBanner agentName={activeAgent?.name} />
       ) : !activeAgentRuntimeBound && activeAgent ? (
@@ -927,6 +952,7 @@ export function ChatWindow() {
         tasks={queuedTasks}
         headStatus={pendingTask?.status}
         onSendNow={handleSendQueuedTaskNow}
+        sendNowDisabled={isAgentAccessRevoked}
         onEdit={handleEditQueuedTask}
         onRemove={handleRemoveQueuedTask}
         onClear={handleClearQueuedTasks}
@@ -939,15 +965,19 @@ export function ChatWindow() {
         onSend={handleSend}
         restoreDraftRequest={restoreDraftRequest}
         onRestoreDraftApplied={handleRestoreDraftApplied}
-        uploadEnabled={!!activeAgent}
+        uploadEnabled={!!activeAgent && !isAgentAccessRevoked}
         onStop={handleStop}
         isRunning={!!pendingTaskId}
         allowSubmitWhileRunning={pendingTask?.supports_queue === true}
         disabled={
-          isSessionArchived || isAgentArchived || !activeAgentRuntimeBound
+          isSessionArchived ||
+          isAgentArchived ||
+          isAgentAccessRevoked ||
+          !activeAgentRuntimeBound
         }
         noAgent={noAgent}
         agentArchived={isAgentArchived}
+        agentAccessRevoked={isAgentAccessRevoked}
         agentRuntimeRequired={!activeAgentRuntimeBound}
         agentName={activeAgent?.name}
         projects={projects}
@@ -1573,83 +1603,6 @@ function SessionDropdown({
         </PopoverContent>
       </Popover>
     </>
-  );
-}
-
-/**
- * Inline editor for a session title. Mounts focused with the existing
- * title pre-selected so the user can either replace it outright or arrow
- * into the existing text. Enter commits, Escape cancels, a real click
- * outside the input also commits.
- *
- * We do NOT commit on the input's `blur` event: the history popover can
- * move focus to sibling rows and nested actions while the user is still
- * interacting with the panel. Instead a document-level `pointerdown`
- * listener commits only when the user actually clicks outside the input.
- */
-function SessionRenameInput({
-  initialValue,
-  onSubmit,
-  onCancel,
-}: {
-  initialValue: string;
-  onSubmit: (value: string) => void;
-  onCancel: () => void;
-}) {
-  const { t } = useT("chat");
-  const [value, setValue] = useState(initialValue);
-  const inputRef = useRef<HTMLInputElement>(null);
-  // Hold the latest value + callback in refs so the mount-only effect's
-  // listener always sees fresh state without re-subscribing on every
-  // keystroke (which would briefly leave a window where pointerdown isn't
-  // observed).
-  const valueRef = useRef(value);
-  valueRef.current = value;
-  const onSubmitRef = useRef(onSubmit);
-  onSubmitRef.current = onSubmit;
-
-  useEffect(() => {
-    inputRef.current?.focus();
-    inputRef.current?.select();
-
-    const handlePointerDown = (e: PointerEvent) => {
-      const input = inputRef.current;
-      if (!input) return;
-      if (input.contains(e.target as Node)) return;
-      onSubmitRef.current(valueRef.current);
-    };
-    // Capture phase — commit before outside-click handling can close the
-    // popover and unmount this component.
-    document.addEventListener("pointerdown", handlePointerDown, true);
-    return () => {
-      document.removeEventListener("pointerdown", handlePointerDown, true);
-    };
-  }, []);
-
-  return (
-    <input
-      ref={inputRef}
-      type="text"
-      value={value}
-      maxLength={200}
-      aria-label={t(($) => $.session_history.row_rename_aria)}
-      onChange={(e) => setValue(e.target.value)}
-      onClick={(e) => e.stopPropagation()}
-      onPointerDown={(e) => e.stopPropagation()}
-      onKeyDown={(e) => {
-        // Keep editing keys inside the input instead of letting the row
-        // selection keyboard handler consume them.
-        e.stopPropagation();
-        if (e.key === "Enter") {
-          e.preventDefault();
-          onSubmit(value);
-        } else if (e.key === "Escape") {
-          e.preventDefault();
-          onCancel();
-        }
-      }}
-      className="w-full rounded-sm bg-background px-1 py-0.5 text-body outline-none ring-1 ring-border focus-visible:ring-brand"
-    />
   );
 }
 

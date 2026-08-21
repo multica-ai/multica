@@ -19,8 +19,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/multica-ai/multica/server/pkg/plugincontract"
-	"github.com/multica-ai/multica/server/pkg/pluginruntime"
 	"github.com/multica-ai/multica/server/pkg/remotemcp"
 )
 
@@ -54,7 +52,7 @@ func (set *remoteMCPBrokerSet) Close() {
 	})
 }
 
-func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, provider string, connections []pluginruntime.RemoteMCPConnection, resolveCredential remoteMCPCredentialResolver, logger *slog.Logger) (json.RawMessage, []string, *remoteMCPBrokerSet, error) {
+func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, provider string, connections []remotemcp.Connection, resolveCredential remoteMCPCredentialResolver, logger *slog.Logger) (json.RawMessage, []string, *remoteMCPBrokerSet, error) {
 	if len(connections) == 0 {
 		return nil, nil, nil, nil
 	}
@@ -160,15 +158,15 @@ func startTaskRemoteMCPBrokers(setupCtx, lifetimeCtx context.Context, taskID, pr
 
 func providerSupportsRemoteMCPBroker(provider string) bool {
 	switch provider {
-	case "codex", "claude", "hermes", "qoder":
+	case "codex", "claude", "hermes", "qoder", "mcode":
 		return true
 	default:
 		return false
 	}
 }
 
-func validatePinnedRemoteMCPTools(approved, discovered []pluginruntime.RemoteMCPTool) error {
-	available := make(map[string]pluginruntime.RemoteMCPTool, len(discovered))
+func validatePinnedRemoteMCPTools(approved, discovered []remotemcp.Tool) error {
+	available := make(map[string]remotemcp.Tool, len(discovered))
 	for _, tool := range discovered {
 		available[tool.Name] = tool
 	}
@@ -192,7 +190,7 @@ func randomBrokerToken() (string, error) {
 	return hex.EncodeToString(value), nil
 }
 
-func remoteMCPServerName(connection pluginruntime.RemoteMCPConnection) string {
+func remoteMCPServerName(connection remotemcp.Connection) string {
 	name := strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-' || r == '_' {
 			return r
@@ -208,7 +206,7 @@ func remoteMCPServerName(connection pluginruntime.RemoteMCPConnection) string {
 
 type remoteMCPProxy struct {
 	taskID            string
-	connection        pluginruntime.RemoteMCPConnection
+	connection        remotemcp.Connection
 	endpoint          *url.URL
 	client            *http.Client
 	credentialHeaders http.Header
@@ -410,12 +408,12 @@ func (proxy *remoteMCPProxy) filterToolsListResponse(raw []byte) ([]byte, error)
 		}
 		byName[tool.Name] = canonical
 	}
-	pinned := append([]pluginruntime.RemoteMCPTool(nil), proxy.connection.ApprovedTools...)
+	pinned := append([]remotemcp.Tool(nil), proxy.connection.ApprovedTools...)
 	sort.Slice(pinned, func(i, j int) bool { return pinned[i].Name < pinned[j].Name })
 	filtered := make([]map[string]any, 0, len(pinned))
 	for _, tool := range pinned {
 		current, ok := byName[tool.Name]
-		if !ok || plugincontract.DigestBytes(current) != tool.SchemaDigest {
+		if !ok || remotemcp.DigestBytes(current) != tool.SchemaDigest {
 			return nil, errors.New("tool schema drift")
 		}
 		filtered = append(filtered, map[string]any{

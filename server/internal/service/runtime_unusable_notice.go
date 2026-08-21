@@ -8,6 +8,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -28,7 +29,8 @@ func (s *IssueService) noteRuntimeUnusable(ctx context.Context, issue db.Issue, 
 	}
 	// author_type='system', author_id=zero UUID. The zero UUID is a valid 16
 	// byte value and the column is NOT NULL; clients branch on author_type.
-	comment, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+	created, err := s.Queries.CreateComment(ctx, db.CreateCommentParams{
+		ID:          dbid.NewV7(),
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
 		AuthorType:  "system",
@@ -42,6 +44,7 @@ func (s *IssueService) noteRuntimeUnusable(ctx context.Context, issue db.Issue, 
 			"error", err, "issue_id", util.UUIDToString(issue.ID))
 		return
 	}
+	comment := created.Comment()
 	if s.Bus == nil {
 		return
 	}
@@ -57,8 +60,10 @@ func (s *IssueService) noteRuntimeUnusable(ctx context.Context, issue db.Issue, 
 				"author_id":   util.UUIDToString(comment.AuthorID),
 				"content":     comment.Content,
 				"type":        comment.Type,
+				"revision":    comment.Revision,
 			},
-			"issue_title": issue.Title,
+			"issue_title":    issue.Title,
+			"issue_revision": created.IssueRevision,
 		},
 	})
 }

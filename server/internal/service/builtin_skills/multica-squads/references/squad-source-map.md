@@ -142,15 +142,16 @@ Contracts:
   enqueue-time via `canEnqueueSquadLeader` (squad.go:1037);
 - archived squad / archived leader rejected at assign-time (issue.go:2622-2627);
 - pending task dedup is applied (squad.go:1042-1048);
-- parent status is agent-managed: assignment brief (`writeWorkflowAssignment` with
-  `IsSquadLeader`) requires `in_progress` on the first turn and forbids
-  unconditional `in_review` on that dispatch turn; Squad Operating Protocol
-  (`squad_briefing.go`) owns the ongoing `in_progress` → later `in_review`
-  contract. `StartTask` / `CompleteTask` do not write issue status. On
-  comment-triggered leader turns `writeWorkflowComment` names that protocol
-  responsibility as the one exception to "do not change status unless the
-  comment asks" — without it the @mention-dispatch shape (no child issues, so
-  no child-done ask) would strand the parent in `in_progress`.
+- parent status is agent-managed: since MUL-6417 the brief's status rule is a
+  fact judgment written when the work changes it (`writeWorkflowIssue`), and the
+  leader variant adds one bullet — dispatching members is not delivery, so a dispatch
+  turn leaves the parent `in_progress` and `in_review` waits for the re-trigger
+  that confirms the overall goal is met. Squad Operating Protocol
+  (`squad_briefing.go`) still states the ongoing `in_progress` → later
+  `in_review` responsibility for owning leaders. `StartTask` / `CompleteTask`
+  do not write issue status. There is no assignee gate anymore: a guest leader
+  writes nothing not because it lacks a grant but because a turn that did not
+  move the issue's state has nothing to record.
 
 ## Comment / Mention
 
@@ -231,9 +232,12 @@ Contracts:
   ungated path; any future invocation gate must be added to BOTH together.
 - parent status is not auto-advanced by the barrier: the system comment asks the
   leader to continue or — when the overall goal is met — run
-  `multica issue status <parent-id> in_review`. That explicit ask is what lets a
-  comment-triggered leader turn change status (the comment workflow otherwise
-  forbids status flips unless asked). `done` remains human / integration owned.
+  `multica issue status <parent-id> in_review`. The Squad Operating Protocol's
+  standing "Own the parent issue status" responsibility (present exactly when
+  the issue is assigned to this squad) states the same expectation; the system
+  comment marks the wrap-up moment. Since MUL-6417 the write itself needs no
+  grant — the brief's fact judgment covers it — but `done` remains
+  human / integration owned.
 
 ## Private Leader Access
 

@@ -28,6 +28,7 @@ type TimelineEntry struct {
 	Content     *string `json:"content,omitempty"`
 	ParentID    *string `json:"parent_id,omitempty"`
 	UpdatedAt   *string `json:"updated_at,omitempty"`
+	Revision    int64   `json:"revision,omitempty"`
 	CommentType *string `json:"comment_type,omitempty"`
 	// Set only on comments produced by a quick action run. Unforgeable: there
 	// is no request field for it on the generic comment endpoint.
@@ -288,6 +289,7 @@ func (h *Handler) commentsToEntries(r *http.Request, comments []db.Comment) []Ti
 			ParentID:       uuidToPtr(c.ParentID),
 			CreatedAt:      timestampToString(c.CreatedAt),
 			UpdatedAt:      &updatedAt,
+			Revision:       c.Revision,
 			Reactions:      reactions[cid],
 			Attachments:    attachments[cid],
 			ResolvedAt:     timestampToPtr(c.ResolvedAt),

@@ -589,7 +589,14 @@ func (s *Supervisor) startSupervisor(parent context.Context, inst Installation) 
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	go s.supervise(ctx, inst, id, gen, done)
+	go func() {
+		defer s.wg.Done()
+		// A supervisor can exit without an explicit cancellation when lease
+		// acquisition is contended or fails. Always detach its child context
+		// from Run's long-lived parent when the goroutine returns.
+		defer cancel()
+		s.supervise(ctx, inst, id, gen, done)
+	}()
 }
 
 // leaseToken composes the per-supervisor lease token: the process-wide
@@ -598,6 +605,14 @@ func (s *Supervisor) startSupervisor(parent context.Context, inst Installation) 
 // same installation (the rotation path) carry different tokens. That
 // distinction stops an old supervisor's post-cancel release from
 // CAS-matching and deleting the successor's just-acquired lease.
+//
+// The result is an internal CAS marker, NOT a credential: it is never sent
+// to any platform and on its own grants nothing (only a direct Redis / DB
+// writer could act on it). It is still kept out of log FIELDS — GH #7132
+// reported a plaintext `lease_token=` field as a leaked channel credential,
+// and disproving that costs a full investigation every time someone reads
+// the log. supervise() logs node_id + lease_gen instead, which carries the
+// same diagnostic information under a name that does not read as a secret.
 func leaseToken(nodeID string, gen uint64) string {
 	return nodeID + "-g" + strconv.FormatUint(gen, 10)
 }
@@ -607,7 +622,6 @@ func leaseToken(nodeID string, gen uint64) string {
 // while it runs → on exit, release + back off → repeat. Returns when ctx is
 // cancelled.
 func (s *Supervisor) supervise(ctx context.Context, inst Installation, id string, gen uint64, done chan<- struct{}) {
-	defer s.wg.Done()
 	defer close(done)
 	defer func() {
 		// Only clear the map entry if it still belongs to us — gen
@@ -625,7 +639,7 @@ func (s *Supervisor) supervise(ctx context.Context, inst Installation, id string
 		"installation_id", id,
 		"channel_type", string(inst.ChannelType),
 		"node_id", s.nodeID,
-		"lease_token", leaseTok,
+		"lease_gen", gen,
 	)
 	backoff := s.cfg.MinBackoff
 

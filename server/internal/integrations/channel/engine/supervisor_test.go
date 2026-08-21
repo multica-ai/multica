@@ -1,10 +1,12 @@
 package engine
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -156,6 +158,30 @@ func (f *fakeStore) leaseHolder(id pgtype.UUID) (string, bool) {
 	return owner, ok
 }
 
+type contextCapturingContendedLeaseStore struct {
+	acquireCtx chan context.Context
+}
+
+func (s *contextCapturingContendedLeaseStore) ListHeldWSLeases(_ context.Context, _ []pgtype.UUID) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (s *contextCapturingContendedLeaseStore) TryAcquireWSLease(ctx context.Context, _ AcquireLeaseParams) error {
+	select {
+	case s.acquireCtx <- ctx:
+	default:
+	}
+	return ErrLeaseNotAcquired
+}
+
+func (s *contextCapturingContendedLeaseStore) RenewWSLease(_ context.Context, _ AcquireLeaseParams) error {
+	return errors.New("unexpected lease renewal")
+}
+
+func (s *contextCapturingContendedLeaseStore) ReleaseWSLease(_ context.Context, _ ReleaseLeaseParams) error {
+	return nil
+}
+
 // fakeChannel is a channel.Channel whose Connect behaves per a script
 // (default: block until ctx is cancelled). It records connect/disconnect
 // counts and captures the injected handler.
@@ -234,6 +260,26 @@ func uuidFromString(t *testing.T, s string) pgtype.UUID {
 
 func discardLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+// syncBuffer is a mutex-guarded sink for capturing slog output. The
+// supervisor logs from several goroutines, so an unguarded bytes.Buffer
+// would race under -race.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 func fastConfig() Config {
@@ -365,6 +411,44 @@ func TestSupervisorInjectsHandler(t *testing.T) {
 
 	cancel()
 	sup.Wait()
+}
+
+func TestSupervisorCancelsChildContextAfterContendedAcquire(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "21212121-2121-2121-2121-212121212121")
+	inst := activeInst(instID, "fp1")
+	leases := &contextCapturingContendedLeaseStore{acquireCtx: make(chan context.Context, 1)}
+
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	sup := NewSupervisor(q, leases, fakeRegistry(fc, &builds, nil), nil, fastConfig())
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	defer func() {
+		parentCancel()
+		sup.wg.Wait()
+	}()
+
+	// Start one supervisor directly so the test observes exactly one lease
+	// attempt; Run would continue sweeping and could start another attempt.
+	sup.startSupervisor(parentCtx, inst)
+	var acquireCtx context.Context
+	select {
+	case acquireCtx = <-leases.acquireCtx:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("supervisor did not attempt to acquire the lease")
+	}
+
+	select {
+	case <-acquireCtx.Done():
+		if !errors.Is(acquireCtx.Err(), context.Canceled) {
+			t.Fatalf("acquire context error = %v, want context.Canceled", acquireCtx.Err())
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("supervisor returned after lease contention without cancelling its child context")
+	}
+	if got := atomic.LoadInt32(&builds); got != 0 {
+		t.Fatalf("contended lease should not build a channel, builds=%d", got)
+	}
 }
 
 func TestSupervisorSkipsWhenAnotherReplicaHoldsLease(t *testing.T) {
@@ -937,4 +1021,55 @@ func TestSupervisorRejectsUnsafeLeaseIntervals(t *testing.T) {
 		LeaseTTL: 30 * time.Second, LeaseRenewInterval: 20 * time.Second, PollInterval: 25 * time.Second,
 		LeaseErrorRetryInterval: time.Second, LeaseExpirySafetyMargin: time.Second,
 	})
+}
+
+// The connection-exit log must not carry a field named lease_token. The
+// lease token is an internal CAS marker rather than a credential, but a
+// plaintext `lease_token=` in the log reads as a leaked channel credential
+// to anyone tailing it — that misread is what GH #7132 reported. node_id
+// and lease_gen are the same information under a name that does not invite
+// the false positive, so this asserts the field NAME is gone and the
+// diagnostic fields survived, not that anything is secret.
+func TestSupervisorExitLogOmitsLeaseTokenField(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "cccccccc-cccc-cccc-cccc-cccccccccccc")
+	q.installations = []Installation{activeInst(instID, "fp1")}
+
+	// First Connect fails immediately, driving the exact "connection exited
+	// with error" branch the report quoted; later attempts park on ctx.
+	fc := &fakeChannel{
+		typ: channel.TypeFeishu,
+		script: []func(ctx context.Context) error{
+			func(ctx context.Context) error { return errors.New("read message: websocket: close 1006") },
+		},
+	}
+	var builds int32
+	reg := fakeRegistry(fc, &builds, nil)
+
+	var logs syncBuffer
+	cfg := fastConfig()
+	cfg.Logger = slog.New(slog.NewTextHandler(&logs, nil))
+
+	sup := NewSupervisor(q, q, reg, nil, cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go sup.Run(ctx)
+
+	if !waitFor(time.Second, func() bool {
+		return strings.Contains(logs.String(), "connection exited with error")
+	}) {
+		t.Fatalf("expected the exit-with-error log; got %q", logs.String())
+	}
+	cancel()
+	sup.Wait()
+
+	out := logs.String()
+	if strings.Contains(out, "lease_token") {
+		t.Errorf("supervisor logs must not carry a lease_token field; got %q", out)
+	}
+	for _, field := range []string{"installation_id=", "node_id=", "lease_gen="} {
+		if !strings.Contains(out, field) {
+			t.Errorf("supervisor logs lost diagnostic field %s; got %q", field, out)
+		}
+	}
 }

@@ -18,7 +18,7 @@ import {
   useRotateAutopilotTriggerWebhookToken,
 } from "@multica/core/autopilots/mutations";
 import { buildAutopilotWebhookUrl } from "@multica/core/autopilots";
-import { api } from "@multica/core/api";
+import { api, clientErrorMessage, dispatchReasonCode } from "@multica/core/api";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { useWorkspacePaths } from "@multica/core/paths";
 import { useActorName } from "@multica/core/workspace/hooks";
@@ -741,7 +741,15 @@ export function AutopilotDetailPage({ autopilotId }: { autopilotId: string }) {
         toast.error(message);
       }
     } catch (e: any) {
-      toast.error(e?.message || t(($) => $.detail.toast_trigger_failed));
+      const reason = dispatchReasonCode(e);
+      if (reason) {
+        toast.error(t(($) => $.detail[runNowBlockedKey(reason)]));
+        return;
+      }
+      // Only a 4xx message is written for the user; a 5xx one is internal
+      // server detail (MUL-6472), so an unclassified dispatch failure shows the
+      // localized generic sentence instead of the raw body.
+      toast.error(clientErrorMessage(e) || t(($) => $.detail.toast_trigger_failed));
     }
   };
 

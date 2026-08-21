@@ -265,10 +265,15 @@ function ShareLinkRow({
         <Link className="h-4 w-4 text-muted-foreground" />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-body font-medium truncate">{joinUrl}</div>
-        <div className="flex items-center gap-1 text-caption text-muted-foreground">
+        <div className="flex flex-wrap items-center gap-x-1 text-body font-medium">
           <span>{t(($) => $.members.share_link_uses, { used: link.use_count, max: link.max_uses ?? "∞" })}</span>
           {link.expires_at && <span>· {t(($) => $.members.share_link_expires, { date: new Date(link.expires_at).toLocaleDateString() })}</span>}
+        </div>
+        <div
+          className="truncate font-mono text-caption text-muted-foreground"
+          title={joinUrl}
+        >
+          {joinUrl}
         </div>
       </div>
       <Button

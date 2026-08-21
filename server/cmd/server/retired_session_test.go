@@ -262,7 +262,7 @@ func TestFailTaskClearsPoisonedChatPointer(t *testing.T) {
 	// The un-upgraded-daemon shape: catchall reason, poisoning only in the text.
 	if _, err := taskSvc.FailTask(ctx, pgtype.UUID{Bytes: parseUUIDBytes(taskID), Valid: true},
 		"Invalid request: the message at position 37 with role 'assistant' must not be empty",
-		"CHAT-PTR-S", "/tmp/chat", "", "agent_error.unknown", false, ""); err != nil {
+		"CHAT-PTR-S", "/tmp/chat", "", "agent_error.unknown", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
@@ -307,7 +307,7 @@ func TestFailTaskKeepsChatPointerOnTransientFailure(t *testing.T) {
 
 	if _, err := taskSvc.FailTask(ctx, pgtype.UUID{Bytes: parseUUIDBytes(taskID), Valid: true},
 		"Connection closed mid-response", "CHAT-KEEP-S", "/tmp/chat", "",
-		"agent_error.provider_network", false, ""); err != nil {
+		"agent_error.provider_network", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 

@@ -6,90 +6,28 @@ import { I18nProvider } from "@multica/core/i18n/react";
 import enCommon from "../../locales/en/common.json";
 import enSettings from "../../locales/en/settings.json";
 
+const mockPreview = vi.hoisted(() => vi.fn());
 const mockInstall = vi.hoisted(() => vi.fn());
+const mockConfigure = vi.hoisted(() => vi.fn());
 const mockSetEnabled = vi.hoisted(() => vi.fn());
-const mockUpgrade = vi.hoisted(() => vi.fn());
-const mockRollback = vi.hoisted(() => vi.fn());
 const mockUninstall = vi.hoisted(() => vi.fn());
-const mockConfigureRemoteMCP = vi.hoisted(() => vi.fn());
-const mockTestRemoteMCP = vi.hoisted(() => vi.fn());
-const mockApproveRemoteMCP = vi.hoisted(() => vi.fn());
-const mockRevokeRemoteMCP = vi.hoisted(() => vi.fn());
-const mockStartRemoteMCPOAuth = vi.hoisted(() => vi.fn());
-const mockOpenExternal = vi.hoisted(() => vi.fn());
-const mockRefetch = vi.hoisted(() => vi.fn());
 
 const data = vi.hoisted(() => ({
-  catalog: {
-    supported: true,
-    diagnostics: [],
-    releases: [{
-      plugin_key: "ai.multica.software-delivery",
-      name: "Software Delivery",
-      description: "Official Multica software-delivery workflow skills.",
-      version: "1.1.0",
-      publisher: "multica",
-      publisher_type: "official",
-      trust_tier: "official",
-      source_kind: "bundled",
-      source_ref: "bundled://ai.multica.software-delivery/1.1.0",
-      requested_capabilities: ["agent.skill.contribute"],
-      host_api: ">=1.0.0 <2.0.0",
-      required_daemon_features: ["execution-manifest-v1", "agent-skill-v1"],
-      signature_key_id: "multica-plugin-release-2026-01",
-      signature_verified: true,
-      manifest_digest: "sha256:manifest",
-      archive_digest: "sha256:archive",
-      artifact_digest: "sha256:artifact",
-      compatible: true,
-      contributions: [{
-        key: "review-readiness",
-        type: "agent.skill.v1",
-        name: "review-readiness",
-        description: "Verify that a software change is ready for review and handoff.",
-        entry_path: "skills/review-readiness/SKILL.md",
-        entry_digest: "sha256:entry",
-      }],
-    }],
-  },
   installed: { plugins: [] as Array<Record<string, unknown>> },
-  agents: [{ id: "agent-1", name: "Reviewer", archived_at: null }],
-  members: [{ user_id: "member-1", name: "Alice", email: "alice@example.com", role: "admin" }],
   role: "owner" as "owner" | "admin" | "member",
 }));
 
 vi.mock("@tanstack/react-query", () => ({
-  useQuery: (options: { queryKey?: readonly string[] }) => {
-    const key = options.queryKey?.join(":") ?? "";
-    if (key.includes("catalog")) return { data: data.catalog, isPending: false, isError: false, refetch: mockRefetch };
-    if (key.includes("installed")) return { data: data.installed, isPending: false, isError: false, refetch: mockRefetch };
-    if (key.includes("members")) return { data: data.members, isPending: false, isError: false, refetch: mockRefetch };
-    return { data: data.agents, isPending: false, isError: false, refetch: mockRefetch };
-  },
+  useQuery: () => ({ data: data.installed, isLoading: false, isError: false }),
 }));
 
 vi.mock("@multica/core/plugins", () => ({
-  comparePluginVersions: (left: string, right: string) => left.localeCompare(right),
-  pluginCatalogOptions: () => ({ queryKey: ["plugins", "catalog"] }),
   pluginInstallationsOptions: () => ({ queryKey: ["plugins", "installed"] }),
+  usePreviewPlugin: () => ({ mutateAsync: mockPreview, isPending: false }),
   useInstallPlugin: () => ({ mutateAsync: mockInstall, isPending: false }),
+  useConfigurePlugin: () => ({ mutateAsync: mockConfigure, isPending: false }),
   useSetPluginEnabled: () => ({ mutateAsync: mockSetEnabled, isPending: false }),
-  useUpgradePlugin: () => ({ mutateAsync: mockUpgrade, isPending: false }),
-  useRollbackPlugin: () => ({ mutateAsync: mockRollback, isPending: false }),
   useUninstallPlugin: () => ({ mutateAsync: mockUninstall, isPending: false }),
-  useConfigurePluginRemoteMCP: () => ({ mutateAsync: mockConfigureRemoteMCP, isPending: false }),
-  useTestPluginRemoteMCP: () => ({ mutateAsync: mockTestRemoteMCP, isPending: false }),
-  useApprovePluginRemoteMCPTools: () => ({ mutateAsync: mockApproveRemoteMCP, isPending: false }),
-  useRevokePluginRemoteMCPCredential: () => ({ mutateAsync: mockRevokeRemoteMCP, isPending: false }),
-  useStartPluginRemoteMCPOAuth: () => ({ mutateAsync: mockStartRemoteMCPOAuth, isPending: false }),
-}));
-
-vi.mock("../../platform/open-external", () => ({ openExternal: mockOpenExternal }));
-vi.mock("../../platform/local-directory", () => ({ isDesktopShell: () => true }));
-
-vi.mock("@multica/core/workspace/queries", () => ({
-  agentListOptions: () => ({ queryKey: ["agents"] }),
-  memberListOptions: () => ({ queryKey: ["members"] }),
 }));
 
 vi.mock("@multica/core/paths", () => ({
@@ -110,194 +48,134 @@ function Wrapper({ children }: { children: ReactNode }) {
   return <I18nProvider locale="en" resources={TEST_RESOURCES}>{children}</I18nProvider>;
 }
 
+const INSTALLATION = {
+  id: "installation-1",
+  plugin_key: "com.example.hello",
+  name: "Hello Panel",
+  description: "A greeting panel.",
+  version: "1.0.0",
+  source_url: "https://example.com/multica.plugin.json",
+  enabled: true,
+  granted_scopes: ["issues:read", "comments:write", "net:example.com"],
+  config_schema: [
+    { key: "repo", type: "string", label: "Repo", required: true, options: [] },
+    { key: "token", type: "secret", label: "Token", required: true, options: [] },
+  ],
+  config: { repo: "multica-ai/multica" },
+  configured_secrets: ["token"],
+  surfaces: [{ key: "hello", type: "issue_panel", name: "Hello", entry: "ui/main.js", platforms: [] }],
+  hooks: [],
+  resources: [],
+  created_at: "2026-08-18T00:00:00Z",
+  updated_at: "2026-08-18T00:00:00Z",
+};
+
+const PREVIEW = {
+  manifest: {
+    key: "com.example.hello",
+    name: "Hello Panel",
+    description: "A greeting panel.",
+    version: "1.0.0",
+    author: { name: "example" },
+  },
+  scopes: ["issues:read", "comments:write", "net:example.com"],
+  config_schema: [],
+  installed: false,
+  added_scopes: [],
+};
+
 describe("PluginsTab", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    window.history.replaceState({}, "", "/");
     data.role = "owner";
-    data.catalog.releases[0]!.compatible = true;
-    data.catalog.releases[0]!.signature_verified = true;
     data.installed.plugins = [];
-    mockInstall.mockResolvedValue({});
-    mockSetEnabled.mockResolvedValue({});
-    mockUninstall.mockResolvedValue({});
-    mockStartRemoteMCPOAuth.mockResolvedValue({ authorization_url: "https://auth.example.test/authorize" });
+    mockPreview.mockResolvedValue(PREVIEW);
+    mockInstall.mockResolvedValue(INSTALLATION);
+    mockConfigure.mockResolvedValue(INSTALLATION);
+    mockSetEnabled.mockResolvedValue(INSTALLATION);
+    mockUninstall.mockResolvedValue(undefined);
   });
 
-  it("renders the install review and keeps installation disabled by default", async () => {
+  it("shows the scope consent screen before anything is installed", async () => {
     const user = userEvent.setup();
     render(<PluginsTab />, { wrapper: Wrapper });
 
-    expect(screen.getByText("review-readiness")).toBeInTheDocument();
-    expect(screen.getByText("agent.skill.contribute")).toBeInTheDocument();
-    expect(screen.getByText("Signature verified")).toBeInTheDocument();
-    expect(screen.getByText(/Installation is disabled by default/)).toBeInTheDocument();
+    await user.type(
+      screen.getByPlaceholderText("https://example.com/multica.plugin.json"),
+      "https://example.com/multica.plugin.json",
+    );
+    await user.click(screen.getByRole("button", { name: "Review" }));
 
-    await user.click(screen.getByRole("button", { name: "Install" }));
+    // The raw scope strings are the trust model, so they must be on screen
+    // verbatim alongside their plain-language meaning.
+    await screen.findByText("This Plugin is asking for the following access");
+    expect(screen.getByText("issues:read")).toBeInTheDocument();
+    expect(screen.getByText("comments:write")).toBeInTheDocument();
+    expect(screen.getByText("net:example.com")).toBeInTheDocument();
+    expect(screen.getByText("Send data to example.com")).toBeInTheDocument();
+    expect(mockInstall).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Grant and install" }));
     await waitFor(() => expect(mockInstall).toHaveBeenCalledWith({
-      plugin_key: "ai.multica.software-delivery",
-      version: "1.1.0",
+      source_url: "https://example.com/multica.plugin.json",
+      granted_scopes: ["issues:read", "comments:write", "net:example.com"],
     }));
   });
 
-  it("enables an installed Plugin for the workspace through a generic binding", async () => {
+  it("renders the configuration form from the manifest and never shows a stored secret", async () => {
+    data.installed.plugins = [INSTALLATION];
     const user = userEvent.setup();
-    data.installed.plugins = [{
-      id: "installation-1",
-      plugin_key: "ai.multica.software-delivery",
-      display_name: "Software Delivery",
-      desired_version: "1.1.0",
-      active_version: "1.1.0",
-      enabled: false,
-      desired_generation: 1,
-      active_generation: 1,
-      lifecycle_status: "installed",
-      contributions: ["review-readiness"],
-      bindings: [],
-      remote_mcp: [],
-    }];
     render(<PluginsTab />, { wrapper: Wrapper });
 
-    expect(screen.getByText("Disabled")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Enable scope" }));
+    const repo = screen.getByDisplayValue("multica-ai/multica");
+    expect(repo).toBeInTheDocument();
+
+    const secret = screen.getByPlaceholderText("Saved — enter a new value to replace it");
+    expect(secret).toHaveAttribute("type", "password");
+    expect(secret).toHaveValue("");
+
+    // Saving without retyping the secret must not send an empty value: that
+    // would clear a stored secret as a side effect of an unrelated edit.
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockConfigure).toHaveBeenCalledWith({
+      installationId: "installation-1",
+      values: { repo: "multica-ai/multica" },
+    }));
+
+    mockConfigure.mockClear();
+    await user.type(secret, "new-token");
+    await user.click(screen.getByRole("button", { name: "Save" }));
+    await waitFor(() => expect(mockConfigure).toHaveBeenCalledWith({
+      installationId: "installation-1",
+      values: { repo: "multica-ai/multica", token: "new-token" },
+    }));
+  });
+
+  it("disables and uninstalls an installed Plugin", async () => {
+    data.installed.plugins = [INSTALLATION];
+    const user = userEvent.setup();
+    render(<PluginsTab />, { wrapper: Wrapper });
+
+    await user.click(screen.getByRole("switch", { name: "Enable Plugin" }));
     await waitFor(() => expect(mockSetEnabled).toHaveBeenCalledWith({
       installationId: "installation-1",
-      enabled: true,
-      binding: { scope_type: "workspace", scope_id: "workspace-1" },
+      enabled: false,
     }));
+
+    await user.click(screen.getByRole("button", { name: "Uninstall" }));
+    await waitFor(() => expect(mockUninstall).toHaveBeenCalledWith("installation-1"));
   });
 
-  it("fails closed when compatibility or signature evidence is absent", () => {
-    data.catalog.releases[0]!.compatible = false;
-    data.catalog.releases[0]!.signature_verified = false;
-    render(<PluginsTab />, { wrapper: Wrapper });
-
-    expect(screen.getByText("Incompatible release")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
-  });
-
-  it("keeps the catalog visible but actions read-only for members", () => {
+  it("blocks management for a non-admin member", () => {
     data.role = "member";
+    data.installed.plugins = [INSTALLATION];
     render(<PluginsTab />, { wrapper: Wrapper });
 
     expect(screen.getByText("Read-only access")).toBeInTheDocument();
-    expect(screen.getByText("review-readiness")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
-  });
-
-  it("shows a private unverified installation outside the official catalog", async () => {
-    const user = userEvent.setup();
-    data.installed.plugins = [{
-      id: "private-installation-1",
-      plugin_key: "dev.acme.incident-guide",
-      display_name: "Incident Guide",
-      desired_version: "0.2.0",
-      active_version: "0.2.0",
-      enabled: false,
-      desired_generation: 2,
-      active_generation: 2,
-      lifecycle_status: "installed",
-      description: "Private incident response guidance.",
-      publisher: "acme.internal",
-      publisher_type: "private_dev",
-      trust_tier: "private_dev",
-      source_kind: "private_dev",
-      source_ref: "private://sha256:archive",
-      uploader_id: "member-1",
-      manifest_digest: "sha256:manifest",
-      archive_digest: "sha256:archive",
-      artifact_digest: "sha256:artifact",
-      signature_verified: false,
-      requested_capabilities: ["agent.skill.contribute"],
-      available_versions: ["0.2.0", "0.1.0"],
-      contributions: ["incident-guide"],
-      contribution_details: [{
-        key: "incident-guide",
-        type: "agent.skill.v1",
-        name: "Incident Guide",
-        description: "Guide incident response.",
-        entry_path: "skills/incident-guide/SKILL.md",
-        entry_digest: "sha256:entry",
-      }],
-      bindings: [],
-      remote_mcp: [],
-    }];
-    render(<PluginsTab />, { wrapper: Wrapper });
-
-    expect(screen.getByText("Private")).toBeInTheDocument();
-    expect(screen.getByText("Unverified")).toBeInTheDocument();
-    expect(screen.getByText(/Private workspace upload/)).toBeInTheDocument();
-    expect(screen.getByText(/Uploaded by Alice/)).toBeInTheDocument();
-    expect(screen.queryByText(/member-1/)).not.toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Uninstall" }));
-    await waitFor(() => expect(mockUninstall).toHaveBeenCalledWith("private-installation-1"));
-  });
-
-  it("opens OAuth in the platform browser and restores saved advanced configuration", async () => {
-    const user = userEvent.setup();
-    data.installed.plugins = [{
-      id: "private-remote-1",
-      plugin_key: "dev.acme.search",
-      display_name: "Search",
-      desired_version: "0.1.0",
-      active_version: "0.1.0",
-      enabled: false,
-      desired_generation: 1,
-      active_generation: 1,
-      lifecycle_status: "installed",
-      publisher: "acme.internal",
-      publisher_type: "private_dev",
-      trust_tier: "private_dev",
-      source_kind: "private_dev",
-      source_ref: "private://sha256:search",
-      signature_verified: false,
-      requested_capabilities: ["tool.remote-mcp.connect"],
-      available_versions: ["0.1.0"],
-      contributions: ["search"],
-      contribution_details: [],
-      bindings: [],
-      remote_mcp: [{
-        contribution_key: "search",
-        default_endpoint: "https://default.example.test/mcp",
-        preferred_auth: "oauth",
-        supported_auth: ["oauth"],
-        endpoint: "https://saved.example.test/mcp",
-        auth_type: "oauth",
-        public_config: { locale: "en" },
-        failure_policy: "optional",
-        credential_state: "missing",
-        approved_tools: [],
-        discovered_tools: [],
-        reviewed: false,
-        ready: false,
-      }],
-    }];
-    render(<PluginsTab />, { wrapper: Wrapper });
-
-    await user.click(screen.getByRole("button", { name: "Connect" }));
-    await waitFor(() => expect(mockStartRemoteMCPOAuth).toHaveBeenCalledWith(expect.objectContaining({
-      installationId: "private-remote-1",
-      contributionKey: "search",
-      request: expect.objectContaining({
-        endpoint: "https://saved.example.test/mcp",
-        public_config: { locale: "en" },
-        failure_policy: "optional",
-      }),
-    })));
-    expect(mockOpenExternal).toHaveBeenCalledWith("https://auth.example.test/authorize");
-
-    await user.click(screen.getByText("Advanced configuration"));
-    expect(screen.getByLabelText("HTTPS endpoint")).toHaveValue("https://saved.example.test/mcp");
-    expect(screen.getByLabelText("Public configuration (JSON object)")).toHaveValue('{\n  "locale": "en"\n}');
-  });
-
-  it("consumes a successful OAuth callback and refreshes installation state", async () => {
-    window.history.replaceState({}, "", "/settings?tab=plugins&remote_mcp_connected=1#plugins");
-
-    render(<PluginsTab />, { wrapper: Wrapper });
-
-    await waitFor(() => expect(mockRefetch).toHaveBeenCalled());
-    expect(window.location.search).toBe("?tab=plugins");
-    expect(window.location.hash).toBe("#plugins");
+    expect(screen.queryByRole("button", { name: "Review" })).not.toBeInTheDocument();
+    // Base UI's Switch marks the disabled state with aria-disabled rather than
+    // the native attribute, so assert what a screen reader actually sees.
+    expect(screen.getByRole("switch", { name: "Enable Plugin" })).toHaveAttribute("aria-disabled", "true");
+    expect(screen.getByRole("button", { name: "Uninstall" })).toBeDisabled();
   });
 });

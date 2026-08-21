@@ -118,7 +118,8 @@ func TestResolveAgentExecutablePathKeepsPATHJunctionEntryPoint(t *testing.T) {
 
 func TestResolveAgentEntryFollowsRetargetedInstallerJunction(t *testing.T) {
 	originalDetect := detectAgentVersion
-	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		path := runtimeCmd.Path
 		return filepath.Base(filepath.Dir(filepath.Dir(path))), nil
 	}
 	t.Cleanup(func() { detectAgentVersion = originalDetect })
@@ -168,13 +169,13 @@ func TestResolveAgentEntryFollowsRetargetedInstallerJunction(t *testing.T) {
 func TestResolveAgentEntryForLaunchRejectsUnverifiedInitialJunctionTarget(t *testing.T) {
 	tests := []struct {
 		name      string
-		detect    func(context.Context, string) (string, error)
+		detect    func(context.Context, agent.Command) (string, error)
 		check     func(error) bool
 		wantError string
 	}{
 		{
 			name: "version detection failure",
-			detect: func(context.Context, string) (string, error) {
+			detect: func(context.Context, agent.Command) (string, error) {
 				return "", errors.New("version probe failed")
 			},
 			check:     func(err error) bool { return strings.Contains(err.Error(), "version probe failed") },
@@ -182,7 +183,7 @@ func TestResolveAgentEntryForLaunchRejectsUnverifiedInitialJunctionTarget(t *tes
 		},
 		{
 			name: "below minimum version",
-			detect: func(context.Context, string) (string, error) {
+			detect: func(context.Context, agent.Command) (string, error) {
 				return "0.9.0", nil
 			},
 			check: func(err error) bool {
@@ -240,7 +241,8 @@ func TestResolveAgentEntryDoesNotSharePreRetargetSingleflightResult(t *testing.T
 	releaseV1Probe := make(chan struct{})
 	v2ProbeStarted := make(chan struct{}, 1)
 	originalDetect := detectAgentVersion
-	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		path := runtimeCmd.Path
 		switch {
 		case sameFile(path, v1):
 			select {
@@ -337,7 +339,8 @@ func TestResolveAgentEntryForLaunchFailsWhenJunctionKeepsRetargeting(t *testing.
 	stableExecutable := filepath.Join(visibleBin, "codex.exe")
 
 	originalDetect := detectAgentVersion
-	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
+		path := runtimeCmd.Path
 		if sameFile(path, v1) {
 			retarget(v2)
 			return "0.144.1", nil
@@ -364,7 +367,7 @@ func TestResolveAgentEntryForLaunchFailsWhenJunctionKeepsRetargeting(t *testing.
 
 func TestResolveAgentEntryCanonicalizesRediscoveredJunction(t *testing.T) {
 	originalDetect := detectAgentVersion
-	detectAgentVersion = func(_ context.Context, path string) (string, error) {
+	detectAgentVersion = func(_ context.Context, runtimeCmd agent.Command) (string, error) {
 		return "0.144.3", nil
 	}
 	t.Cleanup(func() { detectAgentVersion = originalDetect })
@@ -391,7 +394,7 @@ func TestResolveAgentEntryForLaunchRejectsRediscoveredJunctionWhenFinalPathResol
 
 	originalDetect := detectAgentVersion
 	detectCalled := false
-	detectAgentVersion = func(context.Context, string) (string, error) {
+	detectAgentVersion = func(context.Context, agent.Command) (string, error) {
 		detectCalled = true
 		return "0.144.3", nil
 	}

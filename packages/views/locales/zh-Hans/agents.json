@@ -722,7 +722,7 @@
   "visibility": {
     "private": {
       "label": "个人",
-      "tooltip": "个人 · 仅你和工作区管理员可以使用该智能体"
+      "tooltip": "个人 · 仅 owner 和其授权的人可以运行该智能体"
     },
     "workspace": {
       "label": "工作区",
@@ -813,10 +813,12 @@
     "details_provider": "提供方",
     "details_mode": "模式",
     "details_workdir": "工作目录",
+    "details_project_directory": "项目目录",
     "details_created": "创建",
     "details_started": "开始",
     "details_completed": "完成",
     "copy_workdir": "复制工作目录",
+    "copy_project_directory": "复制项目目录",
     "close": "关闭",
     "fact_created": "创建于 {{time}}",
     "fact_took": "用时 {{duration}}",

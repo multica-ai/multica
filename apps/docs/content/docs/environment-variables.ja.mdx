@@ -23,7 +23,7 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 さらにメールサービスを 1 つ選ぶ必要があります。選ばない場合、認証コードと招待はサーバーログに書き込まれるだけです。
 
 <Callout type="warning">
-プロダクションでデフォルトの `JWT_SECRET` を使わないでください。`MULTICA_DEV_VERIFICATION_CODE` も設定しないでください。
+`JWT_SECRET` は本番環境で必須です。`APP_ENV=production` の場合、値が空または既知のプレースホルダーだとバックエンドが起動を拒否します（`openssl rand -hex 32` で生成）。`MULTICA_DEV_VERIFICATION_CODE` も設定しないでください。
 </Callout>
 
 ## API とデータベース
@@ -34,11 +34,12 @@ MULTICA_PUBLIC_URL=https://api.multica.example.com
 | `DATABASE_MAX_CONNS` | `25` | API プロセスあたりの最大データベース接続数 |
 | `DATABASE_MIN_CONNS` | `5` | API プロセスが保持する最小接続数 |
 | `PORT` | `8080` | API のリッスンポート |
-| `JWT_SECRET` | 開発用の固定値 | ログイン JWT と一部の署名フローに使うシークレット |
+| `JWT_SECRET` | 本番環境で必須 | ログイン JWT と一部の署名フローに使うシークレット。本番では空または既知のプレースホルダーだと起動を拒否 |
 | `APP_ENV` | 空 | プロダクションでは `production` を設定 |
 | `AUTH_TOKEN_TTL` | `720h`（30 日） | ブラウザ JWT と cookie の有効期間。Go duration または正の整数秒を受け付けます |
 | `LOG_LEVEL` | アプリのデフォルト | ログレベル |
 | `MULTICA_SHUTDOWN_HOLD_DURATION` | `0` | 終了シグナル受信後、グレースフルシャットダウンを開始するまでの待機時間 |
+| `MULTICA_RUNTIME_RECONNECT_GRACE` | `3h` | オフラインのランタイムが処理中の作業を失敗させずに再接続できる猶予時間。`150s` 未満は `150s` に補正されます |
 
 Kubernetes で shutdown hold を設定する場合、`terminationGracePeriodSeconds` は hold と実際のシャットダウンにかかる時間の合計より大きくしてください。
 
@@ -166,6 +167,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | App ID と対になる完全な PEM 秘密鍵。用途は同上 |
 | Lark | `MULTICA_LARK_SECRET_KEY` | base64 エンコードされた 32 バイトの資格情報暗号化キー |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | base64 エンコードされた 32 バイトの token 暗号化キー |
+| Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | base64 エンコードされた 32 バイトの Bot token 暗号化キー |
 | Composio | `COMPOSIO_API_KEY` | Composio ツール接続を有効化 |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | コールバック API アドレス。`MULTICA_PUBLIC_URL` にフォールバック可能 |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state の署名シークレット。`JWT_SECRET` から派生可能 |
@@ -174,7 +176,7 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 
 `GITHUB_APP_ID` と秘密鍵を設定しなくても、PR の関連付け・ミラー・マージによる done への遷移は通常どおり動きますが、カードに CI とマージ可否のステータスが表示されず、「GitHub から選択」のリポジトリ入口も無効になります。
 
-設定手順は [GitHub 連携](/github-integration#セルフホスト設定)、[Lark Bot](/lark-bot-integration#セルフホスト設定)、[Slack Bot](/slack-bot-integration#セルフホスト設定)を参照してください。
+設定手順は [GitHub 連携](/github-integration#セルフホスト設定)、[Lark Bot](/lark-bot-integration#セルフホスト設定)、[Slack Bot](/slack-bot-integration#セルフホスト設定)、[Telegram Bot](/telegram-bot-integration#管理とセルフホスティング)を参照してください。
 
 ## サーバーサイド LLM
 
@@ -185,8 +187,20 @@ allowlist の正確な判定順序は[ログインとサインアップ](/auth-s
 | `MULTICA_LLM_API_KEY` | 空 | OpenAI 互換の API key |
 | `MULTICA_LLM_BASE_URL` | 空 | OpenAI 互換の endpoint |
 | `MULTICA_LLM_DEFAULT_MODEL` | `gpt-5.6-luna` | リクエストがモデルを指定しない場合に使用 |
+| `MULTICA_LLM_MAX_RETRIES` | `2` | 1 回の呼び出しあたりのリトライ上限。`0` はリトライ無効、`1`〜`5` は最大 N 回 |
 
-API key と base URL の両方が空の場合、サーバーサイド LLM 生成は無効になり、呼び出し側はローカルのフォールバックロジックを使います。
+`MULTICA_LLM_MAX_RETRIES` はリトライポリシーの唯一の設定元です。未設定ならデフォルトの 2 回、`0` なら 1 回の呼び出しにつきリクエストは 1 回だけ、1〜5 ならリトライは最大その回数までになります。これは割り当てではなく上限です。消費するのはリトライ対象の失敗だけで、成功や呼び出し側自身のデッドラインによって早く終わることもあります。それ以外の値（負数、非数値、5 超過）は静かに補正されるのではなく起動に失敗します。上限はレイテンシ予算です。バックオフは 0.5 秒から始まり 8 秒を上限に倍増するため、これより大きい予算は呼び出し側自身のタイムアウトを超え、リトライ可能な失敗をタイムアウトに変えてしまいます。リトライの対象は接続失敗と HTTP 408、409、429、5xx で、それ以外の 4xx はそのまま返されます。サーバーは起動時に有効なポリシーを `llm retry policy` として記録しますが、その行に資格情報は含まれません。
+
+このレイヤーを使う機能は 2 つあり、どちらも設定した endpoint にチャットの内容を送信します。
+
+- **会話タイトルの自動生成** — 新しいチャットセッションでユーザーが最初に送ったメッセージを、そのまま送信します。添付ファイルは含まれません。
+- **フォローアップ質問**（エージェントの返信の下に表示されるボタン） — 会話の末尾を送信します。最大 6 メッセージで、対象の返信は 3000 文字、それより古いメッセージは各 800 文字が上限です。
+
+API key と base URL の両方が空の場合、このレイヤーは無効になり、上流へのリクエストを一切行いません。上記 2 つの機能はどちらも何も送信しなくなります。このレイヤーからチャットの内容をデプロイ外へ出せないポリシーでは、これがサポートされた構成です。セッションはクライアントが最初のメッセージから生成したタイトルをそのまま使い、フォローアップ質問のボタンは表示されず、他の機能への影響はありません。
+
+<Callout type="info">
+これは補助生成レイヤーのみに関する説明です。エージェントの実行は別のデータ経路です。エージェントがチャットに応答するとき、デーモンはそのエージェントの AI コーディングツールをツール自身の資格情報で実行し、上記の `MULTICA_LLM_*` 設定をツールへ渡すことはありません。（エージェント自身が必要とするタスク単位の Multica 接続用変数は、デーモンが別途注入します。）上記の変数を空にしてもこの経路には影響しないため、エージェントのランタイム設定側で制御してください。
+</Callout>
 
 ## デーモン設定
 
@@ -214,7 +228,7 @@ API key と base URL の両方が空の場合、サーバーサイド LLM 生成
 | `MULTICA_AGENT_TEMP_BASE` | `/tmp`（Linux/macOS） | Linux/macOS 専用。作業ごとのプライベート一時ディレクトリの親ディレクトリ。既存かつ書き込み可能な絶対パスである必要があり、無効な値の場合は `/tmp` にフォールバックせず作業の開始に失敗します。短いパスを選んでください。子ツールがその配下に AF_UNIX ソケットを作成する場合があり、`sun_path` の上限は Linux で 108 バイト、macOS で 104 バイトです |
 | `MULTICA_KEEP_ENV_AFTER_TASK` | `false` | デバッグ用にタスクディレクトリを保持 |
 
-各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` と `MULTICA_<PROVIDER>_MODEL` でコマンドパスとデフォルトモデルを上書きできます。QwenPaw だけは例外で、Multica がモデルを渡さないため `MULTICA_QWENPAW_MODEL` はありません。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
+各 AI コーディングツールは `MULTICA_<PROVIDER>_PATH` でコマンドパスを上書きでき、モデル上書き対応ツールでは `MULTICA_<PROVIDER>_MODEL` も利用できます。QwenPaw と MiniMax Code にはモデル変数がなく、MiniMax Code のパス変数は `MULTICA_MCODE_PATH` です。詳しくは [AI コーディングツール比較](/providers#モデルの取得元) を参照してください。DeepSeek Harness は `MULTICA_DSH_PATH` と `MULTICA_DSH_MODEL` に対応しています（値は dsh のモデルカタログにあるモデル ID、例: `deepseek-official/deepseek-chat`）。マシン全体のデフォルト引数 `MULTICA_<PROVIDER>_ARGS` は、現在 Claude Code、Codex、CodeBuddy、Qwen Code、QwenPaw の 5 ツールに対応しています。対応する変数は `MULTICA_CLAUDE_ARGS`、`MULTICA_CODEX_ARGS`、`MULTICA_CODEBUDDY_ARGS`、`MULTICA_QWEN_ARGS`、`MULTICA_QWENPAW_ARGS` です。例:
 
 ```dotenv
 MULTICA_CLAUDE_PATH=/opt/bin/claude

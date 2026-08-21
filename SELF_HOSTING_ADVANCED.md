@@ -11,7 +11,7 @@ All configuration is done via environment variables. Copy `.env.example` as a st
 | Variable | Description | Example |
 |----------|-------------|---------|
 | `DATABASE_URL` | PostgreSQL connection string | `postgres://multica:multica@localhost:5432/multica?sslmode=disable` |
-| `JWT_SECRET` | **Must change from default.** Secret key for signing JWT tokens. Use a long random string. | `openssl rand -hex 32` |
+| `JWT_SECRET` | **Required — no safe default.** Secret key for signing JWT tokens. A production backend refuses to boot if this is empty or a known placeholder. Generate with `openssl rand -hex 32`. | `openssl rand -hex 32` |
 | `FRONTEND_ORIGIN` | URL where the frontend is served (used for CORS) | `https://app.example.com` |
 
 ### Database Pool Tuning (Optional)
@@ -211,6 +211,7 @@ Agent-specific overrides:
 | `MULTICA_OPENCODE_MODEL` | Override the OpenCode model used |
 | `MULTICA_OPENCLAW_PATH` | Custom path to the `openclaw` binary |
 | `MULTICA_OPENCLAW_MODEL` | Override the OpenClaw model used |
+| `MULTICA_OPENCLAW_CLI_TIMEOUT` | Deadline for each `openclaw config ...` call during task preparation (default 30s; accepts `45s` or `45`). Raise it when the local CLI is slow to start; the daemon also reads it from `backends.openclaw.cli_timeout` in the CLI config |
 | `MULTICA_HERMES_PATH` | Custom path to the `hermes` binary |
 | `MULTICA_HERMES_MODEL` | Override the Hermes model used |
 | `MULTICA_PI_PATH` | Custom path to the `pi` binary |
@@ -312,7 +313,7 @@ If you are upgrading from a binary that pre-dates MUL-2957 (or the auto-hook fai
 
 If you prefer to build and run services manually:
 
-**Prerequisites:** Go 1.26+, Node.js 20+, pnpm 10.28+, PostgreSQL 17 with pgvector.
+**Prerequisites:** Go 1.26.6, Node.js 22, pnpm 10.28.2, PostgreSQL 17 with pgvector.
 
 ```bash
 # Start your PostgreSQL (or use: docker compose up -d postgres)
@@ -579,6 +580,34 @@ networking, allowlists, NetworkPolicy, or proxy authentication. If you bind
 `METRICS_ADDR=0.0.0.0:9090` inside a container, only publish that port to a
 trusted network, for example a host-local mapping such as
 `127.0.0.1:9090:9090`.
+
+## Go Runtime Profiling
+
+The backend exposes all standard Go pprof routes on the fixed loopback-only
+management listener `127.0.0.1:6060`, including CPU, heap, allocs, goroutine,
+block, mutex, threadcreate, symbol, and trace profiles:
+
+```bash
+go tool pprof 'http://127.0.0.1:6060/debug/pprof/profile?seconds=30'
+go tool pprof http://127.0.0.1:6060/debug/pprof/heap
+```
+
+The public API port does not serve `/debug/pprof/`. The listener address is not
+configurable and is never bound to a container or host network interface.
+Profiles can reveal process internals and some captures add CPU or memory
+pressure, so access should remain limited to operators on the same host or in
+the same container network namespace.
+
+A loopback listener inside a container belongs to that container's network
+namespace and is not reachable directly from the host. With the Compose stack,
+capture the profile inside the backend container and copy it out:
+
+```bash
+docker compose -f docker-compose.selfhost.yml exec backend \
+  wget -qO /tmp/heap.pprof http://127.0.0.1:6060/debug/pprof/heap
+docker compose -f docker-compose.selfhost.yml cp backend:/tmp/heap.pprof ./heap.pprof
+go tool pprof ./heap.pprof
+```
 
 ## Upgrading
 

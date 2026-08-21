@@ -1,8 +1,78 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY } from "./client";
+import { ApiClient, ApiError, CHAT_DRAFT_RESTORE_CAPABILITY, clientErrorMessage } from "./client";
+import { EMPTY_PLUGIN_PREVIEW } from "./schemas";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("ApiClient edit guards", () => {
+  it("serializes field baselines for issue and comment writes", async () => {
+    const fetchMock = vi.fn().mockImplementation(() => Promise.resolve(
+      new Response("{}", {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    await client.updateIssue("issue-1", { title: "Latest", title_base: "Original" });
+    await client.updateComment("comment-1", "Latest", [], undefined, "Original");
+
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({
+      title: "Latest",
+      title_base: "Original",
+    });
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toMatchObject({
+      content: "Latest",
+      content_base: "Original",
+    });
+  });
+
+  it("accepts an older issue response without revision and rejects a malformed revision", async () => {
+    const legacyIssue = {
+      id: "issue-1",
+      workspace_id: "ws-1",
+      number: 1,
+      identifier: "MUL-1",
+      title: "Legacy issue",
+      description: null,
+      status: "todo",
+      priority: "none",
+      assignee_type: null,
+      assignee_id: null,
+      creator_type: "member",
+      creator_id: "user-1",
+      parent_issue_id: null,
+      project_id: null,
+      position: 0,
+      start_date: null,
+      due_date: null,
+      created_at: "2026-08-16T00:00:00Z",
+      updated_at: "2026-08-16T00:00:00Z",
+    };
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ issues: [legacyIssue], total: 1 }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        issues: [{ ...legacyIssue, revision: "invalid" }],
+        total: 1,
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const client = new ApiClient("https://api.example.test");
+
+    const parsedLegacy = await client.listIssues();
+    expect(parsedLegacy).toMatchObject({ issues: [{ id: "issue-1" }], total: 1 });
+    expect(parsedLegacy.issues[0]).not.toHaveProperty("revision");
+    await expect(client.listIssues()).resolves.toEqual({ issues: [], total: 0 });
+  });
 });
 
 describe("ApiClient pull-request response schema", () => {
@@ -69,24 +139,22 @@ describe("ApiClient pull-request response schema", () => {
   });
 });
 
-describe("ApiClient Remote MCP OAuth response schema", () => {
-  it("degrades a malformed start response without inventing a navigation URL", async () => {
+describe("ApiClient Plugin preview response schema", () => {
+  it("degrades a malformed preview so a blank scope list is never shown as approval", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ authorization_url: 42 }), {
+        new Response(JSON.stringify({ scopes: "issues:read" }), {
           status: 200,
           headers: { "Content-Type": "application/json" },
         }),
       ),
     );
 
-    await expect(new ApiClient("https://api.example.test").startPluginRemoteMCPOAuth(
+    await expect(new ApiClient("https://api.example.test").previewPlugin(
       "workspace-1",
-      "installation-1",
-      "search",
-      { public_config: {}, failure_policy: "required" },
-    )).resolves.toEqual({ authorization_url: "" });
+      { source_url: "https://example.test/multica.plugin.json" },
+    )).resolves.toEqual(EMPTY_PLUGIN_PREVIEW);
   });
 });
 
@@ -824,6 +892,7 @@ describe("ApiClient", () => {
     await client.updateAutopilot("ap-1", { status: "paused", project_id: null });
     await client.deleteAutopilot("ap-1");
     await client.triggerAutopilot("ap-1");
+    await client.getAutopilotQuotaUsage();
     await client.listAutopilotRuns("ap-1", { limit: 10, offset: 20 });
     await client.createAutopilotTrigger("ap-1", {
       kind: "schedule",
@@ -838,6 +907,7 @@ describe("ApiClient", () => {
       url,
       method: init?.method ?? "GET",
       body: init?.body,
+      idempotencyKey: (init?.headers as Record<string, string> | undefined)?.["Idempotency-Key"],
     }));
 
     expect(calls).toMatchObject([
@@ -859,7 +929,12 @@ describe("ApiClient", () => {
         body: JSON.stringify({ status: "paused", project_id: null }),
       },
       { url: "https://api.example.test/api/autopilots/ap-1", method: "DELETE" },
-      { url: "https://api.example.test/api/autopilots/ap-1/trigger", method: "POST" },
+      {
+        url: "https://api.example.test/api/autopilots/ap-1/trigger",
+        method: "POST",
+        idempotencyKey: expect.any(String),
+      },
+      { url: "https://api.example.test/api/autopilots/usage", method: "GET" },
       { url: "https://api.example.test/api/autopilots/ap-1/runs?limit=10&offset=20", method: "GET" },
       {
         url: "https://api.example.test/api/autopilots/ap-1/triggers",
@@ -2215,5 +2290,30 @@ describe("ApiClient workspace MCP servers", () => {
     [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     expect(url).toContain("/api/agents/agent-1/mcp-servers/srv-1");
     expect(init.method).toBe("DELETE");
+  });
+});
+
+describe("clientErrorMessage", () => {
+  it("returns a 4xx message, which handlers write for the user", () => {
+    expect(clientErrorMessage(new ApiError("autopilot is not active", 400, "Bad Request")))
+      .toBe("autopilot is not active");
+    expect(clientErrorMessage(new ApiError("forbidden", 403, "Forbidden"))).toBe("forbidden");
+  });
+
+  it("withholds a 5xx message, which carries internal server detail", () => {
+    // MUL-6472: the pre-fix body for a failed autopilot trigger looked like
+    // this, and it was rendered verbatim in the run-now toast.
+    const leaky = new ApiError(
+      'failed to trigger autopilot: create run: ERROR: duplicate key value violates unique constraint "autopilot_run_pkey" (SQLSTATE 23505)',
+      500,
+      "Internal Server Error",
+    );
+    expect(clientErrorMessage(leaky)).toBeUndefined();
+    expect(clientErrorMessage(new ApiError("internal error", 503, "Service Unavailable"))).toBeUndefined();
+  });
+
+  it("withholds a transport failure, whose message says nothing actionable", () => {
+    expect(clientErrorMessage(new TypeError("Failed to fetch"))).toBeUndefined();
+    expect(clientErrorMessage(undefined)).toBeUndefined();
   });
 });

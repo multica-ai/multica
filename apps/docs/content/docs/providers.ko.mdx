@@ -32,6 +32,7 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | Hermes | `hermes` | ✓ | ✓ | 실행별 `HERMES_HOME/skills/` |
 | Kimi CLI | `kimi` | ✓ | ✓ | `.kimi/skills/` |
 | Kiro CLI | `kiro-cli` | ✓ | ✓ | `.kiro/skills/` |
+| MiniMax Code | `mcode` | — | ✓ | `.minimax/skills/` |
 | OpenClaw | `openclaw` | ✓ | ✓ | `skills/` |
 | OpenCode | `opencode` | ✓ | ✓ | `.opencode/skills/` |
 | Pi | `pi` | ✓ | — | `.pi/skills/` |
@@ -42,6 +43,7 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 | QwenPaw | `qwenpaw` | ✓ | ✓ | 실행별 워크스페이스 `skills/` |
 | Reasonix | `reasonix` | ✓ | ✓ | `.reasonix/skills/` |
 | Trae CLI | `traecli` | ✓ | ✓ | `.traecli/skills/` |
+| Dim | `dim` | ✓ | ✓ | — |
 
 "Multica의 MCP 관리"는 에이전트 설정에 MCP server를 입력하면 Multica가 실행 전에 해당 도구로 전달할 수 있다는 뜻입니다. 도구 자체에 다른 MCP 설정 방법이 없다는 뜻은 아닙니다.
 
@@ -51,7 +53,7 @@ Multica는 사용 중인 AI 코딩 도구를 대체하지 않습니다. 런타�
 
 모델을 선택하지 않으면 Multica가 해당 도구의 기본 설정을 사용합니다. 목록이 비어 있다면 런타임이 온라인이고 도구에 로그인되어 있는지 확인한 뒤 모델 목록을 새로 고치세요.
 
-QwenPaw만 예외입니다. Multica에서 고른 모델을 받아들이지 않으므로 선택 상자가 비활성 상태로 "런타임에서 관리"라고 표시됩니다. 모델은 QwenPaw 자체 설정에서 선택하세요. QwenPaw의 모델 목록이 비어 있는 것은 정상이며 런타임이 오프라인이라는 뜻이 아닙니다.
+QwenPaw와 MiniMax Code는 예외입니다. Multica에서 고른 모델을 받아들이지 않으므로 선택 상자가 비활성 상태로 "런타임에서 관리"라고 표시됩니다. 모델은 각 도구의 자체 설정에서 선택하세요. 모델 목록이 비어 있는 것은 정상이며 런타임이 오프라인이라는 뜻이 아닙니다.
 
 DeepSeek Harness의 모델 카탈로그는 런타임 자체가 제공합니다(`dsh --profile multica --list-models`). 모델 ID는 `provider/model` 형식(예: `deepseek-official/deepseek-chat`)이므로 목록에서 전체 ID를 선택하세요.
 
@@ -61,7 +63,7 @@ DeepSeek Harness의 모델 카탈로그는 런타임 자체가 제공합니다(`
 
 ## 세션 복원
 
-위 도구는 모두 이후 실행에서 기존 세션을 이어갈 수 있습니다. 원래 세션이 여전히 존재하고 해당 세션에 접근할 수 있는 런타임이 태스크를 실행해야 합니다.
+표에서 ✓로 표시된 도구는 이후 실행에서 기존 세션을 이어갈 수 있습니다. 원래 세션이 여전히 존재하고 해당 세션에 접근할 수 있는 런타임이 태스크를 실행해야 합니다. MiniMax Code 0.1.2는 ACP에서 세션 로드 기능을 알리지 않으므로 이후 실행에서는 새 MCode 세션을 시작합니다.
 
 Multica는 도구가 반환한 세션 식별자를 저장합니다. 다음에 같은 이슈에서 작업을 이어갈 때 런타임이 이 세션의 복원을 시도합니다. 복원할 수 없으면 새 세션을 만들어 계속 실행합니다. Pi는 로컬 세션 파일 경로를 저장하므로 원래 컴퓨터와 파일에 더 많이 의존합니다.
 

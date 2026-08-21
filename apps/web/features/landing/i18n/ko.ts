@@ -118,7 +118,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           {
             title: "처음 실행할 때 자동 등록",
             description:
-              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 22개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
+              "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 23개 지원 도구를 스캔해 이미 설치된 것을 런타임으로 자동 등록합니다.",
           },
         ],
       },
@@ -193,7 +193,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
         {
           question: "Multica는 어떤 코딩 에이전트를 지원하나요?",
           answer:
-            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 22개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
+            "Multica는 Antigravity, Claude Code, CodeBuddy, Codex, Copilot, Cursor, DeepSeek Harness, DevEco Code, Dim, Grok, Hermes, Kimi, Kiro CLI, Oh-My-Pi, OpenClaw, OpenCode, Pi, Qoder, Qoder CN, Qwen Code, QwenPaw, Reasonix, Trae CLI 등 23개 코딩 도구를 기본 지원합니다. 데몬이 이미 설치된 CLI를 자동으로 찾아 각각 런타임으로 등록합니다. 오픈소스이므로 직접 백엔드를 추가할 수도 있습니다.",
         },
         {
           question: "셀프 호스팅만 가능한가요, 클라우드 버전도 있나요?",
@@ -269,6 +269,124 @@ export function createKoDict(allowSignup: boolean): LandingDict {
       },
       entries: [
         {
+          version: "0.4.31",
+          date: "2026-08-20",
+          title: "백로그 이동 전 실행 확인, Webhook 이벤트 필터, Windows 빌드 수정",
+          changes: [],
+          improvements: [
+            "웹 도움말 메뉴에서 데스크톱 앱을 바로 찾을 수 있습니다.",
+            "에이전트가 맡은 Issue를 백로그에서 옮기기 전에 실행을 확인할 수 있습니다.",
+            "Webhook 이벤트 필터를 더 쉽게 추가하고 제거할 수 있습니다.",
+            "/ 입력 시 정확히 일치하는 스킬이 먼저 표시됩니다.",
+          ],
+          fixes: [
+            "Windows CLI 빌드에서 올바른 실행 파일 이름을 생성합니다.",
+            "잠시 연결이 끊겨도 에이전트 스킬을 계속 불러올 수 있습니다.",
+            "자동화 실행 실패 시 내부 오류 세부 정보가 더 이상 표시되지 않습니다.",
+            "바쁜 워크스페이스에서도 에이전트 업데이트가 안정적으로 유지됩니다.",
+          ],
+        },
+        {
+          version: "0.4.30",
+          date: "2026-08-19",
+          title: "더 안전한 Issue 편집, 미설정 속성 필터, 더 선명한 에이전트 표시",
+          changes: [],
+          features: [
+            "각 채팅 세션을 담당하는 에이전트를 확인할 수 있어요.",
+            "워크스페이스 관리자는 연결된 DingTalk ID를 볼 수 있어요.",
+            "값이 설정되지 않은 사용자 지정 속성으로 Issue를 필터링할 수 있어요.",
+            "Issue나 댓글을 편집하는 중 충돌이 나도 저장 전에 두 버전을 비교할 수 있어요.",
+          ],
+          improvements: [
+            "명령 팔레트에서 모든 워크스페이스 페이지를 열 수 있어요.",
+            "채팅 세션이 더 빠르게 다시 열립니다.",
+            "Issue 활동 시각이 의미 있는 업데이트를 반영합니다.",
+          ],
+          fixes: [
+            "비공개 에이전트는 소유자만 실행할 수 있어요.",
+            "태스크가 동시에 실행돼도 에이전트 작업 공간이 섞이지 않습니다.",
+            "공급자 명령 로그에 자격 증명이나 프롬프트가 남지 않습니다.",
+            "댓글을 보낸 뒤 잘못된 전송 실패 메시지가 뜨지 않습니다.",
+            "의존성 보안 취약점을 수정했습니다.",
+          ],
+        },
+        {
+          version: "0.4.29",
+          date: "2026-08-18",
+          title: "MiniMax Code, 실행 기록 개선, Hermes 에이전트 동작 수정",
+          changes: [],
+          features: [
+            "MiniMax Code로 에이전트를 실행할 수 있어요.",
+            "Cmd/Ctrl+,를 누르면 설정이 데스크톱의 새 탭에서 열립니다.",
+          ],
+          improvements: [
+            "Hermes 에이전트가 도구를 실행하는 동안에도 실행 기록에 바로 표시됩니다.",
+            "실행 기록에서 중복된 에이전트 이름이 사라져 더 읽기 쉬워졌어요.",
+          ],
+          fixes: [
+            "잠깐 연결이 끊겨도 에이전트 태스크가 계속 실행됩니다.",
+            "일별 및 주별 비용 차트에 캐시 읽기 비용이 포함됩니다.",
+            "Feishu로 직접 보낸 파일과 오디오가 에이전트에게 전달됩니다.",
+            "위임한 태스크가 실패하면 원래 조정 에이전트에게 돌아갑니다.",
+            "다운로드에는 가장 최신의 완전한 릴리스만 표시됩니다.",
+          ],
+        },
+        {
+          version: "0.4.28",
+          date: "2026-08-17",
+          title: "멤버 맞춤 필드, 스킬 일괄 업데이트, 더 친절한 데스크톱 업데이트 알림",
+          changes: [],
+          features: [
+            "맞춤 필드에 워크스페이스 멤버를 한 명 또는 여러 명 담을 수 있어요.",
+            "선택한 스킬을 원본에서 한 번에 모두 업데이트할 수 있어요.",
+          ],
+          improvements: [
+            "데스크톱 업데이트 알림에서 해당 버전의 변경 기록을 바로 열 수 있습니다.",
+            "담당자를 지정하는 곳에서 멤버 이메일도 쓸 수 있습니다.",
+          ],
+          fixes: [
+            "데스크톱에서 새 탭을 열어도 지금 워크스페이스를 잃지 않습니다.",
+            "멤버 필터가 숫자만이 아니라 이름과 아바타로 표시됩니다.",
+          ],
+        },
+        {
+          version: "0.4.27",
+          date: "2026-08-17",
+          title: "워크스페이스 MCP 서버, 공유 링크 초대, 새로워진 실행 기록",
+          changes: [],
+          features: [
+            "MCP 서버를 워크스페이스에서 설정하고 에이전트마다 지정할 수 있어요.",
+            "공유 링크를 만들어 바로 워크스페이스에 들어오게 할 수 있어요.",
+            "실행 기록이 단계 단위로 바뀌고, 2단 타임라인과 결과 요약이 붙습니다.",
+            "Slack으로 보낸 파일이 대화에 첨부로 들어옵니다.",
+            "휴대폰 홈 화면에 Multica를 추가해 앱처럼 열 수 있어요.",
+            "브라우저 탭에 지금 열어 둔 워크스페이스 페이지 이름이 표시됩니다.",
+            "가져온 스킬이 어디서 왔는지 보여 줍니다.",
+            "지금 보고 있는 Issue를 멘션하면 '이 Issue'로 표시됩니다.",
+          ],
+          improvements: [
+            "실행되지 않는 에이전트 CLI는 오프라인이 되고 고치는 명령을 알려 줍니다.",
+            "Issue 식별자를 입력할 때 멘션이 훨씬 빨리 떠요.",
+            "서버가 여러 대여도 채널 메시지가 중복되거나 끊기지 않습니다.",
+            "워크스페이스 초대를 무더기로 보낼 수 없습니다.",
+            "에디터의 떠 있는 툴바를 스크린 리더가 읽어 줍니다.",
+          ],
+          fixes: [
+            "데스크톱 실행이 실패한 뒤 다시 열어도 로그인을 새로 하지 않습니다.",
+            "마지막 워크스페이스를 지워도 데스크톱이 하얗게 되지 않습니다.",
+            "Pi가 오류로 턴을 끝낸 태스크가 멈추지 않고 실패로 처리됩니다.",
+            "Antigravity 모델 목록이 정상적으로 불러와집니다.",
+            "탭을 바꿔도 HTML 첨부가 읽던 위치로 돌아옵니다.",
+            "커스텀 런타임의 고정 인수가 작성한 순서대로 전달됩니다.",
+            "드래그를 중간에 취소해도 보드가 굳지 않습니다.",
+            "모바일 웹에서 빠른 기록을 쓸 수 있어요.",
+            "페이지 머리글에 사이드바 토글이 두 개 나오지 않습니다.",
+            "에이전트를 만들 때 오류가 잠깐 번쩍이지 않습니다.",
+            "실행 타임라인의 막대에 마우스를 올려도 흔들리지 않습니다.",
+            "셀프호스팅 업데이트가 중간에 멈춰도 다시 실행하면 안전하게 이어집니다.",
+          ],
+        },
+        {
           version: "0.4.26",
           date: "2026-08-14",
           title: "DeepSeek Harness 런타임, 보드 드래그 이동, Inbox 보관 단축키",
@@ -300,6 +418,7 @@ export function createKoDict(allowSignup: boolean): LandingDict {
           title: "로컬 폴더 병렬 모드, DingTalk 그룹별 라우팅, 스킬 원클릭 업데이트",
           changes: [],
           features: [
+            "에이전트를 Telegram에 연결해 DM, 그룹 멘션, 포럼 토픽에서 대화할 수 있어요.",
             "로컬 폴더에서 여러 태스크를 병렬로 돌리고, 각각 브랜치로 결과를 받습니다.",
             "DingTalk 봇 하나로 그룹마다 다른 에이전트를 지정할 수 있어요.",
             "가져온 스킬을 원본에서 원클릭으로 업데이트할 수 있어요.",

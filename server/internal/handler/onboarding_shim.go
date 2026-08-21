@@ -35,6 +35,7 @@ import (
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/middleware"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -255,6 +256,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 			description = req.StarterPrompt
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   wsUUID,
 			Title:         onboardingIssueTitle,
 			Description:   strOrNullText(description),
@@ -314,6 +316,7 @@ func (h *Handler) BootstrapOnboardingRuntime(w http.ResponseWriter, r *http.Requ
 	if issueCreated {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
+		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform, _, _ := middleware.ClientMetadataFromContext(r.Context())
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(
@@ -413,6 +416,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 			return
 		}
 		issue, err = qtx.CreateIssue(r.Context(), db.CreateIssueParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   wsUUID,
 			Title:         noRuntimeIssueTitle,
 			Description:   strOrNullText(noRuntimeIssueDescription(userBefore.Language)),
@@ -454,6 +458,7 @@ func (h *Handler) BootstrapOnboardingNoRuntime(w http.ResponseWriter, r *http.Re
 	if issueCreated {
 		prefix := h.getIssuePrefix(r.Context(), issue.WorkspaceID)
 		resp := issueToResponse(issue, prefix)
+		h.fillStatusCategory(r.Context(), issue.WorkspaceID, &resp)
 		h.publish(protocol.EventIssueCreated, req.WorkspaceID, "member", userID, map[string]any{"issue": resp})
 		platform2, _, _ := middleware.ClientMetadataFromContext(r.Context())
 		obsmetrics.RecordEvent(h.Analytics, h.Metrics, analytics.IssueCreated(

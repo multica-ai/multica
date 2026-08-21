@@ -278,11 +278,22 @@ multica: ## Run the multica CLI entrypoint directly from the Go source tree
 VERSION ?= $(shell git describe --tags --match 'v[0-9]*' --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE    ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
-
+# Windows will not execute an extensionless binary, so a source build there has
+# to name its outputs the way the target platform expects — otherwise the CLI
+# builds fine and then fails to re-exec itself as a daemon (#7255). GOOS reaches
+# a build two ways: as an environment variable (`GOOS=windows make build`) and
+# as a Make variable (`make build GOOS=windows`). The top-level `export` sends
+# both forms to the recipe, so `go build` honors both and the suffix has to as
+# well; `$(GOOS)` covers the Make-variable form, which a parse-time
+# `go env GOOS` cannot see. Target-specific so only `build` pays for the probe:
+# a global assignment runs `go env` on every target — `export` expands even a
+# recursive one — which prints `go: Command not found` on frontend-only
+# checkouts with no Go toolchain installed.
+build: EXE = $(if $(filter windows,$(or $(GOOS),$(shell go env GOOS))),.exe,)
 build: ## Build the server, CLI, and migrate binaries into server/bin
-	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server ./cmd/server
-	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica ./cmd/multica
-	cd server && go build -o bin/migrate ./cmd/migrate
+	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT)" -o bin/server$(EXE) ./cmd/server
+	cd server && go build -ldflags "-X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)" -o bin/multica$(EXE) ./cmd/multica
+	cd server && go build -o bin/migrate$(EXE) ./cmd/migrate
 
 test: ## Run Go tests after ensuring the target DB exists and migrations are applied
 	$(REQUIRE_ENV)
@@ -304,7 +315,7 @@ migrate-down: ## Create the target DB if needed, then roll back database migrati
 	cd server && go run ./cmd/migrate down
 
 sqlc: ## Regenerate sqlc code
-	cd server && sqlc generate
+	cd server && go run github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1 generate
 
 # Cleanup
 ##@ Cleanup

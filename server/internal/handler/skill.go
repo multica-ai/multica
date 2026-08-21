@@ -19,6 +19,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	skillpkg "github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"golang.org/x/sync/errgroup"
@@ -26,16 +27,16 @@ import (
 
 // sanitizeNullBytes makes a string safe for a PostgreSQL TEXT column.
 //
-// Two failure modes covered:
-//   - Embedded NUL (0x00) — PG rejects with SQLSTATE 22021. Removed.
-//   - Other invalid-UTF-8 byte sequences (e.g. 0x91 = Windows-1252 smart
-//     quote in imported Windows-encoded prose). `strings.ToValidUTF8` drops
-//     them.
+// Thin alias for util.SanitizeTextForPostgres, kept because ~20 call sites
+// spell it this way. The shared helper is the single definition of what
+// "safe to persist" means, so the daemon task endpoints and the
+// comment/skill/property endpoints can no longer drift into storing
+// different text for the same input (GH #7098 review).
 //
-// Name is kept for compatibility with the many call sites; the behaviour
-// is a strict superset of the original.
+// One behaviour change came with the move: invalid UTF-8 is now replaced
+// with U+FFFD rather than dropped silently. NUL is still removed outright.
 func sanitizeNullBytes(s string) string {
-	return strings.ToValidUTF8(strings.ReplaceAll(s, "\x00", ""), "")
+	return util.SanitizeTextForPostgres(s)
 }
 
 // --- Response structs ---
@@ -643,7 +644,7 @@ func isCapError(err error) bool {
 // assets the agent never reads as text anyway. Logging the skip leaves a
 // breadcrumb if a user expected one of these to import.
 func (s *importedSkill) addFile(path, content string) error {
-	if isLikelyBinaryFilePath(path) {
+	if skillpkg.IsLikelyBinaryFilePath(path) {
 		slog.Info("skill import: skipping binary file", "path", path, "size", len(content))
 		return nil
 	}
@@ -656,34 +657,6 @@ func (s *importedSkill) addFile(path, content string) error {
 	s.bundleSize += len(content)
 	s.files = append(s.files, importedFile{path: path, content: content})
 	return nil
-}
-
-// isLikelyBinaryFilePath reports whether the file's extension indicates a
-// non-text payload. Conservative blacklist — extensions not on the list
-// are assumed text and pass through. `sanitizeNullBytes` (called at PG
-// insert time) is the second-line defence against any text file that
-// turns out to have stray invalid-UTF-8 bytes.
-func isLikelyBinaryFilePath(path string) bool {
-	ext := strings.ToLower(filepath.Ext(path))
-	switch ext {
-	case
-		// images
-		".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tiff", ".ico", ".heic",
-		// fonts
-		".ttf", ".otf", ".woff", ".woff2", ".eot",
-		// archives
-		".zip", ".gz", ".tar", ".bz2", ".7z", ".rar",
-		// documents (binary office)
-		".pdf", ".docx", ".xlsx", ".pptx", ".doc", ".xls", ".ppt",
-		// media
-		".mp3", ".mp4", ".wav", ".avi", ".mov", ".webm", ".m4a", ".flac",
-		// compiled / executable
-		".exe", ".dll", ".so", ".dylib", ".class", ".jar", ".wasm",
-		// db / cache
-		".db", ".sqlite", ".sqlite3", ".pyc":
-		return true
-	}
-	return false
 }
 
 // --- ClawHub types ---
@@ -1367,7 +1340,7 @@ func addSupportingFilesFromTree(ctx context.Context, httpClient *http.Client, re
 		if lowerBase == "skill.md" || lowerBase == "license" || lowerBase == "license.txt" || lowerBase == "license.md" {
 			continue
 		}
-		if isLikelyBinaryFilePath(relPath) {
+		if skillpkg.IsLikelyBinaryFilePath(relPath) {
 			continue
 		}
 		eligible = append(eligible, treeFile{repoPath: entry.Path, relPath: relPath, size: entry.size()})

@@ -116,6 +116,11 @@ import type {
   CreateLabelRequest,
   UpdateLabelRequest,
   ListLabelsResponse,
+  ListIssueStatusesResponse,
+  IssueStatusCategory,
+  IssueStatusEntry,
+  CreateIssueStatusRequest,
+  UpdateIssueStatusRequest,
   IssueLabelsResponse,
   LabelResourceType,
   ResourceLabelsResponse,
@@ -129,6 +134,7 @@ import type {
   Autopilot,
   AutopilotTrigger,
   AutopilotRun,
+  AutopilotQuotaUsage,
   CreateAutopilotRequest,
   UpdateAutopilotRequest,
   CreateAutopilotTriggerRequest,
@@ -142,15 +148,16 @@ import type {
   WebhookDelivery,
   NotificationPreferenceResponse,
   NotificationPreferences,
-  PluginBindingRequest,
-  PluginCatalogResponse,
+  PluginHookResult,
   PluginInstallation,
   PluginInstallationListResponse,
-  PluginReleaseRequest,
-  RemoteMCPConfigRequest,
-  RemoteMCPDiscoveryResponse,
-  RemoteMCPOAuthStartRequest,
-  RemoteMCPOAuthStartResponse,
+  PluginInvocation,
+  PluginMCPTool,
+  PluginPreview,
+  PluginTokenIssue,
+  PluginPreviewRequest,
+  PluginInstallRequest,
+  PluginConfigRequest,
   GitHubPullRequest,
   ListGitHubInstallationsResponse,
   ListGitHubRepositoriesResponse,
@@ -180,6 +187,10 @@ import type {
   ListWecomInstallationsResponse,
   RegisterWecomBYORequest,
   RedeemWecomBindingTokenResponse,
+  TelegramInstallation,
+  ListTelegramInstallationsResponse,
+  RegisterTelegramRequest,
+  RedeemTelegramBindingTokenResponse,
   Squad,
   SquadMember,
   SquadMemberStatusListResponse,
@@ -212,7 +223,7 @@ import type {
   ListCloudRuntimeNodesParams,
 } from "../runtimes/cloud-runtime";
 import { type Logger, noopLogger } from "../logger";
-import { createRequestId } from "../utils";
+import { createRequestId, createSafeId } from "../utils";
 import { getCurrentSlug } from "../platform/workspace-storage";
 import { parseWithFallback } from "./schema";
 import {
@@ -274,6 +285,7 @@ import {
   ListAutopilotsResponseSchema,
   EMPTY_LIST_AUTOPILOTS_RESPONSE,
   AutopilotRunSchema,
+  AutopilotQuotaUsageSchema,
   FALLBACK_AUTOPILOT_RUN,
   CronPreviewResponseSchema,
   UNREADABLE_CRON_PREVIEW_RESPONSE,
@@ -324,6 +336,12 @@ import {
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+  TelegramInstallationSchema,
+  ListTelegramInstallationsResponseSchema,
+  RedeemTelegramBindingTokenResponseSchema,
+  EMPTY_TELEGRAM_INSTALLATION,
+  EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
   EMPTY_BILLING_BALANCE,
   EMPTY_BILLING_TRANSACTIONS_PAGE,
   EMPTY_BILLING_BATCHES_PAGE,
@@ -344,6 +362,8 @@ import {
   EMPTY_NOTIFICATION_PREFERENCE_RESPONSE,
   LabelSchema,
   ListLabelsResponseSchema,
+  ListIssueStatusesResponseSchema,
+  IssueStatusEntrySchema,
   IssuePropertySchema,
   ListPropertiesResponseSchema,
   IssuePropertiesResponseSchema,
@@ -362,6 +382,8 @@ import {
   ResourceLabelsResponseSchema,
   EMPTY_LABEL,
   EMPTY_LIST_LABELS_RESPONSE,
+  EMPTY_LIST_ISSUE_STATUSES_RESPONSE,
+  EMPTY_ISSUE_STATUS_ENTRY,
   EMPTY_RESOURCE_LABELS_RESPONSE,
   GitHubConnectResponseSchema,
   ListGitHubInstallationsResponseSchema,
@@ -377,16 +399,17 @@ import {
   IssueViewListSchema,
   IssueViewPreferenceSchema,
   EMPTY_ISSUE_VIEW_PREFERENCE,
-  EMPTY_PLUGIN_CATALOG,
   EMPTY_PLUGIN_INSTALLATION,
   EMPTY_WORKSPACE_MCP_SERVER,
   EMPTY_PLUGIN_INSTALLATION_LIST,
-  PluginCatalogResponseSchema,
+  EMPTY_PLUGIN_PREVIEW,
+  PluginHookResultSchema,
   PluginInstallationListResponseSchema,
+  PluginInvocationListSchema,
+  PluginMCPToolListSchema,
+  PluginTokenIssueSchema,
   PluginInstallationSchema,
-  RemoteMCPDiscoveryResponseSchema,
-  RemoteMCPOAuthStartResponseSchema,
-  EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE,
+  PluginPreviewSchema,
   WorkspaceMcpServerListSchema,
   WorkspaceMcpServerSchema,
   ShareLinkSchema,
@@ -480,6 +503,20 @@ export function dispatchReasonCode(err: unknown): string | undefined {
   if (err instanceof ApiError && err.body && typeof err.body === "object") {
     const code = (err.body as { reason_code?: unknown }).reason_code;
     if (typeof code === "string" && code.length > 0) return code;
+  }
+  return undefined;
+}
+
+// clientErrorMessage returns the server's message only when it is a CLIENT
+// error (4xx). Handlers write those for the user — "autopilot is not active",
+// "Idempotency-Key is too long" — so they are worth rendering. A 5xx message is
+// internal detail (Go error chains, pgx table/constraint names, internal ids)
+// that must never reach a toast (MUL-6472), and a non-ApiError is a transport
+// failure whose message ("Failed to fetch") says nothing a user can act on.
+// Both return undefined so the caller falls back to its own localized sentence.
+export function clientErrorMessage(err: unknown): string | undefined {
+  if (err instanceof ApiError && err.status >= 400 && err.status < 500) {
+    return err.message || undefined;
   }
   return undefined;
 }
@@ -1153,13 +1190,15 @@ export class ApiClient {
     return this.fetch("/api/assignee-frequency");
   }
 
-  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[]): Promise<Comment> {
+  async updateComment(commentId: string, content: string, attachmentIds?: string[], suppressAgentIds?: string[], contentBase?: string, expectedRevision?: number): Promise<Comment> {
     return this.fetch(`/api/comments/${commentId}`, {
       method: "PUT",
       body: JSON.stringify({
         content,
         attachment_ids: attachmentIds,
         ...(suppressAgentIds?.length ? { suppress_agent_ids: suppressAgentIds } : {}),
+        ...(contentBase !== undefined ? { content_base: contentBase } : {}),
+        ...(expectedRevision !== undefined ? { expected_revision: expectedRevision } : {}),
       }),
     });
   }
@@ -2309,19 +2348,6 @@ export class ApiClient {
     });
   }
 
-  async listPluginCatalog(workspaceId: string): Promise<PluginCatalogResponse> {
-    let raw: unknown;
-    try {
-      raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/catalog`);
-    } catch (error) {
-      if (error instanceof ApiError && error.status === 404) return EMPTY_PLUGIN_CATALOG;
-      throw error;
-    }
-    return parseWithFallback(raw, PluginCatalogResponseSchema, EMPTY_PLUGIN_CATALOG, {
-      endpoint: "GET /api/workspaces/{id}/plugins/catalog",
-    });
-  }
-
   async listPluginInstallations(workspaceId: string): Promise<PluginInstallationListResponse> {
     let raw: unknown;
     try {
@@ -2437,97 +2463,161 @@ export class ApiClient {
     });
   }
 
-  async installPlugin(workspaceId: string, request: PluginReleaseRequest): Promise<PluginInstallation> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/install`, {
+  /**
+   * Step one of the two-step install. Nothing is written: the response is what
+   * the consent screen shows before an installation exists.
+   */
+  async previewPlugin(workspaceId: string, request: PluginPreviewRequest): Promise<PluginPreview> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/preview`, {
+      method: "POST",
+      body: JSON.stringify(request),
+    });
+    return parseWithFallback(raw, PluginPreviewSchema, EMPTY_PLUGIN_PREVIEW, {
+      endpoint: "POST /api/workspaces/{id}/plugins/preview",
+    });
+  }
+
+  async installPlugin(workspaceId: string, request: PluginInstallRequest): Promise<PluginInstallation> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins`, {
       method: "POST",
       body: JSON.stringify(request),
     });
     return parseWithFallback(raw, PluginInstallationSchema, EMPTY_PLUGIN_INSTALLATION, {
-      endpoint: "POST /api/workspaces/{id}/plugins/install",
+      endpoint: "POST /api/workspaces/{id}/plugins",
     });
   }
 
-  async upgradePlugin(workspaceId: string, installationId: string, request: PluginReleaseRequest): Promise<PluginInstallation> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/upgrade`, {
-      method: "POST",
+  async configurePlugin(workspaceId: string, installationId: string, request: PluginConfigRequest): Promise<PluginInstallation> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/config`, {
+      method: "PUT",
       body: JSON.stringify(request),
     });
     return parseWithFallback(raw, PluginInstallationSchema, EMPTY_PLUGIN_INSTALLATION, {
-      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/upgrade",
+      endpoint: "PUT /api/workspaces/{id}/plugins/{installationId}/config",
     });
   }
 
-  async setPluginEnabled(
-    workspaceId: string,
-    installationId: string,
-    enabled: boolean,
-    binding: PluginBindingRequest,
-  ): Promise<PluginInstallation> {
+  async setPluginEnabled(workspaceId: string, installationId: string, enabled: boolean): Promise<PluginInstallation> {
     const action = enabled ? "enable" : "disable";
     const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/${action}`, {
       method: "POST",
-      body: JSON.stringify(binding),
     });
     return parseWithFallback(raw, PluginInstallationSchema, EMPTY_PLUGIN_INSTALLATION, {
       endpoint: `POST /api/workspaces/{id}/plugins/{installationId}/${action}`,
     });
   }
 
-  async rollbackPlugin(workspaceId: string, installationId: string, version: string): Promise<PluginInstallation> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/rollback`, {
-      method: "POST",
-      body: JSON.stringify({ version }),
+  /**
+   * Performs one Action API call on behalf of a plugin surface.
+   *
+   * The surface has no credential — it asked the host over postMessage, and
+   * this re-issues the call on the signed-in user's session. The installation
+   * travels in a header the iframe cannot set for itself; the server derives
+   * the workspace from it rather than trusting anything the client sends.
+   */
+  async callPluginAction(
+    installationId: string,
+    request: { method: "GET" | "POST" | "PATCH" | "PUT" | "DELETE"; path: string; body?: unknown; issueId?: string },
+  ): Promise<unknown> {
+    const query = request.path === "/context" && request.issueId
+      ? `?issue_id=${encodeURIComponent(request.issueId)}`
+      : "";
+    return this.fetch<unknown>(`/api/v1/plugin${request.path}${query}`, {
+      method: request.method,
+      headers: { "X-Multica-Plugin-Installation": installationId },
+      body: request.body === undefined ? undefined : JSON.stringify(request.body),
     });
+  }
+
+  /**
+   * Invokes one hook on behalf of a person.
+   *
+   * `ui` comes from a button inside a surface, `manual` from the issue actions
+   * menu or the command palette. Both block this request and only this request:
+   * somebody is waiting for the answer. The `event` trigger never comes through
+   * here — the host dispatches it, so no client can ask for one and inherit an
+   * identity that is supposed to be the plugin's.
+   */
+  async invokePluginHook(
+    installationId: string,
+    hookKey: string,
+    request: { trigger: "ui" | "manual"; issueId?: string; input?: unknown },
+  ): Promise<PluginHookResult> {
+    const raw = await this.fetch<unknown>(`/api/v1/plugin/hooks/${encodeURIComponent(hookKey)}`, {
+      method: "POST",
+      headers: { "X-Multica-Plugin-Installation": installationId },
+      body: JSON.stringify({ trigger: request.trigger, issue_id: request.issueId, input: request.input }),
+    });
+    return parseWithFallback(raw, PluginHookResultSchema, {
+      status: "ok",
+      hook_key: hookKey,
+      trigger: request.trigger,
+      latency_ms: 0,
+      attempts: 1,
+    }, { endpoint: "POST /api/v1/plugin/hooks/{key}" });
+  }
+
+  async listPluginInvocations(workspaceId: string, installationId: string): Promise<PluginInvocation[]> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/invocations`);
+    return parseWithFallback(raw, PluginInvocationListSchema, { invocations: [] }, {
+      endpoint: "GET /api/workspaces/{id}/plugins/{installationId}/invocations",
+    }).invocations;
+  }
+
+  async rotatePluginToken(workspaceId: string, installationId: string): Promise<PluginTokenIssue> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/token`, {
+      method: "POST",
+    });
+    return parseWithFallback(raw, PluginTokenIssueSchema, { token: "", signing_secret: "" }, {
+      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/token",
+    });
+  }
+
+  async revokePluginToken(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/plugins/${installationId}/token`, { method: "DELETE" });
+  }
+
+  /**
+   * Lists what an `mcp`-transport hook's server currently offers.
+   *
+   * Read-only: discovering a tool adopts nothing. approvePluginMCPTools is the
+   * grant, which is the difference from an `http` hook — that one declares a
+   * single endpoint in a manifest an administrator already read, while an MCP
+   * server decides its own tool list at runtime and can change it later.
+   */
+  async listPluginMCPTools(workspaceId: string, installationId: string, hookKey: string): Promise<PluginMCPTool[]> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/plugins/${installationId}/mcp/${encodeURIComponent(hookKey)}/tools`,
+    );
+    return parseWithFallback(raw, PluginMCPToolListSchema, { tools: [] }, {
+      endpoint: "GET /api/workspaces/{id}/plugins/{installationId}/mcp/{hookKey}/tools",
+    }).tools;
+  }
+
+  /**
+   * Pins the approved tool set for one hook.
+   *
+   * `tools` is the COMPLETE set, not a delta — removing one is the same request
+   * shape as adding one, so there is no way to think you revoked something and
+   * have it stay. An empty array withdraws the hook entirely.
+   */
+  async approvePluginMCPTools(
+    workspaceId: string,
+    installationId: string,
+    hookKey: string,
+    tools: string[],
+  ): Promise<PluginInstallation> {
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/plugins/${installationId}/mcp/${encodeURIComponent(hookKey)}/tools`,
+      { method: "PUT", body: JSON.stringify({ tools }) },
+    );
     return parseWithFallback(raw, PluginInstallationSchema, EMPTY_PLUGIN_INSTALLATION, {
-      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/rollback",
+      endpoint: "PUT /api/workspaces/{id}/plugins/{installationId}/mcp/{hookKey}/tools",
     });
   }
 
   async uninstallPlugin(workspaceId: string, installationId: string): Promise<void> {
     await this.fetch(`/api/workspaces/${workspaceId}/plugins/${installationId}`, {
-      method: "DELETE",
-    });
-  }
-
-  async configurePluginRemoteMCP(workspaceId: string, installationId: string, contributionKey: string, request: RemoteMCPConfigRequest): Promise<RemoteMCPDiscoveryResponse> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/config`, {
-      method: "PUT",
-      body: JSON.stringify(request),
-    });
-    return parseWithFallback(raw, RemoteMCPDiscoveryResponseSchema, { config_revision: 0, discovered_tools: [], discovered_schema_digest: "" }, {
-      endpoint: "PUT /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{contributionKey}/config",
-    });
-  }
-
-  async testPluginRemoteMCP(workspaceId: string, installationId: string, contributionKey: string): Promise<RemoteMCPDiscoveryResponse> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/test`, {
-      method: "POST",
-      body: JSON.stringify({}),
-    });
-    return parseWithFallback(raw, RemoteMCPDiscoveryResponseSchema, { config_revision: 0, discovered_tools: [], discovered_schema_digest: "" }, {
-      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{contributionKey}/test",
-    });
-  }
-
-  async startPluginRemoteMCPOAuth(workspaceId: string, installationId: string, contributionKey: string, request: RemoteMCPOAuthStartRequest): Promise<RemoteMCPOAuthStartResponse> {
-    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/oauth/start`, {
-      method: "POST",
-      body: JSON.stringify(request),
-    });
-    return parseWithFallback(raw, RemoteMCPOAuthStartResponseSchema, EMPTY_REMOTE_MCP_OAUTH_START_RESPONSE, {
-      endpoint: "POST /api/workspaces/{id}/plugins/{installationId}/remote-mcp/{contributionKey}/oauth/start",
-    });
-  }
-
-  async approvePluginRemoteMCPTools(workspaceId: string, installationId: string, contributionKey: string, tools: string[]): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/approve`, {
-      method: "POST",
-      body: JSON.stringify({ tools }),
-    });
-  }
-
-  async revokePluginRemoteMCPCredential(workspaceId: string, installationId: string, contributionKey: string): Promise<void> {
-    await this.fetch(`/api/workspaces/${workspaceId}/plugins/${installationId}/remote-mcp/${encodeURIComponent(contributionKey)}/credential`, {
       method: "DELETE",
     });
   }
@@ -3246,6 +3336,67 @@ export class ApiClient {
     await this.fetch(`/api/labels/${id}`, { method: "DELETE" });
   }
 
+  // Issue status catalog (MUL-6243). Reads are open to any workspace member;
+  // the mutations below are owner/admin only and return 403 otherwise.
+  async listIssueStatuses(includeArchived = false): Promise<ListIssueStatusesResponse> {
+    const query = includeArchived ? "?include_archived=true" : "";
+    const raw = await this.fetch<unknown>(`/api/issue-statuses${query}`);
+    return parseWithFallback(raw, ListIssueStatusesResponseSchema, EMPTY_LIST_ISSUE_STATUSES_RESPONSE, {
+      endpoint: "GET /api/issue-statuses",
+    });
+  }
+
+  async createIssueStatus(data: CreateIssueStatusRequest): Promise<IssueStatusEntry> {
+    const raw = await this.fetch<unknown>(`/api/issue-statuses`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
+      endpoint: "POST /api/issue-statuses",
+    });
+  }
+
+  async updateIssueStatus(id: string, data: UpdateIssueStatusRequest): Promise<IssueStatusEntry> {
+    const raw = await this.fetch<unknown>(`/api/issue-statuses/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify(data),
+    });
+    return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
+      endpoint: "PATCH /api/issue-statuses/{id}",
+    });
+  }
+
+  /**
+   * Rewrites one category's custom-status order in a single server-side
+   * statement. Not expressible as a sequence of `updateIssueStatus` calls: a
+   * row rejected mid-sequence would leave the earlier rows already reordered
+   * while the caller sees a failure. (MUL-6243)
+   */
+  async reorderIssueStatuses(
+    category: IssueStatusCategory,
+    ids: string[],
+  ): Promise<ListIssueStatusesResponse> {
+    const raw = await this.fetch<unknown>(`/api/issue-statuses/reorder`, {
+      method: "PATCH",
+      body: JSON.stringify({ category, ids }),
+    });
+    return parseWithFallback(raw, ListIssueStatusesResponseSchema, EMPTY_LIST_ISSUE_STATUSES_RESPONSE, {
+      endpoint: "PATCH /api/issue-statuses/reorder",
+    });
+  }
+
+  /**
+   * Archives a custom status, retiring it from future use. Issues already on it
+   * keep it and keep behaving as their category prescribes; only new
+   * assignments are refused. Built-in statuses return 403.
+   */
+  async archiveIssueStatus(id: string): Promise<IssueStatusEntry> {
+    const raw = await this.fetch<unknown>(`/api/issue-statuses/${id}`, { method: "DELETE" });
+    return parseWithFallback(raw, IssueStatusEntrySchema, EMPTY_ISSUE_STATUS_ENTRY, {
+      endpoint: "DELETE /api/issue-statuses/{id}",
+    });
+  }
+
   // Custom issue properties
   async listProperties(includeArchived = false): Promise<ListPropertiesResponse> {
     const suffix = includeArchived ? "?include_archived=true" : "";
@@ -3675,13 +3826,35 @@ export class ApiClient {
   }
 
   async triggerAutopilot(id: string): Promise<AutopilotRun> {
-    // Manual "run now" returns 200 even when admission blocks the run (status
-    // skipped/failed). The UI branches on status/reason_code to avoid a
-    // false-success toast (MUL-4525), so parse defensively rather than casting.
-    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/trigger`, { method: "POST" });
+    // Manual "run now" usually returns a run, including downstream admission
+    // failures. Quota rejection is the exception and returns 429. The UI
+    // handles both paths without presenting a false-success toast.
+    const raw = await this.fetch<unknown>(`/api/autopilots/${id}/trigger`, {
+      method: "POST",
+      headers: { "Idempotency-Key": createSafeId() },
+    });
     return parseWithFallback(raw, AutopilotRunSchema, FALLBACK_AUTOPILOT_RUN, {
       endpoint: "POST /api/autopilots/:id/trigger",
     });
+  }
+
+  async getAutopilotQuotaUsage(): Promise<AutopilotQuotaUsage> {
+    const raw = await this.fetch<unknown>("/api/autopilots/usage");
+    return parseWithFallback(
+      raw,
+      AutopilotQuotaUsageSchema,
+      {
+        action: "off",
+        used: null,
+        reserved: null,
+        limit: null,
+        period_start: null,
+        period_end: null,
+        reset_at: null,
+        blocked_counts: null,
+      },
+      { endpoint: "GET /api/autopilots/usage" },
+    );
   }
 
   async listAutopilotRuns(id: string, params?: { limit?: number; offset?: number }): Promise<ListAutopilotRunsResponse> {
@@ -3787,7 +3960,7 @@ export class ApiClient {
   ): Promise<WebhookDelivery> {
     const raw = await this.fetch<unknown>(
       `/api/autopilots/${autopilotId}/deliveries/${deliveryId}/replay`,
-      { method: "POST" },
+      { method: "POST", headers: { "Idempotency-Key": createSafeId() } },
     );
     return parseWithFallback(
       raw,
@@ -4142,6 +4315,55 @@ export class ApiClient {
       RedeemWecomBindingTokenResponseSchema,
       EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
       { endpoint: "POST /api/wecom/binding/redeem" },
+    );
+  }
+
+  async listTelegramInstallations(
+    workspaceId: string,
+  ): Promise<ListTelegramInstallationsResponse> {
+    const raw = await this.fetch<unknown>(`/api/workspaces/${workspaceId}/telegram/installations`);
+    return parseWithFallback(
+      raw,
+      ListTelegramInstallationsResponseSchema,
+      EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+      { endpoint: "GET /api/workspaces/:id/telegram/installations" },
+    );
+  }
+
+  async registerTelegramBot(
+    workspaceId: string,
+    agentId: string,
+    body: RegisterTelegramRequest,
+  ): Promise<TelegramInstallation> {
+    const search = new URLSearchParams({ agent_id: agentId });
+    const raw = await this.fetch<unknown>(
+      `/api/workspaces/${workspaceId}/telegram/install?${search.toString()}`,
+      {
+        method: "POST",
+        body: JSON.stringify(body),
+      },
+    );
+    return parseWithFallback(raw, TelegramInstallationSchema, EMPTY_TELEGRAM_INSTALLATION, {
+      endpoint: "POST /api/workspaces/:id/telegram/install",
+    });
+  }
+
+  async deleteTelegramInstallation(workspaceId: string, installationId: string): Promise<void> {
+    await this.fetch(`/api/workspaces/${workspaceId}/telegram/installations/${installationId}`, {
+      method: "DELETE",
+    });
+  }
+
+  async redeemTelegramBindingToken(token: string): Promise<RedeemTelegramBindingTokenResponse> {
+    const raw = await this.fetch<unknown>(`/api/telegram/binding/redeem`, {
+      method: "POST",
+      body: JSON.stringify({ token }),
+    });
+    return parseWithFallback(
+      raw,
+      RedeemTelegramBindingTokenResponseSchema,
+      EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+      { endpoint: "POST /api/telegram/binding/redeem" },
     );
   }
 }

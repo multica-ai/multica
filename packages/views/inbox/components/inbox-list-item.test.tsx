@@ -1,12 +1,42 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { WorkspaceSlugProvider } from "@multica/core/paths";
-import type { InboxItem } from "@multica/core/types";
+import { buildIssueStatusCatalog } from "@multica/core/issue-statuses";
+import type { InboxItem, IssueStatusEntry } from "@multica/core/types";
 import { NavigationProvider } from "../../navigation";
 import type { NavigationAdapter } from "../../navigation";
 import { InboxListItem } from "./inbox-list-item";
 
-vi.mock("../../issues/components", () => ({ StatusIcon: () => null }));
+// The catalog is server state; these suites render leaves without a
+// QueryClientProvider, so it is stubbed like the other data hooks. The real
+// `buildIssueStatusCatalog` is used rather than a hand-rolled object so the
+// resolver semantics under test (category, entry, is_system) are the shipped
+// ones. `undefined` is the cold-catalog case every test but the status suite
+// exercises.
+let catalogEntries: IssueStatusEntry[] | undefined;
+
+vi.mock("@multica/core/issue-statuses/hooks", () => ({
+  useIssueStatuses: () => buildIssueStatusCatalog(catalogEntries),
+}));
+
+vi.mock("../../issues/components", () => ({
+  StatusIcon: ({
+    status,
+    category,
+    color,
+  }: {
+    status: string;
+    category?: string;
+    color?: string | null;
+  }) => (
+    <span
+      data-testid="status-icon"
+      data-status={status}
+      data-category={category ?? ""}
+      data-color={color ?? ""}
+    />
+  ),
+}));
 vi.mock("../../issues/components/issue-agent-activity-indicator", () => ({
   IssueAgentActivityIndicator: ({
     issueId,
@@ -294,5 +324,93 @@ describe("InboxListItem link semantics", () => {
     });
     expect(onClick).toHaveBeenCalledTimes(1);
     expect(openInNewTab).not.toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// MUL-6395 — the row's only status affordance is one glyph, and the glyph set
+// is per CATEGORY. Without the status's own colour, switching an issue between
+// two statuses that share a category (built-in "In Review" → custom "Human
+// Review") repainted the row identically, so the inbox looked like it had
+// simply not picked the change up.
+// ---------------------------------------------------------------------------
+
+const IN_REVIEW_BUILT_IN: IssueStatusEntry = {
+  id: "in_review",
+  workspace_id: "workspace-1",
+  key: "in_review",
+  name: "In Review",
+  description: "",
+  category: "in_review",
+  color: "#8b5cf6",
+  is_system: true,
+  position: 0,
+  archived_at: null,
+  created_at: "",
+  updated_at: "",
+};
+
+const HUMAN_REVIEW: IssueStatusEntry = {
+  ...IN_REVIEW_BUILT_IN,
+  id: "human_review",
+  key: "human_review",
+  name: "Human Review",
+  color: "#ff0000",
+  is_system: false,
+  position: 1,
+};
+
+describe("InboxListItem status glyph", () => {
+  it("paints a custom status in its own colour", () => {
+    catalogEntries = [IN_REVIEW_BUILT_IN, HUMAN_REVIEW];
+
+    const { getByTestId } = renderRow({
+      item: item({ issue_status: "human_review" }),
+      view: "inbox",
+    });
+
+    const icon = getByTestId("status-icon");
+    expect(icon.getAttribute("data-category")).toBe("in_review");
+    expect(icon.getAttribute("data-color")).toBe("#ff0000");
+  });
+
+  it("leaves a built-in status on its semantic token colour", () => {
+    // The catalog seeds a colour for the built-ins too, but those are theme
+    // tokens in the UI — passing the seeded hex would hard-code one theme.
+    catalogEntries = [IN_REVIEW_BUILT_IN, HUMAN_REVIEW];
+
+    const { getByTestId } = renderRow({
+      item: item({ issue_status: "in_review" }),
+      view: "inbox",
+    });
+
+    expect(getByTestId("status-icon").getAttribute("data-color")).toBe("");
+  });
+
+  it("names the status, so two statuses in one category stay distinguishable", () => {
+    catalogEntries = [IN_REVIEW_BUILT_IN, HUMAN_REVIEW];
+
+    const { container } = renderRow({
+      item: item({ issue_status: "human_review" }),
+      view: "inbox",
+    });
+
+    expect(container.querySelector('[title="Human Review"]')).not.toBeNull();
+  });
+
+  it("still renders a custom status before the catalog lands", () => {
+    // categoryOf falls back to `todo` for an unresolved key; the row must show
+    // the glyph anyway rather than dropping the status entirely.
+    catalogEntries = undefined;
+
+    const { getByTestId } = renderRow({
+      item: item({ issue_status: "human_review" }),
+      view: "inbox",
+    });
+
+    const icon = getByTestId("status-icon");
+    expect(icon.getAttribute("data-status")).toBe("human_review");
+    expect(icon.getAttribute("data-color")).toBe("");
   });
 });

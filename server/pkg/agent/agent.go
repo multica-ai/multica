@@ -1,7 +1,7 @@
 // Package agent provides a unified interface for executing prompts via
 // coding agents (Claude Code, CodeBuddy, Codex, Copilot, OpenCode, DevEco Code,
 // OpenClaw, Hermes, Pi, Oh-My-Pi, Cursor, Kimi, Reasonix, Kiro, Antigravity, Qoder,
-// Trae, Grok, Qwen Code, QwenPaw). It
+// Trae, Grok, Qwen Code, QwenPaw, MiniMax Code). It
 // mirrors the happy-cli AgentBackend pattern, translated to idiomatic Go.
 package agent
 
@@ -10,6 +10,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 )
 
@@ -242,7 +243,7 @@ type Result struct {
 
 // Config configures a Backend instance.
 type Config struct {
-	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw)
+	ExecutablePath string            // path to CLI binary (claude, codebuddy, codex, copilot, opencode, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro-cli, agy, qodercli, qoderclicn, traecli, grok, qwen, qwenpaw, mcode, dim)
 	CLIVersion     string            // detected version paired with ExecutablePath; observation only, never used to choose behavior
 	Env            map[string]string // extra environment variables
 	Logger         *slog.Logger
@@ -260,10 +261,24 @@ type Config struct {
 	// vendor's binary; it defaults to false so an unset caller fails
 	// closed onto standard behavior.
 	BuiltinRuntime bool
+	// provider is the runtime/provider identity used in safe launch logs. New
+	// fills it from the protocol family; NewRuntime preserves the concrete
+	// built-in runtime identity instead (for example omp rather than pi).
+	provider string
+	// LaunchPrefix is the argv prefix that belongs to ExecutablePath itself —
+	// a custom runtime profile's fixed_args. It is spliced in directly after
+	// the executable, ahead of every argument a backend builds, because a
+	// wrapper's subcommand has to be consumed before the wrapped CLI's own
+	// flags mean anything (`ccms start q36` then `-p …`, GH #7046).
+	//
+	// Unlike ExtraArgs this is not opt-in: New filters it once and the
+	// Command boundary applies it to every process the package spawns, task
+	// launches and CLI probes alike. Backends never read it directly.
+	LaunchPrefix []string
 }
 
 // New creates a Backend for the given agent type.
-// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw".
+// Supported types: "claude", "codebuddy", "codex", "copilot", "opencode", "deveco", "openclaw", "hermes", "pi", "cursor", "kimi", "reasonix", "dsh", "kiro", "antigravity", "qoder", "qoderclicn", "traecli", "grok", "qwen", "qwenpaw", "mcode".
 //
 // SupportedTypes is the canonical whitelist of agent types eligible to back a
 // custom runtime profile. It MUST stay in lockstep with the
@@ -271,7 +286,8 @@ type Config struct {
 // migration 134 to add qoder, migration 136 to add traecli, migration 175 to
 // add deveco, migration 179 to add grok, migration 202 to add qwen,
 // migration 242 to add qoderclicn, migration 253 to add qwenpaw,
-// migration 254 to add reasonix, migration 313 to add dsh): a
+// migration 254 to add reasonix, migration 313 to add dsh, migration 327 to
+// add mcode): a
 // custom runtime profile may only
 // be based on a backend Multica officially supports.
 // qoder and qoderclicn share the same ACP backend; keeping both provider keys
@@ -303,6 +319,8 @@ var SupportedTypes = []string{
 	"grok",
 	"qwen",
 	"qwenpaw",
+	"mcode",
+	"dim",
 }
 
 // IsSupportedType reports whether agentType is in the SupportedTypes whitelist.
@@ -348,6 +366,15 @@ func New(agentType string, cfg Config) (Backend, error) {
 	if cfg.Logger == nil {
 		cfg.Logger = slog.Default()
 	}
+	if cfg.provider == "" {
+		cfg.provider = agentType
+	}
+	// Filter the launch prefix here, at the one point that knows both the
+	// prefix and the protocol family. Doing it per-backend would be the same
+	// opt-in arrangement that let ExtraArgs rot: a family that forgot the call
+	// would accept a fixed_args `--output-format text` and break its own
+	// stream-json channel.
+	cfg.LaunchPrefix = filterLaunchPrefix(cfg.LaunchPrefix, agentType, cfg.Logger)
 
 	switch agentType {
 	case "claude":
@@ -376,6 +403,8 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &reasonixBackend{cfg: cfg}, nil
 	case "dsh":
 		return &dshBackend{cfg: cfg}, nil
+	case "dim":
+		return &dimBackend{cfg: cfg}, nil
 	case "kiro":
 		return &kiroBackend{cfg: cfg}, nil
 	case "antigravity":
@@ -390,14 +419,21 @@ func New(agentType string, cfg Config) (Backend, error) {
 		return &qwenBackend{cfg: cfg}, nil
 	case "qwenpaw":
 		return &qwenpawBackend{cfg: cfg}, nil
+	case "mcode":
+		return &mcodeBackend{cfg: cfg}, nil
 	default:
-		return nil, fmt.Errorf("unknown agent type: %q (supported: claude, codebuddy, codex, copilot, opencode, deveco, openclaw, hermes, pi, cursor, kimi, reasonix, dsh, kiro, antigravity, qoder, qoderclicn, traecli, grok, qwen, qwenpaw)", agentType)
+		return nil, fmt.Errorf("unknown agent type: %q (supported: %s)", agentType, strings.Join(SupportedTypes, ", "))
 	}
 }
 
 // DetectVersion runs the agent CLI with --version and returns the output.
-func DetectVersion(ctx context.Context, executablePath string) (string, error) {
-	return detectCLIVersion(ctx, executablePath)
+//
+// cmd carries the runtime's launch prefix, so a custom profile is probed the
+// way it is launched: `ccms start q36 --version` reports the version of the
+// CLI the wrapper actually execs, where a bare `ccms --version` would report
+// the wrapper's own and pin the runtime to the wrong compatibility policy.
+func DetectVersion(ctx context.Context, cmd Command) (string, error) {
+	return detectCLIVersion(ctx, cmd)
 }
 
 // launchHeaders maps each supported agent type to the user-visible skeleton
@@ -428,6 +464,8 @@ var launchHeaders = map[string]string{
 	"grok":        "grok agent stdio",
 	"qwen":        "qwen -p (stream-json)",
 	"qwenpaw":     "qwenpaw acp",
+	"dim":         "dim acp",
+	"mcode":       "mcode acp",
 }
 
 // LaunchHeader returns the user-visible launch skeleton for agentType, or an

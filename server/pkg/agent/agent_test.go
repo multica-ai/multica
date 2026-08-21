@@ -116,7 +116,7 @@ func TestNewDefaultsLogger(t *testing.T) {
 
 func TestDetectVersionFailsForMissingBinary(t *testing.T) {
 	t.Parallel()
-	_, err := DetectVersion(context.Background(), "/nonexistent/binary")
+	_, err := DetectVersion(context.Background(), Command{Path: "/nonexistent/binary"})
 	if err == nil {
 		t.Fatal("expected error for missing binary")
 	}
@@ -168,7 +168,7 @@ func TestDetectVersionTimesOutOnHang(t *testing.T) {
 	done := make(chan error, 1)
 	start := time.Now()
 	go func() {
-		_, err := DetectVersion(context.Background(), script)
+		_, err := DetectVersion(context.Background(), Command{Path: script})
 		done <- err
 	}()
 

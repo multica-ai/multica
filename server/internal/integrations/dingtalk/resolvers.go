@@ -13,6 +13,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // originDingTalkChat is the issue.origin_type label for issues created through
@@ -418,6 +419,7 @@ type auditor struct{ q *db.Queries }
 
 func (r *auditor) RecordDrop(ctx context.Context, instID pgtype.UUID, msg channel.InboundMessage, reason engine.DropReason) error {
 	return r.q.RecordChannelInboundDrop(ctx, db.RecordChannelInboundDropParams{
+		ID:               dbid.NewV7(),
 		ChannelType:      string(TypeDingTalk),
 		EventType:        "message",
 		DropReason:       string(reason),
