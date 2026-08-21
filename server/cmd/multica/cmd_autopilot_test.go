@@ -3,8 +3,10 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -451,6 +453,132 @@ func assertAutopilotSubscriberBody(t *testing.T, body map[string]any, userID str
 	}
 	if sub["user_id"] != userID {
 		t.Fatalf("user_id = %#v, want %q", sub["user_id"], userID)
+	}
+}
+
+func TestRunAutopilotGetRedactsWebhookSecrets(t *testing.T) {
+	const autopilotID = "33333333-3333-3333-3333-333333333333"
+	fixtureToken := "tok_live_abc123"
+	fixtureURL := "https://example.com/hooks/tok_live_abc123"
+	fixturePath := "/hooks/tok_live_abc123"
+	baseResp := func() map[string]any {
+		return map[string]any{
+			"autopilot": map[string]any{"id": autopilotID, "title": "T"},
+			"triggers": []any{
+				map[string]any{"id": "trig-1", "kind": "webhook", "webhook_token": fixtureToken, "webhook_url": fixtureURL, "webhook_path": fixturePath, "enabled": true},
+				map[string]any{"id": "trig-2", "kind": "schedule", "cron_expression": "0 * * * *", "enabled": true},
+			},
+		}
+	}
+	newGetCmd := func(showSecrets bool, output string) *cobra.Command {
+		cmd := &cobra.Command{Use: "get"}
+		cmd.Flags().String("output", "json", "")
+		cmd.Flags().Bool("show-secrets", false, "")
+		_ = cmd.Flags().Set("output", output)
+		if showSecrets {
+			_ = cmd.Flags().Set("show-secrets", "true")
+		}
+		return cmd
+	}
+	t.Run("json without show-secrets redacts and adds has_webhook_token", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(baseResp())
+		}))
+		defer srv.Close()
+		t.Setenv("MULTICA_SERVER_URL", srv.URL)
+		t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+		t.Setenv("MULTICA_TOKEN", "test-token")
+		cmd := newGetCmd(false, "json")
+		out, errOut := runAutopilotGetCaptured(t, cmd, autopilotID)
+		if strings.Contains(out, fixtureToken) || strings.Contains(out, fixtureURL) || strings.Contains(out, fixturePath) {
+			t.Fatalf("output should not contain token, url or path, got %q", out)
+		}
+		if !strings.Contains(out, `"has_webhook_token": true`) && !strings.Contains(out, `"has_webhook_token":true`) {
+			t.Fatalf("expected has_webhook_token true, got %q", out)
+		}
+		if !strings.Contains(out, "[redacted]") {
+			t.Fatalf("expected [redacted], got %q", out)
+		}
+		// schedule trigger unchanged - check its cron still present and not redacted
+		if !strings.Contains(out, "0 * * * *") {
+			t.Fatalf("schedule trigger should be unchanged, got %q", out)
+		}
+		if strings.Contains(errOut, "warning") {
+			t.Fatalf("should not warn without show-secrets, stderr %q", errOut)
+		}
+	})
+	t.Run("json with show-secrets contains token", func(t *testing.T) {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(baseResp())
+		}))
+		defer srv.Close()
+		t.Setenv("MULTICA_SERVER_URL", srv.URL)
+		t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+		t.Setenv("MULTICA_TOKEN", "test-token")
+		cmd := newGetCmd(true, "json")
+		out, errOut := runAutopilotGetCaptured(t, cmd, autopilotID)
+		if !strings.Contains(out, fixtureToken) {
+			t.Fatalf("expected token in output with show-secrets, got %q", out)
+		}
+		if !strings.Contains(errOut, "warning: output contains a live webhook credential") {
+			t.Fatalf("expected warning on stderr, got %q", errOut)
+		}
+	})
+	t.Run("missing token yields has_webhook_token false and no redacted", func(t *testing.T) {
+		resp := map[string]any{
+			"autopilot": map[string]any{"id": autopilotID},
+			"triggers": []any{
+				map[string]any{"id": "trig-1", "kind": "webhook", "enabled": true},
+				map[string]any{"id": "trig-2", "kind": "webhook", "webhook_token": "", "enabled": true},
+			},
+		}
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			json.NewEncoder(w).Encode(resp)
+		}))
+		defer srv.Close()
+		t.Setenv("MULTICA_SERVER_URL", srv.URL)
+		t.Setenv("MULTICA_WORKSPACE_ID", "ws-1")
+		t.Setenv("MULTICA_TOKEN", "test-token")
+		cmd := newGetCmd(false, "json")
+		out, _ := runAutopilotGetCaptured(t, cmd, autopilotID)
+		if strings.Contains(out, "[redacted]") {
+			t.Fatalf("should not contain [redacted] when token absent/empty, got %q", out)
+		}
+		// should contain has_webhook_token false
+		if !strings.Contains(out, `"has_webhook_token": false`) && !strings.Contains(out, `"has_webhook_token":false`) {
+			t.Fatalf("expected has_webhook_token false, got %q", out)
+		}
+	})
+}
+
+func runAutopilotGetCaptured(t *testing.T, cmd *cobra.Command, id string) (string, string) {
+	t.Helper()
+	rOut, wOut, _ := os.Pipe()
+	rErr, wErr, _ := os.Pipe()
+	oldOut := os.Stdout
+	oldErr := os.Stderr
+	os.Stdout = wOut
+	os.Stderr = wErr
+	err := runAutopilotGet(cmd, []string{id})
+	wOut.Close()
+	wErr.Close()
+	os.Stdout = oldOut
+	os.Stderr = oldErr
+	if err != nil {
+		t.Fatalf("runAutopilotGet: %v", err)
+	}
+	out, _ := io.ReadAll(rOut)
+	errOut, _ := io.ReadAll(rErr)
+	return string(out), string(errOut)
+}
+
+func TestAutopilotGetFlagRegistered(t *testing.T) {
+	f := autopilotGetCmd.Flags().Lookup("show-secrets")
+	if f == nil {
+		t.Fatal("autopilotGetCmd missing --show-secrets flag")
+	}
+	if f.DefValue != "false" {
+		t.Fatalf("show-secrets default = %q, want false", f.DefValue)
 	}
 }
 

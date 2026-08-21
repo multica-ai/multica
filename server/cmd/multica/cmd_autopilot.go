@@ -115,6 +115,7 @@ func init() {
 
 	// get
 	autopilotGetCmd.Flags().String("output", "json", "Output format: table or json")
+	autopilotGetCmd.Flags().Bool("show-secrets", false, "Show live webhook credentials (webhook_token, webhook_url, webhook_path)")
 
 	// create
 	autopilotCreateCmd.Flags().String("title", "", "Autopilot title (required)")
@@ -241,6 +242,13 @@ func runAutopilotGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get autopilot: %w", err)
 	}
 
+	showSecrets, _ := cmd.Flags().GetBool("show-secrets")
+	if showSecrets {
+		fmt.Fprintln(os.Stderr, "warning: output contains a live webhook credential")
+	} else {
+		redactAutopilotWebhookSecrets(resp)
+	}
+
 	output, _ := cmd.Flags().GetString("output")
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, resp)
@@ -259,6 +267,50 @@ func runAutopilotGet(cmd *cobra.Command, args []string) error {
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func redactAutopilotWebhookSecrets(resp map[string]any) {
+	raw, ok := resp["triggers"]
+	if !ok {
+		return
+	}
+	var triggers []any
+	switch v := raw.(type) {
+	case []any:
+		triggers = v
+	case []map[string]any:
+		triggers = make([]any, len(v))
+		for i := range v {
+			triggers[i] = v[i]
+		}
+	default:
+		return
+	}
+	for _, t := range triggers {
+		m, ok := t.(map[string]any)
+		if !ok {
+			continue
+		}
+		if m["kind"] != "webhook" {
+			continue
+		}
+		hasToken := false
+		if v, ok := m["webhook_token"]; ok && v != nil {
+			if s, ok := v.(string); ok && s != "" {
+				hasToken = true
+				m["webhook_token"] = "[redacted]"
+			}
+		}
+		m["has_webhook_token"] = hasToken
+		if hasToken {
+			if _, ok := m["webhook_url"]; ok {
+				m["webhook_url"] = "[redacted]"
+			}
+			if _, ok := m["webhook_path"]; ok {
+				m["webhook_path"] = "[redacted]"
+			}
+		}
+	}
 }
 
 func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
