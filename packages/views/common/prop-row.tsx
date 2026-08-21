@@ -43,10 +43,10 @@ export function PropRow({
         interactive ? "transition-colors hover:bg-accent/50" : ""
       }`}
     >
-      <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+      <span className="flex min-w-0 items-center gap-1.5 text-caption text-muted-foreground">
         {label}
       </span>
-      <div className="flex min-w-0 items-center gap-1.5 truncate text-xs">
+      <div className="flex min-w-0 items-center gap-1.5 truncate text-caption">
         {children}
       </div>
     </div>

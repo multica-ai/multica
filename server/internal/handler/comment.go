@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,30 +14,40 @@ import (
 	"unicode"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 type CommentResponse struct {
-	ID             string               `json:"id"`
-	IssueID        string               `json:"issue_id"`
-	AuthorType     string               `json:"author_type"`
-	AuthorID       string               `json:"author_id"`
-	Content        string               `json:"content"`
-	Type           string               `json:"type"`
-	ParentID       *string              `json:"parent_id"`
-	CreatedAt      string               `json:"created_at"`
-	UpdatedAt      string               `json:"updated_at"`
-	ResolvedAt     *string              `json:"resolved_at"`
-	ResolvedByType *string              `json:"resolved_by_type"`
-	ResolvedByID   *string              `json:"resolved_by_id"`
-	SourceTaskID   *string              `json:"source_task_id,omitempty"`
-	Reactions      []ReactionResponse   `json:"reactions"`
-	Attachments    []AttachmentResponse `json:"attachments"`
+	ID             string  `json:"id"`
+	IssueID        string  `json:"issue_id"`
+	AuthorType     string  `json:"author_type"`
+	AuthorID       string  `json:"author_id"`
+	Content        string  `json:"content"`
+	Type           string  `json:"type"`
+	ParentID       *string `json:"parent_id"`
+	CreatedAt      string  `json:"created_at"`
+	UpdatedAt      string  `json:"updated_at"`
+	Revision       int64   `json:"revision"`
+	IssueRevision  int64   `json:"issue_revision,omitempty"`
+	ResolvedAt     *string `json:"resolved_at"`
+	ResolvedByType *string `json:"resolved_by_type"`
+	ResolvedByID   *string `json:"resolved_by_id"`
+	SourceTaskID   *string `json:"source_task_id,omitempty"`
+	// QuickActionID marks a comment produced by a quick action run (MUL-5465).
+	// The timeline renders those as a collapsed one-line card instead of the
+	// raw prompt body. It is NOT settable through this endpoint — there is no
+	// request field for it — which is exactly why the card keys off this id
+	// rather than a `type` value the client controls.
+	QuickActionID *string              `json:"quick_action_id,omitempty"`
+	Reactions     []ReactionResponse   `json:"reactions"`
+	Attachments   []AttachmentResponse `json:"attachments"`
 	// Orientation stats — populated only on the roots_only path and omitted in
 	// every other mode, so the default response shape stays byte-identical for
 	// existing callers. ReplyCount is the number of descendants in the thread;
@@ -97,10 +108,12 @@ func commentToResponse(c db.Comment, reactions []ReactionResponse, attachments [
 		ParentID:       uuidToPtr(c.ParentID),
 		CreatedAt:      timestampToString(c.CreatedAt),
 		UpdatedAt:      timestampToString(c.UpdatedAt),
+		Revision:       c.Revision,
 		ResolvedAt:     timestampToPtr(c.ResolvedAt),
 		ResolvedByType: textToPtr(c.ResolvedByType),
 		ResolvedByID:   uuidToPtr(c.ResolvedByID),
 		SourceTaskID:   uuidToPtr(c.SourceTaskID),
+		QuickActionID:  uuidToPtr(c.QuickActionID),
 		Reactions:      reactions,
 		Attachments:    attachments,
 	}
@@ -267,11 +280,41 @@ func foldResolvedThreads(comments []db.Comment) ([]db.Comment, map[string]foldSt
 // number of rows on a single issue.
 const commentHardCap = 2000
 
-// ListComments returns comments for an issue. The default behaviour is
-// unchanged — full chronological dump capped at commentHardCap — so existing
-// callers and the desktop UI keep working as-is. Optional query params give
-// agent-style readers bounded views that scale to long issues without dragging
-// every prior reply into context:
+// HeaderCommentsTruncated tells browser and CLI callers that a defensive
+// comment-list cap omitted rows. It is deliberately separate from the timeline
+// header: /comments has several projections (roots, one thread, since) whose
+// truncation cannot be described as a timeline activity kind.
+const HeaderCommentsTruncated = "X-Comments-Truncated"
+
+// commentProbeLimit reads one row past the cap so a truncated read can be told
+// apart from an issue holding exactly commentHardCap comments. The difference
+// matters: exact-cap reads are complete and must not advertise data loss.
+const commentProbeLimit = commentHardCap + 1
+
+// Budgets for thread completion (completeCommentThreads).
+//
+// commentThreadContextBudget caps ALL context added outside the newest window:
+// ancestors first, then missing siblings/descendants for any thread whose root
+// had to be restored. A response is therefore bounded by commentHardCap +
+// commentThreadContextBudget comments regardless of thread shape.
+// commentThreadMaxDepth bounds each direction of the walk.
+//
+// Both are needed because reply depth is genuinely unbounded in stored data: the
+// general write path saves the exact comment being replied to, so chains can run
+// far deeper than the two levels the UI usually renders. Without a budget the
+// completion pass would defeat the row cap it is meant to preserve.
+const (
+	commentThreadContextBudget = 2000
+	commentThreadMaxDepth      = 64
+)
+
+// ListComments returns comments for an issue. The default path returns the
+// newest commentHardCap comments in chronological order. If that defensive cap
+// fires, completeCommentThreads restores each affected thread within a bounded
+// context budget (or drops that thread as a unit), and the response sets
+// HeaderCommentsTruncated. Optional query params give agent-style readers
+// bounded views that scale to long issues without dragging every prior reply
+// into context:
 //
 //   - roots_only=true — return only top-level comments (parent_id IS NULL),
 //     each annotated with reply_count + last_activity_at so the caller can
@@ -571,11 +614,16 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 	// Apply the resolve-aware fold before anything keys off the comment set
 	// (reaction/attachment grouping, the response array): folding drops comments,
 	// and the dropped ones should not pay a reactions/attachments round-trip or
-	// appear in the response. fetchCommentsForList only ever returns complete
-	// threads on the modes fold is allowed with (default, recent, untailed
-	// thread), which is the precondition foldResolvedThreads documents.
+	// appear in the response.
+	//
+	// fetchCommentsForList marks FoldUnsafe only when a returned thread is known
+	// to be partial. The default capped path is safe: completeCommentThreads
+	// either restores every affected thread or removes it as one unit. An
+	// oversized untailed --thread read, however, intentionally keeps only the
+	// newest replies, so folding that partial thread would invent resolution
+	// state and folded_count.
 	var foldInfo map[string]foldStat
-	if fold {
+	if fold && !result.FoldUnsafe {
 		result.Comments, foldInfo = foldResolvedThreads(result.Comments)
 	}
 
@@ -627,6 +675,9 @@ func (h *Handler) ListComments(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Multica-Next-Before", result.NextBefore)
 		w.Header().Set("X-Multica-Next-Before-Id", result.NextBeforeID)
 	}
+	if result.CommentsTruncated {
+		w.Header().Set(HeaderCommentsTruncated, "true")
+	}
 
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -663,6 +714,13 @@ type fetchCommentsResult struct {
 	// RootStats carries per-root orientation stats keyed by comment id string.
 	// Populated only on the roots_only path; nil for every other mode.
 	RootStats map[string]rootStat
+	// CommentsTruncated reports that a defensive cap omitted comments. Derived
+	// from a probe read, never from the final response length.
+	CommentsTruncated bool
+	// FoldUnsafe reports that the response contains a known-partial thread.
+	// Truncation alone does not imply this: completeCommentThreads makes the
+	// default newest window safe to fold by restoring or dropping whole threads.
+	FoldUnsafe bool
 }
 
 // rootStat is the per-thread orientation metadata attached to each root comment
@@ -742,6 +800,9 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					ResolvedAt:     r.ResolvedAt,
 					ResolvedByType: r.ResolvedByType,
 					ResolvedByID:   r.ResolvedByID,
+					SourceTaskID:   r.SourceTaskID,
+					QuickActionID:  r.QuickActionID,
+					Revision:       r.Revision,
 				}
 				if !r.ParentID.Valid {
 					root := c
@@ -800,11 +861,15 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 			}
 			return res, nil
 		}
-		rows, err := h.Queries.ListThreadCommentsForIssue(ctx, db.ListThreadCommentsForIssueParams{
+		// Untailed reads use the same newest-reply query as the paged path.
+		// Probe with commentHardCap replies: because the root is unconditional,
+		// 2000 replies proves the total thread exceeds the 2000-row response cap.
+		// We then drop the oldest reply and retain root + newest 1999 replies.
+		rows, err := h.Queries.ListThreadCommentsForIssuePaged(ctx, db.ListThreadCommentsForIssuePagedParams{
 			AnchorID:    anchor,
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
-			RowLimit:    commentHardCap,
+			ReplyLimit:  commentHardCap,
 		})
 		if err != nil {
 			return fetchCommentsResult{}, err
@@ -812,12 +877,10 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 		if len(rows) == 0 {
 			return fetchCommentsResult{}, errCommentThreadNotFound
 		}
-		out := make([]db.Comment, 0, len(rows))
+		var rootComment *db.Comment
+		replies := make([]db.Comment, 0, len(rows))
 		for _, r := range rows {
-			if args.Since.Valid && !r.CreatedAt.Time.After(args.Since.Time) {
-				continue
-			}
-			out = append(out, db.Comment{
+			c := db.Comment{
 				ID:             r.ID,
 				IssueID:        r.IssueID,
 				AuthorType:     r.AuthorType,
@@ -831,9 +894,36 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				ResolvedAt:     r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType,
 				ResolvedByID:   r.ResolvedByID,
-			})
+				SourceTaskID:   r.SourceTaskID,
+				QuickActionID:  r.QuickActionID,
+				Revision:       r.Revision,
+			}
+			if !r.ParentID.Valid {
+				root := c
+				rootComment = &root
+				continue
+			}
+			replies = append(replies, c)
 		}
-		return fetchCommentsResult{Comments: out}, nil
+		truncated := len(replies) >= commentHardCap
+		if truncated {
+			replies = replies[1:]
+		}
+		out := make([]db.Comment, 0, len(replies)+1)
+		if rootComment != nil && (!args.Since.Valid || rootComment.CreatedAt.Time.After(args.Since.Time)) {
+			out = append(out, *rootComment)
+		}
+		for _, reply := range replies {
+			if args.Since.Valid && !reply.CreatedAt.Time.After(args.Since.Time) {
+				continue
+			}
+			out = append(out, reply)
+		}
+		return fetchCommentsResult{
+			Comments:          out,
+			CommentsTruncated: truncated,
+			FoldUnsafe:        truncated,
+		}, nil
 	}
 
 	// Thread-grouped recent read: N most recently active threads.
@@ -892,6 +982,9 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				ResolvedAt:     r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType,
 				ResolvedByID:   r.ResolvedByID,
+				SourceTaskID:   r.SourceTaskID,
+				QuickActionID:  r.QuickActionID,
+				Revision:       r.Revision,
 			})
 		}
 
@@ -932,10 +1025,16 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				IssueID:     issue.ID,
 				WorkspaceID: issue.WorkspaceID,
 				Since:       args.Since,
-				RowLimit:    commentHardCap,
+				RowLimit:    commentProbeLimit,
 			})
 			if err != nil {
 				return fetchCommentsResult{}, err
+			}
+			truncated := len(rows) > commentHardCap
+			if truncated {
+				// Since is an incremental stream: keep the first page after the
+				// cursor so callers can advance without skipping a gap.
+				rows = rows[:commentHardCap]
 			}
 			comments := make([]db.Comment, len(rows))
 			for i, r := range rows {
@@ -944,19 +1043,28 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 					Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 					ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 					ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
+					SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 				}
 				stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 			}
-			return fetchCommentsResult{Comments: comments, RootStats: stats}, nil
+			return fetchCommentsResult{
+				Comments: comments, RootStats: stats, CommentsTruncated: truncated,
+			}, nil
 		}
 
 		rows, err := h.Queries.ListRootCommentsForIssue(ctx, db.ListRootCommentsForIssueParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
-			RowLimit:    commentHardCap,
+			RowLimit:    commentProbeLimit,
 		})
 		if err != nil {
 			return fetchCommentsResult{}, err
+		}
+		truncated := len(rows) > commentHardCap
+		if truncated {
+			// The SQL returns selected roots chronologically after taking the
+			// newest probe window, so the overflow row is the oldest.
+			rows = rows[1:]
 		}
 		comments := make([]db.Comment, len(rows))
 		for i, r := range rows {
@@ -965,29 +1073,388 @@ func (h *Handler) fetchCommentsForList(ctx context.Context, args fetchCommentsAr
 				Content: r.Content, Type: r.Type, CreatedAt: r.CreatedAt, UpdatedAt: r.UpdatedAt,
 				ParentID: r.ParentID, WorkspaceID: r.WorkspaceID, ResolvedAt: r.ResolvedAt,
 				ResolvedByType: r.ResolvedByType, ResolvedByID: r.ResolvedByID,
+				SourceTaskID: r.SourceTaskID, QuickActionID: r.QuickActionID, Revision: r.Revision,
 			}
 			stats[uuidToString(r.ID)] = rootStat{ReplyCount: int(r.ReplyCount), LastActivityAt: r.LastActivityAt}
 		}
-		return fetchCommentsResult{Comments: comments, RootStats: stats}, nil
+		return fetchCommentsResult{
+			Comments: comments, RootStats: stats, CommentsTruncated: truncated,
+		}, nil
 	}
 
-	// Default + since paths preserved verbatim (no behavioural change for
-	// existing callers).
+	// Since reads keep their chronological page shape. A probe makes the cap
+	// visible without skipping the next page of the incremental stream.
 	if args.Since.Valid {
 		comments, err := h.Queries.ListCommentsSinceForIssue(ctx, db.ListCommentsSinceForIssueParams{
 			IssueID:     issue.ID,
 			WorkspaceID: issue.WorkspaceID,
 			CreatedAt:   args.Since,
-			Limit:       commentHardCap,
+			Limit:       commentProbeLimit,
 		})
-		return fetchCommentsResult{Comments: comments}, err
+		if err != nil {
+			return fetchCommentsResult{}, err
+		}
+		truncated := len(comments) > commentHardCap
+		if truncated {
+			comments = comments[:commentHardCap]
+		}
+		return fetchCommentsResult{Comments: comments, CommentsTruncated: truncated}, nil
 	}
 	comments, err := h.Queries.ListCommentsForIssue(ctx, db.ListCommentsForIssueParams{
 		IssueID:     issue.ID,
 		WorkspaceID: issue.WorkspaceID,
-		Limit:       commentHardCap,
+		Limit:       commentProbeLimit,
 	})
-	return fetchCommentsResult{Comments: comments}, err
+	if err != nil {
+		return fetchCommentsResult{}, err
+	}
+	// Probe read: an issue holding exactly commentHardCap comments is complete,
+	// and calling that truncated would needlessly suppress the thread fold below.
+	truncated := len(comments) > commentHardCap
+	if truncated {
+		comments = comments[len(comments)-commentHardCap:]
+		// The cap keeps the NEWEST comments (MUL-5492), so a thread can be cut
+		// in half: an old root or sibling outside the window, a fresh reply
+		// inside it. Complete every affected thread within the shared context
+		// budget. If a thread cannot be completed, it is dropped as one unit.
+		//
+		comments, err = h.completeCommentThreads(ctx, issue.ID, issue.WorkspaceID, comments)
+		if err != nil {
+			return fetchCommentsResult{}, err
+		}
+	}
+	return fetchCommentsResult{Comments: comments, CommentsTruncated: truncated}, nil
+}
+
+// completeCommentThreads restores complete renderable threads around a newest-N
+// comment window.
+//
+// Why this is needed at all: capping with the OLDEST n comments could never
+// orphan a reply, because a reply is always newer than its parent and so a
+// prefix of the timeline is closed under "parent of". A newest-n window is a
+// suffix and has no such property — an old thread root falls outside while a
+// fresh reply to it stays inside (MUL-5492).
+//
+// Parent closure comes first because an orphaned reply is not merely mis-nested,
+// it is invisible.
+// The timeline builds its top level from "activities + comments with no
+// parent_id" and renders replies by looking them up under their parent, so an
+// orphan sits in the map with no card to render it — the exact shape of MUL-1847
+// (1 root + 29 replies, root dropped, all 29 vanished from the UI while the API
+// returned them).
+//
+// Parent closure alone is insufficient for the human timeline. Web and Desktop
+// derive resolution bars and folded counts from the comments they receive, so a
+// backfilled root plus only its newest replies would make a partial thread look
+// complete. After reaching roots, this function walks DOWN from every restored
+// root and adds all missing siblings/descendants. If the shared budget or depth
+// bound cannot prove a whole affected thread complete, that thread is removed
+// as one unit; old installed clients can therefore never fold partial data.
+//
+// Both walks share commentThreadContextBudget, so the returned set remains
+// provably bounded by commentHardCap + commentThreadContextBudget. Descendants
+// are fetched one level at a time for every affected root in one query, avoiding
+// an N+1 query per thread. Each query carries issue + workspace predicates and a
+// probe limit.
+//
+// When a budget is exhausted, a parent row is missing, or a parent belongs to
+// another issue or workspace, keepRootConnected drops the affected replies. A
+// descendant overflow drops every affected thread rather than guessing which
+// root is complete. Returning fewer new replies is a conservative degradation
+// that the caller already signals as truncated; leaking another tenant's
+// comments, returning an unbounded response, or emitting partial threads are all
+// worse.
+func (h *Handler) completeCommentThreads(ctx context.Context, issueID, workspaceID pgtype.UUID, window []db.Comment) ([]db.Comment, error) {
+	if len(window) == 0 {
+		return window, nil
+	}
+
+	initialIDs := make(map[string]struct{}, len(window))
+	byID := make(map[string]db.Comment, len(window)+commentThreadContextBudget/8)
+	through := window[0]
+	for _, c := range window {
+		id := uuidToString(c.ID)
+		initialIDs[id] = struct{}{}
+		byID[id] = c
+		if c.CreatedAt.Time.After(through.CreatedAt.Time) ||
+			(c.CreatedAt.Time.Equal(through.CreatedAt.Time) &&
+				bytes.Compare(c.ID.Bytes[:], through.ID.Bytes[:]) > 0) {
+			through = c
+		}
+	}
+
+	added := 0
+	for depth := 0; depth < commentThreadMaxDepth; depth++ {
+		// Distinct parents referenced by the current set but not in it. Dedup is
+		// what keeps many replies sharing one ancestor from fetching it twice.
+		var missing []pgtype.UUID
+		seen := make(map[string]struct{})
+		for _, c := range byID {
+			if !c.ParentID.Valid {
+				continue
+			}
+			pid := uuidToString(c.ParentID)
+			if _, have := byID[pid]; have {
+				continue
+			}
+			if _, dup := seen[pid]; dup {
+				continue
+			}
+			seen[pid] = struct{}{}
+			missing = append(missing, c.ParentID)
+		}
+		if len(missing) == 0 {
+			break
+		}
+		if added+len(missing) > commentThreadContextBudget {
+			break
+		}
+
+		// Tenant-scoped: a parent in another issue or workspace simply does not
+		// come back, and keepRootConnected then prunes the reply that pointed at
+		// it. The filter is on every level, not just the first.
+		rows, err := h.Queries.ListCommentsByIDsForIssue(ctx, db.ListCommentsByIDsForIssueParams{
+			Ids:         missing,
+			IssueID:     issueID,
+			WorkspaceID: workspaceID,
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(rows) == 0 {
+			break
+		}
+		for _, r := range rows {
+			id := uuidToString(r.ID)
+			if _, have := byID[id]; have {
+				continue
+			}
+			byID[id] = r
+			added++
+		}
+	}
+
+	// Remove every chain that did not reach a same-tenant root within the
+	// ancestor budget/depth. Rebuild the map so the descendant phase cannot
+	// accidentally revive a disconnected chain.
+	connected := keepRootConnected(byID)
+	byID = make(map[string]db.Comment, len(connected)+commentThreadContextBudget-added)
+	for _, c := range connected {
+		byID[uuidToString(c.ID)] = c
+	}
+
+	// A restored root identifies a thread that the newest window cut. Threads
+	// whose roots were already in the suffix are complete under the normal
+	// parent-before-reply timestamp contract and need no extra query.
+	affectedRoots := make(map[string]struct{})
+	for id, c := range byID {
+		if c.ParentID.Valid {
+			continue
+		}
+		if _, wasInWindow := initialIDs[id]; !wasInWindow {
+			affectedRoots[id] = struct{}{}
+		}
+	}
+
+	if len(affectedRoots) > 0 {
+		complete, err := h.addMissingCommentDescendants(
+			ctx,
+			issueID,
+			workspaceID,
+			byID,
+			affectedRoots,
+			through,
+			&added,
+		)
+		if err != nil {
+			return nil, err
+		}
+		if !complete {
+			dropCommentThreads(byID, affectedRoots)
+		}
+	}
+
+	out := make([]db.Comment, 0, len(byID))
+	for _, c := range byID {
+		out = append(out, c)
+	}
+	sortCommentsChronologically(out)
+	return out, nil
+}
+
+// addMissingCommentDescendants walks every affected thread breadth-first. It
+// returns false when the remaining context budget or depth bound cannot prove
+// all affected threads complete; callers then drop those threads as one unit.
+func (h *Handler) addMissingCommentDescendants(
+	ctx context.Context,
+	issueID, workspaceID pgtype.UUID,
+	byID map[string]db.Comment,
+	affectedRoots map[string]struct{},
+	through db.Comment,
+	added *int,
+) (bool, error) {
+	frontier := make(map[string]string, len(affectedRoots)) // comment id -> root id
+	for rootID := range affectedRoots {
+		frontier[rootID] = rootID
+	}
+
+	// Every returned child is unique in a tree walk. The scan budget includes
+	// rows already present in the window plus the remaining add budget, so all
+	// descendant queries together inspect at most the response bound (+1 probe).
+	scanBudget := len(byID) + commentThreadContextBudget - *added
+	for depth := 0; depth <= commentThreadMaxDepth; depth++ {
+		parentKeys := make([]string, 0, len(frontier))
+		for id := range frontier {
+			parentKeys = append(parentKeys, id)
+		}
+		sort.Strings(parentKeys)
+
+		parentIDs := make([]pgtype.UUID, len(parentKeys))
+		for i, id := range parentKeys {
+			parentIDs[i] = byID[id].ID
+		}
+
+		rows, err := h.Queries.ListChildCommentsForParents(ctx, db.ListChildCommentsForParentsParams{
+			ParentIds:   parentIDs,
+			IssueID:     issueID,
+			WorkspaceID: workspaceID,
+			ThroughAt:   through.CreatedAt,
+			ThroughID:   through.ID,
+			RowLimit:    int32(scanBudget + 1),
+		})
+		if err != nil {
+			return false, err
+		}
+		if len(rows) == 0 {
+			return true, nil
+		}
+		if len(rows) > scanBudget || depth == commentThreadMaxDepth {
+			return false, nil
+		}
+		scanBudget -= len(rows)
+
+		next := make(map[string]string, len(rows))
+		for _, row := range rows {
+			parentID := uuidToString(row.ParentID)
+			rootID, ok := frontier[parentID]
+			if !ok {
+				// The query is constrained to frontier parent ids, so this is
+				// defensive fail-closed handling for malformed query output.
+				return false, nil
+			}
+			id := uuidToString(row.ID)
+			next[id] = rootID
+			if _, exists := byID[id]; exists {
+				continue
+			}
+			if *added >= commentThreadContextBudget {
+				return false, nil
+			}
+			byID[id] = row
+			*added = *added + 1
+		}
+		frontier = next
+	}
+	return false, nil
+}
+
+// dropCommentThreads removes every comment whose root is in roots. It is used
+// only after a bounded descendant walk could not prove the affected threads
+// complete.
+func dropCommentThreads(byID map[string]db.Comment, roots map[string]struct{}) {
+	for id := range byID {
+		rootID, ok := commentRootID(id, byID)
+		if !ok {
+			delete(byID, id)
+			continue
+		}
+		if _, drop := roots[rootID]; drop {
+			delete(byID, id)
+		}
+	}
+}
+
+func commentRootID(id string, byID map[string]db.Comment) (string, bool) {
+	seen := make(map[string]struct{})
+	for current := id; ; {
+		if _, loop := seen[current]; loop {
+			return "", false
+		}
+		seen[current] = struct{}{}
+
+		comment, ok := byID[current]
+		if !ok {
+			return "", false
+		}
+		if !comment.ParentID.Valid {
+			return current, true
+		}
+		current = uuidToString(comment.ParentID)
+	}
+}
+
+func sortCommentsChronologically(comments []db.Comment) {
+	sort.Slice(comments, func(i, j int) bool {
+		if !comments[i].CreatedAt.Time.Equal(comments[j].CreatedAt.Time) {
+			return comments[i].CreatedAt.Time.Before(comments[j].CreatedAt.Time)
+		}
+		return bytes.Compare(comments[i].ID.Bytes[:], comments[j].ID.Bytes[:]) < 0
+	})
+}
+
+// keepRootConnected returns only the comments whose parent chain terminates at a
+// root (parent_id IS NULL) inside the set.
+//
+// A comment whose chain leaves the set, loops, or dead-ends is unrenderable: the
+// UI needs a top-level card to hang the thread from. Dropping such a comment also
+// drops its descendants, because their chains run through it and therefore fail
+// the same test — no separate descendant pass is needed.
+//
+// The walk is bounded by the visited set, so a cycle in stored data terminates
+// instead of hanging. Real cycles are impossible via the write path, but a graph
+// walk over stored data should never assume that.
+func keepRootConnected(byID map[string]db.Comment) []db.Comment {
+	connected := make(map[string]bool, len(byID))
+
+	for id := range byID {
+		if _, decided := connected[id]; decided {
+			continue
+		}
+		var path []string
+		visited := make(map[string]struct{})
+		verdict := false
+		for cur := id; ; {
+			if v, decided := connected[cur]; decided {
+				verdict = v
+				break
+			}
+			if _, loop := visited[cur]; loop {
+				break // cycle: nothing on this path reaches a root
+			}
+			c, present := byID[cur]
+			if !present {
+				break // chain leaves the set
+			}
+			visited[cur] = struct{}{}
+			path = append(path, cur)
+			if !c.ParentID.Valid {
+				verdict = true // a real root, inside the set
+				break
+			}
+			cur = uuidToString(c.ParentID)
+		}
+		for _, p := range path {
+			connected[p] = verdict
+		}
+	}
+
+	out := make([]db.Comment, 0, len(byID))
+	for id, c := range byID {
+		if connected[id] {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 type CreateCommentRequest struct {
@@ -1117,11 +1584,11 @@ func commentAgentTriggerReason(trigger commentAgentTrigger) string {
 	}
 }
 
-func commentAgentTriggerToResponse(trigger commentAgentTrigger) CommentTriggerAgentResponse {
+func (h *Handler) commentAgentTriggerToResponse(trigger commentAgentTrigger) CommentTriggerAgentResponse {
 	return CommentTriggerAgentResponse{
 		ID:        uuidToString(trigger.Agent.ID),
 		Name:      trigger.Agent.Name,
-		AvatarURL: textToPtr(trigger.Agent.AvatarUrl),
+		AvatarURL: h.resolveAvatarURLPtr(textToPtr(trigger.Agent.AvatarUrl)),
 		Source:    string(trigger.Source),
 		Reason:    commentAgentTriggerReason(trigger),
 	}
@@ -1210,7 +1677,7 @@ func (h *Handler) PreviewCommentTriggers(w http.ResponseWriter, r *http.Request)
 		Blocked: commentBlockedTargetOutcomes(targets),
 	}
 	for _, trigger := range triggers {
-		resp.Agents = append(resp.Agents, commentAgentTriggerToResponse(trigger))
+		resp.Agents = append(resp.Agents, h.commentAgentTriggerToResponse(trigger))
 	}
 	writeJSON(w, http.StatusOK, resp)
 }
@@ -1276,6 +1743,16 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	if req.Type == "" {
 		req.Type = "comment"
 	}
+	// Validate rather than letting the DB CHECK reject it: an unknown type
+	// previously surfaced as a 500 on a constraint violation, which reads as a
+	// server fault for what is plainly bad input. This is also the explicit
+	// refusal of a client trying to author a machine-written kind (MUL-5465
+	// review): a member must not be able to post a comment that renders as
+	// something the system generated.
+	if !isClientAuthorableCommentType(req.Type) {
+		writeError(w, http.StatusBadRequest, "invalid comment type")
+		return
+	}
 
 	var parentID pgtype.UUID
 	var parentComment *db.Comment
@@ -1306,59 +1783,84 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Determine author identity: agent (via X-Agent-ID header) or member.
 	authorType, authorID := h.resolveActor(r, userID, uuidToString(issue.WorkspaceID))
 
-	// Defense against resumed-session drift: when an agent posts from inside a
-	// comment-triggered task AND the comment is being posted on that same
-	// issue, the parent_id must exactly match the task's trigger comment.
-	// Resumed Claude sessions otherwise carry forward a previous turn's
-	// --parent UUID and silently misplace the reply.
-	//
-	// The task.IssueID scope is important: the CLI stamps X-Task-ID on every
-	// request, so an agent legitimately commenting on a different issue must
-	// not be blocked by its current task's trigger. Assignment-triggered
-	// tasks (no TriggerCommentID) are also unaffected.
 	// sourceTaskID captures the agent's currently-executing task when it posts
 	// via the CLI (X-Task-ID header). Stamping it on the comment row keeps the
 	// originator inheritance chain (resolveOriginatorFromTriggerComment →
 	// comment.source_task_id → parent task's originator_user_id) intact across
-	// the leader→worker mention hop. Without this stamp, a private squad
-	// leader's worker-agent whose completion wakes the leader via
-	// routeAssignedSquadLeaderFallback can't pass canInvokeAgent — the
-	// worker's task originator is unattributed, effectiveUser resolves to "",
-	// and the private-agent gate denies the wake (MUL-4015).
+	// an agent→agent hop. Without this stamp, a private squad leader's
+	// worker-agent whose completion wakes the leader via
+	// routeAssignedSquadLeaderFallback can't pass canInvokeAgent — the worker's
+	// task originator is unattributed, effectiveUser resolves to "", and the
+	// private-agent gate denies the wake (MUL-4015).
+	//
+	// The header is NOT client-chosen: the task token forces X-Task-ID and
+	// X-Agent-ID from its own row, and resolveActor rejects the JWT path unless
+	// the named task belongs to the named agent. So the stamp always records the
+	// authoring agent's own run.
+	//
+	// It is deliberately NOT scoped to that run's own issue (MUL-6490 / GH
+	// #7328). A run that legitimately comments on ANOTHER issue — the ordinary
+	// "agent creates issue Y, then coordinates there" flow — used to persist a
+	// NULL lineage, so the run that comment woke resolved as unattributed and
+	// every @mention / assign / sub-issue inside it hit invocation_not_allowed,
+	// even though the SAME delegation had just succeeded on the originating
+	// issue. Propagating the chain is monotonic: it can only carry the human
+	// this run ALREADY acts for, and every hop still re-runs canInvokeAgent
+	// against that same human, so the admissible set stays a subset of what that
+	// human could trigger directly. What must never happen is SUBSTITUTING a
+	// human — an owner fallback, or adopting the target issue's own originator —
+	// because that borrows a different person's authority; those stay rejected.
+	//
+	// Consumers that genuinely need "the authoring run is working on THIS issue"
+	// keep that check next to their own rule instead: the reply-parent /
+	// no_action guards below, and autopilotDelegationAuthority's lineage
+	// verification (MUL-4857).
 	var sourceTaskID pgtype.UUID
 	if authorType == "agent" {
-		if taskIDHeader := r.Header.Get("X-Task-ID"); taskIDHeader != "" {
-			taskUUID, parseErr := util.ParseUUID(taskIDHeader)
-			if parseErr == nil {
-				task, err := h.Queries.GetAgentTask(r.Context(), taskUUID)
-				if err == nil && task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
-					if task.TriggerCommentID.Valid {
-						if !taskCoversReplyParent(task, parentID) {
-							// Keep this error actionable for agents (MUL-4417 / GH #5266).
-							writeError(w, http.StatusConflict,
-								"comment-triggered tasks cannot create top-level comments; set parent_id (--parent) to "+uuidToString(task.TriggerCommentID)+" or a coalesced comment id")
-							return
+		if task, ok := h.taskFromRequestHeader(r); ok {
+			// Defense against resumed-session drift: when an agent posts from
+			// inside a comment-triggered task AND the comment is being posted on
+			// that same issue, the parent_id must exactly match the task's
+			// trigger comment. Resumed Claude sessions otherwise carry forward a
+			// previous turn's --parent UUID and silently misplace the reply.
+			//
+			// The task.IssueID scope is important: the CLI stamps X-Task-ID on
+			// every request, so an agent legitimately commenting on a different
+			// issue must not be blocked by its current task's trigger.
+			// Assignment-triggered tasks (no TriggerCommentID) are also
+			// unaffected.
+			if task.IssueID.Valid && uuidToString(task.IssueID) == uuidToString(issue.ID) {
+				if task.TriggerCommentID.Valid {
+					if !taskCoversReplyParent(task, parentID) {
+						// Keep this error actionable for agents (MUL-4417 / GH #5266).
+						// The two rejections need different copy. A resumed
+						// session carrying a previous turn's --parent forward
+						// (GH #6264) did NOT ask for a top-level comment, and
+						// telling it that it did sends it looking for a
+						// new-thread opt-in instead of simply correcting the
+						// parent it already passed.
+						fix := "set parent_id (--parent) to " + uuidToString(task.TriggerCommentID) + " or a coalesced comment id"
+						msg := "comment-triggered tasks cannot create top-level comments; " + fix
+						if parentID.Valid {
+							msg = "parent_id " + uuidToString(parentID) + " is not a comment this task may reply under; " + fix
 						}
-					}
-					noAction, checkErr := service.HasSquadLeaderNoActionEvaluationForTask(r.Context(), h.Queries, task)
-					if checkErr != nil {
-						slog.Warn("checking squad leader no_action evaluation failed", append(logger.RequestAttrs(r),
-							"error", checkErr,
-							"task_id", taskIDHeader,
-							"issue_id", issueID,
-						)...)
-					} else if noAction {
-						writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
+						writeError(w, http.StatusConflict, msg)
 						return
 					}
-					// Only stamp source_task_id for a task belonging to THIS
-					// issue. An agent legitimately commenting on a DIFFERENT
-					// issue than its current task must not stamp that task's
-					// id here — the resulting chain would then attribute the
-					// out-of-band comment to an unrelated task's originator.
-					sourceTaskID = taskUUID
+				}
+				noAction, checkErr := service.HasSquadLeaderNoActionEvaluationForTask(r.Context(), h.Queries, task)
+				if checkErr != nil {
+					slog.Warn("checking squad leader no_action evaluation failed", append(logger.RequestAttrs(r),
+						"error", checkErr,
+						"task_id", uuidToString(task.ID),
+						"issue_id", issueID,
+					)...)
+				} else if noAction {
+					writeError(w, http.StatusConflict, "squad leader recorded no_action; comments are not allowed for this task")
+					return
 				}
 			}
+			sourceTaskID = task.ID
 		}
 	}
 
@@ -1382,7 +1884,8 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	comment, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+	created, err := h.Queries.CreateComment(r.Context(), db.CreateCommentParams{
+		ID:           dbid.NewV7(),
 		IssueID:      issue.ID,
 		WorkspaceID:  issue.WorkspaceID,
 		AuthorType:   authorType,
@@ -1397,6 +1900,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "failed to create comment: "+err.Error())
 		return
 	}
+	comment := created.Comment()
 
 	// Link uploaded attachments to this comment.
 	if len(attachmentIDs) > 0 {
@@ -1406,6 +1910,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	// Fetch linked attachments so the response includes them.
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	resp := commentToResponse(comment, nil, groupedAtt[uuidToString(comment.ID)])
+	resp.IssueRevision = created.IssueRevision
 	slog.Info("comment created", append(logger.RequestAttrs(r), "comment_id", uuidToString(comment.ID), "issue_id", issueID)...)
 	h.publish(protocol.EventCommentCreated, uuidToString(issue.WorkspaceID), authorType, authorID, map[string]any{
 		"comment":             resp,
@@ -1413,6 +1918,7 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 		"issue_assignee_type": textToPtr(issue.AssigneeType),
 		"issue_assignee_id":   uuidToPtr(issue.AssigneeID),
 		"issue_status":        issue.Status,
+		"issue_revision":      created.IssueRevision,
 	})
 
 	// A reply in a resolved thread re-opens it. Done after CreateComment commits
@@ -1436,6 +1942,19 @@ func (h *Handler) CreateComment(w http.ResponseWriter, r *http.Request) {
 	resp.TriggerOutcomes = h.triggerTasksForComment(r.Context(), issue, comment, parentComment, authorType, authorID, originatorUserID, delegationAuthority, suppressAgentIDs)
 
 	writeJSON(w, http.StatusCreated, resp)
+}
+
+// clientAuthorableCommentTypes is what POST /comments accepts. `status_change`
+// and `system` are platform-generated narration, so a client claiming them
+// would be forging system output; they are deliberately absent.
+var clientAuthorableCommentTypes = map[string]struct{}{
+	"comment":         {},
+	"progress_update": {},
+}
+
+func isClientAuthorableCommentType(t string) bool {
+	_, ok := clientAuthorableCommentTypes[t]
+	return ok
 }
 
 // noteCommentPrefix marks a comment as a human-only note. A comment whose first
@@ -1471,8 +1990,35 @@ func (h *Handler) triggerTasksForComment(ctx context.Context, issue db.Issue, co
 		AutopilotDelegationAuthorityUserID: delegationAuthorityUserID,
 	})
 	triggers = filterSuppressedCommentAgentTriggers(triggers, suppressAgentIDs)
+	h.noteBlockedRuntimeTargets(ctx, issue, targets)
 	enqueued := h.enqueueCommentAgentTriggers(ctx, issue, comment.ID, triggers)
 	return commentTriggerOutcomes(targets, enqueued)
+}
+
+// noteBlockedRuntimeTargets leaves one system comment per agent refused for an
+// unusable runtime, whoever authored the trigger — see noteRuntimeUnusable for
+// why a human author gets one too. Deduped by agent so a comment naming both
+// @Agent and the squad it leads produces a single notice.
+//
+// Called from the trigger path only. The resolver that produced these targets
+// also runs for the composer preview, where writing a comment would be a side
+// effect of typing.
+func (h *Handler) noteBlockedRuntimeTargets(ctx context.Context, issue db.Issue, targets []commentMentionTarget) {
+	var noted map[string]struct{}
+	for _, t := range targets {
+		if t.unusable == nil {
+			continue
+		}
+		id := uuidToString(t.unusable.agent.ID)
+		if _, done := noted[id]; done {
+			continue
+		}
+		if noted == nil {
+			noted = make(map[string]struct{}, 1)
+		}
+		noted[id] = struct{}{}
+		h.noteRuntimeUnusable(ctx, issue, t.unusable.agent, t.unusable.verdict)
+	}
 }
 
 func filterSuppressedCommentAgentTriggers(triggers []commentAgentTrigger, suppressAgentIDs []pgtype.UUID) []commentAgentTrigger {
@@ -1843,7 +2389,7 @@ func commentMergeTerminalOutcome(result commentMergeResult) (status DispatchStat
 }
 
 // mergeCommentIntoPendingTask folds a newly-arrived comment into the existing
-// QUEUED (not-yet-claimed) task for (issue, agent) instead of dropping it
+// pre-claim task for (issue, agent) instead of dropping it
 // (MUL-4195). It reports HOW it resolved via commentMergeResult so the caller
 // never mislabels a refused/failed merge as success (MUL-4525 §2). No path here
 // enqueues a duplicate: on any failure the original task is kept intact, so the
@@ -2118,12 +2664,19 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 	// creator's authority by commenting on that autopilot's issue.
 
 	mentions := util.ParseMentions(content)
-	if util.HasMentionAll(mentions) {
-		return nil, nil
-	}
 
+	// EXPLICIT @agent / @squad mentions are a direct request and win over the
+	// @all broadcast (MUL-5411). @all only suppresses the IMPLICIT routing
+	// fallbacks (assignee / thread parent / conversation) below — it must not
+	// swallow a target the author named by hand. Before this ordering, a
+	// comment carrying both `@all` and `@Preflight` enqueued nothing at all.
+	// `all` is neither "agent" nor "squad", so it is skipped inside
+	// resolveMentionedAgentCommentTriggers and never enqueues a run of its own.
 	if hasAgentOrSquadMention(mentions) {
 		return h.resolveMentionedAgentCommentTriggers(ctx, issue, mentions, actorType, actorID, opts)
+	}
+	if util.HasMentionAll(mentions) {
+		return nil, nil
 	}
 	if hasMemberMention(mentions) {
 		return nil, nil
@@ -2179,6 +2732,12 @@ func (h *Handler) computeCommentAgentTriggers(ctx context.Context, issue db.Issu
 				}
 			}
 			return triggers, nil
+		}
+		// A plain member-to-member reply must not start the issue assignee just
+		// because the thread has no agent owner. Explicit mentions and existing
+		// conversation owners were already resolved above.
+		if parentComment.AuthorType == "member" {
+			return nil, nil
 		}
 	}
 
@@ -2447,6 +3006,18 @@ type commentMentionTarget struct {
 	ExecAgentID string
 	Status      DispatchStatus
 	ReasonCode  DispatchReasonCode
+	// unusable carries the refused agent and its verdict for the one reason
+	// that needs a durable trace (runtime_unusable). Internal to the handler:
+	// the resolver runs for the composer PREVIEW as well, so it only records
+	// what happened — writing the notice is the trigger path's job.
+	unusable *blockedRuntimeNotice
+}
+
+// blockedRuntimeNotice is a refusal worth leaving on the issue: which agent, and
+// the verdict that names the repair.
+type blockedRuntimeNotice struct {
+	agent   db.Agent
+	verdict service.AgentVerdict
 }
 
 func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issue db.Issue, mentions []util.Mention, authorType, authorID string, opts commentTriggerComputeOptions) ([]commentAgentTrigger, []commentMentionTarget) {
@@ -2492,10 +3063,35 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 	blockTarget := func(targetType, targetID string, reason DispatchReasonCode) {
 		addTarget(commentMentionTarget{TargetType: targetType, TargetID: targetID, Status: DispatchBlocked, ReasonCode: reason})
 	}
+	// blockUnusableTarget is blockTarget for the one verdict that also needs a
+	// durable trace. Every author gets it, including a human: the chip and toast
+	// carry the reason code but not the repair command, and an agent-authored
+	// mention has nobody watching a response at all.
+	blockUnusableTarget := func(targetType, targetID string, agent db.Agent, verdict service.AgentVerdict) {
+		notice := &blockedRuntimeNotice{agent: agent, verdict: verdict}
+		if verdict.Reason != ReasonRuntimeUnusable {
+			notice = nil
+		}
+		addTarget(commentMentionTarget{
+			TargetType: targetType, TargetID: targetID,
+			Status: DispatchBlocked, ReasonCode: verdict.Reason, unusable: notice,
+		})
+	}
 	for _, m := range mentions {
 		if m.Type == "squad" {
 			// @squad mention → trigger the squad's leader agent.
-			squadUUID := parseUUID(m.ID)
+			// The mention id comes from untrusted comment text and MentionRe
+			// accepts any hex/dash run (`mention://squad/-`), so it is parsed
+			// with the error-returning ParseUUID — the Must* variant would
+			// panic the request, and on the create path the comment row is
+			// already committed by then. A malformed id is indistinguishable
+			// from a well-formed id that owns no squad: same target_unavailable
+			// outcome, no run.
+			squadUUID, err := util.ParseUUID(m.ID)
+			if err != nil {
+				blockTarget("squad", m.ID, ReasonTargetUnavailable)
+				continue
+			}
 			squad, err := h.Queries.GetSquadInWorkspace(ctx, db.GetSquadInWorkspaceParams{
 				ID:          squadUUID,
 				WorkspaceID: issue.WorkspaceID,
@@ -2538,8 +3134,9 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 				blockTarget("squad", m.ID, ReasonTargetUnavailable)
 				continue
 			}
-			if !agent.RuntimeID.Valid {
-				blockTarget("squad", m.ID, ReasonRuntimeOffline)
+			// Same shared verdict as the direct-agent branch below.
+			if verdict, err := service.AgentReadiness(ctx, h.Queries, agent); err == nil && verdict.Blocked() {
+				blockUnusableTarget("squad", m.ID, agent, verdict)
 				continue
 			}
 			hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, leaderID, opts)
@@ -2554,7 +3151,18 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 		if m.Type != "agent" {
 			continue
 		}
-		agentUUID := parseUUID(m.ID)
+		agentUUID, err := util.ParseUUID(m.ID)
+		if err != nil {
+			// Untrusted comment text: MentionRe matches any hex/dash run, so a
+			// malformed id must not reach the panicking Must* parser. A string
+			// that is not a UUID at all cannot name an entity in ANY workspace,
+			// so there is no existence to conceal here and the invoke-permission
+			// code would be a false cause (MUL-5548): report the same
+			// target_unavailable the squad path above already uses. Only the
+			// well-formed-but-unresolved case below stays enumeration-safe.
+			blockTarget("agent", m.ID, ReasonTargetUnavailable)
+			continue
+		}
 		// Load the agent scoped to the current issue's workspace. Using the
 		// bare GetAgent here would let a mention resolve to an agent in a
 		// different workspace, and the visibility check below would then be
@@ -2580,8 +3188,14 @@ func (h *Handler) resolveMentionedAgentCommentTriggers(ctx context.Context, issu
 			blockTarget("agent", m.ID, ReasonTargetUnavailable)
 			continue
 		}
-		if !agent.RuntimeID.Valid {
-			blockTarget("agent", m.ID, ReasonRuntimeOffline)
+		// One readiness verdict for every admission path (service.AgentReadiness).
+		// Only a BLOCKED verdict refuses the mention: an unbound agent has no
+		// machine to bring back (MUL-5559), and a machine whose CLI cannot run
+		// will not start doing so on its own (MUL-6164). A merely offline
+		// runtime keeps queueing — that wait ends by itself when the machine
+		// returns, and taking it away would remove a behaviour people rely on.
+		if verdict, err := service.AgentReadiness(ctx, h.Queries, agent); err == nil && verdict.Blocked() {
+			blockUnusableTarget("agent", m.ID, agent, verdict)
 			continue
 		}
 		hasPending, err := h.hasPendingTaskForIssueAndAgent(ctx, issue.ID, agentUUID, opts)
@@ -2637,8 +3251,10 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 
 	var req struct {
 		Content          string    `json:"content"`
+		ContentBase      *string   `json:"content_base,omitempty"`
 		AttachmentIDs    *[]string `json:"attachment_ids"`
 		SuppressAgentIDs []string  `json:"suppress_agent_ids"`
+		ExpectedRevision *int64    `json:"expected_revision,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -2648,10 +3264,25 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	// rejects before the empty check, so an edit that introduces such a byte
 	// can't 500 (GH #5388).
 	req.Content = sanitizeNullBytes(req.Content)
+	if req.ContentBase != nil {
+		sanitized := sanitizeNullBytes(*req.ContentBase)
+		req.ContentBase = &sanitized
+	}
 	if req.Content == "" {
 		writeError(w, http.StatusBadRequest, "content is required")
 		return
 	}
+	if req.ExpectedRevision != nil {
+		if *req.ExpectedRevision < 1 {
+			writeError(w, http.StatusBadRequest, "expected_revision must be a positive integer")
+			return
+		}
+		if existing.Revision != *req.ExpectedRevision {
+			writeRevisionConflict(w, "comment", existing.ID, *req.ExpectedRevision, existing.Revision)
+			return
+		}
+	}
+	strictContentEdit := req.ContentBase != nil || req.ExpectedRevision != nil
 
 	var attachmentIDs []pgtype.UUID
 	replaceAttachments := req.AttachmentIDs != nil
@@ -2686,39 +3317,114 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		}
 		triggerIssue = &issue
 		// A content edit is a NEW action, so its delegation lineage must key on THIS
-		// edit. Only the AGENT author re-editing its OWN comment carries issue-scoped
-		// lineage forward (commentSourceTaskIDForIssue re-stamps the current editing
-		// task, and clears it on a cross-issue edit) — so preview, save, and the
-		// deferred completion-reconcile all resolve the authority from this one
-		// action. Any OTHER editor — a workspace owner/admin editing an AGENT's
-		// comment, or a member editing their own — CLEARS the lineage so the deferred
-		// reconcile fails closed instead of resurrecting the original autopilot run's
-		// creator authority. An admin holds manage rights over the comment, not
-		// invoke rights over the author's private agents (Elon must-fix, round 3).
+		// edit. Only the AGENT author re-editing its OWN comment carries the lineage
+		// forward (commentSourceTaskID re-stamps the current editing task) — so
+		// preview, save, and the deferred completion-reconcile all resolve the
+		// authority from this one action. Any OTHER editor — a workspace owner/admin
+		// editing an AGENT's comment, or a member editing their own — CLEARS the
+		// lineage so the deferred reconcile fails closed instead of resurrecting the
+		// original autopilot run's creator authority. An admin holds manage rights
+		// over the comment, not invoke rights over the author's private agents (Elon
+		// must-fix, round 3).
 		if actorType == "agent" && isAuthor {
-			sourceTaskID = h.commentSourceTaskIDForIssue(r, issue)
+			sourceTaskID = h.commentSourceTaskID(r)
 		} else {
 			sourceTaskID = pgtype.UUID{}
 		}
-		cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
-		if err != nil {
-			slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
-			writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
-			return
+		// Legacy clients keep the existing cancel-before-update behavior. Strict
+		// revision writes defer cancellation until the conditional UPDATE wins,
+		// so a race that returns 409 cannot mutate the task queue.
+		if !strictContentEdit {
+			cancelled, err = h.TaskService.CancelTasksByTriggerComment(r.Context(), existing.ID)
+			if err != nil {
+				slog.Warn("cancel tasks for edited comment failed", "comment_id", uuidToString(existing.ID), "error", err)
+				writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
+				return
+			}
 		}
 	}
 
-	comment, err := h.Queries.UpdateComment(r.Context(), db.UpdateCommentParams{
+	updateParams := db.UpdateCommentParams{
 		ID:           commentUUID,
 		Content:      req.Content,
 		SourceTaskID: sourceTaskID,
-	})
+	}
+	if req.ContentBase != nil {
+		updateParams.ContentBase = pgtype.Text{String: *req.ContentBase, Valid: true}
+	}
+	if req.ExpectedRevision != nil {
+		updateParams.ExpectedRevision = pgtype.Int8{Int64: *req.ExpectedRevision, Valid: true}
+	}
+	var comment db.Comment
+	var issueRevision int64
+	transactionalEdit := replaceAttachments || (oldContent != req.Content && strictContentEdit)
+	if transactionalEdit {
+		// Strict body edits, attachment-set edits, and cancellation of tasks built
+		// from the old body are one database outcome. UpdateComment takes the row
+		// lock before the attachment replacement, so two modern editors cannot
+		// interleave their CAS check and attachment selection. A body + attachment
+		// edit is one visible mutation and therefore bumps revision exactly once.
+		tx, beginErr := h.TxStarter.Begin(r.Context())
+		if beginErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to prepare comment edit")
+			return
+		}
+		defer tx.Rollback(r.Context())
+		qtx := h.Queries.WithTx(tx)
+		var updated db.UpdateCommentRow
+		updated, err = qtx.UpdateComment(r.Context(), updateParams)
+		if err == nil {
+			comment = updated.Comment()
+			issueRevision = updated.IssueRevision
+		}
+		if err == nil && oldContent != req.Content && strictContentEdit {
+			cancelled, err = qtx.CancelAgentTasksByTriggerComment(r.Context(), existing.ID)
+		}
+		if err == nil && replaceAttachments {
+			var changed int64
+			changed, err = qtx.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
+				CommentID:     comment.ID,
+				IssueID:       existing.IssueID,
+				AttachmentIds: attachmentIDs,
+			})
+			if err == nil && changed > 0 && oldContent == req.Content {
+				comment, err = qtx.BumpCommentRevision(r.Context(), db.BumpCommentRevisionParams{
+					ID:          comment.ID,
+					WorkspaceID: existing.WorkspaceID,
+				})
+			}
+		}
+		if err == nil {
+			err = tx.Commit(r.Context())
+		}
+		if err == nil {
+			h.TaskService.BroadcastCancelledTasks(r.Context(), uuidToString(existing.WorkspaceID), cancelled)
+		}
+	} else {
+		var updated db.UpdateCommentRow
+		updated, err = h.Queries.UpdateComment(r.Context(), updateParams)
+		if err == nil {
+			comment = updated.Comment()
+			issueRevision = updated.IssueRevision
+		}
+	}
 	if err != nil {
 		slog.Warn("update comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
-		if triggerIssue != nil {
+		if triggerIssue != nil && !strictContentEdit {
 			// Cancellation committed but the edit did not. Restore the complete
 			// original batch, including the still-valid unchanged comment.
 			h.retriggerCancelledTaskSurvivors(r.Context(), *triggerIssue, cancelled, pgtype.UUID{})
+		}
+		if errors.Is(err, pgx.ErrNoRows) && strictContentEdit {
+			current, reloadErr := h.Queries.GetCommentInWorkspace(r.Context(), db.GetCommentInWorkspaceParams{ID: commentUUID, WorkspaceID: wsUUID})
+			if reloadErr == nil {
+				if req.ExpectedRevision != nil {
+					writeRevisionConflict(w, "comment", current.ID, *req.ExpectedRevision, current.Revision)
+				} else {
+					writeEditConflict(w, "comment", current.ID)
+				}
+				return
+			}
 		}
 		writeError(w, http.StatusInternalServerError, "failed to update comment")
 		return
@@ -2741,30 +3447,12 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 		// author re-stamps its current task; every other editor clears it), so
 		// resolving from the comment keys the delegation authority on the current
 		// editing action — identical to what the edit preview computed from the same
-		// request, and to what the completion-reconcile will restore. A cross-issue
-		// or non-author edit left it NULL, so this fails closed rather than borrowing
-		// the old authoring run's authority.
+		// request, and to what the completion-reconcile will restore. A non-author
+		// edit left it NULL, and a cross-issue editing task is rejected inside
+		// autopilotDelegationAuthority, so neither can borrow the old authoring run's
+		// authority.
 		delegationAuthority := h.autopilotDelegationAuthorityFromComment(r.Context(), issue, comment)
 		return h.triggerTasksForComment(r.Context(), issue, comment, parentComment, actorType, actorID, h.invokeOriginatorFromRequest(r, actorType, actorID), delegationAuthority, suppressAgentIDs)
-	}
-
-	// Replace the comment attachment set when a modern client sends
-	// attachment_ids. Older clients omit the field; in that case preserve the
-	// existing attachment links rather than unlinking everything.
-	if replaceAttachments {
-		if err := h.Queries.ReplaceCommentAttachments(r.Context(), db.ReplaceCommentAttachmentsParams{
-			CommentID:     comment.ID,
-			IssueID:       existing.IssueID,
-			AttachmentIds: attachmentIDs,
-		}); err != nil {
-			slog.Error("failed to replace comment attachments", "error", err)
-			// UpdateComment already committed the new body. Even though attachment
-			// replacement failed, repair task routing for that persisted edit so a
-			// dispatched run cannot permanently keep the old comment version.
-			retriggerEditedComment()
-			writeError(w, http.StatusInternalServerError, "failed to update attachments")
-			return
-		}
 	}
 
 	// Fetch reactions and attachments for the updated comment.
@@ -2772,8 +3460,13 @@ func (h *Handler) UpdateComment(w http.ResponseWriter, r *http.Request) {
 	groupedAtt := h.groupAttachments(r, []pgtype.UUID{comment.ID})
 	cid := uuidToString(comment.ID)
 	resp := commentToResponse(comment, grouped[cid], groupedAtt[cid])
+	resp.IssueRevision = issueRevision
 	slog.Info("comment updated", append(logger.RequestAttrs(r), "comment_id", commentId)...)
-	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, map[string]any{"comment": resp})
+	eventPayload := map[string]any{"comment": resp}
+	if issueRevision > 0 {
+		eventPayload["issue_revision"] = issueRevision
+	}
+	h.publish(protocol.EventCommentUpdated, workspaceID, actorType, actorID, eventPayload)
 
 	// The broadcast above intentionally omits trigger_outcomes — it is the
 	// editor's private feedback, not shared timeline state (MUL-4525 §2).
@@ -2823,10 +3516,17 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	issue, err := h.Queries.GetIssue(r.Context(), comment.IssueID)
-	if err != nil {
+	hasIssue := err == nil
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		slog.Warn("load issue for delete post-processing failed", "issue_id", uuidToString(comment.IssueID), "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to load issue")
 		return
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		// The issue delete may have won the race after GetCommentInWorkspace.
+		// Continue so DeleteComment can report whether the comment itself still
+		// existed; touching issue activity is intentionally best effort.
+		slog.Info("comment parent issue no longer exists", "issue_id", uuidToString(comment.IssueID), "comment_id", commentId)
 	}
 
 	// Collect attachment URLs before CASCADE delete removes them.
@@ -2841,26 +3541,39 @@ func (h *Handler) DeleteComment(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("cancel tasks for deleted trigger comment failed", append(logger.RequestAttrs(r), "error", cancelErr, "comment_id", commentId)...)
 	}
 
-	if err := h.Queries.DeleteComment(r.Context(), db.DeleteCommentParams{
+	deleted, err := h.Queries.DeleteComment(r.Context(), db.DeleteCommentParams{
 		ID:          comment.ID,
 		WorkspaceID: comment.WorkspaceID,
-	}); err != nil {
-		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "comment_id", commentId)...)
-		// Cancellation already committed but deletion did not. The comment is
-		// still valid, so rebuild the complete cancelled batch (including this
-		// trigger) before returning the storage error.
-		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
-		writeError(w, http.StatusInternalServerError, "failed to delete comment")
+	})
+	if err != nil || !deleted.Changed {
+		slog.Warn("delete comment failed", append(logger.RequestAttrs(r), "error", err, "changed", deleted.Changed, "comment_id", commentId)...)
+		// Cancellation already committed but deletion did not. If the parent
+		// issue still exists, rebuild the complete cancelled batch (including
+		// this trigger) before reporting the storage error or concurrent no-op.
+		if hasIssue {
+			h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, pgtype.UUID{})
+		}
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to delete comment")
+		} else {
+			writeError(w, http.StatusNotFound, "comment not found")
+		}
 		return
 	}
 
 	h.deleteS3Objects(r.Context(), attachmentURLs)
 	slog.Info("comment deleted", append(logger.RequestAttrs(r), "comment_id", commentId, "issue_id", uuidToString(comment.IssueID))...)
-	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, map[string]any{
+	eventPayload := map[string]any{
 		"comment_id": uuidToString(comment.ID),
 		"issue_id":   uuidToString(comment.IssueID),
-	})
-	h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, comment.ID)
+	}
+	if deleted.IssueRevision > 0 {
+		eventPayload["issue_revision"] = deleted.IssueRevision
+	}
+	h.publish(protocol.EventCommentDeleted, workspaceID, actorType, actorID, eventPayload)
+	if hasIssue {
+		h.retriggerCancelledTaskSurvivors(r.Context(), issue, cancelled, comment.ID)
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -2918,6 +3631,20 @@ func (h *Handler) retriggerCancelledTaskSurvivors(ctx context.Context, issue db.
 	for i := range comments {
 		comment := comments[i]
 		if isNoteComment(comment.Content) {
+			continue
+		}
+		// Platform recovery comments bypass generic member/agent routing. If
+		// editing or deleting another comment cancelled the queued batch that
+		// carried one, replay it through the durable delegated-failure path so
+		// the cancelled, undelivered task cannot swallow the obligation.
+		if service.IsDelegatedFailureRecoveryComment(comment) {
+			if err := h.TaskService.DispatchDelegatedFailureRecoveryComment(ctx, comment, pgtype.UUID{}); err != nil {
+				slog.Warn("retrigger cancelled comment batch: delegated failure recovery replay failed",
+					"issue_id", uuidToString(issue.ID),
+					"comment_id", uuidToString(comment.ID),
+					"error", err,
+				)
+			}
 			continue
 		}
 		var parentComment *db.Comment

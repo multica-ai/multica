@@ -123,7 +123,8 @@ func installationCredentialsFor(inst Installation, resolver CredentialsResolver)
 // channelMessageFromLark normalizes a decoded Feishu InboundMessage into the
 // cross-platform channel.InboundMessage. The original struct is stashed in Raw
 // so the Feishu resolvers can read the platform-specific fields (app_id,
-// event_type, command body, create time) the envelope does not carry.
+// event_type, create time) the envelope does not carry. CommandBody maps to
+// the normalized CommandText field because command classification is shared.
 func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 	raw, _ := json.Marshal(lm)
 	var reply *channel.ReplyCtx
@@ -135,6 +136,7 @@ func channelMessageFromLark(lm InboundMessage) channel.InboundMessage {
 		MessageID:      lm.MessageID,
 		Type:           channelMsgType(lm.MessageType),
 		Text:           lm.Body,
+		CommandText:    lm.CommandBody,
 		ReplyTo:        reply,
 		AddressedToBot: lm.AddressedToBot,
 		ForceFresh:     lm.ForceFreshSession,
@@ -239,9 +241,16 @@ type channelInstallationStore struct {
 	q *db.Queries
 }
 
+// ChannelInstallationStore exposes both PostgreSQL seams used by the engine:
+// durable installation discovery and the explicit rollback lease backend.
+type ChannelInstallationStore interface {
+	engine.InstallationStore
+	engine.LeaseStore
+}
+
 // NewChannelInstallationStore builds the engine.InstallationStore backed by the
 // generalized channel_* tables.
-func NewChannelInstallationStore(q *db.Queries) engine.InstallationStore {
+func NewChannelInstallationStore(q *db.Queries) ChannelInstallationStore {
 	return &channelInstallationStore{q: q}
 }
 
@@ -262,7 +271,23 @@ func (s *channelInstallationStore) ListActiveInstallations(ctx context.Context) 
 	return out, nil
 }
 
-func (s *channelInstallationStore) AcquireWSLease(ctx context.Context, arg engine.AcquireLeaseParams) error {
+// PostgreSQL remains an explicit rollback/self-host lease backend. Its sweep
+// optimization returns no known holders, so the SQL CAS remains authoritative
+// and each unowned installation is attempted once per poll (never in a blind
+// per-installation loop).
+func (s *channelInstallationStore) ListHeldWSLeases(_ context.Context, _ []pgtype.UUID) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (s *channelInstallationStore) TryAcquireWSLease(ctx context.Context, arg engine.AcquireLeaseParams) error {
+	return s.acquireOrRenewWSLease(ctx, arg)
+}
+
+func (s *channelInstallationStore) RenewWSLease(ctx context.Context, arg engine.AcquireLeaseParams) error {
+	return s.acquireOrRenewWSLease(ctx, arg)
+}
+
+func (s *channelInstallationStore) acquireOrRenewWSLease(ctx context.Context, arg engine.AcquireLeaseParams) error {
 	_, err := s.q.AcquireChannelWSLease(ctx, db.AcquireChannelWSLeaseParams{
 		NewToken:     pgtype.Text{String: arg.Token, Valid: true},
 		NewExpiresAt: pgtype.Timestamptz{Time: arg.ExpiresAt, Valid: true},
@@ -283,6 +308,9 @@ func (s *channelInstallationStore) ReleaseWSLease(ctx context.Context, arg engin
 		CurrentToken: pgtype.Text{String: arg.Token, Valid: true},
 	})
 }
+
+var _ engine.InstallationStore = (*channelInstallationStore)(nil)
+var _ engine.LeaseStore = (*channelInstallationStore)(nil)
 
 // rowFingerprint condenses the credential-bearing config of a
 // channel_installation row into an opaque string. Any change to the platform

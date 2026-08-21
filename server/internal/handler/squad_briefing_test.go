@@ -76,10 +76,12 @@ func TestSquadOperatingProtocolScopesParentStatusOwnership(t *testing.T) {
 		}
 	}
 
-	// The IsSquadLeader marker the daemon greps for must survive both ways,
-	// or a guest leader silently loses its no_action / silent-exit behavior.
+	// Both variants must keep the protocol header. The daemon no longer
+	// derives IsSquadLeader from it (MUL-5811 — it reads is_leader_task /
+	// squad_id off the claim), but it is still the section title the leader
+	// rules in the brief and the per-turn prompt refer to by name.
 	if !strings.Contains(guest, "## Squad Operating Protocol") {
-		t.Error("guest-leader protocol lost the header the daemon keys IsSquadLeader off")
+		t.Error("guest-leader protocol lost its section header")
 	}
 }
 

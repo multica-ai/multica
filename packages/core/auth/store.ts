@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { User, StorageAdapter } from "../types";
 import { identify as identifyAnalytics, resetAnalytics } from "../analytics";
-import { ApiError, type ApiClient } from "../api/client";
+import type { ApiClient } from "../api/client";
 import { setCurrentWorkspace } from "../platform/workspace-storage";
 
 export interface AuthStoreOptions {
@@ -13,11 +13,19 @@ export interface AuthStoreOptions {
   cookieAuth?: boolean;
 }
 
+export type AuthStatus =
+  | "authenticating"
+  | "authenticated"
+  | "unauthenticated"
+  | "recovering";
+
 export interface AuthState {
   user: User | null;
   isLoading: boolean;
+  status: AuthStatus;
+  retryGeneration: number;
 
-  initialize: () => Promise<void>;
+  retryAuthentication: () => void;
   sendCode: (email: string) => Promise<void>;
   verifyCode: (email: string, code: string) => Promise<User>;
   loginWithGoogle: (code: string, redirectUri: string) => Promise<User>;
@@ -33,45 +41,15 @@ export function createAuthStore(options: AuthStoreOptions) {
   return create<AuthState>((set) => ({
     user: null,
     isLoading: true,
+    status: "authenticating",
+    retryGeneration: 0,
 
-    initialize: async () => {
-      if (cookieAuth) {
-        // In cookie mode, the HttpOnly cookie is sent automatically.
-        // Try to fetch the current user — if the cookie exists the server will accept it.
-        try {
-          const user = await api.getMe();
-          set({ user, isLoading: false });
-        } catch {
-          set({ user: null, isLoading: false });
-        }
-        return;
-      }
-
-      // Token mode: read from localStorage (Electron / legacy).
-      const token = storage.getItem("multica_token");
-      if (!token) {
-        set({ isLoading: false });
-        return;
-      }
-
-      api.setToken(token);
-
-      try {
-        const user = await api.getMe();
-        set({ user, isLoading: false });
-      } catch (err) {
-        // Only clear the stored token on a genuine auth failure (401). For
-        // transient errors — network blips, backend rolling restarts, 5xx,
-        // aborted fetches — keep the token so the next initialize() (next
-        // page load or focus-refresh) can retry. The 401 path's token
-        // cleanup is handled upstream by ApiClient.handleUnauthorized via
-        // the onUnauthorized callback; we only need to reset the in-memory
-        // user + workspace state here.
-        if (err instanceof ApiError && err.status === 401) {
-          setCurrentWorkspace(null, null);
-        }
-        set({ user: null, isLoading: false });
-      }
+    retryAuthentication: () => {
+      set((state) => ({
+        isLoading: true,
+        status: "authenticating",
+        retryGeneration: state.retryGeneration + 1,
+      }));
     },
 
     sendCode: async (email: string) => {
@@ -87,7 +65,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       }
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user });
+      set({ user, isLoading: false, status: "authenticated" });
       return user;
     },
 
@@ -99,7 +77,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       }
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user });
+      set({ user, isLoading: false, status: "authenticated" });
       return user;
     },
 
@@ -109,7 +87,7 @@ export function createAuthStore(options: AuthStoreOptions) {
       const user = await api.getMe();
       onLogin?.();
       identifyAnalytics(user.id, { email: user.email, name: user.name });
-      set({ user, isLoading: false });
+      set({ user, isLoading: false, status: "authenticated" });
       return user;
     },
 
@@ -123,16 +101,16 @@ export function createAuthStore(options: AuthStoreOptions) {
       setCurrentWorkspace(null, null);
       resetAnalytics();
       onLogout?.();
-      set({ user: null });
+      set({ user: null, isLoading: false, status: "unauthenticated" });
     },
 
     setUser: (user: User) => {
-      set({ user });
+      set({ user, isLoading: false, status: "authenticated" });
     },
 
     refreshMe: async () => {
       const user = await api.getMe();
-      set({ user });
+      set({ user, isLoading: false, status: "authenticated" });
     },
   }));
 }

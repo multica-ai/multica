@@ -2,7 +2,8 @@ package analytics
 
 import "strings"
 
-// Event names. Keep in sync with docs/analytics.md.
+// Event names. This file is the source-of-truth catalog; keep
+// packages/core/analytics in sync with it.
 const (
 	EventSignup                        = "signup"
 	EventWorkspaceCreated              = "workspace_created"
@@ -44,7 +45,7 @@ const EventSchemaVersion = 2
 // events metrics-only — both the product-behaviour group and the original
 // high-volume runtime/autopilot telemetry are Prometheus-only. PostHog now only
 // receives frontend error/crash telemetry ($exception, client_crash,
-// client_unresponsive); see packages/core/analytics and docs/analytics.md.
+// client_unresponsive); see packages/core/analytics.
 //
 // Note: agent_task_* lifecycle events are also Prometheus-only, but their
 // Prometheus side is handled by typed BusinessMetrics.RecordTask* methods, so
@@ -117,7 +118,7 @@ type CoreProperties struct {
 
 type TaskContext = CoreProperties
 
-// Onboarding completion paths. Keep in sync with docs/analytics.md.
+// Onboarding completion paths. Keep in sync with packages/core/analytics.
 const (
 	OnboardingPathFull           = "full"            // reached first_issue end of flow
 	OnboardingPathRuntimeSkipped = "runtime_skipped" // completed without connecting a runtime
@@ -546,9 +547,8 @@ func OnboardingSourceSubmitted(userID string, source []string, skipped, hasOther
 // just inside onboarding. `isFirstAgentInWorkspace` lets the funnel
 // isolate the Step 4 signal from later agent additions.
 //
-// template is the template slug the frontend used to seed the agent
-// (e.g. "coding", "planning", "writing", "assistant") — empty when the
-// caller didn't come from a template picker.
+// template is the creation-source attribution supplied by the caller (for
+// example, "agent_builder"); empty identifies a manually authored agent.
 func AgentCreated(actorID, workspaceID, agentID, provider, runtimeMode, template string, isFirstAgentInWorkspace bool) Event {
 	return Event{
 		Name:        EventAgentCreated,

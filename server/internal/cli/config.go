@@ -6,9 +6,18 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
-const defaultCLIConfigPath = ".multica/config.json"
+const (
+	defaultCLIConfigPath = ".multica/config.json"
+
+	// TaskConfigRootEnv points daemon-managed CLI invocations at a private,
+	// per-task Multica config directory. It is deliberately Multica-specific:
+	// phase-one hardening keeps the real HOME/XDG environment available to
+	// provider tooling while preventing implicit Owner-profile discovery.
+	TaskConfigRootEnv = "MULTICA_TASK_CONFIG_ROOT"
+)
 
 // CLIConfig holds persistent CLI settings.
 type CLIConfig struct {
@@ -37,6 +46,14 @@ type CLIConfig struct {
 	// MULTICA_AGENT_RUNTIME_NAME env, this field, the built-in
 	// DefaultRuntimeName.
 	RuntimeName string `json:"runtime_name,omitempty"`
+
+	// WorkspacesRoot is the base directory where the daemon creates task
+	// workspaces. Persisting it per profile avoids relying on a process-wide
+	// environment variable and preserves profile isolation. Empty means "not
+	// set — use env / built-in default". Resolution precedence (highest wins):
+	// --workspaces-root flag, MULTICA_WORKSPACES_ROOT env, this field, the
+	// profile-aware built-in default.
+	WorkspacesRoot string `json:"workspaces_root,omitempty"`
 
 	// MaxConcurrentTasks caps the number of task executions the daemon
 	// processes in parallel. Persist here to avoid re-passing
@@ -111,6 +128,15 @@ type CLIConfig struct {
 	// env, this field, DefaultAutoUpdateCheckInterval.
 	AutoUpdateCheckInterval string `json:"auto_update_check_interval,omitempty"`
 
+	// DisableAutoReload, when true, stops the daemon from restarting into a
+	// multica binary that was replaced on disk out of band. Single-direction
+	// like DisableAutoUpdate, and separate from it on purpose: "don't pull
+	// new versions from GitHub" and "don't follow the binary I installed
+	// myself" are different decisions. Resolution precedence:
+	// --no-auto-reload flag, MULTICA_DAEMON_AUTO_RELOAD=false env, this
+	// field, default (enabled).
+	DisableAutoReload bool `json:"disable_auto_reload,omitempty"`
+
 	// Backends contains per-backend overrides for users who want to point
 	// the daemon at non-default tool installations (e.g. an OpenClaw bundled
 	// inside another desktop app, or multiple isolated profiles on the same
@@ -150,6 +176,7 @@ type BackendOverrides struct {
 //
 //	BinaryPath: MULTICA_OPENCLAW_PATH (env)  > backends.openclaw.binary_path > PATH lookup
 //	StateDir:   OPENCLAW_STATE_DIR (env)     > backends.openclaw.state_dir   > OpenClaw's built-in default (~/.openclaw)
+//	CLITimeout: MULTICA_OPENCLAW_CLI_TIMEOUT (env) > backends.openclaw.cli_timeout > built-in default
 //
 // The StateDir env var here is OpenClaw's own OPENCLAW_STATE_DIR — NOT a new
 // MULTICA_OPENCLAW_STATE_DIR. Rationale: OpenClaw already honors its own env
@@ -173,6 +200,17 @@ type BackendOverrides struct {
 type OpenClawOverride struct {
 	BinaryPath string `json:"binary_path,omitempty"`
 	StateDir   string `json:"state_dir,omitempty"`
+	// CLITimeout raises (or lowers) the per-invocation deadline the daemon
+	// applies to `openclaw config ...` during task preparation. Accepts a Go
+	// duration ("45s") or bare seconds ("45"); out-of-range values are clamped
+	// and unparseable ones ignored by the daemon. Empty keeps the built-in
+	// default, which fits every host measured so far — this exists for the
+	// slow-CLI tail (#7112), where discovery legitimately needs longer than the
+	// default and the user previously had no way to say so.
+	//
+	// Resolution mirrors the fields above: MULTICA_OPENCLAW_CLI_TIMEOUT (env) >
+	// backends.openclaw.cli_timeout > built-in default.
+	CLITimeout string `json:"cli_timeout,omitempty"`
 }
 
 // CLIConfigPath returns the default path for the CLI config file.
@@ -183,28 +221,78 @@ func CLIConfigPath() (string, error) {
 // CLIConfigPathForProfile returns the config file path for the given profile.
 // An empty profile returns the default path (~/.multica/config.json).
 // A named profile returns ~/.multica/profiles/<name>/config.json.
+// When TaskConfigRootEnv is set by the daemon, the same profile layout is
+// rooted directly below that private task directory instead of the user's home.
 func CLIConfigPathForProfile(profile string) (string, error) {
-	home, err := os.UserHomeDir()
+	root, taskLocal, err := multicaConfigRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve CLI config path: %w", err)
 	}
-	if profile == "" {
-		return filepath.Join(home, defaultCLIConfigPath), nil
+	if taskLocal {
+		if err := validateTaskLocalProfile(profile); err != nil {
+			return "", fmt.Errorf("resolve CLI config path: %w", err)
+		}
 	}
-	return filepath.Join(home, ".multica", "profiles", profile, "config.json"), nil
+	if profile == "" {
+		if taskLocal {
+			return filepath.Join(root, "config.json"), nil
+		}
+		return filepath.Join(root, defaultCLIConfigPath), nil
+	}
+	if taskLocal {
+		return filepath.Join(root, "profiles", profile, "config.json"), nil
+	}
+	return filepath.Join(root, ".multica", "profiles", profile, "config.json"), nil
 }
 
 // ProfileDir returns the base directory for a profile's state files (pid, log).
 // An empty profile returns ~/.multica/. A named profile returns ~/.multica/profiles/<name>/.
+// Task invocations resolve the equivalent paths below TaskConfigRootEnv.
 func ProfileDir(profile string) (string, error) {
-	home, err := os.UserHomeDir()
+	root, taskLocal, err := multicaConfigRoot()
 	if err != nil {
 		return "", fmt.Errorf("resolve profile dir: %w", err)
 	}
-	if profile == "" {
-		return filepath.Join(home, ".multica"), nil
+	if taskLocal {
+		if err := validateTaskLocalProfile(profile); err != nil {
+			return "", fmt.Errorf("resolve profile dir: %w", err)
+		}
 	}
-	return filepath.Join(home, ".multica", "profiles", profile), nil
+	if profile == "" {
+		if taskLocal {
+			return root, nil
+		}
+		return filepath.Join(root, ".multica"), nil
+	}
+	if taskLocal {
+		return filepath.Join(root, "profiles", profile), nil
+	}
+	return filepath.Join(root, ".multica", "profiles", profile), nil
+}
+
+func multicaConfigRoot() (root string, taskLocal bool, err error) {
+	if rawRoot := strings.TrimSpace(os.Getenv(TaskConfigRootEnv)); rawRoot != "" {
+		root := filepath.Clean(rawRoot)
+		if !filepath.IsAbs(root) {
+			return "", false, fmt.Errorf("%s must be an absolute path", TaskConfigRootEnv)
+		}
+		return root, true, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", false, err
+	}
+	return home, false, nil
+}
+
+func validateTaskLocalProfile(profile string) error {
+	if profile == "" {
+		return nil
+	}
+	if profile == "." || profile == ".." || filepath.IsAbs(profile) || strings.ContainsAny(profile, `/\\`) || filepath.Clean(profile) != profile {
+		return fmt.Errorf("invalid task-local Multica profile name %q", profile)
+	}
+	return nil
 }
 
 // LoadCLIConfig reads the CLI config from disk (default profile).
@@ -244,8 +332,30 @@ func SaveCLIConfigForProfile(cfg CLIConfig, profile string) error {
 		return err
 	}
 	dir := filepath.Dir(path)
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	dirMode := os.FileMode(0o755)
+	if strings.TrimSpace(os.Getenv(TaskConfigRootEnv)) != "" {
+		dirMode = 0o700
+	}
+	if err := os.MkdirAll(dir, dirMode); err != nil {
 		return fmt.Errorf("create CLI config directory: %w", err)
+	}
+	if dirMode == 0o700 {
+		root, _, err := multicaConfigRoot()
+		if err != nil {
+			return fmt.Errorf("resolve task-local CLI config root: %w", err)
+		}
+		for current := dir; ; current = filepath.Dir(current) {
+			if err := os.Chmod(current, 0o700); err != nil {
+				return fmt.Errorf("restrict task-local CLI config directory: %w", err)
+			}
+			if current == root {
+				break
+			}
+			parent := filepath.Dir(current)
+			if parent == current {
+				return fmt.Errorf("task-local CLI config directory %q escapes root %q", dir, root)
+			}
+		}
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

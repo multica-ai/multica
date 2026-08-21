@@ -9,6 +9,13 @@
     "archive_all_read": "읽은 항목 모두 보관",
     "archive_completed": "완료된 항목 보관"
   },
+  "context_menu": {
+    "mark_read": "읽음으로 표시",
+    "mark_unread": "읽지 않음으로 표시",
+    "archive": "보관",
+    "unarchive": "보관 해제",
+    "open_in_new_tab": "새 탭에서 열기"
+  },
   "list": {
     "empty": "알림이 없습니다",
     "mark_done_tooltip": "완료로 표시",
@@ -21,7 +28,8 @@
     },
     "archived_title": "보관됨",
     "archived_empty": "보관된 알림이 없습니다",
-    "unarchive_tooltip": "보관 해제"
+    "unarchive_tooltip": "보관 해제",
+    "actions_aria": "알림 작업"
   },
   "detail": {
     "select_prompt": "자세히 볼 알림을 선택하세요",
@@ -65,8 +73,13 @@
     "created_with_agent": "에이전트가 생성: {{identifier}}",
     "failed_with_detail": "실패: {{detail}}"
   },
+  "toasts": {
+    "archived": "알림을 보관했습니다",
+    "unarchived": "알림을 복원했습니다"
+  },
   "errors": {
     "mark_read_failed": "읽음 표시를 하지 못했습니다",
+    "mark_unread_failed": "읽지 않음 표시를 하지 못했습니다",
     "archive_failed": "보관하지 못했습니다",
     "mark_done_failed": "완료 표시를 하지 못했습니다",
     "mark_all_read_failed": "모두 읽음으로 표시하지 못했습니다",

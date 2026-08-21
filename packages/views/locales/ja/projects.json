@@ -25,7 +25,7 @@
     "progress": "進捗",
     "lead": "リード",
     "created": "作成日",
-    "issues": "Issue 数"
+    "issues": "タスク数"
   },
   "status": {
     "planned": "計画中",
@@ -69,16 +69,17 @@
     "section_description": "説明",
     "prop_start_date": "開始日",
     "prop_due_date": "期限",
-    "clear_date": "日付をクリア",
+    "no_start_date": "開始日なし",
+    "no_due_date": "期限なし",
     "description_placeholder": "説明を追加...",
-    "description_hint": "このプロジェクトのすべてのタスクで、コンテキストとしてエージェントに共有されます。",
-    "empty_issues_title": "リンクされたイシューはありません",
-    "empty_issues_hint": "新しいイシューを作成するか、既存のイシューをこのプロジェクトに割り当ててください。",
-    "empty_issues_new_button": "新規イシュー",
-    "no_issues_yet": "イシューはまだありません",
+    "description_hint": "このプロジェクトのすべての作業で、コンテキストとしてエージェントに共有されます。",
+    "empty_issues_title": "リンクされたタスクはありません",
+    "empty_issues_hint": "新しいタスクを作成するか、既存のタスクをこのプロジェクトに割り当ててください。",
+    "empty_issues_new_button": "新規タスク",
+    "no_issues_yet": "タスクはまだありません",
     "toast_link_copied": "リンクをコピーしました",
     "toast_project_deleted": "プロジェクトを削除しました",
-    "toast_move_issue_failed": "イシューを移動できませんでした"
+    "toast_move_issue_failed": "タスクを移動できませんでした"
   },
   "resources": {
     "section_header": "リソース",
@@ -103,6 +104,8 @@
     "local_no_daemon_tooltip": "ローカルデーモンがまだ ID を報告していないため、エージェントはこのディレクトリを開けません。",
     "local_other_machine_tooltip": "このディレクトリを登録したマシンでのみ利用できます。",
     "chat_hint_prefix": "エージェントは次の場所で直接作業します:",
+    "chat_hint_worktree_prefix": "エージェントは次のリポジトリの独立した worktree で作業します:",
+    "chat_hint_worktree_note": "作業コピーは変更されません。各タスクの成果は agent/… ブランチとして返されます。",
     "toast_local_attached": "ローカルディレクトリを添付しました",
     "toast_local_renamed": "名前を変更しました",
     "toast_local_rename_failed": "名前を変更できませんでした",
@@ -115,19 +118,36 @@
     "local_validate_not_a_directory": "パスはディレクトリではありません。",
     "local_validate_not_readable": "ディレクトリを読み取れません。",
     "local_validate_not_writable": "ディレクトリに書き込めません。",
-    "local_validate_unsupported": "ローカルディレクトリはデスクトップアプリでのみ選択できます。"
+    "local_validate_unsupported": "ローカルディレクトリはデスクトップアプリでのみ選択できます。",
+    "mode_dialog_title": "タスクはこのフォルダをどう使いますか？",
+    "mode_dialog_description": "エージェントの成果物を受け取る方法と、このフォルダのタスクを同時に実行できるかが決まります。",
+    "mode_in_place_title": "このフォルダを直接編集する",
+    "mode_in_place_description": "タスクは一度に1つずつ。エージェントの変更はそのまま作業コピーに現れ、続けて作業できます。",
+    "mode_worktree_title": "隔離して並行実行する",
+    "mode_worktree_description": "タスクは作業コピーに触れずに同時実行されます。それぞれがこのリポジトリの agent/… ブランチを返すので、レビューしてマージします。",
+    "mode_worktree_needs_git": "このフォルダは git リポジトリではないため、ブランチを作成できません。リポジトリを選ぶか、フォルダを直接編集してください。",
+    "mode_worktree_needs_server_upgrade": "接続中の Multica サーバーが古いため並行実行に対応できません。このままでは、タスクがこのフォルダ内で直接実行されてしまいます。サーバーを更新してから有効にしてください。",
+    "mode_cancel": "キャンセル",
+    "mode_save": "保存",
+    "mode_add": "フォルダを追加",
+    "mode_edit_tooltip": "タスクがこのフォルダを使う方法を変更",
+    "mode_badge_worktree": "並行",
+    "mode_badge_worktree_tooltip": "タスクはそれぞれの git ワークツリーで同時に実行され、ブランチとして成果を返します。作業コピーは変更されません。",
+    "toast_local_mode_updated": "実行モードを更新しました",
+    "toast_local_mode_update_failed": "実行モードを更新できませんでした",
+    "mode_badge_in_place": "直接"
   },
   "delete_dialog": {
     "title": "プロジェクトを削除",
-    "description": "プロジェクトが削除されます。イシューは削除されませんが、リンクが解除されます。",
+    "description": "プロジェクトが削除されます。タスクは削除されませんが、リンクが解除されます。",
     "confirm": "削除",
     "cancel": "キャンセル"
   },
   "picker": {
     "no_project": "プロジェクトなし",
-    "remove": "プロジェクトから削除",
     "empty": "プロジェクトはまだありません",
-    "search_placeholder": "プロジェクトを検索..."
+    "search_placeholder": "プロジェクトを検索...",
+    "clear_aria": "プロジェクトをクリア"
   },
   "chip": {
     "fallback_label": "プロジェクト"

@@ -90,8 +90,11 @@ func TestUpdateIssue_SquadPrivateLeader_PlainMemberBlocked(t *testing.T) {
 	}
 }
 
-// TestCreateIssue_SquadPrivateLeader_OwnerAllowed verifies that a workspace
-// owner CAN assign an issue to a squad with a private leader.
+// TestCreateIssue_SquadPrivateLeader_OwnerAllowed verifies that the LEADER
+// AGENT's owner can assign an issue to a squad with a private leader. Named
+// "OwnerAllowed" for the agent owner — a workspace owner/admin who does not own
+// the leader is denied (MUL-3963), which is what the sibling
+// PlainMemberBlocked / assertInvokeForbidden cases pin.
 func TestCreateIssue_SquadPrivateLeader_OwnerAllowed(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")

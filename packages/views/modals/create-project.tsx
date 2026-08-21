@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, Maximize2, Minimize2, MoreHorizontal, Search, X as XIcon, UserMinus } from "lucide-react";
+import { CalendarClock, CalendarDays, ChevronRight, FolderOpen, GitBranch, Maximize2, Minimize2, MoreHorizontal, Pencil, Search, X as XIcon, UserMinus } from "lucide-react";
 
 /**
  * GitHub mark — lucide-react v1 dropped brand icons, so we inline the
@@ -67,6 +67,41 @@ import {
   validateLocalDirectory,
 } from "../platform/local-directory";
 import { useLocalDaemonStatus } from "../platform/use-local-daemon-status";
+import {
+  runtimeAdvertisesLocalWorktree,
+  runtimeListOptions,
+} from "@multica/core/runtimes";
+import { useConfigStore } from "@multica/core/config";
+import type { LocalDirectoryExecutionMode } from "@multica/core/types";
+import { LocalDirectoryModeOptions } from "../projects/components/local-directory-mode-dialog";
+
+/**
+ * Builds the resource_ref for a local directory attached during project
+ * creation.
+ *
+ * Exported so the execution-mode contract can be asserted directly: this is the
+ * payload the server stores and the daemon later reads to decide whether tasks
+ * edit the user's folder or hand back a branch, and getting `execution_mode`
+ * wrong here is invisible until a task runs.
+ */
+export function buildLocalDirectoryResourceRef({
+  localPath,
+  daemonId,
+  label,
+  mode,
+}: {
+  localPath: string;
+  daemonId: string;
+  label: string | null;
+  mode: LocalDirectoryExecutionMode;
+}): Record<string, unknown> {
+  return {
+    local_path: localPath,
+    daemon_id: daemonId,
+    ...(label ? { label } : {}),
+    execution_mode: mode,
+  };
+}
 
 function RepoUrlText({
   url,
@@ -93,6 +128,9 @@ function RepoUrlText({
 
 export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const { t } = useT("modals");
+  // The execution-mode copy lives in the projects namespace alongside the
+  // resource panel's, so both entry points describe the choice identically.
+  const { t: tProjects } = useT("projects");
   const router = useNavigation();
   const workspace = useCurrentWorkspace();
   const workspaceName = workspace?.name;
@@ -150,6 +188,67 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
   const [selectedLocalLabel, setSelectedLocalLabel] = useState<string | null>(null);
   const [localPickError, setLocalPickError] = useState<string | null>(null);
   const [localPicking, setLocalPicking] = useState(false);
+  // Execution mode is chosen here rather than after creation: it decides
+  // whether tasks edit this folder or hand back a branch, which is part of
+  // what the user is setting up, not a setting to discover later.
+  //
+  // null means "the user has not picked one" — distinct from an explicit
+  // in_place. Only then does the folder-derived preselection apply, so an
+  // explicit choice is never overridden by a later folder change.
+  const [localMode, setLocalMode] = useState<LocalDirectoryExecutionMode | null>(null);
+  // undefined = could not check (older desktop build); the daemon re-checks
+  // authoritatively, so unknown stays permissive.
+  const [localIsGitRepo, setLocalIsGitRepo] = useState<boolean | undefined>(undefined);
+  const [localModeOpen, setLocalModeOpen] = useState(false);
+
+  // Worktree mode needs a daemon new enough to implement it; the server refuses
+  // to save the resource otherwise. In this flow the resource is attached in the
+  // same call that creates the project, so an un-caught rejection would fail the
+  // whole creation — check up front and disable the option instead.
+  const { data: runtimes = [] } = useQuery(runtimeListOptions(wsId));
+  // Capability, not version: a dev-built daemon reports a git-describe string
+  // that the version floor exempts, so the version check passed for a binary
+  // with no worktree implementation (MUL-5707). A backend too old to record the
+  // capability at all is its own answer — blaming this machine for that sent a
+  // user off to update the one piece already on the newest release (#7113).
+  // Preselection only — the server gates the save, including on this bundled
+  // create path, and rejects with a message the modal surfaces.
+  const localAdvertisesWorktree = runtimeAdvertisesLocalWorktree(
+    runtimes,
+    daemonStatus.daemonId,
+  );
+  // One declared boolean from the live server. Servers older than the worktree
+  // save gate drop execution_mode and answer 201, so "the backend will check"
+  // is only true once the backend says it checks (#7113).
+  const serverValidatesWorktree = useConfigStore((state) => state.localWorktreeSupported);
+  const worktreeUnavailableReason =
+    localIsGitRepo === false
+      ? ("not_git" as const)
+      : !serverValidatesWorktree
+        ? ("server_outdated" as const)
+        : undefined;
+  // Preselection, not a default behavior change: when the folder is a git repo
+  // and the machine has advertised that it can run worktree mode, parallel is
+  // the better fit, so it starts selected — visibly, in a control the user can
+  // flip in one click before creating anything. A plain folder starts on
+  // direct, and so does a machine that has not advertised: it may still be able
+  // to (an old row proves nothing), but choosing it FOR the user is how a
+  // rejected save would turn into a failed project creation.
+  //
+  // `localIsGitRepo === undefined` (an older desktop build that doesn't report
+  // it) preselects direct. The asymmetry is deliberate: permissive about what
+  // the user MAY choose, conservative about what we choose FOR them.
+  const preselectedLocalMode: LocalDirectoryExecutionMode =
+    localIsGitRepo === true && localAdvertisesWorktree && worktreeUnavailableReason === undefined
+      ? "worktree"
+      : "in_place";
+  // Never submit a mode the picker would have blocked — the folder can change
+  // after a mode was chosen (pick a git repo, choose worktree, then pick a
+  // plain folder), and the stale choice would fail at task time.
+  const effectiveLocalMode: LocalDirectoryExecutionMode =
+    worktreeUnavailableReason !== undefined
+      ? "in_place"
+      : (localMode ?? preselectedLocalMode);
 
   const handleSourceModeChange = (mode: "repos" | "local") => {
     setSourceMode(mode);
@@ -179,6 +278,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       }
       setSelectedLocalPath(picked.path);
       setSelectedLocalLabel(picked.basename ?? null);
+      setLocalIsGitRepo(validation.is_git_repo);
     } finally {
       setLocalPicking(false);
     }
@@ -188,6 +288,8 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
     setSelectedLocalPath(null);
     setSelectedLocalLabel(null);
     setLocalPickError(null);
+    setLocalIsGitRepo(undefined);
+    setLocalMode(null);
   };
 
   // Sync field changes to draft store
@@ -237,11 +339,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
       resources = [
         {
           resource_type: "local_directory" as const,
-          resource_ref: {
-            local_path: selectedLocalPath,
-            daemon_id: daemonStatus.daemonId,
-            ...(selectedLocalLabel ? { label: selectedLocalLabel } : {}),
-          },
+          resource_ref: buildLocalDirectoryResourceRef({
+            localPath: selectedLocalPath,
+            daemonId: daemonStatus.daemonId,
+            label: selectedLocalLabel,
+            mode: effectiveLocalMode,
+          }),
         },
       ];
     }
@@ -304,9 +407,9 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
         <DialogTitle className="sr-only">{t(($) => $.create_project.title)}</DialogTitle>
 
         <div className="flex items-center justify-between px-5 pt-3 pb-2 shrink-0">
-          <div className="flex items-center gap-1.5 text-xs">
+          <div className="flex items-center gap-1.5 text-caption">
             <span className="text-muted-foreground">{workspaceName}</span>
-            <ChevronRight className="size-3 text-muted-foreground/50" />
+            <ChevronRight className="size-3 text-faint-foreground" />
             <span className="font-medium">{t(($) => $.create_project.title_breadcrumb)}</span>
           </div>
           <div className="flex items-center gap-1">
@@ -351,7 +454,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
               render={
                 <button
                   type="button"
-                  className="text-2xl cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
+                  className="text-display-sm cursor-pointer rounded-lg p-1 -ml-1 hover:bg-accent/60 transition-colors"
                   title={t(($) => $.create_project.icon_tooltip)}
                 >
                   {icon || "📁"}
@@ -371,7 +474,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             autoFocus
             defaultValue={draft.title}
             placeholder={t(($) => $.create_project.title_placeholder)}
-            className="text-lg font-semibold"
+            className="text-title font-semibold"
             onChange={(v) => updateTitle(v)}
             onSubmit={handleSubmit}
           />
@@ -385,7 +488,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
             onUpdate={(md) => setDraft({ description: md })}
             debounceMs={500}
           />
-          <p className="mt-1 text-xs text-muted-foreground">
+          <p className="mt-1 text-caption text-muted-foreground">
             {t(($) => $.create_project.description_hint)}
           </p>
         </div>
@@ -448,7 +551,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   {leadType && leadId ? (
                     <>
                       <ActorAvatar actorType={leadType} actorId={leadId} size="sm" showStatusDot />
-                      <span>{leadLabel}</span>
+                      <span className="truncate">{leadLabel}</span>
                     </>
                   ) : (
                     <span className="text-muted-foreground">{t(($) => $.create_project.lead)}</span>
@@ -463,7 +566,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   value={leadFilter}
                   onChange={(e) => setLeadFilter(e.target.value)}
                   placeholder={t(($) => $.create_project.lead_placeholder)}
-                  className="w-full bg-transparent text-sm placeholder:text-muted-foreground outline-none"
+                  className="w-full bg-transparent text-body placeholder:text-muted-foreground outline-none"
                 />
               </div>
               <div className="p-1 max-h-60 overflow-y-auto">
@@ -473,14 +576,14 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     updateLead(undefined, undefined);
                     setLeadOpen(false);
                   }}
-                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                  className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                 >
                   <UserMinus className="h-3.5 w-3.5 text-muted-foreground" />
                   <span className="text-muted-foreground">{t(($) => $.create_project.no_lead)}</span>
                 </button>
                 {filteredMembers.length > 0 && (
                   <>
-                    <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
                       {t(($) => $.create_project.members_group)}
                     </div>
                     {filteredMembers.map((m) => (
@@ -491,7 +594,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           updateLead("member", m.user_id);
                           setLeadOpen(false);
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                       >
                         <ActorAvatar actorType="member" actorId={m.user_id} size="sm" />
                         <span>{m.name}</span>
@@ -501,7 +604,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 )}
                 {filteredAgents.length > 0 && (
                   <>
-                    <div className="px-2 pt-2 pb-1 text-xs font-medium text-muted-foreground uppercase tracking-wider">
+                    <div className="px-2 pt-2 pb-1 text-caption font-medium text-muted-foreground uppercase tracking-wider">
                       {t(($) => $.create_project.agents_group)}
                     </div>
                     {filteredAgents.map((a) => (
@@ -512,7 +615,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           updateLead("agent", a.id);
                           setLeadOpen(false);
                         }}
-                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-accent transition-colors"
+                        className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-body hover:bg-accent transition-colors"
                       >
                         <ActorAvatar actorType="agent" actorId={a.id} size="sm" showStatusDot />
                         <span>{a.name}</span>
@@ -523,7 +626,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 {filteredMembers.length === 0 &&
                   filteredAgents.length === 0 &&
                   leadFilter && (
-                    <div className="px-2 py-3 text-center text-sm text-muted-foreground">
+                    <div className="px-2 py-3 text-center text-body text-muted-foreground">
                       {t(($) => $.create_project.no_results)}
                     </div>
                   )}
@@ -596,7 +699,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={() => handleSourceModeChange("repos")}
                     className={cn(
-                      "rounded px-2 py-1 text-xs transition-colors",
+                      "rounded px-2 py-1 text-caption transition-colors",
                       sourceMode === "repos"
                         ? "bg-background shadow-sm font-medium"
                         : "text-muted-foreground hover:text-foreground",
@@ -608,7 +711,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                     type="button"
                     onClick={() => handleSourceModeChange("local")}
                     className={cn(
-                      "rounded px-2 py-1 text-xs transition-colors",
+                      "rounded px-2 py-1 text-caption transition-colors",
                       sourceMode === "local"
                         ? "bg-background shadow-sm font-medium"
                         : "text-muted-foreground hover:text-foreground",
@@ -621,7 +724,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
 
               {sourceMode === "repos" ? (
                 <>
-                  <div className="text-xs font-medium text-muted-foreground">
+                  <div className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.create_project.repos_heading)}
                   </div>
                   {workspaceRepos.length > 0 ? (
@@ -634,12 +737,12 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           onChange={(e) => setRepoSearch(e.target.value)}
                           aria-label={t(($) => $.create_project.repos_search_placeholder)}
                           placeholder={t(($) => $.create_project.repos_search_placeholder)}
-                          className="h-8 w-full rounded-md border bg-transparent pl-7 pr-2 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
+                          className="h-8 w-full rounded-md border bg-transparent pl-7 pr-2 text-caption outline-none placeholder:text-muted-foreground focus-visible:ring-1 focus-visible:ring-ring"
                         />
                       </div>
                       <div className="max-h-48 space-y-1 overflow-y-auto">
                         {filteredWorkspaceRepos.length === 0 && repoQuery && (
-                          <p className="py-2 text-center text-xs text-muted-foreground">
+                          <p className="py-2 text-center text-caption text-muted-foreground">
                             {t(($) => $.create_project.repos_search_empty)}
                           </p>
                         )}
@@ -651,7 +754,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                               key={repo.url}
                               onClick={() => toggleRepo(repo.url)}
                               className={cn(
-                                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-xs hover:bg-accent transition-colors",
+                                "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-caption hover:bg-accent transition-colors",
                                 checked && "bg-accent",
                               )}
                             >
@@ -669,7 +772,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       </div>
                     </>
                   ) : (
-                    <p className="text-xs text-muted-foreground">
+                    <p className="text-caption text-muted-foreground">
                       {t(($) => $.create_project.repos_empty)}
                     </p>
                   )}
@@ -685,13 +788,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       value={customRepoUrl}
                       onChange={(e) => setCustomRepoUrl(e.target.value)}
                       placeholder={t(($) => $.create_project.repos_url_placeholder)}
-                      className="flex-1 bg-transparent text-xs px-2 py-1 outline-none placeholder:text-muted-foreground"
+                      className="flex-1 bg-transparent text-caption px-2 py-1 outline-none placeholder:text-muted-foreground"
                     />
                     <Button
                       type="submit"
                       size="sm"
                       variant="ghost"
-                      className="h-6 px-2 text-xs"
+                      className="h-6 px-2 text-caption"
                       disabled={!customRepoUrl.trim()}
                     >
                       {t(($) => $.create_project.repos_add)}
@@ -699,13 +802,13 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   </form>
                   {selectedRepos.length > 0 && (
                     <div className="space-y-1 pt-1 border-t">
-                      <div className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider">
+                      <div className="text-micro font-medium text-muted-foreground uppercase tracking-wider">
                         {t(($) => $.create_project.repos_selected)}
                       </div>
                       {selectedRepos.map((url) => (
                         <div
                           key={url}
-                          className="flex items-center gap-2 text-xs"
+                          className="flex items-center gap-2 text-caption"
                         >
                           <GithubIcon className="size-3 text-muted-foreground" />
                           <RepoUrlText url={url} />
@@ -723,7 +826,7 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                 </>
               ) : (
                 <>
-                  <div className="text-xs font-medium text-muted-foreground">
+                  <div className="text-caption font-medium text-muted-foreground">
                     {t(($) => $.create_project.local_heading)}
                   </div>
                   {/* Daemon must be online — daemon_id is required to bind
@@ -731,26 +834,26 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                       the picker; once it boots we re-render automatically
                       via useLocalDaemonStatus. */}
                   {daemonStatus.daemonId && daemonStatus.running ? (
-                    <p className="text-[11px] text-muted-foreground">
+                    <p className="text-micro text-muted-foreground">
                       {t(($) => $.create_project.local_on_device, {
                         device: daemonStatus.deviceName ?? t(($) => $.create_project.local_this_machine),
                       })}
                     </p>
                   ) : (
-                    <p className="text-[11px] text-amber-600 dark:text-amber-400">
+                    <p className="text-micro text-amber-600 dark:text-amber-400">
                       {t(($) => $.create_project.local_daemon_offline)}
                     </p>
                   )}
 
                   {selectedLocalPath ? (
                     <div className="rounded-md border px-2 py-2 space-y-1">
-                      <div className="flex items-start gap-2 text-xs">
+                      <div className="flex items-start gap-2 text-caption">
                         <FolderOpen className="mt-0.5 size-3.5 shrink-0 text-muted-foreground" />
                         <div className="min-w-0 flex-1">
                           {selectedLocalLabel && (
                             <div className="font-medium truncate">{selectedLocalLabel}</div>
                           )}
-                          <div className="font-mono text-[10px] text-muted-foreground break-all">
+                          <div className="font-mono text-micro text-muted-foreground break-all">
                             {selectedLocalPath}
                           </div>
                         </div>
@@ -763,23 +866,66 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                           <XIcon className="size-3" />
                         </button>
                       </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 w-full text-xs"
-                        onClick={handlePickLocalDirectory}
-                        disabled={localPicking || !daemonStatus.running}
-                      >
-                        {t(($) => $.create_project.local_change)}
-                      </Button>
+                      <div className="flex items-center gap-1.5">
+                        <Popover open={localModeOpen} onOpenChange={setLocalModeOpen}>
+                          <PopoverTrigger
+                            render={
+                              <Button
+                                type="button"
+                                size="sm"
+                                variant="ghost"
+                                // Sized to its (short) label so the wider
+                                // "Change directory…" beside it fits whole.
+                                className="h-6 shrink-0 text-caption"
+                              >
+                                {effectiveLocalMode === "worktree" ? (
+                                  <GitBranch className="size-3 shrink-0" />
+                                ) : (
+                                  <Pencil className="size-3 shrink-0" />
+                                )}
+                                {/* Short labels: the panel is ~380px wide and
+                                    two buttons share it, so the full option
+                                    titles truncate to uselessness. The picker
+                                    below carries the full wording. */}
+                                <span className="truncate">
+                                  {effectiveLocalMode === "worktree"
+                                    ? tProjects(($) => $.resources.mode_badge_worktree)
+                                    : tProjects(($) => $.resources.mode_badge_in_place)}
+                                </span>
+                              </Button>
+                            }
+                          />
+                          <PopoverContent align="start" className="w-80 p-2">
+                            <LocalDirectoryModeOptions
+                              value={effectiveLocalMode}
+                              onChange={(mode) => {
+                                setLocalMode(mode);
+                                setLocalModeOpen(false);
+                              }}
+                              unavailableReason={worktreeUnavailableReason}
+                            />
+                          </PopoverContent>
+                        </Popover>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="ghost"
+                          className="h-6 flex-1 min-w-0 text-caption"
+                          onClick={handlePickLocalDirectory}
+                          disabled={localPicking || !daemonStatus.running}
+                        >
+                          <span className="truncate">
+                            {t(($) => $.create_project.local_change)}
+                          </span>
+                        </Button>
+                      </div>
                     </div>
                   ) : (
                     <Button
                       type="button"
                       size="sm"
                       variant="outline"
-                      className="w-full text-xs"
+                      className="w-full text-caption"
                       onClick={handlePickLocalDirectory}
                       disabled={localPicking || !daemonStatus.running}
                     >
@@ -791,10 +937,10 @@ export function CreateProjectModal({ onClose }: { onClose: () => void }) {
                   )}
 
                   {localPickError && (
-                    <p className="text-[11px] text-destructive">{localPickError}</p>
+                    <p className="text-micro text-destructive">{localPickError}</p>
                   )}
 
-                  <p className="text-[10px] text-muted-foreground leading-snug">
+                  <p className="text-micro text-muted-foreground leading-snug">
                     {t(($) => $.create_project.local_hint)}
                   </p>
                 </>

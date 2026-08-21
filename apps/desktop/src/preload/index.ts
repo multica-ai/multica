@@ -120,9 +120,10 @@ const desktopAPI = {
   /** Identifies whether this renderer owns the main tabbed window or a
    *  dedicated issue window, parsed from validated launch arguments. */
   windowContext,
-  /** Read + clear any freeze/crash breadcrumb left by a previous session, so
-   *  the renderer can flush it to telemetry on boot. Returns null when there's
-   *  nothing pending (the normal case). */
+  /** Read any freeze/crash breadcrumb left by a previous session, so the
+   *  renderer can flush it to telemetry on boot. Returns null when there's
+   *  nothing pending (the normal case). Reading does not consume it — call
+   *  `ackFreeze` once the event is on the wire. */
   getLastFreeze: (): FreezeBreadcrumb | null => {
     try {
       return ipcRenderer.sendSync("freeze:get-last") as FreezeBreadcrumb | null;
@@ -130,6 +131,9 @@ const desktopAPI = {
       return null;
     }
   },
+  /** Retire the breadcrumb with this exact timestamp after its event has been
+   *  handed to analytics. Anything left unacknowledged is retried next boot. */
+  ackFreeze: (ts: number) => ipcRenderer.send("freeze:ack", ts),
   /** Report only the resolved user id (never a token) so main can close
    *  dedicated issue windows that belong to an old account. */
   reportAuthSession: (userId: string | null) =>
@@ -214,6 +218,11 @@ const desktopAPI = {
       ipcRenderer.removeListener("tab:close-active", handler);
     };
   },
+  /** Listen for Cmd/Ctrl+, requests to open Settings. Only the main window
+   *  subscribes — main delivers the chord there even when it was pressed in
+   *  an issue window, because Settings is a tab. Returns an unsubscribe fn. */
+  onOpenSettings: (callback: () => void) =>
+    subscribeToMainRendererChannel("settings:open", () => callback()),
   /** Ask the main process to close the window (used after closing the last tab). */
   closeWindow: () => ipcRenderer.send("window:close"),
   /** Open a validated issue-detail route in a dedicated native window. */

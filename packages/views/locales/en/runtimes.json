@@ -27,6 +27,15 @@
       "hint": "This usually takes a few seconds. Your daemon is registering with the workspace."
     }
   },
+  "mika_setup": {
+    "title": "Your runtime is ready. Start with Mika.",
+    "description": "Mika turns your goal into an issue, coordinates the right agent, and helps you add reusable specialists when your workflow needs them.",
+    "action": "Start with Mika",
+    "failed": "Couldn't start Mika",
+    "dialog_title": "Where should Mika run?",
+    "dialog_description": "Pick the runtime Mika will use. You can change it later in settings.",
+    "cancel": "Cancel"
+  },
   "machine": {
     "search_placeholder": "Search machines…",
     "filters": {
@@ -124,8 +133,12 @@
       "public": "Public"
     },
     "visibility_hint": {
-      "private": "Only you and workspace admins can create agents on this runtime.",
+      "private": "Only you can create agents on this runtime.",
       "public": "Any workspace member can create agents on this runtime."
+    },
+    "visibility_hint_readonly": {
+      "private": "Only the runtime owner can create agents on this runtime, and only they can switch it to Public.",
+      "public": "Any workspace member can create agents on this runtime. Only the runtime owner can switch it back to Private."
     },
     "visibility_toast_updated": "Visibility set to {{visibility}}",
     "visibility_toast_failed": "Failed to update visibility",
@@ -140,18 +153,18 @@
         "submitting": "Deleting..."
       },
       "cascade": {
-        "title_one": "Archive {{count}} agent and delete this Runtime?",
-        "title_other": "Archive {{count}} agents and delete this Runtime?",
-        "description": "Delete \"{{name}}\". The agents below will be archived and removed from active workflows; their queued or running tasks will be cancelled, and then the Runtime will be deleted.",
-        "warning": "This is destructive. Archived agents will be removed from active workflows and their queued or running tasks will be cancelled.",
+        "title_one": "Unbind {{count}} agent and delete this Runtime?",
+        "title_other": "Unbind {{count}} agents and delete this Runtime?",
+        "description": "Delete \"{{name}}\". The agents below are kept — their instructions, chats and task history stay intact — but they will be unbound and cannot run until you bind them to another runtime. Their queued or running tasks will be cancelled, and then the Runtime will be deleted.",
+        "warning": "Queued and running tasks will be cancelled, and these agents cannot be assigned new work until they are bound to a runtime.",
         "notice_runtime_has_active_agents": "Active agents were added since you opened this dialog. Review the new plan and confirm.",
         "notice_runtime_delete_plan_changed": "The active agent set changed while this dialog was open. Review the new plan and confirm.",
-        "checkbox_one": "I understand this {{count}} agent will be archived and any queued or running tasks will be cancelled.",
-        "checkbox_other": "I understand these {{count}} agents will be archived and any queued or running tasks will be cancelled.",
+        "checkbox_one": "I understand this {{count}} agent will be unbound and cannot run until I bind it to a runtime, and that any queued or running tasks will be cancelled.",
+        "checkbox_other": "I understand these {{count}} agents will be unbound and cannot run until I bind them to a runtime, and that any queued or running tasks will be cancelled.",
         "cancel": "Cancel",
-        "confirm_one": "Archive {{count}} agent and delete runtime",
-        "confirm_other": "Archive {{count}} agents and delete runtime",
-        "submitting": "Archiving and deleting...",
+        "confirm_one": "Unbind {{count}} agent and delete runtime",
+        "confirm_other": "Unbind {{count}} agents and delete runtime",
+        "submitting": "Unbinding and deleting...",
         "delete_failed_toast": "Failed to delete runtime",
         "table": {
           "header_agent": "Agent",
@@ -255,6 +268,8 @@
     "managed_by_desktop_title": "The CLI binary is managed by Multica Desktop — update Desktop to upgrade the CLI.",
     "read_only": "Read-only",
     "read_only_title": "Only runtime owners and workspace admins can update the CLI.",
+    "local_build": "Local build",
+    "local_build_title": "This runtime reports a non-release version, so Multica cannot tell whether an upgrade is available. Update it from the machine itself.",
     "latest": "Latest",
     "available": "available",
     "action": "Update",
@@ -272,6 +287,13 @@
   "charts": {
     "heatmap_less": "Less",
     "heatmap_more": "More",
+    "heatmap_no_activity": "No activity",
+    "heatmap_busiest_day": "Busiest day",
+    "heatmap_most_active_weekday": "Most active weekday",
+    "heatmap_quietest_weekday": "Quietest weekday",
+    "heatmap_average": "avg {{value}}",
+    "heatmap_window_total_one": "{{count}}-day total",
+    "heatmap_window_total_other": "{{count}}-day total",
     "tooltip_total": "Total"
   },
   "list": {

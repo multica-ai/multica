@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildAutopilotWebhookUrl } from "./webhook";
+import { buildAutopilotWebhookUrl, maskAutopilotWebhookUrl } from "./webhook";
 import type { AutopilotTrigger } from "../types";
 
 const baseTrigger: AutopilotTrigger = {
@@ -69,5 +69,30 @@ describe("buildAutopilotWebhookUrl", () => {
 
   it("returns relative path when no base or origin available", () => {
     expect(buildAutopilotWebhookUrl({ trigger: baseTrigger })).toBe("/api/webhooks/autopilots/awt_abc");
+  });
+});
+
+describe("maskAutopilotWebhookUrl", () => {
+  it("masks the token segment and keeps the rest readable", () => {
+    const masked = maskAutopilotWebhookUrl("https://api.example/api/webhooks/autopilots/awt_abc");
+    expect(masked).toBe("https://api.example/api/webhooks/autopilots/••••••••••••");
+    expect(masked).not.toContain("awt_abc");
+  });
+
+  it("masks the token on a relative path", () => {
+    expect(maskAutopilotWebhookUrl("/api/webhooks/autopilots/awt_abc")).toBe(
+      "/api/webhooks/autopilots/••••••••••••",
+    );
+  });
+
+  it("uses a fixed-width mask so the token length never leaks", () => {
+    const short = maskAutopilotWebhookUrl("https://api.example/hooks/a");
+    const long = maskAutopilotWebhookUrl("https://api.example/hooks/" + "z".repeat(64));
+    expect(short).toBe(long);
+  });
+
+  it("masks the whole value when there is no separable last segment", () => {
+    expect(maskAutopilotWebhookUrl("awt_abc")).toBe("••••••••••••");
+    expect(maskAutopilotWebhookUrl("https://api.example/hooks/")).toBe("••••••••••••");
   });
 });

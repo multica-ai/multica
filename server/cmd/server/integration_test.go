@@ -126,14 +126,18 @@ func setupIntegrationTestFixture(ctx context.Context, pool *pgxpool.Pool) (strin
 		return "", "", err
 	}
 
+	// Owned by the fixture user, like every runtime a real daemon registers
+	// with a member credential: a private runtime is bindable only by its
+	// owner, so an ownerless one could not host the agents these tests create
+	// through the API.
 	var runtimeID string
 	if err := pool.QueryRow(ctx, `
 		INSERT INTO agent_runtime (
-			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at
+			workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, owner_id, last_seen_at
 		)
-		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, now())
+		VALUES ($1, NULL, $2, 'cloud', $3, 'online', $4, '{}'::jsonb, $5, now())
 		RETURNING id
-	`, workspaceID, "Integration Test Runtime", "integration_test_runtime", "Integration test runtime").Scan(&runtimeID); err != nil {
+	`, workspaceID, "Integration Test Runtime", "integration_test_runtime", "Integration test runtime", userID).Scan(&runtimeID); err != nil {
 		return "", "", err
 	}
 
@@ -778,6 +782,205 @@ func TestDeleteWorkspaceRequiresOwner(t *testing.T) {
 	}
 }
 
+func TestDingTalkGroupsThroughRouterSupportsFilteredWorkspaceAndAgentScopes(t *testing.T) {
+	removedRouteResp := authRequest(t, http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/group-routes", nil)
+	removedRouteResp.Body.Close()
+	if removedRouteResp.StatusCode != http.StatusNotFound {
+		t.Fatalf("removed DingTalk group-routes status = %d, want 404", removedRouteResp.StatusCode)
+	}
+
+	resp := authRequest(t, http.MethodGet, "/api/workspaces/"+testWorkspaceID+"/dingtalk/groups", nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("member DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+	var result struct {
+		Groups []any `json:"groups"`
+	}
+	readJSON(t, resp, &result)
+	if result.Groups == nil || len(result.Groups) != 0 {
+		t.Fatalf("disabled DingTalk groups = %#v, want stable empty list", result.Groups)
+	}
+
+	var agentID string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT id FROM agent WHERE workspace_id = $1 ORDER BY created_at LIMIT 1
+`, testWorkspaceID).Scan(&agentID); err != nil {
+		t.Fatalf("load fixture agent: %v", err)
+	}
+	resp = authRequest(t, http.MethodGet, "/api/agents/"+agentID+"/dingtalk/groups", nil)
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		t.Fatalf("visible Agent DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+	readJSON(t, resp, &result)
+	if result.Groups == nil || len(result.Groups) != 0 {
+		t.Fatalf("disabled Agent DingTalk groups = %#v, want stable empty list", result.Groups)
+	}
+
+	var memberUserID string
+	if err := testPool.QueryRow(context.Background(), `
+INSERT INTO "user" (name, email) VALUES ('DingTalk group member', $1) RETURNING id
+`, "dingtalk-groups-member-"+time.Now().Format("150405.000000000")+"@example.test").Scan(&memberUserID); err != nil {
+		t.Fatalf("create member user: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+INSERT INTO member (workspace_id, user_id, role) VALUES ($1, $2, 'member')
+`, testWorkspaceID, memberUserID); err != nil {
+		t.Fatalf("create workspace member: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM member WHERE workspace_id = $1 AND user_id = $2`, testWorkspaceID, memberUserID)
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, memberUserID)
+	})
+	memberToken, err := generateTestJWT(memberUserID, "dingtalk-groups-member@example.test", "DingTalk group member")
+	if err != nil {
+		t.Fatalf("generate member token: %v", err)
+	}
+	req, err := http.NewRequest(http.MethodGet, testServer.URL+"/api/workspaces/"+testWorkspaceID+"/dingtalk/groups", nil)
+	if err != nil {
+		t.Fatalf("build member request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("member request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("member filtered DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+
+	// Mutation routes admit workspace members to the handler, where the target
+	// agent's ownership is checked. Temporarily make this member the agent owner;
+	// a router-level admin gate would return 403 before the disabled/validation
+	// response below.
+	var originalOwnerID string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT owner_id FROM agent WHERE id = $1
+`, agentID).Scan(&originalOwnerID); err != nil {
+		t.Fatalf("load fixture Agent owner: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+UPDATE agent SET owner_id = $2 WHERE id = $1
+`, agentID, memberUserID); err != nil {
+		t.Fatalf("assign fixture Agent owner: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `UPDATE agent SET owner_id = $2 WHERE id = $1`, agentID, originalOwnerID)
+	})
+	req, err = http.NewRequest(http.MethodPost,
+		testServer.URL+"/api/workspaces/"+testWorkspaceID+"/dingtalk/install/byo?agent_id="+agentID,
+		strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("build member DingTalk install request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("member DingTalk install request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest && resp.StatusCode != http.StatusServiceUnavailable {
+		t.Fatalf("agent-owner DingTalk install status = %d, want 400 or 503", resp.StatusCode)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+UPDATE agent SET owner_id = $2 WHERE id = $1
+`, agentID, originalOwnerID); err != nil {
+		t.Fatalf("restore fixture Agent owner: %v", err)
+	}
+
+	var originalPermissionMode, originalVisibility string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT permission_mode, visibility FROM agent WHERE id = $1
+`, agentID).Scan(&originalPermissionMode, &originalVisibility); err != nil {
+		t.Fatalf("load fixture Agent access mode: %v", err)
+	}
+	if _, err := testPool.Exec(context.Background(), `
+UPDATE agent SET permission_mode = 'public_to', visibility = 'workspace' WHERE id = $1
+`, agentID); err != nil {
+		t.Fatalf("make fixture Agent public_to: %v", err)
+	}
+	targetInsert, err := testPool.Exec(context.Background(), `
+INSERT INTO agent_invocation_target (agent_id, target_type, target_id)
+VALUES ($1, 'workspace', $2)
+ON CONFLICT (agent_id, target_type, target_id) DO NOTHING
+`, agentID, testWorkspaceID)
+	if err != nil {
+		t.Fatalf("make fixture agent workspace-visible: %v", err)
+	}
+	insertedTarget := targetInsert.RowsAffected() == 1
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `
+UPDATE agent SET permission_mode = $2, visibility = $3 WHERE id = $1
+`, agentID, originalPermissionMode, originalVisibility)
+		if !insertedTarget {
+			return
+		}
+		_, _ = testPool.Exec(context.Background(), `
+DELETE FROM agent_invocation_target WHERE agent_id = $1 AND target_type = 'workspace' AND target_id = $2
+`, agentID, testWorkspaceID)
+	})
+	req, err = http.NewRequest(http.MethodGet, testServer.URL+"/api/agents/"+agentID+"/dingtalk/groups", nil)
+	if err != nil {
+		t.Fatalf("build member Agent request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("member Agent request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("member visible-Agent DingTalk groups status = %d, want 200", resp.StatusCode)
+	}
+
+	var runtimeID, privateAgentID string
+	if err := testPool.QueryRow(context.Background(), `
+SELECT runtime_id FROM agent WHERE id = $1
+`, agentID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load fixture runtime: %v", err)
+	}
+	if err := testPool.QueryRow(context.Background(), `
+INSERT INTO agent (
+  workspace_id, name, description, runtime_mode, runtime_config, runtime_id,
+  visibility, permission_mode, max_concurrent_tasks, owner_id
+) VALUES ($1, 'DingTalk private groups fixture', '', 'cloud', '{}'::jsonb, $2,
+          'private', 'private', 1, $3)
+RETURNING id
+`, testWorkspaceID, runtimeID, testUserID).Scan(&privateAgentID); err != nil {
+		t.Fatalf("create private Agent: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = testPool.Exec(context.Background(), `DELETE FROM agent WHERE id = $1`, privateAgentID)
+	})
+	req, err = http.NewRequest(http.MethodGet, testServer.URL+"/api/agents/"+privateAgentID+"/dingtalk/groups", nil)
+	if err != nil {
+		t.Fatalf("build private Agent request: %v", err)
+	}
+	req.Header.Set("Authorization", "Bearer "+memberToken)
+	req.Header.Set("X-Workspace-ID", testWorkspaceID)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("private Agent request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("member private-Agent DingTalk groups status = %d, want 403", resp.StatusCode)
+	}
+
+	const outsideWorkspaceID = "d1474000-0000-4000-8000-000000000001"
+	resp = authRequest(t, http.MethodGet, "/api/workspaces/"+outsideWorkspaceID+"/dingtalk/groups", nil)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("non-member DingTalk groups status = %d, want 404", resp.StatusCode)
+	}
+}
+
 // ---- Inbox through full router ----
 
 func TestInboxThroughRouter(t *testing.T) {
@@ -1046,6 +1249,98 @@ func TestUnarchiveInboxPreservesUnread(t *testing.T) {
 // An inbox item belonging to someone else must not be unarchivable, even with a
 // valid session — the loader resolves the item within the caller's workspace and
 // recipient scope.
+// Mark-unread is the inverse of mark-read and, like it, scoped to the single
+// item: the inbox renders one row per issue carrying that group's NEWEST item,
+// so flipping the whole group would resurrect siblings the user already dealt
+// with. The restored item counts toward the unread badge again.
+func TestMarkInboxUnreadIsItemScoped(t *testing.T) {
+	ctx := context.Background()
+	issueID := seedArchivedFixtureIssue(t, "Mark unread fixture")
+
+	var newestID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'new_comment', 'newest', $3, true, false, now())
+		RETURNING id
+	`, testWorkspaceID, testUserID, issueID).Scan(&newestID); err != nil {
+		t.Fatalf("failed to seed inbox item: %v", err)
+	}
+	// An older sibling on the same issue, already read. It must stay read.
+	if _, err := testPool.Exec(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, issue_id, read, archived, created_at)
+		VALUES ($1, 'member', $2, 'status_changed', 'older sibling', $3, true, false, now() - interval '1 hour')
+	`, testWorkspaceID, testUserID, issueID); err != nil {
+		t.Fatalf("failed to seed sibling inbox item: %v", err)
+	}
+
+	resp := authRequest(t, "POST", "/api/inbox/"+newestID+"/unread", nil)
+	if resp.StatusCode != 200 {
+		t.Fatalf("MarkInboxUnread: expected 200, got %d", resp.StatusCode)
+	}
+	var updated inboxItemJSON
+	readJSON(t, resp, &updated)
+	if updated.Read {
+		t.Fatalf("expected the item to come back unread, got %+v", updated)
+	}
+	if updated.Archived {
+		t.Fatalf("mark unread must not archive the item, got %+v", updated)
+	}
+
+	rows, err := testPool.Query(ctx, `
+		SELECT title, read FROM inbox_item WHERE issue_id = $1 ORDER BY title
+	`, issueID)
+	if err != nil {
+		t.Fatalf("failed to read back inbox items: %v", err)
+	}
+	defer rows.Close()
+	got := map[string]bool{}
+	for rows.Next() {
+		var title string
+		var read bool
+		if err := rows.Scan(&title, &read); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		got[title] = read
+	}
+	if got["newest"] {
+		t.Fatal("the targeted item must be unread")
+	}
+	if !got["older sibling"] {
+		t.Fatal("mark unread must not touch older siblings on the same issue")
+	}
+}
+
+// The read/unread endpoints resolve the item within the caller's workspace and
+// recipient scope, so someone else's notification is not addressable.
+func TestMarkInboxUnreadRejectsForeignItem(t *testing.T) {
+	ctx := context.Background()
+	var foreignItemID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO inbox_item (workspace_id, recipient_type, recipient_id, type, title, read)
+		VALUES ($1, 'member', gen_random_uuid(), 'issue_assigned', 'someone else', true)
+		RETURNING id
+	`, testWorkspaceID).Scan(&foreignItemID); err != nil {
+		t.Fatalf("failed to seed foreign inbox item: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(), `DELETE FROM inbox_item WHERE id = $1`, foreignItemID)
+	})
+
+	resp := authRequest(t, "POST", "/api/inbox/"+foreignItemID+"/unread", nil)
+	if resp.StatusCode == 200 {
+		t.Fatal("expected mark-unread of another recipient's item to be rejected")
+	}
+
+	var read bool
+	if err := testPool.QueryRow(ctx,
+		`SELECT read FROM inbox_item WHERE id = $1`, foreignItemID).Scan(&read); err != nil {
+		t.Fatalf("failed to read back foreign item: %v", err)
+	}
+	if !read {
+		t.Fatal("another recipient's item must stay read")
+	}
+}
+
 func TestUnarchiveInboxRejectsForeignItem(t *testing.T) {
 	ctx := context.Background()
 	var foreignItemID string

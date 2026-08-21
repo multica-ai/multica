@@ -51,12 +51,23 @@ WHERE id = $1 AND workspace_id = $2;
 INSERT INTO inbox_item (
     workspace_id, recipient_type, recipient_id,
     type, severity, issue_id, title, body,
-    actor_type, actor_id, details
-) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+    actor_type, actor_id, details, id
+) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, COALESCE(sqlc.narg('id')::uuid, gen_random_uuid()))
 RETURNING *;
 
 -- name: MarkInboxRead :one
 UPDATE inbox_item SET read = true
+WHERE id = $1
+RETURNING *;
+
+-- name: MarkInboxUnread :one
+-- Exact inverse of MarkInboxRead, and item-level for the same reason it is:
+-- the inbox renders one row per issue carrying that group's NEWEST item, and
+-- the group's read state is that item's read state. Flipping the whole group
+-- unread would resurrect older siblings the user already dealt with and
+-- inflate CountUnreadInbox (which counts raw rows), while changing nothing the
+-- UI shows.
+UPDATE inbox_item SET read = false
 WHERE id = $1
 RETURNING *;
 
@@ -133,4 +144,8 @@ WHERE workspace_id = $1 AND recipient_type = 'member' AND recipient_id = $2 AND 
 -- name: ArchiveCompletedInbox :execrows
 UPDATE inbox_item i SET archived = true
 WHERE i.workspace_id = $1 AND i.recipient_type = 'member' AND i.recipient_id = $2 AND i.archived = false
-  AND i.issue_id IN (SELECT id FROM issue WHERE status IN ('done', 'cancelled'));
+  AND i.issue_id IN (
+    SELECT id FROM issue
+    WHERE workspace_id = $1
+      AND issue_effective_status(workspace_id, status) IN ('done', 'cancelled')
+  );

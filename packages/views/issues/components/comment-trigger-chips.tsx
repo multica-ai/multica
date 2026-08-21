@@ -104,7 +104,7 @@ function TriggerAgentTooltipBody({
     <div className="space-y-0.5">
       <div className="flex items-baseline gap-1.5">
         <span className="font-medium">{agent.name}</span>
-        <span className="text-[10px] text-muted-foreground">{sourceLabel(agent.source, t)}</span>
+        <span className="text-micro text-muted-foreground">{sourceLabel(agent.source, t)}</span>
       </div>
       {suppressed ? (
         <div>{t(($) => $.comment.trigger_click_to_restore)}</div>
@@ -174,8 +174,9 @@ export function CommentTriggerChips({
 }
 
 // One blocked mention: named like an allowed chip ("Go"), but with an error
-// indicator and a short reason ("No permission") instead of "will start", so a
-// refused @mention reads as a clear, specific error rather than a vague count.
+// indicator and a short reason ("Not found or no permission") instead of "will
+// start", so a refused @mention reads as a clear, specific error rather than a
+// vague count.
 function BlockedTriggerChip({
   outcome,
   label,
@@ -191,7 +192,7 @@ function BlockedTriggerChip({
       <TooltipTrigger
         render={
           <span
-            className="inline-flex h-6 min-w-0 max-w-full animate-in fade-in items-center gap-1.5 rounded-md px-1.5 text-[11px] font-medium text-destructive"
+            className="inline-flex h-6 min-w-0 max-w-full animate-in fade-in items-center gap-1.5 rounded-md px-1.5 text-micro font-medium text-destructive"
             aria-label={
               label
                 ? t(($) => $.comment.trigger_blocked_chip_aria, { name: label, reason: shortReason })
@@ -211,7 +212,7 @@ function BlockedTriggerChip({
           </span>
         }
       />
-      <TooltipContent side="top" className="max-w-72 text-xs">
+      <TooltipContent side="top" className="max-w-72 text-caption">
         {blockedReasonLabel(outcome.reason_code, t)}
       </TooltipContent>
     </Tooltip>
@@ -250,8 +251,7 @@ function SingleTriggerChip({
             className={cn(
               // Sidebar-style resting state: muted until hover so the strip
               // reads as metadata, not content (see app-sidebar nav items).
-              "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[11px] font-medium text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground",
-              suppressed && "opacity-60",
+              "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-micro font-medium text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground",
             )}
           >
             <TriggerAgentAvatar agent={agent} suppressed={suppressed} />
@@ -259,7 +259,7 @@ function SingleTriggerChip({
           </button>
         }
       />
-      <TooltipContent side="top" className="max-w-72 text-xs">
+      <TooltipContent side="top" className="max-w-72 text-caption">
         <TriggerAgentTooltipBody agent={agent} suppressed={suppressed} t={t} />
       </TooltipContent>
     </Tooltip>
@@ -301,8 +301,7 @@ function MultiTriggerChip({
         <button
           type="button"
           className={cn(
-            "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-[11px] font-medium text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
-            activeCount === 0 && "opacity-60",
+            "inline-flex h-6 min-w-0 max-w-full animate-in fade-in cursor-pointer items-center gap-1.5 rounded-md px-1.5 text-micro font-medium text-muted-foreground transition-colors duration-200 hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground",
           )}
         />
       }
@@ -343,12 +342,12 @@ function MultiTriggerChip({
     <Popover open={open} onOpenChange={setOpen}>
       <Tooltip open={tooltipHover && !open} onOpenChange={setTooltipHover}>
         <TooltipTrigger render={popoverTrigger} />
-        <TooltipContent side="top" className="text-xs">
+        <TooltipContent side="top" className="text-caption">
           {t(($) => $.comment.trigger_click_to_manage)}
         </TooltipContent>
       </Tooltip>
       <PopoverContent align="start" className="w-64 p-2">
-        <div className="px-1.5 pb-1 text-xs font-medium text-muted-foreground">
+        <div className="px-1.5 pb-1 text-caption font-medium text-muted-foreground">
           {t(($) => $.comment.trigger_preview_title)}
         </div>
         <div className="flex flex-col">
@@ -368,23 +367,22 @@ function MultiTriggerChip({
                       onClick={() => onToggle(agent.id)}
                       className={cn(
                         "flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted",
-                        suppressed && "opacity-60",
                       )}
                     >
                       <TriggerAgentAvatar agent={agent} suppressed={suppressed} />
                       <span
                         className={cn(
-                          "min-w-0 flex-1 truncate text-xs",
+                          "min-w-0 flex-1 truncate text-caption",
                           suppressed && "text-muted-foreground",
                         )}
                       >
                         {agent.name}
                       </span>
-                      <span className="shrink-0 text-[10px] text-muted-foreground">{state}</span>
+                      <span className="shrink-0 text-micro text-muted-foreground">{state}</span>
                     </button>
                   }
                 />
-                <TooltipContent side="right" className="max-w-72 text-xs">
+                <TooltipContent side="right" className="max-w-72 text-caption">
                   <TriggerAgentTooltipBody agent={agent} suppressed={suppressed} t={t} />
                 </TooltipContent>
               </Tooltip>

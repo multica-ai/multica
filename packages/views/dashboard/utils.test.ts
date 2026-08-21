@@ -6,6 +6,7 @@ import {
   aggregateAgentTokens,
   aggregateDailyCost,
   aggregateDailyErrors,
+  aggregateDailyTasks,
   aggregateFailureClasses,
   aggregateFailureReasons,
   aggregateWeeklyErrors,
@@ -16,7 +17,11 @@ import {
   computeFailureTotals,
   DELETED_AGENTS_ROW_ID,
   formatDuration,
+  hasRateSample,
+  isSyntheticAgentRow,
   mergeAgentDashboardRows,
+  RESTRICTED_AGENTS_ROW_ID,
+  sortAgentFailures,
 } from "./utils";
 
 describe("aggregateDailyCost", () => {
@@ -51,6 +56,29 @@ describe("aggregateDailyCost", () => {
     expect(result[0]).toMatchObject({ input: 3, output: 0, cacheWrite: 0, total: 3 });
     // 2026-05-10 → $3 input + (0.5M × $15) = $7.5 output. Total $10.5.
     expect(result[1]).toMatchObject({ input: 3, output: 7.5, cacheWrite: 0, total: 10.5 });
+  });
+
+  it("bills cache reads into the stack and its total (MUL-6334)", () => {
+    // The dashboard feeds the same DailyCostChart the runtime page does, so it
+    // has to bill the same categories. Before the fix this aggregator summed
+    // input + output + cacheWrite only, hiding cache-read spend from the bar,
+    // the tooltip Total and the card's headline.
+    const result = aggregateDailyCost([
+      {
+        date: "2026-05-10",
+        provider: "claude",
+        model: "claude-sonnet-4-6",
+        input_tokens: 1_000_000,
+        output_tokens: 0,
+        cache_read_tokens: 20_000_000,
+        cache_write_tokens: 1_000_000,
+        task_count: 2,
+      },
+    ]);
+    // claude-sonnet-4-6: input $3/M, cacheRead $0.30/M, cacheWrite $3.75/M.
+    // $3 + $6 + $3.75 = $12.75.
+    expect(result[0]).toMatchObject({ input: 3, cacheRead: 6, cacheWrite: 3.75 });
+    expect(result[0]?.total).toBeCloseTo(12.75, 2);
   });
 
   it("treats unmapped models as zero-cost", () => {
@@ -162,6 +190,7 @@ describe("mergeAgentDashboardRows", () => {
         total_seconds: 600,
         task_count: 1, // truth: one task touched both models
         failed_count: 0,
+        cancelled_count: 0,
       },
     ];
     const merged = mergeAgentDashboardRows(tokenRows, runTimeRows);
@@ -188,7 +217,7 @@ describe("mergeAgentDashboardRows", () => {
     // list with zeroed-out token columns.
     const merged = mergeAgentDashboardRows(
       [],
-      [{ agent_id: "agent-c", total_seconds: 30, task_count: 1, failed_count: 1 }],
+      [{ agent_id: "agent-c", total_seconds: 30, task_count: 1, failed_count: 1, cancelled_count: 0 }],
     );
     expect(merged).toHaveLength(1);
     expect(merged[0]!.tokens).toBe(0);
@@ -204,7 +233,7 @@ describe("mergeAgentDashboardRows", () => {
         { agentId: "zero-cost-long", tokens: 0, cost: 0, taskCount: 0 },
       ],
       [
-        { agent_id: "zero-cost-long", total_seconds: 1000, task_count: 5, failed_count: 0 },
+        { agent_id: "zero-cost-long", total_seconds: 1000, task_count: 5, failed_count: 0, cancelled_count: 0 },
       ],
     );
     expect(merged.map((r) => r.agentId)).toEqual(["high", "low", "zero-cost-long"]);
@@ -287,6 +316,40 @@ describe("bucketUnknownAgentRows", () => {
     const out = bucketUnknownAgentRows([live, deletedA], null);
     expect(out.map((r) => r.agentId)).toEqual(["live", "deleted-a"]);
   });
+
+  // MUL-5409: the server folds agents the viewer may not see onto its own
+  // sentinel. That row is not in `knownAgentIds` either, and sweeping it into
+  // the "Deleted agents" bucket is exactly the lie the issue was filed for —
+  // those agents are alive.
+  it("keeps the server's restricted bucket out of the deleted bucket", () => {
+    const restricted = {
+      agentId: RESTRICTED_AGENTS_ROW_ID,
+      tokens: 70,
+      cost: 0.7,
+      seconds: 42,
+      taskCount: 3,
+    };
+    const out = bucketUnknownAgentRows(
+      [live, restricted, deletedA],
+      new Set(["live"]),
+    );
+    expect(out.map((r) => r.agentId)).toEqual([
+      "live",
+      RESTRICTED_AGENTS_ROW_ID,
+      DELETED_AGENTS_ROW_ID,
+    ]);
+    // It passes through whole: unlike a deleted agent it really ran, so its
+    // Time / Tasks columns carry real numbers.
+    expect(out.find((r) => r.agentId === RESTRICTED_AGENTS_ROW_ID)).toEqual(
+      restricted,
+    );
+  });
+
+  it("classifies both bucket ids as synthetic and real agents as not", () => {
+    expect(isSyntheticAgentRow(DELETED_AGENTS_ROW_ID)).toBe(true);
+    expect(isSyntheticAgentRow(RESTRICTED_AGENTS_ROW_ID)).toBe(true);
+    expect(isSyntheticAgentRow("live")).toBe(false);
+  });
 });
 
 describe("formatDuration", () => {
@@ -330,9 +393,9 @@ describe("aggregateWeeklyTime", () => {
     // 2026-05-19 is a Tuesday → current week is Mon=05-18..Sun=05-24.
     vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
     const rows = [
-      { date: "2026-05-11", total_seconds: 100, task_count: 0, failed_count: 0 },
-      { date: "2026-05-17", total_seconds: 50, task_count: 0, failed_count: 0 },
-      { date: "2026-05-18", total_seconds: 25, task_count: 0, failed_count: 0 },
+      { date: "2026-05-11", total_seconds: 100, task_count: 0, failed_count: 0, cancelled_count: 0 },
+      { date: "2026-05-17", total_seconds: 50, task_count: 0, failed_count: 0, cancelled_count: 0 },
+      { date: "2026-05-18", total_seconds: 25, task_count: 0, failed_count: 0, cancelled_count: 0 },
     ];
     const result = aggregateWeeklyTime(rows, "UTC", 2);
     expect(result).toHaveLength(2);
@@ -359,7 +422,7 @@ describe("aggregateWeeklyTime", () => {
     const rows = [
       // 2026-04-13 is a Monday — exactly one week earlier than the oldest
       // in-range week (Mon=04-20) for a 5-week trailing window.
-      { date: "2026-04-13", total_seconds: 999, task_count: 0, failed_count: 0 },
+      { date: "2026-04-13", total_seconds: 999, task_count: 0, failed_count: 0, cancelled_count: 0 },
     ];
     const result = aggregateWeeklyTime(rows, "UTC", 5);
     expect(result.map((w) => w.weekStart)).toEqual([
@@ -384,8 +447,8 @@ describe("aggregateWeeklyTasks", () => {
   it("splits completed and failed counts per calendar week", () => {
     vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
     const rows = [
-      { date: "2026-05-12", total_seconds: 0, task_count: 5, failed_count: 1 },
-      { date: "2026-05-18", total_seconds: 0, task_count: 3, failed_count: 0 },
+      { date: "2026-05-12", total_seconds: 0, task_count: 5, failed_count: 1, cancelled_count: 0 },
+      { date: "2026-05-18", total_seconds: 0, task_count: 3, failed_count: 0, cancelled_count: 0 },
     ];
     const result = aggregateWeeklyTasks(rows, "UTC", 2);
     expect(result[0]).toMatchObject({
@@ -399,6 +462,72 @@ describe("aggregateWeeklyTasks", () => {
       failed: 0,
       partial: true,
     });
+  });
+
+  it("keeps cancelled runs out of the completed segment", () => {
+    vi.setSystemTime(new Date("2026-05-19T12:00:00Z"));
+    const result = aggregateWeeklyTasks(
+      [
+        {
+          date: "2026-05-12",
+          total_seconds: 0,
+          task_count: 6,
+          failed_count: 1,
+          cancelled_count: 2,
+        },
+      ],
+      "UTC",
+      2,
+    );
+    expect(result[0]).toMatchObject({
+      weekStart: "2026-05-11",
+      completed: 3,
+      failed: 1,
+      cancelled: 2,
+    });
+  });
+});
+
+describe("aggregateDailyTasks", () => {
+  // failed_count and cancelled_count are disjoint subsets of task_count, so
+  // the succeeded segment is the remainder. Forgetting to subtract cancelled
+  // is what renders a run the user stopped as a green "completed" bar.
+  it("splits the stack three ways and sorts oldest-first", () => {
+    const result = aggregateDailyTasks([
+      {
+        date: "2026-05-18",
+        total_seconds: 0,
+        task_count: 4,
+        failed_count: 1,
+        cancelled_count: 1,
+      },
+      {
+        date: "2026-05-17",
+        total_seconds: 0,
+        task_count: 3,
+        failed_count: 0,
+        cancelled_count: 3,
+      },
+    ]);
+    expect(result.map((r) => r.date)).toEqual(["2026-05-17", "2026-05-18"]);
+    expect(result[0]).toMatchObject({ completed: 0, failed: 0, cancelled: 3 });
+    expect(result[1]).toMatchObject({ completed: 2, failed: 1, cancelled: 1 });
+  });
+
+  // An older backend omits cancelled_count; the schema defaults it to 0, and
+  // the segment math must degrade to the previous two-way split rather than
+  // driving `completed` negative.
+  it("clamps completed at zero when the counts overrun task_count", () => {
+    const result = aggregateDailyTasks([
+      {
+        date: "2026-05-18",
+        total_seconds: 0,
+        task_count: 1,
+        failed_count: 1,
+        cancelled_count: 1,
+      },
+    ]);
+    expect(result[0]).toMatchObject({ completed: 0, failed: 1, cancelled: 1 });
   });
 });
 
@@ -526,7 +655,7 @@ describe("aggregateFailureClasses / aggregateFailureReasons", () => {
 });
 
 describe("aggregateAgentFailures", () => {
-  it("ranks by failure count, carries the rate, and names the dominant class", () => {
+  it("ranks by failure count, carries the rate, and splits failures by class", () => {
     const result = aggregateAgentFailures([
       { agent_id: "a", failure_reason: "", task_count: 90 },
       { agent_id: "a", failure_reason: "timeout", task_count: 10 },
@@ -537,16 +666,62 @@ describe("aggregateAgentFailures", () => {
 
     // `a` fails 10% of the time, `b` fails 80% — but `a` is the bigger
     // absolute problem, so it ranks first and the rate rides along.
-    expect(result).toEqual([
-      { agentId: "a", failed: 10, total: 100, rate: 0.1, topClass: "timeout" },
-      { agentId: "b", failed: 4, total: 5, rate: 0.8, topClass: "runtime" },
+    expect(result.map((r) => [r.agentId, r.failed, r.total, r.rate])).toEqual([
+      ["a", 10, 100, 0.1],
+      ["b", 4, 5, 0.8],
     ]);
+    // The whole composition, not just the heaviest class: `b` failing two
+    // ways is the thing that decides whether to look at the agent or at the
+    // platform, and a single dominant-class label hid it.
+    expect(result[1]?.classes).toMatchObject({ runtime: 3, timeout: 1, auth: 0 });
   });
 
   it("drops agents with no failures — the list is triage, not a census", () => {
     expect(
       aggregateAgentFailures([{ agent_id: "clean", failure_reason: "", task_count: 42 }]),
     ).toEqual([]);
+  });
+});
+
+describe("sortAgentFailures", () => {
+  // `busy` is the workspace's biggest absolute problem; `flaky` is the least
+  // healthy per run; `once` is the small-sample trap — a single failed run is
+  // a 100% rate and would win the Rate ranking outright.
+  const rows = aggregateAgentFailures([
+    { agent_id: "busy", failure_reason: "", task_count: 900 },
+    { agent_id: "busy", failure_reason: "timeout", task_count: 100 },
+    { agent_id: "flaky", failure_reason: "", task_count: 80 },
+    { agent_id: "flaky", failure_reason: "runtime_offline", task_count: 20 },
+    { agent_id: "once", failure_reason: "timeout", task_count: 1 },
+  ]);
+
+  it("ranks by absolute failures by default", () => {
+    expect(sortAgentFailures(rows, "failed").map((r) => r.agentId)).toEqual([
+      "busy",
+      "flaky",
+      "once",
+    ]);
+  });
+
+  it("ranks by rate, with too-small samples demoted rather than dropped", () => {
+    // `once` is 100% and `flaky` only 20%, but one run is not evidence. The
+    // row still renders — the list has to reconcile with the workspace
+    // failure count above it.
+    expect(sortAgentFailures(rows, "rate").map((r) => r.agentId)).toEqual([
+      "flaky",
+      "busy",
+      "once",
+    ]);
+  });
+
+  it("marks which rows have enough runs for their rate to mean anything", () => {
+    expect(rows.map((r) => hasRateSample(r))).toEqual([true, true, false]);
+  });
+
+  it("leaves the input array untouched", () => {
+    const before = rows.map((r) => r.agentId);
+    sortAgentFailures(rows, "rate");
+    expect(rows.map((r) => r.agentId)).toEqual(before);
   });
 });
 
@@ -580,17 +755,17 @@ describe("anonymizeUnresolvedAgentRows", () => {
     expect(result.map((r) => r.task_count)).toEqual([5, 5, 6, 5, 10]);
   });
 
-  it("keeps the bucket's dominant class honest across merged agents", () => {
+  it("keeps the bucket's class split honest across merged agents", () => {
     // This is why the rewrite happens on RAW rows. private-a is auth-dominant
     // (6 vs 5) and private-b is timeout-only (10). Merging AFTER aggregation
-    // would see only each agent's top class and its total failure count —
-    // auth 11, timeout 10 — and label the bucket Auth. The true composition
-    // is timeout 15 / auth 6, so it must read Timeout.
+    // would see only each agent's dominant class and its total failure count —
+    // auth 11, timeout 10 — while the true composition is timeout 15 / auth 6.
     const bucket = aggregateAgentFailures(
       anonymizeUnresolvedAgentRows(rows, new Set(["visible"])),
     ).find((r) => r.agentId === UNRESOLVED_AGENTS_ROW_ID);
 
-    expect(bucket).toMatchObject({ failed: 21, total: 21, topClass: "timeout" });
+    expect(bucket).toMatchObject({ failed: 21, total: 21 });
+    expect(bucket?.classes).toMatchObject({ timeout: 15, auth: 6 });
   });
 
   it("anonymizes everything while the agent list is still loading", () => {

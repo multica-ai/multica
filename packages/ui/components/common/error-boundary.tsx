@@ -81,7 +81,7 @@ function DefaultFallback({ error, reset }: { error: Error; reset: () => void }) 
   return (
     <div
       role="alert"
-      className="flex flex-col items-start gap-3 rounded-md border border-dashed border-border bg-muted/30 p-4 text-sm"
+      className="flex flex-col items-start gap-3 rounded-md border border-dashed border-border bg-muted/30 p-4 text-body"
     >
       <div className="space-y-1">
         <p className="font-medium text-foreground">

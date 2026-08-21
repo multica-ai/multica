@@ -72,9 +72,14 @@ describe("chat store — legacy per-agent new-chat draft migration", () => {
 
     const store = createChatStore({ storage });
 
-    expect(store.getState().inputDraftAttachments[DRAFT_NEW_SESSION]?.map((a) => a.id)).toEqual([
-      "att-mine",
-    ]);
+    // Legacy bare Attachment rows load as `uploaded` entries (MUL-5181 L2).
+    expect(
+      store
+        .getState()
+        .inputDraftAttachments[DRAFT_NEW_SESSION]?.map((u) =>
+          u.status === "uploaded" ? u.attachment.id : u.clientUploadId,
+        ),
+    ).toEqual(["att-mine"]);
     expect(store.getState().inputDraftAttachments["__new__:agent-2"]).toBeUndefined();
   });
 
@@ -300,5 +305,101 @@ describe("chat store — applied draft-restore ledger", () => {
     store.getState().forgetDraftRestoreApplied("r-0");
     expect(store.getState().appliedDraftRestoreIds).toHaveLength(59);
     expect(store.getState().appliedDraftRestoreIds[0]).toBe("r-1");
+  });
+});
+
+// Coordinator-owned upload lifecycle in the draft slots (MUL-5181 L2).
+describe("chat store — draft upload ops", () => {
+  const ATTACHMENTS_KEY = "multica:chat:draft-attachments";
+
+  function freshStore() {
+    const storage = memStorage();
+    return { storage, store: createChatStore({ storage }) };
+  }
+
+  it("add → settle keeps the clientUploadId and strips the signed download_url", () => {
+    const { storage, store } = freshStore();
+    const s = store.getState();
+    s.addInputDraftUpload("session-1", {
+      clientUploadId: "c1",
+      status: "uploading",
+      filename: "shot.png",
+      size: 9,
+    });
+    expect(store.getState().inputDraftAttachments["session-1"]?.[0]?.status).toBe("uploading");
+
+    s.settleInputDraftUpload("session-1", "c1", {
+      ...makeAttachment("att-1"),
+      download_url: "/uploads/att-1.png?Signature=short-lived",
+    });
+
+    const settled = store.getState().inputDraftAttachments["session-1"]?.[0];
+    expect(settled).toMatchObject({ clientUploadId: "c1", status: "uploaded" });
+    expect(settled?.status === "uploaded" && settled.attachment.id).toBe("att-1");
+    // Drafts survive restarts; a response-scoped signed URL must not.
+    expect(settled?.status === "uploaded" && settled.attachment.download_url).toBe("");
+    // And the persisted blob agrees with memory.
+    expect(storage.getItem(ATTACHMENTS_KEY)).toContain('"c1"');
+    expect(storage.getItem(ATTACHMENTS_KEY)).not.toContain("Signature=");
+  });
+
+  it("addInputDraftUpload dedupes by clientUploadId", () => {
+    const { store } = freshStore();
+    const s = store.getState();
+    const placeholder = {
+      clientUploadId: "c1",
+      status: "uploading" as const,
+      filename: "a.png",
+      size: 1,
+    };
+    s.addInputDraftUpload("session-1", placeholder);
+    s.addInputDraftUpload("session-1", placeholder);
+    expect(store.getState().inputDraftAttachments["session-1"]).toHaveLength(1);
+  });
+
+  it("failInputDraftUpload marks the placeholder failed with its reason", () => {
+    const { store } = freshStore();
+    const s = store.getState();
+    s.addInputDraftUpload("session-1", {
+      clientUploadId: "c1",
+      status: "uploading",
+      filename: "a.png",
+      size: 1,
+    });
+    s.failInputDraftUpload("session-1", "c1", "network down");
+    expect(store.getState().inputDraftAttachments["session-1"]?.[0]).toMatchObject({
+      status: "failed",
+      error: "network down",
+      filename: "a.png",
+    });
+  });
+
+  it("removeInputDraftUpload drops the entry and prunes an empty slot", () => {
+    const { storage, store } = freshStore();
+    const s = store.getState();
+    s.addInputDraftUpload("session-1", {
+      clientUploadId: "c1",
+      status: "uploading",
+      filename: "a.png",
+      size: 1,
+    });
+    s.removeInputDraftUpload("session-1", "c1");
+    expect(store.getState().inputDraftAttachments["session-1"]).toBeUndefined();
+    expect(storage.getItem(ATTACHMENTS_KEY)).toBeNull();
+  });
+
+  it("appendToInputDraft lands after trimmed text, or bare on an empty slot", () => {
+    const { store } = freshStore();
+    const s = store.getState();
+    s.setInputDraft("session-1", "wip text  \n");
+    s.appendToInputDraft("session-1", "![shot.png](/api/attachments/att-1/download)");
+    expect(store.getState().inputDrafts["session-1"]).toBe(
+      "wip text\n\n![shot.png](/api/attachments/att-1/download)",
+    );
+
+    s.appendToInputDraft("session-2", "[doc.pdf](/api/attachments/att-2/download)");
+    expect(store.getState().inputDrafts["session-2"]).toBe(
+      "[doc.pdf](/api/attachments/att-2/download)",
+    );
   });
 });

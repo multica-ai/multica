@@ -1,19 +1,20 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { QueryClient, type InfiniteData } from "@tanstack/react-query";
 import { chatKeys } from "@multica/core/chat/queries";
 import type { ChatMessage, ChatMessagesPage, ChatPendingTask } from "@multica/core/types";
 import {
-  hasOptimisticInFlight,
+  hasInFlightPendingTask,
   isStillOnComposeTarget,
   planProjectContextChange,
+  seedAcceptedPendingTask,
 } from "./use-chat-controller";
 
-// hasOptimisticInFlight is the discriminator the stale-session self-heal uses
+// hasInFlightPendingTask is the discriminator the stale-session self-heal uses
 // to EXEMPT a just-created session (awaiting the list refetch) from being
-// dropped as dangling. The critical property (MUL-4171 review): it must key
-// off OPTIMISTIC in-flight writes, NOT merely "has cached messages" — a session
-// deleted elsewhere can still hold real cached history and must remain eligible
-// for self-heal.
+// dropped as dangling. Post-MUL-5181 the send is await-then-render, so the
+// exemption keys purely on the pending task `handleSend` seeds from the send
+// response — NOT on "has cached messages": a session deleted elsewhere can still
+// hold real cached history and must remain eligible for self-heal.
 const sid = "session-1";
 
 function msg(id: string): ChatMessage {
@@ -27,46 +28,108 @@ function msg(id: string): ChatMessage {
   };
 }
 
-describe("hasOptimisticInFlight", () => {
+describe("hasInFlightPendingTask", () => {
   it("is false with an empty cache", () => {
-    expect(hasOptimisticInFlight(new QueryClient(), sid)).toBe(false);
+    expect(hasInFlightPendingTask(new QueryClient(), sid)).toBe(false);
   });
 
-  it("is false when only real (non-optimistic) cached history exists", () => {
+  it("is false when only real cached history exists (no in-flight task)", () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatMessage[]>(chatKeys.messages(sid), [msg("real-1"), msg("real-2")]);
     qc.setQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sid), {
       pages: [{ messages: [msg("real-1")], limit: 50, has_more: false, next_cursor: null }],
       pageParams: [null],
     });
-    // A completed session sets pendingTask to {} (no task_id).
+    // A completed session sets pendingTask to {} (no task_id) — cached history
+    // alone must not exempt it from the self-heal.
     qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sid), {} as ChatPendingTask);
-    expect(hasOptimisticInFlight(qc, sid)).toBe(false);
+    expect(hasInFlightPendingTask(qc, sid)).toBe(false);
   });
 
   it("is true while a pending task is in flight (task_id set)", () => {
     const qc = new QueryClient();
     qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sid), {
-      task_id: "optimistic-abc",
+      task_id: "11111111-1111-4111-8111-111111111111",
       status: "queued",
       created_at: "2026-07-08T00:00:00Z",
     });
-    expect(hasOptimisticInFlight(qc, sid)).toBe(true);
+    expect(hasInFlightPendingTask(qc, sid)).toBe(true);
   });
+});
 
-  it("is true when an optimistic- message sits in the flat cache", () => {
+describe("seedAcceptedPendingTask", () => {
+  it("keeps an idle send as the current head instead of putting it in the queue", () => {
     const qc = new QueryClient();
-    qc.setQueryData<ChatMessage[]>(chatKeys.messages(sid), [msg("optimistic-123")]);
-    expect(hasOptimisticInFlight(qc, sid)).toBe(true);
-  });
 
-  it("is true when an optimistic- message sits in the paged cache", () => {
-    const qc = new QueryClient();
-    qc.setQueryData<InfiniteData<ChatMessagesPage>>(chatKeys.messagesPage(sid), {
-      pages: [{ messages: [msg("optimistic-xyz")], limit: 50, has_more: false, next_cursor: null }],
-      pageParams: [null],
+    seedAcceptedPendingTask(qc, sid, {
+      task_id: "task-1",
+      created_at: "2026-07-08T00:00:00Z",
+      message_id: "message-1",
+      content: "accepted prompt",
+      supports_queue: true,
+      queued: false,
     });
-    expect(hasOptimisticInFlight(qc, sid)).toBe(true);
+
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(sid))).toMatchObject({
+      task_id: "task-1",
+      message_id: "message-1",
+      queued_tasks: [],
+    });
+  });
+
+  it("adds a server-confirmed follow-up behind the current head", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sid), {
+      task_id: "task-active",
+      status: "running",
+      created_at: "2026-07-08T00:00:00Z",
+      queued_tasks: [],
+    });
+
+    seedAcceptedPendingTask(qc, sid, {
+      task_id: "task-next",
+      created_at: "2026-07-08T00:00:01Z",
+      message_id: "message-next",
+      content: "follow up",
+      supports_queue: true,
+      queued: true,
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(sid))).toMatchObject({
+      task_id: "task-active",
+      queued_tasks: [expect.objectContaining({ task_id: "task-next" })],
+    });
+  });
+
+  it("keeps a task dispatched before the send response and refetches authority", () => {
+    const qc = new QueryClient();
+    qc.setQueryData<ChatPendingTask>(chatKeys.pendingTask(sid), {
+      task_id: "task-1",
+      status: "dispatched",
+      created_at: "2026-07-08T00:00:00Z",
+      queued_tasks: [],
+    });
+    const invalidate = vi.spyOn(qc, "invalidateQueries");
+
+    seedAcceptedPendingTask(qc, sid, {
+      task_id: "task-1",
+      created_at: "2026-07-08T00:00:00Z",
+      message_id: "message-1",
+      content: "accepted prompt",
+      supports_queue: true,
+      queued: false,
+    });
+
+    expect(qc.getQueryData<ChatPendingTask>(chatKeys.pendingTask(sid))).toEqual(
+      expect.objectContaining({
+        task_id: "task-1",
+        status: "dispatched",
+        message_id: "message-1",
+        content: "accepted prompt",
+        queued_tasks: [],
+      }),
+    );
+    expect(invalidate).toHaveBeenCalledWith({ queryKey: chatKeys.pendingTask(sid) });
   });
 });
 

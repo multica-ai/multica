@@ -33,7 +33,7 @@ export function VisibilityBadge({
       <TooltipTrigger
         render={
           <span
-            className={`inline-flex items-center gap-1 text-xs text-muted-foreground ${className}`}
+            className={`inline-flex items-center gap-1 text-caption text-muted-foreground ${className}`}
             aria-label={tooltip}
           >
             <Icon className="h-3 w-3 shrink-0" />

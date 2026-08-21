@@ -43,11 +43,15 @@ import type {
 // side.
 // ---------------------------------------------------------------------------
 
+// Mirrors `DailyCostStackData` in the runtimes utils, including its cache-read
+// segment — the dashboard feeds the very same DailyCostChart, so a category
+// missing here is a category missing from the chart's total (MUL-6334).
 export interface DailyCostStack {
   date: string;
   label: string;
   input: number;
   output: number;
+  cacheRead: number;
   cacheWrite: number;
   total: number;
 }
@@ -61,16 +65,25 @@ function formatDateLabel(d: string): string {
   return `${date.getMonth() + 1}/${date.getDate()}`;
 }
 
-// Per-(date, model) rows → 1 row per date with cost broken into the three
+// Per-(date, model) rows → 1 row per date with cost broken into the four
 // segments the stacked bar chart consumes. Stable sort by date asc so the
 // chart x-axis is left-to-right oldest-to-newest.
 export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack[] {
-  const map = new Map<string, { input: number; output: number; cacheWrite: number }>();
+  const map = new Map<
+    string,
+    { input: number; output: number; cacheRead: number; cacheWrite: number }
+  >();
   for (const u of usage) {
     const b = estimateCostBreakdown(u);
-    const entry = map.get(u.date) ?? { input: 0, output: 0, cacheWrite: 0 };
+    const entry = map.get(u.date) ?? {
+      input: 0,
+      output: 0,
+      cacheRead: 0,
+      cacheWrite: 0,
+    };
     entry.input += b.input;
     entry.output += b.output;
+    entry.cacheRead += b.cacheRead;
     entry.cacheWrite += b.cacheWrite;
     map.set(u.date, entry);
   }
@@ -80,14 +93,16 @@ export function aggregateDailyCost(usage: DashboardUsageDaily[]): DailyCostStack
     .map(([date, s]) => {
       const input = round(s.input);
       const output = round(s.output);
+      const cacheRead = round(s.cacheRead);
       const cacheWrite = round(s.cacheWrite);
       return {
         date,
         label: formatDateLabel(date),
         input,
         output,
+        cacheRead,
         cacheWrite,
-        total: round(input + output + cacheWrite),
+        total: round(input + output + cacheRead + cacheWrite),
       };
     });
 }
@@ -243,6 +258,17 @@ export function mergeAgentDashboardRows(
 // placeholder instead of looking the id up in the agent list.
 export const DELETED_AGENTS_ROW_ID = "__deleted_agents__";
 
+// Synthetic agentId the SERVER sends for the bucket aggregating every agent it
+// refuses to name (MUL-5409): agents the viewer may not see, plus the hidden
+// system carriers behind agent-builder sessions, which no client can resolve to
+// a name for anyone. Mirrors `restrictedAgentsRowID` in
+// server/internal/handler/dashboard.go — the two strings must stay in sync.
+//
+// Distinct from DELETED_AGENTS_ROW_ID on purpose: those agents are gone, these
+// are alive and still running. Labelling them "Deleted agents" told the user
+// something false, which is why the bucket renders as a neutral "Other agents".
+export const RESTRICTED_AGENTS_ROW_ID = "__restricted_agents__";
+
 // Fold usage rows whose agent no longer exists in the workspace into a single
 // aggregated "Deleted agents" row instead of dropping them. The agent list is
 // fetched with `include_archived: true`, so archived agents keep their names
@@ -262,6 +288,11 @@ export const DELETED_AGENTS_ROW_ID = "__deleted_agents__";
 // `knownAgentIds` is `null` while the agent list is still loading; callers
 // pass `null` in that case so the rows pass through untouched instead of the
 // whole leaderboard collapsing into one bucket on a slow fetch.
+//
+// The server's restricted bucket is NOT in `knownAgentIds` either (it is not an
+// agent), so it is passed through explicitly rather than swept into the deleted
+// bucket. It also keeps its seconds / taskCount: unlike a hard-deleted agent it
+// really did run, and the run-time rollup folds those numbers into it.
 export function bucketUnknownAgentRows(
   rows: AgentDashboardRow[],
   knownAgentIds: ReadonlySet<string> | null,
@@ -277,7 +308,7 @@ export function bucketUnknownAgentRows(
   };
   let hasDeleted = false;
   for (const r of rows) {
-    if (knownAgentIds.has(r.agentId)) {
+    if (knownAgentIds.has(r.agentId) || r.agentId === RESTRICTED_AGENTS_ROW_ID) {
       known.push(r);
       continue;
     }
@@ -286,6 +317,13 @@ export function bucketUnknownAgentRows(
     bucket.cost += r.cost;
   }
   return hasDeleted ? [...known, bucket] : known;
+}
+
+// Rows the leaderboard renders as a synthetic bucket rather than an agent.
+// `deletedAgentCount` and the caption's agent count both have to exclude these,
+// or the card claims more agents (or more deletions) than it is showing.
+export function isSyntheticAgentRow(agentId: string): boolean {
+  return agentId === DELETED_AGENTS_ROW_ID || agentId === RESTRICTED_AGENTS_ROW_ID;
 }
 
 // ---------------------------------------------------------------------------
@@ -367,21 +405,32 @@ export function aggregateWeeklyTasks(
   weekCount: number,
 ): WeeklyTasksData[] {
   const shells = buildWeekShells(tz, weekCount);
-  const buckets = new Map<string, { completed: number; failed: number }>();
+  const buckets = new Map<
+    string,
+    { completed: number; failed: number; cancelled: number }
+  >();
   for (const shell of shells)
-    buckets.set(shell.weekStart, { completed: 0, failed: 0 });
+    buckets.set(shell.weekStart, { completed: 0, failed: 0, cancelled: 0 });
   for (const r of rows) {
     const wkStart = weekStartIso(r.date);
     const bucket = buckets.get(wkStart);
     if (!bucket) continue;
     const failed = r.failed_count;
-    const completed = Math.max(0, r.task_count - failed);
+    const cancelled = r.cancelled_count;
+    const completed = Math.max(0, r.task_count - failed - cancelled);
     bucket.completed += completed;
     bucket.failed += failed;
+    bucket.cancelled += cancelled;
   }
   return shells.map((s) => {
-    const b = buckets.get(s.weekStart) ?? { completed: 0, failed: 0 };
-    return { ...s, completed: b.completed, failed: b.failed };
+    const b =
+      buckets.get(s.weekStart) ?? { completed: 0, failed: 0, cancelled: 0 };
+    return {
+      ...s,
+      completed: b.completed,
+      failed: b.failed,
+      cancelled: b.cancelled,
+    };
   });
 }
 
@@ -397,19 +446,23 @@ export function aggregateDailyTime(rows: DashboardRunTimeDaily[]): DailyTimeData
     }));
 }
 
-// Per-date run-time rows → one row per date with `completed` and `failed`
-// counts for the DailyTasksChart's stacked bar (failed_count is a subset
-// of task_count, so completed = task_count - failed_count).
+// Per-date run-time rows → one row per date with `completed`, `failed` and
+// `cancelled` counts for the DailyTasksChart's stacked bar. failed_count and
+// cancelled_count are disjoint subsets of task_count, so the succeeded count
+// is the remainder. Subtracting cancelled matters: without it a run the user
+// stopped would render in the green "completed" segment.
 export function aggregateDailyTasks(rows: DashboardRunTimeDaily[]): DailyTasksData[] {
   return rows.toSorted((a, b) => a.date.localeCompare(b.date))
     .map((r) => {
       const failed = r.failed_count;
-      const completed = Math.max(0, r.task_count - failed);
+      const cancelled = r.cancelled_count;
+      const completed = Math.max(0, r.task_count - failed - cancelled);
       return {
         date: r.date,
         label: formatDateLabel(r.date),
         completed,
         failed,
+        cancelled,
       };
     });
 }
@@ -594,13 +647,10 @@ export function aggregateFailureReasons(
 
 // Synthetic agentId for the row aggregating every agent the viewer can't
 // resolve to a name. Distinct from DELETED_AGENTS_ROW_ID because this bucket
-// covers two populations at once: hard-deleted agents, and agents that are
-// private to someone else. The failure rollups are workspace-scoped and do
-// NOT apply per-agent visibility (see the access-control note on
-// server/internal/handler/dashboard.go), while the agent list the client
-// joins against DOES — members only see a private agent when they own it or
-// are workspace owner/admin. Naming the bucket after deletion would be a lie
-// for the second group.
+// covers two populations at once: hard-deleted agents, and the server's
+// already-anonymized restricted bucket. Naming it after deletion would be a
+// lie for the second group, so the Errors card labels it neutrally
+// ("Other agents"), which is honest for both.
 export const UNRESOLVED_AGENTS_ROW_ID = "__unresolved_agents__";
 
 export interface AgentFailureRow {
@@ -608,15 +658,19 @@ export interface AgentFailureRow {
   failed: number;
   total: number;
   rate: number;
-  // Heaviest class for this agent — the "what kind of broken" hint on the
-  // top-offenders row. null when the agent has no failures at all.
-  topClass: FailureClass | null;
+  // Full per-class split of this agent's failures, which the offender row
+  // draws as a stacked bar. Carries the whole composition rather than just
+  // the heaviest class: "fails one way" and "fails five ways" are different
+  // problems, and a single dominant-class label collapsed them into the same
+  // row. Every class is present (0 when unused) so the bar can be built
+  // without existence checks.
+  classes: FailureClassCounts;
 }
 
-// Per-agent failure totals, worst first. Ranked by absolute failure count
-// rather than rate: an agent with 1/1 failed is a 100% rate but is rarely the
-// thing an operator should look at before the agent that failed 40 times.
-// The rate rides along on the row so the reader can still see it.
+// Per-agent failure totals, worst first. Default order is absolute failure
+// count: an agent with 1/1 failed is a 100% rate but is rarely the thing an
+// operator should look at before the agent that failed 40 times. The rate
+// rides along on the row, and `sortAgentFailures` can re-rank on it.
 //
 // Agents with zero failures are dropped — this list is a triage aid, not a
 // census; the leaderboard above it already shows every agent.
@@ -638,35 +692,74 @@ export function aggregateAgentFailures(
     entry.failed += r.task_count;
     entry.classes[failureClassOf(r.failure_reason)] += r.task_count;
   }
-  return Array.from(map.entries())
-    .filter(([, v]) => v.failed > 0)
-    .map(([agentId, v]) => {
-      let topClass: FailureClass | null = null;
-      for (const c of FAILURE_CLASSES) {
-        if (v.classes[c] > 0 && (topClass === null || v.classes[c] > v.classes[topClass])) {
-          topClass = c;
-        }
-      }
-      return {
+  return sortAgentFailures(
+    Array.from(map.entries())
+      .filter(([, v]) => v.failed > 0)
+      .map(([agentId, v]) => ({
         agentId,
         failed: v.failed,
         total: v.total,
         rate: v.total > 0 ? v.failed / v.total : 0,
-        topClass,
-      };
-    })
-    .toSorted((a, b) => b.failed - a.failed || b.rate - a.rate);
+        classes: v.classes,
+      })),
+    "failed",
+  );
+}
+
+// Which metric ranks the offender list, and therefore how long its bars are.
+// The two used to disagree: the list ranked on absolute failures while the
+// most prominent number on the row was the rate, so the bar looked like it
+// measured a percentage it had nothing to do with. Mirrors LeaderboardSort's
+// contract — sort metric, bar length and the emphasised column move together.
+export type OffenderSort = "failed" | "rate";
+
+export const OFFENDER_METRIC: Record<
+  OffenderSort,
+  (r: AgentFailureRow) => number
+> = {
+  failed: (r) => r.failed,
+  rate: (r) => r.rate,
+};
+
+// Minimum terminal runs before an agent's failure rate is allowed to compete
+// on the Rate ranking. One run that failed is a 100% rate, and without a floor
+// that row wins outright and buries every agent worth looking at.
+//
+// Small-sample rows are demoted, NOT hidden: this list has to keep reconciling
+// with the workspace failure count above it, and an agent that failed its only
+// two runs is still a real thing an operator may want to see.
+export const MIN_RATE_SAMPLE = 10;
+
+export function hasRateSample(row: AgentFailureRow): boolean {
+  return row.total >= MIN_RATE_SAMPLE;
+}
+
+// Re-rank the offender rows for the selected metric. Ties break on the other
+// metric so an equal-valued bucket keeps a stable, meaningful order instead of
+// reshuffling on every render.
+export function sortAgentFailures(
+  rows: AgentFailureRow[],
+  sortBy: OffenderSort,
+): AgentFailureRow[] {
+  if (sortBy === "failed") {
+    return rows.toSorted((a, b) => b.failed - a.failed || b.rate - a.rate);
+  }
+  const sample = (r: AgentFailureRow) => (hasRateSample(r) ? 0 : 1);
+  return rows.toSorted(
+    (a, b) => sample(a) - sample(b) || b.rate - a.rate || b.failed - a.failed,
+  );
 }
 
 // Fold rows whose agent the viewer cannot resolve into one aggregated bucket
 // so the Errors list never renders a bare agent UUID.
 //
-// This is a privacy boundary, not just a cosmetic one. The failure rollups
-// return every agent in the workspace — deliberately, since failure volume is
-// a workspace-level operational metric — but the agent list is filtered by
-// per-agent visibility. Rendering `agentId` for the difference would tell a
-// member that a private agent exists, how often it runs, how often it fails,
-// and what it fails on.
+// The privacy boundary itself now lives on the server: GetDashboardFailuresByAgent
+// folds agents the caller may not view onto RESTRICTED_AGENTS_ROW_ID before
+// serializing (MUL-5409), because client-side filtering is decoration — one
+// curl bypasses it. This function stays as the display-side backstop: it still
+// owns hard-deleted agents, whose ids the server has no reason to hide but
+// which resolve to no name, and it re-anonymizes the server's bucket into the
+// same neutral row so the card has one "not an agent you can open" case.
 //
 // `knownAgentIds` is null while the agent list is still loading. Unlike
 // `bucketUnknownAgentRows`, which passes rows through in that window, this
@@ -676,12 +769,10 @@ export function aggregateAgentFailures(
 //
 // This rewrites the RAW per-(agent, reason) rows rather than merging the
 // aggregated ones, so the bucket is just another agent_id by the time
-// `aggregateAgentFailures` runs and its per-class counts stay exact. Merging
-// after aggregation loses the class breakdown: each row carries only its own
-// dominant class, so folding two agents would attribute each one's ENTIRE
-// failure count to that single class. An agent failing auth 6 / timeout 5
-// would contribute 11 to auth and nothing to timeout, and a bucket whose real
-// composition was timeout 15 / auth 6 would announce itself as Auth.
+// `aggregateAgentFailures` runs: its totals, rate, class split and rank all
+// come out of the same code path as every other row. Merging aggregated rows
+// would mean re-deriving `total` and `rate` by hand at the merge site — a
+// second, easily-skewed copy of arithmetic that already exists once.
 export function anonymizeUnresolvedAgentRows(
   rows: DashboardFailureByAgent[],
   knownAgentIds: ReadonlySet<string> | null,

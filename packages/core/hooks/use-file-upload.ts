@@ -80,6 +80,15 @@ function pickMarkdownLink(att: Attachment): string {
   return att.url;
 }
 
+// Adapt a completed server `Attachment` into the editor's `UploadResult` (the
+// two URL fields the editor writes into markdown / persists). Exported so the
+// coordinated-upload path (MUL-5181), which runs the request through the
+// module-level upload coordinator rather than this hook, can hand the editor
+// the exact same shape for its inline preview swap.
+export function toUploadResult(att: Attachment): UploadResult {
+  return { ...att, link: att.url, markdownLink: pickMarkdownLink(att) };
+}
+
 export function useFileUpload(
   api: ApiClient,
   // Receives the failing `file` alongside the error so hosts can name it in
@@ -117,7 +126,7 @@ export function useFileUpload(
           commentId: ctx?.commentId,
           chatSessionId: ctx?.chatSessionId,
         });
-        return { ...att, link: att.url, markdownLink: pickMarkdownLink(att) };
+        return toUploadResult(att);
       } finally {
         setInFlight((n) => n - 1);
       }

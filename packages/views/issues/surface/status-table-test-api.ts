@@ -15,6 +15,40 @@ type LegacyListIssues = (
   params?: ListIssuesParams,
 ) => Promise<ListIssuesResponse>;
 
+/** One agent holding running issue tasks, as the working-agents projection
+ *  reports it. `issue_ids` may name issues outside the queried surface — the
+ *  facet is expected to drop those, which is the whole point of MUL-5525. */
+export interface WorkingTaskFixture {
+  id: string;
+  issue_ids: readonly string[];
+}
+
+/**
+ * Data for the `working_agents` facet. `rows` is read directly rather than
+ * through the legacy list endpoint: several tests assert that a Table surface
+ * never touches that endpoint, and a facet stand-in that called it would make
+ * them pass or fail for the wrong reason.
+ */
+export interface WorkingAgentsFixture {
+  rows: () => readonly Issue[];
+  agents: () => readonly WorkingTaskFixture[];
+}
+
+/**
+ * Group-key axis for a status grouping. Board / list / swimlane surfaces page by
+ * CATEGORY (`status_category:<category>`); the table still groups by concrete
+ * status key. This fixture holds only built-in statuses, where a key IS its own
+ * category, so the two axes select the same rows — only the key shape differs.
+ * (MUL-6243)
+ */
+function statusAxis(group: { kind: string }): string {
+  return group.kind === "status_category" ? "status_category" : "status";
+}
+
+function secondaryAxis(group: { kind: string; secondary?: string }): string {
+  return group.secondary === "status_category" ? "status_category" : "status";
+}
+
 function legacyParamsForStatus(
   query: IssueTableQuerySpec,
   status: IssueStatus,
@@ -80,6 +114,30 @@ async function allRows(
   return rows.flat();
 }
 
+// The working-agents facet drops only ITS dimension, so every other filter in
+// the spec still applies. Mirrors the two predicates `rowsForStatus` enforces.
+function workingAgentFacetValues(
+  query: IssueTableQuerySpec,
+  fixture: WorkingAgentsFixture,
+) {
+  const statuses = query.filters.statuses;
+  const visible = new Set(
+    fixture
+      .rows()
+      .filter((issue) => !statuses || statuses.includes(issue.status))
+      .filter(
+        (issue) =>
+          query.filters.include_sub_issues !== false ||
+          issue.parent_issue_id === null,
+      )
+      .map((issue) => issue.id),
+  );
+  return fixture.agents().flatMap((agent) => {
+    const count = agent.issue_ids.filter((id) => visible.has(id)).length;
+    return count > 0 ? [{ key: agent.id, count }] : [];
+  });
+}
+
 function primaryDescriptor(
   issue: Issue,
   primary: "assignee" | "project" | "parent",
@@ -136,7 +194,13 @@ function primaryDescriptor(
  * imports this module; it lets existing surface tests keep their small
  * per-status in-memory data source while asserting the new request contract.
  */
-export function statusTableMethodsFromLegacy(listIssues: LegacyListIssues) {
+export function statusTableMethodsFromLegacy(
+  listIssues: LegacyListIssues,
+  // Stand-in for the server's issue↔running-task join. Supply it to exercise
+  // the `working_agents` facet; without it the facet answers empty, matching a
+  // workspace where nothing is running.
+  workingAgents: WorkingAgentsFixture = { rows: () => [], agents: () => [] },
+) {
   return {
     listIssueTableGroups: async (request: IssueTableGroupsRequest) => {
       if (request.group.kind === "compound") {
@@ -172,7 +236,7 @@ export function statusTableMethodsFromLegacy(listIssues: LegacyListIssues) {
               const count = issues.filter((issue) => issue.status === status).length;
               return count
                 ? [{
-                    key: `compound:${descriptor.key}:status:${status}`,
+                    key: `compound:${descriptor.key}:${secondaryAxis(request.group)}:${status}`,
                     value: { kind: "status" as const, status },
                     count,
                   }]
@@ -193,7 +257,7 @@ export function statusTableMethodsFromLegacy(listIssues: LegacyListIssues) {
         query_fingerprint: "test",
         total: nonEmpty.reduce((sum, group) => sum + group.issues.length, 0),
         groups: nonEmpty.map(({ status, issues }) => ({
-          key: `status:${status}`,
+          key: `${statusAxis(request.group)}:${status}`,
           value: { kind: "status" as const, status },
           count: issues.length,
         })),
@@ -203,11 +267,10 @@ export function statusTableMethodsFromLegacy(listIssues: LegacyListIssues) {
     listIssueTableRows: async (request: IssueTableRowsRequest) => {
       if (request.group.kind === "compound") {
         const primary = request.group.primary;
-        const marker = request.group_key?.lastIndexOf(":status:") ?? -1;
+        const axis = `:${secondaryAxis(request.group)}:`;
+        const marker = request.group_key?.lastIndexOf(axis) ?? -1;
         const status =
-          marker >= 0
-            ? request.group_key?.slice(marker + ":status:".length)
-            : undefined;
+          marker >= 0 ? request.group_key?.slice(marker + axis.length) : undefined;
         const primaryKey =
           marker >= 0
             ? request.group_key?.slice("compound:".length, marker)
@@ -235,7 +298,7 @@ export function statusTableMethodsFromLegacy(listIssues: LegacyListIssues) {
           next_cursor: null,
         };
       }
-      const rawStatus = request.group_key?.replace(/^status:/, "");
+      const rawStatus = request.group_key?.replace(/^status(_category)?:/, "");
       const status = ALL_STATUSES.find((value) => value === rawStatus);
       const issues = status
         ? await rowsForStatus(listIssues, request.query, status)
@@ -254,22 +317,27 @@ export function statusTableMethodsFromLegacy(listIssues: LegacyListIssues) {
       };
     },
     listIssueTableFacets: async (request: IssueTableFacetsRequest) => {
-      const groups = await Promise.all(
-        ALL_STATUSES.map(async (status) => ({
-          status,
-          issues: await rowsForStatus(
-            listIssues,
-            {
-              ...request.query,
-              filters: {
-                ...request.query.filters,
-                statuses: undefined,
-              },
-            },
-            status,
-          ),
-        })),
-      );
+      // Only touch the legacy list endpoint when a status facet is actually
+      // asked for: Table surfaces request other facets while asserting that
+      // endpoint is never called.
+      const groups = request.facets.some((facet) => facet.kind === "status")
+        ? await Promise.all(
+            ALL_STATUSES.map(async (status) => ({
+              status,
+              issues: await rowsForStatus(
+                listIssues,
+                {
+                  ...request.query,
+                  filters: {
+                    ...request.query.filters,
+                    statuses: undefined,
+                  },
+                },
+                status,
+              ),
+            })),
+          )
+        : [];
       return {
         query_fingerprint: "test",
         total: groups.reduce((sum, group) => sum + group.issues.length, 0),
@@ -283,7 +351,9 @@ export function statusTableMethodsFromLegacy(listIssues: LegacyListIssues) {
                     key: status,
                     count: issues.length,
                   }))
-              : [],
+              : facet.kind === "working_agents"
+                ? workingAgentFacetValues(request.query, workingAgents)
+                : [],
         })),
       };
     },

@@ -11,7 +11,7 @@
     "view_table": "表格",
     "view_cards": "卡片",
     "row_menu": "项目操作",
-    "pin": "钉到侧边栏",
+    "pin": "固定到侧边栏",
     "unpin": "取消钉选",
     "delete": "删除",
     "no_matches": "没有匹配的项目",
@@ -25,7 +25,7 @@
     "progress": "进度",
     "lead": "负责人",
     "created": "创建时间",
-    "issues": "Issue 数"
+    "issues": "任务数"
   },
   "status": {
     "planned": "计划中",
@@ -69,16 +69,17 @@
     "section_description": "描述",
     "prop_start_date": "开始日期",
     "prop_due_date": "截止日期",
-    "clear_date": "清除日期",
+    "no_start_date": "无开始日期",
+    "no_due_date": "无截止日期",
     "description_placeholder": "添加描述...",
-    "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每个任务。",
-    "empty_issues_title": "还没有关联的 issue",
-    "empty_issues_hint": "新建一个 issue，或把已有的 issue 关联到这个项目。",
-    "empty_issues_new_button": "新建 issue",
-    "no_issues_yet": "目前还没有 issue",
+    "description_hint": "会作为项目上下文提供给智能体，应用于该项目下的每个 task。",
+    "empty_issues_title": "还没有关联的任务",
+    "empty_issues_hint": "新建一个任务，或把已有的任务关联到这个项目。",
+    "empty_issues_new_button": "新建任务",
+    "no_issues_yet": "目前还没有任务",
     "toast_link_copied": "已复制链接",
     "toast_project_deleted": "已删除项目",
-    "toast_move_issue_failed": "移动 issue 失败"
+    "toast_move_issue_failed": "移动任务失败"
   },
   "resources": {
     "section_header": "资源",
@@ -102,7 +103,9 @@
     "local_rename_label": "本地目录显示名",
     "local_no_daemon_tooltip": "尚未识别到本机 daemon，agent 暂时无法打开此目录。",
     "local_other_machine_tooltip": "此目录仅在最初注册它的电脑上可用。",
-    "chat_hint_prefix": "Agent 将在",
+    "chat_hint_prefix": "智能体将直接在以下目录中工作：",
+    "chat_hint_worktree_prefix": "智能体将在以下仓库的独立 worktree 中工作：",
+    "chat_hint_worktree_note": "不会改动你的工作副本，每条任务的结果以 agent/… 分支交回。",
     "toast_local_attached": "已添加本地目录",
     "toast_local_renamed": "已重命名",
     "toast_local_rename_failed": "重命名失败",
@@ -115,19 +118,36 @@
     "local_validate_not_a_directory": "该路径不是目录。",
     "local_validate_not_readable": "目录不可读。",
     "local_validate_not_writable": "目录不可写。",
-    "local_validate_unsupported": "本地目录仅能在桌面端选择。"
+    "local_validate_unsupported": "本地目录仅能在桌面端选择。",
+    "mode_dialog_title": "任务如何使用这个文件夹？",
+    "mode_dialog_description": "这决定了你如何拿到智能体的工作成果，以及这个文件夹上的任务能否同时运行。",
+    "mode_in_place_title": "直接修改这个文件夹",
+    "mode_in_place_description": "一次只跑一条任务。智能体的改动会直接出现在你的工作区里，你可以接着改。",
+    "mode_worktree_title": "并行隔离运行",
+    "mode_worktree_description": "任务可以同时跑，互不干扰，也不碰你的工作区。每条任务的结果是这个仓库里的一个 agent/… 分支，由你 review 后合并。",
+    "mode_worktree_needs_git": "这个文件夹不是 git 仓库，分支无处可放。请选择一个仓库，或者继续直接修改这个文件夹。",
+    "mode_worktree_needs_server_upgrade": "当前 Multica 服务端版本过旧，无法支持并行运行——它会把任务直接跑在这个文件夹里。升级服务端后即可开启。",
+    "mode_cancel": "取消",
+    "mode_save": "保存",
+    "mode_add": "添加文件夹",
+    "mode_edit_tooltip": "修改任务使用这个文件夹的方式",
+    "mode_badge_worktree": "并行",
+    "mode_badge_worktree_tooltip": "任务在各自的 git worktree 中同时运行，并以分支形式交付结果。你的工作区不会被改动。",
+    "toast_local_mode_updated": "已更新执行方式",
+    "toast_local_mode_update_failed": "无法更新执行方式",
+    "mode_badge_in_place": "原地"
   },
   "delete_dialog": {
     "title": "删除项目",
-    "description": "将删除这个项目。issue 不会被删除，只会从项目中解除关联。",
+    "description": "将删除这个项目。任务不会被删除，只会从项目中解除关联。",
     "confirm": "删除",
     "cancel": "取消"
   },
   "picker": {
     "no_project": "无项目",
-    "remove": "从项目移除",
     "empty": "还没有项目",
-    "search_placeholder": "搜索项目..."
+    "search_placeholder": "搜索项目...",
+    "clear_aria": "清除项目"
   },
   "chip": {
     "fallback_label": "项目"

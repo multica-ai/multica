@@ -263,6 +263,12 @@ article > p.text-lg {
   font-weight: 600;
 }
 
+/* The page article is a flex column (gap-4), so the prose body's first
+   element must not stack its own top margin on top of that gap. */
+.prose > :first-child {
+  margin-top: 0 !important;
+}
+
 .prose h2 {
   font-family: var(--font-serif), ui-serif, serif;
   font-size: 1.625rem; /* 26px */
@@ -316,7 +322,10 @@ article > p.text-lg {
  * change) — the link "arrives" as a single color shift.
  * ------------------------------------------------------------------------- */
 
-.prose a:not([data-card]):not(.not-prose) {
+.prose
+  a:not([data-card]):not(.not-prose):not(
+    :where([class~="not-prose"] *)
+  ) {
   color: var(--foreground);
   font-weight: 500;
   text-decoration: underline;
@@ -325,7 +334,10 @@ article > p.text-lg {
   text-underline-offset: 3px;
   transition: text-decoration-color 150ms, color 150ms;
 }
-.prose a:not([data-card]):not(.not-prose):hover {
+.prose
+  a:not([data-card]):not(.not-prose):not(
+    :where([class~="not-prose"] *)
+  ):hover {
   color: var(--primary);
   text-decoration-color: var(--primary);
 }
@@ -334,8 +346,16 @@ article > p.text-lg {
  * bg, uppercase NOTE label, body). Another decoration over-loads it — so
  * links inside a callout drop the underline entirely. Color shift on
  * hover is the full affordance. */
-.prose div.shadow-md:has(> [role="none"]) a:not([data-card]):not(.not-prose),
-.prose div.shadow-md:has(> [role="none"]) a:not([data-card]):not(.not-prose):hover {
+.prose
+  div.shadow-md:has(> [role="none"])
+  a:not([data-card]):not(.not-prose):not(
+    :where([class~="not-prose"] *)
+  ),
+.prose
+  div.shadow-md:has(> [role="none"])
+  a:not([data-card]):not(.not-prose):not(
+    :where([class~="not-prose"] *)
+  ):hover {
   text-decoration: none;
 }
 
@@ -555,6 +575,14 @@ article > p.text-lg {
   letter-spacing: -0.005em;
   display: flex;
   align-items: center;
+}
+
+/* The padding shorthand above flattens the folder tree indent
+   (ps-(--sidebar-item-offset)); restore it for links that carry the
+   offset utility so children clear the vertical guide line. */
+#nd-sidebar a[data-active][class*="ps-("],
+#nd-sidebar-mobile a[data-active][class*="ps-("] {
+  padding-inline-start: var(--sidebar-item-offset, 0.625rem);
 }
 
 #nd-sidebar a[data-active="false"],

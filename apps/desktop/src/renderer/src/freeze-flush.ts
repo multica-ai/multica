@@ -1,15 +1,82 @@
+import type { CaptureEventOptions } from "@multica/core/analytics";
 import type { FreezeBreadcrumb } from "../../shared/freeze-breadcrumb";
 
-// Turning a breadcrumb the previous session left behind into event properties.
+// Reporting a failure the previous session couldn't report itself.
 //
-// The breadcrumb context is assembled in the main process and can grow a field
-// at any time, so props are built by explicit whitelist here rather than by
-// spreading it: an unknown key is dropped, not forwarded. That matters because
-// this context is the one place a raw identifier could reach telemetry.
+// Two things here are easy to get wrong, so both are pinned by tests:
+//
+// 1. ACK TIMING. `onCaptured` fires when posthog.capture() returns, which is a
+//    hand-off to the SDK, NOT a delivery confirmation — posthog-js exposes no
+//    delivery callback (`CaptureOptions` has `send_instantly` and `transport`,
+//    and nothing else). Acking there would delete the breadcrumb while the
+//    request is still in flight, so an app that freezes again or is killed a
+//    moment later loses the report anyway — the exact MUL-4115 failure this
+//    was meant to fix. We therefore ack after a grace window: if the process
+//    dies inside it, the timer never fires, the file survives, and the next
+//    boot retries. A duplicate report is the acceptable trade (they carry
+//    `breadcrumb_ts`, so query-side dedupe is trivial); a lost one is not.
+//
+// 2. FIELD SELECTION. The breadcrumb context is assembled in the main process
+//    and could grow a field at any time. Spreading it into telemetry props
+//    means any such field ships automatically. Props are therefore built by
+//    explicit whitelist below — unknown keys are dropped, not forwarded.
 
 /**
- * Build the event properties for a pending freeze/crash breadcrumb, field by
- * field. Anything not named here does not ship.
+ * How long to leave the breadcrumb on disk after hand-off. Long enough for an
+ * instant send to complete on a slow link; short enough that the duplicate
+ * window stays small.
+ */
+export const FREEZE_ACK_GRACE_MS = 10_000;
+
+type CaptureFn = (
+  name: string,
+  props: Record<string, unknown>,
+  options?: CaptureEventOptions,
+) => void;
+
+export interface FlushFreezeBreadcrumbDeps {
+  getLastFreeze: () => FreezeBreadcrumb | null;
+  ackFreeze: (ts: number) => void;
+  capture: CaptureFn;
+  graceMs?: number;
+}
+
+/**
+ * Report a pending freeze/crash breadcrumb, then retire it once the report has
+ * had time to leave. Returns a cleanup that cancels a pending ack — a
+ * cancelled ack leaves the breadcrumb for the next boot, which is the safe
+ * direction.
+ */
+export function flushFreezeBreadcrumb({
+  getLastFreeze,
+  ackFreeze,
+  capture,
+  graceMs = FREEZE_ACK_GRACE_MS,
+}: FlushFreezeBreadcrumbDeps): () => void {
+  const last = getLastFreeze();
+  if (!last) return () => undefined;
+
+  let ackTimer: ReturnType<typeof setTimeout> | null = null;
+  const crashed = last.kind === "render-process-gone";
+
+  capture(crashed ? "client_crash" : "client_unresponsive", buildFreezeEventProps(last), {
+    // The batch timer lives in the thread that already froze once and may be
+    // about to freeze again.
+    sendInstantly: true,
+    onCaptured: () => {
+      ackTimer = setTimeout(() => ackFreeze(last.ts), graceMs);
+    },
+  });
+
+  return () => {
+    if (ackTimer) clearTimeout(ackTimer);
+  };
+}
+
+/**
+ * Build the event properties from a breadcrumb, field by field. Anything not
+ * named here does not ship — including a future key added to the context in
+ * the main process.
  */
 export function buildFreezeEventProps(
   breadcrumb: FreezeBreadcrumb,
@@ -19,7 +86,6 @@ export function buildFreezeEventProps(
 
   return {
     source: crashed ? "render-process-gone" : "main-unresponsive",
-    recovered: false,
     breadcrumb_ts: breadcrumb.ts,
     crashed_version: breadcrumb.version,
     ...routeProps(context.desktopRoute),

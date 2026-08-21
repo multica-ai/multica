@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -458,8 +459,11 @@ func TestReconcileCommentsOnCompletion_AutopilotDelegationRestoresAuthority(t *t
 // must-fix #2 (review round 2): an edit is a NEW action, so it must judge (and
 // persist) authority by the CURRENT editing task, not the comment's original
 // authoring task. A same-issue edit keeps the autopilot-creator authority; a
-// cross-issue edit re-stamps source_task_id to NULL and fails closed, so it can
-// never borrow the old autopilot run's authority (preview and save now agree).
+// cross-issue edit re-stamps source_task_id to the EDITING task and still fails
+// closed, so it can never borrow the old autopilot run's authority (preview and
+// save now agree). Since MUL-6490 the lineage itself is always persisted — the
+// same-issue requirement lives in autopilotDelegationAuthority, which is what
+// rejects the cross-issue editing task here.
 func TestUpdateComment_AutopilotAuthorityReStampedToEditingTask(t *testing.T) {
 	if testHandler == nil || testPool == nil {
 		t.Skip("database not available")
@@ -502,7 +506,7 @@ func TestUpdateComment_AutopilotAuthorityReStampedToEditingTask(t *testing.T) {
 		}
 	})
 
-	t.Run("cross-issue edit re-stamps source task to NULL and fails closed", func(t *testing.T) {
+	t.Run("cross-issue edit re-stamps source task to the editing task and fails closed", func(t *testing.T) {
 		fx := newAutopilotDelegationFixture(t, workerID, ownerID, "autopilot")
 		issueID := uuidToString(fx.Issue.ID)
 		commentID := seedLeaderPlainComment(t, issueID, fx.LeaderAgentID, fx.LeaderTaskID)
@@ -514,12 +518,16 @@ func TestUpdateComment_AutopilotAuthorityReStampedToEditingTask(t *testing.T) {
 		if got := countQueued(t, issueID); got != 0 {
 			t.Fatalf("cross-issue edit must not borrow the old autopilot authority; got %d queued", got)
 		}
-		var sourceTaskValid bool
-		if err := testPool.QueryRow(ctx, `SELECT source_task_id IS NOT NULL FROM comment WHERE id = $1`, commentID).Scan(&sourceTaskValid); err != nil {
+		// MUL-6490: the lineage now records the EDITING run (that is what "which
+		// run wrote this" means, and it is how a human originator survives a
+		// cross-issue hop). The old authoring task must NOT survive the edit —
+		// that is the value the autopilot authority would have accepted.
+		var sourceTaskID pgtype.UUID
+		if err := testPool.QueryRow(ctx, `SELECT source_task_id FROM comment WHERE id = $1`, commentID).Scan(&sourceTaskID); err != nil {
 			t.Fatalf("read comment source_task_id: %v", err)
 		}
-		if sourceTaskValid {
-			t.Fatal("a cross-issue edit must clear source_task_id so preview, save, and reconcile all fail closed")
+		if uuidToString(sourceTaskID) != crossTaskID {
+			t.Fatalf("source_task_id = %q, want the editing task %q", uuidToString(sourceTaskID), crossTaskID)
 		}
 	})
 }

@@ -38,10 +38,17 @@ func TestRuntimeHandlersRejectMalformedRuntimeID(t *testing.T) {
 			handle: testHandler.DeleteAgentRuntime,
 		},
 		{
+			name:   "unbind-agents-and-delete",
+			method: "POST",
+			path:   "/api/runtimes/not-a-uuid/unbind-agents-and-delete",
+			handle: testHandler.UnbindAgentsAndDeleteRuntime,
+		},
+		{
+			// Legacy route kept for installed clients; same handler.
 			name:   "archive-agents-and-delete",
 			method: "POST",
 			path:   "/api/runtimes/not-a-uuid/archive-agents-and-delete",
-			handle: testHandler.ArchiveAgentsAndDeleteRuntime,
+			handle: testHandler.UnbindAgentsAndDeleteRuntime,
 		},
 		{
 			name:   "models",

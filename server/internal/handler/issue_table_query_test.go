@@ -168,6 +168,48 @@ func TestIssueTableExplicitEmptyAssigneesMatchesNone(t *testing.T) {
 	}
 }
 
+func TestIssueTableProjectScopeAssigneeTypes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	spec := issueTableQuerySpec{
+		Scope: issueTableScope{
+			Kind:          "project",
+			ProjectID:     "00000000-0000-0000-0000-000000000001",
+			AssigneeTypes: []string{"agent", "squad"},
+		},
+		Sort: issueTableSortRequest{Field: "position", Direction: "asc"},
+	}
+
+	w := httptest.NewRecorder()
+	compiled, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		spec,
+	)
+	if !ok {
+		t.Fatalf("compile failed: %d %s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(compiled.where, "i.project_id") {
+		t.Fatalf("project predicate missing: %q", compiled.where)
+	}
+	if !strings.Contains(compiled.where, "i.assignee_type = ANY") {
+		t.Fatalf("assignee-type narrowing missing on project scope: %q", compiled.where)
+	}
+
+	bad := spec
+	bad.Scope.AssigneeTypes = []string{"martian"}
+	w = httptest.NewRecorder()
+	if _, ok := testHandler.compileIssueTableQuery(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		bad,
+	); ok {
+		t.Fatal("invalid assignee_types must be rejected on project scope")
+	}
+}
+
 func TestIssueTableWorkingIssueIDsAreExplicitAndAssigneeIndependent(t *testing.T) {
 	if testHandler == nil {
 		t.Skip("database not available")
@@ -417,6 +459,42 @@ func TestIssueTablePositionCursorIncludesIndexableLowerBound(t *testing.T) {
 	}
 }
 
+func TestIssueTableLastActivityDefaultsToIndexedOrder(t *testing.T) {
+	w := httptest.NewRecorder()
+	sort, ok := testHandler.issueTableOrderBy(
+		w,
+		newRequest(http.MethodPost, "/api/issues/table/rows", nil),
+		testWorkspaceID,
+		issueTableSortRequest{Field: "last_activity"},
+	)
+	if !ok {
+		t.Fatalf("last_activity sort rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if got, want := sort.orderBy(), "i.last_activity_at DESC NULLS LAST, i.id DESC"; got != want {
+		t.Fatalf("orderBy = %q, want %q", got, want)
+	}
+
+	sortValue := "2026-08-19T05:04:03.123456Z"
+	cursor := issueTableCursor{
+		SortValue: &sortValue,
+		RowID:     "00000000-0000-4000-8000-000000000001",
+	}
+	args := make([]any, 0, 2)
+	predicate, ok := sort.cursorPredicate(w, &cursor, func(value any) string {
+		args = append(args, value)
+		return fmt.Sprintf("$%d", len(args))
+	})
+	if !ok {
+		t.Fatalf("valid last_activity cursor rejected: status=%d body=%s", w.Code, w.Body.String())
+	}
+	if strings.Contains(predicate, "created_at") {
+		t.Fatalf("last_activity cursor unexpectedly uses created_at tie-break: %s", predicate)
+	}
+	if !strings.Contains(predicate, "i.id < $1::uuid") {
+		t.Fatalf("last_activity cursor is missing id tie-break: %s", predicate)
+	}
+}
+
 func TestIssueTableGroupIdentityBindsIncludeEmpty(t *testing.T) {
 	withoutEmpty := issueTableGroupIdentity(issueTableGroupSpec{
 		Kind:       "property",
@@ -438,6 +516,7 @@ func TestIssueTableCompoundCellKeyResolvesPrimaryAndStatus(t *testing.T) {
 	key := compoundCellGroupKey(
 		"parent:00000000-0000-4000-8000-000000000001",
 		"todo",
+		false,
 	)
 	args := make([]any, 0, 2)
 	predicate, ok := compound.predicate(

@@ -61,6 +61,7 @@ import (
 // during cleanup.
 
 const (
+	defaultTestDatabaseURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
 	// concurrentRunners is the goroutine count for the race tests. Set
 	// large enough that a missing lock would reliably trip on a multi-
 	// core box with -race, but small enough to keep the suite fast on a
@@ -72,12 +73,16 @@ const (
 	raceTestTimeout = 60 * time.Second
 )
 
+func testDatabaseURL() string {
+	if dbURL := os.Getenv("DATABASE_URL"); dbURL != "" {
+		return dbURL
+	}
+	return defaultTestDatabaseURL
+}
+
 func openTestPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
+	dbURL := testDatabaseURL()
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	pool, err := pgxpool.New(ctx, dbURL)
@@ -349,10 +354,7 @@ func TestRunMigrationsAdvisoryLockSerializes(t *testing.T) {
 	// connection re-enters". (pg_advisory_lock is reentrant on the same
 	// session, so re-acquiring on the same conn would not actually
 	// prove serialization.)
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
+	dbURL := testDatabaseURL()
 	holder, err := pgx.Connect(ctx, dbURL)
 	if err != nil {
 		t.Fatalf("side connect: %v", err)
@@ -412,10 +414,7 @@ func TestRunMigrationsAdvisoryLockSerializes(t *testing.T) {
 // this test will deadlock or produce SQL races. Pool size strictly
 // less than runners is the interesting configuration.
 func TestRunMigrationsConcurrentMixedPoolStress(t *testing.T) {
-	dbURL := os.Getenv("DATABASE_URL")
-	if dbURL == "" {
-		dbURL = "postgres://multica:multica@localhost:5432/multica?sslmode=disable"
-	}
+	dbURL := testDatabaseURL()
 	cfg, err := pgxpool.ParseConfig(dbURL)
 	if err != nil {
 		t.Skipf("parse DATABASE_URL: %v", err)

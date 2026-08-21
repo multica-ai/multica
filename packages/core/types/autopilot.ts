@@ -32,6 +32,9 @@ export interface Autopilot {
   assignee_type: AutopilotAssigneeType;
   assignee_id: string;
   status: AutopilotStatus;
+  // Additive machine-readable explanation for a system pause. Null for manual
+  // pauses and older servers.
+  pause_reason?: string | null;
   execution_mode: AutopilotExecutionMode;
   issue_title_template: string | null;
   created_by_type: string;
@@ -123,13 +126,24 @@ export interface AutopilotRun {
   completed_at: string | null;
   failure_reason: string | null;
   // Stable, localizable, enumeration-safe classification of a non-success run
-  // (skipped/failed), derived server-side from failure_reason (MUL-4525). The
+  // (skipped/failed), persisted at the server-side decision source. The
   // "run now" UI localizes this instead of echoing the raw English reason.
   // Older servers omit it.
   reason_code?: string;
   trigger_payload: unknown;
   result: unknown;
   created_at: string;
+}
+
+export interface AutopilotQuotaUsage {
+  action: "off" | "observe" | "enforce";
+  used: number | null;
+  reserved: number | null;
+  limit: number | null;
+  period_start: string | null;
+  period_end: string | null;
+  reset_at: string | null;
+  blocked_counts: Record<string, number> | null;
 }
 
 export interface AutopilotSubscriberInput {
@@ -246,6 +260,8 @@ export interface WebhookDelivery {
   autopilot_run_id: string | null;
   replayed_from_delivery_id: string | null;
   error: string | null;
+  reason_code: string | null;
+  replay_idempotency_key: string | null;
   received_at: string;
   last_attempt_at: string;
   created_at: string;

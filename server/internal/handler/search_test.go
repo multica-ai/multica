@@ -6,7 +6,7 @@ import (
 )
 
 func TestBuildSearchQuery_SingleTerm(t *testing.T) {
-	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false)
+	query, args := buildSearchQuery("Hello", []string{"Hello"}, 0, false, false, nil)
 
 	// Pattern should be lowercased in Go.
 	if args[0] != "hello" {
@@ -42,7 +42,7 @@ func TestBuildSearchQuery_SingleTerm(t *testing.T) {
 }
 
 func TestBuildSearchQuery_MultiTerm(t *testing.T) {
-	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false)
+	query, args := buildSearchQuery("Foo Bar", []string{"Foo", "Bar"}, 0, false, false, nil)
 
 	// Both phrase and terms should be lowercased.
 	if args[0] != "foo bar" {
@@ -63,7 +63,7 @@ func TestBuildSearchQuery_MultiTerm(t *testing.T) {
 }
 
 func TestBuildSearchQuery_WithNumber(t *testing.T) {
-	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false)
+	query, args := buildSearchQuery("MUL-42", []string{"MUL-42"}, 42, true, false, nil)
 
 	_ = args
 	// Number match should be in WHERE.
@@ -77,7 +77,7 @@ func TestBuildSearchQuery_WithNumber(t *testing.T) {
 }
 
 func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
-	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true)
+	query, _ := buildSearchQuery("test", []string{"test"}, 0, false, true, nil)
 
 	if strings.Contains(query, "NOT IN ('done', 'cancelled')") {
 		t.Error("query should not exclude done/cancelled when includeClosed=true")
@@ -85,7 +85,7 @@ func TestBuildSearchQuery_IncludeClosed(t *testing.T) {
 }
 
 func TestBuildSearchQuery_SpecialChars(t *testing.T) {
-	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false)
+	query, args := buildSearchQuery("100%", []string{"100%"}, 0, false, false, nil)
 
 	_ = query
 	// % should be escaped in the phrase arg.
@@ -204,7 +204,7 @@ func TestExtractSnippet_CJKContent(t *testing.T) {
 // --- Ranking regression tests ---
 
 func TestBuildSearchQuery_CommentRankTiers(t *testing.T) {
-	query, _ := buildSearchQuery("test phrase", []string{"test", "phrase"}, 0, false, false)
+	query, _ := buildSearchQuery("test phrase", []string{"test", "phrase"}, 0, false, false, nil)
 
 	// Comment phrase match should be tier 7
 	if !strings.Contains(query, "THEN 7") {
@@ -221,7 +221,7 @@ func TestBuildSearchQuery_CommentRankTiers(t *testing.T) {
 }
 
 func TestBuildSearchQuery_DescriptionRankTiers(t *testing.T) {
-	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false)
+	query, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, nil)
 
 	// Description phrase match should be tier 5
 	if !strings.Contains(query, "THEN 5") {
@@ -234,7 +234,7 @@ func TestBuildSearchQuery_DescriptionRankTiers(t *testing.T) {
 }
 
 func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
-	query, _ := buildSearchQuery("html", []string{"html"}, 0, false, false)
+	query, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, nil)
 
 	// Extract the rank CASE expression (ends with "ELSE 9 END") to avoid
 	// false matches against statusRank which also contains THEN 4/6.
@@ -268,7 +268,7 @@ func TestBuildSearchQuery_SingleTermNoAllTermTiers(t *testing.T) {
 // $4 is buildSearchQuery's canonical workspace_id placeholder (the
 // caller writes wsUUID into args[3] before executing).
 func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
-	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false)
+	singleQuery, _ := buildSearchQuery("html", []string{"html"}, 0, false, false, nil)
 
 	// Every occurrence of `FROM comment c` must be followed by the
 	// c.workspace_id = $4 constraint. Counting is safer than a single
@@ -286,11 +286,118 @@ func TestBuildSearchQuery_CommentSubqueryWorkspaceScope(t *testing.T) {
 
 	// Multi-term uses one extra comment subquery in the WHERE and one in
 	// the rank CASE for the all-terms match — same invariant applies.
-	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false)
+	multiQuery, _ := buildSearchQuery("foo bar", []string{"foo", "bar"}, 0, false, false, nil)
 	fromCountMulti := strings.Count(multiQuery, "FROM comment c")
 	scopedCountMulti := strings.Count(multiQuery, "c.workspace_id = $4")
 	if scopedCountMulti < fromCountMulti {
 		t.Errorf("multi-term query has %d comment subqueries but only %d workspace_id filters",
 			fromCountMulti, scopedCountMulti)
 	}
+}
+
+// --- MUL-5824: cancelled work must not outrank live work ---
+
+// orderByClause returns everything after the final ORDER BY, so ranking-order
+// assertions cannot be satisfied by an expression that merely appears in the
+// SELECT list or the WHERE clause.
+func orderByClause(t *testing.T, query string) string {
+	t.Helper()
+	i := strings.LastIndex(query, "ORDER BY ")
+	if i == -1 {
+		t.Fatalf("query has no ORDER BY clause:\n%s", query)
+	}
+	return query[i+len("ORDER BY "):]
+}
+
+// The cancelled demotion must sort BEFORE the relevance tiers, not after.
+// As a tie-breaker it would be inert: statusRank only orders issues that
+// already landed in the same tier, so an exactly-titled cancelled issue
+// (tier 1) would still beat an in_progress title-contains match (tier 3).
+func TestBuildSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) {
+	orderBy := orderByClause(t, buildSearchQueryForTest(t, "login bug", []string{"login", "bug"}, 0, false, true))
+
+	cancelledAt := strings.Index(orderBy, "i.status = 'cancelled' AND NOT")
+	if cancelledAt == -1 {
+		t.Fatalf("ORDER BY has no cancelled demotion:\n%s", orderBy)
+	}
+
+	// "ELSE 9 END" terminates the relevance CASE (rankExpr).
+	relevanceEndsAt := strings.Index(orderBy, "ELSE 9 END")
+	if relevanceEndsAt == -1 {
+		t.Fatalf("ORDER BY has no relevance rank CASE:\n%s", orderBy)
+	}
+	if cancelledAt > relevanceEndsAt {
+		t.Errorf("cancelled demotion sorts after the relevance tiers, so a well-matching cancelled issue still outranks live work:\n%s", orderBy)
+	}
+
+	// The demotion must not replace the existing status ordering.
+	if !strings.Contains(orderBy, "WHEN 'in_progress' THEN 0") {
+		t.Errorf("statusRank was dropped from ORDER BY:\n%s", orderBy)
+	}
+	if !strings.Contains(orderBy, "i.updated_at DESC") {
+		t.Errorf("recency tie-breaker was dropped from ORDER BY:\n%s", orderBy)
+	}
+}
+
+// Searching an exact title or an exact identifier is unambiguous targeting —
+// the searcher already knows which issue they want, so demoting it would just
+// hide the row they asked for.
+func TestBuildSearchQuery_CancelledDirectHitExempt(t *testing.T) {
+	// $1 is the exact (non-wildcard) phrase param.
+	textOnly := orderByClause(t, buildSearchQueryForTest(t, "ship it", []string{"ship", "it"}, 0, false, true))
+	if !strings.Contains(textOnly, "i.status = 'cancelled' AND NOT (LOWER(i.title) = $1)") {
+		t.Errorf("exact-title hit is not exempt from the cancelled demotion:\n%s", textOnly)
+	}
+	if strings.Contains(textOnly, "i.number = ") {
+		t.Errorf("non-numeric query should not reference i.number in the demotion:\n%s", textOnly)
+	}
+
+	withNumber := orderByClause(t, buildSearchQueryForTest(t, "MUL-42", []string{"MUL-42"}, 42, true, true))
+	if !strings.Contains(withNumber, "LOWER(i.title) = $1 OR i.number = ") {
+		t.Errorf("identifier lookup is not exempt from the cancelled demotion, so MUL-42 sinks below every fuzzy match:\n%s", withNumber)
+	}
+}
+
+// 'done' is finished work worth referencing; only 'cancelled' is thrown away.
+func TestBuildSearchQuery_DoneNotDemotedAheadOfRelevance(t *testing.T) {
+	orderBy := orderByClause(t, buildSearchQueryForTest(t, "login", []string{"login"}, 0, false, true))
+
+	relevanceEndsAt := strings.Index(orderBy, "ELSE 9 END")
+	if doneAt := strings.Index(orderBy, "i.status = 'done'"); doneAt != -1 && doneAt < relevanceEndsAt {
+		t.Errorf("done issues were demoted ahead of relevance; only cancelled should be:\n%s", orderBy)
+	}
+}
+
+// Project search has no statusRank at all, and the command palette renders
+// projects above issues — an undemoted cancelled project can be the first row
+// of the entire result list.
+func TestBuildProjectSearchQuery_CancelledDemotedAheadOfRelevance(t *testing.T) {
+	query, _ := buildProjectSearchQuery("platform", []string{"platform"}, true)
+	orderBy := orderByClause(t, query)
+
+	cancelledAt := strings.Index(orderBy, "p.status = 'cancelled'")
+	if cancelledAt == -1 {
+		t.Fatalf("project ORDER BY has no cancelled demotion:\n%s", orderBy)
+	}
+	relevanceEndsAt := strings.Index(orderBy, "ELSE 5 END")
+	if relevanceEndsAt == -1 {
+		t.Fatalf("project ORDER BY has no relevance rank CASE:\n%s", orderBy)
+	}
+	if cancelledAt > relevanceEndsAt {
+		t.Errorf("cancelled projects sort after the relevance tiers:\n%s", orderBy)
+	}
+	if !strings.Contains(orderBy, "LOWER(p.title) <> $1") {
+		t.Errorf("exact-title hit is not exempt from the cancelled demotion:\n%s", orderBy)
+	}
+	if !strings.Contains(orderBy, "p.updated_at DESC") {
+		t.Errorf("recency tie-breaker was dropped from project ORDER BY:\n%s", orderBy)
+	}
+}
+
+// buildSearchQuery mutates the terms slice in place (lowercasing); this wrapper
+// keeps each test's literals independent.
+func buildSearchQueryForTest(t *testing.T, phrase string, terms []string, num int, hasNum bool, includeClosed bool) string {
+	t.Helper()
+	query, _ := buildSearchQuery(phrase, append([]string(nil), terms...), num, hasNum, includeClosed, nil)
+	return query
 }

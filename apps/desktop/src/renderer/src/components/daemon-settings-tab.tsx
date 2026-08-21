@@ -31,11 +31,11 @@ function DiagnosticsRow({
 }) {
   return (
     <div className="grid grid-cols-[140px_minmax(0,1fr)] items-baseline gap-3 py-1.5">
-      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-caption text-muted-foreground">{label}</span>
       <span
         className={cn(
-          "min-w-0 truncate text-sm",
-          mono && "font-mono text-xs",
+          "min-w-0 truncate text-body",
+          mono && "font-mono text-caption",
         )}
         title={typeof value === "string" ? value : undefined}
       >
@@ -99,10 +99,10 @@ export function DaemonSettingsTab() {
         <div className="mt-4 flex items-start gap-3 rounded-lg border border-destructive/40 bg-destructive/5 px-4 py-3">
           <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" />
           <div className="min-w-0 flex-1">
-            <p className="text-sm font-medium text-destructive">
+            <p className="text-body font-medium text-destructive">
               Sign-in expired
             </p>
-            <p className="mt-0.5 text-sm text-muted-foreground">
+            <p className="mt-0.5 text-body text-muted-foreground">
               The local daemon couldn&apos;t authenticate, so this device
               can&apos;t take tasks. Sign in again to restore it.
             </p>
@@ -122,12 +122,12 @@ export function DaemonSettingsTab() {
       {externallyManaged && (
         <div className="mt-4 flex items-start gap-3 rounded-lg border bg-muted/30 px-4 py-3">
           <Info className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-          <p className="min-w-0 text-sm text-muted-foreground">
+          <p className="min-w-0 text-body text-muted-foreground">
             This device&apos;s daemon runs outside the app — for example inside
             WSL2 — so the app can&apos;t start or stop it. Start or stop it from
             that environment with{" "}
-            <code className="font-mono text-xs">multica daemon start</code> /{" "}
-            <code className="font-mono text-xs">multica daemon stop</code>.
+            <code className="font-mono text-caption">multica daemon start</code> /{" "}
+            <code className="font-mono text-caption">multica daemon stop</code>.
           </p>
         </div>
       )}

@@ -1,5 +1,6 @@
 "use client";
 
+import { issueStatusCategory } from "@multica/core/issues";
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { Issue } from "@multica/core/types";
 import { api } from "@multica/core/api";
@@ -101,7 +102,7 @@ export function IssuePickerModal({
         />
         <CommandList>
           {isLoading && (
-            <div className="py-6 text-center text-sm text-muted-foreground">
+            <div className="py-6 text-center text-body text-muted-foreground">
               {t(($) => $.issue_picker.searching)}
             </div>
           )}
@@ -109,7 +110,7 @@ export function IssuePickerModal({
             <CommandEmpty>{t(($) => $.issue_picker.no_results)}</CommandEmpty>
           )}
           {!isLoading && !query.trim() && (
-            <div className="py-6 text-center text-sm text-muted-foreground">
+            <div className="py-6 text-center text-body text-muted-foreground">
               {t(($) => $.issue_picker.prompt_to_search)}
             </div>
           )}
@@ -124,7 +125,11 @@ export function IssuePickerModal({
                     onOpenChange(false);
                   }}
                 >
-                  <StatusIcon status={issue.status} className="h-3.5 w-3.5 shrink-0" />
+                  <StatusIcon
+                    status={issue.status}
+                    category={issueStatusCategory(issue) ?? undefined}
+                    className="h-3.5 w-3.5 shrink-0"
+                  />
                   <span className="text-muted-foreground shrink-0">{issue.identifier}</span>
                   <span className="truncate">{issue.title}</span>
                 </CommandItem>

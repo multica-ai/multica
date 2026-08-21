@@ -5,6 +5,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useAuthStore } from "@multica/core/auth";
 import { workspaceKeys } from "@multica/core/workspace/queries";
 import { clearWorkspaceStorage, defaultStorage } from "@multica/core/platform";
+import { resetAllRegisteredDrafts } from "@multica/core/drafts/cleanup-registry";
 import { paths } from "@multica/core/paths";
 import type { Workspace } from "@multica/core/types";
 import { useNavigation } from "../navigation";
@@ -28,7 +29,17 @@ export function useLogout() {
   const { push } = useNavigation();
 
   return useCallback(() => {
-    // Clear workspace-scoped storage for every workspace this user has
+    // Reset draft stores' in-memory state FIRST, before removing persisted
+    // keys. Each reset is a Zustand setState, and persist middleware writes
+    // the new (empty) state straight back to storage under the still-active
+    // workspace slug — so resetting after removal would resurrect the very
+    // keys just deleted, with whatever the reset state still carries. Memory
+    // must be wiped regardless of the workspace list below: a client-side
+    // navigation to /login does not reload the page, so the singletons would
+    // otherwise surface the previous user's draft after the next login.
+    resetAllRegisteredDrafts();
+
+    // Then clear workspace-scoped storage for every workspace this user has
     // access to, BEFORE clearing the React Query cache (which holds the
     // workspace list). Otherwise per-workspace drafts/chat/etc would leak
     // to the next user on this device.

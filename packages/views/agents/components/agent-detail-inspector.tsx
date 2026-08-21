@@ -1,12 +1,18 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import type {
   Agent,
   AgentRuntime,
   MemberWithUser,
 } from "@multica/core/types";
-import { AGENT_DESCRIPTION_MAX_LENGTH } from "@multica/core/agents";
+import {
+  AGENT_DESCRIPTION_MAX_LENGTH,
+  AGENT_MAX_CONCURRENT_TASKS_MAX,
+  AGENT_MAX_CONCURRENT_TASKS_MIN,
+} from "@multica/core/agents";
+import { runtimeModelsOptions } from "@multica/core/runtimes";
 import { isImeComposing } from "@multica/core/utils";
 import { Input } from "@multica/ui/components/ui/input";
 import { Textarea } from "@multica/ui/components/ui/textarea";
@@ -20,8 +26,11 @@ import {
 import { useAutoSave } from "../../settings/components/use-auto-save";
 import { useT } from "../../i18n";
 import { CharCounter } from "./char-counter";
-import { ResourceLabelPicker } from "../../labels/resource-label-picker";
 import { ModelPicker } from "./inspector/model-picker";
+import {
+  buildModelChangeUpdate,
+  type ModelCatalog,
+} from "./inspector/model-change-cleanup";
 import { RuntimePicker } from "./inspector/runtime-picker";
 import { ThinkingSettingField } from "./inspector/thinking-prop-row";
 import { ServiceTierSettingField } from "./inspector/service-tier-setting-field";
@@ -108,6 +117,35 @@ export function AgentDetailInspector({
   const isOnline = runtime?.status === "online";
   const nameInvalid = name.trim().length === 0;
 
+  // Same query the Thinking / Speed fields already use, so switching model
+  // costs no extra request. `null` = not authoritative (offline runtime, still
+  // loading, or discovery failed) and must not trigger any clearing.
+  const modelsQuery = useQuery(
+    runtimeModelsOptions(isOnline ? agent.runtime_id : null),
+  );
+  const modelCatalog = useMemo<ModelCatalog>(
+    () =>
+      modelsQuery.isSuccess
+        ? modelsQuery.data.supported
+          ? modelsQuery.data.models
+          : []
+        : null,
+    [modelsQuery.data, modelsQuery.isSuccess],
+  );
+  const handleModelChange = useCallback(
+    (model: string) =>
+      update(
+        buildModelChangeUpdate({
+          provider: runtime?.provider ?? "",
+          model,
+          thinkingLevel: agent.thinking_level ?? "",
+          serviceTier: agent.service_tier ?? "",
+          catalog: modelCatalog,
+        }),
+      ),
+    [agent.service_tier, agent.thinking_level, modelCatalog, runtime?.provider, update],
+  );
+
   return (
     <div className="space-y-8">
       <SettingsSection
@@ -136,6 +174,7 @@ export function AgentDetailInspector({
                 size={56}
                 disabled={!canEdit}
                 onUploaded={(url) => update({ avatar_url: url })}
+                onEmojiSelected={(value) => update({ avatar_url: value })}
               />
             </div>
           </SettingsRow>
@@ -157,7 +196,7 @@ export function AgentDetailInspector({
                 aria-invalid={nameInvalid || undefined}
               />
               {nameInvalid ? (
-                <p className="mt-1 text-xs text-destructive">
+                <p className="mt-1 text-caption text-destructive">
                   {t(($) => $.inspector.rename_required)}
                 </p>
               ) : null}
@@ -188,18 +227,6 @@ export function AgentDetailInspector({
                 max={AGENT_DESCRIPTION_MAX_LENGTH}
               />
             </div>
-          </SettingsRow>
-          <SettingsRow
-            label={t(($) => $.inspector.labels_label)}
-            description={t(($) => $.inspector.labels_hint)}
-            size="text"
-            align="start"
-          >
-            <ResourceLabelPicker
-              resourceType="agent"
-              resourceId={agent.id}
-              canEdit={canEdit}
-            />
           </SettingsRow>
         </SettingsCard>
       </SettingsSection>
@@ -245,7 +272,7 @@ export function AgentDetailInspector({
               runtimeOnline={!!isOnline}
               value={agent.model ?? ""}
               canEdit={canEdit}
-              onChange={(model) => update({ model })}
+              onChange={handleModelChange}
             />
           </SettingsRow>
           <ThinkingSettingField
@@ -264,6 +291,7 @@ export function AgentDetailInspector({
             label={t(($) => $.inspector.prop_speed)}
             runtimeId={agent.runtime_id}
             runtimeOnline={!!isOnline}
+            provider={runtime?.provider ?? ""}
             model={agent.model ?? ""}
             value={agent.service_tier ?? ""}
             canEdit={canEdit}
@@ -296,14 +324,16 @@ function ConcurrencyField({
 }) {
   const { t } = useT("agents");
   const [draft, setDraft] = useState(String(value));
-  const min = 1;
-  const max = 50;
 
   useEffect(() => setDraft(String(value)), [value]);
 
   const commit = () => {
     const next = Number(draft);
-    if (!Number.isInteger(next) || next < min || next > max) {
+    if (
+      !Number.isInteger(next) ||
+      next < AGENT_MAX_CONCURRENT_TASKS_MIN ||
+      next > AGENT_MAX_CONCURRENT_TASKS_MAX
+    ) {
       setDraft(String(value));
       return;
     }
@@ -318,8 +348,8 @@ function ConcurrencyField({
         name="agent-concurrency"
         autoComplete="off"
         inputMode="numeric"
-        min={min}
-        max={max}
+        min={AGENT_MAX_CONCURRENT_TASKS_MIN}
+        max={AGENT_MAX_CONCURRENT_TASKS_MAX}
         value={draft}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={commit}
@@ -334,8 +364,11 @@ function ConcurrencyField({
         aria-label={t(($) => $.inspector.prop_concurrency)}
         className="font-mono tabular-nums"
       />
-      <p className="mt-1 text-xs text-muted-foreground">
-        {t(($) => $.pickers.concurrency_range, { min, max })}
+      <p className="mt-1 text-caption text-muted-foreground">
+        {t(($) => $.pickers.concurrency_range, {
+          min: AGENT_MAX_CONCURRENT_TASKS_MIN,
+          max: AGENT_MAX_CONCURRENT_TASKS_MAX,
+        })}
       </p>
     </div>
   );

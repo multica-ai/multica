@@ -68,7 +68,7 @@ export function SubscriberMultiSelect({
       {selectedMembers.map((m) => (
         <span
           key={m.user_id}
-          className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-xs"
+          className="inline-flex items-center gap-1 rounded-full border bg-background px-2 py-0.5 text-caption"
         >
           <ActorAvatar actorType="member" actorId={m.user_id} size="xs" />
           <span className="max-w-[10rem] truncate">{m.name}</span>
@@ -96,7 +96,7 @@ export function SubscriberMultiSelect({
         trigger={
           <span
             className={cn(
-              "inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-xs text-muted-foreground",
+              "inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-caption text-muted-foreground",
               "hover:border-primary/40 hover:text-foreground transition-colors cursor-pointer",
             )}
           >

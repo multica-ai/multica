@@ -15,7 +15,15 @@ import (
 // TestMain intercepts when the test binary is re-executed as a fake
 // child process by the agent backend. The fake's behavior is selected via
 // CLAUDE_FAKE_MODE; absent that env var, this is a normal `go test` run.
+//
+// Dispatching here rather than from a Test function is what lets a fake be
+// invoked with a real agent CLI's argv: TestMain runs before the testing
+// package parses flags, so arguments like `run --format json` never reach it.
 func TestMain(m *testing.M) {
+	if os.Getenv(opencodeStdinHelperEnv) == "1" {
+		runFakeOpencodeStdinHelper()
+		os.Exit(0)
+	}
 	switch mode := os.Getenv("CLAUDE_FAKE_MODE"); mode {
 	case "":
 		os.Exit(m.Run())

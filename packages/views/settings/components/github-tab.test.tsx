@@ -96,7 +96,9 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
-vi.mock("../../navigation", () => ({
+// Mocked at the context module rather than the barrel so <AppLink> stays the
+// real component and its click contract is what the test exercises.
+vi.mock("../../navigation/context", () => ({
   useNavigation: () => ({
     push: mockNavPush,
     replace: vi.fn(),

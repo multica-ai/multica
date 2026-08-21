@@ -161,7 +161,23 @@ func NewAPIClient(baseURL, workspaceID, token string) *APIClient {
 	}
 }
 
+// clientCapabilities is the X-Client-Capabilities value every CLI request
+// advertises. It is a protocol detail, not a user-visible flag: the CLI always
+// knows how to handle these response shapes, so there is nothing for a caller
+// to opt into.
+//
+// stable_attachment_urls asks bulk responses to return the stable
+// /api/attachments/{id}/download path instead of a ~800-char CloudFront
+// signature that is re-minted on every request (MUL-5372 / GitHub #5999). The
+// CLI never hands an attachment URL to a native loader — `multica attachment
+// download <id>` fetches a fresh signature from the single-attachment endpoint,
+// which keeps signing regardless of this capability — so the signature in list
+// payloads was pure cost: raw bytes, a per-attachment RSA sign, and bytes that
+// differ on every read and therefore defeat agent prompt caching.
+const clientCapabilities = "stable_attachment_urls"
+
 func (c *APIClient) setHeaders(req *http.Request) {
+	req.Header.Set("X-Client-Capabilities", clientCapabilities)
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
@@ -646,6 +662,44 @@ func (c *APIClient) ImportSkillFile(ctx context.Context, fileData []byte, filena
 
 	if resp.StatusCode >= 400 {
 		return newHTTPError(http.MethodPost, "/api/skills/import", resp)
+	}
+	if out == nil {
+		return nil
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// UploadPrivatePlugin installs workspace-private Plugin archive bytes. The
+// filename is transport metadata only; the Server derives source identity from
+// validated manifest content and digests.
+func (c *APIClient) UploadPrivatePlugin(ctx context.Context, path string, archive []byte, filename string, out any) error {
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("artifact", filepath.Base(filename))
+	if err != nil {
+		return fmt.Errorf("create Plugin artifact form file: %w", err)
+	}
+	if _, err := part.Write(archive); err != nil {
+		return fmt.Errorf("write Plugin artifact: %w", err)
+	}
+	if err := writer.Close(); err != nil {
+		return fmt.Errorf("close Plugin artifact upload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.BaseURL+path, &body)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	c.setHeaders(req)
+	resp, err := c.HTTPClient.Do(req)
+	err = wrapTransport(req, err)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		return newHTTPError(http.MethodPost, path, resp)
 	}
 	if out == nil {
 		return nil

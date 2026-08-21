@@ -54,16 +54,6 @@ vi.mock("@multica/core/issues/stores/view-store-context", () => ({
   }),
 }));
 
-vi.mock("@multica/core/issues/mutations", () => ({
-  useLoadMoreByStatus: () => ({
-    total: 0,
-    loaded: 0,
-    hasMore: false,
-    isLoading: false,
-    loadMore: vi.fn(),
-  }),
-}));
-
 vi.mock("@multica/core/workspace/hooks", () => ({
   useActorName: () => ({
     getActorName: (_type: string, id: string) => id,

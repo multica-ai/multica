@@ -43,3 +43,7 @@ html[lang|="ja"] {
     "Microsoft YaHei", "Noto Sans CJK SC", "Apple SD Gothic Neo", "Malgun Gothic",
     "Noto Sans CJK KR", sans-serif;
 }
+
+/* The landing tree overrides `--font-serif` with its own Instrument Serif +
+   per-locale CJK chain, built on the same structure; see "Landing editorial
+   serif" in ./custom.css and keep the two CJK orderings in sync. */

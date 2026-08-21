@@ -27,9 +27,26 @@ const (
 	// ReasonTargetUnavailable: the target cannot run (archived agent, deleted /
 	// archived squad, unresolvable leader, or no assignee).
 	ReasonTargetUnavailable ReasonCode = "target_unavailable"
-	// ReasonRuntimeOffline: the target is permitted but its runtime is not bound
-	// / not online at dispatch time.
+	// ReasonRuntimeOffline: the target is permitted and bound to a runtime, but
+	// that runtime is not online at dispatch time. The task is not lost — the
+	// user's fix is to bring the machine back, and queued work waits for it.
 	ReasonRuntimeOffline ReasonCode = "runtime_offline"
+	// ReasonRuntimeUnusable: the target is bound to a runtime whose machine is
+	// reachable, but whose agent CLI cannot be executed there — the npm
+	// placeholder stub left behind when a package's postinstall was blocked is
+	// the case in the field (MUL-6164). Distinct from runtime_offline for the
+	// same reason agent_runtime_required is: waiting changes nothing here. The
+	// machine is already on, and the fix is a command the user runs on it, which
+	// the daemon reports with this verdict so clients can show it.
+	ReasonRuntimeUnusable ReasonCode = "runtime_unusable"
+	// ReasonAgentRuntimeRequired: the target is permitted but bound to no
+	// runtime at all (agent.runtime_id IS NULL), which is where an agent lands
+	// when its runtime is deleted (MUL-5559). Distinct from runtime_offline on
+	// purpose: there is no machine to bring back, nothing will ever claim work
+	// for this agent, and the only fix is binding it to a runtime. Clients that
+	// collapse the two send the user looking for an offline computer that does
+	// not exist.
+	ReasonAgentRuntimeRequired ReasonCode = "agent_runtime_required"
 	// ReasonAttributionBlocked: a fail-closed workspace could not resolve a
 	// responsible human for the run, so it was refused.
 	ReasonAttributionBlocked ReasonCode = "attribution_blocked"
@@ -43,6 +60,9 @@ const (
 	// success: nothing new runs. (Named to avoid implying the NEW comment was
 	// already processed.)
 	ReasonSelfTriggerSuppressed ReasonCode = "self_trigger_suppressed"
+	// ReasonQuotaExceeded is a policy-neutral refusal for an exhausted
+	// Cloud-provided autopilot interval.
+	ReasonQuotaExceeded ReasonCode = "quota_exceeded"
 	// ReasonInternalError: an unexpected server error prevented a clean decision.
 	ReasonInternalError ReasonCode = "internal_error"
 )

@@ -2,10 +2,12 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/metrics"
@@ -52,10 +54,13 @@ const (
 	// channelMediaReconcileLease bounds how long a claimed row stays owned by
 	// a worker before another replica may reclaim it (crash recovery).
 	channelMediaReconcileLease = 2 * time.Minute
-	// channelMediaReconcileBatchLimit bounds one sweep's claim (and thus its
-	// object-storage work) — the reconciler's concurrency is one batch,
-	// processed sequentially.
-	channelMediaReconcileBatchLimit = 50
+	// channelMediaReconcileSweepLimit bounds how many settle operations one
+	// sweep performs (and thus its object-storage work). Rows are claimed one
+	// at a time and settled sequentially, so a row released early with a
+	// 1-minute backoff can be re-claimed within a long sweep — the limit
+	// counts settles, not distinct rows, and just keeps a sweep from running
+	// away.
+	channelMediaReconcileSweepLimit = 50
 	// Backoff for failed object-storage deletes: base << (attempt-1), capped.
 	channelMediaReconcileBackoffBase = time.Minute
 	channelMediaReconcileBackoffCap  = time.Hour
@@ -136,9 +141,13 @@ func (r *ChannelMediaReconciler) Run(ctx context.Context) {
 	}
 }
 
-// RunOnce claims one batch of due ledger rows and settles each. All errors
-// are per-row and non-fatal: a row that cannot be settled now backs off and
-// is retried on a later sweep (or by another replica after lease expiry).
+// RunOnce settles due ledger rows one at a time: claim a row, settle it, claim
+// the next, up to the per-sweep limit. Each claim is taken immediately before
+// that row's work, so a row is never left holding a lease it has to wait for —
+// its attempt counter and backoff describe deletes that were actually tried.
+// All errors are per-row and non-fatal: a row that cannot be settled now backs
+// off and is retried on a later sweep (or by another replica after lease
+// expiry).
 func (r *ChannelMediaReconciler) RunOnce(ctx context.Context) {
 	if r.Storage == nil {
 		// The wiring only builds a reconciler when a storage backend exists,
@@ -149,18 +158,25 @@ func (r *ChannelMediaReconciler) RunOnce(ctx context.Context) {
 		r.logger().Error("channel media reconciler: no storage backend; skipping sweep")
 		return
 	}
-	leaseToken := pgtype.UUID{Bytes: uuid.New(), Valid: true}
-	rows, err := r.Queries.ClaimChannelMediaPendingObjectsForReconcile(ctx, db.ClaimChannelMediaPendingObjectsForReconcileParams{
-		LeaseToken:  leaseToken,
-		Lease:       pgInterval(channelMediaReconcileLease),
-		SettleDelay: pgInterval(ChannelMediaReconcileSettleDelay),
-		BatchLimit:  channelMediaReconcileBatchLimit,
-	})
-	if err != nil {
-		r.logger().Warn("channel media reconciler: claim failed", "error", err)
-		return
-	}
-	for _, row := range rows {
+	for settles := 0; settles < channelMediaReconcileSweepLimit; settles++ {
+		leaseToken := pgtype.UUID{Bytes: uuid.New(), Valid: true}
+		row, err := r.Queries.ClaimNextChannelMediaPendingObjectForReconcile(ctx, db.ClaimNextChannelMediaPendingObjectForReconcileParams{
+			LeaseToken:  leaseToken,
+			Lease:       pgInterval(channelMediaReconcileLease),
+			SettleDelay: pgInterval(ChannelMediaReconcileSettleDelay),
+		})
+		if errors.Is(err, pgx.ErrNoRows) {
+			break
+		}
+		if err != nil {
+			// Shutdown cancels the sweep mid-loop; that is the normal way a
+			// sweep ends, not a failure worth waking anyone for.
+			if ctx.Err() != nil {
+				return
+			}
+			r.logger().Warn("channel media reconciler: claim failed", "error", err)
+			break
+		}
 		r.settle(ctx, row, leaseToken)
 	}
 	if r.Metrics != nil {
@@ -171,29 +187,12 @@ func (r *ChannelMediaReconciler) RunOnce(ctx context.Context) {
 	}
 }
 
+// settle runs the row the caller just claimed. The lease it holds only has to
+// cover this one row (delete timeout << lease, see the invariant test), so no
+// heartbeat is needed: the claim was taken moments ago and every write below
+// is lease-token guarded, so a row reclaimed after an expiry ignores the old
+// owner's writes rather than being corrupted by them.
 func (r *ChannelMediaReconciler) settle(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID) {
-	// Heartbeat the shared batch lease before this row's work: the lease only
-	// ever needs to cover ONE row's worst case (delete timeout << lease, see
-	// the invariant test), not the whole sequential batch. Losing the renewal
-	// means another replica already reclaimed the row after an expiry — skip
-	// it; touching it now would duplicate its delete and fight the new
-	// owner's attempt/backoff accounting.
-	renewed, err := r.Queries.RenewChannelMediaPendingObjectLease(ctx, db.RenewChannelMediaPendingObjectLeaseParams{
-		StorageKey:  row.StorageKey,
-		WorkspaceID: row.WorkspaceID,
-		LeaseToken:  leaseToken,
-		Lease:       pgInterval(channelMediaReconcileLease),
-	})
-	if err != nil {
-		r.logger().Warn("channel media reconciler: lease renew failed; skipping row",
-			"storage_key", row.StorageKey, "error", err)
-		return
-	}
-	if renewed == 0 {
-		r.logger().Info("channel media reconciler: row reclaimed by another worker; skipping",
-			"storage_key", row.StorageKey, "workspace_id", row.WorkspaceID)
-		return
-	}
 	// The reference check runs AFTER the claim flipped the row to 'deleting':
 	// from that point BindMediaRefs cannot attach this key, so a negative
 	// answer is terminal, not a snapshot race. It runs on tombstone passes too:
@@ -319,6 +318,12 @@ func (r *ChannelMediaReconciler) nextTombstonePass(row db.ChannelMediaPendingObj
 }
 
 func (r *ChannelMediaReconciler) tombstoneRow(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID, next time.Duration, idx int) bool {
+	if ctx.Err() != nil {
+		// Same as release: a cancelled context cannot carry the write, and
+		// shutdown is not a failure. The row stays claimed until its lease
+		// expires, and the next pass re-deletes it idempotently.
+		return false
+	}
 	n, err := r.Queries.TombstoneChannelMediaPendingObject(ctx, db.TombstoneChannelMediaPendingObjectParams{
 		StorageKey:    row.StorageKey,
 		WorkspaceID:   row.WorkspaceID,
@@ -336,6 +341,13 @@ func (r *ChannelMediaReconciler) tombstoneRow(ctx context.Context, row db.Channe
 // release keeps the row in 'deleting' (a bind must still never attach it),
 // drops the lease, and backs off the next attempt.
 func (r *ChannelMediaReconciler) release(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID, cause error) {
+	if ctx.Err() != nil {
+		// Shutdown cancelled the settle itself (a DELETE or a query in
+		// flight). The backoff write would fail on the same cancelled context,
+		// so there is nothing to record and nothing worth waking anyone for —
+		// the lease expiry reclaims the row like any other interrupted worker.
+		return
+	}
 	backoff := channelMediaReconcileBackoffBase << min(row.Attempt-1, 10)
 	if backoff > channelMediaReconcileBackoffCap || backoff <= 0 {
 		backoff = channelMediaReconcileBackoffCap
@@ -359,6 +371,11 @@ func (r *ChannelMediaReconciler) release(ctx context.Context, row db.ChannelMedi
 }
 
 func (r *ChannelMediaReconciler) clearRow(ctx context.Context, row db.ChannelMediaPendingObject, leaseToken pgtype.UUID) bool {
+	if ctx.Err() != nil {
+		// See release: shutdown mid-settle leaves the row to its lease expiry
+		// rather than logging a write that never had a chance to land.
+		return false
+	}
 	n, err := r.Queries.DeleteChannelMediaPendingObject(ctx, db.DeleteChannelMediaPendingObjectParams{
 		StorageKey:  row.StorageKey,
 		WorkspaceID: row.WorkspaceID,

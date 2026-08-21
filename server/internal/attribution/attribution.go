@@ -99,6 +99,9 @@ const (
 	EvidenceAutopilotRun    EvidenceKind = "autopilot_run"
 	EvidenceRuleVersion     EvidenceKind = "rule_version"
 	EvidenceRerun           EvidenceKind = "rerun"
+	// EvidenceDelegatedFailure points at the terminal worker task that handed
+	// control back to its source coordinator.
+	EvidenceDelegatedFailure EvidenceKind = "delegated_failure"
 	// EvidenceChat points the uniform evidence pair at the chat session that
 	// triggered the run — the chat analogue of autopilot_run/issue_assignment.
 	// The dedicated chat_session_id column still exists for its own consumers;
@@ -394,6 +397,61 @@ func TriggerOwner(creatorUserID pgtype.UUID, evidenceKind EvidenceKind, evidence
 		r.Source = SourceUnattributed
 	}
 	return finalizeAttribution(r)
+}
+
+// SubscriptionFacts are the already-fetched facts about an agent-created issue,
+// used to decide who inherits VISIBILITY of it (MUL-5483). Same shape of
+// contract as the Classify* inputs: the caller does the DB reads, the rule
+// stays pure.
+type SubscriptionFacts struct {
+	// CreatorType is the issue's own creator_type. Only agent-created issues
+	// can carry a delegated subscription; a member-created issue already
+	// subscribes its human through the ordinary 'creator' rule.
+	CreatorType string
+
+	// OriginType / OriginOriginator mirror DirectFacts: the issue's provenance
+	// stamp and the origin task's originator_user_id, loaded by the caller.
+	OriginType       string
+	OriginOriginator pgtype.UUID
+}
+
+// DelegatedSubscriber resolves the human who should be auto-subscribed to an
+// agent-created issue, and the reason label to record.
+//
+// It deliberately mirrors ClassifyDirect's origin branch rather than inventing
+// a second notion of "whose behalf is this" — the whole defect this fixes was
+// attribution and notification disagreeing about that (MUL-5483). The waterfall
+// is narrower than ClassifyDirect's on purpose:
+//
+//   - OriginOriginator valid → subscribe. A human authorized this chain, and
+//     because attribution COPIES the accountable human across every agent hop
+//     rather than chaining it (see SourceDelegation), this resolves the ORIGINAL
+//     human at any depth. No depth cap: depth is exactly where a lost signal
+//     hurts most, and the delivery tier — not a cap — is what bounds the noise.
+//
+//   - quick_create → reason 'creator', agent_create → reason 'delegated'. The
+//     quick-create human asked for THAT issue by name, so it is direct intent and
+//     keeps full notifications; an agent_create child is the agent's own decision
+//     made under a broader mandate, so it takes the reduced delegated tier.
+//
+//   - Anything else → no subscription. Notably origin_type='autopilot' is
+//     excluded: an autopilot already has an explicitly configured
+//     autopilot_subscriber template, and that list — not the member who happened
+//     to arm the trigger — is the intended audience for its issues. Degraded
+//     attribution (owner_fallback / unattributed) is excluded for the same
+//     reason it is degraded: we do not fabricate a human to notify.
+func DelegatedSubscriber(f SubscriptionFacts) (pgtype.UUID, string, bool) {
+	if f.CreatorType != "agent" || !f.OriginOriginator.Valid {
+		return pgtype.UUID{}, "", false
+	}
+	switch f.OriginType {
+	case "quick_create":
+		return f.OriginOriginator, "creator", true
+	case "agent_create":
+		return f.OriginOriginator, "delegated", true
+	default:
+		return pgtype.UUID{}, "", false
+	}
 }
 
 // OwnerFallback degrades an UNATTRIBUTED result to owner_fallback (MUL-4302 §3.5):

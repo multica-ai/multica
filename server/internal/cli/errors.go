@@ -337,6 +337,22 @@ var kindMessages = map[ErrorKind][2]string{
 	},
 }
 
+// serverMessagePrefixes lists the kinds whose response body carries a
+// hand-written, actionable message worth showing instead of the generic
+// template, with the {English, Chinese} lead-in used to introduce it.
+//
+// 409 belongs here because the generic conflict copy is not merely vague, it
+// points the wrong way: it reads as a transient race ("re-fetch the latest
+// state and try again") while every conflict this API returns is a
+// deterministic refusal that names its own fix ("a skill with this name
+// already exists", "set parent_id (--parent) to <id>"). Agents took the retry
+// hint literally and burned hours re-sending an unchanged request (GH #6264,
+// GH #5948), and the server-side wording added in MUL-4417 never reached them.
+var serverMessagePrefixes = map[ErrorKind][2]string{
+	KindValidation: {"Invalid request: ", "请求无效："},
+	KindConflict:   {"Request conflict: ", "请求冲突："},
+}
+
 // messageFor returns the localized message for a kind.
 func messageFor(kind ErrorKind, lang Language) string {
 	m, ok := kindMessages[kind]
@@ -391,14 +407,16 @@ func userMessage(err error, lang Language) string {
 	var httpErr *HTTPError
 	if errors.As(err, &httpErr) {
 		kind := httpErr.Kind()
-		// Validation errors usually carry a useful server-provided message;
-		// surface it instead of the generic line.
-		if kind == KindValidation {
+		// Validation and conflict errors carry a useful server-provided
+		// message; surface it instead of the generic line. A body we cannot
+		// recognize still falls back to the template, so this never dumps a
+		// raw response at the user.
+		if prefix, ok := serverMessagePrefixes[kind]; ok {
 			if serverMsg := extractServerMessage(httpErr.Body); serverMsg != "" {
 				if lang == LangZH {
-					return "请求无效：" + serverMsg
+					return prefix[1] + serverMsg
 				}
-				return "Invalid request: " + serverMsg
+				return prefix[0] + serverMsg
 			}
 		}
 		return messageFor(kind, lang)
@@ -413,6 +431,11 @@ func userMessage(err error, lang Language) string {
 // extractServerMessage tries to pull a human-readable message out of a JSON
 // error body like {"error":"..."} or {"message":"..."}. Returns "" if the
 // body is not JSON or has no recognizable message field.
+//
+// A few endpoints put a stable machine code in "error" and the prose in
+// "message" (the issue-table cursor responses do this). Prose always wins;
+// a bare code is kept only as a last resort so the user still gets something
+// greppable when no sentence is on offer.
 func extractServerMessage(body string) string {
 	body = strings.TrimSpace(body)
 	if body == "" || body[0] != '{' {
@@ -422,14 +445,47 @@ func extractServerMessage(body string) string {
 	if err := json.Unmarshal([]byte(body), &parsed); err != nil {
 		return ""
 	}
+	var code string
 	for _, key := range []string{"error", "message", "detail", "title"} {
-		if v, ok := parsed[key]; ok {
-			if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
-				return strings.TrimSpace(s)
+		v, ok := parsed[key]
+		if !ok {
+			continue
+		}
+		s, ok := v.(string)
+		if !ok {
+			continue
+		}
+		if s = strings.TrimSpace(s); s == "" {
+			continue
+		}
+		if looksLikeMachineCode(s) {
+			if code == "" {
+				code = s
 			}
+			continue
+		}
+		return s
+	}
+	return code
+}
+
+// looksLikeMachineCode reports whether s is a bare identifier such as
+// "cursor_query_mismatch" rather than a sentence meant for a person. The test
+// is deliberately narrow — lowercase word characters only — so that ordinary
+// prose in any language, including Chinese without ASCII spaces, is never
+// mistaken for a code.
+func looksLikeMachineCode(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '_', r == '-', r == '.':
+		default:
+			return false
 		}
 	}
-	return ""
+	return true
 }
 
 // debugDetail renders the full original error chain plus any structured

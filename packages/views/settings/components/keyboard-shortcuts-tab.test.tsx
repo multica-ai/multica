@@ -28,13 +28,13 @@ describe("KeyboardShortcutsTab", () => {
     });
 
     fireEvent.click(recorder);
-    fireEvent.keyDown(recorder, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(recorder, { key: "e", ctrlKey: true });
 
     expect(getShortcut("openSearch")).toEqual(
-      createShortcutChord("J", { primary: true }),
+      createShortcutChord("E", { primary: true }),
     );
     expect(within(recorder).getByTitle("Ctrl")).toHaveTextContent("Ctrl");
-    expect(within(recorder).getByTitle("J")).toHaveTextContent("J");
+    expect(within(recorder).getByTitle("E")).toHaveTextContent("E");
   });
 
   it("only captures keys while the recorder is active", () => {
@@ -44,22 +44,22 @@ describe("KeyboardShortcutsTab", () => {
     });
 
     recorder.focus();
-    fireEvent.keyDown(recorder, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(recorder, { key: "e", ctrlKey: true });
     expect(getShortcut("openSearch")).toEqual(
       createShortcutChord("K", { primary: true }),
     );
 
     fireEvent.click(recorder);
-    fireEvent.keyDown(recorder, { key: "j", ctrlKey: true });
+    fireEvent.keyDown(recorder, { key: "e", ctrlKey: true });
     expect(getShortcut("openSearch")).toEqual(
-      createShortcutChord("J", { primary: true }),
+      createShortcutChord("E", { primary: true }),
     );
 
     // Focus remains on the button after a successful recording. Tab must move
     // focus normally instead of silently replacing the shortcut with Tab.
     fireEvent.keyDown(recorder, { key: "Tab" });
     expect(getShortcut("openSearch")).toEqual(
-      createShortcutChord("J", { primary: true }),
+      createShortcutChord("E", { primary: true }),
     );
   });
 

@@ -12,6 +12,21 @@ It covers:
 - full-stack isolated testing (backend + frontend + daemon from source)
 - troubleshooting and destructive reset options
 
+## Contribution Terms
+
+By submitting a contribution to Multica — a pull request, a patch, or any
+other work — you agree to condition 2 of the [Multica License](LICENSE):
+
+- your contribution is submitted under the Multica License as a whole (the
+  additional conditions in Part I together with the incorporated Apache
+  License 2.0 text in Part II), not under the Apache License 2.0 alone;
+- your contributed code may be used for commercial purposes, including the
+  producer's cloud business operations;
+- the producer can adjust the Multica License to be more strict or relaxed
+  as deemed necessary.
+
+See the [LICENSE](LICENSE) file for the full terms.
+
 ## Development Model
 
 Local development uses one shared PostgreSQL container and one database per checkout.
@@ -26,9 +41,9 @@ This keeps Docker simple while still isolating schema and data.
 
 ## Prerequisites
 
-- Node.js `v20+`
-- `pnpm` `v10.28+`
-- Go `v1.26+`
+- Node.js `22`
+- `pnpm` `10.28.2`
+- Go `1.26.6`
 - Docker
 
 ## Important Rules
@@ -175,6 +190,25 @@ make dev              # start (re-runs setup if needed, idempotent)
 make stop-worktree    # stop
 make check-worktree   # verify
 ```
+
+### Removing a Worktree
+
+Git does not provide a `pre-worktree-remove` hook. Use the repository wrapper
+from another checkout so database cleanup happens before Git removes the
+worktree directory:
+
+```bash
+make remove-worktree WORKTREE=../multica-feature
+```
+
+The command refuses to remove the primary checkout, the current checkout, a
+locked worktree, or a worktree with uncommitted changes. If the target contains
+`.env.worktree`, it shows the database name and asks for `y/N` confirmation,
+drops that database, and only then runs `git worktree remove`. A worktree that
+was never set up has no `.env.worktree`, so database cleanup is skipped.
+
+Running `git worktree remove` directly bypasses this cleanup and can leave an
+orphaned local database.
 
 ## Running Main and Worktree at the Same Time
 
@@ -497,7 +531,9 @@ derives, from the worktree path (same `cksum % 1000` offset as the backend /
 frontend ports in `.env.worktree`):
 
 - `DESKTOP_RENDERER_PORT` = `5174 + offset` — its own Vite dev server (`5174`
-  base leaves `5173` for the primary checkout, even when `offset` is `0`)
+  base leaves `5173` for the primary checkout, even when `offset` is `0`). The
+  one offset that would land on `6000` gets `6174` instead: Chromium treats
+  `6000` as a restricted port and fails the load with `ERR_UNSAFE_PORT`
 - `DESKTOP_APP_SUFFIX` = `<folder>-<offset>` — its own single-instance lock /
   `userData`, and an app named `Multica Canary <folder>-<offset>` so it is
   distinguishable in Cmd+Tab. The offset keeps it unique across worktrees that
@@ -626,6 +662,19 @@ make start
 - only affects the current env's database; other worktree databases are untouched
 - refuses to run if `DATABASE_URL` points at a remote host
 - pass `ENV_FILE=.env.worktree` to target a specific worktree
+
+To permanently drop the current worktree database without recreating it:
+
+```bash
+make db-drop ENV_FILE=.env.worktree
+```
+
+The command prints the selected database and environment file, then requires a
+`y/N` confirmation. It only operates on the local Docker PostgreSQL service,
+protects PostgreSQL system databases, and refuses to drop the default main
+database `multica` unless `ALLOW_MAIN_DB_DROP=1` is explicitly supplied.
+Declining the confirmation is a successful no-op; when called by
+`make remove-worktree`, it also leaves the worktree in place.
 
 If you want to wipe all local PostgreSQL data for this repo:
 

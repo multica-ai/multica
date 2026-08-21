@@ -1,9 +1,11 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"testing"
 	"time"
@@ -313,10 +315,10 @@ func TestChannelMediaReconciler_SettleInvariantDwarfsPipelineBudgets(t *testing.
 	if channelMediaReconcileLease <= 0 || channelMediaReconcileLease >= ChannelMediaReconcileSettleDelay {
 		t.Fatalf("lease %v must be positive and well under settle %v", channelMediaReconcileLease, ChannelMediaReconcileSettleDelay)
 	}
-	// The lease is heartbeated per row, so it only ever needs to cover ONE
-	// row's worst case (a delete at its full timeout plus DB round-trips) —
-	// never the whole sequential batch. 2x margin keeps renewal comfortably
-	// ahead of expiry.
+	// A row is claimed immediately before its own settle, so the lease only
+	// ever needs to cover ONE row's worst case (a delete at its full timeout
+	// plus DB round-trips) — never a whole sweep. 2x margin keeps the owner
+	// comfortably ahead of expiry.
 	if channelMediaReconcileLease < 2*channelMediaReconcileDeleteTimeout {
 		t.Fatalf("lease %v must be >= 2x the per-delete timeout %v", channelMediaReconcileLease, channelMediaReconcileDeleteTimeout)
 	}
@@ -419,52 +421,110 @@ func TestChannelMediaReconciler_StalledDeleteIsBoundedAndBacksOff(t *testing.T) 
 	}
 }
 
-// The batch shares one claim but the lease is heartbeated per row: a row
-// reclaimed by another replica mid-batch (its lease expired while earlier
-// deletes ran long) must be skipped — no duplicate delete, no clobbered
-// attempt/backoff on the new owner's row.
-func TestChannelMediaReconciler_SkipsRowReclaimedMidBatch(t *testing.T) {
+// Shutdown cancels the sweep mid-loop. That is how a sweep normally ends, so
+// it must settle nothing and stay silent rather than page someone with a
+// claim-failure warning for its own cancellation.
+func TestChannelMediaReconciler_CancelledSweepIsQuiet(t *testing.T) {
 	pool := newCancelFinalizePool(t)
 	f := seedReconcilerFixture(t, pool)
-	foreign := util.MustParseUUID("66666666-6666-4666-8666-666666666666")
+	key := "ws/lark/cancelled"
+	f.seedLedgerRow(t, key, "https://cdn.test/cancelled", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+	var logs bytes.Buffer
 	deleter := &fakeObjectDeleter{}
-	// While row 1's delete runs, another replica reclaims row 2 (its shared
-	// lease "expired"): simulated by swapping in a foreign lease token.
+	rec := &ChannelMediaReconciler{
+		Queries: db.New(pool),
+		Storage: deleter,
+		// Warn and above only: shutdown must not page anyone. Debug/info
+		// tracing a future RunOnce may add is not what this test guards.
+		Logger: slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	rec.RunOnce(ctx)
+
+	if logs.Len() != 0 {
+		t.Fatalf("cancelled sweep logged %q, want no warnings", logs.String())
+	}
+	if deleted := deleter.deletedKeys(); len(deleted) != 0 {
+		t.Fatalf("cancelled sweep deleted %v, want nothing", deleted)
+	}
+	if state, attempt, exists := f.rowState(t, key); !exists || state != "pending" || attempt != 0 {
+		t.Fatalf("row = (%q, attempt=%d, %v), want an untouched ('pending', 0)", state, attempt, exists)
+	}
+}
+
+// Cancellation that lands INSIDE a settle — the common case, since a sweep
+// spends its time in object-storage deletes — must be as quiet as one at the
+// claim boundary. The row keeps its lease and is reclaimed after expiry, so
+// there is nothing to record: writing the backoff would fail on the same
+// cancelled context and log twice per in-flight row on every shutdown.
+func TestChannelMediaReconciler_CancelledSettleIsQuiet(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	key := "ws/lark/cancelled-mid-settle"
+	f.seedLedgerRow(t, key, "https://cdn.test/cancelled-mid-settle", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
+	ctx, cancel := context.WithCancel(context.Background())
+	deleter := &fakeObjectDeleter{err: context.Canceled}
+	deleter.onDelete = func(string) { cancel() }
+	var logs bytes.Buffer
+	rec := &ChannelMediaReconciler{
+		Queries: db.New(pool),
+		Storage: deleter,
+		Logger:  slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn})),
+	}
+	defer cancel()
+
+	rec.RunOnce(ctx)
+
+	if logs.Len() != 0 {
+		t.Fatalf("sweep cancelled during a delete logged %q, want no warnings", logs.String())
+	}
+	// The claim stands: the row waits for its lease to expire, exactly like a
+	// worker that crashed mid-delete.
+	if state, attempt, exists := f.rowState(t, key); !exists || state != "deleting" || attempt != 1 {
+		t.Fatalf("row = (%q, attempt=%d, %v), want a still-claimed ('deleting', 1)", state, attempt, exists)
+	}
+}
+
+// Rows are claimed one at a time, immediately before their own work: while
+// the first row's delete runs, the next row must still be untouched
+// ('pending', attempt 0). Claiming the whole batch up front made that row hold
+// a lease through work it was not part of — it could expire and be reclaimed
+// before its first DELETE was ever tried, so attempt/backoff counted attempts
+// that never happened.
+func TestChannelMediaReconciler_TailRowIsUnclaimedUntilItsTurn(t *testing.T) {
+	pool := newCancelFinalizePool(t)
+	f := seedReconcilerFixture(t, pool)
+	deleter := &fakeObjectDeleter{}
+	var tailState string
+	var tailAttempt int
 	deleter.onDelete = func(key string) {
 		if key != "ws/lark/first" {
 			return
 		}
-		if _, err := pool.Exec(context.Background(), `
-			UPDATE channel_media_pending_object
-			SET lease_token = $2, attempt = attempt + 1
-			WHERE storage_key = $1
-		`, "ws/lark/second", foreign); err != nil {
-			t.Errorf("simulate reclaim: %v", err)
-		}
+		tailState, tailAttempt, _ = f.rowState(t, "ws/lark/second")
 	}
 	rec := &ChannelMediaReconciler{Queries: db.New(pool), Storage: deleter}
 
-	// Ordered by next_attempt_at: "first" is older, processed first.
+	// Ordered by next_attempt_at: "first" is older, so it is claimed first.
 	f.seedLedgerRow(t, "ws/lark/first", "https://cdn.test/first", "pending", ChannelMediaReconcileSettleDelay+2*time.Minute)
 	f.seedLedgerRow(t, "ws/lark/second", "https://cdn.test/second", "pending", ChannelMediaReconcileSettleDelay+time.Minute)
 
 	rec.RunOnce(context.Background())
 
-	if deleted := deleter.deletedKeys(); len(deleted) != 1 || deleted[0] != "ws/lark/first" {
-		t.Fatalf("deleted keys = %v, want only the first row (second was reclaimed)", deleted)
+	if tailState != "pending" || tailAttempt != 0 {
+		t.Fatalf("tail row during the first delete = (%q, attempt=%d), want an unclaimed ('pending', 0)", tailState, tailAttempt)
 	}
-	state, attempt, exists := f.rowState(t, "ws/lark/second")
-	if !exists || state != "deleting" || attempt != 2 {
-		t.Fatalf("reclaimed row = (%q, attempt=%d, %v), want untouched under the new owner ('deleting', 2, true)", state, attempt, exists)
+	// Both rows are still settled by the same sweep, just in turn.
+	if deleted := deleter.deletedKeys(); len(deleted) != 2 {
+		t.Fatalf("deleted keys = %v, want both rows settled in one sweep", deleted)
 	}
-	var token pgtype.UUID
-	if err := pool.QueryRow(context.Background(), `
-		SELECT lease_token FROM channel_media_pending_object WHERE storage_key = $1
-	`, "ws/lark/second").Scan(&token); err != nil {
-		t.Fatalf("load lease: %v", err)
-	}
-	if token != foreign {
-		t.Fatalf("lease token = %v, want the new owner's %v", token, foreign)
+	for _, key := range []string{"ws/lark/first", "ws/lark/second"} {
+		state, attempt, exists := f.rowState(t, key)
+		if !exists || state != "tombstoned" || attempt != 1 {
+			t.Fatalf("row %s = (%q, attempt=%d, %v), want ('tombstoned', 1, true) — one claim, one delete", key, state, attempt, exists)
+		}
 	}
 }
 

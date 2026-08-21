@@ -40,6 +40,11 @@ func TestClassifyRules(t *testing.T) {
 		{"prompt is too long", "API Error: prompt is too long: 250000 tokens > 200000 maximum", ReasonAgentContextOverflow},
 		{"context size has been exceeded", "context size has been exceeded; consider /compact", ReasonAgentContextOverflow},
 		{"token limit", "Hit the token limit for this conversation", ReasonAgentContextOverflow},
+		// GH #6360, verbatim from Claude Code 2.1.x. The turn is not
+		// rejected with a 400 — the response comes back with stop_reason
+		// "model_context_window_exceeded" and the CLI prints this line.
+		{"claude code context window limit", "API Error: The model has reached its context window limit.", ReasonAgentContextOverflow},
+		{"raw stop reason", `{"stop_reason":"model_context_window_exceeded"}`, ReasonAgentContextOverflow},
 
 		// 2. Missing config.
 		{"missing env var", "Missing environment variable: `MIFY_API_KEY`.", ReasonAgentMissingConfig},
@@ -102,6 +107,20 @@ func TestClassifyRules(t *testing.T) {
 		{"connectionrefused single", "ConnectionRefused", ReasonAgentProviderNetwork},
 		{"dns", "dns lookup failed", ReasonAgentProviderNetwork},
 		{"i/o timeout", "read tcp 1.2.3.4:443: i/o timeout", ReasonAgentProviderNetwork},
+		// MUL-5370: every Go-side context deadline used to land in
+		// agent_error.unknown, which is not on the retry allowlist — a
+		// transient stall became a terminal failure with a useless label.
+		{"context deadline exceeded", "context deadline exceeded", ReasonAgentProviderNetwork},
+		{"wrapped context deadline", `Post "https://api.example.com/v1": context deadline exceeded`, ReasonAgentProviderNetwork},
+		{"http client timeout", `Get "https://api.example.com": net/http: request canceled (Client.Timeout exceeded while awaiting headers)`, ReasonAgentProviderNetwork},
+		// #6522: all three OpenCode terminal-signal guard failures are silent
+		// provider stream cuts. The two "terminal signal" variants used to hit
+		// rule 13 by accident (the word "signal") and the empty-step one fell
+		// to agent_error.unknown; neither bucket is retryable.
+		{"opencode step open at EOF", "opencode stream ended without a terminal signal (step still open at EOF)", ReasonAgentProviderNetwork},
+		{"opencode continuation never started", "opencode stream ended without a terminal signal (last step required a continuation that never started)", ReasonAgentProviderNetwork},
+		{"opencode empty final step", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing", ReasonAgentProviderNetwork},
+		{"opencode empty step with process exit appended", "opencode stream ended on an empty step (no text, no tool call, no reported usage) — the provider produced nothing; opencode exited with error: exit status 1", ReasonAgentProviderNetwork},
 
 		// 8. Model not found / unavailable.
 		{"model not found", "Error: model claude-3-opus-99 not found", ReasonAgentModelNotFoundOrUnavailable},
@@ -120,6 +139,7 @@ func TestClassifyRules(t *testing.T) {
 
 		// 11. Runtime missing executable.
 		{"executable not found", "executable not found in $PATH", ReasonAgentRuntimeMissingExecutable},
+		{"exec format error", "start claude: fork/exec /usr/lib/node_modules/@anthropic-ai/claude-code/bin/claude.exe: exec format error", ReasonAgentRuntimeMissingExecutable},
 
 		// 12. Runtime version unsupported.
 		{"below the minimum supported version", "claude CLI 0.1.0 is below the minimum supported version 0.5.0", ReasonAgentRuntimeVersionUnsupported},
@@ -195,6 +215,7 @@ func TestClassifyOrderingPriorities(t *testing.T) {
 		// — the upstream classification should win because the
 		// process_failure rule is checked last.
 		{"exit status with 401 upstream", "exit status 1: API Error: 401 Unauthorized", ReasonAgentProviderAuthOrAccess},
+		{"windows codex process start", "start codex: fork/exec C:\\invalid\\codex.exe: %1 is not a valid Win32 application.", ReasonAgentProcessFailure},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -263,5 +284,286 @@ func TestClassifyAlwaysReturnsAgentSide(t *testing.T) {
 		if !got.IsAgentError() {
 			t.Errorf("Classify(%q) = %q, must be agent_error.* (in-flight classifier never returns platform-side reasons)", s, got)
 		}
+	}
+}
+
+// TestNormalizeDaemonReason is the mixed-version regression for MUL-5370.
+//
+// The daemon-side fix labels a failed skill-bundle download structurally, but
+// installed daemons upgrade on their own cadence. An un-upgraded daemon reports
+// a NON-EMPTY catchall, which FailTask's "classify only when empty" guard
+// deliberately preserves — so without this normalisation the fix would reach
+// only hosts that happened to update: no auto-retry (the catchall is not on the
+// retry allowlist) and generic chat copy, on exactly the hosts most likely to
+// be hitting the bug.
+func TestNormalizeDaemonReason(t *testing.T) {
+	t.Parallel()
+
+	const legacyErr = "resolve skill bundles: context deadline exceeded"
+
+	cases := []struct {
+		name   string
+		reason string
+		raw    string
+		want   Reason
+	}{
+		{
+			name:   "old daemon catchall is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    legacyErr,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			// A daemon new enough to classify the deadline as network, but not
+			// new enough to know the failure was a skill bundle.
+			name:   "old daemon network guess is upgraded",
+			reason: string(ReasonAgentProviderNetwork),
+			raw:    legacyErr,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			name:   "pre-MUL-1949 coarse reason is upgraded",
+			reason: "agent_error",
+			raw:    legacyErr,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			name:   "leading whitespace does not defeat the witness",
+			reason: string(ReasonAgentUnknown),
+			raw:    "  " + legacyErr,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			// A current daemon already sends the right reason and a different
+			// error string; nothing to do.
+			name:   "current daemon reason passes through",
+			reason: string(ReasonSkillBundleUnavailable),
+			raw:    `skill bundle unavailable: skill "x" (id=1, 10 bytes) after 30s: context deadline exceeded`,
+			want:   ReasonSkillBundleUnavailable,
+		},
+		{
+			// The witness is a prefix, not a substring: an agent that merely
+			// mentions the old wrapper in its output must not be relabelled.
+			name:   "prefix only, not substring",
+			reason: string(ReasonAgentUnknown),
+			raw:    "the agent said it could not resolve skill bundles: and then gave up",
+			want:   ReasonAgentUnknown,
+		},
+		{
+			name:   "unrelated reason with the witness is left alone",
+			reason: string(ReasonAgentProviderAuthOrAccess),
+			raw:    legacyErr,
+			want:   ReasonAgentProviderAuthOrAccess,
+		},
+		{
+			name:   "catchall without the witness is left alone",
+			reason: string(ReasonAgentUnknown),
+			raw:    "claude exited with error: exit status 1",
+			want:   ReasonAgentUnknown,
+		},
+		{
+			name:   "empty reason is left alone for the caller's classifier",
+			reason: "",
+			raw:    legacyErr,
+			want:   Reason(""),
+		},
+
+		// --- GH #6360: response-side context overflow. An un-upgraded daemon
+		// classifies the wordings below as the catchall, which is on no resume
+		// blacklist — so without this the over-full session stays pinned and
+		// every later comment on the issue replays the same overflow.
+		{
+			name:   "old daemon catchall on the claude code wording is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    "API Error: The model has reached its context window limit.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			name:   "old daemon catchall on the raw stop reason is upgraded",
+			reason: string(ReasonAgentUnknown),
+			raw:    `{"stop_reason":"model_context_window_exceeded"}`,
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			name:   "pre-MUL-1949 coarse reason on the overflow is upgraded",
+			reason: "agent_error",
+			raw:    "API Error: The model has reached its context window limit.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			// The witness is matched case-insensitively, like Classify's.
+			name:   "witness casing does not defeat the upgrade",
+			reason: string(ReasonAgentUnknown),
+			raw:    "API ERROR: THE MODEL HAS REACHED ITS CONTEXT WINDOW LIMIT.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			// A current daemon already classified it; nothing to do.
+			name:   "current daemon overflow reason passes through",
+			reason: string(ReasonAgentContextOverflow),
+			raw:    "API Error: The model has reached its context window limit.",
+			want:   ReasonAgentContextOverflow,
+		},
+		{
+			// A refined reason means the old daemon matched an earlier rule on
+			// this same text. That is a stronger statement about what ended the
+			// run than the witness is, so it is left alone.
+			name:   "refined reason with the overflow witness is left alone",
+			reason: string(ReasonAgentProcessFailure),
+			raw:    "claude exited with error: exit status 1: The model has reached its context window limit.",
+			want:   ReasonAgentProcessFailure,
+		},
+		{
+			name:   "catchall without an overflow witness is left alone",
+			reason: string(ReasonAgentUnknown),
+			raw:    "API Error: the model is overloaded",
+			want:   ReasonAgentUnknown,
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := NormalizeDaemonReason(tc.reason, tc.raw); got != tc.want {
+				t.Errorf("NormalizeDaemonReason(%q, %q) = %q, want %q", tc.reason, tc.raw, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestNormalizeDaemonReason_UpgradedReasonIsRetryable pins the property that
+// actually matters to the user: the normalised reason must be one the server
+// retries. If someone later drops skill_bundle_unavailable from
+// internal/service/task.go's retryableReasons, the label survives but the
+// self-healing this PR is for silently disappears.
+func TestNormalizeDaemonReason_UpgradedReasonIsPlatformSide(t *testing.T) {
+	t.Parallel()
+
+	got := NormalizeDaemonReason(string(ReasonAgentUnknown), "resolve skill bundles: context deadline exceeded")
+	if got.IsAgentError() {
+		t.Errorf("%q must be platform-side: the agent process never started", got)
+	}
+}
+
+// TestProviderUnconfigured pins the predicate the daemon uses to decide whether
+// a failure is worth annotating with the HERMES_HOME it actually read (GH
+// #6872). The wrapped fixture is the shape the error really arrives in — the
+// runtime's message nested inside the ACP transport's JSON-RPC framing — so a
+// future refactor to equality matching fails here rather than in production.
+func TestProviderUnconfigured(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		name string
+		in   string
+		want bool
+	}{
+		{
+			"wrapped acp error as the daemon receives it",
+			`hermes session/new failed: session/new: Internal error (code=-32603, ` +
+				`data={"details":"No LLM provider configured. Run ` + "`hermes model`" + ` to select a provider."})`,
+			true,
+		},
+		{"bare runtime message", "No LLM provider configured. Run `hermes model` to select a provider.", true},
+		{"lowercased by a forwarder", "error: no llm provider configured", true},
+		// A credential that exists but was rejected is a different failure with
+		// a different fix; the annotation would misdirect the user.
+		{"rejected credential", "401 unauthorized: invalid api key", false},
+		// The provider WAS resolved — it just could not be reached.
+		{"provider unreachable", "connection refused: https://example.invalid/v1", false},
+		{"empty", "", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := ProviderUnconfigured(tc.in); got != tc.want {
+				t.Errorf("ProviderUnconfigured(%q) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestProviderUnconfiguredAgreesWithClassify keeps the shared phrase honest:
+// the predicate and rule 2 read the same const, so anything the predicate
+// recognises must still be filed as a config problem. If these two ever
+// disagree, the daemon would be annotating failures the platform files as
+// something else entirely.
+func TestProviderUnconfiguredAgreesWithClassify(t *testing.T) {
+	t.Parallel()
+
+	const errText = "No LLM provider configured. Run `hermes model` to select a provider."
+	if !ProviderUnconfigured(errText) {
+		t.Fatal("precondition: the predicate should match its own phrase")
+	}
+	if got := Classify(errText); got != ReasonAgentMissingConfig {
+		t.Errorf("Classify(%q) = %q, want %q", errText, got, ReasonAgentMissingConfig)
+	}
+}
+
+// TestNormalizeDaemonReasonUpgradesOpenclawCLITimeout covers the mixed-version
+// window for #7112. A daemon that predates the timeout sentinel classifies the
+// failure from its text and lands on agent_error.provider_network, which is
+// worse than merely imprecise: that reason is on the auto-retry allowlist, so
+// every attempt re-pays the same 8-11s stall and fails identically, and the
+// chat bubble tells the user to check a network that was never involved.
+// Recognising the wire shape fixes both the moment the server deploys.
+func TestNormalizeDaemonReasonUpgradesOpenclawCLITimeout(t *testing.T) {
+	t.Parallel()
+
+	const rawError = "prepare execution environment: execenv: prepare openclaw config: " +
+		"locate openclaw active config: openclaw config file: context deadline exceeded " +
+		"(process: signal: killed)"
+
+	for _, legacy := range []string{
+		string(ReasonAgentProviderNetwork),
+		string(ReasonAgentUnknown),
+		"agent_error",
+	} {
+		if got := NormalizeDaemonReason(legacy, rawError); got != ReasonRuntimeCLITimeout {
+			t.Errorf("NormalizeDaemonReason(%q, openclaw timeout) = %q, want %q", legacy, got, ReasonRuntimeCLITimeout)
+		}
+	}
+
+	// A current daemon already reports the precise reason; normalization must
+	// leave it alone.
+	if got := NormalizeDaemonReason(string(ReasonRuntimeCLITimeout), rawError); got != ReasonRuntimeCLITimeout {
+		t.Errorf("NormalizeDaemonReason(runtime_cli_timeout) = %q, want it preserved", got)
+	}
+
+	// Both witnesses are required. A real provider-side deadline, and an
+	// openclaw prep failure that is not a timeout, must keep their own
+	// classification — the global "deadline exceeded" rule still belongs to
+	// genuine network stalls.
+	unrelated := map[string]struct {
+		reason   string
+		rawError string
+		want     Reason
+	}{
+		"provider deadline stays provider_network": {
+			reason:   string(ReasonAgentProviderNetwork),
+			rawError: "API Error: context deadline exceeded while streaming from provider",
+			want:     ReasonAgentProviderNetwork,
+		},
+		"openclaw prep failure without a timeout is untouched": {
+			reason:   string(ReasonAgentUnknown),
+			rawError: "execenv: prepare openclaw config: read openclaw agents.list: exit status 1",
+			want:     ReasonAgentUnknown,
+		},
+	}
+	for name, tc := range unrelated {
+		if got := NormalizeDaemonReason(tc.reason, tc.rawError); got != tc.want {
+			t.Errorf("%s: NormalizeDaemonReason = %q, want %q", name, got, tc.want)
+		}
+	}
+}
+
+// TestClassifyKeepsDeadlineExceededAsProviderNetwork pins the rule the fix
+// deliberately did NOT touch. Local runtime CLI timeouts are recognised
+// structurally, upstream of Classify; the text rule still has to serve real
+// provider stalls, which are transient and retryable.
+func TestClassifyKeepsDeadlineExceededAsProviderNetwork(t *testing.T) {
+	t.Parallel()
+
+	if got := Classify("post to provider: context deadline exceeded"); got != ReasonAgentProviderNetwork {
+		t.Errorf("Classify(provider deadline) = %q, want %q", got, ReasonAgentProviderNetwork)
 	}
 }

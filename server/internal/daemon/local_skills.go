@@ -1,14 +1,18 @@
 package daemon
 
 import (
+	"bytes"
 	"fmt"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/multica-ai/multica/server/internal/skill"
+	"github.com/multica-ai/multica/server/pkg/agent"
 )
 
 const (
@@ -125,72 +129,119 @@ func localSkillRootsForProvider(provider string) ([]localSkillRoot, bool, error)
 	}
 
 	var providerRoot string
-	switch provider {
-	case "claude":
-		providerRoot = filepath.Join(home, ".claude", "skills")
-	case "codebuddy":
-		// CodeBuddy Code is a Claude Code fork but ships its own native
-		// config directory; it does NOT read ~/.claude/skills unless the
-		// user manually symlinks it in (the vendor's documented Claude
-		// Code migration path). See
-		// https://www.codebuddy.ai/docs/cli/codebuddy-dir ("Global
-		// directory ~/.codebuddy/") and
-		// https://www.codebuddy.ai/docs/cli/skills ("User-level Skills:
-		// ~/.codebuddy/skills/").
-		providerRoot = filepath.Join(home, ".codebuddy", "skills")
-	case "codex":
-		codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
-		if codexHome == "" {
-			codexHome = filepath.Join(home, ".codex")
+	// Built-in runtime identities (e.g. "omp") declare their user skills dir
+	// in the descriptor; resolve to providerRoot and fall through to the
+	// common construction below so universal roots, merging, and fallback
+	// import all still apply — same as every protocol-family provider.
+	if desc, ok := agent.BuiltinRuntimeByID(provider); ok {
+		providerRoot = filepath.Join(home, desc.UserSkillsDir)
+	} else {
+		switch provider {
+		case "claude":
+			providerRoot = filepath.Join(home, ".claude", "skills")
+		case "codebuddy":
+			// CodeBuddy Code is a Claude Code fork but ships its own native
+			// config directory; it does NOT read ~/.claude/skills unless the
+			// user manually symlinks it in (the vendor's documented Claude
+			// Code migration path). See
+			// https://www.codebuddy.ai/docs/cli/codebuddy-dir ("Global
+			// directory ~/.codebuddy/") and
+			// https://www.codebuddy.ai/docs/cli/skills ("User-level Skills:
+			// ~/.codebuddy/skills/").
+			providerRoot = filepath.Join(home, ".codebuddy", "skills")
+		case "codex":
+			codexHome := strings.TrimSpace(os.Getenv("CODEX_HOME"))
+			if codexHome == "" {
+				codexHome = filepath.Join(home, ".codex")
+			}
+			providerRoot = filepath.Join(codexHome, "skills")
+		case "copilot":
+			providerRoot = filepath.Join(home, ".copilot", "skills")
+		case "opencode":
+			providerRoot = filepath.Join(home, ".config", "opencode", "skills")
+		case "deveco":
+			providerRoot = filepath.Join(home, ".config", "deveco", "skills")
+		case "openclaw":
+			providerRoot = filepath.Join(home, ".openclaw", "skills")
+		case "pi":
+			providerRoot = filepath.Join(home, ".pi", "agent", "skills")
+		case "cursor":
+			providerRoot = filepath.Join(home, ".cursor", "skills")
+		case "hermes":
+			providerRoot = filepath.Join(home, ".hermes", "skills")
+		case "kimi":
+			providerRoot = filepath.Join(home, ".kimi", "skills")
+		case "reasonix":
+			reasonixHome := strings.TrimSpace(os.Getenv("REASONIX_HOME"))
+			if reasonixHome == "" {
+				reasonixHome = filepath.Join(home, ".reasonix")
+			}
+			providerRoot = filepath.Join(reasonixHome, "skills")
+		case "dsh":
+			dshHome := strings.TrimSpace(os.Getenv("DSH_HOME"))
+			if dshHome == "" {
+				dshHome = filepath.Join(home, ".dsh")
+			}
+			providerRoot = filepath.Join(dshHome, "skills")
+		case "kiro":
+			providerRoot = filepath.Join(home, ".kiro", "skills")
+		case "qoder":
+			providerRoot = filepath.Join(home, ".qoder", "skills")
+		case "qoderclicn":
+			providerRoot = filepath.Join(home, ".qoder-cn", "skills")
+		case "traecli":
+			// Official TRAE CLI global skills live in ~/.traecli/skills.
+			// See https://docs.trae.cn/cli_skills
+			providerRoot = filepath.Join(home, ".traecli", "skills")
+		case "antigravity":
+			// agy inherits Gemini CLI's global skill root; see
+			// https://antigravity.google/docs/gcli-migration ("Global skills").
+			providerRoot = filepath.Join(home, ".gemini", "antigravity-cli", "skills")
+		case "grok":
+			// GROK_HOME replaces the default ~/.grok home for settings, sessions,
+			// and user-level skills.
+			grokHome := strings.TrimSpace(os.Getenv("GROK_HOME"))
+			if grokHome == "" {
+				grokHome = filepath.Join(home, ".grok")
+			}
+			providerRoot = filepath.Join(grokHome, "skills")
+		case "qwen":
+			// QWEN_HOME replaces Qwen Code's global ~/.qwen directory. It owns
+			// settings, sessions, credentials and personal skills; project
+			// .qwen/skills remains rooted in the task workdir.
+			qwenHome := strings.TrimSpace(os.Getenv("QWEN_HOME"))
+			if qwenHome == "" {
+				qwenHome = filepath.Join(home, ".qwen")
+			}
+			providerRoot = filepath.Join(qwenHome, "skills")
+		case "qwenpaw":
+			// QWENPAW_WORKING_DIR (or legacy COPAW_WORKING_DIR) overrides
+			// QwenPaw's global ~/.qwenpaw directory, which owns settings,
+			// sessions, credentials and personal skills. The runtime
+			// resolves its root from QWENPAW_WORKING_DIR → COPAW_WORKING_DIR
+			// → ~/.copaw (legacy) → ~/.qwenpaw (default).
+			// See constant.py in the QwenPaw source.
+			qwenpawHome := strings.TrimSpace(os.Getenv("QWENPAW_WORKING_DIR"))
+			if qwenpawHome == "" {
+				qwenpawHome = strings.TrimSpace(os.Getenv("COPAW_WORKING_DIR"))
+			}
+			if qwenpawHome == "" {
+				legacyCopaw := filepath.Join(home, ".copaw")
+				if _, err := os.Stat(legacyCopaw); err == nil {
+					qwenpawHome = legacyCopaw
+				} else {
+					qwenpawHome = filepath.Join(home, ".qwenpaw")
+				}
+			}
+			providerRoot = filepath.Join(qwenpawHome, "skill_pool")
+		case "mcode":
+			// MCode's default data directory is ~/.minimax; global skills live
+			// directly below it. Project skills are injected separately under
+			// <workDir>/.minimax/skills.
+			providerRoot = filepath.Join(home, ".minimax", "skills")
+		default:
+			return nil, false, nil
 		}
-		providerRoot = filepath.Join(codexHome, "skills")
-	case "copilot":
-		providerRoot = filepath.Join(home, ".copilot", "skills")
-	case "opencode":
-		providerRoot = filepath.Join(home, ".config", "opencode", "skills")
-	case "deveco":
-		providerRoot = filepath.Join(home, ".config", "deveco", "skills")
-	case "openclaw":
-		providerRoot = filepath.Join(home, ".openclaw", "skills")
-	case "pi":
-		providerRoot = filepath.Join(home, ".pi", "agent", "skills")
-	case "cursor":
-		providerRoot = filepath.Join(home, ".cursor", "skills")
-	case "hermes":
-		providerRoot = filepath.Join(home, ".hermes", "skills")
-	case "kimi":
-		providerRoot = filepath.Join(home, ".kimi", "skills")
-	case "kiro":
-		providerRoot = filepath.Join(home, ".kiro", "skills")
-	case "qoder":
-		providerRoot = filepath.Join(home, ".qoder", "skills")
-	case "traecli":
-		// Official TRAE CLI global skills live in ~/.traecli/skills.
-		// See https://docs.trae.cn/cli_skills
-		providerRoot = filepath.Join(home, ".traecli", "skills")
-	case "antigravity":
-		// agy inherits Gemini CLI's global skill root; see
-		// https://antigravity.google/docs/gcli-migration ("Global skills").
-		providerRoot = filepath.Join(home, ".gemini", "antigravity-cli", "skills")
-	case "grok":
-		// GROK_HOME replaces the default ~/.grok home for settings, sessions,
-		// and user-level skills.
-		grokHome := strings.TrimSpace(os.Getenv("GROK_HOME"))
-		if grokHome == "" {
-			grokHome = filepath.Join(home, ".grok")
-		}
-		providerRoot = filepath.Join(grokHome, "skills")
-	case "qwen":
-		// QWEN_HOME replaces Qwen Code's global ~/.qwen directory. It owns
-		// settings, sessions, credentials and personal skills; project
-		// .qwen/skills remains rooted in the task workdir.
-		qwenHome := strings.TrimSpace(os.Getenv("QWEN_HOME"))
-		if qwenHome == "" {
-			qwenHome = filepath.Join(home, ".qwen")
-		}
-		providerRoot = filepath.Join(qwenHome, "skills")
-	default:
-		return nil, false, nil
 	}
 
 	roots := []localSkillRoot{
@@ -324,6 +375,57 @@ func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileDa
 		if err != nil || info.Size() > maxLocalSkillFileSize {
 			return nil
 		}
+		// A binary supporting file cannot survive SkillFileData.Content: the
+		// bytes go out as a Go string and encoding/json rewrites every invalid
+		// UTF-8 byte to U+FFFD, so writeSkillFiles later recreates a file that
+		// differs from the original and will not open.
+		//
+		// IsLikelyBinaryFilePath is the cheap first pass on the extension — the
+		// same heuristic the archive/URL importer uses — checked before any
+		// read so a known-binary file never pays the I/O. On its own it misses
+		// a binary file with an unlisted or missing extension (a .safetensors,
+		// a .parquet, a stray no-extension blob) and a text file in a
+		// non-UTF-8 encoding, both of which corrupt exactly the same way.
+		if skill.IsLikelyBinaryFilePath(rel) {
+			slog.Info("local skill: skipping binary file",
+				"skill_dir", skillDir,
+				"path", filepath.ToSlash(rel),
+				"size", info.Size(),
+				"reason", "binary_extension",
+			)
+			return nil
+		}
+		// The read below is the actual guarantee: skip whenever the bytes
+		// themselves are not safely round-trippable, regardless of what the
+		// extension suggested. This runs on both the includeContent=false
+		// (discovery) and includeContent=true (sync) passes so they agree on
+		// which files make up the bundle — skipping the read on the false pass
+		// would let a discovery listing promise a file that sync then silently
+		// drops.
+		//
+		// Valid UTF-8 alone is not enough: a NUL byte is legal UTF-8 but the
+		// server-side import path strips every 0x00 via sanitizeNullBytes
+		// (server/internal/handler/skill_create.go), so a file that is valid
+		// UTF-8 but contains NUL — UTF-16LE text made of ASCII characters is a
+		// realistic example — still comes back different from what went in.
+		// Require both: valid UTF-8 AND NUL-free.
+		content, err := os.ReadFile(path)
+		if err != nil {
+			return nil
+		}
+		if !utf8.Valid(content) || bytes.IndexByte(content, 0) >= 0 {
+			reason := "invalid_utf8"
+			if utf8.Valid(content) {
+				reason = "embedded_nul"
+			}
+			slog.Info("local skill: skipping binary file",
+				"skill_dir", skillDir,
+				"path", filepath.ToSlash(rel),
+				"size", info.Size(),
+				"reason", reason,
+			)
+			return nil
+		}
 		if len(files) >= maxLocalSkillFileCount {
 			return fmt.Errorf("local skill exceeds %d files", maxLocalSkillFileCount)
 		}
@@ -334,10 +436,6 @@ func collectLocalSkillFiles(skillDir string, includeContent bool) ([]SkillFileDa
 
 		file := SkillFileData{Path: filepath.ToSlash(rel)}
 		if includeContent {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				return nil
-			}
 			file.Content = string(content)
 		}
 		files = append(files, file)

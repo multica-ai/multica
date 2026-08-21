@@ -3,6 +3,7 @@
 package agent
 
 import (
+	"bytes"
 	"fmt"
 	"log/slog"
 	"path/filepath"
@@ -248,4 +249,204 @@ func TestCursorExecuteIgnoresUnknownSubtypes(t *testing.T) {
 // single quote, so a JSON line reaches printf verbatim.
 func shellSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// runCursorStreamLines replays the given NDJSON lines through the real cursor
+// backend and returns the messages, the result, and everything the backend
+// logged.
+func runCursorStreamLines(t *testing.T, lines []string) ([]Message, Result, string) {
+	t.Helper()
+
+	script := "#!/bin/sh\n"
+	for _, line := range lines {
+		script += fmt.Sprintf("printf '%%s\\n' %s\n", shellSingleQuote(line))
+	}
+
+	fakePath := filepath.Join(t.TempDir(), "cursor-agent")
+	writeTestExecutable(t, fakePath, []byte(script))
+
+	var logBuf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&logBuf, nil))
+
+	backend, err := New("cursor", Config{ExecutablePath: fakePath, Logger: logger})
+	if err != nil {
+		t.Fatalf("New(cursor): %v", err)
+	}
+	session, err := backend.Execute(t.Context(), "hello", ExecOptions{Timeout: 30 * time.Second})
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+
+	var messages []Message
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for msg := range session.Messages {
+			messages = append(messages, msg)
+		}
+	}()
+	result := <-session.Result
+	<-done
+
+	return messages, result, logBuf.String()
+}
+
+func countCursorMessageTypes(messages []Message) map[MessageType]int {
+	counts := make(map[MessageType]int)
+	for _, msg := range messages {
+		counts[msg.Type]++
+	}
+	return counts
+}
+
+// TestCursorExecuteReportsUnhandledTopLevelTypes is the MUL-5434 regression.
+//
+// Reported symptom: a Cursor run that demonstrably used tools produced a single
+// blob of agent text, tools=0, no reasoning — and not one diagnostic. This test
+// reproduces that exact stream shape by renaming only the top-level event types
+// (`thinking`→`reasoning`, `tool_call`→`tool_calls`) and leaving every nested
+// field untouched, which is what an upstream protocol rename looks like.
+//
+// The parser must still refuse to guess: no tool or reasoning message may be
+// synthesized from an event it does not recognize. What it must NOT do is stay
+// silent — a silent drop leaves no trace at all, which is what made the original
+// report impossible to triage from logs.
+//
+// This asserts only that the signal exists and that nothing is fabricated. The
+// tally is deliberately not treated as a verdict on WHY the transcript is empty;
+// see cursorUnhandledTypeTally for the branches it cannot rule out.
+func TestCursorExecuteReportsUnhandledTopLevelTypes(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"system","subtype":"init","session_id":"sess-drift"}`,
+		`{"type":"reasoning","subtype":"delta","text":"reasoning under a renamed type"}`,
+		`{"type":"tool_calls","subtype":"started","call_id":"call-y","tool_call":{"readToolCall":{"args":{"path":"/y"}},"toolCallId":"call-y"}}`,
+		`{"type":"tool_calls","subtype":"completed","call_id":"call-y","tool_call":{"readToolCall":{"args":{"path":"/y"},"result":{"success":{}}},"toolCallId":"call-y"}}`,
+		`{"type":"toolCall","subtype":"started","call_id":"call-z","tool_call":{"readToolCall":{"args":{"path":"/z"}},"toolCallId":"call-z"}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"single blob","session_id":"sess-drift"}`,
+	}
+
+	messages, result, logs := runCursorStreamLines(t, lines)
+
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed; error=%q", result.Status, result.Error)
+	}
+
+	// Unrecognized events are never coerced into transcript rows.
+	counts := countCursorMessageTypes(messages)
+	if counts[MessageToolUse] != 0 || counts[MessageToolResult] != 0 {
+		t.Errorf("unhandled types synthesized tool rows: tool_use=%d tool_result=%d",
+			counts[MessageToolUse], counts[MessageToolResult])
+	}
+	if counts[MessageThinking] != 0 {
+		t.Errorf("unhandled type folded into reasoning: thinking=%d", counts[MessageThinking])
+	}
+
+	// ...but the drop is now observable, and names the events that were dropped.
+	if !strings.Contains(logs, "cursor-agent ignored unhandled event types") {
+		t.Fatalf("no unhandled-type warning emitted; logs:\n%s", logs)
+	}
+	for _, want := range []string{`count=4`, `reasoning=1`, `toolCall=1`, `tool_calls=2`} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("warning/summary missing %q; logs:\n%s", want, logs)
+		}
+	}
+
+	// The tally is also on the structured summary line, next to the other
+	// protocol counters an operator has to weigh alongside it.
+	if !strings.Contains(logs, "unhandled_event_type_count=4") {
+		t.Errorf("protocol summary missing unhandled_event_type_count=4; logs:\n%s", logs)
+	}
+	if !strings.Contains(logs, "tool_use_count=0") {
+		t.Errorf("protocol summary missing tool_use_count=0; logs:\n%s", logs)
+	}
+}
+
+// TestCursorExecuteDoesNotWarnOnHealthyStream guards the other half of the fix:
+// the warning has to stay quiet on a run with nothing wrong with it. Top-level
+// `user` (the CLI echoing our prompt, present in every recorded run) and the
+// `connection` / `retry` control frames carry no transcript content and are
+// dropped by design — if those counted as drift the warning would fire on every
+// task and stop meaning anything.
+func TestCursorExecuteDoesNotWarnOnHealthyStream(t *testing.T) {
+	t.Parallel()
+
+	lines := []string{
+		`{"type":"system","subtype":"init","session_id":"sess-ok"}`,
+		`{"type":"user","message":{"role":"user","content":[{"type":"text","text":"hello"}]}}`,
+		`{"type":"connection","subtype":"reconnecting"}`,
+		`{"type":"retry","subtype":"scheduled"}`,
+		`{"type":"thinking","subtype":"delta","text":"thinking"}`,
+		`{"type":"thinking","subtype":"completed"}`,
+		`{"type":"tool_call","subtype":"started","call_id":"call-a","tool_call":{"readToolCall":{"args":{"path":"/a"}},"toolCallId":"call-a"}}`,
+		`{"type":"tool_call","subtype":"completed","call_id":"call-a","tool_call":{"readToolCall":{"args":{"path":"/a"},"result":{"success":{}}},"toolCallId":"call-a"}}`,
+		`{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"sess-ok"}`,
+	}
+
+	messages, result, logs := runCursorStreamLines(t, lines)
+
+	if result.Status != "completed" {
+		t.Fatalf("status = %q, want completed; error=%q", result.Status, result.Error)
+	}
+	if strings.Contains(logs, "cursor-agent ignored unhandled event types") {
+		t.Errorf("unhandled-type warning fired on a healthy stream; logs:\n%s", logs)
+	}
+	if !strings.Contains(logs, "unhandled_event_type_count=0") {
+		t.Errorf("protocol summary should report unhandled_event_type_count=0; logs:\n%s", logs)
+	}
+	// Suppressing the warning must not have suppressed the real rows: the
+	// known-good `thinking` / `tool_call` events still reach the transcript.
+	counts := countCursorMessageTypes(messages)
+	if counts[MessageToolUse] != 1 || counts[MessageToolResult] != 1 || counts[MessageThinking] != 1 {
+		t.Errorf("healthy stream lost rows: tool_use=%d tool_result=%d thinking=%d",
+			counts[MessageToolUse], counts[MessageToolResult], counts[MessageThinking])
+	}
+}
+
+// TestCursorLastAssistantBytesExcludesResultText pins the second half of
+// MUL-5434's diagnostic gap. The result event writes its text into the same
+// builder as assistant text, so the summary used to report
+// last_assistant_bytes == result_bytes even when the assistant streamed
+// nothing — erasing the one signal that says "no incremental output arrived,
+// only the final answer", which is precisely the reported failure.
+func TestCursorLastAssistantBytesExcludesResultText(t *testing.T) {
+	t.Parallel()
+
+	t.Run("result only", func(t *testing.T) {
+		t.Parallel()
+		_, result, logs := runCursorStreamLines(t, []string{
+			`{"type":"system","subtype":"init","session_id":"sess-blob"}`,
+			`{"type":"result","subtype":"success","is_error":false,"result":"0123456789","session_id":"sess-blob"}`,
+		})
+		if result.Status != "completed" {
+			t.Fatalf("status = %q, want completed; error=%q", result.Status, result.Error)
+		}
+		if !strings.Contains(logs, "result_bytes=10") {
+			t.Errorf("summary missing result_bytes=10; logs:\n%s", logs)
+		}
+		if !strings.Contains(logs, "last_assistant_bytes=0") {
+			t.Errorf("assistant streamed nothing, so last_assistant_bytes must be 0; logs:\n%s", logs)
+		}
+	})
+
+	t.Run("assistant text counted", func(t *testing.T) {
+		t.Parallel()
+		_, result, logs := runCursorStreamLines(t, []string{
+			`{"type":"system","subtype":"init","session_id":"sess-text"}`,
+			`{"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"abcde"}]}}`,
+			`{"type":"result","subtype":"success","is_error":false,"result":"0123456789","session_id":"sess-text"}`,
+		})
+		if result.Status != "completed" {
+			t.Fatalf("status = %q, want completed; error=%q", result.Status, result.Error)
+		}
+		// The result text is NOT appended (output is already non-empty), and the
+		// assistant's own 5 bytes are what gets reported.
+		if !strings.Contains(logs, "last_assistant_bytes=5") {
+			t.Errorf("summary should report the assistant's 5 bytes; logs:\n%s", logs)
+		}
+		if result.Output != "abcde" {
+			t.Errorf("output = %q, want %q", result.Output, "abcde")
+		}
+	})
 }

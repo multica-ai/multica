@@ -42,7 +42,7 @@ export function InfiniteScrollSentinel({
         <>
           <Loader2 className="size-3 animate-spin text-muted-foreground" />
           {label && (
-            <span className="text-xs text-muted-foreground">{label}</span>
+            <span className="text-caption text-muted-foreground">{label}</span>
           )}
         </>
       )}

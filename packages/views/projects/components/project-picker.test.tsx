@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { I18nProvider } from "@multica/core/i18n/react";
 import enProjects from "../../locales/en/projects.json";
@@ -9,7 +9,10 @@ import { PillButton } from "../../common/pill-button";
 
 vi.mock("@tanstack/react-query", () => ({
   useQuery: () => ({
-    data: [{ id: "project-1", title: "Launch Command Center", icon: null }],
+    data: [
+      { id: "project-1", title: "Launch Command Center", icon: null },
+      { id: "project-2", title: "Mobile Web", icon: null },
+    ],
   }),
 }));
 
@@ -25,89 +28,112 @@ vi.mock("./project-icon", () => ({
   ProjectIcon: () => <span data-testid="project-icon" />,
 }));
 
-// Real PropertyPicker (Popover) — do not mock it: the inline clear control is
-// rendered by ProjectPicker outside the popover, so it is present without
-// opening the picker.
+function withI18n(children: React.ReactNode) {
+  return (
+    <I18nProvider locale="en" resources={{ en: { projects: enProjects, issues: enIssues } }}>
+      {children}
+    </I18nProvider>
+  );
+}
+
+// Real PropertyPicker (Popover) — do not mock it: clearing now lives inside
+// the popover, so the tests have to actually open it.
 function renderPicker(props: Partial<React.ComponentProps<typeof ProjectPicker>> = {}) {
   return render(
-    <I18nProvider locale="en" resources={{ en: { projects: enProjects, issues: enIssues } }}>
+    withI18n(
       <ProjectPicker
         projectId="project-1"
         onUpdate={props.onUpdate ?? vi.fn()}
         triggerRender={<PillButton />}
         {...props}
-      />
-    </I18nProvider>,
+      />,
+    ),
   );
 }
 
-function findInlineClear() {
-  return screen
-    .getAllByRole("button", { name: "Remove from project" })
-    .find((button) => button.className.includes("group-hover/project:opacity-100"));
-}
+const SEARCH_PLACEHOLDER = "Search projects...";
 
 describe("ProjectPicker", () => {
-  it("shows a hover clear action for the selected project", async () => {
+  it("renders the trigger alone — the pill carries no inline clear control", () => {
+    // Regression: the clear × used to be an absolutely-positioned sibling
+    // overlaying the trigger, and only the picker's own default trigger
+    // reserved right padding for it. Every caller passing `triggerRender`
+    // (create dialog pill, table cell, autopilot card) had the × painted on
+    // top of the project name. Clearing belongs in the popover instead, which
+    // is also where the other property pickers put it.
+    renderPicker();
+
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+    expect(screen.getByRole("button", { name: /launch command center/i })).toBeInTheDocument();
+  });
+
+  it("clears the selection from the No project row", async () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn();
 
     renderPicker({ onUpdate });
 
-    const clear = findInlineClear();
-    expect(clear).toBeDefined();
-    expect(clear!.className).toContain("group-hover/project:opacity-100");
-    expect(clear!.className).toContain("size-3.5");
-    expect(clear!.className).toContain("hover:bg-muted-foreground/20");
-    expect(clear!.className).not.toContain("bg-background/95");
-    expect(clear!.className).not.toContain("inset-y-0");
-    expect(clear!.className).not.toContain("w-7");
+    await user.click(screen.getByRole("button", { name: /launch command center/i }));
+    await user.click(await screen.findByRole("button", { name: /no project/i }));
 
-    await user.click(clear!);
     expect(onUpdate).toHaveBeenCalledWith({ project_id: null });
   });
 
-  it("clears via keyboard activation when enabled", async () => {
-    // Other callers (issue/create/autopilot) rely on the clear control staying
-    // reachable by keyboard, not just hover. Enabling must not regress that.
+  it("keeps the empty row first while searching", async () => {
+    // The empty value is the fixed first row of every picker in the app — a
+    // typed query must not move or hide it, or "clear this field" lands
+    // somewhere different depending on what the user typed.
     const user = userEvent.setup();
     const onUpdate = vi.fn();
 
     renderPicker({ onUpdate });
 
-    const clear = findInlineClear();
-    expect(clear).toBeDefined();
-    expect(clear).not.toBeDisabled();
+    await user.click(screen.getByRole("button", { name: /launch command center/i }));
+    await user.type(await screen.findByPlaceholderText(SEARCH_PLACEHOLDER), "zzzznomatch");
 
-    clear!.focus();
-    expect(clear).toHaveFocus();
-    await user.keyboard("{Enter}");
+    await user.click(screen.getByRole("button", { name: /no project/i }));
     expect(onUpdate).toHaveBeenCalledWith({ project_id: null });
   });
 
-  it("locks the inline clear control against pointer and keyboard when disabled", () => {
-    // Regression (MUL-5150): the outer wrapper's `pointer-events-none` only
-    // blocks the mouse. The inline clear button stayed in the tab order, so a
-    // keyboard user could Tab to it and press Enter to detach the project while
-    // a chat send was in flight — retargeting the lazily-created session. The
-    // explicit `disabled` capability must remove it from the tab order and make
-    // both pointer and keyboard activation inert.
+  it("keeps the empty row ahead of the filtered matches", async () => {
+    const user = userEvent.setup();
+
+    renderPicker({ projectId: null });
+
+    // Unset, the trigger adopts the "No project" label too, so both it and
+    // the row match — before and after typing.
+    await user.click(screen.getByRole("button", { name: /no project/i }));
+    expect(screen.getAllByRole("button", { name: /no project/i })).toHaveLength(2);
+
+    await user.type(await screen.findByPlaceholderText(SEARCH_PLACEHOLDER), "mobile");
+    expect(screen.getAllByRole("button", { name: /no project/i })).toHaveLength(2);
+    expect(screen.getByRole("button", { name: /mobile web/i })).toBeInTheDocument();
+  });
+
+  it("locks every mutation path when disabled", async () => {
+    // Regression (MUL-5150): a keyboard user could Tab to the inline clear
+    // button and detach the project while a chat send was in flight,
+    // retargeting the lazily-created session. With clearing moved into the
+    // popover, `disabled` has a single path to close — the popover.
+    const user = userEvent.setup();
     const onUpdate = vi.fn();
 
-    renderPicker({ onUpdate, disabled: true });
+    const { unmount } = render(
+      withI18n(<ProjectPicker projectId="project-1" onUpdate={onUpdate} disabled />),
+    );
 
-    const clear = findInlineClear();
-    expect(clear).toBeDefined();
-    expect(clear).toBeDisabled();
+    const trigger = screen.getByRole("button", { name: /launch command center/i });
+    expect(trigger).toBeDisabled();
 
-    // A disabled control cannot receive focus, so it is not tabbable.
-    clear!.focus();
-    expect(clear).not.toHaveFocus();
+    await user.click(trigger);
+    expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).not.toBeInTheDocument();
+    expect(onUpdate).not.toHaveBeenCalled();
 
-    // Neither keyboard activation nor a direct click may mutate the selection.
-    fireEvent.keyDown(clear!, { key: "Enter" });
-    fireEvent.keyDown(clear!, { key: " " });
-    fireEvent.click(clear!);
+    // The lock also wins over a controlled `open` — a caller that freezes the
+    // picker mid-send cannot leave it hanging open with a live clear row.
+    unmount();
+    render(withI18n(<ProjectPicker projectId="project-1" onUpdate={onUpdate} disabled open />));
+    expect(screen.queryByPlaceholderText(SEARCH_PLACEHOLDER)).not.toBeInTheDocument();
     expect(onUpdate).not.toHaveBeenCalled();
   });
 });
