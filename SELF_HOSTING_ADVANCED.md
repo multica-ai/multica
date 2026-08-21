@@ -223,7 +223,36 @@ Agent-specific overrides:
 
 ## Database Setup
 
-Multica requires PostgreSQL 17 with the pgvector extension.
+Multica requires PostgreSQL 17. It does **not** use pgvector: no migration in
+`server/migrations/` declares a `vector` column or runs `CREATE EXTENSION
+vector`. The bundled image is named `pgvector/pgvector:pg17` for historical
+reasons only — a stock PostgreSQL 17 is sufficient.
+
+Four extensions are referenced by migrations:
+
+| Extension | Migration | Required |
+| --- | --- | --- |
+| `pgcrypto` | `001_init` | **Yes** — the migration runs a bare `CREATE EXTENSION` and fails without it |
+| `pg_trgm` | `137_search_index_pg_trgm_extension` | **Yes** — same, and the trigram GIN indexes behind `/search` depend on it |
+| `pg_bigm` | `032_issue_search_index` | No — wrapped in `DO ... EXCEPTION`, skipped with a `NOTICE` when unavailable |
+| `pg_cron` | `076_task_usage_pgcron_extension` | No — same; the usage rollup runs in-process instead, see [Usage Dashboard Rollup](#usage-dashboard-rollup) |
+
+`pgcrypto` and `pg_trgm` ship with every standard PostgreSQL 17 build
+(`postgresql-contrib` on Debian/Ubuntu, included in Homebrew's
+`postgresql@17`), so the two hard requirements need no custom image.
+
+`pg_bigm` is the only one that does need a custom image or a source build, and
+the bundled `pgvector/pgvector:pg17` image does not ship it either. Without it,
+`/search` loses its bigram indexes and falls back to sequential scans on
+`issue` plus correlated scans on `comment` — which is why the handler caps
+every search at 3 s and returns `503` on timeout rather than hanging (see
+`server/internal/handler/search.go`). This matters most for CJK text, where
+trigram indexes are far less selective.
+
+> Because the two optional extensions are skipped conditionally, a row in
+> `schema_migrations` proves the migration ran, not that its objects exist.
+> Check `SELECT extname FROM pg_extension` to see what a given database
+> actually has.
 
 ### Using Docker Compose (Recommended)
 
@@ -231,10 +260,12 @@ The `docker-compose.selfhost.yml` includes PostgreSQL. No separate setup needed.
 
 ### Using Your Own PostgreSQL
 
-If you prefer to use an existing PostgreSQL instance, ensure the pgvector extension is available:
+If you prefer to use an existing PostgreSQL instance, confirm the migration
+role can create the two required extensions:
 
 ```sql
-CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
 ```
 
 Set `DATABASE_URL` in your `.env` and remove the `postgres` service from the compose file.
@@ -313,7 +344,7 @@ If you are upgrading from a binary that pre-dates MUL-2957 (or the auto-hook fai
 
 If you prefer to build and run services manually:
 
-**Prerequisites:** Go 1.26.6, Node.js 22, pnpm 10.28.2, PostgreSQL 17 with pgvector.
+**Prerequisites:** Go 1.26.6, Node.js 22, pnpm 10.28.2, PostgreSQL 17 — a stock install is enough, see [Database Setup](#database-setup).
 
 ```bash
 # Start your PostgreSQL (or use: docker compose up -d postgres)
