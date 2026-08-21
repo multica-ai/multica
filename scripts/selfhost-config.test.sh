@@ -44,7 +44,9 @@ printf '\nBACKEND_PORT=9100\nSMTP_FROM_EMAIL=multica@example.com\n' >>"$tmp_env"
 printf 'MULTICA_LLM_API_KEY=llm-key-from-env\nMULTICA_LLM_BASE_URL=http://gateway.example/v1\nMULTICA_LLM_DEFAULT_MODEL=model-from-env\nMULTICA_LLM_MAX_RETRIES=3\n' >>"$tmp_env"
 
 config="$(
-  docker compose \
+  LOCAL_UPLOAD_DIR=/var/lib/multica/uploads \
+  LOCAL_UPLOAD_BASE_URL=https://uploads.example.com \
+    docker compose \
     --env-file "$tmp_env" \
     -f docker-compose.selfhost.yml \
     config
@@ -56,6 +58,8 @@ require_config "$config" 'FRONTEND_ORIGIN: http://localhost:3100'
 require_config "$config" 'GOOGLE_REDIRECT_URI: http://localhost:3100/auth/callback'
 require_config "$config" 'MULTICA_APP_URL: http://localhost:3100'
 require_config "$config" 'SMTP_FROM_EMAIL: multica@example.com'
+require_config "$config" 'LOCAL_UPLOAD_DIR: /var/lib/multica/uploads'
+require_config "$config" 'LOCAL_UPLOAD_BASE_URL: https://uploads.example.com'
 
 # The backend environment is an explicit allowlist, so a variable documented in
 # .env.example but missing here silently never reaches the container: the
