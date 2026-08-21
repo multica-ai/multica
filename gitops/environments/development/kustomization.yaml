@@ -43,4 +43,4 @@ images:
     newTag: "243ae4ce"
   - name: ghcr.io/g2crowd/agentfarm-web-prod
     newName: ghcr.io/g2crowd/agentfarm-web-dev
-    newTag: "92c31a54"
+    newTag: "243ae4ce"
