@@ -21,8 +21,14 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 COMPOSE_FILE="docker-compose.selfhost.yml"
 COLIMA_CPU=2
 COLIMA_MEM=4
-FRONTEND_URL="http://localhost:3000"
-BACKEND_URL="http://localhost:8080"
+# Both ports are read from the environment and exported so `docker compose`
+# picks them up — an environment variable outranks the same key in .env.
+# Override either one when a default collides with another local service.
+FRONTEND_PORT="${FRONTEND_PORT:-3000}"
+BACKEND_PORT="${BACKEND_PORT:-8080}"
+export BACKEND_PORT FRONTEND_PORT
+FRONTEND_URL="http://localhost:${FRONTEND_PORT}"
+BACKEND_URL="http://localhost:${BACKEND_PORT}"
 
 # ---- Helpers ---------------------------------------------------------------
 c_green() { printf '\033[32m%s\033[0m\n' "$*"; }
