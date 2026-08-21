@@ -148,6 +148,18 @@ func writeWorkspacesRootMarkerAtomic(path string, data []byte) error {
 // cloud-mode tasks whose envRoot is wiped wholesale by the GC loop — may
 // pass nil to skip the bookkeeping entirely.
 func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+	return writeContextFilesWithMode(workDir, provider, ctx, manifest, false)
+}
+
+// writeContextFilesRefreshing overwrites daemon-owned sidecars (issue context,
+// project resources) that a previous occupant of this workdir left behind.
+// Used on managed Prepare/Reuse only — local_directory still refuses to
+// clobber a user-owned file at the same path.
+func writeContextFilesRefreshing(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+	return writeContextFilesWithMode(workDir, provider, ctx, manifest, true)
+}
+
+func writeContextFilesWithMode(workDir, provider string, ctx TaskContextForEnv, manifest *sidecarManifest, overwriteSidecars bool) error {
 	if err := writeTaskContextMarker(workDir, ctx, manifest); err != nil {
 		return err
 	}
@@ -159,15 +171,13 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 
 	content := renderIssueContext(provider, ctx)
 	path := filepath.Join(contextDir, "issue_context.md")
-	if err := recordWriteFile(path, []byte(content), 0o644, manifest); err != nil {
-		// A pre-existing path means the user already owns
-		// .agent_context/issue_context.md — either they created it
-		// themselves or it survived from a crashed prior run we can't
-		// safely distinguish from intentional content. Refusing the
-		// write is the correct call: the runtime brief (CLAUDE.md /
-		// AGENTS.md) already carries every fact this file
-		// would, so the agent runs fine without the sidecar copy.
-		// Anything else is a real failure.
+	if err := writeSidecarFile(path, []byte(content), 0o644, manifest, overwriteSidecars); err != nil {
+		// A pre-existing path on the local_directory path means the user
+		// already owns .agent_context/issue_context.md. Refusing the write
+		// is the correct call there: the runtime brief already carries
+		// every fact this file would. Managed env roots overwrite instead,
+		// so a leftover brief from another issue cannot be served to this
+		// run. Anything else is a real failure.
 		if !errors.Is(err, errPathPreExists) {
 			return fmt.Errorf("write issue_context.md: %w", err)
 		}
@@ -196,7 +206,7 @@ func writeContextFiles(workDir, provider string, ctx TaskContextForEnv, manifest
 	// block task startup. Missing resources surface as the agent simply not
 	// seeing the file, which matches the "scoped, not dumped" design (the
 	// meta skill content always lists what the agent should expect).
-	if err := writeProjectResources(workDir, ctx, manifest); err != nil {
+	if err := writeProjectResources(workDir, ctx, manifest, overwriteSidecars); err != nil {
 		// Caller logs warnings; avoid noisy returns for non-fatal context.
 		return fmt.Errorf("write project resources: %w", err)
 	}
@@ -285,7 +295,7 @@ func (p ProjectResourceForEnv) MarshalJSON() ([]byte, error) {
 // manifest, when non-nil, is populated with the .multica/project chain
 // of created directories and the resources.json file so CleanupSidecars
 // can undo them on local_directory teardown.
-func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest) error {
+func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *sidecarManifest, overwrite bool) error {
 	if ctx.ProjectID == "" && len(ctx.ProjectResources) == 0 {
 		return nil
 	}
@@ -307,15 +317,42 @@ func writeProjectResources(workDir string, ctx TaskContextForEnv, manifest *side
 	if err != nil {
 		return err
 	}
-	if err := recordWriteFile(filepath.Join(dir, "resources.json"), data, 0o644, manifest); err != nil {
-		// .multica/project/resources.json is Multica-owned and a
-		// pre-existing path is almost certainly user content the
-		// manifest must not destroy. The runtime brief already lists
-		// every project resource so the agent runs fine without the
-		// JSON sidecar — collision degrades to brief-only mode.
+	if err := writeSidecarFile(filepath.Join(dir, "resources.json"), data, 0o644, manifest, overwrite); err != nil {
+		// .multica/project/resources.json is Multica-owned. On a
+		// local_directory path a pre-existing file is treated as user
+		// content the manifest must not destroy. Managed env roots
+		// overwrite, so a leftover House Builder Pro resource file
+		// cannot be handed to a Command Center run. The runtime brief
+		// already lists every project resource, so a refused write on
+		// the local_directory path degrades to brief-only mode.
 		if !errors.Is(err, errPathPreExists) {
 			return err
 		}
+	}
+	return nil
+}
+
+// writeSidecarFile writes a daemon sidecar. When overwrite is false it
+// preserves a pre-existing path (local_directory user content). When
+// overwrite is true it replaces a regular file so a leftover occupant
+// cannot leak another issue's context into this run.
+func writeSidecarFile(path string, data []byte, perm os.FileMode, manifest *sidecarManifest, overwrite bool) error {
+	err := recordWriteFile(path, data, perm, manifest)
+	if err == nil || !overwrite || !errors.Is(err, errPathPreExists) {
+		return err
+	}
+	info, statErr := os.Lstat(path)
+	if statErr != nil {
+		return err
+	}
+	if !info.Mode().IsRegular() {
+		return err
+	}
+	if writeErr := os.WriteFile(path, data, perm); writeErr != nil {
+		return fmt.Errorf("refresh sidecar %s: %w", path, writeErr)
+	}
+	if manifest != nil {
+		manifest.Files = append(manifest.Files, path)
 	}
 	return nil
 }

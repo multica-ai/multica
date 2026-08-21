@@ -721,3 +721,55 @@ func TestScanDiskUsage_SkipsDaemonInternalDotDirs(t *testing.T) {
 		t.Errorf("total_size_bytes = %d, want 1000 (skill cache excluded)", report.TotalSizeBytes)
 	}
 }
+
+// TestScanDiskUsage_PrefersLiveIdentityOverStaleGCMeta is the APEX-1692
+// attribution case: a prefix-collided or reused env root can still have the
+// previous occupant's .gc_meta.json while Prepare has already rewritten the
+// task marker and provenance. Disk-usage must report the live issue, not the
+// leftover parent id.
+func TestScanDiskUsage_PrefersLiveIdentityOverStaleGCMeta(t *testing.T) {
+	t.Parallel()
+
+	root := t.TempDir()
+	wsID := "d21747ad-7e06-4378-9a81-cd6271b37bec"
+	taskDir := filepath.Join(root, wsID, "01a02554")
+	writeFile(t, filepath.Join(taskDir, "workdir/notes.md"), 100)
+	mustWriteMeta(t, taskDir, execenv.GCMeta{
+		Kind:        execenv.GCKindIssue,
+		IssueID:     "01a02554-9a14-7ea7-86bf-63ad1dbace8d",
+		WorkspaceID: wsID,
+		CompletedAt: time.Now().Add(-time.Hour),
+	})
+	if err := os.WriteFile(filepath.Join(taskDir, ".task_owner"), []byte("01a02554-9110-75ad-9f58-3c51f673ee8f\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := execenv.WriteManagedEnvProvenance(taskDir, execenv.ManagedEnvProvenance{
+		WorkspaceID: wsID,
+		IssueID:     "01a02554-9110-75ad-9f58-3c51f673ee8f",
+		AgentID:     "agent-cc",
+		ProjectID:   "949398e5-2e0e-4584-8d3c-98c0439c79c4",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	report, err := ScanDiskUsage(root, nil)
+	if err != nil {
+		t.Fatalf("ScanDiskUsage: %v", err)
+	}
+	if len(report.Tasks) != 1 {
+		t.Fatalf("len(tasks) = %d, want 1", len(report.Tasks))
+	}
+	got := report.Tasks[0]
+	if got.TaskID != "01a02554-9110-75ad-9f58-3c51f673ee8f" {
+		t.Errorf("task_id = %q, want the live owner", got.TaskID)
+	}
+	if got.IssueID != "01a02554-9110-75ad-9f58-3c51f673ee8f" {
+		t.Errorf("issue_id = %q, want the live Command Center issue, not the leftover HBP gc_meta", got.IssueID)
+	}
+	if got.ParentID != got.IssueID {
+		t.Errorf("parent_id = %q, want live issue %q", got.ParentID, got.IssueID)
+	}
+	if got.ProjectID != "949398e5-2e0e-4584-8d3c-98c0439c79c4" {
+		t.Errorf("project_id = %q", got.ProjectID)
+	}
+}

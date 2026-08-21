@@ -23,6 +23,9 @@ type TaskDiskUsage struct {
 	WorkspaceID       string `json:"workspace_id"`
 	WorkspaceShort    string `json:"workspace_short"`
 	TaskShort         string `json:"task_short"`
+	TaskID            string `json:"task_id,omitempty"`
+	IssueID           string `json:"issue_id,omitempty"`
+	ProjectID         string `json:"project_id,omitempty"`
 	Path              string `json:"path"`
 	Kind              string `json:"kind"`
 	ParentID          string `json:"parent_id,omitempty"`
@@ -312,11 +315,33 @@ func buildTaskUsage(taskDir, wsID, taskShort string, matcher artifactMatcher) Ta
 		Kind:           DiskUsageKindUnknown,
 	}
 
+	ident := execenv.ReadTaskDirIdentity(taskDir)
+	usage.TaskID = ident.TaskID
+	usage.IssueID = ident.IssueID
+	usage.ProjectID = ident.ProjectID
+	if ident.Kind != "" {
+		usage.Kind = string(ident.Kind)
+	}
+	switch ident.Kind {
+	case execenv.GCKindIssue:
+		usage.ParentID = ident.IssueID
+	case execenv.GCKindChat:
+		usage.ParentID = ident.ChatSessionID
+	case execenv.GCKindAutopilotRun:
+		// Autopilot run id is only in gc_meta; identity() does not carry it.
+	case execenv.GCKindQuickCreate:
+		usage.ParentID = ident.TaskID
+	}
+
 	metaPresent := false
 	if meta, err := execenv.ReadGCMeta(taskDir); err == nil && meta != nil {
 		metaPresent = true
-		usage.Kind = string(meta.Kind)
-		usage.ParentID = parentIDForMeta(meta)
+		if usage.Kind == DiskUsageKindUnknown {
+			usage.Kind = string(meta.Kind)
+		}
+		if usage.ParentID == "" {
+			usage.ParentID = parentIDForMeta(meta)
+		}
 		if !meta.CompletedAt.IsZero() {
 			usage.AgeSeconds = int64(time.Since(meta.CompletedAt).Seconds())
 		} else if age, ok := gcMetaFileAge(taskDir); ok {

@@ -5851,6 +5851,10 @@ func shouldReusePriorWorkdir(task Task, localAssignment *localDirectoryAssignmen
 	if marker.ManagedBy != execenv.TaskContextMarkerManagedBy || marker.AgentID != task.AgentID {
 		return "", false
 	}
+	repoURLs := execenv.BindingRepoURLs(convertReposForEnv(task.Repos), convertProjectResourcesForEnv(task.ProjectResources))
+	if !execenv.ProvenanceMatchesBinding(prov, task.ProjectID, repoURLs) {
+		return "", false
+	}
 	if task.IssueID != "" {
 		if prov.IssueID != task.IssueID || marker.IssueID != task.IssueID {
 			return "", false
