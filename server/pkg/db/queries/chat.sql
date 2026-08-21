@@ -592,13 +592,20 @@ WHERE message.chat_session_id = @chat_session_id
 -- a task owner. A process crash drops in-memory debounce timers; the next normal
 -- inbound message uses this list to re-arm older generations instead of only
 -- recovering the current one. Legacy NULL revisions are generation 1.
-SELECT DISTINCT COALESCE(channel_context_revision, 1)::bigint AS context_revision
-FROM chat_message
-WHERE chat_session_id = $1
-  AND role = 'user'
-  AND task_id IS NULL
-  AND message_kind != 'channel_command'
-ORDER BY context_revision;
+WITH pending AS (
+    SELECT DISTINCT COALESCE(channel_context_revision, 1)::bigint AS context_revision
+    FROM chat_message
+    WHERE chat_session_id = $1
+      AND role = 'user'
+      AND task_id IS NULL
+      AND message_kind != 'channel_command'
+)
+SELECT pending.context_revision, generation.initiator_user_id
+FROM pending
+LEFT JOIN channel_chat_context_generation AS generation
+  ON generation.chat_session_id = $1
+ AND generation.revision = pending.context_revision
+ORDER BY pending.context_revision;
 
 -- name: DeferChatTaskForSealedPendingMedia :one
 -- Closes the enqueue-vs-append race: under READ COMMITTED a media message can

@@ -12,6 +12,7 @@ import (
 )
 
 type dingtalkRouteCleanupOwner struct {
+	creatorID      string
 	workspaceID    string
 	runtimeID      string
 	agentID        string
@@ -30,10 +31,17 @@ func seedDingTalkRouteCleanupOwner(
 ) dingtalkRouteCleanupOwner {
 	t.Helper()
 	owner := dingtalkRouteCleanupOwner{
+		creatorID:   uuid.NewString(),
 		workspaceID: uuid.NewString(),
 		runtimeID:   uuid.NewString(),
 	}
 	slug := "dingtalk-route-cleanup-" + uuid.NewString()
+	if _, err := pool.Exec(ctx, `
+		INSERT INTO "user" (id, name, email)
+		VALUES ($1, 'DingTalk route cleanup creator', $2)
+	`, owner.creatorID, slug+"@multica.test"); err != nil {
+		t.Fatalf("seed cleanup creator: %v", err)
+	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO workspace (id, name, slug, description)
 		VALUES ($1, 'DingTalk route cleanup', $2, '')
@@ -52,6 +60,7 @@ func seedDingTalkRouteCleanupOwner(
 		_, _ = pool.Exec(context.Background(), `DELETE FROM dingtalk_group_route WHERE workspace_id = $1`, owner.workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE workspace_id = $1`, owner.workspaceID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM workspace WHERE id = $1`, owner.workspaceID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM "user" WHERE id = $1`, owner.creatorID)
 	})
 	return seedDingTalkRouteCleanupAgent(t, ctx, pool, owner, kind, status)
 }
@@ -87,7 +96,7 @@ func seedDingTalkRouteCleanupAgent(
 		) VALUES (
 			$1, $2, $3, 'dingtalk', jsonb_build_object('app_id', $4::text), $5, $6
 		)
-	`, owner.installationID, owner.workspaceID, owner.agentID, owner.appID, uuid.NewString(), status); err != nil {
+	`, owner.installationID, owner.workspaceID, owner.agentID, owner.appID, owner.creatorID, status); err != nil {
 		t.Fatalf("seed cleanup installation: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -239,14 +248,10 @@ func TestDeleteChannelInstallationsBySystemRuntimeAgentsCleansRetiredChatContext
 	systemOwner := seedDingTalkRouteCleanupOwner(t, ctx, pool, "system", "active")
 	userOwner := seedDingTalkRouteCleanupAgent(t, ctx, pool, systemOwner, "user", "active")
 
-	var creatorID string
-	if err := pool.QueryRow(ctx, `SELECT id FROM "user" ORDER BY created_at LIMIT 1`).Scan(&creatorID); err != nil {
-		t.Fatalf("load chat creator: %v", err)
-	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO chat_session (id, workspace_id, agent_id, creator_id, title)
 		VALUES ($1, $2, $3, $4, 'retired system channel chat')
-	`, systemOwner.chatSessionID, systemOwner.workspaceID, systemOwner.agentID, creatorID); err != nil {
+	`, systemOwner.chatSessionID, systemOwner.workspaceID, systemOwner.agentID, systemOwner.creatorID); err != nil {
 		t.Fatalf("seed retired system channel chat: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `
@@ -288,14 +293,10 @@ func TestDeleteWorkspaceCleansRetiredChatContexts(t *testing.T) {
 	target := seedDingTalkRouteCleanupOwner(t, ctx, pool, "user", "active")
 	unrelated := seedDingTalkRouteCleanupOwner(t, ctx, pool, "user", "active")
 
-	var creatorID string
-	if err := pool.QueryRow(ctx, `SELECT id FROM "user" ORDER BY created_at LIMIT 1`).Scan(&creatorID); err != nil {
-		t.Fatalf("load chat creator: %v", err)
-	}
 	if _, err := pool.Exec(ctx, `
 		INSERT INTO chat_session (id, workspace_id, agent_id, creator_id, title)
 		VALUES ($1, $2, $3, $4, 'retired channel chat')
-	`, target.chatSessionID, target.workspaceID, target.agentID, creatorID); err != nil {
+	`, target.chatSessionID, target.workspaceID, target.agentID, target.creatorID); err != nil {
 		t.Fatalf("seed retired channel chat: %v", err)
 	}
 	if _, err := pool.Exec(ctx, `

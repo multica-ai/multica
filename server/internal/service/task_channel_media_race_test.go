@@ -170,6 +170,30 @@ func TestEnqueueChannelChatTask_ContextClearFailureRollsBackTaskAndSeal(t *testi
 	}
 }
 
+func TestEnqueueChannelChatTask_RejectsRetiredBinding(t *testing.T) {
+	pool := newResolveOriginatorPool(t)
+	ctx := context.Background()
+	q := db.New(pool)
+	workspaceID, userID, agentID, _ := seedAttributionFixture(t, pool)
+	chatSessionID := seedChannelChatSession(t, ctx, pool, workspaceID, agentID, userID)
+
+	svc := &TaskService{Queries: q, TxStarter: pool, Bus: events.New()}
+	_, err := svc.EnqueueChannelChatTask(ctx, db.ChatSession{
+		ID: util.MustParseUUID(chatSessionID), AgentID: util.MustParseUUID(agentID),
+	}, util.MustParseUUID(userID), false, 1)
+	if !errors.Is(err, pgx.ErrNoRows) {
+		t.Fatalf("EnqueueChannelChatTask error = %v, want missing binding", err)
+	}
+
+	var taskCount int
+	if err := pool.QueryRow(ctx, `SELECT count(*) FROM agent_task_queue WHERE chat_session_id = $1`, chatSessionID).Scan(&taskCount); err != nil {
+		t.Fatalf("count channel tasks: %v", err)
+	}
+	if taskCount != 0 {
+		t.Fatalf("tasks created after binding retirement = %d, want 0", taskCount)
+	}
+}
+
 // TestEnqueueChatTaskDefersWhenMediaMessageCommitsDuringEnqueue pins the fix
 // for the enqueue-vs-append race: a media-pending message sealed into the task
 // after the deadline read must still leave the task deferred (not claimable)

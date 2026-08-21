@@ -1696,27 +1696,28 @@ func (s *TaskService) enqueueChatTask(ctx context.Context, chatSession db.ChatSe
 	// Lock the channel binding only after the chat_session lock above. The
 	// append path touches chat_session before binding as well, so this order
 	// avoids an ABBA edge while keeping pending fresh in the enqueue transaction.
-	var pendingFresh bool
-	if err := qtx.EnsureChannelChatContextGeneration(ctx, chatSession.ID); err != nil {
-		return db.AgentTaskQueue{}, fmt.Errorf("ensure channel context generation: %w", err)
+	binding, err := qtx.LockChannelChatSessionBindingForContext(ctx, chatSession.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return db.AgentTaskQueue{}, fmt.Errorf("lock channel chat binding: %w", err)
 	}
-	if contextRevision > 0 {
+	if errors.Is(err, pgx.ErrNoRows) && contextRevision > 0 {
+		return db.AgentTaskQueue{}, fmt.Errorf("lock channel chat binding: %w", err)
+	}
+	pendingFresh := false
+	if err == nil {
+		if err := qtx.EnsureChannelChatContextGeneration(ctx, chatSession.ID); err != nil {
+			return db.AgentTaskQueue{}, fmt.Errorf("ensure channel context generation: %w", err)
+		}
+		if contextRevision <= 0 {
+			contextRevision = binding.ContextRevision
+		}
 		generation, err := qtx.LockChannelChatContextGenerationByRevision(ctx, db.LockChannelChatContextGenerationByRevisionParams{
 			ChatSessionID: chatSession.ID, Revision: contextRevision,
 		})
 		if err != nil {
 			return db.AgentTaskQueue{}, fmt.Errorf("lock channel context generation: %w", err)
 		}
-		pendingFresh = generation.PendingFresh
-	} else {
-		state, err := qtx.LockChannelChatContextGeneration(ctx, chatSession.ID)
-		if err != nil && !errors.Is(err, pgx.ErrNoRows) {
-			return db.AgentTaskQueue{}, fmt.Errorf("lock channel context generation: %w", err)
-		}
-		if err == nil {
-			contextRevision = state.ContextRevision
-			pendingFresh = state.GenerationPendingFresh || state.PendingFresh
-		}
+		pendingFresh = generation.PendingFresh || (contextRevision == binding.ContextRevision && binding.PendingFresh)
 	}
 	if pendingFresh {
 		forceFreshSession = true

@@ -67,6 +67,8 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 	}
 
 	const sessionID = "c3440000-0000-4000-8000-000000000001"
+	const directSessionID = "c3440000-0000-4000-8000-000000000009"
+	const directTaskID = "c3440000-0000-4000-8000-000000000010"
 	if _, err := conn.Exec(ctx, `INSERT INTO channel_chat_session_binding (chat_session_id) VALUES ($1)`, sessionID); err != nil {
 		t.Fatalf("seed pre-migration binding: %v", err)
 	}
@@ -79,8 +81,9 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 	}
 	if _, err := conn.Exec(ctx, `
 		INSERT INTO agent_task_queue (id, chat_session_id)
-		VALUES ('c3440000-0000-4000-8000-000000000004', $1)
-	`, sessionID); err != nil {
+		VALUES ('c3440000-0000-4000-8000-000000000004', $1),
+		       ($2, $3)
+	`, sessionID, directTaskID, directSessionID); err != nil {
 		t.Fatalf("seed pre-migration task: %v", err)
 	}
 
@@ -128,8 +131,15 @@ func TestChannelChatContextGenerationMigrationsUpDownAndLegacyRows(t *testing.T)
 	if err := conn.QueryRow(ctx, `SELECT channel_context_revision FROM agent_task_queue WHERE chat_session_id = $1`, sessionID).Scan(&taskRevision); err != nil {
 		t.Fatalf("read task backfill: %v", err)
 	}
-	if taskRevision != nil {
-		t.Fatalf("legacy task revision = %v, want NULL (readers treat it as revision 1)", *taskRevision)
+	if taskRevision == nil || *taskRevision != 1 {
+		t.Fatalf("legacy channel task revision = %v, want 1", taskRevision)
+	}
+	var directTaskRevision *int64
+	if err := conn.QueryRow(ctx, `SELECT channel_context_revision FROM agent_task_queue WHERE id = $1`, directTaskID).Scan(&directTaskRevision); err != nil {
+		t.Fatalf("read direct task backfill: %v", err)
+	}
+	if directTaskRevision != nil {
+		t.Fatalf("legacy direct task revision = %v, want NULL", *directTaskRevision)
 	}
 
 	assertChannelContextMixedVersionGuards(t, ctx, conn.Conn(), sessionID)

@@ -62,6 +62,29 @@ FOR EACH ROW
 WHEN (NEW.channel_context_revision IS NULL AND NEW.chat_session_id IS NOT NULL)
 EXECUTE FUNCTION stamp_channel_task_context_revision();
 
+-- Snapshot pre-migration channel tasks before a later /new advances the live
+-- binding. A task tied to an extant channel binding is channel-originated even
+-- when its input has not yet been sealed; channel_ingested ownership also
+-- preserves tasks whose binding was retired after enqueue. Direct Chat tasks
+-- intentionally remain NULL and continue using the legacy session-wide path.
+UPDATE agent_task_queue AS task
+SET channel_context_revision = 1
+WHERE task.channel_context_revision IS NULL
+  AND task.chat_session_id IS NOT NULL
+  AND (
+      EXISTS (
+          SELECT 1
+          FROM channel_chat_session_binding AS binding
+          WHERE binding.chat_session_id = task.chat_session_id
+      )
+      OR EXISTS (
+          SELECT 1
+          FROM chat_message AS message
+          WHERE message.task_id = task.id
+            AND message.channel_ingested
+      )
+  );
+
 CREATE OR REPLACE FUNCTION enforce_channel_message_task_context_revision()
 RETURNS trigger
 LANGUAGE plpgsql

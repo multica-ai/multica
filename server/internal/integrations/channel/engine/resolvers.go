@@ -134,9 +134,18 @@ type AppendResult struct {
 	// ContextRevision is the durable agent-visible context generation assigned
 	// to this message. The batcher keys and task snapshot use it as a boundary.
 	ContextRevision int64
-	// PendingContextRevisions includes every generation with durable unowned
-	// input after this append. It re-arms debounce windows lost on process crash.
-	PendingContextRevisions []int64
+	// PendingContexts includes every generation with durable unowned input and
+	// its authenticated sender snapshot. It re-arms debounce windows lost on
+	// process crash without borrowing the sender of a later generation.
+	PendingContexts []PendingContext
+}
+
+// PendingContext identifies durable unowned input that needs a run timer. The
+// initiator can be absent only for legacy or corrupt data; recovery fails
+// closed for such older generations rather than impersonating a new sender.
+type PendingContext struct {
+	Revision        int64
+	InitiatorUserID pgtype.UUID
 }
 
 // BindMediaParams carries stored media references to the post-append

@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS channel_chat_context_generation (
     history_end_message_id   TEXT,
     history_boundary_pending BOOLEAN NOT NULL DEFAULT FALSE,
     pending_fresh            BOOLEAN NOT NULL DEFAULT FALSE,
+    initiator_user_id        UUID,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

@@ -327,6 +327,7 @@ type ChannelChatContextGeneration struct {
 	HistoryEndMessageID    pgtype.Text        `json:"history_end_message_id"`
 	HistoryBoundaryPending bool               `json:"history_boundary_pending"`
 	PendingFresh           bool               `json:"pending_fresh"`
+	InitiatorUserID        pgtype.UUID        `json:"initiator_user_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 

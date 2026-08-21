@@ -387,6 +387,7 @@ type fakeTasks struct {
 	forceFresh          bool
 	forceFreshArgs      []bool
 	initiator           pgtype.UUID
+	initiators          []pgtype.UUID
 	contextRevisions    []int64
 	err                 error
 }
@@ -413,6 +414,7 @@ func (f *fakeTasks) EnqueueChannelChatTask(_ context.Context, _ db.ChatSession, 
 	f.forceFresh = forceFresh
 	f.forceFreshArgs = append(f.forceFreshArgs, forceFresh)
 	f.initiator = initiator
+	f.initiators = append(f.initiators, initiator)
 	f.contextRevisions = append(f.contextRevisions, contextRevision)
 	return db.AgentTaskQueue{}, f.err
 }
@@ -438,6 +440,11 @@ func (f *fakeTasks) initiatorArg() pgtype.UUID {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.initiator
+}
+func (f *fakeTasks) initiatorArgs() []pgtype.UUID {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return append([]pgtype.UUID(nil), f.initiators...)
 }
 
 type fakeReader struct {
@@ -1195,7 +1202,12 @@ func TestRouter_RearmsUnownedContextGenerationsAfterBatcherRestart(t *testing.T)
 	timers := &fakeTimerFactory{}
 	h.router.batcher = newTestBatcher(timers)
 	h.binder.appendResult.ContextRevision = 2
-	h.binder.appendResult.PendingContextRevisions = []int64{1, 2}
+	alice := uuidFromString(t, "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa")
+	bob := h.ident.id.UserID
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1, InitiatorUserID: alice},
+		{Revision: 2, InitiatorUserID: bob},
+	}
 	msg := p2pMessage(t)
 	msg.ForceFresh = true
 
@@ -1215,6 +1227,36 @@ func TestRouter_RearmsUnownedContextGenerationsAfterBatcherRestart(t *testing.T)
 	if got := h.tasks.freshArgs(); len(got) != 2 || got[0] || !got[1] {
 		t.Fatalf("recovered force-fresh flags = %v, want [false true]", got)
 	}
+	if got := h.tasks.initiatorArgs(); len(got) != 2 || got[0] != alice || got[1] != bob {
+		t.Fatalf("recovered initiators = %v, want [%v %v]", got, alice, bob)
+	}
+}
+
+func TestRouter_RecoveryWithoutInitiatorFailsClosed(t *testing.T) {
+	h := newHarness(t)
+	timers := &fakeTimerFactory{}
+	h.router.batcher = newTestBatcher(timers)
+	h.binder.appendResult.ContextRevision = 2
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1},
+		{Revision: 2, InitiatorUserID: h.ident.id.UserID},
+	}
+
+	msg := p2pMessage(t)
+	msg.ForceFresh = true
+	if err := h.router.Handle(context.Background(), msg); err != nil {
+		t.Fatalf("Handle: %v", err)
+	}
+	if got := h.router.batcher.pendingCount(); got != 1 {
+		t.Fatalf("scheduled generation windows = %d, want 1", got)
+	}
+	timers.fireArmed()
+	if !waitFor(time.Second, func() bool { return h.tasks.calls() == 1 }) {
+		t.Fatalf("generation flushes = %d, want 1", h.tasks.calls())
+	}
+	if got := h.tasks.revisions(); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("enqueued context revisions = %v, want [2]", got)
+	}
 }
 
 func TestRouter_RecoveryDoesNotDelayLiveOlderGeneration(t *testing.T) {
@@ -1226,7 +1268,10 @@ func TestRouter_RecoveryDoesNotDelayLiveOlderGeneration(t *testing.T) {
 		h.binder.ensureID, h.ident.id.UserID, 1)
 
 	h.binder.appendResult.ContextRevision = 2
-	h.binder.appendResult.PendingContextRevisions = []int64{1, 2}
+	h.binder.appendResult.PendingContexts = []PendingContext{
+		{Revision: 1, InitiatorUserID: h.ident.id.UserID},
+		{Revision: 2, InitiatorUserID: h.ident.id.UserID},
+	}
 	msg.ForceFresh = true
 	if err := h.router.Handle(context.Background(), msg); err != nil {
 		t.Fatalf("Handle: %v", err)

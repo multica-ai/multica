@@ -275,6 +275,9 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	if err != nil {
 		t.Fatalf("restore A before append-wins fence: %v", err)
 	}
+	// Production resolves the route and re-creates the active binding before it
+	// enters AppendUserMessage. Keep this lock-order test on that same path.
+	exec(`INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, config) VALUES ($1, $2, 'dingtalk', $3, 'group', jsonb_build_object('agent_id', $4::text))`, chatSessionID, installation, conversation, defaultAgent)
 
 	// Append-wins cutover: exercise the real message transaction. It locks the
 	// chat session first, then this route revision, and keeps both locks through
@@ -368,6 +371,7 @@ func TestDingTalkGroupRoute_DiscoverReassignAndFenceStaleSessionDB(t *testing.T)
 	if err != nil {
 		t.Fatalf("restore A after append-wins fence: %v", err)
 	}
+	exec(`INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type, config) VALUES ($1, $2, 'dingtalk', $3, 'group', jsonb_build_object('agent_id', $4::text))`, chatSessionID, installation, conversation, defaultAgent)
 
 	// Workspace teardown takes workspace -> chat_session -> route. The real
 	// append path must take chat_session before its route fence, so teardown can

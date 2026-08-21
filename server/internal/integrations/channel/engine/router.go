@@ -569,18 +569,26 @@ func (r *Router) processClaimed(ctx context.Context, set ResolverSet, msg channe
 	//    and the OutboundReplier still fires — only the debounced run trigger
 	//    (and therefore the typing indicator) is suppressed.
 	if !msg.SkipAgentRun {
-		pendingRevisions := appendRes.PendingContextRevisions
-		if len(pendingRevisions) == 0 {
+		pendingContexts := appendRes.PendingContexts
+		if len(pendingContexts) == 0 {
 			// Test and third-party SessionBinder implementations created before the
 			// crash-recovery field still schedule the appended generation normally.
-			pendingRevisions = []int64{appendRes.ContextRevision}
+			pendingContexts = []PendingContext{{
+				Revision: appendRes.ContextRevision, InitiatorUserID: identity.UserID,
+			}}
 		}
-		for _, revision := range pendingRevisions {
+		for _, pending := range pendingContexts {
+			revision := pending.Revision
 			forceFresh := revision == appendRes.ContextRevision && msg.ForceFresh
 			if revision == appendRes.ContextRevision {
 				r.scheduleRunWithFresh(set, inst, msg, sessionID, identity.UserID, forceFresh, revision)
+			} else if pending.InitiatorUserID.Valid {
+				r.scheduleRecoveredRun(set, inst, msg, sessionID, pending.InitiatorUserID, revision)
 			} else {
-				r.scheduleRecoveredRun(set, inst, msg, sessionID, identity.UserID, revision)
+				slog.Warn("skipping recovered channel context without initiator snapshot",
+					"chat_session_id", util.UUIDToString(sessionID),
+					"context_revision", revision,
+				)
 			}
 		}
 		res.runScheduled = true

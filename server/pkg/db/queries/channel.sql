@@ -576,6 +576,14 @@ SELECT pending_fresh FROM channel_chat_session_binding
 WHERE chat_session_id = $1
 FOR UPDATE;
 
+-- name: LockChannelChatSessionBindingForContext :one
+-- Context mutations acquire this row after chat_session and before any
+-- channel_chat_context_generation row. Keeping the statements separate makes
+-- the lock order explicit and identical for append, /new, and task enqueue.
+SELECT * FROM channel_chat_session_binding
+WHERE chat_session_id = $1
+FOR UPDATE;
+
 -- name: ClearChannelChatSessionPendingFresh :exec
 UPDATE channel_chat_session_binding
 SET pending_fresh = FALSE
@@ -586,20 +594,6 @@ UPDATE channel_chat_session_binding
 SET pending_fresh = FALSE
 WHERE chat_session_id = @chat_session_id
   AND context_revision = @revision;
-
--- name: LockChannelChatContextGeneration :one
--- Serializes append, /new and task enqueue for one durable context generation.
--- The binding lock is acquired after the chat_session lock everywhere.
-SELECT binding.*, generation.history_start_message_id,
-       generation.history_end_message_id,
-       generation.history_boundary_pending,
-       generation.pending_fresh AS generation_pending_fresh
-FROM channel_chat_session_binding AS binding
-JOIN channel_chat_context_generation AS generation
-  ON generation.chat_session_id = binding.chat_session_id
- AND generation.revision = binding.context_revision
-WHERE binding.chat_session_id = $1
-FOR UPDATE OF binding, generation;
 
 -- name: EnsureChannelChatContextGeneration :exec
 -- Rolling-deploy repair: an older server can create a binding after the schema
@@ -656,6 +650,16 @@ SET history_start_message_id = @history_start_message_id,
 WHERE chat_session_id = @chat_session_id
   AND revision = @revision
   AND history_boundary_pending;
+
+-- name: SetChannelChatContextInitiator :one
+-- Snapshots the latest authenticated sender whose durable input belongs to a
+-- generation. Crash recovery must use this identity rather than the sender of
+-- a later generation that happened to re-arm the lost debounce timer.
+UPDATE channel_chat_context_generation
+SET initiator_user_id = @initiator_user_id
+WHERE chat_session_id = @chat_session_id
+  AND revision = @revision
+RETURNING initiator_user_id;
 
 -- name: ClearChannelChatContextPendingFresh :exec
 UPDATE channel_chat_context_generation

@@ -50,6 +50,32 @@ type sessionPersistenceFixture struct {
 }
 
 func seedSessionPersistenceFixture(t *testing.T, pool *pgxpool.Pool) sessionPersistenceFixture {
+	f := seedSessionPersistenceFixtureWithoutChannel(t, pool)
+	ctx := context.Background()
+	var installationID pgtype.UUID
+	if err := pool.QueryRow(ctx, `
+		INSERT INTO channel_installation (
+			workspace_id, agent_id, channel_type, config, status, installer_user_id
+		) VALUES ($1, $2, 'lark', '{}'::jsonb, 'active', $3)
+		RETURNING id
+	`, f.workspaceID, f.agentID, f.userID).Scan(&installationID); err != nil {
+		t.Fatalf("create channel installation: %v", err)
+	}
+	if _, err := db.New(pool).CreateChannelChatSessionBinding(ctx, db.CreateChannelChatSessionBindingParams{
+		ChatSessionID: f.sessionID, InstallationID: installationID, ChannelType: "lark",
+		ChannelChatID: "channel-media-" + fmt.Sprint(time.Now().UnixNano()), ChatType: "p2p", Config: []byte("{}"),
+	}); err != nil {
+		t.Fatalf("create channel binding: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_context_generation WHERE chat_session_id = $1`, f.sessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, f.sessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_installation WHERE id = $1`, installationID)
+	})
+	return f
+}
+
+func seedSessionPersistenceFixtureWithoutChannel(t *testing.T, pool *pgxpool.Pool) sessionPersistenceFixture {
 	t.Helper()
 	ctx := context.Background()
 	suffix := time.Now().UnixNano()
@@ -101,7 +127,7 @@ func seedSessionPersistenceFixture(t *testing.T, pool *pgxpool.Pool) sessionPers
 
 func TestAppendUserMessage_AdvancesPendingFreshForBindingCreatedByLegacyServer(t *testing.T) {
 	pool := sessionPersistenceTestDB(t)
-	fixture := seedSessionPersistenceFixture(t, pool)
+	fixture := seedSessionPersistenceFixtureWithoutChannel(t, pool)
 	ctx := context.Background()
 	queries := db.New(pool)
 	session := NewChatSession(queries, pool, channel.TypeFeishu, SessionTitles{})
@@ -158,8 +184,14 @@ func TestAppendUserMessage_AdvancesPendingFreshForBindingCreatedByLegacyServer(t
 	if result.ContextRevision != 2 {
 		t.Fatalf("new message revision = %d, want 2", result.ContextRevision)
 	}
-	if len(result.PendingContextRevisions) != 2 || result.PendingContextRevisions[0] != 1 || result.PendingContextRevisions[1] != 2 {
-		t.Fatalf("pending context revisions = %v, want [1 2]", result.PendingContextRevisions)
+	if len(result.PendingContexts) != 2 || result.PendingContexts[0].Revision != 1 || result.PendingContexts[1].Revision != 2 {
+		t.Fatalf("pending contexts = %v, want revisions [1 2]", result.PendingContexts)
+	}
+	if result.PendingContexts[0].InitiatorUserID.Valid {
+		t.Fatalf("legacy context initiator = %v, want missing fail-closed snapshot", result.PendingContexts[0].InitiatorUserID)
+	}
+	if result.PendingContexts[1].InitiatorUserID != fixture.userID {
+		t.Fatalf("new context initiator = %v, want %v", result.PendingContexts[1].InitiatorUserID, fixture.userID)
 	}
 
 	var bindingRevision int64

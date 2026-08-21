@@ -84,11 +84,13 @@ type fakeSessionQueries struct {
 	pendingFresh       bool
 	legacyPendingFresh bool
 	contextRevision    int64
+	contextInitiator   pgtype.UUID
 	boundaryPending    bool
 	ensureContextErr   error
 	lockContextErr     error
 	advanceContextErr  error
 	resolveContextErr  error
+	setInitiatorErr    error
 	pendingContextsErr error
 	createBindingErr   error // simulate a unique violation on create
 	raceWinner         pgtype.UUID
@@ -141,11 +143,11 @@ func (f *fakeSessionQueries) CreateChatMessage(_ context.Context, arg db.CreateC
 	return db.ChatMessage{ID: f.messageID}, nil
 }
 
-func (f *fakeSessionQueries) ListUnownedChannelChatContextRevisions(context.Context, pgtype.UUID) ([]int64, error) {
+func (f *fakeSessionQueries) ListUnownedChannelChatContextRevisions(context.Context, pgtype.UUID) ([]PendingContext, error) {
 	if f.pendingContextsErr != nil {
 		return nil, f.pendingContextsErr
 	}
-	return []int64{f.contextRevision}, nil
+	return []PendingContext{{Revision: f.contextRevision, InitiatorUserID: f.contextInitiator}}, nil
 }
 
 func (f *fakeSessionQueries) ClearChatMessageChannelMediaPending(context.Context, db.ClearChatMessageChannelMediaPendingParams) error {
@@ -200,14 +202,22 @@ func (f *fakeSessionQueries) TouchChatSession(context.Context, pgtype.UUID) erro
 	return nil
 }
 
-func (f *fakeSessionQueries) LockChannelChatContextGeneration(context.Context, pgtype.UUID) (db.LockChannelChatContextGenerationRow, error) {
+func (f *fakeSessionQueries) LockChannelChatSessionBindingForContext(context.Context, pgtype.UUID) (db.ChannelChatSessionBinding, error) {
 	if f.lockContextErr != nil {
-		return db.LockChannelChatContextGenerationRow{}, f.lockContextErr
+		return db.ChannelChatSessionBinding{}, f.lockContextErr
 	}
-	return db.LockChannelChatContextGenerationRow{
+	return db.ChannelChatSessionBinding{
 		ContextRevision: f.contextRevision, PendingFresh: f.legacyPendingFresh,
+	}, nil
+}
+
+func (f *fakeSessionQueries) LockChannelChatContextGenerationByRevision(context.Context, db.LockChannelChatContextGenerationByRevisionParams) (db.ChannelChatContextGeneration, error) {
+	if f.lockContextErr != nil {
+		return db.ChannelChatContextGeneration{}, f.lockContextErr
+	}
+	return db.ChannelChatContextGeneration{
+		Revision: f.contextRevision, PendingFresh: f.pendingFresh,
 		HistoryBoundaryPending: f.boundaryPending,
-		GenerationPendingFresh: f.pendingFresh,
 	}, nil
 }
 
@@ -231,6 +241,14 @@ func (f *fakeSessionQueries) ResolveChannelChatContextHistoryStart(context.Conte
 	}
 	f.boundaryPending = false
 	return nil
+}
+
+func (f *fakeSessionQueries) SetChannelChatContextInitiator(_ context.Context, arg db.SetChannelChatContextInitiatorParams) (pgtype.UUID, error) {
+	if f.setInitiatorErr != nil {
+		return pgtype.UUID{}, f.setInitiatorErr
+	}
+	f.contextInitiator = arg.InitiatorUserID
+	return arg.InitiatorUserID, nil
 }
 
 func (f *fakeSessionQueries) UpdateChannelChatSessionBindingReplyTarget(context.Context, db.UpdateChannelChatSessionBindingReplyTargetParams) error {
@@ -834,6 +852,7 @@ func TestAppendUserMessage_ContextGenerationFailuresDoNotWriteMessage(t *testing
 			f.boundaryPending = true
 			f.resolveContextErr = testErr
 		}, input: AppendInput{MessageID: "boundary"}},
+		{name: "snapshot initiator", setup: func(f *fakeSessionQueries) { f.setInitiatorErr = testErr }},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

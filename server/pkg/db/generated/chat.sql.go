@@ -2228,32 +2228,44 @@ func (q *Queries) ListPendingChatTasksForSession(ctx context.Context, chatSessio
 }
 
 const listUnownedChannelChatContextRevisions = `-- name: ListUnownedChannelChatContextRevisions :many
-SELECT DISTINCT COALESCE(channel_context_revision, 1)::bigint AS context_revision
-FROM chat_message
-WHERE chat_session_id = $1
-  AND role = 'user'
-  AND task_id IS NULL
-  AND message_kind != 'channel_command'
-ORDER BY context_revision
+WITH pending AS (
+    SELECT DISTINCT COALESCE(channel_context_revision, 1)::bigint AS context_revision
+    FROM chat_message
+    WHERE chat_session_id = $1
+      AND role = 'user'
+      AND task_id IS NULL
+      AND message_kind != 'channel_command'
+)
+SELECT pending.context_revision, generation.initiator_user_id
+FROM pending
+LEFT JOIN channel_chat_context_generation AS generation
+  ON generation.chat_session_id = $1
+ AND generation.revision = pending.context_revision
+ORDER BY pending.context_revision
 `
+
+type ListUnownedChannelChatContextRevisionsRow struct {
+	ContextRevision int64       `json:"context_revision"`
+	InitiatorUserID pgtype.UUID `json:"initiator_user_id"`
+}
 
 // Returns every durable context generation that still has channel input without
 // a task owner. A process crash drops in-memory debounce timers; the next normal
 // inbound message uses this list to re-arm older generations instead of only
 // recovering the current one. Legacy NULL revisions are generation 1.
-func (q *Queries) ListUnownedChannelChatContextRevisions(ctx context.Context, chatSessionID pgtype.UUID) ([]int64, error) {
+func (q *Queries) ListUnownedChannelChatContextRevisions(ctx context.Context, chatSessionID pgtype.UUID) ([]ListUnownedChannelChatContextRevisionsRow, error) {
 	rows, err := q.db.Query(ctx, listUnownedChannelChatContextRevisions, chatSessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []int64{}
+	items := []ListUnownedChannelChatContextRevisionsRow{}
 	for rows.Next() {
-		var context_revision int64
-		if err := rows.Scan(&context_revision); err != nil {
+		var i ListUnownedChannelChatContextRevisionsRow
+		if err := rows.Scan(&i.ContextRevision, &i.InitiatorUserID); err != nil {
 			return nil, err
 		}
-		items = append(items, context_revision)
+		items = append(items, i)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
