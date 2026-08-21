@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/multica-ai/multica/server/internal/testutil"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -59,6 +60,86 @@ func TestCreateIssuePositionTopOfColumn(t *testing.T) {
 	}
 	if pos3 >= pos2 {
 		t.Errorf("third issue position (%v) should be less than second (%v)", pos3, pos2)
+	}
+}
+
+func TestUpdateIssueStatusPositionTopOfColumn(t *testing.T) {
+	movingID := dbfx.Issue(t, "status-position moving issue", testutil.Cols{
+		"status":   "todo",
+		"priority": "low",
+		"position": 0.0,
+	})
+	dbfx.Issue(t, "status-position destination issue", testutil.Cols{
+		"status":   "done",
+		"priority": "low",
+		"position": -1000.0,
+	})
+
+	var destinationMin float64
+	dbfx.QueryRow(t,
+		`SELECT MIN(position) FROM issue WHERE workspace_id = $1 AND status = 'done'`,
+		testWorkspaceID).Scan(&destinationMin)
+
+	var updated IssueResponse
+	req := testutil.WithURLParams(newRequest(http.MethodPut, "/api/issues/"+movingID,
+		map[string]any{"status": "done"}), "id", movingID)
+	testutil.Call(t, testHandler.UpdateIssue, req).
+		Want(http.StatusOK).JSON(&updated)
+
+	if updated.Status != "done" {
+		t.Fatalf("updated status = %q, want done", updated.Status)
+	}
+	if updated.Position >= destinationMin {
+		t.Fatalf("updated position = %v, want below destination minimum %v", updated.Position, destinationMin)
+	}
+}
+
+func TestUpdateIssueStatusKeepsExplicitPosition(t *testing.T) {
+	movingID := dbfx.Issue(t, "status-position explicit issue", testutil.Cols{
+		"status":   "todo",
+		"priority": "low",
+		"position": 0.0,
+	})
+
+	const explicitPosition = 42.5
+	var updated IssueResponse
+	req := testutil.WithURLParams(newRequest(http.MethodPut, "/api/issues/"+movingID,
+		map[string]any{"status": "done", "position": explicitPosition}), "id", movingID)
+	testutil.Call(t, testHandler.UpdateIssue, req).
+		Want(http.StatusOK).JSON(&updated)
+
+	if updated.Position != explicitPosition {
+		t.Fatalf("updated position = %v, want explicit position %v", updated.Position, explicitPosition)
+	}
+}
+
+func TestDirectUpdateIssueStatusPositionTopOfColumn(t *testing.T) {
+	movingID := dbfx.Issue(t, "direct status-position moving issue", testutil.Cols{
+		"status":   "todo",
+		"priority": "low",
+		"position": 0.0,
+	})
+	dbfx.Issue(t, "direct status-position destination issue", testutil.Cols{
+		"status":   "done",
+		"priority": "low",
+		"position": -1000.0,
+	})
+
+	var destinationMin float64
+	dbfx.QueryRow(t,
+		`SELECT MIN(position) FROM issue WHERE workspace_id = $1 AND status = 'done'`,
+		testWorkspaceID).Scan(&destinationMin)
+
+	updated, err := testHandler.Queries.UpdateIssueStatus(context.Background(), db.UpdateIssueStatusParams{
+		ID:          parseUUID(movingID),
+		Status:      "done",
+		WorkspaceID: parseUUID(testWorkspaceID),
+	})
+	if err != nil {
+		t.Fatalf("UpdateIssueStatus: %v", err)
+	}
+	if updated.Position >= destinationMin {
+		t.Fatalf("updated position = %v, want below destination minimum %v", updated.Position, destinationMin)
 	}
 }
 
