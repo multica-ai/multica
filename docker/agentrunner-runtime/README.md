@@ -145,6 +145,16 @@ pod's lifetime, is never written to the node's disk, and doesn't survive a
 pod rebuild. It's a bridge for the pod's lifetime, not a persistent secrets
 store.
 
+`entrypoint.sh` uses the same `$HOME/.secrets` dir for one non-PEM value:
+when `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are both present it writes
+`$HOME/.secrets/GITHUB_APP_ID` (plain text — the App ID is a public numeric
+identifier, not credential material). Hermes tool-command subprocesses
+inherit `GITHUB_APP_PRIVATE_KEY` but not `GITHUB_APP_ID`, so
+`gh-platform-bot-wrapper.sh` (`/usr/local/bin/gh`) reads this file as a
+fallback whenever its own environment is missing the var, then forwards the
+resolved value explicitly to `git-credential-platform-bot.sh` — an env var
+already present in the wrapper's own process always wins over the file.
+
 ## Smoke test
 
 ```bash

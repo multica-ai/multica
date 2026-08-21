@@ -8,6 +8,21 @@ set -euo pipefail
 : "${OPENAI_API_KEY:?OPENAI_API_KEY required}"
 : "${WORKSPACE_SLUG:?WORKSPACE_SLUG required}"
 
+# ── Secrets dir (tmpfs) ────────────────────────────────────────────────────────
+# Backed by a tmpfs (`emptyDir: {medium: Memory}`) volume mounted in
+# gitops/base/agent-runtime/deployment.yaml, so material written here lives in
+# RAM for the pod's lifetime and is never written to the node's disk. Defined
+# early so both the GitHub App ID bridge below and the PEM-secret bridge
+# further down can share it.
+SECRETS_DIR="${HOME}/.secrets"
+mkdir -p "${SECRETS_DIR}"
+# ${SECRETS_DIR} is the mount point of the emptyDir{medium: Memory} volume in
+# gitops/base/agent-runtime/deployment.yaml, created root-owned with group
+# 1000 via fsGroup. fsGroup grants the non-root agent user rw access but not
+# chmod (that needs ownership or CAP_FOWNER), so this fails with EPERM —
+# harmless, since fsGroup already restricts the dir to owner/group only.
+chmod 700 "${SECRETS_DIR}" 2>/dev/null || true
+
 # ── GitHub credential helper (Enterprise Platform Bot GitHub App) ─────────────
 # The runner mints short-lived installation tokens via git-credential-platform-bot.
 # Installation IDs are resolved dynamically per org/repo at mint time, so no
@@ -25,6 +40,18 @@ if [ -n "${GITHUB_APP_ID:-}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]; then
   # gh doesn't use git's credential helper; the /usr/local/bin/gh wrapper injects
   # a fresh token per invocation (same on-demand minting as git), so there's no
   # long-lived gh token to keep alive over the pod's multi-month life.
+
+  # Hermes tool-command subprocesses inherit GITHUB_APP_PRIVATE_KEY but not
+  # GITHUB_APP_ID (the two arrive through different forwarding paths and only
+  # the key survives into that subprocess env), so the gh wrapper's own
+  # precedence check — which requires both — used to fall through to the real
+  # gh binary with no GH_TOKEN and GitHub CLI commands failed authentication.
+  # GITHUB_APP_ID isn't secret (it's a public numeric identifier, not
+  # credential material), so write it to the tmpfs secrets dir here;
+  # gh-platform-bot-wrapper.sh reads it back as a fallback when its own
+  # environment lacks it (PRO-68).
+  printf '%s' "${GITHUB_APP_ID}" > "${SECRETS_DIR}/GITHUB_APP_ID"
+  chmod 600 "${SECRETS_DIR}/GITHUB_APP_ID"
 fi
 
 # ── Git identity ──────────────────────────────────────────────────────────────
@@ -187,18 +214,8 @@ fi
 # per pod boot: any `<NAME>_PRIVATE_KEY` env var whose value looks like PEM
 # gets written to a pod-lifetime file and gets a sibling `<NAME>_PRIVATE_KEY_FILE`
 # exported pointing at it, so downstream tooling never has to special-case
-# "where did this secret come from" (ROIPPC-2). `${SECRETS_DIR}` is backed by a
-# tmpfs (`emptyDir: {medium: Memory}`) volume mounted in
-# gitops/base/agent-runtime/deployment.yaml, so the material lives in RAM for
-# the pod's lifetime and is never written to the node's disk.
-SECRETS_DIR="${HOME}/.secrets"
-mkdir -p "${SECRETS_DIR}"
-# ${SECRETS_DIR} is the mount point of the emptyDir{medium: Memory} volume in
-# gitops/base/agent-runtime/deployment.yaml, created root-owned with group
-# 1000 via fsGroup. fsGroup grants the non-root agent user rw access but not
-# chmod (that needs ownership or CAP_FOWNER), so this fails with EPERM —
-# harmless, since fsGroup already restricts the dir to owner/group only.
-chmod 700 "${SECRETS_DIR}" 2>/dev/null || true
+# "where did this secret come from" (ROIPPC-2). Uses `${SECRETS_DIR}`, set up
+# near the top of this script.
 while IFS='=' read -r -d '' env_name env_value; do
   case "${env_name}" in
     *_PRIVATE_KEY)

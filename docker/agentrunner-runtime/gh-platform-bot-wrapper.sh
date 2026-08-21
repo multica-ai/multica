@@ -12,9 +12,22 @@ set -euo pipefail
 
 REAL_GH=/usr/bin/gh
 
+# Hermes tool-command subprocesses inherit GITHUB_APP_PRIVATE_KEY but not
+# GITHUB_APP_ID (PRO-68) — entrypoint.sh writes the (non-secret) App ID here
+# at pod startup precisely so this wrapper can still resolve it when its own
+# environment is missing the var. Not a /proc/1/environ read: this file is a
+# runtime-controlled artifact inside the pod's own tmpfs, not a reach across
+# the PID-namespace boundary into another process's environment.
+GITHUB_APP_ID_FILE="${HOME:-}/.secrets/GITHUB_APP_ID"
+
+app_id="${GITHUB_APP_ID:-}"
+if [ -z "${app_id}" ] && [ -f "${GITHUB_APP_ID_FILE}" ]; then
+  app_id="$(cat "${GITHUB_APP_ID_FILE}" 2>/dev/null || true)"
+fi
+
 if [ -x "${REAL_GH}" ] \
   && [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ] \
-  && [ -n "${GITHUB_APP_ID:-}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]; then
+  && [ -n "${app_id}" ] && [ -n "${GITHUB_APP_PRIVATE_KEY:-}" ]; then
 
   owner="" repo_name="" repo_spec=""
 
@@ -80,13 +93,16 @@ if [ -x "${REAL_GH}" ] \
   # newlines, which used to drop the final path= line before the helper ever
   # saw it (it silently fell back to GITHUB_DEFAULT_ORG for every repo outside
   # that org).
+  # Forward the resolved app_id explicitly rather than relying on it already
+  # being in this process's environment — that's the whole point of the file
+  # fallback above.
   if [ -n "$owner" ] && [ -n "$repo_name" ] && [ "$owner" != "$repo_name" ]; then
     token=$(printf 'protocol=https\nhost=github.com\npath=%s/%s\n\n' "$owner" "$repo_name" \
-      | /usr/local/bin/git-credential-platform-bot get 2>/dev/null \
+      | GITHUB_APP_ID="${app_id}" /usr/local/bin/git-credential-platform-bot get 2>/dev/null \
       | sed -n 's/^password=//p' || true)
   else
     token=$(printf 'protocol=https\nhost=github.com\n\n' \
-      | /usr/local/bin/git-credential-platform-bot get 2>/dev/null \
+      | GITHUB_APP_ID="${app_id}" /usr/local/bin/git-credential-platform-bot get 2>/dev/null \
       | sed -n 's/^password=//p' || true)
   fi
 
