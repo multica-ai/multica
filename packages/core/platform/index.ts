@@ -7,6 +7,7 @@ export { createWorkspaceAwareStorage, setCurrentWorkspace, getCurrentSlug, getCu
 export { clearWorkspaceStorage } from "./storage-cleanup";
 export {
   registerSystemNotificationClickHandler,
+  registerSystemNotificationSoundPlayer,
   isWebNotificationSupported,
   getWebNotificationPermission,
   requestWebNotificationPermission,
