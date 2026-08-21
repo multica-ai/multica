@@ -200,6 +200,19 @@ type TaskContextForEnv struct {
 	// non-empty so every agent in the workspace sees the same shared context,
 	// regardless of issue / chat / autopilot / quick-create.
 	WorkspaceContext string
+	// IssueStatuses is the workspace's active CUSTOM status catalog from the
+	// claim payload (MUL-6460), in catalog order. Rendered into the brief's
+	// status-command line so agents can see and use statuses beyond the seven
+	// built-ins. Like WorkspaceContext, this is durable workspace configuration,
+	// not per-turn state: it may legitimately change brief bytes when an admin
+	// edits the catalog between runs of a resumed session, exactly as a
+	// Workspace Context edit does. Empty — including on old servers that never
+	// send the field — renders the built-in-only line byte-identical to before.
+	IssueStatuses []IssueStatusForEnv
+	// IssueStatusesOmitted is the count of active custom statuses the server's
+	// cap dropped from IssueStatuses, so the brief can disclose truncation
+	// instead of presenting a partial catalog as complete.
+	IssueStatusesOmitted int
 	// ConnectedApps lists per-run external app capabilities mounted through
 	// MCP overlays. Rendered briefly so the agent can map app names such as
 	// Notion to the actual MCP server name (`composio`).
@@ -225,6 +238,18 @@ type TaskContextForEnv struct {
 }
 
 // SkillContextForEnv represents a skill to be written into the execution environment.
+// IssueStatusForEnv is one active custom workspace status rendered into the
+// brief (MUL-6460). Name and Description are user-authored text and MUST pass
+// through the brief sanitizers before rendering; Key is constrained by the
+// storage CHECK to `^[a-z0-9][a-z0-9_]{0,31}$` but is still guarded with
+// sanitizeBriefCodeToken as defense-in-depth.
+type IssueStatusForEnv struct {
+	Key         string
+	Name        string
+	Category    string
+	Description string
+}
+
 type SkillContextForEnv struct {
 	Name        string
 	Description string
@@ -394,7 +419,7 @@ func Prepare(params PrepareParams, logger *slog.Logger) (*Environment, error) {
 		lockClaimed = true
 		defer func() {
 			if lockClaimed {
-				releaseEnvRootLock(lockFile)
+				releaseLockFile(lockFile)
 			}
 		}()
 		// reset means this task already owned the directory and the execution
@@ -1186,7 +1211,7 @@ func (c *EnvRootClaim) Release() {
 	if c == nil || c.lock == nil {
 		return
 	}
-	releaseEnvRootLock(c.lock)
+	releaseLockFile(c.lock)
 	c.lock = nil
 }
 
@@ -1208,7 +1233,7 @@ func ClaimEnvRoot(workspacesRoot, workspaceID, taskID string) (*EnvRootClaim, er
 	}
 	if reset {
 		if err := resetEnvRootContents(envRoot); err != nil {
-			releaseEnvRootLock(lock)
+			releaseLockFile(lock)
 			return nil, fmt.Errorf("execenv: reset existing env: %w", err)
 		}
 	}
@@ -1324,7 +1349,7 @@ func claimEnvRoot(envRoot, taskID string) (lockFile *os.File, reset bool, err er
 		return nil, false, fmt.Errorf("create env root %s: %w", envRoot, err)
 	}
 
-	lockFile, err = openEnvRootLockFile(filepath.Join(envRoot, envRootLockFile))
+	lockFile, err = openLockFile(filepath.Join(envRoot, envRootLockFile))
 	if err != nil {
 		return nil, false, fmt.Errorf("open env root lock for %s: %w", envRoot, err)
 	}
@@ -1341,7 +1366,7 @@ func claimEnvRoot(envRoot, taskID string) (lockFile *os.File, reset bool, err er
 	// process or any other, so the checks below cannot race.
 	defer func() {
 		if err != nil {
-			releaseEnvRootLock(lockFile)
+			releaseLockFile(lockFile)
 			lockFile = nil
 		}
 	}()
@@ -1385,12 +1410,12 @@ func (env *Environment) ReleaseLock() {
 	if env == nil || env.lockFile == nil {
 		return
 	}
-	releaseEnvRootLock(env.lockFile)
+	releaseLockFile(env.lockFile)
 	env.lockFile = nil
 }
 
-// releaseEnvRootLock drops the execution lock and closes the file. Safe on nil.
-func releaseEnvRootLock(f *os.File) {
+// releaseLockFile drops the execution lock and closes the file. Safe on nil.
+func releaseLockFile(f *os.File) {
 	if f == nil {
 		return
 	}

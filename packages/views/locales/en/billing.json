@@ -236,6 +236,7 @@
       "preview_loading": "Updating estimate...",
       "preview_unreadable": "The estimate could not be read. Change the seat count or retry.",
       "preview_failed": "The estimate is temporarily unavailable. Retry in a moment.",
+      "capacity_out_of_sync": "The seat count in Stripe does not match the billing record. Contact support before retrying this purchase.",
       "in_progress": "Another seat purchase is being processed. Wait for it to finish; contact support if it remains here.",
       "purchase_unreadable": "The purchase response could not be read. Retry this quote; the same purchase request will be reused.",
       "purchase_failed": "Seats could not be added. Retry with the same quote, or refresh if it has expired.",
