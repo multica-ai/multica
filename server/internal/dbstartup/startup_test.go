@@ -61,12 +61,88 @@ func TestSettingsFromEnvSharesEntrypointStartupBudget(t *testing.T) {
 }
 
 func TestParsePoolConfigAppliesConnectTimeout(t *testing.T) {
+	t.Setenv("PGCONNECT_TIMEOUT", "")
+	t.Setenv("PGSERVICE", "")
+
 	cfg, err := ParsePoolConfig("postgres://user:pass@localhost:5432/db?sslmode=disable", 7*time.Second)
 	if err != nil {
 		t.Fatalf("ParsePoolConfig: %v", err)
 	}
 	if cfg.ConnConfig.ConnectTimeout != 7*time.Second {
 		t.Fatalf("ConnectTimeout = %s, want 7s", cfg.ConnConfig.ConnectTimeout)
+	}
+}
+
+func TestParsePoolConfigPreservesNativeConnectTimeout(t *testing.T) {
+	t.Setenv("PGCONNECT_TIMEOUT", "")
+	t.Setenv("PGSERVICE", "")
+
+	tests := []struct {
+		name          string
+		databaseURL   string
+		multicaValue  time.Duration
+		wantPGXNative time.Duration
+	}{
+		{
+			name:          "URL longer than Multica fallback",
+			databaseURL:   "postgres://user:pass@localhost:5432/db?sslmode=disable&connect_timeout=30",
+			multicaValue:  5 * time.Second,
+			wantPGXNative: 30 * time.Second,
+		},
+		{
+			name:          "URL shorter than explicit Multica value",
+			databaseURL:   "postgres://user:pass@localhost:5432/db?sslmode=disable&connect_timeout=1",
+			multicaValue:  30 * time.Second,
+			wantPGXNative: time.Second,
+		},
+		{
+			name:          "URL explicitly disables timeout",
+			databaseURL:   "postgres://user:pass@localhost:5432/db?sslmode=disable&connect_timeout=0",
+			multicaValue:  5 * time.Second,
+			wantPGXNative: 0,
+		},
+		{
+			name:          "keyword value",
+			databaseURL:   "host=localhost port=5432 user=user password=pass dbname=db sslmode=disable connect_timeout=12",
+			multicaValue:  5 * time.Second,
+			wantPGXNative: 12 * time.Second,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg, err := ParsePoolConfig(tt.databaseURL, tt.multicaValue)
+			if err != nil {
+				t.Fatalf("ParsePoolConfig: %v", err)
+			}
+			if cfg.ConnConfig.ConnectTimeout != tt.wantPGXNative {
+				t.Fatalf("ConnectTimeout = %s, want native pgx value %s", cfg.ConnConfig.ConnectTimeout, tt.wantPGXNative)
+			}
+		})
+	}
+}
+
+func TestParsePoolConfigPreservesPGConnectTimeout(t *testing.T) {
+	t.Setenv("PGSERVICE", "")
+
+	tests := []struct {
+		value string
+		want  time.Duration
+	}{
+		{value: "17", want: 17 * time.Second},
+		{value: "0", want: 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.value, func(t *testing.T) {
+			t.Setenv("PGCONNECT_TIMEOUT", tt.value)
+			cfg, err := ParsePoolConfig("postgres://user:pass@localhost:5432/db?sslmode=disable", 5*time.Second)
+			if err != nil {
+				t.Fatalf("ParsePoolConfig: %v", err)
+			}
+			if cfg.ConnConfig.ConnectTimeout != tt.want {
+				t.Fatalf("ConnectTimeout = %s, want PGCONNECT_TIMEOUT value %s", cfg.ConnConfig.ConnectTimeout, tt.want)
+			}
+		})
 	}
 }
 
@@ -229,6 +305,9 @@ func TestIsTransientDatabaseError(t *testing.T) {
 }
 
 func TestRetryRetriesConnectionHandshakeTimeout(t *testing.T) {
+	t.Setenv("PGCONNECT_TIMEOUT", "")
+	t.Setenv("PGSERVICE", "")
+
 	address := startStalledDatabaseListener(t)
 	pool, err := NewPool(
 		context.Background(),

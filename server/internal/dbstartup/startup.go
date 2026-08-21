@@ -7,7 +7,9 @@ import (
 	"log/slog"
 	"math/rand/v2"
 	"net"
+	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +30,11 @@ const (
 	DefaultConnectTimeout = 5 * time.Second
 	defaultInitialBackoff = time.Second
 	defaultMaxBackoff     = 30 * time.Second
+)
+
+var (
+	keywordConnectTimeoutPattern = regexp.MustCompile(`(?:^|\s)connect_timeout\s*=`)
+	keywordServicePattern        = regexp.MustCompile(`(?:^|\s)service\s*=`)
 )
 
 // Settings bounds database startup retries and individual connection attempts.
@@ -76,18 +83,42 @@ func settingsFromEnv(now func() time.Time) Settings {
 	return settings
 }
 
-// ParsePoolConfig applies the same bounded connection timeout to every startup
-// pool while leaving each caller free to configure its own pool sizing.
+// ParsePoolConfig applies connectTimeout as a compatibility fallback. Native
+// pgx connect_timeout settings take precedence because pgx configures both its
+// whole-connection deadline and DialFunc from the same value.
 func ParsePoolConfig(databaseURL string, connectTimeout time.Duration) (*pgxpool.Config, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
+	if pgxConnectTimeoutConfigured(databaseURL, cfg.ConnConfig.ConnectTimeout) {
+		return cfg, nil
+	}
 	if connectTimeout <= 0 {
 		connectTimeout = DefaultConnectTimeout
 	}
 	cfg.ConnConfig.ConnectTimeout = connectTimeout
+	dialer := &net.Dialer{Timeout: connectTimeout}
+	cfg.ConnConfig.DialFunc = dialer.DialContext
 	return cfg, nil
+}
+
+func pgxConnectTimeoutConfigured(databaseURL string, parsedTimeout time.Duration) bool {
+	if parsedTimeout != 0 || os.Getenv("PGCONNECT_TIMEOUT") != "" || os.Getenv("PGSERVICE") != "" {
+		return true
+	}
+
+	if strings.HasPrefix(databaseURL, "postgres://") || strings.HasPrefix(databaseURL, "postgresql://") {
+		parsedURL, err := url.Parse(databaseURL)
+		if err == nil {
+			query := parsedURL.Query()
+			_, hasConnectTimeout := query["connect_timeout"]
+			_, hasService := query["service"]
+			return hasConnectTimeout || hasService
+		}
+	}
+
+	return keywordConnectTimeoutPattern.MatchString(databaseURL) || keywordServicePattern.MatchString(databaseURL)
 }
 
 // NewPool creates a startup pool with the shared connection timeout.
