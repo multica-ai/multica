@@ -122,7 +122,10 @@ type RetryOptions struct {
 }
 
 // RetryOptions returns production defaults with the startup budget remaining
-// at the time of the call. Repeated phases therefore share one deadline.
+// at the time of the call. Repeated phases therefore share one wall-clock
+// deadline, so successful work between retry phases also consumes the budget.
+// Once it expires, later phases make one fail-fast attempt instead of reserving
+// a new minimum window that could exceed the container-level retry bound.
 func (s Settings) RetryOptions() RetryOptions {
 	timeout := s.StartupTimeout
 	if timeout > 0 && !s.startupDeadline.IsZero() {

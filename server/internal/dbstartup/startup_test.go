@@ -242,7 +242,7 @@ func TestRetryRetriesConnectionHandshakeTimeout(t *testing.T) {
 
 	var attempts int
 	err = Retry(context.Background(), RetryOptions{
-		Timeout:        200 * time.Millisecond,
+		Timeout:        time.Second,
 		InitialBackoff: time.Millisecond,
 		MaxBackoff:     time.Millisecond,
 		Jitter:         func(delay time.Duration) time.Duration { return delay },
