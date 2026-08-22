@@ -123,6 +123,14 @@ export function skillDetailOptions(wsId: string, skillId: string) {
   });
 }
 
+export function skillTasksOptions(wsId: string, skillId: string) {
+  return queryOptions({
+    queryKey: [...workspaceKeys.skills(wsId), skillId, "tasks"] as const,
+    queryFn: () => api.listSkillTasks(skillId),
+    enabled: !!skillId,
+  });
+}
+
 /**
  * Builds a `Map<skillId, Agent[]>` from the cached agent list. The server
  * already returns each agent with its full skill list inline, so no extra

@@ -54,6 +54,7 @@ function makeSkill(createdBy: string | null): Skill {
     content: "",
     config: {},
     files: [],
+    use_count: 0,
     created_by: createdBy,
     created_at: "2026-04-01T00:00:00Z",
     updated_at: "2026-04-01T00:00:00Z",

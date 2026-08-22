@@ -53,6 +53,7 @@ import { PAGE_TOOLBAR } from "../../layout/page-header";
 export type OriginType = SkillOriginType;
 
 const COLUMN_KEYS: SkillColumnKey[] = [
+  "useCount",
   "usedBy",
   "source",
   "creator",
@@ -157,6 +158,7 @@ export function SkillListToolbar({
   };
 
   const COLUMN_LABELS: Record<SkillColumnKey, string> = {
+    useCount: t(($) => $.table.use_count),
     usedBy: t(($) => $.table.used_by),
     source: t(($) => $.table.source),
     creator: t(($) => $.table.created_by),

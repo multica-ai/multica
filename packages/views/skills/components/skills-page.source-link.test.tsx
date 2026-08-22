@@ -129,6 +129,7 @@ const importedSkill: SkillSummary = {
   name: "animations",
   description: "",
   config: { origin: { type: "github", source_url: SOURCE_URL } },
+  use_count: 0,
   created_by: "user-1",
   created_at: "2026-07-28T18:11:37Z",
   updated_at: "2026-07-28T18:14:40Z",
