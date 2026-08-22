@@ -255,6 +255,9 @@ export interface IssueViewState {
   toggleNoProject: () => void;
   toggleLabelFilter: (labelId: string) => void;
   togglePropertyFilter: (propertyId: string, optionId: string) => void;
+  /** Replace a property's full filter value set (used by scalar value inputs
+   *  for text/number/date/url, which build the array including "__none__"). */
+  setPropertyFilterValues: (propertyId: string, optionIds: string[]) => void;
   setDateFilter: (filter: IssueDateFilter | null) => void;
   toggleAgentRunningFilter: () => void;
   hideStatus: (category: IssueStatusCategory) => void;
@@ -398,6 +401,13 @@ export const viewStoreSlice = (set: StoreApi<IssueViewState>["setState"]): Issue
       const propertyFilters = { ...state.propertyFilters };
       if (next.length === 0) delete propertyFilters[propertyId];
       else propertyFilters[propertyId] = next;
+      return { propertyFilters };
+    }),
+  setPropertyFilterValues: (propertyId, optionIds) =>
+    set((state) => {
+      const propertyFilters = { ...state.propertyFilters };
+      if (optionIds.length === 0) delete propertyFilters[propertyId];
+      else propertyFilters[propertyId] = optionIds;
       return { propertyFilters };
     }),
   setDateFilter: (filter) => set({ dateFilter: filter }),
