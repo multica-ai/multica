@@ -93,27 +93,67 @@ func (r *feishuInstallationResolver) ResolveInstallation(ctx context.Context, ms
 
 // ---- identity ----
 
-type feishuIdentityResolver struct{ store *ChannelStore }
+type feishuIdentityStore interface {
+	GetLarkUserBindingByOpenID(context.Context, GetUserBindingByOpenIDParams) (UserBinding, error)
+	IsWorkspaceMember(context.Context, pgtype.UUID, pgtype.UUID) (bool, error)
+}
+
+type feishuIdentityResolver struct{ store feishuIdentityStore }
 
 func (r *feishuIdentityResolver) ResolveSender(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage) (engine.ResolvedIdentity, error) {
+	lm, err := larkMsgFromRaw(msg)
+	if err != nil {
+		return engine.ResolvedIdentity{}, err
+	}
+	feishuInst, ok := inst.Platform.(Installation)
+	if !ok {
+		return engine.ResolvedIdentity{}, errors.New("lark: resolved installation has unexpected platform value")
+	}
 	binding, err := r.store.GetLarkUserBindingByOpenID(ctx, GetUserBindingByOpenIDParams{
 		InstallationID: inst.ID,
 		ChannelUserID:  msg.Source.SenderID,
 	})
-	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
-			return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return engine.ResolvedIdentity{}, err
+	}
+	if err == nil {
+		isMember, memberErr := r.store.IsWorkspaceMember(ctx, inst.WorkspaceID, binding.MulticaUserID)
+		if memberErr != nil {
+			return engine.ResolvedIdentity{}, memberErr
 		}
-		return engine.ResolvedIdentity{}, err
+		if isMember {
+			return engine.ResolvedIdentity{UserID: binding.MulticaUserID}, nil
+		}
 	}
-	isMember, err := r.store.IsWorkspaceMember(ctx, inst.WorkspaceID, binding.MulticaUserID)
-	if err != nil {
-		return engine.ResolvedIdentity{}, err
+
+	// Guest access is a per-installation opt-in. It is deliberately constrained
+	// to the installation's own tenant; accepting an event from another tenant
+	// would turn a broadly-available bot into a cross-tenant workspace gateway.
+	if feishuInst.InboundAccessMode == InboundAccessFeishuUsers {
+		installationTenant := feishuInst.TenantKey.String
+		if installationTenant == "" {
+			// Installations created by releases before tenant_key was persisted can
+			// still be checked safely: the event header tenant is authenticated on
+			// this installation's WebSocket. Keep sender tenant separate so an
+			// external participant in the same group is still rejected.
+			installationTenant = lm.TenantKey
+		}
+		if installationTenant == "" || lm.SenderTenantKey == "" || lm.SenderTenantKey != installationTenant {
+			return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
+		}
+		if feishuInst.TenantKey.Valid && lm.TenantKey != "" && lm.TenantKey != feishuInst.TenantKey.String {
+			return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
+		}
+		return engine.ResolvedIdentity{
+			UserID:        inst.InstallerUserID,
+			External:      true,
+			ChannelUserID: msg.Source.SenderID,
+		}, nil
 	}
-	if !isMember {
-		return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
+	if errors.Is(err, pgx.ErrNoRows) {
+		return engine.ResolvedIdentity{}, engine.ErrSenderUnbound
 	}
-	return engine.ResolvedIdentity{UserID: binding.MulticaUserID}, nil
+	return engine.ResolvedIdentity{}, engine.ErrSenderNotMember
 }
 
 // ---- dedup ----

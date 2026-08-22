@@ -182,6 +182,7 @@ const (
 	// notification. `revoked` flips status to 'revoked' without
 	// deleting the row; the audit trail is preserved.
 	EventLarkInstallationCreated = "lark_installation:created"
+	EventLarkInstallationUpdated = "lark_installation:updated"
 	EventLarkInstallationRevoked = "lark_installation:revoked"
 
 	// Slack installation lifecycle (MUL-3666). Same semantics as the Lark

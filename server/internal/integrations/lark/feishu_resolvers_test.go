@@ -3,13 +3,131 @@ package lark
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 )
+
+type fakeFeishuIdentityStore struct {
+	binding   UserBinding
+	bindErr   error
+	isMember  bool
+	memberErr error
+}
+
+func (f *fakeFeishuIdentityStore) GetLarkUserBindingByOpenID(context.Context, GetUserBindingByOpenIDParams) (UserBinding, error) {
+	return f.binding, f.bindErr
+}
+
+func (f *fakeFeishuIdentityStore) IsWorkspaceMember(context.Context, pgtype.UUID, pgtype.UUID) (bool, error) {
+	return f.isMember, f.memberErr
+}
+
+func feishuIdentityMessage(t *testing.T, eventTenantKey, senderTenantKey string) channel.InboundMessage {
+	t.Helper()
+	raw, err := json.Marshal(InboundMessage{TenantKey: eventTenantKey, SenderTenantKey: senderTenantKey})
+	if err != nil {
+		t.Fatalf("marshal raw message: %v", err)
+	}
+	return channel.InboundMessage{
+		Source: channel.Source{SenderID: "ou_sender"},
+		Raw:    raw,
+	}
+}
+
+func TestFeishuIdentityResolver_StrictModeKeepsBindingRequirement(t *testing.T) {
+	resolver := &feishuIdentityResolver{store: &fakeFeishuIdentityStore{bindErr: pgx.ErrNoRows}}
+	_, err := resolver.ResolveSender(context.Background(), engine.ResolvedInstallation{
+		InstallerUserID: binderUUID(9),
+		Platform: Installation{
+			InboundAccessMode: InboundAccessWorkspaceMembers,
+			TenantKey:         pgtype.Text{String: "tenant-a", Valid: true},
+		},
+	}, feishuIdentityMessage(t, "tenant-a", "tenant-a"))
+	if !errors.Is(err, engine.ErrSenderUnbound) {
+		t.Fatalf("ResolveSender error = %v, want ErrSenderUnbound", err)
+	}
+}
+
+func TestFeishuIdentityResolver_AllowsSameTenantGuestWhenEnabled(t *testing.T) {
+	installer := binderUUID(9)
+	resolver := &feishuIdentityResolver{store: &fakeFeishuIdentityStore{bindErr: pgx.ErrNoRows}}
+	got, err := resolver.ResolveSender(context.Background(), engine.ResolvedInstallation{
+		InstallerUserID: installer,
+		Platform: Installation{
+			InboundAccessMode: InboundAccessFeishuUsers,
+			TenantKey:         pgtype.Text{String: "tenant-a", Valid: true},
+		},
+	}, feishuIdentityMessage(t, "tenant-a", "tenant-a"))
+	if err != nil {
+		t.Fatalf("ResolveSender: %v", err)
+	}
+	if !got.External || got.UserID != installer || got.ChannelUserID != "ou_sender" {
+		t.Fatalf("guest identity = %+v", got)
+	}
+	if got.TaskInitiatorUserID().Valid {
+		t.Fatalf("external sender must not inherit installer's per-user capabilities: %+v", got.TaskInitiatorUserID())
+	}
+}
+
+func TestFeishuIdentityResolver_RejectsCrossTenantGuest(t *testing.T) {
+	resolver := &feishuIdentityResolver{store: &fakeFeishuIdentityStore{bindErr: pgx.ErrNoRows}}
+	_, err := resolver.ResolveSender(context.Background(), engine.ResolvedInstallation{
+		InstallerUserID: binderUUID(9),
+		Platform: Installation{
+			InboundAccessMode: InboundAccessFeishuUsers,
+			TenantKey:         pgtype.Text{String: "tenant-a", Valid: true},
+		},
+	}, feishuIdentityMessage(t, "tenant-a", "tenant-b"))
+	if !errors.Is(err, engine.ErrSenderNotMember) {
+		t.Fatalf("ResolveSender error = %v, want ErrSenderNotMember", err)
+	}
+}
+
+func TestFeishuIdentityResolver_BoundMemberRemainsAttributed(t *testing.T) {
+	member := binderUUID(7)
+	resolver := &feishuIdentityResolver{store: &fakeFeishuIdentityStore{
+		binding:  UserBinding{MulticaUserID: member},
+		isMember: true,
+	}}
+	got, err := resolver.ResolveSender(context.Background(), engine.ResolvedInstallation{
+		InstallerUserID: binderUUID(9),
+		Platform: Installation{
+			InboundAccessMode: InboundAccessFeishuUsers,
+			TenantKey:         pgtype.Text{String: "tenant-a", Valid: true},
+		},
+	}, feishuIdentityMessage(t, "tenant-a", "tenant-a"))
+	if err != nil {
+		t.Fatalf("ResolveSender: %v", err)
+	}
+	if got.External || got.UserID != member || got.TaskInitiatorUserID() != member {
+		t.Fatalf("bound member identity = %+v", got)
+	}
+}
+
+func TestFeishuIdentityResolver_LegacyInstallationUsesAuthenticatedEventTenant(t *testing.T) {
+	installer := binderUUID(9)
+	resolver := &feishuIdentityResolver{store: &fakeFeishuIdentityStore{bindErr: pgx.ErrNoRows}}
+	got, err := resolver.ResolveSender(context.Background(), engine.ResolvedInstallation{
+		InstallerUserID: installer,
+		Platform: Installation{
+			InboundAccessMode: InboundAccessFeishuUsers,
+			// Older installations do not have tenant_key in config. The event
+			// header is authenticated on this installation's WebSocket instead.
+		},
+	}, feishuIdentityMessage(t, "tenant-a", "tenant-a"))
+	if err != nil {
+		t.Fatalf("ResolveSender: %v", err)
+	}
+	if !got.External || got.UserID != installer {
+		t.Fatalf("guest identity = %+v", got)
+	}
+}
 
 func binderUUID(b byte) pgtype.UUID {
 	var u pgtype.UUID

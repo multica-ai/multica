@@ -88,6 +88,22 @@ func (s *InstallationService) Revoke(ctx context.Context, id pgtype.UUID) error 
 	})
 }
 
+// UpdateInboundAccessMode changes who may invoke this installation's Agent.
+// Validation lives here so HTTP and future management surfaces share the same
+// closed set; the store performs an atomic single-key JSONB update.
+func (s *InstallationService) UpdateInboundAccessMode(ctx context.Context, id pgtype.UUID, mode InboundAccessMode) error {
+	if mode != InboundAccessWorkspaceMembers && mode != InboundAccessFeishuUsers {
+		return ErrInvalidInboundAccessMode
+	}
+	if err := s.queries.SetLarkInstallationInboundAccessMode(ctx, SetInstallationInboundAccessModeParams{ID: id, Mode: mode}); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return ErrInstallationNotFound
+		}
+		return err
+	}
+	return nil
+}
+
 // DecryptAppSecret returns the plaintext app_secret for the supplied
 // installation row. Used by the WebSocket hub when it needs to
 // authenticate against the Lark API on behalf of an installation; do
@@ -132,6 +148,8 @@ func (s *InstallationService) ListByWorkspace(ctx context.Context, workspaceID p
 // — used by the HTTP layer to return 404. Distinct from a plain
 // pgx.ErrNoRows so handlers do not need to import pgx.
 var ErrInstallationNotFound = errors.New("lark installation not found")
+
+var ErrInvalidInboundAccessMode = errors.New("invalid lark inbound access mode")
 
 func validateInstallationParams(p InstallationParams) error {
 	switch {

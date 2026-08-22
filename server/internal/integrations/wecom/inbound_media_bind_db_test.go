@@ -166,7 +166,7 @@ type bindTestTasks struct {
 	promoted int
 }
 
-func (*bindTestTasks) EnqueueChatTask(context.Context, db.ChatSession, pgtype.UUID, bool) (db.AgentTaskQueue, error) {
+func (*bindTestTasks) EnqueueChatTask(context.Context, db.ChatSession, pgtype.UUID, bool, ...service.ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
 	return db.AgentTaskQueue{}, nil
 }
 func (b *bindTestTasks) PromoteChannelChatTasksIfMediaReady(context.Context, pgtype.UUID) error {

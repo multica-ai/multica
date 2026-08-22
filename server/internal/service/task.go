@@ -350,6 +350,40 @@ type runtimeMCPOverlayData struct {
 	ConnectedApps json.RawMessage
 }
 
+// ChatTaskEnqueueOptions carries security-sensitive dispatch policy that is
+// specific to one channel turn. The zero value preserves the established
+// product contract: an authorised invocation may use connected apps the Agent
+// owner explicitly attached to that Agent.
+type ChatTaskEnqueueOptions struct {
+	// DisableOwnerConnectedApps is used for channel identities that have no
+	// Multica account (for example an explicitly-enabled same-tenant Feishu
+	// guest). They may use the Agent's ordinary configured capabilities, but a
+	// task created on their behalf must never project the owner's personal
+	// Composio connections.
+	DisableOwnerConnectedApps bool
+}
+
+// disabledConnectedAppsMetadata is both harmless daemon metadata (an empty
+// list) and a durable deny marker copied to automatic retry tasks. NULL means
+// "no connected apps happened to resolve" and may be recomputed later; []
+// means "policy forbids owner connected apps" and must stay disabled.
+var disabledConnectedAppsMetadata = json.RawMessage("[]")
+
+func ownerConnectedAppsDisabled(metadata json.RawMessage) bool {
+	return strings.TrimSpace(string(metadata)) == string(disabledConnectedAppsMetadata)
+}
+
+func disabledRuntimeMCPOverlay() runtimeMCPOverlayData {
+	return runtimeMCPOverlayData{ConnectedApps: append(json.RawMessage(nil), disabledConnectedAppsMetadata...)}
+}
+
+func preserveDisabledConnectedApps(metadata json.RawMessage) (runtimeMCPOverlayData, bool) {
+	if !ownerConnectedAppsDisabled(metadata) {
+		return runtimeMCPOverlayData{}, false
+	}
+	return disabledRuntimeMCPOverlay(), true
+}
+
 // buildRuntimeMCPOverlay computes the optional per-task Composio MCP overlay.
 // Enqueue paths call this BEFORE inserting the queued row so the daemon cannot
 // claim a task during the network round-trip to Composio and miss the overlay.
@@ -1028,7 +1062,15 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 	if len(triggerCommentID) > 0 {
 		commentID = triggerCommentID[0]
 	}
-	return s.enqueueIssueTask(ctx, issue, commentID, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{})
+	return s.enqueueIssueTask(ctx, issue, commentID, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{}, false)
+}
+
+// EnqueueTaskForIssueWithoutOwnerConnectedApps is the external-channel
+// variant of EnqueueTaskForIssue. The issue remains assigned to and executed
+// by the Agent, but the task carries a durable deny marker so automatic
+// retries cannot later rehydrate the Agent owner's personal connected apps.
+func (s *TaskService) EnqueueTaskForIssueWithoutOwnerConnectedApps(ctx context.Context, issue db.Issue) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{}, true)
 }
 
 // EnqueueDeferredChannelIssueTask persists the assigned task for a media-backed
@@ -1036,7 +1078,7 @@ func (s *TaskService) EnqueueTaskForIssue(ctx context.Context, issue db.Issue, t
 // crash-safe fallback; the channel router promotes the task as soon as the
 // detached attachment transaction settles.
 func (s *TaskService) EnqueueDeferredChannelIssueTask(ctx context.Context, issue db.Issue, fireAt time.Time) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true})
+	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true}, false)
 }
 
 // createDeferredChannelIssueTaskWithQueries inserts the inert media-gated task
@@ -1045,9 +1087,9 @@ func (s *TaskService) EnqueueDeferredChannelIssueTask(ctx context.Context, issue
 // intentionally absent from the transaction-scoped service: the task cannot be
 // claimed while deferred, so the optional external overlay is hydrated after
 // commit without holding database locks across a network call.
-func (s *TaskService) createDeferredChannelIssueTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue, fireAt time.Time) (db.AgentTaskQueue, error) {
+func (s *TaskService) createDeferredChannelIssueTaskWithQueries(ctx context.Context, q *db.Queries, issue db.Issue, fireAt time.Time, disableOwnerConnectedApps bool) (db.AgentTaskQueue, error) {
 	txService := &TaskService{Queries: q}
-	return txService.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true})
+	return txService.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, "", pgtype.UUID{}, pgtype.UUID{}, pgtype.Timestamptz{Time: fireAt, Valid: true}, disableOwnerConnectedApps)
 }
 
 // hydrateDeferredChannelIssueTaskOverlay fills the optional Composio overlay
@@ -1056,6 +1098,9 @@ func (s *TaskService) createDeferredChannelIssueTaskWithQueries(ctx context.Cont
 // re-attributed the task (with its own matching overlay).
 func (s *TaskService) hydrateDeferredChannelIssueTaskOverlay(ctx context.Context, task db.AgentTaskQueue) error {
 	if s == nil || s.Queries == nil || s.Composio == nil || !featureflags.ComposioMCPAppsEnabled(ctx, s.FeatureFlags) {
+		return nil
+	}
+	if ownerConnectedAppsDisabled(task.RuntimeConnectedApps) {
 		return nil
 	}
 	agent, err := s.Queries.GetAgent(ctx, task.AgentID)
@@ -1089,7 +1134,7 @@ func (s *TaskService) hydrateDeferredChannelIssueTaskOverlay(ctx context.Context
 // member who performed the assign/promote and becomes the accountable human for
 // the run (MUL-4302 §4); invalid when the caller has no member actor.
 func (s *TaskService) EnqueueTaskForIssueWithHandoff(ctx context.Context, issue db.Issue, handoffNote string, actorUserID pgtype.UUID) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote, actorUserID, pgtype.UUID{}, pgtype.Timestamptz{})
+	return s.enqueueIssueTask(ctx, issue, pgtype.UUID{}, false, handoffNote, actorUserID, pgtype.UUID{}, pgtype.Timestamptz{}, false)
 }
 
 // enqueueIssueTask is the shared implementation behind EnqueueTaskForIssue
@@ -1137,11 +1182,11 @@ func (s *TaskService) ResolveIssueReviewSHAParam(ctx context.Context, issueID pg
 	return headShaText(s.ResolveIssueReviewSHA(ctx, issueID))
 }
 
-func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz) (db.AgentTaskQueue, error) {
-	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt)
+func (s *TaskService) enqueueIssueTask(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, disableOwnerConnectedApps bool) (db.AgentTaskQueue, error) {
+	return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, nil, forceFreshSession, handoffNote, actorUserID, rerunOfTaskID, fireAt, disableOwnerConnectedApps)
 }
 
-func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz) (db.AgentTaskQueue, error) {
+func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue db.Issue, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, forceFreshSession bool, handoffNote string, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID, fireAt pgtype.Timestamptz, disableOwnerConnectedApps bool) (db.AgentTaskQueue, error) {
 	if !issue.AssigneeID.Valid {
 		slog.Error("task enqueue failed", "issue_id", util.UUIDToString(issue.ID), "error", "issue has no assignee")
 		return db.AgentTaskQueue{}, fmt.Errorf("issue has no assignee")
@@ -1175,7 +1220,10 @@ func (s *TaskService) enqueueIssueTaskWithCommentPlan(ctx context.Context, issue
 		return db.AgentTaskQueue{}, err
 	}
 	originatorUserID := attr.UserID
-	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
+	runtimeMCPOverlay := disabledRuntimeMCPOverlay()
+	if !disableOwnerConnectedApps {
+		runtimeMCPOverlay = s.buildRuntimeMCPOverlay(ctx, originatorUserID, agent)
+	}
 	attrSource, attrDelegatedFrom, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
 	createParams := db.CreateAgentTaskParams{
 		ID:                   dbid.NewV7(),
@@ -1668,7 +1716,7 @@ var ErrChatSessionArchived = errors.New("chat task: session archived")
 // forceFreshSession applies only to the task created by this call. The daemon
 // uses it to skip prior chat-session resume for this dispatch without clearing
 // the chat session's stored resume pointer for future normal messages.
-func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool) (db.AgentTaskQueue, error) {
+func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSession, initiatorUserID pgtype.UUID, forceFreshSession bool, options ...ChatTaskEnqueueOptions) (db.AgentTaskQueue, error) {
 	agent, err := s.Queries.GetAgent(ctx, chatSession.AgentID)
 	if err != nil {
 		slog.Error("chat task enqueue failed", "chat_session_id", util.UUIDToString(chatSession.ID), "error", err)
@@ -1696,7 +1744,14 @@ func (s *TaskService) EnqueueChatTask(ctx context.Context, chatSession db.ChatSe
 		return db.AgentTaskQueue{}, err
 	}
 	attrSource, _, attrEvidenceKind, attrEvidenceRef := attributionCreateParams(attr)
-	runtimeMCPOverlay := s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
+	var enqueueOptions ChatTaskEnqueueOptions
+	if len(options) > 0 {
+		enqueueOptions = options[0]
+	}
+	runtimeMCPOverlay := disabledRuntimeMCPOverlay()
+	if !enqueueOptions.DisableOwnerConnectedApps {
+		runtimeMCPOverlay = s.buildRuntimeMCPOverlay(ctx, initiatorUserID, agent)
+	}
 
 	tx, err := s.TxStarter.Begin(ctx)
 	if err != nil {
@@ -4329,7 +4384,9 @@ func (s *TaskService) FailTask(ctx context.Context, taskID pgtype.UUID, errMsg, 
 			if delay := retryDelayForAttempt(failureReason, parent.Attempt); delay > 0 {
 				retryFireAt = pgtype.Timestamptz{Time: time.Now().Add(delay), Valid: true}
 			}
-			if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
+			if disabledOverlay, disabled := preserveDisabledConnectedApps(parent.RuntimeConnectedApps); disabled {
+				retryOverlay = disabledOverlay
+			} else if agent, aerr := s.Queries.GetAgent(ctx, parent.AgentID); aerr != nil {
 				// Best-effort: a missing overlay is not retry-fatal — the child
 				// simply runs without the Composio overlay.
 				slog.Warn("fail task auto-retry: load agent for overlay failed",
@@ -4843,8 +4900,9 @@ func (s *TaskService) MaybeRetryFailedTask(ctx context.Context, parent db.AgentT
 	}
 
 	var runtimeMCPOverlay runtimeMCPOverlayData
-	agent, agentErr := s.Queries.GetAgent(ctx, parent.AgentID)
-	if agentErr != nil {
+	if disabledOverlay, disabled := preserveDisabledConnectedApps(parent.RuntimeConnectedApps); disabled {
+		runtimeMCPOverlay = disabledOverlay
+	} else if agent, agentErr := s.Queries.GetAgent(ctx, parent.AgentID); agentErr != nil {
 		// Best-effort: failing to resolve the agent for the overlay is not
 		// retry-fatal. Log and continue — the daemon will reject the claim
 		// later if the agent is genuinely gone.
@@ -5189,7 +5247,7 @@ func (s *TaskService) promoteNewestSurvivingComment(ctx context.Context, ids []p
 func (s *TaskService) enqueueRerunTask(ctx context.Context, issue db.Issue, agentID pgtype.UUID, triggerCommentID pgtype.UUID, coalescedCommentIDs []pgtype.UUID, isLeader bool, squadID pgtype.UUID, actorUserID pgtype.UUID, rerunOfTaskID pgtype.UUID) (db.AgentTaskQueue, error) {
 	if issue.AssigneeType.String == "agent" && issue.AssigneeID.Valid &&
 		util.UUIDToString(issue.AssigneeID) == util.UUIDToString(agentID) {
-		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{})
+		return s.enqueueIssueTaskWithCommentPlan(ctx, issue, triggerCommentID, coalescedCommentIDs, true, "", actorUserID, rerunOfTaskID, pgtype.Timestamptz{}, false)
 	}
 	return s.enqueueMentionTaskWithCommentPlan(ctx, issue, agentID, triggerCommentID, coalescedCommentIDs, isLeader, squadID, true, "", actorUserID, rerunOfTaskID)
 }

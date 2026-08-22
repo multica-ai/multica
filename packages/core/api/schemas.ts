@@ -32,6 +32,8 @@ import type {
   CreateWorkspaceSubscriptionPortalResponse,
   CronPreviewResponse,
   DingTalkInstallation,
+  LarkInstallation,
+  ListLarkInstallationsResponse,
   ListDingTalkInstallationsResponse,
   ListDingTalkGroupsResponse,
   RedeemDingTalkBindingTokenResponse,
@@ -2696,6 +2698,51 @@ export const MALFORMED_RUNTIME_MODEL_LIST_REQUEST: RuntimeModelListRequest = {
   error: "invalid model discovery response",
   created_at: "",
   updated_at: "",
+};
+
+// Feishu/Lark installation responses are consumed by installed Desktop builds,
+// so keep the schema forward-compatible while defaulting every security-relevant
+// field to the strict state. In particular, a missing or unknown access mode
+// must never make an older installation guest-accessible.
+export const LarkInstallationSchema = z.object({
+  id: z.string(),
+  workspace_id: z.string().default(""),
+  agent_id: z.string().default(""),
+  app_id: z.string().default(""),
+  tenant_key: z.string().nullable().optional(),
+  bot_open_id: z.string().default(""),
+  installer_user_id: z.string().default(""),
+  status: z.string().default("revoked"),
+  region: z.string().optional(),
+  inbound_access_mode: z.string().default("workspace_members"),
+  installed_at: z.string().default(""),
+  created_at: z.string().default(""),
+  updated_at: z.string().default(""),
+}).loose();
+
+export const EMPTY_LARK_INSTALLATION: LarkInstallation = {
+  id: "",
+  workspace_id: "",
+  agent_id: "",
+  app_id: "",
+  bot_open_id: "",
+  installer_user_id: "",
+  status: "revoked",
+  inbound_access_mode: "workspace_members",
+  installed_at: "",
+  created_at: "",
+  updated_at: "",
+};
+
+export const ListLarkInstallationsResponseSchema = z.object({
+  installations: z.array(LarkInstallationSchema).default([]),
+  configured: z.boolean().default(false),
+  install_supported: z.boolean().optional(),
+}).loose();
+
+export const EMPTY_LIST_LARK_INSTALLATIONS_RESPONSE: ListLarkInstallationsResponse = {
+  installations: [],
+  configured: false,
 };
 
 export const DingTalkInstallationSchema = z.object({
