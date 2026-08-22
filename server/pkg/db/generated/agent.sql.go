@@ -3601,8 +3601,18 @@ func (q *Queries) FailExpiredRuntimeReconnectRetries(ctx context.Context, arg Fa
 
 const failStaleTasks = `-- name: FailStaleTasks :many
 UPDATE agent_task_queue
-SET status = 'failed', completed_at = now(), error = 'task timed out',
-    failure_reason = 'timeout',
+SET status = 'failed', completed_at = now(),
+    error = CASE
+      WHEN status = 'waiting_local_directory'
+        THEN 'local_directory wait abandoned (prepare lease expired)'
+      ELSE 'task timed out'
+    END,
+    failure_reason = CASE
+      WHEN status = 'waiting_local_directory'
+        THEN 'waiting_local_directory_abandoned'
+      ELSE 'timeout'
+    END,
+    wait_reason = NULL,
     prepare_lease_expires_at = NULL
 WHERE (
     status = 'dispatched'
@@ -3642,6 +3652,10 @@ WHERE (
       )
     )
   )
+   OR (
+    status = 'waiting_local_directory'
+    AND (prepare_lease_expires_at IS NULL OR prepare_lease_expires_at < now())
+  )
 RETURNING id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir, channel_context_revision
 `
 
@@ -3652,7 +3666,8 @@ type FailStaleTasksParams struct {
 	RunningTimeoutSecs        float64 `json:"running_timeout_secs"`
 }
 
-// Fails tasks stuck in dispatched/running beyond the given thresholds.
+// Fails tasks stuck in dispatched/running/waiting_local_directory beyond the
+// given thresholds.
 //
 // Each branch pairs a wall-clock deadline with a task-appropriate liveness
 // signal, so the sweeper only kills tasks whose owning daemon is no longer
@@ -3671,6 +3686,17 @@ type FailStaleTasksParams struct {
 //     grace, even when its own wall-clock timeout elapsed earlier. This keeps
 //     healthy multi-hour work alive through a network partition.
 //
+//   - waiting_local_directory: the daemon refreshes the same prepare lease
+//     while blocked on the path mutex. A live lease means a live waiter and
+//     must not be killed — a legitimate queue ahead of this task can exceed
+//     the dispatch / running timeouts without being "stuck". An expired (or
+//     absent) lease means the daemon stopped proving the wait is still in
+//     progress: the waiter goroutine died, the process wedged without
+//     releasing capacity, or the runtime vanished without
+//     RecoverOrphanedTasksForRuntime. Reclaiming those rows is what stops
+//     #7427's capacity leak (waiters forever in waiting_local_directory
+//     after their holder was force-stopped).
+//
 // The daemon-dead case is recovered immediately when that daemon restarts via
 // RecoverOrphanedTasksForRuntime. Until then, this query and
 // FailTasksForOfflineRuntimes share the same bounded reconnect grace.
@@ -3678,12 +3704,6 @@ type FailStaleTasksParams struct {
 // runtime_id IS NULL: a running row with no runtime is by definition not
 // proving liveness, so the wall clock is allowed to fire — same shape as
 // the legacy pure-wall-clock behavior for that (rare / historical) case.
-//
-// waiting_local_directory rows are intentionally excluded: the daemon owns
-// the wait (with its own ctx-driven timeout) and a legitimate queue ahead
-// of this task can exceed the dispatch / running timeouts without being
-// "stuck". If the daemon dies, RecoverOrphanedTasksForRuntime reclaims
-// those rows at restart.
 func (q *Queries) FailStaleTasks(ctx context.Context, arg FailStaleTasksParams) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, failStaleTasks,
 		arg.DispatchTimeoutSecs,
