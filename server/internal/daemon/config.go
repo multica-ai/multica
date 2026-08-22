@@ -939,6 +939,10 @@ var supportedLoginShells = map[string]struct{}{
 // of name → path for whatever the shell could find, and an empty map if the
 // shell is unavailable / unsupported / times out / produces no usable output.
 //
+// The probe can be disabled via MULTICA_LOGIN_SHELL_PROBE=false/0, in which
+// case the daemon falls back to exec.LookPath and explicit MULTICA_*_PATH. A
+// CLI reachable only through ~/.zshrc will then not be found.
+//
 // Why we need this:
 //
 // Daemon-style processes on macOS/Linux do not inherit the user's interactive
@@ -966,10 +970,26 @@ var supportedLoginShells = map[string]struct{}{
 //     (`[A-Za-z0-9._-]` only); we inline them into the script unquoted to
 //     keep the script readable. Custom MULTICA_*_PATH values never reach this
 //     resolver — those go through exec.LookPath directly.
-//
+
+// loginShellProbeEnabled reports whether the daemon may fork the user's login
+// shell to resolve agent paths (#7047). Some host-security products flag
+// `$SHELL -ilc` as interactive-shell reconnaissance, so operators need a way
+// to switch it off and rely on exec.LookPath plus explicit MULTICA_*_PATH.
+func loginShellProbeEnabled() bool {
+	v := os.Getenv("MULTICA_LOGIN_SHELL_PROBE")
+	if v == "false" || v == "0" {
+		return false
+	}
+	return true
+}
+
 // A var so tests can stub the fork without a real login shell.
 var resolveAgentsViaLoginShell = func(names []string) map[string]string {
 	out := map[string]string{}
+	if !loginShellProbeEnabled() {
+		slog.Debug("login-shell probe disabled via MULTICA_LOGIN_SHELL_PROBE")
+		return out
+	}
 	if len(names) == 0 {
 		return out
 	}

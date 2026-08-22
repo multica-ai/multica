@@ -256,6 +256,7 @@ Daemon behavior is configured via flags or environment variables:
 | Runtime name | `--runtime-name` | `MULTICA_AGENT_RUNTIME_NAME` | `Local Agent` |
 | Workspaces root | — | `MULTICA_WORKSPACES_ROOT` | `~/multica_workspaces` |
 | GC enabled | — | `MULTICA_GC_ENABLED` | `true` (set `false`/`0` to disable) |
+| Login-shell agent PATH probe | — | `MULTICA_LOGIN_SHELL_PROBE` | `true` (set `false`/`0` to disable) |
 | GC scan interval | — | `MULTICA_GC_INTERVAL` | `2h` |
 | GC TTL (done/cancelled issues) | — | `MULTICA_GC_TTL` | `24h` |
 | GC completed-task TTL (issue tasks) | — | `MULTICA_GC_COMPLETED_TASK_TTL` | `14d` on Multica Cloud, `0` (disabled) elsewhere |
