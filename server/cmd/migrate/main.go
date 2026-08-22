@@ -250,6 +250,7 @@ var concurrentIndexCleanups = map[string]string{
 	"395_plugin_package_version_package_index":                  "idx_plugin_package_version_package",
 	"396_plugin_package_file_path_index":                        "idx_plugin_package_file_path",
 	"397_plugin_installation_package_version_index":             "idx_plugin_installation_package_version",
+	"398_issue_workspace_status_position_index":                 "idx_issue_workspace_status_position",
 }
 
 // concurrentDownIndexCleanups covers every migration whose down direction
