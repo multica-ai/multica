@@ -5,12 +5,12 @@
 # TLS and forwards to 127.0.0.1:8080 (backend) and 127.0.0.1:3000 (frontend).
 # Do NOT change these bindings to 0.0.0.0 — Docker bypasses host firewalls
 # (UFW/iptables) by default, so the raw ports would be exposed to the internet
-# with the default JWT_SECRET and Postgres credentials. See:
+# while any deployment credentials remain weak. See:
 #   apps/docs/content/docs/self-host-quickstart.mdx
 #
 # Usage:
 #   cp .env.example .env
-#   # Edit .env — change JWT_SECRET at minimum
+#   # Edit .env — generate JWT_SECRET with `openssl rand -hex 32` (required)
 #   docker compose -f docker-compose.selfhost.yml up -d
 #
 # Frontend: http://localhost:${FRONTEND_PORT:-3000}
@@ -65,7 +65,7 @@ services:
       DATABASE_URL: postgres://${POSTGRES_USER:-multica}:${POSTGRES_PASSWORD:-multica}@postgres:5432/${POSTGRES_DB:-multica}?sslmode=disable
       PORT: "8080"
       METRICS_ADDR: ${METRICS_ADDR:-}
-      JWT_SECRET: ${JWT_SECRET:-change-me-in-production}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set to a strong random value — generate one with 'openssl rand -hex 32'}
       FRONTEND_ORIGIN: ${FRONTEND_ORIGIN:-http://localhost:3000}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-}
       RESEND_API_KEY: ${RESEND_API_KEY:-}
@@ -96,6 +96,8 @@ services:
       APP_ENV: ${APP_ENV:-production}
       MULTICA_DEV_VERIFICATION_CODE: ${MULTICA_DEV_VERIFICATION_CODE:-}
       MULTICA_APP_URL: ${MULTICA_APP_URL:-http://localhost:3000}
+      MULTICA_DATABASE_STARTUP_TIMEOUT: ${MULTICA_DATABASE_STARTUP_TIMEOUT:-3m}
+      MULTICA_DATABASE_CONNECT_TIMEOUT: ${MULTICA_DATABASE_CONNECT_TIMEOUT:-5s}
       MULTICA_SHUTDOWN_HOLD_DURATION: ${MULTICA_SHUTDOWN_HOLD_DURATION:-}
       MULTICA_RUNTIME_RECONNECT_GRACE: ${MULTICA_RUNTIME_RECONNECT_GRACE:-}
       MULTICA_TASK_QUEUED_TTL: ${MULTICA_TASK_QUEUED_TTL:-}
@@ -114,6 +116,16 @@ services:
       MULTICA_ENTITLEMENT_EMERGENCY_DISABLED: ${MULTICA_ENTITLEMENT_EMERGENCY_DISABLED:-false}
       GITHUB_APP_SLUG: ${GITHUB_APP_SLUG:-}
       GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET:-}
+      # App API credentials. The pull_request webhook is what mirrors a PR
+      # onto a card; these are what let the server authenticate as the App
+      # and pull the CI / mergeability snapshot that enriches it, plus
+      # Settings -> Repositories -> Choose from GitHub. Left unset,
+      # ghsnapshot.NewClientFromEnv returns a nil client and the enrichment
+      # degrades off silently - no error and no log line to notice.
+      # GITHUB_APP_PRIVATE_KEY is a PEM block: double-quote it in .env so
+      # its newlines survive into the container.
+      GITHUB_APP_ID: ${GITHUB_APP_ID:-}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY:-}
       # Public URL the API is reachable at from the open internet, no
       # trailing slash. Used to mint absolute webhook URLs for autopilot
       # webhook triggers. Leave unset behind a same-origin reverse proxy

@@ -11,6 +11,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
@@ -413,6 +414,7 @@ func notifyIssueSubscribers(
 		}
 
 		item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   parseUUID(workspaceID),
 			RecipientType: "member",
 			RecipientID:   sub.UserID,
@@ -478,6 +480,7 @@ func notifyDirect(
 	}
 
 	item, err := queries.CreateInboxItem(ctx, db.CreateInboxItemParams{
+		ID:            dbid.NewV7(),
 		WorkspaceID:   parseUUID(workspaceID),
 		RecipientType: recipientType,
 		RecipientID:   parseUUID(recipientID),
@@ -592,6 +595,7 @@ func notifyMentionedMembers(
 			continue
 		}
 		item, err := queries.CreateInboxItem(context.Background(), db.CreateInboxItemParams{
+			ID:            dbid.NewV7(),
 			WorkspaceID:   parseUUID(e.WorkspaceID),
 			RecipientType: "member",
 			RecipientID:   parseUUID(id),

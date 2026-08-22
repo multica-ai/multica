@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"os"
@@ -175,7 +174,10 @@ func TestConfigFieldsForManifestKeepsDeclarationOrder(t *testing.T) {
 	}
 }
 
-func TestFetchManifestFromLocalDir(t *testing.T) {
+// readLocalFile is the only path left that touches the filesystem on behalf of
+// an API caller. The directory name arrives over HTTP, so it must not be able to
+// escape MULTICA_PLUGIN_DIR or name a dotfile path.
+func TestReadLocalFileStaysInsideThePluginDirectory(t *testing.T) {
 	root := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(root, "hello"), 0o755); err != nil {
 		t.Fatalf("create local plugin dir: %v", err)
@@ -183,50 +185,82 @@ func TestFetchManifestFromLocalDir(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "hello", plugincontract.ManifestFilename), []byte(testManifestJSON), 0o644); err != nil {
 		t.Fatalf("write local manifest: %v", err)
 	}
+	// A file the caller must not be able to reach by naming a traversing entry.
+	if err := os.WriteFile(filepath.Join(root, "secret.txt"), []byte("nope"), 0o644); err != nil {
+		t.Fatalf("write sibling file: %v", err)
+	}
 	service := &PluginService{LocalDir: root}
 
-	manifest, canonical, err := service.FetchManifest(context.Background(), LocalSourcePrefix+"hello")
+	raw, err := service.readLocalFile("hello", plugincontract.ManifestFilename)
 	if err != nil {
-		t.Fatalf("FetchManifest: %v", err)
+		t.Fatalf("readLocalFile: %v", err)
 	}
-	if manifest.Key != "com.example.hello" || len(canonical) == 0 {
-		t.Fatalf("unexpected manifest: %+v", manifest)
+	if len(raw) == 0 {
+		t.Fatal("readLocalFile returned nothing")
 	}
 
-	if _, _, err := service.FetchManifest(context.Background(), LocalSourcePrefix+"missing"); err == nil {
-		t.Fatal("FetchManifest accepted a missing local plugin")
+	if _, err := service.readLocalFile("hello", "missing.js"); err == nil {
+		t.Fatal("readLocalFile accepted a missing entry")
 	} else if kind := pluginErrKind(t, err); kind != PluginErrorNotFound {
-		t.Fatalf("missing local plugin kind = %q, want %q", kind, PluginErrorNotFound)
+		t.Fatalf("missing entry kind = %q, want %q", kind, PluginErrorNotFound)
 	}
 
-	// A traversing name would let an API caller read any manifest-shaped file
-	// on the host, so it is rejected before it reaches the filesystem.
 	for _, name := range []string{"../secrets", "nested/plugin", ".hidden", ""} {
-		if _, _, err := service.FetchManifest(context.Background(), LocalSourcePrefix+name); err == nil {
-			t.Fatalf("FetchManifest accepted local source %q", name)
+		if _, err := service.readLocalFile(name, plugincontract.ManifestFilename); err == nil {
+			t.Fatalf("readLocalFile accepted local source %q", name)
 		}
+	}
+	if _, err := service.readLocalFile("hello", "../secret.txt"); err == nil {
+		t.Fatal("readLocalFile followed a traversing entry out of the plugin directory")
 	}
 
 	disabled := &PluginService{}
-	if _, _, err := disabled.FetchManifest(context.Background(), LocalSourcePrefix+"hello"); err == nil {
+	if _, err := disabled.readLocalFile("hello", plugincontract.ManifestFilename); err == nil {
 		t.Fatal("local sources must require MULTICA_PLUGIN_DIR")
 	}
 }
 
-func TestFetchManifestRejectsNonPublicSources(t *testing.T) {
-	service := &PluginService{}
-	for _, source := range []string{
-		"",
-		"http://example.com/multica.plugin.json",
-		"https://localhost/multica.plugin.json",
-		"https://127.0.0.1/multica.plugin.json",
-		"https://169.254.169.254/latest/meta-data",
-		"file:///etc/passwd",
-		"https://user:pass@example.com/multica.plugin.json",
-	} {
-		if _, _, err := service.FetchManifest(context.Background(), source); err == nil {
-			t.Fatalf("FetchManifest accepted source %q", source)
-		}
+// A published version's manifest is read back from the row, never re-parsed
+// from anything the author still controls.
+func TestManifestForVersionReadsTheStoredSnapshot(t *testing.T) {
+	_, canonical, err := plugincontract.ParseManifest([]byte(testManifestJSON))
+	if err != nil {
+		t.Fatalf("parse manifest: %v", err)
+	}
+	manifest, raw, err := ManifestForVersion(db.PluginPackageVersion{Manifest: canonical})
+	if err != nil {
+		t.Fatalf("ManifestForVersion: %v", err)
+	}
+	if manifest.Key != "com.example.hello" || len(raw) == 0 {
+		t.Fatalf("unexpected manifest: %+v", manifest)
+	}
+	if _, _, err := ManifestForVersion(db.PluginPackageVersion{Manifest: []byte("not json")}); err == nil {
+		t.Fatal("ManifestForVersion accepted a corrupt snapshot")
+	}
+}
+
+// Publishing the same version twice is a conflict for an upload — that
+// collision IS immutability — but a development publish takes a build suffix,
+// because re-publishing an unchanged version is what editing a file looks like.
+func TestResolvePublishVersion(t *testing.T) {
+	existing := []db.PluginPackageVersion{
+		{Version: "1.0.0"},
+		{Version: "1.0.0+dev.1"},
+		{Version: "1.0.0+dev.2"},
+	}
+
+	if got, err := resolvePublishVersion("1.0.0", existing, false); err != nil || got != "1.0.0" {
+		t.Fatalf("upload version = %q, %v; want the manifest's own version so the unique index refuses it", got, err)
+	}
+	if got, err := resolvePublishVersion("1.0.0", existing, true); err != nil || got != "1.0.0+dev.3" {
+		t.Fatalf("dev version = %q, %v; want 1.0.0+dev.3", got, err)
+	}
+	if got, err := resolvePublishVersion("2.0.0", existing, true); err != nil || got != "2.0.0" {
+		t.Fatalf("unused dev version = %q, %v; want 2.0.0 with no suffix", got, err)
+	}
+	long := "1.0.0+" + strings.Repeat("a", plugincontract.MaxVersionLength-6)
+	if _, err := resolvePublishVersion(long, []db.PluginPackageVersion{{Version: long}}, true); err == nil {
+		t.Fatal("a version with no room for a dev suffix must be refused, not silently truncated")
 	}
 }
 
@@ -277,27 +311,57 @@ func TestCapabilityMessageNamesTheMissingCapabilities(t *testing.T) {
 	}
 }
 
+// Binds every shipped capability to the host code that actually runs it.
+//
+// The gate is only meaningful if it tracks what renders. A capability enabled
+// here with no mount point installs successfully and then never appears — the
+// exact silent failure the gate exists to prevent — and nothing else in the
+// build would notice, because the manifest is valid and the install succeeds.
+//
+// Each line names the host code that makes it true. Flipping one on means
+// changing this file too, in the same commit as its runtime.
 func TestShippedHostCapabilitiesRunTheSurfacesTheHostMounts(t *testing.T) {
-	// The gate is only meaningful if it tracks what actually renders. A surface
-	// type enabled here with no mount point installs successfully and then never
-	// appears — the exact silent failure the gate exists to prevent.
 	shipped := plugincontract.HostCapabilities()
+
+	// packages/views/plugins/plugin-panel-section.tsx
 	if !shipped.SurfaceTypes[plugincontract.SurfaceIssuePanel] {
 		t.Fatal("issue_panel is mounted by PluginPanelSection and must be shipped")
 	}
+	// packages/views/plugins/plugin-modal-surface.tsx, opened from the issue
+	// actions menu by a person — never on the plugin's own initiative.
+	if !shipped.SurfaceTypes[plugincontract.SurfaceModal] {
+		t.Fatal("modal is mounted by PluginModalSurface and must be shipped")
+	}
+	// No host location exists for this one. Enabling it would install surfaces
+	// that never render.
 	if shipped.SurfaceTypes[plugincontract.SurfaceSidebarPanel] {
 		t.Fatal("sidebar_panel has no mount point yet; enabling it would install surfaces that never render")
 	}
-	if shipped.SurfaceTypes[plugincontract.SurfaceModal] {
-		t.Fatal("modal is opened by the manual trigger, which the hook engine has not landed")
-	}
-	for _, trigger := range []string{plugincontract.TriggerUI, plugincontract.TriggerManual, plugincontract.TriggerAgent, plugincontract.TriggerEvent} {
-		if shipped.HookTriggers[trigger] {
-			t.Fatalf("hook trigger %q is enabled but the hook engine has not landed", trigger)
+
+	// handler.InvokePluginHook serves ui and manual; service.PluginEventDispatcher
+	// serves event off the internal bus; daemon/plugin_hook_mcp.go renders
+	// agent-trigger hooks as MCP tools.
+	for _, trigger := range []string{
+		plugincontract.TriggerUI, plugincontract.TriggerManual,
+		plugincontract.TriggerEvent, plugincontract.TriggerAgent,
+	} {
+		if !shipped.HookTriggers[trigger] {
+			t.Fatalf("hook trigger %q has a host call site and must be shipped", trigger)
 		}
 	}
-	if shipped.ResourceTypes[plugincontract.ResourceSkill] {
-		t.Fatal("skill resources are enabled but the agent integration has not landed")
+
+	// service.callHookEndpoint speaks http; service.AgentMCPConnections turns an
+	// approved mcp hook into a broker connection.
+	for _, transport := range []string{plugincontract.TransportHTTP, plugincontract.TransportMCP} {
+		if !shipped.HookTransport[transport] {
+			t.Fatalf("hook transport %q has an implementation and must be shipped", transport)
+		}
+	}
+
+	// service.InstallSkillResources writes these into the skill table, and
+	// Uninstall removes them again.
+	if !shipped.ResourceTypes[plugincontract.ResourceSkill] {
+		t.Fatal("skill resources are installed by InstallSkillResources and must be shipped")
 	}
 }
 

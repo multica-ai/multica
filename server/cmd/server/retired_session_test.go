@@ -31,6 +31,12 @@ func newPoisonTestChatSession(t *testing.T, agentID, runtimeID, title string) st
 	return chatSessionID
 }
 
+func lastChatTaskSessionParams(chatSessionID string) db.GetLastChatTaskSessionParams {
+	return db.GetLastChatTaskSessionParams{
+		ChatSessionID: pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true},
+	}
+}
+
 // TestGetLastChatTaskSessionDoesNotResurrectFromOlderCompletedRow is the Chat
 // half of the GH #5975 wormhole, which the issue query closed and the chat
 // query never did. Task A completed on session S; task B then resumed S, hit
@@ -61,7 +67,7 @@ func TestGetLastChatTaskSessionDoesNotResurrectFromOlderCompletedRow(t *testing.
 	}
 
 	queries := db.New(testPool)
-	prior, err := queries.GetLastChatTaskSession(ctx, pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true})
+	prior, err := queries.GetLastChatTaskSession(ctx, lastChatTaskSessionParams(chatSessionID))
 	requireSessionExcluded(t, prior.SessionID, err)
 }
 
@@ -92,7 +98,7 @@ func TestGetLastChatTaskSessionKeepsHealthyDistinctSession(t *testing.T) {
 	}
 
 	queries := db.New(testPool)
-	prior, err := queries.GetLastChatTaskSession(ctx, pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true})
+	prior, err := queries.GetLastChatTaskSession(ctx, lastChatTaskSessionParams(chatSessionID))
 	if err != nil {
 		t.Fatalf("GetLastChatTaskSession failed: %v", err)
 	}
@@ -124,7 +130,7 @@ func TestGetLastChatTaskSessionExcludesAuthResolutionFailure(t *testing.T) {
 	}
 
 	queries := db.New(testPool)
-	prior, err := queries.GetLastChatTaskSession(ctx, pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true})
+	prior, err := queries.GetLastChatTaskSession(ctx, lastChatTaskSessionParams(chatSessionID))
 	requireSessionExcluded(t, prior.SessionID, err)
 }
 
@@ -150,7 +156,7 @@ func TestGetLastChatTaskSessionKeepsSessionOnAuthAdjacentError(t *testing.T) {
 	}
 
 	queries := db.New(testPool)
-	prior, err := queries.GetLastChatTaskSession(ctx, pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true})
+	prior, err := queries.GetLastChatTaskSession(ctx, lastChatTaskSessionParams(chatSessionID))
 	if err != nil {
 		t.Fatalf("GetLastChatTaskSession failed: %v", err)
 	}
@@ -221,7 +227,7 @@ func TestRetiredSessionExcludedFromChatResume(t *testing.T) {
 	}
 
 	queries := db.New(testPool)
-	prior, err := queries.GetLastChatTaskSession(ctx, pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true})
+	prior, err := queries.GetLastChatTaskSession(ctx, lastChatTaskSessionParams(chatSessionID))
 	requireSessionExcluded(t, prior.SessionID, err)
 }
 
@@ -262,7 +268,7 @@ func TestFailTaskClearsPoisonedChatPointer(t *testing.T) {
 	// The un-upgraded-daemon shape: catchall reason, poisoning only in the text.
 	if _, err := taskSvc.FailTask(ctx, pgtype.UUID{Bytes: parseUUIDBytes(taskID), Valid: true},
 		"Invalid request: the message at position 37 with role 'assistant' must not be empty",
-		"CHAT-PTR-S", "/tmp/chat", "", "agent_error.unknown", false, ""); err != nil {
+		"CHAT-PTR-S", "/tmp/chat", "", "agent_error.unknown", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
@@ -307,7 +313,7 @@ func TestFailTaskKeepsChatPointerOnTransientFailure(t *testing.T) {
 
 	if _, err := taskSvc.FailTask(ctx, pgtype.UUID{Bytes: parseUUIDBytes(taskID), Valid: true},
 		"Connection closed mid-response", "CHAT-KEEP-S", "/tmp/chat", "",
-		"agent_error.provider_network", false, ""); err != nil {
+		"agent_error.provider_network", false, "", ""); err != nil {
 		t.Fatalf("FailTask: %v", err)
 	}
 
@@ -354,6 +360,6 @@ func TestGetLastChatTaskSessionExcludesOverflowedResumeFromOlderCompletedRow(t *
 	}
 
 	queries := db.New(testPool)
-	prior, err := queries.GetLastChatTaskSession(ctx, pgtype.UUID{Bytes: parseUUIDBytes(chatSessionID), Valid: true})
+	prior, err := queries.GetLastChatTaskSession(ctx, lastChatTaskSessionParams(chatSessionID))
 	requireSessionExcluded(t, prior.SessionID, err)
 }

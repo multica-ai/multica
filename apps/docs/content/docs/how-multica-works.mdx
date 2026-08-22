@@ -9,7 +9,7 @@ When you assign an issue to an agent, Multica creates a task that a runtime on a
 
 ## The full path of a run
 
-![Diagram of a run: on the left, the Multica area records and schedules — an issue triggers the creation of a task; on the right, in the "your computer" area, the daemon claims the task, launches the AI coding tool, and reads and writes the working directory; progress messages stream back to the execution log in real time, and the daemon writes the final result back to the issue](/images/docs/how-a-run-works.png)
+![Diagram of a run: on the left, the Multica area records and schedules — an issue triggers the creation of a task; on the right, in the "your computer" area, the daemon claims the task, launches the AI coding tool, and reads and writes the working directory; progress messages stream back to the execution log in real time, and the daemon writes the final result back to the issue](/images/docs/how-a-run-works.webp)
 
 1. **The issue provides the context.** The issue holds the work description, the discussion, and the assignee. When it is assigned to an agent, the system uses that agent's instructions, model, skills, and runtime configuration.
 2. **Multica creates a task.** The task enters the queue; if no runtime is online, it waits there.

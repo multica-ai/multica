@@ -158,6 +158,30 @@ func (f *fakeStore) leaseHolder(id pgtype.UUID) (string, bool) {
 	return owner, ok
 }
 
+type contextCapturingContendedLeaseStore struct {
+	acquireCtx chan context.Context
+}
+
+func (s *contextCapturingContendedLeaseStore) ListHeldWSLeases(_ context.Context, _ []pgtype.UUID) (map[string]struct{}, error) {
+	return map[string]struct{}{}, nil
+}
+
+func (s *contextCapturingContendedLeaseStore) TryAcquireWSLease(ctx context.Context, _ AcquireLeaseParams) error {
+	select {
+	case s.acquireCtx <- ctx:
+	default:
+	}
+	return ErrLeaseNotAcquired
+}
+
+func (s *contextCapturingContendedLeaseStore) RenewWSLease(_ context.Context, _ AcquireLeaseParams) error {
+	return errors.New("unexpected lease renewal")
+}
+
+func (s *contextCapturingContendedLeaseStore) ReleaseWSLease(_ context.Context, _ ReleaseLeaseParams) error {
+	return nil
+}
+
 // fakeChannel is a channel.Channel whose Connect behaves per a script
 // (default: block until ctx is cancelled). It records connect/disconnect
 // counts and captures the injected handler.
@@ -387,6 +411,44 @@ func TestSupervisorInjectsHandler(t *testing.T) {
 
 	cancel()
 	sup.Wait()
+}
+
+func TestSupervisorCancelsChildContextAfterContendedAcquire(t *testing.T) {
+	q := newFakeStore()
+	instID := uuidFromString(t, "21212121-2121-2121-2121-212121212121")
+	inst := activeInst(instID, "fp1")
+	leases := &contextCapturingContendedLeaseStore{acquireCtx: make(chan context.Context, 1)}
+
+	fc := &fakeChannel{typ: channel.TypeFeishu}
+	var builds int32
+	sup := NewSupervisor(q, leases, fakeRegistry(fc, &builds, nil), nil, fastConfig())
+	parentCtx, parentCancel := context.WithCancel(context.Background())
+	defer func() {
+		parentCancel()
+		sup.wg.Wait()
+	}()
+
+	// Start one supervisor directly so the test observes exactly one lease
+	// attempt; Run would continue sweeping and could start another attempt.
+	sup.startSupervisor(parentCtx, inst)
+	var acquireCtx context.Context
+	select {
+	case acquireCtx = <-leases.acquireCtx:
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("supervisor did not attempt to acquire the lease")
+	}
+
+	select {
+	case <-acquireCtx.Done():
+		if !errors.Is(acquireCtx.Err(), context.Canceled) {
+			t.Fatalf("acquire context error = %v, want context.Canceled", acquireCtx.Err())
+		}
+	case <-time.After(300 * time.Millisecond):
+		t.Fatal("supervisor returned after lease contention without cancelling its child context")
+	}
+	if got := atomic.LoadInt32(&builds); got != 0 {
+		t.Fatalf("contended lease should not build a channel, builds=%d", got)
+	}
 }
 
 func TestSupervisorSkipsWhenAnotherReplicaHoldsLease(t *testing.T) {

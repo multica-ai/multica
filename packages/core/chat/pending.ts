@@ -86,17 +86,33 @@ export function enqueuePendingChatTask(
   };
 }
 
+// A hold explanation outlives the hold: the daemon writes wait_reason once on
+// the way in and never clears it, so the only thing keeping "held by task
+// abc12345" off a task that has since started running is this gate. Any status
+// other than the waiting one drops the text, whether it arrived on this event
+// or was already in the cache.
+function resolveWaitReason(
+  status: string,
+  incoming: string | undefined,
+  existing: string | undefined,
+): string | undefined {
+  if (status !== "waiting_local_directory") return undefined;
+  return incoming ?? existing;
+}
+
 export function promotePendingChatTask(
   current: ChatPendingTask | undefined,
   taskID: string,
   status: string,
   createdAt?: string,
+  waitReason?: string,
 ): ChatPendingTask {
   const queue = current?.queued_tasks ?? [];
   if (current?.task_id === taskID) {
     return {
       ...current,
       status,
+      wait_reason: resolveWaitReason(status, waitReason, current.wait_reason),
       queued_tasks: queue.filter((task) => task.task_id !== taskID),
     };
   }
@@ -110,6 +126,7 @@ export function promotePendingChatTask(
     ...promoted,
     supports_queue: current.supports_queue,
     status,
+    wait_reason: resolveWaitReason(status, waitReason, undefined),
     created_at: promoted.created_at || createdAt || "",
     queued_tasks: uniqueQueue([
       ...(previousHead?.status === "queued" ? [previousHead] : []),

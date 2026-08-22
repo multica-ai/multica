@@ -1,37 +1,40 @@
 ---
 title: Chat integrations
-description: Connect Multica agents to Feishu, Lark, Slack, DingTalk, or WeCom and use them from the chat tools your team already uses.
+description: Connect Multica agents to Feishu, Lark, Slack, DingTalk, WeCom, or Telegram and use them from the chat tools your team already uses.
 ---
 
 import { Callout } from "fumadocs-ui/components/callout";
 
 Chat integrations let the team ask an agent questions, @-mention it in a group chat, or create issues from the chat window — without opening Multica.
 
-Feishu/Lark, Slack, DingTalk, and WeCom are supported today. They share the same session, identity, and execution mechanics but install differently.
+Feishu/Lark, Slack, DingTalk, WeCom, and Telegram are supported today. They share the same session, identity, and execution mechanics but install differently.
 
 ## Choose a platform
 
-| | Feishu / Lark | Slack | DingTalk | WeCom |
-|---|---|---|---|---|
-| Installation | Generate a QR code in Multica and authorize by scanning it with Feishu | Create an app in Slack, then paste two tokens into Multica | Create an internal app and Stream-mode robot, then paste its AppKey and AppSecret into Multica | Create a smart bot with the long connection enabled in the WeCom admin console, then paste its Bot ID and Secret into Multica |
-| DM the agent | Supported | Supported | Supported | Supported |
-| Groups or channels | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot |
-| Create issues | `/issue` message command; creates the issue from your input as-is | `/issue` slash command; the agent writes up the description before creating | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is |
-| Connection | Platform long connection | Socket Mode | Stream mode | Platform long connection |
+| | Feishu / Lark | Slack | DingTalk | WeCom | Telegram |
+|---|---|---|---|---|---|
+| Installation | Generate a QR code in Multica and authorize by scanning it with Feishu | Create an app in Slack, then paste two tokens into Multica | Create an internal app and Stream-mode robot, then paste its AppKey and AppSecret into Multica | Create a smart bot with the long connection enabled in the WeCom admin console, then paste its Bot ID and Secret into Multica | Create a Bot with @BotFather, then paste its token into Multica |
+| DM the agent | Supported | Supported | Supported | Supported | Supported |
+| Groups or channels | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning the Bot | Triggered by @-mentioning or replying to the Bot |
+| Create issues | `/issue` message command; creates the issue from your input as-is | `/issue` slash command; the agent writes up the description before creating | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is | `/issue` message command; creates the issue from your input as-is |
+| Connection | Platform long connection | Socket Mode | Stream mode | Platform long connection | `getUpdates` long polling |
 
 New connections are currently open only for mainland-China Feishu; existing international Lark connections keep working and can still be managed.
 
 Each Bot is bound to one Multica agent. To use several agents on the same chat platform, connect a separate Bot for each.
 
-DingTalk and WeCom are community-maintained: they ship in every release, but carry no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
+DingTalk, WeCom, and Telegram are [community-maintained](/community-maintained): they ship in every release, but carry no official support SLA. Report problems in [GitHub issues](https://github.com/multica-ai/multica/issues).
 
 WeCom handles text messages today. Voice, image, and file messages get a short reply explaining that, and are not passed to the agent.
+
+Telegram handles text messages today. Unsupported media gets a short reply explaining that, and is not passed to the agent.
 
 Step-by-step guides:
 
 - [Feishu / Lark Bot integration](/lark-bot-integration)
 - [Slack Bot integration](/slack-bot-integration)
 - [DingTalk Bot integration](/dingtalk-bot-integration)
+- [Telegram Bot integration](/telegram-bot-integration)
 
 ## How a message is processed
 
@@ -51,6 +54,7 @@ Ordinary messages follow this flow. `/issue` is a command, not a chat turn: Mult
 - Slack separates DMs by channel; in a channel, each thread holds its own session.
 - DingTalk separates sessions by conversation; each DM or group continues its own session.
 - WeCom separates sessions by chat; each DM or group chat continues its own session.
+- Telegram separates sessions by chat; forum topics are isolated by topic.
 
 Follow-ups in a channel still need a fresh @-mention. The agent only receives messages addressed to it — it never reads the whole channel history automatically.
 
@@ -79,6 +83,7 @@ MULTICA_LARK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_SLACK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_DINGTALK_SECRET_KEY=<base64-encoded 32-byte key>
 MULTICA_WECOM_SECRET_KEY=<base64-encoded 32-byte key>
+MULTICA_TELEGRAM_SECRET_KEY=<base64-encoded 32-byte key>
 ```
 
 These keys encrypt stored Bot credentials. See [Environment variables](/environment-variables) for how to generate, store, and rotate them. Multica Cloud already has this configured.
@@ -90,4 +95,5 @@ WeCom additionally requires a **single backend replica**: its only outbound path
 - [Feishu / Lark Bot integration](/lark-bot-integration) — connect an agent by scanning a QR code.
 - [Slack Bot integration](/slack-bot-integration) — create a Slack app and paste its tokens into Multica.
 - [DingTalk Bot integration](/dingtalk-bot-integration) — create a Stream-mode robot and paste its credentials into Multica.
+- [Telegram Bot integration](/telegram-bot-integration) — create a Bot with @BotFather and paste its token into Multica.
 - [Chat](/chat) — the conversation and execution model behind every Bot.

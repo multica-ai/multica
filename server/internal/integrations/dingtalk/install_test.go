@@ -78,7 +78,9 @@ func (f *fakeInstallQueries) GetDingTalkInstallationOwnerForUpdate(_ context.Con
 	if f.existing == nil {
 		return db.GetDingTalkInstallationOwnerForUpdateRow{}, pgx.ErrNoRows
 	}
-	return db.GetDingTalkInstallationOwnerForUpdateRow{ID: f.existing.ID, AppID: f.existingAppID}, nil
+	return db.GetDingTalkInstallationOwnerForUpdateRow{
+		ID: f.existing.ID, AppID: f.existingAppID,
+	}, nil
 }
 
 func (f *fakeInstallQueries) DeleteDingTalkInstallationForReplacement(_ context.Context, arg db.DeleteDingTalkInstallationForReplacementParams) (pgtype.UUID, error) {

@@ -480,7 +480,7 @@ func PruneCodexSessionStores(profile string, retention time.Duration, now time.T
 				continue
 			}
 			storeDir := filepath.Join(agentDir, is.Name())
-			newest, size := codexStoreStat(storeDir)
+			newest, size := dirStat(storeDir)
 			if newest.IsZero() || now.Sub(newest) <= retention {
 				kept++
 				continue
@@ -518,9 +518,10 @@ func PruneCodexSessionStores(profile string, retention time.Duration, now time.T
 	return removed, bytesFreed
 }
 
-// codexStoreStat walks dir once, returning the newest modification time seen
-// (the store's last activity) and its total byte size (for GC accounting).
-func codexStoreStat(dir string) (newest time.Time, size int64) {
+// dirStat walks dir once, returning the newest modification time seen (the
+// directory's last activity) and its total byte size (for GC accounting).
+// Shared by the store pruners and the task temp sweep.
+func dirStat(dir string) (newest time.Time, size int64) {
 	_ = filepath.WalkDir(dir, func(_ string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -665,7 +666,7 @@ func linkCodexSessionsToStore(dst, storeDir, sharedSessions, resumeID string, lo
 }
 
 // touchCodexSessionStore refreshes storeDir's modification time to now — the
-// signal codexStoreStat reads as the store's last activity. Best-effort: a
+// signal dirStat reads as the store's last activity. Best-effort: a
 // failed touch only risks an over-eager prune, which the active-store guard
 // still prevents.
 func touchCodexSessionStore(storeDir string, logger *slog.Logger) {

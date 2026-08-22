@@ -293,6 +293,17 @@ type countingCatalogQuerier struct {
 	issuestatus.Querier
 	entryReads    int
 	categoryReads int
+	// keyReads counts point lookups. A caller resolving many statuses should
+	// read the catalog ONCE (entryReads) rather than once per key — the
+	// difference between the two is the N+1. (MUL-6243)
+	keyReads int
+}
+
+func (c *countingCatalogQuerier) GetIssueStatusEntryByKey(
+	ctx context.Context, arg db.GetIssueStatusEntryByKeyParams,
+) (db.IssueStatus, error) {
+	c.keyReads++
+	return c.Querier.GetIssueStatusEntryByKey(ctx, arg)
 }
 
 func (c *countingCatalogQuerier) ListIssueStatusEntries(

@@ -1731,9 +1731,10 @@ export function IssueDisplayControls({
     updated_at: "sort_updated",
     title: "sort_title",
   };
-  const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee"> = {
+  const GROUPING_LABEL_KEY: Record<typeof GROUPING_OPTIONS[number]["value"], "group_status" | "group_assignee" | "group_project"> = {
     status: "group_status",
     assignee: "group_assignee",
+    project: "group_project",
   };
   const SWIMLANE_GROUPING_LABEL_KEY: Record<SwimlaneGrouping, "group_parent" | "group_project" | "group_assignee"> = {
     parent: "group_parent",
@@ -1774,7 +1775,9 @@ export function IssueDisplayControls({
       ? t(($) => $.table.columns.status)
       : effectiveTableGrouping === "assignee"
         ? t(($) => $.table.columns.assignee)
-        : t(($) => $.table.group_none);
+        : effectiveTableGrouping === "project"
+          ? t(($) => $.table.columns.project)
+          : t(($) => $.table.group_none);
   const controlButtonClass = "h-8 w-8 gap-1 px-0 text-muted-foreground md:h-7 md:w-auto md:px-2.5";
 
   return (
@@ -1851,6 +1854,9 @@ export function IssueDisplayControls({
                 </DropdownMenuRadioItem>
                 <DropdownMenuRadioItem value="assignee">
                   {t(($) => $.table.columns.assignee)}
+                </DropdownMenuRadioItem>
+                <DropdownMenuRadioItem value="project">
+                  {t(($) => $.table.columns.project)}
                 </DropdownMenuRadioItem>
                 {tableGroupableProperties.map((property) => (
                   <DropdownMenuRadioItem

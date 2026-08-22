@@ -167,6 +167,17 @@ read. Read that array after posting — it is the only place any of this shows u
   is the squad assignment/promote path, not this one; the child-done wake is
   ungated — see the multica-squads skill.)
 
+A chain that crosses issues keeps its human (MUL-6490). The A2A gate judges the
+human at the top of your chain, and that human travels on the comment you write:
+the comment records the run that authored it, so the run it wakes inherits your
+originator. This holds when you comment on a DIFFERENT issue than the one you are
+running on — the ordinary "create issue Y, then coordinate there" flow — so a
+delegation that works on your own issue keeps working on the issue you just
+created. It does not go the other way: nothing ever substitutes a different human
+(your agent's owner, or the target issue's originator), so if your chain has no
+human at its top, member-scoped allow-lists stay closed no matter which issue you
+move to.
+
 One nuance for automation (MUL-4857): when an UNATTRIBUTED autopilot run (a
 schedule/webhook dispatch has no human originator, so the A2A gate has no human
 to key on) delegates by `@mention` while working on the issue that autopilot

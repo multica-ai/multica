@@ -309,6 +309,8 @@
     "event_filter_docs_link_label": "Learn how event filters work",
     "event_filter_event_placeholder": "e.g. workflow_run",
     "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_add": "Add",
+    "event_filter_remove_label": "Remove filter",
     "event_filter_hint": "Only process webhooks matching these events. Leave empty to accept all.",
     "schedule_disabled_reason": "This autopilot has multiple schedules — edit them in the detail page.",
     "schedule_empty": "No schedule — this autopilot only runs when triggered manually.",

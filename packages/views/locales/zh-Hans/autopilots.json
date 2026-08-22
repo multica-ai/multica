@@ -309,6 +309,8 @@
     "event_filter_docs_link_label": "了解事件过滤的工作方式",
     "event_filter_event_placeholder": "例如 workflow_run",
     "event_filter_actions_placeholder": "completed, failed",
+    "event_filter_add": "添加",
+    "event_filter_remove_label": "移除过滤条件",
     "event_filter_hint": "只处理匹配这些事件的 webhook。留空则接受所有事件。",
     "schedule_disabled_reason": "该自动化有多个时间表——请到详情页编辑。",
     "schedule_empty": "还没有时间表——这个自动化只在手动触发时运行。",

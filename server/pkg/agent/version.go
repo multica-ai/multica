@@ -16,6 +16,7 @@ var MinVersions = map[string]string{
 	"copilot": "1.0.0",   // --output-format json envelope stable from 1.0.x
 	"grok":    "0.2.89",  // ACP + authenticate/session-load/set_model/MCP and --effort thinking flag
 	"qwen":    "0.20.0",  // stream-json protocol captured and verified against Qwen Code 0.20.0
+	"dim":     "0.3.10",  // cross-run session/load: per-process lock releases on graceful exit
 	"mcode":   "0.1.2",   // ACP v1 session/new, prompt, MCP capability forwarding
 }
 

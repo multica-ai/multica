@@ -68,6 +68,7 @@ func TestRegisterBYO_DifferentAppKey_IsolatesIdentityStateDB(t *testing.T) {
 
 	clean := func() {
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_outbound_card_message WHERE chat_session_id = $1`, chatSessionID)
+		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_context_generation WHERE chat_session_id = $1`, chatSessionID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_chat_session_binding WHERE chat_session_id = $1`, chatSessionID)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_binding_token WHERE token_hash = $1`, tokenHash)
 		_, _ = pool.Exec(context.Background(), `DELETE FROM channel_user_binding WHERE workspace_id = $1 AND channel_user_id = $2`, workspaceID, staffID)
@@ -97,6 +98,10 @@ VALUES ($1, $2, $3, 'dingtalk', $4)
 INSERT INTO channel_chat_session_binding (chat_session_id, installation_id, channel_type, channel_chat_id, chat_type)
 VALUES ($1, $2, 'dingtalk', $3, 'p2p')
 `, chatSessionID, oldInstallID, chatID)
+	exec(`
+INSERT INTO channel_chat_context_generation (chat_session_id, revision)
+VALUES ($1, 1)
+`, chatSessionID)
 	exec(`
 INSERT INTO channel_binding_token (token_hash, workspace_id, installation_id, channel_type, channel_user_id, expires_at)
 VALUES ($1, $2, $3, 'dingtalk', $4, now() + interval '10 minutes')
@@ -166,6 +171,7 @@ VALUES ($1, $2, $3, 'https://storage.example.test/old-image', $4)
 	assertCount("old installation", `SELECT count(*) FROM channel_installation WHERE id = $1`, 0, oldInstallID)
 	assertCount("old user binding", `SELECT count(*) FROM channel_user_binding WHERE installation_id = $1`, 0, oldInstallID)
 	assertCount("old chat binding", `SELECT count(*) FROM channel_chat_session_binding WHERE installation_id = $1`, 0, oldInstallID)
+	assertCount("old chat context", `SELECT count(*) FROM channel_chat_context_generation WHERE chat_session_id = $1`, 1, chatSessionID)
 	assertCount("old binding token", `SELECT count(*) FROM channel_binding_token WHERE installation_id = $1`, 0, oldInstallID)
 	assertCount("old outbound state", `SELECT count(*) FROM channel_outbound_card_message WHERE chat_session_id = $1`, 0, chatSessionID)
 	assertCount("old dedup state", `SELECT count(*) FROM channel_inbound_message_dedup WHERE installation_id = $1`, 0, oldInstallID)

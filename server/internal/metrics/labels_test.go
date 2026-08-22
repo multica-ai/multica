@@ -23,6 +23,7 @@ func TestNormalizeRuntimeProviderRecognizesKnownProviders(t *testing.T) {
 		{input: "TraeCLI", want: "traecli"},
 		{input: "Reasonix", want: "reasonix"},
 		{input: "DSH", want: "dsh"},
+		{input: "Dim", want: "dim"},
 	}
 	for _, tt := range tests {
 		if got := NormalizeRuntimeProvider(tt.input); got != tt.want {

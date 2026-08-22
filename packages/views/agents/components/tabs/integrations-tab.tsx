@@ -6,17 +6,28 @@ import { useAuthStore } from "@multica/core/auth";
 import { useWorkspaceId } from "@multica/core/hooks";
 import { larkInstallationsOptions } from "@multica/core/lark";
 import { slackInstallationsOptions } from "@multica/core/slack";
-import { dingtalkInstallationsOptions } from "@multica/core/dingtalk";
+import {
+  dingtalkAgentGroupsOptions,
+  dingtalkInstallationsOptions,
+} from "@multica/core/dingtalk";
 import { wecomInstallationsOptions } from "@multica/core/wecom";
+import { telegramInstallationsOptions } from "@multica/core/telegram";
 import { memberListOptions } from "@multica/core/workspace/queries";
 import { LarkAgentBindButton } from "../../../settings/components/lark-tab";
 import { LarkMark } from "../../../settings/components/lark-mark";
 import { SlackAgentBindButton } from "../../../settings/components/slack-tab";
 import { SlackMark } from "../../../settings/components/slack-mark";
-import { DingTalkAgentBindButton } from "../../../settings/components/dingtalk-tab";
+import {
+  DingTalkAgentBindButton,
+  DingTalkBotGroups,
+  DingTalkConnectionLabel,
+  getDingTalkBotIdentity,
+} from "../../../settings/components/dingtalk-tab";
 import { DingTalkMark } from "../../../settings/components/dingtalk-mark";
 import { WecomAgentBindButton } from "../../../settings/components/wecom-tab";
 import { WecomMark } from "../../../settings/components/wecom-mark";
+import { TelegramAgentBindButton } from "../../../settings/components/telegram-tab";
+import { TelegramMark } from "../../../settings/components/telegram-mark";
 import { useT } from "../../../i18n";
 
 /**
@@ -57,6 +68,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ...wecomInstallationsOptions(wsId),
     enabled: !!wsId,
   });
+  const { data: telegramListing } = useQuery({
+    ...telegramInstallationsOptions(wsId),
+    enabled: !!wsId,
+  });
   const { data: members = [] } = useQuery({
     ...memberListOptions(wsId),
     enabled: !!wsId,
@@ -68,7 +83,10 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   const isWorkspaceAdmin =
     currentMember?.role === "owner" || currentMember?.role === "admin";
   const isAgentOwner =
-    !!user?.id && agent.owner_id != null && agent.owner_id === user.id;
+    currentMember != null &&
+    !!user?.id &&
+    agent.owner_id != null &&
+    agent.owner_id === user.id;
   // Lark bind/manage is authorized for the agent's owner OR a workspace
   // owner/admin (server/internal/handler/lark.go canManageAgent, MUL-4213).
   // Slack's install/revoke routes are still workspace owner/admin-only, so
@@ -77,6 +95,7 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
   const canManageLark = isWorkspaceAdmin || isAgentOwner;
   const canManageSlack = isWorkspaceAdmin;
   const canManageWecom = isWorkspaceAdmin;
+  const canManageTelegram = isWorkspaceAdmin;
   const hasActiveInstall =
     listing?.installations.some(
       (inst) => inst.agent_id === agent.id && inst.status === "active",
@@ -90,9 +109,33 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
     ) ?? false;
 
   const dingtalkConfigured = dingtalkListing?.configured === true;
-  // DingTalk BYO install/revoke are workspace owner/admin-only at the router,
-  // matching Slack rather than Lark's owner-or-admin rule.
-  const canManageDingtalk = isWorkspaceAdmin;
+  const dingtalkInstallation = dingtalkListing?.installations.find(
+    (inst) => inst.agent_id === agent.id && inst.status === "active",
+  );
+  const dingtalkHasActiveInstall = !!dingtalkInstallation;
+  const {
+    data: dingtalkGroupsListing,
+    isLoading: dingtalkGroupsLoading,
+    isError: dingtalkGroupsError,
+    refetch: retryDingtalkGroups,
+  } = useQuery({
+    ...dingtalkAgentGroupsOptions(wsId, agent.id),
+    enabled: !!wsId && dingtalkHasActiveInstall,
+  });
+  const dingtalkGroups = dingtalkGroupsListing?.groups ?? [];
+  const dingtalkGroupDiscoverySupported =
+    dingtalkGroupsListing?.group_discovery_supported === true;
+  const showDingtalkGroupDiscovery =
+    dingtalkGroupDiscoverySupported ||
+    dingtalkGroupsLoading ||
+    dingtalkGroupsError;
+  const dingtalkBotIdentity = dingtalkInstallation
+    ? dingtalkGroupsListing?.bot_identities?.[dingtalkInstallation.id] ??
+      getDingTalkBotIdentity(dingtalkGroups, dingtalkInstallation.id)
+    : undefined;
+  // DingTalk uses the same per-agent management rule as Lark: the target
+  // agent's owner or a workspace owner/admin may connect and disconnect it.
+  const canManageDingtalk = isWorkspaceAdmin || isAgentOwner;
 
   const wecomConfigured = wecomListing?.configured === true;
   const wecomInstallSupported = wecomListing?.install_supported === true;
@@ -101,19 +144,74 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
       (inst) => inst.agent_id === agent.id && inst.status === "active",
     ) ?? false;
 
-  // A member who can manage no platform (not a workspace admin and not this
-  // agent's owner) gets the read-only note instead of the sections.
-  // Members can still view connected bots in the (member-visible)
-  // Settings → Integrations listing.
-  if (!canManageLark && !canManageSlack && !canManageDingtalk && !canManageWecom) {
+  const telegramConfigured = telegramListing?.configured === true;
+  const telegramInstallSupported = telegramListing?.install_supported === true;
+  const telegramHasActiveInstall =
+    telegramListing?.installations.some(
+      (inst) => inst.agent_id === agent.id && inst.status === "active",
+    ) ?? false;
+
+  // Preserve the established Integrations management gate: a member who can
+  // manage no platform gets the read-only note instead of install controls.
+  // The agent-scoped DingTalk relationship remains visible because reaching
+  // this Agent detail already passed the server's Agent view permission gate.
+  if (
+    !canManageLark &&
+    !canManageSlack &&
+    !canManageDingtalk &&
+    !canManageWecom &&
+    !canManageTelegram
+  ) {
     return (
       <div className="space-y-6">
         <p className="text-caption text-muted-foreground">
           {t(($) => $.tab_body.integrations.intro)}
         </p>
-        <p className="text-caption text-muted-foreground">
-          {t(($) => $.tab_body.integrations.members_note)}
-        </p>
+        {dingtalkInstallation ? (
+          <section className="rounded-lg border">
+            <div className="flex items-start gap-3 p-4">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+                <DingTalkMark className="h-5 w-5" />
+              </span>
+              <div className="min-w-0 flex-1 space-y-1">
+                <h3 className="text-body font-medium">
+                  {ts(($) => $.dingtalk.section_title)}
+                </h3>
+                <p className="text-caption leading-relaxed text-muted-foreground">
+                  {ts(($) => $.dingtalk.agent_page_description)}
+                </p>
+              </div>
+            </div>
+            <div className="border-t px-4 py-3">
+              <DingTalkConnectionLabel
+                botName={dingtalkBotIdentity?.bot_name ?? ""}
+                botIdentityIssue={dingtalkBotIdentity?.bot_identity_issue ?? ""}
+                showBotIdentity={
+                  dingtalkGroupDiscoverySupported && !dingtalkGroupsLoading
+                }
+                showPermissionHelp={false}
+              />
+            </div>
+            {showDingtalkGroupDiscovery && (
+              <div className="border-t px-4 pb-4">
+                <DingTalkBotGroups
+                  workspaceId={wsId}
+                  agentId={agent.id}
+                  installationId={dingtalkInstallation.id}
+                  groups={dingtalkGroups}
+                  inactiveCount={dingtalkGroupsListing?.inactive_group_counts?.[dingtalkInstallation.id] ?? 0}
+                  isLoading={dingtalkGroupsLoading}
+                  isError={dingtalkGroupsError}
+                  onRetry={() => void retryDingtalkGroups()}
+                />
+              </div>
+            )}
+          </section>
+        ) : (
+          <p className="text-caption text-muted-foreground">
+            {t(($) => $.tab_body.integrations.members_note)}
+          </p>
+        )}
       </div>
     );
   }
@@ -219,26 +317,64 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
           <div className="min-w-0 flex-1 space-y-1">
             <h3 className="text-body font-medium">{ts(($) => $.dingtalk.section_title)}</h3>
             <p className="text-caption leading-relaxed text-muted-foreground">
-              {ts(($) => $.dingtalk.page_description)}
+              {ts(($) => $.dingtalk.agent_page_description)}
             </p>
           </div>
         </div>
         <div className="border-t px-4 py-3">
           {!canManageDingtalk ? (
-            // DingTalk install/revoke stay workspace owner/admin-only, so an
-            // agent owner who is not an admin only gets the read-only note
-            // here (unlike Lark above). Reuses the shared members note.
-            <p className="text-caption text-muted-foreground">
-              {t(($) => $.tab_body.integrations.members_note)}
-            </p>
+            // Viewers who cannot manage this agent still see its connected
+            // DingTalk identity and discovered groups as read-only details.
+            dingtalkInstallation ? (
+              <DingTalkConnectionLabel
+                botName={dingtalkBotIdentity?.bot_name ?? ""}
+                botIdentityIssue={dingtalkBotIdentity?.bot_identity_issue ?? ""}
+                showBotIdentity={
+                  dingtalkGroupDiscoverySupported && !dingtalkGroupsLoading
+                }
+                showPermissionHelp={false}
+              />
+            ) : (
+              <p className="text-caption text-muted-foreground">
+                {t(($) => $.tab_body.integrations.members_note)}
+              </p>
+            )
           ) : !dingtalkConfigured ? (
             <p className="text-caption text-muted-foreground">
               {ts(($) => $.dingtalk.not_enabled_title)}
             </p>
           ) : (
-            <DingTalkAgentBindButton agentId={agent.id} agentName={agent.name} />
+            <DingTalkAgentBindButton
+              agentId={agent.id}
+              agentName={agent.name}
+              agentOwnerId={agent.owner_id}
+              botName={
+                dingtalkGroupsLoading || !dingtalkGroupDiscoverySupported
+                  ? undefined
+                  : (dingtalkBotIdentity?.bot_name ?? "")
+              }
+              botIdentityIssue={
+                dingtalkGroupsLoading || !dingtalkGroupDiscoverySupported
+                  ? undefined
+                  : (dingtalkBotIdentity?.bot_identity_issue ?? "")
+              }
+            />
           )}
         </div>
+        {dingtalkInstallation && showDingtalkGroupDiscovery && (
+          <div className="border-t px-4 pb-4">
+            <DingTalkBotGroups
+              workspaceId={wsId}
+              agentId={agent.id}
+              installationId={dingtalkInstallation.id}
+              groups={dingtalkGroups}
+              inactiveCount={dingtalkGroupsListing?.inactive_group_counts?.[dingtalkInstallation.id] ?? 0}
+              isLoading={dingtalkGroupsLoading}
+              isError={dingtalkGroupsError}
+              onRetry={() => void retryDingtalkGroups()}
+            />
+          </div>
+        )}
       </section>
 
       <section className="rounded-lg border">
@@ -271,6 +407,40 @@ export function IntegrationsTab({ agent }: { agent: Agent }) {
             </div>
           ) : (
             <WecomAgentBindButton agentId={agent.id} agentName={agent.name} />
+          )}
+        </div>
+      </section>
+
+      <section className="rounded-lg border">
+        <div className="flex items-start gap-3 p-4">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border bg-muted/40 text-muted-foreground">
+            <TelegramMark className="h-4 w-4" />
+          </span>
+          <div className="min-w-0 flex-1 space-y-1">
+            <h3 className="text-body font-medium">{ts(($) => $.telegram.section_title)}</h3>
+            <p className="text-caption leading-relaxed text-muted-foreground">
+              {ts(($) => $.telegram.page_description)}
+            </p>
+          </div>
+        </div>
+        <div className="border-t px-4 py-3">
+          {!canManageTelegram ? (
+            <p className="text-caption text-muted-foreground">
+              {t(($) => $.tab_body.integrations.members_note)}
+            </p>
+          ) : !telegramConfigured ? (
+            <p className="text-caption text-muted-foreground">
+              {ts(($) => $.telegram.not_enabled_title)}
+            </p>
+          ) : !telegramInstallSupported && !telegramHasActiveInstall ? (
+            <div className="space-y-1">
+              <p className="text-caption font-medium">{ts(($) => $.telegram.preview_title)}</p>
+              <p className="text-caption text-muted-foreground">
+                {ts(($) => $.telegram.preview_description)}
+              </p>
+            </div>
+          ) : (
+            <TelegramAgentBindButton agentId={agent.id} agentName={agent.name} />
           )}
         </div>
       </section>

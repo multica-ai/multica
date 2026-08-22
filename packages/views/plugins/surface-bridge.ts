@@ -32,6 +32,11 @@ const ALLOWED_PATHS: RegExp[] = [
   /^\/issues\/[^/]+\/comments$/,
   /^\/storage\/(workspace|user)$/,
   /^\/storage\/(workspace|user)\/[^/]+$/,
+  // A surface invoking its OWN plugin's hook: the `ui` trigger. The server
+  // still checks the manifest declared it, and the installation is the one
+  // this bridge was created for — a surface cannot reach another plugin's
+  // hook by naming it here.
+  /^\/hooks\/[^/]+$/,
 ];
 
 const MAX_RESIZE_PX = 4000;

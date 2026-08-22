@@ -226,7 +226,7 @@ func TestOmpExecuteCompletesFromEventStream(t *testing.T) {
 // an object wrapper {"models":[...]} where each entry has separate `provider`,
 // `id`, `selector` (provider/id), and `name` fields. The persistable Model.ID
 // is the selector (provider/id), matching the convention parsePiModels uses
-// so buildPiArgs emits both --provider and --model.
+// so buildPiArgs can hand the whole selector to --model.
 func TestParseOmpModels(t *testing.T) {
 	sample := `{"models":[` +
 		`{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Claude Sonnet 5","contextWindow":200000,"maxTokens":64000,"reasoning":true},` +
@@ -315,8 +315,9 @@ func TestOmpModelsJSONShape(t *testing.T) {
 
 // TestOmpSelectorSurvivesToBuildPiArgs is the regression test the review
 // asked for: a real `omp models --json` fixture → parseOmpModels →
-// buildPiArgs should emit both --provider and --model, not just --model.
-// This pins the contract that Model.ID is the selector (provider/id).
+// buildPiArgs should hand the selector to --model whole. This pins the
+// contract that Model.ID is the selector (provider/id) and that the selector
+// reaches the CLI intact — the pi-family resolver takes it from there.
 func TestOmpSelectorSurvivesToBuildPiArgs(t *testing.T) {
 	raw := `{"models":[{"provider":"anthropic","id":"claude-sonnet-5","selector":"anthropic/claude-sonnet-5","name":"Claude Sonnet 5"}]}`
 	models, err := parseOmpModels([]byte(raw))
@@ -326,15 +327,17 @@ func TestOmpSelectorSurvivesToBuildPiArgs(t *testing.T) {
 	if len(models) != 1 {
 		t.Fatalf("expected 1 model, got %d", len(models))
 	}
-	// The model ID is "anthropic/claude-sonnet-5" (the selector).
-	// buildPiArgs should split it into --provider anthropic --model claude-sonnet-5.
+	// The model ID is "anthropic/claude-sonnet-5" (the selector), and that is
+	// exactly what --model receives. Splitting it into --provider anthropic
+	// --model claude-sonnet-5 resolves identically for a real provider prefix
+	// but breaks slash-shaped model ids, so the split is gone (GH #7300).
 	args := buildPiArgs("/tmp/session.jsonl", ExecOptions{Model: models[0].ID}, slog.Default())
 	joined := strings.Join(args, " ")
-	if !strings.Contains(joined, "--provider anthropic") {
-		t.Errorf("args missing --provider anthropic: %s", joined)
+	if !strings.Contains(joined, "--model anthropic/claude-sonnet-5") {
+		t.Errorf("args missing --model anthropic/claude-sonnet-5: %s", joined)
 	}
-	if !strings.Contains(joined, "--model claude-sonnet-5") {
-		t.Errorf("args missing --model claude-sonnet-5: %s", joined)
+	if strings.Contains(joined, "--provider") {
+		t.Errorf("args should not synthesize --provider: %s", joined)
 	}
 }
 

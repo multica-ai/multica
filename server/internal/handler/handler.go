@@ -22,6 +22,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/auth"
 	"github.com/multica-ai/multica/server/internal/cloudruntime"
 	"github.com/multica-ai/multica/server/internal/daemonws"
+	"github.com/multica-ai/multica/server/internal/entitlement"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/integrations/channel/engine"
 	composio "github.com/multica-ai/multica/server/internal/integrations/composio"
@@ -29,6 +30,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/integrations/ghsnapshot"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
+	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/issuestatus"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
@@ -162,9 +164,13 @@ type DaemonPendingWorkNotifier interface {
 }
 
 type Handler struct {
-	Queries                *db.Queries
-	DB                     dbExecutor
-	TxStarter              txStarter
+	Queries   *db.Queries
+	DB        dbExecutor
+	TxStarter txStarter
+	// issueTableWindowCache is initialized only on the request-local Handler
+	// copy used by a repeatable-read table request. It lets facets reuse one
+	// visible-id snapshot without adding mutable state to the shared Handler.
+	issueTableWindowCache  *issueTableWindowCache
 	Hub                    *realtime.Hub
 	DaemonHub              *daemonws.Hub
 	DaemonProfileRefresh   RuntimeProfileRefreshNotifier
@@ -174,12 +180,15 @@ type Handler struct {
 	PluginService          *service.PluginService
 	IssueService           *service.IssueService
 	AutopilotService       *service.AutopilotService
-	EmailService           *service.EmailService
-	UpdateStore            UpdateStore
-	ModelListStore         ModelListStore
-	LocalSkillListStore    LocalSkillListStore
-	LocalSkillImportStore  LocalSkillImportStore
-	FeatureFlags           *featureflag.Service
+	// Entitlements supplies workspace-scoped commercial gates. A nil provider
+	// preserves the self-hosted and pre-rollout behavior without extra reads.
+	Entitlements          entitlement.Provider
+	EmailService          *service.EmailService
+	UpdateStore           UpdateStore
+	ModelListStore        ModelListStore
+	LocalSkillListStore   LocalSkillListStore
+	LocalSkillImportStore LocalSkillImportStore
+	FeatureFlags          *featureflag.Service
 	// IssueStatusCatalog reads the workspace status catalog. Defaults to
 	// Queries; a test can substitute a counting wrapper to assert HOW MANY
 	// catalog reads a request performs, which is the only property that
@@ -303,6 +312,18 @@ type Handler struct {
 	// production, which gets the real handshake probe; tests inject a fake so
 	// the install path runs without a socket.
 	WecomCredentialProbe wecom.CredentialProbe
+
+	// TelegramInstall owns the Telegram bot install lifecycle (register a
+	// pasted BotFather token / list / revoke) and the at-rest encryption of
+	// each bot's token. Nil unless MULTICA_TELEGRAM_SECRET_KEY is set.
+	TelegramInstall *telegram.InstallService
+	// TelegramBindingTokens mints/redeems the user-binding tokens behind the
+	// "link your Telegram account" prompt. Nil unless Telegram is configured.
+	TelegramBindingTokens *telegram.BindingTokenService
+	// TelegramOutbound owns the asynchronous terminal-delivery worker pool.
+	// The process owner starts and joins it; the synchronous event bus only
+	// enqueues EventChatDone work.
+	TelegramOutbound *telegram.Outbound
 
 	// channelFileDelivery names the channel types that can, IN THIS
 	// DEPLOYMENT, carry a file the agent produced the last hop into the
@@ -947,6 +968,9 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	// silently returns false for non-identifier strings, falling through to
 	// the UUID path below.
 	if issue, ok := h.resolveIssueByIdentifier(r.Context(), issueID, workspaceID); ok {
+		if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "direct") {
+			return db.Issue{}, false
+		}
 		return issue, true
 	}
 
@@ -968,6 +992,9 @@ func (h *Handler) loadIssueForUser(w http.ResponseWriter, r *http.Request, issue
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, "issue not found")
+		return db.Issue{}, false
+	}
+	if !h.authorizeIssueWindow(w, r, issue.ID, issue.WorkspaceID, "direct") {
 		return db.Issue{}, false
 	}
 	return issue, true
@@ -1139,6 +1166,9 @@ func (h *Handler) loadInboxItemForUser(w http.ResponseWriter, r *http.Request, i
 
 	if item.RecipientType != "member" || uuidToString(item.RecipientID) != userID {
 		writeError(w, http.StatusNotFound, "inbox item not found")
+		return db.InboxItem{}, false
+	}
+	if item.IssueID.Valid && !h.authorizeIssueWindow(w, r, item.IssueID, item.WorkspaceID, "inbox") {
 		return db.InboxItem{}, false
 	}
 	return item, true

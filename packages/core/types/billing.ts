@@ -185,8 +185,9 @@ export interface CreateBillingPortalSessionResponse {
 // Workspace subscriptions (`/api/cloud-subscriptions/*`)
 //
 // Workspace-scoped, unlike the account-level wallet types above. The server
-// injects the workspace from the authenticated request context, so no client
-// ever names a workspace, an amount, a Price ID, or a seat quantity.
+// injects the workspace from the authenticated request context. Clients never
+// name a workspace, amount, or Price ID. Seat purchases use additive counts;
+// Cloud validates and converts them to an absolute Stripe quantity.
 //
 // Every field the server may not know is nullable rather than defaulted. A
 // missing value has to stay visibly unknown: rendering an absent plan as Free
@@ -222,6 +223,13 @@ export interface WorkspaceSubscriptionSummary {
   billedSeats: number | null;
   /** A lower quantity already scheduled for the next period, if any. */
   pendingSeatQuantity: number | null;
+  /** Confirmed human members consuming Cloud-owned commercial capacity. */
+  usedSeats: number;
+  /** Live pending invitations that reserve purchased capacity. */
+  reservedSeats: number;
+  /** Null when connected to a Cloud version that predates seat purchases. */
+  purchaseVersion: number | null;
+  activeSeatPurchase: WorkspaceSeatPurchaseSummary | null;
   cancelAtPeriodEnd: boolean;
   graceUntil: string | null;
   /**
@@ -230,6 +238,13 @@ export interface WorkspaceSubscriptionSummary {
    * must gate that control on the member's role as well.
    */
   hasStripeCustomer: boolean;
+}
+
+export interface WorkspaceSeatPurchaseSummary {
+  requestId: string;
+  targetSeats: number;
+  status: "pending" | "processing" | "submitted";
+  expiresAt: string | null;
 }
 
 /** Display-safe subset of a configured Stripe Price. IDs stay server-side. */
@@ -256,6 +271,43 @@ export interface CreateWorkspaceSubscriptionCheckoutResponse {
   requestId: string;
   sessionId: string;
   url: string;
+}
+
+export interface PreviewWorkspaceSeatPurchaseRequest {
+  additionalSeats: number;
+}
+
+export interface WorkspaceSeatPurchasePreview {
+  currentSeats: number;
+  additionalSeats: number;
+  resultingSeats: number;
+  purchaseVersion: number;
+  currency: string;
+  /** Estimated immediate proration in Stripe's minor currency unit. */
+  prorationAmount: number;
+  /** Estimated next full recurring invoice in minor currency units. */
+  nextInvoiceAmount: number;
+  quotedAt: string;
+}
+
+export interface PurchaseWorkspaceSeatsRequest {
+  additionalSeats: number;
+  expectedCurrentSeats: number;
+  expectedPurchaseVersion: number;
+  acceptedProrationAmount: number;
+  currency: string;
+  idempotencyKey: string;
+}
+
+export interface PurchaseWorkspaceSeatsResponse {
+  requestId: string;
+  currentSeats: number;
+  additionalSeats: number;
+  resultingSeats: number;
+  currency: string;
+  prorationAmount: number;
+  nextInvoiceAmount: number;
+  status: "pending" | "submitted" | "confirmed";
 }
 
 export interface WorkspaceSubscriptionSeatReconcileResult {

@@ -8,7 +8,7 @@ Deploy Multica on your own infrastructure in minutes.
 |-----------|-------------|------------|
 | **Backend** | REST API + WebSocket server | Go (single binary) |
 | **Frontend** | Web application | Next.js 16 |
-| **Database** | Primary data store | PostgreSQL 17 with pgvector |
+| **Database** | Primary data store | PostgreSQL 17 (`pgcrypto` + `pg_trgm`) |
 
 Each user who runs AI agents locally also installs the **`multica` CLI** and runs the **agent daemon** on their own machine.
 
@@ -122,6 +122,7 @@ You also need at least one AI agent CLI installed:
 - [Cursor Agent](https://cursor.com/) (`cursor-agent` on PATH)
 - Kimi (`kimi` on PATH)
 - [Reasonix](https://github.com/esengine/DeepSeek-Reasonix) (`reasonix` on PATH; run `reasonix setup` first)
+- Dim (`dim` on PATH)
 - Kiro CLI (`kiro-cli` on PATH)
 - Qoder CLI (`qodercli` on PATH)
 - Qoder CN CLI (`qoderclicn` on PATH)
@@ -473,7 +474,9 @@ cd multica
 cp .env.example .env
 ```
 
-Edit `.env` — at minimum, change `JWT_SECRET`:
+Edit `.env` — set `JWT_SECRET` (required): docker compose refuses to start without
+it, and a production backend refuses to boot on the dev default or any known
+placeholder.
 
 ```bash
 JWT_SECRET=$(openssl rand -hex 32)

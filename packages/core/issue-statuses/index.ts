@@ -3,6 +3,7 @@ export {
   issueStatusListOptions,
   buildIssueStatusCatalog,
   isIssueStatusCategory,
+  issueStatusColor,
   type IssueStatusCatalog,
 } from "./queries";
 export { compareIssueStatusEntries } from "./queries";

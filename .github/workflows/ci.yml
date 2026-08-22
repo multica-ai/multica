@@ -29,6 +29,7 @@ jobs:
       frontend: ${{ steps.decide.outputs.frontend }}
       backend: ${{ steps.decide.outputs.backend }}
       sqlc: ${{ steps.decide.outputs.sqlc }}
+      images: ${{ steps.filter.outputs.images }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -99,8 +100,13 @@ jobs:
               - 'scripts/agent-cli-command-names.txt'
               - 'scripts/go-test-with-agent-cli-guard.sh'
               - 'scripts/helm-config.test.sh'
+              - 'scripts/entrypoint.test.sh'
+              - 'docker/entrypoint.sh'
               - 'scripts/test-go.sh'
               - 'scripts/test-go.test.sh'
+              # makefile-build.test.sh asserts how `make build` names its
+              # output binaries, so a change to either side must run it.
+              - 'scripts/makefile-build.test.sh'
               - 'Makefile'
               - '.github/workflows/ci.yml'
             sqlc:
@@ -110,6 +116,19 @@ jobs:
               - 'server/sqlc.yaml'
               - 'Makefile'
               - '.github/workflows/ci.yml'
+            # Gates the image-budget job so the full-history checkout it
+            # needs is only paid for on PRs that actually touch a bitmap.
+            images:
+              - '**/*.png'
+              - '**/*.jpg'
+              - '**/*.jpeg'
+              - '**/*.gif'
+              - '**/*.bmp'
+              - '**/*.tif'
+              - '**/*.tiff'
+              - '**/*.webp'
+              - '**/*.avif'
+              - 'scripts/check-image-budget.mjs'
 
       - name: Decide
         id: decide
@@ -485,6 +504,14 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: bash scripts/helm-config.test.sh
 
+      - name: Test backend entrypoint signals
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: bash scripts/entrypoint.test.sh
+
+      - name: Test build output naming
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: bash scripts/makefile-build.test.sh
+
       - name: Build
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go build ./...
@@ -688,6 +715,20 @@ jobs:
           go test ./internal/daemon/execenv -v -run '^(TestSeedUserCodexSkills|TestHydrateCodexSkills)' -count=1 -timeout=5m
           go test ./internal/daemon -v -run '^(TestCleanTaskArtifacts_DoesNotFollowDirectoryJunction|TestTaskSize_DoesNotCountDirectoryJunction)$' -count=1 -timeout=5m
 
+      - name: Test Windows task temp dir sweep survives a sharing violation
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        working-directory: server
+        # The GC's task temp sweep has to cope with a file it cannot delete: a
+        # leftover child process holding one open is what left 174 directories
+        # behind in #7364. Only a real Windows filesystem produces that sharing
+        # violation — on unix an open file unlinks fine — so this is the only
+        # place we can prove the two things that matter: the failed cleanup
+        # keeps .task_lock (without it the directory reads as a pre-lock
+        # leftover and stops being reclaimable on liveness), and the next cycle
+        # removes the directory once the handle closes.
+        # -v so a skip is visible instead of passing silently as "ok".
+        run: go test ./internal/daemon/execenv -v -run '^TestPruneTaskTempDirsSurvivesRealSharingViolation$' -count=1 -timeout=5m
+
       - name: Test Windows agent executable junction resolution
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
@@ -703,6 +744,27 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         working-directory: server
         run: go build ./cmd/multica
+
+  image-budget:
+    # Soft gate against the 21.7MB of raw PNG/JPG that MUL-6352 cleared out:
+    # a bitmap added or grown past 300KB fails until the PR description says
+    # why. Pull requests only — a push to main has no description to read,
+    # and the branch it came from was already checked.
+    needs: changes
+    if: ${{ github.event_name == 'pull_request' && needs.changes.outputs.images == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          # The check diffs against the base branch, which a shallow
+          # clone does not contain.
+          fetch-depth: 0
+
+      - name: Check image budget
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node scripts/check-image-budget.mjs --base "origin/${{ github.base_ref }}"
 
   installer:
     # Stub-driven shell tests for scripts/install.sh and scripts/install.ps1.

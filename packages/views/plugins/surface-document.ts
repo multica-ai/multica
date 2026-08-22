@@ -1,11 +1,16 @@
-import type { PluginInstallation, PluginSurface } from "@multica/core/types";
-
 /**
- * The host generates the document a surface runs in. That is the point: CSP is
- * a response-header/meta decision made by whoever emits the document, so if the
- * plugin author's server emitted it, the `net:` scopes the admin approved would
- * be a claim we never check. Here they become a `connect-src` the browser
- * enforces.
+ * The host generates the document a surface runs in, and now supplies the code
+ * that runs in it. That is the point: CSP is a response-header/meta decision
+ * made by whoever emits the document, so if the plugin author's server emitted
+ * it, the `net:` scopes the admin approved would be a claim we never check. Here
+ * they become a `connect-src` the browser enforces.
+ *
+ * The script is INLINED rather than loaded from an origin. When it came from
+ * the author's server, `script-src` had to name that origin, which meant a
+ * surface could always reach its author back — and it meant every panel open
+ * told the author who was reading which issue. Now Multica stores the published
+ * artifact and hands it to the frame, so the policy names no remote script
+ * origin at all.
  *
  * The frame is mounted with `sandbox="allow-scripts"` and NOT
  * `allow-same-origin` — the pairing the HTML spec calls out as defeating the
@@ -41,38 +46,6 @@ export function readThemeTokens(element: Element | null): Record<string, string>
   return tokens;
 }
 
-/**
- * Resolves a surface entry to an absolute script URL.
- *
- * `entry` is relative to the manifest, so the plugin's own host serves its code
- * — we never proxy or re-host third-party JavaScript. A `local:` source has no
- * URL to resolve against; those installs are for developing the manifest and
- * cannot render a surface, which the panel says out loud rather than showing an
- * empty frame.
- */
-export function resolveSurfaceEntry(installation: PluginInstallation, surface: PluginSurface): string | null {
-  const source = installation.source_url ?? "";
-  let resolved: URL;
-  try {
-    resolved = new URL(surface.entry, source);
-  } catch {
-    // A `local:` source is not a URL at all — there is nothing a browser could
-    // fetch, and guessing one would be worse than saying so.
-    return null;
-  }
-  if (resolved.protocol === "https:") return resolved.toString();
-  // Plain HTTP is allowed only from loopback, matching what browsers already
-  // treat as a secure context. That is what makes developing a surface possible
-  // — serve it from a local static server and install by URL like any other —
-  // without opening plaintext delivery on a real deployment.
-  if (resolved.protocol === "http:" && isLoopbackHost(resolved.hostname)) return resolved.toString();
-  return null;
-}
-
-function isLoopbackHost(hostname: string): boolean {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || hostname === "::1";
-}
-
 function escapeAttribute(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
@@ -88,28 +61,23 @@ export function surfaceConnectSources(grantedScopes: string[]): string[] {
     .map((scope) => `https://${scope.slice("net:".length)}`);
 }
 
-export function buildSurfaceCSP(grantedScopes: string[], scriptOrigin: string): string {
+export function buildSurfaceCSP(grantedScopes: string[]): string {
   const connect = surfaceConnectSources(grantedScopes);
   return [
     "default-src 'none'",
-    // The surface's own script, and nothing else executable. This origin is
-    // unavoidable — the code has to load from somewhere — and it is the reason
-    // `net:` bounds THIRD-PARTY destinations rather than exfiltration in
-    // general: a script served by its author can always reach its author back,
-    // and closing that would mean re-hosting third-party code, which this design
-    // deliberately does not do.
-    `script-src ${scriptOrigin} 'unsafe-inline'`,
+    // Inline only, and no remote origin at all. The surface's code is supplied
+    // by us, so the generated document has nothing left for `script-src` to
+    // fetch. Under the previous model the author's own origin was always in
+    // this list.
+    "script-src 'unsafe-inline'",
     "style-src 'unsafe-inline'",
-    // Narrowed to inline data rather than the script origin: an <img> or webfont
-    // URL is the cheapest possible side channel back to the author, and a
-    // surface that needs artwork can inline it. It does not make the channel
-    // impossible — a dynamic import of the author's own origin remains — but it
-    // removes the two that cost nothing to use.
+    // Inline data only. An <img> or webfont URL is the cheapest possible side
+    // channel, and a surface that needs artwork inlines it.
     "img-src data: blob:",
     "font-src data:",
-    // With no net: scope this is 'none', so a surface cannot reach any
-    // third-party host. Its author's own origin is still reachable via
-    // script-src; see above.
+    // With no net: scope, connection APIs in the generated document cannot
+    // reach an origin. Self-navigation is a separate sandbox gap documented
+    // below and tracked outside this change.
     `connect-src ${connect.length > 0 ? connect.join(" ") : "'none'"}`,
     // A sandboxed frame cannot navigate the top level anyway; saying so keeps
     // the policy honest if the sandbox attribute is ever loosened.
@@ -122,19 +90,54 @@ export function buildSurfaceCSP(grantedScopes: string[], scriptOrigin: string): 
 }
 
 export interface SurfaceDocumentInput {
-  entryUrl: string;
+  /** The surface's entry script, as published. */
+  code: string;
   grantedScopes: string[];
   theme: Record<string, string>;
 }
 
 /**
- * The srcdoc a surface iframe renders. Everything executable in it is the
- * plugin's own entry script loaded cross-origin; the inline script only forwards
- * load failures so a broken plugin reports itself instead of showing blank.
+ * Encodes the surface's code so it can be carried inside an HTML document.
+ *
+ * Base64 rather than escaping `</script`: the alphabet cannot contain anything
+ * the HTML tokenizer reacts to, so there is no sequence in a plugin's source
+ * that can end the script element early or shift the parser into another state.
+ * Escaping works too, but it is a rule about JavaScript syntax enforced by a
+ * string replace, and getting it subtly wrong looks like a plugin bug.
  */
-export function buildSurfaceDocument({ entryUrl, grantedScopes, theme }: SurfaceDocumentInput): string {
-  const scriptOrigin = new URL(entryUrl).origin;
-  const csp = buildSurfaceCSP(grantedScopes, scriptOrigin);
+function encodeSurfaceCode(code: string): string {
+  const bytes = new TextEncoder().encode(code);
+  let binary = "";
+  // Chunked: String.fromCharCode(...bytes) blows the argument limit somewhere
+  // around a hundred kilobytes, which a real surface reaches.
+  for (let index = 0; index < bytes.length; index += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000));
+  }
+  return btoa(binary);
+}
+
+/**
+ * The srcdoc a surface iframe renders.
+ *
+ * The plugin's code arrives as base64 in a non-executable element and is
+ * activated by a small bootstrap. Everything executable is inline, and rendering
+ * this document fetches nothing.
+ *
+ * KNOWN GAP — a sandboxed frame may navigate ITSELF. `allow-scripts` without
+ * `allow-top-navigation` stops a surface navigating the top level or a sibling,
+ * but the HTML sandbox deliberately permits `_self`, and no shipped CSP
+ * directive covers it (`navigate-to` was dropped from CSP3, and `connect-src` /
+ * `form-action` govern other things). So a HOSTILE artifact can still run
+ * `location.replace("https://author.example/live.html")`, which reaches the
+ * author's server once and replaces this document with one whose CSP we do not
+ * write. Closing it needs either an embedder `frame-src` policy or a handshake
+ * the navigated document cannot complete. Tracked separately; do not describe
+ * a surface as unable to reach its author until that lands. In particular, do
+ * not use lifecycle events from this document as a security signal: a normal
+ * host-driven `srcDoc` reload fires the same events.
+ */
+export function buildSurfaceDocument({ code, grantedScopes, theme }: SurfaceDocumentInput): string {
+  const csp = buildSurfaceCSP(grantedScopes);
   const themeCss = Object.entries(theme)
     .map(([name, value]) => `${name}: ${value};`)
     .join(" ");
@@ -161,7 +164,57 @@ body {
 </head>
 <body>
 <div id="root"></div>
-<script src="${escapeAttribute(entryUrl)}" onerror="parent.postMessage({type:'multica:plugin-surface-error'},'*')"></script>
+<script type="text/plain" id="multica-surface-code">${encodeSurfaceCode(code)}</script>
+<script>
+(function () {
+  var errorReportAttempts = 0;
+  var errorReportTimer = null;
+
+  function emitSurfaceError() {
+    parent.postMessage({ type: 'multica:plugin-surface-error' }, '*');
+    errorReportAttempts++;
+    if (errorReportAttempts >= 50 && errorReportTimer !== null) {
+      clearInterval(errorReportTimer);
+      errorReportTimer = null;
+    }
+  }
+
+  function reportSurfaceError() {
+    if (errorReportAttempts > 0) return;
+    emitSurfaceError();
+    if (errorReportAttempts < 50) errorReportTimer = setInterval(emitSurfaceError, 120);
+  }
+
+  // A srcdoc document may execute before the host component's effect attaches
+  // its listener. Repeat a failure until the host acknowledges it, bounded to
+  // the same six-second window as the SDK bridge handshake.
+  window.addEventListener("message", function (event) {
+    if (event.source !== parent) return;
+    if (!event.data || event.data.type !== 'multica:plugin-surface-error-ack') return;
+    errorReportAttempts = 50;
+    if (errorReportTimer !== null) clearInterval(errorReportTimer);
+    errorReportTimer = null;
+  });
+
+  // Installed before plugin code executes. Dynamically appending an inline
+  // script does not rethrow its syntax/runtime errors from appendChild; the
+  // browser reports them through these global events instead.
+  window.addEventListener("error", reportSurfaceError);
+  window.addEventListener("unhandledrejection", reportSurfaceError);
+
+  try {
+    var encoded = document.getElementById("multica-surface-code").textContent;
+    var binary = atob(encoded);
+    var bytes = new Uint8Array(binary.length);
+    for (var i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    var element = document.createElement("script");
+    element.textContent = new TextDecoder().decode(bytes);
+    document.body.appendChild(element);
+  } catch (error) {
+    reportSurfaceError();
+  }
+})();
+</script>
 </body>
 </html>`;
 }

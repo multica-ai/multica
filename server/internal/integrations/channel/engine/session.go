@@ -16,6 +16,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/channelmedia"
 	"github.com/multica-ai/multica/server/internal/integrations/channel"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 )
 
 // This file is the SHARED, channel-agnostic chat-session service every IM
@@ -48,6 +49,7 @@ type SessionQueries interface {
 	CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error)
 	LockChatSessionForAppend(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error)
 	CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error)
+	ListUnownedChannelChatContextRevisions(ctx context.Context, chatSessionID pgtype.UUID) ([]PendingContext, error)
 	ClearChatMessageChannelMediaPending(ctx context.Context, arg db.ClearChatMessageChannelMediaPendingParams) error
 	LockIssueForChannelMediaBind(ctx context.Context, arg db.LockIssueForChannelMediaBindParams) (pgtype.UUID, error)
 	UpdateChatMessageContentForChannelMedia(ctx context.Context, arg db.UpdateChatMessageContentForChannelMediaParams) (int64, error)
@@ -56,7 +58,12 @@ type SessionQueries interface {
 	LinkAttachmentsToChatMessage(ctx context.Context, arg db.LinkAttachmentsToChatMessageParams) ([]pgtype.UUID, error)
 	ClaimChannelMediaPendingObjectsForBind(ctx context.Context, arg db.ClaimChannelMediaPendingObjectsForBindParams) ([]string, error)
 	TouchChatSession(ctx context.Context, id pgtype.UUID) error
-	MarkChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error)
+	LockChannelChatSessionBindingForContext(ctx context.Context, chatSessionID pgtype.UUID) (db.ChannelChatSessionBinding, error)
+	LockChannelChatContextGenerationByRevision(ctx context.Context, arg db.LockChannelChatContextGenerationByRevisionParams) (db.ChannelChatContextGeneration, error)
+	EnsureChannelChatContextGeneration(ctx context.Context, chatSessionID pgtype.UUID) error
+	AdvanceChannelChatContextGeneration(ctx context.Context, arg db.AdvanceChannelChatContextGenerationParams) (db.AdvanceChannelChatContextGenerationRow, error)
+	ResolveChannelChatContextHistoryStart(ctx context.Context, arg db.ResolveChannelChatContextHistoryStartParams) error
+	SetChannelChatContextInitiator(ctx context.Context, arg db.SetChannelChatContextInitiatorParams) (pgtype.UUID, error)
 	UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error
 	MarkChannelInboundDedupProcessed(ctx context.Context, arg db.MarkChannelInboundDedupProcessedParams) (int64, error)
 }
@@ -79,13 +86,33 @@ func (a dbSessionQueries) CreateChatSession(ctx context.Context, arg db.CreateCh
 	return a.q.CreateChatSession(ctx, arg)
 }
 func (a dbSessionQueries) CreateChannelChatSessionBinding(ctx context.Context, arg db.CreateChannelChatSessionBindingParams) (db.ChannelChatSessionBinding, error) {
-	return a.q.CreateChannelChatSessionBinding(ctx, arg)
+	row, err := a.q.CreateChannelChatSessionBinding(ctx, arg)
+	return db.ChannelChatSessionBinding{
+		ID: row.ID, ChatSessionID: row.ChatSessionID, InstallationID: row.InstallationID,
+		ChannelType: row.ChannelType, ChannelChatID: row.ChannelChatID, ChatType: row.ChatType,
+		LastMessageID: row.LastMessageID, LastThreadID: row.LastThreadID, Config: row.Config,
+		CreatedAt: row.CreatedAt, PendingFresh: row.PendingFresh, ContextRevision: row.ContextRevision,
+	}, err
 }
 func (a dbSessionQueries) LockChatSessionForAppend(ctx context.Context, id pgtype.UUID) (pgtype.UUID, error) {
 	return a.q.LockChatSessionForAppend(ctx, id)
 }
 func (a dbSessionQueries) CreateChatMessage(ctx context.Context, arg db.CreateChatMessageParams) (db.ChatMessage, error) {
 	return a.q.CreateChatMessage(ctx, arg)
+}
+func (a dbSessionQueries) ListUnownedChannelChatContextRevisions(ctx context.Context, chatSessionID pgtype.UUID) ([]PendingContext, error) {
+	rows, err := a.q.ListUnownedChannelChatContextRevisions(ctx, chatSessionID)
+	if err != nil {
+		return nil, err
+	}
+	contexts := make([]PendingContext, 0, len(rows))
+	for _, row := range rows {
+		contexts = append(contexts, PendingContext{
+			Revision:        row.ContextRevision,
+			InitiatorUserID: row.InitiatorUserID,
+		})
+	}
+	return contexts, nil
 }
 func (a dbSessionQueries) ClearChatMessageChannelMediaPending(ctx context.Context, arg db.ClearChatMessageChannelMediaPendingParams) error {
 	return a.q.ClearChatMessageChannelMediaPending(ctx, arg)
@@ -112,8 +139,23 @@ func (a dbSessionQueries) ClaimChannelMediaPendingObjectsForBind(ctx context.Con
 func (a dbSessionQueries) TouchChatSession(ctx context.Context, id pgtype.UUID) error {
 	return a.q.TouchChatSession(ctx, id)
 }
-func (a dbSessionQueries) MarkChannelChatSessionPendingFresh(ctx context.Context, chatSessionID pgtype.UUID) (bool, error) {
-	return a.q.MarkChannelChatSessionPendingFresh(ctx, chatSessionID)
+func (a dbSessionQueries) LockChannelChatSessionBindingForContext(ctx context.Context, chatSessionID pgtype.UUID) (db.ChannelChatSessionBinding, error) {
+	return a.q.LockChannelChatSessionBindingForContext(ctx, chatSessionID)
+}
+func (a dbSessionQueries) LockChannelChatContextGenerationByRevision(ctx context.Context, arg db.LockChannelChatContextGenerationByRevisionParams) (db.ChannelChatContextGeneration, error) {
+	return a.q.LockChannelChatContextGenerationByRevision(ctx, arg)
+}
+func (a dbSessionQueries) EnsureChannelChatContextGeneration(ctx context.Context, chatSessionID pgtype.UUID) error {
+	return a.q.EnsureChannelChatContextGeneration(ctx, chatSessionID)
+}
+func (a dbSessionQueries) AdvanceChannelChatContextGeneration(ctx context.Context, arg db.AdvanceChannelChatContextGenerationParams) (db.AdvanceChannelChatContextGenerationRow, error) {
+	return a.q.AdvanceChannelChatContextGeneration(ctx, arg)
+}
+func (a dbSessionQueries) ResolveChannelChatContextHistoryStart(ctx context.Context, arg db.ResolveChannelChatContextHistoryStartParams) error {
+	return a.q.ResolveChannelChatContextHistoryStart(ctx, arg)
+}
+func (a dbSessionQueries) SetChannelChatContextInitiator(ctx context.Context, arg db.SetChannelChatContextInitiatorParams) (pgtype.UUID, error) {
+	return a.q.SetChannelChatContextInitiator(ctx, arg)
 }
 func (a dbSessionQueries) UpdateChannelChatSessionBindingReplyTarget(ctx context.Context, arg db.UpdateChannelChatSessionBindingReplyTargetParams) error {
 	return a.q.UpdateChannelChatSessionBindingReplyTarget(ctx, arg)
@@ -239,6 +281,7 @@ func (s *ChatSession) createSessionAndBinding(ctx context.Context, in EnsureSess
 	}
 
 	session, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: in.WorkspaceID,
 		AgentID:     in.AgentID,
 		CreatorID:   in.Sender,
@@ -289,10 +332,6 @@ type AppendInput struct {
 	ClaimToken          pgtype.UUID
 	MediaPendingSeconds float64
 	ForceFresh          bool
-	// BeforeWrite runs inside the append transaction before any durable write.
-	// Adapters use it to acquire a route fence that is held through the message
-	// insert and in-transaction dedup mark.
-	BeforeWrite func(context.Context, pgx.Tx) error
 }
 
 // BindMediaInput links already-uploaded media to either an /issue target or a
@@ -331,45 +370,79 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	}
 	defer tx.Rollback(ctx)
 	qtx := s.q.WithTx(tx)
-	// Keep the repo-wide teardown order: chat_session before any adapter-owned
-	// route fence. FOR KEY SHARE is sufficient to serialize deletion without
-	// blocking normal non-key session updates or debounced task enqueueing.
-	if _, err := qtx.LockChatSessionForAppend(ctx, in.SessionID); err != nil {
-		return AppendResult{}, fmt.Errorf("lock chat session for append: %w", err)
-	}
-	if in.BeforeWrite != nil {
-		if err := in.BeforeWrite(ctx, tx); err != nil {
-			return AppendResult{}, err
-		}
-	}
-
 	commandSource := in.CommandText
 	if commandSource == "" {
 		commandSource = in.Body
 	}
 	cmd, _ := ParseIssueCommand(commandSource)
 
+	// Context paths acquire chat_session before binding and generation. This
+	// also keeps the later TouchChatSession update from introducing the reverse
+	// binding -> chat_session edge against task enqueue.
+	if _, err := qtx.LockChatSessionForAppend(ctx, in.SessionID); err != nil {
+		return AppendResult{}, fmt.Errorf("lock chat session for append: %w", err)
+	}
+	binding, err := qtx.LockChannelChatSessionBindingForContext(ctx, in.SessionID)
+	if err != nil {
+		return AppendResult{}, fmt.Errorf("lock channel chat binding: %w", err)
+	}
+	if err := qtx.EnsureChannelChatContextGeneration(ctx, in.SessionID); err != nil {
+		return AppendResult{}, fmt.Errorf("ensure channel chat context: %w", err)
+	}
+	contextState, err := qtx.LockChannelChatContextGenerationByRevision(ctx, db.LockChannelChatContextGenerationByRevisionParams{
+		ChatSessionID: in.SessionID, Revision: binding.ContextRevision,
+	})
+	if err != nil {
+		return AppendResult{}, fmt.Errorf("lock channel chat context: %w", err)
+	}
+	contextRevision := binding.ContextRevision
+	if in.ForceFresh || (binding.PendingFresh && !contextState.PendingFresh) {
+		advanced, err := qtx.AdvanceChannelChatContextGeneration(ctx, db.AdvanceChannelChatContextGenerationParams{
+			ChatSessionID: in.SessionID, CurrentRevision: contextRevision,
+			HistoryBoundaryMessageID: textOrNull(in.MessageID), HasMessageBody: true,
+		})
+		if err != nil {
+			return AppendResult{}, fmt.Errorf("advance channel chat context: %w", err)
+		}
+		contextRevision = advanced.Revision
+	} else if contextState.HistoryBoundaryPending && in.MessageID != "" {
+		if err := qtx.ResolveChannelChatContextHistoryStart(ctx, db.ResolveChannelChatContextHistoryStartParams{
+			HistoryStartMessageID: textOrNull(in.MessageID), ChatSessionID: in.SessionID, Revision: contextRevision,
+		}); err != nil {
+			return AppendResult{}, fmt.Errorf("resolve channel chat history boundary: %w", err)
+		}
+	}
+	// A channel command is excluded from agent input, so it must not replace
+	// the principal used to recover earlier unowned agent-visible messages.
+	if contextRevision > 0 && cmd == nil {
+		if _, err := qtx.SetChannelChatContextInitiator(ctx, db.SetChannelChatContextInitiatorParams{
+			ChatSessionID: in.SessionID, Revision: contextRevision, InitiatorUserID: in.Sender,
+		}); err != nil {
+			return AppendResult{}, fmt.Errorf("snapshot channel context initiator: %w", err)
+		}
+	}
 	// channel_ingested is the immutable provenance the cancel path gates on:
 	// it must be stamped in the same transaction as the message so no later
 	// binding deletion (archive, installation rebind) can strip it.
 	msg, err := qtx.CreateChatMessage(ctx, db.CreateChatMessageParams{
+		ID:                      dbid.NewV7(),
 		ChatSessionID:           in.SessionID,
 		Role:                    "user",
 		Content:                 in.Body,
 		MessageKind:             textOrNullIf(cmd != nil, channelCommandMessageKind),
 		ChannelMediaPendingSecs: pgtype.Float8{Float64: in.MediaPendingSeconds, Valid: in.MediaPendingSeconds > 0},
 		ChannelIngested:         pgtype.Bool{Bool: true, Valid: true},
+		ChannelContextRevision:  pgtype.Int8{Int64: contextRevision, Valid: contextRevision > 0},
 	})
 	if err != nil {
 		return AppendResult{}, fmt.Errorf("create chat message: %w", err)
 	}
+	pendingContexts, err := qtx.ListUnownedChannelChatContextRevisions(ctx, in.SessionID)
+	if err != nil {
+		return AppendResult{}, fmt.Errorf("list pending channel contexts: %w", err)
+	}
 	if err := qtx.TouchChatSession(ctx, in.SessionID); err != nil {
 		return AppendResult{}, fmt.Errorf("touch chat session: %w", err)
-	}
-	if in.ForceFresh {
-		if _, err := qtx.MarkChannelChatSessionPendingFresh(ctx, in.SessionID); err != nil {
-			return AppendResult{}, fmt.Errorf("mark pending fresh: %w", err)
-		}
 	}
 
 	// Record the latest trigger so the decoupled outbound patcher can thread
@@ -405,14 +478,48 @@ func (s *ChatSession) AppendUserMessage(ctx context.Context, in AppendInput) (Ap
 	if err := tx.Commit(ctx); err != nil {
 		return AppendResult{}, fmt.Errorf("commit: %w", err)
 	}
-	return AppendResult{MessageID: msg.ID, IssueCommand: cmd, DedupMarked: markedInTx}, nil
+	return AppendResult{
+		MessageID:       msg.ID,
+		IssueCommand:    cmd,
+		DedupMarked:     markedInTx,
+		ContextRevision: contextRevision,
+		PendingContexts: pendingContexts,
+	}, nil
 }
 
 // MarkPendingFresh persists a bare `/new` command. Non-bare `/new` messages
 // mark the same flag inside AppendUserMessage's transaction instead.
-func (s *ChatSession) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID) error {
-	if _, err := s.q.MarkChannelChatSessionPendingFresh(ctx, sessionID); err != nil {
-		return fmt.Errorf("mark pending fresh: %w", err)
+func (s *ChatSession) MarkPendingFresh(ctx context.Context, sessionID pgtype.UUID, messageID string) error {
+	tx, err := s.tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("begin fresh context tx: %w", err)
+	}
+	defer tx.Rollback(ctx)
+	qtx := s.q.WithTx(tx)
+	if _, err := qtx.LockChatSessionForAppend(ctx, sessionID); err != nil {
+		return fmt.Errorf("lock chat session for fresh context: %w", err)
+	}
+	binding, err := qtx.LockChannelChatSessionBindingForContext(ctx, sessionID)
+	if err != nil {
+		return fmt.Errorf("lock channel chat binding: %w", err)
+	}
+	if err := qtx.EnsureChannelChatContextGeneration(ctx, sessionID); err != nil {
+		return fmt.Errorf("ensure channel chat context: %w", err)
+	}
+	_, err = qtx.LockChannelChatContextGenerationByRevision(ctx, db.LockChannelChatContextGenerationByRevisionParams{
+		ChatSessionID: sessionID, Revision: binding.ContextRevision,
+	})
+	if err != nil {
+		return fmt.Errorf("lock channel chat context: %w", err)
+	}
+	if _, err := qtx.AdvanceChannelChatContextGeneration(ctx, db.AdvanceChannelChatContextGenerationParams{
+		ChatSessionID: sessionID, CurrentRevision: binding.ContextRevision,
+		HistoryBoundaryMessageID: textOrNull(messageID), HasMessageBody: false,
+	}); err != nil {
+		return fmt.Errorf("advance channel chat context: %w", err)
+	}
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit fresh context: %w", err)
 	}
 	return nil
 }

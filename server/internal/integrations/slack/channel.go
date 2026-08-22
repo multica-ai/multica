@@ -34,13 +34,15 @@ type slackSender struct {
 // Send delivers a minimal text reply via chat.postMessage, threading into
 // out.ThreadID when set so a decoupled reply lands back in the originating
 // thread. Long bodies are chunked under Slack's per-message cap; the returned
-// SendResult carries the timestamp of the LAST posted chunk.
+// SendResult carries every posted chunk timestamp and keeps MessageID as the
+// timestamp of the last chunk for existing callers.
 func (c *slackSender) Send(ctx context.Context, out channel.OutboundMessage) (channel.SendResult, error) {
 	if c.api == nil {
 		return channel.SendResult{}, errors.New("slack: api client not configured")
 	}
 	threadTS := outboundThreadTS(out)
 	var lastTS string
+	var messageIDs []string
 	// Convert the agent's standard Markdown to Slack mrkdwn before posting so
 	// bold/headers/links render instead of showing literal markup.
 	for _, chunk := range chunkMessage(formatMrkdwn(out.Text), maxMessageRunes) {
@@ -56,8 +58,9 @@ func (c *slackSender) Send(ctx context.Context, out channel.OutboundMessage) (ch
 			return channel.SendResult{}, fmt.Errorf("slack: chat.postMessage: %w", err)
 		}
 		lastTS = ts
+		messageIDs = append(messageIDs, ts)
 	}
-	return channel.SendResult{MessageID: lastTS}, nil
+	return channel.SendResult{MessageID: lastTS, MessageIDs: messageIDs}, nil
 }
 
 // newSlackSender builds a Send-only client from decoded credentials and a

@@ -2,6 +2,7 @@ import { useId } from "react";
 import { Monitor } from "lucide-react";
 import qwenLogo from "./qwen-logo.svg";
 import reasonixLogo from "./reasonix-logo.svg";
+import dimLogo from "./dim-logo.png";
 
 // Next.js exposes static imports as objects while Vite exposes URL strings.
 // Normalize both shapes here so shared provider logos work in web and desktop.
@@ -337,6 +338,13 @@ function DshLogo({ className }: { className: string }) {
   );
 }
 
+// Dim (DimCode) — official app icon from the DimAgent desktop client
+// (/opt/DimAgent/resources/build/icon.png), resized to 128px for crisp
+// rendering at small sizes.
+function DimLogo({ className }: { className: string }) {
+  return <img src={staticAssetSrc(dimLogo)} alt="" aria-hidden className={className} />;
+}
+
 export function ProviderLogo({
   provider,
   className = "h-4 w-4",
@@ -390,6 +398,8 @@ export function ProviderLogo({
       return <McodeLogo className={className} />;
     case "dsh":
       return <DshLogo className={className} />;
+    case "dim":
+      return <DimLogo className={className} />;
     default:
       return <Monitor className={className} />;
   }

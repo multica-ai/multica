@@ -11,6 +11,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/logger"
 	"github.com/multica-ai/multica/server/internal/service"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/dbid"
 	"github.com/multica-ai/multica/server/pkg/protocol"
 	"log/slog"
 	"net/http"
@@ -296,6 +297,7 @@ func (h *Handler) getOrCreateMikaSession(ctx context.Context, agent db.Agent, wo
 	}
 
 	created, err := qtx.CreateChatSession(ctx, db.CreateChatSessionParams{
+		ID:          dbid.NewV7(),
 		WorkspaceID: wsUUID,
 		AgentID:     agent.ID,
 		CreatorID:   creatorUUID,

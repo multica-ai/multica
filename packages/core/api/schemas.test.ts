@@ -1,12 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   AppConfigSchema,
+  ChildIssueProgressResponseSchema,
   WecomInstallationSchema,
   ListWecomInstallationsResponseSchema,
   RedeemWecomBindingTokenResponseSchema,
   EMPTY_WECOM_INSTALLATION,
   EMPTY_LIST_WECOM_INSTALLATIONS_RESPONSE,
   EMPTY_REDEEM_WECOM_BINDING_TOKEN_RESPONSE,
+  TelegramInstallationSchema,
+  ListTelegramInstallationsResponseSchema,
+  RedeemTelegramBindingTokenResponseSchema,
+  EMPTY_TELEGRAM_INSTALLATION,
+  EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+  EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
   AgentTaskListSchema,
   AutopilotQuotaUsageSchema,
   AutopilotRunSchema,
@@ -50,6 +57,7 @@ import {
   UserSchema,
   PluginInstallationSchema,
   PluginInstallationListResponseSchema,
+  PluginMCPToolListSchema,
   PluginPreviewSchema,
   EMPTY_PLUGIN_INSTALLATION_LIST,
   EMPTY_PLUGIN_PREVIEW,
@@ -86,6 +94,40 @@ const baseIssue = {
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
 };
+
+describe("ChildIssueProgressResponseSchema", () => {
+  it("keeps older server responses compatible when visibility fields are absent", () => {
+    const parsed = ChildIssueProgressResponseSchema.parse({
+      progress: [{ parent_issue_id: "parent-1", total: 3, done: 1 }],
+    });
+    expect(parsed.progress[0]).toEqual({ parent_issue_id: "parent-1", total: 3, done: 1 });
+  });
+
+  it("parses full and visible progress independently", () => {
+    const parsed = ChildIssueProgressResponseSchema.parse({
+      progress: [{
+        parent_issue_id: "parent-1",
+        total: 10,
+        done: 3,
+        visible_total: 4,
+        visible_done: 3,
+        hidden_total: 6,
+      }],
+    });
+    expect(parsed.progress[0]?.hidden_total).toBe(6);
+    expect(parsed.progress[0]?.visible_total).toBe(4);
+  });
+
+  it("falls back instead of exposing malformed progress to installed clients", () => {
+    const fallback = { progress: [] };
+    expect(parseWithFallback(
+      { progress: [{ parent_issue_id: "parent-1", total: "many", done: 1 }] },
+      ChildIssueProgressResponseSchema,
+      fallback,
+      { endpoint: "GET /api/issues/child-progress" },
+    )).toEqual(fallback);
+  });
+});
 
 describe("IssueSchema (via ListIssuesResponseSchema)", () => {
   it("accepts null activity during backfill and rejects malformed activity", () => {
@@ -399,6 +441,43 @@ describe("AgentTaskListSchema", () => {
       "comment-2",
       "comment-3",
     ]);
+  });
+
+  it("accepts durable workdir metadata from newer backends", () => {
+    const parsed = AgentTaskListSchema.parse([
+      {
+        ...task,
+        status: "completed",
+        work_dir: "/managed/task/worktree",
+        durable_work_dir: "/Users/dev/project",
+        relative_durable_work_dir: "project",
+        branch_name: "agent/j/abc12345",
+      },
+    ]);
+
+    expect(parsed[0]).toMatchObject({
+      durable_work_dir: "/Users/dev/project",
+      relative_durable_work_dir: "project",
+      branch_name: "agent/j/abc12345",
+    });
+  });
+
+  it("degrades malformed optional path metadata without dropping task rows", () => {
+    const parsed = AgentTaskListSchema.parse([
+      {
+        ...task,
+        work_dir: 1,
+        durable_work_dir: { path: "/project" },
+        relative_durable_work_dir: false,
+        branch_name: ["agent/j/abc12345"],
+      },
+    ]);
+
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0]?.work_dir).toBeUndefined();
+    expect(parsed[0]?.durable_work_dir).toBeUndefined();
+    expect(parsed[0]?.relative_durable_work_dir).toBeUndefined();
+    expect(parsed[0]?.branch_name).toBeUndefined();
   });
 });
 
@@ -1450,6 +1529,66 @@ describe("WeCom installation schemas", () => {
   });
 });
 
+// Telegram drives the same connect/disabled/revoked UI decisions as WeCom.
+// Keep its wire-contract fallbacks explicit so malformed or older responses
+// cannot render a bot as connected or report a binding success.
+describe("Telegram installation schemas", () => {
+  it("parses a well-formed installation", () => {
+    const parsed = TelegramInstallationSchema.parse({
+      id: "i1",
+      workspace_id: "w1",
+      agent_id: "a1",
+      bot_id: "12345",
+      bot_username: "multica_test_bot",
+      installer_user_id: "u1",
+      status: "active",
+    });
+    expect(parsed.bot_username).toBe("multica_test_bot");
+    expect(parsed.status).toBe("active");
+  });
+
+  it("defaults incomplete data to the disconnected state", () => {
+    const parsed = TelegramInstallationSchema.parse({ id: "i1" });
+    expect(parsed.status).toBe("revoked");
+    expect(parsed.bot_id).toBe("");
+    expect(parsed.bot_username).toBe("");
+
+    const list = ListTelegramInstallationsResponseSchema.parse({});
+    expect(list).toEqual({ installations: [], configured: false });
+  });
+
+  it("keeps unknown forward-compatible installation fields", () => {
+    const parsed = TelegramInstallationSchema.parse({ id: "i1", future_field: "keep" });
+    expect((parsed as unknown as { future_field?: string }).future_field).toBe("keep");
+  });
+
+  it("falls back safely for malformed list, install, and redeem responses", () => {
+    expect(
+      parseWithFallback(
+        "not json",
+        ListTelegramInstallationsResponseSchema,
+        EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE,
+        { endpoint: "GET /api/workspaces/:id/telegram/installations" },
+      ),
+    ).toEqual(EMPTY_LIST_TELEGRAM_INSTALLATIONS_RESPONSE);
+
+    expect(
+      parseWithFallback(42, TelegramInstallationSchema, EMPTY_TELEGRAM_INSTALLATION, {
+        endpoint: "POST /api/workspaces/:id/telegram/install",
+      }),
+    ).toEqual(EMPTY_TELEGRAM_INSTALLATION);
+
+    expect(
+      parseWithFallback(
+        null,
+        RedeemTelegramBindingTokenResponseSchema,
+        EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE,
+        { endpoint: "POST /api/telegram/binding/redeem" },
+      ),
+    ).toEqual(EMPTY_REDEEM_TELEGRAM_BINDING_TOKEN_RESPONSE);
+  });
+});
+
 describe("Plugin schemas", () => {
   it("defaults every missing installation field to an inert, disabled shape", () => {
     const parsed = PluginInstallationSchema.parse({ id: "installation-1" });
@@ -1501,6 +1640,22 @@ describe("Plugin schemas", () => {
     });
     expect(parsed).toEqual(EMPTY_PLUGIN_PREVIEW);
     expect(parsed.scopes).toEqual([]);
+  });
+
+  it("degrades a malformed MCP tool list to empty rather than showing tools as approved", () => {
+    const parsed = parseWithFallback({ tools: "search" }, PluginMCPToolListSchema, { tools: [] }, {
+      endpoint: "GET /api/workspaces/{id}/plugins/{installationId}/mcp/{hookKey}/tools",
+    });
+    expect(parsed.tools).toEqual([]);
+  });
+
+  // The dangerous direction is one-sided: a response missing `approved` must
+  // read as NOT approved. The opposite default would render an unpinned tool
+  // with a checked box, and the administrator's next save would pin it.
+  it("treats a tool with no approval field as unapproved", () => {
+    const parsed = PluginMCPToolListSchema.parse({ tools: [{ name: "search" }] });
+    expect(parsed.tools[0]?.approved).toBe(false);
+    expect(parsed.tools[0]?.drifted).toBe(false);
   });
 
   it("parses a preview that reports an upgrade adding new scopes", () => {

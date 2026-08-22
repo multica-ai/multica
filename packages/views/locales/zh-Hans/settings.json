@@ -1,13 +1,12 @@
 {
   "issue_statuses": {
-    "title": "议题状态",
-    "description": "在内置的 7 个状态之外添加自己的状态。每个状态都属于一个分类，分类决定了它的行为。",
+    "title": "任务状态",
+    "description": "定义任务流转的工作流。每个状态的行为由它所属的分类决定。",
     "loading": "正在加载状态…",
     "add": "添加状态",
     "show_archived": "显示已归档（{{count}}）",
     "archived_badge": "已归档",
-    "archived_hint": "已停止用于新的指派，已经在该状态上的议题保持不变。",
-    "built_in_locked": "内置状态，名称、颜色和分类均不可修改。",
+    "archived_hint": "已停止用于新的指派，已经在该状态上的任务保持不变。",
     "flag_off": "当前部署尚未开启自定义状态，下面的内置状态照常使用。",
     "reorder_failed": "排序保存失败。",
     "actions": {
@@ -22,8 +21,9 @@
       "behavior_hint": "该状态的行为与「{{category}}」完全一致。",
       "name": "名称",
       "name_placeholder": "例如：Code Review",
+      "key_hint": "API 和 CLI 中通过 {{key}} 引用。",
       "category": "分类",
-      "category_locked": "分类不可修改 —— 已经处于该状态的议题依赖它。",
+      "category_locked": "分类不可修改 —— 已经处于该状态的任务依赖它。",
       "description": "描述",
       "description_placeholder": "这个状态对团队意味着什么",
       "color": "颜色",
@@ -34,14 +34,14 @@
     },
     "archive_dialog": {
       "title": "归档这个状态？",
-      "description": "「{{name}}」将不再能被指派给新的议题。已经处于该状态的议题保持不变，行为也完全不变。",
+      "description": "「{{name}}」将不再能被指派给新的任务。已经处于该状态的任务保持不变，行为也完全不变。",
       "cancel": "取消",
       "confirm": "归档",
       "failed": "归档失败。"
     },
     "categories": {
-      "backlog": "搁置。把议题移到这里不会启动 agent。",
-      "todo": "排队中。把议题移到这里会启动指派的 agent。",
+      "backlog": "搁置。把任务移到这里不会启动 agent。",
+      "todo": "排队中。把任务移到这里会启动指派的 agent。",
       "in_progress": "正在进行。",
       "in_review": "已交付，等待人工 review。会结束 autopilot 运行。",
       "done": "已完成。",
@@ -159,28 +159,94 @@
       "navigation": "导航"
     },
     "actions": {
-      "openSearch": { "label": "打开搜索", "description": "随时搜索内容或运行命令。" },
-      "createIssue": { "label": "新建任务", "description": "打开你常用的任务创建流程。" },
-      "toggleSidebar": { "label": "显示或隐藏侧边栏", "description": "切换主侧边栏的显示状态。" },
-      "toggleChat": { "label": "显示或隐藏聊天窗", "description": "打开或关闭悬浮聊天窗，打开时自动聚焦输入框。" },
-      "findInIssue": { "label": "在任务中查找", "description": "搜索当前打开的任务详情。" },
-      "openThreadNav": { "label": "打开讨论导航", "description": "列出、搜索并跳转当前任务的评论讨论。" },
-      "archiveInboxItem": { "label": "归档通知", "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。" },
-      "send": { "label": "发送", "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建任务。" },
-      "goBack": { "label": "后退", "description": "像浏览器一样在历史记录中后退。" },
-      "goForward": { "label": "前进", "description": "像浏览器一样在历史记录中前进。" },
-      "goInbox": { "label": "前往收件箱", "description": "打开工作区收件箱。" },
-      "goChat": { "label": "前往聊天", "description": "打开工作区聊天。" },
-      "goMyIssues": { "label": "前往我的任务", "description": "打开分配给你的任务。" },
-      "goIssues": { "label": "前往任务", "description": "打开任务列表。" },
-      "goProjects": { "label": "前往项目", "description": "打开项目列表。" },
-      "goAutopilots": { "label": "前往自动化", "description": "打开工作区自动化。" },
-      "goAgents": { "label": "前往智能体", "description": "打开智能体列表。" },
-      "goSquads": { "label": "前往小队", "description": "打开小队列表。" },
-      "goUsage": { "label": "前往用量", "description": "打开用量分析。" },
-      "goRuntimes": { "label": "前往运行时", "description": "打开运行时配置。" },
-      "goSkills": { "label": "前往 Skills", "description": "打开 skill 库。" },
-      "goSettings": { "label": "前往设置", "description": "打开工作区设置。" }
+      "openSearch": {
+        "label": "打开搜索",
+        "description": "随时搜索内容或运行命令。"
+      },
+      "createIssue": {
+        "label": "新建任务",
+        "description": "打开你常用的任务创建流程。"
+      },
+      "toggleSidebar": {
+        "label": "显示或隐藏侧边栏",
+        "description": "切换主侧边栏的显示状态。"
+      },
+      "toggleChat": {
+        "label": "显示或隐藏聊天窗",
+        "description": "打开或关闭悬浮聊天窗，打开时自动聚焦输入框。"
+      },
+      "findInIssue": {
+        "label": "在任务中查找",
+        "description": "搜索当前打开的任务详情。"
+      },
+      "openThreadNav": {
+        "label": "打开讨论导航",
+        "description": "列出、搜索并跳转当前任务的评论讨论。"
+      },
+      "archiveInboxItem": {
+        "label": "归档通知",
+        "description": "归档当前打开的收件箱通知；在归档列表中则取消归档。"
+      },
+      "send": {
+        "label": "发送",
+        "description": "发送聊天消息、评论、回复、反馈和提示词，并在创建弹窗中创建任务。"
+      },
+      "goBack": {
+        "label": "后退",
+        "description": "像浏览器一样在历史记录中后退。"
+      },
+      "goForward": {
+        "label": "前进",
+        "description": "像浏览器一样在历史记录中前进。"
+      },
+      "goInbox": {
+        "label": "前往收件箱",
+        "description": "打开工作区收件箱。"
+      },
+      "goChat": {
+        "label": "前往聊天",
+        "description": "打开工作区聊天。"
+      },
+      "goMyIssues": {
+        "label": "前往我的任务",
+        "description": "打开分配给你的任务。"
+      },
+      "goIssues": {
+        "label": "前往任务",
+        "description": "打开任务列表。"
+      },
+      "goProjects": {
+        "label": "前往项目",
+        "description": "打开项目列表。"
+      },
+      "goAutopilots": {
+        "label": "前往自动化",
+        "description": "打开工作区自动化。"
+      },
+      "goAgents": {
+        "label": "前往智能体",
+        "description": "打开智能体列表。"
+      },
+      "goSquads": {
+        "label": "前往小队",
+        "description": "打开小队列表。"
+      },
+      "goUsage": {
+        "label": "前往用量",
+        "description": "打开用量分析。"
+      },
+      "goRuntimes": {
+        "label": "前往运行时",
+        "description": "打开运行时配置。"
+      },
+      "goSkills": {
+        "label": "前往 Skills",
+        "description": "打开 skill 库。"
+      },
+      "goSettings": {
+        "label": "前往设置",
+        "description": "打开工作区设置。"
+      }
     },
     "fixed": {
       "title": "固定的系统快捷键",
@@ -255,17 +321,17 @@
       "labs": "实验室",
       "members": "成员",
       "labels": "标签",
-      "issue_statuses": "议题状态",
+      "issue_statuses": "任务状态",
       "properties": "属性",
       "quick_actions": "快捷操作",
-    "plugins": "Plugins",
-    "mcp": "MCP",
-    "billing": "账单与套餐"
+      "plugins": "Plugins",
+      "mcp": "MCP",
+      "billing": "账单与套餐"
     }
   },
   "plugins": {
     "title": "Plugins",
-    "description": "通过 URL 安装 Plugin，并逐条查看它能访问什么。",
+    "description": "在这个工作区里发布插件，然后安装某个具体版本，并逐条确认它能访问什么。",
     "loading": "正在加载 Plugins",
     "load_failed": "无法加载 Plugins",
     "load_failed_description": "请重试。已安装的 Plugin 不受影响。",
@@ -282,22 +348,15 @@
     "contributes": "提供的能力",
     "version": "v{{version}}",
     "byline": "{{author}} · v{{version}}",
-    "source": "来源",
     "states": {
       "disabled": "已停用"
-    },
-    "install": {
-      "title": "安装 Plugin",
-      "description": "粘贴 Plugin manifest 的 URL。安装前你会先看到它请求的全部权限。",
-      "placeholder": "https://example.com/multica.plugin.json",
-      "review": "查看权限"
     },
     "installed": {
       "title": "已安装"
     },
     "consent": {
       "title": "该 Plugin 请求以下访问权限",
-      "description": "Multica 从不在服务器上运行 Plugin 代码。Plugin 只能做这些权限允许的事，且永远不会超过使用者本人的权限。",
+      "description": "你批准的是某个具体版本。它的代码由 Multica 存储，在你升级之前不会变化。Plugin 只能做这些权限允许的事，且永远不会超过使用者本人的权限。",
       "cancel": "取消",
       "confirm": "授权并安装",
       "confirm_upgrade": "授权并升级",
@@ -324,6 +383,31 @@
       "storage_workspace": "存储工作区共享数据",
       "net": "向 {{domain}} 发送数据",
       "unknown": "无法识别的权限 — 请勿安装"
+    },
+    "hook_circuit_open": "连续失败后已停止投递该 hook。",
+    "hook_recent_failures": "最近有 {{count}} 次 hook 调用失败。",
+    "mcp": {
+      "badge": "MCP",
+      "description": "该 hook 采用插件作者自己的 MCP server 提供的工具。勾选允许 agent 调用的工具——之后新出现的工具不会自动生效，需要你再次批准。",
+      "loading": "正在加载工具",
+      "unreachable": "无法连接插件的 MCP server。",
+      "empty": "该 MCP server 当前没有提供任何工具。",
+      "drifted": "schema 已变更",
+      "save": "保存批准",
+      "approved": "已更新批准的工具。"
+    },
+    "publish": {
+      "title": "发布插件",
+      "description": "上传插件产物包。Multica 负责存储和分发，作者不需要自己的服务器。",
+      "hint": "一个 .zip，包含 multica.plugin.json 和它引用的所有文件。",
+      "upload": "上传产物包",
+      "published": "已发布 {{name}} {{version}}",
+      "empty": "这个工作区还没有发布过插件。",
+      "delete": "删除已发布的插件",
+      "deleted": "已删除发布的插件",
+      "installed_version": "使用中",
+      "review_install": "查看并安装",
+      "review_upgrade": "查看并升级"
     }
   },
   "properties": {
@@ -831,29 +915,39 @@
   },
   "dingtalk": {
     "section_title": "钉钉",
-    "page_description": "将钉钉机器人连接到 Multica。私聊使用机器人的默认智能体；同一个机器人在不同群里可分别绑定不同智能体。",
-    "group_routes_title": "群路由",
-    "group_routes_description": "将同一个机器人加入多个钉钉群，并在每个群里 @ 它一次。Multica 会自动发现群聊，后续消息将交给这里选择的智能体。",
-    "group_routes_empty_title": "尚未发现群聊",
-    "group_routes_empty_description": "将已连接的机器人加入钉钉群，并 @ 它一次。该群会自动显示在这里。",
-    "group_routes_error_title": "无法加载群路由",
-    "group_routes_error_description": "自动刷新已暂停。请检查服务器后重试。",
-    "group_routes_retry": "重试",
-    "group_routes_agents_loading": "正在加载群路由可用的智能体…",
-    "group_routes_agents_empty_title": "没有可用的智能体",
-    "group_routes_agents_empty_description": "请先创建或恢复智能体，再重新分配钉钉群。",
-    "group_routes_agents_error_title": "无法加载智能体",
-    "group_routes_agents_error_description": "加载智能体列表前，群路由重新分配不可用。",
-    "group_routes_agents_retry": "重试加载智能体",
-    "group_routes_agent_label": "此群绑定的智能体",
-    "group_routes_unknown_agent": "未知智能体",
-    "group_routes_updated": "已更新群智能体",
-    "group_routes_update_failed": "无法更新群智能体",
+    "page_description": "将每个 Multica 智能体连接到专属的钉钉机器人。成员可私聊机器人、在群里 @ 它，或输入 /issue 直接创建 Multica 任务。",
+    "agent_page_description": "通过专属钉钉机器人私聊该智能体、在群内 @ 它，或输入 /issue 创建 Multica 任务。",
+    "groups_title": "近期钉群",
+    "groups_description": "工作区成员关联钉钉账号并在群内 @ 该机器人后，群会显示在这里。默认展示最近 90 天活跃的群。",
+    "groups_overview_description": "每条连接显示智能体、钉钉机器人和近期有交互的群。",
+    "groups_loading": "正在加载钉群…",
+    "groups_empty": "尚未观察到群消息。",
+    "groups_no_recent": "最近 90 天没有活跃群。",
+    "groups_inactive": "长期未活跃（{{count}}）",
+    "groups_load_more": "加载更多",
+    "groups_error": "无法加载钉群。",
+    "groups_retry": "重试",
+    "group_untitled": "未命名钉群",
+    "groups_count": "{{count}}",
+    "conversation_id_label": "钉群会话 ID",
+    "group_last_active": "最近活跃 {{time}}",
+    "group_mentions_other": "被 @ {{count}} 次",
+    "group_forget": "忘记",
+    "group_forget_title": "忘记这个群？",
+    "group_forget_description": "该群会从 Multica 的群列表中移除，对话和消息记录不会删除。以后再次 @ 机器人时，群会重新出现。",
+    "group_forget_cancel": "取消",
+    "group_forget_confirm": "忘记群",
+    "group_forget_success": "已从群列表移除",
+    "group_forget_failed": "无法移除该群",
+    "bot_identity_unavailable": "身份暂不可用",
+    "bot_permission_tooltip_prefix": "请在钉钉开放平台为此机器人的应用开通",
+    "bot_permission_tooltip_suffix": "权限，然后在任一已添加该机器人的钉群中重新 @ 它。",
     "not_enabled_title": "钉钉集成未启用",
     "not_enabled_description_prefix": "在服务器上设置",
     "not_enabled_description_suffix": "以启用钉钉机器人安装。",
     "not_enabled_self_host_hint": "自部署用户：详见项目 README。",
-    "connected_bots": "已连接的机器人",
+    "connections_title": "连接关系",
+    "deleted_agent": "已删除的智能体",
     "loading": "加载中…",
     "empty_title": "尚未连接机器人",
     "empty_description_prefix": "在本工作区打开一个 Agent，点击",
@@ -861,7 +955,7 @@
     "empty_description_suffix": "为其安装机器人。",
     "revoked_badge": "已撤销",
     "installed_at_label": "安装于 {{when}}",
-    "identity_label": "钉钉绑定身份：{{identity}}",
+    "identity_label": "已关联的 Staff ID：{{identity}}",
     "disconnect": "断开连接",
     "disconnecting": "正在断开…",
     "disconnect_confirm_title": "断开此钉钉机器人？",
@@ -871,7 +965,7 @@
     "toast_disconnect_failed": "断开失败",
     "bind_button": "连接钉钉",
     "bind_button_title": "把 {{agent}} 连接到钉钉机器人",
-    "agent_bot_connected_label": "已连接到钉钉",
+    "agent_bot_connected_label": "已连接机器人：",
     "agent_bot_disconnect_tooltip": "将此钉钉机器人从 Agent 解绑。机器人将停止接收钉钉消息。",
     "byo_dialog_title": "连接钉钉机器人",
     "byo_docs_link": "Step-by-step：把你的 Multica 智能体连接到钉钉",
@@ -932,6 +1026,47 @@
     "byo_credentials_unverifiable": "没能连上企业微信来校验这个机器人。你的凭据没有被改动，请稍后重试。",
     "byo_install_failed": "没能保存这个机器人，是我们这边出了问题。你的凭据没有被改动，请重试；如果一直失败，请联系支持。",
     "byo_failed_toast": "无法连接企业微信机器人"
+  },
+  "telegram": {
+    "section_title": "Telegram",
+    "page_description": "将每个 Multica 智能体连接到专属的 Telegram 机器人。成员可私聊机器人、在群里 @ 它、输入 /issue 创建 Multica 任务，并实时看到智能体的流式回复。",
+    "not_enabled_title": "Telegram 集成未启用",
+    "not_enabled_description_prefix": "在服务器上设置",
+    "not_enabled_description_suffix": "以启用 Telegram 机器人安装。",
+    "not_enabled_self_host_hint": "自部署用户：详见项目 README。",
+    "preview_title": "Telegram 安装即将上线",
+    "preview_description": "静态加密密钥已设置，但本部署暂未开放安装。开放后，连接按钮会出现在这里。",
+    "connected_bots": "已连接的机器人",
+    "loading": "加载中…",
+    "load_failed": "加载 Telegram 安装失败",
+    "empty_title": "尚未连接机器人",
+    "empty_description_prefix": "在本工作区打开一个智能体，点击",
+    "empty_description_cta": "连接 Telegram",
+    "empty_description_suffix": "为其安装机器人。",
+    "revoked_badge": "已撤销",
+    "installed_at_label": "安装于 {{when}}",
+    "disconnect": "断开连接",
+    "disconnecting": "正在断开…",
+    "disconnect_confirm_title": "断开此 Telegram 机器人？",
+    "disconnect_confirm_description": "机器人将停止接收本工作区的 Telegram 消息。Multica 中的会话记录会保留；之后可在同一智能体上重新连接。",
+    "disconnect_confirm_cancel": "取消",
+    "toast_disconnected": "已断开 Telegram 机器人",
+    "toast_disconnect_failed": "断开失败",
+    "bind_button": "连接 Telegram",
+    "bind_button_title": "将 {{agent}} 连接到 Telegram 机器人",
+    "agent_bot_connected_label": "已连接 Telegram",
+    "agent_bot_disconnect_tooltip": "解除该智能体与 Telegram 机器人的绑定，机器人将停止接收 Telegram 消息。",
+    "agent_bot_manage_link": "在 Telegram 中打开",
+    "agent_bot_manage_tooltip": "在 Telegram 中打开与该机器人的对话。",
+    "connect_dialog_title": "连接 Telegram 机器人",
+    "connect_dialog_description": "在 Telegram 中通过 @BotFather 创建机器人，然后在下方粘贴它的 token。token 会实时校验并加密存储。",
+    "connect_docs_link": "分步指南：将 Multica 智能体连接到 Telegram",
+    "bot_token_label": "机器人 token",
+    "connect_submit": "连接",
+    "connect_submitting": "正在连接…",
+    "connect_cancel": "取消",
+    "connect_success_toast": "已连接 Telegram 机器人",
+    "connect_failed_toast": "连接 Telegram 机器人失败"
   },
   "repositories": {
     "section_title": "代码仓库",

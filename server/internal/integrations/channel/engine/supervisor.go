@@ -589,7 +589,14 @@ func (s *Supervisor) startSupervisor(parent context.Context, inst Installation) 
 	}
 	s.wg.Add(1)
 	s.mu.Unlock()
-	go s.supervise(ctx, inst, id, gen, done)
+	go func() {
+		defer s.wg.Done()
+		// A supervisor can exit without an explicit cancellation when lease
+		// acquisition is contended or fails. Always detach its child context
+		// from Run's long-lived parent when the goroutine returns.
+		defer cancel()
+		s.supervise(ctx, inst, id, gen, done)
+	}()
 }
 
 // leaseToken composes the per-supervisor lease token: the process-wide
@@ -615,7 +622,6 @@ func leaseToken(nodeID string, gen uint64) string {
 // while it runs → on exit, release + back off → repeat. Returns when ctx is
 // cancelled.
 func (s *Supervisor) supervise(ctx context.Context, inst Installation, id string, gen uint64, done chan<- struct{}) {
-	defer s.wg.Done()
 	defer close(done)
 	defer func() {
 		// Only clear the map entry if it still belongs to us — gen

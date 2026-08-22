@@ -28,7 +28,7 @@ var autopilotListCmd = &cobra.Command{
 
 var autopilotGetCmd = &cobra.Command{
 	Use:   "get <id>",
-	Short: "Get autopilot details (includes triggers)",
+	Short: "Get autopilot details (webhook credentials redacted by default)",
 	Args:  exactArgs(1),
 	RunE:  runAutopilotGet,
 }
@@ -115,6 +115,7 @@ func init() {
 
 	// get
 	autopilotGetCmd.Flags().String("output", "json", "Output format: table or json")
+	autopilotGetCmd.Flags().Bool("show-secrets", false, "Include live webhook credentials in JSON output (unsafe for logs)")
 
 	// create
 	autopilotCreateCmd.Flags().String("title", "", "Autopilot title (required)")
@@ -223,6 +224,12 @@ func runAutopilotList(cmd *cobra.Command, _ []string) error {
 }
 
 func runAutopilotGet(cmd *cobra.Command, args []string) error {
+	output, _ := cmd.Flags().GetString("output")
+	showSecrets, _ := cmd.Flags().GetBool("show-secrets")
+	if showSecrets && output != "json" {
+		return fmt.Errorf("--show-secrets requires --output json")
+	}
+
 	client, err := newAPIClient(cmd)
 	if err != nil {
 		return err
@@ -241,7 +248,12 @@ func runAutopilotGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("get autopilot: %w", err)
 	}
 
-	output, _ := cmd.Flags().GetString("output")
+	if showSecrets {
+		fmt.Fprintln(os.Stderr, "Warning: --show-secrets exposes live webhook credentials; keep this output out of logs and shared transcripts.")
+	} else {
+		redactAutopilotWebhookCredentials(resp)
+	}
+
 	if output == "json" {
 		return cli.PrintJSON(os.Stdout, resp)
 	}
@@ -259,6 +271,49 @@ func runAutopilotGet(cmd *cobra.Command, args []string) error {
 	}}
 	cli.PrintTable(os.Stdout, headers, rows)
 	return nil
+}
+
+func redactAutopilotWebhookCredentials(resp map[string]any) {
+	triggers, ok := resp["triggers"].([]any)
+	if !ok {
+		return
+	}
+	for _, raw := range triggers {
+		trigger, ok := raw.(map[string]any)
+		if !ok {
+			continue
+		}
+		_, hasTokenField := trigger["webhook_token"]
+		_, hasPathField := trigger["webhook_path"]
+		_, hasURLField := trigger["webhook_url"]
+		if !hasTokenField && !hasPathField && !hasURLField {
+			continue
+		}
+
+		token := strVal(trigger, "webhook_token")
+		hasToken, _ := trigger["has_webhook_token"].(bool)
+		hasToken = hasToken ||
+			strVal(trigger, "kind") == "webhook" ||
+			token != "" ||
+			strVal(trigger, "webhook_path") != "" ||
+			strVal(trigger, "webhook_url") != ""
+		trigger["has_webhook_token"] = hasToken
+		if hint := webhookTokenHint(token); hint != "" {
+			trigger["webhook_token_hint"] = hint
+		} else {
+			trigger["webhook_token_hint"] = nil
+		}
+		trigger["webhook_token"] = nil
+		trigger["webhook_path"] = nil
+		trigger["webhook_url"] = nil
+	}
+}
+
+func webhookTokenHint(token string) string {
+	if len(token) < 4 {
+		return ""
+	}
+	return token[len(token)-4:]
 }
 
 func runAutopilotCreate(cmd *cobra.Command, _ []string) error {
