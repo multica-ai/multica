@@ -9,6 +9,7 @@ import (
 
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/service"
+	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
 
@@ -187,6 +188,93 @@ func TestRefreshAgentStatusFromTasks(t *testing.T) {
 		t.Fatalf("expected cancelled-only task set to refresh agent status to idle, got %q", agent.Status)
 	}
 }
+
+// TestFailStaleTasks_ReclaimsAbandonedLocalDirectoryWaiters is the server-side
+// half of #7427: waiting_local_directory rows whose prepare lease has expired
+// (daemon no longer proving the wait) must be failed so they stop consuming
+// CountRunningTasks capacity. A live lease must survive — that is a real
+// waiter still blocked on the path mutex.
+func TestFailStaleTasks_ReclaimsAbandonedLocalDirectoryWaiters(t *testing.T) {
+	if testPool == nil {
+		t.Skip("no database connection")
+	}
+
+	ctx := context.Background()
+	queries := db.New(testPool)
+
+	issueID, agentID, liveID := setupSweeperTestFixture(t, "dispatched")
+	t.Cleanup(func() { cleanupSweeperFixture(t, issueID, agentID) })
+
+	var runtimeID string
+	if err := testPool.QueryRow(ctx, `SELECT runtime_id::text FROM agent_task_queue WHERE id = $1`, liveID).Scan(&runtimeID); err != nil {
+		t.Fatalf("load runtime_id: %v", err)
+	}
+
+	if _, err := testPool.Exec(ctx, `
+		UPDATE agent_task_queue
+		SET status = 'waiting_local_directory',
+		    wait_reason = 'depot (held by task deadbeef)',
+		    prepare_lease_expires_at = now() + interval '5 minutes'
+		WHERE id = $1
+	`, liveID); err != nil {
+		t.Fatalf("park live waiter: %v", err)
+	}
+
+	var deadID string
+	if err := testPool.QueryRow(ctx, `
+		INSERT INTO agent_task_queue (
+			agent_id, runtime_id, issue_id, status, priority,
+			dispatched_at, wait_reason, prepare_lease_expires_at
+		)
+		VALUES (
+			$1, $2, $3, 'waiting_local_directory', 0,
+			now() - interval '2 hours', 'depot (held by task deadbeef)',
+			now() - interval '1 minute'
+		)
+		RETURNING id
+	`, agentID, runtimeID, issueID).Scan(&deadID); err != nil {
+		t.Fatalf("insert abandoned waiter: %v", err)
+	}
+
+	failedTasks, err := queries.FailStaleTasks(ctx, db.FailStaleTasksParams{
+		DispatchTimeoutSecs:       300.0,
+		RunningTimeoutSecs:        3600.0,
+		RuntimeStaleSecs:          staleThresholdSeconds,
+		RuntimeReconnectGraceSecs: defaultRuntimeReconnectGrace.Seconds(),
+	})
+	if err != nil {
+		t.Fatalf("FailStaleTasks failed: %v", err)
+	}
+
+	foundDead := false
+	for _, ft := range failedTasks {
+		id := util.UUIDToString(ft.ID)
+		if id == liveID {
+			t.Fatalf("FailStaleTasks reclaimed a waiter with a live prepare lease (%s)", liveID)
+		}
+		if id == deadID {
+			foundDead = true
+			if ft.FailureReason.String != "waiting_local_directory_abandoned" {
+				t.Fatalf("failure_reason = %q, want waiting_local_directory_abandoned", ft.FailureReason.String)
+			}
+			if !strings.Contains(ft.Error.String, "prepare lease expired") {
+				t.Fatalf("error = %q, want prepare-lease abandoned message", ft.Error.String)
+			}
+		}
+	}
+	if !foundDead {
+		t.Fatalf("expected abandoned waiter %s to be failed, got %#v", deadID, failedTasks)
+	}
+
+	var liveStatus string
+	if err := testPool.QueryRow(ctx, `SELECT status FROM agent_task_queue WHERE id = $1`, liveID).Scan(&liveStatus); err != nil {
+		t.Fatalf("load live waiter: %v", err)
+	}
+	if liveStatus != "waiting_local_directory" {
+		t.Fatalf("live waiter status = %q, want waiting_local_directory", liveStatus)
+	}
+}
+
 
 func TestStartTaskSkipsUnchangedAgentStatusWriteAndBroadcast(t *testing.T) {
 	if testPool == nil {

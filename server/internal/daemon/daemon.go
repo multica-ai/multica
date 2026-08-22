@@ -5041,7 +5041,12 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	// so the server-side state machine is dispatched →
 	// waiting_local_directory → running rather than backwards-transitioning
 	// from running into the wait state. The release is deferred so a panic
-	// or early return always frees the lock for the next waiter.
+	// during prepare/run always frees the lock for the next waiter.
+	//
+	// After runner.run returns we also release eagerly (see below): holding
+	// the mutex through FailTask/CompleteTask network I/O left waiters in
+	// waiting_local_directory for hours when a holder was idle_watchdog-
+	// killed but the terminal callback stalled (#7427).
 	//
 	// StartTask itself now lives in runTask (see issue #3999 race A) and
 	// fires only after execenv.Prepare/Reuse has put env.WorkDir on disk,
@@ -5100,6 +5105,17 @@ func (d *Daemon) handleTask(ctx context.Context, task Task, slot int) {
 	}()
 
 	result, err := d.runner.run(runCtx, task, provider, slot, taskLog)
+
+	// Free the path mutex before any post-run network I/O. The lock exists to
+	// serialise prepare+agent writes into the user's in_place directory; once
+	// the agent process has exited those writes are done. Keeping it through
+	// ReportTaskUsage / FailTask / CompleteTask / AckTaskCancelled meant a
+	// stalled terminal callback (or a long retry loop) pinned every waiter in
+	// waiting_local_directory and leaked agent capacity (#7427). releaser is
+	// idempotent, so the deferred call above is still safe on panic paths.
+	if localRelease != nil {
+		localRelease()
+	}
 
 	// Report usage before any early return — the agent accumulates tokens
 	// whether the task completes, errors, or is cancelled mid-run by the poll

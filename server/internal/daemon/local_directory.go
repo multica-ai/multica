@@ -453,11 +453,13 @@ func isGitWorkTree(ctx context.Context, path string) bool {
 }
 
 // LocalPathLocker serialises agent tasks that share the same on-disk path.
-// The lock is owned for the entire lifetime of a task (claim → context
-// write → agent execution → result report), not just the agent execution
-// window, because the context files and skill scratch directories the
-// daemon writes at task-prepare time can race with a sibling task on the
-// same path.
+// The lock is owned from claim through agent execution (prepare context
+// write + run), not through the post-run terminal HTTP callbacks. Holding
+// it across FailTask/CompleteTask left waiters parked in
+// waiting_local_directory whenever a holder's terminal report stalled
+// after the agent had already been force-stopped (#7427). Prepare-time
+// context files and skill scratch still need the lock — those race with
+// a sibling task on the same path; reporting does not.
 //
 // Implementation: per-key sync.Mutex inside a map guarded by mu. When a
 // task can't take the lock immediately, the waiter blocks on the per-key

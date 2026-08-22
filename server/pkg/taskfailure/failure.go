@@ -26,7 +26,8 @@
 //     queued_expired, runtime_offline, runtime_reconnect_timeout,
 //     runtime_recovery, timeout, iteration_limit, agent_blocked,
 //     api_invalid_request, skill_bundle_unavailable,
-//     runtime_cli_timeout, invalid_task_identity, issue_window_restricted
+//     runtime_cli_timeout, invalid_task_identity, issue_window_restricted,
+//     waiting_local_directory_abandoned
 //
 //   - 14 agent-side values (with `agent_error.` prefix) produced by
 //     Classify(rawError) when the agent process surfaced an error string.
@@ -144,6 +145,15 @@ const (
 	// workspace policy changes.
 	ReasonIssueWindowRestricted Reason = "issue_window_restricted"
 
+	// ReasonWaitingLocalDirectoryAbandoned: a task parked in
+	// waiting_local_directory stopped proving liveness (prepare lease
+	// expired or missing). The daemon extends that lease while blocked on
+	// the path mutex; once it stops, the waiter is no longer in progress
+	// and would otherwise leak agent capacity forever (#7427). Written by
+	// FailStaleTasks. Retryable — re-admissioning is how a wedged waiter
+	// recovers once the contested path is free.
+	ReasonWaitingLocalDirectoryAbandoned Reason = "waiting_local_directory_abandoned"
+
 	// Agent process side: failure surfaced by the agent CLI / SDK as
 	// an error string. Classify(rawError) is responsible for picking
 	// the right sub-reason from the string. IsAgentError returns true
@@ -219,7 +229,7 @@ const (
 	ReasonAgentUnknown Reason = "agent_error.unknown"
 )
 
-// allReasons is the canonical ordered list of the 26 reasons. Order is
+// allReasons is the canonical ordered list of the 27 reasons. Order is
 // stable so callers (e.g. Prometheus collectors that pre-warm series via
 // AllReasons) can build deterministic label sets across restarts.
 //
@@ -242,6 +252,7 @@ var allReasons = []Reason{
 	ReasonRuntimeCLITimeout,
 	ReasonInvalidTaskIdentity,
 	ReasonIssueWindowRestricted,
+	ReasonWaitingLocalDirectoryAbandoned,
 
 	// Agent process side: provider errors.
 	ReasonAgentProviderAuthOrAccess,

@@ -1211,3 +1211,122 @@ func TestIssueTasksStillSerialiseOnPathMutex(t *testing.T) {
 	}
 	release()
 }
+
+// TestHandleTask_ReleasesLocalDirectoryLockBeforeTerminalReport is the
+// regression guard for #7427: a holder whose agent has already exited must
+// free the path mutex before FailTask/CompleteTask network I/O. Otherwise a
+// stalled terminal callback pins every waiter in waiting_local_directory and
+// leaks agent capacity even though the holder is "gone".
+func TestHandleTask_ReleasesLocalDirectoryLockBeforeTerminalReport(t *testing.T) {
+	t.Parallel()
+
+	const daemonID = "d-7427"
+	dir := t.TempDir()
+	ref, err := json.Marshal(localDirectoryRef{LocalPath: dir, DaemonID: daemonID})
+	if err != nil {
+		t.Fatalf("marshal ref: %v", err)
+	}
+
+	completeStarted := make(chan struct{})
+	releaseComplete := make(chan struct{})
+	var waitMarked atomic.Bool
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		switch {
+		case strings.HasSuffix(req.URL.Path, "/complete"):
+			close(completeStarted)
+			<-releaseComplete
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(req.URL.Path, "/wait-local-directory"):
+			waitMarked.Store(true)
+			w.WriteHeader(http.StatusOK)
+		case strings.HasSuffix(req.URL.Path, "/status"):
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"status":"running"}`))
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+
+	d := &Daemon{
+		client:             NewClient(srv.URL),
+		logger:             slog.Default(),
+		localPathLocks:     NewLocalPathLocker(),
+		workspaces:         make(map[string]*workspaceState),
+		runtimeIndex:       map[string]Runtime{"rt-1": {ID: "rt-1", Provider: "claude"}},
+		activeEnvRoots:     make(map[string]int),
+		cancelPollInterval: time.Hour,
+		cfg:                Config{DaemonID: daemonID},
+	}
+	d.runner = taskRunnerFunc(func(context.Context, Task, string, int, *slog.Logger) (TaskResult, error) {
+		return TaskResult{Status: "completed", Comment: "done"}, nil
+	})
+
+	holder := Task{
+		ID:          "task-holder-7427",
+		WorkspaceID: "ws-7427",
+		RuntimeID:   "rt-1",
+		IssueID:     "issue-holder",
+		Agent:       &AgentData{Name: "holder"},
+		ProjectResources: []ProjectResourceData{
+			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
+		},
+	}
+	waiter := Task{
+		ID: "task-waiter-7427",
+		ProjectResources: []ProjectResourceData{
+			{ID: "r1", ResourceType: localDirectoryResourceType, ResourceRef: ref},
+		},
+	}
+
+	holderDone := make(chan struct{})
+	go func() {
+		defer close(holderDone)
+		d.handleTask(context.Background(), holder, 0)
+	}()
+
+	select {
+	case <-completeStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("holder never reached /complete — cannot assert lock release timing")
+	}
+
+	// Holder is blocked inside the terminal report. A waiter must be able to
+	// take the path lock now; before #7427 it stayed parked until /complete
+	// returned.
+	type acquireResult struct {
+		release func()
+		abort   bool
+	}
+	acquired := make(chan acquireResult, 1)
+	go func() {
+		rel, abort := d.acquireLocalDirectoryLockIfNeeded(context.Background(), waiter, slog.Default())
+		acquired <- acquireResult{release: rel, abort: abort}
+	}()
+
+	select {
+	case got := <-acquired:
+		if got.abort {
+			t.Fatal("waiter aborted while holder was only blocked on /complete")
+		}
+		if got.release == nil {
+			t.Fatal("waiter did not acquire the path lock while holder reported")
+		}
+		got.release()
+	case <-time.After(2 * time.Second):
+		t.Fatal("waiter still blocked on path mutex during holder's terminal report (#7427)")
+	}
+
+	close(releaseComplete)
+	select {
+	case <-holderDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("holder handleTask did not finish after /complete unblocked")
+	}
+
+	if waitMarked.Load() {
+		t.Fatal("waiter should have taken the free lock without parking as waiting_local_directory")
+	}
+}
+
