@@ -97,6 +97,69 @@ func (q *Queries) GetTaskUsage(ctx context.Context, taskID pgtype.UUID) ([]TaskU
 	return items, nil
 }
 
+const listAgentTaskUsage = `-- name: ListAgentTaskUsage :many
+SELECT
+    tu.task_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens,
+    tu.cost_usd_ticks
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.agent_id = $1
+ORDER BY tu.task_id, tu.model
+`
+
+type ListAgentTaskUsageRow struct {
+	TaskID           pgtype.UUID `json:"task_id"`
+	Provider         string      `json:"provider"`
+	Model            string      `json:"model"`
+	InputTokens      int64       `json:"input_tokens"`
+	OutputTokens     int64       `json:"output_tokens"`
+	CacheReadTokens  int64       `json:"cache_read_tokens"`
+	CacheWriteTokens int64       `json:"cache_write_tokens"`
+	CostUsdTicks     pgtype.Int8 `json:"cost_usd_ticks"`
+}
+
+// Per-(task, provider, model) usage rows for the task history of one agent.
+// ListAgentTasks is already access-gated before this query runs; keeping the
+// agent predicate here makes the accounting join match that authorized task
+// scope without an N+1 query per returned task.
+//
+// Uses idx_agent_task_queue_agent_id_keyset (migration 278) plus the
+// task_usage task_id index (migration 032).
+func (q *Queries) ListAgentTaskUsage(ctx context.Context, agentID pgtype.UUID) ([]ListAgentTaskUsageRow, error) {
+	rows, err := q.db.Query(ctx, listAgentTaskUsage, agentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListAgentTaskUsageRow{}
+	for rows.Next() {
+		var i ListAgentTaskUsageRow
+		if err := rows.Scan(
+			&i.TaskID,
+			&i.Provider,
+			&i.Model,
+			&i.InputTokens,
+			&i.OutputTokens,
+			&i.CacheReadTokens,
+			&i.CacheWriteTokens,
+			&i.CostUsdTicks,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listDashboardAgentRunTime = `-- name: ListDashboardAgentRunTime :many
 SELECT
     atq.agent_id,

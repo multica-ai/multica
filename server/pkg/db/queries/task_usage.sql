@@ -49,6 +49,28 @@ JOIN agent_task_queue atq ON atq.id = tu.task_id
 WHERE atq.issue_id = $1
 ORDER BY tu.task_id, tu.model;
 
+-- name: ListAgentTaskUsage :many
+-- Per-(task, provider, model) usage rows for the task history of one agent.
+-- ListAgentTasks is already access-gated before this query runs; keeping the
+-- agent predicate here makes the accounting join match that authorized task
+-- scope without an N+1 query per returned task.
+--
+-- Uses idx_agent_task_queue_agent_id_keyset (migration 278) plus the
+-- task_usage task_id index (migration 032).
+SELECT
+    tu.task_id,
+    tu.provider,
+    tu.model,
+    tu.input_tokens,
+    tu.output_tokens,
+    tu.cache_read_tokens,
+    tu.cache_write_tokens,
+    tu.cost_usd_ticks
+FROM task_usage tu
+JOIN agent_task_queue atq ON atq.id = tu.task_id
+WHERE atq.agent_id = $1
+ORDER BY tu.task_id, tu.model;
+
 -- name: GetIssueUsageSummary :one
 SELECT
     COALESCE(SUM(tu.input_tokens), 0)::bigint AS total_input_tokens,
