@@ -105,6 +105,14 @@
       "description": "6일 넘게 오프라인입니다. 다시 연결되지 않으면 7일째 자동 삭제됩니다."
     }
   },
+  "drainAction": "안전 종료",
+  "drainCancel": "안전 종료 취소",
+  "drainForceStop": "지금 종료",
+  "stateDraining": "안전 종료 중",
+  "drainInlineHint": "실행 중 작업 {{inflight}} · 대기 작업 {{queued}}",
+  "drainConfirmTitle": "실행 중인 작업 {{count}}개를 중단합니다.",
+  "drainQueuedHint": "대기 중인 작업 {{count}}개는 시간 초과까지 유지됩니다.",
+  "drainDescription": "새 작업을 받지 않으며 실행 중인 작업이 완료되면 자동으로 종료됩니다.",
   "detail": {
     "all_runtimes": "모든 런타임",
     "read_only": "읽기 전용",

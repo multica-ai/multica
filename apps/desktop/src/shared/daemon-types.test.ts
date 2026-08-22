@@ -14,6 +14,12 @@ describe("daemonStatusAlive", () => {
     expect(daemonStatusAlive("starting")).toBe(true);
   });
 
+  it("treats a draining daemon as alive (NEX-38)", () => {
+    // A draining daemon is still on the port and finishing in-flight work; it
+    // must not be treated as stopped (which would spawn a second daemon).
+    expect(daemonStatusAlive("draining")).toBe(true);
+  });
+
   it("treats stopped / unknown / missing as not alive", () => {
     expect(daemonStatusAlive("stopped")).toBe(false);
     expect(daemonStatusAlive("bogus")).toBe(false);

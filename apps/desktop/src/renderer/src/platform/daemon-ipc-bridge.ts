@@ -13,6 +13,7 @@ import type { AgentRuntime } from "@multica/core/types";
 interface DaemonStatusLike {
   state:
     | "running"
+    | "draining"
     | "stopped"
     | "starting"
     | "stopping"
@@ -43,6 +44,15 @@ function mergeDaemonStatus(rt: AgentRuntime, status: DaemonStatusLike): AgentRun
     return {
       ...rt,
       status: "online",
+      last_seen_at: new Date().toISOString(),
+    };
+  }
+  // Draining keeps heartbeats flowing and finishes in-flight work, so the
+  // runtime stays alive — just not claiming new tasks (NEX-38).
+  if (status.state === "draining") {
+    return {
+      ...rt,
+      status: "draining",
       last_seen_at: new Date().toISOString(),
     };
   }

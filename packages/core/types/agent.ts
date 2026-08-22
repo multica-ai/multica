@@ -71,7 +71,12 @@ export interface RuntimeDevice {
   runtime_mode: AgentRuntimeMode;
   provider: string;
   launch_header: string;
-  status: "online" | "offline";
+  /**
+   * Server-side runtime status. `draining` is the NEX-38 safe-shutdown state:
+   * the runtime stops claiming new tasks but keeps heartbeating and finishes
+   * in-flight work, so it stays "alive" for the offline sweeper.
+   */
+  status: "online" | "draining" | "offline";
   device_info: string;
   metadata: Record<string, unknown>;
   owner_id: string | null;

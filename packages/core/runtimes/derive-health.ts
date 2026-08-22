@@ -13,7 +13,11 @@ const FIVE_MINUTES_MS = 5 * 60 * 1000;
 const ABOUT_TO_GC_THRESHOLD_MS = 6 * 24 * 3600 * 1000; // 6 days
 
 export function deriveRuntimeHealth(runtime: AgentRuntime, now: number): RuntimeHealth {
-  if (runtime.status === "online") return "online";
+  // `draining` is an alive state: the runtime keeps heartbeating while it
+  // finishes in-flight work, so it must not read as lost/offline.
+  if (runtime.status === "online" || runtime.status === "draining") {
+    return "online";
+  }
 
   // No last_seen timestamp ever recorded — treat as long-offline. This is
   // an unusual case (the back-end always sets last_seen_at on register),

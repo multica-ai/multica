@@ -15,6 +15,7 @@ import type {
   DaemonStatus,
   DaemonPrefs,
   LocalRuntimeProbe,
+  DaemonDrainAction,
 } from "../shared/daemon-types";
 
 interface DesktopAPI {
@@ -125,6 +126,9 @@ interface DaemonAPI {
   start: () => Promise<{ success: boolean; error?: string }>;
   stop: () => Promise<{ success: boolean; error?: string }>;
   restart: () => Promise<{ success: boolean; error?: string }>;
+  drain: (
+    action: DaemonDrainAction,
+  ) => Promise<{ success: boolean; error?: string }>;
   getStatus: () => Promise<DaemonStatus>;
   probeRuntimes: () => Promise<LocalRuntimeProbe>;
   getHostName: () => Promise<string>;

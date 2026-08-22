@@ -23,6 +23,7 @@ import { AUTH_SESSION_STATE_CHANNEL } from "../shared/auth-session";
 import type {
   DaemonStatus,
   LocalRuntimeProbe,
+  DaemonDrainAction,
 } from "../shared/daemon-types";
 import {
   MAIN_RENDERER_CHANNEL_STATE_CHANNEL,
@@ -242,6 +243,10 @@ const daemonAPI = {
     ipcRenderer.invoke("daemon:stop"),
   restart: (): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke("daemon:restart"),
+  drain: (
+    action: DaemonDrainAction,
+  ): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke("daemon:drain", action),
   getStatus: (): Promise<DaemonStatus> =>
     ipcRenderer.invoke("daemon:get-status"),
   probeRuntimes: (): Promise<LocalRuntimeProbe> =>
