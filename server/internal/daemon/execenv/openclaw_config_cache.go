@@ -28,11 +28,11 @@ import (
 // (PrepareIsolated / ReuseIsolated), so an in-process cache would never
 // survive to the next task.
 //
-// What is NOT cached: the fully resolved config read by
-// openclawResolvedFullConfig. That payload carries the user's API keys and
-// model-provider tokens, and copying it into a long-lived shared file is a
-// secret-spill surface the wrapper flow does not need — that call already
-// only happens for agents with a managed mcp_config.
+// What is NOT cached: the resolved `mcp` subtree read by
+// openclawResolvedMcpConfig. It is small, but it is per-agent state that has to
+// reflect the user's config as it is now rather than as it was for some earlier
+// task, and that call already only happens for agents with a managed
+// mcp_config.
 const (
 	// openclawDiscoveryCacheFile is the per-profile cache file name. It sits
 	// in the profile directory (~/.multica[/profiles/<name>]) so every task on

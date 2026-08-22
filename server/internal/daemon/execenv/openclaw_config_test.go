@@ -779,19 +779,15 @@ func TestPrepareOpenclawConfigStrictReplacesUserMcpServers(t *testing.T) {
 	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("write user cfg: %v", err)
 	}
-	// The resolved user config the CLI would return: a user global
-	// mcp.servers + some other non-mcp content the snapshot must preserve.
-	resolvedUser := `{
-		"mcp": {"servers": {
-			"global_one": {"command": "/bin/echo", "args": ["user"]},
-			"shared":     {"command": "/bin/old-version"}
-		}},
-		"gateway": {"port": 18789},
-		"providers": {"anthropic": {"apiKey": "sk-user-secret"}}
-	}`
+	// The resolved `mcp` subtree the CLI would return: a user global
+	// mcp.servers the wrapper must replace.
+	resolvedMcp := `{"servers": {
+		"global_one": {"command": "/bin/echo", "args": ["user"]},
+		"shared":     {"command": "/bin/old-version"}
+	}}`
 	stub := installOpenclawStub(t, map[string]openclawResponse{
 		"config file":                   {stdout: userCfgPath},
-		"config get --json":             {stdout: resolvedUser},
+		"config get mcp --json":         {stdout: resolvedMcp},
 		"config get agents.list --json": {stdout: "null"},
 	})
 
@@ -847,24 +843,103 @@ func TestPrepareOpenclawConfigStrictReplacesUserMcpServers(t *testing.T) {
 		t.Errorf("$include = %q, want sanitized snapshot %q", snapshotPath, wantSnapshot)
 	}
 
-	// Snapshot must exist, must drop the `mcp` block, and must preserve the
-	// non-mcp keys (gateway, providers, secrets) so OpenClaw still has API
-	// keys and other config the user relied on.
+	// The snapshot is an include chain, not a copy: it pulls in the live user
+	// config, resets `mcp` wholesale, and restores only the resolved non-server
+	// MCP settings. Everything else the user configured (gateway, providers,
+	// credentials) still reaches OpenClaw through stage 1, without any of it
+	// being written into the task directory.
 	snap := mustReadJSON(t, snapshotPath)
-	if _, present := snap["mcp"]; present {
-		t.Errorf("snapshot still contains an `mcp` block — strict replace not enforced: %v", snap["mcp"])
+	snapInclude, ok := snap["$include"].([]any)
+	if !ok || len(snapInclude) != 2 {
+		t.Fatalf("snapshot $include = %#v, want [user-config, mcp-reset]", snap["$include"])
 	}
-	if gw, ok := snap["gateway"].(map[string]any); !ok || gw["port"] != float64(18789) {
-		t.Errorf("snapshot lost gateway.port carryover: %v", snap["gateway"])
+	if snapInclude[0] != userCfgPath {
+		t.Errorf("snapshot $include[0] = %v, want the live user config %q", snapInclude[0], userCfgPath)
 	}
-	if _, ok := snap["providers"].(map[string]any); !ok {
-		t.Errorf("snapshot lost providers carryover: %v", snap)
+	wantReset := filepath.Join(envRoot, openclawMcpResetFile)
+	if snapInclude[1] != wantReset {
+		t.Errorf("snapshot $include[1] = %v, want the mcp reset %q", snapInclude[1], wantReset)
+	}
+	reset := mustReadJSON(t, wantReset)
+	if value, present := reset["mcp"]; !present || value != nil {
+		t.Errorf("mcp reset = %v, want an explicit null so the include merge replaces the user's block", reset)
+	}
+	// No user config bytes in the task directory — this is the point of the
+	// include chain over the flat copy it replaces.
+	snapRaw, err := os.ReadFile(snapshotPath)
+	if err != nil {
+		t.Fatalf("read snapshot: %v", err)
+	}
+	if strings.Contains(string(snapRaw), "global_one") {
+		t.Errorf("snapshot carries the user's server definitions: %s", snapRaw)
 	}
 
-	// The snapshot lives in envRoot alongside the wrapper, so the daemon
-	// does NOT need to grant an OPENCLAW_INCLUDE_ROOTS entry for it.
-	if result.IncludeRoot != "" {
-		t.Errorf("IncludeRoot = %q, want empty (snapshot lives in envRoot, no cross-dir include)", result.IncludeRoot)
+	// The snapshot $includes the live user config, so that cross-directory hop
+	// has to be granted to OpenClaw's include resolver.
+	if result.IncludeRoot != filepath.Dir(userCfgPath) {
+		t.Errorf("IncludeRoot = %q, want %q (the snapshot includes the user config)",
+			result.IncludeRoot, filepath.Dir(userCfgPath))
+	}
+}
+
+// TestPrepareOpenclawConfigIncludeRootGrants pins which include targets need an
+// OPENCLAW_INCLUDE_ROOTS grant, since getting this wrong fails in a way no
+// snapshot-shape assertion would catch: OpenClaw's include-confinement check
+// rejects the chain at load time, and the task fails with a config error rather
+// than anything pointing back here.
+//
+// The managed-MCP row is the one that changed. The flat resolved-config copy it
+// replaces was self-contained, so it needed no grant; the include chain reaches
+// the user's real config, so it does.
+func TestPrepareOpenclawConfigIncludeRootGrants(t *testing.T) {
+	cases := []struct {
+		name       string
+		mcpConfig  json.RawMessage
+		userConfig bool
+		wantGrant  bool
+	}{
+		{name: "managed mcp includes the user config", mcpConfig: json.RawMessage(`{"mcpServers":{"m":{"command":"uvx"}}}`), userConfig: true, wantGrant: true},
+		{name: "inherited mcp includes the user config", userConfig: true, wantGrant: true},
+		{name: "fresh install has nothing to include", mcpConfig: json.RawMessage(`{"mcpServers":{"m":{"command":"uvx"}}}`), userConfig: false, wantGrant: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			envRoot := t.TempDir()
+			workDir := filepath.Join(envRoot, "workdir")
+			if err := os.MkdirAll(workDir, 0o755); err != nil {
+				t.Fatalf("mkdir workdir: %v", err)
+			}
+			responses := map[string]openclawResponse{
+				"config get agents.list --json": {stdout: "null"},
+				"config get mcp --json":         {stdout: `{"sessionIdleTtlMs":1000}`},
+			}
+			userCfgPath := ""
+			if tc.userConfig {
+				userCfgPath = filepath.Join(t.TempDir(), "openclaw.json")
+				if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
+					t.Fatalf("write user cfg: %v", err)
+				}
+				responses["config file"] = openclawResponse{stdout: userCfgPath}
+			} else {
+				responses["config file"] = openclawResponse{stdout: filepath.Join(t.TempDir(), "absent.json")}
+			}
+			stub := installOpenclawStub(t, responses)
+
+			result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
+				OpenclawBin: stub.bin,
+				McpConfig:   tc.mcpConfig,
+			})
+			if err != nil {
+				t.Fatalf("prepareOpenclawConfig: %v", err)
+			}
+			want := ""
+			if tc.wantGrant {
+				want = filepath.Dir(userCfgPath)
+			}
+			if result.IncludeRoot != want {
+				t.Errorf("IncludeRoot = %q, want %q", result.IncludeRoot, want)
+			}
+		})
 	}
 }
 
@@ -887,20 +962,17 @@ func TestPrepareOpenclawConfigStrictPreservesNonServerMcpKeys(t *testing.T) {
 	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("write user cfg: %v", err)
 	}
-	// User's resolved config has BOTH `mcp.servers` (must be stripped) and
-	// `mcp.sessionIdleTtlMs` (must survive). The snapshot is what OpenClaw
-	// loads via the wrapper's $include, so only the snapshot's `mcp` block
-	// is consulted for non-server settings.
-	resolvedUser := `{
-		"mcp": {
-			"sessionIdleTtlMs": 300000,
-			"servers": {"global_one": {"command": "/bin/echo"}}
-		},
-		"gateway": {"port": 18789}
+	// The resolved `mcp` subtree has BOTH `servers` (must be replaced) and
+	// `sessionIdleTtlMs` (must survive). The snapshot is what OpenClaw loads via
+	// the wrapper's $include, so only the snapshot's `mcp` block is consulted
+	// for non-server settings.
+	resolvedMcp := `{
+		"sessionIdleTtlMs": 300000,
+		"servers": {"global_one": {"command": "/bin/echo"}}
 	}`
 	stub := installOpenclawStub(t, map[string]openclawResponse{
 		"config file":                   {stdout: userCfgPath},
-		"config get --json":             {stdout: resolvedUser},
+		"config get mcp --json":         {stdout: resolvedMcp},
 		"config get agents.list --json": {stdout: "null"},
 	})
 	mcpConfig := json.RawMessage(`{"mcpServers": {"managed_only": {"command": "uvx", "args": ["m"]}}}`)
@@ -955,7 +1027,7 @@ func TestPrepareOpenclawConfigStrictEmptyManagedSetDropsUserMcp(t *testing.T) {
 	if err := os.WriteFile(userCfgPath, []byte(`{}`), 0o600); err != nil {
 		t.Fatalf("write user cfg: %v", err)
 	}
-	resolvedUser := `{"mcp": {"servers": {"global_one": {"command": "/bin/echo"}}}}`
+	resolvedMcp := `{"servers": {"global_one": {"command": "/bin/echo"}}}`
 
 	cases := map[string]json.RawMessage{
 		"object_empty":          json.RawMessage(`{}`),
@@ -965,7 +1037,7 @@ func TestPrepareOpenclawConfigStrictEmptyManagedSetDropsUserMcp(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			stub := installOpenclawStub(t, map[string]openclawResponse{
 				"config file":                   {stdout: userCfgPath},
-				"config get --json":             {stdout: resolvedUser},
+				"config get mcp --json":         {stdout: resolvedMcp},
 				"config get agents.list --json": {stdout: "null"},
 			})
 			result, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
@@ -1100,12 +1172,12 @@ func TestPrepareOpenclawConfigManagedSetFreshInstall(t *testing.T) {
 	}
 }
 
-// TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError — when the
+// TestPrepareOpenclawConfigFailsClosedOnResolvedMcpError — when the
 // user has a config on disk and the agent has managed mcp_config but
-// `openclaw config get --json` errors, the preparer must NOT fall back to
-// `$include`ing the live user file (which would leak global mcp.servers).
-// Fail closed instead, mirroring the existing fail-closed posture.
-func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError(t *testing.T) {
+// `openclaw config get mcp --json` errors, the preparer must NOT fall back to
+// `$include`ing the live user file without the reset (which would leak global
+// mcp.servers). Fail closed instead, mirroring the existing fail-closed posture.
+func TestPrepareOpenclawConfigFailsClosedOnResolvedMcpError(t *testing.T) {
 	envRoot := t.TempDir()
 	workDir := filepath.Join(envRoot, "workdir")
 	if err := os.MkdirAll(workDir, 0o755); err != nil {
@@ -1118,9 +1190,9 @@ func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError(t *testing.T) {
 	stub := installOpenclawStub(t, map[string]openclawResponse{
 		"config file":                   {stdout: userCfgPath},
 		"config get agents.list --json": {stdout: "null"},
-		"config get --json": {
+		"config get mcp --json": {
 			stdout: `{"error":"schema validation failed","resolved":{"apiKey":"must-not-leak"}}`,
-			err:    errors.New("openclaw config get --json: exit status 1"),
+			err:    errors.New("openclaw config get mcp --json: exit status 1"),
 		},
 	})
 	mcpConfig := json.RawMessage(`{"mcpServers": {"context7": {"command": "uvx"}}}`)
@@ -1130,10 +1202,10 @@ func TestPrepareOpenclawConfigFailsClosedOnResolvedConfigError(t *testing.T) {
 		McpConfig:   mcpConfig,
 	})
 	if err == nil {
-		t.Fatal("prepareOpenclawConfig succeeded when `config get --json` errored; expected fail closed")
+		t.Fatal("prepareOpenclawConfig succeeded when `config get mcp --json` errored; expected fail closed")
 	}
-	if !strings.Contains(err.Error(), "resolved config") {
-		t.Errorf("error %q does not name the resolved-config step", err.Error())
+	if !strings.Contains(err.Error(), "resolved mcp config") {
+		t.Errorf("error %q does not name the resolved-mcp step", err.Error())
 	}
 	if !strings.Contains(err.Error(), "json error: schema validation failed") {
 		t.Errorf("error %q omits the structured CLI diagnostic", err.Error())

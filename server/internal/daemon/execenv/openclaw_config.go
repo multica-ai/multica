@@ -21,13 +21,24 @@ import (
 // the rest of the task env.
 const openclawConfigFile = "openclaw-config.json"
 
-// openclawUserSnapshotFile is the sanitized copy of the user's fully
-// resolved openclaw config the wrapper $includes when the agent has a
-// managed mcp_config. It is the user's config minus the `mcp` block so the
-// wrapper's managed `mcp.servers` is the only MCP definition visible to
-// OpenClaw — true strict-replace, not deep-merge-by-name. Lives in envRoot
-// at 0o600 next to the wrapper.
+// openclawUserSnapshotFile is what the wrapper $includes when the agent has a
+// managed mcp_config. Despite the name it holds no copy of the user's config:
+// it is an include chain — the user's live config, then openclawMcpResetFile,
+// then the resolved non-server `mcp` settings — so the wrapper's managed
+// `mcp.servers` is the only MCP server definition visible to OpenClaw. True
+// strict-replace, not deep-merge-by-name.
+//
+// It replaced a flat sanitized copy of the resolved config, which is why the
+// file is still named "snapshot". Lives in envRoot at 0o600 next to the
+// wrapper; the 0o600 is now about the include paths it names rather than about
+// secrets it carries, because it carries none.
 const openclawUserSnapshotFile = "openclaw-user-snapshot.json"
+
+// openclawMcpResetFile contributes `{"mcp":null}` between the user's config and
+// the sanitized MCP settings. OpenClaw's include merge treats a primitive source
+// as replacement, so this resets the entire user MCP object before the next
+// merge restores the allowed siblings.
+const openclawMcpResetFile = "openclaw-mcp-reset.json"
 
 // openclawCLITimeout is the default context deadline set on each
 // `openclaw config ...` invocation during task setup.
@@ -358,40 +369,64 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	// **Strict replace for managed mcp_config.** When the agent has a managed
 	// set, deep-merging the wrapper's `mcp.servers` against the user's active
 	// config via `$include` would let user-only entries leak in (and an empty
-	// managed set would not actually clear inherited servers). To enforce the
-	// Codex-style "managed wins, user globals invisible" contract, fetch the
-	// user's resolved config, drop just the `mcp.servers` map (keep other
-	// `mcp.*` settings like `sessionIdleTtlMs`), write a sanitized snapshot
-	// in envRoot, and $include the snapshot instead of the live user file.
-	// The wrapper's `mcp.servers` then becomes the only MCP server definition
-	// the snapshot's resolution can yield, while the user's surrounding `mcp`
-	// tuning still flows through.
+	// managed set would not actually clear inherited servers).
+	//
+	// The resolved-root form this used to use (`config get --json` with no path)
+	// is not reliably answered: measured against 2026.5.27 it writes zero bytes
+	// to stdout and never exits, which fails preparation for every managed-MCP
+	// task on such a host. Scoped to that measurement deliberately — the field
+	// reports on 2026.7.1-2 are about `config file`, not this read, so the root
+	// read's behaviour there is unmeasured. `config get mcp --json` is answered,
+	// and is also the only part this code needs, so ask for the subtree and build
+	// a three-stage include:
+	//
+	//  1. include the user's full config,
+	//  2. merge `mcp: null` to replace its MCP object wholesale,
+	//  3. restore the resolved non-server MCP settings (`sessionIdleTtlMs` and
+	//     friends).
+	//
+	// The wrapper then adds the managed server set, which becomes the only MCP
+	// server definition the snapshot can yield, while the user's surrounding
+	// `mcp` tuning still flows through. OpenClaw's own loader resolves JSON5,
+	// nested includes and env substitutions behind the include, so — unlike the
+	// flat resolved-config copy this replaces — no user config bytes, API keys
+	// or provider tokens are written into the task directory at all.
 	snapshotPath := ""
 	if hasManagedMcp && exists {
-		resolved, ferr := openclawResolvedFullConfig(bin, timeout)
+		// Same deadline as every other call in this preparation. The MCP query
+		// is one of the openclawMaxCLICallsPerPreparation calls the budget
+		// arithmetic already accounts for, and it is the same class of
+		// invocation as the discovery calls — measured at 4.3s on the slow host
+		// in #7142 — so giving it a shorter budget of its own would fail closed
+		// on exactly the machines that override the deadline because they need
+		// it. It also has to honour MULTICA_OPENCLAW_CLI_TIMEOUT for the same
+		// reason.
+		resolvedMcp, ferr := openclawResolvedMcpConfig(bin, timeout)
 		if ferr != nil {
-			return OpenclawConfigResult{}, fmt.Errorf("read openclaw resolved config: %w", ferr)
+			return OpenclawConfigResult{}, fmt.Errorf("read openclaw resolved mcp config: %w", ferr)
 		}
-		if resolved == nil {
-			// CLI reports the file exists but `config get --json` returned
-			// nothing structured. Treat as no user-config-to-strip: the
-			// wrapper will carry managed mcp.servers as the sole source.
-			exists = false
-			activePath = ""
-		} else {
-			stripUserMcpServers(resolved)
-			snapBytes, merr := json.MarshalIndent(resolved, "", "  ")
-			if merr != nil {
-				return OpenclawConfigResult{}, fmt.Errorf("marshal openclaw user snapshot: %w", merr)
-			}
-			snapshotPath = filepath.Join(envRoot, openclawUserSnapshotFile)
-			// 0o600 — the snapshot is now a flat copy of the user's resolved
-			// config and may carry API keys / model-provider tokens that
-			// $include used to keep on disk in the user's own file. Lock the
-			// snapshot to the daemon owner; only the openclaw child reads it.
-			if werr := os.WriteFile(snapshotPath, snapBytes, 0o600); werr != nil {
-				return OpenclawConfigResult{}, fmt.Errorf("write openclaw user snapshot: %w", werr)
-			}
+		delete(resolvedMcp, "servers")
+
+		resetPath := filepath.Join(envRoot, openclawMcpResetFile)
+		if werr := os.WriteFile(resetPath, []byte("{\n  \"mcp\": null\n}\n"), 0o600); werr != nil {
+			return OpenclawConfigResult{}, fmt.Errorf("write openclaw mcp reset: %w", werr)
+		}
+		snapshot := map[string]any{
+			"$include": []any{activePath, resetPath},
+		}
+		if len(resolvedMcp) > 0 {
+			snapshot["mcp"] = resolvedMcp
+		}
+		snapBytes, merr := json.MarshalIndent(snapshot, "", "  ")
+		if merr != nil {
+			return OpenclawConfigResult{}, fmt.Errorf("marshal openclaw user snapshot: %w", merr)
+		}
+		snapshotPath = filepath.Join(envRoot, openclawUserSnapshotFile)
+		// 0o600 even though the snapshot now holds only include paths and MCP
+		// tuning: it names the user's real config location, and nothing outside
+		// the openclaw child needs to read it.
+		if werr := os.WriteFile(snapshotPath, snapBytes, 0o600); werr != nil {
+			return OpenclawConfigResult{}, fmt.Errorf("write openclaw user snapshot: %w", werr)
 		}
 	}
 
@@ -411,9 +446,13 @@ func prepareOpenclawConfig(envRoot, workDir string, opts OpenclawConfigPrep) (Op
 	result := OpenclawConfigResult{ConfigPath: outPath}
 	includeTarget := "none"
 	if snapshotPath != "" {
-		// Sanitized snapshot lives in envRoot alongside the wrapper, so the
-		// $include never crosses directories — daemon does not need to grant
-		// an extra OPENCLAW_INCLUDE_ROOTS entry.
+		// The snapshot sits beside the wrapper, but unlike the flat resolved
+		// copy it replaces, it $includes the live user config — so that
+		// cross-directory hop now has to be granted to OpenClaw's nested
+		// include resolver. This is the cost side of not copying the user's
+		// config into the task directory: the daemon grants read access to the
+		// directory instead of duplicating its contents (and its secrets).
+		result.IncludeRoot = filepath.Dir(activePath)
 		includeTarget = "sanitized-snapshot"
 	} else if exists {
 		// Live user config is in its own directory; tell the daemon to grant
@@ -624,28 +663,6 @@ func rewriteAgentsListWorkspaces(list []any, workDir string) []any {
 		return nil
 	}
 	return out
-}
-
-// stripUserMcpServers removes only `mcp.servers` from a resolved user
-// config, leaving every other key under `mcp` (e.g. `sessionIdleTtlMs`)
-// intact. The wrapper's managed `mcp.servers` becomes the sole server
-// definition while the user's surrounding MCP tuning still applies — see
-// https://docs.openclaw.ai/gateway/configuration-reference#mcp for the
-// full list of sibling settings the snapshot should preserve.
-//
-// If the resulting `mcp` block has no keys left, the parent `mcp` key is
-// dropped too so the snapshot doesn't carry an empty placeholder. Any
-// non-object value for `mcp` is left as-is; we only know how to strip
-// servers from the documented object shape.
-func stripUserMcpServers(resolved map[string]any) {
-	mcp, ok := resolved["mcp"].(map[string]any)
-	if !ok {
-		return
-	}
-	delete(mcp, "servers")
-	if len(mcp) == 0 {
-		delete(resolved, "mcp")
-	}
 }
 
 // openclawActiveConfigPath runs `openclaw config file` to discover the path
@@ -953,33 +970,42 @@ func isOpenclawConfigFileUnsupported(err error) bool {
 		(strings.Contains(msg, "unknown") && strings.Contains(msg, "config") && strings.Contains(msg, "file"))
 }
 
-// openclawResolvedFullConfig fetches the user's fully resolved openclaw
-// config via `openclaw config get --json` (no key path — root). The CLI's
-// loader handles JSON5 / $include / env-substitution and emits a flat JSON
-// object, which is what we need to write a sanitized snapshot that the
-// wrapper can $include without inheriting the user's `mcp.servers`.
+// openclawResolvedMcpConfig fetches the user's resolved `mcp` subtree via
+// `openclaw config get mcp --json`. The CLI's loader handles JSON5 / $include /
+// env-substitution, so this is the user's effective MCP settings with the
+// sibling tuning (`sessionIdleTtlMs` and friends) the wrapper has to preserve.
 //
-// Returns (nil, nil) when the CLI prints empty / null output for the root
-// — interpreted as "no resolvable user config" by the caller, which then
-// falls through to the fresh-install code path. Any other failure
-// surfaces as an error so the daemon fails closed instead of silently
-// degrading to a leaky non-strict wrapper.
-func openclawResolvedFullConfig(bin string, timeout time.Duration) (map[string]any, error) {
+// The subtree rather than the root: `config get --json` with no key path was
+// measured against 2026.5.27 writing nothing to stdout and never exiting, which
+// makes reading the root a preparation timeout for every managed-MCP task on
+// such a host. That is one release on one host and is not generalized here: the
+// field reports on 2026.7.1-2 (#6275, #7308) both concern `config file`, so what
+// the root read does on that version is unmeasured. The subtree is the right
+// target regardless — it is the only part of the configuration this code needs,
+// which also keeps the user's API keys and provider tokens out of this process
+// entirely.
+//
+// A missing key is not an error: a config with no `mcp` block at all answers
+// "path not found", which means there is nothing to preserve.
+func openclawResolvedMcpConfig(bin string, timeout time.Duration) (map[string]any, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	out, err := openclawExec(ctx, bin, "config", "get", "--json")
+	out, err := openclawExec(ctx, bin, "config", "get", "mcp", "--json")
 	if err != nil {
+		if isOpenclawKeyMissing(err) {
+			return nil, nil
+		}
 		return nil, annotateOpenclawJSONError(err, out)
 	}
 	trimmed := strings.TrimSpace(out)
 	if trimmed == "" || trimmed == "null" {
 		return nil, nil
 	}
-	var cfg map[string]any
-	if err := json.Unmarshal([]byte(trimmed), &cfg); err != nil {
-		return nil, fmt.Errorf("parse `openclaw config get --json` output: %w", err)
+	var mcp map[string]any
+	if err := json.Unmarshal([]byte(trimmed), &mcp); err != nil {
+		return nil, fmt.Errorf("parse `openclaw config get mcp --json` output: %w", err)
 	}
-	return cfg, nil
+	return mcp, nil
 }
 
 // openclawResolvedAgentsList fetches the user's resolved per-agent list and

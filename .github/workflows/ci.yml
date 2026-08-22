@@ -516,6 +516,16 @@ jobs:
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go build ./...
 
+      # The `agentintegration` files execute real agent CLIs, so no CI job runs
+      # them. Nothing compiled them either, which let them rot silently: a
+      # helper renamed in an ordinary test file, or two branches each defining
+      # the same helper in one package, breaks the tagged build with every
+      # untagged job still green. vet type-checks test files, so this is the
+      # cheapest gate that keeps them honest without needing an agent CLI.
+      - name: Vet tag-gated agent integration tests
+        if: ${{ needs.changes.outputs.backend == 'true' }}
+        run: cd server && go vet -tags agentintegration ./...
+
       - name: Run migrations
         if: ${{ needs.changes.outputs.backend == 'true' }}
         run: cd server && go run ./cmd/migrate up

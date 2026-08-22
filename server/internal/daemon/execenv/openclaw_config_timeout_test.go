@@ -212,8 +212,8 @@ func TestPrepareOpenclawConfigWorstCaseCLICallCount(t *testing.T) {
 		"config get agents.list --json": {err: errors.New("Config path not found: agents.list")},
 		// 3. registry fallback
 		"agents list --json": {stdout: `[{"id":"scout"}]`},
-		// 4. full resolved config, reached only via a managed mcp_config
-		"config get --json": {stdout: `{"agents":{"list":[{"id":"scout"}]}}`},
+		// 4. resolved MCP subtree, reached only via a managed mcp_config
+		"config get mcp --json": {stdout: `{"sessionIdleTtlMs":1000}`},
 	})
 
 	if _, err := prepareOpenclawConfig(envRoot, workDir, OpenclawConfigPrep{
