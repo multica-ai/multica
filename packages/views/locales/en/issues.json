@@ -376,7 +376,12 @@
     "project_directory_path_copied": "Project directory path copied",
     "project_directory_path_copied_with_branch": "Project directory path copied — work is on {{branch}}",
     "workdir_path_copy_failed": "Failed to copy workdir path",
-    "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent"
+    "workdir_path_unavailable": "No local workdir yet — issue has not been run by a local agent",
+    "list_rail": {
+      "toggle_expand_aria": "Expand issue list",
+      "toggle_collapse_aria": "Collapse issue list",
+      "count_badge": "{{count}} issues"
+    }
   },
   "timeline": {
     "loading": "Loading..."

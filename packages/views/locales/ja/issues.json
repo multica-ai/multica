@@ -371,7 +371,12 @@
     "project_directory_path_copied": "プロジェクトディレクトリのパスをコピーしました",
     "project_directory_path_copied_with_branch": "プロジェクトディレクトリのパスをコピーしました — 作業は {{branch}} ブランチにあります",
     "workdir_path_copy_failed": "作業ディレクトリのパスをコピーできませんでした",
-    "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません"
+    "workdir_path_unavailable": "まだローカルの作業ディレクトリがありません。ローカルエージェントがこのタスクを実行していません",
+    "list_rail": {
+      "toggle_expand_aria": "タスクリストを展開",
+      "toggle_collapse_aria": "タスクリストを折りたたむ",
+      "count_badge": "タスク {{count}} 件"
+    }
   },
   "timeline": {
     "loading": "読み込み中..."

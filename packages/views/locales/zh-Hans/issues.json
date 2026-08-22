@@ -370,6 +370,11 @@
     "project_directory_path_copied_with_branch": "已复制项目目录路径 — 任务改动位于 {{branch}} 分支",
     "workdir_path_copy_failed": "复制本地 workdir 路径失败",
     "workdir_path_unavailable": "暂无本地 workdir — 这个任务还没被本地 agent 运行过",
+    "list_rail": {
+      "toggle_expand_aria": "展开任务列表",
+      "toggle_collapse_aria": "收起任务列表",
+      "count_badge": "{{count}} 个任务"
+    },
     "unsubscribe_subtree_succeeded": "已取消订阅此任务及其子任务。",
     "subscription_update_failed": "无法更新订阅状态，请重试。"
   },
