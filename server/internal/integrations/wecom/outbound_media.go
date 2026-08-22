@@ -152,13 +152,6 @@ func WithAttachments(objects mediaObjectStore) OutboundOption {
 	return func(o *Outbound) { o.objects = objects }
 }
 
-// mayCarryAttachments reports whether this turn is worth the lookups even
-// though the agent said nothing. Everything it checks is already in hand, so a
-// deployment with no storage — or an event naming no message — costs no query.
-func (o *Outbound) mayCarryAttachments(e events.Event) bool {
-	return o.objects != nil && e.WorkspaceID != "" && chatDoneMessageID(e.Payload) != ""
-}
-
 // deliverAttachments hands the answer's files to a goroutine of their own, if
 // there are any to hand over. It is called after the words are out, and
 // returns immediately.
@@ -230,12 +223,15 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		return
 	}
 	// Past here a file is known to be waiting, so every way out of this
-	// function has to end in either a delivery or a sentence to the user.
+	// function ends in either a delivery or a sentence to the user — with one
+	// exception, and it is the installation itself being withdrawn. That
+	// silences both (tellUser).
 
 	// Shed when too many deliveries that found a file are already outstanding.
 	// The semaphore below bounds how many RUN at once; this bounds how many
-	// wait for it, and unlike admission it can name what was dropped, so the
-	// user hears about it.
+	// wait for it, and unlike admission it can name what was dropped — so the
+	// user hears about it, unless they are the one who withdrew the connection
+	// it would be said over (tellUser).
 	if !o.claimAttachmentSlot() {
 		o.logger.WarnContext(ctx, "wecom outbound: attachment delivery shed, too many already pending",
 			"installation_id", uuidStringPub(to.InstallationID),
@@ -274,7 +270,39 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 		return
 	}
 	failed, unknown := 0, 0
-	for _, row := range rows {
+	for i, row := range rows {
+		// Asked once per file, not once per turn. Every one of them is its own
+		// irreversible act — a file in somebody's chat, and nothing takes it
+		// back — so a withdrawal landing mid-loop has to stop the ones that
+		// have not gone yet, and the loop is minutes long when the files are
+		// large.
+		//
+		// This is also the gate that covers everything above it. The permission
+		// was read before the handoff (sayTheAnswer), and since then this
+		// goroutine has waited on the lookup, on a pending slot and on the
+		// concurrency semaphore — three waits a revoke can land in, with a
+		// socket that stays in the registry until the reaper clears it.
+		//
+		// Fail-closed on both refusals. A revoked row is a person taking the
+		// connection back; a read that failed establishes nothing, and nothing
+		// is not permission to upload. The cost of being wrong is asymmetric —
+		// the file stays in object storage and the user can ask again, while a
+		// file sent into a chat that said no cannot be recalled.
+		if check := o.mayStillWrite(ctx, to.InstallationID); check != installationOK {
+			o.logger.WarnContext(ctx, "wecom outbound: file delivery stopped, the installation may no longer be written to",
+				"installation_id", uuidStringPub(to.InstallationID),
+				"permission", check,
+				// i is how many rows were ATTEMPTED, not how many landed: this
+				// gate sits at the top of the iteration, so a row whose send
+				// failed a moment ago is already behind it. failed and unknown
+				// are the loop's own tallies, so delivered costs nothing to
+				// state and an operator reading "delivered=0 attempted=1" is
+				// not misled into thinking a file went out.
+				"attempted", i, "delivered", i-failed-unknown, "withheld", len(rows)-i)
+			// Nothing is said about the ones already tried: the sentence would
+			// travel over the same connection this check just refused.
+			return
+		}
 		state, err := o.sendAttachment(ctx, sender, row, to)
 		switch state {
 		case deliveryDefinitelyFailed:
@@ -314,8 +342,21 @@ func (o *Outbound) sendAttachments(ctx context.Context, messageID, workspaceID p
 // tellUser puts one sentence into the conversation, best effort. Every caller
 // is already on a path where something went wrong, so a failure here is logged
 // and dropped rather than propagated — there is nothing further to try.
+//
+// The permission is read here rather than at the four call sites, because every
+// one of them arrives after a wait long enough for a revoke to land in, and an
+// apology is a message in somebody's chat like any other. After a withdrawal the
+// right answer is silence: mediaSendFailedText pushed through a connection its
+// owner has just taken back is the same trespass as the file would have been,
+// minus the file.
 func (o *Outbound) tellUser(ctx context.Context, to attachmentTarget, text string) {
 	if o.senders == nil {
+		return
+	}
+	if check := o.mayStillWrite(ctx, to.InstallationID); check != installationOK {
+		o.logger.WarnContext(ctx, "wecom outbound: the user was told nothing about their file, the installation may no longer be written to",
+			"installation_id", uuidStringPub(to.InstallationID),
+			"permission", check)
 		return
 	}
 	sender := o.senders.get(to.InstallationID)
@@ -377,12 +418,16 @@ func (o *Outbound) sendAttachment(ctx context.Context, sender *wsSender, row db.
 // answer is not an answer. errAckTimeout means the frame reached the socket and
 // the verdict never came, which leaves the message possibly delivered.
 //
-// A transport failure lands there too, and for the same reason rather than a
-// weaker one. errWriteAttempted marks an error raised once WriteMessage had
-// been entered; past that point the frame may already be at the peer, since a
-// half-closed connection reports "broken pipe" to the writer for bytes the
-// reader has. Only what fails before the write — a marshal error, a deadline
-// the connection refused — is provably undelivered.
+// A transport failure does NOT land there, and the reason is the one place
+// that can see it. writeLocked hands the whole frame to a single
+// net.Conn.Write, which reports an error only when it could not write all of
+// it (gorilla/websocket conn.go, Conn.write). A partial WebSocket frame is a
+// protocol error at the peer, not a short message, so its application never
+// receives one — which is why writeLocked names the failure
+// errFrameNotOnTheWire and why that reads as definitely failed here. The
+// earlier reading, that a half-closed connection may report "broken pipe" for
+// bytes the reader already has, is about frames that WERE written whole; the
+// one that fails is not among them.
 //
 // A context error lands on the same side, and less precisely than one would
 // like. wsSender.request returns the same ctx.Err() whether the context ended
@@ -396,7 +441,6 @@ func sendOutcome(err error) deliveryState {
 	case err == nil:
 		return deliveryDelivered
 	case errors.Is(err, errAckTimeout),
-		errors.Is(err, errWriteAttempted),
 		errors.Is(err, context.Canceled),
 		errors.Is(err, context.DeadlineExceeded):
 		return deliveryUnknown

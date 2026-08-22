@@ -41,8 +41,8 @@ func TestAckNotifier_CoalescesBurstThenReacksAfterWindow(t *testing.T) {
 	sid := sessionUUID(1)
 	ctx := context.Background()
 
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid)
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid)
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid, 0)
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid, 0)
 	if len(*sent) != 1 {
 		t.Fatalf("a burst within the window must coalesce to one ack, got %d", len(*sent))
 	}
@@ -51,7 +51,7 @@ func TestAckNotifier_CoalescesBurstThenReacksAfterWindow(t *testing.T) {
 	}
 
 	cur = base.Add(6 * time.Second)
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid)
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid, 0)
 	if len(*sent) != 2 {
 		t.Fatalf("a message after the window must re-ack, got %d", len(*sent))
 	}
@@ -63,10 +63,10 @@ func TestAckNotifier_SettleResetsDedup(t *testing.T) {
 	sid := sessionUUID(2)
 	ctx := context.Background()
 
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid)
-	n.OnSettled(ctx, sid)
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid, 0)
+	n.OnSettled(ctx, sid, 0)
 	// Even within the window, a settled session acks its next turn immediately.
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid)
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sid, 0)
 	if len(*sent) != 2 {
 		t.Fatalf("OnSettled must reset dedup so the next turn re-acks, got %d", len(*sent))
 	}
@@ -77,8 +77,8 @@ func TestAckNotifier_DistinctSessionsAckIndependently(t *testing.T) {
 	n, sent := newTestAck(func() time.Time { return cur })
 	ctx := context.Background()
 
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sessionUUID(3))
-	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sessionUUID(4))
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sessionUUID(3), 0)
+	n.OnIngested(ctx, engine.ResolvedInstallation{}, channel.InboundMessage{}, sessionUUID(4), 0)
 	if len(*sent) != 2 {
 		t.Fatalf("distinct sessions must each ack, got %d", len(*sent))
 	}

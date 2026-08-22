@@ -16,6 +16,7 @@ package wecom
 // without threading the Channel through the engine.
 
 import (
+	"context"
 	"sync"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -75,4 +76,53 @@ func (r *sendersRegistry) get(id pgtype.UUID) *wsSender {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.byKey[util.UUIDToString(id)]
+}
+
+// stream writes one frame of a streaming reply to the bubble h describes.
+//
+// A stream frame is only meaningful while the req_id it echoes is still fresh,
+// so a frame that cannot go out now is worthless later — there is nothing
+// useful to do with it but report the failure and let the caller say the same
+// words as an ordinary message instead.
+//
+// The sender is resolved HERE, per frame, rather than captured when the bubble
+// opened, and that is load-bearing rather than redundant: a callback's req_id
+// belongs to the TURN on WeCom's side, not to the connection it arrived on. A
+// bubble opened before a reconnect is therefore finished after it, over
+// whatever socket the installation holds by then, which is what lets a run
+// outlive the connection its question came in on. Binding a connection at
+// stream-open time reads like the obvious tightening and would strand the
+// bubble on every reconnect — a failure that shows up only when the connection
+// flaps, and never in a test.
+//
+// Measured 2026-08-09 against a live tenant, with our own backend stopped so
+// nothing competed for the bot's socket: one connection took a real
+// aibot_msg_callback, opened a stream on it and closed. A second connection,
+// dialled and subscribed fresh, then refreshed that stream in place (same
+// stream id) and opened a further one on the same req_id (new stream id) —
+// errcode 0 both times, and both confirmed by reading the chat rather than by
+// the errcode, since a server that accepts a frame and drops it looks the same
+// on the wire.
+//
+// This is the server's req_id. The ones newReqID mints for our own frames are
+// a separate key space, meaningful only on the connection that wrote them
+// (ws_sender.go).
+func (r *sendersRegistry) stream(ctx context.Context, h streamHandle, content string, finish bool) error {
+	sender := r.get(h.InstallationID)
+	if sender == nil {
+		return errNoLiveConnection
+	}
+	return sender.respondStream(ctx, h.ReqID, h.StreamID, content, finish)
+}
+
+// sendTextCtx pushes a plain message to a chat over the installation's live
+// connection — the fallback every closing frame degrades to. Separate from
+// stream because a message has no req_id to expire: this is the path that
+// still works when the bubble is beyond saving.
+func (r *sendersRegistry) sendTextCtx(ctx context.Context, id pgtype.UUID, chatID string, chatType int, content string) error {
+	sender := r.get(id)
+	if sender == nil {
+		return errNoLiveConnection
+	}
+	return sender.sendTextCtx(ctx, chatID, chatType, content)
 }

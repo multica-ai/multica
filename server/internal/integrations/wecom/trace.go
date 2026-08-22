@@ -12,7 +12,8 @@ package wecom
 //
 // With MULTICA_WECOM_TRACE=1 the server records enough to check a real-device
 // session afterwards: which way the frame went, what chat it was addressed
-// to, whether that chat is a room or a person, and what the server said back.
+// to, whether that chat is a room or a person, which bubble a stream frame was
+// writing to and whether that write sealed it, and what the server said back.
 // The switch also covers the one thing a frame does not carry — what an
 // attachment's own response said its name was (traceMediaHeaders), which no
 // later inspection can recover once the five-minute media URL has lapsed.
@@ -209,6 +210,24 @@ func traceOutFields(log *slog.Logger, frame map[string]any) *outTrace {
 		}
 		if md, ok := body["markdown"].(map[string]string); ok {
 			t.attrs = append(t.attrs, "len", len(md["content"]), "text", tracePreview(md["content"]))
+		}
+		// Which bubble this frame was writing to, and whether the write sealed
+		// it. Only respondStreamBody puts a stream here, and neither value is a
+		// credential: the id is ours to mint and the flag is a boolean. The
+		// content under it is deliberately left out, so what a stream frame
+		// records is the same shape as before plus its identity.
+		//
+		// Without these, a closing frame and the opening frame that painted the
+		// bubble are one cmd with one req_id and nothing between them, and the
+		// question "did the answer end up IN the bubble" can only be answered by
+		// counting lines.
+		if st, ok := body["stream"].(map[string]any); ok {
+			if v, ok := st["id"].(string); ok {
+				t.attrs = append(t.attrs, "stream_id", v)
+			}
+			if v, ok := st["finish"].(bool); ok {
+				t.attrs = append(t.attrs, "finish", v)
+			}
 		}
 	}
 	return t

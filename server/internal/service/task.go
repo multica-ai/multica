@@ -2388,12 +2388,6 @@ func (s *TaskService) BroadcastTaskQueued(ctx context.Context, task db.AgentTask
 	s.broadcastTaskEvent(ctx, protocol.EventTaskQueued, task)
 }
 
-func (s *TaskService) CaptureCancelledTasks(ctx context.Context, cancelled []db.AgentTaskQueue) {
-	for _, t := range cancelled {
-		s.captureTaskCancelled(ctx, t)
-	}
-}
-
 type CancelledChatMessageResult struct {
 	ChatSessionID  string
 	MessageID      string

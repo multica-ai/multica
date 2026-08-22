@@ -2250,14 +2250,24 @@ func (h *Handler) ArchiveAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Cancel all pending/active tasks for this agent. Discard the returned
-	// rows here — the agent:archived event below already triggers a full
-	// active-tasks invalidation on every connected client, so per-task
-	// task:cancelled events would be redundant noise.
-	if cancelled, err := h.Queries.CancelAgentTasksByAgent(r.Context(), agent.ID); err != nil {
+	// Cancel all pending/active tasks for this agent, and broadcast each row's
+	// task:cancelled — the same call CancelAgentTasks (the "cancel all tasks"
+	// button) makes, on the same query and the same agent.
+	//
+	// This used to run the query here and swallow the rows, on the grounds that
+	// the agent:archived event below already invalidates every client's active
+	// task list, so per-task events were noise. That was a statement about ONE
+	// consumer. task:cancelled is now also how a channel adapter learns a run
+	// it is showing the user is over: WeCom paints a bubble while a chat task
+	// runs and, hearing nothing, replaces it after five minutes with "还在处理，
+	// 完成后我再单独回复你。" — a written promise of a separate reply. Archiving
+	// the agent cancels the row, so the daemon's own completion no longer
+	// matches CompleteAgentTask's status = 'running' guard and publishes
+	// nothing; without the cancellation event nothing else ever arrives, and
+	// the promise is never kept. Archive was the only one of the four cancel
+	// paths that stayed silent.
+	if _, err := h.TaskService.CancelTasksForAgent(r.Context(), agent.ID); err != nil {
 		slog.Warn("cancel agent tasks on archive failed", append(logger.RequestAttrs(r), "error", err, "agent_id", id)...)
-	} else {
-		h.TaskService.CaptureCancelledTasks(r.Context(), cancelled)
 	}
 
 	wsID := uuidToString(archived.WorkspaceID)

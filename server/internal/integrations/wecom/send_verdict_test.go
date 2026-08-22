@@ -58,4 +58,12 @@ func TestSendTextDistinguishesALostAckFromARefusal(t *testing.T) {
 	if errors.As(err, &apiErr) {
 		t.Error("a lost ack was reported as a server refusal")
 	}
+	// And the same fact stated where a caller weighing another attempt reads
+	// it. The frame went out, so this message may be in the chat; every reader
+	// that decides whether to say the words again looks for this mark rather
+	// than for a name it has to have met before (answerRetryCause, outbound.go).
+	if !errors.Is(err, errWordsMayBeOnScreen) {
+		t.Error("a lost ack was not marked errWordsMayBeOnScreen — a caller reading no mark as " +
+			"'nothing reached the user' puts these words on the screen a second time")
+	}
 }

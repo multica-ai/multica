@@ -71,6 +71,11 @@ type Result struct {
 	// runScheduled reports whether this ingest scheduled a normal chat run.
 	// It is Router-internal state: repliers must continue to use Outcome.
 	runScheduled bool
+	// runBatch is the debouncer's verdict on which run this message was
+	// collected into, valid only when runScheduled. Router-internal, and the
+	// only thing a TypingNotifier may use to decide "same run as the last
+	// message or not".
+	runBatch RunBatchID
 }
 
 // ResolvedInstallation is the channel-agnostic installation context the Router
@@ -311,16 +316,38 @@ type OutboundReplier interface {
 // TypingNotifier shows a "processing" indicator when a message is ingested and
 // clears it once the message reaches a terminal outcome. Optional; nil disables
 // it.
+//
+// Every call names the run batch it is about, so an implementation that keeps
+// per-run state never has to work out which run a call belongs to. The three
+// calls are the whole life of one batch as the engine knows it: messages come
+// in (OnIngested, once per message, same id for every message of the batch),
+// then the debounced flush either creates the run (OnRunStarted) or does not
+// (OnSettled). Exactly one of the last two fires per batch.
 type TypingNotifier interface {
 	// OnIngested shows the indicator for a successfully ingested message.
-	OnIngested(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID)
-	// OnSettled clears the indicator for a session whose run trigger produced no
+	// batch is the run the debouncer collected this message into; every
+	// message of one run carries the same id, and it is the ONLY sound answer
+	// to "is this the same run as the previous message" — the ingest path
+	// cannot re-derive it from arrival times without disagreeing with the
+	// debouncer near the window boundary.
+	//
+	// The Router calls this on a detached goroutine, so calls can arrive out
+	// of order relative to each other and to OnRunStarted; the ids are
+	// monotonic, so an implementation can order them itself.
+	OnIngested(ctx context.Context, inst ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, batch RunBatchID)
+	// OnRunStarted names the task the debounced flush created for batch. It is
+	// the authoritative binding between an indicator and the run it stands
+	// for: every later task lifecycle event carries this task id (or, for an
+	// auto-retry clone, inherits its chat_input_task_id), so an implementation
+	// can match an ending to an indicator without guessing.
+	OnRunStarted(ctx context.Context, sessionID pgtype.UUID, batch RunBatchID, taskID pgtype.UUID)
+	// OnSettled clears the indicator for a batch whose run trigger produced no
 	// task (agent offline / archived, or an enqueue failure). In that case no
 	// task lifecycle event is ever published, so the platform's own bus-driven
 	// clear (on chat-done / task-failed) would never fire and the indicator would
 	// stick. The Router calls this from the debounced flush. Idempotent: a
-	// session with no indicator is a no-op.
-	OnSettled(ctx context.Context, sessionID pgtype.UUID)
+	// batch with no indicator is a no-op.
+	OnSettled(ctx context.Context, sessionID pgtype.UUID, batch RunBatchID)
 }
 
 // ResolverSet is the per-platform bundle the Router runs the pipeline through.

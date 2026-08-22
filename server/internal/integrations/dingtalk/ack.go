@@ -70,7 +70,7 @@ func NewAckNotifier(client *Client, decrypt Decrypter, logger *slog.Logger) *ack
 
 // OnIngested posts the processing ack unless a recent ack for the same session
 // is still within the coalesce window.
-func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, _ engine.RunBatchID) {
 	if n.suppress(sessionID) {
 		return
 	}
@@ -84,8 +84,12 @@ func (n *ackNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstal
 	}
 }
 
+// OnRunStarted is a no-op: the ack is a single message per session, not a
+// handle on a run, so it never has to be matched back to a task.
+func (n *ackNotifier) OnRunStarted(context.Context, pgtype.UUID, engine.RunBatchID, pgtype.UUID) {}
+
 // OnSettled clears the session's dedup entry so its next turn acks immediately.
-func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID) {
+func (n *ackNotifier) OnSettled(_ context.Context, sessionID pgtype.UUID, _ engine.RunBatchID) {
 	key := util.UUIDToString(sessionID)
 	if key == "" {
 		return

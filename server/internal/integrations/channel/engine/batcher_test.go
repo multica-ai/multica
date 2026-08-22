@@ -84,11 +84,11 @@ func TestPendingBatcher_DebounceCoalesces(t *testing.T) {
 	f := &fakeTimerFactory{}
 	b := newTestBatcher(f)
 	calls := 0
-	flush := func() { calls++ }
+	flush := func(RunBatchID) { calls++ }
 
-	b.Schedule("s", flush)
-	b.Schedule("s", flush)
-	b.Schedule("s", flush)
+	b.Schedule("s", 0, flush)
+	b.Schedule("s", 0, flush)
+	b.Schedule("s", 0, flush)
 
 	if got := b.pendingCount(); got != 1 {
 		t.Fatalf("three Schedules on one session must keep a single pending entry; got %d", got)
@@ -111,8 +111,8 @@ func TestPendingBatcher_MultiSessionIndependent(t *testing.T) {
 	b := newTestBatcher(f)
 	var a, c int
 
-	b.Schedule("a", func() { a++ })
-	b.Schedule("c", func() { c++ })
+	b.Schedule("a", 0, func(RunBatchID) { a++ })
+	b.Schedule("c", 0, func(RunBatchID) { c++ })
 
 	if got := b.pendingCount(); got != 2 {
 		t.Fatalf("two distinct sessions must hold two windows; got %d", got)
@@ -128,9 +128,9 @@ func TestPendingBatcher_StaleTimerFireIsNoop(t *testing.T) {
 	b := newTestBatcher(f)
 	calls := 0
 
-	b.Schedule("s", func() { calls++ })
+	b.Schedule("s", 0, func(RunBatchID) { calls++ })
 	first := f.all[0]
-	b.Schedule("s", func() { calls++ }) // resets: cancels first, arms a new timer
+	b.Schedule("s", 0, func(RunBatchID) { calls++ }) // resets: cancels first, arms a new timer
 
 	first.fired = true
 	first.fn()
@@ -149,11 +149,18 @@ func TestPendingBatcher_ScheduleIfAbsentPreservesExistingWindow(t *testing.T) {
 	b := newTestBatcher(f)
 	firstCalls, recoveryCalls := 0, 0
 
-	b.Schedule("s", func() { firstCalls++ })
-	b.ScheduleIfAbsent("s", func() { recoveryCalls++ })
+	live := b.Schedule("s", 7, func(RunBatchID) { firstCalls++ })
+	rejoined := b.ScheduleIfAbsent("s", 9, func(RunBatchID) { recoveryCalls++ })
 
 	if got := f.createdCount(); got != 1 {
 		t.Fatalf("recovery replaced a live timer: created=%d, want 1", got)
+	}
+	// Declining to re-arm is not declining to belong: the recovered message
+	// joins the batch the live window is already collecting, so it must be
+	// told that id and not the one it offered. Anything else binds the turn
+	// to a round nothing will flush.
+	if live != 7 || rejoined != 7 {
+		t.Fatalf("batch ids = %d/%d, want 7/7", live, rejoined)
 	}
 	f.fireArmed()
 	if firstCalls != 1 || recoveryCalls != 0 {
@@ -166,8 +173,8 @@ func TestPendingBatcher_FlushAllDrainsPending(t *testing.T) {
 	b := newTestBatcher(f)
 	var a, c int
 
-	b.Schedule("a", func() { a++ })
-	b.Schedule("c", func() { c++ })
+	b.Schedule("a", 0, func(RunBatchID) { a++ })
+	b.Schedule("c", 0, func(RunBatchID) { c++ })
 
 	b.FlushAll()
 	if a != 1 || c != 1 {
@@ -178,7 +185,7 @@ func TestPendingBatcher_FlushAllDrainsPending(t *testing.T) {
 	}
 
 	ran := false
-	b.Schedule("d", func() { ran = true })
+	b.Schedule("d", 0, func(RunBatchID) { ran = true })
 	if !ran {
 		t.Fatalf("Schedule after FlushAll must run inline")
 	}
@@ -196,7 +203,7 @@ func TestNewPendingBatcher_DefaultsWindow(t *testing.T) {
 func TestPendingBatcher_RealTimerFlushes(t *testing.T) {
 	b := newPendingBatcher(15 * time.Millisecond)
 	done := make(chan struct{})
-	b.Schedule("s", func() { close(done) })
+	b.Schedule("s", 0, func(RunBatchID) { close(done) })
 
 	select {
 	case <-done:

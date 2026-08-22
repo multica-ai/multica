@@ -289,7 +289,11 @@ func NewTypingNotifier(decrypt Decrypter, apiBase string, client *http.Client, l
 	return &typingNotifier{decrypt: decrypt, apiBase: apiBase, client: client, logger: logger}
 }
 
-func (n *typingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID) {
+// The run batch is unused here: Telegram's indicator is sendChatAction, which
+// holds no per-run state to match an ending back to — it simply expires. The
+// parameter is taken to satisfy engine.TypingNotifier, whose stateful
+// implementations (WeCom's bubble) do need it.
+func (n *typingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedInstallation, msg channel.InboundMessage, sessionID pgtype.UUID, _ engine.RunBatchID) {
 	row, ok := inst.Platform.(db.ChannelInstallation)
 	if !ok {
 		return
@@ -312,4 +316,9 @@ func (n *typingNotifier) OnIngested(ctx context.Context, inst engine.ResolvedIns
 	}
 }
 
-func (n *typingNotifier) OnSettled(ctx context.Context, sessionID pgtype.UUID) {}
+func (n *typingNotifier) OnSettled(context.Context, pgtype.UUID, engine.RunBatchID) {}
+
+// OnRunStarted is a no-op for the same reason: nothing here is waiting to be
+// told which task the batch became.
+func (n *typingNotifier) OnRunStarted(context.Context, pgtype.UUID, engine.RunBatchID, pgtype.UUID) {
+}

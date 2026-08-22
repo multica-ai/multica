@@ -34,7 +34,6 @@ type scriptedConn struct {
 	mu        sync.Mutex
 	ackFrame  []byte // queued subscribe ack, set when the subscribe write is seen
 	reads     int
-	readErr   error
 	writes    int
 	closed    bool
 	closeOnce sync.Once
