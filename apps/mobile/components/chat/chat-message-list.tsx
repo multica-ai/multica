@@ -41,7 +41,11 @@
  * hacks). Cell recycling also keeps scroll-up smooth.
  */
 import { useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, View } from "react-native";
+import {
+  ActivityIndicator,
+  Pressable,
+  View,
+} from "react-native";
 import { FlashList } from "@shopify/flash-list";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
@@ -276,7 +280,6 @@ function MessageRow({
     (s) => s.selectingId === message.id,
   );
   const longPress = useChatMessageLongPress(message);
-
   if (isFailure) {
     return (
       <FailureBubble
@@ -299,7 +302,10 @@ function MessageRow({
     const body = (
       <View
         className={cn(
-          "self-end max-w-[80%] gap-1.5 rounded-2xl border-2 px-3.5 py-2 transition-colors",
+          // EnrichedMarkdownText must receive its final width during the
+          // first Yoga pass. A max width leaves native content intrinsically
+          // measured, which can disagree with the recycled cell's width.
+          "self-end w-[80%] gap-1.5 rounded-2xl border-2 px-3.5 py-2 transition-colors",
           isSelecting
             ? "bg-primary/5 border-primary/30"
             : longPress.isPressed
