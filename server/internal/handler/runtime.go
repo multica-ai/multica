@@ -726,21 +726,24 @@ func canSetRuntimeVisibility(member db.Member, rt db.AgentRuntime) bool {
 
 func (h *Handler) ListAgentRuntimes(w http.ResponseWriter, r *http.Request) {
 	workspaceID := h.resolveWorkspaceID(r)
+	userID, ok := requireUserID(w, r)
+	if !ok {
+		return
+	}
 
 	var runtimes []db.AgentRuntime
 	var err error
 
 	if ownerFilter := r.URL.Query().Get("owner"); ownerFilter == "me" {
-		userID, ok := requireUserID(w, r)
-		if !ok {
-			return
-		}
 		runtimes, err = h.Queries.ListAgentRuntimesByOwner(r.Context(), db.ListAgentRuntimesByOwnerParams{
 			WorkspaceID: parseUUID(workspaceID),
 			OwnerID:     parseUUID(userID),
 		})
 	} else {
-		runtimes, err = h.Queries.ListAgentRuntimes(r.Context(), parseUUID(workspaceID))
+		runtimes, err = h.Queries.ListVisibleAgentRuntimes(r.Context(), db.ListVisibleAgentRuntimesParams{
+			WorkspaceID: parseUUID(workspaceID),
+			OwnerID:     parseUUID(userID),
+		})
 	}
 
 	if err != nil {
