@@ -1099,6 +1099,19 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 
 	switch task.Status {
 	case "completed":
+		if reason, declared := taskDeclaredFailureForAutopilotRun(task); declared {
+			updatedRun, err := s.failAutopilotRun(ctx, db.UpdateAutopilotRunFailedParams{
+				ID:            run.ID,
+				FailureReason: pgtype.Text{String: reason, Valid: true},
+			})
+			if err != nil {
+				slog.Warn("failed to record agent-declared autopilot failure", "run_id", util.UUIDToString(run.ID), "error", err)
+				return
+			}
+			s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
+			s.publishRunDone(wsID, updatedRun, "failed")
+			return
+		}
 		updatedRun, err := s.completeAutopilotRun(ctx, db.UpdateAutopilotRunCompletedParams{
 			ID:     run.ID,
 			Result: task.Result,
@@ -1125,6 +1138,58 @@ func (s *AutopilotService) SyncRunFromTask(ctx context.Context, task db.AgentTas
 		s.captureAutopilotRunFailed(autopilot, updatedRun, updatedRun.Source, reason)
 		s.publishRunDone(wsID, updatedRun, "failed")
 	}
+}
+
+// taskDeclaredFailureForAutopilotRun lets a run-only agent distinguish
+// "the provider turn returned normally" from "the automation delivered its
+// contract". Agent backends expose only a completed turn when the model exits
+// with a final answer, so without this explicit output protocol a fail-fast
+// budget/verification verdict is indistinguishable from successful delivery.
+//
+// The marker is the durable protocol. The two legacy prefixes preserve the
+// failure contracts already embedded in long-lived autopilot descriptions.
+// Only the first non-empty output line is considered, preventing a successful
+// report that quotes or discusses an earlier failure from being reclassified.
+func taskDeclaredFailureForAutopilotRun(task db.AgentTaskQueue) (string, bool) {
+	var payload protocol.TaskCompletedPayload
+	if err := json.Unmarshal(task.Result, &payload); err != nil {
+		return "", false
+	}
+
+	lines := strings.Split(strings.TrimSpace(payload.Output), "\n")
+	if len(lines) == 0 {
+		return "", false
+	}
+	first := strings.TrimSpace(lines[0])
+	if first == "" {
+		return "", false
+	}
+
+	if first == protocol.AutopilotFailureMarker {
+		for _, line := range lines[1:] {
+			if reason := strings.TrimSpace(line); reason != "" {
+				return "task declared failure: " + reason, true
+			}
+		}
+		return "task declared failure", true
+	}
+	for _, separator := range []string{" ", ":"} {
+		prefix := protocol.AutopilotFailureMarker + separator
+		if strings.HasPrefix(first, prefix) {
+			reason := strings.TrimSpace(strings.TrimPrefix(first, prefix))
+			if reason == "" {
+				return "task declared failure", true
+			}
+			return "task declared failure: " + reason, true
+		}
+	}
+
+	for _, prefix := range []string{"Run failed fast:", "Phase 4 verify FAILED:"} {
+		if strings.HasPrefix(first, prefix) {
+			return "task declared failure: " + first, true
+		}
+	}
+	return "", false
 }
 
 // SyncRunFromLinkedIssueTask fails a create_issue autopilot run when its

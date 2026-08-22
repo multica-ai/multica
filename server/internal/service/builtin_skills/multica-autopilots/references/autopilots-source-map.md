@@ -4,6 +4,8 @@
 - The CLI maps reads/writes to `/api/autopilots`, `/api/autopilots/{id}`, `/api/autopilots/{id}/trigger`, `/api/autopilots/{id}/runs`, and trigger subroutes. `autopilot get` nulls `webhook_token`, `webhook_path`, and `webhook_url` in normal JSON output and adds `has_webhook_token` plus `webhook_token_hint`; `--show-secrets` is an explicit JSON-only escape hatch that prints a credential-exposure warning to stderr.
 - `server/internal/service/autopilot.go` has `DispatchAutopilot`, synchronous delivery-idempotent `AdmitAutopilotWebhookDelivery`, and worker-side `DispatchAutopilotForWebhookDelivery`; it creates `autopilot_run` and switches on `execution_mode`.
 - `create_issue` calls `dispatchCreateIssue`; `run_only` calls `dispatchRunOnly`.
+- `server/pkg/protocol/messages.go` defines `AutopilotFailureMarker`; `server/internal/daemon/execenv/runtime_config_sections.go` teaches it to run-only agents, and `taskDeclaredFailureForAutopilotRun` / `SyncRunFromTask` in `server/internal/service/autopilot.go` convert a marked completed task (plus the two documented legacy prefixes) into a failed run with `failure_reason`.
+- Migration `398_backfill_declared_autopilot_failures` corrects historical `completed` rows whose first non-empty output line used either legacy failure prefix; it deliberately ignores failures quoted later in an otherwise successful report.
 - `resolveAutopilotLeader` resolves squad-assigned autopilots to the squad leader.
 - `AgentReadiness` blocks archived/runtime-unready agents before enqueue.
 - `server/cmd/server/router.go` exposes authenticated `/api/autopilots` routes and unauthenticated webhook ingress `/api/webhooks/autopilots/{token}`.

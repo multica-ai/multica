@@ -3,6 +3,8 @@ package execenv
 import (
 	"strings"
 	"testing"
+
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 // TestClassifyTask pins the precedence rule on classifyTask. All four
@@ -210,6 +212,16 @@ func TestBriefOwnsAutopilotIssueCommandsGuard(t *testing.T) {
 	out := buildMetaSkillContent("claude", TaskContextForEnv{AutopilotRunID: "run-1"})
 	if !strings.Contains(out, AutopilotIssueCommandsGuard) {
 		t.Errorf("autopilot brief missing AutopilotIssueCommandsGuard — the per-turn prompt defers to this single emission point")
+	}
+}
+
+func TestBriefTeachesAutopilotDeclaredFailureMarker(t *testing.T) {
+	out := buildMetaSkillContent("claude", TaskContextForEnv{AutopilotRunID: "run-1"})
+	if !strings.Contains(out, protocol.AutopilotFailureMarker+" <short_reason_code>: <reason>") {
+		t.Fatalf("autopilot brief missing the declared-failure output contract")
+	}
+	if !strings.Contains(out, "makes the autopilot run `failed`") {
+		t.Fatalf("autopilot brief does not explain the marker's terminal effect")
 	}
 }
 

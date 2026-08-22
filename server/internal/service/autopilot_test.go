@@ -1,12 +1,14 @@
 package service
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
+	"github.com/multica-ai/multica/server/pkg/protocol"
 )
 
 func TestAutopilotErrorType(t *testing.T) {
@@ -59,6 +61,75 @@ func TestTaskFailureReasonForAutopilotRun(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			if got := taskFailureReasonForAutopilotRun(tc.task); got != tc.want {
 				t.Fatalf("taskFailureReasonForAutopilotRun() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTaskDeclaredFailureForAutopilotRun(t *testing.T) {
+	result := func(output string) []byte {
+		data, err := json.Marshal(protocol.TaskCompletedPayload{Output: output})
+		if err != nil {
+			t.Fatalf("marshal task result: %v", err)
+		}
+		return data
+	}
+
+	cases := []struct {
+		name       string
+		result     []byte
+		wantReason string
+		want       bool
+	}{
+		{
+			name:       "marker and inline reason",
+			result:     result("[MULTICA_AUTOPILOT_FAILED] budget_exceeded: no delivery receipt"),
+			wantReason: "task declared failure: budget_exceeded: no delivery receipt",
+			want:       true,
+		},
+		{
+			name:       "marker and next-line reason",
+			result:     result("[MULTICA_AUTOPILOT_FAILED]\n\nverification_failed: main issue missing"),
+			wantReason: "task declared failure: verification_failed: main issue missing",
+			want:       true,
+		},
+		{
+			name:       "marker without reason",
+			result:     result("[MULTICA_AUTOPILOT_FAILED]"),
+			wantReason: "task declared failure",
+			want:       true,
+		},
+		{
+			name:       "legacy fail-fast contract",
+			result:     result("Run failed fast: the explicit token budget was exceeded\nNo issue was created."),
+			wantReason: "task declared failure: Run failed fast: the explicit token budget was exceeded",
+			want:       true,
+		},
+		{
+			name:       "legacy phase verification contract",
+			result:     result("Phase 4 verify FAILED: missing fresh main issue"),
+			wantReason: "task declared failure: Phase 4 verify FAILED: missing fresh main issue",
+			want:       true,
+		},
+		{
+			name:   "quoted failure later in successful output",
+			result: result("Delivery recovered and verified.\nPrevious attempt: Run failed fast: budget exceeded"),
+		},
+		{
+			name:   "ordinary completion",
+			result: result("Created and verified WS-123."),
+		},
+		{
+			name:   "malformed task result",
+			result: []byte(`{"output":`),
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			gotReason, got := taskDeclaredFailureForAutopilotRun(db.AgentTaskQueue{Result: tc.result})
+			if got != tc.want || gotReason != tc.wantReason {
+				t.Fatalf("taskDeclaredFailureForAutopilotRun() = (%q, %v), want (%q, %v)", gotReason, got, tc.wantReason, tc.want)
 			}
 		})
 	}

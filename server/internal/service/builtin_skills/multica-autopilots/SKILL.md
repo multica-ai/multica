@@ -31,6 +31,18 @@ Execution modes:
 - `run_only` creates an agent task directly. No issue is created; any durable
   report location has to come from other task context or instructions.
 
+A run-only provider turn can exit normally even when the automation contract
+failed. For a terminal incomplete outcome, begin the final response with:
+
+```text
+[MULTICA_AUTOPILOT_FAILED] <short_reason_code>: <reason>
+```
+
+The server records the autopilot run as `failed` and exposes the reason. Do not
+use the marker for an acceptable degraded delivery. Long-lived descriptions
+that begin the final output with `Run failed fast:` or `Phase 4 verify FAILED:`
+remain compatible, but new instructions should use the explicit marker.
+
 `issue-title-template` only supports `{{date}}`. Do not invent `{{trigger_id}}`, `{{branch}}`, or other variables.
 
 ## CLI

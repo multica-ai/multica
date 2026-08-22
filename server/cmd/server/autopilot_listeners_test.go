@@ -45,6 +45,16 @@ func TestAutopilotRunOnlyTaskTerminalEventsUpdateRun(t *testing.T) {
 			wantResult: "done",
 		},
 		{
+			name: "agent declared failure",
+			finalize: func(task db.AgentTaskQueue) {
+				if _, err := taskSvc.CompleteTask(ctx, task.ID, []byte(`{"output":"[MULTICA_AUTOPILOT_FAILED] budget_exceeded: no delivery receipt"}`), "", "", "", false, "", ""); err != nil {
+					t.Fatalf("CompleteTask: %v", err)
+				}
+			},
+			wantStatus: "failed",
+			wantReason: "task declared failure: budget_exceeded: no delivery receipt",
+		},
+		{
 			name: "failed",
 			finalize: func(task db.AgentTaskQueue) {
 				if _, err := taskSvc.FailTask(ctx, task.ID, "boom", "", "", "", "agent_error", false, "", ""); err != nil {
