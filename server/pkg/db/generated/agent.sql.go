@@ -1557,13 +1557,14 @@ WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = $2
       AND atq.runtime_id = $3
+      AND ($4::uuid IS NULL OR atq.id = $4::uuid)
       AND atq.status = 'queued'
       AND EXISTS (
           SELECT 1 FROM agent_runtime r
           WHERE r.id = atq.runtime_id
             AND r.status = 'online'
             AND COALESCE(r.last_seen_at, r.updated_at) >=
-                now() - make_interval(secs => $4::double precision)
+                now() - make_interval(secs => $5::double precision)
       )
       AND NOT EXISTS (
           SELECT 1 FROM agent_task_queue active
@@ -1593,6 +1594,7 @@ type ClaimAgentTaskParams struct {
 	PrepareLeaseSecs float64     `json:"prepare_lease_secs"`
 	AgentID          pgtype.UUID `json:"agent_id"`
 	RuntimeID        pgtype.UUID `json:"runtime_id"`
+	CandidateTaskID  pgtype.UUID `json:"candidate_task_id"`
 	RuntimeStaleSecs float64     `json:"runtime_stale_secs"`
 }
 
@@ -1611,6 +1613,7 @@ func (q *Queries) ClaimAgentTask(ctx context.Context, arg ClaimAgentTaskParams) 
 		arg.PrepareLeaseSecs,
 		arg.AgentID,
 		arg.RuntimeID,
+		arg.CandidateTaskID,
 		arg.RuntimeStaleSecs,
 	)
 	var i AgentTaskQueue
@@ -5591,19 +5594,32 @@ func (q *Queries) ListPendingTasksByRuntime(ctx context.Context, runtimeID pgtyp
 }
 
 const listQueuedClaimCandidatesByRuntime = `-- name: ListQueuedClaimCandidatesByRuntime :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC
+SELECT candidate.id, candidate.agent_id, candidate.issue_id, candidate.status, candidate.priority, candidate.dispatched_at, candidate.started_at, candidate.completed_at, candidate.result, candidate.error, candidate.created_at, candidate.context, candidate.runtime_id, candidate.session_id, candidate.work_dir, candidate.trigger_comment_id, candidate.chat_session_id, candidate.autopilot_run_id, candidate.attempt, candidate.max_attempts, candidate.parent_task_id, candidate.failure_reason, candidate.trigger_summary, candidate.force_fresh_session, candidate.is_leader_task, candidate.wait_reason, candidate.initiator_user_id, candidate.handoff_note, candidate.prepare_lease_expires_at, candidate.squad_id, candidate.runtime_mcp_overlay, candidate.escalation_for_task_id, candidate.fire_at, candidate.originator_user_id, candidate.runtime_connected_apps, candidate.coalesced_comment_ids, candidate.delivered_comment_ids, candidate.chat_input_task_id, candidate.chat_finalize_deferred_at, candidate.originator_source, candidate.delegated_from_task_id, candidate.retry_of_task_id, candidate.rerun_of_task_id, candidate.rule_version_id, candidate.trigger_evidence_kind, candidate.trigger_evidence_ref_id, candidate.accountable_user_id, candidate.session_rollout_missing, candidate.retired_session_id, candidate.quick_actions_disabled, candidate.regenerate_quick_actions_for, candidate.branch_name, candidate.durable_work_dir FROM agent_task_queue candidate
+WHERE candidate.runtime_id = $1
+  AND candidate.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue active
+      WHERE active.agent_id = candidate.agent_id
+        AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+        AND (
+          (candidate.issue_id IS NOT NULL AND active.issue_id = candidate.issue_id)
+          OR (candidate.chat_session_id IS NOT NULL AND active.chat_session_id = candidate.chat_session_id)
+          OR (
+            candidate.issue_id IS NULL
+            AND candidate.chat_session_id IS NULL
+            AND candidate.autopilot_run_id IS NULL
+            AND active.issue_id IS NULL
+            AND active.chat_session_id IS NULL
+            AND active.autopilot_run_id IS NULL
+          )
+        )
+  )
+ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC
 `
 
-// Returns rows the runtime can attempt to claim. Status is restricted to
-// 'queued' (in contrast to ListPendingTasksByRuntime which also includes
-// 'dispatched') because dispatched rows are by definition already owned
-// and cannot be re-claimed — including them in the candidate list pads
-// the result with rows that always lose the per-(issue, agent) race in
-// ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
-// runtime is busy on a long-running task. Backed by the partial index
-// idx_agent_task_queue_claim_candidates so the warm path is cheap.
+// Returns serialization-eligible rows in the global order the runtime must
+// preserve. ClaimAgentTask re-checks the same predicate while locking the exact
+// candidate, closing the race between this snapshot and the claim transaction.
 func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtimeID pgtype.UUID) ([]AgentTaskQueue, error) {
 	rows, err := q.db.Query(ctx, listQueuedClaimCandidatesByRuntime, runtimeID)
 	if err != nil {
@@ -5679,9 +5695,27 @@ func (q *Queries) ListQueuedClaimCandidatesByRuntime(ctx context.Context, runtim
 }
 
 const listQueuedClaimCandidatesByRuntimes = `-- name: ListQueuedClaimCandidatesByRuntimes :many
-SELECT id, agent_id, issue_id, status, priority, dispatched_at, started_at, completed_at, result, error, created_at, context, runtime_id, session_id, work_dir, trigger_comment_id, chat_session_id, autopilot_run_id, attempt, max_attempts, parent_task_id, failure_reason, trigger_summary, force_fresh_session, is_leader_task, wait_reason, initiator_user_id, handoff_note, prepare_lease_expires_at, squad_id, runtime_mcp_overlay, escalation_for_task_id, fire_at, originator_user_id, runtime_connected_apps, coalesced_comment_ids, delivered_comment_ids, chat_input_task_id, chat_finalize_deferred_at, originator_source, delegated_from_task_id, retry_of_task_id, rerun_of_task_id, rule_version_id, trigger_evidence_kind, trigger_evidence_ref_id, accountable_user_id, session_rollout_missing, retired_session_id, quick_actions_disabled, regenerate_quick_actions_for, branch_name, durable_work_dir FROM agent_task_queue
-WHERE runtime_id = ANY($1::uuid[]) AND status = 'queued'
-ORDER BY priority DESC, created_at ASC
+SELECT candidate.id, candidate.agent_id, candidate.issue_id, candidate.status, candidate.priority, candidate.dispatched_at, candidate.started_at, candidate.completed_at, candidate.result, candidate.error, candidate.created_at, candidate.context, candidate.runtime_id, candidate.session_id, candidate.work_dir, candidate.trigger_comment_id, candidate.chat_session_id, candidate.autopilot_run_id, candidate.attempt, candidate.max_attempts, candidate.parent_task_id, candidate.failure_reason, candidate.trigger_summary, candidate.force_fresh_session, candidate.is_leader_task, candidate.wait_reason, candidate.initiator_user_id, candidate.handoff_note, candidate.prepare_lease_expires_at, candidate.squad_id, candidate.runtime_mcp_overlay, candidate.escalation_for_task_id, candidate.fire_at, candidate.originator_user_id, candidate.runtime_connected_apps, candidate.coalesced_comment_ids, candidate.delivered_comment_ids, candidate.chat_input_task_id, candidate.chat_finalize_deferred_at, candidate.originator_source, candidate.delegated_from_task_id, candidate.retry_of_task_id, candidate.rerun_of_task_id, candidate.rule_version_id, candidate.trigger_evidence_kind, candidate.trigger_evidence_ref_id, candidate.accountable_user_id, candidate.session_rollout_missing, candidate.retired_session_id, candidate.quick_actions_disabled, candidate.regenerate_quick_actions_for, candidate.branch_name, candidate.durable_work_dir FROM agent_task_queue candidate
+WHERE candidate.runtime_id = ANY($1::uuid[])
+  AND candidate.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue active
+      WHERE active.agent_id = candidate.agent_id
+        AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+        AND (
+          (candidate.issue_id IS NOT NULL AND active.issue_id = candidate.issue_id)
+          OR (candidate.chat_session_id IS NOT NULL AND active.chat_session_id = candidate.chat_session_id)
+          OR (
+            candidate.issue_id IS NULL
+            AND candidate.chat_session_id IS NULL
+            AND candidate.autopilot_run_id IS NULL
+            AND active.issue_id IS NULL
+            AND active.chat_session_id IS NULL
+            AND active.autopilot_run_id IS NULL
+          )
+        )
+  )
+ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC
 `
 
 // Batch variant of ListQueuedClaimCandidatesByRuntime (MUL-4257): returns

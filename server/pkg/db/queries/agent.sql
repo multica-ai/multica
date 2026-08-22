@@ -738,6 +738,7 @@ WHERE id = (
     SELECT atq.id FROM agent_task_queue atq
     WHERE atq.agent_id = @agent_id
       AND atq.runtime_id = @runtime_id
+      AND (sqlc.narg(candidate_task_id)::uuid IS NULL OR atq.id = sqlc.narg(candidate_task_id)::uuid)
       AND atq.status = 'queued'
       AND EXISTS (
           SELECT 1 FROM agent_runtime r
@@ -1971,17 +1972,30 @@ WHERE runtime_id = $1 AND status IN ('queued', 'dispatched')
 ORDER BY priority DESC, created_at ASC;
 
 -- name: ListQueuedClaimCandidatesByRuntime :many
--- Returns rows the runtime can attempt to claim. Status is restricted to
--- 'queued' (in contrast to ListPendingTasksByRuntime which also includes
--- 'dispatched') because dispatched rows are by definition already owned
--- and cannot be re-claimed — including them in the candidate list pads
--- the result with rows that always lose the per-(issue, agent) race in
--- ClaimAgentTask, wasting CPU and a SELECT every poll cycle when the
--- runtime is busy on a long-running task. Backed by the partial index
--- idx_agent_task_queue_claim_candidates so the warm path is cheap.
-SELECT * FROM agent_task_queue
-WHERE runtime_id = $1 AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+-- Returns serialization-eligible rows in the global order the runtime must
+-- preserve. ClaimAgentTask re-checks the same predicate while locking the exact
+-- candidate, closing the race between this snapshot and the claim transaction.
+SELECT candidate.* FROM agent_task_queue candidate
+WHERE candidate.runtime_id = $1
+  AND candidate.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue active
+      WHERE active.agent_id = candidate.agent_id
+        AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+        AND (
+          (candidate.issue_id IS NOT NULL AND active.issue_id = candidate.issue_id)
+          OR (candidate.chat_session_id IS NOT NULL AND active.chat_session_id = candidate.chat_session_id)
+          OR (
+            candidate.issue_id IS NULL
+            AND candidate.chat_session_id IS NULL
+            AND candidate.autopilot_run_id IS NULL
+            AND active.issue_id IS NULL
+            AND active.chat_session_id IS NULL
+            AND active.autopilot_run_id IS NULL
+          )
+        )
+  )
+ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC;
 
 -- name: CancelSupersededDeferredRetriesForRuntimes :many
 -- Cancels deferred auto-retry rows that a newer active task has already
@@ -2086,9 +2100,27 @@ RETURNING *;
 -- a sort step (each runtime's slice is index-ordered, but merging several
 -- runtimes' rows into one priority/FIFO order is not). The per-machine
 -- candidate set is small, so this is cheap in practice.
-SELECT * FROM agent_task_queue
-WHERE runtime_id = ANY(@runtime_ids::uuid[]) AND status = 'queued'
-ORDER BY priority DESC, created_at ASC;
+SELECT candidate.* FROM agent_task_queue candidate
+WHERE candidate.runtime_id = ANY(@runtime_ids::uuid[])
+  AND candidate.status = 'queued'
+  AND NOT EXISTS (
+      SELECT 1 FROM agent_task_queue active
+      WHERE active.agent_id = candidate.agent_id
+        AND active.status IN ('dispatched', 'running', 'waiting_local_directory')
+        AND (
+          (candidate.issue_id IS NOT NULL AND active.issue_id = candidate.issue_id)
+          OR (candidate.chat_session_id IS NOT NULL AND active.chat_session_id = candidate.chat_session_id)
+          OR (
+            candidate.issue_id IS NULL
+            AND candidate.chat_session_id IS NULL
+            AND candidate.autopilot_run_id IS NULL
+            AND active.issue_id IS NULL
+            AND active.chat_session_id IS NULL
+            AND active.autopilot_run_id IS NULL
+          )
+        )
+  )
+ORDER BY candidate.priority DESC, candidate.created_at ASC, candidate.id ASC;
 
 -- name: PromoteDueDeferredTasksForRuntimes :many
 -- Batch variant of PromoteDueDeferredTasksForRuntime (MUL-4257): promotes all
