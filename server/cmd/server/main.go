@@ -661,6 +661,12 @@ func main() {
 	if err := schedulerMgr.Register(scheduler.AutopilotScheduleDispatchJob(pool, queries, autopilotSvc)); err != nil {
 		slog.Warn("scheduler: failed to register autopilot_schedule_dispatch job", "error", err)
 	}
+	// #5927: one-time issue-scheduled-trigger dispatch. Same scheduler
+	// infrastructure as the Autopilot schedule job above; each pending
+	// trigger fires at most once, ever (see jobs_issue_schedule.go).
+	if err := schedulerMgr.Register(scheduler.IssueScheduleDispatchJob(pool, queries, h.IssueScheduleService)); err != nil {
+		slog.Warn("scheduler: failed to register issue_schedule_dispatch job", "error", err)
+	}
 	go func() {
 		_ = schedulerMgr.Run(sweepCtx)
 	}()

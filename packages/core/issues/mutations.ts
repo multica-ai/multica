@@ -1109,3 +1109,38 @@ export function useUnsubscribeFromIssueSubtree(issueId: string) {
     },
   });
 }
+
+// ---------------------------------------------------------------------------
+// One-time scheduled run (#5927)
+// ---------------------------------------------------------------------------
+
+/**
+ * Register a one-time future run for issueId. Not optimistic — per CLAUDE.md
+ * State Rules, a create/register flow with server-side validation (run_at in
+ * the future, issue has an assignee, at most one pending schedule) must await
+ * the server rather than predict an outcome that can fail for reasons the
+ * client cannot know in advance.
+ */
+export function useCreateIssueSchedule(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: (runAt: string) => api.createIssueSchedule(issueId, runAt),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.schedule(wsId, issueId) });
+    },
+  });
+}
+
+/** Cancel issueId's pending schedule. Not optimistic for the same reason as
+ *  useCreateIssueSchedule — awaits the server, then invalidates. */
+export function useCancelIssueSchedule(issueId: string) {
+  const qc = useQueryClient();
+  const wsId = useWorkspaceId();
+  return useMutation({
+    mutationFn: () => api.cancelIssueSchedule(issueId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: issueKeys.schedule(wsId, issueId) });
+    },
+  });
+}

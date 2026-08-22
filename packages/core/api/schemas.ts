@@ -1054,6 +1054,20 @@ export const IssueTriggerPreviewSchema = z.object({
   total_count: z.number().default(0),
 }).loose();
 
+// A one-time scheduled run bound to an issue (#5927). status/missed_policy
+// stay z.string(), not enums, per the API Compatibility rule — an unknown
+// value from an older/newer server must still parse.
+export const IssueScheduleSchema = z.object({
+  id: z.string(),
+  issue_id: z.string(),
+  run_at: z.string(),
+  status: z.string(),
+  missed_policy: z.string().default("notify"),
+  created_by_user_id: z.string().default(""),
+  fired_at: z.string().nullable().default(null),
+  created_at: z.string(),
+}).loose();
+
 // Metadata is primitive-only by API/DB contract. Stay lenient on shape:
 // unknown keys land as `unknown` to a caller, but the field itself defaults
 // to {} so consumers never need to nil-guard `issue.metadata`.
