@@ -31,6 +31,7 @@ import (
 	composiointeg "github.com/multica-ai/multica/server/internal/integrations/composio"
 	"github.com/multica-ai/multica/server/internal/integrations/dingtalk"
 	"github.com/multica-ai/multica/server/internal/integrations/lark"
+	"github.com/multica-ai/multica/server/internal/integrations/sharecrm"
 	"github.com/multica-ai/multica/server/internal/integrations/slack"
 	"github.com/multica-ai/multica/server/internal/integrations/telegram"
 	"github.com/multica-ai/multica/server/internal/integrations/wecom"
@@ -949,6 +950,44 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		slog.Info("wecom integration disabled (MULTICA_WECOM_SECRET_KEY not set)")
 	}
 
+	// ShareCRM (纷享销客) uses one outbound SSE connection per BYO installation.
+	// The appSecret is encrypted at rest; the integration is inert unless
+	// MULTICA_SHARECRM_SECRET_KEY is configured.
+	if sharecrmKey, err := secretbox.LoadKey("MULTICA_SHARECRM_SECRET_KEY"); err == nil {
+		box, err := secretbox.New(sharecrmKey)
+		if err != nil {
+			slog.Error("sharecrm: secretbox.New failed; integration disabled", "error", err)
+		} else {
+			sharecrmClient := sharecrm.NewClient(nil)
+			bindingSvc := sharecrm.NewBindingTokenService(queries, pool)
+			h.ShareCRMBindingTokens = bindingSvc
+			replier := sharecrm.NewOutboundReplier(sharecrm.OutboundReplierConfig{
+				Binding: bindingSvc,
+				Decrypt: box.Open,
+				Client:  sharecrmClient,
+				AppURL:  appURLFromEnv(),
+				Logger:  slog.Default(),
+			})
+			ack := sharecrm.NewAckNotifier(sharecrmClient, box.Open, slog.Default())
+			channelRouter.Register(sharecrm.TypeShareCRM, sharecrm.NewShareCRMResolverSet(queries, pool, replier, ack))
+			sharecrm.NewOutbound(queries, box.Open, sharecrmClient, slog.Default()).Register(bus)
+			sharecrm.RegisterShareCRM(channelRegistry, sharecrm.ChannelDeps{
+				Decrypt: box.Open,
+				Client:  sharecrmClient,
+				Logger:  slog.Default(),
+			})
+			installSvc, installErr := sharecrm.NewInstallService(queries, pool, box, slog.Default())
+			if installErr != nil {
+				slog.Error("sharecrm: InstallService init failed; install disabled", "error", installErr)
+			} else {
+				h.ShareCRMInstall = installSvc
+			}
+			slog.Info("sharecrm integration enabled (BYO per-installation SSE mode)")
+		}
+	} else {
+		slog.Info("sharecrm integration disabled (MULTICA_SHARECRM_SECRET_KEY not set)")
+	}
+
 	// Telegram integration. Same shape as Slack: BYO bot token pasted at
 	// install, one getUpdates long-polling loop per active installation
 	// supervised by the shared engine.Supervisor, resolvers on the generic
@@ -1611,6 +1650,16 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					r.Delete("/telegram/installations/{installationId}", h.RevokeTelegramInstallation)
 					r.Post("/telegram/install", h.RegisterTelegramBot)
 				})
+
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceMemberFromURL(queries, "id"))
+					r.Get("/sharecrm/installations", h.ListShareCRMInstallations)
+				})
+				r.Group(func(r chi.Router) {
+					r.Use(middleware.RequireWorkspaceRoleFromURL(queries, "id", "owner", "admin"))
+					r.Delete("/sharecrm/installations/{installationId}", h.RevokeShareCRMInstallation)
+					r.Post("/sharecrm/install/byo", h.RegisterShareCRMBYO)
+				})
 			})
 		})
 
@@ -1638,7 +1687,7 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 		// workspace-scoped, identity from the session, token proves only
 		// "this Telegram user id requested binding".
 		r.Post("/api/telegram/binding/redeem", h.RedeemTelegramBindingToken)
-
+		r.Post("/api/sharecrm/binding/redeem", h.RedeemShareCRMBindingToken)
 		// Composio integration (MUL-3720). User-scoped (no workspace context):
 		// a connection belongs to a user. These four require a logged-in
 		// session; the OAuth callback is the outlier and lives outside the Auth

@@ -213,4 +213,9 @@ const (
 	// front-ends invalidate the Telegram installations query on either.
 	EventTelegramInstallationCreated = "telegram_installation:created"
 	EventTelegramInstallationRevoked = "telegram_installation:revoked"
+
+	// ShareCRM (纷享销客) installation lifecycle — same create/revoke
+	// semantics as Slack/DingTalk BYO channel installations.
+	EventShareCRMInstallationCreated = "sharecrm_installation:created"
+	EventShareCRMInstallationRevoked = "sharecrm_installation:revoked"
 )

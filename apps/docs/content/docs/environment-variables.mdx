@@ -169,7 +169,10 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 | GitHub | `GITHUB_APP_PRIVATE_KEY` | Full PEM private key paired with the App ID; same uses as above |
 | Lark | `MULTICA_LARK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key |
 | Slack | `MULTICA_SLACK_SECRET_KEY` | Base64-encoded 32-byte token encryption key |
+| DingTalk | `MULTICA_DINGTALK_SECRET_KEY` | Base64-encoded 32-byte credential encryption key; empty disables DingTalk |
+| WeCom | `MULTICA_WECOM_SECRET_KEY` | Base64-encoded 32-byte credential encryption key; empty disables WeCom |
 | Telegram | `MULTICA_TELEGRAM_SECRET_KEY` | Base64-encoded 32-byte Bot token encryption key |
+| ShareCRM | `MULTICA_SHARECRM_SECRET_KEY` | Base64-encoded 32-byte credential encryption key; empty disables ShareCRM |
 | Composio | `COMPOSIO_API_KEY` | Enables Composio tool connections |
 | Composio | `COMPOSIO_CALLBACK_BASE_URL` | Callback API URL; can fall back to `MULTICA_PUBLIC_URL` |
 | Composio | `COMPOSIO_STATE_SECRET` | OAuth state signing secret; can be derived from `JWT_SECRET` |
@@ -178,7 +181,7 @@ The auth rate limits require `REDIS_URL`; without it, the startup log notes that
 
 Without `GITHUB_APP_ID` and the private key, PRs still link, mirror, and trigger merge-to-done normally, but cards show no CI or mergeability status, and the "pick from GitHub" repository entry is disabled.
 
-For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), [Slack bot](/slack-bot-integration#self-hosting-setup), and [Telegram bot](/telegram-bot-integration#self-hosting-setup).
+For setup steps, see [GitHub integration](/github-integration#self-hosting-setup), [Lark bot](/lark-bot-integration#self-hosting-setup), [Slack bot](/slack-bot-integration#self-hosting-setup), [DingTalk bot](/dingtalk-bot-integration#self-host-setup), [Telegram bot](/telegram-bot-integration#self-hosting-setup), [ShareCRM bot](/sharecrm-bot-integration#self-host-setup), and [Chat integrations](/channels#self-hosting).
 
 ## Server-side LLM
 

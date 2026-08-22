@@ -94,6 +94,13 @@ vi.mock("@multica/core/telegram", () => ({
   }),
 }));
 
+vi.mock("@multica/core/sharecrm", () => ({
+  sharecrmInstallationsOptions: () => ({
+    queryKey: ["sharecrm", "installations"],
+    queryFn: vi.fn(),
+  }),
+}));
+
 vi.mock("@multica/core/dingtalk", () => ({
   dingtalkInstallationsOptions: () => ({
     queryKey: ["dingtalk", "installations"],
@@ -131,6 +138,10 @@ vi.mock("@multica/core/auth", () => {
   return { useAuthStore };
 });
 
+// Stub markers for each platform's agent bind entry. Production BYO CTAs use
+// `*-agent-connect` (see dingtalk/wecom/slack/sharecrm-tab.tsx); these
+// `*-bind-button` testids are tab-local markers so this file only asserts
+// branch selection, not each platform's install dialog.
 vi.mock("../../../settings/components/lark-tab", () => ({
   LarkAgentBindButton: ({
     agentId,
@@ -147,16 +158,12 @@ vi.mock("../../../settings/components/lark-tab", () => ({
   ),
 }));
 
-// SlackAgentBindButton is the shared bind entry covered in slack-tab.test.tsx;
-// here it is a marker so the tests assert branch selection, not the OAuth flow.
 vi.mock("../../../settings/components/slack-tab", () => ({
   SlackAgentBindButton: ({ agentId }: { agentId: string }) => (
     <div data-testid="slack-bind-button" data-agent-id={agentId} />
   ),
 }));
 
-// Same stubbing rationale for WeCom smart-bot: the shared bind entry has
-// its own coverage in wecom-tab.test.tsx (when added); here it's a marker.
 vi.mock("../../../settings/components/wecom-tab", () => ({
   WecomAgentBindButton: ({ agentId }: { agentId: string }) => (
     <div data-testid="wecom-bind-button" data-agent-id={agentId} />
@@ -166,6 +173,12 @@ vi.mock("../../../settings/components/wecom-tab", () => ({
 vi.mock("../../../settings/components/telegram-tab", () => ({
   TelegramAgentBindButton: ({ agentId }: { agentId: string }) => (
     <div data-testid="telegram-bind-button" data-agent-id={agentId} />
+  ),
+}));
+
+vi.mock("../../../settings/components/sharecrm-tab", () => ({
+  ShareCRMAgentBindButton: ({ agentId }: { agentId: string }) => (
+    <div data-testid="sharecrm-bind-button" data-agent-id={agentId} />
   ),
 }));
 
@@ -270,15 +283,22 @@ describe("IntegrationsTab", () => {
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
   });
 
-  it("renders the shared bind entries for an owner when configured and supported", () => {
+  it("renders the shared bind entry for each platform for an owner when configured and supported", () => {
     renderTab(<IntegrationsTab agent={agent} />);
     expect(screen.getByText("Lark")).toBeTruthy();
     expect(screen.getByText("Slack")).toBeTruthy();
+    expect(screen.getByText("DingTalk")).toBeTruthy();
     expect(screen.getByText("Telegram")).toBeTruthy();
+    expect(screen.getByText("ShareCRM")).toBeTruthy();
     expect(screen.getByText(/Telegram bot.*\/issue.*reply stream live/i)).toBeTruthy();
     expect(screen.getByTestId("lark-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
     expect(screen.getByTestId("slack-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
+    expect(screen.getByTestId("dingtalk-agent-connect")).toBeTruthy();
+    expect(screen.getByTestId("wecom-bind-button").getAttribute("data-agent-id")).toBe("agent-1");
     expect(screen.getByTestId("telegram-bind-button").getAttribute("data-agent-id")).toBe(
+      "agent-1",
+    );
+    expect(screen.getByTestId("sharecrm-bind-button").getAttribute("data-agent-id")).toBe(
       "agent-1",
     );
   });
@@ -551,7 +571,7 @@ describe("IntegrationsTab", () => {
 
   it("points members at Settings when they are neither an admin nor the agent owner", () => {
     // A plain member viewing an agent owned by someone else can manage
-    // neither platform, so the read-only note replaces both sections.
+    // no platform, so the single read-only note replaces all sections.
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     renderTab(<IntegrationsTab agent={{ ...agent, owner_id: "user-2" }} />);
     expect(
@@ -559,14 +579,16 @@ describe("IntegrationsTab", () => {
     ).toBeGreaterThanOrEqual(1);
     expect(screen.queryByTestId("lark-bind-button")).toBeNull();
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
+    expect(screen.queryByTestId("dingtalk-agent-connect")).toBeNull();
     expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
     expect(screen.queryByTestId("telegram-bind-button")).toBeNull();
+    expect(screen.queryByTestId("sharecrm-bind-button")).toBeNull();
   });
 
   it("lets a non-admin agent owner bind Lark and DingTalk", () => {
     // The agent's owner (user-1) is only a plain workspace member. Lark and
-    // DingTalk both authorize the target agent's owner through canManageAgent;
-    // Slack, WeCom and Telegram remain workspace owner/admin-only.
+    // DingTalk both authorize the target agent's owner's canManageAgent path;
+    // Slack, WeCom, Telegram and ShareCRM remain workspace owner/admin-only.
     membersRef.current = [{ user_id: "user-1", role: "member" }];
     renderTab(<IntegrationsTab agent={agent} />);
     const larkButton = screen.getByTestId("lark-bind-button");
@@ -576,10 +598,12 @@ describe("IntegrationsTab", () => {
     expect(screen.queryByTestId("slack-bind-button")).toBeNull();
     expect(screen.queryByTestId("wecom-bind-button")).toBeNull();
     expect(screen.queryByTestId("telegram-bind-button")).toBeNull();
-    // The Slack, WeCom and Telegram sections fall back to the shared members note.
+    expect(screen.queryByTestId("sharecrm-bind-button")).toBeNull();
+    // Slack, WeCom, Telegram and ShareCRM each fall back to the shared
+    // members note.
     expect(
       screen.getAllByText(/Only workspace owners and admins can manage this connection/i),
-    ).toHaveLength(3);
+    ).toHaveLength(4);
   });
 
   it("renders the bind entry (not coming-soon) when installs are unavailable but the agent is already bound", () => {
