@@ -78,6 +78,14 @@ func (d *Daemon) agentDiscoveryLoop(ctx context.Context) {
 			d.refreshAgentVersions(ctx)
 		case now := <-ticker.C:
 			gained := d.refreshAgentAvailability()
+			// Discovery-time rejections condemn a provider even when the version
+			// probe never saw it: dsh without its Multica runtime profile is
+			// deterministically unusable, so take any lingering runtime rows
+			// offline with the reason instead of leaving a selectable-but-broken
+			// runtime behind (the "discovery failed" launch error). Self-heals:
+			// installing the profile puts the provider back in the availability
+			// set and converge re-registers it on a later tick.
+			d.demoteDiscoverySkippedRuntimes(ctx)
 			missing := d.providersMissingRuntimes()
 			if len(missing) == 0 {
 				backoff = 0
@@ -155,6 +163,64 @@ func (d *Daemon) skippedAgentsSnapshot() map[string]string {
 	return out
 }
 
+// setDiscoverySkipped records providers that CLI discovery rejected before
+// any registration round (currently only dsh without its Multica runtime
+// profile — see dshProfileMissingReason). Unlike setSkippedAgents, which is
+// replaced by each registration round, this set is replaced by each
+// refreshAgentAvailability, so installing the missing profile clears the
+// entry on the next discovery tick.
+func (d *Daemon) setDiscoverySkipped(skipped map[string]string) {
+	d.skippedAgentsMu.Lock()
+	defer d.skippedAgentsMu.Unlock()
+	if len(skipped) == 0 {
+		d.discoverySkipped = nil
+		return
+	}
+	out := make(map[string]string, len(skipped))
+	for name, reason := range skipped {
+		out[name] = reason
+	}
+	d.discoverySkipped = out
+}
+
+// discoverySkippedSnapshot copies the current discovery-time rejections for
+// consumers that need to act on them (e.g. demoting a runtime whose profile
+// went missing).
+func (d *Daemon) discoverySkippedSnapshot() map[string]string {
+	d.skippedAgentsMu.RLock()
+	defer d.skippedAgentsMu.RUnlock()
+	if len(d.discoverySkipped) == 0 {
+		return nil
+	}
+	out := make(map[string]string, len(d.discoverySkipped))
+	for name, reason := range d.discoverySkipped {
+		out[name] = reason
+	}
+	return out
+}
+
+// mergeDiscoverySkipped folds the latest discovery-time rejections into a
+// registration round's own drop set for /health. Round drops win on a name
+// collision; discovery reasons that no longer apply (the profile is now
+// installed) are absent from discoverySkipped and therefore not carried over.
+func (d *Daemon) mergeDiscoverySkipped(round map[string]string) map[string]string {
+	d.skippedAgentsMu.RLock()
+	defer d.skippedAgentsMu.RUnlock()
+	if len(d.discoverySkipped) == 0 {
+		return round
+	}
+	merged := make(map[string]string, len(round)+len(d.discoverySkipped))
+	for name, reason := range round {
+		merged[name] = reason
+	}
+	for name, reason := range d.discoverySkipped {
+		if _, exists := merged[name]; !exists {
+			merged[name] = reason
+		}
+	}
+	return merged
+}
+
 // refreshAgentAvailability re-runs CLI discovery and publishes providers that
 // appeared since the last probe. It performs no registration — that is
 // convergeRuntimeRegistrations, driven by live state so a failure retries.
@@ -169,7 +235,11 @@ func (d *Daemon) skippedAgentsSnapshot() map[string]string {
 // Returns the providers that were added, for logging and tests.
 func (d *Daemon) refreshAgentAvailability() []string {
 	current := d.agents()
-	probed := probeAgentCLIs()
+	probed, discoverySkipped := probeAgentCLIs()
+	d.setDiscoverySkipped(discoverySkipped)
+	for name, reason := range discoverySkipped {
+		d.logger.Warn("skip registering runtime: rejected at discovery", "name", name, "reason", reason)
+	}
 
 	var gained []string
 	for name := range probed {
@@ -177,22 +247,30 @@ func (d *Daemon) refreshAgentAvailability() []string {
 			gained = append(gained, name)
 		}
 	}
-	if len(gained) == 0 {
-		return nil
-	}
-	sort.Strings(gained)
 
-	// Copy-on-write: build the union, then publish. Entries for providers we
-	// already knew about are preserved as-is so this never fights the pinned
-	// path / self-heal bookkeeping (resolvedPaths) for a running provider.
+	// Copy-on-write: build the union, then publish — even when nothing was
+	// gained, because a provider rejected at discovery time (dsh without its
+	// Multica runtime profile) must be DROPPED from the availability set. The
+	// rejection is deterministic, and keeping the provider would make converge
+	// re-register the runtime the demotion path just took offline, toggling
+	// every discovery tick. Known providers are otherwise preserved as-is so
+	// this never fights the pinned path / self-heal bookkeeping (resolvedPaths).
 	merged := make(map[string]AgentEntry, len(current)+len(gained))
 	for name, entry := range current {
+		if _, rejected := discoverySkipped[name]; rejected {
+			continue
+		}
 		merged[name] = entry
 	}
 	for _, name := range gained {
 		merged[name] = probed[name]
 	}
 	d.agentsAvailable.Store(&merged)
+
+	if len(gained) == 0 {
+		return nil
+	}
+	sort.Strings(gained)
 	d.logger.Info("agent CLI discovered after startup", "providers", gained)
 	return gained
 }
@@ -465,6 +543,39 @@ func (d *Daemon) demoteUnusableRuntimes(ctx context.Context, causes map[string]r
 		})
 	}
 	d.notifyRuntimeSetChanged()
+}
+
+// demoteDiscoverySkippedRuntimes takes offline the server-side runtime rows of
+// providers that discovery rejected (currently only dsh without its Multica
+// runtime profile), reusing the demotion path built for confirmed-unusable
+// version verdicts.
+//
+// The rejection is deterministic in the same sense as not_executable: without
+// the profile the CLI has no --stdio protocol, so every task would fail after
+// being advertised as healthy. Leaving the previously registered row in place
+// makes the runtime look selectable, and selecting it fails every launch with
+// a generic discovery error — the silence this diagnostic exists to remove.
+// Demoting it surfaces the reason on the server row and in /health.
+//
+// Recovery needs no new machinery: once the profile is installed the provider
+// reappears in the availability set, its demotion is cleared by the healthy
+// probe, and converge re-registers the runtime on a later tick.
+func (d *Daemon) demoteDiscoverySkippedRuntimes(ctx context.Context) {
+	skipped := d.discoverySkippedSnapshot()
+	if len(skipped) == 0 {
+		return
+	}
+	causes := make(map[string]runtimeVerdict, len(skipped))
+	for provider, reason := range skipped {
+		causes[provider] = runtimeVerdict{
+			reason: reason,
+			offline: &RuntimeOfflineReason{
+				Code:   RuntimeOfflineCodeProfileMissing,
+				Detail: reason,
+			},
+		}
+	}
+	d.demoteUnusableRuntimes(ctx, causes)
 }
 
 // deregisterRevivedRuntimes takes offline the rows a register response brought

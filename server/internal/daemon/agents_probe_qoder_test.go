@@ -26,7 +26,7 @@ func TestProbeAgentCLIs_QoderResolvesViaLoginShell(t *testing.T) {
 	// qoder can resolve is the login-shell fallback.
 	t.Setenv("PATH", "")
 
-	agents := probeAgentCLIs()
+	agents, _ := probeAgentCLIs()
 	entry, ok := agents["qoder"]
 	if !ok {
 		t.Fatal("qoder was not discovered via the login-shell fallback; " +
@@ -52,7 +52,7 @@ func TestProbeAgentCLIs_QoderCNResolvesIndependently(t *testing.T) {
 	resetShellResolveCacheForTest(t)
 	t.Setenv("PATH", "")
 
-	agents := probeAgentCLIs()
+	agents, _ := probeAgentCLIs()
 	entry, ok := agents["qoderclicn"]
 	if !ok {
 		t.Fatal("qoderclicn was not discovered via the login-shell fallback")
@@ -83,7 +83,8 @@ func TestProbeAgentCLIs_QoderPinnedPathStaysHardMiss(t *testing.T) {
 	t.Setenv("PATH", "")
 	t.Setenv("MULTICA_QODER_PATH", "/nonexistent/pinned/qodercli")
 
-	if entry, ok := probeAgentCLIs()["qoder"]; ok {
+	agents, _ := probeAgentCLIs()
+	if entry, ok := agents["qoder"]; ok {
 		t.Errorf("pinned-but-missing MULTICA_QODER_PATH resolved to %q, want a hard miss", entry.Path)
 	}
 }

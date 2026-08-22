@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -28,7 +29,7 @@ func stubAgentProbe(t *testing.T, initial map[string]AgentEntry) func(map[string
 		mu      sync.Mutex
 		current = initial
 	)
-	probeAgentCLIs = func() map[string]AgentEntry {
+	probeAgentCLIs = func() (map[string]AgentEntry, map[string]string) {
 		mu.Lock()
 		defer mu.Unlock()
 		// Copy so the caller can iterate without holding the lock.
@@ -36,12 +37,46 @@ func stubAgentProbe(t *testing.T, initial map[string]AgentEntry) func(map[string
 		for name, entry := range current {
 			out[name] = entry
 		}
-		return out
+		return out, nil
 	}
 	return func(next map[string]AgentEntry) {
 		mu.Lock()
 		defer mu.Unlock()
 		current = next
+	}
+}
+
+// stubAgentProbeWithDiscoverySkips is stubAgentProbe plus a discovery-time
+// skip set (the second probeAgentCLIs return value), for tests that pin the
+// skipped_agents diagnostic for discovery-rejected providers (e.g. dsh
+// without its Multica runtime profile).
+func stubAgentProbeWithDiscoverySkips(t *testing.T, initial map[string]AgentEntry, initialSkipped map[string]string) func(map[string]AgentEntry, map[string]string) {
+	t.Helper()
+	orig := probeAgentCLIs
+	t.Cleanup(func() { probeAgentCLIs = orig })
+	var (
+		mu      sync.Mutex
+		current = initial
+		skipped = initialSkipped
+	)
+	probeAgentCLIs = func() (map[string]AgentEntry, map[string]string) {
+		mu.Lock()
+		defer mu.Unlock()
+		out := make(map[string]AgentEntry, len(current))
+		for name, entry := range current {
+			out[name] = entry
+		}
+		skipOut := make(map[string]string, len(skipped))
+		for name, reason := range skipped {
+			skipOut[name] = reason
+		}
+		return out, skipOut
+	}
+	return func(next map[string]AgentEntry, nextSkipped map[string]string) {
+		mu.Lock()
+		defer mu.Unlock()
+		current = next
+		skipped = nextSkipped
 	}
 }
 
@@ -562,6 +597,132 @@ func TestHealth_ReportsSkippedAgents(t *testing.T) {
 	d.detectBuiltinRuntimes(context.Background())
 	if got := d.skippedAgentsSnapshot(); len(got) != 0 {
 		t.Errorf("skipped agents = %v after a clean round, want empty", got)
+	}
+}
+
+// TestDiscovery_DshWithoutProfileReportedInSkippedAgents pins the
+// discovery-half of the skipped_agents diagnostic: a resolvable dsh whose
+// Multica runtime profile is missing is rejected inside probeAgentCLIs and
+// never reaches the registration round, so the daemon must carry the
+// discovery reason into /health itself — and clear it once the profile is
+// installed.
+func TestDiscovery_DshWithoutProfileReportedInSkippedAgents(t *testing.T) {
+	fx := newBatchFixture(t)
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{"codex": {Path: "/fake/codex"}}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+
+	setProbe := stubAgentProbeWithDiscoverySkips(t, map[string]AgentEntry{"codex": {Path: "/fake/codex"}}, nil)
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	// dsh is installed but its Multica runtime profile is not: discovery
+	// finds the CLI and rejects it before any registration round.
+	setProbe(
+		map[string]AgentEntry{"codex": {Path: "/fake/codex"}},
+		map[string]string{"dsh": dshProfileMissingReason},
+	)
+	d.refreshAgentAvailability()
+	d.convergeRuntimeRegistrations(context.Background())
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Fatalf("providers = %v, want only codex while dsh has no profile", got)
+	}
+	reason, ok := d.skippedAgentsSnapshot()["dsh"]
+	if !ok {
+		t.Fatalf("skipped_agents = %v, want a dsh entry", d.skippedAgentsSnapshot())
+	}
+	if !strings.Contains(reason, "dsh plugin --profile multica add") {
+		t.Errorf("dsh skip reason = %q, want it to name the repair command", reason)
+	}
+
+	// User installs the profile: the next discovery round reports nothing
+	// skipped and a clean registration round clears the entry.
+	setProbe(map[string]AgentEntry{"codex": {Path: "/fake/codex"}}, nil)
+	d.refreshAgentAvailability()
+	d.convergeRuntimeRegistrations(context.Background())
+	if got := d.skippedAgentsSnapshot(); len(got) != 0 {
+		t.Errorf("skipped agents = %v after installing the profile, want empty", got)
+	}
+}
+
+// TestDiscovery_DshWithoutProfileDemotesStaleRuntime pins the behavior half
+// of the dsh diagnostic: a dsh runtime that registered while its Multica
+// profile was installed must be taken offline when the profile disappears,
+// instead of lingering as a selectable runtime whose launches all fail with
+// a generic discovery error. Reinstalling the profile must bring it back
+// without a restart.
+func TestDiscovery_DshWithoutProfileDemotesStaleRuntime(t *testing.T) {
+	fx := newBatchFixture(t)
+	fx.enableStableRuntimeIDs()
+	d := fx.daemon
+	d.cfg.Agents = map[string]AgentEntry{
+		"codex": {Path: "/fake/codex"},
+		"dsh":   {Path: "/fake/dsh"},
+	}
+	fx.setWorkspaces(WorkspaceInfo{ID: "ws-1", Name: "one"})
+
+	setProbe := stubAgentProbeWithDiscoverySkips(t, map[string]AgentEntry{
+		"codex": {Path: "/fake/codex"},
+		"dsh":   {Path: "/fake/dsh"},
+	}, nil)
+	if err := d.syncWorkspacesFromAPI(context.Background(), false); err != nil {
+		t.Fatalf("syncWorkspacesFromAPI: %v", err)
+	}
+
+	// Both providers register while the dsh profile is present.
+	d.refreshAgentAvailability()
+	d.convergeRuntimeRegistrations(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 {
+		t.Fatalf("providers = %v, want codex and dsh registered", got)
+	}
+	dshID := fx.runtimeIDFor("ws-1", "dsh")
+	if dshID == "" {
+		t.Fatal("no stable runtime id for dsh")
+	}
+
+	// The user removes the profile: discovery rejects dsh and the stale row
+	// must be taken offline with the reason, not left selectable.
+	setProbe(map[string]AgentEntry{"codex": {Path: "/fake/codex"}}, map[string]string{"dsh": dshProfileMissingReason})
+	d.refreshAgentAvailability()
+	d.demoteDiscoverySkippedRuntimes(context.Background())
+
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Fatalf("providers = %v, want only codex after dsh loses its profile", got)
+	}
+	if got := fx.deregisteredIDs(); len(got) != 1 || got[0] != dshID {
+		t.Fatalf("deregistered = %v, want the dsh runtime %q deregistered", got, dshID)
+	}
+	reason, ok := fx.runtimeOfflineReason(dshID)
+	if !ok {
+		t.Fatal("dsh row went offline with no reason")
+	}
+	if reason.Code != RuntimeOfflineCodeProfileMissing {
+		t.Errorf("offline reason code = %q, want %q", reason.Code, RuntimeOfflineCodeProfileMissing)
+	}
+	if !strings.Contains(reason.Detail, "dsh plugin --profile multica add") {
+		t.Errorf("offline reason detail = %q, want it to name the repair command", reason.Detail)
+	}
+
+	// Another discovery round must NOT re-register dsh: the availability set
+	// drops discovery-rejected providers, so converge never sees dsh as missing
+	// again — otherwise demote and converge toggle the row every tick.
+	d.refreshAgentAvailability()
+	d.convergeRuntimeRegistrations(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 1 || got[0] != "codex" {
+		t.Fatalf("providers after a second round = %v, want dsh to stay offline (no demote/converge toggle)", got)
+	}
+
+	// The user installs the profile again: dsh re-registers on a later tick.
+	setProbe(map[string]AgentEntry{
+		"codex": {Path: "/fake/codex"},
+		"dsh":   {Path: "/fake/dsh"},
+	}, nil)
+	d.refreshAgentAvailability()
+	d.convergeRuntimeRegistrations(context.Background())
+	if got := registeredProviders(t, d, "ws-1"); len(got) != 2 || got[0] != "codex" || got[1] != "dsh" {
+		t.Fatalf("providers after profile reinstall = %v, want codex and dsh", got)
 	}
 }
 
