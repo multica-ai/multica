@@ -502,6 +502,8 @@ func TestSendSMTP_OpenClientFailureNoPanic(t *testing.T) {
 type testSMTPServer struct {
 	Listener net.Listener
 	Addr     string
+	// ReceivedData captures complete DATA payloads for message-level assertions.
+	ReceivedData chan string
 
 	// Auth mechs advertised in EHLO response (e.g. "LOGIN" or "PLAIN LOGIN")
 	AuthMechs string
@@ -521,6 +523,9 @@ func startTestSMTPServer(t *testing.T, cfg testSMTPServer) (*testSMTPServer, fun
 	}
 	cfg.Listener = l
 	cfg.Addr = l.Addr().String()
+	if cfg.ReceivedData == nil {
+		cfg.ReceivedData = make(chan string, 4)
+	}
 
 	done := make(chan struct{})
 	go func() {
@@ -616,12 +621,15 @@ func (s *testSMTPServer) handleConn(conn net.Conn) {
 		case upper == "DATA":
 			writeLine("354 Start mail input; end with <CRLF>.<CRLF>")
 			// Read until line containing only "."
+			var dataLines []string
 			for {
 				dataLine := readLine()
 				if dataLine == "." {
 					break
 				}
+				dataLines = append(dataLines, dataLine)
 			}
+			s.ReceivedData <- strings.Join(dataLines, "\r\n")
 			writeLine("250 OK")
 
 		case strings.HasPrefix(upper, "STARTTLS"):
@@ -685,6 +693,28 @@ func TestSendSMTP_PlainAuthSucceedsWithoutFallback(t *testing.T) {
 	err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>")
 	if err != nil {
 		t.Fatalf("sendSMTP failed: %v", err)
+	}
+}
+
+func TestSendSMTP_OmitsProviderManagedHeaders(t *testing.T) {
+	srv, cleanup := startTestSMTPServer(t, testSMTPServer{})
+	defer cleanup()
+	host, port, _ := net.SplitHostPort(srv.Addr)
+
+	s := &EmailService{
+		fromEmail: "sender@gmail.com",
+		smtpHost:  host,
+		smtpPort:  port,
+	}
+	if err := s.sendSMTP("to@example.com", "Test Subject", "<p>Hello</p>"); err != nil {
+		t.Fatalf("sendSMTP failed: %v", err)
+	}
+
+	payload := strings.ToLower(<-srv.ReceivedData)
+	for _, header := range []string{"date:", "message-id:"} {
+		if strings.Contains(payload, "\r\n"+header) || strings.HasPrefix(payload, header) {
+			t.Fatalf("SMTP payload must let the provider assign %s; got:\n%s", header, payload)
+		}
 	}
 }
 

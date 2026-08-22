@@ -290,7 +290,6 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	// non-ASCII workspace/inviter names crossing strict or older SMTP hops.
 	has8Bit, _ := c.Extension("8BITMIME")
 	encodedSubject := mime.QEncoding.Encode("utf-8", subject)
-	msgID := fmt.Sprintf("<%d@%s>", time.Now().UnixNano(), s.smtpHost)
 
 	var bodyBytes []byte
 	var cte string
@@ -319,8 +318,6 @@ func (s *EmailService) sendSMTP(to, subject, htmlBody string) error {
 	headers := "From: " + s.fromEmail + "\r\n" +
 		"To: " + to + "\r\n" +
 		"Subject: " + encodedSubject + "\r\n" +
-		"Date: " + time.Now().UTC().Format(time.RFC1123Z) + "\r\n" +
-		"Message-ID: " + msgID + "\r\n" +
 		"MIME-Version: 1.0\r\n" +
 		"Content-Type: text/html; charset=UTF-8\r\n" +
 		"Content-Transfer-Encoding: " + cte + "\r\n" +
