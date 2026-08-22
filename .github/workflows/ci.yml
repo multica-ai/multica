@@ -64,6 +64,8 @@ jobs:
               - 'scripts/drop-database.sh'
               - 'scripts/remove-worktree.sh'
               - 'scripts/worktree-db.test.sh'
+              - 'scripts/dev-env.sh'
+              - 'scripts/dev-env.test.sh'
               - 'scripts/selfhost-wait.sh'
               # selfhost-config.test.sh asserts on the installers' side of
               # the port contract, so a change to either must run it.
@@ -256,6 +258,10 @@ jobs:
       - name: Test worktree database cleanup
         if: ${{ needs.changes.outputs.frontend == 'true' }}
         run: bash scripts/worktree-db.test.sh
+
+      - name: Test development environment registry
+        if: ${{ needs.changes.outputs.frontend == 'true' }}
+        run: bash scripts/dev-env.test.sh
 
       - name: Verify reserved-slugs.ts is up to date
         if: ${{ needs.changes.outputs.frontend == 'true' }}

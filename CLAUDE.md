@@ -76,7 +76,12 @@ Mobile is independent. It may import types and pure functions from `@multica/cor
 Use the repo scripts as the source of truth. Common commands:
 
 ```bash
-make dev              # auto-setup and start the app
+make up               # start this checkout's environment (C=api,web,daemon,desktop)
+make status           # what is running, with pid/commit proof it is yours
+make list             # every development environment on this machine
+make down             # stop the processes, keep the database
+make destroy          # stop, then drop the database and free the slot
+make dev              # auto-setup and start the app in the foreground
 make start            # start backend + frontend
 make stop             # stop app processes for this checkout
 make db-drop          # permanently drop this checkout's local database
@@ -95,6 +100,8 @@ pnpm test             # TS/Vitest tests through Turborepo
 pnpm exec playwright test
 pnpm ui:add badge     # shadcn/Base UI component into packages/ui
 ```
+
+`make up` records each environment in `~/.multica/dev/`, allocates its ports and database name under a lock instead of recomputing them from the path, and verifies the database through `DATABASE_URL` rather than `docker exec` — a `docker exec` create lands in the wrong server whenever a native PostgreSQL owns 5432. `make down` keeps the data; `make destroy` consumes it.
 
 Worktrees share one PostgreSQL container and get isolated DB names/ports via `.env.worktree`. `make dev` auto-detects this. For manual setup use `make worktree-env`, `make setup-worktree`, and `make start-worktree`. `pnpm dev:desktop` additionally self-isolates per worktree (its own renderer port + app name) automatically, independent of `.env.worktree`.
 
