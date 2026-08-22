@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -19,6 +20,7 @@ import (
 	"github.com/multica-ai/multica/server/internal/dbstartup"
 	"github.com/multica-ai/multica/server/internal/events"
 	"github.com/multica-ai/multica/server/internal/handler"
+	"github.com/multica-ai/multica/server/internal/integrations/wecom"
 	"github.com/multica-ai/multica/server/internal/logger"
 	obsmetrics "github.com/multica-ai/multica/server/internal/metrics"
 	"github.com/multica-ai/multica/server/internal/profiling"
@@ -355,6 +357,16 @@ func main() {
 	go hub.Run()
 	daemonHub := daemonws.NewHub()
 	var daemonWakeup service.TaskWakeupNotifier = daemonHub
+	// Nil unless a Redis relay is running: without one there is only one
+	// replica, and it both publishes the completion and holds the socket.
+	var wecomRelay WecomRelay
+	// Built here rather than in the router because the relay's shard readers
+	// start before the router exists, and a deliverer registered after they
+	// start would miss the replay window they open with. The registry is a
+	// bare map with no dependencies, so it can be minted this early and handed
+	// down.
+	wecomSenders := wecom.NewSendersRegistry()
+	var wecomRelayOutbound *wecom.RelayOutbound
 
 	// MUL-1138: when REDIS_URL is set, route fanout through a Redis relay so
 	// multiple API nodes can deliver each other's events. Without it the hub
@@ -372,14 +384,31 @@ func main() {
 	var shardedReadRedis *redis.Client
 	var legacyReadRedis *redis.Client
 	var relay realtime.ManagedRelay
+	// stopRelay halts the relay readers and drains the WeCom dispatcher. It is
+	// called from the shutdown BODY, before the channel supervisor is torn
+	// down — the dispatcher's drain sends over the sockets the supervisor
+	// owns, and each supervised connection clears its sender on exit, so a
+	// drain that runs after that teardown finds ownsSocket false for every
+	// installation and discards everything it was built to save. The defer
+	// keeps a second call (idempotent via the Once) for the early-return
+	// paths that never reach the body's shutdown sequence.
+	var stopRelayOnce sync.Once
+	stopRelay := func() {
+		stopRelayOnce.Do(func() {
+			if relay != nil {
+				relay.Stop()
+			}
+			relayCancel()
+			if relay != nil {
+				relay.Wait()
+			}
+			// Join the dispatcher BEFORE its Redis clients go away, or the
+			// drain races the teardown it depends on.
+			wecomRelayOutbound.Wait()
+		})
+	}
 	defer func() {
-		if relay != nil {
-			relay.Stop()
-		}
-		relayCancel()
-		if relay != nil {
-			relay.Wait()
-		}
+		stopRelay()
 		closeRedisClient("realtime-read-legacy", legacyReadRedis)
 		closeRedisClient("realtime-read-sharded", shardedReadRedis)
 		closeRedisClient("realtime-read", relayReadRedis)
@@ -418,6 +447,7 @@ func main() {
 				legacyReadRedis = newNamedRedisClient(opts, "realtime-read-legacy")
 				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, shardedReadRedis, relayConfig)
 				sharded.SetDaemonRuntimeDeliverer(daemonHub)
+				wecomRelay = sharded
 				legacy := realtime.NewRedisRelayWithClientsAndConfig(hub, relayWriteRedis, legacyReadRedis, relayConfig.RetentionConfig())
 				relay = realtime.NewMirroredRelay(sharded, legacy)
 				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
@@ -425,9 +455,20 @@ func main() {
 				relayReadRedis = newNamedRedisClient(opts, "realtime-read")
 				sharded := realtime.NewShardedStreamRelay(hub, relayWriteRedis, relayReadRedis, relayConfig)
 				sharded.SetDaemonRuntimeDeliverer(daemonHub)
+				wecomRelay = sharded
 				relay = sharded
 				daemonWakeup = daemonws.NewRelayNotifier(daemonHub, sharded)
 			}
+			if wecomRelay != nil {
+				wecomRelayOutbound = wecom.NewRelayOutbound(wecomRelay,
+					wecom.NewRedisDedupe(relayWriteRedis, slog.Default()),
+					relayConfig.ReplayGrace, slog.Default())
+				wecomRelay.SetWecomOutboundDeliverer(wecomRelayOutbound)
+				wecomRelayOutbound.Start(relayCtx)
+			}
+			// Every deliverer is registered by this point. The shard readers
+			// open on a replay window, so anything registered after Start
+			// silently misses it.
 			relay.Start(relayCtx)
 			broadcaster = realtime.NewDualWriteBroadcaster(hub, relay)
 			storePoolSize := 0
@@ -560,6 +601,8 @@ func main() {
 		WecomMetrics:        wecomMetrics,
 		DaemonHub:           daemonHub,
 		DaemonWakeup:        daemonWakeup,
+		WecomSenders:        wecomSenders,
+		WecomRelayOutbound:  wecomRelayOutbound,
 		FeatureFlags:        flags,
 		HeartbeatScheduler:  heartbeatScheduler,
 		LLMMaxRetries:       llmMaxRetries,
@@ -757,6 +800,10 @@ func main() {
 	// debounced run triggers and join any in-flight outbound replies
 	// (each bounded by ReplyTimeout) so a binding card / offline notice is
 	// not lost on shutdown.
+	// Relay first, supervisor second: the dispatcher's graceful drain can only
+	// deliver while the supervised connections are still live.
+	stopRelay()
+
 	if h.ChannelSupervisor != nil {
 		if !h.ChannelSupervisor.WaitWithTimeout(h.ChannelSupervisor.ShutdownTimeout()) {
 			slog.Warn("channel supervisor: connections did not exit within shutdown timeout; proceeding",

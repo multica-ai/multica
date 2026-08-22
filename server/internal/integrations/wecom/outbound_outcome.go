@@ -55,6 +55,14 @@ const (
 	// dropAttachmentNotAdmitted — the delivery was shed because too many were
 	// already running or pending. A file only, never a whole reply.
 	dropAttachmentNotAdmitted dropReason = "attachment_not_admitted"
+
+	// dropRelayOverflow — a routed delivery was shed because this replica's
+	// dispatch queue was full. Shedding rather than blocking is deliberate:
+	// the caller is the shared realtime shard reader, and stalling it would
+	// hold up browser traffic, daemon wakeups and every other bot on that
+	// shard. A sustained rate here means one bot cannot keep up and is
+	// starving the queue it shares.
+	dropRelayOverflow dropReason = "relay_overflow"
 )
 
 // skipReason names a completion this adapter was never going to deliver. Kept

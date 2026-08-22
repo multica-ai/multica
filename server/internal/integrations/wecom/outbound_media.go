@@ -171,14 +171,23 @@ func (o *Outbound) mayCarryAttachments(e events.Event) bool {
 // already landed and the reply's outcome is settled, so only the per-file
 // counters move here.
 func (o *Outbound) deliverAttachments(e events.Event, to attachmentTarget, carriesTheReply bool) {
+	o.deliverAttachmentsByID(chatDoneMessageID(e.Payload), e.WorkspaceID, to, carriesTheReply)
+}
+
+// deliverAttachmentsByID is deliverAttachments for a caller holding ids rather
+// than the event — the relayed path, where the event was published on another
+// replica and only its identifiers crossed the wire. The files themselves are
+// read here, by the replica that will send them, rather than shipped through
+// Redis.
+func (o *Outbound) deliverAttachmentsByID(rawMessageID, rawWorkspaceID string, to attachmentTarget, carriesTheReply bool) {
 	if o.objects == nil || o.senders == nil {
 		return
 	}
-	messageID, err := util.ParseUUID(chatDoneMessageID(e.Payload))
+	messageID, err := util.ParseUUID(rawMessageID)
 	if err != nil || !messageID.Valid {
 		return // a turn with no assistant message has nothing bound to it
 	}
-	workspaceID, err := util.ParseUUID(e.WorkspaceID)
+	workspaceID, err := util.ParseUUID(rawWorkspaceID)
 	if err != nil || !workspaceID.Valid {
 		return
 	}
