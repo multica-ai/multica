@@ -178,8 +178,8 @@ func Classify(rawError string) Reason {
 	//    Note this only catches deadlines that arrive as a bare string;
 	//    callers holding the error value should classify structurally
 	//    instead (see taskRunFailureReason in daemon/daemon.go).
-	//    "opencode stream ended" is the shared prefix of every failure the
-	//    OpenCode terminal-signal guard raises (pkg/agent/opencode.go): a step
+	//    The OpenCode/CodeArts "stream ended" prefixes cover every failure the
+	//    shared terminal-signal guard raises (pkg/agent/opencode.go): a step
 	//    left open at EOF, a continuation that never started, and a run that
 	//    ended on a step with no text, no tool call and no reported usage.
 	//    All three mean the same thing — the provider stream died and
@@ -194,6 +194,7 @@ func Classify(rawError string) Reason {
 	case containsAny(lower,
 		"stream disconnected",
 		opencodeStreamEndedPrefix,
+		codeartsStreamEndedPrefix,
 		"connection closed",
 		"mid-response",
 		"error sending request",
@@ -401,7 +402,10 @@ var legacyOpenclawCLITimeoutReasons = map[string]bool{
 // guard raises (pkg/agent/opencode.go). Exactly one code path emits it, and it
 // is a PREFIX of the whole error rather than a phrase somewhere inside it, so
 // its presence identifies the failure outright.
-const opencodeStreamEndedPrefix = "opencode stream ended"
+const (
+	opencodeStreamEndedPrefix = "opencode stream ended"
+	codeartsStreamEndedPrefix = "codearts stream ended"
+)
 
 // legacyOpencodeStreamEndedReasons are the buckets a daemon predating rule 7's
 // entry lands these errors in: process_failure for the two "terminal signal"
@@ -460,8 +464,10 @@ func NormalizeDaemonReason(reason, rawError string) Reason {
 	// allowlist on exactly the un-upgraded hosts most likely to be hitting a
 	// flaky provider. Upgrading here makes the retry work the moment the server
 	// deploys, without waiting on the daemon fleet.
+	lowerError := strings.ToLower(strings.TrimSpace(rawError))
 	if legacyOpencodeStreamEndedReasons[reason] &&
-		strings.HasPrefix(strings.ToLower(strings.TrimSpace(rawError)), opencodeStreamEndedPrefix) {
+		(strings.HasPrefix(lowerError, opencodeStreamEndedPrefix) ||
+			strings.HasPrefix(lowerError, codeartsStreamEndedPrefix)) {
 		return ReasonAgentProviderNetwork
 	}
 	// #7112: same mixed-version gap. A daemon predating the OpenClaw CLI
