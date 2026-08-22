@@ -283,7 +283,9 @@ export function useUpdateIssue() {
           vars.status !== undefined ||
           Object.prototype.hasOwnProperty.call(vars, "project_id"),
       });
-      qc.invalidateQueries({ queryKey: issueKeys.tableAll(wsId) });
+      const tableRefetch = qc.invalidateQueries({
+        queryKey: issueKeys.tableAll(wsId),
+      });
       if (ctx) {
         invalidateStaleListKeys(qc, ctx.change.staleKeys);
       }
@@ -318,6 +320,18 @@ export function useUpdateIssue() {
       if (ctx?.parentId || newParentId) {
         qc.invalidateQueries({ queryKey: issueKeys.childrenByParentsAll(wsId) });
       }
+      // Drag surfaces render from a local column mirror frozen until their
+      // settle callback (mutate-level onSettled) releases it. Table branch
+      // caches reconcile ORDER through the invalidation above — the
+      // optimistic pass patches row fields in place, never row order — so a
+      // release that runs before the refetch lands repaints the stale order
+      // and the card visibly snaps back, then jumps again when the refetch
+      // arrives. Returning the promise parks the caller's callback until
+      // the authoritative order is in cache (TanStack awaits promises
+      // returned from hook-level callbacks before running mutate-level
+      // ones). On error the rollback already restored the old order and the
+      // revert should paint promptly, so the wait is skipped.
+      return vars.move_intent && !_err ? tableRefetch : undefined;
     },
   });
 }

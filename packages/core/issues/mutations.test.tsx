@@ -3,7 +3,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClient, QueryClientProvider, useQuery } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
 import { setApiInstance } from "../api";
@@ -407,6 +407,89 @@ describe("useUpdateIssue — optimistic move keeps every bucketed board in sync"
 
     expect(inboxStatus("issue-1")).toBe("todo");
     expect(inboxStatus("issue-2")).toBe("todo");
+  });
+
+  it("parks the caller's onSettled until the table branch refetch lands (move only)", async () => {
+    // The drag surfaces release their frozen column mirror from this
+    // callback, and table branch caches reconcile ORDER through the tableAll
+    // refetch, not through the optimistic patch — a release that ran before
+    // the refetch would repaint the stale order (the drag flicker).
+    moveIssue.mockResolvedValue(makeIssue(1, { position: 5 }));
+    let fetchCount = 0;
+    let resolveRefetch!: () => void;
+    const tableKey = [...issueKeys.tableAll(WS_ID), "rows", "test", "page", null];
+    const tableQuery = renderHook(
+      () =>
+        useQuery({
+          queryKey: tableKey,
+          queryFn: () => {
+            fetchCount++;
+            if (fetchCount === 1) return Promise.resolve({ rows: [] });
+            return new Promise<{ rows: never[] }>((r) => {
+              resolveRefetch = () => r({ rows: [] });
+            });
+          },
+        }),
+      { wrapper: createWrapper(qc) },
+    );
+    await waitFor(() => expect(fetchCount).toBe(1));
+
+    const onSettled = vi.fn();
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+    act(() => {
+      result.current.mutate(
+        { id: "issue-1", position: 5, move_intent: { before_id: null, after_id: null } },
+        { onSettled },
+      );
+    });
+
+    // The settle invalidation refetches the active table query; the caller's
+    // callback must stay parked while that refetch is in flight.
+    await waitFor(() => expect(fetchCount).toBe(2));
+    expect(onSettled).not.toHaveBeenCalled();
+
+    await act(async () => {
+      resolveRefetch();
+    });
+    await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+    tableQuery.unmount();
+  });
+
+  it("releases the caller's onSettled promptly when the move fails", async () => {
+    // The rollback already restored the old order; the revert should paint
+    // without waiting out a refetch.
+    moveIssue.mockRejectedValue(new Error("boom"));
+    let fetchCount = 0;
+    const tableKey = [...issueKeys.tableAll(WS_ID), "rows", "test", "page", null];
+    const tableQuery = renderHook(
+      () =>
+        useQuery({
+          queryKey: tableKey,
+          queryFn: () => {
+            fetchCount++;
+            if (fetchCount === 1) return Promise.resolve({ rows: [] });
+            return new Promise<{ rows: never[] }>(() => {}); // refetch never lands
+          },
+        }),
+      { wrapper: createWrapper(qc) },
+    );
+    await waitFor(() => expect(fetchCount).toBe(1));
+
+    const onSettled = vi.fn();
+    const { result } = renderHook(() => useUpdateIssue(), {
+      wrapper: createWrapper(qc),
+    });
+    act(() => {
+      result.current.mutate(
+        { id: "issue-1", position: 5, move_intent: { before_id: null, after_id: null } },
+        { onSettled },
+      );
+    });
+
+    await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(1));
+    tableQuery.unmount();
   });
 
   it("does not invalidate the board list on settle (no refetch flicker)", async () => {
