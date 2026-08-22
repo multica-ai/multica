@@ -252,15 +252,15 @@ export function useAttachmentPreview(): AttachmentPreviewHandle {
 // pre-MUL-5752 behaviour, traded back for correctness there.
 function useSettledImageURL(
   targetUrl: string,
-  enabled: boolean,
+  ready: boolean,
   onLoadError?: () => void,
 ): string {
-  const [settled, setSettled] = useState(targetUrl);
+  const [settled, setSettled] = useState(ready ? targetUrl : "");
   const onErrorRef = useRef(onLoadError);
   onErrorRef.current = onLoadError;
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!ready) return;
     if (!targetUrl) {
       setSettled(targetUrl);
       return;
@@ -284,9 +284,9 @@ function useSettledImageURL(
     return () => {
       cancelled = true;
     };
-  }, [targetUrl, enabled]);
+  }, [targetUrl, ready]);
 
-  return enabled ? settled : targetUrl;
+  return settled;
 }
 
 // Warms the browser cache for a sequence neighbour so paging to it swaps
@@ -294,17 +294,17 @@ function useSettledImageURL(
 // then fetches the bytes through a detached <img>. Renders nothing.
 export function PreviewImagePrefetch({ source }: { source: PreviewSource }) {
   const state = normalize(source);
-  const url = useResignedInlineMediaURL(
+  const { url, pending } = useResignedInlineMediaURL(
     state.attachmentId ?? undefined,
     state.mediaUrl,
     true,
   );
 
   useEffect(() => {
-    if (!url) return;
+    if (pending || !url) return;
     const probe = new window.Image();
     probe.src = url;
-  }, [url]);
+  }, [pending, url]);
 
   return null;
 }
@@ -511,7 +511,7 @@ function PreviewPanel({
   // clicked, so — unlike the click-through path, where <Attachment> had
   // already upgraded the URL — the modal has to run the re-sign itself. A
   // no-op for URLs that are already loadable (signed CDN, public storage).
-  const targetUrl = useResignedInlineMediaURL(
+  const { url: targetUrl, pending: targetPending } = useResignedInlineMediaURL(
     state.attachmentId ?? undefined,
     state.mediaUrl,
     kind === "image",
@@ -519,7 +519,11 @@ function PreviewPanel({
   // The previous image stays on the canvas until this one has decoded — the
   // swap itself is what used to flash. Also absorbs the re-sign URL upgrade
   // (raw -> signed) without a second visible load.
-  const mediaUrl = useSettledImageURL(targetUrl, kind === "image", onImageError);
+  const mediaUrl = useSettledImageURL(
+    targetUrl,
+    kind === "image" && !targetPending,
+    onImageError,
+  );
 
   // Natural size is carried with the URL it was measured from, so a panel
   // reused for a different attachment can never fit the new image against the
@@ -652,7 +656,7 @@ function PreviewPanel({
             canvas={canvas}
             natural={natural}
             onNaturalSize={handleNaturalSize}
-            onError={onImageError}
+            onError={targetPending ? undefined : onImageError}
           />
         ) : (
           <PreviewContent
@@ -746,23 +750,25 @@ function ImagePreview({
       className="bg-black/40"
       autoFocus
     >
-      <img
-        // A cached image is already `complete` before React attaches onLoad,
-        // so that event never fires — measure from the ref as well.
-        ref={readNaturalSize}
-        onLoad={(e) => readNaturalSize(e.currentTarget)}
-        onError={onError}
-        src={url}
-        alt={state.filename}
-        className={cn(
-          "select-none",
-          natural
-            ? "block size-full"
-            : "max-h-full max-w-full rounded-lg object-contain",
-        )}
-        // Native image dragging would hijack the pan gesture.
-        draggable={false}
-      />
+      {url && (
+        <img
+          // A cached image is already `complete` before React attaches onLoad,
+          // so that event never fires — measure from the ref as well.
+          ref={readNaturalSize}
+          onLoad={(e) => readNaturalSize(e.currentTarget)}
+          onError={onError}
+          src={url}
+          alt={state.filename}
+          className={cn(
+            "select-none",
+            natural
+              ? "block size-full"
+              : "max-h-full max-w-full rounded-lg object-contain",
+          )}
+          // Native image dragging would hijack the pan gesture.
+          draggable={false}
+        />
+      )}
     </ZoomCanvas>
   );
 }
