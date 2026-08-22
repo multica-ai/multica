@@ -967,6 +967,12 @@ func NewRouterWithOptions(pool *pgxpool.Pool, hub *realtime.Hub, bus *events.Bus
 					wecomOutboundOpts = append(wecomOutboundOpts, wecom.WithAttachments(store))
 					h.DeclareChannelFileDelivery(string(wecom.TypeWecom))
 				}
+				// The outbound subscriber reports to the same sink the
+				// connection path uses, so an operator reads "replies are
+				// being dropped, and for which reason" off the same dashboard
+				// as "the bot cannot connect".
+				wecomOutboundOpts = append(wecomOutboundOpts,
+					wecom.WithOutboundMetrics(wecomMetricsOrNil(opts.WecomMetrics)))
 				wecom.NewOutbound(queries, wecomSenders, slog.Default(), wecomOutboundOpts...).Register(bus)
 
 				// Ranges the media fetcher may dial despite looking reserved.
