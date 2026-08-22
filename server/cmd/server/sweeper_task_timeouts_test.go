@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// TestQueuedTTLFromEnv pins the queued-TTL boot path: the env var value
-// reaches the sweeper unchanged, and unset, unparseable, or non-positive
-// values fall back to the documented default so existing deployments
-// behave identically. A zero TTL must stay invalid: it would expire every
-// queued task immediately.
+// TestQueuedTTLFromEnv pins the env parsing for the queued TTL (the same
+// helper and default main passes into runRuntimeSweeper): unset,
+// unparseable, or non-positive values fall back to the documented default
+// so existing deployments behave identically. A zero TTL must stay invalid:
+// it would expire every queued task immediately.
 func TestQueuedTTLFromEnv(t *testing.T) {
 	tests := []struct {
 		name  string

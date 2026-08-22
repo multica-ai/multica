@@ -35,7 +35,15 @@ default_config="$(
 require_rendered_value "$default_config" 'MULTICA_VCS_INTEGRATION_ENABLED: "true"'
 require_rendered_value "$default_config" 'MULTICA_ENTITLEMENT_POLICY_ENABLED: "false"'
 require_rendered_value "$default_config" 'MULTICA_ENTITLEMENT_POLICY_URL: ""'
+require_rendered_value "$default_config" 'MULTICA_TASK_QUEUED_TTL: "2h"'
 reject_rendered_value "$default_config" 'MULTICA_ENTITLEMENT_SERVICE_TOKEN'
+
+queued_ttl_config="$(
+  helm template multica "$CHART_DIR" \
+    --show-only templates/configmap.yaml \
+    --set-string backend.config.taskQueuedTTL=12h
+)"
+require_rendered_value "$queued_ttl_config" 'MULTICA_TASK_QUEUED_TTL: "12h"'
 
 disabled_config="$(
   helm template multica "$CHART_DIR" \

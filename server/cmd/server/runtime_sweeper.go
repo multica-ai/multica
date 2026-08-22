@@ -85,13 +85,15 @@ const (
 	// admission gate that blocks new enqueues against offline runtimes,
 	// tasks already on the queue when a runtime drops off (or that lost
 	// the race against a runtime that went offline mid-tick) need a
-	// time-bounded exit. 2 hours is conservatively above any reasonable
-	// "queued behind a long-running task" window for an online runtime, so we
-	// don't expire legitimately-pending work, while still draining the historical
-	// 87k autopilot backlog within ~24h once enabled. Self-hosted deployments
-	// whose runtimes have low task concurrency can legitimately hold queued
-	// work behind long-running tasks for longer than 2 hours; raise via
-	// MULTICA_TASK_QUEUED_TTL in that case to avoid queued_expired failures.
+	// time-bounded exit. The 2h default was chosen under the historical
+	// assumption that it sits conservatively above any reasonable "queued
+	// behind a long-running task" window for an online runtime, so the sweep
+	// drains the historical 87k autopilot backlog within ~24h without
+	// expiring legitimately-pending work. That assumption breaks down for
+	// self-hosted deployments whose runtimes have low task concurrency: a
+	// single slow task can hold the rest of the queue for longer than 2
+	// hours; raise it via MULTICA_TASK_QUEUED_TTL in that case to avoid
+	// queued_expired failures.
 	defaultTaskQueuedTTL = 2 * time.Hour
 	// queuedExpireBatchSize caps how many queued rows a single sweeper tick
 	// transitions to failed. Keeps the sweep transaction short even when
