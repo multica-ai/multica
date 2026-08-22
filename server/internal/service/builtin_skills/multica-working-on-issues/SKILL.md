@@ -309,6 +309,39 @@ Read each sub-issue's description before promoting and only promote items whose
 stated dependencies are met; if a description conflicts with the parent's
 breakdown, leave it `backlog` and comment to confirm first.
 
+## Recurring work → autopilot, not a sub-issue
+
+A sub-issue is a single run: `--status todo` starts exactly one task for the
+assignee, and nothing re-triggers it once that run ends. A recurring ask —
+"check the weather every 20 seconds," a cron expression, a periodic
+health check — needs a schedule, not a one-shot delegation. Route it to an
+autopilot instead (GitHub issue #6417):
+
+```bash
+multica autopilot create --title "Report current temperature" \
+  --description "Fetch the current temperature for Shanghai and post it as a comment on <issue-id>." \
+  --agent <agent> --mode run_only
+
+multica autopilot trigger-add <autopilot-id> --kind schedule \
+  --cron "* * * * *" --timezone Asia/Shanghai
+```
+
+Two limits before proposing a cadence:
+
+- **One minute is the finest granularity.** Schedule triggers take standard
+  5-field cron expressions, so sub-minute cadences ("every 20 seconds") are
+  not expressible. The scheduler also ticks on a ~30s interval and coalesces
+  missed occurrences instead of backfilling them, so "roughly once a minute"
+  is the practical floor even at `* * * * *`.
+- **Use `run_only`, not `create_issue`, for anything frequent.** At one run
+  per minute, `create_issue` would produce up to 1440 issues a day.
+  `run_only` creates no issue, so state the report destination (which issue
+  to comment on, which channel, ...) explicitly in the autopilot's
+  `--description` — there is no issue for the run to fall back on.
+
+Full autopilot CLI, execution-mode semantics, and debugging live in the
+`multica-autopilots` skill — read it before creating or updating one.
+
 ## Incorrect → correct
 
 PR title (link the issue):
@@ -332,6 +365,18 @@ multica issue create --title "Step 2" --parent <issue-id> --assignee <agent> --s
 multica issue create --title "Step 3" --parent <issue-id> --assignee <agent> --stage 3 --status backlog
 ```
 
+Recurring request (route to an autopilot, not a sub-issue):
+
+```bash
+# incorrect — a sub-issue is a single run; nothing re-triggers it, so a
+# "check every minute" ask only ever produces one reading
+multica issue create --title "Check temperature" --parent <issue-id> --assignee <agent> --status todo
+
+# correct — a schedule trigger keeps firing on its own
+multica autopilot create --title "Check temperature" --description "..." --agent <agent> --mode run_only
+multica autopilot trigger-add <autopilot-id> --kind schedule --cron "* * * * *"
+```
+
 ## References
 
 `references/working-on-issues-source-map.md` — accurate `file:line` for every
@@ -339,5 +384,5 @@ contract above: the `pull-requests` CLI and route, the PR response field list,
 `derivePRState`, the two-path link (`extractIdentifiers`) vs close-intent
 (`extractClosingIdentifiers`) proof, the backlog enqueue lines, child-done
 notify, the stage column / `stageBarrierClosed` barrier and the `--stage` /
-`issue children` CLI, and the metadata CLI. Re-derive before depending on an
-exact line.
+`issue children` CLI, the metadata CLI, and the autopilot schedule-trigger
+cron floor / tick interval. Re-derive before depending on an exact line.

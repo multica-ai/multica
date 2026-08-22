@@ -57,6 +57,14 @@ func TestSubIssueCreationSectionPresentForIssueRuns(t *testing.T) {
 				"`--status backlog` parks it",
 				"`--stage <N>` groups children into ordered stages",
 				"read the `multica-working-on-issues` skill",
+				// GitHub issue #6417 gap 1: a recurring ask must be routed to
+				// an autopilot before the agent reaches for `issue create` —
+				// a sub-issue is a single run, not a schedule. Same demotion
+				// pattern as above: pointer here, full playbook in
+				// multica-working-on-issues (TestWorkingOnIssuesSkillCoversRecurringWorkRouting).
+				"If the request is recurring",
+				"this is an autopilot with a schedule trigger, not a sub-issue",
+				"see the `multica-autopilots` skill",
 			} {
 				if !strings.Contains(out, want) {
 					t.Errorf("[%s] section missing %q", tc.name, want)
@@ -648,6 +656,13 @@ func TestSubIssueCreationSectionIsUnconditional(t *testing.T) {
 
 	if strings.Contains(section, "parent_issue_id") {
 		t.Errorf("Sub-issue Creation section must not reference `parent_issue_id` — it applies to any issue-bound run, including top-level parents:\n%s", section)
+	}
+
+	// The recurring-work routing pointer (MUL-6417 gap 1) belongs in this
+	// same unconditional section — a top-level issue can receive a recurring
+	// ask just as easily as a child issue can.
+	if !strings.Contains(section, "see the `multica-autopilots` skill") {
+		t.Errorf("Sub-issue Creation section must route recurring requests to the multica-autopilots skill:\n%s", section)
 	}
 }
 
