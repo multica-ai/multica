@@ -324,6 +324,17 @@
       "upload_failed_toast": "アバターのアップロードに失敗しました"
     }
   },
+  "starter_prompts": {
+    "label": "おすすめの最初のアクション",
+    "hint": "このエージェントの使い始め方が伝わる例を3件まで追加できます。選ぶと送信せずに入力欄へ入ります。",
+    "add": "候補を追加",
+    "item_label": "候補 {{number}} のラベル",
+    "prompt_label": "候補 {{number}} のプロンプト",
+    "label_placeholder": "プルリクエストをレビュー",
+    "prompt_placeholder": "開いているプルリクエストをレビューし、リスクと次の手順をまとめてください。",
+    "incomplete": "各候補を完成させるか削除してから保存してください。",
+    "remove": "候補 {{number}} を削除"
+  },
   "tab_body": {
     "common": {
       "save": "保存",

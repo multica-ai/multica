@@ -8,6 +8,7 @@ export type {
 } from "./issue-status";
 export type {
   Agent,
+  AgentStarterPrompt,
   AgentStatus,
   AgentRuntimeMode,
   AgentVisibility,

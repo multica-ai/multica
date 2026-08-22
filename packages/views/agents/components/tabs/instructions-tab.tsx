@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { Loader2, Save } from "lucide-react";
-import type { Agent } from "@multica/core/types";
+import type { Agent, AgentStarterPrompt } from "@multica/core/types";
 import { Button } from "@multica/ui/components/ui/button";
 import { Textarea } from "@multica/ui/components/ui/textarea";
 import { useT } from "../../../i18n";
+
+import { StarterPromptsEditor } from "../starter-prompts-editor";
 
 export function InstructionsTab({
   agent,
@@ -13,14 +15,26 @@ export function InstructionsTab({
   onDirtyChange,
 }: {
   agent: Agent;
-  onSave: (instructions: string) => Promise<void>;
+  onSave: (updates: {
+    instructions: string;
+    starter_prompts: AgentStarterPrompt[];
+  }) => Promise<void>;
   onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { t } = useT("agents");
   const [value, setValue] = useState(agent.instructions ?? "");
+  const [starterPrompts, setStarterPrompts] = useState<AgentStarterPrompt[]>(
+    agent.starter_prompts ?? [],
+  );
   const [saving, setSaving] = useState(false);
   const [systemOpen, setSystemOpen] = useState(false);
-  const isDirty = value !== (agent.instructions ?? "");
+  const isDirty =
+    value !== (agent.instructions ?? "") ||
+    JSON.stringify(starterPrompts) !==
+      JSON.stringify(agent.starter_prompts ?? []);
+  const starterPromptsValid = starterPrompts.every(
+    (item) => item.label.trim() && item.prompt.trim(),
+  );
 
   // A system agent's prompt has two halves: the product half ships with the
   // backend and updates on deploy, so it is shown read-only; the editable
@@ -32,7 +46,8 @@ export function InstructionsTab({
   // Sync when switching between agents.
   useEffect(() => {
     setValue(agent.instructions ?? "");
-  }, [agent.id, agent.instructions]);
+    setStarterPrompts(agent.starter_prompts ?? []);
+  }, [agent.id, agent.instructions, agent.starter_prompts]);
 
   // Report dirty state up so the parent can guard tab switches.
   useEffect(() => {
@@ -42,7 +57,7 @@ export function InstructionsTab({
   const handleSave = async () => {
     setSaving(true);
     try {
-      await onSave(value);
+      await onSave({ instructions: value, starter_prompts: starterPrompts });
     } catch {
       // toast handled by parent
     } finally {
@@ -112,14 +127,21 @@ export function InstructionsTab({
         />
       </div>
 
+      <StarterPromptsEditor
+        value={starterPrompts}
+        onChange={setStarterPrompts}
+      />
+
       <div className="flex items-center justify-end gap-3">
         {isDirty && (
-          <span className="text-caption text-muted-foreground">{t(($) => $.tab_body.common.unsaved_changes)}</span>
+          <span className="text-caption text-muted-foreground">
+            {t(($) => $.tab_body.common.unsaved_changes)}
+          </span>
         )}
         <Button
           size="sm"
           onClick={handleSave}
-          disabled={!isDirty || saving}
+          disabled={!isDirty || !starterPromptsValid || saving}
         >
           {saving ? (
             <Loader2
