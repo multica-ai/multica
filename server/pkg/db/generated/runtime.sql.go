@@ -778,6 +778,59 @@ func (q *Queries) ListStaleOfflineRuntimeGCCandidates(ctx context.Context, arg L
 	return items, nil
 }
 
+const listVisibleAgentRuntimes = `-- name: ListVisibleAgentRuntimes :many
+SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
+WHERE workspace_id = $1
+  AND (owner_id = $2 OR visibility = 'public')
+ORDER BY created_at ASC
+`
+
+type ListVisibleAgentRuntimesParams struct {
+	WorkspaceID pgtype.UUID `json:"workspace_id"`
+	OwnerID     pgtype.UUID `json:"owner_id"`
+}
+
+// A private runtime is another member's machine and must not leak into their
+// runtime list. The owner can always see their own runtime; everyone else
+// sees only runtimes the owner has explicitly shared with the workspace.
+func (q *Queries) ListVisibleAgentRuntimes(ctx context.Context, arg ListVisibleAgentRuntimesParams) ([]AgentRuntime, error) {
+	rows, err := q.db.Query(ctx, listVisibleAgentRuntimes, arg.WorkspaceID, arg.OwnerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []AgentRuntime{}
+	for rows.Next() {
+		var i AgentRuntime
+		if err := rows.Scan(
+			&i.ID,
+			&i.WorkspaceID,
+			&i.DaemonID,
+			&i.Name,
+			&i.RuntimeMode,
+			&i.Provider,
+			&i.Status,
+			&i.DeviceInfo,
+			&i.Metadata,
+			&i.LastSeenAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.OwnerID,
+			&i.LegacyDaemonID,
+			&i.Visibility,
+			&i.ProfileID,
+			&i.CustomName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockAgentRuntime = `-- name: LockAgentRuntime :one
 SELECT id, workspace_id, daemon_id, name, runtime_mode, provider, status, device_info, metadata, last_seen_at, created_at, updated_at, owner_id, legacy_daemon_id, visibility, profile_id, custom_name FROM agent_runtime
 WHERE id = $1

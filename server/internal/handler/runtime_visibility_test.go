@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/multica-ai/multica/server/internal/testutil"
 	"github.com/multica-ai/multica/server/internal/util"
 	db "github.com/multica-ai/multica/server/pkg/db/generated"
 )
@@ -227,6 +228,39 @@ func TestCreateAgent_AllowsPublicRuntimeForPlainMember(t *testing.T) {
 	testHandler.CreateAgent(w, newRequestAs(plainMemberID, http.MethodPost, "/api/agents", body))
 	if w.Code != http.StatusCreated {
 		t.Fatalf("CreateAgent as plain member on public runtime: expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestListAgentRuntimes_HidesOtherMembersPrivateRuntimes(t *testing.T) {
+	if testHandler == nil {
+		t.Skip("database not available")
+	}
+
+	privateRuntimeID, _, plainMemberID := runtimeVisibilityFixture(t)
+
+	if _, err := testPool.Exec(context.Background(),
+		`UPDATE agent_runtime SET visibility = 'public' WHERE id = $1`, testRuntimeID,
+	); err != nil {
+		t.Fatalf("make fixture runtime public: %v", err)
+	}
+	t.Cleanup(func() {
+		testPool.Exec(context.Background(),
+			`UPDATE agent_runtime SET visibility = 'private' WHERE id = $1`, testRuntimeID)
+	})
+
+	w := testutil.Call(t, testHandler.ListAgentRuntimes,
+		newRequestAs(plainMemberID, http.MethodGet, "/api/runtimes", nil),
+	).Want(http.StatusOK)
+	var runtimes []AgentRuntimeResponse
+	w.JSON(&runtimes)
+
+	for _, runtime := range runtimes {
+		if runtime.ID == privateRuntimeID {
+			t.Fatalf("private runtime %s owned by another member was returned", privateRuntimeID)
+		}
+	}
+	if len(runtimes) != 1 || runtimes[0].ID != testRuntimeID {
+		t.Fatalf("visible runtimes = %#v; want only public runtime %s", runtimes, testRuntimeID)
 	}
 }
 
