@@ -64,11 +64,14 @@ import (
 //
 //   - resolveActor's primary job is "agent vs member" classification
 //     for ownership / authorship attribution (issue creator, comment
-//     author, etc.). It also has a fallback path that trusts
-//     X-Agent-ID + X-Task-ID for legacy CLI flows; that fallback is
-//     valid for resolving authorship but is irrelevant here. Billing
-//     authorization needs the strict "machine credential → forbidden"
-//     gate, nothing else.
+//     author, etc.). For production requests it derives agent identity
+//     solely from the server-set `X-Actor-Source: task_token` path —
+//     the Auth middleware strips any client-supplied X-Agent-ID /
+//     X-Task-ID and only the mat_ branch re-stamps them from the
+//     task-token row, so a member or PAT request can never opt into
+//     agent authorship. That classification is irrelevant here:
+//     billing authorization needs the strict "machine credential →
+//     forbidden" gate, nothing else.
 //   - resolveActor takes a workspaceID parameter; billing routes have
 //     no workspace context, so threading one through just to call it
 //     would be misleading.
