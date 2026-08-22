@@ -69,10 +69,47 @@ function supportedTimezones(): string[] {
   }
 }
 
+// IANA renamed identifiers, mapped to their current names. Each entry
+// cites the tzdata release that made the rename (NEWS file).
+// Renamed in tzdata 2022b.
+export const LEGACY_TIMEZONE_ALIASES: Record<string, string> = {
+  "Europe/Kiev": "Europe/Kyiv",
+};
+
+// Returns the modern name for a legacy identifier, or the input when it
+// is not a known rename.
+export function canonicalizeTimezone(tz: string): string {
+  return LEGACY_TIMEZONE_ALIASES[tz] ?? tz;
+}
+
+function runtimeAccepts(tz: string): boolean {
+  try {
+    new Intl.DateTimeFormat(undefined, { timeZone: tz });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Canonicalize an identifier for this runtime: map a legacy rename to its
+// modern name, but keep the legacy name when the runtime's ICU is too old
+// to format the modern identifier.
+function canonicalizeForRuntime(tz: string): string {
+  const mapped = canonicalizeTimezone(tz);
+  return mapped !== tz && runtimeAccepts(mapped) ? mapped : tz;
+}
+
 export function timezoneOptions(current: string): string[] {
   const browser = browserTimezone();
+  // Canonicalize before dedupe so a legacy name and its modern name
+  // collapse to one option.
   return Array.from(
-    new Set([current, browser, ...COMMON_TIMEZONES, ...supportedTimezones()]),
+    new Set([
+      canonicalizeForRuntime(current),
+      canonicalizeForRuntime(browser),
+      ...COMMON_TIMEZONES,
+      ...supportedTimezones().map(canonicalizeForRuntime),
+    ]),
   ).filter(Boolean);
 }
 
@@ -89,8 +126,9 @@ export function TimezoneSelect({
   disabled?: boolean;
   triggerClassName?: string;
 }) {
-  const browser = browserTimezone();
-  const options = timezoneOptions(value);
+  const browser = canonicalizeForRuntime(browserTimezone());
+  const canonicalValue = canonicalizeForRuntime(value);
+  const options = timezoneOptions(canonicalValue);
   const render = (tz: string) =>
     tz === browser ? `${tz}${browserSuffix}` : tz;
   const items = options.map((value) => ({ value, label: render(value) }));
@@ -98,7 +136,7 @@ export function TimezoneSelect({
   return (
     <Select
       items={items}
-      value={value}
+      value={canonicalValue}
       disabled={disabled}
       onValueChange={(next) => {
         if (next) onValueChange(next);
@@ -108,7 +146,7 @@ export function TimezoneSelect({
         size="sm"
         className={triggerClassName ?? "w-full rounded-md font-mono text-caption"}
       >
-        <SelectValue>{render(value)}</SelectValue>
+        <SelectValue>{render(canonicalValue)}</SelectValue>
       </SelectTrigger>
       <SelectContent align="start" className="max-h-72">
         {items.map((item) => (
