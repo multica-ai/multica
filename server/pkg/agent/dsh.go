@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	dshProfile         = "multica"
-	dshProtocolVersion = 1
-	dshCancelGrace     = 3 * time.Second
-	dshTerminateGrace  = 2 * time.Second
+	dshProfile          = "multica"
+	dshProtocolVersion  = 1
+	dshCancelGrace      = 3 * time.Second
+	dshTerminateGrace   = 2 * time.Second
+	dshHandshakeTimeout = 10 * time.Second
 )
 
 // dshBackend drives the Multica DSH bundle over its versioned JSONL
@@ -48,6 +49,31 @@ type dshMCPServer struct {
 	ToolCallTimeoutMS int               `json:"tool_call_timeout_ms,omitempty"`
 }
 
+// dshCapabilities is the `ready` frame's capabilities object. The runtime
+// advertises which optional execute fields it understands. Both old and new
+// profiles share protocol_version 1, so this is the only safe way to know
+// whether issue_id / task_contract can be sent.
+type dshCapabilities struct {
+	Resume       bool     `json:"resume"`
+	Cancel       bool     `json:"cancel"`
+	Models       bool     `json:"models"`
+	Thinking     bool     `json:"thinking"`
+	Usage        bool     `json:"usage"`
+	Tools        bool     `json:"tools"`
+	Progress     bool     `json:"progress"`
+	Acceptance   bool     `json:"acceptance"`
+	MCP          []string `json:"mcp,omitempty"`
+	IssueID      bool     `json:"issue_id"`
+	TaskContract bool     `json:"task_contract"`
+}
+
+type dshTaskContract struct {
+	Goal           string   `json:"goal"`
+	Acceptance     []string `json:"acceptance,omitempty"`
+	StateFile      string   `json:"state_file,omitempty"`
+	RequiredChecks []string `json:"required_checks,omitempty"`
+}
+
 type dshExecuteCommand struct {
 	Version         int                `json:"v"`
 	Type            string             `json:"type"`
@@ -55,9 +81,11 @@ type dshExecuteCommand struct {
 	Cwd             string             `json:"cwd"`
 	Prompt          string             `json:"prompt"`
 	ResumeSessionID string             `json:"resume_session_id,omitempty"`
+	IssueID         string             `json:"issue_id,omitempty"`
 	Model           *dshModelSelection `json:"model,omitempty"`
 	ReasoningEffort string             `json:"reasoning_effort,omitempty"`
 	MCPServers      []dshMCPServer     `json:"mcp_servers"`
+	TaskContract    *dshTaskContract   `json:"task_contract,omitempty"`
 }
 
 type dshCancelCommand struct {
@@ -71,33 +99,51 @@ type dshWireError struct {
 	Message string `json:"message"`
 }
 
+type dshAcceptanceCheck struct {
+	Command   string        `json:"command"`
+	ExitCode  int           `json:"exit_code"`
+	Passed    bool          `json:"passed"`
+	Output    string        `json:"output,omitempty"`
+	Truncated bool          `json:"truncated,omitempty"`
+	Error     *dshWireError `json:"error,omitempty"`
+}
+
+type dshAcceptance struct {
+	Passed bool                 `json:"passed"`
+	Checks []dshAcceptanceCheck `json:"checks"`
+}
+
 type dshFrame struct {
-	Version          int             `json:"v"`
-	Type             string          `json:"type"`
-	Runtime          string          `json:"runtime,omitempty"`
-	ProtocolVersion  int             `json:"protocol_version,omitempty"`
-	RequestID        string          `json:"request_id,omitempty"`
-	SessionID        string          `json:"session_id,omitempty"`
-	Resumed          bool            `json:"resumed,omitempty"`
-	Content          string          `json:"content,omitempty"`
-	CallID           string          `json:"call_id,omitempty"`
-	Name             string          `json:"name,omitempty"`
-	Arguments        string          `json:"arguments,omitempty"`
-	Output           string          `json:"output,omitempty"`
-	IsError          bool            `json:"is_error,omitempty"`
-	Provider         string          `json:"provider,omitempty"`
-	Model            string          `json:"model,omitempty"`
-	InputTokens      int64           `json:"input_tokens,omitempty"`
-	OutputTokens     int64           `json:"output_tokens,omitempty"`
-	CacheReadTokens  int64           `json:"cache_read_tokens,omitempty"`
-	CacheWriteTokens int64           `json:"cache_write_tokens,omitempty"`
-	Status           string          `json:"status,omitempty"`
-	StopReason       string          `json:"stop_reason,omitempty"`
-	ResumeRejected   bool            `json:"resume_rejected,omitempty"`
-	Error            *dshWireError   `json:"error,omitempty"`
-	Code             string          `json:"code,omitempty"`
-	Message          string          `json:"message,omitempty"`
-	Models           []dshModelFrame `json:"models,omitempty"`
+	Version          int              `json:"v"`
+	Type             string           `json:"type"`
+	Runtime          string           `json:"runtime,omitempty"`
+	ProtocolVersion  int              `json:"protocol_version,omitempty"`
+	Capabilities     *dshCapabilities `json:"capabilities,omitempty"`
+	RequestID        string           `json:"request_id,omitempty"`
+	SessionID        string           `json:"session_id,omitempty"`
+	Resumed          bool             `json:"resumed,omitempty"`
+	Content          string           `json:"content,omitempty"`
+	CallID           string           `json:"call_id,omitempty"`
+	Name             string           `json:"name,omitempty"`
+	Arguments        string           `json:"arguments,omitempty"`
+	Output           string           `json:"output,omitempty"`
+	IsError          bool             `json:"is_error,omitempty"`
+	Provider         string           `json:"provider,omitempty"`
+	Model            string           `json:"model,omitempty"`
+	InputTokens      int64            `json:"input_tokens,omitempty"`
+	OutputTokens     int64            `json:"output_tokens,omitempty"`
+	CacheReadTokens  int64            `json:"cache_read_tokens,omitempty"`
+	CacheWriteTokens int64            `json:"cache_write_tokens,omitempty"`
+	Status           string           `json:"status,omitempty"`
+	StopReason       string           `json:"stop_reason,omitempty"`
+	ResumeRejected   bool             `json:"resume_rejected,omitempty"`
+	Error            *dshWireError    `json:"error,omitempty"`
+	Code             string           `json:"code,omitempty"`
+	Message          string           `json:"message,omitempty"`
+	Phase            string           `json:"phase,omitempty"`
+	Data             map[string]any   `json:"data,omitempty"`
+	Acceptance       *dshAcceptance   `json:"acceptance,omitempty"`
+	Models           []dshModelFrame  `json:"models,omitempty"`
 }
 
 type dshThinkingFrame struct {
@@ -115,6 +161,10 @@ type dshModelFrame struct {
 
 func dshLaunchArgs() []string {
 	return []string{"--profile", dshProfile, "--stdio"}
+}
+
+func hasTaskContract(contract TaskContractInput) bool {
+	return contract.Goal != "" || len(contract.Acceptance) > 0 || contract.StateFile != "" || len(contract.RequiredChecks) > 0
 }
 
 func parseDshModelID(value string) (*dshModelSelection, error) {
@@ -254,8 +304,10 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 	command := dshExecuteCommand{
 		Version: dshProtocolVersion, Type: "execute", RequestID: requestID,
 		Cwd: opts.Cwd, Prompt: prompt, ResumeSessionID: opts.ResumeSessionID,
-		Model: model, ReasoningEffort: opts.ThinkingLevel, MCPServers: mcpServers,
+		Model: model, ReasoningEffort: opts.ThinkingLevel,
+		MCPServers: mcpServers,
 	}
+
 	var writeMu sync.Mutex
 	encoder := json.NewEncoder(stdin)
 	writeFrame := func(value any) error {
@@ -263,17 +315,144 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		defer writeMu.Unlock()
 		return encoder.Encode(value)
 	}
+
+	msgCh := make(chan Message, 256)
+	resCh := make(chan Result, 1)
+	procDone := make(chan struct{})
+	readyCh := make(chan dshCapabilities, 1)
+
+	go func() {
+		defer cancel()
+		defer close(msgCh)
+		defer close(resCh)
+		defer func() { _ = stdin.Close() }()
+		started := time.Now()
+		state := dshRunState{usage: make(map[string]TokenUsage)}
+		scanner := newAgentStreamScanner(stdout)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" {
+				continue
+			}
+			var frame dshFrame
+			if err := json.Unmarshal([]byte(line), &frame); err != nil {
+				state.invalidFrames++
+				continue
+			}
+			state.frameCount++
+			if frame.Type == "ready" && frame.Version == dshProtocolVersion {
+				var capabilities dshCapabilities
+				if frame.Capabilities != nil {
+					capabilities = *frame.Capabilities
+				}
+				select {
+				case readyCh <- capabilities:
+				default:
+				}
+			}
+			handleDshFrame(frame, requestID, msgCh, &state)
+		}
+		scanErr := scanner.Err()
+		if scanErr != nil {
+			_ = stdout.Close()
+		}
+		exitErr := cmd.Wait()
+		close(procDone)
+
+		result := state.result
+		if result == nil {
+			result = &Result{Status: "failed", SessionID: state.sessionID, Usage: state.usage, Progress: state.progress, Acceptance: state.acceptance}
+			switch {
+			case errors.Is(runCtx.Err(), context.DeadlineExceeded):
+				result.Status = "timeout"
+				result.Error = fmt.Sprintf("dsh timed out after %s", opts.Timeout)
+			case errors.Is(runCtx.Err(), context.Canceled):
+				result.Status = "cancelled"
+				result.Error = "dsh execution cancelled"
+			case scanErr != nil:
+				result.Error = fmt.Sprintf("read dsh event stream: %v", scanErr)
+			case state.protocolError != "":
+				result.Error = state.protocolError
+			case exitErr != nil:
+				result.Error = fmt.Sprintf("dsh exited with error: %v", exitErr)
+			case !state.ready:
+				result.Error = "dsh exited before the runtime protocol became ready"
+			default:
+				result.Error = "dsh exited without a terminal result"
+			}
+		}
+		if result.Error != "" {
+			result.Error = withAgentStderr(result.Error, "dsh", stderrBuf.Tail())
+		}
+		result.DurationMs = time.Since(started).Milliseconds()
+		b.cfg.Logger.Info("dsh finished", "pid", cmd.Process.Pid, "status", result.Status,
+			"duration", time.Since(started).Round(time.Millisecond).String(), "frames", state.frameCount,
+			"invalid_frames", state.invalidFrames)
+		resCh <- *result
+	}()
+
+	// Wait for the runtime's `ready` frame before sending execute. Old and new
+	// profiles share protocol_version 1, so the capabilities object is the only
+	// safe signal for optional execute fields like issue_id / task_contract.
+	// Ready, process exit, and external cancellation are observed as distinct
+	// outcomes: a pre-ready exit must surface the reader's diagnostic (exit
+	// status, protocol error, stderr tail) rather than a generic cancellation
+	// message, and every failure path must tear down the whole process group
+	// before Execute returns.
+	handshakeTimeout := opts.HandshakeTimeout
+	if handshakeTimeout <= 0 {
+		handshakeTimeout = dshHandshakeTimeout
+	}
+	readyTimer := time.NewTimer(handshakeTimeout)
+	defer readyTimer.Stop()
+	var capabilities dshCapabilities
+	select {
+	case capabilities = <-readyCh:
+	case result := <-resCh:
+		cancel()
+		reapDshStartupTree(cmd)
+		return nil, dshStartupError(result)
+	case <-runCtx.Done():
+		// The reader's deferred cancel() runs after it delivers the exit
+		// result, so a value here means the process died on its own and its
+		// diagnostic must win over the generic cancellation message.
+		select {
+		case result := <-resCh:
+			cancel()
+			reapDshStartupTree(cmd)
+			return nil, dshStartupError(result)
+		default:
+		}
+		terminateDshStartupTree(cmd, stdout, stdin)
+		<-procDone
+		cancel()
+		return nil, errors.New(withAgentStderr("dsh cancelled before the runtime protocol became ready", "dsh", stderrBuf.Tail()))
+	case <-readyTimer.C:
+		terminateDshStartupTree(cmd, stdout, stdin)
+		<-procDone
+		cancel()
+		return nil, errors.New(withAgentStderr(fmt.Sprintf("dsh did not become ready within %s", handshakeTimeout), "dsh", stderrBuf.Tail()))
+	}
+
+	if capabilities.IssueID && opts.IssueID != "" {
+		command.IssueID = opts.IssueID
+	}
+	if capabilities.TaskContract && hasTaskContract(opts.TaskContract) {
+		command.TaskContract = &dshTaskContract{
+			Goal:           opts.TaskContract.Goal,
+			Acceptance:     opts.TaskContract.Acceptance,
+			StateFile:      opts.TaskContract.StateFile,
+			RequiredChecks: opts.TaskContract.RequiredChecks,
+		}
+	}
 	if err := writeFrame(command); err != nil {
-		signalProcessGroup(cmd, syscall.SIGKILL)
-		_ = cmd.Wait()
+		terminateDshStartupTree(cmd, stdout, stdin)
+		<-procDone
 		cancel()
 		return nil, fmt.Errorf("send dsh execute command: %w", err)
 	}
 
 	b.cfg.Logger.Info("dsh started", "pid", cmd.Process.Pid, "cwd", opts.Cwd, "model", opts.Model)
-	msgCh := make(chan Message, 256)
-	resCh := make(chan Result, 1)
-	procDone := make(chan struct{})
 
 	go func() {
 		select {
@@ -296,67 +475,50 @@ func (b *dshBackend) Execute(ctx context.Context, prompt string, opts ExecOption
 		_ = stdout.Close()
 	}()
 
-	go func() {
-		defer cancel()
-		defer close(msgCh)
-		defer close(resCh)
-		defer func() { _ = stdin.Close() }()
-		started := time.Now()
-		state := dshRunState{usage: make(map[string]TokenUsage)}
-		scanner := newAgentStreamScanner(stdout)
-		for scanner.Scan() {
-			line := strings.TrimSpace(scanner.Text())
-			if line == "" {
-				continue
-			}
-			var frame dshFrame
-			if err := json.Unmarshal([]byte(line), &frame); err != nil {
-				state.invalidFrames++
-				continue
-			}
-			state.frameCount++
-			handleDshFrame(frame, requestID, msgCh, &state)
-		}
-		scanErr := scanner.Err()
-		if scanErr != nil {
-			_ = stdout.Close()
-		}
-		exitErr := cmd.Wait()
-		close(procDone)
-
-		result := state.result
-		if result == nil {
-			result = &Result{Status: "failed", SessionID: state.sessionID, Usage: state.usage}
-			switch {
-			case errors.Is(runCtx.Err(), context.DeadlineExceeded):
-				result.Status = "timeout"
-				result.Error = fmt.Sprintf("dsh timed out after %s", opts.Timeout)
-			case errors.Is(runCtx.Err(), context.Canceled):
-				result.Status = "cancelled"
-				result.Error = "dsh execution cancelled"
-			case scanErr != nil:
-				result.Error = fmt.Sprintf("read dsh event stream: %v", scanErr)
-			case state.protocolError != "":
-				result.Error = state.protocolError
-			case !state.ready:
-				result.Error = "dsh exited before the runtime protocol became ready"
-			case exitErr != nil:
-				result.Error = fmt.Sprintf("dsh exited with error: %v", exitErr)
-			default:
-				result.Error = "dsh exited without a terminal result"
-			}
-		}
-		if result.Error != "" {
-			result.Error = withAgentStderr(result.Error, "dsh", stderrBuf.Tail())
-		}
-		result.DurationMs = time.Since(started).Milliseconds()
-		b.cfg.Logger.Info("dsh finished", "pid", cmd.Process.Pid, "status", result.Status,
-			"duration", time.Since(started).Round(time.Millisecond).String(), "frames", state.frameCount,
-			"invalid_frames", state.invalidFrames)
-		resCh <- *result
-	}()
-
 	return &Session{Messages: msgCh, Result: resCh}, nil
+}
+
+// terminateDshStartupTree tears down the runtime process tree on a pre-ready
+// failure path. Before execute is sent there is no cancel goroutine yet, and
+// cmd.Cancel is a no-op, so without this the direct child dies (eventually,
+// via WaitDelay) while descendants that inherited stdout keep the scanner
+// blocked and survive the task. It mirrors the post-execute escalation:
+// SIGKILL the group, close both pipes so the reader unblocks, and let the
+// caller wait on procDone for the fully reaped tree.
+func terminateDshStartupTree(cmd *exec.Cmd, stdout io.ReadCloser, stdin io.WriteCloser) {
+	signalProcessGroup(cmd, syscall.SIGKILL)
+	if stdout != nil {
+		_ = stdout.Close()
+	}
+	if stdin != nil {
+		_ = stdin.Close()
+	}
+}
+
+// reapDshStartupTree finishes cleanup after the runtime process itself has
+// already exited (the reader delivered a result, so cmd.Wait returned and
+// procDone is closed). A pre-ready exit can still leave descendants behind —
+// a background child that redirected its own stdio does not keep the scanner
+// blocked and survives the parent — so SIGKILL the remaining group and wait
+// for it to be gone before returning the diagnostic. Escalation beyond the
+// grace window is unnecessary: nothing is left to read our signals politely.
+func reapDshStartupTree(cmd *exec.Cmd) {
+	signalProcessGroup(cmd, syscall.SIGKILL)
+	waitProcessGroupGone(cmd, dshTerminateGrace)
+	signalProcessGroup(cmd, syscall.SIGKILL)
+}
+
+// dshStartupError converts a pre-ready reader result into the Execute error.
+// The reader already classified the failure (exit status, protocol error,
+// timeout, stderr tail), so surface it verbatim instead of masking it with a
+// generic "cancelled before ready" — external cancellation races with a real
+// crash must keep the diagnostic.
+func dshStartupError(result Result) error {
+	message := fmt.Sprintf("dsh exited before the runtime protocol became ready")
+	if result.Error != "" {
+		message = result.Error
+	}
+	return errors.New(message)
 }
 
 type dshRunState struct {
@@ -366,6 +528,8 @@ type dshRunState struct {
 	frameCount    int
 	invalidFrames int
 	usage         map[string]TokenUsage
+	progress      []ProgressEvent
+	acceptance    *AcceptanceResult
 	result        *Result
 }
 
@@ -414,19 +578,49 @@ func handleDshFrame(frame dshFrame, requestID string, ch chan<- Message, state *
 		}
 	case "protocol_error":
 		state.protocolError = strings.TrimSpace(frame.Code + ": " + frame.Message)
+	case "progress":
+		event := ProgressEvent{Phase: frame.Phase, Message: frame.Message}
+		if frame.Data != nil {
+			event.Data = frame.Data
+		}
+		state.progress = append(state.progress, event)
 	case "result":
 		errorText := ""
 		if frame.Error != nil {
 			errorText = strings.TrimSpace(frame.Error.Code + ": " + frame.Error.Message)
 		}
+		state.acceptance = acceptanceFromWire(frame.Acceptance)
 		state.result = &Result{
 			Status: frame.Status, Output: frame.Output, Error: errorText,
 			SessionID: frame.SessionID, Usage: state.usage, ResumeRejected: frame.ResumeRejected,
+			Progress: state.progress, Acceptance: state.acceptance,
 		}
 		if state.result.SessionID == "" {
 			state.result.SessionID = state.sessionID
 		}
 	}
+}
+
+func acceptanceFromWire(wire *dshAcceptance) *AcceptanceResult {
+	if wire == nil {
+		return nil
+	}
+	checks := make([]AcceptanceCheckResult, 0, len(wire.Checks))
+	for _, check := range wire.Checks {
+		item := AcceptanceCheckResult{
+			Command:   check.Command,
+			ExitCode:  check.ExitCode,
+			Passed:    check.Passed,
+			Output:    check.Output,
+			Truncated: check.Truncated,
+		}
+		if check.Error != nil {
+			item.ErrorCode = check.Error.Code
+			item.ErrorMessage = check.Error.Message
+		}
+		checks = append(checks, item)
+	}
+	return &AcceptanceResult{Passed: wire.Passed, Checks: checks}
 }
 
 func discoverDshModels(ctx context.Context, runtimeCmd Command) ([]Model, error) {

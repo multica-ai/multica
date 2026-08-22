@@ -667,6 +667,80 @@ func TestLoadConfig_CodexHandshakeTimeout(t *testing.T) {
 	}
 }
 
+// TestLoadConfig_DshHandshakeTimeout mirrors the Codex handshake test for the
+// DSH knob, and pins the isolation property from the PR review: the two env
+// knobs are independent, so MULTICA_CODEX_HANDSHAKE_TIMEOUT must not move
+// DshHandshakeTimeout (and vice versa).
+func TestLoadConfig_DshHandshakeTimeout(t *testing.T) {
+	stageFakeAgent(t)
+	t.Setenv("MULTICA_DSH_HANDSHAKE_TIMEOUT", "")
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "")
+
+	cfg, err := LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with defaults: %v", err)
+	}
+	if cfg.DshHandshakeTimeout != DefaultDshHandshakeTimeout {
+		t.Fatalf("DshHandshakeTimeout = %s, want default %s", cfg.DshHandshakeTimeout, DefaultDshHandshakeTimeout)
+	}
+
+	t.Setenv("MULTICA_DSH_HANDSHAKE_TIMEOUT", "7s")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with env: %v", err)
+	}
+	if cfg.DshHandshakeTimeout != 7*time.Second {
+		t.Fatalf("DshHandshakeTimeout = %s, want 7s from env", cfg.DshHandshakeTimeout)
+	}
+
+	t.Setenv("MULTICA_DSH_HANDSHAKE_TIMEOUT", "0")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with zero env: %v", err)
+	}
+	if cfg.DshHandshakeTimeout != DefaultDshHandshakeTimeout {
+		t.Fatalf("DshHandshakeTimeout = %s, want default %s for zero env", cfg.DshHandshakeTimeout, DefaultDshHandshakeTimeout)
+	}
+
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:           "http://localhost:8080",
+		WorkspacesRoot:      t.TempDir(),
+		DshHandshakeTimeout: 3 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with override: %v", err)
+	}
+	if cfg.DshHandshakeTimeout != 3*time.Second {
+		t.Fatalf("DshHandshakeTimeout = %s, want 3s from override", cfg.DshHandshakeTimeout)
+	}
+
+	// Cross-talk: a Codex env value must not leak into the DSH knob.
+	t.Setenv("MULTICA_DSH_HANDSHAKE_TIMEOUT", "")
+	t.Setenv("MULTICA_CODEX_HANDSHAKE_TIMEOUT", "77s")
+	cfg, err = LoadConfig(Overrides{
+		ServerURL:      "http://localhost:8080",
+		WorkspacesRoot: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("LoadConfig with codex env: %v", err)
+	}
+	if cfg.DshHandshakeTimeout != DefaultDshHandshakeTimeout {
+		t.Fatalf("DshHandshakeTimeout = %s, want default %s; CODEX env leaked into DSH", cfg.DshHandshakeTimeout, DefaultDshHandshakeTimeout)
+	}
+	if cfg.CodexHandshakeTimeout != 77*time.Second {
+		t.Fatalf("CodexHandshakeTimeout = %s, want 77s from env", cfg.CodexHandshakeTimeout)
+	}
+}
+
 // TestLoadConfig_CodexFirstTurnNoProgressTimeout pins the env-only
 // MULTICA_CODEX_FIRST_TURN_TIMEOUT resolution (GH #3262 / #5959): unset and an
 // explicit "0" both mean "keep the backend default" (0 = unset), while a positive

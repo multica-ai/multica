@@ -7436,6 +7436,13 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 	if provider == "opencode" {
 		idleWatchdogTimeout = d.cfg.OpenCodeIdleWatchdog
 	}
+	// HandshakeTimeout is provider-scoped: Codex app-server RPCs and the DSH
+	// stdio `ready` wait answer to different env knobs, so one provider's
+	// operator tuning must not change the other's startup bound.
+	handshakeTimeout := d.cfg.CodexHandshakeTimeout
+	if provider == "dsh" {
+		handshakeTimeout = d.cfg.DshHandshakeTimeout
+	}
 	execOpts := agent.ExecOptions{
 		Cwd:                        env.WorkDir,
 		Model:                      model,
@@ -7444,7 +7451,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		SemanticInactivityTimeout:  d.cfg.CodexSemanticInactivityTimeout,
 		FirstTurnNoProgressTimeout: d.cfg.CodexFirstTurnNoProgressTimeout,
 		IdleWatchdogTimeout:        idleWatchdogTimeout,
-		HandshakeTimeout:           d.cfg.CodexHandshakeTimeout,
+		HandshakeTimeout:           handshakeTimeout,
 		ResumeSessionID:            task.PriorSessionID,
 		// Post-gate intent: PriorSessionID here already reflects the pre-flight
 		// resume gates (a dropped resume is surfaced via the prompt instead). If it
@@ -7467,6 +7474,7 @@ func (d *Daemon) runTask(ctx context.Context, task Task, provider string, slot i
 		OpenclawMode:           openclawMode,
 		ClaudeSettingsPath:     env.ClaudeSettingsPath,
 		QwenpawWorkspace:       env.QwenpawWorkspace,
+		IssueID:                task.IssueID,
 	}
 	// Some providers do not reliably load the per-task runtime config files we
 	// write into the task workdir:

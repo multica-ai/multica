@@ -73,8 +73,9 @@ printf '%s\n' '{"v":1,"type":"thinking","request_id":"task-1","content":"checkin
 printf '%s\n' '{"v":1,"type":"tool_call","request_id":"task-1","call_id":"call-1","name":"bash","arguments":"{\"command\":\"pwd\"}"}'
 printf '%s\n' '{"v":1,"type":"tool_result","request_id":"task-1","call_id":"call-1","name":"bash","output":"/work","is_error":false}'
 printf '%s\n' '{"v":1,"type":"text","request_id":"task-1","content":"done"}'
+printf '%s\n' '{"v":1,"type":"progress","request_id":"task-1","phase":"acceptance_check","message":"","data":{"index":0,"command":"true","exit_code":0,"passed":true}}'
 printf '%s\n' '{"v":1,"type":"usage","request_id":"task-1","provider":"deepseek-official","model":"deepseek-v4-flash","input_tokens":12,"output_tokens":3,"cache_read_tokens":2}'
-printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed","session_id":"session-1","output":"done","resume_rejected":false}'
+printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed","session_id":"session-1","output":"done","resume_rejected":false,"acceptance":{"passed":true,"checks":[{"command":"true","exit_code":0,"passed":true,"output":"ok"}]}}'
 `)
 	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-1", Logger: slog.Default()})
 	if err != nil {
@@ -96,8 +97,150 @@ printf '%s\n' '{"v":1,"type":"result","request_id":"task-1","status":"completed"
 	if usage.InputTokens != 12 || usage.OutputTokens != 3 || usage.CacheReadTokens != 2 {
 		t.Fatalf("bad usage: %#v", usage)
 	}
+	if len(result.Progress) != 1 || result.Progress[0].Phase != "acceptance_check" || result.Progress[0].Data["command"] != "true" {
+		t.Fatalf("bad progress: %#v", result.Progress)
+	}
+	if result.Acceptance == nil || !result.Acceptance.Passed || len(result.Acceptance.Checks) != 1 {
+		t.Fatalf("bad acceptance: %#v", result.Acceptance)
+	}
+	if check := result.Acceptance.Checks[0]; check.Command != "true" || check.ExitCode != 0 || !check.Passed || check.Output != "ok" {
+		t.Fatalf("bad acceptance check: %#v", check)
+	}
 	if len(messages) != 5 || messages[0].SessionID != "session-1" || messages[2].Tool != "bash" {
 		t.Fatalf("bad messages: %#v", messages)
+	}
+}
+
+func TestDshBackendForwardsIssueAndTaskContract(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+if [ "$1" != "--profile" ] || [ "$2" != "multica" ] || [ "$3" != "--stdio" ]; then exit 9; fi
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{"issue_id":true,"task_contract":true}}'
+IFS= read -r command
+case "$command" in *'"type":"execute"'*) ;; *) exit 8 ;; esac
+case "$command" in *'"issue_id":"issue-1"'*) ;; *) exit 7 ;; esac
+case "$command" in *'"task_contract":{"goal":"ship it"'*) ;; *) exit 6 ;; esac
+case "$command" in *'"required_checks":["true"]'*) ;; *) exit 5 ;; esac
+printf '%s\n' '{"v":1,"type":"result","request_id":"task-contract","status":"completed","session_id":"session-contract","output":"ok","resume_rejected":false}'
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-contract", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "ship it", ExecOptions{
+		Cwd:          t.TempDir(),
+		Timeout:      5 * time.Second,
+		IssueID:      "issue-1",
+		TaskContract: TaskContractInput{Goal: "ship it", RequiredChecks: []string{"true"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "ok" {
+		t.Fatalf("bad result: %#v", result)
+	}
+}
+
+func TestDshBackendOmitsTaskContractWhenEmpty(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+if [ "$1" != "--profile" ] || [ "$2" != "multica" ] || [ "$3" != "--stdio" ]; then exit 9; fi
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r command
+case "$command" in *'"type":"execute"'*) ;; *) exit 8 ;; esac
+case "$command" in *'"task_contract"'*) exit 7 ;; esac
+printf '%s\n' '{"v":1,"type":"result","request_id":"task-empty-contract","status":"completed","session_id":"session-empty-contract","output":"ok","resume_rejected":false}'
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-empty-contract", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "ship it", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "ok" {
+		t.Fatalf("bad result: %#v", result)
+	}
+}
+
+func TestDshBackendOmitsIssueAndTaskContractWhenNotAdvertised(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+if [ "$1" != "--profile" ] || [ "$2" != "multica" ] || [ "$3" != "--stdio" ]; then exit 9; fi
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r command
+case "$command" in *'"type":"execute"'*) ;; *) exit 8 ;; esac
+case "$command" in *'"issue_id"'*) exit 7 ;; esac
+case "$command" in *'"task_contract"'*) exit 6 ;; esac
+printf '%s\n' '{"v":1,"type":"result","request_id":"task-not-advertised","status":"completed","session_id":"session-not-advertised","output":"ok","resume_rejected":false}'
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-not-advertised", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "ship it", ExecOptions{
+		Cwd:          t.TempDir(),
+		Timeout:      5 * time.Second,
+		IssueID:      "issue-1",
+		TaskContract: TaskContractInput{Goal: "ship it", RequiredChecks: []string{"true"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "completed" || result.Output != "ok" {
+		t.Fatalf("bad result: %#v", result)
+	}
+}
+
+func TestDshBackendPreservesProgressOnNonTerminalStream(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+if [ "$1" != "--profile" ] || [ "$2" != "multica" ] || [ "$3" != "--stdio" ]; then exit 9; fi
+printf '%s\n' '{"v":1,"type":"ready","runtime":"dsh","plugin_version":"test","capabilities":{}}'
+IFS= read -r command
+case "$command" in *'"type":"execute"'*) ;; *) exit 8 ;; esac
+printf '%s\n' '{"v":1,"type":"progress","request_id":"task-fallback","phase":"acceptance_check","message":"","data":{"index":0,"command":"true","exit_code":0,"passed":true}}'
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-fallback", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, err := b.Execute(context.Background(), "run", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 5 * time.Second,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for range session.Messages {
+	}
+	result := <-session.Result
+	if result.Status != "failed" {
+		t.Fatalf("expected failed fallback result, got %#v", result)
+	}
+	if len(result.Progress) != 1 || result.Progress[0].Phase != "acceptance_check" || result.Progress[0].Data["command"] != "true" {
+		t.Fatalf("fallback dropped progress: %#v", result.Progress)
 	}
 }
 
@@ -148,6 +291,67 @@ printf '%s\n' '{"v":1,"type":"models","models":[{"id":"deepseek-official/deepsee
 	}
 	if len(models) != 1 || !models[0].Default || models[0].Thinking == nil || models[0].Thinking.DefaultLevel != "high" {
 		t.Fatalf("bad models: %#v", models)
+	}
+}
+
+func TestDshBackendPreservesStartupErrorBeforeReady(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	bin := writeDshFixture(t, `
+echo "dsh: profile multica not found" >&2
+exit 3
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-startup-exit", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = b.Execute(context.Background(), "run", ExecOptions{
+		Cwd:     t.TempDir(),
+		Timeout: 5 * time.Second,
+	})
+	if err == nil {
+		t.Fatal("expected startup error")
+	}
+	// The runtime's real exit status and stderr must survive; a generic
+	// "cancelled before ready" would hide why the startup failed.
+	if !strings.Contains(err.Error(), "exited with error") || !strings.Contains(err.Error(), "exit status 3") {
+		t.Fatalf("expected exit-status diagnostic, got %q", err.Error())
+	}
+	if !strings.Contains(err.Error(), "profile multica not found") {
+		t.Fatalf("expected stderr tail in error, got %q", err.Error())
+	}
+}
+
+func TestDshBackendHandshakeTimeoutUsesProvidedValue(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell fixture")
+	}
+	// The fixture never emits `ready`: Execute must give up after the
+	// configured (short) HandshakeTimeout, not the 10s backend default, and
+	// must kill the process group on the way out.
+	bin := writeDshFixture(t, `
+sleep 30
+`)
+	b, err := New("dsh", Config{ExecutablePath: bin, TaskID: "task-handshake-timeout", Logger: slog.Default()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	started := time.Now()
+	_, err = b.Execute(context.Background(), "run", ExecOptions{
+		Cwd:              t.TempDir(),
+		Timeout:          5 * time.Second,
+		HandshakeTimeout: 300 * time.Millisecond,
+	})
+	elapsed := time.Since(started)
+	if err == nil || !strings.Contains(err.Error(), "did not become ready within") {
+		t.Fatalf("expected handshake-timeout error, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "300ms") {
+		t.Fatalf("error should name the configured timeout, got %q", err.Error())
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("handshake took %s; the provided HandshakeTimeout was not consumed", elapsed)
 	}
 }
 
