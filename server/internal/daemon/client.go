@@ -350,7 +350,89 @@ func (c *Client) ExtendTaskPrepareLease(ctx context.Context, runtimeID, taskID s
 }
 
 func (c *Client) StartTask(ctx context.Context, taskID string) error {
-	return c.postJSON(ctx, fmt.Sprintf("/api/daemon/tasks/%s/start", taskID), map[string]any{}, nil)
+	path := fmt.Sprintf("/api/daemon/tasks/%s/start", taskID)
+	var lastErr error
+	ambiguousAttempt := false
+	for attempt := 0; ; attempt++ {
+		// A prior transport error can commit after its first reconciliation.
+		// Re-read immediately before every retry POST, after any backoff, so a
+		// late dispatched -> running transition cannot race into a conflict.
+		if attempt > 0 {
+			started, err := c.reconcileStartTaskStatus(ctx, taskID, lastErr)
+			if err != nil {
+				return err
+			}
+			if started {
+				return nil
+			}
+		}
+
+		err := c.postJSON(ctx, path, map[string]any{}, nil)
+		if err == nil {
+			return nil
+		}
+		lastErr = err
+		if !isTransientError(err) {
+			if ambiguousAttempt {
+				return c.finalReconcileStartTask(ctx, taskID, err)
+			}
+			return err
+		}
+		ambiguousAttempt = true
+
+		// A transport error is ambiguous: the server may have committed the
+		// transition even when the daemon did not receive its response. Read
+		// the task state before considering another POST so this logical start
+		// never launches the agent twice.
+		started, reconcileErr := c.reconcileStartTaskStatus(ctx, taskID, err)
+		if reconcileErr != nil {
+			return reconcileErr
+		}
+		if started {
+			return nil
+		}
+
+		if attempt >= len(startTaskRetrySchedule) {
+			return lastErr
+		}
+		if sleepErr := retrySleep(ctx, startTaskRetrySchedule[attempt]); sleepErr != nil {
+			return lastErr
+		}
+	}
+}
+
+// reconcileStartTaskStatus proves whether one ambiguous start attempt committed.
+// It reports started=true when the task is running; started=false is returned
+// only for states that the SQL StartAgentTask transition accepts. Every caller
+// that retries must invoke it immediately before its POST.
+func (c *Client) reconcileStartTaskStatus(ctx context.Context, taskID string, cause error) (bool, error) {
+	status, statusErr := c.GetTaskStatus(ctx, taskID)
+	if statusErr != nil {
+		return false, fmt.Errorf("reconcile start task after %w: get task status: %w", cause, statusErr)
+	}
+	switch status {
+	case "running":
+		return true, nil
+	case "dispatched", "waiting_local_directory":
+		return false, nil
+	default:
+		return false, fmt.Errorf("reconcile start task after %w: task status is %q", cause, status)
+	}
+}
+
+// finalReconcileStartTask closes the narrow race where the original ambiguous
+// POST commits after the retry's last GET but before the retry reaches the
+// server. Only an already-ambiguous logical start uses this fallback: an
+// ordinary permanent 4xx must remain an error.
+func (c *Client) finalReconcileStartTask(ctx context.Context, taskID string, startErr error) error {
+	status, statusErr := c.GetTaskStatus(ctx, taskID)
+	if statusErr != nil {
+		return fmt.Errorf("final reconcile start task after %w: get task status: %w", startErr, statusErr)
+	}
+	if status == "running" {
+		return nil
+	}
+	return startErr
 }
 
 // MarkTaskWaitingLocalDirectory parks a freshly-dispatched task in the
@@ -947,6 +1029,15 @@ var defaultTerminalRetrySchedule = []time.Duration{
 var skillBundleResolveRetrySchedule = []time.Duration{
 	500 * time.Millisecond,
 	2 * time.Second,
+}
+
+// startTaskRetrySchedule bounds recovery for an uncertain task-start callback.
+// Each retry is preceded by GetTaskStatus: another POST is allowed only after
+// the server confirms the task is still not running. Two backoffs mean at most
+// three POST attempts for one logical task start.
+var startTaskRetrySchedule = []time.Duration{
+	250 * time.Millisecond,
+	time.Second,
 }
 
 // retrySleep is the sleep used between retry attempts. Pulled into a package
